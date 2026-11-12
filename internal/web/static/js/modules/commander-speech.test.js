@@ -225,6 +225,21 @@ test('while it reads the songs the Commander says where it is, and announces it 
     goal_offer: { goal: 'Finish the album', max_runes: 300 }
   });
   assert.equal(commanderSpeech(mixed).phase, 'learning');
+  // While the agent writes up what it learned the Commander says so, the same way.
+  const summarizing = view({
+    state: 'set_up',
+    setup: { status: 'done', lines: runLines },
+    learning: {
+      status: 'summarizing',
+      line: 'Putting together what I learned…',
+      done: 7,
+      total: 7
+    },
+    goal_offer: { goal: 'Finish the album', max_runes: 300 }
+  });
+  assert.equal(commanderSpeech(summarizing).phase, 'learning');
+  assert.equal(commanderSpeech(summarizing).line, 'Putting together what I learned…');
+  assert.equal(commanderSpeech(summarizing).review, false);
   // A finished reading says nothing of its own: the receipt or the goal speaks.
   const finished = view({
     state: 'set_up',

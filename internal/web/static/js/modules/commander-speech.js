@@ -125,7 +125,7 @@ export function commanderSpeech(view) {
       // place exists it asks to learn them first (FR2), and only then offers the
       // goal. The announcement stays the same word while a reading runs, so a
       // screen reader is not read every song.
-      if (view.learning?.status === 'running') {
+      if (view.learning?.status === 'running' || view.learning?.status === 'summarizing') {
         return {
           phase: 'learning',
           line: view.learning.line,

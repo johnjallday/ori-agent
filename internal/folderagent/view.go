@@ -98,6 +98,9 @@ type View struct {
 type GoalOfferView struct {
 	Goal     string `json:"goal"`
 	MaxRunes int    `json:"max_runes"`
+	// Basis says where the sentence came from: GoalBasisLearned (written by the
+	// agent after it learned the songs) or GoalBasisLook (the first look's).
+	Basis string `json:"basis,omitempty"`
 }
 
 // Landing names the Home a finished run lands in, for the card's "Opening
@@ -266,7 +269,8 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	v.SongsOffer = s.songsOffer(ctx, rec)
 	v.Learning = learningView(rec)
 	if s.goalOffered(ctx, rec) {
-		v.GoalOffer = &GoalOfferView{Goal: rec.Sections.Goal, MaxRunes: personalassistant.BriefMaxRunes}
+		goal, basis := offeredGoal(rec)
+		v.GoalOffer = &GoalOfferView{Goal: goal, MaxRunes: personalassistant.BriefMaxRunes, Basis: basis}
 	}
 	v.Premise = premiseView(rec)
 	withdrawn := premiseWithdrawn(rec)

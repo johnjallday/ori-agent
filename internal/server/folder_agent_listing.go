@@ -62,6 +62,9 @@ func listFolderAgentSongs(ctx context.Context, library folderAgentLibrary, rec f
 	for scans < folderagent.MaxScopedScans {
 		issued, err := library.FolderAgentScopes(owner, homeID, rootID)
 		if err != nil {
+			// The folders still needed stay unreached (and say so); it is logged
+			// because nothing else shows why a listing stopped at the root.
+			logger.Warn("Folder agent could not read the library's scopes", logger.Fields{"workspace_id": rec.WorkspaceID, "error": err.Error()})
 			break
 		}
 		scopes := make([]folderagent.LibraryScope, 0, len(issued))

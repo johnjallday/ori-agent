@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/folderagent"
+	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
@@ -19,6 +20,7 @@ import (
 type folderAgentLearnLibrary interface {
 	folderAgentLibrary
 	PortfolioLibraryState(ownerUserID, homeID, folder string) (sessionhttp.PortfolioLibraryState, error)
+	FolderAgentSongs(ownerUserID, homeID, rootID string) ([]projectlibrary.LearnedSong, error)
 }
 
 // folderAgentSongs is the folder agent's side of the Home's song-details
@@ -108,11 +110,68 @@ func (f folderAgentSongs) Learn(ctx context.Context, rec folderagent.Record, hom
 	}
 	key := "folder-agent-" + rec.WorkspaceID + "-learn-" + f.token()
 	ctx = projectlibrary.WithSongFactsProgress(ctx, progress.note)
-	_, err = listFolderAgentSongs(ctx, library, rec, rec.OwnerUserID, homeID, state.RootID, key, "", "", func(string, string, string) {})
+	listing, err := listFolderAgentSongs(ctx, library, rec, rec.OwnerUserID, homeID, state.RootID, key, "", "", func(string, string, string) {})
 	if err != nil {
 		logger.Warn("Folder agent could not list the songs to read them", logger.Fields{"workspace_id": rec.WorkspaceID, "error": err.Error()})
 	}
-	return progress.final(err == nil)
+	// A folder of songs the listing never reached is a reading that did not
+	// happen, not one that found nothing to read: it ends "stopped", and what was
+	// read stays read.
+	if err == nil && listing.unreached > 0 {
+		logger.Warn("Folder agent could not reach every folder of songs to read them", logger.Fields{"workspace_id": rec.WorkspaceID, "folders": listing.unreached})
+	}
+	return progress.final(err == nil && listing.unreached == 0)
+}
+
+// Facts is this folder's songs with what was learned from each, for the folder's
+// own agent: the numbers, and the track names, markers and regions under a
+// consent that covers them. It gives nothing unless the Home's consent is on, and
+// only the folder agent's own turns call it (no route, no tool of the Manager's).
+func (f folderAgentSongs) Facts(_ context.Context, rec folderagent.Record, homeID string) ([]folderlook.Song, error) {
+	library := f.library()
+	if library == nil || f.anchor == nil {
+		return nil, folderagent.ErrUnavailable
+	}
+	if state, _, err := f.consents.ReadScope(homeID); err != nil || state != workspace.SongDetailsOn {
+		return nil, nil
+	}
+	folder, err := f.anchor(rec.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	state, err := library.PortfolioLibraryState(rec.OwnerUserID, homeID, folder)
+	if err != nil {
+		return nil, err
+	}
+	if state.RootID == "" {
+		return nil, errors.New("the folder is not a root of the library")
+	}
+	songs, err := library.FolderAgentSongs(rec.OwnerUserID, homeID, state.RootID)
+	if err != nil {
+		return nil, err
+	}
+	return learnedSongs(songs), nil
+}
+
+// learnedSongs turns the library's songs into what a model turn is given.
+func learnedSongs(in []projectlibrary.LearnedSong) []folderlook.Song {
+	out := make([]folderlook.Song, 0, len(in))
+	for _, song := range in {
+		turn := folderlook.Song{Name: song.Name, NotRead: song.NotRead}
+		if song.Facts != nil {
+			turn.TempoBPM, turn.TempoVaries = song.Facts.TempoBPM, song.Facts.TempoVaries
+			turn.LengthSeconds, turn.TrackCount = song.Facts.LengthSeconds, song.Facts.TrackCount
+		}
+		if song.Names != nil {
+			turn.Tracks, turn.TracksLeftOut = append([]string(nil), song.Names.Tracks...), song.Names.TracksLeftOut
+			turn.MarkersLeftOut = song.Names.MarkersLeftOut
+			for _, m := range song.Names.Markers {
+				turn.Markers = append(turn.Markers, folderlook.SongMarker{Name: m.Name, At: m.At, End: m.End})
+			}
+		}
+		out = append(out, turn)
+	}
+	return out
 }
 
 // learnProgress adds up the fact passes of one reading. Each scan runs its own

@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"math"
 	"slices"
+	"sort"
 	"strconv"
+	"strings"
 	"unicode"
 	"unicode/utf8"
 
@@ -85,6 +87,72 @@ func learnedFrom(entry Entry, roots map[string]Root, inactive map[string]bool, c
 		return &SongLearned{SongNames: *facts.Names.clone()}
 	}
 	return nil
+}
+
+// LearnedSong is one song of one folder as that folder's own agent may be given
+// it for a turn: its name, the numbers, and, under a consent that covers names,
+// the names read from its project file, or why it was not read (NotRead). It is
+// read by no one but the folder agent's own turns; rows, the roster and the
+// Manager's tools never carry it.
+type LearnedSong struct {
+	Name    string
+	Facts   *SongFacts
+	Names   *SongNames
+	NotRead string
+}
+
+// maxLearnedSongs bounds how many songs one folder's reading returns.
+const maxLearnedSongs = 500
+
+// LearnedSongsInRoot lists the songs the library holds under one root, with what
+// was learned from each: nothing at all unless the Home's consent is active, the
+// numbers under any consent, and names only when it covers them. Songs are
+// ordered by name. Only the usable source of each song in that root counts, by
+// the same rule that dates a song anywhere else.
+func (s *Store) LearnedSongsInRoot(scope Scope, rootID string) ([]LearnedSong, error) {
+	doc, state, err := s.readSnapshot(scope)
+	if err != nil {
+		return nil, err
+	}
+	consent := state.GetSongDetailsConsent()
+	if !consent.Active() || rootID == "" {
+		return nil, nil
+	}
+	views := newProjectionMaps(doc, state)
+	var songs []LearnedSong
+	for _, entry := range doc.Entries {
+		inRoot := entry
+		inRoot.Observations = nil
+		for _, observed := range entry.Observations {
+			if observed.RootID == rootID {
+				inRoot.Observations = append(inRoot.Observations, observed)
+			}
+		}
+		if len(inRoot.Observations) == 0 {
+			continue
+		}
+		row := s.projectSearchRowInRoot(scope, inRoot, views.roots, views.linked, views.inactive, rootID, true)
+		if row.Availability != "available" && row.Availability != "ambiguous" {
+			continue
+		}
+		song := LearnedSong{Name: row.Name, Facts: row.Facts}
+		if learned := learnedFrom(inRoot, views.roots, views.inactive, consent); learned != nil {
+			song.NotRead = learned.NotRead
+			if learned.NotRead == "" {
+				names := learned.SongNames
+				song.Names = &names
+			}
+		}
+		songs = append(songs, song)
+	}
+	sort.SliceStable(songs, func(i, j int) bool {
+		a, b := strings.ToLower(songs[i].Name), strings.ToLower(songs[j].Name)
+		return a < b
+	})
+	if len(songs) > maxLearnedSongs {
+		songs = songs[:maxLearnedSongs]
+	}
+	return songs, nil
 }
 
 // clone copies the names so a copy shares no slice with the original.

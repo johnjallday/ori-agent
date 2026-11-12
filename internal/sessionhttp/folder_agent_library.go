@@ -20,29 +20,77 @@ const maxFolderAgentScopePages = 64
 // FolderAgentScopes lists the scopes the library itself issued for a root
 // (its own scans' known folders), relative to the root. Scope ids never come
 // from a client path.
+//
+// The listing is bound to one revision of the Home's library, and the Library
+// Manager's turn writes to the Home right after every scan commits, which is
+// exactly when a listing asks for the scopes. A moved revision is a busy moment,
+// not a failure, so the whole listing is read again (a few times, a beat apart)
+// before it is given up; giving up on the first conflict left "Learn them" with
+// nothing to scan and a reading that looked finished.
 func (h *Handler) FolderAgentScopes(ownerUserID, homeID, rootID string) ([]projectlibrary.ScanScopeChoice, error) {
 	scope, err := h.portfolioLibraryScope(ownerUserID, homeID)
 	if err != nil || h.assistantLibraryRoots == nil {
 		return nil, ErrPortfolioSetupUnavailable
 	}
-	doc, err := h.assistantLibraryStore().Read(scope)
-	if err != nil {
-		return nil, err
-	}
-	var out []projectlibrary.ScanScopeChoice
-	offset := 0
-	for range maxFolderAgentScopePages {
-		page, err := h.assistantLibraryRoots.ListScanScopes(scope, rootID, doc.Revision, offset)
+	return retryLibraryRead(folderAgentScopeAttempts, folderAgentScopePause, func() ([]projectlibrary.ScanScopeChoice, error) {
+		doc, err := h.assistantLibraryStore().Read(scope)
 		if err != nil {
-			return out, err
+			return nil, err
 		}
-		out = append(out, page.Rows...)
-		if page.NextOffset <= offset || len(page.Rows) == 0 {
-			break
+		var out []projectlibrary.ScanScopeChoice
+		offset := 0
+		for range maxFolderAgentScopePages {
+			page, err := h.assistantLibraryRoots.ListScanScopes(scope, rootID, doc.Revision, offset)
+			if err != nil {
+				return out, err
+			}
+			out = append(out, page.Rows...)
+			if page.NextOffset <= offset || len(page.Rows) == 0 {
+				break
+			}
+			offset = page.NextOffset
 		}
-		offset = page.NextOffset
+		return out, nil
+	})
+}
+
+// Reading a Home's scopes again after its revision moved: how often, and how
+// long a beat to leave (the writer that moved it is a short write).
+const (
+	folderAgentScopeAttempts = 6
+	folderAgentScopePause    = 150 * time.Millisecond
+)
+
+// retryLibraryRead runs read until it succeeds or fails with something other
+// than a busy Home (a moved revision, or the fenced state briefly unavailable),
+// at most attempts times with a growing pause between them. The last error is
+// returned when every attempt met a busy Home.
+func retryLibraryRead[T any](attempts int, pause time.Duration, read func() (T, error)) (T, error) {
+	var value T
+	var err error
+	for attempt := range attempts {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * pause)
+		}
+		value, err = read()
+		if !retryableLibraryError(err) {
+			return value, err
+		}
 	}
-	return out, nil
+	return value, err
+}
+
+// FolderAgentSongs lists the songs the library holds under one root with what
+// was learned from each (numbers, and names under a consent that covers them),
+// for the folder agent's own turns. Nothing else is given this: it is not a
+// route, and the Manager's tools never reach it. The Home is resolved for the
+// owner, as for every other folder-agent library call.
+func (h *Handler) FolderAgentSongs(ownerUserID, homeID, rootID string) ([]projectlibrary.LearnedSong, error) {
+	scope, err := h.portfolioLibraryScope(ownerUserID, homeID)
+	if err != nil {
+		return nil, ErrPortfolioSetupUnavailable
+	}
+	return h.assistantLibraryStore().LearnedSongsInRoot(scope, rootID)
 }
 
 // ScanFolderAgentRoot reviews and commits one whole-root listing under the

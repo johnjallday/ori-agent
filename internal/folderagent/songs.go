@@ -7,7 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -18,11 +20,19 @@ const (
 	SongsDismissed = "dismissed"
 )
 
-// How the first reading of the songs stands.
+// How the first reading of the songs stands. Summarizing is the short stretch
+// after the reading, while the agent writes what it learned.
 const (
-	LearningRunning = "running"
-	LearningDone    = "done"
-	LearningStopped = "stopped"
+	LearningRunning     = "running"
+	LearningSummarizing = "summarizing"
+	LearningDone        = "done"
+	LearningStopped     = "stopped"
+)
+
+// Who wrote the summary a reading ends with.
+const (
+	SummaryByAgent = "agent"
+	SummaryByHost  = "host"
 )
 
 // learningFlushEvery is how often a running reading's progress is written to
@@ -42,6 +52,16 @@ type Learning struct {
 	Song       string    `json:"song,omitempty"`
 	StartedAt  time.Time `json:"started_at,omitzero"`
 	FinishedAt time.Time `json:"finished_at,omitzero"`
+	// Summary is what the reading ends with. When SummaryBy is SummaryByAgent it
+	// is the agent's own words, at most four sentences, written after the facts
+	// and checked and bounded by the host; when SummaryByHost it is the host's
+	// line of ranges ("6–24 tracks, 84–128 BPM") because there was no model or the
+	// turn failed. Goal is the goal the agent wrote from the same facts (empty
+	// when it wrote none that survived); the goal offer uses it before the first
+	// look's.
+	Summary   string `json:"summary,omitempty"`
+	SummaryBy string `json:"summary_by,omitempty"`
+	Goal      string `json:"goal,omitempty"`
 }
 
 // songsReads is what the offer says it will read, and what it will not touch.
@@ -67,6 +87,11 @@ type Songs interface {
 	// ended. report is called with the reading's progress as it goes; it never
 	// blocks. Nothing is read unless the Home holds a consent.
 	Learn(ctx context.Context, rec Record, homeID string, total int, report func(Learning)) Learning
+	// Facts is this folder's songs with what was learned from each (the numbers,
+	// and the track names, markers and regions under a consent that covers
+	// them), for the folder's own agent. It is empty unless the Home's consent is
+	// active. Only the folder's own agent is given it.
+	Facts(ctx context.Context, rec Record, homeID string) ([]folderlook.Song, error)
 }
 
 // SongsOfferView is the Commander's offer to learn the songs, made once the
@@ -98,9 +123,11 @@ func songsAnswerable(rec *Record) bool {
 	return false
 }
 
-// learningRunning says a reading of the songs is under way.
+// learningRunning says a reading of the songs is under way: still reading, or
+// writing up what it learned.
 func learningRunning(rec *Record) bool {
-	return rec != nil && rec.Learning != nil && rec.Learning.Status == LearningRunning
+	return rec != nil && rec.Learning != nil &&
+		(rec.Learning.Status == LearningRunning || rec.Learning.Status == LearningSummarizing)
 }
 
 // songsHome is the Home a finished Set it up run placed the folder in, as the
@@ -272,14 +299,117 @@ func (s *Service) runLearning(ctx context.Context, rec Record, homeID string, to
 	if final.Status != LearningDone {
 		final.Status = LearningStopped
 	}
-	final.Total, final.StartedAt, final.FinishedAt = total, rec.Learning.StartedAt, s.deps.Now().UTC()
+	final.Total, final.StartedAt = total, rec.Learning.StartedAt
 	final.Done, final.Read = min(max(final.Done, 0), total), min(max(final.Read, 0), total)
-	_, _ = s.deps.Store.Update(rec.WorkspaceID, func(r *Record) error {
+	if final.Status == LearningDone && final.Read > 0 {
+		// The reading is over and the facts are stored. The agent now writes what
+		// it learned and a goal from it; the goal offer waits for that, so the
+		// card says so while it does. A reading that stopped, or read nothing,
+		// has nothing to summarise.
+		pending := final
+		pending.Status, pending.Song = LearningSummarizing, ""
+		if s.updateLearning(rec.WorkspaceID, pending) {
+			final.Summary, final.SummaryBy, final.Goal = s.summarize(ctx, rec, homeID)
+		}
+	}
+	final.FinishedAt = s.deps.Now().UTC()
+	s.updateLearning(rec.WorkspaceID, final)
+}
+
+// updateLearning writes a reading's state, only while the reading is still under
+// way (a restart's sweep may have closed it). It says whether it wrote.
+func (s *Service) updateLearning(workspaceID string, l Learning) bool {
+	applied := false
+	_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
 		if learningRunning(r) {
-			r.Learning = &final
+			r.Learning = &l
+			applied = true
 		}
 		return nil
 	})
+	return applied
+}
+
+// summarize is the second turn: once the songs are read, the folder's own agent
+// is given this folder's facts (numbers, and track and marker names under a
+// consent that covers them) and writes a short summary and a goal from them. It
+// returns the summary, who wrote it, and the goal.
+//
+// The host's own line stands in whenever the agent cannot: no model chosen, a
+// provider that is not available, a failed or empty reply, or a summary that did
+// not survive the parser's bounds. The host line carries ranges only
+// ("6–24 tracks, 84–128 BPM"). A goal that did not survive is empty, and the goal
+// offer then falls back to the first look's. Nothing a name says is ever acted
+// on: the turn has no tools and its reply is parsed, bounded and checked for a
+// path before anything is kept.
+func (s *Service) summarize(ctx context.Context, rec Record, homeID string) (text, by, goal string) {
+	songs, err := s.deps.Songs.Facts(ctx, rec, homeID)
+	if err != nil {
+		logger.Warn("Folder agent could not read the songs it learned", logger.Fields{"workspace_id": rec.WorkspaceID, "error": err.Error()})
+		return "", "", ""
+	}
+	if len(songs) == 0 {
+		return "", "", ""
+	}
+	hostText, hostBy := learnedRanges(songs), SummaryByHost
+	if hostText == "" {
+		hostBy = ""
+	}
+	resolved := s.resolveModel(ctx, &rec)
+	if resolved.chat == nil {
+		return hostText, hostBy, ""
+	}
+	reference, _ := folderlook.BuildSongsReference(folderlook.SongsReferenceInput{
+		FolderName: rec.FolderName, Noun: foldermap.ShapeNoun(rec.Facts.Readability().Shape, 2), Songs: songs,
+	})
+	result := folderlook.RunSummaryTurn(ctx, folderlook.SummaryTurnInput{
+		Chat: resolved.chat, Model: resolved.name, AgentName: rec.AgentName, Reference: reference,
+	})
+	if result.Err != nil || result.Reply == "" {
+		fields := logger.Fields{"workspace_id": rec.WorkspaceID, "provider": resolved.provider, "model": resolved.name}
+		if result.Err != nil {
+			fields["error"] = result.Err.Error()
+		}
+		logger.Warn("Folder agent could not summarise what it learned", fields)
+		return hostText, hostBy, ""
+	}
+	parsed := folderlook.ParseSummary(result.Reply, nestedFolderPaths(rec.Map))
+	goal = parsed.Goal
+	if goal != "" {
+		// The same check the owner's own goal gets: one line, bounded, nothing
+		// that looks like a secret.
+		if normalized, err := personalassistant.NormalizeFolderBrief(goal); err == nil {
+			goal = normalized
+		} else {
+			goal = ""
+		}
+	}
+	if parsed.Text == "" {
+		return hostText, hostBy, goal
+	}
+	return parsed.Text, SummaryByAgent, goal
+}
+
+// nestedFolderPaths are the map's relative folder paths that hold a slash: a
+// summary quoting one names a path and is dropped.
+func nestedFolderPaths(m *foldermap.Map) []string {
+	if m == nil {
+		return nil
+	}
+	var nested []string
+	for _, f := range m.Folders {
+		if strings.Contains(f.Path, "/") {
+			nested = append(nested, f.Path)
+		}
+	}
+	return nested
+}
+
+// learnedRanges is the host's own line about what was read: the range of track
+// counts and of tempos across the songs that gave numbers, "6–24 tracks, 84–128
+// BPM". Empty when no song gave either.
+func learnedRanges(songs []folderlook.Song) string {
+	return folderlook.SongRanges(songs)
 }
 
 // LearningView is the reading of the songs as the card and the Commander say it.
@@ -291,13 +421,21 @@ type LearningView struct {
 	Done    int    `json:"done"`
 	Total   int    `json:"total"`
 	NotRead string `json:"not_read,omitempty"`
+	// Summary is the agent's own words about what it learned (SummaryBy "agent"):
+	// shown as the agent's, never as the host's. When the host wrote the summary
+	// (no model, or the turn failed) it is part of Line instead and Summary is
+	// empty, so it is said once.
+	Summary   string `json:"summary,omitempty"`
+	SummaryBy string `json:"summary_by,omitempty"`
 }
 
 // learningView words a record's reading, or nil when none was started.
 //
-//	running   "Learning <song>… (2 of 7)"
-//	done      "Learned 7 songs"  /  "Learned 5 of 7 songs"  /  "No song could be read"
-//	stopped   "Stopped before it finished. Learned 3 of 7 songs"
+//	running      "Learning <song>… (2 of 7)"
+//	summarizing  "Putting together what I learned…"
+//	done         "Learned 7 songs"  /  "Learned 5 of 7 songs"  /  "No song could be read",
+//	             and, when the host wrote the summary, "Learned 7 songs: 6–24 tracks, 84–128 BPM"
+//	stopped      "Stopped before it finished. Learned 3 of 7 songs"
 func learningView(rec *Record) *LearningView {
 	l := rec.Learning
 	if l == nil {
@@ -314,6 +452,8 @@ func learningView(rec *Record) *LearningView {
 		} else {
 			view.Line = fmt.Sprintf("Learning %s… (%d of %d)", l.Song, position, l.Total)
 		}
+	case LearningSummarizing:
+		view.Line = "Putting together what I learned…"
 	case LearningDone, LearningStopped:
 		learned := ""
 		switch {
@@ -333,8 +473,38 @@ func learningView(rec *Record) *LearningView {
 			view.Line = "Stopped before it finished. " + learned
 		default:
 			view.Line = learned
+			switch {
+			case l.Summary != "" && l.SummaryBy == SummaryByHost && learned != "":
+				view.Line = learned + ": " + l.Summary
+			case l.Summary != "" && l.SummaryBy == SummaryByAgent:
+				view.Summary, view.SummaryBy = l.Summary, SummaryByAgent
+			}
 		}
 		view.NotRead = notReadSentence(readability)
 	}
 	return view
+}
+
+// Where the goal the offer makes came from.
+const (
+	GoalBasisLearned = "learned"
+	GoalBasisLook    = "look"
+)
+
+// offeredGoal is the goal the offer makes and where it came from: the one the
+// agent wrote after learning the songs, when it wrote one that survived the
+// host's checks, otherwise the first look's suggestion. Empty when neither exists.
+func offeredGoal(rec *Record) (goal, basis string) {
+	if rec == nil {
+		return "", ""
+	}
+	if l := rec.Learning; l != nil && l.Status == LearningDone && strings.TrimSpace(l.Goal) != "" {
+		return strings.TrimSpace(l.Goal), GoalBasisLearned
+	}
+	if rec.Sections != nil {
+		if goal := strings.TrimSpace(rec.Sections.Goal); goal != "" {
+			return goal, GoalBasisLook
+		}
+	}
+	return "", ""
 }

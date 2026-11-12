@@ -235,3 +235,69 @@ func TestLearnedFrom_UsesTheSourceThatDatesTheSong(t *testing.T) {
 		t.Fatal("learnedFrom shares storage with the document")
 	}
 }
+
+// The folder agent's own turns read one folder's songs with what was learned:
+// nothing without a consent, numbers under any consent, names only under one that
+// covers them.
+func TestLearnedSongsInRoot_ReadsOneFoldersSongsUnderTheConsent(t *testing.T) {
+	s, scope, file, _ := songCardFixture(t)
+	setSongRecord(t, s, scope, "song-a", func(f *ObservedFacts) { f.Names = smallNames() })
+	names := func(songs []LearnedSong) []string {
+		var out []string
+		for _, song := range songs {
+			out = append(out, song.Name)
+		}
+		return out
+	}
+
+	// The fixture's consent covers numbers only: numbers, no names.
+	songs, err := s.LearnedSongsInRoot(scope, "home-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ordered by name; a linked song is named after its workspace; song-c has no
+	// observation under this root.
+	if got := strings.Join(names(songs), "|"); got != "Catalog only|Song A|Song B" {
+		t.Fatalf("songs = %s", got)
+	}
+	songA := songs[1]
+	if songA.Facts == nil || songA.Facts.TempoBPM != 92 || songA.Facts.TrackCount != 14 || songA.Names != nil || songA.NotRead != "" {
+		t.Fatalf("under a numbers consent Song A = %+v", songA)
+	}
+	if songs[2].Facts != nil || songs[2].Names != nil {
+		t.Fatalf("a song the pass has not reached shows %+v", songs[2])
+	}
+
+	// A consent that covers names: the names come with the numbers.
+	grantNames(t, file, scope)
+	songs, _ = s.LearnedSongsInRoot(scope, "home-root")
+	if songs[1].Names == nil || strings.Join(songs[1].Names.Tracks, ",") != "Kick,Bass" || songs[1].Facts == nil {
+		t.Fatalf("under a names consent Song A = %+v", songs[1])
+	}
+	// The returned names are a copy.
+	songs[1].Names.Tracks[0] = "Changed"
+	if again, _ := s.LearnedSongsInRoot(scope, "home-root"); again[1].Names.Tracks[0] != "Kick" {
+		t.Fatal("the reader shares storage with the document")
+	}
+
+	// A song that was not read says why, with no numbers.
+	setSongRecord(t, s, scope, "song-a", func(f *ObservedFacts) {
+		f.SongFacts, f.Names, f.NotRead = SongFacts{}, nil, NotReadUnreadable
+	})
+	songs, _ = s.LearnedSongsInRoot(scope, "home-root")
+	if songs[1].NotRead != NotReadUnreadable || songs[1].Facts != nil || songs[1].Names != nil {
+		t.Fatalf("a not-read song = %+v", songs[1])
+	}
+
+	// Another root, an empty root id, and a switched-off Home give nothing.
+	if other, _ := s.LearnedSongsInRoot(scope, "some-other-root"); len(other) != 0 {
+		t.Fatalf("another root returned %d songs", len(other))
+	}
+	if none, _ := s.LearnedSongsInRoot(scope, ""); len(none) != 0 {
+		t.Fatalf("an empty root id returned %d songs", len(none))
+	}
+	switchSongDetailsOff(t, file, scope)
+	if off, _ := s.LearnedSongsInRoot(scope, "home-root"); len(off) != 0 {
+		t.Fatalf("a switched-off Home returned %d songs", len(off))
+	}
+}

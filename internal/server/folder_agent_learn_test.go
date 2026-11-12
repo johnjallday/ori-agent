@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/folderagent"
+	"github.com/johnjallday/ori-agent/internal/folderlook"
+	"github.com/johnjallday/ori-agent/internal/foldermap"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -23,10 +25,27 @@ type fakeLearnLibrary struct {
 	rootKeys  []string
 	scopeKeys []string
 	folders   []string // folders PortfolioLibraryState was asked about
+	// scopes are what FolderAgentScopes issues, or fails with scopesErr.
+	scopes    []projectlibrary.ScanScopeChoice
+	scopesErr error
+	// songs are what FolderAgentSongs returns; songAsks records each call as
+	// "owner|home|root".
+	songs    []projectlibrary.LearnedSong
+	songsErr error
+	songAsks []string
+}
+
+func (f *fakeLearnLibrary) FolderAgentSongs(owner, home, root string) ([]projectlibrary.LearnedSong, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.songAsks = append(f.songAsks, owner+"|"+home+"|"+root)
+	return f.songs, f.songsErr
 }
 
 func (f *fakeLearnLibrary) FolderAgentScopes(string, string, string) ([]projectlibrary.ScanScopeChoice, error) {
-	return nil, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.scopes, f.scopesErr
 }
 
 func (f *fakeLearnLibrary) ScanFolderAgentRoot(_ context.Context, _, _, _, key string) (int, bool, error) {
@@ -270,6 +289,145 @@ func TestFolderAgentSongs_LearnStopsWhenItCannotList(t *testing.T) {
 				t.Fatalf("reading = %+v, want stopped", got)
 			}
 		})
+	}
+}
+
+// songsRecord is a folder whose songs sit one folder down ("REAPER Projects/<song>"),
+// so listing them takes a scoped scan after the root's.
+func songsRecord() folderagent.Record {
+	return folderagent.Record{WorkspaceID: "ws-1", OwnerUserID: "local", Facts: foldermap.Facts{
+		Members: []foldermap.Project{
+			{Path: "REAPER Projects/Night Drive", Name: "Night Drive", Depth: 2},
+			{Path: "REAPER Projects/Glass Hour", Name: "Glass Hour", Depth: 2},
+		},
+	}}
+}
+
+// The demo's "Learn them" read 0 of 6 songs and said "No song could be read": the
+// library's scopes could not be read for a moment (the Library Manager writes to
+// the Home right after every scan), the listing stopped at the root without a word,
+// and the reading ended "done". A folder the listing never reached is a reading
+// that did not happen.
+func TestFolderAgentSongs_LearnEndsStoppedWhenTheFoldersOfSongsWereNeverReached(t *testing.T) {
+	rec := songsRecord()
+	f := newLearnFixture(t)
+	if err := f.songs.Grant(context.Background(), "local", "ws-1", f.homeID); err != nil {
+		t.Fatal(err)
+	}
+	f.library.scopesErr = errors.New("the library's revision moved")
+	got := f.songs.Learn(context.Background(), rec, f.homeID, 6, nil)
+	if got.Status != folderagent.LearningStopped {
+		t.Fatalf("reading = %+v, want stopped: the songs' folder was never listed", got)
+	}
+	if len(f.library.scopeKeys) != 0 {
+		t.Fatalf("scoped scans ran without scopes: %v", f.library.scopeKeys)
+	}
+}
+
+func TestFolderAgentSongs_LearnListsTheFoldersOfSongsAndEndsDone(t *testing.T) {
+	rec := songsRecord()
+	f := newLearnFixture(t)
+	if err := f.songs.Grant(context.Background(), "local", "ws-1", f.homeID); err != nil {
+		t.Fatal(err)
+	}
+	f.library.scopes = []projectlibrary.ScanScopeChoice{{ID: "scope-1", RelativeFolder: "REAPER Projects"}}
+	got := f.songs.Learn(context.Background(), rec, f.homeID, 6, nil)
+	if got.Status != folderagent.LearningDone {
+		t.Fatalf("reading = %+v, want done", got)
+	}
+	if len(f.library.scopeKeys) != 1 || !strings.HasPrefix(f.library.scopeKeys[0], "folder-agent-ws-1-learn-") {
+		t.Fatalf("scoped scan keys = %v, want one fresh key", f.library.scopeKeys)
+	}
+}
+
+func TestFolderAgentSongs_FactsAreThisFoldersSongsForItsOwnAgent(t *testing.T) {
+	rec := folderagent.Record{WorkspaceID: "ws-1", OwnerUserID: "local"}
+	ctx := context.Background()
+	t.Run("under a consent, for this folder's root and owner", func(t *testing.T) {
+		f := newLearnFixture(t)
+		f.library.songs = []projectlibrary.LearnedSong{
+			{Name: "Night Drive", Facts: &projectlibrary.SongFacts{TempoBPM: 92, LengthSeconds: 221, TrackCount: 4},
+				Names: &projectlibrary.SongNames{Tracks: []string{"Kick", "Bass"}, TracksLeftOut: 2,
+					Markers: []projectlibrary.SongMarker{{Name: "Chorus", At: 30, End: 45}}, MarkersLeftOut: 1}},
+			{Name: "Broken Take", NotRead: projectlibrary.NotReadUnreadable},
+		}
+		if err := f.songs.Grant(ctx, "local", "ws-1", f.homeID); err != nil {
+			t.Fatal(err)
+		}
+		songs, err := f.songs.Facts(ctx, rec, f.homeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(songs) != 2 || songs[0].Name != "Night Drive" || songs[0].TempoBPM != 92 || songs[0].TrackCount != 4 ||
+			songs[0].LengthSeconds != 221 || strings.Join(songs[0].Tracks, ",") != "Kick,Bass" || songs[0].TracksLeftOut != 2 ||
+			len(songs[0].Markers) != 1 || songs[0].Markers[0] != (folderlook.SongMarker{Name: "Chorus", At: 30, End: 45}) ||
+			songs[0].MarkersLeftOut != 1 || songs[0].NotRead != "" {
+			t.Fatalf("mapped song = %+v", songs[0])
+		}
+		if songs[1].Name != "Broken Take" || songs[1].NotRead != "unreadable" || songs[1].TrackCount != 0 || len(songs[1].Tracks) != 0 {
+			t.Fatalf("a not-read song = %+v", songs[1])
+		}
+		// Asked of this owner's Home and this folder's root, nothing else.
+		if len(f.library.songAsks) != 1 || f.library.songAsks[0] != "local|"+f.homeID+"|root-1" {
+			t.Fatalf("the library was asked %v", f.library.songAsks)
+		}
+		// The agent's slice is its own: changing it leaves the library's songs alone.
+		songs[0].Tracks[0] = "Changed"
+		if f.library.songs[0].Names.Tracks[0] != "Kick" {
+			t.Fatal("the mapped names share storage with the library's")
+		}
+	})
+	t.Run("nothing without a consent", func(t *testing.T) {
+		f := newLearnFixture(t)
+		f.library.songs = []projectlibrary.LearnedSong{{Name: "X"}}
+		songs, err := f.songs.Facts(ctx, rec, f.homeID)
+		if err != nil || len(songs) != 0 || len(f.library.songAsks) != 0 {
+			t.Fatalf("with no consent: %v, %v, asks %v", songs, err, f.library.songAsks)
+		}
+	})
+	t.Run("nothing once the Home is switched off", func(t *testing.T) {
+		f := newLearnFixture(t)
+		f.library.songs = []projectlibrary.LearnedSong{{Name: "X"}}
+		if err := f.songs.Grant(ctx, "local", "ws-1", f.homeID); err != nil {
+			t.Fatal(err)
+		}
+		f.switchOff(t)
+		songs, err := f.songs.Facts(ctx, rec, f.homeID)
+		if err != nil || len(songs) != 0 || len(f.library.songAsks) != 0 {
+			t.Fatalf("switched off: %v, %v, asks %v", songs, err, f.library.songAsks)
+		}
+	})
+	t.Run("errors are reported, not swallowed", func(t *testing.T) {
+		for name, set := range map[string]func(*learnFixture){
+			"the library has no root":  func(f *learnFixture) { f.library.rootID = "" },
+			"the library state fails":  func(f *learnFixture) { f.library.stateErr = errors.New("unavailable") },
+			"the songs cannot be read": func(f *learnFixture) { f.library.songsErr = errors.New("busy") },
+			"the folder is gone":       func(f *learnFixture) { f.songs.anchor = func(string) (string, error) { return "", errors.New("gone") } },
+			"no library yet":           func(f *learnFixture) { f.songs.library = func() folderAgentLearnLibrary { return nil } },
+		} {
+			f := newLearnFixture(t)
+			if err := f.songs.Grant(ctx, "local", "ws-1", f.homeID); err != nil {
+				t.Fatal(err)
+			}
+			set(f)
+			if songs, err := f.songs.Facts(ctx, rec, f.homeID); err == nil || len(songs) != 0 {
+				t.Fatalf("%s: songs %v err %v", name, songs, err)
+			}
+		}
+	})
+}
+
+func TestLearnedSongs_MapsEverythingAndNothingElse(t *testing.T) {
+	if got := learnedSongs(nil); len(got) != 0 {
+		t.Fatalf("no songs = %+v", got)
+	}
+	got := learnedSongs([]projectlibrary.LearnedSong{{Name: "Bare"}})
+	if len(got) != 1 || got[0].Name != "Bare" || got[0].TempoBPM != 0 || got[0].Tracks != nil || got[0].Markers != nil {
+		t.Fatalf("a song with nothing learned = %+v", got)
+	}
+	got = learnedSongs([]projectlibrary.LearnedSong{{Name: "Varies", Facts: &projectlibrary.SongFacts{TempoBPM: 96, TempoVaries: true}}})
+	if !got[0].TempoVaries || got[0].TempoBPM != 96 {
+		t.Fatalf("tempo that varies = %+v", got[0])
 	}
 }
 

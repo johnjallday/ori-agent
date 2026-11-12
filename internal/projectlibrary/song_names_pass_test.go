@@ -1,6 +1,7 @@
 package projectlibrary
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -309,29 +310,55 @@ func fillLibrary(t *testing.T, r *Roots, scope Scope, store workspace.Store, lea
 
 // A library so full that names cannot be written keeps the numbers and says how
 // many names there were: a full library never costs a song its numbers.
+//
+// The listing scan and the discovery run BEFORE the library is filled. A scan of
+// an almost-full library is slow (every directory read re-reads the document) and
+// runs under a time budget, so on a loaded machine it can honestly come back
+// partial, and a partial scan leaves the songs it did not reach alone. That is
+// not what is under test: this is the save, which has no such budget, so it is
+// called with what the pass would have read.
 func TestSongFactsPass_ALibraryTooFullKeepsTheNumbersAndCountsTheNames(t *testing.T) {
 	r, scope, file, tree, root := connectedMusicRoot(t)
 	namedMusicTree(t, tree)
-	grantNumbers(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "before-full")
-
-	// Each song now holds more names than the room left.
-	var tracks []namedTrack
-	for i := 0; i < 100; i++ {
-		tracks = append(tracks, namedTrack{lines: []string{nameLine(fmt.Sprintf("Track %03d ", i) + strings.Repeat("n", 60))}})
+	scan := scanRoot(t, r, scope, root.ID, "listing") // no consent yet: the listing only
+	observed, err := r.Discover(context.Background(), scope, root.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	saved := time.Date(2026, time.October, 9, 10, 0, 0, 0, time.UTC)
-	writeSongProject(t, filepath.Join(tree.single, "Song.rpp"), namedProject("92", nil, tracks), saved)
-	writeSongProject(t, filepath.Join(tree.alternate, "Take B.RPP"), namedProject("96", nil, tracks), saved)
+	if scan.Status != "complete" || observed.PartialReason != "" {
+		t.Fatalf("setup needs a complete listing: scan %q, discovery %q", scan.Status, observed.PartialReason)
+	}
+	grantNames(t, file, scope)
+	targets, grant, ok := r.songFactsTargets(scope, scan, observed)
+	if !ok || !grant.names || len(targets) != 2 {
+		t.Fatalf("targets = %d under grant %+v (ok %v), want the two REAPER songs under names", len(targets), grant, ok)
+	}
+	// What the pass would have read: each song holds 100 long track names, more
+	// than the room the library will have left.
+	var reads []songFactsRead
+	for _, target := range targets {
+		names := &SongNames{}
+		for i := 0; i < 100; i++ {
+			names.Tracks = append(names.Tracks, fmt.Sprintf("Track %03d ", i)+strings.Repeat("n", 60))
+		}
+		reads = append(reads, songFactsRead{songFactsTarget: target,
+			Facts: SongFacts{TempoBPM: 92, LengthSeconds: 221, TrackCount: 100}, Names: names})
+	}
 
 	fillLibrary(t, r, scope, file, 6<<10)
-	entriesBefore := func() int { doc, _ := r.library.Read(scope); return len(doc.Entries) }()
+	doc, err := r.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entriesBefore := len(doc.Entries)
 	t.Logf("library filled to %d of %d bytes with %d entries", len(storedLibrary(t, file, scope)), maxDocumentBytes, entriesBefore)
 
-	grantNames(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "when-full")
+	saved, readable, err := r.saveSongFacts(scope, scan, reads, grant)
+	if err != nil || saved != 2 || readable != 2 {
+		t.Fatalf("saveSongFacts = saved %d, readable %d, err %v; want both songs' numbers kept", saved, readable, err)
+	}
 
-	doc, err := NewStore(file).Read(scope)
+	doc, err = NewStore(file).Read(scope)
 	if err != nil {
 		t.Fatalf("the full library no longer reads: %v", err)
 	}
@@ -341,7 +368,7 @@ func TestSongFactsPass_ALibraryTooFullKeepsTheNumbersAndCountsTheNames(t *testin
 			t.Fatalf("%s lost its facts in a full library", relative)
 		}
 		facts := observation.Facts
-		if facts.TrackCount != 100 || facts.TempoBPM == 0 {
+		if facts.TrackCount != 100 || facts.TempoBPM != 92 || facts.LengthSeconds != 221 {
 			t.Fatalf("%s: the numbers were not kept: %+v", relative, facts.SongFacts)
 		}
 		if facts.Names == nil || len(facts.Names.Tracks) != 0 || facts.Names.TracksLeftOut != 100 {

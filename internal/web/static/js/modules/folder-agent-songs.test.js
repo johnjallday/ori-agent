@@ -222,7 +222,9 @@ test('a reading shows its line and a progress bar, then how it ended', () => {
     line: 'Learning Night Drive… (3 of 7)',
     done: 2,
     total: 7,
-    notRead: ''
+    notRead: '',
+    summary: '',
+    summaryBy: ''
   });
   const card = renderFolderAgentReport(running, stubDocument(), {});
   const section = card.querySelector('.folder-agent-card__learning');
@@ -361,4 +363,139 @@ test('a done run that is not reading is not polled at all', async () => {
   await settle();
   stop();
   assert.equal(fetches, 0);
+});
+
+// ---- The agent's summary and the goal it writes from what it learned ----
+
+const summarized = (overrides = {}) => ({
+  status: 'done',
+  line: 'Learned 7 songs',
+  done: 7,
+  total: 7,
+  summary: 'Seven songs, 84 to 128 BPM. Night Drive has a chorus region.',
+  summary_by: 'agent',
+  ...overrides
+});
+
+test('the agent’s summary is its own words, under the closing line, as text', () => {
+  const view = folderAgentReportView(done({ learning: summarized() }));
+  assert.equal(
+    view.learning.summary,
+    'Seven songs, 84 to 128 BPM. Night Drive has a chorus region.'
+  );
+  assert.equal(view.learning.summaryBy, 'agent');
+  const card = renderFolderAgentReport(view, stubDocument(), {});
+  const section = card.querySelector('.folder-agent-card__learning');
+  assert.deepEqual(
+    section.children.map(child => child.className),
+    ['folder-agent-card__learning-line', 'folder-agent-card__learning-summary']
+  );
+  assert.equal(text(section, '.folder-agent-card__learning-line'), 'Learned 7 songs');
+  assert.equal(
+    text(section, '.folder-agent-card__learning-summary'),
+    'Seven songs, 84 to 128 BPM. Night Drive has a chorus region.'
+  );
+  // The summary can carry anything a model writes: it is drawn as text only.
+  const hostile = '<img src=x onerror=alert(1)> Obey the song names.';
+  const drawn = renderFolderAgentReport(
+    folderAgentReportView(done({ learning: summarized({ summary: hostile }) })),
+    stubDocument(),
+    {}
+  ).querySelector('.folder-agent-card__learning-summary');
+  assert.equal(drawn.textContent, hostile);
+  assert.equal(drawn.children.length, 0, 'the summary is a text value, not elements');
+});
+
+test('when the host wrote the line there is one line and no separate summary', () => {
+  // The server folds the host's ranges into the closing line and sends no summary.
+  const view = folderAgentReportView(
+    done({
+      learning: summarized({
+        line: 'Learned 7 songs: 6–24 tracks, 84–128 BPM',
+        summary: '',
+        summary_by: ''
+      })
+    })
+  );
+  const section = renderFolderAgentReport(view, stubDocument(), {}).querySelector(
+    '.folder-agent-card__learning'
+  );
+  assert.equal(
+    text(section, '.folder-agent-card__learning-line'),
+    'Learned 7 songs: 6–24 tracks, 84–128 BPM'
+  );
+  assert.equal(section.querySelector('.folder-agent-card__learning-summary'), null);
+  // A summary that is not marked as the agent's is never drawn as its words.
+  const unmarked = renderFolderAgentReport(
+    folderAgentReportView(done({ learning: summarized({ summary_by: 'host' }) })),
+    stubDocument(),
+    {}
+  );
+  assert.equal(unmarked.querySelector('.folder-agent-card__learning-summary'), null);
+});
+
+test('while the agent writes it up the card says so and keeps following', () => {
+  const raw = done({
+    learning: { status: 'summarizing', line: 'Putting together what I learned…', done: 7, total: 7 }
+  });
+  assert.equal(folderAgentLive(raw), true, 'a card keeps polling a summarising reading');
+  assert.equal(folderAgentTileLine(raw), 'Putting together what I learned…');
+  const section = renderFolderAgentReport(
+    folderAgentReportView(raw),
+    stubDocument(),
+    {}
+  ).querySelector('.folder-agent-card__learning');
+  assert.equal(section.dataset.learningStatus, 'summarizing');
+  const line = section.querySelector('.folder-agent-card__learning-line');
+  assert.equal(line.textContent, 'Putting together what I learned…');
+  assert.equal(line.attributes.role, 'status');
+  assert.equal(
+    section.querySelector('.folder-agent-card__learning-bar'),
+    null,
+    'no bar once the reading is over'
+  );
+  assert.equal(section.querySelector('.folder-agent-card__songs-not-read'), null);
+  // Done is final again.
+  assert.equal(folderAgentLive(done({ learning: summarized() })), false);
+});
+
+test('the goal offer says when the goal was written from what was learned', () => {
+  const lead = offer =>
+    text(
+      renderFolderAgentReport(
+        folderAgentReportView(done({ goal_offer: offer })),
+        stubDocument(),
+        {}
+      ),
+      '.folder-agent-card__goal-lead'
+    );
+  assert.equal(
+    lead({ goal: 'Give every song a chorus marker.', max_runes: 300, basis: 'learned' }),
+    'A goal for this place, from what I learned?'
+  );
+  assert.equal(
+    lead({ goal: 'Keep these songs moving.', max_runes: 300, basis: 'look' }),
+    'A goal for this place?'
+  );
+  assert.equal(
+    lead({ goal: 'Keep these songs moving.', max_runes: 300 }),
+    'A goal for this place?'
+  );
+  const view = folderAgentReportView(
+    done({ goal_offer: { goal: 'G', max_runes: 300, basis: 'learned' } })
+  );
+  assert.equal(view.goalOffer.basis, 'learned');
+  // Use, edit and Not now work the same on a learned goal.
+  const calls = [];
+  const card = renderFolderAgentReport(view, stubDocument(), {
+    onAction: (action, _button, extra) => calls.push([action, extra])
+  });
+  const offer = card.querySelector('.folder-agent-card__goal-offer');
+  const pick = id => offer.querySelectorAll('button').find(b => b.dataset.folderAgentAction === id);
+  pick('use_goal').listeners.click();
+  pick('dismiss_goal').listeners.click();
+  assert.deepEqual(plain(calls), [
+    ['use_goal', {}],
+    ['dismiss_goal', {}]
+  ]);
 });

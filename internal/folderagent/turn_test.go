@@ -22,6 +22,8 @@ type scriptedTurns struct {
 	chatErr    error
 	responses  []*llm.ChatResponse
 	references []string
+	// requests are every request the model was given, in order.
+	requests []llm.ChatRequest
 }
 
 func (s *scriptedTurns) Model(context.Context, string, string) (folderlook.Chat, folderlook.ModelRef, error) {
@@ -31,6 +33,7 @@ func (s *scriptedTurns) Model(context.Context, string, string) (folderlook.Chat,
 	return func(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		s.requests = append(s.requests, req)
 		if s.chatErr != nil {
 			return nil, s.chatErr
 		}

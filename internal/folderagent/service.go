@@ -1117,7 +1117,11 @@ const (
 // while the offer to learn the songs waits for an answer, the goal waits too.
 func (s *Service) goalOffered(ctx context.Context, rec *Record) bool {
 	if rec == nil || rec.State != StateSetUp || rec.Setup == nil || rec.Setup.Status != personalassistant.FolderSetupDone ||
-		rec.Sections == nil || strings.TrimSpace(rec.Sections.Goal) == "" || rec.GoalAnswer != "" {
+		rec.GoalAnswer != "" {
+		return false
+	}
+	// The goal the agent wrote after learning the songs, else the first look's.
+	if goal, _ := offeredGoal(rec); goal == "" {
 		return false
 	}
 	if s.deps.Workspaces == nil {
@@ -1144,7 +1148,7 @@ func (s *Service) AnswerGoal(ctx context.Context, userID, workspaceID string, us
 	if !s.goalOffered(ctx, current) {
 		return View{}, ErrWrongState
 	}
-	goal := current.Sections.Goal
+	goal, _ := offeredGoal(current)
 	if use && edited != nil {
 		goal = *edited
 	}

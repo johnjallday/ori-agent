@@ -112,7 +112,7 @@ export function folderAgentTileLine(view) {
   if (view.state === 'setting_up') return 'Setting up…';
   // Reading the songs after "Learn them": the host's own line, "Learning <song>…
   // (2 of 7)". It goes when the reading ends; the card keeps the closing line.
-  if (view.learning?.status === 'running' && view.learning.line) return String(view.learning.line);
+  if (folderAgentReading(view) && view.learning.line) return String(view.learning.line);
   return '';
 }
 
@@ -190,7 +190,9 @@ export function folderAgentReportView(view) {
     goalOffer: view.goal_offer?.goal
       ? {
           goal: String(view.goal_offer.goal),
-          maxRunes: Number(view.goal_offer.max_runes) > 0 ? Number(view.goal_offer.max_runes) : 300
+          maxRunes: Number(view.goal_offer.max_runes) > 0 ? Number(view.goal_offer.max_runes) : 300,
+          // "learned": written by the agent after it learned the songs.
+          basis: String(view.goal_offer.basis || '')
         }
       : null,
     // The Commander's offer to learn the songs, made once after a setup that
@@ -213,7 +215,12 @@ export function folderAgentReportView(view) {
           line: String(view.learning.line),
           done: Number(view.learning.done) || 0,
           total: Number(view.learning.total) || 0,
-          notRead: String(view.learning.not_read || '')
+          notRead: String(view.learning.not_read || ''),
+          // The agent's own words about what it learned, written after the
+          // facts (FR17); empty when the host's line stands in (FR18), which
+          // is then part of `line`.
+          summary: String(view.learning.summary || ''),
+          summaryBy: String(view.learning.summary_by || '')
         }
       : null
   };
@@ -1174,9 +1181,11 @@ function learningSection(doc, learning) {
   section.setAttribute('aria-label', 'Learning the songs');
   const line = el(doc, 'p', 'folder-agent-card__learning-line', learning.line);
   section.append(line);
-  if (learning.status === 'running') {
+  if (learning.status === 'running' || learning.status === 'summarizing') {
     // The poll redraws this card; role=status announces the line as it changes.
     line.setAttribute('role', 'status');
+  }
+  if (learning.status === 'running') {
     if (learning.total > 0) {
       const bar = doc.createElement('progress');
       bar.className = 'folder-agent-card__learning-bar';
@@ -1186,7 +1195,12 @@ function learningSection(doc, learning) {
       section.append(bar);
     }
   }
-  if (learning.notRead && learning.status !== 'running') {
+  // The agent's own summary of what it learned, as its words in text (never
+  // markup), under the host's closing line and before the songs it could not read.
+  if (learning.summary && learning.summaryBy === 'agent') {
+    section.append(el(doc, 'p', 'folder-agent-card__learning-summary', learning.summary));
+  }
+  if (learning.notRead && learning.status !== 'running' && learning.status !== 'summarizing') {
     section.append(el(doc, 'p', 'folder-agent-card__songs-not-read', learning.notRead));
   }
   return section;
@@ -1202,7 +1216,15 @@ function learningSection(doc, learning) {
 function goalOfferSection(doc, offer, onAction) {
   const section = el(doc, 'section', 'folder-agent-card__goal-offer');
   section.setAttribute('aria-label', 'Suggested goal');
-  const lead = el(doc, 'p', 'folder-agent-card__goal-lead', 'A goal for this place?');
+  // A goal the agent wrote after it learned the songs says so (FR17).
+  const lead = el(
+    doc,
+    'p',
+    'folder-agent-card__goal-lead',
+    offer.basis === 'learned'
+      ? 'A goal for this place, from what I learned?'
+      : 'A goal for this place?'
+  );
   const sentence = el(doc, 'p', 'folder-agent-card__goal-text', offer.goal);
   const row = el(doc, 'div', 'folder-agent-card__actions folder-agent-card__goal-actions');
   const button = (label, action, primary = false) => {
@@ -1899,11 +1921,13 @@ export function notifyPlacement(previous, next) {
 // keep following it: looking, setting up, or reading the songs after "Learn
 // them". Takes the server's view.
 export function folderAgentLive(view) {
-  return (
-    view?.state === 'looking' ||
-    view?.state === 'setting_up' ||
-    view?.learning?.status === 'running'
-  );
+  return view?.state === 'looking' || view?.state === 'setting_up' || folderAgentReading(view);
+}
+
+// folderAgentReading says the agent is still on the songs: reading them, or
+// writing up what it learned. Takes the server's view.
+export function folderAgentReading(view) {
+  return view?.learning?.status === 'running' || view?.learning?.status === 'summarizing';
 }
 
 // followFolderAgent polls one folder agent while it looks, sets up or reads the

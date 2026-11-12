@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
+	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -28,6 +29,24 @@ type fakeSongs struct {
 	learns   []string // homeIDs read
 	learned  func(rec Record, total int, report func(Learning)) Learning
 	block    chan struct{}
+	// facts are the folder's songs the agent is given after the reading;
+	// factsCalls counts how often it was asked.
+	facts      []folderlook.Song
+	factsErr   error
+	factsCalls int
+}
+
+func (f *fakeSongs) Facts(context.Context, Record, string) ([]folderlook.Song, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.factsCalls++
+	return f.facts, f.factsErr
+}
+
+func (f *fakeSongs) factsAsked() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.factsCalls
 }
 
 func (f *fakeSongs) Consent(_ context.Context, _, _, homeID string) (string, bool, error) {
@@ -207,8 +226,15 @@ func TestNotReadSentence(t *testing.T) {
 // in a Home, so the finished record carries the receipt the offer reads.
 func songsHarness(t *testing.T, songs *fakeSongs) (*harness, string) {
 	t.Helper()
+	return songsHarnessWith(t, songs, &scriptedTurns{responses: []*llm.ChatResponse{{Content: demoReport}}})
+}
+
+// songsHarnessWith is songsHarness with the model's script supplied: the first
+// response is the first look's, the next are for turns after the reading.
+func songsHarnessWith(t *testing.T, songs *fakeSongs, turns *scriptedTurns) (*harness, string) {
+	t.Helper()
 	h := newHarness(t, demo(t))
-	withTurns(h, &scriptedTurns{responses: []*llm.ChatResponse{{Content: demoReport}}})
+	withTurns(h, turns)
 	h.setups.receipt = &SetupReceipt{Home: &WorkspaceRef{ID: "home-1", Name: "Music", Route: "/workspaces/home-1"}}
 	h.svc.deps.Songs = songs
 	view := h.start(t, "")
