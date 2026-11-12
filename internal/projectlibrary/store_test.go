@@ -17,7 +17,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-func libraryHome(t *testing.T) (*workspace.FileStore, Scope) {
+func libraryHome(t testing.TB) (*workspace.FileStore, Scope) {
 	t.Helper()
 	store, err := workspace.NewFileStore(t.TempDir())
 	if err != nil {
@@ -37,7 +37,7 @@ func libraryHome(t *testing.T) (*workspace.FileStore, Scope) {
 	return store, scope
 }
 
-func initializeLibrary(t *testing.T, s *Store, scope Scope) OperationReceipt {
+func initializeLibrary(t testing.TB, s *Store, scope Scope) OperationReceipt {
 	t.Helper()
 	review, err := s.ReviewInitialize(scope)
 	if err != nil {

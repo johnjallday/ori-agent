@@ -2,6 +2,7 @@ package projectlibrary
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -258,17 +259,32 @@ func TestSongFactsPass_NamesAreCutToTheLibraryBudget(t *testing.T) {
 }
 
 // fillLibrary adds filler entries until the stored library is within leave bytes
-// of its 8 MiB limit, through the library's own fenced writes.
+// of its 8 MiB limit, through the library's own fenced writes, so the final
+// document is exactly what the product validated and stored.
+//
+// Every write decodes, validates, encodes and stores the whole document, so what
+// costs time is the number of writes made once the document is large, not the
+// number of entries. fillLibrary therefore measures what a write and an entry
+// cost while the document is still small, adds the bulk in a single write that
+// stops one to two entries short of the margin, and lands the rest with the
+// small final writes. (It used to halve the remaining gap each round, which is
+// about fifteen full-size writes.) The limit, the margin and the entries'
+// contents are unchanged.
 func fillLibrary(t *testing.T, r *Roots, scope Scope, store workspace.Store, leave int) {
 	t.Helper()
-	filler := func(n, alternates int, tag string) {
+	doc, err := r.library.Read(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := doc.Revision
+	stored := func() int { return len(storedLibrary(t, store, scope)) }
+	// add writes n filler entries, each holding the given number of long
+	// alternate names, and follows the revision through the write's receipt
+	// instead of decoding the document again.
+	add := func(n, alternates int, tag string) {
 		t.Helper()
-		doc, err := r.library.Read(scope)
-		if err != nil {
-			t.Fatal(err)
-		}
-		key := fmt.Sprintf("filler-%s-%d", tag, doc.Revision)
-		_, _, err = r.library.mutate(scope, doc.Revision, operation{key: key, action: "fixture_filler", digest: key}, func(current *Document) (string, error) {
+		key := fmt.Sprintf("filler-%s-%d", tag, revision)
+		written, _, err := r.library.mutate(scope, revision, operation{key: key, action: "fixture_filler", digest: key}, func(current *Document) (string, error) {
 			seed := current.Entries[0]
 			for i := 0; i < n; i++ {
 				entry := seed
@@ -279,7 +295,7 @@ func fillLibrary(t *testing.T, r *Roots, scope Scope, store workspace.Store, lea
 				observation.FileIdentity = fmt.Sprintf("filler-identity-%s-%04d-%d", tag, i, current.Revision)
 				observation.Alternates = make([]string, alternates)
 				for a := range observation.Alternates {
-					observation.Alternates[a] = fmt.Sprintf("%s-%02d.rpp", strings.Repeat("a", 200), a)
+					observation.Alternates[a] = fillerAlternate(a)
 				}
 				entry.Observations = []Observation{observation}
 				current.Entries = append(current.Entries, entry)
@@ -289,23 +305,67 @@ func fillLibrary(t *testing.T, r *Roots, scope Scope, store workspace.Store, lea
 		if err != nil {
 			t.Fatalf("filler %s: %v", tag, err)
 		}
+		revision = written.Revision
 	}
-	const entryBytes = 14 << 10 // an entry holding 64 long alternates
+
+	// What a write and an entry cost, measured on the small document: one write
+	// of one entry, then of two, so the per-write receipt and the per-entry bytes
+	// separate. The tags have the bulk tag's length because each entry embeds its
+	// tag, so the measured entries are the same size as the bulk ones.
+	start := stored()
+	add(1, 64, "cal1")
+	afterOne := stored()
+	add(2, 64, "cal2")
+	afterTwo := stored()
+	entry := (afterTwo - afterOne) - (afterOne - start) // one entry holding 64 long alternates
+	receipt := (afterOne - start) - entry               // what a write adds besides its entries
+	if entry < 4<<10 || entry > 64<<10 || receipt < 0 {
+		t.Fatalf("filler cost is not what the fixture assumes: entry %d bytes, write overhead %d bytes", entry, receipt)
+	}
+	// What one alternate name costs in the stored document (its encoded string and
+	// the comma), and so what an entry costs besides its alternates.
+	encodedAlternate, err := json.Marshal(fillerAlternate(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	perAlternate := len(encodedAlternate) + 1
+	fixed := entry - 64*perAlternate
+	if perAlternate < 100 || fixed < 0 {
+		t.Fatalf("filler cost is not what the fixture assumes: %d bytes per alternate, %d bytes per entry besides them", perAlternate, fixed)
+	}
+	// The bulk: as many entries as leave one to two entries of room under the
+	// margin, in one write.
+	bulk := (maxDocumentBytes-leave-afterTwo-receipt)/entry - 1
+	if bulk < 1 {
+		t.Fatalf("the library is already within %d bytes of its limit before the fill", leave+2*entry)
+	}
+	add(bulk, 64, "bulk")
+
 	for round := 0; ; round++ {
-		gap := maxDocumentBytes - len(storedLibrary(t, store, scope)) - leave
-		if gap < 2*entryBytes {
+		gap := maxDocumentBytes - stored() - leave
+		if gap < 2*entry {
 			break
 		}
-		filler(min(gap/entryBytes/2, 200), 64, fmt.Sprintf("big%d", round))
+		add(1, 64, fmt.Sprintf("big%d", round))
 	}
-	// Land within leave: an entry whose few alternates take what is left.
+	// Land within leave: one entry whose alternates take what is left, sized from
+	// the measured costs so the write never crosses the margin. The slack covers
+	// the few bytes a receipt's timestamp varies in width between platforms.
+	const slack = 64
 	for round := 0; round < 4; round++ {
-		gap := maxDocumentBytes - len(storedLibrary(t, store, scope)) - leave
-		if gap < 1500 {
+		gap := maxDocumentBytes - stored() - leave
+		fit := (gap - receipt - fixed - slack) / perAlternate
+		if fit < 1 {
 			break
 		}
-		filler(1, max(1, min(63, gap/260)), fmt.Sprintf("fine%d", round))
+		add(1, min(63, fit), fmt.Sprintf("fine%d", round))
 	}
+}
+
+// fillerAlternate is the long alternate file name a filler entry carries: 207
+// characters, so each costs the stored document a predictable amount.
+func fillerAlternate(index int) string {
+	return fmt.Sprintf("%s-%02d.rpp", strings.Repeat("a", 200), index)
 }
 
 // A library so full that names cannot be written keeps the numbers and says how
@@ -345,18 +405,52 @@ func TestSongFactsPass_ALibraryTooFullKeepsTheNumbersAndCountsTheNames(t *testin
 			Facts: SongFacts{TempoBPM: 92, LengthSeconds: 221, TrackCount: 100}, Names: names})
 	}
 
-	fillLibrary(t, r, scope, file, 6<<10)
+	const leave = 6 << 10
+	filling := time.Now()
+	fillLibrary(t, r, scope, file, leave)
+	filled := time.Since(filling)
 	doc, err := r.library.Read(scope)
 	if err != nil {
 		t.Fatal(err)
 	}
 	entriesBefore := len(doc.Entries)
-	t.Logf("library filled to %d of %d bytes with %d entries", len(storedLibrary(t, file, scope)), maxDocumentBytes, entriesBefore)
+	stored := len(storedLibrary(t, file, scope))
+	t.Logf("library filled to %d of %d bytes with %d entries in %s", stored, maxDocumentBytes, entriesBefore, filled)
 
+	// What the rest of the test stands on, so a fixture that stopped being full
+	// cannot pass silently: the library is within a few KiB of the real 8 MiB
+	// limit, the names these songs carry do not fit in the room left, and their
+	// numbers do.
+	jsonSize := func(v any) int {
+		t.Helper()
+		encoded, err := json.Marshal(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(encoded)
+	}
+	room := maxDocumentBytes - stored
+	var namesBytes, numbersBytes int
+	for _, read := range reads {
+		namesBytes += jsonSize(read.Names)
+		numbersBytes += jsonSize(read.Facts)
+	}
+	if room < leave || room > leave+4<<10 {
+		t.Fatalf("the fixture must leave about %d bytes of the %d byte limit, left %d", leave, maxDocumentBytes, room)
+	}
+	if namesBytes <= room {
+		t.Fatalf("the names (%d bytes) would fit in the %d bytes left, so nothing is under test", namesBytes, room)
+	}
+	if numbersBytes >= room {
+		t.Fatalf("the numbers (%d bytes) cannot fit in the %d bytes left", numbersBytes, room)
+	}
+
+	saving := time.Now()
 	saved, readable, err := r.saveSongFacts(scope, scan, reads, grant)
 	if err != nil || saved != 2 || readable != 2 {
 		t.Fatalf("saveSongFacts = saved %d, readable %d, err %v; want both songs' numbers kept", saved, readable, err)
 	}
+	t.Logf("the save under test took %s", time.Since(saving))
 
 	doc, err = NewStore(file).Read(scope)
 	if err != nil {
