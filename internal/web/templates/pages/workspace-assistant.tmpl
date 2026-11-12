@@ -177,10 +177,16 @@
                     <h3 id="projectLibrarySongDetailsTitle">Song details</h3>
                     <div class="form-check form-switch project-library-sharing-switch">
                       <input id="projectLibrarySongDetailsSwitch" class="form-check-input" type="checkbox" role="switch" aria-describedby="projectLibrarySongDetailsNote">
-                      <label class="form-check-label" for="projectLibrarySongDetailsSwitch">Read song details when scanning</label>
+                      <label id="projectLibrarySongDetailsLabel" class="form-check-label" for="projectLibrarySongDetailsSwitch">Read song details, track names and markers when scanning</label>
                     </div>
                   </div>
                   <p id="projectLibrarySongDetailsNote" class="project-library-sharing-note"></p>
+                  <div id="projectLibrarySongDetailsAsk" class="project-library-song-details-ask" role="group" aria-labelledby="projectLibrarySongDetailsAskText" hidden>
+                    <p id="projectLibrarySongDetailsAskText" class="project-library-sharing-note"></p>
+                    <button id="projectLibrarySongDetailsAllow" class="modern-btn modern-btn-primary" type="button">Allow</button>
+                    <button id="projectLibrarySongDetailsDecline" class="modern-btn modern-btn-secondary" type="button">Not now</button>
+                  </div>
+                  <button id="projectLibrarySongDetailsUpgrade" class="modern-btn modern-btn-secondary" type="button" hidden></button>
                 </section>
                 <section id="projectLibraryResume" class="project-library-resume" aria-labelledby="projectLibraryResumeTitle" hidden>
                   <h3 id="projectLibraryResumeTitle">Pick up where you left off</h3>

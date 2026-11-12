@@ -122,6 +122,7 @@ export default defineConfig([
       'internal/web/static/js/modules/library-open.js',
       'internal/web/static/js/modules/song-card.js',
       'internal/web/static/js/modules/song-card-suggestions.js',
+      'internal/web/static/js/modules/song-learned.js',
       'internal/web/static/js/modules/field-labels.js',
       'internal/web/static/js/modules/home-song-roster.js',
       'internal/web/static/js/modules/library-freshness.js',

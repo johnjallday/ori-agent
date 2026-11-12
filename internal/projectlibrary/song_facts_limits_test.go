@@ -93,8 +93,20 @@ func TestSongFacts_UnreadableFilesGiveNoFactsAndNoError(t *testing.T) {
 			t.Fatalf("%s lost its save time", row.Name)
 		}
 	}
-	// The refused files are remembered; only the oversized one is skipped
-	// unopened again, so a rescan opens nothing.
+	// Every refused file is remembered with the reason, the oversized one without
+	// ever being opened, so the same unchanged file is not looked at again.
+	for relative, reason := range map[string]string{
+		"Not REAPER": NotReadUnreadable, "Binary": NotReadUnreadable, "Empty": NotReadUnreadable,
+		"Long Line": NotReadTooLarge, "Huge": NotReadTooLarge,
+	} {
+		facts := factsAt(t, r, scope, root.ID, relative)
+		if facts == nil || facts.NotRead != reason || !facts.empty() || facts.Names != nil {
+			t.Fatalf("%s: stored %+v, want not read as %q", relative, facts, reason)
+		}
+	}
+	if good := factsAt(t, r, scope, root.ID, "Good"); good == nil || good.NotRead != "" || good.TempoBPM != 92 {
+		t.Fatalf("the readable song: %+v", good)
+	}
 	scanRoot(t, r, scope, root.ID, "unreadable-again")
 	if got := opens.take(); len(got) != 0 {
 		t.Fatalf("a rescan opened unchanged files: %v", got)

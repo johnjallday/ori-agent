@@ -32,14 +32,21 @@ func (s *Store) SongDetailsState(scope Scope) (string, error) {
 }
 
 // SetSongDetails turns the Home's song-details switch off or on (D6) in one
-// fenced Home write. Off records revoked_at and clears every stored song fact,
-// and the collection brief written from them, in that same write, so nothing
-// read under the consent outlives it; the next
-// scan opens no file. On clears revoked_at on a Home that consented at setup
-// (ErrSongDetailsNotGranted otherwise) and starts no scan: facts return on the
-// next one. Setting the state it already has changes nothing. Off is reductive
-// and stays possible on a read-only Home; on needs a writable one.
-func (s *Store) SetSongDetails(scope Scope, enabled bool) (string, error) {
+// fenced Home write. Off records revoked_at and clears every stored song fact
+// (the numbers, the track names, markers and regions), and the collection brief
+// written from them, in that same write, so nothing read under the consent
+// outlives it; the next scan opens no file. The consent's scope is left as it
+// was, only its switch moves.
+//
+// On starts no scan: facts return on the next one. It is the owner's new answer,
+// so it resumes exactly what they have just agreed to and no more: names true is
+// the full wording (numbers, track names, markers and regions) and makes the
+// consent cover names, a new and broader grant when it did not before; names
+// false resumes the numbers only (tempo, length, track count). A consent that is
+// already on at that scope changes nothing. On needs a Home that consented at
+// setup (ErrSongDetailsNotGranted otherwise). Off is reductive and stays possible
+// on a read-only Home; on needs a writable one.
+func (s *Store) SetSongDetails(scope Scope, enabled, names bool) (string, error) {
 	if s == nil || s.workspaces == nil || !scope.valid() {
 		return "", ErrUnavailable
 	}
@@ -57,11 +64,22 @@ func (s *Store) SetSongDetails(scope Scope, enabled bool) (string, error) {
 			if !s.providerWritable(scope, home) {
 				return ErrUnavailable
 			}
-			if consent.RevokedAt == nil {
+			if consent.RevokedAt == nil && (!names || consent.CoversNames()) {
 				result = workspace.SongDetailsOn
 				return errSongDetailsUnchanged
 			}
-			consent.RevokedAt = nil
+			now := s.now().UTC()
+			if now.Before(consent.GrantedAt) {
+				now = consent.GrantedAt
+			}
+			// The owner's answer to the switch's own question, written as a grant
+			// at the scope they agreed to; an older record's source and time never
+			// stand for a wider one.
+			next := &workspace.SongDetailsConsent{GrantedAt: now, Source: consent.Source, Scope: workspace.SongDetailsScopeNumbers, OfferID: consent.OfferID}
+			if names {
+				next.Source, next.Scope, next.OfferID = workspace.SongDetailsConsentLearnSongs, workspace.SongDetailsScopeNames, "switch"
+			}
+			consent = next
 		} else {
 			cleared := 0
 			if len(state.ProjectLibrary) != 0 {

@@ -32,6 +32,9 @@
 # for the server and runs one stage of its browser demo. The Command rail
 # accordion (tasks/tasks-command-rail-accordion.md) adds rail, the same for its
 # demo.
+# Learn the songs (tasks/prd-learn-the-songs.md) adds learn-songs-fixture: the
+# whole sandbox recipe for its demos (Downloads, named songs, Beats, seeded
+# folder agents) in one call, so no demo repeats a five-command shell recipe.
 # Earlier features' checks are kept, because the point of one stable name is
 # that it accumulates: Reviewed integration floor
 # (tasks/prd-reviewed-integration-latest-release.md): integration,
@@ -3403,6 +3406,31 @@ PY
 # so a before/after pair shows exactly which of the two a step rewrote. The
 # definition is looked for in the data dir, the confirmed workspace root, and
 # the staging root.
+# smoke_learn_songs_fixture prepares a demo sandbox for "Learn them"
+# (tasks/prd-learn-the-songs.md) in one call: the empty Downloads folder every
+# folder check needs (without it each folder is "unverifiable"), the six standard
+# songs in Music/REAPER Projects, then the learn-the-songs songs on top of them
+# (named tracks, markers and regions, a song past both caps, a broken one, an
+# oversized one, a Logic Pro bundle, and <long-takes> large projects so the
+# card's per-song progress can be seen), a second folder Beats with six standard
+# songs for the upgrade offer and the composer's Add folder entry, and, when a
+# server URL is given, the saved folder agents "Music Manager" and "Beats
+# Manager" on the Claude API (the server needs its key in its environment).
+smoke_learn_songs_fixture() {
+  local sandbox="${2:-}" url="${3:-}" longs="${4:-0}" here
+  [[ -n "$sandbox" && -d "$sandbox" && "$sandbox" == *"/ori-demo."* && "$longs" =~ ^[0-9]+$ ]] ||
+    fail "usage: $0 learn-songs-fixture <ori-demo-sandbox> [<server-url> [long-takes]]"
+  here="$(cd "$(dirname "$0")" && pwd)"
+  mkdir -p "$sandbox/Downloads"
+  "$here/demo-song-folder.sh" "$sandbox" >/dev/null
+  python3 -I "$here/learn-songs-fixture.py" "$sandbox" "$longs"
+  "$here/demo-song-folder.sh" "$sandbox" "Beats/REAPER Projects" >/dev/null
+  if [[ -n "$url" ]]; then
+    "$here/folder-agent-demo-setup.sh" "$url" --provider claude --model claude-sonnet-5-5 Music Beats
+  fi
+  echo "ok   learn-songs fixture ready in $sandbox (Music and Beats${url:+, agents seeded on $url})"
+}
+
 smoke_agent_files() {
   local sandbox="${2:-}" name="${3:-}" path found=0
   [[ -n "$sandbox" && -d "$sandbox" && -n "$name" ]] || fail "usage: $0 agent-files <sandbox> <agent-name>"
@@ -4308,6 +4336,7 @@ seed-import) smoke_seed_import "$@" ;;
 gosec-new) smoke_gosec_new "$@" ;;
 baseline-export) smoke_baseline_export "$@" ;;
 agent-files) smoke_agent_files "$@" ;;
+learn-songs-fixture) smoke_learn_songs_fixture "$@" ;;
 agent-chat) smoke_agent_chat "$@" ;;
 seed-legacy-agents) smoke_seed_legacy_agents "$@" ;;
 confirm-root) smoke_confirm_root "$@" ;;
@@ -4422,6 +4451,7 @@ propose-fields) smoke_propose_fields "$@" ;;
   echo "  $0 library-notifications [--paired]      # library notifications: browser acceptance on a free port (needs ORI_MUSIC_PLUGIN_SOURCE; --paired also ORI_REAPER_PLUGIN_SOURCE)" >&2
   echo "  $0 home-profile                          # Home profile card: browser acceptance on a free port with fixture applications (needs ORI_MUSIC_PLUGIN_SOURCE declaring home_profile; ORI_REAPER_PLUGIN_SOURCE adds the templates read)" >&2
   echo "  $0 filetree <base-url> <stage>           # Home file tree: endpoints | endpoints-r2 | seed [sandbox] | wait | demo <tree|pane|note|outputs|linked|chats|groups|narrow|create|manage|finish> [theme] [sandbox] | demo-all [sandbox]" >&2
+  echo "  $0 learn-songs-fixture <ori-demo-sandbox> [<server-url> [long-takes]]  # Learn the songs: Downloads, Music (named songs, a Logic song) and Beats in a sandbox, optionally seed the folder agents" >&2
   echo "  $0 prettier-head <file>...               # was each file Prettier-clean at HEAD? (only then is --write on the whole file safe)" >&2
   echo "  $0 restart-sandbox <ori-demo-sandbox> [port]  # rebuild and rerun this worktree's server on an existing demo sandbox (foreground)" >&2
   echo "  $0 seed-recap <base-url> <home> <entry> <goal> <recap>  # one accepted studio session with a recap on a library entry" >&2

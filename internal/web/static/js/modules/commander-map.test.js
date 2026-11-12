@@ -254,6 +254,40 @@ test('a closed chat box leaves the plan to the balloon, which opens by itself as
   assert.equal(page.balloon.expanded, true);
 });
 
+// The Commander's balloon carries the songs question, then the reading, in the
+// host's words (learn-the-songs FR2, FR14), on the folder's own map.
+test('the balloon asks to learn the songs, then follows the reading', () => {
+  const finishedSetup = { status: 'done', lines: [] };
+  const songsOffer = {
+    count: 7,
+    noun: 'songs',
+    ask: 'Want me to learn the 7 songs?',
+    reads:
+      "I'll read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened.",
+    not_read: ''
+  };
+  const present = overrides => {
+    const map = fakeMap();
+    const host = fakeHost();
+    const view = folderAgentReportView(
+      raw({ state: 'set_up', actions: ['look_further'], setup: finishedSetup, ...overrides })
+    );
+    commanderPresenter(map).present(args(map, host, { view }));
+    return { map, host };
+  };
+
+  const asking = present({ songs_offer: songsOffer });
+  assert.equal(asking.map.balloon.content.line, 'Want me to learn the 7 songs? · Review');
+  assert.equal(asking.host.shown.children[0].textContent, 'Albums Manager asks to learn the songs');
+  assert.equal(asking.map.balloon.content.body().kind, 'compact');
+
+  const reading = present({
+    learning: { status: 'running', line: 'Learning Night Drive… (2 of 7)', done: 1, total: 7 }
+  });
+  assert.equal(reading.map.balloon.content.line, 'Learning Night Drive… (2 of 7)');
+  assert.equal(reading.host.shown.children[0].textContent, 'Learning Night Drive… (2 of 7)');
+});
+
 test('other tabs and narrow screens keep the full card (FR14, FR17)', () => {
   const map = fakeMap({ visible: false });
   const host = fakeHost();

@@ -113,6 +113,13 @@ type HomeFacts struct {
 	// below); the plan then says "Fills the Home's roles".
 	MissingRoles []string `json:"missing_roles,omitempty"`
 	RolesKnown   bool     `json:"roles_known,omitempty"`
+	// SongDetails says what the existing Home's song-details consent lets its
+	// scans read from the project files of every folder placed in it, so the plan
+	// does not say "nothing is read" when it is not true: SongDetailsNumbers
+	// (tempo, length and track count) or SongDetailsNames (and the track names,
+	// markers and regions). Empty when the Home has no active consent, or does not
+	// exist yet.
+	SongDetails string `json:"song_details,omitempty"`
 	// Hires describes each of MissingRoles, index for index: the name it
 	// would be hired under, what it does and a name it would otherwise have
 	// had. The host fills it when the look runs, from the provider's reviewed
@@ -133,6 +140,12 @@ type HomeHire struct {
 	// new one under Name. Empty when Name is the role's own name.
 	Taken string `json:"taken,omitempty"`
 }
+
+// What an existing Home's consent reaches (HomeFacts.SongDetails).
+const (
+	SongDetailsNumbers = "numbers"
+	SongDetailsNames   = "names"
+)
 
 // Bounds of HomeFacts: a Home declares a handful of roles.
 const (
@@ -198,6 +211,9 @@ func cleanHomeFacts(in HomeFacts) *HomeFacts {
 		ProviderReady:   in.ProviderReady,
 		HomeExists:      in.HomeExists,
 		RolesKnown:      in.RolesKnown && len(hires) <= maxHomeRoles,
+	}
+	if in.HomeExists && (in.SongDetails == SongDetailsNumbers || in.SongDetails == SongDetailsNames) {
+		out.SongDetails = in.SongDetails
 	}
 	if out.RolesKnown {
 		for _, hire := range hires {

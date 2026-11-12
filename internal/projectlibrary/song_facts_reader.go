@@ -14,9 +14,11 @@ import (
 
 // SongFacts are three numbers read from one project file: its base tempo, the
 // end of its last item and its track count. They are facts, never a
-// judgement of progress, and nothing the user typed into the project (track,
-// marker or item names, notes, plugins) is read or kept. A zero value means
-// unknown and is left out wherever facts are shown.
+// judgement of progress. The names a person typed into the project (track
+// names, markers and regions) are not part of them: they are read only under a
+// consent that covers names, and are kept apart as SongNames. Item names, notes
+// and plugins are never read. A zero value means unknown and is left out
+// wherever facts are shown.
 type SongFacts struct {
 	TempoBPM      float64 `json:"tempo_bpm,omitempty"`
 	TempoVaries   bool    `json:"tempo_varies,omitempty"`
@@ -61,7 +63,14 @@ var DefaultSongFactsLimits = SongFactsLimits{MaxBytes: 32 << 20, MaxLineBytes: 2
 // error is an I/O failure, tried again on the next scan.
 var ErrSongFactsUnreadable = errors.New("project file holds no readable song facts")
 
+// errSongFactsOverCap is the refusal for a file or a line over a cap. It is an
+// ErrSongFactsUnreadable too; it is told apart so a song can say it was too
+// large to read and not that its content was malformed.
+var errSongFactsOverCap = fmt.Errorf("%w: over a cap", ErrSongFactsUnreadable)
+
 func unreadableFacts(why string) error { return fmt.Errorf("%w: %s", ErrSongFactsUnreadable, why) }
+
+func overCapFacts(why string) error { return fmt.Errorf("%w: %s", errSongFactsOverCap, why) }
 
 // maxSongFactsDepth bounds block nesting. Real projects nest about six deep
 // (project > track > item > source > …).
@@ -76,13 +85,41 @@ const (
 	blockTempoChanges
 )
 
-// ReadSongFacts streams one project file line by line, guided only by the
+// ReadSongFacts reads the three numbers only: it never reads a name, whatever
+// the grammar declares, so a caller without a consent that covers names cannot
+// obtain one through it.
+func ReadSongFacts(r io.Reader, grammar *folderdigest.ProjectFacts, limits SongFactsLimits) (SongFacts, error) {
+	facts, _, err := ReadSongDetails(r, grammar.WithoutNames(), limits)
+	return facts, err
+}
+
+// ReadSongDetails streams one project file line by line, guided only by the
 // format's inert grammar from the host's marker table. It holds a fixed-size
 // block stack and at most one line, never recurses, and allocates nothing that
-// grows with the file. It reads exactly three things: the root's tempo
-// attribute and tempo-change points, the track blocks directly in the root,
-// and the start and length directly inside each item of a track.
-func ReadSongFacts(r io.Reader, grammar *folderdigest.ProjectFacts, limits SongFactsLimits) (SongFacts, error) {
+// grows with the file. It reads the numbers: the root's tempo attribute and
+// tempo-change points, the track blocks directly in the root, and the start and
+// length directly inside each item of a track. When the grammar also gives names
+// it reads, under fixed caps, the name directly in each track block and the
+// marker and region lines directly in the root, and returns them; SongNames is
+// nil exactly when the grammar gives no names (or there is an error).
+func ReadSongDetails(r io.Reader, grammar *folderdigest.ProjectFacts, limits SongFactsLimits) (SongFacts, *SongNames, error) {
+	var collector *nameCollector
+	if grammar.HasNames() {
+		collector = newNameCollector(grammar)
+	}
+	facts, err := readSongFacts(r, grammar, limits, collector)
+	if err != nil {
+		return SongFacts{}, nil, err
+	}
+	if collector == nil {
+		return facts, nil, nil
+	}
+	return facts, collector.names(), nil
+}
+
+// readSongFacts is the one pass over the file. names, when not nil, collects the
+// track names and markers as the lines go by.
+func readSongFacts(r io.Reader, grammar *folderdigest.ProjectFacts, limits SongFactsLimits, names *nameCollector) (SongFacts, error) {
 	if r == nil || limits.MaxBytes < 1 || limits.MaxLineBytes < 64 {
 		return SongFacts{}, unreadableFacts("no limits")
 	}
@@ -105,6 +142,11 @@ func ReadSongFacts(r io.Reader, grammar *folderdigest.ProjectFacts, limits SongF
 	var itemHasStart, itemHasLength bool
 	var tracks int
 	tracksOverflow := false
+	// trackNamed says the open track's name was already taken: only the first
+	// name line directly in a track block counts, never an item's or a take's.
+	trackNamed := false
+	// values holds the tokens of one marker or name line, as subslices of it.
+	var values [8][]byte
 
 	noteTempo := func(bpm float64) {
 		if !tempoSeen {
@@ -141,6 +183,7 @@ func ReadSongFacts(r io.Reader, grammar *folderdigest.ProjectFacts, limits SongF
 			switch name := blockName(line); {
 			case current == blockRoot && string(name) == grammar.Track:
 				kind = blockTrack
+				trackNamed = false
 				if tracks < maxSongTrackCount {
 					tracks++
 				} else {
@@ -172,6 +215,21 @@ func ReadSongFacts(r io.Reader, grammar *folderdigest.ProjectFacts, limits SongF
 					facts.TempoBPM = bpm
 				}
 			}
+			if names != nil {
+				// A marker or region line; one whose quote never closes is skipped.
+				if n, matched, ok := lineValues(line, grammar.Marker, values[:]); matched && ok {
+					names.noteMarker(values[:n])
+				}
+			}
+		case blockTrack:
+			if names != nil && !trackNamed {
+				if n, matched, ok := lineValues(line, grammar.TrackName, values[:1]); matched {
+					trackNamed = true
+					if ok && n == 1 {
+						names.noteTrack(values[0])
+					}
+				}
+			}
 		case blockTempoChanges:
 			if value, ok := field(line, grammar.TempoPoint, 2); ok {
 				if bpm, ok := songNumber(value); ok && bpm >= minSongTempo && bpm <= maxSongTempo {
@@ -188,13 +246,13 @@ func ReadSongFacts(r io.Reader, grammar *folderdigest.ProjectFacts, limits SongF
 	}
 	if err := scanner.Err(); err != nil {
 		if errors.Is(err, bufio.ErrTooLong) {
-			return SongFacts{}, unreadableFacts("line too long")
+			return SongFacts{}, overCapFacts("line too long")
 		}
 		// An I/O failure says nothing about the file's content: not a refusal.
 		return SongFacts{}, fmt.Errorf("read project file: %w", err)
 	}
 	if counted.N <= 0 {
-		return SongFacts{}, unreadableFacts("file too large")
+		return SongFacts{}, overCapFacts("file too large")
 	}
 	if !started {
 		return SongFacts{}, unreadableFacts("empty file")

@@ -211,6 +211,33 @@ func (h *LLMTaskHandler) reviewedTaskMemorySection(ctx context.Context, task Tas
 	return section
 }
 
+// taskSongFactsSection asks the server's reader for the song facts of the folder
+// this ticket runs in. The reader decides who is the folder's own agent; the
+// name given is that of the agent attached to the ticket's workspace that the
+// task executes as (task.To), resolved from the server's own attachments, so a
+// name that is not an agent of this workspace is never asked about.
+func (h *LLMTaskHandler) taskSongFactsSection(ctx context.Context, task Task) string {
+	if h == nil || h.songFacts == nil || h.workspaceStore == nil ||
+		strings.TrimSpace(task.WorkspaceID) == "" || strings.TrimSpace(task.To) == "" {
+		return ""
+	}
+	ws, err := h.workspaceStore.Get(task.WorkspaceID)
+	if err != nil || ws == nil {
+		return ""
+	}
+	instance, found := ws.FindAgentInstance(task.To, task.AssignedNodeID)
+	if !found || instance == nil || strings.TrimSpace(instance.Name) == "" {
+		return ""
+	}
+	section := strings.TrimSpace(h.songFacts.SongFacts(ctx, task.WorkspaceID, instance.Name))
+	if section != "" {
+		// Said once per run, without a name in it: the only way to tell afterwards
+		// that a ticket was given the song facts, and that another was not.
+		logger.Info("Ticket prompt carries song facts", logger.Fields{"workspace_id": task.WorkspaceID, "task_id": task.ID, "agent": instance.Name, "bytes": len(section)})
+	}
+	return section
+}
+
 func (h *LLMTaskHandler) buildTaskMemorySection(ctx context.Context, task Task, reviewedInBase bool) string {
 	if h.workspaceStore == nil || strings.TrimSpace(task.WorkspaceID) == "" {
 		return ""
@@ -932,6 +959,14 @@ func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task,
 	skipReviewed := len(reviewedInBase) != 0 && reviewedInBase[0]
 	if workspaceMemory := h.buildTaskMemorySection(ctx, task, skipReviewed); workspaceMemory != "" {
 		segs = append(segs, promptSegment{label: "memory", text: workspaceMemory + "\n\n", trimOrder: 4})
+	}
+
+	// What the Home learned about this folder's songs, for the folder's own agent
+	// only. Built on every run, so it follows the Home's song-details switch; it
+	// is trimmed with the snapshot, head and tail kept, so the block's closing
+	// boundary survives a cut.
+	if songFacts := h.taskSongFactsSection(ctx, task); songFacts != "" {
+		segs = append(segs, promptSegment{label: "song_facts", text: songFacts + "\n\n", trimOrder: 3})
 	}
 
 	// Workspace snapshot (task/file/note/session lists) — WS2.6 c.

@@ -145,8 +145,9 @@ type Observation struct {
 	LastCheckedAt  time.Time `json:"last_checked_at,omitempty"`
 	FileModifiedAt time.Time `json:"file_modified_at,omitempty"`
 	Availability   string    `json:"availability"`
-	// Facts are the song's tempo, length and track count, read by a consenting
-	// Home's fact pass from the file that dates the song. Nil: not read.
+	// Facts are the song's tempo, length and track count, and, under a consent
+	// that covers names, its track names, markers and regions, read by a
+	// consenting Home's fact pass from the file that dates the song. Nil: not read.
 	Facts *ObservedFacts `json:"facts,omitempty"`
 	// MovedFrom says where this song was recorded before the scan that found
 	// its folder here (a relink, library-upkeep FR8). Nil: it did not move, or
@@ -172,8 +173,26 @@ func (m *MovedFrom) valid(o Observation) bool {
 // A later scan reads the file again only when that file changed.
 type ObservedFacts struct {
 	SongFacts
+	// Names are the song's track names, markers and regions, read only under a
+	// consent that covers names. Nil: the file was read under numbers only (a
+	// later consent that covers names reads it once more). Non-nil, even empty:
+	// it was read under names. Kept apart from SongFacts so nothing that shows
+	// the numbers can show the names.
+	Names *SongNames `json:"names,omitempty"`
+	// NotRead says why this file gave nothing: NotReadTooLarge (over a size cap)
+	// or NotReadUnreadable (not a project of its format, or malformed). The
+	// numbers and Names are then empty. The file is not read again until it
+	// changes, since ReadFrom names it. A format with no reading grammar at all
+	// has no record: that is known from the format and never stored.
+	NotRead  string      `json:"not_read,omitempty"`
 	ReadFrom FactsSource `json:"read_from"`
 }
+
+// Why a project file was not read, as stored in ObservedFacts.NotRead.
+const (
+	NotReadTooLarge   = "too_large"
+	NotReadUnreadable = "unreadable"
+)
 
 // FactsSource names a project file by its listing: base name, identity, size
 // and save time. Any difference means the facts are no longer this file's.
@@ -188,11 +207,25 @@ type FactsSource struct {
 // of the observation's listed files of that format.
 func (f *ObservedFacts) valid(o Observation) bool {
 	source := f.ReadFrom
-	return f.SongFacts.valid() &&
+	// Only a file that was too large to read may be larger than the read cap.
+	sizeOK := source.Size >= 0 && (source.Size <= DefaultSongFactsLimits.MaxBytes || f.NotRead == NotReadTooLarge)
+	return f.SongFacts.valid() && f.notReadValid() && f.Names.valid() &&
 		source.File != "" && filepath.Base(source.File) == source.File && validText(source.File, 240) &&
 		factsFile(o.Format, source.File) && slices.Contains(o.Alternates, source.File) &&
 		source.Identity != "" && validText(source.Identity, 160) &&
-		source.Size >= 0 && source.Size <= DefaultSongFactsLimits.MaxBytes && !source.ModifiedAt.IsZero()
+		sizeOK && !source.ModifiedAt.IsZero()
+}
+
+// notReadValid: NotRead is empty or one of the two reasons, and a file that was
+// not read holds no numbers and no names.
+func (f *ObservedFacts) notReadValid() bool {
+	switch f.NotRead {
+	case "":
+		return true
+	case NotReadTooLarge, NotReadUnreadable:
+		return f.empty() && f.Names == nil
+	}
+	return false
 }
 
 func (s FactsSource) sameFile(other FactsSource) bool {
@@ -205,6 +238,7 @@ func (f *ObservedFacts) clone() *ObservedFacts {
 		return nil
 	}
 	copied := *f
+	copied.Names = f.Names.clone()
 	return &copied
 }
 

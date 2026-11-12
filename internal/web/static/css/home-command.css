@@ -3945,6 +3945,60 @@ a.quest-title:focus-visible {
   font-weight: 600;
 }
 
+/* The offer to learn the songs (asked before the goal) and the reading's own
+   line and progress: the question, what is read, and the two answers. */
+.folder-agent-card__songs-offer,
+.folder-agent-card__learning {
+  display: grid;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hc-line, var(--cozy-line));
+}
+
+.folder-agent-card__songs-lead,
+.folder-agent-card__learning-line {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.folder-agent-card__songs-reads,
+.folder-agent-card__songs-not-read {
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.folder-agent-card__learning-bar {
+  width: 100%;
+  height: 6px;
+  border: 0;
+  border-radius: 3px;
+  appearance: none;
+  background: var(--hc-line-bright, var(--cozy-line-strong));
+  accent-color: var(--hc-signal, var(--cozy-moss));
+  overflow: hidden;
+}
+
+/* The native fill is nearly the track's own colour in the dark theme: draw both
+   from the theme's tokens so the progress always shows. */
+.folder-agent-card__learning-bar::-webkit-progress-bar {
+  border-radius: 3px;
+  background: var(--hc-line-bright, var(--cozy-line-strong));
+}
+
+.folder-agent-card__learning-bar::-webkit-progress-value {
+  border-radius: 3px;
+  background: var(--hc-signal, var(--cozy-moss));
+}
+
+.folder-agent-card__learning-bar::-moz-progress-bar {
+  border-radius: 3px;
+  background: var(--hc-signal, var(--cozy-moss));
+}
+
 .folder-agent-card__line[data-state="done"]:not(:last-child)::before {
   background: var(--hc-signal, var(--cozy-moss));
 }

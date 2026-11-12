@@ -44,10 +44,14 @@ type SongCard struct {
 	// EntryID is the Home library entry whose reciprocal link to this child is
 	// connected now. Empty when the link is broken, diverged or not yet
 	// adopted by the library; the card then shows no facts and no entry link.
-	EntryID         string                 `json:"entry_id,omitempty"`
-	Title           string                 `json:"title"`
-	Facts           *SongFacts             `json:"facts,omitempty"`
-	FactsState      string                 `json:"facts_state,omitempty"`
+	EntryID    string     `json:"entry_id,omitempty"`
+	Title      string     `json:"title"`
+	Facts      *SongFacts `json:"facts,omitempty"`
+	FactsState string     `json:"facts_state,omitempty"`
+	// Learned is what the card shows under "Learned from the project file":
+	// track names, markers and regions under a consent that covers names, or
+	// why the song was not read. Nil when there is nothing to show.
+	Learned         *SongLearned           `json:"learned,omitempty"`
 	LastSavedAt     *time.Time             `json:"last_saved_at,omitempty"`
 	KeeperAgentName string                 `json:"keeper_agent_name,omitempty"`
 	LastSession     *SongSession           `json:"last_session,omitempty"`
@@ -189,6 +193,7 @@ func (s *Store) SongCard(scope Scope, childID string, words Words) (SongCard, er
 			return card, nil
 		}
 		card.EntryID, card.Title, card.LastSavedAt, card.Facts = entry.ID, row.Name, row.LastSavedAt, row.Facts
+		card.Learned = learnedFrom(entry, views.roots, views.inactive, state.GetSongDetailsConsent())
 		switch {
 		case !factsOn:
 			card.FactsState = FactsStateOff

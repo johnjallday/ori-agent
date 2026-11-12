@@ -25,6 +25,7 @@ import {
   LIBRARY_INTRO,
   libraryBriefView,
   libraryIntroText,
+  SONG_DETAILS_QUESTION,
   songDetailsStatus,
   songDetailsSwitchView
 } from './project-library.js';
@@ -4255,25 +4256,51 @@ test('the song-details switch shows only on a Home that agreed at setup', () => 
   for (const songDetails of [undefined, null, {}, { state: 'none' }, { state: 'surprise' }]) {
     assert.deepEqual(songDetailsSwitchView(songDetails), { visible: false });
   }
-  assert.deepEqual(songDetailsSwitchView({ state: 'on', app_name: 'REAPER' }), {
+  // The older card's consent covers the numbers only: its label and note say so,
+  // and the switch can be widened.
+  assert.deepEqual(songDetailsSwitchView({ state: 'on', names: false, app_name: 'REAPER' }), {
     visible: true,
     checked: true,
     disabled: false,
-    note: "Ori reads each REAPER project's tempo, length and track count. Nothing is changed."
+    label: 'Read song details when scanning',
+    note: "Ori reads each REAPER project's tempo, length and track count. Nothing is changed.",
+    upgrade: 'Also read track names, markers and regions'
+  });
+  // A consent that reaches names says so in the label and the note; nothing to widen.
+  assert.deepEqual(songDetailsSwitchView({ state: 'on', names: true, app_name: 'REAPER' }), {
+    visible: true,
+    checked: true,
+    disabled: false,
+    label: 'Read song details, track names and markers when scanning',
+    note: "Ori reads each REAPER project's tempo, length and track count, and the track names, markers and regions typed into it. Nothing is changed.",
+    upgrade: ''
   });
   const off = songDetailsSwitchView({ state: 'off', app_name: 'REAPER' });
   assert.equal(off.checked, false);
+  assert.match(off.label, /track names and markers/);
   assert.match(off.note, /^Scans read no project files\./);
-  assert.equal(songDetailsSwitchView({ state: 'on' }, true).disabled, true, 'read-only: disabled');
+  assert.match(off.note, /track names, markers and regions/);
+  assert.equal(off.upgrade, '');
+  const readOnly = songDetailsSwitchView({ state: 'on' }, true);
+  assert.equal(readOnly.disabled, true, 'read-only: disabled');
+  assert.equal(readOnly.upgrade, '', 'read-only: nothing to widen');
   assert.equal(
     songDetailsSwitchView({ state: 'on' }).note,
     "Ori reads each project's tempo, length and track count. Nothing is changed."
   );
   assert.equal(
     songDetailsStatus(false),
-    'Song details cleared. Scans no longer read project files.'
+    'Song details cleared: tempo, length, track count, track names, markers and regions. Scans no longer read project files.'
   );
+  assert.match(songDetailsStatus(true), /track names, markers and regions/);
   assert.match(songDetailsStatus(true), /next scan reads them; nothing is scanned now/);
+  // The question asked before anything is read names everything and says that off clears it.
+  assert.match(
+    SONG_DETAILS_QUESTION,
+    /tempo, length, track count, track names, markers and regions/
+  );
+  assert.match(SONG_DETAILS_QUESTION, /Nothing is changed, and audio is not opened/);
+  assert.match(SONG_DETAILS_QUESTION, /clears everything it read/);
 });
 
 test('the library intro says what a scan reads', () => {
@@ -4282,7 +4309,13 @@ test('the library intro says what a scan reads', () => {
   assert.match(LIBRARY_INTRO, /without opening project files/);
   const on = libraryIntroText({ state: 'on', app_name: 'REAPER' });
   assert.match(on, /each REAPER project's tempo, length and track count/);
+  assert.doesNotMatch(on, /track names/, 'a numbers-only Home does not promise names');
   assert.doesNotMatch(on, /without opening project files/);
+  const names = libraryIntroText({ state: 'on', names: true, app_name: 'REAPER' });
+  assert.match(
+    names,
+    /each REAPER project's tempo, length and track count, and the track names, markers and regions typed into it/
+  );
 });
 
 test('switching song details off clears the facts lines and says so', async () => {
@@ -4304,13 +4337,20 @@ test('switching song details off clears the facts lines and says so', async () =
       this.children = [];
     },
     addEventListener() {},
-    setAttribute() {}
+    setAttribute() {},
+    focus() {}
   });
   for (const id of [
     'projectLibraryIntro',
     'projectLibrarySongDetails',
     'projectLibrarySongDetailsSwitch',
+    'projectLibrarySongDetailsLabel',
     'projectLibrarySongDetailsNote',
+    'projectLibrarySongDetailsUpgrade',
+    'projectLibrarySongDetailsAsk',
+    'projectLibrarySongDetailsAskText',
+    'projectLibrarySongDetailsAllow',
+    'projectLibrarySongDetailsDecline',
     'projectLibraryStatus'
   ]) {
     elements[id] = makeElement('x');
@@ -4321,13 +4361,19 @@ test('switching song details off clears the facts lines and says so', async () =
     panel.state = {
       initialized: true,
       provider_read_only: false,
-      song_details: { state: 'on', app_name: 'REAPER' }
+      song_details: { state: 'on', names: true, app_name: 'REAPER' }
     };
     const posts = [];
     let refreshed = 0;
     panel.post = async (path, body) => {
       posts.push({ path, body });
-      return { song_details: { state: body.enabled ? 'on' : 'off', app_name: 'REAPER' } };
+      return {
+        song_details: {
+          state: body.enabled ? 'on' : 'off',
+          names: body.enabled && body.names,
+          app_name: 'REAPER'
+        }
+      };
     };
     // The whole library is re-read: facts, the brief and the moved revision.
     panel.refresh = async () => refreshed++;
@@ -4336,6 +4382,8 @@ test('switching song details off clears the facts lines and says so', async () =
     assert.equal(elements.projectLibrarySongDetails.hidden, false);
     assert.equal(toggle.checked, true);
     assert.match(elements.projectLibraryIntro.textContent, /tempo, length and track count/);
+    assert.match(elements.projectLibrarySongDetailsLabel.textContent, /track names and markers/);
+    assert.equal(elements.projectLibrarySongDetailsAsk.hidden, true, 'no question while it is on');
 
     toggle.checked = false;
     await panel.setSongDetails(toggle);
@@ -4346,11 +4394,35 @@ test('switching song details off clears the facts lines and says so', async () =
     assert.equal(refreshed, 1, 'the library is re-read');
     assert.equal(
       elements.projectLibraryStatus.textContent,
-      'Song details cleared. Scans no longer read project files.'
+      'Song details cleared: tempo, length, track count, track names, markers and regions. Scans no longer read project files.'
     );
     assert.equal(elements.projectLibraryIntro.textContent, LIBRARY_INTRO);
 
+    // Turning it back on is a question first: nothing is posted until it is allowed.
+    toggle.checked = true;
+    await panel.setSongDetails(toggle);
+    assert.equal(posts.length, 1, 'the question comes before any request');
+    assert.equal(toggle.checked, false, 'the switch is not on until the owner allows it');
+    assert.equal(elements.projectLibrarySongDetailsAsk.hidden, false);
+    assert.equal(elements.projectLibrarySongDetailsAskText.textContent, SONG_DETAILS_QUESTION);
+    // Not now: the question closes and nothing happened.
+    await panel.answerSongDetails(false);
+    assert.equal(elements.projectLibrarySongDetailsAsk.hidden, true);
+    assert.equal(posts.length, 1);
+    assert.equal(panel.state.song_details.state, 'off');
+    // Allow: the full wording was agreed to, so the request says names.
+    toggle.checked = true;
+    await panel.setSongDetails(toggle);
+    await panel.answerSongDetails(true);
+    assert.equal(posts.length, 2);
+    assert.equal(posts[1].body.enabled, true);
+    assert.equal(posts[1].body.names, true);
+    assert.equal(panel.state.song_details.state, 'on');
+    assert.equal(elements.projectLibrarySongDetailsAsk.hidden, true);
+    assert.match(elements.projectLibraryStatus.textContent, /track names, markers and regions/);
+
     // A refusal keeps the server's state and its message.
+    panel.state.song_details = { state: 'off', app_name: 'REAPER' };
     panel.post = async () => {
       const error = new Error(
         'This Home is read-only right now, so song details cannot be turned on.'
@@ -4358,12 +4430,94 @@ test('switching song details off clears the facts lines and says so', async () =
       error.payload = { song_details: { state: 'off' } };
       throw error;
     };
+    refreshed = 1;
     toggle.checked = true;
     await panel.setSongDetails(toggle);
+    await panel.answerSongDetails(true);
     assert.equal(panel.state.song_details.state, 'off');
     assert.equal(toggle.checked, false);
     assert.match(elements.projectLibraryStatus.textContent, /read-only right now/);
     assert.equal(refreshed, 1, 'a refusal re-reads nothing');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('an older numbers-only Home is widened from the switch with the same question', async () => {
+  const previousDocument = globalThis.document;
+  const elements = {};
+  const makeElement = tag => ({
+    tag,
+    children: [],
+    textContent: '',
+    className: '',
+    hidden: false,
+    checked: false,
+    disabled: false,
+    dataset: {},
+    append() {},
+    replaceChildren() {},
+    addEventListener() {},
+    setAttribute() {},
+    focus() {}
+  });
+  for (const id of [
+    'projectLibraryIntro',
+    'projectLibrarySongDetails',
+    'projectLibrarySongDetailsSwitch',
+    'projectLibrarySongDetailsLabel',
+    'projectLibrarySongDetailsNote',
+    'projectLibrarySongDetailsUpgrade',
+    'projectLibrarySongDetailsAsk',
+    'projectLibrarySongDetailsAskText',
+    'projectLibrarySongDetailsAllow',
+    'projectLibrarySongDetailsDecline',
+    'projectLibraryStatus'
+  ]) {
+    elements[id] = makeElement('x');
+  }
+  globalThis.document = { createElement: makeElement, getElementById: id => elements[id] || null };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = {
+      initialized: true,
+      provider_read_only: false,
+      song_details: { state: 'on', names: false, app_name: 'REAPER' }
+    };
+    const posts = [];
+    panel.post = async (path, body) => {
+      posts.push({ path, body });
+      return { song_details: { state: 'on', names: Boolean(body.names), app_name: 'REAPER' } };
+    };
+    panel.refresh = async () => {};
+    panel.renderSongDetails();
+    assert.equal(
+      elements.projectLibrarySongDetailsLabel.textContent,
+      'Read song details when scanning'
+    );
+    assert.equal(elements.projectLibrarySongDetailsUpgrade.hidden, false);
+    assert.equal(
+      elements.projectLibrarySongDetailsUpgrade.textContent,
+      'Also read track names, markers and regions'
+    );
+    assert.doesNotMatch(elements.projectLibraryIntro.textContent, /track names/);
+
+    panel.askSongDetails(true);
+    assert.equal(elements.projectLibrarySongDetailsAsk.hidden, false);
+    assert.equal(elements.projectLibrarySongDetailsUpgrade.hidden, true, 'one question at a time');
+    assert.equal(posts.length, 0, 'nothing is requested before the answer');
+    await panel.answerSongDetails(true);
+    assert.deepEqual(
+      { enabled: posts[0].body.enabled, names: posts[0].body.names },
+      { enabled: true, names: true }
+    );
+    assert.equal(panel.state.song_details.names, true);
+    assert.equal(elements.projectLibrarySongDetailsUpgrade.hidden, true, 'nothing left to widen');
+    assert.match(elements.projectLibrarySongDetailsLabel.textContent, /track names and markers/);
+    assert.match(
+      elements.projectLibraryIntro.textContent,
+      /track names, markers and regions typed into it/
+    );
   } finally {
     globalThis.document = previousDocument;
   }

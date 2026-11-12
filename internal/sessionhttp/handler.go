@@ -40,7 +40,11 @@ type Handler struct {
 	// for task mutations such as the entry-agent claim sweep. It must be the same
 	// store orchestration reads from (SQLite primary + disk write-through), not
 	// the raw folder store, or task changes won't be visible to task reads.
-	collectionReview              *projectlibrary.CollectionReviewService
+	collectionReview *projectlibrary.CollectionReviewService
+	// songDetailsOff is told, once a Home's song-details switch has been turned
+	// off and its stored facts cleared, which Home it was, so what was written
+	// from those facts elsewhere goes with them.
+	songDetailsOff                func(homeID string)
 	arrangementPlanning           func(context.Context, projectlibrary.ArrangementPlanningRequest) (projectlibrary.ArrangementPlanningResult, error)
 	arrangementContext            func(context.Context, string, string) (projectlibrary.ArrangementPlanningContext, error)
 	workspaceTaskStore            workspace.Store

@@ -705,12 +705,16 @@ func (r portfolioReceipts) Receipt(_ context.Context, homeID string, facts folde
 		Kind: "library", Name: fmt.Sprintf("Listed %d %s in %s", facts.Listed.Listed, noun, r.folder),
 		Detail: "names and project files only",
 	}
-	if home.GetAssistantProgramState().GetSongDetailsConsent().Active() {
+	if consent := home.GetAssistantProgramState().GetSongDetailsConsent(); consent.Active() {
 		one := strings.TrimSpace(r.projectLabel)
 		if one == "" {
 			one = "project"
 		}
+		// What the line says follows what the Home's consent reaches.
 		listed.Detail = "names, project files, and each " + one + "'s tempo, length and track count"
+		if consent.CoversNames() {
+			listed.Detail = "names, project files, and each " + one + "'s tempo, length, track count, track names, markers and regions"
+		}
 	}
 	if facts.Listed.Partial {
 		// Never claim the whole folder after a partial listing.

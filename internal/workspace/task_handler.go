@@ -57,6 +57,7 @@ type LLMTaskHandler struct {
 	contextStore     taskPromptContextStore
 	userProfileStore userprofile.UserStore
 	reviewedMemory   ReviewedMemoryReader
+	songFacts        SongFactsReader
 	eventBus         *EventBus // Optional event bus for publishing execution events
 	mcpRegistry      mcpRegistry
 	// nativeMCPExecTimeout bounds a native-MCP CLI task run (which runs its own
@@ -251,6 +252,14 @@ func (h *LLMTaskHandler) SetContextStore(store taskPromptContextStore) {
 func (h *LLMTaskHandler) SetReviewedMemoryReader(reader ReviewedMemoryReader) {
 	if h != nil {
 		h.reviewedMemory = reader
+	}
+}
+
+// SetSongFactsReader attaches the server's reader of what the Home learned about
+// a folder's songs. Nil leaves every ticket without song facts.
+func (h *LLMTaskHandler) SetSongFactsReader(reader SongFactsReader) {
+	if h != nil {
+		h.songFacts = reader
 	}
 }
 
