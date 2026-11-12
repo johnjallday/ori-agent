@@ -81,6 +81,13 @@ type View struct {
 	// and while the workspace has no goal and the owner has not answered
 	// (Use this goal, Edit, Not now). Nil otherwise.
 	GoalOffer *GoalOfferView `json:"goal_offer,omitempty"`
+	// SongsOffer is the Commander's offer to learn the songs, made once after a
+	// Set it up run that put the folder in a Home, and before the goal offer
+	// (Learn them, Not now). Nil when none is waiting.
+	SongsOffer *SongsOfferView `json:"songs_offer,omitempty"`
+	// Learning is the reading of the songs once the owner said "Learn them":
+	// the line it shows while it runs, and how it ended. Nil before that.
+	Learning *LearningView `json:"learning,omitempty"`
 	// Landing is where a watched run goes once it finished with every step
 	// done and its plan included the Home step: the Home's Map, asking it to
 	// open the projects sheet. Nil for every other run, which keeps Route.
@@ -91,6 +98,9 @@ type View struct {
 type GoalOfferView struct {
 	Goal     string `json:"goal"`
 	MaxRunes int    `json:"max_runes"`
+	// Basis says where the sentence came from: GoalBasisLearned (written by the
+	// agent after it learned the songs) or GoalBasisLook (the first look's).
+	Basis string `json:"basis,omitempty"`
 }
 
 // Landing names the Home a finished run lands in, for the card's "Opening
@@ -213,7 +223,7 @@ func planViewOf(plan Plan) *PlanView {
 		Alternatives: alternatives}
 }
 
-func (s *Service) viewOf(_ context.Context, rec *Record) View {
+func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	rec = s.effectiveRecord(rec)
 	v := View{
 		WorkspaceID: rec.WorkspaceID, WorkspaceName: rec.WorkspaceName, FolderName: rec.FolderName,
@@ -278,8 +288,11 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 	}
 	v.Plan = planViewOf(plan)
 	v.Landing = landingOf(rec, plan)
-	if s.goalOffered(rec) {
-		v.GoalOffer = &GoalOfferView{Goal: rec.Sections.Goal, MaxRunes: personalassistant.BriefMaxRunes}
+	v.SongsOffer = s.songsOffer(ctx, rec)
+	v.Learning = learningView(rec)
+	if s.goalOffered(ctx, rec) {
+		goal, basis := offeredGoal(rec)
+		v.GoalOffer = &GoalOfferView{Goal: goal, MaxRunes: personalassistant.BriefMaxRunes, Basis: basis}
 	}
 	v.Premise = premiseView(rec)
 	withdrawn := premiseWithdrawn(rec)
@@ -884,16 +897,56 @@ func toolsBeforeHome(order []string, steps []folderlook.Step, byHandle map[strin
 // what the plan adds (PRD FR25): the plugins it installs, the Home it creates
 // and the agents it hires, naming only the parts that apply. hires is how many
 // agents the plan names (the hires block); 0 when it names none.
+//
+// "Or read" holds for a folder placed in a new Home, and in a Home that reads no
+// song details. A folder placed in a Home whose song-details consent is active is
+// read by that Home's own scans as it is set up, so the line then says what they
+// read instead of promising nothing is read.
 func assuranceLine(rec Record, candidates []folderlook.Candidate, hires int) string {
 	folder := strings.TrimSpace(rec.FolderName)
-	line := "Nothing in " + folder + " is moved, copied or read"
-	if folder == "" || strings.ContainsAny(folder, "/\\\x00\r\n") {
+	anonymous := folder == "" || strings.ContainsAny(folder, "/\\\x00\r\n")
+	reads := readsSentence(candidates)
+	var line string
+	switch {
+	case anonymous && reads != "":
+		line = "Nothing is moved or copied"
+	case anonymous:
 		line = "Nothing is moved, copied or read"
+	case reads != "":
+		line = "Nothing in " + folder + " is moved or copied"
+	default:
+		line = "Nothing in " + folder + " is moved, copied or read"
+	}
+	if reads != "" {
+		line += ". " + reads
 	}
 	if adds := addsSentence(candidates, hires); adds != "" {
 		line += ". " + adds
+	} else if reads != "" {
+		// The reads sentence is the last one: it ends like the adds sentence would.
+		line += "."
 	}
 	return line
+}
+
+// readsSentence says what the Home a plan places the folder in already reads from
+// project files, without a closing full stop (the assurance joins its parts):
+// "Music Production Home already reads song details, so setting up reads each
+// project's tempo, length and track count". Empty when the plan places the folder
+// in no existing Home that does.
+func readsSentence(candidates []folderlook.Candidate) string {
+	for _, c := range candidates {
+		if c.Kind != folderlook.KindHomeProvider || c.Home == nil || !c.Home.HomeExists {
+			continue
+		}
+		switch c.Home.SongDetails {
+		case folderlook.SongDetailsNumbers:
+			return homeName(c) + " already reads song details, so setting up reads each project's tempo, length and track count"
+		case folderlook.SongDetailsNames:
+			return homeName(c) + " already reads song details, so setting up reads each project's tempo, length, track count, track names, markers and regions"
+		}
+	}
+	return ""
 }
 
 // addsSentence is the assurance's second half: "Ori adds 2 plugins, <Home>,

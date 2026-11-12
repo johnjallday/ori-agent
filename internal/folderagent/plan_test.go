@@ -163,6 +163,24 @@ func TestBuildPlan_TheAssuranceNamesWhatOriAdds(t *testing.T) {
 			want: kept + ". Ori adds Music Production Home."},
 		"the Home left unticked": {integration: folderlook.ActionInstall, homeAction: folderlook.ActionInstall,
 			home: &folderlook.HomeFacts{}, selected: []string{"reaper-tools"}, want: kept + ". Ori adds 1 plugin."},
+		// A folder placed in a Home that already reads song details is read by that
+		// Home's own scans as it is set up (the demo's second folder was read before
+		// any "Learn them"), so "or read" would not be true: the line says what is read.
+		"an existing Home that reads the numbers": {integration: folderlook.ActionAlreadyHere, homeAction: folderlook.ActionAlreadyHere,
+			home:     &folderlook.HomeFacts{ProviderReady: true, HomeExists: true, RolesKnown: true, SongDetails: folderlook.SongDetailsNumbers},
+			selected: []string{"music-production-home"},
+			want:     "Nothing in Albums is moved or copied. Music Production Home already reads song details, so setting up reads each project's tempo, length and track count."},
+		"an existing Home that reads the names too": {integration: folderlook.ActionConnect, homeAction: folderlook.ActionAlreadyHere,
+			home:     &folderlook.HomeFacts{ProviderReady: true, HomeExists: true, RolesKnown: true, SongDetails: folderlook.SongDetailsNames},
+			selected: []string{"music-production-home", "reaper-tools"},
+			want:     "Nothing in Albums is moved or copied. Music Production Home already reads song details, so setting up reads each project's tempo, length, track count, track names, markers and regions. Ori adds 1 plugin."},
+		// A Home the plan creates reads nothing yet, and a Home that reads no song
+		// details keeps the promise as it was.
+		"a new Home reads nothing": {integration: folderlook.ActionAlreadyHere, homeAction: folderlook.ActionInstall,
+			home: &folderlook.HomeFacts{ProviderReady: true, RolesKnown: true, SongDetails: folderlook.SongDetailsNames}, selected: []string{"music-production-home"},
+			want: kept + ". Ori adds Music Production Home."},
+		"an existing Home that reads no song details": {integration: folderlook.ActionAlreadyHere, homeAction: folderlook.ActionAlreadyHere,
+			home: &folderlook.HomeFacts{ProviderReady: true, HomeExists: true, RolesKnown: true}, selected: []string{"music-production-home"}, want: kept},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

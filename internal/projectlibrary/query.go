@@ -56,6 +56,9 @@ type SearchRow struct {
 	LastSavedAt *time.Time `json:"last_saved_at,omitempty"`
 	// Facts are the tempo, length and track count read from the same source
 	// that gives LastSavedAt. Nil when unknown, or when the Home's switch is off.
+	// The track names, markers and regions a names consent reads are kept apart
+	// (ObservedFacts.Names) and never travel on this struct, so a row, the roster
+	// and the Manager's tools stay numbers only.
 	Facts       *SongFacts `json:"facts,omitempty"`
 	NeedsChoice bool       `json:"needs_choice,omitempty"`
 	// CanOpen says the owner can open the row in one click: it is connected, or
@@ -140,6 +143,10 @@ type Detail struct {
 	TotalSources     int            `json:"total_sources"`
 	Revision         int64          `json:"revision"`
 	ProviderReadOnly bool           `json:"provider_read_only"`
+	// Learned is what the shelf shows under "Learned from the project file". It
+	// is set only for the person's own view (DetailWithWords); Detail, which the
+	// Manager's tools use, never carries names.
+	Learned *SongLearned `json:"learned,omitempty"`
 }
 
 type DetailSource struct {
@@ -169,15 +176,18 @@ func shownFacts(observed Observation, factsOn bool) *SongFacts {
 // values: only a reader that knows the Home's words may show them
 // (DetailWithWords), so a retired id is never sent (PRD #792 FR30).
 func (s *Store) Detail(scope Scope, entryID string) (Detail, error) {
-	return s.detail(scope, entryID, Words{})
+	return s.detail(scope, entryID, Words{}, false)
 }
 
-// DetailWithWords is Detail with the plugin fields the words declare.
+// DetailWithWords is Detail with the plugin fields the words declare, for the
+// person's own view of the shelf: it also carries what was learned from the
+// project file (track names, markers and regions, under a consent that covers
+// them). Nothing that is given to an agent calls it.
 func (s *Store) DetailWithWords(scope Scope, entryID string, words Words) (Detail, error) {
-	return s.detail(scope, entryID, words)
+	return s.detail(scope, entryID, words, true)
 }
 
-func (s *Store) detail(scope Scope, entryID string, words Words) (Detail, error) {
+func (s *Store) detail(scope Scope, entryID string, words Words, withLearned bool) (Detail, error) {
 	if entryID == "" || !validText(entryID, 160) {
 		return Detail{}, ErrConflict
 	}
@@ -210,6 +220,9 @@ func (s *Store) detail(scope Scope, entryID string, words Words) (Detail, error)
 			ProviderReadOnly: !state.PluginAvailable}
 		if row.Connection == "connected" && entry.Link != nil {
 			result.WorkspaceID = entry.Link.WorkspaceID
+		}
+		if withLearned {
+			result.Learned = learnedFrom(entry, roots, inactive, state.GetSongDetailsConsent())
 		}
 		result.TotalSources = len(entry.Observations)
 		for _, observed := range entry.Observations {

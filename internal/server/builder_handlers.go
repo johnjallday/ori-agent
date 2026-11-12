@@ -204,6 +204,14 @@ func (b *ServerBuilder) initializeHandlers() {
 			return resolveTemplatesRoot(b.configManager)
 		})
 		b.sessionHandler.SetAgentStore(b.st)
+		// Turning a Home's song details off also drops what the folder's agent wrote
+		// from them. The folder agent is looked up when the switch is used, so it
+		// does not matter which of the two is wired first.
+		b.sessionHandler.SetSongDetailsOffHook(func(homeID string) {
+			if b.folderAgentService != nil {
+				b.folderAgentService.ForgetLearned(homeID)
+			}
+		})
 		if b.configManager != nil {
 			b.sessionHandler.SetSystemModelReader(b.configManager)
 		}

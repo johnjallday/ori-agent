@@ -649,6 +649,8 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.installScriptedTaskHandler()
 	b.taskHandler = workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 	b.taskHandler.SetEventBus(b.eventBus)
+	// The folder's own agent is told what the Home learned about the folder's songs.
+	b.taskHandler.SetSongFactsReader(folderAgentTicketSongFacts{builder: b})
 	b.taskHandler.SetMCPRegistry(b.mcpRegistry)
 	b.taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
 	// A software project's first assessment runs under this recipe and no other

@@ -153,6 +153,114 @@ test('a done run with a goal offer asks about the goal (folder-setup-ends-in-hom
   });
 });
 
+const songsOffer = {
+  count: 7,
+  noun: 'songs',
+  ask: 'Want me to learn the 7 songs?',
+  reads:
+    "I'll read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened.",
+  not_read: ''
+};
+
+test('a done run asks to learn the songs before it offers the goal (learn-the-songs FR2)', () => {
+  const asking = view({
+    state: 'set_up',
+    setup: { status: 'done', lines: runLines },
+    songs_offer: songsOffer
+  });
+  const speech = commanderSpeech(asking);
+  assert.equal(speech.phase, 'songs');
+  assert.equal(speech.line, 'Want me to learn the 7 songs? · Review');
+  assert.equal(speech.announce, 'Want me to learn the 7 songs?');
+  assert.equal(speech.review, true);
+  assert.deepEqual(commanderOneLine(asking), {
+    phase: 'songs',
+    text: 'Albums Manager asks to learn the songs',
+    action: 'Review'
+  });
+  // Given both, the Commander speaks the songs question: one thing at a time.
+  const both = view({
+    state: 'set_up',
+    setup: { status: 'done', lines: runLines },
+    songs_offer: songsOffer,
+    goal_offer: { goal: 'Finish the album', max_runes: 300 }
+  });
+  assert.equal(commanderSpeech(both).phase, 'songs');
+  // Once the songs are answered the goal is what it asks.
+  const answered = view({
+    state: 'set_up',
+    setup: { status: 'done', lines: runLines },
+    goal_offer: { goal: 'Finish the album', max_runes: 300 }
+  });
+  assert.equal(commanderSpeech(answered).phase, 'goal');
+});
+
+test('while it reads the songs the Commander says where it is, and announces it once', () => {
+  const reading = (line, done) =>
+    view({
+      state: 'set_up',
+      setup: { status: 'done', lines: runLines },
+      learning: { status: 'running', line, done, total: 7 }
+    });
+  const a = commanderSpeech(reading('Learning Night Drive… (2 of 7)', 1));
+  const b = commanderSpeech(reading('Learning Closer… (6 of 7)', 5));
+  assert.equal(a.phase, 'learning');
+  assert.equal(a.line, 'Learning Night Drive… (2 of 7)');
+  assert.equal(a.review, false);
+  // The line moves; the announcement does not tick through every song.
+  assert.notEqual(a.line, b.line);
+  assert.equal(a.announce, 'Learning the songs');
+  assert.equal(b.announce, a.announce);
+  assert.deepEqual(commanderOneLine(reading('Learning Closer… (6 of 7)', 5)), {
+    phase: 'learning',
+    text: 'Learning Closer… (6 of 7)',
+    action: 'Review'
+  });
+  // The reading outranks an offer that is still on the view, and a goal waits.
+  const mixed = view({
+    state: 'set_up',
+    setup: { status: 'done', lines: runLines },
+    learning: { status: 'running', line: 'Learning the 7 songs…', done: 0, total: 7 },
+    songs_offer: songsOffer,
+    goal_offer: { goal: 'Finish the album', max_runes: 300 }
+  });
+  assert.equal(commanderSpeech(mixed).phase, 'learning');
+  // While the agent writes up what it learned the Commander says so, the same way.
+  const summarizing = view({
+    state: 'set_up',
+    setup: { status: 'done', lines: runLines },
+    learning: {
+      status: 'summarizing',
+      line: 'Putting together what I learned…',
+      done: 7,
+      total: 7
+    },
+    goal_offer: { goal: 'Finish the album', max_runes: 300 }
+  });
+  assert.equal(commanderSpeech(summarizing).phase, 'learning');
+  assert.equal(commanderSpeech(summarizing).line, 'Putting together what I learned…');
+  assert.equal(commanderSpeech(summarizing).review, false);
+  // A finished reading says nothing of its own: the receipt or the goal speaks.
+  const finished = view({
+    state: 'set_up',
+    setup: { status: 'done', lines: runLines },
+    learning: { status: 'done', line: 'Learned 7 songs', done: 7, total: 7 }
+  });
+  assert.equal(commanderSpeech(finished).phase, 'done');
+});
+
+test('a song name in the line is passed through as text', () => {
+  const hostile = '<b>Night</b> "Drive"';
+  const speech = commanderSpeech(
+    view({
+      state: 'set_up',
+      setup: { status: 'done', lines: runLines },
+      learning: { status: 'running', line: `Learning ${hostile}… (1 of 7)`, done: 0, total: 7 }
+    })
+  );
+  assert.equal(speech.line, `Learning ${hostile}… (1 of 7)`);
+});
+
 test('the one-line card words per phase (FR13)', () => {
   assert.deepEqual(commanderOneLine(view()), {
     phase: 'report',

@@ -323,6 +323,35 @@ func (h *Handler) Goal(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"folder_agent": view})
 }
 
+type songsRequest struct {
+	// Answer is "learn" (Learn them) or "dismiss" (Not now).
+	Answer string `json:"answer"`
+}
+
+// Songs answers the offer to learn the songs the done run makes. Learn them
+// grants the Home's song-details consent and reads the folder's songs in the
+// background; Not now reads nothing. Nothing is read before this call.
+func (h *Handler) Songs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.user(w, r)
+	if !ok {
+		return
+	}
+	var req songsRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Answer != "learn" && req.Answer != "dismiss" {
+		fail(w, http.StatusBadRequest, "Answer learn or dismiss")
+		return
+	}
+	view, err := h.service.AnswerSongs(r.Context(), userID, r.PathValue("workspaceID"), req.Answer == "learn")
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"folder_agent": view})
+}
+
 type planRequest struct {
 	Selected []string `json:"selected"`
 }

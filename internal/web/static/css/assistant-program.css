@@ -1049,6 +1049,11 @@
 .project-library-sharing .modern-btn {
   margin-top: 0.6rem;
 }
+/* The question the song-details switch asks before it reads names: its words,
+   then the two answers side by side. */
+.project-library-song-details-ask .modern-btn {
+  margin-right: 0.5rem;
+}
 /* The Manager's collection brief: one short paragraph, its source muted below. */
 .project-library-brief {
   margin: 0.4rem 0 0.8rem;

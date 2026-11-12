@@ -462,10 +462,14 @@ const REPORT_KIND = {
   // A goal offer asks the owner something, like a report; so does the
   // premise.
   goal: 'report',
+  // The offer to learn the songs asks the owner something too; the reading
+  // itself is live work, like a setup run.
+  songs: 'report',
   premise: 'report',
   withdrawn: 'report',
   done: 'done',
   running: 'live',
+  learning: 'live',
   looking: 'live'
 };
 

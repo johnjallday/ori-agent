@@ -422,7 +422,7 @@ func TestStore_ForgedBriefsMakeTheDocumentInvalid(t *testing.T) {
 		})
 	}
 	// Switching song details off removes the brief with the facts.
-	if _, err := f.library.SetSongDetails(f.scope, false); err != nil {
+	if _, err := f.library.SetSongDetails(f.scope, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if brief := f.doc(t).CollectionBrief; brief != nil {

@@ -3247,15 +3247,16 @@ The same status and finish from a project's own workspace. The server resolves t
 
 ### Song Details (tempo, length, track count)
 
-`GET /api/workspaces/{homeID}/assistant-program/library/roots` also includes `song_details`: `{ state: none | on | off, app_name }`. `none` means the Home never agreed (it was made before this, or step by step) and has no switch. Search rows (`GET …/library/projects`) and detail sources carry `facts: { tempo_bpm, tempo_varies, length_seconds, track_count }` when known and the switch is on; unknown parts are left out.
+`GET /api/workspaces/{homeID}/assistant-program/library/roots` also includes `song_details`: `{ state: none | on | off, names, app_name }`. `none` means the Home never agreed (it was made before this, or step by step) and has no switch. `names` is true while the switch is on and its consent also covers track names, markers and regions (the owner's yes to the folder agent's offer to learn the songs, or to the switch's own question); the folder card's consent covers the numbers only. Search rows (`GET …/library/projects`) and detail sources carry `facts: { tempo_bpm, tempo_varies, length_seconds, track_count }` when known and the switch is on; unknown parts are left out. A project's own detail (`GET …/library/projects/{entryID}`) and the song's own card (`GET /api/workspaces/{workspaceID}/song-card`) also carry `learned` (track names, markers and regions, or why the song was not read) under a names consent; no list, search or roster response ever does.
 
 **Endpoint:** `POST /api/workspaces/{homeID}/assistant-program/library/song-details`
 
 ```json
 { "request_id": "song-details-1", "enabled": false }
+{ "request_id": "song-details-2", "enabled": true, "names": true }
 ```
 
-`enabled: false` stops later scans from reading project files and clears every stored fact and the collection brief in the same Home write. `enabled: true` turns it back on (no scan starts; facts return with the next one). Answers `200` with `{ song_details: { state, app_name } }`; setting the current state is a no-op. `409 song_details_not_granted` when the Home has no consent record; `409 provider_unavailable` for `enabled: true` on a read-only Home (off still works). A scan review on a Home whose switch is on discloses the read: `reads_song_facts: true` and a `scope` that names the three facts.
+`enabled: false` stops later scans from reading project files and clears every stored fact (numbers, track names, markers and regions) and the collection brief in the same Home write; the folder agent then also drops the summary and goal it wrote from them. `enabled: true` turns it back on and is the owner's new answer: `names: true` is the full wording (the numbers, track names, markers and regions) and makes the consent cover names, a new and broader grant; `names: false` (or no `names`) resumes the numbers only; an answer no wider than the consent changes nothing. No scan starts; facts return with the next one. Answers `200` with `{ song_details: { state, names, app_name } }`; setting the current state is a no-op. `409 song_details_not_granted` when the Home has no consent record; `409 provider_unavailable` for `enabled: true` on a read-only Home (off still works). A scan review on a Home whose switch is on discloses the read: `reads_song_facts: true` and a `scope` that names what is read (the three numbers, or the three numbers and the track names, markers and regions).
 
 ### The Manager's Collection Brief
 

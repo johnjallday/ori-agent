@@ -414,7 +414,9 @@ func (h *Handler) CommitPortfolioRoot(ownerUserID, homeID, token, key string) (s
 
 // PortfolioScanReview is what one listing review of the whole root discloses.
 // MetadataOnly is true only for a whole-root scan of names and project markers,
-// plus, when ReadsSongDetails, each project's tempo, length and track count.
+// plus, when ReadsSongDetails, what the Home's consent lets it read from each
+// project file: its tempo, length and track count and, under a consent that
+// covers them, its track names, markers and regions.
 type PortfolioScanReview struct {
 	Token            string
 	RootID           string
@@ -436,12 +438,9 @@ func (h *Handler) ReviewPortfolioScan(ownerUserID, homeID, rootID string) (Portf
 	if err != nil {
 		return PortfolioScanReview{}, err
 	}
-	scopeText := projectlibrary.ScanScopeNamesOnly
-	if review.ReadsSongFacts {
-		scopeText = projectlibrary.ScanScopeSongDetails
-	}
 	return PortfolioScanReview{Token: review.Token, RootID: review.RootID, ReadsSongDetails: review.ReadsSongFacts,
-		MetadataOnly: review.IncludesScan && review.ScopeID == "" && review.MaxEntries > 0 && review.Scope == scopeText}, nil
+		MetadataOnly: review.IncludesScan && review.ScopeID == "" && review.MaxEntries > 0 &&
+			projectlibrary.ScanScopeKnown(review.Scope, review.ReadsSongFacts)}, nil
 }
 
 // CommitPortfolioScan lists the root and reports how many projects the library

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -705,7 +706,7 @@ func TestSetSongDetails_OffClearsFactsAndOnReadsThemOnTheNextScan(t *testing.T) 
 	factsMusicTree(t, tree)
 	store := r.library
 	for _, enabled := range []bool{true, false} {
-		if _, err := store.SetSongDetails(scope, enabled); !errors.Is(err, ErrSongDetailsNotGranted) {
+		if _, err := store.SetSongDetails(scope, enabled, false); !errors.Is(err, ErrSongDetailsNotGranted) {
 			t.Fatalf("a Home without consent, enabled=%v: %v", enabled, err)
 		}
 	}
@@ -720,7 +721,7 @@ func TestSetSongDetails_OffClearsFactsAndOnReadsThemOnTheNextScan(t *testing.T) 
 	}
 
 	// Off: the switch and every stored fact go in one Home write.
-	if state, err := store.SetSongDetails(scope, false); err != nil || state != workspace.SongDetailsOff {
+	if state, err := store.SetSongDetails(scope, false, false); err != nil || state != workspace.SongDetailsOff {
 		t.Fatalf("off: %q %v", state, err)
 	}
 	if count := storedFacts(t, file, scope); count != 0 {
@@ -738,7 +739,7 @@ func TestSetSongDetails_OffClearsFactsAndOnReadsThemOnTheNextScan(t *testing.T) 
 		t.Fatalf("off: revision %d→%d, %d entries %v", before.Revision, after.Revision, len(after.Entries), err)
 	}
 	// Off again (a retried request) writes nothing.
-	if state, err := store.SetSongDetails(scope, false); err != nil || state != workspace.SongDetailsOff {
+	if state, err := store.SetSongDetails(scope, false, false); err != nil || state != workspace.SongDetailsOff {
 		t.Fatalf("off again: %q %v", state, err)
 	}
 	if again, _ := store.Read(scope); again.Revision != after.Revision {
@@ -751,13 +752,13 @@ func TestSetSongDetails_OffClearsFactsAndOnReadsThemOnTheNextScan(t *testing.T) 
 	}
 
 	// On: no scan starts, no facts until the next scan, then they come back.
-	if state, err := store.SetSongDetails(scope, true); err != nil || state != workspace.SongDetailsOn {
+	if state, err := store.SetSongDetails(scope, true, false); err != nil || state != workspace.SongDetailsOn {
 		t.Fatalf("on: %q %v", state, err)
 	}
 	if got := opens.take(); len(got) != 0 || factsAt(t, r, scope, root.ID, "Single") != nil {
 		t.Fatalf("turning on read files (%v) or showed facts", got)
 	}
-	if state, err := store.SetSongDetails(scope, true); err != nil || state != workspace.SongDetailsOn {
+	if state, err := store.SetSongDetails(scope, true, false); err != nil || state != workspace.SongDetailsOn {
 		t.Fatalf("on again: %q %v", state, err)
 	}
 	scanRoot(t, r, scope, root.ID, "back-on")
@@ -772,10 +773,10 @@ func TestSetSongDetails_AReadOnlyHomeCanTurnOffButNotOn(t *testing.T) {
 	grantSongDetails(t, file, scope)
 	scanRoot(t, r, scope, root.ID, "facts")
 	readOnly := NewStore(file).WithProviderEvidence(func(Scope, *workspace.Workspace) bool { return false })
-	if state, err := readOnly.SetSongDetails(scope, false); err != nil || state != workspace.SongDetailsOff {
+	if state, err := readOnly.SetSongDetails(scope, false, false); err != nil || state != workspace.SongDetailsOff {
 		t.Fatalf("off on a read-only Home: %q %v", state, err)
 	}
-	if _, err := readOnly.SetSongDetails(scope, true); !errors.Is(err, ErrUnavailable) {
+	if _, err := readOnly.SetSongDetails(scope, true, false); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("on on a read-only Home: %v", err)
 	}
 	if state, err := readOnly.SongDetailsState(scope); err != nil || state != workspace.SongDetailsOff {
@@ -803,6 +804,18 @@ func TestReviewScan_SaysWhenTheScanReadsSongFacts(t *testing.T) {
 	grantSongDetails(t, file, scope)
 	if facts := review(); !facts.ReadsSongFacts || facts.Scope != ScanScopeSongDetails {
 		t.Fatalf("a consenting Home: %+v", facts)
+	}
+	// The review says what the consent reaches: once it covers names, so does the
+	// review, in the same sentence the scan's disclosure is held to.
+	if _, err := r.library.SetSongDetails(scope, true, true); err != nil {
+		t.Fatal(err)
+	}
+	if names := review(); !names.ReadsSongFacts || names.Scope != ScanScopeSongNames || !ScanScopeKnown(names.Scope, true) ||
+		!strings.Contains(names.Scope, "track names, markers and regions") {
+		t.Fatalf("a Home that agreed to names: %+v", names)
+	}
+	if ScanScopeKnown(ScanScopeSongNames, false) || ScanScopeKnown(ScanScopeNamesOnly, true) || ScanScopeKnown("something else", true) {
+		t.Fatal("a disclosure that does not match what the scan reads was accepted")
 	}
 	switchSongDetailsOff(t, file, scope)
 	if off := review(); off.ReadsSongFacts || off.Scope != ScanScopeNamesOnly {
