@@ -268,3 +268,30 @@ was shard 2 in 7 of the 12 runs. One run's macOS aggregation leg waited 300 s fo
 Integration/E2E waited behind it (`needs: test-unit`); that is queue delay, not execution. The
 curated tables and the per-run inventory are in the feature's findings and PR description.
 
+### Local before/after of the throughput change (2026-11-12) and what is still pending
+
+Controlled local samples (steps 3 and 4 above): Darwin arm64 (10 CPUs), `go1.26.0`, `TZ=UTC`,
+`-short -race -count=1 -covermode=atomic`, pristine export of base `292a4e41b` against this tree,
+alternating sides under the unit lock, no overlapping test run, compile warm-up excluded.
+
+Whole-package, one sample per side (package `go test -json` Elapsed): `personalassistant` 522.4 ->
+239.8 s (125 -> 1 migrations), `personalhq` 119.7 -> 11.6 s (44 -> 1), `learningmissions` 305.1 ->
+49.1 s (105 -> 7), `projectlibrary` 442.7 -> 344.5 s, `testutil/testdb` 16.2 -> 15.2 s (unchanged
+by design). Test identities 1,379/59/215/663/25 -> 1,380/60/219/664/25 with no outcome change, and
+covered blocks equal (one extra block in `personalassistant`, inside the hosted noise above).
+
+Repeated (three interleaved samples per side, medians) on the slowest tests of each package, so the
+ratios are larger than the whole-package ones: the two `projectlibrary` hot tests 160.1 -> 51.1 s,
+six `personalassistant` tests 50.5 -> 10.6 s, three `learningmissions` tests 47.4 -> 7.2 s, three
+`personalhq` tests 17.6 -> 5.3 s; ranges within about 2-4% of the median, identities and covered
+blocks equal in every pair. In the full-library test the fixture construction fell from about 110 s
+to about 20 s while the save under test stayed at about 13.5 s.
+
+Limits: these are local timings on a different architecture and OS from the Ubuntu runners; one
+whole-package sample per side is parity evidence, not a benchmark; package seconds overlap and are
+not job time. **Hosted performance verification is pending**: the PR's own runs must supply at least
+three compatible candidate samples (same event type), compared by median against the baseline above,
+with the slowest Linux unit job and the end-to-end critical path as the acceptance measure. The
+shard weights are provisional until then, and `go run ./scripts/testtiming` plus
+`unit-shards.py weights` is the refresh path.
+
