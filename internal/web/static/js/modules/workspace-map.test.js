@@ -2139,6 +2139,61 @@ test('a folder agent line takes the tile status slot while it looks; other tiles
   assert.equal(map.folderAgentLines.statusText({ id: 'fed', active: false }), 'Idle');
 });
 
+test('a tile a folder agent works on wears is-agent-working and the agent’s face only while its line is set (visual-hire FR17, FR18)', () => {
+  const map = loadOriWorkspaceMap();
+  const ws = { id: 'fed', name: 'Downloads', agent_count: 1 };
+  const draw = (tile = ws) => map.tileHTML({ ws: tile, col: 0, row: 0 });
+  const face = '<span class="agent-avatar agent-avatar--generated" data-aa-name="Atlas"></span>';
+  const faceSlot = `<span class="ws-map-tile-face" aria-hidden="true">${face}</span>`;
+
+  map.folderAgentLines.setSnapshot({ fed: 'Looking around…' });
+  map.folderAgentFaces.setSnapshot({ fed: face, other: face });
+  assert.match(draw(), /class="ws-map-tile[^"]* is-agent-working"/);
+  assert.ok(draw().includes(faceSlot), 'the face stands on the working tile');
+  // A tile with no line wears neither, even if the host still holds its face.
+  const other = draw({ id: 'other', name: 'Other', agent_count: 1 });
+  assert.doesNotMatch(other, /is-agent-working|ws-map-tile-face/);
+
+  // The line ends (the look ends, fails or reports): the mark and the face go.
+  map.folderAgentLines.setSnapshot({});
+  assert.doesNotMatch(draw(), /is-agent-working|ws-map-tile-face/);
+
+  // A line with no face is marked without a face slot; a face too long to be
+  // markup the host wrote is ignored rather than drawn.
+  map.folderAgentLines.setSnapshot({ fed: 'Looking around…' });
+  map.folderAgentFaces.setSnapshot(null);
+  assert.match(draw(), /is-agent-working/);
+  assert.doesNotMatch(draw(), /ws-map-tile-face/);
+  map.folderAgentFaces.setSnapshot({ fed: 'x'.repeat(5000) });
+  assert.doesNotMatch(draw(), /ws-map-tile-face/);
+});
+
+test('the working mark survives an in-place status patch and is outline and glow only (visual-hire FR18, FR19)', () => {
+  // The tile is redrawn wholesale on each refresh and patched in place between,
+  // so both paths carry the mark from the same line.
+  assert.match(source, /el\.classList\.toggle\('is-agent-working', Boolean\(agentLine\)\)/);
+  const rule = (css, selector) =>
+    css.match(new RegExp(`${selector.replace(/[.[\]]/g, '\\$&')}\\s*\\{([^}]*)\\}`))?.[1] || '';
+  const steady = rule(mapCSS, '.ws-map-tile.is-agent-working');
+  // A steady outline always: the whole of what reduced motion sees.
+  assert.match(steady, /outline:\s*2px solid/);
+  assert.doesNotMatch(steady, /animation/);
+  // Never a size change, so neighbouring tiles do not move.
+  const keyframes = mapCSS.match(/@keyframes ws-map-tile-working\s*\{[\s\S]*?\n\}\n/)?.[0] || '';
+  assert.ok(keyframes, 'the glow has keyframes');
+  for (const text of [steady, keyframes])
+    assert.doesNotMatch(text, /transform|scale|width|height|margin|padding|top:|left:/);
+  // The pulse is opt-in through the OS motion preference.
+  assert.match(
+    mapCSS,
+    /@media \(prefers-reduced-motion: no-preference\) \{\s*\.ws-map-tile\.is-agent-working \{\s*animation: ws-map-tile-working [^;]+;\s*\}\s*\}/
+  );
+  // The face badge floats outside the tile and takes no clicks.
+  const badge = rule(mapCSS, '.ws-map-tile-face');
+  assert.match(badge, /position:\s*absolute/);
+  assert.match(badge, /pointer-events:\s*none/);
+});
+
 test('tileHTML never reads open_task_count and leaves unreported counts out', () => {
   const { tileHTML } = loadOriWorkspaceMap();
   const html = tileHTML({

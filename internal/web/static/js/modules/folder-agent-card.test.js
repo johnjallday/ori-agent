@@ -18,6 +18,7 @@ import {
   tickFolderAgentClocks,
   folderAgentReportView,
   folderAgentSetUpLabel,
+  folderAgentTileFaces,
   folderAgentTileLine,
   mountWorkspaceFolderAgent,
   mountFolderAgentChoice,
@@ -694,6 +695,55 @@ test('exactly one of the new agent and your agents is chosen; typing in the new 
   pick(card, 'Atlas');
   fresh.listeners.focusin();
   only(fresh, 'new');
+});
+
+test('a working agent wears its face on its tile only while the tile has a line (visual-hire FR17)', () => {
+  const win = faceWindow();
+  const albums = {
+    name: 'Albums Manager',
+    source: 'user',
+    role: 'orchestrator',
+    appearance: { mode: 'generated', generated: {} }
+  };
+  const records = new Map([[albums.name, albums]]);
+  const views = [
+    { workspace_id: 'ws-1', agent_name: 'Albums Manager', state: 'looking', progress_line: 'x' },
+    { workspace_id: 'ws-2', agent_name: 'Beta Manager', state: 'setting_up' },
+    { workspace_id: 'ws-3', agent_name: 'Gamma Manager', state: 'reported' },
+    { workspace_id: 'ws-4', agent_name: 'Delta Manager', state: 'failed' },
+    { workspace_id: 'ws-5', state: 'looking' }
+  ];
+  const faces = folderAgentTileFaces(views, records, win);
+  // Only the tiles that show a line, and only for an agent that has a name.
+  assert.deepEqual(Object.keys(faces), ['ws-1', 'ws-2']);
+  assert.equal(faces['ws-1'], '<span data-face="Albums Manager"></span>');
+  // At the tile's size through the shared renderer. An agent the list has is drawn
+  // as the hire card and the Agents page draw it; one it has not yet is drawn as
+  // its name's own face, and the tile redraws when the list answers.
+  assert.equal(win.drawn[0].options.size, 32);
+  assert.deepEqual(win.drawn[0].input, {
+    name: 'Albums Manager',
+    source: 'user',
+    role: 'orchestrator',
+    roleAccent: '#2c7a4b',
+    roleEmblem: 'compass',
+    appearance: albums.appearance,
+    character: null
+  });
+  assert.deepEqual(win.drawn[1].input, { name: 'Beta Manager', source: 'user', appearance: {} });
+  // Nothing to draw with, or nothing to draw: no faces.
+  assert.deepEqual(folderAgentTileFaces(views, records, null), {});
+  assert.deepEqual(folderAgentTileFaces(null, records, win), {});
+
+  // An agent whose record is still being asked for wears no face rather than its
+  // name's own, which is not its real one and would flash first. The agents that
+  // are not pending are unaffected; once the lookup ends it is drawn.
+  const waiting = folderAgentTileFaces(views, records, win, new Set(['Albums Manager']));
+  assert.deepEqual(Object.keys(waiting), ['ws-2']);
+  assert.deepEqual(Object.keys(folderAgentTileFaces(views, records, win, new Set())), [
+    'ws-1',
+    'ws-2'
+  ]);
 });
 
 test('a saved manager of the same name is chosen when the card opens, and the chosen face is scrolled into view', () => {

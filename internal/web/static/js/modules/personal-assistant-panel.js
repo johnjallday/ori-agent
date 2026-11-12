@@ -491,18 +491,69 @@ export function drawerWidthForKey(key, { width, min, max, shift = false }) {
 }
 
 /**
+ * The "narrow for this hire" state (visual-hire FR15, FR22, FR23). After Hire &
+ * start on Home the chat box is narrowed so the map and the new tile show, then
+ * brought back once when the agent's look ends, unless the person has changed
+ * the width since. The state is `null` or `{ workspaceID, touched }`, held in
+ * memory only: it is never written to storage and a reload forgets it.
+ *
+ * This is the whole rulebook, as a pure function. The event is one of:
+ *   request{workspaceID, applicable, moves}  a hire was started: applicable is
+ *       "the desktop sheet is open", moves is "narrowing would change the width"
+ *   touch   the person dragged or keyed the handle
+ *   expand  the person pressed Expand while narrowed
+ *   closed  the box was closed
+ *   restore{workspaceID}  that hire's look ended
+ * It answers the next state and a result: request is 'narrowed', 'already' or
+ * 'skipped'; restore is 'restored', 'kept' (the person's width stays) or 'none'.
+ */
+export function hireNarrowNext(current, event = {}) {
+  switch (event.type) {
+    case 'request':
+      if (!event.applicable) return { next: current, result: 'skipped' };
+      // A second hire retargets the one already narrowed and keeps the person's say.
+      if (current)
+        return {
+          next: { workspaceID: event.workspaceID, touched: current.touched },
+          result: 'already'
+        };
+      if (!event.moves) return { next: null, result: 'already' };
+      return { next: { workspaceID: event.workspaceID, touched: false }, result: 'narrowed' };
+    case 'touch':
+      return { next: current ? { ...current, touched: true } : current, result: '' };
+    case 'expand':
+    case 'closed':
+      return { next: null, result: '' };
+    case 'restore':
+      if (!current || !event.workspaceID || current.workspaceID !== event.workspaceID)
+        return { next: current, result: 'none' };
+      // The person's width wins; the restore is spent either way (once per hire).
+      if (current.touched) return { next: { ...current, workspaceID: '' }, result: 'kept' };
+      return { next: null, result: 'restored' };
+    default:
+      return { next: current, result: '' };
+  }
+}
+
+/**
  * What the sheet looks like now. `exploring` is Tree + Chat, which takes the
  * expanded width while it is open without changing the saved choice (FR6);
  * Expand steps aside meanwhile, since there is nothing for it to change.
- * Off the desktop sheet there is no handle and no Expand (FR9).
+ * `hireNarrow` is the transient narrow width after a hire (see hireNarrowNext):
+ * on the desktop sheet it outranks both Expand and Tree + Chat, shows the
+ * person's own handle width, and reads "Expand" so pressing it asks for the wide
+ * box. Off the desktop sheet there is no handle and no Expand (FR9), and
+ * `hireNarrow` changes nothing.
  */
-export function drawerLayoutView({ viewportWidth, prefs, exploring = false }) {
+export function drawerLayoutView({ viewportWidth, prefs, exploring = false, hireNarrow = false }) {
   const sheet = Number(viewportWidth) > DRAWER_SHEET_BREAKPOINT;
+  const narrowed = sheet && hireNarrow === true;
   const expanded = prefs?.expanded === true;
-  const wide = expanded || exploring === true;
+  const wide = !narrowed && (expanded || exploring === true);
   const handleWidth = clampDrawerWidth(prefs?.width, viewportWidth);
   return {
     sheet,
+    narrowed,
     bounds: drawerWidthBounds(viewportWidth),
     width: wide ? expandedDrawerWidth(viewportWidth) : handleWidth,
     // The handle's own value: the remembered width, fitted to this viewport.
@@ -510,8 +561,8 @@ export function drawerLayoutView({ viewportWidth, prefs, exploring = false }) {
     handleVisible: sheet,
     handleInert: wide,
     expandVisible: sheet && exploring !== true,
-    expanded,
-    expandLabel: expanded ? 'Shrink' : 'Expand'
+    expanded: expanded && !narrowed,
+    expandLabel: expanded && !narrowed ? 'Shrink' : 'Expand'
   };
 }
 
@@ -697,6 +748,8 @@ const state = {
   // applied, and the drag in progress, if any.
   drawer: { width: DRAWER_DEFAULT_WIDTH, expanded: false },
   drawerLayout: null,
+  // The transient narrow width after a hire (hireNarrowNext). Memory only.
+  hireNarrow: null,
   drag: null,
   viewport: { width: 0, scale: 1 },
   els: null
@@ -721,7 +774,8 @@ function applyDrawerLayout() {
   const view = drawerLayoutView({
     viewportWidth: state.viewport.width,
     prefs: state.drawer,
-    exploring: panel.classList.contains('personal-assistant-panel--exploring')
+    exploring: panel.classList.contains('personal-assistant-panel--exploring'),
+    hireNarrow: state.hireNarrow !== null
   });
   state.drawerLayout = view;
   const width = `${view.width}px`;
@@ -749,6 +803,8 @@ function startDrawerResize(event) {
   const view = state.drawerLayout;
   if (event.button !== 0 || !view?.sheet || view.handleInert) return;
   event.preventDefault();
+  // The width is the person's now: a restore after a hire leaves it alone (FR23).
+  state.hireNarrow = hireNarrowNext(state.hireNarrow, { type: 'touch' }).next;
   state.drag = {
     pointerId: event.pointerId,
     x: event.clientX,
@@ -790,6 +846,7 @@ function keyDrawerResize(event) {
   });
   if (next === null) return;
   event.preventDefault();
+  state.hireNarrow = hireNarrowNext(state.hireNarrow, { type: 'touch' }).next;
   state.drawer.width = next;
   applyDrawerLayout();
   writeDrawerPrefs(browserStorage(), { width: next });
@@ -797,9 +854,66 @@ function keyDrawerResize(event) {
 
 function toggleDrawerExpanded() {
   if (!state.drawerLayout?.expandVisible) return;
-  state.drawer.expanded = !state.drawer.expanded;
+  if (state.hireNarrow) {
+    // Narrowed after a hire the button reads "Expand": the person asks for the
+    // wide box, whatever the saved choice was, and the narrowing steps aside.
+    state.hireNarrow = hireNarrowNext(state.hireNarrow, { type: 'expand' }).next;
+    state.drawer.expanded = true;
+  } else {
+    state.drawer.expanded = !state.drawer.expanded;
+  }
   writeDrawerPrefs(browserStorage(), { expanded: state.drawer.expanded });
   applyDrawerLayout();
+}
+
+/**
+ * After Hire & start on Home, narrow the box so the map and the new tile show
+ * (FR15). The caller has already checked that Home's map is on screen and that
+ * the hire was accepted. Answers 'narrowed' (the width moved), 'already' (it was
+ * narrow, or an earlier hire's narrowing now follows this one) or 'skipped' (the
+ * box is closed, stepped aside, or on the phone sheet: nothing to do, and no
+ * tile work). Nothing is written to storage.
+ */
+function narrowForHire(workspaceID) {
+  const id = String(workspaceID || '').trim();
+  if (!id || !state.els?.panel) return 'skipped';
+  const view = input =>
+    drawerLayoutView({
+      viewportWidth: state.viewport.width,
+      prefs: state.drawer,
+      exploring: state.els.panel.classList.contains('personal-assistant-panel--exploring'),
+      ...input
+    });
+  const applicable = Boolean(state.open && !state.suspended && state.drawerLayout?.sheet);
+  const moves =
+    applicable &&
+    view({ hireNarrow: true }).width !== view({ hireNarrow: state.hireNarrow !== null }).width;
+  const { next, result } = hireNarrowNext(state.hireNarrow, {
+    type: 'request',
+    workspaceID: id,
+    applicable,
+    moves
+  });
+  state.hireNarrow = next;
+  if (result === 'narrowed') applyDrawerLayout();
+  return result;
+}
+
+/**
+ * Bring the box back to the width it had before narrowForHire, once, when that
+ * hire's look ends with something for the person (FR22, FR23). Answers
+ * 'restored' (the width moved), 'kept' (the person changed the width since, so it
+ * stays) or 'none' (not narrowed for this hire: never narrowed, already restored,
+ * superseded, closed, expanded, or a reload forgot it).
+ */
+function restoreHireWidth(workspaceID) {
+  const { next, result } = hireNarrowNext(state.hireNarrow, {
+    type: 'restore',
+    workspaceID: String(workspaceID || '').trim()
+  });
+  state.hireNarrow = next;
+  if (result === 'restored') applyDrawerLayout();
+  return result;
 }
 
 function syncPanelViewport() {
@@ -2259,6 +2373,12 @@ function init() {
   resize?.addEventListener('lostpointercapture', endDrawerResize);
   resize?.addEventListener('keydown', keyDrawerResize);
   state.els.expand?.addEventListener('click', toggleDrawerExpanded);
+  // Closing the box ends the narrowing for good: a later plan never reopens it
+  // or moves it (FR23). The event is dispatched by every real close, including
+  // closing while the drawer is stepped aside.
+  document.addEventListener('personal-assistant:closed', () => {
+    state.hireNarrow = hireNarrowNext(state.hireNarrow, { type: 'closed' }).next;
+  });
   state.els.form?.addEventListener('submit', submit);
   // A legacy work handoff is an explicit recovery offer, not a Help search.
   try {
@@ -2510,6 +2630,9 @@ const api = {
   setToday,
   setFolderBusy,
   syncViewport: syncPanelViewport,
+  // The transient narrow width after a hire, and its one restore (FR15, FR22).
+  narrowForHire,
+  restoreHireWidth,
   refreshWorkspaceContext,
   // The Home manager's offer changed (Not now, the press, a new read): brief
   // mode follows it.

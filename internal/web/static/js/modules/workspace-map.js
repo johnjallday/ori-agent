@@ -725,6 +725,12 @@
   // tile's status slot while the look or a setup runs; no new map element.
   var folderAgentLines = Object.create(null);
   var FOLDER_AGENT_LINE_MAX = 60;
+  // The face of the agent working on a tile, keyed by workspace id: markup the
+  // host rendered and escaped itself with the shared avatar renderer (the same
+  // trust as a unit's portraitHTML). It is drawn only while the tile's line is
+  // set, so it goes with the look (visual-hire FR17).
+  var folderAgentFaces = Object.create(null);
+  var FOLDER_AGENT_FACE_MAX = 4000;
   var workspaceUpdateBadges = Object.create(null);
 
   function setWorkspaceUpdateBadges(snapshot) {
@@ -832,6 +838,16 @@
         text.length > FOLDER_AGENT_LINE_MAX
           ? text.slice(0, FOLDER_AGENT_LINE_MAX - 1).trim() + '…'
           : text;
+    });
+  }
+
+  function setFolderAgentFaces(snapshot) {
+    folderAgentFaces = Object.create(null);
+    if (!snapshot || typeof snapshot !== 'object') return;
+    Object.keys(snapshot).forEach(function (id) {
+      var markup = typeof snapshot[id] === 'string' ? snapshot[id].trim() : '';
+      if (!id || !markup || markup.length > FOLDER_AGENT_FACE_MAX) return;
+      folderAgentFaces[id] = markup;
     });
   }
 
@@ -3102,6 +3118,10 @@
       selected +
       multiCls +
       (isHQ ? ' is-hq' : '') +
+      // A folder agent is working on this tile: the same line that lights its
+      // LED also marks the tile, so the mark ends when the look ends, fails or
+      // reports (visual-hire FR18).
+      (folderAgentLines[ws.id] ? ' is-agent-working' : '') +
       '" ' +
       'data-ws-id="' +
       escapeHtml(ws.id) +
@@ -3136,6 +3156,11 @@
       '"></span>' +
       escapeHtml(statusText) +
       '</span>' +
+      // The agent at work wears its face on the tile's corner while its line is
+      // set; decorative, the status line says the same in words (FR17).
+      (folderAgentLines[ws.id] && folderAgentFaces[ws.id]
+        ? '<span class="ws-map-tile-face" aria-hidden="true">' + folderAgentFaces[ws.id] + '</span>'
+        : '') +
       (hasKeeper ? '<span class="ws-map-tile-crest" title="Commander (locked)">★</span>' : '') +
       (isHQ ? '<span class="ws-map-tile-hq-badge" title="Personal HQ">HQ</span>' : '') +
       // Same badge slot as HQ, so the economy's badges inherit the tile's own
@@ -7074,6 +7099,7 @@
       flag && typeof flag.querySelector === 'function' ? flag.querySelector('.ws-map-led') : null;
     var agentLine = ws && ws.id ? folderAgentLines[ws.id] : '';
     if (agentLine) working = true;
+    if (el.classList) el.classList.toggle('is-agent-working', Boolean(agentLine));
     var statusText = agentLine || (working ? 'Working' : 'Idle');
     if (flag && led && led.classList && flag.lastChild) {
       led.classList.toggle('is-working', working);
@@ -11915,6 +11941,7 @@
     // A host that passes none (every surface but Home) draws plain meta lines.
     setSongFacts(state && state.songFacts);
     setFolderAgentLines(state && state.folderAgentLines);
+    setFolderAgentFaces(state && state.folderAgentFaces);
     setWorkspaceUpdateBadges(state && state.workspaceUpdateBadges);
     setLibraryEmptyState(state && state.libraryEmptyState);
     var allWorkspaces = (state && state.workspaces) || [];
@@ -12289,6 +12316,10 @@
     folderAgentLines: {
       setSnapshot: setFolderAgentLines,
       statusText: tileStatusText
+    },
+    // The face of the agent working on a tile, shown with its line.
+    folderAgentFaces: {
+      setSnapshot: setFolderAgentFaces
     },
     workspaceUpdates: {
       setSnapshot: setWorkspaceUpdateBadges,

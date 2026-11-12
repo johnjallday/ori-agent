@@ -32,7 +32,12 @@ import {
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
 import { collectCurrentWorkspaceContext } from './personal-assistant-workspace-context.js';
-import { commanderPresenter, homeCommanderMap } from './commander-map.js';
+import {
+  commanderPresenter,
+  homeCommanderMap,
+  homeMapShowing,
+  revealHiredTile
+} from './commander-map.js';
 import {
   chooseFolder,
   fetchFolderAgent,
@@ -6974,6 +6979,24 @@ async function chooseForAgent(body) {
   }
 }
 
+// After a hire is accepted on Home with the map showing, the chat box narrows so
+// the map and the new tile are visible, and the tile is brought into the part of
+// the map beside it (visual-hire FR15, FR17). The panel answers 'skipped' when
+// the box is closed, stepped aside or on the phone sheet: nothing moved, so no
+// tile work. The workspace page, Needs you and any page without Home's map never
+// get this far (FR21).
+function narrowForHiredAgent(workspaceID) {
+  const id = String(workspaceID || '').trim();
+  if (!id) return;
+  const showing = homeMapShowing({
+    hasMap: Boolean(document.getElementById('cockpitMap')),
+    view: document.getElementById('homeCockpit')?.dataset?.view || ''
+  });
+  if (!showing) return;
+  const outcome = window.PersonalAssistantPanel?.narrowForHire?.(id);
+  if (outcome === 'narrowed' || outcome === 'already') void revealHiredTile(id);
+}
+
 async function startAgent(brief, button, hire) {
   const card = state.agent.card;
   if (!card || state.agent.busy) return;
@@ -7000,6 +7023,7 @@ async function startAgent(brief, button, hire) {
         detail: { workspaceID: result.view?.workspace_id }
       })
     );
+    narrowForHiredAgent(result.view?.workspace_id);
     scheduleAgentPoll();
   } catch (_) {
     state.agent.error = 'The agent could not be started right now.';

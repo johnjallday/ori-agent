@@ -286,6 +286,76 @@ export function homeTileAnchor(root, workspaceID) {
   );
 }
 
+// homeMapShowing is whether Home's map is on screen: its map is on the page and
+// the Tree view is not showing. It is the check behind Hire & start narrowing the
+// chat box (visual-hire FR15, FR21): the workspace page, Needs you and any page
+// without the Home map answer false. Same rule as homeCommanderMap's showing().
+export function homeMapShowing({ hasMap = false, view = '' } = {}) {
+  return hasMap === true && view !== 'tree';
+}
+
+// tileIntoAreaDelta is how far the map must pan so a tile lies wholly inside the
+// part of the map the owner can see: null when it already does, else the move
+// that puts its centre at the centre of that area (showTile's own formula).
+export function tileIntoAreaDelta(rect, area) {
+  if (!rect || !area || !(area.width > 0) || !(area.height > 0)) return null;
+  const inside =
+    rect.left >= area.left &&
+    rect.top >= area.top &&
+    rect.left + rect.width <= area.left + area.width &&
+    rect.top + rect.height <= area.top + area.height;
+  if (inside) return null;
+  return {
+    dx: rect.left + rect.width / 2 - (area.left + area.width / 2),
+    dy: rect.top + rect.height / 2 - (area.top + area.height / 2)
+  };
+}
+
+// revealHiredTile brings a just-hired folder's tile into the part of Home's map
+// beside the narrowed chat box (visual-hire FR17), once. It waits for the tile
+// (the map draws it after its own refresh), lets any placement motion settle, then
+// pans only if the tile is not already in the visible area. It never refits the
+// map (that would discard the person's pan and zoom) and never calls reveal, which
+// would also select the tile. Answers whether the tile is in view.
+export async function revealHiredTile(
+  workspaceID,
+  { doc = globalThis.document, win = globalThis.window, waitMs = 5000 } = {}
+) {
+  const map = win?.OriWorkspaceMap;
+  const root = () => doc?.querySelector?.('#cockpitMap .ws-map-canvas') || null;
+  const anchor = () => homeTileAnchor(root(), workspaceID);
+  if (!anchor()) {
+    const found = await new Promise(resolve => {
+      let timer = 0;
+      const check = () => {
+        if (anchor()) done(true);
+      };
+      const done = value => {
+        clearTimeout(timer);
+        doc?.removeEventListener?.(MAP_MOUNTED_EVENT, check);
+        resolve(value);
+      };
+      doc?.addEventListener?.(MAP_MOUNTED_EVENT, check);
+      timer = setTimeout(() => done(false), waitMs);
+    });
+    if (!found) return false;
+  }
+  await map?.whenMotionSettled?.(1000);
+  await new Promise(resolve =>
+    win?.requestAnimationFrame ? win.requestAnimationFrame(() => resolve()) : resolve()
+  );
+  const at = anchor()?.getBoundingClientRect?.();
+  if (!at) return false;
+  const area = visibleMapArea(
+    root()?.getBoundingClientRect?.(),
+    pageObstacles(doc, win).concat(mapObstacles(root())),
+    windowRect(win)
+  );
+  const delta = tileIntoAreaDelta(at, area);
+  if (!delta) return true;
+  return typeof map?.panBy === 'function' && map.panBy(delta.dx, delta.dy) !== false;
+}
+
 // homeCommanderMap is Home's adapter for one folder workspace: the balloon
 // speaks from its tile on the cockpit map, laid out beside the drawer.
 export function homeCommanderMap(

@@ -488,10 +488,39 @@ function agentFace(agent, record, win) {
   };
 }
 
+const TILE_FACE_SIZE = 32;
+
+// folderAgentTileFaces is the face each working folder agent wears on its tile
+// on Home's map (visual-hire FR17): the agent drawn from its record in the agents
+// list, exactly as the hire card and the Agents page draw it, so a hired agent
+// and a reused one are both the face the person saw. Only an agent whose tile
+// shows a line (it looks around or sets up) has one, so it goes with the look.
+// Without the shared renderer nobody gets a face. `pending` names the agents whose
+// record has been asked for and not yet answered: they get no face rather than the
+// name's own, which is not theirs and would flash before their real one. Once the
+// lookup ends (found or failed) they are no longer pending, and a name the list
+// lacks falls back to its own face. Answers { workspaceID: markup }.
+export function folderAgentTileFaces(views, records, win, pending = null) {
+  const out = {};
+  (Array.isArray(views) ? views : []).forEach(view => {
+    if (!view?.workspace_id || !view.agent_name || !folderAgentTileLine(view)) return;
+    if (pending?.has?.(String(view.agent_name))) return;
+    const agent = { name: String(view.agent_name) };
+    const markup = faceMarkup(
+      win,
+      agentFace(agent, records?.get?.(agent.name), win),
+      '',
+      TILE_FACE_SIZE
+    );
+    if (markup) out[view.workspace_id] = markup;
+  });
+  return out;
+}
+
 // fetchAgentRecords asks for the owner's agents with their appearance, because
 // the hire payload names only name and model. It answers a map by name, or null
 // when the list cannot be read: the faces then stay the fallback.
-async function fetchAgentRecords(fetchImpl) {
+export async function fetchAgentRecords(fetchImpl) {
   try {
     const response = await fetchImpl('/api/agents/dashboard/list');
     if (!response?.ok) return null;

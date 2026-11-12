@@ -2442,3 +2442,34 @@ test('a declined library requires Ask again before setup or package controls', (
     assert.deepEqual(view.prerequisites, []);
   }
 });
+
+test('Hire & start narrows the box only after an accepted hire, and only on Home with the map showing (visual-hire FR15, FR20, FR21)', () => {
+  const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
+  const body = name =>
+    source.match(
+      new RegExp(`(?:async )?function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}\\n`)
+    )?.[0] || '';
+  const start = body('startAgent');
+  assert.ok(start, 'startAgent exists');
+  // A refusal returns before anything narrows, so a refused hire changes nothing.
+  const refusal = start.indexOf('if (result.error) {');
+  const refusalReturn = start.indexOf('return;', refusal);
+  const started = start.indexOf("'ori:folder-agent-started'");
+  const narrow = start.indexOf('narrowForHiredAgent(');
+  assert.ok(refusal >= 0 && refusalReturn > refusal, 'a refusal returns early');
+  assert.ok(narrow > refusalReturn, 'narrowing comes after the refusal returns');
+  assert.ok(narrow > started, 'and after the hire is announced');
+
+  // Home's map must be showing (not the workspace page, not Needs you, not Tree).
+  const helper = body('narrowForHiredAgent');
+  assert.match(helper, /homeMapShowing\(/);
+  assert.match(helper, /getElementById\('cockpitMap'\)/);
+  assert.match(helper, /getElementById\('homeCockpit'\)\?\.dataset\?\.view/);
+  // The panel decides whether the box moves; the tile is only brought into view
+  // when the box is (or already was) narrow, never when the panel skipped.
+  assert.match(helper, /PersonalAssistantPanel\?\.narrowForHire\?\.\(/);
+  assert.match(helper, /outcome === 'narrowed' \|\| outcome === 'already'/);
+  assert.match(helper, /revealHiredTile\(/);
+  // Nothing here saves a width: the saved Expand choice is not changed.
+  assert.doesNotMatch(helper, /localStorage|setItem|writeDrawerPrefs/);
+});
