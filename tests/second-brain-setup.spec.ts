@@ -110,7 +110,7 @@ async function startSetup(page: Page, request: APIRequestContext) {
   await expect(card(page)).toContainText('Where should I set up your notes?');
   await card(page).getByLabel('or paste a folder path').fill(documents);
   await card(page).getByRole('button', { name: 'Use this path' }).click();
-  await expect(card(page)).toContainText('Set up "Second Brain" in Documents?');
+  await expect(card(page)).toContainText('Set up "My Notes" in Documents?');
   await expect(card(page)).toContainText(
     "I'll keep Inbox, Daily, People, a note per project and what I know about you up to date; everything else is yours."
   );
@@ -146,7 +146,7 @@ test('set one up in one click: the Workspace Directory, no picker, and Somewhere
   const place = (await secondBrain(request)) as SecondBrain & {
     setup_default?: { parent_name: string; path: string };
   };
-  expect(place.setup_default?.path.endsWith('/Second Brain')).toBe(true);
+  expect(place.setup_default?.path.endsWith('/My Notes')).toBe(true);
   await openDrawer(page);
   await action(page, 'setup').click();
   // Setup goes straight to where the notes live: no project question first
@@ -163,7 +163,7 @@ test('set one up in one click: the Workspace Directory, no picker, and Somewhere
   // The server records the canonical path (on macOS /var is /private/var).
   await expect
     .poll(async () => (await secondBrain(request)).source?.path, { timeout: 25_000 })
-    .toBe(join(realpathSync(join(place.setup_default?.path as string, '..')), 'Second Brain'));
+    .toBe(join(realpathSync(join(place.setup_default?.path as string, '..')), 'My Notes'));
   await expect(card(page)).not.toContainText('Where should I set up');
   await disconnect(request);
   // The folder stays after a disconnect; move it so later cases start clean.

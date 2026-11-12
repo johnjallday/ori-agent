@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // check-notes-copy.mjs — people read "notes", never "second brain" (Issue 776 FR26).
 //
-// The folder Ori sets up is called Notes on every surface. "Second Brain" survives
-// only as the default folder name and inside that folder's own README, which names
-// the folder. Code identifiers (`secondBrain`, `second-brain`, `second_brain`) do not
-// match, because the check looks for the two words with a space between them.
+// The folder Ori sets up is called Notes on every surface, on disk too: the default
+// folder name is "My Notes". Code identifiers (`secondBrain`, `second-brain`,
+// `second_brain`) do not match, because the check looks for the two words with a
+// space between them.
 //
 // It reads the string literals of the browser modules and of the Go packages that
 // write the drawer's, the missions' and the notes' sentences. Comments and log lines
@@ -30,18 +30,8 @@ export const GO_ROOTS = [
 const PHRASE = /second\s+brain/i;
 
 // Each entry names a file and the start of the one literal that may keep the words.
-export const ALLOWLIST = [
-  {
-    file: 'internal/web/static/js/modules/personal-assistant-second-brain.js',
-    text: 'Second Brain',
-    reason: 'The default folder name; the folder keeps its name.'
-  },
-  {
-    file: 'internal/secondbrain/creator.go',
-    text: 'This is your second brain:',
-    reason: "The folder's own root README names the folder."
-  }
-];
+// Nothing does now.
+export const ALLOWLIST = [];
 
 // A literal passed straight to one of these never reaches a person.
 const JS_CODE_CONTEXT = /(?:console\.\w+|logger\.\w+)\s*\(\s*$/;
