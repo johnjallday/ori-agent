@@ -1023,6 +1023,12 @@ function renderPlan(
   );
   section.append(list);
   if (installs.length) section.append(renderInstalls(doc, installs, lines, phase));
+  // Before Set it up, who the ticked steps hire, directly under what they
+  // install: the button confirms both. Once the run starts its lines say it.
+  if (phase === 'plan') {
+    const hires = renderHires(doc, plan?.hires || [], plan?.hiresNote || '');
+    if (hires) section.append(hires);
+  }
   notes.forEach(line => {
     const note = el(doc, 'p', 'folder-agent-card__line folder-agent-card__line--note');
     note.dataset.state = line.state || 'waiting';
@@ -1132,6 +1138,63 @@ function renderInstalls(doc, installs, lines, phase) {
   block.append(list);
   return block;
 }
+
+// renderHires draws the hires block (setup-card-clarity FR6, FR7, FR9) before
+// Set it up: the agents the ticked steps will hire, one row each, read-only.
+// Name, then what it does, then the model it will run on (the order a narrow
+// card wraps them in), and a muted note when one of the owner's own agents
+// already holds the name. The one "Agents" link leads to where they can be
+// changed after they are hired. When the host cannot tell who the Home will
+// hire it says so in one sentence instead of rows; it draws nothing when
+// nobody is hired. The children are divs on purpose: the Home drawer restyles
+// the spans directly inside any list item.
+function renderHires(doc, hires, note) {
+  if (!hires.length && !note) return null;
+  const block = el(doc, 'section', 'folder-agent-card__hires');
+  if (!hires.length) {
+    block.append(el(doc, 'p', 'folder-agent-card__hires-note', note));
+    return block;
+  }
+  const n = hires.length;
+  const head = el(doc, 'div', 'folder-agent-card__hires-head');
+  head.append(
+    el(doc, 'h4', 'folder-agent-card__heading', `Hires ${n} ${plural(n, 'agent', 'agents')}`)
+  );
+  const agents = el(doc, 'a', 'folder-agent-card__install-link', 'Agents');
+  agents.href = '/agents';
+  head.append(agents);
+  block.append(head);
+  const list = el(doc, 'ul', 'folder-agent-card__hire-list');
+  hires.forEach(entry => {
+    const item = el(doc, 'li', 'folder-agent-card__hire');
+    item.dataset.step = entry.step;
+    item.append(
+      el(doc, 'div', 'folder-agent-card__line-name folder-agent-card__hire-name', entry.name)
+    );
+    if (entry.job)
+      item.append(
+        el(doc, 'div', 'folder-agent-card__line-detail folder-agent-card__hire-job', entry.job)
+      );
+    item.append(
+      el(
+        doc,
+        'div',
+        'folder-agent-card__install-version folder-agent-card__hire-model',
+        entry.model || NO_MODEL_YET
+      )
+    );
+    if (entry.note)
+      item.append(
+        el(doc, 'div', 'folder-agent-card__line-detail folder-agent-card__hire-note', entry.note)
+      );
+    list.append(item);
+  });
+  block.append(list);
+  return block;
+}
+
+// What a hire's model reads when the host sent none (the host says the same).
+const NO_MODEL_YET = 'No model yet';
 
 const HANDLE_PATTERN = /\[([a-z0-9][a-z0-9-]*)\]/g;
 
@@ -1696,6 +1759,19 @@ function planView(plan) {
         appSentence: String(entry?.app_sentence || '')
       }))
       .filter(entry => entry.name && entry.step),
+    // The agents the ticked steps will hire, by the name each is hired under,
+    // what it does and the model it runs on; or one sentence when the host
+    // cannot tell yet. The host decides both, the card only draws them.
+    hires: (Array.isArray(plan.hires) ? plan.hires : [])
+      .map(entry => ({
+        step: String(entry?.step || ''),
+        name: String(entry?.name || ''),
+        job: String(entry?.job || ''),
+        model: String(entry?.model || ''),
+        note: String(entry?.note || '')
+      }))
+      .filter(entry => entry.name),
+    hiresNote: String(plan.hires_note || ''),
     // Every step Ori offered, chosen or not; the owner can tick any of them.
     steps: (Array.isArray(plan.steps) ? plan.steps : [])
       .map(step => ({

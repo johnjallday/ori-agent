@@ -3904,13 +3904,15 @@ a.quest-title:focus-visible {
 
 /* The install block (confirm-and-visible-installs FR13–FR19): one row per
    plugin, wrapping as name and version; where it comes from; what it gives. */
-.folder-agent-card__installs {
+.folder-agent-card__installs,
+.folder-agent-card__hires {
   display: grid;
   gap: 6px;
   margin-top: 4px;
 }
 
-.folder-agent-card__install-list {
+.folder-agent-card__install-list,
+.folder-agent-card__hire-list {
   display: grid;
   gap: 8px;
   margin: 0;
@@ -3918,7 +3920,8 @@ a.quest-title:focus-visible {
   list-style: none;
 }
 
-.folder-agent-card__install {
+.folder-agent-card__install,
+.folder-agent-card__hire {
   display: grid;
   gap: 2px;
   min-width: 0;
@@ -3926,6 +3929,79 @@ a.quest-title:focus-visible {
   border: 1px solid var(--hc-line, var(--cozy-line));
   border-radius: 8px;
   overflow-wrap: anywhere;
+}
+
+/* The hires block (setup-card-clarity FR6): the install block's rows for the
+   agents a Home will hire. The heading and its one "Agents" link share a row.
+   A row reads name | model, with the job beneath, while there is room; in a
+   narrow card (the Commander's balloon) it wraps as name, job, then model.
+   The block is the query container, so the rows answer to the width they get,
+   not the window's. The children are divs: the Home drawer restyles the spans
+   directly inside any list item. */
+.folder-agent-card__hires {
+  container-type: inline-size;
+}
+
+.folder-agent-card__hires-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0 8px;
+}
+
+.folder-agent-card__hires-head .folder-agent-card__heading {
+  margin: 0;
+}
+
+.folder-agent-card__hires-note {
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__hire {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "name model"
+    "job job"
+    "note note";
+  column-gap: 8px;
+  align-items: baseline;
+}
+
+.folder-agent-card__hire-name {
+  grid-area: name;
+}
+
+.folder-agent-card__hire-job {
+  grid-area: job;
+}
+
+.folder-agent-card__hire-model {
+  grid-area: model;
+  justify-self: end;
+  text-align: right;
+}
+
+.folder-agent-card__hire-note {
+  grid-area: note;
+}
+
+@container (max-width: 400px) {
+  .folder-agent-card__hire {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "name"
+      "job"
+      "model"
+      "note";
+  }
+
+  .folder-agent-card__hire-model {
+    justify-self: start;
+    text-align: left;
+  }
 }
 
 .folder-agent-card__install-head,

@@ -2620,3 +2620,158 @@ test('from the moment the run starts every action shows with its live state and 
     ['done', 'working', 'waiting', 'waiting', 'waiting', 'waiting']
   );
 });
+
+// Named hires (setup-card-clarity FR6, FR7, FR9, FR10, FR14): the agents a Home
+// step will hire, read-only, directly under the install block.
+const MODEL = 'claude-sonnet-5-5 (claude)';
+const hire = (name, extra = {}) => ({ step: HOME, name, model: MODEL, ...extra });
+const hiresCard = (hires, hiresNote = '', options = {}) =>
+  renderFolderAgentReport(
+    folderAgentReportView(
+      reported({
+        model_sentence: '',
+        tools_sentence: '',
+        plan: {
+          ...homePlanOf(options.lines || newHomeLines, options.installs),
+          hires,
+          hires_note: hiresNote
+        },
+        ...(options.report || {})
+      })
+    ),
+    stubDocument(),
+    {}
+  );
+const hiresBlock = card => card.querySelector('.folder-agent-card__hires');
+const classesOf = node => node.className.split(' ');
+
+test('the hires block is absent when nobody is hired', () => {
+  assert.equal(hiresBlock(hiresCard([])), null);
+  // A plan from before the host named hires has none either.
+  const old = renderFolderAgentReport(
+    folderAgentReportView(
+      reported({ model_sentence: '', tools_sentence: '', plan: homePlanOf(newHomeLines) })
+    ),
+    stubDocument(),
+    {}
+  );
+  assert.equal(hiresBlock(old), null);
+});
+
+test('one hire: its name, what it does and its model, one link to Agents, nothing to change', () => {
+  const card = hiresCard([
+    hire('Portfolio Manager', { job: 'Coordinates status and priorities.' })
+  ]);
+  const block = hiresBlock(card);
+  assert.equal(text(block, '.folder-agent-card__heading'), 'Hires 1 agent');
+  const rows = block.querySelectorAll('.folder-agent-card__hire');
+  assert.equal(rows.length, 1);
+  assert.equal(text(rows[0], '.folder-agent-card__hire-name'), 'Portfolio Manager');
+  assert.equal(text(rows[0], '.folder-agent-card__hire-job'), 'Coordinates status and priorities.');
+  assert.equal(text(rows[0], '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(rows[0].dataset.step, HOME);
+  // The reading order, which a narrow card wraps in: name, job, model.
+  assert.deepEqual(
+    rows[0].children.map(child =>
+      classesOf(child).find(name => name.startsWith('folder-agent-card__hire-'))
+    ),
+    ['folder-agent-card__hire-name', 'folder-agent-card__hire-job', 'folder-agent-card__hire-model']
+  );
+  // One link, to Agents; no rename, no model picker, no opt-out (decision 2A).
+  const links = block.querySelectorAll('a');
+  assert.deepEqual(
+    links.map(link => [link.textContent, link.href]),
+    [['Agents', '/agents']]
+  );
+  for (const tag of ['input', 'select', 'button', 'textarea'])
+    assert.equal(block.querySelectorAll(tag).length, 0, `a ${tag} in the hires block`);
+  assert.equal(block.querySelectorAll('.folder-agent-card__tool-pick').length, 0);
+});
+
+test('several hires keep their order; a missing job, model or note leaves its part out or says so', () => {
+  const card = hiresCard([
+    hire('Portfolio Manager', { job: 'Plans the work.' }),
+    hire('Library Manager 2', { note: 'Your existing Library Manager stays as it is.' }),
+    hire('Third', { model: '' })
+  ]);
+  const block = hiresBlock(card);
+  assert.equal(text(block, '.folder-agent-card__heading'), 'Hires 3 agents');
+  const rows = block.querySelectorAll('.folder-agent-card__hire');
+  assert.deepEqual(
+    rows.map(row => text(row, '.folder-agent-card__hire-name')),
+    ['Portfolio Manager', 'Library Manager 2', 'Third']
+  );
+  // No job from the provider: no empty job line.
+  assert.equal(rows[1].querySelector('.folder-agent-card__hire-job'), null);
+  // A taken name is hired beside the owner's own agent, and the row says so.
+  assert.equal(
+    text(rows[1], '.folder-agent-card__hire-note'),
+    'Your existing Library Manager stays as it is.'
+  );
+  assert.equal(rows[0].querySelector('.folder-agent-card__hire-note'), null);
+  // No model can run yet: the row says so, and the run will ask for one.
+  assert.equal(text(rows[2], '.folder-agent-card__hire-model'), 'No model yet');
+  assert.equal(text(rows[0], '.folder-agent-card__hire-model'), MODEL);
+});
+
+test('when the host cannot name the hires it says so in one sentence, with no rows and no link', () => {
+  const sentence = "Hires the Home's agents; each is named as it is hired";
+  const block = hiresBlock(hiresCard([], sentence));
+  assert.equal(text(block, '.folder-agent-card__hires-note'), sentence);
+  assert.equal(block.querySelectorAll('.folder-agent-card__hire').length, 0);
+  assert.equal(block.querySelector('.folder-agent-card__heading'), null);
+  assert.equal(block.querySelectorAll('a').length, 0);
+});
+
+test('the block sits directly under the install block, before the assurance, and in its place when nothing installs', () => {
+  const order = card =>
+    card
+      .querySelector('.folder-agent-card__run')
+      .children.map(child =>
+        classesOf(child).find(name => /__(plan|installs|hires|line)$/.test(name))
+      )
+      .filter(Boolean);
+  const withInstall = hiresCard([hire('Portfolio Manager')]);
+  const kinds = order(withInstall);
+  assert.deepEqual(kinds.slice(-4), [
+    'folder-agent-card__plan',
+    'folder-agent-card__installs',
+    'folder-agent-card__hires',
+    'folder-agent-card__line'
+  ]);
+  // The assurance note follows the block.
+  const run = withInstall.querySelector('.folder-agent-card__run');
+  const last = run.children[run.children.length - 1];
+  assert.equal(last.dataset.kind, 'folder');
+  // Nothing installs: the hires block follows the steps directly.
+  const noInstalls = order(hiresCard([hire('Portfolio Manager')], '', { installs: [] }));
+  assert.deepEqual(noInstalls.slice(-3), [
+    'folder-agent-card__plan',
+    'folder-agent-card__hires',
+    'folder-agent-card__line'
+  ]);
+  assert.equal(
+    hiresCard([hire('Portfolio Manager')], '', { installs: [] }).querySelector(
+      '.folder-agent-card__installs'
+    ),
+    null
+  );
+});
+
+test('the hires block is drawn before Set it up only: the run and its receipt list what happened', () => {
+  const lines = newHomeLines.slice(0, -1).map(line => ({ ...line, state: 'done' }));
+  for (const [state, status] of [
+    ['setting_up', 'running'],
+    ['set_up', 'done'],
+    ['set_up', 'stopped']
+  ]) {
+    const card = hiresCard([hire('Portfolio Manager')], '', {
+      report: {
+        state,
+        actions: [],
+        setup: { status, started_at: '2026-11-11T10:00:00Z', lines }
+      }
+    });
+    assert.equal(hiresBlock(card), null, `a hires block in the ${status} card`);
+  }
+});

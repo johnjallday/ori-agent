@@ -129,6 +129,14 @@ type Setups interface {
 	Run(ctx context.Context, rec Record, plan Plan, update func([]personalassistant.FolderPlanLine)) RunResult
 }
 
+// HomeHireModeler is the optional part of Setups that says which model the
+// Home step's hires would run on right now, worded as the Hire step words a
+// model ("<model> (<provider>)"); "" when no model can run. Every hire gets
+// the same one (staffing takes the system model), so there is one answer.
+type HomeHireModeler interface {
+	HomeHireModel() string
+}
+
 // RunResult is how a Set it up run ended and what it made (its receipt,
 // partial when it stopped).
 type RunResult struct {

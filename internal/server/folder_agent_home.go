@@ -405,7 +405,7 @@ func folderAgentHomeFacts(ctx context.Context, b *ServerBuilder, userID, provide
 		return folderlook.HomeFacts{}, false
 	}
 	facts := folderlook.HomeFacts{ProviderName: provider.DisplayName}
-	preview, err := folderHomeProviderSetup{builder: b}.Preview(ctx, provider.Key)
+	preview, declared, err := folderHomeProviderSetup{builder: b}.previewHome(ctx, provider.Key)
 	if err != nil {
 		return facts, false
 	}
@@ -414,19 +414,42 @@ func folderAgentHomeFacts(ctx context.Context, b *ServerBuilder, userID, provide
 	if err != nil {
 		return facts, false
 	}
+	staffing := portfolioHomeStaffing{builder: b}
 	if station == nil {
-		// The roles come from the Home's declaration, which exists only once
-		// the Home does: the plan says "Fills the Home's roles".
+		// No Home yet, so its roles are the ones the reviewed release declares:
+		// the release the preview just inspected (nothing is installed to read
+		// it). A release whose Home cannot be told, or that hires nobody,
+		// leaves the roles unknown and the plan says "Fills the Home's roles".
+		if hires := staffing.declaredHires(declared); len(hires) > 0 {
+			facts.MissingRoles, facts.Hires = homeFactHires(hires)
+			facts.RolesKnown = true
+		}
 		return facts, true
 	}
 	facts.HomeExists = true
-	missing, err := portfolioHomeStaffing{builder: b}.Missing(ctx, station.ID)
+	hires, err := staffing.missingHires(station.ID)
 	if err != nil {
 		return facts, true
 	}
-	for _, role := range missing {
-		facts.MissingRoles = append(facts.MissingRoles, role.Name)
-	}
+	facts.MissingRoles, facts.Hires = homeFactHires(hires)
 	facts.RolesKnown = true
 	return facts, true
+}
+
+// homeFactHires are the facts' words for the agents a Home hires: each name,
+// the provider's description of its job (bounded when the facts are cleaned)
+// and, when one of the owner's agents already holds the role's own name, that
+// name, since the run hires a new agent beside it and never adopts it.
+func homeFactHires(hires []homeHire) ([]string, []folderlook.HomeHire) {
+	names := make([]string, 0, len(hires))
+	out := make([]folderlook.HomeHire, 0, len(hires))
+	for _, hire := range hires {
+		entry := folderlook.HomeHire{Name: hire.Name, Job: hire.Description}
+		if hire.Base != "" && !strings.EqualFold(hire.Base, hire.Name) {
+			entry.Taken = hire.Base
+		}
+		names = append(names, hire.Name)
+		out = append(out, entry)
+	}
+	return names, out
 }
