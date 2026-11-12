@@ -355,6 +355,75 @@ test('a host that keeps no line says nothing on the map and comes back with the 
   assert.equal(host.hidden, false);
 });
 
+test('a report posted to the conversation is one line off the map, and nothing while the chat shows it (Plan B)', () => {
+  const map = fakeMap({ visible: false });
+  const host = { ...fakeHost(), hidden: false };
+  let held = false;
+  const opened = [];
+  const presenter = commanderPresenter(map, {
+    hostLine: false,
+    chatHolds: () => held,
+    chatLine: { open: (ref, button) => opened.push([ref, button]) }
+  });
+  const posted = {
+    ...args(map, host),
+    raw: raw({ state: 'reported', chat: { session_id: 's-1', message_id: 'm-1', unread: true } })
+  };
+  presenter.present(posted);
+  // Overview: one line that opens the report in the chat, not a second card.
+  assert.equal(host.hidden, false);
+  assert.equal(host.shown.children[0].textContent, 'Albums Manager has a plan for Albums');
+  assert.equal(host.shown.children[1].textContent, 'Open in chat');
+  host.shown.children[1].listeners.click();
+  assert.deepEqual(opened[0][0], { sessionID: 's-1', messageID: 'm-1', unread: true });
+  // The open chat shows it: the page says nothing, the balloon carries no body.
+  held = true;
+  map.fire();
+  assert.equal(host.hidden, true);
+  assert.equal(map.balloon.content.body, null);
+  // On the Map with the chat showing it: the balloon folds to its line.
+  map.state.visible = true;
+  map.balloon.expand();
+  map.fire();
+  assert.equal(map.balloon.expanded, false);
+  assert.equal(host.hidden, true);
+  // The chat closes: the balloon carries the plan again; the page stays quiet.
+  held = false;
+  map.fire();
+  assert.equal(typeof map.balloon.content.body, 'function');
+  assert.equal(host.hidden, true);
+});
+
+test('a kept report the chat shows is not drawn again on the page', () => {
+  const map = fakeMap({ visible: false });
+  const host = { ...fakeHost(), hidden: false };
+  let held = true;
+  const presenter = commanderPresenter(map, {
+    hostLine: false,
+    chatHolds: () => held,
+    chatLine: { open: () => {} }
+  });
+  const kept = folderAgentReportView(raw({ state: 'kept' }));
+  presenter.present({
+    ...args(map, host, { view: kept }),
+    raw: raw({ state: 'kept', chat: { session_id: 's-1', message_id: 'm-1' } })
+  });
+  assert.equal(host.hidden, true);
+  held = false;
+  map.fire();
+  assert.equal(host.shown.kind, 'full');
+  assert.equal(host.hidden, false);
+});
+
+test('a report that was never posted keeps the full card off the map', () => {
+  const map = fakeMap({ visible: false });
+  const host = { ...fakeHost(), hidden: false };
+  commanderPresenter(map, { hostLine: false, chatLine: { open: () => {} } }).present(
+    args(map, host)
+  );
+  assert.equal(host.shown.kind, 'full');
+});
+
 test('the report names the ticket it narrates while it has something to say', () => {
   const map = fakeMap();
   const host = fakeHost();

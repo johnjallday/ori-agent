@@ -54,6 +54,7 @@ func ResetRecordTables() []string {
 		"group_requirement_reviews", "group_requirement_operations",
 		"workspace_lead_conversations",                                // local welcome delivery; never replay deleted conversations
 		"workspace_welcome_enrollments", "workspace_welcome_messages", // local delivery recovery and exact-message exposure
+		"workspace_folder_reports",      // where a folder agent's report was posted in the Commander's thread, and whether it was seen
 		"workspace_creation_operations", // local reviewed-create delivery receipts; never inferred from portable workspaces
 		"agent_map_layouts", "agent_map_positions",
 		// The City Economy ledger is an app record: resetting app records

@@ -92,6 +92,9 @@ type View struct {
 	// done and its plan included the Home step: the Home's Map, asking it to
 	// open the projects sheet. Nil for every other run, which keeps Route.
 	Landing *Landing `json:"landing,omitempty"`
+	// Chat is where the latest report was posted in the Commander's
+	// conversation (workspace chat sync); nil when none was.
+	Chat *ChatRef `json:"chat,omitempty"`
 }
 
 // GoalOfferView is the sentence the offer shows; MaxRunes bounds an edit.
@@ -233,6 +236,7 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	if s.deps.Workspaces != nil {
 		v.Route = s.deps.Workspaces.Route(rec.WorkspaceID)
 	}
+	v.Chat = s.chatRef(ctx, rec.WorkspaceID)
 	switch rec.State {
 	case StateLooking:
 		v.Receipt = "Looking around…"

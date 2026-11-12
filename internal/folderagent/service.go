@@ -195,7 +195,10 @@ type Deps struct {
 	// Songs reads the Home's song-details consent for the offer to learn the
 	// songs. Nil makes no offer.
 	Songs Songs
-	Now   func() time.Time
+	// Reports posts a look's report into the Commander's conversation when the
+	// look ends (workspace chat sync). Nil posts nothing.
+	Reports Reports
+	Now     func() time.Time
 	// KnownFolderRoot shares the chooser's trusted configured-home resolver.
 	KnownFolderRoot func(string) (string, error)
 	// Walk overrides the walk options (tests).
@@ -428,12 +431,15 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 			fields["error"] = cause.Error()
 		}
 		logger.Warn("Folder agent look failed", fields)
-		_, _ = s.deps.Store.Update(workspaceID, func(r *Record) error {
+		failed, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
 			r.State, r.Failure = StateFailed, sentence
 			return nil
 		})
 		if rec.TicketID != "" {
 			_ = s.deps.Tickets.Finish(workspaceID, rec.TicketID, sentence, true)
+		}
+		if err == nil {
+			s.announce(ctx, failed)
 		}
 	}
 	root, err := s.deps.Workspaces.AnchorRoot(workspaceID)
@@ -536,6 +542,7 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	}
 	updated = s.effectiveRecord(updated)
 	s.remember(updated)
+	s.announce(ctx, updated)
 	if updated.TicketID != "" {
 		result := foldermap.FactsLine(facts)
 		if policy := folderlook.PolicyLine(updated.RootPolicy); policy != "" {
@@ -1220,7 +1227,7 @@ func (s *Service) SweepInterrupted() int {
 		if err != nil || (rec.State != StateLooking && rec.State != StateSettingUp && !learningRunning(rec)) {
 			continue
 		}
-		_, err = s.deps.Store.Update(id, func(r *Record) error {
+		swept, err := s.deps.Store.Update(id, func(r *Record) error {
 			// A reading of the songs a previous process left running is over;
 			// whatever it read is kept, and the goal offer is no longer held.
 			if learningRunning(r) {
@@ -1244,6 +1251,11 @@ func (s *Service) SweepInterrupted() int {
 		})
 		if err == nil {
 			closed++
+			// A look this process never finished ends here: its report (or its
+			// failure) reaches the conversation like any other look's.
+			if rec.State == StateLooking {
+				s.announce(context.Background(), s.effectiveRecord(swept))
+			}
 		}
 	}
 	return closed
