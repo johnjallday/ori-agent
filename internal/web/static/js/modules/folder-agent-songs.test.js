@@ -81,6 +81,16 @@ const plain = value => JSON.parse(JSON.stringify(value));
 const okJSON = body => ({ ok: true, status: 200, json: async () => body });
 const settle = () => new Promise(resolve => setTimeout(resolve, 40));
 
+// until waits for a condition that a background poll makes true, up to five
+// seconds, and fails loudly instead of hanging when it never does.
+async function until(condition) {
+  const deadline = Date.now() + 5000;
+  while (!condition()) {
+    if (Date.now() > deadline) assert.fail('timed out waiting for the poll');
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+}
+
 // The server's view of a folder whose Set it up run is done and put it in a Home.
 const done = (overrides = {}) => ({
   workspace_id: 'ws-1',
@@ -103,7 +113,7 @@ const songsOffer = {
   noun: 'songs',
   ask: 'Want me to learn the 7 songs?',
   reads:
-    "I'll read tempo, length and track count from each project file. Nothing is changed, and audio is not opened.",
+    "I'll read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened.",
   not_read: "1 Logic Pro song can't be read this way."
 };
 
@@ -326,6 +336,10 @@ test('the poll follows a reading to its end and then stops', async () => {
     pollMs: 1,
     onView: (next, finished) => seen.push([next.learning.line, finished])
   });
+  // Wait for the second poll itself, not for a guessed amount of time (a busy
+  // machine is slower than any fixed sleep), then give a wrongly continuing
+  // follower a moment to fetch a third time before checking it did not.
+  await until(() => seen.length >= 2);
   await settle();
   stop();
   assert.deepEqual(seen, [

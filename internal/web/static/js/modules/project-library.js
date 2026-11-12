@@ -15,6 +15,7 @@ import {
 } from './library-open.js';
 import { loadStaffingPlan, runSetup, staffingDisclosure } from './library-setup.js';
 import { acceptLines, suggestionRows } from './song-card-suggestions.js';
+import { learnedView, renderLearned } from './song-learned.js';
 import { setupQuestURL } from './setup-quest-links.js';
 import { folderPickCopy } from './folder-pick-copy.js';
 import { arrangementID, mountArrangementHistory } from './workspace-arrangement.js';
@@ -4021,7 +4022,13 @@ export class ProjectLibraryPanel {
       if (!lines.length) description.setAttribute('aria-label', `${name} not set`);
       summary.append(node('dt', '', name), description);
     }
-    content.append(summary, node('h4', '', 'Saved source observations'));
+    content.append(summary);
+    // What was learned from the project file (names, markers and regions, or
+    // why it was not read): the server sends it only to this view and only
+    // under a consent that covers it; it is drawn as text only.
+    const learned = renderLearned(document, learnedView(detail.learned));
+    if (learned) content.append(learned);
+    content.append(node('h4', '', 'Saved source observations'));
     const sources = node('ul');
     for (const source of detail.sources || []) {
       sources.append(

@@ -61,9 +61,12 @@ func (f folderAgentSongs) Consent(_ context.Context, _, _, homeID string) (strin
 	return f.consents.ReadScope(homeID)
 }
 
-// Grant records the consent for "Learn them", at numbers scope. It refuses when
-// the folder's workspace is not inside that Home, and when the Home's switch is
-// off: only the Home's own switch turns reading back on.
+// Grant records the consent for "Learn them", at names scope: the offer's words
+// say tempo, length, track count, track names, markers and regions, so the
+// consent covers all of them (a Home that already holds a numbers consent is
+// widened, as a new and broader grant). It refuses when the folder's workspace is
+// not inside that Home, and when the Home's switch is off: only the Home's own
+// switch turns reading back on.
 func (f folderAgentSongs) Grant(_ context.Context, _, workspaceID, homeID string) error {
 	if f.store == nil {
 		return folderagent.ErrUnavailable
@@ -72,7 +75,7 @@ func (f folderAgentSongs) Grant(_ context.Context, _, workspaceID, homeID string
 	if err != nil || ws == nil || homeID == "" || ws.ParentID != homeID {
 		return folderagent.ErrWrongState
 	}
-	err = f.consents.GrantScope(homeID, workspace.SongDetailsConsentLearnSongs, "folder-agent:"+workspaceID, workspace.SongDetailsScopeNumbers)
+	err = f.consents.GrantScope(homeID, workspace.SongDetailsConsentLearnSongs, "folder-agent:"+workspaceID, workspace.SongDetailsScopeNames)
 	if errors.Is(err, workspace.ErrSongDetailsConsentRevoked) {
 		return folderagent.ErrWrongState
 	}

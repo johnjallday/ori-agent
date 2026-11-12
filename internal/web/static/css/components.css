@@ -1429,6 +1429,61 @@ textarea.form-control:focus {
   font-style: italic;
 }
 
+/* "Learned from the project file": the track names, markers and regions read
+   under a consent that covers names, or why a song was not read. Shared by the
+   song card and the shelf's project detail. Names are plain text. */
+.song-learned {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--cozy-line, rgba(0, 0, 0, 0.12));
+}
+
+.song-learned-title {
+  margin: 0;
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.song-learned-note,
+.song-learned-more {
+  margin: 0;
+  color: var(--cozy-ink-dim, #5d5442);
+  font-size: 0.86rem;
+}
+
+.song-learned-summary {
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.song-learned-entries {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding-left: 1.1rem;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.song-learned-marker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.6rem;
+}
+
+.song-learned-time {
+  /* Wide enough for a region ("0:30–0:45") so the names line up. */
+  min-width: 5.2rem;
+  color: var(--cozy-ink-dim, #5d5442);
+  font-variant-numeric: tabular-nums;
+}
+
 .song-card-status {
   font-size: 0.9rem;
 }

@@ -108,7 +108,7 @@ func (f *learnFixture) switchOff(t *testing.T) {
 	}
 }
 
-func TestFolderAgentSongs_GrantRecordsTheFolderAgentsOfferAtNumbersScope(t *testing.T) {
+func TestFolderAgentSongs_GrantRecordsTheFolderAgentsOfferAtNamesScope(t *testing.T) {
 	f := newLearnFixture(t)
 	ctx := context.Background()
 	if state, names, err := f.songs.Consent(ctx, "local", "ws-1", f.homeID); err != nil || state != workspace.SongDetailsNone || names {
@@ -118,15 +118,38 @@ func TestFolderAgentSongs_GrantRecordsTheFolderAgentsOfferAtNumbersScope(t *test
 		t.Fatal(err)
 	}
 	got := f.consent(t)
-	if got.Source != workspace.SongDetailsConsentLearnSongs || got.Scope != workspace.SongDetailsScopeNumbers || got.OfferID != "folder-agent:ws-1" || !got.Active() {
+	if got.Source != workspace.SongDetailsConsentLearnSongs || got.Scope != workspace.SongDetailsScopeNames || got.OfferID != "folder-agent:ws-1" || !got.Active() || !got.CoversNames() {
 		t.Fatalf("consent = %+v", got)
 	}
-	if state, names, err := f.songs.Consent(ctx, "local", "ws-1", f.homeID); err != nil || state != workspace.SongDetailsOn || names {
+	if state, names, err := f.songs.Consent(ctx, "local", "ws-1", f.homeID); err != nil || state != workspace.SongDetailsOn || !names {
 		t.Fatalf("after: %q names=%v err=%v", state, names, err)
 	}
 	// Granting again is the same grant.
 	if err := f.songs.Grant(ctx, "local", "ws-1", f.homeID); err != nil {
 		t.Fatalf("second grant = %v", err)
+	}
+}
+
+// A Home that holds the older card's consent (numbers only) is widened by "Learn
+// them", whose words promise names: as a new and broader grant, not by assuming
+// the old one covered them.
+func TestFolderAgentSongs_GrantWidensAnOlderNumbersOnlyConsent(t *testing.T) {
+	f := newLearnFixture(t)
+	ctx := context.Background()
+	if err := workspace.NewSongDetailsConsents(f.store).Grant(f.homeID, "older-card"); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.consent(t); got.Source != workspace.SongDetailsConsentFolderOffer || got.CoversNames() {
+		t.Fatalf("setup: %+v", got)
+	}
+	if state, names, _ := f.songs.Consent(ctx, "local", "ws-1", f.homeID); state != workspace.SongDetailsOn || names {
+		t.Fatalf("the older consent reads as %q names=%v", state, names)
+	}
+	if err := f.songs.Grant(ctx, "local", "ws-1", f.homeID); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.consent(t); got.Source != workspace.SongDetailsConsentLearnSongs || got.OfferID != "folder-agent:ws-1" || !got.CoversNames() || got.RevokedAt != nil {
+		t.Fatalf("after widening: %+v", got)
 	}
 }
 

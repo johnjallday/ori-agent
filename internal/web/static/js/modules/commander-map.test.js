@@ -144,7 +144,8 @@ test('the balloon asks to learn the songs, then follows the reading', () => {
     count: 7,
     noun: 'songs',
     ask: 'Want me to learn the 7 songs?',
-    reads: 'I read three numbers.',
+    reads:
+      "I'll read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened.",
     not_read: ''
   };
   const present = overrides => {

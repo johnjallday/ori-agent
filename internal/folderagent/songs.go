@@ -46,8 +46,9 @@ type Learning struct {
 
 // songsReads is what the offer says it will read, and what it will not touch.
 // It is the one sentence that promises the limit, so it names exactly what the
-// reader takes from a project file.
-const songsReads = "I'll read tempo, length and track count from each project file. Nothing is changed, and audio is not opened."
+// reader takes from a project file under the consent "Learn them" grants: the
+// three numbers, and the names a person typed (tracks, markers and regions).
+const songsReads = "I'll read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened."
 
 // Songs is the Home's song-details consent as the folder agent needs it: the
 // offer to learn the songs is made only while the Home holds none.
@@ -57,9 +58,9 @@ type Songs interface {
 	// regions. An error means the state could not be read.
 	Consent(ctx context.Context, userID, workspaceID, homeID string) (state string, names bool, err error)
 	// Grant records the consent for the owner's "Learn them", on the Home the
-	// folder was set up in. It refuses (an error) when the folder is not in
-	// that Home or the Home's switch was turned off; it never turns a switch
-	// back on.
+	// folder was set up in, covering the numbers and the names (the words of the
+	// offer say both). It refuses (an error) when the folder is not in that Home
+	// or the Home's switch was turned off; it never turns a switch back on.
 	Grant(ctx context.Context, userID, workspaceID, homeID string) error
 	// Learn reads the folder's songs under that consent: it lists the folder's
 	// songs again so the library's own pass reads them, and returns how it

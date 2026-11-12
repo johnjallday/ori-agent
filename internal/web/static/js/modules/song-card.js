@@ -17,6 +17,7 @@
 import { stageLabel, statusLabel } from './field-labels.js';
 import { lastSavedLabel, lowerNoun, projectWords, songFactsLabel } from './library-open.js';
 import { renderSuggestions, suggestionHandlers, suggestionView } from './song-card-suggestions.js';
+import { learnedView, renderLearned } from './song-learned.js';
 
 export const FACTS_OFF_TEXT = 'Project details are off for this Home.';
 export const NOT_LINKED_TEXT = 'Not linked to a Home library entry';
@@ -128,6 +129,7 @@ export function songCardView(data, { now = new Date(), words } = {}) {
     // The details block: null for a card without an entry (a broken or
     // diverged link shows none); [] reads "No details yet."
     details: null,
+    learned: null,
     editDetails: null,
     openInHome: null,
     // The Home the card's suggestions are answered on (PRD #792 FR24), and
@@ -156,6 +158,10 @@ export function songCardView(data, { now = new Date(), words } = {}) {
   } else {
     view.factsNote = factsAbsentText(resolvedWords);
   }
+  // What was learned from the project file (track names, markers and regions,
+  // or why the song was not read): the server sends it only under a consent
+  // that covers it, and it is drawn as text only.
+  view.learned = learnedView(data.learned);
   const entryHref = safeWorkspaceRoute(data.home_entry_route);
   if (entryHref) {
     view.openInHome = { label: 'Open in Home', href: entryHref };
@@ -265,6 +271,8 @@ export function renderSongCard(container, view, { onAccept, onDismiss } = {}) {
     facts.append(anchor(doc, 'song-card-switch-link', view.factsSwitch));
   }
   card.append(facts);
+  const learned = renderLearned(doc, view.learned);
+  if (learned) card.append(learned);
 
   if (view.savedText) card.append(element(doc, 'p', 'song-card-saved', view.savedText));
   card.append(

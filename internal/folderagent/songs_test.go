@@ -159,7 +159,7 @@ func TestSongsOffer_WordsAndCounts(t *testing.T) {
 		Count:   7,
 		Noun:    "songs",
 		Ask:     "Want me to learn the 7 songs?",
-		Reads:   "I'll read tempo, length and track count from each project file. Nothing is changed, and audio is not opened.",
+		Reads:   "I'll read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened.",
 		NotRead: "1 Logic Pro song can't be read this way.",
 	}
 	if *offer != want {

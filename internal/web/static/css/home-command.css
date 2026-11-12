@@ -3725,7 +3725,29 @@ a.quest-title:focus-visible {
 .folder-agent-card__learning-bar {
   width: 100%;
   height: 6px;
+  border: 0;
+  border-radius: 3px;
+  appearance: none;
+  background: var(--hc-line-bright, var(--cozy-line-strong));
   accent-color: var(--hc-signal, var(--cozy-moss));
+  overflow: hidden;
+}
+
+/* The native fill is nearly the track's own colour in the dark theme: draw both
+   from the theme's tokens so the progress always shows. */
+.folder-agent-card__learning-bar::-webkit-progress-bar {
+  border-radius: 3px;
+  background: var(--hc-line-bright, var(--cozy-line-strong));
+}
+
+.folder-agent-card__learning-bar::-webkit-progress-value {
+  border-radius: 3px;
+  background: var(--hc-signal, var(--cozy-moss));
+}
+
+.folder-agent-card__learning-bar::-moz-progress-bar {
+  border-radius: 3px;
+  background: var(--hc-signal, var(--cozy-moss));
 }
 
 .folder-agent-card__line[data-state="done"]:not(:last-child)::before {
