@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projectstaffing"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
@@ -393,7 +394,82 @@ type portfolioHomeStaffing struct {
 	model   *personalassistant.FolderSetupModelIntent
 }
 
-func (s portfolioHomeStaffing) Missing(_ context.Context, homeID string) ([]foldersetup.HomeRole, error) {
+// homeRoleDecl is a role as the hire set reads it: from a Home's stored
+// declaration, or from a provider's release before any Home exists.
+type homeRoleDecl struct {
+	ID, Label, Description string
+	Required, Primary      bool
+}
+
+// homeHire is one agent a Home would hire: the name the run hires it under,
+// the name its role would have had (the same unless one of the owner's agents
+// holds it), and the provider's own description of the job.
+type homeHire struct {
+	RoleID, Name, Base, Description string
+}
+
+// homeHireSet is the one place that decides who is hired and under what
+// name, for the run and for the card that shows it first: the roles a Home
+// requires and has not filled, the primary one under the Home's default name,
+// each under the first name no existing agent holds. Never adopt an agent that
+// happens to share the name (D3): a taken name is hired as "<name> 2".
+func homeHireSet(roles []homeRoleDecl, defaultPrimaryName string, filled map[string]bool, taken func(string) bool) []homeHire {
+	var out []homeHire
+	for _, role := range roles {
+		if !role.Required || filled[role.ID] {
+			continue
+		}
+		base := role.Label
+		if primary := strings.TrimSpace(defaultPrimaryName); role.Primary && primary != "" {
+			base = primary
+		}
+		out = append(out, homeHire{RoleID: role.ID, Name: workspace.FirstFreeAgentName(base, taken),
+			Base: strings.TrimSpace(base), Description: role.Description})
+	}
+	return out
+}
+
+// takenAgentName reports whether an agent, or an instance in home, already
+// holds name, ignoring case. home is nil before the Home exists.
+func (s portfolioHomeStaffing) takenAgentName(home *workspace.Workspace) func(string) bool {
+	return func(name string) bool {
+		if s.builder.st != nil {
+			for _, existing := range s.builder.st.ListAgents() {
+				if strings.EqualFold(strings.TrimSpace(existing), name) {
+					return true
+				}
+			}
+		}
+		if home != nil {
+			for _, instance := range home.GetAgentInstances() {
+				if strings.EqualFold(strings.TrimSpace(instance.Name), name) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+}
+
+// declaredHires are the agents creating a Home from a provider's declaration
+// would hire, before the Home exists: none of its roles is filled yet, and
+// only the owner's own agents can hold a name.
+func (s portfolioHomeStaffing) declaredHires(decl *projecttemplates.AssistantProgramHome) []homeHire {
+	if decl == nil {
+		return nil
+	}
+	roles := make([]homeRoleDecl, 0, len(decl.Roles))
+	for _, role := range decl.Roles {
+		// A declared Home role is always Home scoped (its component fixes it).
+		roles = append(roles, homeRoleDecl{ID: role.ID, Label: role.Label, Description: role.Description,
+			Required: role.Required, Primary: role.Primary})
+	}
+	return homeHireSet(roles, decl.DefaultPrimaryName, nil, s.takenAgentName(nil))
+}
+
+// missingHires are the agents an existing Home still needs, from its own
+// stored declaration.
+func (s portfolioHomeStaffing) missingHires(homeID string) ([]homeHire, error) {
 	home, err := s.builder.workspaceStore.Get(homeID)
 	if err != nil || home == nil {
 		return nil, errSetupUnavailable
@@ -406,32 +482,25 @@ func (s portfolioHomeStaffing) Missing(_ context.Context, homeID string) ([]fold
 	for _, binding := range state.HomeBindings.Bindings {
 		filled[binding.RoleID] = true
 	}
-	taken := func(name string) bool {
-		if s.builder.st != nil {
-			for _, existing := range s.builder.st.ListAgents() {
-				if strings.EqualFold(strings.TrimSpace(existing), name) {
-					return true
-				}
-			}
-		}
-		for _, instance := range home.GetAgentInstances() {
-			if strings.EqualFold(strings.TrimSpace(instance.Name), name) {
-				return true
-			}
-		}
-		return false
-	}
-	var roles []foldersetup.HomeRole
+	roles := make([]homeRoleDecl, 0, len(state.Declaration.Roles))
 	for _, role := range state.Declaration.Roles {
-		if role.Scope != workspace.AssistantRoleScopeHome || !role.Required || filled[role.ID] {
+		if role.Scope != workspace.AssistantRoleScopeHome {
 			continue
 		}
-		name := role.Label
-		if primary := strings.TrimSpace(state.Declaration.DefaultPrimaryName); role.Primary && primary != "" {
-			name = primary
-		}
-		// Never adopt an agent that happens to share the name (D3).
-		roles = append(roles, foldersetup.HomeRole{RoleID: role.ID, Name: workspace.FirstFreeAgentName(name, taken)})
+		roles = append(roles, homeRoleDecl{ID: role.ID, Label: role.Label, Description: role.Description,
+			Required: role.Required, Primary: role.Primary})
+	}
+	return homeHireSet(roles, state.Declaration.DefaultPrimaryName, filled, s.takenAgentName(home)), nil
+}
+
+func (s portfolioHomeStaffing) Missing(_ context.Context, homeID string) ([]foldersetup.HomeRole, error) {
+	hires, err := s.missingHires(homeID)
+	if err != nil {
+		return nil, err
+	}
+	var roles []foldersetup.HomeRole
+	for _, hire := range hires {
+		roles = append(roles, foldersetup.HomeRole{RoleID: hire.RoleID, Name: hire.Name})
 	}
 	return roles, nil
 }

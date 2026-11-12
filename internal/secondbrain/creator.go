@@ -561,7 +561,7 @@ func (r *creatorRun) rollback() {
 func rootReadme(hasFacts bool) []byte {
 	var out strings.Builder
 	out.WriteString(OwnedFoldersSentence + "\n\n")
-	out.WriteString("This is your second brain: plain Markdown files you own. They open in Obsidian or any editor, and stay useful without Ori. Ori only writes to `Inbox/`, `Daily/`, `People/`, one `README.md` in each folder under `Projects/`, and `What Ori knows about you.md`, and never changes a note you edited there.\n\n")
+	out.WriteString("These are your notes: plain Markdown files you own. They open in Obsidian or any editor, and stay useful without Ori. Ori only writes to `Inbox/`, `Daily/`, `People/`, one `README.md` in each folder under `Projects/`, and `What Ori knows about you.md`, and never changes a note you edited there.\n\n")
 	out.WriteString("## Folders\n\n")
 	out.WriteString("- `Inbox/`: captures from chat, your open follow-ups, unsorted notes\n")
 	out.WriteString("- `Daily/`: one note per day, from your HQ Journal\n")

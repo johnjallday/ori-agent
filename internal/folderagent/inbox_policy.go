@@ -75,6 +75,11 @@ func (s *Service) effectiveRecord(rec *Record) *Record {
 		return rec
 	}
 	copy := *rec
+	// Read on the copy only, on every plan build, so the card, the digest it
+	// carries and the check just before the run all see the same model.
+	if modeler, ok := s.deps.Setups.(HomeHireModeler); ok {
+		copy.HomeHireModel = modeler.HomeHireModel()
+	}
 	identity := s.rootIdentity(rec.WorkspaceID)
 	copy.RootPolicy, copy.PolicyBinding = identity.Policy, identity.Binding
 	if identity.Policy != folderlook.RootOrdinary {

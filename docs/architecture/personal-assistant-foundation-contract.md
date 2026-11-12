@@ -901,8 +901,9 @@ connected **read-only to the Personal HQ** as a source only the assistant's look
 service reads. There is no project workspace, no agent access, and no chat tool
 over them.
 
-- **One name.** People read **Notes**; "Second Brain" is only the default folder
-  name and that folder's README (`scripts/check-notes-copy.mjs` guards it).
+- **One name.** People read **Notes**, and the folder Ori sets up is `My Notes`
+  (`scripts/check-notes-copy.mjs` guards the copy). A folder set up earlier as
+  `Second Brain` keeps that name.
 - **The ask.** The assistant's first message after HQ is active, while nothing is
   connected, and only while the drawer talks to the assistant: **Set up your
   notes** with **Set up my notes** as the one primary action and **Not now**;
@@ -933,7 +934,7 @@ over them.
   {name}" with Choose again, with no dialog.
 - **A second brain Ori set up** (#750, #757, #759, #776). **Set up my notes** asks
   "What's the main thing you're working on right now?" first, then makes a
-  Markdown folder in the Workspace Directory (`<root>/Second Brain`, beside the
+  Markdown folder in the Workspace Directory (`<root>/My Notes`, beside the
   workspaces and `Agents/`) whose first note is that project
   (`Projects/<name>/README.md`, inside the same creation), and seeds it once with
   the user's open follow-ups, approved facts and known people; the place card says

@@ -31,6 +31,9 @@ type homeReleases struct {
 	impostor   map[string]bool
 	inspectErr map[string]error
 	inspected  []string
+	// roles and primaryName are the Home each release declares; none by default.
+	roles       []projecttemplates.AssistantProgramHomeRole
+	primaryName string
 }
 
 func newHomeReleases(t *testing.T, versions ...string) *homeReleases {
@@ -74,9 +77,10 @@ func (releases *homeReleases) inspect(source string, _ plugin.SourceFormat) (plu
 		Skills: []plugin.SkillSpec{{Name: provider.PluginID}},
 		WorkspaceSurfaces: &plugin.SurfaceContribution{
 			Name: provider.PluginID, Version: version,
-			Protocol:              plugin.ProtocolRange{Min: provider.ExpectedProtocol, Max: provider.ExpectedProtocol},
-			RequiresHostFeatures:  append([]string(nil), provider.RequiredHostFeatures...),
-			AssistantProgramHomes: []projecttemplates.AssistantProgramHome{{ID: provider.ProgramID, SchemaVersion: provider.HomeSchemaVersion, Version: 1}},
+			Protocol:             plugin.ProtocolRange{Min: provider.ExpectedProtocol, Max: provider.ExpectedProtocol},
+			RequiresHostFeatures: append([]string(nil), provider.RequiredHostFeatures...),
+			AssistantProgramHomes: []projecttemplates.AssistantProgramHome{{ID: provider.ProgramID, SchemaVersion: provider.HomeSchemaVersion, Version: 1,
+				DefaultPrimaryName: releases.primaryName, Roles: releases.roles}},
 		},
 	}
 	if releases.newerHost[source] {

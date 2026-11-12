@@ -718,7 +718,7 @@ test('setting one up asks where first, then names the folder and what Ori will w
     { name: 'Documents', path: '/Users/sam/Documents' },
     ''
   );
-  assert.equal(confirm.title, 'Set up "Second Brain" in Documents?');
+  assert.equal(confirm.title, 'Set up "My Notes" in Documents?');
   assert.equal(confirm.path, '/Users/sam/Documents');
   assert.equal(
     confirm.lines[0],
@@ -732,7 +732,7 @@ test('setting one up asks where first, then names the folder and what Ori will w
     secondBrainSetupConfirmView({ name: 'Documents' }, 'My Brain').title,
     'Set up "My Brain" in Documents?'
   );
-  assert.equal(DEFAULT_SECOND_BRAIN_NAME, 'Second Brain');
+  assert.equal(DEFAULT_SECOND_BRAIN_NAME, 'My Notes');
 });
 
 test('the card of a folder Ori set up says what Ori wrote and takes a note', () => {

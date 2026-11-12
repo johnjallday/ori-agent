@@ -309,13 +309,25 @@ func RootSkillsDir(root string) string {
 }
 
 // SecondBrainFolderName is the folder inside the workspace root where "Set
-// one up for me" puts the user's second brain unless they choose another
-// place. It is the user's notes, not Ori's state: no workspace.json, no
-// sidecar, and no reset ever touches it. Like Agents, the name is reserved as
-// a top-level workspace slug.
-const SecondBrainFolderName = "Second Brain"
+// one up for me" puts the user's notes unless they choose another place. It
+// is the user's notes, not Ori's state: no workspace.json, no sidecar, and no
+// reset ever touches it. Like Agents, the name is reserved as a top-level
+// workspace slug.
+const SecondBrainFolderName = "My Notes"
 
-// RootSecondBrainDir returns <root>/Second Brain for a workspace root.
+// LegacySecondBrainFolderName is what that folder was called before it took
+// the name people read everywhere else. A folder set up under it stays where
+// it is, connected by its path, so the name keeps its reservation and its
+// Projects keep anchoring workspaces.
+const LegacySecondBrainFolderName = "Second Brain"
+
+// SecondBrainFolderNames are the names the notes folder may have in a
+// workspace root: the current one first, then the older one.
+func SecondBrainFolderNames() []string {
+	return []string{SecondBrainFolderName, LegacySecondBrainFolderName}
+}
+
+// RootSecondBrainDir returns <root>/My Notes for a workspace root.
 func RootSecondBrainDir(root string) string {
 	return filepath.Join(root, SecondBrainFolderName)
 }
