@@ -4295,7 +4295,10 @@ test('the song-details switch shows only on a Home that agreed at setup', () => 
   assert.match(songDetailsStatus(true), /track names, markers and regions/);
   assert.match(songDetailsStatus(true), /next scan reads them; nothing is scanned now/);
   // The question asked before anything is read names everything and says that off clears it.
-  assert.match(SONG_DETAILS_QUESTION, /tempo, length, track count, track names, markers and regions/);
+  assert.match(
+    SONG_DETAILS_QUESTION,
+    /tempo, length, track count, track names, markers and regions/
+  );
   assert.match(SONG_DETAILS_QUESTION, /Nothing is changed, and audio is not opened/);
   assert.match(SONG_DETAILS_QUESTION, /clears everything it read/);
 });
@@ -4365,7 +4368,11 @@ test('switching song details off clears the facts lines and says so', async () =
     panel.post = async (path, body) => {
       posts.push({ path, body });
       return {
-        song_details: { state: body.enabled ? 'on' : 'off', names: body.enabled && body.names, app_name: 'REAPER' }
+        song_details: {
+          state: body.enabled ? 'on' : 'off',
+          names: body.enabled && body.names,
+          app_name: 'REAPER'
+        }
       };
     };
     // The whole library is re-read: facts, the brief and the moved revision.
@@ -4484,9 +4491,15 @@ test('an older numbers-only Home is widened from the switch with the same questi
     };
     panel.refresh = async () => {};
     panel.renderSongDetails();
-    assert.equal(elements.projectLibrarySongDetailsLabel.textContent, 'Read song details when scanning');
+    assert.equal(
+      elements.projectLibrarySongDetailsLabel.textContent,
+      'Read song details when scanning'
+    );
     assert.equal(elements.projectLibrarySongDetailsUpgrade.hidden, false);
-    assert.equal(elements.projectLibrarySongDetailsUpgrade.textContent, 'Also read track names, markers and regions');
+    assert.equal(
+      elements.projectLibrarySongDetailsUpgrade.textContent,
+      'Also read track names, markers and regions'
+    );
     assert.doesNotMatch(elements.projectLibraryIntro.textContent, /track names/);
 
     panel.askSongDetails(true);
@@ -4501,7 +4514,10 @@ test('an older numbers-only Home is widened from the switch with the same questi
     assert.equal(panel.state.song_details.names, true);
     assert.equal(elements.projectLibrarySongDetailsUpgrade.hidden, true, 'nothing left to widen');
     assert.match(elements.projectLibrarySongDetailsLabel.textContent, /track names and markers/);
-    assert.match(elements.projectLibraryIntro.textContent, /track names, markers and regions typed into it/);
+    assert.match(
+      elements.projectLibraryIntro.textContent,
+      /track names, markers and regions typed into it/
+    );
   } finally {
     globalThis.document = previousDocument;
   }

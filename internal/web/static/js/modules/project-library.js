@@ -639,14 +639,17 @@ export function songDetailsSwitchView(songDetails, readOnly = false) {
   const numbersOnly = on && !names;
   let note;
   if (names) note = `Ori reads ${songDetailsReads(songDetails, true)}. Nothing is changed.`;
-  else if (numbersOnly) note = `Ori reads ${songDetailsReads(songDetails, false)}. Nothing is changed.`;
+  else if (numbersOnly)
+    note = `Ori reads ${songDetailsReads(songDetails, false)}. Nothing is changed.`;
   else
     note = `Scans read no project files. Turn this on to read ${songDetailsReads(songDetails, true)}, on the next scan.`;
   return {
     visible: true,
     checked: on,
     disabled: Boolean(readOnly),
-    label: numbersOnly ? 'Read song details when scanning' : 'Read song details, track names and markers when scanning',
+    label: numbersOnly
+      ? 'Read song details when scanning'
+      : 'Read song details, track names and markers when scanning',
     note,
     upgrade: numbersOnly && !readOnly ? 'Also read track names, markers and regions' : ''
   };

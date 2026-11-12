@@ -557,6 +557,11 @@ func (c *nameCollector) noteMarker(values [][]byte) {
 		return
 	}
 	region := flags&uint64(g.MarkerRegionBit) != 0
+	// markerUint read it with a 32-bit limit, so this holds; the check says so where
+	// the conversion is.
+	if index > math.MaxUint32 {
+		return
+	}
 	number := uint32(index)
 
 	if region {
