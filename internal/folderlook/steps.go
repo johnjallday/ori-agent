@@ -48,6 +48,10 @@ type Step struct {
 	Default bool `json:"default,omitempty"`
 	// Excludes is the handle this step cannot run together with.
 	Excludes string `json:"excludes,omitempty"`
+	// Tradeoff says in one line what the owner gives up by taking this step
+	// instead of the one it excludes, in the host's words with the tables'
+	// nouns. Only a step with an Excludes has one.
+	Tradeoff string `json:"tradeoff,omitempty"`
 	// Chosen is set on a plan's catalog when the step is in the plan.
 	Chosen bool `json:"chosen,omitempty"`
 }
@@ -60,6 +64,7 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 	handles := newHandles()
 	var out []Step
 	homeHandle := ""
+	homeLabel := ""
 	homeDefault := false
 	for _, c := range candidates {
 		if c.Action == ActionAlreadyHere && !c.Required {
@@ -121,7 +126,7 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 		}
 		step.Handle = handles.take(c.Name, step.Kind)
 		if step.Kind == StepHome {
-			homeHandle = step.Handle
+			homeHandle, homeLabel = step.Handle, c.Name
 		}
 		out = append(out, step)
 	}
@@ -137,9 +142,20 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 		}
 		if homeHandle != "" {
 			step.Excludes = homeHandle
+			// What each gives up, for whichever of the two is offered as the
+			// alternative to the other (setup-card-clarity FR17).
+			step.Tradeoff = fmt.Sprintf("One workspace per %s inside %s, and no %s: nothing lists %s across your other folders.",
+				noun, folderName, homeLabel, foldermap.ShapeNoun(memberShape(facts), n))
+			shelfShape := folderdigest.Shape("")
+			if facts.Portfolio != nil {
+				shelfShape = facts.Portfolio.Shape
+			}
+			shelfTradeoff := fmt.Sprintf("One shelf for every %s across your folders; %s get workspaces when you open them.",
+				foldermap.ShapeNoun(shelfShape, 1), foldermap.ShapeNoun(shelfShape, 2))
 			for i := range out {
 				if out[i].Handle == homeHandle {
 					out[i].Excludes = HandleGroup
+					out[i].Tradeoff = shelfTradeoff
 				}
 			}
 		}

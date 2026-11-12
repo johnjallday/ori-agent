@@ -183,6 +183,10 @@ type PlanView struct {
 	// the Home will hire (HiresUnnamed); never both.
 	Hires     []HireEntry `json:"hires"`
 	HiresNote string      `json:"hires_note,omitempty"`
+	// Alternatives are the other ways to set this folder up: each step that
+	// cannot run together with a chosen one, kept out of the main list and
+	// offered under "Other ways to set this up".
+	Alternatives []Alternative `json:"alternatives"`
 }
 
 func planViewOf(plan Plan) *PlanView {
@@ -198,10 +202,15 @@ func planViewOf(plan Plan) *PlanView {
 	if hires == nil {
 		hires = []HireEntry{}
 	}
+	alternatives := plan.Alternatives
+	if alternatives == nil {
+		alternatives = []Alternative{}
+	}
 	return &PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable,
 		Unavailable: plan.Unavailable, Selected: plan.Selected, Source: plan.Source, Words: plan.Words,
 		WordsRaw: plan.WordsRaw, Steps: steps, Excluded: plan.Excluded, DefaultReason: plan.DefaultReason,
-		ReorderNote: plan.ReorderNote, Installs: installs, Hires: hires, HiresNote: plan.HiresNote}
+		ReorderNote: plan.ReorderNote, Installs: installs, Hires: hires, HiresNote: plan.HiresNote,
+		Alternatives: alternatives}
 }
 
 func (s *Service) viewOf(_ context.Context, rec *Record) View {
@@ -263,8 +272,9 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 		// The agent's words keep naming the steps that did not run.
 		plan.WordsRaw = folderlook.NameHandles(plan.WordsRaw, plan.Steps, kept)
 		plan.Steps = ran
-		// A receipt lists what the run did, not what it would hire.
-		plan.Hires, plan.HiresNote = nil, ""
+		// A receipt lists what the run did, not what it would hire, and a
+		// finished setup has no other way left to choose.
+		plan.Hires, plan.HiresNote, plan.Alternatives = nil, "", nil
 	}
 	v.Plan = planViewOf(plan)
 	v.Landing = landingOf(rec, plan)
@@ -457,6 +467,39 @@ type Plan struct {
 	// the host cannot name them yet. See PlanView.
 	Hires     []HireEntry
 	HiresNote string
+	// Alternatives are the steps set aside because a chosen step excludes
+	// them; see PlanView. They are not part of the digest: choosing one is a
+	// new selection, and a new selection is a new plan.
+	Alternatives []Alternative
+}
+
+// Alternative is a step offered instead of the one the plan has chosen, for
+// the card's "Other ways to set this up". The host writes the trade-off.
+type Alternative struct {
+	// Step is the step's handle: choosing it re-plans with it in place of the
+	// step it excludes.
+	Step string `json:"step"`
+	// Title is what the step does; Tradeoff what taking it gives up.
+	Title    string `json:"title"`
+	Tradeoff string `json:"tradeoff"`
+}
+
+// alternativesOf lists every step that excludes a step the plan chose and is
+// not itself chosen, in the catalog's order. A step with nothing chosen
+// against it is not an alternative: it stays among the optional steps.
+func alternativesOf(steps []folderlook.Step, chosen map[string]bool) []Alternative {
+	var out []Alternative
+	for _, step := range steps {
+		if step.Chosen || step.Excludes == "" || !chosen[step.Excludes] {
+			continue
+		}
+		tradeoff := step.Tradeoff
+		if tradeoff == "" {
+			tradeoff = step.Why
+		}
+		out = append(out, Alternative{Step: step.Handle, Title: step.Title, Tradeoff: tradeoff})
+	}
+	return out
 }
 
 // What the hires block says when it has nothing to name.
@@ -669,6 +712,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 		s.Chosen = chosen[s.Handle]
 		plan.Steps[i] = s
 	}
+	plan.Alternatives = alternativesOf(plan.Steps, chosen)
 	candidates := make(map[string]folderlook.Candidate, len(rec.Candidates))
 	for _, c := range rec.Candidates {
 		candidates[c.ID] = c

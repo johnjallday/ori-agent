@@ -845,7 +845,14 @@ function renderPlan(
       actions: []
     });
   });
-  const offered = phase === 'plan' ? steps.filter(step => !chosen.has(step.handle)) : [];
+  // A step that cannot run with a chosen one is an alternative, not an
+  // optional row: it waits under "Other ways to set this up".
+  const alternatives = phase === 'plan' ? plan?.alternatives || [] : [];
+  const alternativeHandles = new Set(alternatives.map(alternative => alternative.step));
+  const offered =
+    phase === 'plan'
+      ? steps.filter(step => !chosen.has(step.handle) && !alternativeHandles.has(step.handle))
+      : [];
   const done = rows.filter(row => rowState(row) === 'done').length;
   const failedAt = rows.findIndex(row => rowState(row) === 'failed');
   const head = el(doc, 'p', 'folder-agent-card__run-head');
@@ -1022,6 +1029,9 @@ function renderPlan(
     )
   );
   section.append(list);
+  // After the plan and before the install block: the other ways in, collapsed.
+  if (alternatives.length)
+    section.append(renderAlternatives(doc, alternatives, steps, selecting ? onTick : null));
   if (installs.length) section.append(renderInstalls(doc, installs, lines, phase));
   // Before Set it up, who the ticked steps hire, directly under what they
   // install: the button confirms both. Once the run starts its lines say it.
@@ -1196,6 +1206,59 @@ function renderHires(doc, hires, note) {
 // What a hire's model reads when the host sent none (the host says the same).
 const NO_MODEL_YET = 'No model yet';
 
+let alternativesSeq = 0;
+
+// renderAlternatives draws "Other ways to set this up" (setup-card-clarity
+// FR16, FR18): the steps that cannot run together with a chosen one, kept out
+// of the main list so the list holds the path being recommended. A real button
+// opens it (closed by default); each alternative shows its title, the host's one
+// line on what taking it gives up, and "Use this instead", which takes the same
+// path as ticking that step: the re-plan puts it in place of the step it
+// excludes and every part of the card follows the new plan. The children are
+// divs because the Home drawer restyles the spans directly inside any list item.
+function renderAlternatives(doc, alternatives, steps, onTick) {
+  const block = el(doc, 'section', 'folder-agent-card__alternatives');
+  alternativesSeq += 1;
+  const listId = `folder-agent-alternatives-${alternativesSeq}`;
+  const toggle = el(
+    doc,
+    'button',
+    'folder-agent-card__alternatives-toggle',
+    'Other ways to set this up'
+  );
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-controls', listId);
+  const list = el(doc, 'ul', 'folder-agent-card__alternative-list');
+  list.id = listId;
+  list.hidden = true;
+  alternatives.forEach(alternative => {
+    const item = el(doc, 'li', 'folder-agent-card__alternative');
+    item.dataset.step = alternative.step;
+    item.append(el(doc, 'div', 'folder-agent-card__line-name', alternative.title));
+    if (alternative.tradeoff)
+      item.append(el(doc, 'div', 'folder-agent-card__line-detail', alternative.tradeoff));
+    if (onTick) {
+      const use = el(doc, 'button', 'folder-agent-card__alternative-use', 'Use this instead');
+      use.type = 'button';
+      use.dataset.altStep = alternative.step;
+      use.addEventListener('click', () => {
+        const excludes = steps.find(step => step.handle === alternative.step)?.excludes || '';
+        return onTick(alternative.step, true, excludes);
+      });
+      item.append(use);
+    }
+    list.append(item);
+  });
+  toggle.addEventListener('click', () => {
+    const open = Boolean(list.hidden);
+    list.hidden = !open;
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  block.append(toggle, list);
+  return block;
+}
+
 const HANDLE_PATTERN = /\[([a-z0-9][a-z0-9-]*)\]/g;
 
 // renderWords draws the agent's plan with each step it named as a chip
@@ -1345,9 +1408,16 @@ export function renderFolderAgentReport(
       // The box the owner just ticked keeps focus through the redraw (a
       // keyboard user would otherwise be dropped on the page body).
       const focused = doc.activeElement?.dataset?.stepHandle || '';
+      // "Use this instead" is gone after the swap; focus goes to the control
+      // that now holds the way the owner just left.
+      const swapped = Boolean(doc.activeElement?.dataset?.altStep);
       planHost.replaceChildren(
         renderPlan(doc, view, plan, plan.lines, 'plan', { selecting, onTick })
       );
+      if (swapped)
+        planHost
+          .querySelector?.('.folder-agent-card__alternatives-toggle')
+          ?.focus?.({ preventScroll: true });
       if (focused) {
         const again = Array.from(planHost.querySelectorAll?.('input[type="checkbox"]') || []).find(
           box => box.dataset?.stepHandle === focused
@@ -1772,6 +1842,15 @@ function planView(plan) {
       }))
       .filter(entry => entry.name),
     hiresNote: String(plan.hires_note || ''),
+    // The other ways to set this folder up: steps that cannot run with a chosen
+    // one, each with the host's line on what taking it gives up.
+    alternatives: (Array.isArray(plan.alternatives) ? plan.alternatives : [])
+      .map(alternative => ({
+        step: String(alternative?.step || ''),
+        title: String(alternative?.title || ''),
+        tradeoff: String(alternative?.tradeoff || '')
+      }))
+      .filter(alternative => alternative.step && alternative.title),
     // Every step Ori offered, chosen or not; the owner can tick any of them.
     steps: (Array.isArray(plan.steps) ? plan.steps : [])
       .map(step => ({
@@ -1835,10 +1914,24 @@ export async function postFolderAgentAction(
   else if (action === 'premise_other') body = { answer: 'something_else' };
   const { ok, payload } = await post(url, body, fetchImpl);
   if (!ok) {
-    return {
-      error: String(payload?.error || 'That did not go through.'),
-      view: payload?.folder_agent || null
-    };
+    let refused = payload?.folder_agent || null;
+    // A plan that changed after it was shown (an agent took a name, a model was
+    // set) is redrawn on the owner's own choice of steps, not on Ori's default
+    // for the folder, so what changed is on the card to read before they press
+    // again. The server's own view stands if the re-plan cannot be had.
+    if (payload?.plan_changed && action === 'set_up' && refused && Array.isArray(extra?.selected)) {
+      try {
+        const again = await post(
+          `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(view.workspaceID)}/plan`,
+          { selected: extra.selected },
+          fetchImpl
+        );
+        if (again.ok && again.payload?.plan) refused = { ...refused, plan: again.payload.plan };
+      } catch (_) {
+        // keep the server's view
+      }
+    }
+    return { error: String(payload?.error || 'That did not go through.'), view: refused };
   }
   // Home's map follows: a Set it up can turn a tile into a district or move
   // it into a Home.
