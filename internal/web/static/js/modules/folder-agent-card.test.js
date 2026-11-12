@@ -17,7 +17,9 @@ import {
   formatFolderAgentDuration,
   tickFolderAgentClocks,
   folderAgentReportView,
+  ensureRoleCatalog,
   folderAgentSetUpLabel,
+  folderAgentTileFaces,
   folderAgentTileLine,
   mountWorkspaceFolderAgent,
   mountFolderAgentChoice,
@@ -196,20 +198,23 @@ test('the card before Start reads the server card and refuses one without a toke
   });
   assert.equal(text(card, '.folder-agent-card__title'), 'Start an agent on Ori Music Demo');
   assert.equal(text(card, '.folder-agent-card__start'), 'Hire & start');
-  assert.equal(text(card, '.folder-agent-card__hire-title'), 'Hire');
+  assert.equal(text(card, '.folder-agent-card__who-title'), 'Hire');
   const input = card.querySelector('.folder-agent-card__brief');
   assert.equal(input.maxLength, 300);
   input.value = 'Mix this song';
   // A new agent by default: rename it, pick another model, give it a role.
-  const name = card.querySelector('.folder-agent-card__hire-name');
+  const name = card.querySelector('.folder-agent-card__who-name');
   assert.equal(name.value, 'Ori Music Demo Manager');
-  assert.equal(card.querySelector('.folder-agent-card__hire-agent').disabled, true);
+  const atlas = card
+    .querySelectorAll('.folder-agent-card__who-agent-radio')
+    .find(radio => radio.value === 'Atlas');
+  assert.equal(atlas.checked, false);
   name.value = 'Song Keeper';
   name.listeners.input();
-  const model = card.querySelector('.folder-agent-card__hire-model');
+  const model = card.querySelector('.folder-agent-card__who-model');
   model.value = 'openai\u0000gpt-x';
   model.listeners.change();
-  const role = card.querySelector('.folder-agent-card__hire-mandate');
+  const role = card.querySelector('.folder-agent-card__who-role');
   role.value = 'Keep my songs moving';
   role.listeners.input();
   card.querySelector('.folder-agent-card__start').listeners.click();
@@ -223,13 +228,12 @@ test('the card before Start reads the server card and refuses one without a toke
     }
   });
   // One of your agents instead: only its name is sent.
-  const reuse = card
-    .querySelectorAll('input')
-    .find(node => node.dataset.folderAgentHire === 'existing');
-  reuse.checked = true;
-  reuse.listeners.change();
-  assert.equal(name.disabled, true);
-  assert.equal(card.querySelector('.folder-agent-card__hire-agent').disabled, false);
+  atlas.checked = true;
+  atlas.listeners.change();
+  // The new agent's row is dimmed, not disabled, so typing in it chooses it again.
+  assert.equal(card.querySelector('.folder-agent-card__who-new').dataset.selected, 'false');
+  assert.equal(name.disabled, false);
+  assert.equal(atlas.checked, true);
   card.querySelector('.folder-agent-card__start').listeners.click();
   assert.deepEqual(plain(started.hire), { existing: 'Atlas' });
 });
@@ -248,8 +252,8 @@ test('a saved manager is preselected, and no model still lets the agent be hired
   assert.equal(view.hire.mode, 'existing');
   assert.deepEqual(plain(folderAgentHireChoice(view.hire)), { existing: 'Songs Manager' });
   const card = renderFolderAgentCard(view, stubDocument(), {});
-  assert.equal(card.querySelector('.folder-agent-card__hire-model'), null);
-  assert.match(text(card, '.folder-agent-card__hire-note'), /No model is set up yet/);
+  assert.equal(card.querySelector('.folder-agent-card__who-model'), null);
+  assert.match(text(card, '.folder-agent-card__who-note'), /No model is set up yet/);
   view.hire.mode = 'new';
   assert.deepEqual(plain(folderAgentHireChoice(view.hire)), { name: 'Songs Manager', mandate: '' });
 
@@ -260,11 +264,599 @@ test('a saved manager is preselected, and no model still lets the agent be hired
     hire: { models: [{ provider: 'claude_code', model: 'sonnet', label: 'sonnet (claude_code)' }] }
   });
   const picker = renderFolderAgentCard(unset, stubDocument(), {}).querySelector(
-    '.folder-agent-card__hire-model'
+    '.folder-agent-card__who-model'
   );
   assert.equal(picker.children[0].textContent, 'No model yet');
   assert.equal(unset.hire.model, '');
   assert.equal(folderAgentHireChoice(unset.hire).model, undefined);
+});
+
+// A window with just what the hire section reads to draw a face: the shared
+// renderer (recording what it is asked to draw), the role catalog that shapes
+// the ring and emblem, and the character catalog.
+function faceWindow({ rolesLoaded = true } = {}) {
+  const roles = { loaded: rolesLoaded, resolve: null };
+  const ready = new Promise(resolve => {
+    roles.resolve = resolve;
+  });
+  const characters = { listeners: [], loads: 0, stopped: 0, byId: {} };
+  const win = {
+    drawn: [],
+    roles,
+    characters,
+    AgentAvatar: {
+      markup(input, options) {
+        win.drawn.push({ input: plain(input), options: plain(options) });
+        return `<span data-face="${input.name}"></span>`;
+      }
+    },
+    RoleCatalog: {
+      isLoaded: () => roles.loaded,
+      entry: slug =>
+        slug === 'orchestrator' ? { accent_color: '#2c7a4b', emblem: 'compass' } : null,
+      ready: () => ready
+    },
+    CharacterCatalog: {
+      get: id => characters.byId[id] || null,
+      load: () => (characters.loads += 1),
+      onChange(fn) {
+        characters.listeners.push(fn);
+        return () => (characters.stopped += 1);
+      }
+    }
+  };
+  return win;
+}
+const lastFace = win => win.drawn.at(-1);
+const faceOf = card => card.querySelector('.folder-agent-card__who-face');
+const hireCardView = (hire = {}) =>
+  folderAgentCardView({
+    choice_token: 'fa-9',
+    folder_name: 'Downloads',
+    hire: { agent_name: 'Downloads Manager', models: [], agents: [], ...hire }
+  });
+const hireCard = (win, hire) => renderFolderAgentCard(hireCardView(hire), stubDocument(), { win });
+
+test('the hire card leads with the face the Agents page will draw for the agent it creates', () => {
+  const win = faceWindow();
+  const card = hireCard(win, {
+    models: [
+      { provider: 'claude', model: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5 (claude)' }
+    ],
+    provider: 'claude',
+    model: 'claude-sonnet-5-5'
+  });
+  const row = card.querySelector('.folder-agent-card__who-new');
+  assert.equal(row.children[0].className, 'folder-agent-card__who-face');
+  assert.equal(row.children[1].className, 'folder-agent-card__who-main');
+  // The name, then the model as a chip under it.
+  const [name, chip] = row.children[1].children;
+  assert.equal(name.value, 'Downloads Manager');
+  // Its text is the model picked; the native list sits over it.
+  assert.equal(chip.className, 'folder-agent-card__who-chip');
+  const [chipText, list] = chip.children;
+  assert.equal(chipText.textContent, 'claude-sonnet-5-5 (claude)');
+  assert.equal(chipText.attributes['aria-hidden'], 'true');
+  assert.equal(list.className, 'folder-agent-card__who-model');
+  assert.equal(list.attributes['aria-label'], 'Model');
+  assert.equal(faceOf(card).innerHTML, '<span data-face="Downloads Manager"></span>');
+  // Name, source, role and the role's ring and emblem: what agents-roster.js
+  // passes for an agent hired as an orchestrator. A name alone draws another face.
+  assert.deepEqual(lastFace(win), {
+    input: {
+      name: 'Downloads Manager',
+      source: 'user',
+      role: 'orchestrator',
+      roleAccent: '#2c7a4b',
+      roleEmblem: 'compass',
+      appearance: { mode: 'generated', generated: {} }
+    },
+    options: { size: 48, className: 'folder-agent-card__who-avatar' }
+  });
+  assert.equal(win.characters.loads, 1);
+});
+
+test('the face follows the name as it is typed, and is neutral without one', () => {
+  const win = faceWindow();
+  const card = hireCard(win);
+  const name = card.querySelector('.folder-agent-card__who-name');
+  const typed = value => {
+    name.value = value;
+    name.listeners.input();
+    return lastFace(win).input;
+  };
+  // The server saves a run of spaces as one, so the face is drawn from that.
+  assert.equal(typed('Song   Keeper').name, 'Song Keeper');
+  assert.deepEqual(typed(''), { name: '' });
+  assert.deepEqual(typed('   '), { name: '' });
+  assert.equal(typed('Atlas').name, 'Atlas');
+  assert.equal(faceOf(card).innerHTML, '<span data-face="Atlas"></span>');
+});
+
+test('the face is neutral until the role catalog arrives, never a wrong one', async () => {
+  const win = faceWindow({ rolesLoaded: false });
+  const card = hireCard(win);
+  assert.deepEqual(lastFace(win).input, { name: '' });
+  win.roles.loaded = true;
+  win.roles.resolve();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(lastFace(win).input.name, 'Downloads Manager');
+  assert.equal(lastFace(win).input.roleEmblem, 'compass');
+  assert.equal(faceOf(card).innerHTML, '<span data-face="Downloads Manager"></span>');
+  // A page with no role catalog at all draws the neutral face too.
+  const bare = faceWindow();
+  delete bare.RoleCatalog;
+  hireCard(bare);
+  assert.deepEqual(lastFace(bare).input, { name: '' });
+});
+
+test('a character catalog change redraws the face, and a card that left the page stops listening', () => {
+  const win = faceWindow();
+  const card = hireCard(win);
+  const drawn = win.drawn.length;
+  win.characters.listeners[0]();
+  assert.equal(win.drawn.length, drawn + 1);
+  card.querySelector('.folder-agent-card__who').isConnected = false;
+  win.characters.listeners[0]();
+  assert.equal(win.drawn.length, drawn + 1);
+  assert.equal(win.characters.stopped, 1);
+});
+
+test('without the shared renderer the face is the first letter of the name', () => {
+  const card = hireCard(null);
+  assert.equal(faceOf(card).textContent, 'D');
+  const name = card.querySelector('.folder-agent-card__who-name');
+  name.value = '';
+  name.listeners.input();
+  assert.equal(faceOf(card).textContent, '?');
+});
+
+test('Role waits behind Customize, closed unless it already holds text', () => {
+  const closed = hireCard(null);
+  const details = closed.querySelector('.folder-agent-card__who-customize');
+  assert.equal(details.open, false);
+  assert.equal(text(closed, '.folder-agent-card__who-customize-toggle'), 'Customize');
+  const role = details.querySelector('.folder-agent-card__who-role');
+  assert.equal(role.placeholder, 'Same as what it should do');
+  assert.equal(role.maxLength, 300);
+  const filled = hireCard(null, { mandate: 'Keep my downloads tidy' });
+  assert.equal(filled.querySelector('.folder-agent-card__who-customize').open, true);
+  assert.equal(
+    filled.querySelector('.folder-agent-card__who-role').value,
+    'Keep my downloads tidy'
+  );
+});
+
+test('the model chip lists the same models, and what it picks is what Start sends', () => {
+  const view = hireCardView({
+    models: [
+      { provider: 'claude', model: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5 (claude)' },
+      { provider: 'openai', model: 'gpt-x', label: 'gpt-x (openai)' }
+    ]
+  });
+  const card = renderFolderAgentCard(view, stubDocument(), {});
+  const chip = card.querySelector('.folder-agent-card__who-model');
+  // No system model: "No model yet" leads, so a hire without one stays possible.
+  assert.deepEqual(
+    chip.children.map(option => option.textContent),
+    ['No model yet', 'claude-sonnet-5-5 (claude)', 'gpt-x (openai)']
+  );
+  assert.equal(folderAgentHireChoice(view.hire).model, undefined);
+  const chipText = () => card.querySelector('.folder-agent-card__who-chip-text').textContent;
+  assert.equal(chipText(), 'No model yet');
+  chip.value = ['openai', 'gpt-x'].join(String.fromCharCode(0));
+  chip.listeners.change();
+  assert.equal(chipText(), 'gpt-x (openai)');
+  assert.deepEqual(plain(folderAgentHireChoice(view.hire)), {
+    name: 'Downloads Manager',
+    mandate: '',
+    provider: 'openai',
+    model: 'gpt-x'
+  });
+});
+
+// The owner's own agents, as the hire payload names them (name and model only).
+const SAVED = [{ name: 'Atlas', model: 'claude-sonnet-5-5' }, { name: 'Beta' }, { name: 'Cato' }];
+const agentItems = card => card.querySelectorAll('.folder-agent-card__who-agent');
+const agentRadio = (card, name) =>
+  card.querySelectorAll('.folder-agent-card__who-agent-radio').find(radio => radio.value === name);
+const agentItem = (card, name) =>
+  agentItems(card).find(item => text(item, '.folder-agent-card__who-agent-name') === name);
+const pick = (card, name) => {
+  const radio = agentRadio(card, name);
+  radio.checked = true;
+  radio.listeners.change();
+};
+// What the card marks as chosen: the new agent's row or one agent's face.
+const chosen = card =>
+  [...card.querySelectorAll('.folder-agent-card__who-new'), ...agentItems(card)].filter(
+    node => node.dataset.selected === 'true'
+  );
+const listOf = agents => async () => ({ ok: true, json: async () => ({ agents }) });
+// settle lets an answer land and its redraw run, and lets "nothing happened" be
+// asserted. It was 25 ms and failed twice on a saturated machine (the whole suite
+// runs in parallel), so it leaves a wider margin; a wait for something that must
+// happen uses untilTrue, defined further down.
+const settle = () => new Promise(resolve => setTimeout(resolve, 100));
+const agentDraws = win => win.drawn.filter(draw => draw.options.size === 40);
+
+test('your agents are a row of faces under "Or one of your agents", not a dropdown', () => {
+  const win = faceWindow();
+  const card = renderFolderAgentCard(hireCardView({ agents: SAVED }), stubDocument(), {
+    win,
+    fetchImpl: listOf([])
+  });
+  const heading = card.querySelector('.folder-agent-card__who-heading');
+  assert.equal(heading.textContent, 'Or one of your agents');
+  const row = card.querySelector('.folder-agent-card__who-agents');
+  assert.equal(row.attributes.role, 'radiogroup');
+  assert.equal(row.attributes['aria-labelledby'], heading.id);
+  assert.deepEqual(
+    agentItems(card).map(item => text(item, '.folder-agent-card__who-agent-name')),
+    ['Atlas', 'Beta', 'Cato']
+  );
+  // The name is under the face; the title carries it when the name is cut short.
+  assert.equal(agentItem(card, 'Atlas').attributes.title, 'Atlas');
+  // Each choice is announced with the agent's name and model.
+  assert.equal(agentRadio(card, 'Atlas').attributes['aria-label'], 'Atlas, claude-sonnet-5-5');
+  assert.equal(agentRadio(card, 'Beta').attributes['aria-label'], 'Beta');
+  const radios = card.querySelectorAll('.folder-agent-card__who-agent-radio');
+  assert.equal(new Set(radios.map(radio => radio.name)).size, 1);
+  assert.ok(radios.every(radio => radio.type === 'radio'));
+  assert.equal(card.querySelectorAll('select').length, 0);
+  // About 40px, through the shared renderer, in the agent-sized class.
+  assert.equal(agentDraws(win).length, 3);
+  assert.equal(
+    agentDraws(win)[0].options.className,
+    'folder-agent-card__who-avatar folder-agent-card__who-avatar--agent'
+  );
+});
+
+test('with no agents of your own there is no row, no heading and no request for them', async () => {
+  let asked = 0;
+  const card = renderFolderAgentCard(hireCardView(), stubDocument(), {
+    win: faceWindow(),
+    fetchImpl: async () => {
+      asked += 1;
+      return { ok: true, json: async () => ({ agents: [] }) };
+    }
+  });
+  assert.equal(card.querySelector('.folder-agent-card__who-reuse'), null);
+  assert.equal(card.querySelector('.folder-agent-card__who-heading'), null);
+  assert.equal(card.querySelector('.folder-agent-card__who-agents'), null);
+  await settle();
+  assert.equal(asked, 0);
+});
+
+test('each agent shows its real face once the list answers, and a fallback face until then', async () => {
+  const win = faceWindow();
+  win.characters.byId.fox = { id: 'fox', assets: { portrait: '/characters/fox.png' } };
+  const records = [
+    {
+      name: 'Atlas',
+      source: 'user',
+      role: 'orchestrator',
+      appearance: { mode: 'character', character: { catalog_id: 'fox' } }
+    },
+    {
+      name: 'Beta',
+      source: 'user',
+      role: '',
+      appearance: { mode: 'uploaded', uploaded: { image: 'beta.png' } }
+    },
+    {
+      name: 'Cato',
+      source: 'cli',
+      role: 'cli_agent',
+      appearance: { mode: 'generated', generated: { color: '#112233' } }
+    }
+  ];
+  const asked = [];
+  renderFolderAgentCard(hireCardView({ agents: SAVED }), stubDocument(), {
+    win,
+    fetchImpl: async url => {
+      asked.push(url);
+      return { ok: true, json: async () => ({ agents: records }) };
+    }
+  });
+  // Until the list answers: the name's generated face.
+  const fallback = name => ({ name, source: 'user', appearance: {} });
+  assert.deepEqual(
+    agentDraws(win).map(draw => draw.input),
+    [fallback('Atlas'), fallback('Beta'), fallback('Cato')]
+  );
+  await settle();
+  // Then each agent as the Agents page draws it: the appearance exactly as
+  // returned, the source and role, the role's ring, and the character.
+  assert.deepEqual(asked, ['/api/agents/dashboard/list']);
+  const [atlas, beta, cato] = agentDraws(win)
+    .slice(-3)
+    .map(draw => draw.input);
+  assert.deepEqual(atlas, {
+    name: 'Atlas',
+    source: 'user',
+    role: 'orchestrator',
+    roleAccent: '#2c7a4b',
+    roleEmblem: 'compass',
+    appearance: records[0].appearance,
+    character: { id: 'fox', assets: { portrait: '/characters/fox.png' } }
+  });
+  assert.deepEqual(beta, {
+    name: 'Beta',
+    source: 'user',
+    role: '',
+    roleAccent: '',
+    roleEmblem: '',
+    appearance: records[1].appearance,
+    character: null
+  });
+  assert.equal(cato.source, 'cli');
+  assert.equal(cato.role, 'cli_agent');
+  assert.deepEqual(cato.appearance, records[2].appearance);
+});
+
+test('a list that cannot be read leaves the fallback faces and the choice still works', async () => {
+  const unreadable = [
+    async () => {
+      throw new Error('offline');
+    },
+    async () => ({ ok: false }),
+    async () => ({
+      ok: true,
+      json: async () => {
+        throw new Error('not json');
+      }
+    })
+  ];
+  for (const fetchImpl of unreadable) {
+    const win = faceWindow();
+    const view = hireCardView({ agents: SAVED });
+    const card = renderFolderAgentCard(view, stubDocument(), { win, fetchImpl });
+    const drawn = win.drawn.length;
+    await settle();
+    assert.equal(win.drawn.length, drawn);
+    pick(card, 'Beta');
+    assert.deepEqual(plain(folderAgentHireChoice(view.hire)), { existing: 'Beta' });
+  }
+});
+
+test('the list is asked for once per card, and an answer after the card left is ignored', async () => {
+  const records = SAVED.map(agent => ({ name: agent.name, role: '', appearance: {} }));
+  const win = faceWindow();
+  let asked = 0;
+  renderFolderAgentCard(hireCardView({ agents: SAVED }), stubDocument(), {
+    win,
+    fetchImpl: async () => {
+      asked += 1;
+      return { ok: true, json: async () => ({ agents: records }) };
+    }
+  });
+  await settle();
+  // A character catalog change redraws the faces; it does not ask again.
+  win.characters.listeners[0]();
+  await settle();
+  assert.equal(asked, 1);
+
+  const late = faceWindow();
+  let release = null;
+  const gate = new Promise(resolve => {
+    release = resolve;
+  });
+  const card = renderFolderAgentCard(hireCardView({ agents: SAVED }), stubDocument(), {
+    win: late,
+    fetchImpl: async () => {
+      await gate;
+      return { ok: true, json: async () => ({ agents: records }) };
+    }
+  });
+  card.querySelector('.folder-agent-card__who').isConnected = false;
+  const drawn = late.drawn.length;
+  release();
+  await settle();
+  assert.equal(late.drawn.length, drawn);
+});
+
+test('exactly one of the new agent and your agents is chosen; typing in the new one chooses it again', () => {
+  const view = hireCardView({ agents: SAVED });
+  const card = renderFolderAgentCard(view, stubDocument(), { win: faceWindow() });
+  const fresh = card.querySelector('.folder-agent-card__who-new');
+  const name = card.querySelector('.folder-agent-card__who-name');
+  const only = (node, mode) => {
+    assert.deepEqual(chosen(card), [node]);
+    assert.equal(view.hire.mode, mode);
+    // Role belongs to the new agent: it is dimmed whenever the new agent is not chosen.
+    assert.equal(
+      card.querySelector('.folder-agent-card__who-customize').dataset.selected,
+      String(mode === 'new')
+    );
+    // The radios agree with the marks: one checked at most, and it is the chosen one.
+    const checked = card
+      .querySelectorAll('.folder-agent-card__who-agent-radio')
+      .filter(radio => radio.checked)
+      .map(radio => radio.value);
+    assert.deepEqual(checked, mode === 'existing' ? [node.querySelector('input').value] : []);
+  };
+  only(fresh, 'new');
+
+  pick(card, 'Beta');
+  only(agentItem(card, 'Beta'), 'existing');
+  // The request for a reused agent is what it was: only its name.
+  assert.deepEqual(plain(folderAgentHireChoice(view.hire)), { existing: 'Beta' });
+
+  pick(card, 'Cato');
+  only(agentItem(card, 'Cato'), 'existing');
+  assert.deepEqual(plain(folderAgentHireChoice(view.hire)), { existing: 'Cato' });
+
+  name.value = 'Mine';
+  name.listeners.input();
+  only(fresh, 'new');
+  assert.deepEqual(plain(folderAgentHireChoice(view.hire)), { name: 'Mine', mandate: '' });
+
+  pick(card, 'Atlas');
+  fresh.listeners.click();
+  only(fresh, 'new');
+
+  pick(card, 'Atlas');
+  fresh.listeners.focusin();
+  only(fresh, 'new');
+});
+
+test('a working agent wears its face on its tile only while the tile has a line (visual-hire FR17)', () => {
+  const win = faceWindow();
+  const albums = {
+    name: 'Albums Manager',
+    source: 'user',
+    role: 'orchestrator',
+    appearance: { mode: 'generated', generated: {} }
+  };
+  const records = new Map([[albums.name, albums]]);
+  const views = [
+    { workspace_id: 'ws-1', agent_name: 'Albums Manager', state: 'looking', progress_line: 'x' },
+    { workspace_id: 'ws-2', agent_name: 'Beta Manager', state: 'setting_up' },
+    { workspace_id: 'ws-3', agent_name: 'Gamma Manager', state: 'reported' },
+    { workspace_id: 'ws-4', agent_name: 'Delta Manager', state: 'failed' },
+    { workspace_id: 'ws-5', state: 'looking' }
+  ];
+  const faces = folderAgentTileFaces(views, records, win);
+  // Only the tiles that show a line, and only for an agent that has a name.
+  assert.deepEqual(Object.keys(faces), ['ws-1', 'ws-2']);
+  assert.equal(faces['ws-1'], '<span data-face="Albums Manager"></span>');
+  // At the tile's size through the shared renderer. An agent the list has is drawn
+  // as the hire card and the Agents page draw it; one it has not yet is drawn as
+  // its name's own face, and the tile redraws when the list answers.
+  assert.equal(win.drawn[0].options.size, 32);
+  assert.deepEqual(win.drawn[0].input, {
+    name: 'Albums Manager',
+    source: 'user',
+    role: 'orchestrator',
+    roleAccent: '#2c7a4b',
+    roleEmblem: 'compass',
+    appearance: albums.appearance,
+    character: null
+  });
+  assert.deepEqual(win.drawn[1].input, { name: 'Beta Manager', source: 'user', appearance: {} });
+  // Nothing to draw with, or nothing to draw: no faces.
+  assert.deepEqual(folderAgentTileFaces(views, records, null), {});
+  assert.deepEqual(folderAgentTileFaces(null, records, win), {});
+
+  // An agent whose record is still being asked for wears no face rather than its
+  // name's own, which is not its real one and would flash first. The agents that
+  // are not pending are unaffected; once the lookup ends it is drawn.
+  const waiting = folderAgentTileFaces(views, records, win, new Set(['Albums Manager']));
+  assert.deepEqual(Object.keys(waiting), ['ws-2']);
+  assert.deepEqual(Object.keys(folderAgentTileFaces(views, records, win, new Set())), [
+    'ws-1',
+    'ws-2'
+  ]);
+});
+
+// A page double that records the scripts added to its head.
+function headDocument({ head = true } = {}) {
+  const added = [];
+  return {
+    added,
+    createElement: tag => ({ tag, src: '', async: false, onload: null, onerror: null }),
+    head: head ? { appendChild: node => added.push(node) } : undefined
+  };
+}
+
+test('the role catalog is fetched only when a face needs it, once per window, and never blocks a face (visual-hire FR4)', async () => {
+  // Already on the page (the Agents page loads it): nothing is added.
+  const have = faceWindow();
+  have.roles.resolve();
+  const owned = headDocument();
+  assert.equal(await ensureRoleCatalog(owned, have), have.RoleCatalog);
+  assert.deepEqual(owned.added, []);
+
+  // Not on the page: one script is added however many faces ask, and the answer
+  // is the catalog the script installed.
+  const bare = {};
+  const page = headDocument();
+  const first = ensureRoleCatalog(page, bare);
+  const second = ensureRoleCatalog(page, bare);
+  assert.equal(first, second);
+  assert.equal(page.added.length, 1);
+  assert.equal(page.added[0].src, '/js/modules/role-catalog.js');
+  const catalog = { ready: () => Promise.resolve() };
+  bare.RoleCatalog = catalog;
+  page.added[0].onload();
+  assert.equal(await first, catalog);
+  // Once it is there, later asks use it and add nothing.
+  assert.equal(await ensureRoleCatalog(page, bare), catalog);
+  assert.equal(page.added.length, 1);
+
+  // A script that fails, a page with no head, and no window all answer null.
+  const broken = headDocument();
+  const failing = ensureRoleCatalog(broken, {});
+  broken.added[0].onerror();
+  assert.equal(await failing, null);
+  assert.equal(await ensureRoleCatalog(headDocument({ head: false }), {}), null);
+  assert.equal(await ensureRoleCatalog(headDocument(), null), null);
+});
+
+test('a page without the role catalog loads it when the card is drawn, and the real face replaces the neutral one (visual-hire FR4)', async () => {
+  const win = faceWindow();
+  const roles = win.RoleCatalog;
+  delete win.RoleCatalog;
+  const doc = stubDocument();
+  const added = [];
+  doc.head = { appendChild: node => added.push(node) };
+  const card = renderFolderAgentCard(hireCardView(), doc, { win });
+  // The neutral face while it loads, and the page was asked for the script once.
+  assert.deepEqual(lastFace(win).input, { name: '' });
+  assert.equal(added.length, 1);
+  assert.equal(added[0].src, '/js/modules/role-catalog.js');
+  // The script arrives and installs the catalog: the face is redrawn as the Agents page draws it.
+  win.RoleCatalog = roles;
+  win.roles.resolve();
+  added[0].onload();
+  await settle();
+  assert.equal(lastFace(win).input.roleEmblem, 'compass');
+  assert.equal(faceOf(card).innerHTML, '<span data-face="Downloads Manager"></span>');
+});
+
+test('no face is drawn on a tile until the role catalog is here, and no page pays for it unless it draws one (visual-hire FR4)', () => {
+  const views = [{ workspace_id: 'ws-1', agent_name: 'Albums Manager', state: 'looking' }];
+  const records = new Map();
+  assert.deepEqual(Object.keys(folderAgentTileFaces(views, records, faceWindow())), ['ws-1']);
+  assert.deepEqual(folderAgentTileFaces(views, records, faceWindow({ rolesLoaded: false })), {});
+  const bare = faceWindow();
+  delete bare.RoleCatalog;
+  assert.deepEqual(folderAgentTileFaces(views, records, bare), {});
+
+  // The shared head must not load it (the README capture fails any page that makes a
+  // request it does not expect); the Agents page, which draws from it, does.
+  const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
+  assert.doesNotMatch(read('../../../templates/layout/head.tmpl'), /role-catalog\.js/);
+  assert.match(read('../../../templates/pages/agents-roster.tmpl'), /role-catalog\.js/);
+});
+
+test('a saved manager of the same name is chosen when the card opens, and the chosen face is scrolled into view', () => {
+  const win = faceWindow();
+  const queued = [];
+  win.requestAnimationFrame = run => queued.push(run);
+  const view = hireCardView({
+    agent_name: 'Songs Manager',
+    agents: [{ name: 'Atlas' }, { name: 'Songs Manager' }],
+    existing: 'Songs Manager'
+  });
+  const card = renderFolderAgentCard(view, stubDocument(), { win });
+  assert.equal(view.hire.mode, 'existing');
+  assert.deepEqual(chosen(card), [agentItem(card, 'Songs Manager')]);
+  assert.equal(card.querySelector('.folder-agent-card__who-new').dataset.selected, 'false');
+
+  const scrolled = [];
+  agentItems(card).forEach(item => {
+    item.scrollIntoView = options =>
+      scrolled.push([text(item, '.folder-agent-card__who-agent-name'), plain(options)]);
+  });
+  const near = { block: 'nearest', inline: 'nearest' };
+  queued.forEach(run => run());
+  assert.deepEqual(scrolled, [['Songs Manager', near]]);
+
+  // Choosing another face brings that one into view too.
+  pick(card, 'Atlas');
+  assert.deepEqual(scrolled.at(-1), ['Atlas', near]);
 });
 
 test('the receipt shows the progress line while the agent looks', () => {
@@ -1598,10 +2190,6 @@ const setUp = (overrides = {}) =>
     ...overrides
   });
 const okJSON = body => ({ ok: true, status: 200, json: async () => body });
-// settle lets 1 ms polls land and lets "nothing happened" be asserted. It was 25 ms
-// and failed twice on a saturated machine (the whole suite runs in parallel), so it
-// leaves a wider margin; a wait for something that must happen uses untilTrue.
-const settle = () => new Promise(resolve => setTimeout(resolve, 100));
 
 // untilTrue waits, up to five seconds, for a condition a background poll makes
 // true, and fails loudly instead of hanging when it never does.

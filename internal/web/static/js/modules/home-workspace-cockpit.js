@@ -12,7 +12,10 @@ import {
 } from './home-library-badges.js';
 import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
 import {
+  ensureRoleCatalog,
+  fetchAgentRecords,
   folderAgentReportView,
+  folderAgentTileFaces,
   folderAgentTileLine,
   folderAgentOpeningLine,
   listFolderAgents,
@@ -2178,6 +2181,9 @@ import {
     // A folder agent's live line keyed by workspace id, while it looks around
     // or sets up, for the tile's status slot.
     folderAgentLines: {},
+    // The face each of those agents wears on its tile while it works, as
+    // markup from the shared avatar renderer (visual-hire FR17).
+    folderAgentFaces: {},
     workspaceUpdateBadges: {},
     onboardingGate: {
       state: ONBOARDING_GATE_LOADING,
@@ -2526,6 +2532,7 @@ import {
       libraryBadges: state.libraryBadges,
       songFacts: state.songFacts,
       folderAgentLines: state.folderAgentLines,
+      folderAgentFaces: state.folderAgentFaces,
       workspaceUpdateBadges: state.workspaceUpdateBadges,
       // Cockpit contract (see workspace-map.js): select-only pointer semantics,
       // no internal topbar/overview chrome, and no invented default selection.
@@ -5286,6 +5293,39 @@ import {
   // setup newer than that lands its members (null until the first read, so a
   // page load never replays an old one).
   let folderAgentSetups = null;
+  // The agents behind the tiles being worked on, as the agents list names them
+  // (appearance, role, source): each name is looked up once, the first time it
+  // works, so its tile can wear its face (visual-hire FR17). A name the list does
+  // not have is not asked for again. Until the answer lands (found or failed) a
+  // name is pending and its tile wears no face, so it never flashes a face that is
+  // not its own before the real one.
+  let agentRecords = new Map();
+  const askedForAgents = new Set();
+  const pendingAgents = new Set();
+  // The role catalog gives a face its ring and emblem; Home does not load it, so
+  // the first time an agent works it is asked for, and the tiles redraw once it is
+  // here. Pages that never see an agent work never fetch it.
+  let roleCatalogAsked = false;
+  function lookUpWorkingAgents(views) {
+    const working = views.filter(view => view.agent_name && folderAgentTileLine(view));
+    if (working.length && !roleCatalogAsked) {
+      roleCatalogAsked = true;
+      void ensureRoleCatalog(document, window).then(() => refreshFolderAgentLines());
+    }
+    const names = working
+      .map(view => String(view.agent_name))
+      .filter(name => !agentRecords.has(name) && !askedForAgents.has(name));
+    if (!names.length) return;
+    names.forEach(name => {
+      askedForAgents.add(name);
+      pendingAgents.add(name);
+    });
+    void fetchAgentRecords(globalThis.fetch).then(found => {
+      if (found) agentRecords = found;
+      names.forEach(name => pendingAgents.delete(name));
+      void refreshFolderAgentLines();
+    });
+  }
   async function refreshFolderAgentLines() {
     if (folderAgentTimer) clearTimeout(folderAgentTimer);
     folderAgentTimer = 0;
@@ -5336,7 +5376,13 @@ import {
     const changed = JSON.stringify(next) !== JSON.stringify(state.folderAgentLines);
     const finished = Object.keys(state.folderAgentLines).some(id => !next[id]);
     state.folderAgentLines = next;
-    if (changed) mountMap();
+    // Each working agent's face on its tile: from what the list has said so far
+    // (the name's own face until it answers), redrawn when it changes.
+    lookUpWorkingAgents(views);
+    const faces = folderAgentTileFaces(views, agentRecords, window, pendingAgents);
+    const facesChanged = JSON.stringify(faces) !== JSON.stringify(state.folderAgentFaces);
+    state.folderAgentFaces = faces;
+    if (changed || facesChanged) mountMap();
     // A look that just finished may have changed what the workspace shows.
     if (finished) void refreshQuietly();
     if (Object.keys(next).length) folderAgentTimer = setTimeout(refreshFolderAgentLines, 2000);

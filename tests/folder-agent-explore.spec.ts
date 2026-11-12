@@ -67,12 +67,14 @@ test('Explore a folder starts an agent and reports what it found without a model
   );
   await expect(host).toContainText('Nothing is created until you hire.');
   // The Hire step: who is hired, before anything exists.
-  await expect(host.locator('.folder-agent-card__hire-title')).toHaveText('Hire');
-  await expect(host.locator('.folder-agent-card__hire-name')).toHaveValue('One Song Manager');
+  await expect(host.locator('.folder-agent-card__who-title')).toHaveText('Hire');
+  await expect(host.locator('.folder-agent-card__who-name')).toHaveValue('One Song Manager');
   const before = await page.request.get('/api/personal-assistant/folder-agent');
   expect((await before.json()).folder_agents).toHaveLength(0);
   await host.locator('.folder-agent-card__brief').fill('Help me finish this song');
-  await host.locator('.folder-agent-card__hire-mandate').fill('Help me finish songs');
+  // Role waits behind Customize until it has text.
+  await host.locator('.folder-agent-card__who-customize-toggle').click();
+  await host.locator('.folder-agent-card__who-role').fill('Help me finish songs');
   await host.getByRole('button', { name: 'Hire & start', exact: true }).click();
 
   // Hire & start sends the server's choice token, the brief and the hire,

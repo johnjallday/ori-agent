@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  chatHoldsFolderPlan,
   folderActionAvailable,
   folderChipBusy,
   folderDecisionProgress,
@@ -2441,4 +2442,76 @@ test('a declined library requires Ask again before setup or package controls', (
     assert.equal(view.plan, null);
     assert.deepEqual(view.prerequisites, []);
   }
+});
+
+test('the chat box holds the folder agent’s plan only while it is open and the agent has something for the person (visual-hire FR22, FR24)', () => {
+  const holds = (state, rest = {}) => chatHoldsFolderPlan({ open: true, state, ...rest });
+  // A plan to review or a question (reported) and a failed look.
+  assert.equal(holds('reported'), true);
+  assert.equal(holds('failed'), true);
+  // While it looks, or sets up, the chat keeps its one line (FR16).
+  assert.equal(holds('looking'), false);
+  assert.equal(holds('setting_up'), false);
+  assert.equal(holds('set_up'), false);
+  // A closed box, or one stepped aside, holds nothing: the balloon carries the plan.
+  assert.equal(holds('reported', { open: false }), false);
+  assert.equal(holds('reported', { suspended: true }), false);
+  assert.equal(chatHoldsFolderPlan(), false);
+});
+
+test('the chat box returns once, when the look ends, and the presenter is told whether it holds the plan (visual-hire FR22, FR23, FR24)', () => {
+  const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
+  const body = name =>
+    source.match(
+      new RegExp(`(?:async )?function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}\\n`)
+    )?.[0] || '';
+  // The restore is asked for in one place only: the poll, at the look's end.
+  assert.equal(source.match(/restoreHireWidth/g)?.length, 1);
+  const poll = body('scheduleAgentPoll');
+  const restore = poll.indexOf('restoreHireWidth?.(next.workspace_id)');
+  assert.ok(restore > 0, 'the poll restores the box');
+  assert.match(
+    poll.slice(0, restore),
+    /if \(folderLookEnded\(view, next\)\)\s*window\.PersonalAssistantPanel\?\.$/
+  );
+  // ...before the new view is drawn, so the card lands in the box at its width.
+  assert.ok(restore < poll.indexOf('state.agent.view = next'));
+  assert.ok(restore < poll.indexOf('render();'));
+  // The presenter asks the panel live, so closing or opening the box moves the plan.
+  const render = body('renderFolderAgent');
+  assert.match(render, /chatHolds: \(\) =>\s*chatHoldsFolderPlan\(\{/);
+  assert.match(render, /PersonalAssistantPanel\?\.isOpen\?\.\(\) === true/);
+  assert.match(render, /PersonalAssistantPanel\?\.isSuspended\?\.\(\) === true/);
+  assert.match(render, /state: shown\.state/);
+});
+
+test('Hire & start narrows the box only after an accepted hire, and only on Home with the map showing (visual-hire FR15, FR20, FR21)', () => {
+  const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
+  const body = name =>
+    source.match(
+      new RegExp(`(?:async )?function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}\\n`)
+    )?.[0] || '';
+  const start = body('startAgent');
+  assert.ok(start, 'startAgent exists');
+  // A refusal returns before anything narrows, so a refused hire changes nothing.
+  const refusal = start.indexOf('if (result.error) {');
+  const refusalReturn = start.indexOf('return;', refusal);
+  const started = start.indexOf("'ori:folder-agent-started'");
+  const narrow = start.indexOf('narrowForHiredAgent(');
+  assert.ok(refusal >= 0 && refusalReturn > refusal, 'a refusal returns early');
+  assert.ok(narrow > refusalReturn, 'narrowing comes after the refusal returns');
+  assert.ok(narrow > started, 'and after the hire is announced');
+
+  // Home's map must be showing (not the workspace page, not Needs you, not Tree).
+  const helper = body('narrowForHiredAgent');
+  assert.match(helper, /homeMapShowing\(/);
+  assert.match(helper, /getElementById\('cockpitMap'\)/);
+  assert.match(helper, /getElementById\('homeCockpit'\)\?\.dataset\?\.view/);
+  // The panel decides whether the box moves; the tile is only brought into view
+  // when the box is (or already was) narrow, never when the panel skipped.
+  assert.match(helper, /PersonalAssistantPanel\?\.narrowForHire\?\.\(/);
+  assert.match(helper, /outcome === 'narrowed' \|\| outcome === 'already'/);
+  assert.match(helper, /revealHiredTile\(/);
+  // Nothing here saves a width: the saved Expand choice is not changed.
+  assert.doesNotMatch(helper, /localStorage|setItem|writeDrawerPrefs/);
 });

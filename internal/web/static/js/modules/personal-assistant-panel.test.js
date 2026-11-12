@@ -32,6 +32,7 @@ import {
   drawerWidthBounds,
   drawerWidthForKey,
   expandedDrawerWidth,
+  hireNarrowNext,
   readDrawerPrefs,
   writeDrawerPrefs,
   ENTRY_HYDRATION_FAILED,
@@ -1096,6 +1097,118 @@ test('the sheet layout: width, handle and Expand per state (FR5, FR6, FR9)', () 
     assert.equal(phone.handleVisible, false);
     assert.equal(phone.expandVisible, false);
   }
+});
+
+test('narrow for this hire outranks Expand and Tree + Chat on the sheet and changes nothing off it (FR15)', () => {
+  const prefs = { width: 640, expanded: true };
+  const base = { viewportWidth: 1440, prefs };
+  assert.equal(drawerLayoutView(base).width, 1180);
+  assert.equal(drawerLayoutView(base).narrowed, false);
+
+  // Narrow beats a saved Expand: the person's own handle width, the handle live,
+  // and the button reads Expand so pressing it asks for the wide box.
+  const narrow = drawerLayoutView({ ...base, hireNarrow: true });
+  assert.equal(narrow.narrowed, true);
+  assert.equal(narrow.width, 640);
+  assert.equal(narrow.handleWidth, 640);
+  assert.equal(narrow.handleInert, false);
+  assert.equal(narrow.expanded, false);
+  assert.equal(narrow.expandLabel, 'Expand');
+  assert.equal(narrow.expandVisible, true);
+
+  // It beats Tree + Chat too, which keeps Expand out of the way as before.
+  const exploring = drawerLayoutView({
+    viewportWidth: 1440,
+    prefs: { width: 700, expanded: false },
+    exploring: true,
+    hireNarrow: true
+  });
+  assert.equal(exploring.width, 700);
+  assert.equal(exploring.handleInert, false);
+  assert.equal(exploring.expandVisible, false);
+
+  // The saved choice is never touched, and without the flag nothing is different.
+  assert.deepEqual(prefs, { width: 640, expanded: true });
+  assert.deepEqual(drawerLayoutView({ ...base, hireNarrow: false }), drawerLayoutView(base));
+
+  // The phone sheet, or a zoom that reaches phone width: identical to no flag.
+  for (const viewportWidth of [760, 390]) {
+    assert.deepEqual(
+      drawerLayoutView({ viewportWidth, prefs, hireNarrow: true }),
+      drawerLayoutView({ viewportWidth, prefs })
+    );
+  }
+});
+
+test('hireNarrowNext is the rulebook for narrowing after a hire and restoring once (FR15, FR22, FR23)', () => {
+  const request = { type: 'request', workspaceID: 'ws-1', applicable: true, moves: true };
+  const fresh = { workspaceID: 'ws-1', touched: false };
+  const touched = { workspaceID: 'ws-1', touched: true };
+
+  // A request narrows only when the desktop sheet is open and the width would move.
+  assert.deepEqual(hireNarrowNext(null, request), { next: fresh, result: 'narrowed' });
+  assert.deepEqual(hireNarrowNext(null, { ...request, applicable: false }), {
+    next: null,
+    result: 'skipped'
+  });
+  assert.deepEqual(hireNarrowNext(null, { ...request, moves: false }), {
+    next: null,
+    result: 'already'
+  });
+  assert.deepEqual(hireNarrowNext(touched, { ...request, applicable: false }), {
+    next: touched,
+    result: 'skipped'
+  });
+  // A second hire retargets the narrowing and keeps what the person already did.
+  assert.deepEqual(hireNarrowNext(touched, { ...request, workspaceID: 'ws-2' }), {
+    next: { workspaceID: 'ws-2', touched: true },
+    result: 'already'
+  });
+
+  // The person's own changes: dragging or keying the handle marks it touched;
+  // pressing Expand or closing the box ends the narrowing altogether.
+  assert.deepEqual(hireNarrowNext(fresh, { type: 'touch' }).next, touched);
+  assert.equal(hireNarrowNext(null, { type: 'touch' }).next, null);
+  assert.equal(hireNarrowNext(touched, { type: 'expand' }).next, null);
+  assert.equal(hireNarrowNext(fresh, { type: 'closed' }).next, null);
+
+  // The restore: once, for that hire, and the person's width wins.
+  const restore = id => ({ type: 'restore', workspaceID: id });
+  assert.deepEqual(hireNarrowNext(fresh, restore('ws-1')), { next: null, result: 'restored' });
+  assert.equal(hireNarrowNext(null, restore('ws-1')).result, 'none');
+  const kept = hireNarrowNext(touched, restore('ws-1'));
+  assert.deepEqual(kept, { next: { workspaceID: '', touched: true }, result: 'kept' });
+  assert.equal(hireNarrowNext(kept.next, restore('ws-1')).result, 'none');
+  assert.deepEqual(hireNarrowNext(fresh, restore('ws-2')), { next: fresh, result: 'none' });
+  assert.equal(hireNarrowNext(fresh, restore('')).result, 'none');
+
+  // Superseded: the earlier hire's restore does nothing, the later one restores.
+  const retargeted = hireNarrowNext(fresh, { ...request, workspaceID: 'ws-2' }).next;
+  assert.equal(hireNarrowNext(retargeted, restore('ws-1')).result, 'none');
+  assert.equal(hireNarrowNext(retargeted, restore('ws-2')).result, 'restored');
+
+  // Unknown events change nothing.
+  assert.deepEqual(hireNarrowNext(fresh, { type: 'other' }), { next: fresh, result: '' });
+});
+
+test('the panel wires narrowing to the person’s own width changes and writes nothing to storage (FR23)', () => {
+  const source = readFileSync(new URL('./personal-assistant-panel.js', import.meta.url), 'utf8');
+  const body = name =>
+    source.match(new RegExp(`function ${name}\\([^)]*\\) \\{[\\s\\S]*?\\n\\}`))?.[0] || '';
+  // Neither entry point may touch storage: the narrowing is memory only.
+  for (const name of ['narrowForHire', 'restoreHireWidth']) {
+    assert.ok(body(name), `${name} exists`);
+    assert.doesNotMatch(body(name), /writeDrawerPrefs|localStorage|setItem/, name);
+  }
+  // The layout reads it, and each of the person's width changes reports it.
+  assert.match(source, /hireNarrow: state\.hireNarrow !== null/);
+  assert.match(body('startDrawerResize'), /type: 'touch'/);
+  assert.match(body('keyDrawerResize'), /type: 'touch'/);
+  assert.match(body('toggleDrawerExpanded'), /type: 'expand'/);
+  assert.match(source, /addEventListener\('personal-assistant:closed'[\s\S]{0,200}type: 'closed'/);
+  // Pressing Expand while narrowed asks for the wide box whatever was saved.
+  assert.match(body('toggleDrawerExpanded'), /state\.drawer\.expanded = true/);
+  assert.match(source, /narrowForHire,\s*restoreHireWidth/);
 });
 
 test('the drawer carries the resize handle and the Expand toggle (FR2, FR5)', () => {

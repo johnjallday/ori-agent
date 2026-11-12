@@ -2481,3 +2481,30 @@ test('a folder workspace that just became a group is framed as the setup sheet f
   assert.match(land, /row\.parent_id === groupId/);
   assert.match(land, /await landSetUpProjects\(groupId, ids\)/);
 });
+
+test('Home gives the map the face of each working agent, read from the agents list once per name (visual-hire FR17)', () => {
+  const source = readFileSync(new URL('./home-workspace-cockpit.js', import.meta.url), 'utf8');
+  // The map is mounted with the faces beside the lines they go with.
+  assert.match(source, /folderAgentFaces: state\.folderAgentFaces/);
+  // They are computed from the same views as the lines, and a change redraws the map.
+  assert.match(source, /folderAgentTileFaces\(views, agentRecords, window, pendingAgents\)/);
+  assert.match(source, /if \(changed \|\| facesChanged\) mountMap\(\)/);
+  // The list is asked for the first time a name works, never again for that name,
+  // so the two-second follow loop cannot ask every turn.
+  assert.match(source, /const askedForAgents = new Set\(\)/);
+  assert.match(source, /!agentRecords\.has\(name\) && !askedForAgents\.has\(name\)/);
+  assert.match(source, /askedForAgents\.add\(name\);\s*pendingAgents\.add\(name\);/);
+  // The role catalog is not on Home: it is asked for once, the first time an agent
+  // works, and the tiles redraw when it is here.
+  assert.match(source, /let roleCatalogAsked = false/);
+  assert.match(
+    source,
+    /ensureRoleCatalog\(document, window\)\.then\(\(\) => refreshFolderAgentLines\(\)\)/
+  );
+  // Until it answers a name is pending (no face rather than a wrong one); an answer
+  // or a failure ends that and the tiles are drawn again.
+  assert.match(
+    source,
+    /names\.forEach\(name => pendingAgents\.delete\(name\)\);\s*void refreshFolderAgentLines\(\)/
+  );
+});

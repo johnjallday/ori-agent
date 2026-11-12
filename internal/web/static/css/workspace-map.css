@@ -4307,6 +4307,55 @@
   }
 }
 
+/* A tile a folder agent is working on (visual-hire FR18, FR19): a steady soft
+   outline always, and a slow glow in the same colour only when motion is
+   allowed. An outline and a glow, never a size change, so neighbouring tiles do
+   not move. The class comes from the line that lights the tile's LED, so it ends
+   when the look ends, fails or reports. Before the placement ring below, which
+   takes over for its short life. */
+.ws-map-tile.is-agent-working {
+  outline: 2px solid rgba(70, 211, 154, 0.75);
+  outline-offset: 4px;
+  border-radius: 10px;
+}
+@keyframes ws-map-tile-working {
+  0%,
+  100% {
+    outline-color: rgba(70, 211, 154, 0.35);
+    box-shadow: 0 0 0 0 rgba(70, 211, 154, 0);
+  }
+  50% {
+    outline-color: rgba(70, 211, 154, 0.9);
+    box-shadow: 0 0 0 8px rgba(70, 211, 154, 0.16);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ws-map-tile.is-agent-working {
+    animation: ws-map-tile-working 2.8s ease-in-out infinite;
+  }
+}
+
+/* The working agent's face on the tile's corner (visual-hire FR17): the shared
+   renderer's face, so it is the one on the hire card and the Agents page. It
+   floats outside the tile's box and takes no clicks; it exists only while the
+   tile's line is set. */
+.ws-map-tile-face {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  z-index: 3;
+  display: block;
+  width: 32px;
+  height: 32px;
+  pointer-events: none;
+}
+
+.ws-map-tile .ws-map-tile-face .agent-avatar {
+  --aa-size: 32px;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
 /* A tile that was just put on the map from the setup sheet: a ring that fades
    so the new buildings can be found (map-library-setup FR-17). The sheet's own
    status line says the same thing in words. */

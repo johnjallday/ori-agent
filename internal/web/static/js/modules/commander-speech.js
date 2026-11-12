@@ -259,6 +259,15 @@ export function renderCommanderOneLine(view, doc = document, { onReview, action 
   return row;
 }
 
+// folderLookEnded is whether the agent's look has just ended with something for
+// the person: a report (a plan to review, or a question) or a look that failed
+// (visual-hire FR22). One clause for the two things that happen at that moment:
+// the balloon opening on the map (commanderAutoOpen) and the chat box coming
+// back to the width it had before the hire.
+export function folderLookEnded(previous, next) {
+  return previous?.state === 'looking' && (next?.state === 'reported' || next?.state === 'failed');
+}
+
 // commanderAutoOpen decides FR10: the balloon expands by itself only when the
 // owner just started the look or pressed Set it up on this page (followed),
 // or when the report arrives while the owner is on this map. A report that
@@ -270,7 +279,7 @@ export function commanderAutoOpen({ previous, next, followed = false, onMap = fa
   if (before === now) return false;
   if (followed && (now === 'looking' || now === 'setting_up')) return true;
   if (followed && before === 'setting_up' && now === 'set_up') return true;
-  if (before === 'looking' && (now === 'reported' || now === 'failed')) return true;
+  if (folderLookEnded(previous, next)) return true;
   return false;
 }
 

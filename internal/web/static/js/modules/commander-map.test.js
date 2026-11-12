@@ -8,7 +8,11 @@ import { speakingFolderAgents } from './home-workspace-cockpit.js';
 import {
   commanderPresenter,
   homeCommanders,
+  homeMapShowing,
   homeTileAnchor,
+  MAP_MOUNTED_EVENT,
+  revealHiredTile,
+  tileIntoAreaDelta,
   visibleMapArea,
   clearScroll,
   lotAnchor,
@@ -134,6 +138,120 @@ test('on the Map tab the header card is one line and the balloon carries the rep
   // Review expands the balloon and brings the map into view.
   host.shown.children[1].listeners.click();
   assert.deepEqual(map.calls.slice(-2), [['reveal'], ['expand', true]]);
+});
+
+// The chat box's answer to "do you hold the plan?" is asked on every draw.
+const withChat = (map, host, held, options) => ({
+  ...args(map, host, options),
+  chatHolds: () => held.value
+});
+
+test('while the chat box holds the plan its host shows the full card and the balloon keeps only its line (visual-hire FR22, FR24)', () => {
+  const map = fakeMap();
+  const host = fakeHost();
+  const held = { value: false };
+  const presenter = commanderPresenter(map);
+  const looking = folderAgentReportView(raw({ state: 'looking' }));
+  const reported = folderAgentReportView(raw());
+
+  // During the look the chat keeps its one line (FR16), as before.
+  presenter.present(withChat(map, host, held, { view: looking, followed: true }));
+  assert.equal(host.shown.className.includes('folder-agent-card--line'), true);
+
+  // Starting the look opens the balloon by itself (the owner just started it).
+  assert.equal(map.balloon.expanded, true);
+
+  // The look ends with a plan and the chat box is open: it takes the whole card,
+  // the balloon folds to its line with no plan in it and does not open again.
+  held.value = true;
+  const before = map.calls.length;
+  presenter.present(
+    withChat(map, host, held, { view: reported, previous: looking, followed: true })
+  );
+  assert.equal(host.shown.kind, 'full');
+  assert.equal(map.balloon.expanded, false);
+  assert.deepEqual(
+    map.calls.slice(before).filter(([name]) => name === 'expand'),
+    []
+  );
+  assert.equal(
+    map.calls.slice(before).some(([name]) => name === 'collapse'),
+    true
+  );
+  assert.equal(map.balloon.content.body, null);
+  assert.equal(map.balloon.content.line, 'I have a plan for Albums · Review');
+  // The arrival is announced once, by the balloon's own line.
+  assert.ok(map.balloon.content.announce);
+  assert.match(map.balloon.content.signature, /\|true$/);
+});
+
+test('closing the chat box gives the plan back to the balloon, and opening it takes it again (visual-hire FR23, FR24)', () => {
+  const map = fakeMap();
+  const host = fakeHost();
+  const held = { value: true };
+  const presenter = commanderPresenter(map);
+  const looking = folderAgentReportView(raw({ state: 'looking' }));
+  const reported = folderAgentReportView(raw());
+  presenter.present(
+    withChat(map, host, held, { view: reported, previous: looking, followed: true })
+  );
+  assert.equal(host.shown.kind, 'full');
+  assert.equal(map.balloon.content.body, null);
+
+  // The person closes the box: the chat's host has nothing to hold, the balloon
+  // carries the plan again (its body returns) as it did before this feature.
+  held.value = false;
+  map.fire();
+  assert.equal(typeof map.balloon.content.body, 'function');
+  assert.equal(map.balloon.content.body().kind, 'compact');
+  assert.equal(host.shown.className.includes('folder-agent-card--line'), true);
+
+  // They open it again: the plan goes back into the chat and out of the balloon.
+  held.value = true;
+  map.fire();
+  assert.equal(host.shown.kind, 'full');
+  assert.equal(map.balloon.content.body, null);
+});
+
+test('a look that failed is held by the chat box the same way (visual-hire FR22)', () => {
+  const map = fakeMap();
+  const host = fakeHost();
+  const held = { value: true };
+  const presenter = commanderPresenter(map);
+  const looking = folderAgentReportView(raw({ state: 'looking' }));
+  const failed = folderAgentReportView(
+    raw({ state: 'failed', failure: 'The agent could not finish looking around.' })
+  );
+  presenter.present(withChat(map, host, held, { view: failed, previous: looking, followed: true }));
+  assert.equal(host.shown.kind, 'full');
+  assert.equal(map.balloon.expanded, false);
+  assert.equal(map.balloon.content.body, null);
+});
+
+test('a closed chat box leaves the plan to the balloon, which opens by itself as before (visual-hire FR23)', () => {
+  const map = fakeMap();
+  const host = fakeHost();
+  const held = { value: false };
+  const presenter = commanderPresenter(map);
+  const looking = folderAgentReportView(raw({ state: 'looking' }));
+  const reported = folderAgentReportView(raw());
+  presenter.present(
+    withChat(map, host, held, { view: reported, previous: looking, followed: true })
+  );
+  assert.equal(host.shown.className.includes('folder-agent-card--line'), true);
+  assert.equal(map.balloon.content.body().kind, 'compact');
+  assert.deepEqual(map.calls.at(-1), ['expand', false]);
+  assert.equal(map.balloon.expanded, true);
+
+  // The workspace page passes no chat at all and is unchanged.
+  const page = fakeMap();
+  const pageHost = fakeHost();
+  commanderPresenter(page).present(
+    args(page, pageHost, { view: reported, previous: looking, followed: true })
+  );
+  assert.equal(pageHost.shown.className.includes('folder-agent-card--line'), true);
+  assert.equal(page.balloon.content.body().kind, 'compact');
+  assert.equal(page.balloon.expanded, true);
 });
 
 // The Commander's balloon carries the songs question, then the reading, in the
@@ -475,4 +593,158 @@ test('the Commander anchor: command node, group Commander unit, else the lot', (
     workspaceMapRoot({ querySelector: s => (s.includes('detachment') ? null : opmap) }),
     opmap
   );
+});
+
+test("Home's map is showing only when its map is on the page and the Tree view is not (visual-hire FR15, FR21)", () => {
+  assert.equal(homeMapShowing({ hasMap: true, view: 'map' }), true);
+  assert.equal(homeMapShowing({ hasMap: true, view: '' }), true);
+  assert.equal(homeMapShowing({ hasMap: true, view: 'tree' }), false);
+  // The workspace page, Needs you and any page without Home's map.
+  assert.equal(homeMapShowing({ hasMap: false, view: 'map' }), false);
+  assert.equal(homeMapShowing({ hasMap: 'yes' }), false);
+  assert.equal(homeMapShowing(), false);
+});
+
+test('a tile is panned only when it is not wholly in the visible map area, to the area centre (FR17)', () => {
+  // The map clipped to the left of a 640px drawer.
+  const area = { left: 0, top: 100, width: 792, height: 700 };
+  const tile = (left, top) => ({ left, top, width: 120, height: 100 });
+  assert.equal(tileIntoAreaDelta(tile(200, 300), area), null);
+  // The edges are inside.
+  assert.equal(tileIntoAreaDelta({ left: 0, top: 100, width: 792, height: 700 }, area), null);
+  // Under the drawer, and half under it: the move that centres the tile.
+  assert.deepEqual(tileIntoAreaDelta(tile(900, 300), area), { dx: 564, dy: -100 });
+  assert.deepEqual(tileIntoAreaDelta(tile(760, 300), area), { dx: 424, dy: -100 });
+  // Above the area as well as beside it.
+  assert.deepEqual(tileIntoAreaDelta(tile(200, 20), area), { dx: -136, dy: -380 });
+  // Nothing to measure, nothing to move.
+  assert.equal(tileIntoAreaDelta(null, area), null);
+  assert.equal(tileIntoAreaDelta(tile(200, 300), null), null);
+  assert.equal(tileIntoAreaDelta(tile(200, 300), { left: 0, top: 0, width: 0, height: 0 }), null);
+});
+
+// A page double for revealHiredTile: Home's map canvas with one tile whose rect
+// the test sets, an open drawer (or none), and the map's camera calls recorded.
+function hiredTileHarness({ tile, drawer = null, drawn = true, panResult = true }) {
+  const calls = [];
+  const listeners = {};
+  let present = drawn;
+  const node = { getBoundingClientRect: () => tile };
+  const canvas = {
+    querySelector: selector =>
+      present && selector === '.ws-map-tile[data-ws-id="ws-1"]' ? node : null,
+    getBoundingClientRect: () => ({ left: 0, top: 100, width: 1400, height: 700 }),
+    closest: () => ({ querySelectorAll: () => [] })
+  };
+  const panel = drawer && { hidden: false, getBoundingClientRect: () => drawer };
+  const doc = {
+    querySelector: selector => (selector === '#cockpitMap .ws-map-canvas' ? canvas : null),
+    getElementById: id => (id === 'personalAssistantPanel' ? panel : null),
+    addEventListener: (type, fn) => {
+      listeners[type] = fn;
+    },
+    removeEventListener: type => {
+      delete listeners[type];
+    }
+  };
+  const win = {
+    innerWidth: 1440,
+    innerHeight: 900,
+    PersonalAssistantPanel: { isOpen: () => Boolean(drawer) },
+    OriWorkspaceMap: {
+      whenMotionSettled: ms => {
+        calls.push(['settled', ms]);
+        return Promise.resolve();
+      },
+      panBy: (dx, dy) => {
+        calls.push(['panBy', dx, dy]);
+        return panResult;
+      },
+      reveal: () => calls.push(['reveal']),
+      fitAll: () => calls.push(['fitAll']),
+      framePlaced: () => calls.push(['framePlaced'])
+    },
+    requestAnimationFrame: run => run()
+  };
+  return {
+    doc,
+    win,
+    calls,
+    listeners,
+    mount() {
+      present = true;
+      listeners[MAP_MOUNTED_EVENT]?.();
+    }
+  };
+}
+const DRAWER = { left: 800, top: 0, width: 640, height: 900 };
+const camera = h => h.calls.filter(([name]) => name !== 'settled').map(([name]) => name);
+
+test('a hired tile under the drawer is panned into the map beside it; one in view is left alone (FR17)', async () => {
+  const under = hiredTileHarness({
+    tile: { left: 900, top: 300, width: 120, height: 100 },
+    drawer: DRAWER
+  });
+  assert.equal(await revealHiredTile('ws-1', { doc: under.doc, win: under.win }), true);
+  // The map had its motion settled first, then moved once, by the centring delta
+  // inside the part of the map left of the drawer (8px gap).
+  assert.deepEqual(under.calls, [
+    ['settled', 1000],
+    ['panBy', 564, -100]
+  ]);
+
+  const seen = hiredTileHarness({
+    tile: { left: 200, top: 300, width: 120, height: 100 },
+    drawer: DRAWER
+  });
+  assert.equal(await revealHiredTile('ws-1', { doc: seen.doc, win: seen.win }), true);
+  assert.deepEqual(camera(seen), []);
+
+  // A map that cannot move (not ready) says so.
+  const stuck = hiredTileHarness({
+    tile: { left: 900, top: 300, width: 120, height: 100 },
+    drawer: DRAWER,
+    panResult: false
+  });
+  assert.equal(await revealHiredTile('ws-1', { doc: stuck.doc, win: stuck.win }), false);
+});
+
+test('revealing a hired tile never selects it, refits the map or frames it, whatever the page does (FR17)', async () => {
+  for (const tile of [
+    { left: 900, top: 300, width: 120, height: 100 },
+    { left: 200, top: 300, width: 120, height: 100 }
+  ]) {
+    const h = hiredTileHarness({ tile, drawer: DRAWER });
+    await revealHiredTile('ws-1', { doc: h.doc, win: h.win });
+    assert.deepEqual(
+      camera(h).filter(name => name !== 'panBy'),
+      []
+    );
+  }
+});
+
+test('a hired tile that is not drawn yet is waited for until the map mounts, then given up on', async () => {
+  const late = hiredTileHarness({
+    tile: { left: 900, top: 300, width: 120, height: 100 },
+    drawer: DRAWER,
+    drawn: false
+  });
+  const arriving = revealHiredTile('ws-1', { doc: late.doc, win: late.win, waitMs: 1000 });
+  assert.ok(late.listeners[MAP_MOUNTED_EVENT], 'it listens for the map to mount');
+  late.mount();
+  assert.equal(await arriving, true);
+  assert.deepEqual(camera(late), ['panBy']);
+  assert.equal(late.listeners[MAP_MOUNTED_EVENT], undefined, 'and stops listening');
+
+  const never = hiredTileHarness({
+    tile: { left: 900, top: 300, width: 120, height: 100 },
+    drawer: DRAWER,
+    drawn: false
+  });
+  assert.equal(
+    await revealHiredTile('ws-1', { doc: never.doc, win: never.win, waitMs: 20 }),
+    false
+  );
+  assert.deepEqual(never.calls, []);
+  assert.equal(never.listeners[MAP_MOUNTED_EVENT], undefined);
 });

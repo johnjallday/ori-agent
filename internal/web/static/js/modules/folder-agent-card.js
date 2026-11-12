@@ -445,45 +445,240 @@ function el(doc, tag, className, text) {
 let hireSeq = 0;
 
 function hireField(doc, caption, control) {
-  const label = el(doc, 'label', 'folder-agent-card__hire-field');
+  const label = el(doc, 'label', 'folder-agent-card__who-field');
   label.append(el(doc, 'span', 'folder-agent-card__label', caption), control);
   return label;
 }
 
-// renderHire draws the Hire section and keeps hire (the view's own object)
-// in step with what the owner picks.
-function renderHire(doc, hire) {
-  const group = `folder-agent-hire-${++hireSeq}`;
-  const box = el(doc, 'fieldset', 'folder-agent-card__hire');
-  box.append(el(doc, 'legend', 'folder-agent-card__hire-title', 'Hire'));
-  const radio = (mode, text) => {
-    const label = el(doc, 'label', 'folder-agent-card__hire-option');
-    const input = doc.createElement('input');
-    input.type = 'radio';
-    input.name = group;
-    input.value = mode;
-    input.checked = hire.mode === mode;
-    input.dataset.folderAgentHire = mode;
-    label.append(input, el(doc, 'span', 'folder-agent-card__hire-option-label', text));
-    return { label, input };
-  };
+// The agent a hire creates is an orchestrator with the default generated
+// appearance (internal/sessionhttp/folder_agent_create.go, folderAgentConfig).
+// The Agents page draws it from the inputs below, so the card draws the same
+// face (visual-hire G3, FR4). A name-only call would draw another face: the
+// generated face is seeded from the name and the source, and the role adds the
+// ring and emblem.
+const HIRED_AGENT_ROLE = 'orchestrator';
+const HIRED_AGENT_SOURCE = 'user';
+const NEUTRAL_FACE = { name: '' };
+const FACE_SIZE = 48;
 
-  const fresh = radio('new', 'A new agent');
-  const freshFields = el(doc, 'div', 'folder-agent-card__hire-fields');
+// hiredName is the name the server saves: a run of whitespace is one space
+// (resolveHire).
+function hiredName(value) {
+  return String(value || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(' ');
+}
+
+// hireFace is the renderer's input for the name typed. It is the neutral face
+// while there is no name, and while the role catalog that shapes the ring has
+// not arrived: never a wrong face (FR3, FR4).
+function hireFace(name, win) {
+  const who = hiredName(name);
+  const roles = win?.RoleCatalog;
+  if (!who || !roles?.isLoaded?.()) return NEUTRAL_FACE;
+  const role = roles.entry?.(HIRED_AGENT_ROLE) || null;
+  return {
+    name: who,
+    source: HIRED_AGENT_SOURCE,
+    role: HIRED_AGENT_ROLE,
+    roleAccent: role?.accent_color || '',
+    roleEmblem: role?.emblem || '',
+    appearance: { mode: 'generated', generated: {} }
+  };
+}
+
+// faceMarkup draws one face through the shared renderer, or returns '' when the
+// page does not have it.
+function faceMarkup(win, input, className, size = FACE_SIZE) {
+  if (typeof win?.AgentAvatar?.markup !== 'function') return '';
+  return win.AgentAvatar.markup(input, { size, className });
+}
+
+const AGENT_FACE_SIZE = 40;
+
+// agentFace is the renderer's input for one of the owner's agents. Before the
+// agents list answers it is the name's generated face (FR9). Once it has, it is
+// built like agents-roster.js avatarInput: the canonical appearance exactly as
+// returned (the renderer picks the active source; nothing here infers it), the
+// source and role, the role's ring and emblem, and the character once the
+// catalog has it. Without the role catalog the ring is unknown, so the face
+// stays the fallback rather than a wrong one.
+function agentFace(agent, record, win) {
+  const roles = win?.RoleCatalog;
+  if (!record || !roles?.isLoaded?.()) return { name: agent.name, source: 'user', appearance: {} };
+  const role = String(record.role || '');
+  const entry = role ? roles.entry?.(role) || null : null;
+  const appearance =
+    record.appearance && typeof record.appearance === 'object' ? record.appearance : {};
+  const characterId = String(appearance.character?.catalog_id || '').trim();
+  return {
+    name: String(record.name || agent.name),
+    source: String(record.source || 'user').toLowerCase() === 'cli' ? 'cli' : 'user',
+    role,
+    roleAccent: entry?.accent_color || '',
+    roleEmblem: entry?.emblem || '',
+    appearance,
+    character: characterId ? win.CharacterCatalog?.get?.(characterId) || null : null
+  };
+}
+
+const TILE_FACE_SIZE = 32;
+
+// folderAgentTileFaces is the face each working folder agent wears on its tile
+// on Home's map (visual-hire FR17): the agent drawn from its record in the agents
+// list, exactly as the hire card and the Agents page draw it, so a hired agent
+// and a reused one are both the face the person saw. Only an agent whose tile
+// shows a line (it looks around or sets up) has one, so it goes with the look.
+// Without the shared renderer nobody gets a face. `pending` names the agents whose
+// record has been asked for and not yet answered: they get no face rather than the
+// name's own, which is not theirs and would flash before their real one. Once the
+// lookup ends (found or failed) they are no longer pending, and a name the list
+// lacks falls back to its own face. Answers { workspaceID: markup }.
+export function folderAgentTileFaces(views, records, win, pending = null) {
+  const out = {};
+  // The role's ring and emblem are part of the face: until the role catalog is
+  // here there is no face rather than a wrong one.
+  if (!win?.RoleCatalog?.isLoaded?.()) return out;
+  (Array.isArray(views) ? views : []).forEach(view => {
+    if (!view?.workspace_id || !view.agent_name || !folderAgentTileLine(view)) return;
+    if (pending?.has?.(String(view.agent_name))) return;
+    const agent = { name: String(view.agent_name) };
+    const markup = faceMarkup(
+      win,
+      agentFace(agent, records?.get?.(agent.name), win),
+      '',
+      TILE_FACE_SIZE
+    );
+    if (markup) out[view.workspace_id] = markup;
+  });
+  return out;
+}
+
+// fetchAgentRecords asks for the owner's agents with their appearance, because
+// the hire payload names only name and model. It answers a map by name, or null
+// when the list cannot be read: the faces then stay the fallback.
+export async function fetchAgentRecords(fetchImpl) {
+  try {
+    const response = await fetchImpl('/api/agents/dashboard/list');
+    if (!response?.ok) return null;
+    const data = await response.json();
+    const items = Array.isArray(data) ? data : Array.isArray(data?.agents) ? data.agents : [];
+    return new Map(items.filter(item => item?.name).map(item => [String(item.name), item]));
+  } catch {
+    return null;
+  }
+}
+
+const ROLE_CATALOG_SRC = '/js/modules/role-catalog.js';
+const roleCatalogLoads = new WeakMap();
+
+// ensureRoleCatalog makes the role catalog available on a page that did not load
+// it (only the Agents page does): the first time a face needs its ring and
+// emblem the script is added, once per window, so no page that never draws one
+// of these faces pays for the fetch it makes. Answers the catalog once it has
+// loaded, or null when it cannot be had (no window, no head, a script that
+// fails): the face then stays neutral rather than wrong.
+export function ensureRoleCatalog(doc, win) {
+  if (!win) return Promise.resolve(null);
+  const ready = () =>
+    Promise.resolve(win.RoleCatalog?.ready?.()).then(() => win.RoleCatalog || null);
+  if (win.RoleCatalog) return ready();
+  if (!roleCatalogLoads.has(win)) {
+    roleCatalogLoads.set(
+      win,
+      new Promise(resolve => {
+        const script = doc?.createElement?.('script');
+        if (!script || typeof doc.head?.appendChild !== 'function') return resolve(null);
+        script.src = ROLE_CATALOG_SRC;
+        script.async = true;
+        script.onload = () => resolve(null);
+        script.onerror = () => resolve(null);
+        doc.head.appendChild(script);
+        return undefined;
+      }).then(ready)
+    );
+  }
+  return roleCatalogLoads.get(win);
+}
+
+// watchFaces redraws when a catalog that shapes a face arrives or changes. A
+// character is only drawn once the catalog has it, and the role ring only once
+// the role catalog is here (fetched now if the page has not got it). The card
+// stops listening when it is no longer on the page.
+function watchFaces(card, win, redraw, doc = null) {
+  if (!win) return;
+  let stop = null;
+  const again = () => {
+    if (card.isConnected === false) {
+      stop?.();
+      stop = null;
+      return;
+    }
+    redraw();
+  };
+  const characters = win.CharacterCatalog;
+  if (typeof characters?.onChange === 'function') stop = characters.onChange(again);
+  characters?.load?.();
+  void ensureRoleCatalog(doc, win).then(again);
+}
+
+// cardWindow is the window whose renderer and catalogs the card draws with.
+function cardWindow(doc, win) {
+  return win || doc?.defaultView || globalThis.window || null;
+}
+
+// renderHire draws the Hire section and keeps hire (the view's own object)
+// in step with what the owner picks. The new agent is a face with its name
+// beside it; clicking or typing there chooses a new agent. The owner's own
+// agents are a row of faces under "Or one of your agents"; choosing one dims
+// the new agent. fetchImpl reads the agents' appearance (once per card).
+function renderHire(doc, hire, win, fetchImpl) {
+  const group = `folder-agent-hire-${++hireSeq}`;
+  const box = el(doc, 'fieldset', 'folder-agent-card__who');
+  box.append(el(doc, 'legend', 'folder-agent-card__who-title', 'Hire'));
+
+  const fresh = el(doc, 'div', 'folder-agent-card__who-new');
+  fresh.dataset.folderAgentHire = 'new';
+  const face = el(doc, 'span', 'folder-agent-card__who-face');
+  face.setAttribute('aria-hidden', 'true');
+  const main = el(doc, 'div', 'folder-agent-card__who-main');
   const name = doc.createElement('input');
   name.type = 'text';
-  name.className = 'form-control form-control-sm folder-agent-card__hire-name';
+  name.className = 'form-control form-control-sm folder-agent-card__who-name';
   name.maxLength = hire.nameMax;
   name.value = hire.name;
   name.autocomplete = 'off';
+  name.placeholder = 'Name';
+  name.setAttribute('aria-label', 'Name');
+  const drawFace = () => {
+    const markup = faceMarkup(win, hireFace(hire.name, win), 'folder-agent-card__who-avatar');
+    if (markup) face.innerHTML = markup;
+    else face.textContent = (hiredName(hire.name)[0] || '?').toUpperCase();
+  };
   name.addEventListener('input', () => {
     hire.name = String(name.value || '');
+    select('new');
+    drawFace();
   });
-  freshFields.append(hireField(doc, 'Name', name));
+  main.append(name);
   let model = null;
   if (hire.models.length) {
     model = doc.createElement('select');
-    model.className = 'form-select form-select-sm folder-agent-card__hire-model';
+    // The model is a chip under the name. Its text is the model picked, and the
+    // native list lies transparently over it, so pressing the chip opens the same
+    // list with the keyboard and screen readers as before. A bare select would
+    // size to its longest option and draw no caret.
+    model.className = 'folder-agent-card__who-model';
+    model.setAttribute('aria-label', 'Model');
+    const chip = el(doc, 'span', 'folder-agent-card__who-chip');
+    const chipText = el(doc, 'span', 'folder-agent-card__who-chip-text');
+    chipText.setAttribute('aria-hidden', 'true');
+    chip.append(chipText, model);
+    const chipLabel = () =>
+      hire.models.find(item => item.provider === hire.provider && item.model === hire.model)
+        ?.label || 'No model yet';
     // Without a system model nothing is preselected: hired without a model,
     // the agent still looks around and reports.
     if (!hire.model) {
@@ -503,74 +698,154 @@ function renderHire(doc, hire) {
       const [provider, picked] = String(model.value || '').split('\u0000');
       hire.provider = provider || '';
       hire.model = picked || '';
+      chipText.textContent = chipLabel();
     });
-    freshFields.append(hireField(doc, 'Model', model));
+    chipText.textContent = chipLabel();
+    main.append(chip);
   } else {
-    freshFields.append(
+    main.append(
       el(
         doc,
         'p',
-        'folder-agent-card__hire-note',
+        'folder-agent-card__who-note',
         'No model is set up yet. It still looks around and reports without one.'
       )
     );
   }
+  fresh.append(face, main);
+  box.append(fresh);
   const mandate = doc.createElement('input');
   mandate.type = 'text';
-  mandate.className = 'form-control form-control-sm folder-agent-card__hire-mandate';
+  mandate.className = 'form-control form-control-sm folder-agent-card__who-role';
   mandate.maxLength = 300;
   mandate.value = hire.mandate;
   mandate.placeholder = 'Same as what it should do';
   mandate.autocomplete = 'off';
   mandate.addEventListener('input', () => {
     hire.mandate = String(mandate.value || '');
+    select('new');
   });
-  freshFields.append(hireField(doc, 'Role', mandate));
-  box.append(fresh.label, freshFields);
+  // Role is rarely needed, so it waits behind Customize; it starts open when it
+  // already holds text (FR6).
+  const customize = el(doc, 'details', 'folder-agent-card__who-customize');
+  customize.open = Boolean(hire.mandate);
+  customize.append(
+    el(doc, 'summary', 'folder-agent-card__who-customize-toggle', 'Customize'),
+    hireField(doc, 'Role', mandate)
+  );
+  box.append(customize);
 
-  let reuse = null;
-  let agent = null;
+  // The owner's own agents: one row of faces, each a visually hidden radio in a
+  // label, so the arrow keys, the checked state and the announcement come from the
+  // browser. Each choice is announced with the agent's name and model. The row
+  // scrolls sideways and never wraps (FR8, FR11, FR13).
+  const choices = [];
   if (hire.agents.length) {
-    reuse = radio('existing', 'One of your agents');
-    agent = doc.createElement('select');
-    agent.className = 'form-select form-select-sm folder-agent-card__hire-agent';
-    agent.setAttribute('aria-label', 'Your agent');
-    hire.agents.forEach(option => {
-      const item = doc.createElement('option');
-      item.value = option.name;
-      item.textContent = option.model ? `${option.name} · ${option.model}` : option.name;
-      agent.append(item);
+    const reuse = el(doc, 'div', 'folder-agent-card__who-reuse');
+    const heading = el(doc, 'p', 'folder-agent-card__who-heading', 'Or one of your agents');
+    heading.id = `${group}-heading`;
+    const row = el(doc, 'div', 'folder-agent-card__who-agents');
+    row.setAttribute('role', 'radiogroup');
+    row.setAttribute('aria-labelledby', heading.id);
+    hire.agents.forEach(agent => {
+      const item = el(doc, 'label', 'folder-agent-card__who-agent');
+      item.setAttribute('title', agent.name);
+      const radio = doc.createElement('input');
+      radio.type = 'radio';
+      radio.name = group;
+      radio.value = agent.name;
+      radio.className = 'folder-agent-card__who-agent-radio';
+      radio.setAttribute('aria-label', agent.model ? `${agent.name}, ${agent.model}` : agent.name);
+      const agentFaceBox = el(doc, 'span', 'folder-agent-card__who-agent-face');
+      agentFaceBox.setAttribute('aria-hidden', 'true');
+      item.append(
+        radio,
+        agentFaceBox,
+        el(doc, 'span', 'folder-agent-card__who-agent-name', agent.name)
+      );
+      radio.addEventListener('change', () => {
+        if (!radio.checked) return;
+        select('existing', agent.name);
+        item.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      });
+      choices.push({ agent, item, radio, face: agentFaceBox });
+      row.append(item);
     });
-    if (!hire.existing) hire.existing = hire.agents[0].name;
-    agent.value = hire.existing;
-    agent.addEventListener('change', () => {
-      hire.existing = String(agent.value || '');
-    });
-    const reuseFields = el(doc, 'div', 'folder-agent-card__hire-fields');
-    reuseFields.append(agent);
-    box.append(reuse.label, reuseFields);
+    reuse.append(heading, row);
+    box.append(reuse);
   }
 
-  const sync = () => {
-    const isNew = hire.mode !== 'existing';
-    [name, model, mandate].forEach(control => {
-      if (control) control.disabled = !isNew;
+  // The owner's agents as the list answered them, by name; empty until it does.
+  let records = new Map();
+  const drawAgentFaces = () => {
+    choices.forEach(({ agent, face: agentFaceBox }) => {
+      const markup = faceMarkup(
+        win,
+        agentFace(agent, records.get(agent.name), win),
+        'folder-agent-card__who-avatar folder-agent-card__who-avatar--agent',
+        AGENT_FACE_SIZE
+      );
+      if (markup) agentFaceBox.innerHTML = markup;
+      else agentFaceBox.textContent = (agent.name[0] || '?').toUpperCase();
     });
-    if (agent) agent.disabled = isNew;
   };
-  [fresh.input, reuse?.input].forEach(input => {
-    input?.addEventListener('change', () => {
-      if (input.checked) hire.mode = input.value;
-      sync();
+  const drawFaces = () => {
+    drawFace();
+    drawAgentFaces();
+  };
+
+  // Exactly one is chosen: the new agent or one of the owner's. The new agent's
+  // row is dimmed, not disabled, while one of theirs is chosen; clicking, focusing
+  // or typing in it chooses a new agent again (FR10). The chosen agent is scrolled
+  // into view.
+  function select(mode, picked) {
+    if (picked) hire.existing = picked;
+    const chosen =
+      mode === 'existing' ? choices.find(choice => choice.agent.name === hire.existing) : null;
+    hire.mode = chosen ? 'existing' : 'new';
+    fresh.dataset.selected = String(!chosen);
+    // Role belongs to the new agent, so it dims with it.
+    customize.dataset.selected = String(!chosen);
+    choices.forEach(choice => {
+      const on = choice === chosen;
+      choice.radio.checked = on;
+      choice.item.dataset.selected = String(on);
     });
-  });
-  sync();
+    return chosen;
+  }
+  const chooseNew = () => select('new');
+  fresh.addEventListener('click', chooseNew);
+  fresh.addEventListener('focusin', chooseNew);
+  const preselected = select(hire.mode);
+  drawFaces();
+  watchFaces(box, win, drawFaces, doc);
+  // A saved manager of the same name is already chosen when the card opens
+  // (FR12): bring it into view once the card is on the page.
+  if (preselected && win?.requestAnimationFrame) {
+    win.requestAnimationFrame(() =>
+      preselected.item.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    );
+  }
+  if (choices.length && fetchImpl) {
+    void fetchAgentRecords(fetchImpl).then(found => {
+      if (!found || box.isConnected === false) return;
+      records = found;
+      drawAgentFaces();
+    });
+  }
   return box;
 }
 
 // renderFolderAgentCard draws the card before Start. onStart(brief, button,
-// hire) posts Hire & start; the caller swaps in the receipt.
-export function renderFolderAgentCard(view, doc = document, { onStart, error = '' } = {}) {
+// hire) posts Hire & start; the caller swaps in the receipt. win is the window
+// whose avatar renderer and catalogs draw the hire section's faces (the page's
+// own by default); fetchImpl reads the owner's agents' appearance (the page's
+// own fetch by default, none without a window).
+export function renderFolderAgentCard(
+  view,
+  doc = document,
+  { onStart, error = '', win = null, fetchImpl = null } = {}
+) {
   const card = el(doc, 'article', 'folder-agent-card');
   card.dataset.folderAgentCard = 'choose';
   const title = el(doc, 'h3', 'folder-agent-card__title', view.title);
@@ -583,7 +858,10 @@ export function renderFolderAgentCard(view, doc = document, { onStart, error = '
   input.value = view.brief;
   input.setAttribute('aria-label', view.field);
   label.append(caption, input);
-  const hire = view.hire ? renderHire(doc, view.hire) : null;
+  const hireWindow = cardWindow(doc, win);
+  const hire = view.hire
+    ? renderHire(doc, view.hire, hireWindow, fetchImpl || hireWindow?.fetch?.bind(hireWindow))
+    : null;
   const note = el(doc, 'p', 'folder-agent-card__note', view.note);
   const actions = el(doc, 'div', 'folder-agent-card__actions');
   const start = el(doc, 'button', 'btn btn-primary folder-agent-card__start', view.action);
