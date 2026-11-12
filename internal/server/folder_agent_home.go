@@ -348,6 +348,14 @@ func folderAgentHomeFacts(ctx context.Context, b *ServerBuilder, userID, provide
 		return facts, true
 	}
 	facts.HomeExists = true
+	// A folder placed in a Home that already reads song details is read by that
+	// Home's own scans as it is set up, so the plan says so.
+	if consent := station.GetAssistantProgramState().GetSongDetailsConsent(); consent.Active() {
+		facts.SongDetails = folderlook.SongDetailsNumbers
+		if consent.CoversNames() {
+			facts.SongDetails = folderlook.SongDetailsNames
+		}
+	}
 	missing, err := portfolioHomeStaffing{builder: b}.Missing(ctx, station.ID)
 	if err != nil {
 		return facts, true

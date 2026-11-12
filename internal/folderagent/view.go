@@ -767,16 +767,53 @@ func toolsBeforeHome(order []string, steps []folderlook.Step, byHandle map[strin
 // the folder (its base name, never a path) so the promise is concrete, then
 // what the plan adds (PRD FR25): the plugins it installs, the Home it creates
 // and that Home's agents, naming only the parts that apply.
+//
+// "Or read" holds for a folder placed in a new Home, and in a Home that reads no
+// song details. A folder placed in a Home whose song-details consent is active is
+// read by that Home's own scans as it is set up, so the line then says what they
+// read instead of promising nothing is read.
 func assuranceLine(rec Record, candidates []folderlook.Candidate) string {
 	folder := strings.TrimSpace(rec.FolderName)
-	line := "Nothing in " + folder + " is moved, copied or read"
-	if folder == "" || strings.ContainsAny(folder, "/\\\x00\r\n") {
+	anonymous := folder == "" || strings.ContainsAny(folder, "/\\\x00\r\n")
+	reads := readsSentence(candidates)
+	var line string
+	switch {
+	case anonymous && reads != "":
+		line = "Nothing is moved or copied"
+	case anonymous:
 		line = "Nothing is moved, copied or read"
+	case reads != "":
+		line = "Nothing in " + folder + " is moved or copied"
+	default:
+		line = "Nothing in " + folder + " is moved, copied or read"
+	}
+	if reads != "" {
+		line += ". " + reads
 	}
 	if adds := addsSentence(candidates); adds != "" {
 		line += ". " + adds
 	}
 	return line
+}
+
+// readsSentence says what the Home a plan places the folder in already reads from
+// project files, without a closing full stop (the assurance joins its parts):
+// "Music Production Home already reads song details, so setting up reads each
+// project's tempo, length and track count". Empty when the plan places the folder
+// in no existing Home that does.
+func readsSentence(candidates []folderlook.Candidate) string {
+	for _, c := range candidates {
+		if c.Kind != folderlook.KindHomeProvider || c.Home == nil || !c.Home.HomeExists {
+			continue
+		}
+		switch c.Home.SongDetails {
+		case folderlook.SongDetailsNumbers:
+			return homeName(c) + " already reads song details, so setting up reads each project's tempo, length and track count"
+		case folderlook.SongDetailsNames:
+			return homeName(c) + " already reads song details, so setting up reads each project's tempo, length, track count, track names, markers and regions"
+		}
+	}
+	return ""
 }
 
 // addsSentence is the assurance's second half: "Ori adds 2 plugins, <Home>,
