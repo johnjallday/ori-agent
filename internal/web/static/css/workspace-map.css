@@ -4485,6 +4485,17 @@
   display: none;
 }
 
+/* A pinned line (the workspace page, where it is the Commander's only status)
+   stays at every zoom; docked at the map's edge it points at nothing, so it
+   wears no tail. */
+.ws-map-canvas.is-activity-far .commander-balloon-line.is-pinned:not([hidden]) {
+  display: inline-flex;
+}
+
+.commander-balloon-line.is-docked::after {
+  display: none;
+}
+
 .commander-balloon-line[hidden],
 .commander-balloon[hidden] {
   display: none;

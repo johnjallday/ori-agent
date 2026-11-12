@@ -75,6 +75,9 @@ export function workspaceCommanderMap(
         anchor: () => workspaceCommanderAnchor(root()),
         narrow,
         onNarrow,
+        // The page shows no line of its own above the header on the Map tab, so
+        // the Commander's line stays on the map at any zoom or pan.
+        pinLine: true,
         visibleArea: () =>
           visibleMapArea(
             root()?.getBoundingClientRect?.(),
@@ -225,7 +228,8 @@ export function scrollClear(
 }
 
 // mapObstacles are a map's own floating controls (zoom, Fit all, Arrange,
-// the dock tools and the compass).
+// the dock tools and the compass, and the workspace Map's Resources button in
+// its corner).
 // They float beside the viewport, not inside it, so they are found from the
 // map's own container (Home's #cockpitMap, a group page's detachment host).
 export function mapObstacles(root) {
@@ -234,7 +238,9 @@ export function mapObstacles(root) {
     root?.parentElement ||
     root;
   return Array.from(
-    container?.querySelectorAll?.('.ws-map-controls, .ws-map-dock-tools, .ws-map-compass') || []
+    container?.querySelectorAll?.(
+      '.ws-map-controls, .ws-map-dock-tools, .ws-map-compass, .ws-cmd-map-toolbar'
+    ) || []
   )
     .filter(node => !node.hidden)
     .map(node => node.getBoundingClientRect?.())
@@ -546,11 +552,17 @@ const REPORT_KIND = {
 // ticketItems(activity) turns the Commander's ticket activity (the
 // 'ori:commander-activity' detail, through map.onActivity) into balloon items
 // (commander-tickets.js); the balloon then carries both, most urgent first.
+// hostLine false is a host that shows nothing while the map speaks (the
+// workspace page's Map tab): the Commander's line on the map is the status, and
+// the host comes back with the full card wherever no balloon can open.
+// onNarrated(ticketID) hears which ticket the report itself narrates (the folder
+// agent's own look), '' when none, each time that changes.
 export function commanderPresenter(
   map,
-  { onReview, action, watched = true, ticketItems = null } = {}
+  { onReview, action, watched = true, ticketItems = null, hostLine = true, onNarrated = null } = {}
 ) {
   let last = null;
+  let narrated = '';
   let tickets = [];
   let activity = null;
   let shift = 0;
@@ -634,6 +646,16 @@ export function commanderPresenter(
     first?.focus?.({ preventScroll: true });
   };
 
+  // showCard draws the full card in the host. A host that keeps no line was
+  // hidden while the map spoke, so it is shown again here.
+  const showCard = fresh => {
+    const { host, card } = last;
+    if (hostMode !== 'card' || fresh) host?.replaceChildren(card(false));
+    if (!hostLine && host) host.hidden = false;
+    hostMode = 'card';
+    return true;
+  };
+
   // draw: report says the folder agent's view is new (auto-open may apply).
   const draw = ({ report = false, refresh = false } = {}) => {
     const attached = map.attach({ onNarrow: revealHost });
@@ -647,13 +669,9 @@ export function commanderPresenter(
       return false;
     }
     const fresh = report;
-    const { view, previous, followed, host, doc, card } = last;
+    const { view, previous, followed, host, doc } = last;
     const speech = commanderSpeech(view);
-    if (!speech) {
-      if (hostMode !== 'card' || fresh) host?.replaceChildren(card(false));
-      hostMode = 'card';
-      return true;
-    }
+    if (!speech) return showCard(fresh);
     const onMap = attached && map.visible() && !map.narrow();
     // The chat box holds the full plan: it shows the whole card, and the balloon
     // stays collapsed to its one line, so it never opens by itself over the plan
@@ -662,9 +680,7 @@ export function commanderPresenter(
     if (onMap && held) {
       pendingOpen = '';
       if (map.balloon.expanded) map.balloon.collapse({ returnFocus: false });
-      if (hostMode !== 'card' || fresh) host?.replaceChildren(card(false));
-      hostMode = 'card';
-      return true;
+      return showCard(fresh);
     }
     // An opening the rules call for waits for the map when the anchor is not
     // drawn yet (a new folder's tile arrives with the next refresh).
@@ -683,6 +699,15 @@ export function commanderPresenter(
         // Opening by itself never takes focus from where the owner is.
         map.balloon.expand({ focus: false });
       }
+      // The Commander's line on the map is the status: this host says nothing
+      // and takes no room. Its owner unhides it before every draw, so it is
+      // hidden again each time, not only when the mode changes.
+      if (!hostLine) {
+        if (hostMode !== 'quiet') host?.replaceChildren();
+        if (host) host.hidden = true;
+        hostMode = 'quiet';
+        return true;
+      }
       if (hostMode !== 'line' || fresh) {
         const line = renderCommanderOneLine(view, doc, {
           action,
@@ -698,9 +723,7 @@ export function commanderPresenter(
       return true;
     }
     if (map.balloon.expanded) map.balloon.collapse({ returnFocus: false });
-    if (hostMode !== 'card' || fresh) host?.replaceChildren(card(false));
-    hostMode = 'card';
-    return true;
+    return showCard(fresh);
   };
   const retick = () => {
     tickets = ticketItems && activity ? ticketItems(activity) : [];
@@ -729,7 +752,15 @@ export function commanderPresenter(
       if (phase !== lastPhase) shift = 0;
       lastPhase = phase;
       last = args;
-      return draw({ report: true });
+      const drawn = draw({ report: true });
+      // While the report has something to say, its own look ticket is told by
+      // the report: a host that lists tickets leaves that one to the Commander.
+      const ticket = phase ? String(args?.raw?.ticket_id || '') : '';
+      if (ticket !== narrated) {
+        narrated = ticket;
+        onNarrated?.(ticket);
+      }
+      return drawn;
     },
     // retick redraws the tickets after an answer, an error or a dismissal.
     retick,

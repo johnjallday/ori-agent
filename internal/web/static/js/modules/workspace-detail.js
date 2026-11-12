@@ -607,10 +607,18 @@ export class WorkspaceDetailPage {
     }
     // A workspace started from a folder shows its agent's report here too;
     // on the Map tab its Commander presents it in a balloon on the map and
-    // this card shrinks to one line.
+    // this card takes no room: the Commander's line on the map is the status.
+    // The look's own ticket is told by that report, so the Map's Next action
+    // leaves it out (commanderNarratedTicket).
     this.commanderPresenter?.dispose();
+    this.commanderNarratedTicket = '';
     this.commanderPresenter = commanderPresenter(workspaceCommanderMap(this.workspaceId), {
-      ticketItems: activity => this.commanderTicketItems(activity)
+      ticketItems: activity => this.commanderTicketItems(activity),
+      hostLine: false,
+      onNarrated: ticketID => {
+        this.commanderNarratedTicket = ticketID;
+        window.workspaceCommand?.refreshNextAction?.(this.workspaceId);
+      }
     });
     mountWorkspaceFolderAgent(
       document.getElementById('workspaceFolderAgentReport'),

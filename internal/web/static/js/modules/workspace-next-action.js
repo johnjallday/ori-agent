@@ -144,7 +144,10 @@ export function resolveWorkspaceNextAction(input) {
       );
   } else if (known) qualify('File review', janitor.batch);
   if (known) qualify('Filing history', janitor.history);
-  if (current) ongoing.push(`Running: ${taskTitle(current)}`);
+  // Said once: when the running ticket is itself the next action, its title is
+  // already the card's heading (taskDescriptor leaves this line out).
+  const runningLine = current ? `Running: ${taskTitle(current)}` : '';
+  if (runningLine) ongoing.push(runningLine);
   if (janitor?.scanning) ongoing.push('Scanning for files. Nothing moves without approval.');
   if (known && janitor.scanState === 'failed')
     ongoing.push('The last scan failed. Open File Janitor to retry explicitly.');
@@ -161,11 +164,11 @@ export function resolveWorkspaceNextAction(input) {
     statusState,
     ...(known ? [janitor.batch?.state, janitor.history?.state] : [])
   ].includes('loading');
-  const finish = descriptor => ({
+  const finish = (descriptor, { omit = '' } = {}) => ({
     ...descriptor,
     isLoading: isLoading || updateView?.state === 'loading',
     qualifications,
-    ongoing,
+    ongoing: omit ? ongoing.filter(line => line !== omit) : ongoing,
     taskWork,
     message,
     sourceRows: updateSourceRows(saved),
@@ -177,23 +180,26 @@ export function resolveWorkspaceNextAction(input) {
   const taskDescriptor = task => {
     const presentation = resolveTaskPresentation(task);
     const action = presentation.primaryAction;
-    return finish({
-      kind: 'task',
-      title: taskTitle(task),
-      // The ticket's state, or how its latest run went; never a legacy status.
-      description: resolveRunSignal(task) || resolveTicketStatePill(task).label,
-      tone: presentation.tone,
-      action:
-        action && task.id
-          ? {
-              owner: 'task',
-              kind: action.id,
-              id: String(task.id),
-              key: `task:${action.id}:${task.id}`,
-              label: 'Open ticket'
-            }
-          : null
-    });
+    return finish(
+      {
+        kind: 'task',
+        title: taskTitle(task),
+        // The ticket's state, or how its latest run went; never a legacy status.
+        description: resolveRunSignal(task) || resolveTicketStatePill(task).label,
+        tone: presentation.tone,
+        action:
+          action && task.id
+            ? {
+                owner: 'task',
+                kind: action.id,
+                id: String(task.id),
+                key: `task:${action.id}:${task.id}`,
+                label: 'Open ticket'
+              }
+            : null
+      },
+      { omit: task === current ? runningLine : '' }
+    );
   };
   const consoleDescriptor = (kind, title, description, label, tone = 'neutral') =>
     finish({

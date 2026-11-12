@@ -374,6 +374,19 @@ test('setup, manual ready, scan, review, partial result and undo state transitio
   assert.match(guidance([], console).description, /no eligible files/);
 });
 
+test('a running ticket that is itself the next action is not repeated as "Running:"', () => {
+  const result = guidance([task('in_progress', 'work', { description: 'Look around Downloads' })]);
+  assert.equal(result.title, 'Look around Downloads');
+  assert.deepEqual(result.ongoing, []);
+  // Behind another action it is still said once, underneath.
+  const behind = guidance([
+    task('in_progress', 'work', { description: 'Look around Downloads' }),
+    task('failed', 'broken')
+  ]);
+  assert.notEqual(behind.title, 'Look around Downloads');
+  assert.deepEqual(behind.ongoing, ['Running: Look around Downloads']);
+});
+
 test('navigation keys change on workspace generation, root, batch and receipt identity', () => {
   const console = consoleState({ pendingCount: 2 });
   const before = guidance([], console).action.key;

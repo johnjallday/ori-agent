@@ -330,6 +330,48 @@ test('a report arriving while the owner is on the map opens the balloon without 
   );
 });
 
+test('a host that keeps no line says nothing on the map and comes back with the full card elsewhere (map-above-the-fold)', () => {
+  const map = fakeMap();
+  const host = { ...fakeHost(), hidden: false };
+  const presenter = commanderPresenter(map, { hostLine: false });
+  assert.equal(presenter.present(args(map, host)), true);
+  // On the map the Commander's line is the status: the host is empty and hidden.
+  assert.equal(host.shown, undefined);
+  assert.equal(host.hidden, true);
+  assert.equal(map.balloon.content.line, 'I have a plan for Albums · Review');
+  // The page unhides the host before each draw; a redraw hides it again.
+  host.hidden = false;
+  map.fire();
+  assert.equal(host.hidden, true);
+  // Another tab, or a screen too narrow for a balloon: the full card, shown.
+  map.state.visible = false;
+  map.fire();
+  assert.equal(host.shown.kind, 'full');
+  assert.equal(host.hidden, false);
+  map.state.visible = true;
+  map.state.narrow = true;
+  map.fire();
+  assert.equal(host.shown.kind, 'full');
+  assert.equal(host.hidden, false);
+});
+
+test('the report names the ticket it narrates while it has something to say', () => {
+  const map = fakeMap();
+  const host = fakeHost();
+  const heard = [];
+  const presenter = commanderPresenter(map, { hostLine: false, onNarrated: id => heard.push(id) });
+  const withTicket = (state, ticket) => ({
+    ...args(map, host, { view: folderAgentReportView(raw({ state })) }),
+    raw: raw({ state, ticket_id: ticket })
+  });
+  presenter.present(withTicket('looking', 't-look'));
+  presenter.present(withTicket('reported', 't-look'));
+  assert.deepEqual(heard, ['t-look'], 'told once, not on every draw');
+  // A kept folder has nothing to say: the ticket is a ticket like any other again.
+  presenter.present(withTicket('kept', 't-look'));
+  assert.deepEqual(heard, ['t-look', '']);
+});
+
 test('a kept folder or a missing report takes the balloon away (FR30)', () => {
   const map = fakeMap();
   const host = fakeHost();

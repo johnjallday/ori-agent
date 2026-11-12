@@ -334,7 +334,10 @@ test('Map shell and Details render the identical action without replacing statio
   const details = command.renderWorkFirst();
   command.viewMode = 'map';
   const map = command.renderOperationsMap();
-  assert.ok(map.includes(details));
+  // The same action; on the Map only its layout class differs (one row).
+  assert.ok(
+    map.includes(details.replace('class="ws-cmd-work-first', 'class="ws-cmd-work-first is-map'))
+  );
   assert.match(map, /Workspace operations map/);
   assert.match(map, /data-cmd-open-tickets/);
   assert.match(map, /All tickets/);
@@ -503,4 +506,26 @@ for (const kind of ['station', 'detachment']) {
 test('HQ and group journeys do not acquire ordinary workspace guidance', () => {
   assert.equal(view([], { workspace: { designation: 'personal_hq' } }).renderWorkFirst(), '');
   assert.equal(view([], { workspace: { kind: 'group' } }).renderWorkFirst(), '');
+});
+
+test('on the Map the look the Commander narrates is not the next action; Overview lists it (map-above-the-fold)', () => {
+  const look = { id: 'look', status: 'in_progress', description: 'Look around Downloads' };
+  const command = view([look], { commanderNarratedTicket: 'look' });
+  command.viewMode = 'details';
+  const overview = command.renderWorkFirst();
+  assert.match(overview, /Look around Downloads/);
+  assert.doesNotMatch(overview, /is-map/);
+  // Nothing else to do: the Map says nothing beside the Commander's line.
+  command.viewMode = 'map';
+  assert.equal(command.renderWorkFirst(), '');
+  // Other work still leads, as one row.
+  command.page.tasks = [look, { ...running }];
+  const map = command.renderWorkFirst();
+  assert.match(map, /class="ws-cmd-work-first is-map"/);
+  assert.match(map, /Routine work/);
+  assert.doesNotMatch(map, /Look around Downloads/);
+  // Without a narrated ticket the Map shows the look like any ticket.
+  command.page.commanderNarratedTicket = '';
+  command.page.tasks = [look];
+  assert.match(command.renderWorkFirst(), /Look around Downloads/);
 });
