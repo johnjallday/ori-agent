@@ -6,22 +6,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/session"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
 // testHarness wires a real userprofile.SQLiteStore and session.SQLiteStore
-// against the same in-memory database, matching how the service is wired in
+// against the same private database, matching how the service is wired in
 // production (internal/server/builder_handlers.go), rather than hand-rolled
-// fakes that could drift from the real persistence contracts.
+// fakes that could drift from the real persistence contracts. The database is
+// the test's own migrated clone (see testdb), opened through the real
+// database.Open path and file-backed in the test's directory; the test closes
+// it exactly once. None of these tests is about memory mode, migration or
+// reopening; one that was would open its own database.
 func newTestHarness(t *testing.T) (*Service, *userprofile.SQLiteStore, *session.SQLiteStore) {
 	t.Helper()
-	db, err := database.Open(context.Background(), &database.Config{InMemory: true, WALMode: false})
-	if err != nil {
-		t.Fatalf("database.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := testdb.Open(t)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
 
 	profiles := userprofile.NewSQLiteStore(db)
 	workspaces := session.NewSQLiteStore(db)
@@ -43,6 +48,15 @@ func createWorkspace(t *testing.T, store *session.SQLiteStore, id, owner string,
 		t.Fatalf("CreateWorkspace(%s): %v", id, err)
 	}
 	return ws
+}
+
+// Each harness is its own database: the same workspace id can be created in
+// two harnesses, which one shared database would reject as a duplicate.
+func TestHarnessesAreIndependentDatabases(t *testing.T) {
+	_, _, first := newTestHarness(t)
+	_, _, second := newTestHarness(t)
+	createWorkspace(t, first, "hq-1", "local", session.WorkspaceKindWorkspace, session.WorkspaceStatusActive)
+	createWorkspace(t, second, "hq-1", "local", session.WorkspaceKindWorkspace, session.WorkspaceStatusActive)
 }
 
 func TestStatusReportsNoDesignationByDefault(t *testing.T) {

@@ -2,7 +2,9 @@ package learningmissions
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -10,19 +12,83 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/database"
+	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 )
 
+// fixtureBusyTimeoutMillis is how long the fixtures have always waited on a
+// lock. A testdb clone is opened with none, so testStore sets it back.
+const fixtureBusyTimeoutMillis = 5000
+
+func seedPracticeWorkspace(t *testing.T, db *database.DB) {
+	t.Helper()
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO workspaces(id,name,created_at,updated_at) VALUES('workspace','Practice',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// testStore is the fixture for an ordinary test: its own migrated database, a
+// private clone of the process's template opened through the real
+// database.Open path (see testdb), with the practice workspace seeded. The
+// test owns the handle and closes it exactly once, before the directory goes.
+// The clone is write-ahead-log journaled and carries no busy timeout, so the
+// timeout the fixtures always had is set on the pooled connection the way
+// database.Open's own pragma step sets it (the pool holds one connection).
+//
+// A test whose subject is closing, reopening, resetting or the database path
+// must use freshTestStore instead.
 func testStore(t *testing.T) (*SQLiteStore, *database.DB, string) {
 	t.Helper()
+	db := testdb.Open(t)
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
+		}
+	})
+	if _, err := db.ExecContext(t.Context(), fmt.Sprintf("PRAGMA busy_timeout = %d", fixtureBusyTimeoutMillis)); err != nil {
+		t.Fatal(err)
+	}
+	seedPracticeWorkspace(t, db)
+	return NewSQLiteStore(db), db, db.Path()
+}
+
+// requireFreshlyInitialized fails a lifecycle test that was wired to a testdb
+// clone. A clone is write-ahead-log journaled; the fresh fixtures use the
+// rollback journal, so the mode tells the two apart.
+func requireFreshlyInitialized(t *testing.T, db rowQuerier) {
+	t.Helper()
+	if problem := freshnessProblem(t.Context(), db); problem != "" {
+		t.Fatal(problem)
+	}
+}
+
+// rowQuerier is what both *sql.DB (held by the store) and *database.DB offer.
+type rowQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+// freshnessProblem is empty for a freshly initialized fixture database and
+// describes the mistake for a testdb clone.
+func freshnessProblem(ctx context.Context, db rowQuerier) string {
+	var mode string
+	if err := db.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "delete" {
+		return fmt.Sprintf("a close/reopen/reset test needs a freshly initialized database, not a clone (journal_mode %q, %v): use the fresh* fixtures", mode, err)
+	}
+	return ""
+}
+
+// freshTestStore opens a new file database through the full initialization
+// path (every migration), with the rollback journal and the fixtures' busy
+// timeout. Lifecycle tests use it: reload, restart and reset need a database
+// they can close, reopen by path and reset.
+func freshTestStore(t *testing.T) (*SQLiteStore, *database.DB, string) {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "learning.db")
-	db, err := database.Open(t.Context(), &database.Config{Path: path, BusyTimeout: 5000})
+	db, err := database.Open(t.Context(), &database.Config{Path: path, BusyTimeout: fixtureBusyTimeoutMillis})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.ExecContext(t.Context(), `INSERT INTO workspaces(id,name,created_at,updated_at) VALUES('workspace','Practice',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`); err != nil {
-		t.Fatal(err)
-	}
+	seedPracticeWorkspace(t, db)
 	return NewSQLiteStore(db), db, path
 }
 
@@ -51,7 +117,7 @@ func seedInstance(t *testing.T, s *SQLiteStore, owner, id string) Owner {
 }
 
 func TestStoreReadDoesNotEnrollAndReloadKeepsContract(t *testing.T) {
-	s, db, path := testStore(t)
+	s, db, path := freshTestStore(t)
 	owner, err := s.Owner(t.Context(), "local")
 	if err != nil || owner.Revision != 0 || owner.Preferences.Mode != "on_request" {
 		t.Fatalf("unenrolled read: %+v %v", owner, err)

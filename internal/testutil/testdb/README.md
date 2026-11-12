@@ -114,6 +114,57 @@ were unchanged (backuprecovery 2074 → 2075 of 3137, projectlibrary 3412 of
 4357). projectlibrary's remaining time is in catalog and arrangement stress
 tests that never open a database.
 
+### Service fixtures (`ci-test-throughput`, 2026-11-12)
+
+`personalassistant`, `personalhq` and `learningmissions` paid the full migration
+chain for every ordinary service fixture (125, 44 and 105 matched `Running
+database migrations` events per race run on the base). Their ordinary fixtures now
+use private clones:
+
+- `personalassistant`: `openTestDB(t)` (a `testdb.Open` plus a checked close
+  registered as the sole owner) backs `newTestStore`, the hire-record and
+  hire-proposal helpers and the second-brain harness. The harness keeps its
+  knowledge database and its follow-up database as two separate clones, and
+  joins the follow-up service's workers (`t.Cleanup(service.Wait)`) before the
+  database closes.
+- `personalhq`: `newTestHarness` opens one clone per harness.
+- `learningmissions`: `testStore`, `testService`, `workFixture` and
+  `reviewFixture` take a clone and re-apply the original 5,000 ms busy timeout
+  (`fixtureBusyTimeoutMillis`) because clones default to 0 ms. Production
+  connection setup still runs; only that one pragma is added.
+
+**Deliberately still fresh.** `freshTestStore`, `freshTestService`,
+`freshWorkFixture` and `freshReviewFixture` keep the real `database.Open` on
+the original path for the restart/reopen matrix, the full-app reset matrix and
+the reload test. `requireFreshlyInitialized` asserts that a caller routed to
+the fresh path really has the original (non-WAL) storage, so a lifecycle test
+cannot drift onto a clone unnoticed. `TestFixtureDatabasesKeepTheirStorageContract`
+and `TestOrdinaryFixturesAreIndependentDatabases` pin both routes; the other two
+packages each have a test that two fixtures never share a database.
+
+Single interleaved before/after samples on a local Darwin arm64 machine with Go
+1.26.0 (`-short -race -count=1 -covermode=atomic`, base `292a4e41b` exported with
+`git archive` versus this tree, same lock and background conditions):
+
+| Package | Migrations before → after | Package time before → after | Identities | Covered blocks (of total) |
+| --- | ---: | ---: | ---: | ---: |
+| `internal/personalassistant` | 125 → 1 | 522.4 s → 239.8 s | 1379 → 1380 | 8680 → 8681 (11445) |
+| `internal/personalhq` | 44 → 1 | 119.7 s → 11.6 s | 59 → 60 | 259 → 259 (334) |
+| `internal/learningmissions` | 105 → 7 | 305.1 s → 49.1 s | 215 → 219 | 1296 → 1296 (1843) |
+| `internal/testutil/testdb` | 4 → 4 | 16.2 s → 15.2 s | 25 → 25 | 24 → 24 (30) |
+
+No test identity disappeared and no outcome changed; the added identities are the
+guard tests named above. The remaining migrations are the per-process template
+builds and `learningmissions`' fresh lifecycle fixtures. These are one-run local
+timings, not Ubuntu CI evidence and not whole-job savings: package executions
+overlap and compilation is excluded. The hosted comparison stays a review
+criterion.
+
+**Follow-up candidates, not changed here:** `internal/database`,
+`internal/settingsreset`, `internal/workspacemap`, `internal/chathttp`,
+`internal/assistantsetup` and `internal/server` also show migration events in
+their logs. Each needs its own caller audit before conversion; none was touched.
+
 ## Measurement
 
 `BenchmarkOpenFresh` retains the real production initialization path for memory

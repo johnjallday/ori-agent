@@ -12,7 +12,12 @@ import (
 	"github.com/johnjallday/ori-agent/internal/testutil/testdb"
 )
 
-func newTestStore(t *testing.T) (*SQLiteStore, *database.DB) {
+// openTestDB gives a test its own migrated database: a private clone of the
+// process's template through the real database.Open path (see testdb). The
+// test owns it and closes it exactly once, before the directory is removed.
+// Use a fresh database.Open instead only when migration, startup, reopen or a
+// storage mode is itself the subject of the test.
+func openTestDB(t *testing.T) *database.DB {
 	t.Helper()
 	db := testdb.Open(t)
 	t.Cleanup(func() {
@@ -20,6 +25,12 @@ func newTestStore(t *testing.T) (*SQLiteStore, *database.DB) {
 			t.Errorf("close test database: %v", err)
 		}
 	})
+	return db
+}
+
+func newTestStore(t *testing.T) (*SQLiteStore, *database.DB) {
+	t.Helper()
+	db := openTestDB(t)
 	return NewSQLiteStore(db), db
 }
 
