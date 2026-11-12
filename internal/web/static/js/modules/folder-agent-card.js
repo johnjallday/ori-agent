@@ -455,9 +455,52 @@ function hireFace(name, win) {
 
 // faceMarkup draws one face through the shared renderer, or returns '' when the
 // page does not have it.
-function faceMarkup(win, input, className) {
+function faceMarkup(win, input, className, size = FACE_SIZE) {
   if (typeof win?.AgentAvatar?.markup !== 'function') return '';
-  return win.AgentAvatar.markup(input, { size: FACE_SIZE, className });
+  return win.AgentAvatar.markup(input, { size, className });
+}
+
+const AGENT_FACE_SIZE = 40;
+
+// agentFace is the renderer's input for one of the owner's agents. Before the
+// agents list answers it is the name's generated face (FR9). Once it has, it is
+// built like agents-roster.js avatarInput: the canonical appearance exactly as
+// returned (the renderer picks the active source; nothing here infers it), the
+// source and role, the role's ring and emblem, and the character once the
+// catalog has it. Without the role catalog the ring is unknown, so the face
+// stays the fallback rather than a wrong one.
+function agentFace(agent, record, win) {
+  const roles = win?.RoleCatalog;
+  if (!record || !roles?.isLoaded?.()) return { name: agent.name, source: 'user', appearance: {} };
+  const role = String(record.role || '');
+  const entry = role ? roles.entry?.(role) || null : null;
+  const appearance =
+    record.appearance && typeof record.appearance === 'object' ? record.appearance : {};
+  const characterId = String(appearance.character?.catalog_id || '').trim();
+  return {
+    name: String(record.name || agent.name),
+    source: String(record.source || 'user').toLowerCase() === 'cli' ? 'cli' : 'user',
+    role,
+    roleAccent: entry?.accent_color || '',
+    roleEmblem: entry?.emblem || '',
+    appearance,
+    character: characterId ? win.CharacterCatalog?.get?.(characterId) || null : null
+  };
+}
+
+// fetchAgentRecords asks for the owner's agents with their appearance, because
+// the hire payload names only name and model. It answers a map by name, or null
+// when the list cannot be read: the faces then stay the fallback.
+async function fetchAgentRecords(fetchImpl) {
+  try {
+    const response = await fetchImpl('/api/agents/dashboard/list');
+    if (!response?.ok) return null;
+    const data = await response.json();
+    const items = Array.isArray(data) ? data : Array.isArray(data?.agents) ? data.agents : [];
+    return new Map(items.filter(item => item?.name).map(item => [String(item.name), item]));
+  } catch {
+    return null;
+  }
 }
 
 // watchFaces redraws when a catalog that shapes a face arrives or changes. A
@@ -488,9 +531,10 @@ function cardWindow(doc, win) {
 
 // renderHire draws the Hire section and keeps hire (the view's own object)
 // in step with what the owner picks. The new agent is a face with its name
-// beside it; clicking or typing there chooses a new agent, and choosing one of
-// the owner's agents dims it.
-function renderHire(doc, hire, win) {
+// beside it; clicking or typing there chooses a new agent. The owner's own
+// agents are a row of faces under "Or one of your agents"; choosing one dims
+// the new agent. fetchImpl reads the agents' appearance (once per card).
+function renderHire(doc, hire, win, fetchImpl) {
   const group = `folder-agent-hire-${++hireSeq}`;
   const box = el(doc, 'fieldset', 'folder-agent-card__who');
   box.append(el(doc, 'legend', 'folder-agent-card__who-title', 'Hire'));
@@ -591,69 +635,116 @@ function renderHire(doc, hire, win) {
   );
   box.append(customize);
 
-  let reuse = null;
-  let agent = null;
+  // The owner's own agents: one row of faces, each a visually hidden radio in a
+  // label, so the arrow keys, the checked state and the announcement come from the
+  // browser. Each choice is announced with the agent's name and model. The row
+  // scrolls sideways and never wraps (FR8, FR11, FR13).
+  const choices = [];
   if (hire.agents.length) {
-    const reuseLabel = el(doc, 'label', 'folder-agent-card__who-option');
-    reuse = doc.createElement('input');
-    reuse.type = 'radio';
-    reuse.name = group;
-    reuse.value = 'existing';
-    reuse.checked = hire.mode === 'existing';
-    reuse.dataset.folderAgentHire = 'existing';
-    reuseLabel.append(
-      reuse,
-      el(doc, 'span', 'folder-agent-card__who-option-label', 'One of your agents')
-    );
-    agent = doc.createElement('select');
-    agent.className = 'form-select form-select-sm folder-agent-card__who-agent';
-    agent.setAttribute('aria-label', 'Your agent');
-    hire.agents.forEach(option => {
-      const item = doc.createElement('option');
-      item.value = option.name;
-      item.textContent = option.model ? `${option.name} · ${option.model}` : option.name;
-      agent.append(item);
+    const reuse = el(doc, 'div', 'folder-agent-card__who-reuse');
+    const heading = el(doc, 'p', 'folder-agent-card__who-heading', 'Or one of your agents');
+    heading.id = `${group}-heading`;
+    const row = el(doc, 'div', 'folder-agent-card__who-agents');
+    row.setAttribute('role', 'radiogroup');
+    row.setAttribute('aria-labelledby', heading.id);
+    hire.agents.forEach(agent => {
+      const item = el(doc, 'label', 'folder-agent-card__who-agent');
+      item.setAttribute('title', agent.name);
+      const radio = doc.createElement('input');
+      radio.type = 'radio';
+      radio.name = group;
+      radio.value = agent.name;
+      radio.className = 'folder-agent-card__who-agent-radio';
+      radio.setAttribute('aria-label', agent.model ? `${agent.name}, ${agent.model}` : agent.name);
+      const agentFaceBox = el(doc, 'span', 'folder-agent-card__who-agent-face');
+      agentFaceBox.setAttribute('aria-hidden', 'true');
+      item.append(
+        radio,
+        agentFaceBox,
+        el(doc, 'span', 'folder-agent-card__who-agent-name', agent.name)
+      );
+      radio.addEventListener('change', () => {
+        if (!radio.checked) return;
+        select('existing', agent.name);
+        item.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      });
+      choices.push({ agent, item, radio, face: agentFaceBox });
+      row.append(item);
     });
-    if (!hire.existing) hire.existing = hire.agents[0].name;
-    agent.value = hire.existing;
-    agent.addEventListener('change', () => {
-      hire.existing = String(agent.value || '');
-    });
-    const reuseFields = el(doc, 'div', 'folder-agent-card__who-reuse');
-    reuseFields.append(reuseLabel, agent);
-    box.append(reuseFields);
+    reuse.append(heading, row);
+    box.append(reuse);
   }
 
-  // Exactly one of the two is chosen. The new agent's row is dimmed, not
-  // disabled, while one of the owner's agents is chosen: clicking or typing in
-  // it chooses a new agent again (FR10).
-  function select(mode) {
-    hire.mode = mode === 'existing' && hire.agents.length ? 'existing' : 'new';
-    const isNew = hire.mode !== 'existing';
-    fresh.dataset.selected = String(isNew);
-    if (reuse) reuse.checked = !isNew;
-    if (agent) agent.disabled = isNew;
+  // The owner's agents as the list answered them, by name; empty until it does.
+  let records = new Map();
+  const drawAgentFaces = () => {
+    choices.forEach(({ agent, face: agentFaceBox }) => {
+      const markup = faceMarkup(
+        win,
+        agentFace(agent, records.get(agent.name), win),
+        'folder-agent-card__who-avatar folder-agent-card__who-avatar--agent',
+        AGENT_FACE_SIZE
+      );
+      if (markup) agentFaceBox.innerHTML = markup;
+      else agentFaceBox.textContent = (agent.name[0] || '?').toUpperCase();
+    });
+  };
+  const drawFaces = () => {
+    drawFace();
+    drawAgentFaces();
+  };
+
+  // Exactly one is chosen: the new agent or one of the owner's. The new agent's
+  // row is dimmed, not disabled, while one of theirs is chosen; clicking, focusing
+  // or typing in it chooses a new agent again (FR10). The chosen agent is scrolled
+  // into view.
+  function select(mode, picked) {
+    if (picked) hire.existing = picked;
+    const chosen =
+      mode === 'existing' ? choices.find(choice => choice.agent.name === hire.existing) : null;
+    hire.mode = chosen ? 'existing' : 'new';
+    fresh.dataset.selected = String(!chosen);
+    // Role belongs to the new agent, so it dims with it.
+    customize.dataset.selected = String(!chosen);
+    choices.forEach(choice => {
+      const on = choice === chosen;
+      choice.radio.checked = on;
+      choice.item.dataset.selected = String(on);
+    });
+    return chosen;
   }
   const chooseNew = () => select('new');
   fresh.addEventListener('click', chooseNew);
   fresh.addEventListener('focusin', chooseNew);
-  reuse?.addEventListener('change', () => {
-    if (reuse.checked) select('existing');
-  });
-  select(hire.mode);
-  drawFace();
-  watchFaces(box, win, drawFace);
+  const preselected = select(hire.mode);
+  drawFaces();
+  watchFaces(box, win, drawFaces);
+  // A saved manager of the same name is already chosen when the card opens
+  // (FR12): bring it into view once the card is on the page.
+  if (preselected && win?.requestAnimationFrame) {
+    win.requestAnimationFrame(() =>
+      preselected.item.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+    );
+  }
+  if (choices.length && fetchImpl) {
+    void fetchAgentRecords(fetchImpl).then(found => {
+      if (!found || box.isConnected === false) return;
+      records = found;
+      drawAgentFaces();
+    });
+  }
   return box;
 }
 
 // renderFolderAgentCard draws the card before Start. onStart(brief, button,
 // hire) posts Hire & start; the caller swaps in the receipt. win is the window
 // whose avatar renderer and catalogs draw the hire section's faces (the page's
-// own by default).
+// own by default); fetchImpl reads the owner's agents' appearance (the page's
+// own fetch by default, none without a window).
 export function renderFolderAgentCard(
   view,
   doc = document,
-  { onStart, error = '', win = null } = {}
+  { onStart, error = '', win = null, fetchImpl = null } = {}
 ) {
   const card = el(doc, 'article', 'folder-agent-card');
   card.dataset.folderAgentCard = 'choose';
@@ -667,7 +758,10 @@ export function renderFolderAgentCard(
   input.value = view.brief;
   input.setAttribute('aria-label', view.field);
   label.append(caption, input);
-  const hire = view.hire ? renderHire(doc, view.hire, cardWindow(doc, win)) : null;
+  const hireWindow = cardWindow(doc, win);
+  const hire = view.hire
+    ? renderHire(doc, view.hire, hireWindow, fetchImpl || hireWindow?.fetch?.bind(hireWindow))
+    : null;
   const note = el(doc, 'p', 'folder-agent-card__note', view.note);
   const actions = el(doc, 'div', 'folder-agent-card__actions');
   const start = el(doc, 'button', 'btn btn-primary folder-agent-card__start', view.action);

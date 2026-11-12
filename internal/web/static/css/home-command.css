@@ -3266,7 +3266,7 @@ a.quest-title:focus-visible {
    plan's hires rows further down, which own the `hire` names. */
 .folder-agent-card__who {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -3293,7 +3293,7 @@ a.quest-title:focus-visible {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border: 1px solid var(--hc-line, var(--cozy-line));
   border-radius: 8px;
 }
@@ -3305,7 +3305,8 @@ a.quest-title:focus-visible {
   box-shadow: 0 0 0 1px var(--hc-signal, var(--cozy-moss));
 }
 
-.folder-agent-card__who-new[data-selected="false"] {
+.folder-agent-card__who-new[data-selected="false"],
+.folder-agent-card__who-customize[data-selected="false"] {
   opacity: 0.55;
 }
 
@@ -3330,7 +3331,7 @@ a.quest-title:focus-visible {
 .folder-agent-card__who-main {
   display: grid;
   flex: 1 1 auto;
-  gap: 4px;
+  gap: 2px;
   min-width: 0;
 }
 
@@ -3357,7 +3358,7 @@ a.quest-title:focus-visible {
   background: var(--hc-panel-raised, var(--cozy-paper-raised));
   color: var(--hc-ink-dim, var(--cozy-ink-dim));
   font-size: 12px;
-  line-height: 18px;
+  line-height: 16px;
 }
 
 .folder-agent-card__who-chip::after {
@@ -3412,6 +3413,7 @@ a.quest-title:focus-visible {
   justify-self: start;
   color: var(--hc-ink-dim, var(--cozy-ink-dim));
   font-size: 12px;
+  line-height: 16px;
   cursor: pointer;
 }
 
@@ -3426,22 +3428,96 @@ a.quest-title:focus-visible {
   margin-top: 6px;
 }
 
-.folder-agent-card__who-option {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-}
-
+/* One of your agents (visual-hire FR8–FR13): a row of faces with the name under
+   each, one line that scrolls sideways and never wraps. Each choice is a label
+   around a visually hidden radio, so the arrow keys and the announcement are the
+   browser's; the choice is marked like the new agent's row above. */
 .folder-agent-card__who-reuse {
   display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.folder-agent-card__who-heading {
+  margin: 0;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+  line-height: 14px;
+}
+
+.folder-agent-card__who-agents {
+  display: flex;
+  flex-wrap: nowrap;
   gap: 6px;
+  min-width: 0;
+  padding: 2px 2px 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
 }
 
 .folder-agent-card__who-agent {
+  position: relative;
+  display: grid;
+  flex: 0 0 76px;
+  justify-items: center;
+  gap: 2px;
   min-width: 0;
+  padding: 4px;
+  border: 1px solid var(--hc-line, var(--cozy-line));
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.folder-agent-card__who-agent:hover {
+  border-color: var(--hc-line-bright, var(--cozy-line-strong));
+}
+
+.folder-agent-card__who-agent[data-selected="true"] {
+  border-color: var(--hc-signal, var(--cozy-moss));
+  box-shadow: 0 0 0 1px var(--hc-signal, var(--cozy-moss));
+}
+
+.folder-agent-card__who-agent:has(:focus-visible) {
+  outline: 2px solid var(--hc-signal, var(--cozy-moss));
+  outline-offset: 1px;
+}
+
+/* The radio covers its label, so a click or a tap lands on it. */
+.folder-agent-card__who-agent-radio {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.folder-agent-card__who-agent-face {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--hc-panel-raised, var(--cozy-paper-raised));
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-weight: 600;
+}
+
+/* After the 48px rule above: same weight, so the later one wins. */
+.folder-agent-card .folder-agent-card__who-avatar--agent {
+  --aa-size: 40px;
+}
+
+.folder-agent-card__who-agent-name {
   max-width: 100%;
+  overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .folder-agent-card__hire-note {
