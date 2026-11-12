@@ -57,24 +57,34 @@ func TestClaudeProvider_IgnoresTheMachineSDKProfile(t *testing.T) {
 }
 
 // Anthropic answers an unknown workspace with the same 404 not_found_error as
-// an unknown model. It is a provider-settings problem, so it must not be
-// reported as a missing model with "choose a different model".
-func TestClaudeProvider_AWorkspace404IsNotAMissingModel(t *testing.T) {
+// an unknown model, and a missing workspace with a generic 400
+// invalid_request_error. Both are provider-settings problems, so neither may be
+// reported as a missing model ("choose a different model") or a bad task.
+func TestClaudeProvider_WorkspaceErrorsPointAtTheWorkspaceSetting(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		message  string
-		category ErrorCategory
-		action   UserAction
+		name      string
+		status    int
+		errorType string
+		message   string
+		category  ErrorCategory
+		action    UserAction
+		shown     string // a phrase the user-facing sentence must contain
 	}{
-		{name: "workspace", message: "Workspace `182314a5-5af1-4215-acf5-d6a8e9e036dd` not found.", category: CategoryPermissionDenied, action: ActionConfigureProvider},
-		{name: "model", message: "model: claude-fixture", category: CategoryInvalidModel, action: ActionChooseModel},
+		{name: "unknown workspace", status: http.StatusNotFound, errorType: "not_found_error",
+			message: "Workspace `182314a5-5af1-4215-acf5-d6a8e9e036dd` not found.", category: CategoryPermissionDenied, action: ActionConfigureProvider, shown: "did not find the workspace"},
+		{name: "no workspace for an organization key", status: http.StatusBadRequest, errorType: "invalid_request_error",
+			message: "API key is not scoped to a workspace, must include anthropic-workspace-id", category: CategoryPermissionDenied, action: ActionConfigureProvider, shown: "must name a workspace"},
+		{name: "unknown model", status: http.StatusNotFound, errorType: "not_found_error",
+			message: "model: claude-fixture", category: CategoryInvalidModel, action: ActionChooseModel},
+		{name: "ordinary bad request", status: http.StatusBadRequest, errorType: "invalid_request_error",
+			message: "messages: at least one message is required", category: CategoryInvalidRequest, action: ActionEditTask},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = io.ReadAll(r.Body)
 				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusNotFound)
-				_, _ = io.WriteString(w, `{"type":"error","error":{"type":"not_found_error","message":"`+tc.message+`"}}`)
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, `{"type":"error","error":{"type":"`+tc.errorType+`","message":"`+tc.message+`"}}`)
 			}))
 			defer server.Close()
 			t.Setenv("ANTHROPIC_BASE_URL", server.URL)
@@ -85,10 +95,10 @@ func TestClaudeProvider_AWorkspace404IsNotAMissingModel(t *testing.T) {
 			if !errors.As(err, &typed) {
 				t.Fatalf("error is not typed: %v", err)
 			}
-			if typed.Category != tc.category || typed.Action != tc.action || typed.Retryable || typed.HTTPStatus != http.StatusNotFound {
+			if typed.Category != tc.category || typed.Action != tc.action || typed.Retryable || typed.HTTPStatus != tc.status {
 				t.Fatalf("classified %s action=%s retryable=%v status=%d, want %s/%s", typed.Category, typed.Action, typed.Retryable, typed.HTTPStatus, tc.category, tc.action)
 			}
-			if tc.name == "workspace" && (!strings.Contains(typed.Message, "Workspace ID") || strings.Contains(typed.Message, "182314a5")) {
+			if tc.shown != "" && (!strings.Contains(typed.Message, tc.shown) || !strings.Contains(typed.Message, "Workspace ID in Settings") || strings.Contains(typed.Message, "182314a5")) {
 				t.Fatalf("message = %q, want Ori's own sentence naming the Workspace ID setting", typed.Message)
 			}
 		})
