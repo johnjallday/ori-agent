@@ -16,6 +16,11 @@
        appearance; consumers opt into it only for their local generated default. -->
   <script defer src="/js/modules/workspace-agent-portrait.js"></script>
   <script defer src="/js/modules/character-catalog.js"></script>
+  <!-- The role catalog shapes a face's ring and emblem. The Agents page draws an
+       agent from it, so the hire card on Home and on the workspace page needs it
+       too, or it would draw a face the agent does not have. It fetches the small
+       catalog once on load. -->
+  <script defer src="/js/modules/role-catalog.js"></script>
   <!-- The Appearance editor reads AgentAvatar for its preview, so it must load
        after it. Registering it here rather than per page is deliberate: an
        editable agent surface can appear on several pages, and a per-page
