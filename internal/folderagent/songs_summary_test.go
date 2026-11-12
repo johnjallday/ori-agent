@@ -378,7 +378,7 @@ func folderAgentBusy(v View) bool {
 }
 
 func TestSummary_ARestartDuringTheSummaryClosesItAndReleasesTheGoal(t *testing.T) {
-	songs := &fakeSongs{state: workspace.SongDetailsOn}
+	songs := &fakeSongs{state: workspace.SongDetailsOn, names: true}
 	h, id, _ := afterLooking(t, songs)
 	if _, err := h.svc.deps.Store.Update(id, func(r *Record) error {
 		r.SongsAnswer = SongsLearn

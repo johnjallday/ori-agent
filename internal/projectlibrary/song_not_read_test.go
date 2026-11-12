@@ -79,7 +79,7 @@ func TestSongNotRead_ALegacyEmptyRecordIsReplacedAndNotReadForever(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if facts := factsAt(t, r, scope, root.ID, "Song"); facts == nil || facts.NotRead != "" || !facts.SongFacts.empty() {
+	if facts := factsAt(t, r, scope, root.ID, "Song"); facts == nil || facts.NotRead != "" || !facts.empty() {
 		t.Fatalf("setup: %+v", facts)
 	}
 
@@ -116,7 +116,7 @@ func TestSongNotRead_UnderANamesConsentAnUnreadableFileRecordsNoNames(t *testing
 	scanRoot(t, r, scope, root.ID, "names")
 
 	bad := factsAt(t, r, scope, root.ID, "Bad")
-	if bad == nil || bad.NotRead != NotReadUnreadable || bad.Names != nil || !bad.SongFacts.empty() {
+	if bad == nil || bad.NotRead != NotReadUnreadable || bad.Names != nil || !bad.empty() {
 		t.Fatalf("an unreadable file under names: %+v", bad)
 	}
 	good := factsAt(t, r, scope, root.ID, "Good")

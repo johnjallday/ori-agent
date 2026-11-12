@@ -114,8 +114,10 @@ type Library interface {
 	CommitScan(ctx context.Context, homeID, rootID string, review LibraryScanReview, key string) (ScanOutcome, error)
 }
 
-// SongDetails records the Home's song-details consent: each scan may read
-// each project's tempo, length and track count.
+// SongDetails records the Home's song-details consent from the folder card: each
+// scan may read each project's tempo, length and track count. The card never asks
+// for track names, markers or regions; those are the owner's separate yes (to
+// the folder agent's offer to learn the songs, or to the Home's switch).
 type SongDetails interface {
 	Grant(ctx context.Context, homeID string) error
 }

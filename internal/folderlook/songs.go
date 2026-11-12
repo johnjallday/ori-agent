@@ -2,6 +2,7 @@ package folderlook
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -300,9 +301,17 @@ const (
 	SummaryMaxRunes     = 600
 	SummaryMaxSentences = 4
 	// SummaryTurnTimeout bounds the one model call.
-	SummaryTurnTimeout   = 45 * time.Second
-	summaryMaxCompletion = 700
+	SummaryTurnTimeout = 45 * time.Second
+	// summaryMaxCompletion is room for the two lines asked for and for whatever
+	// reasoning a model spends before them: a model that counts its reasoning
+	// against the limit was stopped at 700 mid-word in the demo (a summary cut at
+	// "…Drop and Bre", and no goal line after it). A reply that still stops at the
+	// limit is refused (replyWasCut), not kept.
+	summaryMaxCompletion = 2000
 )
+
+// errReplyCut says the provider stopped the reply at its token limit.
+var errReplyCut = errors.New("folderlook: the reply was cut at the token limit")
 
 // SummarySystemPrompt is the host-owned instruction for the summary turn. It is
 // the same for every folder: nothing from a project file is placed here. The
@@ -316,7 +325,7 @@ func SummarySystemPrompt(agentName string) string {
 	b.WriteString("Rules:\n")
 	b.WriteString("- Use only the facts shown. Never claim to know what was not listed, and say nothing about songs the list says it did not show.\n")
 	b.WriteString("- Name songs and tracks by their names only. Never write a path, a slash-separated location or a file name.\n")
-	b.WriteString("- When you give a range of tempo, track count or length, copy the Ranges line as written; do not work one out from the song lines.\n")
+	b.WriteString("- When you give a range of tempo, track count or length, take it from the Ranges line as written and say it as a plain fact; do not work one out from the song lines, and never mention the Ranges line, the SONG FACTS section or these rules.\n")
 	b.WriteString("- Do not judge quality or progress, and do not call anything \"ready\" or \"finished\".\n")
 	b.WriteString("- Use plain words; a work item is a ticket, never a task.\n\n")
 	b.WriteString("Answer in exactly these two lines, nothing before them:\n")
@@ -368,6 +377,11 @@ func RunSummaryTurn(parent context.Context, in SummaryTurnInput) SummaryTurnResu
 		}
 		return SummaryTurnResult{Err: err}
 	}
+	if replyWasCut(response.FinishReason) {
+		// A reply stopped at the token limit ends mid-word and may have lost its goal
+		// line: the host writes its own line instead of keeping half a summary.
+		return SummaryTurnResult{Err: errReplyCut}
+	}
 	tokens := response.Usage.TotalTokens
 	if parts := response.Usage.PromptTokens + response.Usage.CompletionTokens; parts > tokens {
 		tokens = parts
@@ -404,6 +418,35 @@ func echoesDelimiter(text string) bool {
 	return strings.Contains(text, "<<<") || strings.Contains(text, ">>>") || strings.Contains(text, "SONG-FACTS")
 }
 
+// namesTheInstructions says a reply talks about the host's own wording (the facts
+// section, its Ranges line, the rules) instead of the songs: the owner reads it as
+// the agent's words about their songs, so it is dropped whole.
+func namesTheInstructions(text string) bool {
+	lower := strings.ToLower(text)
+	for _, label := range []string{"ranges line", "song facts", "facts section", "the rules"} {
+		if strings.Contains(lower, label) {
+			return true
+		}
+	}
+	return false
+}
+
+// endsLikeASentence says a text ends the way a finished sentence does. A reply the
+// provider cut short ends mid-word; it is not kept as the agent's summary.
+func endsLikeASentence(text string) bool {
+	text = strings.TrimRight(strings.TrimSpace(text), `"')]*_`)
+	return strings.HasSuffix(text, ".") || strings.HasSuffix(text, "!") || strings.HasSuffix(text, "?")
+}
+
+// replyWasCut says the provider stopped the reply at its token limit.
+func replyWasCut(reason string) bool {
+	switch strings.ToLower(strings.TrimSpace(reason)) {
+	case "max_tokens", llm.FinishReasonLength, "length_exceeded":
+		return true
+	}
+	return false
+}
+
 // ParseSummary reads the model's reply into a summary and a goal. Each is kept
 // whole or dropped whole, never trimmed: a summary over 600 characters or four
 // sentences, a goal over 300, either one naming a path, or either repeating the
@@ -429,7 +472,7 @@ func ParseSummary(reply string, folderPaths []string) Summary {
 	if text != "" {
 		switch {
 		case utf8.RuneCountInString(text) > SummaryMaxRunes, sentenceCount(text) > SummaryMaxSentences,
-			namesPath(text, folderPaths), echoesDelimiter(text):
+			!endsLikeASentence(text), namesTheInstructions(text), namesPath(text, folderPaths), echoesDelimiter(text):
 			out.Dropped = append(out.Dropped, "summary")
 		default:
 			out.Text = text
@@ -438,7 +481,7 @@ func ParseSummary(reply string, folderPaths []string) Summary {
 	goal := oneLine(strings.Join(raw["goal"], " "))
 	if goal != "" {
 		switch {
-		case utf8.RuneCountInString(goal) > GoalMaxRunes, namesPath(goal, folderPaths), echoesDelimiter(goal):
+		case utf8.RuneCountInString(goal) > GoalMaxRunes, namesTheInstructions(goal), namesPath(goal, folderPaths), echoesDelimiter(goal):
 			out.Dropped = append(out.Dropped, "goal")
 		default:
 			out.Goal = goal

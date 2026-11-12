@@ -34,12 +34,18 @@ type fakeSongs struct {
 	facts      []folderlook.Song
 	factsErr   error
 	factsCalls int
+	// offAfterFacts turns the Home's switch off right after the facts are handed
+	// over: the owner switches off while the agent is writing from them.
+	offAfterFacts bool
 }
 
 func (f *fakeSongs) Facts(context.Context, Record, string) ([]folderlook.Song, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.factsCalls++
+	if f.offAfterFacts {
+		f.state, f.names = workspace.SongDetailsOff, false
+	}
 	return f.facts, f.factsErr
 }
 
@@ -63,7 +69,8 @@ func (f *fakeSongs) Grant(_ context.Context, _, _, homeID string) error {
 		return f.grantErr
 	}
 	f.grants = append(f.grants, homeID)
-	f.state = workspace.SongDetailsOn
+	// The owner's yes is to the offer's words, which include the names.
+	f.state, f.names = workspace.SongDetailsOn, true
 	return nil
 }
 
@@ -122,7 +129,9 @@ func TestSongsOffer_Eligibility(t *testing.T) {
 		offered bool
 	}{
 		{"a finished run, no consent", &fakeSongs{state: workspace.SongDetailsNone}, nil, true},
-		{"the Home already reads (numbers)", &fakeSongs{state: workspace.SongDetailsOn}, nil, false},
+		// The older folder card's consent covers the numbers only: the next folder
+		// added to that Home is offered the upgrade, with the same words.
+		{"the Home reads the numbers only (the upgrade)", &fakeSongs{state: workspace.SongDetailsOn}, nil, true},
 		{"the Home already reads (names)", &fakeSongs{state: workspace.SongDetailsOn, names: true}, nil, false},
 		{"the Home's switch was turned off", &fakeSongs{state: workspace.SongDetailsOff}, nil, false},
 		{"the consent could not be read", &fakeSongs{err: errors.New("boom")}, nil, false},
@@ -130,7 +139,21 @@ func TestSongsOffer_Eligibility(t *testing.T) {
 		{"answered: learn, reading under way", &fakeSongs{state: workspace.SongDetailsNone}, func(r *Record) {
 			r.SongsAnswer, r.Learning = SongsLearn, &Learning{Status: LearningRunning, Total: 7}
 		}, false},
-		{"answered: learn, granted", &fakeSongs{state: workspace.SongDetailsOn}, func(r *Record) { r.SongsAnswer = SongsLearn }, false},
+		{"answered: learn, granted", &fakeSongs{state: workspace.SongDetailsOn, names: true}, func(r *Record) { r.SongsAnswer = SongsLearn }, false},
+		// A folder that already learned its songs is not asked again when the Home's
+		// consent is later lowered to the numbers (the demo showed it asking twice);
+		// nor while the summary is being written.
+		{"answered: learn, finished, consent later lowered", &fakeSongs{state: workspace.SongDetailsOn}, func(r *Record) {
+			r.SongsAnswer, r.Learning = SongsLearn, &Learning{Status: LearningDone, Total: 7, Read: 7}
+		}, false},
+		{"answered: learn, summary being written", &fakeSongs{state: workspace.SongDetailsOn}, func(r *Record) {
+			r.SongsAnswer, r.Learning = SongsLearn, &Learning{Status: LearningSummarizing, Total: 7, Read: 7}
+		}, false},
+		// A reading that was stopped before it finished can be offered again where the
+		// consent does not yet cover names.
+		{"answered: learn, stopped, numbers consent", &fakeSongs{state: workspace.SongDetailsOn}, func(r *Record) {
+			r.SongsAnswer, r.Learning = SongsLearn, &Learning{Status: LearningStopped, Total: 7}
+		}, true},
 		// Ori stopped between recording the yes and granting it: asked again.
 		{"answered: learn, never granted", &fakeSongs{state: workspace.SongDetailsNone}, func(r *Record) { r.SongsAnswer = SongsLearn }, true},
 		{"answered: not now", &fakeSongs{state: workspace.SongDetailsNone}, func(r *Record) { r.SongsAnswer = SongsDismissed }, false},
@@ -288,7 +311,9 @@ func TestSongsOffer_TheGoalOfferProceedsOnceTheSongsOfferIsSettled(t *testing.T)
 				t.Fatal(err)
 			}
 		},
-		"the Home already reads": func(_ *testing.T, _ *harness, _ string, songs *fakeSongs) { songs.state = workspace.SongDetailsOn },
+		"the Home already reads": func(_ *testing.T, _ *harness, _ string, songs *fakeSongs) {
+			songs.state, songs.names = workspace.SongDetailsOn, true
+		},
 		"the Home was switched off": func(_ *testing.T, _ *harness, _ string, songs *fakeSongs) {
 			songs.state = workspace.SongDetailsOff
 		},

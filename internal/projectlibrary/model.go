@@ -223,7 +223,7 @@ func (f *ObservedFacts) notReadValid() bool {
 	case "":
 		return true
 	case NotReadTooLarge, NotReadUnreadable:
-		return f.SongFacts.empty() && f.Names == nil
+		return f.empty() && f.Names == nil
 	}
 	return false
 }

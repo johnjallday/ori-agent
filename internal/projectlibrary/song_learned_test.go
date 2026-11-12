@@ -11,8 +11,9 @@ import (
 
 // setSongNames stores names (or a refusal) on song-a's observation through the
 // library's own fenced write.
-func setSongRecord(t *testing.T, s *Store, scope Scope, entryID string, edit func(*ObservedFacts)) {
+func setSongRecord(t *testing.T, s *Store, scope Scope, edit func(*ObservedFacts)) {
 	t.Helper()
+	const entryID = "song-a"
 	doc, err := s.Read(scope)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +44,7 @@ func setSongRecord(t *testing.T, s *Store, scope Scope, entryID string, edit fun
 func TestSongLearned_NamesReachOnlyThePersonsOwnCardAndShelf(t *testing.T) {
 	s, scope, file, _ := songCardFixture(t)
 	grantNames(t, file, scope) // widens the fixture's older numbers-only consent
-	setSongRecord(t, s, scope, "song-a", func(f *ObservedFacts) { f.Names = smallNames() })
+	setSongRecord(t, s, scope, func(f *ObservedFacts) { f.Names = smallNames() })
 
 	card, err := s.SongCard(scope, "child-a", musicWordsForTest())
 	if err != nil {
@@ -94,7 +95,7 @@ func TestSongLearned_NamesReachOnlyThePersonsOwnCardAndShelf(t *testing.T) {
 
 func TestSongLearned_NamesShowOnlyUnderAConsentThatCoversThem(t *testing.T) {
 	s, scope, file, _ := songCardFixture(t) // the fixture's consent covers numbers only
-	setSongRecord(t, s, scope, "song-a", func(f *ObservedFacts) { f.Names = smallNames() })
+	setSongRecord(t, s, scope, func(f *ObservedFacts) { f.Names = smallNames() })
 	card, err := s.SongCard(scope, "child-a", musicWordsForTest())
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +125,7 @@ func TestSongLearned_ASongThatWasNotReadSaysWhy(t *testing.T) {
 	for _, reason := range []string{NotReadUnreadable, NotReadTooLarge} {
 		t.Run(reason, func(t *testing.T) {
 			s, scope, _, _ := songCardFixture(t)
-			setSongRecord(t, s, scope, "song-a", func(f *ObservedFacts) {
+			setSongRecord(t, s, scope, func(f *ObservedFacts) {
 				f.SongFacts, f.Names, f.NotRead = SongFacts{}, nil, reason
 				if reason == NotReadTooLarge {
 					f.ReadFrom.Size = DefaultSongFactsLimits.MaxBytes + 1
@@ -241,7 +242,7 @@ func TestLearnedFrom_UsesTheSourceThatDatesTheSong(t *testing.T) {
 // covers them.
 func TestLearnedSongsInRoot_ReadsOneFoldersSongsUnderTheConsent(t *testing.T) {
 	s, scope, file, _ := songCardFixture(t)
-	setSongRecord(t, s, scope, "song-a", func(f *ObservedFacts) { f.Names = smallNames() })
+	setSongRecord(t, s, scope, func(f *ObservedFacts) { f.Names = smallNames() })
 	names := func(songs []LearnedSong) []string {
 		var out []string
 		for _, song := range songs {
@@ -281,7 +282,7 @@ func TestLearnedSongsInRoot_ReadsOneFoldersSongsUnderTheConsent(t *testing.T) {
 	}
 
 	// A song that was not read says why, with no numbers.
-	setSongRecord(t, s, scope, "song-a", func(f *ObservedFacts) {
+	setSongRecord(t, s, scope, func(f *ObservedFacts) {
 		f.SongFacts, f.Names, f.NotRead = SongFacts{}, nil, NotReadUnreadable
 	})
 	songs, _ = s.LearnedSongsInRoot(scope, "home-root")

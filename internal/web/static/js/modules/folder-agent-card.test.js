@@ -1598,7 +1598,10 @@ const setUp = (overrides = {}) =>
     ...overrides
   });
 const okJSON = body => ({ ok: true, status: 200, json: async () => body });
-const settle = () => new Promise(resolve => setTimeout(resolve, 25));
+// settle lets 1 ms polls land and lets "nothing happened" be asserted. It was 25 ms
+// and failed twice on a saturated machine (the whole suite runs in parallel), so it
+// leaves a wider margin; a wait for something that must happen uses untilTrue.
+const settle = () => new Promise(resolve => setTimeout(resolve, 100));
 
 // untilTrue waits, up to five seconds, for a condition a background poll makes
 // true, and fails loudly instead of hanging when it never does.
@@ -1930,7 +1933,9 @@ test('Needs you follows a Set it up in place until it ends, then opens the place
     navigate: route => stayed.push(route),
     onDone: () => done++
   });
-  await settle();
+  // The poll ends the run in the background: wait for the end, not for a fixed
+  // moment (a saturated machine took longer than a short sleep).
+  await untilTrue(() => stayed.length > 0 && text(kept, '.folder-agent-card__title') === 'Ori Music Demo is set up');
   assert.equal(kept.children.length, 1);
   assert.equal(text(kept, '.folder-agent-card__title'), 'Ori Music Demo is set up');
   assert.equal(text(kept, '.folder-agent-card__opening'), 'Opening Ori Music Demo…');

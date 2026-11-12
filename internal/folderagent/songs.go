@@ -111,14 +111,16 @@ type SongsOfferView struct {
 }
 
 // songsAnswerable says the offer can still be answered: nobody has answered it,
-// or the owner said yes but nothing was granted and nothing is running (Ori
-// stopped between the two). A "Not now", and a reading under way, are final.
+// or the owner said yes but the reading never ran to its end (Ori stopped between
+// the yes and the grant, or the reading was stopped). A "Not now", a reading under
+// way, and a reading that finished are final: a folder that has learned its songs
+// is not asked again, whatever the Home's consent later becomes.
 func songsAnswerable(rec *Record) bool {
 	switch rec.SongsAnswer {
 	case "":
 		return true
 	case SongsLearn:
-		return rec.Learning == nil || rec.Learning.Status != LearningRunning
+		return rec.Learning == nil || rec.Learning.Status == LearningStopped
 	}
 	return false
 }
@@ -144,11 +146,16 @@ func songsHome(rec *Record) string {
 //
 // It is due when the folder was set up under a build that makes it, the run is
 // done and put the folder in a Home, at least one song is in a format that can
-// be read offline, the owner has not answered, and the Home holds no
-// song-details consent at all. A Home whose switch is on already reads its
-// songs (a newly added folder is learned by its normal scan); one whose switch
-// is off was turned off by a person and is not asked again, because the Home's
-// switch is the way back. A state that cannot be read makes no offer.
+// be read offline, the owner has not answered, and the Home does not yet
+// consent to what the offer's words say (numbers, track names, markers and
+// regions): it holds no song-details consent at all, or only the older folder
+// card's, which covers the numbers. The second is the upgrade, made when the next
+// folder is added to such a Home, with the same words and buttons; a yes widens
+// the consent as a new, broader grant. A Home whose consent already covers names
+// reads its songs (a newly added folder is learned by its normal scan) and is not
+// asked; one whose switch is off was turned off by a person and is not asked
+// again, because the Home's switch is the way back. A state that cannot be read
+// makes no offer.
 func (s *Service) songsOffer(ctx context.Context, rec *Record) *SongsOfferView {
 	if s.deps.Songs == nil || rec == nil || !rec.OffersSongs || !songsAnswerable(rec) {
 		return nil
@@ -161,8 +168,10 @@ func (s *Service) songsOffer(ctx context.Context, rec *Record) *SongsOfferView {
 	if readability.Readable <= 0 {
 		return nil
 	}
-	state, _, err := s.deps.Songs.Consent(ctx, rec.OwnerUserID, rec.WorkspaceID, homeID)
-	if err != nil || state != workspace.SongDetailsNone {
+	state, names, err := s.deps.Songs.Consent(ctx, rec.OwnerUserID, rec.WorkspaceID, homeID)
+	// No consent at all, or the numbers-only one (the upgrade).
+	eligible := state == workspace.SongDetailsNone || (state == workspace.SongDetailsOn && !names)
+	if err != nil || !eligible {
 		return nil
 	}
 	return &SongsOfferView{
@@ -310,6 +319,11 @@ func (s *Service) runLearning(ctx context.Context, rec Record, homeID string, to
 		pending.Status, pending.Song = LearningSummarizing, ""
 		if s.updateLearning(rec.WorkspaceID, pending) {
 			final.Summary, final.SummaryBy, final.Goal = s.summarize(ctx, rec, homeID)
+			// The switch may have gone off while the agent was writing: words
+			// made from what it let Ori read are not kept past that.
+			if !s.stillAllowed(ctx, rec, homeID) {
+				final.Summary, final.SummaryBy, final.Goal = "", "", ""
+			}
 		}
 	}
 	final.FinishedAt = s.deps.Now().UTC()

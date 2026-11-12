@@ -181,7 +181,7 @@ func TestAnswerSongs_TwoClicksGrantAndReadOnce(t *testing.T) {
 
 func TestAnswerSongs_RefusedWhenNoOfferIsWaiting(t *testing.T) {
 	cases := map[string]func(*fakeSongs){
-		"the Home already reads": func(f *fakeSongs) { f.state = workspace.SongDetailsOn },
+		"the Home already reads": func(f *fakeSongs) { f.state, f.names = workspace.SongDetailsOn, true },
 		"the Home was switched off": func(f *fakeSongs) {
 			f.state = workspace.SongDetailsOff
 		},
@@ -242,7 +242,7 @@ func TestAnswerSongs_AStoppedReadingSaysSoAndTheGoalOfferStillFollows(t *testing
 }
 
 func TestAnswerSongs_ASweepClosesAReadingAPreviousProcessLeftRunning(t *testing.T) {
-	songs := &fakeSongs{state: workspace.SongDetailsOn}
+	songs := &fakeSongs{state: workspace.SongDetailsOn, names: true}
 	h, id := songsHarness(t, songs)
 	// A previous process was reading when it stopped.
 	if _, err := h.svc.deps.Store.Update(id, func(r *Record) error {

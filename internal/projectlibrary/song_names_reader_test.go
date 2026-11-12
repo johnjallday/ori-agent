@@ -418,7 +418,7 @@ func TestReadSongDetails_OverCapAndMalformedAreToldApart(t *testing.T) {
 func FuzzReadSongDetails(f *testing.F) {
 	f.Add(namedProject("92", []string{marker(1, "1", `"Intro"`, 0), marker(2, "2", `"R"`, 1), marker(2, "9", `""`, 1)},
 		[]namedTrack{{lines: []string{nameLine("Kick")}}, {lines: []string{`NAME 'x'`}}}))
-	f.Add("<REAPER_PROJECT 1\n  MARKER 1 2 \"a\" 1\n  <TRACK\n    NAME \"\xff‮/etc/passwd\"\n  >\n>\n")
+	f.Add("<REAPER_PROJECT 1\n  MARKER 1 2 \"a\" 1\n  <TRACK\n    NAME \"\xff" + string(rune(0x202e)) + "/etc/passwd\"\n  >\n>\n")
 	f.Fuzz(func(t *testing.T, project string) {
 		facts, names, err := ReadSongDetails(strings.NewReader(project), factsGrammar("reaper"), SongFactsLimits{MaxBytes: 1 << 20, MaxLineBytes: 4096})
 		if err != nil {

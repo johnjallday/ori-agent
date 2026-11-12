@@ -56,6 +56,9 @@ type SearchRow struct {
 	LastSavedAt *time.Time `json:"last_saved_at,omitempty"`
 	// Facts are the tempo, length and track count read from the same source
 	// that gives LastSavedAt. Nil when unknown, or when the Home's switch is off.
+	// The track names, markers and regions a names consent reads are kept apart
+	// (ObservedFacts.Names) and never travel on this struct, so a row, the roster
+	// and the Manager's tools stay numbers only.
 	Facts       *SongFacts `json:"facts,omitempty"`
 	NeedsChoice bool       `json:"needs_choice,omitempty"`
 	// CanOpen says the owner can open the row in one click: it is connected, or

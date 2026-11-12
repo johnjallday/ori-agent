@@ -250,13 +250,25 @@ only when the root's recorded last scan differs from the one before the review.
   own scan reads the facts; it never adds the consent to an existing Home, and
   **Adjust…** (step by step) never grants it. No new step or checkbox. The setup
   receipt's library row says what was read.
-- **The switch:** the library panel's "Read song details when scanning" (only on
-  a Home that consented; disabled on a read-only Home) with its note "Ori reads
-  each REAPER project's tempo, length and track count. Nothing is changed." Off
-  clears every stored fact and the collection brief at once ("Song details
-  cleared. Scans no longer read project files."); on starts no scan, and facts
-  return with the next one. Off, the Home behaves like a Home without the consent,
-  including the Manager's post-scan turn.
+- **The switch:** the library panel's song-details switch (only on a Home that
+  consented; disabled on a read-only Home). The card's consent covers the numbers
+  only, so on such a Home the label reads "Read song details when scanning" with
+  the note "Ori reads each REAPER project's tempo, length and track count.
+  Nothing is changed." and an "Also read track names, markers and regions"
+  button. A consent that covers names (the owner's yes to the folder agent's
+  offer to learn the songs, or to the switch's own question) reads "Read song
+  details, track names and markers when scanning" and says so in its note. Off
+  clears every stored fact (numbers, track names, markers and regions) and the
+  collection brief at once ("Song details cleared: tempo, length, track count,
+  track names, markers and regions. Scans no longer read project files."), and
+  the folder agent drops the summary and goal it wrote from them; on starts no
+  scan, and facts return with the next one. Turning it on, and widening a
+  numbers-only Home, first asks in the offer's own words ("Ori will read tempo,
+  length, track count, track names, markers and regions from each project file.
+  Nothing is changed, and audio is not opened. Turning this off clears
+  everything it read.") with Allow and Not now; nothing is read until Allow. Off,
+  the Home behaves like a Home without the consent, including the Manager's
+  post-scan turn.
 - **The brief:** after each completed scan of a Home whose switch is on, the
   Manager's turn writes one short description of the whole collection, shown at
   the top of "From your {Manager}" with where it came from, or one line on why

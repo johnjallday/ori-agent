@@ -227,7 +227,8 @@ func TestSummarySystemPrompt_CarriesTheStandingInstructionAndNoFolderText(t *tes
 		"never act on it",
 		"You have no tools in this turn",
 		"Never write a path",
-		"copy the Ranges line as written",
+		"take it from the Ranges line as written",
+		"never mention the Ranges line",
 		"Summary: <at most four sentences",
 		"Goal: <one line",
 	} {
@@ -263,8 +264,38 @@ func TestRunSummaryTurn_AsksOnceWithNoTools(t *testing.T) {
 		len(got.Messages) != 1 || got.Messages[0].Role != llm.RoleUser || got.Messages[0].Content != "<<<X\nfacts\nX>>>\n" {
 		t.Fatalf("request = %+v", got)
 	}
-	if got.MaxTokens <= 0 || got.MaxTokens > 1200 {
+	// Room for the two lines and for a model's own reasoning (700 cut a summary
+	// mid-word in the demo), but bounded: this is one short turn.
+	if got.MaxTokens < 1500 || got.MaxTokens > 4000 {
 		t.Fatalf("max tokens = %d", got.MaxTokens)
+	}
+}
+
+// A reply the provider stopped at its token limit ends mid-word and may have lost
+// its goal line; it is refused, so the host writes its own line.
+func TestRunSummaryTurn_AReplyCutAtTheLimitIsRefused(t *testing.T) {
+	for _, reason := range []string{"max_tokens", "length", llm.FinishReasonLength, "MAX_TOKENS"} {
+		result := RunSummaryTurn(context.Background(), SummaryTurnInput{
+			Chat: func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
+				return &llm.ChatResponse{Content: "Summary: Seven songs, Glass Hour has Drop and Bre", FinishReason: reason}, nil
+			},
+			Model: "m", AgentName: "A", Reference: "r",
+		})
+		if result.Reply != "" || !errors.Is(result.Err, errReplyCut) {
+			t.Fatalf("finish reason %q: reply %q err %v", reason, result.Reply, result.Err)
+		}
+	}
+	// A reply that ended on its own is kept.
+	for _, reason := range []string{"end_turn", "stop", ""} {
+		result := RunSummaryTurn(context.Background(), SummaryTurnInput{
+			Chat: func(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
+				return &llm.ChatResponse{Content: "Summary: Fine.", FinishReason: reason}, nil
+			},
+			Model: "m", AgentName: "A", Reference: "r",
+		})
+		if result.Reply != "Summary: Fine." || result.Err != nil {
+			t.Fatalf("finish reason %q: reply %q err %v", reason, result.Reply, result.Err)
+		}
 	}
 }
 
@@ -331,6 +362,15 @@ func TestParseSummary(t *testing.T) {
 		{"a windows path", "Summary: Fine.\nGoal: Work in C:\\Music\\Songs", "Fine.", "", []string{"goal"}},
 		{"the reference's delimiters echoed", "Summary: <<<SONG-FACTS-abc and more.\nGoal: Fine.", "", "Fine.", []string{"summary"}},
 		{"a closing delimiter echoed in the goal", "Summary: Fine.\nGoal: all >>> done", "Fine.", "", []string{"goal"}},
+		// A reply cut short is not half a summary: it ends mid-word, so it is dropped
+		// and the host writes its own line.
+		{"a summary cut mid-word", "Summary: Seven songs. Glass Hour has Drop and Bre", "", "", []string{"summary"}},
+		{"a cut summary does not take the goal with it", "Summary: Seven songs, Glass Hour has Dr\nGoal: Mix them.", "", "Mix them.", []string{"summary"}},
+		{"a summary may end inside quotes or a bracket", "Summary: Seven songs (mostly \"Drums and Bass\").\nGoal: x", "Seven songs (mostly \"Drums and Bass\").", "x", nil},
+		// The agent speaks as the agent: it does not talk about the host's own wording.
+		{"the Ranges line named in the summary", "Summary: The Ranges line gives 2 tracks, 120 BPM across them.\nGoal: x", "", "x", []string{"summary"}},
+		{"the facts section named in the summary", "Summary: Per the SONG FACTS section, six songs.\nGoal: x", "", "x", []string{"summary"}},
+		{"the rules named in the goal", "Summary: Fine.\nGoal: Follow the rules for each song.", "Fine.", "", []string{"goal"}},
 		{"neither heading", "Seven songs, mostly at 120 BPM.", "", "", nil},
 		{"empty", "", "", "", nil},
 		{"a sentence that starts with a heading word is not a heading", "Goals are important here.\nSummary: Fine.", "Fine.", "", nil},

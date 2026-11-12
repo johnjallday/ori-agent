@@ -321,8 +321,11 @@ type AssistantProgramState struct {
 	// consent created. Written only through ProjectStaffingConsents.
 	ProjectStaffingConsent *ProjectStaffingConsent `json:"project_staffing_consent,omitempty"`
 	// SongDetailsConsent lets each scan read tempo, length and track count from
-	// the Home's project files. Granted only by a folder card that created
-	// the Home; a Home without it never opens a project file.
+	// the Home's project files and, when its Scope is names, the track names,
+	// markers and regions typed into them. Granted by a folder card that created
+	// the Home (numbers only), or by the owner's yes to the folder agent's offer to
+	// learn the songs or to the Home's own switch (names); a Home without it never
+	// opens a project file.
 	SongDetailsConsent *SongDetailsConsent `json:"song_details_consent,omitempty"`
 	// HomeProfile is what the Home knows about where its owner works, under the
 	// rows its package declares. Written only from the owner's card or a setup

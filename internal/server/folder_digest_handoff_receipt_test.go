@@ -3,6 +3,7 @@ package server
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -68,6 +69,36 @@ func TestHandoffReceipts_ReadTheSongsSetupBackInOrder(t *testing.T) {
 	}
 	if rows[3].Route != "/workspaces/album-5" || rows[3].Operation != "create" || !strings.HasSuffix(rows[0].Route, "?mode=map&panel=assistant") {
 		t.Fatalf("routes = %+v", rows)
+	}
+	// The library row says what the Home's consent reaches: the numbers (the folder
+	// card's), or the track names, markers and regions too (the owner's yes to the
+	// offer to learn the songs).
+	for _, tc := range []struct{ source, scope, want string }{
+		{workspace.SongDetailsConsentFolderOffer, workspace.SongDetailsScopeNumbers, "names, project files, and its tempo, length and track count"},
+		{workspace.SongDetailsConsentLearnSongs, workspace.SongDetailsScopeNames, "names, project files, and its tempo, length, track count, track names, markers and regions"},
+	} {
+		if err := primary.Update("home-1", func(home *workspace.Workspace) error {
+			state := home.GetAssistantProgramState()
+			state.SongDetailsConsent = &workspace.SongDetailsConsent{GrantedAt: time.Now().UTC(), Source: tc.source, Scope: tc.scope}
+			home.SetAssistantProgramState(state)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		consented, err := receipts.Receipt(t.Context(), "home-1", foldersetup.PortfolioReceiptFacts{Opened: &foldersetup.OpenOutcome{
+			EntryID: "entry-5", WorkspaceID: "song-1", Created: true, Staffing: "joined", AgentName: "REAPER Assistant", FirstTask: true}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var library string
+		for _, row := range consented {
+			if row.Kind == "library" {
+				library = row.Detail
+			}
+		}
+		if library != tc.want {
+			t.Fatalf("library row under a %s consent = %q, want %q", tc.scope, library, tc.want)
+		}
 	}
 	// A second song into the same Home: reused Home, manager already there,
 	// the shared assistant joined.

@@ -593,7 +593,9 @@ export function librarySharingView(sharing, readOnly = false) {
 }
 
 // The library's intro: what reading this Home's folders does. A Home whose
-// song-details switch is on also reads three numbers from each project file.
+// song-details switch is on also reads each project file's tempo, length and
+// track count and, when the owner agreed to it, the track names, markers and
+// regions typed into it.
 export const LIBRARY_INTRO =
   'Discover project names and formats without opening project files, launching a project application or creating workspaces. Each scan is a separate choice; planning a session saves notes only.';
 
@@ -602,34 +604,59 @@ function songProjects(songDetails) {
   return app ? `each ${app} project's` : "each project's";
 }
 
-export function libraryIntroText(songDetails) {
-  if (songDetails?.state !== 'on') return LIBRARY_INTRO;
-  return `Discover project names and formats, and ${songProjects(songDetails)} tempo, length and track count, without launching a project application, creating workspaces or changing any file. Each scan is a separate choice; planning a session saves notes only.`;
+// What the switch reads, as one phrase after "reads": the numbers, and the names
+// only when the Home's consent covers them (`names`), or when the switch is asked
+// to turn on, which is the question that asks for them.
+function songDetailsReads(songDetails, withNames) {
+  const read = songProjects(songDetails);
+  return withNames
+    ? `${read} tempo, length and track count, and the track names, markers and regions typed into it`
+    : `${read} tempo, length and track count`;
 }
 
-// songDetailsSwitchView words the Home's "Read song details when scanning"
-// switch from the library read's `song_details`. Only a Home that agreed on its
-// setup card has it (state on or off); a read-only Home shows it disabled.
+export function libraryIntroText(songDetails) {
+  if (songDetails?.state !== 'on') return LIBRARY_INTRO;
+  const reads = songDetailsReads(songDetails, Boolean(songDetails?.names));
+  return `Discover project names and formats, and ${reads}, without launching a project application, creating workspaces or changing any file. Each scan is a separate choice; planning a session saves notes only.`;
+}
+
+// The question the switch asks before it turns on, and before it adds names to a
+// consent that has only the numbers: the same words as the Commander's offer to
+// learn the songs. Nothing is read until the owner allows it.
+export const SONG_DETAILS_QUESTION =
+  'Ori will read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened. Turning this off clears everything it read.';
+
+// songDetailsSwitchView words the Home's song-details switch from the library
+// read's `song_details`. Only a Home that agreed (on its setup card, or to the
+// offer to learn the songs) has it (state on or off); a read-only Home shows it
+// disabled. The label says the switch covers names unless the Home's consent is
+// the older numbers-only one, which can be widened with `upgrade`.
 export function songDetailsSwitchView(songDetails, readOnly = false) {
   const state = String(songDetails?.state || '');
   if (state !== 'on' && state !== 'off') return { visible: false };
-  const read = songProjects(songDetails);
+  const on = state === 'on';
+  const names = on && Boolean(songDetails?.names);
+  const numbersOnly = on && !names;
+  let note;
+  if (names) note = `Ori reads ${songDetailsReads(songDetails, true)}. Nothing is changed.`;
+  else if (numbersOnly) note = `Ori reads ${songDetailsReads(songDetails, false)}. Nothing is changed.`;
+  else
+    note = `Scans read no project files. Turn this on to read ${songDetailsReads(songDetails, true)}, on the next scan.`;
   return {
     visible: true,
-    checked: state === 'on',
+    checked: on,
     disabled: Boolean(readOnly),
-    note:
-      state === 'on'
-        ? `Ori reads ${read} tempo, length and track count. Nothing is changed.`
-        : `Scans read no project files. Turn this on to read ${read} tempo, length and track count on the next scan.`
+    label: numbersOnly ? 'Read song details when scanning' : 'Read song details, track names and markers when scanning',
+    note,
+    upgrade: numbersOnly && !readOnly ? 'Also read track names, markers and regions' : ''
   };
 }
 
 // What the status line says after the switch changed.
 export function songDetailsStatus(enabled) {
   return enabled
-    ? 'Song details are on. The next scan reads them; nothing is scanned now.'
-    : 'Song details cleared. Scans no longer read project files.';
+    ? 'Song details are on, with track names, markers and regions. The next scan reads them; nothing is scanned now.'
+    : 'Song details cleared: tempo, length, track count, track names, markers and regions. Scans no longer read project files.';
 }
 
 const QUEUE_LIMIT = 100;
@@ -1038,6 +1065,15 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibrarySongDetailsSwitch')
       ?.addEventListener('change', event => void this.setSongDetails(event.currentTarget));
+    document
+      .getElementById('projectLibrarySongDetailsUpgrade')
+      ?.addEventListener('click', () => this.askSongDetails(true));
+    document
+      .getElementById('projectLibrarySongDetailsAllow')
+      ?.addEventListener('click', () => void this.answerSongDetails(true));
+    document
+      .getElementById('projectLibrarySongDetailsDecline')
+      ?.addEventListener('click', () => void this.answerSongDetails(false));
     this.initBrowser();
     await this.restoreBrowserNavigation();
     await this.restoreCollectionContinuation();
@@ -1086,15 +1122,64 @@ export class ProjectLibraryPanel {
       toggle.checked = view.checked;
       toggle.disabled = this.busy || view.disabled;
     }
+    const label = document.getElementById('projectLibrarySongDetailsLabel');
+    if (label) label.textContent = view.label;
     const note = document.getElementById('projectLibrarySongDetailsNote');
     if (note) note.textContent = view.note;
+    // A numbers-only Home can be widened to names, with the same question.
+    const upgrade = document.getElementById('projectLibrarySongDetailsUpgrade');
+    if (upgrade) {
+      upgrade.hidden = !view.upgrade || Boolean(this.songDetailsAsking);
+      upgrade.textContent = view.upgrade || '';
+      upgrade.disabled = this.busy;
+    }
+    const ask = document.getElementById('projectLibrarySongDetailsAsk');
+    if (ask) {
+      ask.hidden = !this.songDetailsAsking;
+      const text = document.getElementById('projectLibrarySongDetailsAskText');
+      if (text) text.textContent = SONG_DETAILS_QUESTION;
+      for (const id of ['projectLibrarySongDetailsAllow', 'projectLibrarySongDetailsDecline']) {
+        const button = document.getElementById(id);
+        if (button) button.disabled = this.busy;
+      }
+    }
   }
 
-  // Off clears every stored song fact on the server, so the facts lines go
-  // with it; on starts no scan, so there is nothing to show until the next one.
+  // Turning song details on reads track names, markers and regions as well as the
+  // numbers, so the switch asks in words first and reads nothing until the owner
+  // allows it; the same question widens an older numbers-only Home. Off needs no
+  // question: it only removes.
+  askSongDetails(open) {
+    this.songDetailsAsking = Boolean(open);
+    this.renderSongDetails();
+    if (open) document.getElementById('projectLibrarySongDetailsAllow')?.focus();
+  }
+
+  async answerSongDetails(allowed) {
+    if (this.busy) return;
+    const button = document.getElementById('projectLibrarySongDetailsAllow');
+    this.songDetailsAsking = false;
+    this.renderSongDetails();
+    if (!allowed) return;
+    await this.changeSongDetails(button, true, true);
+  }
+
   async setSongDetails(toggle) {
     if (!this.state?.song_details || this.busy || this.readOnly) return;
-    const enabled = Boolean(toggle?.checked);
+    if (toggle?.checked) {
+      // Not on yet: the question comes first.
+      toggle.checked = false;
+      this.askSongDetails(true);
+      return;
+    }
+    await this.changeSongDetails(toggle, false, false);
+  }
+
+  // Off clears every stored song fact on the server (numbers, track names, markers
+  // and regions), so the facts lines go with it; on starts no scan, so there is
+  // nothing to show until the next one. `names` is the owner's answer to the
+  // question: the full wording, track names included.
+  async changeSongDetails(toggle, enabled, names) {
     let changed = false;
     await this.run(
       toggle,
@@ -1103,7 +1188,8 @@ export class ProjectLibraryPanel {
         try {
           const result = await this.post('/song-details', {
             request_id: `song-details-${globalThis.crypto.randomUUID()}`,
-            enabled
+            enabled,
+            names
           });
           if (result?.song_details) this.state.song_details = result.song_details;
           changed = true;

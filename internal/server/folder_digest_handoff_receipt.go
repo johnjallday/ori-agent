@@ -56,8 +56,11 @@ func (r handoffReceipts) Receipt(_ context.Context, homeID string, facts folders
 	}
 	rows = append(rows, personalassistant.FolderReceiptRow{Kind: "library", Name: r.song + " listed in the Home's library",
 		Detail: "names and project files only"})
-	if home.GetAssistantProgramState().GetSongDetailsConsent().Active() {
+	if consent := home.GetAssistantProgramState().GetSongDetailsConsent(); consent.Active() {
 		rows[len(rows)-1].Detail = "names, project files, and its tempo, length and track count"
+		if consent.CoversNames() {
+			rows[len(rows)-1].Detail = "names, project files, and its tempo, length, track count, track names, markers and regions"
+		}
 	}
 	if opened := facts.Opened; opened != nil {
 		// The song is read where the verifier reads it: its own folder record.

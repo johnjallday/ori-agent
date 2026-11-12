@@ -151,6 +151,76 @@ func TestLibrarySongDetails_TheSwitchTurnsOffAndOnAgain(t *testing.T) {
 	}
 }
 
+func songDetailsNames(result map[string]any) bool {
+	view, _ := result["song_details"].(map[string]any)
+	if view == nil {
+		data, _ := result["data"].(map[string]any)
+		view, _ = data["song_details"].(map[string]any)
+	}
+	names, _ := view["names"].(bool)
+	return names
+}
+
+// The switch tells the page whether the consent reaches names, so its label and
+// its question can say what turning it on reads; turning it on carries the
+// owner's answer to that question.
+func TestLibrarySongDetails_TheSwitchSaysWhetherItCoversNamesAndAsksBeforeResumingThem(t *testing.T) {
+	handler, store, station := songDetailsHome(t)
+	if err := workspace.NewSongDetailsConsents(store).Grant(station.ID, "older-card"); err != nil {
+		t.Fatal(err)
+	}
+	// The older card's consent is the numbers only.
+	code, result := postSongDetails(t, handler, station.ID, `{"request_id":"r-numbers","enabled":true}`)
+	if code != http.StatusOK || songDetailsState(result) != workspace.SongDetailsOn || songDetailsNames(result) {
+		t.Fatalf("numbers-only Home: %d %v", code, result)
+	}
+	// The full wording, agreed to: the consent now reaches names.
+	code, result = postSongDetails(t, handler, station.ID, `{"request_id":"r-widen","enabled":true,"names":true}`)
+	if code != http.StatusOK || songDetailsState(result) != workspace.SongDetailsOn || !songDetailsNames(result) {
+		t.Fatalf("widened: %d %v", code, result)
+	}
+	// Off keeps the scope but reports no names: nothing is read, nothing is covered.
+	code, result = postSongDetails(t, handler, station.ID, `{"request_id":"r-off","enabled":false}`)
+	if code != http.StatusOK || songDetailsState(result) != workspace.SongDetailsOff || songDetailsNames(result) {
+		t.Fatalf("off: %d %v", code, result)
+	}
+	// On without the question resumes the numbers only, however it was before.
+	code, result = postSongDetails(t, handler, station.ID, `{"request_id":"r-resume","enabled":true}`)
+	if code != http.StatusOK || songDetailsState(result) != workspace.SongDetailsOn || songDetailsNames(result) {
+		t.Fatalf("resumed without names: %d %v", code, result)
+	}
+	if consent := mustHome(t, handler, station.ID).GetAssistantProgramState().GetSongDetailsConsent(); consent.CoversNames() {
+		t.Fatalf("a switch turned on without the question covers names: %+v", consent)
+	}
+}
+
+// Whatever was written from the facts elsewhere (the folder agent's summary and
+// goal) is told to go once the switch is off, also when it was already off; a
+// refused request or turning on tells nobody.
+func TestLibrarySongDetails_OffTellsTheHookWhichHome(t *testing.T) {
+	handler, store, station := songDetailsHome(t)
+	if err := workspace.NewSongDetailsConsents(store).Grant(station.ID, "offer-1"); err != nil {
+		t.Fatal(err)
+	}
+	var told []string
+	handler.SetSongDetailsOffHook(func(homeID string) { told = append(told, homeID) })
+
+	for _, body := range []string{`{"request_id":"on-1","enabled":true}`, `{"enabled":false}`} {
+		postSongDetails(t, handler, station.ID, body)
+	}
+	if len(told) != 0 {
+		t.Fatalf("told %v by a turn-on or a refused request", told)
+	}
+	for _, body := range []string{`{"request_id":"off-1","enabled":false}`, `{"request_id":"off-1","enabled":false}`} {
+		if code, _ := postSongDetails(t, handler, station.ID, body); code != http.StatusOK {
+			t.Fatalf("%s: %d", body, code)
+		}
+	}
+	if len(told) != 2 || told[0] != station.ID || told[1] != station.ID {
+		t.Fatalf("told %v, want this Home twice", told)
+	}
+}
+
 func TestLibrarySongDetails_ARefusedOrForeignRequestChangesNothing(t *testing.T) {
 	handler, store, station := songDetailsHome(t)
 	if err := workspace.NewSongDetailsConsents(store).Grant(station.ID, "offer-1"); err != nil {

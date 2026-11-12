@@ -20,8 +20,10 @@ import (
 // The fact pass reads song facts after a consenting Home's scan is recorded.
 // It never changes the listing: it opens only the file that dates each song,
 // through the scan's pinned no-follow walk, re-checks that the file is the one
-// the listing saw, reads three numbers and saves them in a second fenced
-// write. A song it does not reach keeps no facts until a later scan.
+// the listing saw, reads the numbers (tempo, length, track count) and, under a
+// consent that covers them, the track names, markers and regions, and saves them
+// in a second fenced write. A song it does not reach keeps no facts until a later
+// scan.
 
 // songFactsBudget bounds one scan's pass: wall time and bytes read (T2).
 type songFactsBudget struct {
@@ -474,7 +476,7 @@ func attachSongFacts(doc *Document, scan Scan, read songFactsRead) bool {
 // is what a names consent would otherwise read again on every scan).
 func attachWanted(stored *ObservedFacts, read songFactsRead, format string) bool {
 	if read.NotRead != "" {
-		return stored == nil || (stored.NotRead == "" && stored.SongFacts.empty() && stored.Names == nil)
+		return stored == nil || (stored.NotRead == "" && stored.empty() && stored.Names == nil)
 	}
 	return factsWanted(stored, read.Names != nil, format)
 }

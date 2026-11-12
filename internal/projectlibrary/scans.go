@@ -30,17 +30,30 @@ type ScanReview struct {
 	IncludesScan        bool   `json:"includes_scan"`
 	InterruptsPriorScan bool   `json:"interrupts_prior_scan"`
 	// ReadsSongFacts says the Home's song-details switch is on, so the scan also
-	// reads each project's tempo, length and track count.
+	// reads each project's tempo, length and track count and, when the consent
+	// covers them, its track names, markers and regions; Scope says which.
 	ReadsSongFacts bool      `json:"reads_song_facts,omitempty"`
 	ExpiresAt      time.Time `json:"expires_at"`
 	Revision       int64     `json:"revision"`
 }
 
-// What a scan review says the scan reads.
+// What a scan review says the scan reads. It follows the Home's consent: the
+// numbers only (the older folder card's), or the numbers and the names typed into
+// each project (the folder agent's offer to learn the songs, and the switch).
 const (
 	ScanScopeNamesOnly   = "selected folder and immediate child names/project markers (no file contents)"
 	ScanScopeSongDetails = "selected folder and immediate child names/project markers, and each project's tempo, length and track count (no other file contents)"
+	ScanScopeSongNames   = "selected folder and immediate child names/project markers, and each project's tempo, length, track count, track names, markers and regions (no other file contents)"
 )
+
+// ScanScopeKnown says a review's disclosed scope is one of the three the host
+// words, and agrees with whether the scan reads song details.
+func ScanScopeKnown(scope string, readsSongFacts bool) bool {
+	if !readsSongFacts {
+		return scope == ScanScopeNamesOnly
+	}
+	return scope == ScanScopeSongDetails || scope == ScanScopeSongNames
+}
 
 func scanDigest(scope Scope, root Root, expected int64, selected *ScanScope) string {
 	action := "scan_root:" + strconv.FormatInt(expected, 10)
@@ -207,6 +220,9 @@ func (r *Roots) reviewScan(scope Scope, rootID, scopeID string, expected int64) 
 		ExpiresAt: review.ExpiresAt, Revision: review.Revision}
 	if _, state, err := r.library.readSnapshot(scope); err == nil && state.GetSongDetailsConsent().Active() {
 		disclosed.Scope, disclosed.ReadsSongFacts = ScanScopeSongDetails, true
+		if state.GetSongDetailsConsent().CoversNames() {
+			disclosed.Scope = ScanScopeSongNames
+		}
 	}
 	return disclosed, nil
 }

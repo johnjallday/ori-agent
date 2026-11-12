@@ -100,7 +100,7 @@ func TestSongFacts_UnreadableFilesGiveNoFactsAndNoError(t *testing.T) {
 		"Long Line": NotReadTooLarge, "Huge": NotReadTooLarge,
 	} {
 		facts := factsAt(t, r, scope, root.ID, relative)
-		if facts == nil || facts.NotRead != reason || !facts.SongFacts.empty() || facts.Names != nil {
+		if facts == nil || facts.NotRead != reason || !facts.empty() || facts.Names != nil {
 			t.Fatalf("%s: stored %+v, want not read as %q", relative, facts, reason)
 		}
 	}
