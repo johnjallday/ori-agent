@@ -169,7 +169,7 @@ func TestBuildPlan_TheAssuranceNamesWhatOriAdds(t *testing.T) {
 		"an existing Home that reads the numbers": {integration: folderlook.ActionAlreadyHere, homeAction: folderlook.ActionAlreadyHere,
 			home:     &folderlook.HomeFacts{ProviderReady: true, HomeExists: true, RolesKnown: true, SongDetails: folderlook.SongDetailsNumbers},
 			selected: []string{"music-production-home"},
-			want:     "Nothing in Albums is moved or copied. Music Production Home already reads song details, so setting up reads each project's tempo, length and track count"},
+			want:     "Nothing in Albums is moved or copied. Music Production Home already reads song details, so setting up reads each project's tempo, length and track count."},
 		"an existing Home that reads the names too": {integration: folderlook.ActionConnect, homeAction: folderlook.ActionAlreadyHere,
 			home:     &folderlook.HomeFacts{ProviderReady: true, HomeExists: true, RolesKnown: true, SongDetails: folderlook.SongDetailsNames},
 			selected: []string{"music-production-home", "reaper-tools"},

@@ -922,6 +922,9 @@ func assuranceLine(rec Record, candidates []folderlook.Candidate, hires int) str
 	}
 	if adds := addsSentence(candidates, hires); adds != "" {
 		line += ". " + adds
+	} else if reads != "" {
+		// The reads sentence is the last one: it ends like the adds sentence would.
+		line += "."
 	}
 	return line
 }
