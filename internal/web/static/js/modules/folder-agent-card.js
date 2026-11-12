@@ -4,7 +4,12 @@
 // sends a path. Words come from the server's view (facts line, stage line,
 // tools); this module only lays them out.
 
+import { publishFolderAgentChat } from './folder-agent-chat.js';
+
 export const FOLDER_AGENT_ENDPOINT = '/api/personal-assistant/folder-agent';
+// How many times the workspace page asks again for the report's message after
+// the look ended (folder-agent-chat.js).
+const CHAT_RETRIES = 4;
 export const FOLDER_AGENT_LOOK_KIND = 'folder_agent_look';
 export const FOLDER_AGENT_REPORT_KIND = 'folder_agent_report';
 
@@ -2595,6 +2600,37 @@ export async function mountWorkspaceFolderAgent(
   // last view said, and whether the owner acted on this page.
   let previous = null;
   let followed = false;
+  // The look's report reaches the Commander's conversation a moment after the
+  // view says "reported" (workspace chat sync): until the view names a message
+  // newer than the one current while the agent looked, ask again a few times.
+  let lookMessage = null;
+  let chatRetries = 0;
+  const awaitChat = current => {
+    const state = String(current?.state || '');
+    const id = String(current?.chat?.message_id || '');
+    if (state === 'looking') {
+      lookMessage = id;
+      chatRetries = 0;
+      return;
+    }
+    if (lookMessage === null || (state !== 'reported' && state !== 'failed')) return;
+    if ((id && id !== lookMessage) || chatRetries >= CHAT_RETRIES) {
+      lookMessage = null;
+      return;
+    }
+    chatRetries += 1;
+    setTimeout(async () => {
+      if (!isActive() || lookMessage === null) return;
+      let next = null;
+      try {
+        next = await fetchFolderAgent(workspaceID, fetchImpl);
+      } catch (_) {
+        next = null;
+      }
+      if (next && isActive()) draw(next);
+      else lookMessage = null;
+    }, pollMs);
+  };
   const draw = (current, error = '', opening = false) => {
     const view = folderAgentReportView(current);
     const onAction = async (action, button, extra) => {
@@ -2607,6 +2643,9 @@ export async function mountWorkspaceFolderAgent(
     };
     const card = compact =>
       renderFolderAgentReport(view, doc, { error, opening, onAction, compact });
+    // The drawer draws the same card under the report's message in the
+    // Commander's conversation (workspace chat sync).
+    publishFolderAgentChat({ workspaceID: view.workspaceID, raw: current, card, error });
     host.hidden = false;
     // A presenter (the Map tab's Commander) may draw the card in its balloon
     // and shrink this host to one line; otherwise the full card shows here.
@@ -2623,6 +2662,7 @@ export async function mountWorkspaceFolderAgent(
     });
     if (!shown) host.replaceChildren(card(false));
     previous = view;
+    awaitChat(current);
   };
   let stop = () => {};
   const follow = current => {

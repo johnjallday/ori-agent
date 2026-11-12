@@ -28,6 +28,7 @@ import {
 } from './workspace-first-task-banner.js';
 import { mountWorkspaceFolderAgent } from './folder-agent-card.js';
 import { commanderPresenter, workspaceCommanderMap } from './commander-map.js';
+import { chatShowsFolderAgentReport } from './folder-agent-chat.js';
 import { answerTicket, commanderTicketItems } from './commander-tickets.js';
 import { WorkspacePluginsManager } from './workspace-detail-plugins.js';
 import { WorkspaceMemoryManager } from './workspace-detail-memory.js';
@@ -618,6 +619,14 @@ export class WorkspaceDetailPage {
       onNarrated: ticketID => {
         this.commanderNarratedTicket = ticketID;
         window.workspaceCommand?.refreshNextAction?.(this.workspaceId);
+      },
+      // The report is also the Commander's message in its thread (workspace
+      // chat sync): while the open drawer shows it, the balloon keeps only its
+      // line; off the Map the page shows one line that opens it there.
+      chatHolds: () => chatShowsFolderAgentReport(this.workspaceId),
+      chatLine: {
+        open: (ref, button) =>
+          window.PersonalAssistantPanel?.openFolderReport?.(this.workspaceId, ref, button)
       }
     });
     mountWorkspaceFolderAgent(

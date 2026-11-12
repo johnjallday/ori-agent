@@ -28,6 +28,15 @@ import {
   createCreationTransition
 } from './workspace-creation-transition.js';
 import { mountFirstLookReports } from './first-look-report.js';
+import {
+  attachFolderAgentChatCard,
+  chatRefOf,
+  folderAgentChat,
+  folderAgentChatUnread,
+  FOLDER_AGENT_CHAT_EVENT,
+  markFolderAgentChatSeen,
+  postFolderAgentChatSeen
+} from './folder-agent-chat.js';
 import { briefModeView, briefSend } from './personal-assistant-brief-mode.js';
 
 // Capture before Command consumes its one-shot update intent. Drawer restoration
@@ -967,15 +976,28 @@ function currentWelcome() {
   return { ...view.data.welcome, stale: view.stale || view.data.welcome.stale };
 }
 
+// The folder agent's report waiting unseen in the Commander's thread on this
+// workspace page (workspace chat sync): its place, or null.
+function waitingFolderReport() {
+  const current = recipients()?.current?.();
+  if (current?.kind !== RECIPIENT_WORKSPACE_ENTRY || !current.available) return null;
+  if (!folderAgentChatUnread(current.workspaceId)) return null;
+  const ref = chatRefOf(folderAgentChat(current.workspaceId)?.raw);
+  return ref ? { ...ref, workspaceId: current.workspaceId, agent: current.name } : null;
+}
+
 function renderWelcomeIndicator(view = state.welcomeView) {
   state.welcomeView = view;
   const els = state.els;
   if (!els?.unread) return;
   const source = currentWelcome();
-  const unread = source?.unread_count > 0;
-  const label = unread
-    ? `${source.stale ? 'Last known: new' : 'New'} message from ${source.agent_name}`
-    : '';
+  const report = waitingFolderReport();
+  const unread = source?.unread_count > 0 || Boolean(report);
+  const label = report
+    ? `New message from ${report.agent}`
+    : unread
+      ? `${source.stale ? 'Last known: new' : 'New'} message from ${source.agent_name}`
+      : '';
   const accessible = els.unread.querySelector('span');
   if (accessible && accessible.textContent !== label) accessible.textContent = label;
   els.unread.hidden = !unread;
@@ -997,6 +1019,33 @@ function welcomeBlockedByModal() {
   );
 }
 
+// exposeFolderReport marks the report seen once its message has been in view
+// in the open, focused drawer, like a welcome message (workspace chat sync).
+function exposeFolderReport(pane, transcript) {
+  const report = waitingFolderReport();
+  if (!report) return;
+  const ready =
+    state.open &&
+    !state.suspended &&
+    state.els.panel.hidden === false &&
+    document.visibilityState === 'visible' &&
+    document.hasFocus() &&
+    window.PersonalAssistantTranscript?.isSettled?.() !== false &&
+    !switchLock() &&
+    !welcomeBlockedByModal();
+  if (!ready) return;
+  const row = Array.from(transcript.querySelectorAll('[data-lead-message-id]')).find(
+    node => node.dataset.leadMessageId === report.messageID
+  );
+  if (!row) return;
+  const bounds = row.getBoundingClientRect();
+  const viewport = pane.getBoundingClientRect();
+  if (bounds.bottom <= viewport.top || bounds.top >= viewport.bottom) return;
+  markFolderAgentChatSeen(report.workspaceId, report.messageID);
+  renderWelcomeIndicator();
+  void postFolderAgentChatSeen(report.workspaceId, report.messageID);
+}
+
 let welcomeExposureFrame = null;
 const welcomeAcknowledging = new Set();
 function scheduleWelcomeExposure() {
@@ -1007,6 +1056,7 @@ function scheduleWelcomeExposure() {
     const pane = document.getElementById('personalAssistantScroll');
     const transcript = document.getElementById('homeAssistantConversation');
     const current = recipients()?.current?.();
+    if (pane && transcript) exposeFolderReport(pane, transcript);
     if (!pane || !transcript || !source || state.welcomeView?.state !== 'ready' || source.stale)
       return;
     const messages = exposedWelcomeMessages({
@@ -1149,6 +1199,79 @@ async function openWorkspaceWelcome(workspaceId, trigger, expected = null) {
   return openWelcome(trigger, expected);
 }
 
+// openFolderReport opens the Commander's thread that holds the folder agent's
+// report and brings the report into view (workspace chat sync): the page's
+// "Open in chat", the launcher and the drawer's "New message" control while the
+// report waits unseen. No turn is sent and no draft is discarded.
+async function openFolderReport(workspaceId, ref, trigger) {
+  const target = ref || waitingFolderReport();
+  if (!target?.sessionID || !target?.messageID) return false;
+  if (routeContext().workspace_id !== workspaceId || creationTransition.blocksReveal())
+    return false;
+  if (!state.els) init();
+  if (recipients()?.current?.()?.kind !== RECIPIENT_WORKSPACE_ENTRY) {
+    await refresh();
+    await recipients()?.refresh?.();
+    if (routeContext().workspace_id !== workspaceId) return false;
+  }
+  const lock = switchLock();
+  const changing = recipients()?.sessionId?.() !== target.sessionID;
+  if (lock || (changing && (state.draft || state.els?.input?.value))) {
+    open(trigger, { preserveConversation: true });
+    setStatus(
+      lock || 'Finish or clear your draft before opening this message. Your draft has been kept.'
+    );
+    return false;
+  }
+  if (recipients()?.current?.()?.kind !== RECIPIENT_WORKSPACE_ENTRY) {
+    if (!chooseRecipient(RECIPIENT_WORKSPACE_ENTRY)) return false;
+  }
+  const current = recipients()?.current?.();
+  if (current?.kind !== RECIPIENT_WORKSPACE_ENTRY || current.workspaceId !== workspaceId)
+    return false;
+  if (changing) {
+    recipients().rememberSession(workspaceId, { id: target.sessionID, title: '' });
+  }
+  const hydrated =
+    changing || !document.querySelector(`#homeAssistantConversation [data-lead-message-id]`)
+      ? await hydrateEntryConversation({ force: true, exact: true })
+      : true;
+  open(trigger, { preserveConversation: true });
+  if (!hydrated && changing) {
+    setStatus('This saved conversation is unavailable. Try again from the map.');
+    return false;
+  }
+  const transcript = document.getElementById('homeAssistantConversation');
+  const row = attachFolderAgentChatCard(transcript, workspaceId);
+  row?.scrollIntoView?.({ block: 'start' });
+  scheduleWelcomeExposure();
+  return true;
+}
+
+// The report changed on the workspace page (a new message, an answer, a run's
+// step): redraw its card in the thread, or load the thread again when the
+// report's message arrived after the thread was loaded.
+function onFolderAgentChat(event) {
+  const workspaceId = String(event?.detail?.workspaceID || '');
+  const current = recipients()?.current?.();
+  if (current?.kind === RECIPIENT_WORKSPACE_ENTRY && current.workspaceId === workspaceId) {
+    const transcript = document.getElementById('homeAssistantConversation');
+    const row = attachFolderAgentChatCard(transcript, workspaceId);
+    const ref = chatRefOf(folderAgentChat(workspaceId)?.raw);
+    const shown = recipients()?.sessionId?.() || '';
+    if (!row && ref && state.open && (!shown || shown === ref.sessionID))
+      void hydrateEntryConversation({ force: true });
+  }
+  renderWelcomeIndicator();
+}
+
+// openUnread: the launcher and "New message" open what waits, the report first.
+function openUnread(trigger) {
+  const report = waitingFolderReport();
+  if (report) return void openFolderReport(report.workspaceId, report, trigger);
+  return void openWelcome(trigger);
+}
+
 function renderEntrySessionBar() {
   const els = state.els;
   if (!els) return;
@@ -1260,6 +1383,11 @@ async function hydrateEntryConversation({ force = false, exact = false } = {}) {
         element.dataset.leadSessionId = loaded.session.id;
       }
     }
+    // The folder agent's report, when this thread holds it, carries its card.
+    attachFolderAgentChatCard(
+      document.getElementById('homeAssistantConversation'),
+      now.workspaceId
+    );
   } finally {
     transcript?.endHydration?.();
   }
@@ -2346,10 +2474,11 @@ function init() {
   };
   launcher.addEventListener('click', () => {
     if (state.open) close();
-    else if (currentWelcome()?.unread_count > 0) void openWelcome(launcher);
+    else if (waitingFolderReport() || currentWelcome()?.unread_count > 0) openUnread(launcher);
     else open(launcher);
   });
-  state.els.openWelcome?.addEventListener('click', event => void openWelcome(event.currentTarget));
+  state.els.openWelcome?.addEventListener('click', event => openUnread(event.currentTarget));
+  window.addEventListener(FOLDER_AGENT_CHAT_EVENT, onFolderAgentChat);
   state.els.openWelcome?.addEventListener('blur', () => renderWelcomeIndicator());
   document.addEventListener('personal-assistant:exposure', scheduleWelcomeExposure);
   document.addEventListener('personal-assistant:opened', scheduleWelcomeExposure);
@@ -2598,6 +2727,8 @@ const api = {
   open,
   openWelcome,
   openWorkspaceWelcome,
+  // The folder agent's report in the Commander's thread (workspace chat sync).
+  openFolderReport,
   openActivity: (trigger, options = {}) => {
     if (state.open) {
       if (options.focus === true) focusOnOpen();

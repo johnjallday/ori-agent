@@ -15,6 +15,11 @@ import {
   renderCommanderOneLine
 } from './commander-speech.js';
 import { COMMANDER_ACTIVITY_EVENT } from './commander-tickets.js';
+import { chatRefOf, FOLDER_AGENT_CHAT_SHOWN_EVENT } from './folder-agent-chat.js';
+
+// The drawer opening or closing, or the report's card appearing in its thread,
+// moves the plan between the chat and the balloon (workspace chat sync).
+const CHAT_EVENTS = ['personal-assistant:opened', 'personal-assistant:closed'];
 
 export const WORKSPACE_MAP_RENDERED_EVENT = 'ori:workspace-map-rendered';
 export const MAP_MOUNTED_EVENT = 'ori:map-mounted';
@@ -111,17 +116,25 @@ export function workspaceCommanderMap(
       }
       return () => doc?.removeEventListener?.(COMMANDER_ACTIVITY_EVENT, handler);
     },
-    // onChange runs fn after a Map render, a map mount or a tab change.
+    // onChange runs fn after a Map render, a map mount or a tab change, and when
+    // the drawer opens, closes or shows the report in its thread.
     onChange(fn) {
       const handler = () => fn();
-      const events = [WORKSPACE_MAP_RENDERED_EVENT, MAP_MOUNTED_EVENT, VIEW_MODE_EVENT];
+      const events = [
+        WORKSPACE_MAP_RENDERED_EVENT,
+        MAP_MOUNTED_EVENT,
+        VIEW_MODE_EVENT,
+        ...CHAT_EVENTS
+      ];
       events.forEach(type => doc?.addEventListener?.(type, handler));
       win?.addEventListener?.('resize', handler);
       win?.addEventListener?.('scroll', handler, { passive: true });
+      win?.addEventListener?.(FOLDER_AGENT_CHAT_SHOWN_EVENT, handler);
       return () => {
         events.forEach(type => doc?.removeEventListener?.(type, handler));
         win?.removeEventListener?.('resize', handler);
         win?.removeEventListener?.('scroll', handler);
+        win?.removeEventListener?.(FOLDER_AGENT_CHAT_SHOWN_EVENT, handler);
       };
     }
   };
@@ -557,9 +570,24 @@ const REPORT_KIND = {
 // the host comes back with the full card wherever no balloon can open.
 // onNarrated(ticketID) hears which ticket the report itself narrates (the folder
 // agent's own look), '' when none, each time that changes.
+// chatHolds() says whether the open chat shows the report (a host that cannot
+// pass it with each present, like the workspace page); chatLine.open(ref,
+// button) opens the report's message in the chat. With chatLine, a report that
+// was posted to the conversation (raw.chat) shows off the map as one line with
+// "Open in chat" instead of the full card, and as nothing while the chat shows
+// it (workspace chat sync, Plan B).
 export function commanderPresenter(
   map,
-  { onReview, action, watched = true, ticketItems = null, hostLine = true, onNarrated = null } = {}
+  {
+    onReview,
+    action,
+    watched = true,
+    ticketItems = null,
+    hostLine = true,
+    onNarrated = null,
+    chatHolds = null,
+    chatLine = null
+  } = {}
 ) {
   let last = null;
   let narrated = '';
@@ -571,8 +599,13 @@ export function commanderPresenter(
   let pendingOpen = '';
   // Whether the chat box holds the plan (visual-hire FR24). Asked live, on every
   // draw, so opening or closing the box moves the plan between it and the balloon.
-  const chatHeld = () => typeof last?.chatHolds === 'function' && last.chatHolds() === true;
+  const chatHeld = () => {
+    const asks = typeof last?.chatHolds === 'function' ? last.chatHolds : chatHolds;
+    return typeof asks === 'function' && asks() === true;
+  };
   let lastHeld = false;
+  // Where the report sits in the conversation, when this host can open it there.
+  const chatRef = () => (chatLine?.open ? chatRefOf(last?.raw) : null);
 
   const queue = () => {
     // The report goes first among equals: a look or a setup run in progress
@@ -656,6 +689,33 @@ export function commanderPresenter(
     return true;
   };
 
+  // quiet: the host says nothing and takes no room. Its owner unhides it
+  // before every draw, so it is hidden again each time.
+  const quiet = () => {
+    const { host } = last;
+    if (hostMode !== 'quiet') host?.replaceChildren();
+    if (host) host.hidden = true;
+    hostMode = 'quiet';
+    return true;
+  };
+
+  // showChatLine: the report is a message in the conversation, so the host is
+  // one line whose button opens it there (Plan B), not a second full card.
+  const showChatLine = fresh => {
+    const { view, host, doc } = last;
+    if (hostMode !== 'chat' || fresh) {
+      const line = renderCommanderOneLine(view, doc, {
+        action: 'Open in chat',
+        onReview: button => chatLine.open(chatRef(), button)
+      });
+      if (line) line.dataset.folderAgentChatLine = 'true';
+      host?.replaceChildren(line);
+    }
+    if (host) host.hidden = false;
+    hostMode = 'chat';
+    return true;
+  };
+
   // draw: report says the folder agent's view is new (auto-open may apply).
   const draw = ({ report = false, refresh = false } = {}) => {
     const attached = map.attach({ onNarrow: revealHost });
@@ -671,7 +731,9 @@ export function commanderPresenter(
     const fresh = report;
     const { view, previous, followed, host, doc } = last;
     const speech = commanderSpeech(view);
-    if (!speech) return showCard(fresh);
+    // Nothing to say on the map (a kept folder): the full card, unless the
+    // chat already shows it under the report's message.
+    if (!speech) return chatRef() && held ? quiet() : showCard(fresh);
     const onMap = attached && map.visible() && !map.narrow();
     // The chat box holds the full plan: it shows the whole card, and the balloon
     // stays collapsed to its one line, so it never opens by itself over the plan
@@ -680,7 +742,8 @@ export function commanderPresenter(
     if (onMap && held) {
       pendingOpen = '';
       if (map.balloon.expanded) map.balloon.collapse({ returnFocus: false });
-      return showCard(fresh);
+      // A host whose report is a message in the thread already shows it there.
+      return hostLine ? showCard(fresh) : quiet();
     }
     // An opening the rules call for waits for the map when the anchor is not
     // drawn yet (a new folder's tile arrives with the next refresh).
@@ -700,14 +763,8 @@ export function commanderPresenter(
         map.balloon.expand({ focus: false });
       }
       // The Commander's line on the map is the status: this host says nothing
-      // and takes no room. Its owner unhides it before every draw, so it is
-      // hidden again each time, not only when the mode changes.
-      if (!hostLine) {
-        if (hostMode !== 'quiet') host?.replaceChildren();
-        if (host) host.hidden = true;
-        hostMode = 'quiet';
-        return true;
-      }
+      // and takes no room.
+      if (!hostLine) return quiet();
       if (hostMode !== 'line' || fresh) {
         const line = renderCommanderOneLine(view, doc, {
           action,
@@ -723,6 +780,9 @@ export function commanderPresenter(
       return true;
     }
     if (map.balloon.expanded) map.balloon.collapse({ returnFocus: false });
+    // Off the map (another tab, or too narrow for a balloon): a report posted to
+    // the conversation is one line there, or nothing while the chat shows it.
+    if (chatRef()) return held ? quiet() : showChatLine(fresh);
     return showCard(fresh);
   };
   const retick = () => {

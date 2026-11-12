@@ -4483,3 +4483,19 @@ a.quest-title:focus-visible {
   gap: 8px;
   padding: 10px 12px 12px;
 }
+
+/* The folder agent's report as a message in the Commander's thread (workspace
+   chat sync): the compact card sits right under the message it belongs to,
+   as wide as a message bubble. */
+.folder-agent-chat-card {
+  max-width: 92%;
+  margin: -0.35rem 0 0.75rem;
+}
+
+.folder-agent-chat-card .folder-agent-card {
+  margin: 0;
+}
+
+.folder-agent-card--line[data-folder-agent-chat-line] .folder-agent-card__line-action {
+  white-space: nowrap;
+}

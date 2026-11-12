@@ -392,6 +392,36 @@ func (h *Handler) StartNext(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"folder_agent": view})
 }
 
+type chatSeenRequest struct {
+	MessageID string `json:"message_id"`
+}
+
+// ChatSeen marks the report's message in the Commander's conversation seen,
+// once the drawer has shown it (workspace chat sync).
+func (h *Handler) ChatSeen(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.user(w, r)
+	if !ok {
+		return
+	}
+	var req chatSeenRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.MessageID) == "" {
+		fail(w, http.StatusBadRequest, "The request is not valid")
+		return
+	}
+	if err := h.service.ChatSeen(r.Context(), userID, r.PathValue("workspaceID"), req.MessageID); err != nil {
+		if errors.Is(err, folderagent.ErrChatUnavailable) {
+			fail(w, http.StatusNotFound, "That message is no longer in the conversation")
+			return
+		}
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"seen": true})
+}
+
 func writeError(w http.ResponseWriter, err error) {
 	var refusal *folderagent.Refusal
 	var rootErr *personalassistant.FolderRootError
