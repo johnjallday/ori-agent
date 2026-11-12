@@ -100,7 +100,18 @@ def main(argv):
         view = got.get("folder_agent") or view
     if view.get("state") == "failed":
         die("look failed: %s" % view.get("failure"))
+    premise = view.get("premise") or {}
+    if premise:
+        print("premise:", premise.get("state"), "-", premise.get("sentence"))
+    if premise.get("state") == "asked" and not plan_only:
+        # Set it up is refused until the owner confirms what the folder is.
+        status, got = call(api + "/" + ws + "/premise", "POST", {"answer": "confirmed"})
+        if status != 200:
+            die("premise %s: %s" % (status, got))
+        view = got.get("folder_agent") or view
+        print("premise answered: confirmed")
     plan = view.get("plan") or {}
+    print("installs:", ", ".join("%s %s" % (e.get("name"), e.get("version") or "(latest reviewed)") for e in plan.get("installs", [])) or "none")
     print("offered steps:", ", ".join("%s%s" % (s["handle"], "*" if s.get("chosen") else "") for s in plan.get("steps", [])))
     if opts["--steps"] is not None:
         selected = [h for h in opts["--steps"].split(",") if h]

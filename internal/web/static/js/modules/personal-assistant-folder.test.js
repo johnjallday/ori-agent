@@ -1994,7 +1994,12 @@ test('Home Explore opens its own chooser, whose choice starts an agent on the fo
   // A chip, the dialog or a typed path goes to the folder agent, not the digest.
   const scan = source.slice(source.indexOf('async function scan('), source.indexOf('// postOffer'));
   assert.match(scan, /if \(!body\.file\) \{\s*await chooseForAgent\(body\);\s*return;/);
-  assert.match(source, /const result = await chooseFolder\(body\);/);
+  // The choice names the workspace page it is made from (a Home's own page
+  // skips that Home's premise); never a path.
+  assert.match(
+    source,
+    /const result = await chooseFolder\(from \? \{ \.\.\.body, from_workspace_id: from \} : body\);/
+  );
 });
 
 test('the module never sends a folder path to the server', () => {

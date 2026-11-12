@@ -57,6 +57,12 @@ type View struct {
 	Nested        *WorkspaceRef          `json:"nested,omitempty"`
 	UpdatedAt     time.Time              `json:"updated_at"`
 
+	// Premise is "This looks like a <kind> folder" and its answer
+	// (confirm-and-visible-installs FR1–FR6); nil when the folder is not asked.
+	// While its state is "asked" the report waits on it: the plan is prepared
+	// but the card shows only the question, and Set it up is refused.
+	Premise *PremiseView `json:"premise,omitempty"`
+
 	// The agent's words (PRD FR24), shown as text, never executed.
 	WhatItIs       string `json:"what_it_is,omitempty"`
 	SuggestedGoal  string `json:"suggested_goal,omitempty"`
@@ -165,6 +171,12 @@ type PlanView struct {
 	// cannot run with it; DefaultReason says why Ori's own plan is shown.
 	Excluded      string `json:"excluded,omitempty"`
 	DefaultReason string `json:"default_reason,omitempty"`
+	// ReorderNote is the muted line under the agent's words when Ori runs a
+	// tools step ahead of where the agent named it.
+	ReorderNote string `json:"reorder_note,omitempty"`
+	// Installs are the plugins the ticked steps download and install, in run
+	// order: the card's install block and the count on its button.
+	Installs []InstallEntry `json:"installs"`
 }
 
 func planViewOf(plan Plan) *PlanView {
@@ -172,9 +184,14 @@ func planViewOf(plan Plan) *PlanView {
 	if steps == nil {
 		steps = []folderlook.Step{}
 	}
+	installs := plan.Installs
+	if installs == nil {
+		installs = []InstallEntry{}
+	}
 	return &PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable,
 		Unavailable: plan.Unavailable, Selected: plan.Selected, Source: plan.Source, Words: plan.Words,
-		WordsRaw: plan.WordsRaw, Steps: steps, Excluded: plan.Excluded, DefaultReason: plan.DefaultReason}
+		WordsRaw: plan.WordsRaw, Steps: steps, Excluded: plan.Excluded, DefaultReason: plan.DefaultReason,
+		ReorderNote: plan.ReorderNote, Installs: installs}
 }
 
 func (s *Service) viewOf(_ context.Context, rec *Record) View {
@@ -226,11 +243,15 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 		plan.Runnable = false
 		v.StageLine = "Set up as confirmed. Nothing in the source folder was moved."
 		var ran []folderlook.Step
+		kept := map[string]bool{}
 		for _, step := range plan.Steps {
 			if step.Chosen {
 				ran = append(ran, step)
+				kept[step.Handle] = true
 			}
 		}
+		// The agent's words keep naming the steps that did not run.
+		plan.WordsRaw = folderlook.NameHandles(plan.WordsRaw, plan.Steps, kept)
 		plan.Steps = ran
 	}
 	v.Plan = planViewOf(plan)
@@ -238,11 +259,24 @@ func (s *Service) viewOf(_ context.Context, rec *Record) View {
 	if s.goalOffered(rec) {
 		v.GoalOffer = &GoalOfferView{Goal: rec.Sections.Goal, MaxRunes: personalassistant.BriefMaxRunes}
 	}
+	v.Premise = premiseView(rec)
+	withdrawn := premiseWithdrawn(rec)
+	if withdrawn {
+		// "Something else": nothing is recommended until a look with the
+		// owner's own words (FR6); the report stays on the record.
+		v.Plan = nil
+	}
 	switch rec.State {
 	case StateReported:
 		v.Actions = []string{ActionSetUp, ActionKeep, ActionLookFurther}
+		if withdrawn {
+			v.Actions = []string{ActionKeep, ActionLookFurther}
+		}
 	case StateKept:
 		v.Actions = []string{ActionSetUp, ActionLookFurther}
+		if withdrawn {
+			v.Actions = []string{ActionLookFurther}
+		}
 	case StateSetUp:
 		v.Actions = []string{ActionLookFurther}
 		if rec.Setup != nil && rec.Setup.Status == personalassistant.FolderSetupStopped {
@@ -402,7 +436,70 @@ type Plan struct {
 	// cannot run with it; DefaultReason says why Ori's own plan is shown.
 	Excluded      string
 	DefaultReason string
+	// ReorderNote is set when Ori moved a tools step ahead of where the
+	// agent's plan named it.
+	ReorderNote string
+	// Installs are the plugins the plan downloads and installs, in run order.
+	Installs []InstallEntry
 }
+
+// InstallEntry is one plugin a plan downloads and installs, for the card's
+// install block (PRD FR13–FR15). The host builds it; the card never parses
+// line text for it.
+type InstallEntry struct {
+	// Step is the handle of the step that installs it; Line is the kind of
+	// that step's plan line the run marks while it installs, so the block
+	// can follow the run (the step has one line of that kind).
+	Step string `json:"step"`
+	Line string `json:"line"`
+	// Name is the plugin's display name; Version the release it would put
+	// in place, empty when the host does not know it before the download.
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	// Publisher, SourceLabel and SourceURL name a reviewed release.
+	Publisher   string `json:"publisher,omitempty"`
+	SourceLabel string `json:"source_label,omitempty"`
+	SourceURL   string `json:"source_url,omitempty"`
+	// Search marks an add-on found by search; Marketplace is where.
+	Search      bool   `json:"search,omitempty"`
+	Marketplace string `json:"marketplace,omitempty"`
+	// Why is what it gives the owner; AppSentence where the application
+	// and its tools stand, for an integration.
+	Why         string `json:"why,omitempty"`
+	AppSentence string `json:"app_sentence,omitempty"`
+}
+
+// installEntryOf is the install block's row for a candidate that installs a
+// plugin, under the step that runs it.
+func installEntryOf(step string, c folderlook.Candidate) InstallEntry {
+	e := InstallEntry{Step: step, Name: c.Name, Why: c.Why}
+	if c.Release != nil {
+		e.Version, e.Publisher, e.SourceLabel, e.SourceURL = c.Release.Version, c.Release.Publisher, c.Release.SourceLabel, c.Release.SourceURL
+	}
+	switch c.Kind {
+	case folderlook.KindIntegration:
+		e.Line = personalassistant.FolderPlanIntegration
+		e.AppSentence = folderlook.AppToolsSentence(c)
+	case folderlook.KindHomeProvider:
+		e.Line = personalassistant.FolderPlanProvider
+		if c.Home != nil && c.Home.ProviderName != "" {
+			e.Name = c.Home.ProviderName
+		}
+		if e.Version == "" && c.Home != nil {
+			e.Version = c.Home.ProviderVersion
+		}
+		e.Why = "Provides your " + homeName(c) + "."
+	default:
+		e.Line = FolderPlanAddOn
+		e.Search = c.Source == folderlook.SourceSearch
+		e.Marketplace = c.Marketplace
+	}
+	return e
+}
+
+// ReorderNote is the muted line under the agent's words when Ori runs the
+// tools ahead of the order the agent named them in.
+const ReorderNote = "Ori runs the tools first, so the Home can list what they can open."
 
 // BuildPlan lists every consequence of Set it up. The steps come from the
 // agent's plan (the handles it named, in its order), else from Ori's default
@@ -444,6 +541,25 @@ func BuildPlan(rec Record, selected []string) Plan {
 		plan.DefaultReason = defaultReason(rec)
 	}
 	order := base
+	if selected == nil && premiseDeclined(&rec) {
+		// The owner said the folder is something else: their answer outranks
+		// the agent's and Ori's recommendation. The Home step and every step
+		// that installs a plugin stay offered, unticked, until they tick one
+		// (confirm-and-visible-installs FR7).
+		candidates := make(map[string]folderlook.Candidate, len(rec.Candidates))
+		for _, c := range rec.Candidates {
+			candidates[c.ID] = c
+		}
+		var kept []string
+		for _, h := range order {
+			step := steps[byHandle[h]]
+			if step.Kind == folderlook.StepHome || installsPlugin(candidates[step.CandidateID]) {
+				continue
+			}
+			kept = append(kept, h)
+		}
+		order = kept
+	}
 	if selected != nil {
 		ticked := make(map[string]bool, len(selected))
 		for _, id := range selected {
@@ -465,7 +581,13 @@ func BuildPlan(rec Record, selected []string) Plan {
 		}
 	}
 	order, plan.Excluded = applyExcludes(order, steps, byHandle)
+	asNamed := order
 	order = toolsBeforeHome(order, steps, byHandle)
+	// The agent's words are never rewritten; when the host moved a tools step
+	// ahead of where the agent named it, the card says why (PRD FR26).
+	if plan.Source == PlanByAgent && strings.Join(asNamed, ",") != strings.Join(order, ",") {
+		plan.ReorderNote = ReorderNote
+	}
 	chosen := make(map[string]bool, len(order))
 	for _, h := range order {
 		chosen[h] = true
@@ -504,17 +626,14 @@ func BuildPlan(rec Record, selected []string) Plan {
 			stage = foldermap.StageTools
 		}
 		plan.Candidates = append(plan.Candidates, c)
+		if installsPlugin(c) {
+			plan.Installs = append(plan.Installs, installEntryOf(h, c))
+		}
 		switch c.Kind {
 		case folderlook.KindIntegration:
-			if c.Action != folderlook.ActionAlreadyHere {
-				detail := ""
-				if c.Action == folderlook.ActionInstall && c.App != "" {
-					detail = c.App + " itself is not on this Mac yet."
-				} else if c.App != "" {
-					detail = c.App + " is installed on this Mac."
-				}
+			if folderlook.IntegrationInstalls(c) {
 				plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{
-					Kind: personalassistant.FolderPlanIntegration, Name: "Installs " + c.Name, Detail: detail,
+					Kind: personalassistant.FolderPlanIntegration, Name: "Installs " + c.Name, Detail: folderlook.AppToolsSentence(c),
 				})
 			}
 			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{
@@ -574,7 +693,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 			}
 		}
 	}
-	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: assuranceLine(rec)})
+	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: assuranceLine(rec, plan.Candidates)})
 	sort.Strings(plan.Selected)
 	plan.Digest = planDigest(plan)
 	return plan
@@ -632,13 +751,91 @@ func toolsBeforeHome(order []string, steps []folderlook.Step, byHandle map[strin
 }
 
 // assuranceLine is the note under every phase of the plan (PRD FR13). It names
-// the folder (its base name, never a path) so the promise is concrete.
-func assuranceLine(rec Record) string {
+// the folder (its base name, never a path) so the promise is concrete, then
+// what the plan adds (PRD FR25): the plugins it installs, the Home it creates
+// and that Home's agents, naming only the parts that apply.
+func assuranceLine(rec Record, candidates []folderlook.Candidate) string {
 	folder := strings.TrimSpace(rec.FolderName)
+	line := "Nothing in " + folder + " is moved, copied or read"
 	if folder == "" || strings.ContainsAny(folder, "/\\\x00\r\n") {
-		return "Nothing is moved, copied or read"
+		line = "Nothing is moved, copied or read"
 	}
-	return "Nothing in " + folder + " is moved, copied or read"
+	if adds := addsSentence(candidates); adds != "" {
+		line += ". " + adds
+	}
+	return line
+}
+
+// addsSentence is the assurance's second half: "Ori adds 2 plugins, <Home>,
+// and its agents." Empty when the plan adds none of them.
+func addsSentence(candidates []folderlook.Candidate) string {
+	var parts []string
+	if n := len(pluginInstalls(candidates)); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", n, plural(n, "plugin", "plugins")))
+	}
+	for _, c := range candidates {
+		if c.Kind != folderlook.KindHomeProvider || !createsHome(c) {
+			continue
+		}
+		parts = append(parts, homeName(c))
+		if hiresAgents(c) {
+			parts = append(parts, "its agents")
+		}
+	}
+	switch len(parts) {
+	case 0:
+		return ""
+	case 1:
+		return "Ori adds " + parts[0] + "."
+	case 2:
+		return "Ori adds " + parts[0] + " and " + parts[1] + "."
+	}
+	return "Ori adds " + strings.Join(parts[:len(parts)-1], ", ") + ", and " + parts[len(parts)-1] + "."
+}
+
+// pluginInstalls are the plan's candidates whose step downloads and installs
+// a plugin, in run order: an integration whose tools are not in place, a Home
+// provider that is not ready, and a plugin add-on.
+func pluginInstalls(candidates []folderlook.Candidate) []folderlook.Candidate {
+	var out []folderlook.Candidate
+	for _, c := range candidates {
+		if installsPlugin(c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// installsPlugin reports whether a candidate's step downloads and installs a
+// plugin. A plugin already installed, enabled and at the reviewed release is
+// never one (PRD FR17).
+func installsPlugin(c folderlook.Candidate) bool {
+	switch c.Kind {
+	case folderlook.KindIntegration:
+		return folderlook.IntegrationInstalls(c)
+	case folderlook.KindHomeProvider:
+		return c.Home != nil && !c.Home.ProviderReady
+	case folderlook.KindPlugin:
+		return c.Action != folderlook.ActionAlreadyHere
+	}
+	return false
+}
+
+// createsHome reports whether the Home step makes a new Home rather than
+// joining the owner's.
+func createsHome(home folderlook.Candidate) bool {
+	if home.Home != nil {
+		return !home.Home.HomeExists
+	}
+	return home.Action != folderlook.ActionAlreadyHere
+}
+
+// hiresAgents reports whether the Home step hires any agent.
+func hiresAgents(home folderlook.Candidate) bool {
+	if home.Home == nil {
+		return createsHome(home)
+	}
+	return !home.Home.RolesKnown || len(home.Home.MissingRoles) > 0
 }
 
 // defaultReason says why Ori's own plan is shown rather than the agent's.
@@ -696,6 +893,12 @@ func planDigest(plan Plan) string {
 	}
 	for _, id := range plan.Selected {
 		lines = append(lines, personalassistant.FolderPlanLine{Kind: "selected", Name: id})
+	}
+	// The install block is what the button confirms (PRD FR21): a plan whose
+	// installs changed since the card was drawn is refused and redrawn.
+	for _, e := range plan.Installs {
+		lines = append(lines, personalassistant.FolderPlanLine{Kind: "install", Name: e.Step + "\x00" + e.Name + "\x00" + e.Version,
+			Detail: e.Publisher + "\x00" + e.SourceURL + "\x00" + e.Marketplace})
 	}
 	return personalassistant.FolderPlanDigest(lines)
 }

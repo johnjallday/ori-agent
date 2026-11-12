@@ -48,7 +48,8 @@ func TestSteps_CatalogAcrossStagesWithReadableHandles(t *testing.T) {
 	if steps[0].Name != "Music Production Home" || steps[4].Name != "a group" {
 		t.Fatalf("names = %q %q", steps[0].Name, steps[4].Name)
 	}
-	if steps[1].Title != "Connect REAPER tools to Albums" || steps[1].Why != "Lets the agent work with the REAPER songs here." {
+	// The application is on this Mac but its plugin is not: still an install.
+	if steps[1].Title != "Install REAPER tools and connect them to Albums" || steps[1].Why != "Lets the agent work with the REAPER songs here." {
 		t.Fatalf("integration step = %+v", steps[1])
 	}
 	if steps[2].Label != "Found by search · Skills" || steps[2].Title != "Add the skill Mix helper" {
@@ -85,6 +86,36 @@ func TestSteps_CatalogAcrossStagesWithReadableHandles(t *testing.T) {
 	}
 }
 
+func TestNameHandles_KeepsChipsOnlyForTheKeptSteps(t *testing.T) {
+	steps := []Step{{Handle: "group", Name: "a group"}, {Handle: "reaper-tools", Name: "REAPER tools"}}
+	got := NameHandles("Start with [group], then [reaper-tools] and [made-up].", steps, map[string]bool{"reaper-tools": true})
+	if got != "Start with a group, then [reaper-tools] and [made-up]." {
+		t.Fatalf("named = %q", got)
+	}
+}
+
+// The title rule (PRD FR23) follows the plugin's readiness, never the app check.
+func TestSteps_IntegrationTitleFollowsThePlugin(t *testing.T) {
+	song := foldermap.Facts{RootProject: &foldermap.Project{Shape: "audio", Format: "reaper", Marker: "*.rpp"}}
+	cases := []struct {
+		action, title, sentence string
+	}{
+		{ActionInstall, "Install REAPER tools and connect them to One Song", "REAPER is not on this Mac yet; the tools install anyway and work once it is."},
+		{ActionConnect, "Install REAPER tools and connect them to One Song", "REAPER is on this Mac; its Ori tools are not yet."},
+		{ActionAlreadyHere, "Connect REAPER tools to One Song", ""},
+	}
+	for _, tc := range cases {
+		c := Candidate{ID: "integration:ori_reaper", Kind: KindIntegration, Name: "REAPER tools", Action: tc.action, Required: true, App: "REAPER"}
+		steps := Steps("One Song", song, []Candidate{c})
+		if len(steps) != 1 || steps[0].Title != tc.title {
+			t.Fatalf("%s: steps = %+v", tc.action, steps)
+		}
+		if got := AppToolsSentence(c); got != tc.sentence {
+			t.Fatalf("%s: sentence = %q", tc.action, got)
+		}
+	}
+}
+
 func TestSteps_DumpAndSingleProject(t *testing.T) {
 	dump := Steps("Messy", foldermap.Facts{Dump: true, RootLooseFiles: 36, RootLooseKinds: 6},
 		RequiredCandidates(foldermap.Facts{Dump: true}, Readiness{}))
@@ -97,6 +128,9 @@ func TestSteps_DumpAndSingleProject(t *testing.T) {
 	if len(single) != 1 || single[0].Title != "Install REAPER tools and connect them to One Song" ||
 		single[0].Why != "Lets the agent work with the REAPER songs here. REAPER is not on this Mac yet." {
 		t.Fatalf("single steps = %+v", single)
+	}
+	if got := AppToolsSentence(install[0]); got != "REAPER is not on this Mac yet; the tools install anyway and work once it is." {
+		t.Fatalf("install sentence = %q", got)
 	}
 	if none := Steps("Notes", foldermap.Facts{}, nil); len(none) != 0 {
 		t.Fatalf("nothing recognized offers steps: %+v", none)

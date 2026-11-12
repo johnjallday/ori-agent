@@ -239,6 +239,9 @@ func TestRunTurn_UnknownToolIsRefusedUnexecuted(t *testing.T) {
 }
 
 func TestSystemPrompt_AsksOnlyWhenAllowed(t *testing.T) {
+	if !strings.Contains(SystemPrompt("A", false), "Ori runs every tools step before a Home step") {
+		t.Fatal("the prompt must say the tools run before the Home step")
+	}
 	if strings.Contains(SystemPrompt("A", false), "Question:") || !strings.Contains(SystemPrompt("A", true), "Question:") {
 		t.Fatal("the Question section follows the host's gate")
 	}

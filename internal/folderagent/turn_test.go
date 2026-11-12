@@ -189,6 +189,12 @@ func TestTurn_ThePlanInTheAgentsWordsNamesTheStepsOriRuns(t *testing.T) {
 	// Set it up runs the agent's plan, Home and tools, as confirmed, with the
 	// tools first so the Home's listing can see them; the first step is working
 	// from the start.
+	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: plan.Digest}); !errors.Is(err, ErrPremiseOwed) {
+		t.Fatalf("set up before the premise = %v", err)
+	}
+	if _, err := h.svc.AnswerPremise(context.Background(), "u1", view.WorkspaceID, PremiseConfirmed); err != nil {
+		t.Fatal(err)
+	}
 	started, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: plan.Digest})
 	if err != nil {
 		t.Fatal(err)

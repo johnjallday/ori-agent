@@ -103,8 +103,10 @@ test('Explore a folder starts an agent and reports what it found without a model
   await expect(report.locator('[data-step="reaper-tools"] input')).toBeChecked();
   await expect(report.locator('.folder-agent-card__run-head')).toHaveText('Plan · 1 step');
   await expect(report.locator('.folder-agent-card__run')).not.toContainText("Ori's default plan");
+  // The primary button counts the plugins it installs: one while the REAPER
+  // tools are not in place (the sandbox's usual state).
   await expect(report.locator('[data-folder-agent-action]')).toHaveText([
-    'Set it up',
+    /^(Install 1 & set up|Set it up)$/,
     'Keep the folder as it is',
     'Look further'
   ]);
@@ -134,7 +136,7 @@ test('Explore a folder starts an agent and reports what it found without a model
   // Keep the folder as it is: the report is put aside, Set it up stays.
   await report.getByRole('button', { name: 'Keep the folder as it is' }).click();
   await expect(report.locator('[data-folder-agent-action]')).toHaveText([
-    'Set it up',
+    /^(Install 1 & set up|Set it up)$/,
     'Look further'
   ]);
 });

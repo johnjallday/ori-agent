@@ -210,6 +210,24 @@ func (r *SetupReceipt) Clean() *SetupReceipt {
 	return out
 }
 
+// Premise answers.
+const (
+	PremiseConfirmed     = "confirmed"
+	PremiseSomethingElse = "something_else"
+)
+
+// PremiseAnswer is the owner's answer to the premise, for the Home provider
+// whose kind it named. A later look that recognises a different provider's
+// kind asks again (PRD FR9).
+type PremiseAnswer struct {
+	Answer   string    `json:"answer"`
+	Provider string    `json:"provider"`
+	At       time.Time `json:"at"`
+	// Relooked is set once a look finished after a "something else" answer:
+	// the report is then shown again, without the Home or installs ticked.
+	Relooked bool `json:"relooked,omitempty"`
+}
+
 // Record is one folder workspace's state.
 type Record struct {
 	// Current trusted identity is projected at runtime, never persisted.
@@ -255,6 +273,17 @@ type Record struct {
 	GoalAnswer string `json:"goal_answer,omitempty"`
 	// Failure is the plain sentence a failed look shows.
 	Failure string `json:"failure,omitempty"`
+
+	// AsksPremise is set on every record created since the premise shipped. A
+	// record without it predates the question and is never asked (PRD FR11):
+	// its owner has already seen the card.
+	AsksPremise bool `json:"asks_premise,omitempty"`
+	// FedFromHome is the Home provider key of the Home the folder was fed from
+	// inside; empty when it was fed from anywhere else (PRD FR8).
+	FedFromHome string `json:"fed_from_home,omitempty"`
+	// Premise is the owner's answer to "This looks like a <kind> folder";
+	// nil while unanswered.
+	Premise *PremiseAnswer `json:"premise,omitempty"`
 
 	Revision  int       `json:"revision"`
 	CreatedAt time.Time `json:"created_at"`

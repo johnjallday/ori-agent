@@ -3751,6 +3751,12 @@ a.quest-title:focus-visible {
   padding-top: 1px;
 }
 
+/* A step's label and its "Installs 1 plugin" marker are small chips, not
+   rows: they keep their own width in the step's grid. */
+.folder-agent-card__line-body > .folder-agent-card__tool-label {
+  justify-self: start;
+}
+
 .folder-agent-card__line-state {
   padding-top: 2px;
   white-space: nowrap;
@@ -3851,6 +3857,64 @@ a.quest-title:focus-visible {
   font-size: 11px;
 }
 
+/* The install block (confirm-and-visible-installs FR13–FR19): one row per
+   plugin, wrapping as name and version; where it comes from; what it gives. */
+.folder-agent-card__installs {
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.folder-agent-card__install-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-agent-card__install {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--hc-line, var(--cozy-line));
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+
+.folder-agent-card__install-head,
+.folder-agent-card__install-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+}
+
+.folder-agent-card__install-version,
+.folder-agent-card__install-source {
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__install-sep {
+  margin: 0 -2px;
+}
+
+.folder-agent-card__install-link {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.folder-agent-card__install-marker {
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+}
+
+.folder-agent-card__install[data-state="working"] .folder-agent-card__line-state {
+  color: var(--hc-signal, var(--cozy-moss));
+}
+
+.folder-agent-card__install[data-state="failed"] .folder-agent-card__line-state,
 .folder-agent-card__line[data-state="failed"] .folder-agent-card__line-state,
 .folder-agent-card__failure,
 .folder-agent-card__error {

@@ -17,6 +17,7 @@ import {
   formatFolderAgentDuration,
   tickFolderAgentClocks,
   folderAgentReportView,
+  folderAgentSetUpLabel,
   folderAgentTileLine,
   mountWorkspaceFolderAgent,
   mountFolderAgentChoice,
@@ -1255,6 +1256,37 @@ test("the agent's plan shows in its words; Ori's default says why", () => {
     ['true', 'false']
   );
   assert.equal(text(card, '.folder-agent-card__run-head'), 'Plan · 1 step');
+  // No reorder: no note under the words.
+  assert.equal(card.querySelector('.folder-agent-card__degraded'), null);
+
+  // Ori ran the tools ahead of the agent's order: one muted line under its words.
+  const reordered = folderAgentReportView(
+    reported({
+      model_sentence: '',
+      tools_sentence: '',
+      plan: {
+        digest: 'r',
+        runnable: true,
+        source: 'agent',
+        selected: ['reaper-tools'],
+        words: 'Connect REAPER tools first.',
+        reorder_note: 'Ori runs the tools first, so the Home can list what they can open.',
+        steps,
+        lines: []
+      }
+    })
+  );
+  const reorderedRun = renderFolderAgentReport(reordered, stubDocument(), {}).querySelector(
+    '.folder-agent-card__run'
+  );
+  assert.deepEqual(
+    reorderedRun.children.slice(0, 3).map(node => node.className),
+    ['folder-agent-card__heading', 'folder-agent-card__words', 'folder-agent-card__degraded']
+  );
+  assert.equal(
+    text(reorderedRun, '.folder-agent-card__degraded'),
+    'Ori runs the tools first, so the Home can list what they can open.'
+  );
 
   const fallback = folderAgentReportView(
     reported({
@@ -1918,5 +1950,446 @@ test('ordinary reports do not acquire an inbox policy or project-folder action',
   assert.equal(
     card.querySelectorAll('a').some(node => node.textContent === 'Explore a project folder…'),
     false
+  );
+});
+
+// The install block (confirm-and-visible-installs FR13–FR22): the plugins the
+// ticked steps install, a marker beside each step that installs, and a
+// button that says how many it installs.
+const installSteps = chosen => [
+  {
+    handle: 'reaper-tools',
+    kind: 'integration',
+    name: 'REAPER tools',
+    title: 'Install REAPER tools and connect them to Ori Music Demo',
+    chosen: chosen.includes('reaper-tools')
+  },
+  {
+    handle: 'music-production-home',
+    kind: 'home',
+    name: 'Music Production Home',
+    title: 'Create your Music Production Home and put Ori Music Demo on its shelf (8 songs)',
+    chosen: chosen.includes('music-production-home')
+  }
+];
+const reaperInstall = {
+  step: 'reaper-tools',
+  line: 'integration',
+  name: 'REAPER tools',
+  version: '0.9.1',
+  publisher: 'Ori',
+  source_label: 'johnjallday/reaper-plugin',
+  source_url: 'https://github.com/johnjallday/reaper-plugin',
+  why: 'Lets the agent work with the REAPER songs here.',
+  app_sentence: 'REAPER is on this Mac; its Ori tools are not yet.'
+};
+const providerInstall = {
+  step: 'music-production-home',
+  line: 'provider',
+  name: 'Music Project Management',
+  publisher: 'Ori',
+  source_label: 'johnjallday/music-project-management',
+  source_url: 'https://github.com/johnjallday/music-project-management',
+  why: 'Provides your Music Production Home.'
+};
+const installPlan = chosen => ({
+  digest: chosen.join('+'),
+  runnable: chosen.length > 0,
+  source: 'default',
+  selected: chosen,
+  steps: installSteps(chosen),
+  installs: [
+    chosen.includes('reaper-tools') ? reaperInstall : null,
+    chosen.includes('music-production-home') ? providerInstall : null
+  ].filter(Boolean),
+  lines: [
+    chosen.includes('reaper-tools')
+      ? { kind: 'integration', name: 'Installs REAPER tools', step: 'reaper-tools' }
+      : null,
+    chosen.includes('reaper-tools')
+      ? { kind: 'workspace', name: 'Connects REAPER tools to Ori Music Demo', step: 'reaper-tools' }
+      : null,
+    chosen.includes('music-production-home')
+      ? {
+          kind: 'provider',
+          name: 'Installs Music Project Management',
+          step: 'music-production-home'
+        }
+      : null,
+    chosen.includes('music-production-home')
+      ? { kind: 'home', name: 'Creates your Music Production Home', step: 'music-production-home' }
+      : null,
+    { kind: 'folder', name: 'Nothing in Ori Music Demo is moved, copied or read.' }
+  ].filter(Boolean)
+});
+const installCard = (chosen, options = {}) =>
+  renderFolderAgentReport(
+    folderAgentReportView(
+      reported({ model_sentence: '', tools_sentence: '', plan: installPlan(chosen) })
+    ),
+    stubDocument(),
+    options
+  );
+
+test('the button says how many plugins it installs: Set it up at none', () => {
+  assert.equal(folderAgentSetUpLabel({ installs: [] }), 'Set it up');
+  assert.equal(folderAgentSetUpLabel(null), 'Set it up');
+  assert.equal(folderAgentSetUpLabel({ installs: [{}] }), 'Install 1 & set up');
+  assert.equal(folderAgentSetUpLabel({ installs: [{}, {}] }), 'Install 2 & set up');
+  const view = folderAgentReportView(
+    reported({ model_sentence: '', tools_sentence: '', plan: installPlan(['reaper-tools']) })
+  );
+  assert.deepEqual(
+    view.actions.map(a => a.label),
+    ['Install 1 & set up', 'Keep the folder as it is', 'Look further']
+  );
+  const nothingToInstall = folderAgentReportView(
+    reported({
+      model_sentence: '',
+      tools_sentence: '',
+      plan: { ...installPlan(['reaper-tools']), installs: [] }
+    })
+  );
+  assert.equal(nothingToInstall.actions[0].label, 'Set it up');
+});
+
+test('the install block lists each plugin with its release, source and why; no block at none', () => {
+  const card = installCard(['reaper-tools', 'music-production-home']);
+  const block = card.querySelector('.folder-agent-card__installs');
+  assert.equal(text(block, '.folder-agent-card__heading'), 'Downloads and installs 2 plugins');
+  const rows = block.querySelectorAll('.folder-agent-card__install');
+  assert.deepEqual(
+    rows.map(row => [row.dataset.step, text(row, '.folder-agent-card__line-name')]),
+    [
+      ['reaper-tools', 'REAPER tools'],
+      ['music-production-home', 'Music Project Management']
+    ]
+  );
+  // Name and version; a version the host does not know yet says so.
+  assert.equal(text(rows[0], '.folder-agent-card__install-version'), '0.9.1');
+  assert.equal(text(rows[1], '.folder-agent-card__install-version'), 'latest reviewed release');
+  // Reviewed release, the publisher, the source in a new tab, and Plugins.
+  const links = rows[0].querySelectorAll('a');
+  assert.deepEqual(
+    links.map(a => [a.textContent, a.href, a.target || '']),
+    [
+      ['johnjallday/reaper-plugin', 'https://github.com/johnjallday/reaper-plugin', '_blank'],
+      ['Plugins', '/plugins', '']
+    ]
+  );
+  assert.equal(links[0].rel, 'noopener noreferrer');
+  assert.equal(text(rows[0], '.folder-agent-card__install-review'), 'Reviewed release');
+  assert.equal(text(rows[0], '.folder-agent-card__install-publisher'), 'Ori');
+  assert.deepEqual(
+    rows[0].querySelectorAll('.folder-agent-card__line-detail').map(n => n.textContent),
+    [
+      'Lets the agent work with the REAPER songs here.',
+      'REAPER is on this Mac; its Ori tools are not yet.'
+    ]
+  );
+  // No state before a run.
+  assert.equal(rows[0].dataset.state, undefined);
+  assert.equal(rows[0].querySelector('.folder-agent-card__line-state'), null);
+  // The install lines are not repeated among the steps' actions; each step
+  // that installs carries a marker beside its title.
+  assert.deepEqual(
+    card.querySelectorAll('.folder-agent-card__action-name').map(n => n.textContent),
+    ['Connects REAPER tools to Ori Music Demo', 'Creates your Music Production Home']
+  );
+  assert.deepEqual(
+    card.querySelectorAll('.folder-agent-card__install-marker').map(n => n.textContent),
+    ['Installs 1 plugin', 'Installs 1 plugin']
+  );
+  // The block sits between the steps and the assurance note, above the buttons.
+  const run = card.querySelector('.folder-agent-card__run');
+  const kinds = run.children.map(n => n.className.split(' ')[0]);
+  assert.ok(
+    kinds.indexOf('folder-agent-card__plan') < kinds.indexOf('folder-agent-card__installs')
+  );
+  assert.ok(
+    kinds.indexOf('folder-agent-card__installs') < kinds.indexOf('folder-agent-card__line')
+  );
+
+  assert.equal(installCard([]).querySelector('.folder-agent-card__installs'), null);
+});
+
+test('a search add-on reads Found by search with its marketplace in place of the review', () => {
+  const plan = {
+    ...installPlan([]),
+    runnable: true,
+    selected: ['mix-kit'],
+    steps: [
+      { handle: 'mix-kit', kind: 'add_on', name: 'Mix Kit', title: 'Install Mix Kit', chosen: true }
+    ],
+    installs: [
+      {
+        step: 'mix-kit',
+        line: 'add_on',
+        name: 'Mix Kit',
+        search: true,
+        marketplace: 'Community',
+        why: 'Mixes.'
+      }
+    ],
+    lines: [{ kind: 'add_on', name: 'Installs Mix Kit · found by search', step: 'mix-kit' }]
+  };
+  const card = renderFolderAgentReport(
+    folderAgentReportView(reported({ model_sentence: '', tools_sentence: '', plan })),
+    stubDocument(),
+    {}
+  );
+  const row = card.querySelector('.folder-agent-card__install');
+  assert.equal(text(row, '.folder-agent-card__tool-label'), 'Found by search · Community');
+  assert.equal(row.querySelector('.folder-agent-card__install-review'), null);
+  assert.deepEqual(
+    row.querySelectorAll('a').map(a => a.textContent),
+    ['Plugins']
+  );
+});
+
+test('unticking a step updates the block, the markers and the button from the same re-plan', async () => {
+  const requests = [];
+  const fetchImpl = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    requests.push(body);
+    return { ok: true, status: 200, json: async () => ({ plan: installPlan(body.selected) }) };
+  };
+  const card = installCard(['reaper-tools', 'music-production-home'], { fetchImpl });
+  const setUp = card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'set_up');
+  assert.equal(setUp.textContent, 'Install 2 & set up');
+  const home = card
+    .querySelectorAll('input')
+    .find(b => b.dataset.stepHandle === 'music-production-home');
+  home.checked = false;
+  await home.listeners.change();
+  assert.deepEqual(requests, [{ selected: ['reaper-tools'] }]);
+  assert.equal(
+    text(card.querySelector('.folder-agent-card__installs'), '.folder-agent-card__heading'),
+    'Downloads and installs 1 plugin'
+  );
+  assert.equal(card.querySelectorAll('.folder-agent-card__install').length, 1);
+  assert.equal(card.querySelectorAll('.folder-agent-card__install-marker').length, 1);
+  assert.equal(setUp.textContent, 'Install 1 & set up');
+  home.checked = true;
+  await home.listeners.change();
+  assert.equal(setUp.textContent, 'Install 2 & set up');
+  assert.equal(card.querySelectorAll('.folder-agent-card__install').length, 2);
+});
+
+test('during and after a run each install row shows its state from the run line', () => {
+  const plan = installPlan(['reaper-tools', 'music-production-home']);
+  const runCard = (state, status, lines) =>
+    renderFolderAgentReport(
+      folderAgentReportView(
+        reported({
+          state,
+          actions: [],
+          model_sentence: '',
+          tools_sentence: '',
+          plan,
+          setup: { status, started_at: '2026-11-11T10:00:00Z', lines }
+        })
+      ),
+      stubDocument(),
+      {}
+    );
+  const states = card =>
+    card
+      .querySelectorAll('.folder-agent-card__install')
+      .map(row => [row.dataset.state, text(row, '.folder-agent-card__line-state')]);
+  const running = runCard('setting_up', 'running', [
+    {
+      kind: 'integration',
+      name: 'Installs REAPER tools',
+      step: 'reaper-tools',
+      state: 'working',
+      progress: 'Downloading REAPER 0.9.1'
+    },
+    { kind: 'workspace', name: 'Connects REAPER tools', step: 'reaper-tools', state: 'waiting' },
+    {
+      kind: 'provider',
+      name: 'Installs Music Project Management',
+      step: 'music-production-home',
+      state: 'waiting'
+    }
+  ]);
+  assert.deepEqual(states(running), [
+    ['working', 'Downloading REAPER 0.9.1'],
+    ['waiting', 'Waiting']
+  ]);
+  const ended = runCard('set_up', 'stopped', [
+    {
+      kind: 'integration',
+      name: 'Installs REAPER tools',
+      step: 'reaper-tools',
+      state: 'done',
+      progress: 'Installed REAPER 0.9.1'
+    },
+    {
+      kind: 'provider',
+      name: 'Installs Music Project Management',
+      step: 'music-production-home',
+      state: 'failed',
+      progress: 'The download did not verify'
+    }
+  ]);
+  assert.deepEqual(states(ended), [
+    ['done', 'Installed 0.9.1'],
+    ['failed', 'Failed: The download did not verify']
+  ]);
+});
+
+// The premise (confirm-and-visible-installs FR1–FR6, FR12).
+const askedPremise = {
+  state: 'asked',
+  sentence: 'This looks like a music production folder: 7 REAPER songs and 1 Logic Pro song.',
+  confirm: 'Manage them as songs',
+  other: "It's something else"
+};
+
+test('while the premise is asked the card shows only it, with two real buttons in order', async () => {
+  const view = folderAgentReportView(
+    reported({
+      what_it_is: 'A music demo folder.',
+      premise: askedPremise,
+      plan: installPlan(['reaper-tools', 'music-production-home'])
+    })
+  );
+  const actions = [];
+  const card = renderFolderAgentReport(view, stubDocument(), {
+    onAction: (id, button) => actions.push([id, button.textContent])
+  });
+  const premise = card.querySelector('.folder-agent-card__premise');
+  assert.deepEqual(
+    premise.children.map(node => node.className),
+    ['folder-agent-card__premise-text', 'folder-agent-card__actions']
+  );
+  assert.equal(text(premise, '.folder-agent-card__premise-text'), askedPremise.sentence);
+  const buttons = card.querySelectorAll('button');
+  assert.deepEqual(
+    buttons.map(b => [b.textContent, b.type, b.className.includes('btn-primary')]),
+    [
+      ['Manage them as songs', 'button', true],
+      ["It's something else", 'button', false]
+    ]
+  );
+  // No recommendation, plan, install block, report buttons or agent words.
+  for (const hidden of [
+    '.folder-agent-card__run',
+    '.folder-agent-card__installs',
+    '.folder-agent-card__what',
+    '.folder-agent-card__degraded',
+    '.folder-agent-card__facts'
+  ])
+    assert.equal(card.querySelector(hidden), null, hidden);
+  assert.equal(
+    card.querySelectorAll('a').some(a => a.textContent === 'Open Ori Music Demo'),
+    true
+  );
+  await buttons[0].listeners.click();
+  await buttons[1].listeners.click();
+  assert.deepEqual(actions, [
+    ['premise_confirm', 'Manage them as songs'],
+    ['premise_other', "It's something else"]
+  ]);
+});
+
+test('the premise answers post to the premise route with the answer', async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push([url, JSON.parse(init.body)]);
+    return { ok: true, status: 200, json: async () => ({ folder_agent: null }) };
+  };
+  const view = { workspaceID: 'ws-1' };
+  await postFolderAgentAction(view, 'premise_confirm', fetchImpl);
+  await postFolderAgentAction(view, 'premise_other', fetchImpl);
+  assert.deepEqual(calls, [
+    ['/api/personal-assistant/folder-agent/ws-1/premise', { answer: 'confirmed' }],
+    ['/api/personal-assistant/folder-agent/ws-1/premise', { answer: 'something_else' }]
+  ]);
+});
+
+test('confirmed, the premise is one plain line in place of the agent sentence and the plan shows', () => {
+  const view = folderAgentReportView(
+    reported({
+      what_it_is: 'A music demo folder.',
+      model_sentence: '',
+      tools_sentence: '',
+      premise: {
+        state: 'confirmed',
+        sentence: 'A music production folder: 7 REAPER songs and 1 Logic Pro song.'
+      },
+      plan: installPlan(['reaper-tools'])
+    })
+  );
+  const card = renderFolderAgentReport(view, stubDocument(), {});
+  assert.equal(
+    text(card, '.folder-agent-card__premise-text'),
+    'A music production folder: 7 REAPER songs and 1 Logic Pro song.'
+  );
+  assert.equal(card.querySelector('.folder-agent-card__premise'), null);
+  assert.equal(card.querySelector('.folder-agent-card__what'), null);
+  assert.equal(card.querySelector('.folder-agent-card__facts'), null);
+  assert.ok(card.querySelector('.folder-agent-card__installs'));
+  assert.equal(
+    card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'set_up').textContent,
+    'Install 1 & set up'
+  );
+});
+
+test("after It's something else the card offers a plain workspace or the owner's words", async () => {
+  const view = folderAgentReportView(
+    reported({
+      actions: ['keep', 'look_further'],
+      plan: null,
+      premise: {
+        state: 'something_else',
+        sentence: 'Nothing is installed or created.',
+        withdrawn: true
+      }
+    })
+  );
+  const actions = [];
+  const card = renderFolderAgentReport(view, stubDocument(), {
+    onAction: (id, _button, extra) => actions.push([id, extra])
+  });
+  assert.equal(text(card, '.folder-agent-card__premise-text'), 'Nothing is installed or created.');
+  assert.equal(card.querySelector('.folder-agent-card__run'), null);
+  const field = card.querySelector('input');
+  assert.equal(field.attributes['aria-label'], 'Tell Ori Music Demo Manager what it is');
+  const buttons = card.querySelectorAll('button');
+  assert.deepEqual(
+    buttons.map(b => b.textContent),
+    ['Look again', 'Keep it as a plain workspace']
+  );
+  // An empty field asks nothing; a typed one looks again with it as the hint.
+  await buttons[0].listeners.click();
+  field.value = 'Lecture recordings';
+  await buttons[0].listeners.click();
+  await buttons[1].listeners.click();
+  assert.deepEqual(actions, [
+    ['look_further', { hint: 'Lecture recordings' }],
+    ['keep', undefined]
+  ]);
+  // Kept: only the field remains.
+  const kept = renderFolderAgentReport(
+    folderAgentReportView(
+      reported({
+        state: 'kept',
+        actions: ['look_further'],
+        plan: null,
+        premise: {
+          state: 'something_else',
+          sentence: 'Nothing is installed or created.',
+          withdrawn: true
+        }
+      })
+    ),
+    stubDocument(),
+    {}
+  );
+  assert.deepEqual(
+    kept.querySelectorAll('button').map(b => b.textContent),
+    ['Look again']
   );
 });

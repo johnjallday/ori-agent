@@ -88,7 +88,10 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 			homeDefault = step.Default
 		case KindIntegration:
 			step.Kind = StepIntegration
-			if c.Action == ActionInstall {
+			// The title follows the plugin, not the application: the tools are
+			// downloaded and installed unless they are already in place, even
+			// when the application itself is on this Mac (PRD FR23).
+			if IntegrationInstalls(c) {
 				step.Title = fmt.Sprintf("Install %s and connect them to %s", c.Name, folderName)
 			} else {
 				step.Title = fmt.Sprintf("Connect %s to %s", c.Name, folderName)
@@ -219,6 +222,24 @@ func PlanWords(text string, steps []Step) string {
 	out = spaceRun.ReplaceAllString(out, " ")
 	out = spaceBeforePunct.ReplaceAllString(out, "$1")
 	return strings.TrimSpace(out)
+}
+
+// NameHandles writes each offered step's handle that keep does not hold as
+// the step's name, leaving the kept handles (the card's chips) and any other
+// token as they are. A finished card lists only the steps that ran; the
+// agent's words still name the others.
+func NameHandles(text string, steps []Step, keep map[string]bool) string {
+	names := make(map[string]string, len(steps))
+	for _, s := range steps {
+		names[s.Handle] = s.Name
+	}
+	return handlePattern.ReplaceAllStringFunc(text, func(token string) string {
+		handle := handlePattern.FindStringSubmatch(token)[1]
+		if name, ok := names[handle]; ok && !keep[handle] {
+			return name
+		}
+		return token
+	})
 }
 
 var handleNoise = regexp.MustCompile(`[^a-z0-9]+`)

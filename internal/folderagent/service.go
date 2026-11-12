@@ -183,6 +183,7 @@ type Deps struct {
 	Workspaces Workspaces
 	Tickets    Tickets
 	Setups     Setups
+	Homes      Homes
 	Now        func() time.Time
 	// KnownFolderRoot shares the chooser's trusted configured-home resolver.
 	KnownFolderRoot func(string) (string, error)
@@ -204,6 +205,16 @@ type choice struct {
 	userID  string
 	path    string
 	expires time.Time
+	// fedFromHome is the Home provider key of the Home the folder was chosen
+	// from inside, resolved on the server; empty otherwise.
+	fedFromHome string
+}
+
+// Homes tells which reviewed Home provider a workspace is a Home of, for the
+// feed origin (PRD FR8). "" when the workspace is not one of the user's
+// Homes, or its provider is unknown.
+type Homes interface {
+	HomeProviderOf(ctx context.Context, userID, workspaceID string) string
 }
 
 // NewService builds the service.
@@ -236,12 +247,24 @@ type Chosen struct {
 // Choose resolves the folder and issues a token for Start. Nothing is
 // created and nothing is read; a cancelled dialog returns nil.
 func (s *Service) Choose(ctx context.Context, userID string, c personalassistant.FolderChoice) (*Chosen, error) {
+	return s.ChooseFrom(ctx, userID, c, "")
+}
+
+// ChooseFrom is Choose from a workspace page: when that workspace is one of
+// the owner's Homes, the folder is recorded as fed from inside it, and the
+// premise is not asked for the kind that Home holds (PRD FR8). The page names
+// the workspace; the server decides whether it is a Home.
+func (s *Service) ChooseFrom(ctx context.Context, userID string, c personalassistant.FolderChoice, fromWorkspaceID string) (*Chosen, error) {
 	if s == nil || s.deps.Folders == nil {
 		return nil, ErrUnavailable
 	}
 	path, chosen, err := s.deps.Folders.ChooseFolder(ctx, userID, c)
 	if err != nil || !chosen {
 		return nil, err
+	}
+	fedFromHome := ""
+	if from := strings.TrimSpace(fromWorkspaceID); from != "" && s.deps.Homes != nil {
+		fedFromHome = s.deps.Homes.HomeProviderOf(ctx, userID, from)
 	}
 	token := newToken()
 	s.mu.Lock()
@@ -251,7 +274,7 @@ func (s *Service) Choose(ctx context.Context, userID string, c personalassistant
 			delete(s.choices, key)
 		}
 	}
-	s.choices[token] = choice{userID: userID, path: path, expires: now.Add(choiceTTL)}
+	s.choices[token] = choice{userID: userID, path: path, expires: now.Add(choiceTTL), fedFromHome: fedFromHome}
 	s.mu.Unlock()
 	name := filepath.Base(path)
 	return &Chosen{
@@ -262,14 +285,14 @@ func (s *Service) Choose(ctx context.Context, userID string, c personalassistant
 	}, nil
 }
 
-func (s *Service) takeChoice(userID, token string) (string, error) {
+func (s *Service) takeChoice(userID, token string) (choice, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	held, ok := s.choices[strings.TrimSpace(token)]
 	if !ok || held.userID != userID || s.deps.Now().After(held.expires) {
-		return "", ErrChoiceLost
+		return choice{}, ErrChoiceLost
 	}
-	return held.path, nil
+	return held, nil
 }
 
 func (s *Service) dropChoice(token string) {
@@ -285,10 +308,11 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string, hire H
 	if s == nil || s.deps.Store == nil || s.deps.Workspaces == nil || s.deps.Tickets == nil {
 		return View{}, ErrUnavailable
 	}
-	path, err := s.takeChoice(userID, token)
+	held, err := s.takeChoice(userID, token)
 	if err != nil {
 		return View{}, err
 	}
+	path := held.path
 	brief, err = personalassistant.NormalizeFolderBrief(brief)
 	if err != nil {
 		return View{}, err
@@ -317,6 +341,7 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string, hire H
 	rec := &Record{
 		WorkspaceID: created.ID, OwnerUserID: userID, FolderName: folder, WorkspaceName: created.Name,
 		AgentName: created.AgentName, TicketID: ticketID, Brief: brief, State: StateLooking,
+		AsksPremise: true, FedFromHome: held.fedFromHome,
 	}
 	if err := s.deps.Store.Create(rec); err != nil {
 		return View{}, err
@@ -487,6 +512,11 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 		r.ExistingMembers = existing
 		r.Progress = Progress{Entries: m.Entries, FoldersLeft: len(facts.Unopened)}
 		r.State, r.Failure = StateReported, ""
+		// A look after "something else" brings the report back, without the
+		// Home or installs ticked (PRD FR7).
+		if r.Premise != nil && r.Premise.Answer == PremiseSomethingElse {
+			r.Premise.Relooked = true
+		}
 		return nil
 	})
 	if err != nil {
@@ -903,6 +933,12 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 	if plan.Digest != planDigest {
 		return View{}, personalassistant.ErrFolderPlanChanged
 	}
+	// Nothing runs until the owner confirmed what the folder is (PRD FR10),
+	// and nothing is recommended after "something else" until a look with
+	// their words followed it (PRD FR6).
+	if premiseOwed(current) || premiseWithdrawn(current) {
+		return View{}, ErrPremiseOwed
+	}
 	if !plan.Runnable {
 		if current.RootPolicy != folderlook.RootOrdinary {
 			return View{}, personalassistant.ErrFolderPlanChanged
@@ -915,6 +951,9 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 	rec, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
 		if !setUpAllowed(r) {
 			return ErrWrongState
+		}
+		if e := s.effectiveRecord(r); premiseOwed(e) || premiseWithdrawn(e) {
+			return ErrPremiseOwed
 		}
 		if current.RootPolicy != folderlook.RootOrdinary {
 			// Persist the choices actually confirmed, only on this mutation.

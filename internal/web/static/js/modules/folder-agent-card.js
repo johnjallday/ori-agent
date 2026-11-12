@@ -22,7 +22,10 @@ const ACTION_PATHS = {
   look_further: 'look-further',
   // The goal offer's answers (Use this goal / Save after Edit, and Not now).
   use_goal: 'goal',
-  dismiss_goal: 'goal'
+  dismiss_goal: 'goal',
+  // The premise's answers (Manage them as …, and It's something else).
+  premise_confirm: 'premise',
+  premise_other: 'premise'
 };
 
 export function isFolderAgentKind(kind) {
@@ -169,6 +172,9 @@ export function folderAgentReportView(view) {
       .filter(folder => folder?.name && folder?.ref)
       .map(folder => ({ name: String(folder.name), ref: String(folder.ref) })),
     leftOut: view.left_out && typeof view.left_out === 'object' ? { ...view.left_out } : {},
+    // What the folder is, in the host's words, and the owner's answer
+    // (confirm-and-visible-installs FR1–FR6); null when it is not asked.
+    premise: premiseView(view.premise),
     nextTicket: view.next_ticket?.title
       ? { title: String(view.next_ticket.title), started: Boolean(view.next_ticket.started) }
       : null,
@@ -208,6 +214,10 @@ export function folderAgentReportView(view) {
     out.plan = planView(view.plan);
     // Set it up waits for a plan that can run; the card says why it cannot.
     if (!out.plan.runnable) out.actions = out.actions.filter(a => a.id !== 'set_up');
+    // The button says what it confirms: how many plugins it installs.
+    out.actions = out.actions.map(a =>
+      a.id === 'set_up' ? { ...a, label: folderAgentSetUpLabel(out.plan) } : a
+    );
   }
   if (view.setup) {
     out.setup = {
@@ -220,6 +230,22 @@ export function folderAgentReportView(view) {
     };
   }
   return out;
+}
+
+function premiseView(raw) {
+  if (!raw?.state || !raw?.sentence) return null;
+  return {
+    state: String(raw.state),
+    sentence: String(raw.sentence),
+    confirm: String(raw.confirm || ''),
+    other: String(raw.other || ''),
+    withdrawn: Boolean(raw.withdrawn)
+  };
+}
+
+// The premise is asked: the card shows only it until the owner answers.
+export function folderAgentPremiseAsked(view) {
+  return view?.premise?.state === 'asked' && !view?.setup;
 }
 
 // A workspace route the receipt may link: the app's own workspace pages only.
@@ -723,6 +749,9 @@ function renderPlan(
       const verb = phase === 'plan' ? 'recommends' : 'recommended';
       section.append(el(doc, 'h4', 'folder-agent-card__heading', `${view.agent} ${verb}`));
       section.append(renderWords(doc, plan));
+      // Ori ran the tools ahead of the agent's order; its words stand as written.
+      if (plan.reorderNote)
+        section.append(el(doc, 'p', 'folder-agent-card__degraded', plan.reorderNote));
     } else if (phase === 'plan') {
       section.append(el(doc, 'h4', 'folder-agent-card__heading', 'Steps'));
       if (plan.defaultReason)
@@ -731,6 +760,16 @@ function renderPlan(
     }
   }
   const { rows, notes } = groupActions(lines, steps);
+  const installs = plan?.installs || [];
+  // An install the block lists is not repeated among its step's actions
+  // (PRD FR18); its line still counts toward the step's state, which the run
+  // moves. A step that installs carries a marker beside its title instead.
+  const installsOf = new Map();
+  installs.forEach(entry => {
+    installsOf.set(entry.step, (installsOf.get(entry.step) || 0) + 1);
+  });
+  const covered = line =>
+    installs.some(entry => entry.step === line.step && entry.line === line.kind);
   const chosen = new Set(rows.map(row => row.handle).filter(Boolean));
   // While choosing, a chosen step whose lines carry no step yet still has its
   // row. From Set it up on, the run's own lines are the steps: the plan's
@@ -866,14 +905,26 @@ function renderPlan(
       body.append(el(doc, 'span', 'folder-agent-card__line-name', row.title));
     }
     if (row.label) body.append(el(doc, 'span', 'folder-agent-card__tool-label', row.label));
-    if (row.actions.length) {
+    const installing = isChosen ? installsOf.get(row.handle) || 0 : 0;
+    if (installing) {
+      const marker = el(
+        doc,
+        'span',
+        'folder-agent-card__tool-label folder-agent-card__install-marker',
+        `Installs ${installing} ${plural(installing, 'plugin', 'plugins')}`
+      );
+      body.append(marker);
+    }
+    const shown = row.actions.filter(action => !covered(action));
+    if (shown.length) {
       const actions = el(doc, 'span', 'folder-agent-card__actions-line');
-      row.actions.forEach((action, k) => {
+      shown.forEach((action, k) => {
         if (k) actions.append(el(doc, 'span', 'folder-agent-card__action-sep', ' · '));
         actions.append(renderAction(doc, action, now));
       });
       body.append(actions);
-    } else {
+    } else if (!row.actions.length) {
+      // A step whose every action is in the install block shows none here.
       if (row.detail) body.append(el(doc, 'span', 'folder-agent-card__line-detail', row.detail));
       // A row that is its own action shows its live words and time too.
       if (row.line && phase !== 'plan') {
@@ -908,6 +959,7 @@ function renderPlan(
     )
   );
   section.append(list);
+  if (installs.length) section.append(renderInstalls(doc, installs, lines, phase));
   notes.forEach(line => {
     const note = el(doc, 'p', 'folder-agent-card__line folder-agent-card__line--note');
     note.dataset.state = line.state || 'waiting';
@@ -919,6 +971,103 @@ function renderPlan(
   if (phase === 'plan' && view.toolsSentence)
     section.append(el(doc, 'p', 'folder-agent-card__degraded', view.toolsSentence));
   return section;
+}
+
+// installState is an install row's state from the run's line for it: the
+// line of its kind under its step. Before a run there is none.
+function installState(entry, lines, phase) {
+  if (phase === 'plan') return { state: '', words: '' };
+  const line = lines.find(l => l.step === entry.step && l.kind === entry.line);
+  const state = line?.state || 'waiting';
+  const progress = String(line?.progress || '');
+  switch (state) {
+    case 'working':
+      return { state, words: progress || 'Downloading' };
+    case 'done': {
+      // The runner's receipt words end with the installed version ("Installed
+      // <plugin> 0.9.1"); the row already names the plugin, so it shows only
+      // the version. A plugin that was already in place says Installed.
+      const version = progress.startsWith('Installed')
+        ? (progress.match(/(\d+\.\d+[\w.+-]*)$/) || [])[1]
+        : '';
+      return { state, words: version ? `Installed ${version}` : 'Installed' };
+    }
+    case 'failed':
+      return { state, words: progress ? `Failed: ${progress}` : 'Failed' };
+  }
+  return { state: 'waiting', words: 'Waiting' };
+}
+
+// renderInstalls draws the install block (PRD FR13, FR14, FR19): one row per
+// plugin the plan downloads and installs, in run order. Name and version;
+// where it comes from with a link to its source and to Plugins; what it gives
+// the owner; where the application and its tools stand. While a run is under
+// way and after it, each row shows its state from the run's own line.
+function renderInstalls(doc, installs, lines, phase) {
+  const n = installs.length;
+  const block = el(doc, 'section', 'folder-agent-card__installs');
+  const heading = el(
+    doc,
+    'h4',
+    'folder-agent-card__heading',
+    `Downloads and installs ${n} ${plural(n, 'plugin', 'plugins')}`
+  );
+  block.append(heading);
+  const list = el(doc, 'ul', 'folder-agent-card__install-list');
+  installs.forEach(entry => {
+    const item = el(doc, 'li', 'folder-agent-card__install');
+    item.dataset.step = entry.step;
+    const { state, words } = installState(entry, lines, phase);
+    if (state) item.dataset.state = state;
+    const head = el(doc, 'span', 'folder-agent-card__install-head');
+    head.append(
+      el(doc, 'span', 'folder-agent-card__line-name', entry.name),
+      el(
+        doc,
+        'span',
+        'folder-agent-card__install-version',
+        entry.version || 'latest reviewed release'
+      )
+    );
+    if (words) head.append(el(doc, 'span', 'folder-agent-card__line-state', words));
+    const source = el(doc, 'span', 'folder-agent-card__install-source');
+    const part = node => {
+      if (source.children.length)
+        source.append(el(doc, 'span', 'folder-agent-card__install-sep', ' · '));
+      source.append(node);
+    };
+    if (entry.search) {
+      part(
+        el(
+          doc,
+          'span',
+          'folder-agent-card__tool-label',
+          entry.marketplace ? `Found by search · ${entry.marketplace}` : 'Found by search'
+        )
+      );
+    } else {
+      part(el(doc, 'span', 'folder-agent-card__install-review', 'Reviewed release'));
+      if (entry.publisher)
+        part(el(doc, 'span', 'folder-agent-card__install-publisher', entry.publisher));
+    }
+    if (entry.sourceURL) {
+      const link = el(doc, 'a', 'folder-agent-card__install-link', entry.sourceLabel || 'Source');
+      link.href = entry.sourceURL;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      part(link);
+    }
+    const plugins = el(doc, 'a', 'folder-agent-card__install-link', 'Plugins');
+    plugins.href = '/plugins';
+    part(plugins);
+    item.append(head, source);
+    if (entry.why) item.append(el(doc, 'span', 'folder-agent-card__line-detail', entry.why));
+    if (entry.appSentence)
+      item.append(el(doc, 'span', 'folder-agent-card__line-detail', entry.appSentence));
+    list.append(item);
+  });
+  block.append(list);
+  return block;
 }
 
 const HANDLE_PATTERN = /\[([a-z0-9][a-z0-9-]*)\]/g;
@@ -1080,7 +1229,11 @@ export function renderFolderAgentReport(
         again?.focus?.({ preventScroll: true });
       }
     }
-    if (setUpButton) setUpButton.disabled = !plan.runnable;
+    if (setUpButton) {
+      setUpButton.disabled = !plan.runnable;
+      // The label follows the install block (PRD FR16, FR21).
+      setUpButton.textContent = folderAgentSetUpLabel(plan);
+    }
   };
   if (!compact) card.append(el(doc, 'h3', 'folder-agent-card__title', view.title));
   if (view.state === 'looking' && compact) {
@@ -1099,20 +1252,101 @@ export function renderFolderAgentReport(
     if (view.nested) card.append(el(doc, 'p', 'folder-agent-card__note', view.nested));
     return card;
   }
+  const premise = view.premise;
+  const openLink = () => {
+    if (!view.route) return;
+    const open = el(doc, 'a', 'folder-agent-card__open', `Open ${view.workspace}`);
+    open.href = view.route;
+    card.append(open);
+  };
+  const errorLine = () => {
+    if (!error) return;
+    const alert = el(doc, 'p', 'folder-agent-card__error', error);
+    alert.setAttribute('role', 'alert');
+    card.append(alert);
+  };
+  if (folderAgentPremiseAsked(view)) {
+    // What the folder is comes first (FR1–FR4, FR12): the host's sentence and
+    // two real buttons, in that reading order. The recommendation, the plan,
+    // the install block and the report's buttons wait for the answer.
+    const ask = el(doc, 'section', 'folder-agent-card__premise');
+    ask.append(el(doc, 'p', 'folder-agent-card__premise-text', premise.sentence));
+    const answers = el(doc, 'div', 'folder-agent-card__actions');
+    [
+      ['premise_confirm', premise.confirm, 'btn btn-primary btn-sm'],
+      ['premise_other', premise.other, 'btn btn-sm folder-agent-card__secondary']
+    ].forEach(([id, label, className]) => {
+      const button = el(doc, 'button', className, label);
+      button.type = 'button';
+      button.dataset.folderAgentAction = id;
+      button.addEventListener('click', () => onAction?.(id, button));
+      answers.append(button);
+    });
+    ask.append(answers);
+    card.append(ask);
+    openLink();
+    errorLine();
+    return card;
+  }
+  if (premise?.withdrawn && !view.setup) {
+    // "It's something else" (FR6): nothing is recommended. A plain workspace,
+    // or the owner's own words for a fresh look.
+    card.append(el(doc, 'p', 'folder-agent-card__premise-text', premise.sentence));
+    const row = el(doc, 'div', 'folder-agent-card__answer');
+    const field = doc.createElement('input');
+    field.type = 'text';
+    field.maxLength = 200;
+    field.className = 'folder-agent-card__answer-input';
+    const label = `Tell ${view.agent} what it is`;
+    field.setAttribute('aria-label', label);
+    field.placeholder = label;
+    const again = el(doc, 'button', 'btn btn-sm folder-agent-card__secondary', 'Look again');
+    again.type = 'button';
+    again.dataset.folderAgentAction = 'look_again';
+    again.addEventListener('click', () => {
+      const hint = String(field.value || '').trim();
+      if (hint) onAction?.('look_further', again, { hint });
+    });
+    row.append(field, again);
+    if (view.actions.some(action => action.id === 'look_further')) card.append(row);
+    if (view.actions.some(action => action.id === 'keep')) {
+      const actions = el(doc, 'div', 'folder-agent-card__actions');
+      const keep = el(
+        doc,
+        'button',
+        'btn btn-sm folder-agent-card__secondary',
+        'Keep it as a plain workspace'
+      );
+      keep.type = 'button';
+      keep.dataset.folderAgentAction = 'keep';
+      keep.addEventListener('click', () => onAction?.('keep', keep));
+      actions.append(keep);
+      card.append(actions);
+    }
+    openLink();
+    errorLine();
+    return card;
+  }
   if (view.failure) card.append(el(doc, 'p', 'folder-agent-card__failure', view.failure));
   if (view.modelSentence)
     card.append(el(doc, 'p', 'folder-agent-card__degraded', view.modelSentence));
+  // Confirmed, the premise stays as one plain line in place of the agent's
+  // own sentence and the facts line (FR5; open question 1: hide it).
+  const premiseLine = premise?.state === 'confirmed';
+  if (premiseLine) card.append(el(doc, 'p', 'folder-agent-card__premise-text', premise.sentence));
   const leftOut = section =>
     view.leftOut[section]
       ? el(doc, 'p', 'folder-agent-card__degraded', view.leftOut[section])
       : null;
-  const whatItIs = view.whatItIs
-    ? el(doc, 'p', 'folder-agent-card__what', view.whatItIs)
-    : leftOut('what_it_is');
+  const whatItIs = premiseLine
+    ? null
+    : view.whatItIs
+      ? el(doc, 'p', 'folder-agent-card__what', view.whatItIs)
+      : leftOut('what_it_is');
   if (whatItIs) card.append(whatItIs);
   // The host's facts line stands in for the agent's sentence when there is
   // none; beside it, it would only repeat the counts.
-  if (view.facts && (!view.whatItIs || view.policyNote))
+  if (!premiseLine && view.facts && (!view.whatItIs || view.policyNote))
     card.append(el(doc, 'p', 'folder-agent-card__facts', view.facts));
   if (view.policyNote) card.append(el(doc, 'p', 'folder-agent-card__note', view.policyNote));
   if (view.exploreFolder) {
@@ -1354,6 +1588,20 @@ export async function fetchFolderAgent(workspaceID, fetchImpl = globalThis.fetch
   return response.ok ? payload?.folder_agent || null : null;
 }
 
+// A plugin's source link: a plain https URL only.
+function safeSourceURL(value) {
+  const url = String(value || '');
+  return /^https:\/\/[^\s"'<>\\]+$/.test(url) ? url : '';
+}
+
+// folderAgentSetUpLabel is the primary button's words for a plan (PRD FR20):
+// "Install N & set up" while the ticked steps install N plugins, else
+// "Set it up". Every surface that offers the action uses it.
+export function folderAgentSetUpLabel(plan) {
+  const n = plan?.installs?.length || 0;
+  return n > 0 ? `Install ${n} & set up` : ACTION_LABELS.set_up;
+}
+
 function planView(plan) {
   return {
     digest: String(plan.digest || ''),
@@ -1367,6 +1615,24 @@ function planView(plan) {
     wordsRaw: String(plan.words_raw || ''),
     excluded: String(plan.excluded || ''),
     defaultReason: String(plan.default_reason || ''),
+    reorderNote: String(plan.reorder_note || ''),
+    // The plugins the ticked steps download and install, in run order: the
+    // install block and the count on the button.
+    installs: (Array.isArray(plan.installs) ? plan.installs : [])
+      .map(entry => ({
+        step: String(entry?.step || ''),
+        line: String(entry?.line || ''),
+        name: String(entry?.name || ''),
+        version: String(entry?.version || ''),
+        publisher: String(entry?.publisher || ''),
+        sourceLabel: String(entry?.source_label || ''),
+        sourceURL: safeSourceURL(entry?.source_url),
+        search: Boolean(entry?.search),
+        marketplace: String(entry?.marketplace || ''),
+        why: String(entry?.why || ''),
+        appSentence: String(entry?.app_sentence || '')
+      }))
+      .filter(entry => entry.name && entry.step),
     // Every step Ori offered, chosen or not; the owner can tick any of them.
     steps: (Array.isArray(plan.steps) ? plan.steps : [])
       .map(step => ({
@@ -1426,6 +1692,8 @@ export async function postFolderAgentAction(
     const goal = String(extra?.goal || '').trim();
     body = goal ? { answer: 'use', goal } : { answer: 'use' };
   } else if (action === 'dismiss_goal') body = { answer: 'dismiss' };
+  else if (action === 'premise_confirm') body = { answer: 'confirmed' };
+  else if (action === 'premise_other') body = { answer: 'something_else' };
   const { ok, payload } = await post(url, body, fetchImpl);
   if (!ok) {
     return {

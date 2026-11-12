@@ -308,6 +308,39 @@ func TestStart_SingleSongIsTheToolsStageAndSetsUp(t *testing.T) {
 	}
 }
 
+// A plan whose installs changed between the card and Set it up is refused,
+// and the fresh view carries the new install block to confirm (PRD FR21).
+func TestSetUp_RefusesAPlanWhoseInstallsChanged(t *testing.T) {
+	h := newHarness(t, build(t, "Song.rpp"))
+	view := h.start(t, "")
+	shown, _ := h.svc.View(context.Background(), "u1", view.WorkspaceID)
+	if len(shown.Plan.Installs) != 1 || shown.Plan.Installs[0].Name != "REAPER tools" || shown.Plan.Installs[0].Version != "" {
+		t.Fatalf("installs shown = %+v", shown.Plan.Installs)
+	}
+	// The reviewed release moved on after the card was drawn.
+	if _, err := h.svc.deps.Store.Update(view.WorkspaceID, func(r *Record) error {
+		for i := range r.Candidates {
+			if r.Candidates[i].Kind == folderlook.KindIntegration {
+				r.Candidates[i].Release = &folderlook.ReleaseFacts{Version: "0.9.2", Publisher: "Ori"}
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: shown.Plan.Digest}); !errors.Is(err, personalassistant.ErrFolderPlanChanged) {
+		t.Fatalf("set up on the old installs = %v", err)
+	}
+	fresh, _ := h.svc.View(context.Background(), "u1", view.WorkspaceID)
+	if fresh.Plan.Digest == shown.Plan.Digest || len(fresh.Plan.Installs) != 1 || fresh.Plan.Installs[0].Version != "0.9.2" {
+		t.Fatalf("fresh plan = %+v", fresh.Plan)
+	}
+	if _, err := h.svc.SetUp(context.Background(), "u1", view.WorkspaceID, SetUpRequest{PlanDigest: fresh.Plan.Digest}); err != nil {
+		t.Fatalf("set up on the fresh plan = %v", err)
+	}
+	h.svc.Wait()
+}
+
 func TestStart_EveryStagePlanIsWorded(t *testing.T) {
 	var dump []string
 	for i, kind := range strings.Split(strings.Repeat("pdf jpg zip docx dmg ", 4), " ") {
@@ -342,7 +375,7 @@ func TestStart_EveryStagePlanIsWorded(t *testing.T) {
 		"Creates Album-1, linked to its own folder", "Creates Album-2, linked to its own folder", "Creates Album-3, linked to its own folder",
 		"Creates Album-4, linked to its own folder", "Creates Album-5, linked to its own folder", "Creates Logic Sketch, linked to its own folder",
 		"Creates Track-1, linked to its own folder", "Creates Track-2, linked to its own folder",
-		"Installs REAPER tools", "Connects REAPER tools to Ori Music Demo", "Nothing in Ori Music Demo is moved, copied or read"}
+		"Installs REAPER tools", "Connects REAPER tools to Ori Music Demo", "Nothing in Ori Music Demo is moved, copied or read. Ori adds 1 plugin."}
 	if !hr.Plan.Runnable || hr.Plan.Stage != foldermap.StageGroup || strings.Join(lines, "|") != strings.Join(want, "|") {
 		t.Fatalf("default plan stage=%q runnable=%v lines=%v", hr.Plan.Stage, hr.Plan.Runnable, lines)
 	}
