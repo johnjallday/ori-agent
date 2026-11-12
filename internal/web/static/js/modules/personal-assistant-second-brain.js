@@ -346,7 +346,7 @@ export function setupLearningClosing(written) {
     : `${count} notes were written to your notes folder.`;
 }
 
-export const DEFAULT_SECOND_BRAIN_NAME = 'Second Brain';
+export const DEFAULT_SECOND_BRAIN_NAME = 'My Notes';
 
 // secondBrainFolderNameProblem is the one sentence for a name that is not one
 // plain folder name, or '' when it is fine. The server checks it again.

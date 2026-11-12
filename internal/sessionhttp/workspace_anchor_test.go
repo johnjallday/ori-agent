@@ -217,6 +217,27 @@ func secondBrainFolderForTest(t *testing.T, h *Handler, rel string) string {
 	return path
 }
 
+// The notes folder is "My Notes" now and was "Second Brain" before; a project
+// under either anchors, and nothing else in or beside them does.
+func TestProjectsOfTheNotesFolderUnderEitherNameCanAnchor(t *testing.T) {
+	root := filepath.Join(string(filepath.Separator), "home", "Ori Workspaces")
+	cases := map[string]bool{
+		"My Notes/Projects/Album":       true,
+		"Second Brain/Projects/Album":   true,
+		"My Notes/Projects/Album/Mixes": true,
+		"My Notes/Projects":             false,
+		"My Notes/Inbox":                false,
+		"My Notes":                      false,
+		"Notes/Projects/Album":          false,
+		"My Notes Old/Projects/Album":   false,
+	}
+	for rel, want := range cases {
+		if got := insideSecondBrainProjects(filepath.Join(root, filepath.FromSlash(rel)), root); got != want {
+			t.Errorf("insideSecondBrainProjects(%q) = %v, want %v", rel, got, want)
+		}
+	}
+}
+
 // A project in the second brain kept in the Workspace Directory anchors a
 // workspace, and nothing is written into the project folder.
 func TestAProjectInTheSecondBrainInTheWorkspaceDirectoryCanAnchor(t *testing.T) {

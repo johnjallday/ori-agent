@@ -125,10 +125,10 @@ never stored.
 
 ## The ask
 
-The user-facing name is **Notes** (Issue 776); "Second Brain" survives only as
-the default folder name and in that folder's own README, and
-`scripts/check-notes-copy.mjs` (run by `make test-js` and CI) fails on "second
-brain" anywhere else a person reads it.
+The user-facing name is **Notes** (Issue 776), and the folder Ori sets up is
+`My Notes`. `scripts/check-notes-copy.mjs` (run by `make test-js` and CI) fails
+on "second brain" anywhere a person reads it. "Second Brain" was the default
+folder name before; a folder set up under it keeps its name and its place.
 
 The ask is Notes-first (`secondBrainChoiceView`): a scope line
 **Personal notes · Personal HQ**, the title **Set up your notes**, one benefit
@@ -262,7 +262,7 @@ a missing value can never grant a write. A connected vault cannot become
 | `Archive/` | Finished projects and areas | No |
 | `People/` | One note per person | Yes: `People/<name>.md` |
 | `What Ori knows about you.md` | The approved facts and the working agreement | Yes |
-| `README.md` | How this second brain works with Ori | Written once |
+| `README.md` | How these notes work with Ori | Written once |
 | `.obsidian/` | Minimal vault config so Obsidian opens it | Written once |
 
 "Yes" always means the third write rule below: a new note, a note still exactly as
@@ -272,11 +272,15 @@ README.
 
 ### Setting one up
 
-By default the folder goes in the Workspace Directory as `<root>/Second Brain`,
+By default the folder goes in the Workspace Directory as `<root>/My Notes`,
 next to `Agents/` and the workspaces, so it travels with the root. The card asks
 one question with the place already named, and **Somewhere else…** leads to the
 picker. It holds no `workspace.json`, the name is a reserved top-level slug, and
-deleting a workspace or Start Fresh does not touch it. Before a Workspace
+deleting a workspace or Start Fresh does not touch it. `Notes` on its own is
+not reserved, so a workspace may still be called that. The older default,
+`<root>/Second Brain`, stays reserved and its `Projects/` still anchor
+workspaces (`config.SecondBrainFolderNames`), because a folder set up under it
+is never renamed or moved. Before a Workspace
 Directory is chosen the root is a staging folder, so `setup_default` is absent
 and the card asks where. Changing the Workspace Directory later leaves the
 folder where it is and it stays connected by its path.

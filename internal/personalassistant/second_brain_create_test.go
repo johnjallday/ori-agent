@@ -50,7 +50,7 @@ func TestSecondBrainCreate_WithoutAPickUsesTheDefaultPlace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(root, "Second Brain")
+	want := filepath.Join(root, secondbrain.DefaultFolderName)
 	if status.SetupDefault == nil || status.SetupDefault.ParentName != "Ori Workspaces" || status.SetupDefault.Path != want {
 		t.Fatalf("setup default = %+v", status.SetupDefault)
 	}
@@ -61,7 +61,7 @@ func TestSecondBrainCreate_WithoutAPickUsesTheDefaultPlace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.Source == nil || view.Source.Origin != secondbrain.OriginCreatedByOri || filepath.Base(view.Source.Path) != "Second Brain" {
+	if view.Source == nil || view.Source.Origin != secondbrain.OriginCreatedByOri || filepath.Base(view.Source.Path) != secondbrain.DefaultFolderName {
 		t.Fatalf("source = %+v", view.Source)
 	}
 	if _, err := os.Stat(filepath.Join(want, "Inbox")); err != nil {
@@ -88,7 +88,7 @@ func TestSecondBrainCreate_WithoutAPickOrADefaultAsksForAPick(t *testing.T) {
 func TestSecondBrainCreate_ATakenDefaultPlaceIsRefusedAndLeftAlone(t *testing.T) {
 	h := newSecondBrainHarness(t)
 	root := t.TempDir()
-	note := filepath.Join(root, "Second Brain", "mine.md")
+	note := filepath.Join(root, secondbrain.DefaultFolderName, "mine.md")
 	if err := os.MkdirAll(filepath.Dir(note), 0o750); err != nil {
 		t.Fatal(err)
 	}

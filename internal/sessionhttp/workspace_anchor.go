@@ -77,11 +77,16 @@ func (h *Handler) parentAnchorOwner(path string) *projectconnection.FolderOwner 
 // second brain Ori keeps in the Workspace Directory. That folder holds the
 // user's notes rather than a managed workspace, so its projects can anchor a
 // workspace like any folder elsewhere. Only Projects qualifies: Inbox and Daily
-// are Ori's to write, and the second brain itself is not a project.
+// are Ori's to write, and the second brain itself is not a project. A folder
+// set up under the older name counts too.
 func insideSecondBrainProjects(path, root string) bool {
-	projects := filepath.Join(root, config.SecondBrainFolderName, "Projects")
-	rel, err := filepath.Rel(projects, path)
-	return err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	for _, name := range config.SecondBrainFolderNames() {
+		rel, err := filepath.Rel(filepath.Join(root, name, "Projects"), path)
+		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *Handler) validateAnchorPath(input, ignoreID string) (string, *anchorPathError) {
