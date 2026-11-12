@@ -10,6 +10,7 @@ import {
   balloonWidth,
   commanderBalloon,
   dockEdge,
+  dockLine,
   firstFocusable,
   placeBalloon,
   placeLine,
@@ -305,6 +306,51 @@ test('placeLine sits over the anchor, below when the top is near', () => {
     }),
     null
   );
+});
+
+test('dockLine keeps a pinned line at the map edge nearest its anchor, with no tail', () => {
+  const left = dockLine({
+    anchor: { left: -400, top: 300, width: 40, height: 40 },
+    area,
+    width: 200,
+    height: 24
+  });
+  assert.deepEqual(left, { left: 8, top: 308, below: false, docked: true });
+  const below = dockLine({
+    anchor: { left: 480, top: 900, width: 40, height: 40 },
+    area,
+    width: 200,
+    height: 24
+  });
+  assert.equal(below.top, 700 - 8 - 24);
+  assert.equal(below.left, 400);
+  assert.equal(dockLine({ anchor: null, area, width: 200, height: 24 }), null);
+});
+
+test('a pinned line stays on the map when its anchor leaves the view; an unpinned one goes', () => {
+  resetCommanderBalloons();
+  const doc = fakeDocument();
+  const { root, unit } = mapRoot(doc);
+  const pinned = commanderBalloon('ws:pinned', { doc, now: () => 0, setTimer: () => 1 });
+  pinned.attach(root, { anchor: () => unit, narrow: () => false, pinLine: true });
+  pinned.update(reportContent(doc));
+  assert.equal(pinned.nodes.line.classList.contains('is-pinned'), true);
+  unit.rect = { left: 1400, top: 500, width: 40, height: 40 };
+  pinned.reposition();
+  assert.equal(pinned.nodes.line.hidden, false);
+  assert.equal(pinned.nodes.line.classList.contains('is-docked'), true);
+  // Back in view: over its anchor again, with its tail.
+  unit.rect = { left: 480, top: 500, width: 40, height: 40 };
+  pinned.reposition();
+  assert.equal(pinned.nodes.line.classList.contains('is-docked'), false);
+
+  const plain = commanderBalloon('ws:plain', { doc, now: () => 0, setTimer: () => 1 });
+  plain.attach(root, { anchor: () => unit, narrow: () => false });
+  plain.update(reportContent(doc));
+  unit.rect = { left: 1400, top: 500, width: 40, height: 40 };
+  plain.reposition();
+  assert.equal(plain.nodes.line.hidden, true);
+  assert.equal(plain.nodes.line.classList.contains('is-pinned'), false);
 });
 
 test('shouldAnnounce speaks a new line at most once per 10 s', () => {

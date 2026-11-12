@@ -33,6 +33,37 @@ test('anchored header and folder rows show the real root, sidecar and relink sta
   assert.equal(command.folderRole({ id: 'other' }).label, 'Reference');
 });
 
+test('the Map header leaves out the folder facts and workflow line unless the folder is missing (map-above-the-fold)', () => {
+  const workspace = {
+    name: 'Downloads',
+    shape: 'anchored',
+    home_directory: '/Users/test',
+    sidecar_path: '/Users/test/Ori Workspaces/downloads',
+    anchor: { directory_reference_id: 'a', path: '/Users/test/Downloads' },
+    mcp_bindings: [],
+    skill_bindings: []
+  };
+  const command = new WorkspaceCommandView(null);
+  command.page = { workspaceId: 'w', workspace, tasks: [], buildAgentGroups: () => [] };
+  const bar = mode => {
+    command.viewMode = mode;
+    return command.commandBarHTML(workspace, workspace.name, 'Guided', {});
+  };
+  const overview = bar('details');
+  assert.match(overview, /Anchored to ~\/Downloads/);
+  assert.match(overview, /Workflow · Guided/);
+  assert.doesNotMatch(overview, /ws-cmd-topbar[^"]*is-map/);
+  const map = bar('map');
+  assert.match(map, /class="ws-cmd-topbar ws-cmd-compact is-map"/);
+  assert.doesNotMatch(map, /Anchored to|Ori’s notes and settings|Workflow · Guided/);
+  assert.doesNotMatch(map, /id="workspace-command-subtitle"/);
+  // A folder Ori cannot find is said on every tab, with its Relink.
+  workspace.anchor.missing = true;
+  const missing = bar('map');
+  assert.match(missing, /Folder not found/);
+  assert.match(missing, /data-cmd-relink-anchor="a"/);
+});
+
 test('filesystem loadout rows expose alias, escaped root and exact read-only policy', () => {
   const command = new WorkspaceCommandView(null);
   command.page = { workspace: { home_directory: '/Users/test' } };

@@ -202,6 +202,23 @@ export function placeLine({ anchor, area, width, height, gap = 12, pad = BALLOON
   return { left, top: above ? a.top - gap - h : a.bottom + gap, below: !above };
 }
 
+// dockLine keeps a pinned speech line on the map when its anchor has left the
+// visible area: it sits at the edge nearest the anchor, as close to it as the
+// area allows, and wears no tail (docked) because it points at nothing.
+export function dockLine({ anchor, area, width, height, pad = BALLOON_PAD }) {
+  const a = rectOf(anchor);
+  const v = rectOf(area);
+  if (!a || !v || !(v.width > 0) || !(v.height > 0)) return null;
+  const w = Math.min(Number(width) || 0, Math.max(0, v.width - pad * 2));
+  const h = Number(height) || 0;
+  return {
+    left: clamp(a.left + a.width / 2 - w / 2, v.left + pad, v.right - pad - w),
+    top: clamp(a.top + a.height / 2 - h / 2, v.top + pad, v.bottom - pad - h),
+    below: false,
+    docked: true
+  };
+}
+
 // shouldAnnounce applies FR27: a new line is announced when it differs from
 // the last one spoken and the gap has passed; otherwise it waits for wait ms.
 export function shouldAnnounce(text, last, now, gap = BALLOON_ANNOUNCE_GAP_MS) {
@@ -279,6 +296,7 @@ class CommanderBalloon {
     this.narrowOf = null;
     this.onShow = null;
     this.onNarrow = null;
+    this.pinLine = false;
     this.held = null;
     this.scrollTop = 0;
     this.focusInside = false;
@@ -393,7 +411,11 @@ class CommanderBalloon {
   // re-measures. anchor() returns the anchor element or its client rect;
   // visibleArea() the part of the map the owner can see, in client
   // coordinates (default: the root). Call it after every mount.
-  attach(root, { anchor, visibleArea, narrow, onShow, onNarrow } = {}) {
+  // pinLine keeps the collapsed line on the map whatever the camera does: it
+  // ignores the far-zoom rule and docks at the edge when its anchor is out of
+  // view. The workspace page asks for it, because there the line is the only
+  // place the Commander's status shows.
+  attach(root, { anchor, visibleArea, narrow, onShow, onNarrow, pinLine } = {}) {
     if (!root || this.removed) return this;
     const nodes = this.build();
     if (!nodes) return this;
@@ -402,6 +424,8 @@ class CommanderBalloon {
     if (narrow !== undefined) this.narrowOf = narrow;
     if (onShow !== undefined) this.onShow = onShow;
     if (onNarrow !== undefined) this.onNarrow = onNarrow;
+    if (pinLine !== undefined) this.pinLine = pinLine === true;
+    nodes.line.classList?.toggle('is-pinned', this.pinLine);
     const moved = this.root !== root || !this.layer || this.layer.parentElement !== root;
     if (moved) {
       const reattach = Boolean(this.layer);
@@ -650,13 +674,16 @@ class CommanderBalloon {
       nodes.line.hidden = false;
       const width = Number(nodes.line.offsetWidth) || 220;
       const height = Number(nodes.line.offsetHeight) || 24;
-      const spot = placeLine({ anchor: anchorRect, area, width, height });
+      const spot =
+        placeLine({ anchor: anchorRect, area, width, height }) ||
+        (this.pinLine ? dockLine({ anchor: anchorRect, area, width, height }) : null);
       nodes.line.hidden = !spot;
       if (spot) {
         const at = local(spot, spot.left, spot.top);
         nodes.line.style.left = `${Math.round(at.left)}px`;
         nodes.line.style.top = `${Math.round(at.top)}px`;
         nodes.line.classList?.toggle('is-below', Boolean(spot.below));
+        nodes.line.classList?.toggle('is-docked', Boolean(spot.docked));
       }
       return;
     }

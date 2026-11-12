@@ -1776,10 +1776,12 @@ export class WorkspaceCommandView {
     );
   }
 
-  anchorDetailsHTML() {
+  // quiet (the Map tab) says nothing while the folder is where it should be;
+  // a missing folder is said everywhere, with its Relink.
+  anchorDetailsHTML({ quiet = false } = {}) {
     const ws = this.page?.workspace || {};
     const anchor = anchorFolder(ws);
-    if (!anchor) return '';
+    if (!anchor || (quiet && !anchor.missing)) return '';
     return (
       '<div class="ws-cmd-anchor-details">' +
       '<div>Anchored to ' +
@@ -1938,10 +1940,14 @@ export class WorkspaceCommandView {
     const tags = this.workspaceTags();
     const long = Array.from(description).length > 150;
     const hqDetails = this.isPersonalHQ() && this.viewMode === 'details';
+    // The Map tab gives its height to the map: the folder facts and the
+    // workflow line stay on Overview and in Settings unless something is wrong.
+    const mapTab = this.viewMode === 'map';
     return (
       '<header class="ws-cmd-topbar ws-cmd-compact' +
       (this.isGroupWorkspace() ? ' is-group' : '') +
       (hqDetails ? ' ws-hq-header' : '') +
+      (mapTab ? ' is-map' : '') +
       '"' +
       this.groupAccentStyle(ws) +
       '>' +
@@ -1993,17 +1999,20 @@ export class WorkspaceCommandView {
       // Keep safety/setup sources visible until their Group 2 replacements exist.
       '<div class="ws-cmd-header-status">' +
       this.groupTemplateStatusHTML({ quietSuccess: true }) +
-      this.anchorDetailsHTML() +
+      this.anchorDetailsHTML({ quiet: mapTab }) +
       (hqDetails
         ? '<p class="ws-hq-facts" data-cmd-hq-facts>' + this.hqFactsHTML() + '</p>'
         : '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>') +
-      '<span class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
-      escapeHtml(mode ? 'Workflow · ' + mode : '') +
-      '"' +
-      (mode ? '' : ' hidden') +
-      '>' +
-      escapeHtml(mode ? 'Workflow · ' + mode : '') +
-      '</span></div>' +
+      (mapTab
+        ? ''
+        : '<span class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
+          escapeHtml(mode ? 'Workflow · ' + mode : '') +
+          '"' +
+          (mode ? '' : ' hidden') +
+          '>' +
+          escapeHtml(mode ? 'Workflow · ' + mode : '') +
+          '</span>') +
+      '</div>' +
       this.buildSummaryHTML(ws) +
       '</header>'
     );
@@ -2488,6 +2497,14 @@ export class WorkspaceCommandView {
     return this._updatesListening ? workspaceUpdates.read(this.workspaceId()) : undefined;
   }
 
+  // The ticket the Commander's report narrates on the map (the folder agent's
+  // own look). On the Map tab the Commander tells it there, so Next action
+  // leaves it out; every other tab lists it as before.
+  narratedTicketId() {
+    if (this.viewMode !== 'map') return '';
+    return String(this.page?.commanderNarratedTicket || '').trim();
+  }
+
   nextAction() {
     const page = this.page || {};
     const state = page.tasksLoadFailed
@@ -2495,12 +2512,19 @@ export class WorkspaceCommandView {
       : page.tasksLoading || page.initialListsLoaded === false || !Array.isArray(page.tasks)
         ? 'loading'
         : 'ready';
-    return resolveWorkspaceNextAction({
+    const narrated = this.narratedTicketId();
+    const items =
+      narrated && Array.isArray(page.tasks)
+        ? page.tasks.filter(task => String(task?.id || '') !== narrated)
+        : page.tasks;
+    const view = resolveWorkspaceNextAction({
       workspaceId: this.workspaceId(),
-      tasks: { state, items: page.tasks },
+      tasks: { state, items },
       console: this.janitorActionState(),
       updates: this.updatesView()
     });
+    view.narratedElsewhere = Array.isArray(page.tasks) && items.length !== page.tasks.length;
+    return view;
   }
 
   nextWork() {
@@ -2549,6 +2573,10 @@ export class WorkspaceCommandView {
     // Groups and HQ retain their specialized journey; dashboards are user-owned.
     if (!this.guidesNextAction()) return '';
     const view = this.nextAction();
+    const onMap = this.viewMode === 'map';
+    // The only work is the look the Commander is narrating on the map: saying
+    // "No open work" beside it would contradict it, so the Map says nothing.
+    if (onMap && view.narratedElsewhere && view.kind === 'idle') return '';
     const action = view.action;
     const taskAttrs =
       action?.owner === 'task'
@@ -2560,9 +2588,9 @@ export class WorkspaceCommandView {
         : '';
     return (
       '<section id="workspaceNextActionRegion" class="ws-cmd-work-first' +
-      (this.viewMode === 'map' && action?.owner === 'workspace' && action.kind === 'create'
-        ? ' is-quiet'
-        : '') +
+      // On the Map the card is one row above the map (is-map), whatever it says.
+      (onMap ? ' is-map' : '') +
+      (onMap && action?.owner === 'workspace' && action.kind === 'create' ? ' is-quiet' : '') +
       '" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending">' +
       '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
       '<button type="button" class="ws-cmd-agent-action" data-cmd-open-tickets data-cmd-work-key="tickets">All tickets</button></div>' +
