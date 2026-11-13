@@ -78,6 +78,11 @@ const (
 	// the facts line. An older host decodes the key strictly and rejects the
 	// whole package, so a release that declares it requires this feature.
 	HostFeatureProjectCardWordsV1 = "project_card_words_v1"
+	// HostFeatureProjectFactsV1 gates a project plugin's `project_facts`: the
+	// read-only operation that reads the project files the host names and returns
+	// each song's facts. An older host decodes the key strictly and rejects the
+	// whole package, so a release that declares it requires this feature.
+	HostFeatureProjectFactsV1 = "project_facts_v1"
 )
 
 // hostFeatures is what this build advertises. It is the one list: a second copy
@@ -96,6 +101,7 @@ var hostFeatures = []string{
 	HostFeatureHomeProfileV1,
 	HostFeatureResourceWorkspacesV1,
 	HostFeatureProjectCardWordsV1,
+	HostFeatureProjectFactsV1,
 }
 
 // HostFeatures returns the features this build advertises, newest last.
@@ -189,6 +195,10 @@ type SurfaceContribution struct {
 	// about this plugin's own application for a Home profile. A manifest that
 	// declares it must require the home_profile_v1 host feature.
 	HomeProfileFacts *HomeProfileFactsRef `json:"home_profile_facts,omitempty"`
+	// ProjectFacts names the one read-only operation that reads the project
+	// files the host names, for the formats it lists. A manifest that declares it
+	// must require the project_facts_v1 host feature.
+	ProjectFacts *ProjectFactsRef `json:"project_facts,omitempty"`
 	// ResourceCatalog is a resource workspace's catalog declaration, held raw
 	// so it is decoded by its own strict reader (duplicate keys included). A
 	// manifest that declares it must require resource_workspaces_v1.
@@ -374,6 +384,14 @@ func ParseSurfaceContribution(data []byte) (*SurfaceContribution, error) {
 	if len(bytes.TrimSpace(data)) == 0 || len(data) > maxSurfaceManifestSize {
 		return nil, contributionError(CodeContributionInvalid, "manifest", "", "manifest is empty or exceeds 1 MiB", nil)
 	}
+	// A release that needs a host feature this build lacks may also use a key
+	// this build does not know, which the strict decode below would report as a
+	// broken manifest. Read the required features first, leniently, so such a
+	// release is "needs a newer host" and the resolver steps down to an older
+	// one (assistant-reads-projects).
+	if err := requiredFeaturesKnown(data, hostFeatures); err != nil {
+		return nil, err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 	var contribution SurfaceContribution
@@ -384,6 +402,29 @@ func ParseSurfaceContribution(data []byte) (*SurfaceContribution, error) {
 		return nil, err
 	}
 	return &contribution, nil
+}
+
+// requiredFeaturesKnown reads only a manifest's requires_host_features and
+// reports a feature this host does not advertise as CodeHostFeatureUnsupported.
+// A manifest whose features cannot be read this way is left to the strict
+// decode, which says what is wrong with it.
+func requiredFeaturesKnown(data []byte, available []string) error {
+	var head struct {
+		RequiresHostFeatures []string `json:"requires_host_features"`
+	}
+	if json.Unmarshal(data, &head) != nil {
+		return nil
+	}
+	known := make(map[string]struct{}, len(available))
+	for _, feature := range available {
+		known[feature] = struct{}{}
+	}
+	for _, feature := range head.RequiresHostFeatures {
+		if _, ok := known[strings.TrimSpace(feature)]; !ok {
+			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "a required host feature is unavailable", nil)
+		}
+	}
+	return nil
 }
 
 func (c *SurfaceContribution) Validate() error {
@@ -470,6 +511,11 @@ func (c *SurfaceContribution) ValidateForHost(protocolVersion int, hostFeatures 
 			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "home_profile_facts requires home_profile_v1", nil)
 		}
 	}
+	if c.ProjectFacts != nil {
+		if _, declared := seenHostFeatures[HostFeatureProjectFactsV1]; !declared {
+			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "project_facts requires project_facts_v1", nil)
+		}
+	}
 	if c.declaresResourceWorkspaceFields() {
 		if _, declared := seenHostFeatures[HostFeatureResourceWorkspacesV1]; !declared {
 			return contributionError(CodeHostFeatureUnsupported, "manifest", "requires_host_features", "resource workspace declarations require resource_workspaces_v1", nil)
@@ -519,6 +565,9 @@ func validateContributionComponents(c *SurfaceContribution) error {
 		}
 	}
 	if err := validateHomeProfileFacts(c.HomeProfileFacts, services); err != nil {
+		return err
+	}
+	if err := validateProjectFacts(c.ProjectFacts, services); err != nil {
 		return err
 	}
 	if err := validateResourceCatalog(c, services); err != nil {

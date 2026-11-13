@@ -182,9 +182,11 @@ read-only operation, only after the owner agreed.
   by **Review** then **Read templates** on the Home's profile card. **Forget**
   clears the list and withdraws the consent in one write. **Detect again** asks
   the operation for the version only.
-- **Reviewed floor stays 0.9.0.** A Home whose installed REAPER plugin has no
-  such operation works otherwise unchanged and shows "Update the REAPER plugin
-  to read templates." in the templates row.
+- **Reviewed floor.** The floor stayed at 0.9.0 while this read was added, and
+  moved to 0.12.0 with the project reader (see "Reviewed floor and latest
+  release"). A Home whose installed REAPER plugin has no such operation works
+  otherwise unchanged and shows "Update the REAPER plugin to read templates." in
+  the templates row.
 - **Checking a candidate.** `ORI_REAPER_PLUGIN_PATH=<plugin checkout> go test
   ./internal/plugin/ -run TestLocalProjectPluginFactsOperationFitsTheHostContract`
   checks the candidate's declared operation against what Ori sends and accepts.
@@ -213,11 +215,11 @@ Linked projects must be explicitly disconnected before organizational reparentin
 
 Ori’s reviewed registry entry for this integration is a **floor**, not a pin. A person reviewed the `johnjallday/reaper-plugin` repository and its minimum release; every later stable release from that repository is accepted once Ori’s automatic identity, host-feature, blueprint, program, platform and artifact checks pass. The entry in `internal/reviewedintegration/entries.go` holds:
 
-- Minimum reviewed version `0.9.0`.
-- Fallback commit `0a597684f3b181735c961bfb44ed5c2b80994814` (the annotated `v0.9.0` tag’s resolved commit), installed when the latest release cannot be checked.
+- Minimum reviewed version `0.12.0`, the first release whose manifest declares the project reader (`project_facts`, host feature `project_facts_v1`).
+- Fallback commit `ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3` (the annotated `v0.12.0` tag’s resolved commit), installed when the latest release cannot be checked.
 - Blueprint `reaper-song` at version 10 **or later**.
 - Referenced Home program `music-producer-assistant` schema 1 and surface protocol 1, both **exact**.
-- Required host features `blueprint_inputs_v1`, `independent_program_homes_v1`, `setup_quests_v2`, `specialist_setup_journey_v1` and `template_group_requirements_v1`. A release may require more, as long as this Ori build has them.
+- Required host features `blueprint_inputs_v1`, `home_profile_v1`, `independent_program_homes_v1`, `project_facts_v1`, `resource_workspaces_v1`, `setup_quests_v2`, `specialist_setup_journey_v1` and `template_group_requirements_v1`: exactly what the 0.12.0 manifest requires. A release may require more, as long as this Ori build has them.
 - Platform `darwin/arm64`.
 
 ### How the latest release is chosen
@@ -276,14 +278,14 @@ A locally built candidate is not release evidence. A squash merge upstream chang
 
 ### Verification evidence for the fallback release
 
-- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.9.0 (published September 25, 2026).
-- Commit: `0a597684f3b181735c961bfb44ed5c2b80994814`.
-- Published asset: `reaper-plugin_v0.9.0_darwin_arm64`, **8,780,098 bytes**, SHA-256 `dd0df90c1735e9a059e61b2aa0c69bc4f128122ffc56d9ed1f3969a261d52ed7`.
-- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/36076920735.
-- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/36076920734.
-- Manifest identity at that commit: blueprint `reaper-song` version 10 with one project role `reaper-assistant` (REAPER Assistant, primary), project declaration `reaper-song-team` schema/version 1 referencing Home program `music-producer-assistant` schema/version 1, setup quest `reaper_setup` version 4 with four steps, protocol 1, and the five required host features listed above.
+- Release: https://github.com/johnjallday/reaper-plugin/releases/tag/v0.12.0 (published November 13, 2026).
+- Commit: `ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3`, the squash merge of reaper-plugin#20 and the annotated tag’s resolved commit. The pull request’s last commit (`ebbc6d7`) differs from the commit that was tested as a candidate (`6a05b36`) only in the two CI workflows and one line of `AGENTS.md`, so the shipped binary is the candidate’s.
+- Published asset: `reaper-plugin_v0.12.0_darwin_arm64`, **9,459,650 bytes**, SHA-256 `29d2f5320f890a3067f674421d3239ce1debf4a0a46bd3baa379de1587c4c478`.
+- Source CI: https://github.com/johnjallday/reaper-plugin/actions/runs/43427679975.
+- Release workflow: https://github.com/johnjallday/reaper-plugin/actions/runs/43427679998.
+- Manifest identity at that commit: blueprint `reaper-song` version 10 (unchanged from 0.9.0; the song team, Home program, setup quest and protocol are unchanged too, and the `reaper-studio` blueprint and resource catalog added in 0.11.0 are still there), the new top-level key `project_facts` (service `reaper-service`, operation `project.facts.read`, format `reaper`) and the eight required host features listed above.
 
-The published asset and checksum were downloaded on September 30, 2026 and compared against the manifest at the tag’s resolved commit. Size and digest matched; the executable reported `0.9.0`. The v0.8.0 floor it replaces was verified the same way (`3e3234bfae3465f909fe2aa5189f685a41c7a2ed`, SHA-256 `1f5ab0f061bddb739461ececc088900ec8f4cee47154ea631bb05ebfdfdad08e`).
+How it was checked (November 13, 2026): the SHA-256 and size GitHub records for the uploaded asset equal the digest and size the manifest at the tag’s commit declares; the same bytes were also rebuilt deterministically from the candidate (`./scripts/reaper-demo.sh artifact`, which verifies the checksum and reports version `0.12.0`); and the published-release test below installed the asset from GitHub through Ori’s own install path and compared it with the manifest, with the fallback forced and with the live resolver. The asset was not downloaded and run by hand. The v0.9.0 floor it replaces was verified by hand the same way (`0a597684f3b181735c961bfb44ed5c2b80994814`, SHA-256 `dd0df90c1735e9a059e61b2aa0c69bc4f128122ffc56d9ed1f3969a261d52ed7`, 8,780,098 bytes).
 
 ### Rerun the checks
 
@@ -294,7 +296,7 @@ ORI_TEST_REVIEWED_INTEGRATION_RELEASE=1 go test ./internal/setupjourney \
   -run '^TestReviewedIntegrationPublishedRelease$' -count=1 -v
 
 # The published exact-commit source meets the host contract and the floor.
-ORI_REVIEWED_PLUGIN_CANDIDATE='https://github.com/johnjallday/reaper-plugin#sha=0a597684f3b181735c961bfb44ed5c2b80994814' \
+ORI_REVIEWED_PLUGIN_CANDIDATE='https://github.com/johnjallday/reaper-plugin#sha=ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3' \
   go test ./internal/plugin ./internal/reviewedintegration \
   -run 'TestReviewedCandidateHostContract|TestReviewedCandidateMeetsTheFloor' -count=1 -v
 ```
@@ -307,6 +309,8 @@ The fallback run points the resolver at an unreachable loopback API and checks t
 - **0.6.0** (commit `03af9fda3e6b9d8cc3c0496c5e9ef6df99e870b9`, SHA-256 `4def4fec14ecf083b0358c686c608514d4b9afff99dd810f1184213312770119`) is the first release that declares `reaper_setup` version 2 under `setup_quests_v2`, with blueprint version 7. It is below the floor, so an exact-commit installation is offered a reviewed replacement with the latest release.
 - **0.6.1** only drops the retired agent `type` key from the blueprint roles (reaper-plugin#9, following ori-agent#490). It was the previous combined-contract floor.
 - **0.8.0** separates Music-owned Home authority from REAPER-owned project authority, requires Music Project Management 0.1.0 and the independent-Home host feature, advances Reaper Song to v9 and setup quest to v3. It was the reviewed floor until 0.9.0.
-- **0.9.0** (commit `0a597684f3b181735c961bfb44ed5c2b80994814`, SHA-256 `dd0df90c1735e9a059e61b2aa0c69bc4f128122ffc56d9ed1f3969a261d52ed7`) staffs one **REAPER Assistant** per project instead of a Producer, Mix Engineer and Songwriter, advances Reaper Song to v10 and setup quest to v4 (staffing copy only), keeps the project team at schema/version 1, and is the current reviewed floor. A project created from an earlier release keeps its recorded team.
+- **0.9.0** (commit `0a597684f3b181735c961bfb44ed5c2b80994814`, SHA-256 `dd0df90c1735e9a059e61b2aa0c69bc4f128122ffc56d9ed1f3969a261d52ed7`) staffs one **REAPER Assistant** per project instead of a Producer, Mix Engineer and Songwriter, advances Reaper Song to v10 and setup quest to v4 (staffing copy only), keeps the project team at schema/version 1. It was the reviewed floor until 0.12.0. A project created from an earlier release keeps its recorded team.
+- **0.10.0** and **0.11.0** added the template-list read (`home_profile_facts`, host feature `home_profile_v1`) and the REAPER Studio (the `reaper-studio` blueprint and `resource_catalog`, host feature `resource_workspaces_v1`). Neither moved the floor: an Ori that has the features accepts them, and one that lacks them refuses the manifest.
+- **0.12.0** (commit `ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3`, SHA-256 `29d2f5320f890a3067f674421d3239ce1debf4a0a46bd3baa379de1587c4c478`) adds the project reader (`project_facts`, host feature `project_facts_v1`): one read-only operation, `project.facts.read`, that reads the tempo, length and track count of project files Ori names (and, only when the person agreed, their track names, markers and regions) with no running REAPER, and is the current reviewed floor. Ori no longer reads project files itself, so this is the first release a Home can learn its songs from. An Ori build without `project_facts_v1` cannot verify it.
 
 Local plugin development remains separate. `scripts/reaper-demo.sh` stages an isolated copy and uses an explicit process-local source override; it labels the copy **not release-verified**. Installing a local directory or setting an arbitrary override is not a production recovery path.

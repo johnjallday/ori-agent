@@ -4,9 +4,11 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
+	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -30,6 +32,14 @@ type librarySharingView struct {
 	// AgentName is the assistant the consent created; empty until the first open.
 	AgentName        string `json:"agent_name,omitempty"`
 	AssistantMissing bool   `json:"assistant_missing,omitempty"`
+	// Hired says the Home has its shared assistant: the consent records it and
+	// the agent exists, whether or not the switch adds it to songs right now
+	// (assistant-reads-projects FR13, FR15). The Home lists it; it is not
+	// chatted with there.
+	Hired bool `json:"hired,omitempty"`
+	// OfferDismissed says the owner answered "Not now" to the Home's one offer
+	// to add its shared assistant (FR16).
+	OfferDismissed bool `json:"offer_dismissed,omitempty"`
 	// TeamDigest is what turning sharing on (or reviewing it) agrees to: the
 	// installed blueprint's team. The browser sends it back unchanged.
 	TeamDigest string `json:"team_digest,omitempty"`
@@ -57,6 +67,9 @@ func (h *Handler) librarySharing(scope projectlibrary.Scope, home *workspace.Wor
 		labels = append(labels, role.Label)
 	}
 	view := librarySharingView{State: sharingNone, RoleLabel: strings.Join(labels, ", "), TeamDigest: team.Digest}
+	if state := home.GetAssistantProgramState(); state != nil && state.ProjectStaffingOfferDismissedAt != nil {
+		view.OfferDismissed = true
+	}
 	consent := home.GetAssistantProgramState().GetProjectStaffingConsent()
 	if consent == nil || consent.Validate() != nil || !consent.Covers(team.PluginID, team.BlueprintID) {
 		return view
@@ -73,6 +86,7 @@ func (h *Handler) librarySharing(scope projectlibrary.Scope, home *workspace.Wor
 		if entry, covered := consent.Role(role.ID); covered && entry.AgentName != "" {
 			view.AgentName = entry.AgentName
 			view.AssistantMissing = !h.agentExists(entry.AgentName)
+			view.Hired = !view.AssistantMissing
 		}
 	}
 	return view
@@ -82,6 +96,10 @@ type librarySharingRequest struct {
 	RequestID  string `json:"request_id"`
 	Enabled    bool   `json:"enabled"`
 	TeamDigest string `json:"team_digest,omitempty"`
+	// Hire, with Enabled, also hires the shared assistant now instead of at the
+	// first song opened: the Home's offer to a Home set up before Homes hired
+	// it at setup (FR16).
+	Hire bool `json:"hire,omitempty"`
 }
 
 // SetAssistantLibrarySharing handles
@@ -115,6 +133,10 @@ func (h *Handler) SetAssistantLibrarySharing(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	consents := h.projectStaffing.Consents()
+	if request.Enabled && request.Hire {
+		h.hireLibrarySharedAssistant(w, r, scope, home, current, request)
+		return
+	}
 	unlock := h.lockHomeStaffing(home.ID)
 	defer unlock()
 	if !request.Enabled {
@@ -159,6 +181,120 @@ func (h *Handler) SetAssistantLibrarySharing(w http.ResponseWriter, r *http.Requ
 	}
 	h.respondSharing(w, scope, home.ID)
 }
+
+// hireLibrarySharedAssistant is the switch turned on with hire: the owner's yes
+// to the Home's offer. In one turn under the Home's lock it records the Home's
+// approval for exactly the team the switch showed (source home_switch) and
+// hires the shared assistant, so the Home lists it before any song is opened.
+// Nothing is granted unless the owner asked.
+func (h *Handler) hireLibrarySharedAssistant(w http.ResponseWriter, r *http.Request, scope projectlibrary.Scope,
+	home *workspace.Workspace, current librarySharingView, request librarySharingRequest) {
+	if request.TeamDigest != current.TeamDigest {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "The assistant changed while you were looking. Review it again.", "reason": "sharing_changed",
+			"sharing": current,
+		})
+		return
+	}
+	team, ok := h.projectTeamFor(scope, home)
+	if !ok || team.Digest != request.TeamDigest {
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "The assistant changed while you were looking. Review it again.", "reason": "sharing_changed",
+			"sharing": h.librarySharing(scope, home),
+		})
+		return
+	}
+	if h.sharedAgentCreator == nil {
+		_ = orihttp.RespondConflict(w, "Hiring the assistant is unavailable")
+		return
+	}
+	shared := projectstaffing.Team{PluginID: team.PluginID, BlueprintID: team.BlueprintID, Digest: team.Digest, Roles: team.Roles}
+	grant := workspace.ProjectStaffingConsentGrant{
+		Source: workspace.ProjectStaffingConsentHomeSwitch, PluginID: team.PluginID,
+		BlueprintID: team.BlueprintID, TeamDigest: team.Digest,
+	}
+	for _, role := range team.Roles {
+		grant.RoleIDs = append(grant.RoleIDs, role.ID)
+	}
+	modelReady := h.staffingModelReady != nil && h.staffingModelReady()
+	err := h.projectStaffing.WithHome(home.ID, func(tx *projectstaffing.Tx) error {
+		if _, err := tx.Consents().Grant(home.ID, grant); err != nil {
+			return err
+		}
+		_, err := tx.HireShared(r.Context(), shared,
+			projectstaffing.Grant{Source: workspace.ProjectStaffingConsentHomeSwitch, OfferID: request.RequestID},
+			modelReady, h.sharedAgentCreator)
+		return err
+	})
+	switch {
+	case err == nil:
+	case errors.Is(err, projectstaffing.ErrNoModel):
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "Choose a model for new agents first, then add the assistant.", "reason": staffingNeedsModel,
+			"sharing": h.librarySharing(scope, h.reloadHome(home)),
+		})
+		return
+	case errors.Is(err, projectstaffing.ErrReservationHeld):
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "An agent with the assistant's name already exists, and Ori did not make it for this Home.", "reason": staffingReconcile,
+			"sharing": h.librarySharing(scope, h.reloadHome(home)),
+		})
+		return
+	default:
+		respondSharingError(w, err)
+		return
+	}
+	h.respondSharing(w, scope, home.ID)
+}
+
+// reloadHome is the Home as stored now, or the copy given when it cannot be read.
+func (h *Handler) reloadHome(home *workspace.Workspace) *workspace.Workspace {
+	if fresh, err := h.workspaceTaskStore.Get(home.ID); err == nil && fresh != nil {
+		return fresh
+	}
+	return home
+}
+
+// DismissAssistantLibrarySharingOffer handles
+// POST /api/workspaces/{workspaceID}/assistant-program/library/sharing/offer:
+// the owner's "Not now" to the Home's offer to add its shared assistant. It is
+// remembered on the Home; nothing is granted or hired, and the switch stays.
+func (h *Handler) DismissAssistantLibrarySharingOffer(w http.ResponseWriter, r *http.Request) {
+	scope, home, ok := h.assistantLibraryScope(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		RequestID string `json:"request_id"`
+	}
+	if !decodeLibraryAction(w, r, &request) {
+		return
+	}
+	if strings.TrimSpace(request.RequestID) == "" || len(request.RequestID) > 120 {
+		_ = orihttp.RespondBadRequest(w, "Invalid library request")
+		return
+	}
+	err := h.workspaceTaskStore.Update(home.ID, func(current *workspace.Workspace) error {
+		state := current.GetAssistantProgramState()
+		if state == nil || current.GetAssistantProjectLink() != nil {
+			return workspace.ErrAssistantStationNotFound
+		}
+		if state.ProjectStaffingOfferDismissedAt != nil {
+			return errSharingOfferUnchanged
+		}
+		now := time.Now().UTC()
+		state.ProjectStaffingOfferDismissedAt = &now
+		current.SetAssistantProgramState(state)
+		return nil
+	})
+	if err != nil && !errors.Is(err, errSharingOfferUnchanged) {
+		respondSharingError(w, err)
+		return
+	}
+	h.respondSharing(w, scope, home.ID)
+}
+
+var errSharingOfferUnchanged = errors.New("sharing offer already dismissed")
 
 // ReAddAssistantLibrarySharing handles
 // POST /api/workspaces/{workspaceID}/assistant-program/library/sharing/assistant:

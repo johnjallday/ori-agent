@@ -12,17 +12,17 @@ type FormatCount struct {
 }
 
 // Readability splits the projects of the map's portfolio shape (the shape a
-// Home would hold) by whether their files can be read offline: Readable counts
-// those whose format the host's table gives a reading grammar, Unreadable
-// lists the rest by format, largest first. It is a count of what is on disk,
-// not of what any Home has read, and it opens no file.
+// Home would hold) by whether their files can be read: Readable counts those
+// whose format the caller says an installed app plugin reads, Unreadable lists
+// the rest by format. It is a count of what is on disk, not of what any Home
+// has read, and it opens no file.
 type Readability struct {
 	Shape      folderdigest.Shape
 	Readable   int
 	Unreadable []FormatCount
 }
 
-// UnreadableTotal is how many projects have no offline grammar, in all formats.
+// UnreadableTotal is how many projects nothing reads, in all formats.
 func (r Readability) UnreadableTotal() int {
 	total := 0
 	for _, u := range r.Unreadable {
@@ -31,9 +31,20 @@ func (r Readability) UnreadableTotal() int {
 	return total
 }
 
-// Readability reports the map's portfolio shape split by offline readability.
-// A map with no portfolio (no Home would hold these projects) reports nothing.
-func (f Facts) Readability() Readability {
+// PortfolioShape is the shape a Home would hold for this map, or "" when no
+// Home would hold these projects.
+func (f Facts) PortfolioShape() folderdigest.Shape {
+	if f.Portfolio == nil {
+		return ""
+	}
+	return f.Portfolio.Shape
+}
+
+// Readability reports the map's portfolio shape split by readability. readable
+// says whether a project format is read by an installed app plugin; the host
+// has no reader of its own, so a nil readable reads nothing. A map with no
+// portfolio (no Home would hold these projects) reports nothing.
+func (f Facts) Readability(readable func(format string) bool) Readability {
 	if f.Portfolio == nil {
 		return Readability{}
 	}
@@ -43,7 +54,7 @@ func (f Facts) Readability() Readability {
 		if s.Shape != out.Shape || s.Count <= 0 {
 			continue
 		}
-		if _, ok := folderdigest.FactsMarker(s.Format); ok {
+		if readable != nil && readable(s.Format) {
 			out.Readable += s.Count
 			continue
 		}

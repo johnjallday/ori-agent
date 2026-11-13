@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	agentpkg "github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/hostquests"
 	"github.com/johnjallday/ori-agent/internal/integrationrelease"
@@ -201,11 +202,21 @@ func (b *ServerBuilder) initializeSetupJourney() {
 		readers[specialist.SetupStepAssistantProgramStaffing] = staffingAdapter
 		b.assistantStaffing = staffingAdapter
 		b.projectStaffing = projectstaffing.New(b.workspaceStore, b.st)
+		// A Home's shared assistant hired at setup that a previous process
+		// created but never recorded is recorded now, by the marker its own
+		// create left (assistant-reads-projects FR10).
+		if err := b.projectStaffing.RecoverShared(); err != nil {
+			logger.Warn("Could not finish an interrupted shared assistant hire", logger.Fields{"error": err.Error()})
+		}
 		if projectAdapter != nil {
 			projectAdapter.SetCreatedProjectStaffer(b.staffCreatedProject)
 		}
 		if b.sessionHandler != nil {
 			b.sessionHandler.SetSharedProjectStaffing(b.projectStaffing, b.systemModelAvailable)
+			b.sessionHandler.SetSharedAgentCreator(func(ctx context.Context, role workspace.AssistantProgramRoleSpec, name string,
+				marker *agentpkg.AssistantSetupProvenance) (bool, error) {
+				return staffingAdapter.CreateSharedProjectAgent(ctx, role, name, "", "", marker)
+			})
 			if b.setupWizardService != nil {
 				wizard := b.setupWizardService
 				b.sessionHandler.SetOpenedSongFileOnly(func(ctx context.Context, workspaceID string) error {

@@ -208,6 +208,10 @@ func (b *ServerBuilder) initializeHandlers() {
 		// from them. The folder agent is looked up when the switch is used, so it
 		// does not matter which of the two is wired first.
 		b.sessionHandler.SetSongDetailsOffHook(func(homeID string) {
+			// A read in progress stops; nothing from its batch in flight is kept.
+			if runner := b.sessionHandler.FactsReadRunner(); runner != nil {
+				runner.Stop(homeID)
+			}
 			if b.folderAgentService != nil {
 				b.folderAgentService.ForgetLearned(homeID)
 			}

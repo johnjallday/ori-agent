@@ -556,7 +556,7 @@ export function proposalSourceLabel(proposal) {
 // librarySharingView words the Home's shared-assistant switch from the
 // library read's `sharing`. Hidden when no installed blueprint opens this Home's
 // songs, or the Home is read-only.
-export function librarySharingView(sharing, readOnly = false) {
+export function librarySharingView(sharing, readOnly = false, songDetails = null) {
   const state = String(sharing?.state || '');
   if (readOnly || !state || state === 'unavailable') return { visible: false };
   const role = String(sharing.role_label || 'assistant').trim();
@@ -567,8 +567,24 @@ export function librarySharingView(sharing, readOnly = false) {
     switchDisabled: state === 'stale',
     switchLabel: `Add my ${role} to songs I open`,
     note: '',
-    action: null
+    action: null,
+    dismiss: null,
+    hired: null
   };
+  // The Home has its assistant (assistant-reads-projects FR13): listed here,
+  // with what it does, and never chatted with on the Home. The two switches
+  // are independent (FR15): joining songs is this one, reading is song details.
+  if (sharing.hired && agent) {
+    view.hired = {
+      name: agent,
+      notes: [
+        state === 'on' ? 'Joins each song you open' : 'Not added to songs you open',
+        songDetails?.state === 'on'
+          ? 'Reads your songs'
+          : 'Reads your songs once song details are on'
+      ]
+    };
+  }
   switch (state) {
     case 'on':
       view.note = agent
@@ -584,12 +600,84 @@ export function librarySharingView(sharing, readOnly = false) {
       break;
     default:
       view.note = `Turn this on and your ${role} joins each song you open.`;
+      // A Home set up before Homes hired their assistant: one offer, until it is
+      // answered (assistant-reads-projects FR16). Nothing is granted silently.
+      if (!sharing.offer_dismissed) {
+        view.note = `This Home has no ${role} yet. Add it now and it joins each song you open, and reads your songs when song details are on.`;
+        view.action = { id: 'hire', label: `Add your ${role}` };
+        view.dismiss = { id: 'dismiss_offer', label: 'Not now' };
+      }
   }
   if (sharing.assistant_missing && state === 'on') {
     view.note = `${agent || `Your ${role}`} is gone, so songs you open get no agent. The next one can get a new ${role}.`;
     view.action = { id: 'readd', label: 'Add the assistant again' };
   }
   return view;
+}
+
+// libraryFactsReadView words the Home assistant's newest song-reading turn
+// (assistant-reads-projects FR33, FR35): who is reading while it runs, and for
+// a stopped one why, with the one thing to do about it. Nothing when the read
+// finished or there is none. Try again on the Home is the root's own Scan; there
+// is no fallback reader behind any reason.
+export function libraryFactsReadView(run, role = 'assistant') {
+  if (!run || typeof run !== 'object') return null;
+  const who = String(run.agent_name || '').trim() || `Your ${role}`;
+  const targets = Number(run.targets) || 0;
+  const done = Math.max(0, targets - (Number(run.left) || 0));
+  if (run.status === 'started') {
+    return {
+      status: 'running',
+      text: `${who} is reading ${targets} ${targets === 1 ? 'song' : 'songs'}…`,
+      action: null
+    };
+  }
+  if (run.status !== 'stopped') return null;
+  const retry = { id: 'rescan', label: 'Try again' };
+  switch (run.reason) {
+    case 'no_model':
+      return {
+        status: 'stopped',
+        text: `${who} has no model, so the songs were not read.`,
+        action: { id: 'link', label: 'Choose a model', href: '/settings' },
+        retry
+      };
+    case 'assistant_missing':
+      return {
+        status: 'stopped',
+        text: `Your ${role} is gone, so the songs were not read.`,
+        action: null,
+        retry
+      };
+    case 'no_assistant':
+      return {
+        status: 'stopped',
+        text: `This Home has no ${role} to read the songs yet.`,
+        action: null
+      };
+    case 'plugin_update':
+      return {
+        status: 'stopped',
+        text: 'The plugin cannot read songs yet. Update it to read them.',
+        action: { id: 'link', label: 'Update', href: '/plugins' }
+      };
+    case 'plugin_failed':
+    case 'time_limit':
+      return {
+        status: 'stopped',
+        text: `Reading stopped after ${done} of ${targets} songs.`,
+        action: retry
+      };
+    case 'restarted':
+      return { status: 'stopped', text: 'Reading stopped when Ori restarted.', action: retry };
+    case 'details_off':
+      return { status: 'stopped', text: 'Song details are off for this Home.', action: null };
+    case 'no_call':
+    case 'model_error':
+      return { status: 'stopped', text: `${who} did not start the reading.`, action: retry };
+    default:
+      return null;
+  }
 }
 
 // The library's intro: what reading this Home's folders does. A Home whose
@@ -622,9 +710,29 @@ export function libraryIntroText(songDetails) {
 
 // The question the switch asks before it turns on, and before it adds names to a
 // consent that has only the numbers: the same words as the Commander's offer to
-// learn the songs. Nothing is read until the owner allows it.
+// learn the songs. Nothing is read until the owner allows it. An app plugin does
+// the reading (assistant-reads-projects FR44, FR45): the question names the
+// plugin, says Ori keeps only those facts, and keeps the two limits. Ori has no
+// reader of its own, so with no plugin named it says "The app plugin".
 export const SONG_DETAILS_QUESTION =
-  'Ori will read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened. Turning this off clears everything it read.';
+  'The app plugin reads tempo, length, track count, track names, markers and regions from each project file, and Ori keeps only those. Nothing is changed, and audio is not opened. Turning this off clears everything it read.';
+export function songDetailsQuestion(songDetails) {
+  const reader = String(songDetails?.reader_name || '').trim();
+  if (!reader) return SONG_DETAILS_QUESTION;
+  return `${reader} reads tempo, length, track count, track names, markers and regions from each project file, and Ori keeps only those. Nothing is changed, and audio is not opened. Turning this off clears everything it read.`;
+}
+
+// The one notice a Home gets when it approved song details before an app plugin
+// read them (FR46): who reads now, that it is the same facts, and where the
+// switch is. Null when there is nothing to say.
+export function songDetailsReaderNotice(songDetails) {
+  const reader = String(songDetails?.reader_name || '').trim();
+  if (!songDetails?.reader_notice || !reader) return null;
+  return {
+    text: `Song details are now read by ${reader}, not by Ori itself. It reads the same facts, and Ori keeps only those.`,
+    dismiss: 'Got it'
+  };
+}
 
 // songDetailsSwitchView words the Home's song-details switch from the library
 // read's `song_details`. Only a Home that agreed (on its setup card, or to the
@@ -637,10 +745,21 @@ export function songDetailsSwitchView(songDetails, readOnly = false) {
   const on = state === 'on';
   const names = on && Boolean(songDetails?.names);
   const numbersOnly = on && !names;
+  // Who reads: the app plugin, by its own name. Ori keeps only the listed facts.
+  // With no installed plugin that reads, nothing reads, and the note says what to
+  // do: update the reviewed plugin that is installed, or install one. It is never
+  // a silent blank (FR49).
+  const reader = String(songDetails?.reader_name || '').trim();
+  const update = String(songDetails?.reader_update || '').trim();
   let note;
-  if (names) note = `Ori reads ${songDetailsReads(songDetails, true)}. Nothing is changed.`;
+  if (!reader) {
+    note = update
+      ? `Update ${update} to read songs.`
+      : 'No installed plugin reads these songs yet. Install the app plugin to read them.';
+  } else if (names)
+    note = `${reader} reads ${songDetailsReads(songDetails, true)}. Ori keeps only those facts. Nothing is changed.`;
   else if (numbersOnly)
-    note = `Ori reads ${songDetailsReads(songDetails, false)}. Nothing is changed.`;
+    note = `${reader} reads ${songDetailsReads(songDetails, false)}. Ori keeps only those facts. Nothing is changed.`;
   else
     note = `Scans read no project files. Turn this on to read ${songDetailsReads(songDetails, true)}, on the next scan.`;
   return {
@@ -651,7 +770,8 @@ export function songDetailsSwitchView(songDetails, readOnly = false) {
       ? 'Read song details when scanning'
       : 'Read song details, track names and markers when scanning',
     note,
-    upgrade: numbersOnly && !readOnly ? 'Also read track names, markers and regions' : ''
+    upgrade: numbersOnly && !readOnly ? 'Also read track names, markers and regions' : '',
+    notice: songDetailsReaderNotice(songDetails)
   };
 }
 
@@ -713,7 +833,7 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
 // up to six songs with a save time, each with Open where the Home can open it,
 // and its song facts when they are known. A read-only Home still shows its
 // songs, without Open. No dated song: hidden.
-export function recentlySavedView(page, now = new Date(), words = null) {
+export function recentlySavedView(page, now = new Date(), words = null, sharing = null) {
   const readOnly = page?.provider_read_only !== false;
   const rows = (Array.isArray(page?.rows) ? page.rows : []).filter(Boolean);
   const picks = readOnly
@@ -726,7 +846,7 @@ export function recentlySavedView(page, now = new Date(), words = null) {
       name: String(row.name || '').trim() || 'This song',
       saved: lastSavedLabel(row.last_saved_at, now),
       facts: songFactsLabel(row.facts, words),
-      open: libraryOpenAction(row, readOnly)
+      open: libraryOpenAction(row, readOnly, sharing)
     }))
   };
 }
@@ -1066,8 +1186,17 @@ export class ProjectLibraryPanel {
       .getElementById('projectLibrarySharingAction')
       ?.addEventListener('click', event => void this.runSharingAction(event.currentTarget));
     document
+      .getElementById('projectLibrarySharingDismiss')
+      ?.addEventListener('click', event => void this.runSharingAction(event.currentTarget));
+    document
+      .getElementById('projectLibraryFactsReadRetry')
+      ?.addEventListener('click', event => void this.rescanAll(event.currentTarget));
+    document
       .getElementById('projectLibrarySongDetailsSwitch')
       ?.addEventListener('change', event => void this.setSongDetails(event.currentTarget));
+    document
+      .getElementById('projectLibrarySongDetailsNoticeDismiss')
+      ?.addEventListener('click', event => void this.dismissSongDetailsNotice(event.currentTarget));
     document
       .getElementById('projectLibrarySongDetailsUpgrade')
       ?.addEventListener('click', () => this.askSongDetails(true));
@@ -1089,9 +1218,34 @@ export class ProjectLibraryPanel {
   renderSharing() {
     const section = document.getElementById('projectLibrarySharing');
     if (!section) return;
-    const view = librarySharingView(this.state?.sharing, this.readOnly);
+    const view = librarySharingView(this.state?.sharing, this.readOnly, this.state?.song_details);
+    // An Open label promises an assistant only while one will be added
+    // (FR19): it follows the switch without fetching the songs again.
+    for (const button of document.querySelectorAll('[data-library-open]')) {
+      const row = (this.recentRows || []).find(
+        item => String(item.id) === button.dataset.libraryOpen
+      );
+      const open = row ? libraryOpenAction(row, this.readOnly, this.state?.sharing) : null;
+      if (open) button.setAttribute('aria-label', open.ariaLabel);
+    }
     section.hidden = !view.visible;
     if (!view.visible) return;
+    const hired = document.getElementById('projectLibrarySharingHired');
+    if (hired) {
+      hired.hidden = !view.hired;
+      const name = document.getElementById('projectLibrarySharingHiredName');
+      if (name) name.textContent = view.hired?.name || '';
+      const notes = document.getElementById('projectLibrarySharingHiredNotes');
+      if (notes) {
+        notes.replaceChildren(
+          ...(view.hired?.notes || []).map(text => {
+            const item = document.createElement('li');
+            item.textContent = text;
+            return item;
+          })
+        );
+      }
+    }
     const toggle = document.getElementById('projectLibrarySharingSwitch');
     if (toggle) {
       toggle.checked = view.checked;
@@ -1108,11 +1262,20 @@ export class ProjectLibraryPanel {
       action.dataset.sharingAction = view.action?.id || '';
       action.disabled = this.busy;
     }
+    const dismiss = document.getElementById('projectLibrarySharingDismiss');
+    if (dismiss) {
+      dismiss.hidden = !view.dismiss;
+      dismiss.textContent = view.dismiss?.label || '';
+      dismiss.dataset.sharingAction = view.dismiss?.id || '';
+      dismiss.disabled = this.busy;
+    }
   }
 
   // The Home's song-details switch and the intro that says what a scan reads.
   // Both ride the library read.
   renderSongDetails() {
+    // The shared assistant's "Reads your songs" note follows this switch.
+    this.renderSharing();
     const intro = document.getElementById('projectLibraryIntro');
     if (intro) intro.textContent = libraryIntroText(this.state?.song_details);
     const section = document.getElementById('projectLibrarySongDetails');
@@ -1129,6 +1292,18 @@ export class ProjectLibraryPanel {
     if (label) label.textContent = view.label;
     const note = document.getElementById('projectLibrarySongDetailsNote');
     if (note) note.textContent = view.note;
+    // The one notice a Home gets when the app plugin took over the reading (FR46).
+    const notice = document.getElementById('projectLibrarySongDetailsNotice');
+    if (notice) {
+      notice.hidden = !view.notice;
+      const noticeText = document.getElementById('projectLibrarySongDetailsNoticeText');
+      if (noticeText) noticeText.textContent = view.notice?.text || '';
+      const noticeDismiss = document.getElementById('projectLibrarySongDetailsNoticeDismiss');
+      if (noticeDismiss) {
+        noticeDismiss.textContent = view.notice?.dismiss || '';
+        noticeDismiss.disabled = this.busy;
+      }
+    }
     // A numbers-only Home can be widened to names, with the same question.
     const upgrade = document.getElementById('projectLibrarySongDetailsUpgrade');
     if (upgrade) {
@@ -1140,7 +1315,7 @@ export class ProjectLibraryPanel {
     if (ask) {
       ask.hidden = !this.songDetailsAsking;
       const text = document.getElementById('projectLibrarySongDetailsAskText');
-      if (text) text.textContent = SONG_DETAILS_QUESTION;
+      if (text) text.textContent = songDetailsQuestion(this.state?.song_details);
       for (const id of ['projectLibrarySongDetailsAllow', 'projectLibrarySongDetailsDecline']) {
         const button = document.getElementById(id);
         if (button) button.disabled = this.busy;
@@ -1165,6 +1340,25 @@ export class ProjectLibraryPanel {
     this.renderSongDetails();
     if (!allowed) return;
     await this.changeSongDetails(button, true, true);
+  }
+
+  // "Got it" on the one notice: recorded on the Home's consent, so it is not shown
+  // again. It changes nothing that is read and leaves the switch where it was.
+  async dismissSongDetailsNotice(trigger) {
+    if (!this.state?.song_details?.reader_notice || this.busy || this.readOnly) return;
+    await this.run(trigger, 'Saving…', async () => {
+      try {
+        const result = await this.post('/song-details/notice', {
+          request_id: `song-details-notice-${globalThis.crypto.randomUUID()}`
+        });
+        if (result?.song_details) this.state.song_details = result.song_details;
+      } catch (error) {
+        if (error.payload?.song_details) this.state.song_details = error.payload.song_details;
+        throw error;
+      } finally {
+        this.renderSongDetails();
+      }
+    });
   }
 
   async setSongDetails(toggle) {
@@ -1282,6 +1476,38 @@ export class ProjectLibraryPanel {
         try {
           await this.postSharing('/sharing/assistant', {});
           this.status(`The next song you open gets a new ${sharing.role_label || 'assistant'}.`);
+        } finally {
+          this.renderSharing();
+        }
+      });
+      return;
+    }
+    // The Home's offer (FR16): yes hires the assistant now; Not now is remembered.
+    if (id === 'hire') {
+      const role = sharing.role_label || 'assistant';
+      await this.run(trigger, `Adding your ${role}…`, async () => {
+        try {
+          const result = await this.postSharing('/sharing', {
+            enabled: true,
+            hire: true,
+            team_digest: sharing.team_digest
+          });
+          const name = result?.sharing?.agent_name || `Your ${role}`;
+          this.status(`${name} is hired. It joins each song you open.`);
+        } catch (error) {
+          if (error.payload?.sharing && this.state) this.state.sharing = error.payload.sharing;
+          throw error;
+        } finally {
+          this.renderSharing();
+        }
+      });
+      return;
+    }
+    if (id === 'dismiss_offer') {
+      await this.run(trigger, 'Saving your answer…', async () => {
+        try {
+          await this.postSharing('/sharing/offer', {});
+          this.status('Not now. The switch stays here if you change your mind.');
         } finally {
           this.renderSharing();
         }
@@ -1694,6 +1920,35 @@ export class ProjectLibraryPanel {
     return projectWords(this.summary?.words);
   }
 
+  // The Home assistant's song-reading turn: who is reading while it runs, and
+  // why a stopped one stopped with its one action. It rides the summary read:
+  // no extra request. Try again is this Home's own Scan.
+  renderFactsRead() {
+    const box = document.getElementById('projectLibraryFactsRead');
+    if (!box) return;
+    const role = String(this.state?.sharing?.role_label || 'assistant');
+    const view = this.readOnly ? null : libraryFactsReadView(this.summary?.facts_read, role);
+    box.hidden = !view;
+    if (!view) return;
+    box.dataset.factsReadStatus = view.status;
+    const text = document.getElementById('projectLibraryFactsReadText');
+    if (text) text.textContent = view.text;
+    const link = document.getElementById('projectLibraryFactsReadLink');
+    const linkAction = view.action?.id === 'link' ? view.action : null;
+    if (link) {
+      link.hidden = !linkAction;
+      link.textContent = linkAction?.label || '';
+      link.href = linkAction?.href || '#';
+    }
+    const retryAction = view.action?.id === 'rescan' ? view.action : view.retry || null;
+    const retry = document.getElementById('projectLibraryFactsReadRetry');
+    if (retry) {
+      retry.hidden = !retryAction;
+      retry.textContent = retryAction?.label || '';
+      retry.disabled = this.busy;
+    }
+  }
+
   async renderProposals({ loaded = false } = {}) {
     const section = document.getElementById('projectLibraryProposals');
     const container = document.getElementById('projectLibraryProposalRows');
@@ -1706,6 +1961,7 @@ export class ProjectLibraryPanel {
     // read, so there is no extra request.
     const summary = loaded ? this.summary : await this.loadSummary();
     this.renderFreshness();
+    this.renderFactsRead();
     const digestText = libraryDigestText(summary?.digest, this.state?.roots);
     const digestLine = document.getElementById('projectLibraryDigest');
     if (digestLine) {
@@ -2057,13 +2313,15 @@ export class ProjectLibraryPanel {
       view = recentlySavedView(
         await this.request(`/projects?${RECENT_SONGS_QUERY}`),
         new Date(),
-        this.projectWords()
+        this.projectWords(),
+        this.state?.sharing
       );
     } catch (_) {
       view = { visible: false, cards: [] };
     }
     container.replaceChildren();
     section.hidden = !view.visible;
+    this.recentRows = view.cards.map(card => card.row);
     for (const card of view.cards) {
       const item = node('article', 'project-library-resume-card project-library-recent-card');
       const text = node('div', 'project-library-recent-text');
@@ -2427,7 +2685,12 @@ export class ProjectLibraryPanel {
       trigger.disabled = true;
       trigger.textContent = 'Opening…';
     }
-    this.status(`Opening ${row.name}… making its workspace and adding your assistant.`);
+    const sharing = this.state?.sharing;
+    this.status(
+      sharing?.state === 'on' && !sharing.assistant_missing
+        ? `Opening ${row.name}… making its workspace and adding your assistant.`
+        : `Opening ${row.name}… making its workspace.`
+    );
     try {
       const result = await this.post(`/projects/${encodeURIComponent(row.id)}/open`, body);
       this.openRequests.delete(row.id);

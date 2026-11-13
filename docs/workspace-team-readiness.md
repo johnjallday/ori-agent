@@ -273,6 +273,31 @@ new request-owned definitions may be compensated; saved/reused definitions are
 never edited or deleted. Folder/plugin/automation failures remain their own
 warnings and do not rewrite staffing truth.
 
+## The Home's shared project assistant is not a Create role
+
+An application's song blueprint can declare a shared project agent (the
+**app assistant**) that one Home owns and each song binds on Open. It is not a
+role of this wizard: no `role_staffing` entry fills it, `team_staffed` neither
+counts nor requires it, and a strict Create request never hires it.
+
+It is hired outside Create, once per Home, under the Home's standing
+project-staffing approval (`AssistantProgramState.project_staffing_consent`):
+
+- by the folder agent's Set up, which lists it as one more row of the plan's
+  hires and records the approval and the agent in the same step; or
+- by the Home's one-time "Add your <assistant>" offer, for a Home set up before
+  that row existed (dismissing it is remembered; nothing is granted silently).
+
+The hire reserves a name, creates the agent with a marker carrying the
+reservation's ID and records it under the Home's lock; a sweep records an agent
+whose marker matches a pending reservation, so running Set up again, or a stop
+between create and record, never makes a second assistant. A Home whose
+"Add my … to songs I open" switch is off keeps it and the card says so. Reading
+a song's project file and being given its facts follow the Home's song-details
+approval, not this contract; see
+[project-library.md](architecture/project-library.md), "App-plugin readers and
+the app assistant's read".
+
 ## Compatibility matrix
 
 | Caller or state | Contract |

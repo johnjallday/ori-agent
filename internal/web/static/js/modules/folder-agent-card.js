@@ -31,6 +31,8 @@ const ACTION_PATHS = {
   // The offer to learn the songs (Learn them, Not now), asked before the goal.
   learn_songs: 'songs',
   dismiss_songs: 'songs',
+  // Try again on a reading that stopped (the owner already said yes).
+  retry_songs: 'songs',
   // The premise's answers (Manage them as …, and It's something else).
   premise_confirm: 'premise',
   premise_other: 'premise'
@@ -209,7 +211,10 @@ export function folderAgentReportView(view) {
           noun: String(view.songs_offer.noun || 'songs'),
           ask: String(view.songs_offer.ask),
           reads: String(view.songs_offer.reads || ''),
-          notRead: String(view.songs_offer.not_read || '')
+          notRead: String(view.songs_offer.not_read || ''),
+          // The reviewed app plugin that is installed but cannot read these songs
+          // yet: the card says to update it, and there is nothing to learn.
+          update: String(view.songs_offer.update || '')
         }
       : null,
     // The reading of the songs once "Learn them" was said: the line to show
@@ -225,7 +230,17 @@ export function folderAgentReportView(view) {
           // facts (FR17); empty when the host's line stands in (FR18), which
           // is then part of `line`.
           summary: String(view.learning.summary || ''),
-          summaryBy: String(view.learning.summary_by || '')
+          summaryBy: String(view.learning.summary_by || ''),
+          // The app assistant reading the songs, and why a stopped reading
+          // stopped with the one thing to do about it (assistant-reads-projects
+          // FR33, FR35). The host's words; the card only draws them.
+          reader: String(view.learning.reader || ''),
+          reason: String(view.learning.reason || ''),
+          action: String(view.learning.action || ''),
+          // The reviewed app plugin that owns some of these songs and is
+          // installed without a reader, once the reading ended: the card says
+          // to update it rather than calling those songs unreadable (FR49).
+          update: String(view.learning.update || '')
         }
       : null
   };
@@ -1622,6 +1637,17 @@ function songsOfferSection(doc, offer, onAction) {
   const section = el(doc, 'section', 'folder-agent-card__songs-offer');
   section.setAttribute('aria-label', 'Learn the songs');
   section.append(el(doc, 'p', 'folder-agent-card__songs-lead', offer.ask));
+  if (offer.update) {
+    // An installed plugin that cannot read these songs yet: no Learn them, no
+    // Not now, only the way to fix it. Never a silent blank.
+    section.dataset.songsOffer = 'update';
+    const updateRow = el(doc, 'div', 'folder-agent-card__actions folder-agent-card__songs-actions');
+    const update = el(doc, 'a', 'btn btn-primary btn-sm', 'Update');
+    update.href = '/plugins';
+    updateRow.append(update);
+    section.append(updateRow);
+    return section;
+  }
   if (offer.reads) section.append(el(doc, 'p', 'folder-agent-card__songs-reads', offer.reads));
   if (offer.notRead) {
     section.append(el(doc, 'p', 'folder-agent-card__songs-not-read', offer.notRead));
@@ -1644,15 +1670,59 @@ function songsOfferSection(doc, offer, onAction) {
   return section;
 }
 
+// learningStopActions are the one thing to do about a reading that stopped for a
+// named reason (FR35): fix it where it can be fixed, and Try again where a
+// retry can help. There is no fallback reader behind any of them.
+function learningStopActions(doc, learning, onAction, homeRoute) {
+  const row = el(doc, 'div', 'folder-agent-card__actions folder-agent-card__learning-actions');
+  const link = (text, href) => {
+    const a = el(doc, 'a', 'btn btn-sm folder-agent-card__secondary', text);
+    a.href = href;
+    row.append(a);
+  };
+  const retry = () => {
+    const b = el(doc, 'button', 'btn btn-primary btn-sm', 'Try again');
+    b.type = 'button';
+    b.addEventListener('click', () => onAction?.('retry_songs', b, {}));
+    row.append(b);
+  };
+  switch (learning.action) {
+    case 'choose_model':
+      link('Choose a model', '/settings');
+      retry();
+      break;
+    case 'add_assistant':
+      if (homeRoute) link('Add it', homeRoute);
+      retry();
+      break;
+    case 'update_plugin':
+      link('Update', '/plugins');
+      break;
+    case 'open_switch':
+      if (homeRoute) link("Open the Home's switch", homeRoute);
+      break;
+    case 'retry':
+      retry();
+      break;
+    default:
+      break;
+  }
+  return row;
+}
+
 // learningSection is the reading of the songs as it runs and once it ended
 // (FR14): the host's line ("Learning <song>… (2 of 7)", then "Learned 7 songs"),
 // a progress bar while it runs, and the songs that cannot be read this way.
-function learningSection(doc, learning) {
+function learningSection(doc, learning, onAction = null, homeRoute = '') {
   const section = el(doc, 'section', 'folder-agent-card__learning');
   section.dataset.learningStatus = learning.status;
+  if (learning.reason) section.dataset.learningReason = learning.reason;
   section.setAttribute('aria-label', 'Learning the songs');
   const line = el(doc, 'p', 'folder-agent-card__learning-line', learning.line);
   section.append(line);
+  if (learning.status === 'stopped' && learning.action) {
+    section.append(learningStopActions(doc, learning, onAction, homeRoute));
+  }
   if (learning.status === 'running' || learning.status === 'summarizing') {
     // The poll redraws this card; role=status announces the line as it changes.
     line.setAttribute('role', 'status');
@@ -1672,8 +1742,21 @@ function learningSection(doc, learning) {
   if (learning.summary && learning.summaryBy === 'agent') {
     section.append(el(doc, 'p', 'folder-agent-card__learning-summary', learning.summary));
   }
-  if (learning.notRead && learning.status !== 'running' && learning.status !== 'summarizing') {
+  const ended = learning.status !== 'running' && learning.status !== 'summarizing';
+  if (learning.notRead && ended) {
     section.append(el(doc, 'p', 'folder-agent-card__songs-not-read', learning.notRead));
+  }
+  // Songs the installed plugin cannot read yet: the way to fix it, with the
+  // update, never a silent blank (FR49).
+  if (learning.update && ended) {
+    section.append(
+      el(doc, 'p', 'folder-agent-card__songs-not-read', `Update ${learning.update} to read songs.`)
+    );
+    const row = el(doc, 'div', 'folder-agent-card__actions folder-agent-card__learning-actions');
+    const update = el(doc, 'a', 'btn btn-sm folder-agent-card__secondary', 'Update');
+    update.href = '/plugins';
+    row.append(update);
+    section.append(row);
   }
   return section;
 }
@@ -2079,7 +2162,10 @@ export function renderFolderAgentReport(
   }
   // The Commander asks one thing at a time: the songs first, then the goal
   // (learn-the-songs FR2, FR17). The reading's line stays once it ended.
-  if (view.learning) card.append(learningSection(doc, view.learning));
+  if (view.learning)
+    card.append(
+      learningSection(doc, view.learning, onAction, view.setup?.receipt?.home?.route || '')
+    );
   if (view.songsOffer) card.append(songsOfferSection(doc, view.songsOffer, onAction));
   if (view.goalOffer) card.append(goalOfferSection(doc, view.goalOffer, onAction));
   if (view.actions.length) {
@@ -2307,6 +2393,7 @@ export async function postFolderAgentAction(
   } else if (action === 'dismiss_goal') body = { answer: 'dismiss' };
   else if (action === 'learn_songs') body = { answer: 'learn' };
   else if (action === 'dismiss_songs') body = { answer: 'dismiss' };
+  else if (action === 'retry_songs') body = { answer: 'retry' };
   else if (action === 'premise_confirm') body = { answer: 'confirmed' };
   else if (action === 'premise_other') body = { answer: 'something_else' };
   const { ok, payload } = await post(url, body, fetchImpl);

@@ -10,7 +10,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
+	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/toolapi"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -88,12 +90,44 @@ func (b *ServerBuilder) agentToolModel(workspaceID, agentName string) (projectli
 		}
 		return noModel(err)
 	}
-	model := strings.TrimSpace(local.Settings.Model)
+	return b.toolModelFor(local.Settings)
+}
+
+// rootAgentToolModel is agentToolModel for one of the user's own agents that
+// is bound into no workspace: a Home's shared assistant, hired before any song
+// (assistant-reads-projects). A song's workspace-only copy is never it.
+func (b *ServerBuilder) rootAgentToolModel(agentName string) (projectlibrary.ManagerChat, folderlook.ModelRef, error) {
+	noModel := func(err error) (projectlibrary.ManagerChat, folderlook.ModelRef, error) {
+		return nil, folderlook.ModelRef{}, &folderlook.ModelError{Cause: folderlook.Cause{Kind: folderlook.CauseNoModel}, Err: err}
+	}
+	if b.st == nil || b.llmFactory == nil {
+		return noModel(errors.New("models are not wired"))
+	}
+	found, ok := b.st.GetAgent(agentName)
+	if !ok || found == nil {
+		return noModel(errors.New("the agent is gone"))
+	}
+	if origins, ok := b.st.(interface {
+		AgentOrigin(string) (store.AgentOrigin, bool)
+	}); ok {
+		if origin, known := origins.AgentOrigin(agentName); !known || origin.Source == store.SourceWorkspace {
+			return noModel(errors.New("the agent is a workspace-only copy"))
+		}
+	}
+	return b.toolModelFor(found.Settings)
+}
+
+// toolModelFor resolves the tool-capable model an agent's settings name.
+func (b *ServerBuilder) toolModelFor(settings types.Settings) (projectlibrary.ManagerChat, folderlook.ModelRef, error) {
+	noModel := func(err error) (projectlibrary.ManagerChat, folderlook.ModelRef, error) {
+		return nil, folderlook.ModelRef{}, &folderlook.ModelError{Cause: folderlook.Cause{Kind: folderlook.CauseNoModel}, Err: err}
+	}
+	model := strings.TrimSpace(settings.Model)
 	if model == "" {
 		return noModel(errors.New("the agent has no model"))
 	}
-	providerName := libraryManagerProviderName(local.Settings.Provider, model, b.llmFactory)
-	ref := folderlook.ModelRef{Provider: providerDisplayName(providerName, local.Settings.Provider), Model: model}
+	providerName := libraryManagerProviderName(settings.Provider, model, b.llmFactory)
+	ref := folderlook.ModelRef{Provider: providerDisplayName(providerName, settings.Provider), Model: model}
 	failed := func(kind string, err error) (projectlibrary.ManagerChat, folderlook.ModelRef, error) {
 		return nil, ref, &folderlook.ModelError{Cause: folderlook.Cause{Kind: kind, Provider: ref.Provider, Model: model}, Err: err}
 	}

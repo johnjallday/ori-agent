@@ -955,7 +955,9 @@ export function setupResultView(
           name,
           saved: lastSavedLabel(row.last_saved_at, now),
           facts: songFactsLabel(row.facts, words),
-          ariaLabel: libraryOpenAction({ ...row, name }, false).ariaLabel
+          // This screen follows a setup that recorded the Home's approval for
+          // its shared assistant, so opening a song adds it.
+          ariaLabel: libraryOpenAction({ ...row, name }, false, { state: 'on' }).ariaLabel
         };
       }),
       openLabel: `Browse all ${library}`

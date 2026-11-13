@@ -150,9 +150,10 @@ func homeLines(rec Record, home folderlook.Candidate) []personalassistant.Folder
 			lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanHome, Name: "Creates your " + name,
 				Outcome: createsOutcome(name)})
 		}
+		hires := HomeHiresOutcome
 		if facts.RolesKnown {
 			// One outcome item for every hire, whatever the number of roles.
-			hires := hiresOutcome(len(facts.MissingRoles))
+			hires = hiresOutcome(len(facts.MissingRoles) + assistantHires(facts))
 			for _, role := range facts.MissingRoles {
 				lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: "Hires " + role, Outcome: hires})
 			}
@@ -160,6 +161,7 @@ func homeLines(rec Record, home folderlook.Candidate) []personalassistant.Folder
 			lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: HomeRolesLine, Outcome: HomeHiresOutcome,
 				Detail: "Each role is named as it is hired."})
 		}
+		lines = append(lines, assistantLines(facts.Assistant, hires)...)
 	}
 	lines = append(lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanLibrary,
 		Name: "Adds " + rec.FolderName + " to your " + name})
@@ -185,6 +187,45 @@ func homeLines(rec Record, home folderlook.Candidate) []personalassistant.Folder
 	return lines
 }
 
+// AssistantJoins is the note on the shared assistant's hire: what it does
+// beyond the Home's own roles.
+const AssistantJoins = "Joins each song you open."
+
+// assistantHires is 1 when the Home step hires the shared assistant.
+func assistantHires(facts *folderlook.HomeFacts) int {
+	if facts != nil && facts.Assistant != nil && facts.Assistant.State == folderlook.AssistantHire {
+		return 1
+	}
+	return 0
+}
+
+// assistantLines are the plan's lines about the Home's shared assistant: its
+// hire, on its own line after the Home's roles (FR1, FR7), or one line saying
+// why Set up adds nobody for it (FR4). A Home that has it gets no line (FR3).
+// Set up never switches the Home's approval on, renews it, or decides for the
+// owner about an agent it did not make: each of those is the Home's to do.
+func assistantLines(a *folderlook.HomeAssistant, hires string) []personalassistant.FolderPlanLine {
+	if a == nil {
+		return nil
+	}
+	notAdded := "Your " + a.Label + " is not added"
+	switch a.State {
+	case folderlook.AssistantHire:
+		return []personalassistant.FolderPlanLine{{Kind: FolderPlanAssistant, Name: "Hires " + a.Name, Outcome: hires,
+			Detail: AssistantJoins}}
+	case folderlook.AssistantOff:
+		return []personalassistant.FolderPlanLine{{Kind: FolderPlanAssistantNote, Name: notAdded,
+			Detail: "The Home's \"Add my " + a.Label + " to songs I open\" switch is off. Set up leaves it off; turn it on in the Home."}}
+	case folderlook.AssistantStale:
+		return []personalassistant.FolderPlanLine{{Kind: FolderPlanAssistantNote, Name: notAdded,
+			Detail: "The Home agreed to it for an older version of its team. Review it in the Home."}}
+	case folderlook.AssistantHeld:
+		return []personalassistant.FolderPlanLine{{Kind: FolderPlanAssistantNote, Name: notAdded,
+			Detail: "An agent named " + a.Name + " already exists, and Ori did not make it for this Home. Decide in the Home."}}
+	}
+	return nil
+}
+
 // homeName is the Home's name as the plan words it.
 func homeName(home folderlook.Candidate) string {
 	if home.Name == "" {
@@ -206,4 +247,13 @@ const (
 	FolderPlanPlace  = "place"
 	// FolderPlanHire is a hire line: "Hires <role>" or HomeRolesLine.
 	FolderPlanHire = "hire"
+	// FolderPlanAssistant is the shared assistant's hire line. It is not a
+	// FolderPlanHire line: the Home's roles are hired first, and their lines
+	// are settled before it runs.
+	FolderPlanAssistant = "assistant"
+	// FolderPlanAssistantNote says why Set up adds no shared assistant.
+	FolderPlanAssistantNote = "assistant_note"
+	// FolderPlanHomeTools installs the app plugin that gives the Home's songs
+	// their team, when the plan's own tools step does not.
+	FolderPlanHomeTools = "home_tools"
 )

@@ -169,8 +169,18 @@
                       <label id="projectLibrarySharingLabel" class="form-check-label" for="projectLibrarySharingSwitch">Add my assistant to songs I open</label>
                     </div>
                   </div>
+                  <div id="projectLibrarySharingHired" class="project-library-sharing-hired" hidden>
+                    <span id="projectLibrarySharingHiredName" class="project-library-sharing-hired-name"></span>
+                    <ul id="projectLibrarySharingHiredNotes" class="project-library-sharing-hired-notes"></ul>
+                  </div>
                   <p id="projectLibrarySharingNote" class="project-library-sharing-note"></p>
                   <button id="projectLibrarySharingAction" class="modern-btn modern-btn-primary" type="button" hidden></button>
+                  <button id="projectLibrarySharingDismiss" class="modern-btn modern-btn-secondary" type="button" hidden></button>
+                </section>
+                <section id="projectLibraryFactsRead" class="project-library-sharing project-library-facts-read" aria-label="Reading your songs" hidden>
+                  <p id="projectLibraryFactsReadText" class="project-library-sharing-note" role="status"></p>
+                  <a id="projectLibraryFactsReadLink" class="modern-btn modern-btn-secondary" href="#" hidden></a>
+                  <button id="projectLibraryFactsReadRetry" class="modern-btn modern-btn-primary" type="button" hidden></button>
                 </section>
                 <section id="projectLibrarySongDetails" class="project-library-sharing project-library-song-details" aria-labelledby="projectLibrarySongDetailsTitle" hidden>
                   <div class="project-library-sharing-head">
@@ -181,6 +191,10 @@
                     </div>
                   </div>
                   <p id="projectLibrarySongDetailsNote" class="project-library-sharing-note"></p>
+                  <div id="projectLibrarySongDetailsNotice" class="project-library-song-details-ask" role="group" aria-labelledby="projectLibrarySongDetailsNoticeText" hidden>
+                    <p id="projectLibrarySongDetailsNoticeText" class="project-library-sharing-note"></p>
+                    <button id="projectLibrarySongDetailsNoticeDismiss" class="modern-btn modern-btn-secondary" type="button"></button>
+                  </div>
                   <div id="projectLibrarySongDetailsAsk" class="project-library-song-details-ask" role="group" aria-labelledby="projectLibrarySongDetailsAskText" hidden>
                     <p id="projectLibrarySongDetailsAskText" class="project-library-sharing-note"></p>
                     <button id="projectLibrarySongDetailsAllow" class="modern-btn modern-btn-primary" type="button">Allow</button>

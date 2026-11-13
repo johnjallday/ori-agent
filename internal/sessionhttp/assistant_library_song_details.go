@@ -28,11 +28,73 @@ type librarySongDetailsView struct {
 	// AppName names whose project files are read, from the host's marker
 	// table, so the switch's note can say so.
 	AppName string `json:"app_name,omitempty"`
+	// ReaderName names the app plugin that reads them, as the reviewed list gives
+	// it: the approval says the plugin reads the files and Ori keeps only the
+	// listed facts (assistant-reads-projects FR44, FR45). Empty when no
+	// installed plugin reads this Home's songs.
+	ReaderName string `json:"reader_name,omitempty"`
+	// ReaderNotice is true once, for a Home that approved song details before the
+	// app plugin read them: the page tells it so and links the switch. It is not
+	// asked again; acknowledging it is recorded on the consent (FR46).
+	ReaderNotice bool `json:"reader_notice,omitempty"`
+	// ReaderUpdate names a reviewed app plugin that is installed but declares no
+	// reader, so no installed plugin reads this Home's songs: the page says
+	// "Update <plugin> to read songs" where the details would be, never a silent
+	// blank (assistant-reads-projects FR49). Empty when a plugin reads, or none
+	// is installed.
+	ReaderUpdate string `json:"reader_update,omitempty"`
+}
+
+// librarySongDetailsFor is librarySongDetails with the app plugin that reads the
+// songs named, from the installed plugins, and the one-time notice for a Home
+// that approved song details before it did.
+func (h *Handler) librarySongDetailsFor(home *workspace.Workspace) librarySongDetailsView {
+	view := librarySongDetails(home)
+	if h != nil && h.installedPluginLister != nil {
+		if installed, err := h.installedPluginLister.List(); err == nil {
+			view.ReaderName = projectlibrary.ReaderDisplayName(installed)
+			if view.ReaderName == "" {
+				view.ReaderUpdate = projectlibrary.ReaderUpdateName(installed)
+			}
+		}
+	}
+	if view.ReaderName != "" && view.State == workspace.SongDetailsOn && home != nil {
+		view.ReaderNotice = home.GetAssistantProgramState().GetSongDetailsConsent().NeedsReaderNotice()
+	}
+	return view
+}
+
+// AcknowledgeSongDetailsReaderNotice handles
+// POST /api/workspaces/{workspaceID}/assistant-program/library/song-details/notice
+// {request_id}: the owner saw that the app plugin now reads the project files.
+// It records that on the Home's consent and changes nothing else: not what is
+// read, not the switch. Asking twice is a no-op.
+func (h *Handler) AcknowledgeSongDetailsReaderNotice(w http.ResponseWriter, r *http.Request) {
+	_, home, ok := h.assistantLibraryScope(w, r)
+	if !ok {
+		return
+	}
+	var request struct {
+		RequestID string `json:"request_id"`
+	}
+	if !decodeLibraryAction(w, r, &request) {
+		return
+	}
+	if strings.TrimSpace(request.RequestID) == "" || len(request.RequestID) > 120 {
+		_ = orihttp.RespondBadRequest(w, "Invalid library request")
+		return
+	}
+	if err := workspace.NewSongDetailsConsents(h.workspaceTaskStore).AcknowledgeReaderNotice(home.ID); err != nil {
+		h.respondSongDetailsError(w, home, err)
+		return
+	}
+	current, _ := h.workspaceTaskStore.Get(home.ID)
+	_ = orihttp.RespondSuccess(w, map[string]any{"song_details": h.librarySongDetailsFor(current)})
 }
 
 // librarySongDetails reads the switch from the Home the request resolved.
 func librarySongDetails(home *workspace.Workspace) librarySongDetailsView {
-	view := librarySongDetailsView{State: workspace.SongDetailsNone, AppName: folderdigest.FactsAppName()}
+	view := librarySongDetailsView{State: workspace.SongDetailsNone, AppName: folderdigest.ReviewedAppName()}
 	if home != nil {
 		consent := home.GetAssistantProgramState().GetSongDetailsConsent()
 		view.State, view.Names = consent.State(), consent.CoversNames()
@@ -75,30 +137,30 @@ func (h *Handler) SetAssistantLibrarySongDetails(w http.ResponseWriter, r *http.
 		return
 	}
 	if librarySongDetails(home).State == workspace.SongDetailsNone {
-		respondSongDetailsError(w, home, projectlibrary.ErrSongDetailsNotGranted)
+		h.respondSongDetailsError(w, home, projectlibrary.ErrSongDetailsNotGranted)
 		return
 	}
 	state, err := h.assistantLibraryStore().SetSongDetails(scope, request.Enabled, request.Names)
 	if err != nil {
 		current, _ := h.workspaceTaskStore.Get(home.ID)
-		respondSongDetailsError(w, current, err)
+		h.respondSongDetailsError(w, current, err)
 		return
 	}
 	if !request.Enabled && h.songDetailsOff != nil {
 		// Also on a repeated off: it only ever removes, so it can be told twice.
 		h.songDetailsOff(home.ID)
 	}
-	view := librarySongDetails(nil)
+	view := h.librarySongDetailsFor(nil)
 	if current, _ := h.workspaceTaskStore.Get(home.ID); current != nil {
-		view = librarySongDetails(current)
+		view = h.librarySongDetailsFor(current)
 	} else {
 		view.State = state
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"song_details": view})
 }
 
-func respondSongDetailsError(w http.ResponseWriter, home *workspace.Workspace, err error) {
-	body := map[string]any{"song_details": librarySongDetails(home)}
+func (h *Handler) respondSongDetailsError(w http.ResponseWriter, home *workspace.Workspace, err error) {
+	body := map[string]any{"song_details": h.librarySongDetailsFor(home)}
 	switch {
 	case errors.Is(err, projectlibrary.ErrSongDetailsNotGranted):
 		body["error"], body["reason"] = "This Home was not set up to read song details.", "song_details_not_granted"

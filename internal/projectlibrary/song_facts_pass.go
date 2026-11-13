@@ -10,35 +10,20 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
-// The fact pass reads song facts after a consenting Home's scan is recorded.
-// It never changes the listing: it opens only the file that dates each song,
-// through the scan's pinned no-follow walk, re-checks that the file is the one
-// the listing saw, reads the numbers (tempo, length, track count) and, under a
-// consent that covers them, the track names, markers and regions, and saves them
-// in a second fenced write. A song it does not reach keeps no facts until a later
+// Song facts are saved after a consenting Home's scan is recorded. The host does
+// not read project files itself: an installed app plugin's reader does (see
+// project_facts_read.go and facts_read_run.go). This file holds what the
+// plugin read turn shares: the songs whose facts are still wanted, the grant
+// they are read under, and the fenced write that saves them. The write never
+// changes the listing. A song that is not reached keeps no facts until a later
 // scan.
 
-// songFactsBudget bounds one scan's pass: wall time and bytes read (T2).
-type songFactsBudget struct {
-	Duration time.Duration
-	Bytes    int64
-}
-
-var defaultSongFactsBudget = songFactsBudget{Duration: 10 * time.Second, Bytes: 512 << 20}
-
-// songFactsBatch is how many files are read per hold of the root gate, so a
-// revocation waits for at most one batch and each batch is bracketed by a
-// fresh check of the root and the consent.
-const songFactsBatch = 32
-
-// songFactsTarget is one song whose dated file the pass may read.
+// songFactsTarget is one song whose dated file the read may ask a plugin for.
 type songFactsTarget struct {
 	Relative       string      `json:"relative_folder"`
 	FolderIdentity string      `json:"folder_identity"`
@@ -80,39 +65,15 @@ func songFactsGrantOf(state *workspace.AssistantProgramState) (songFactsGrant, b
 // grant is dropped if the Home no longer gives one.
 func (g songFactsGrant) covers(other songFactsGrant) bool { return !other.names || g.names }
 
-// factsGrammarFor is the grammar the reader gets under a grant: the format's own
-// when names are allowed, the same grammar with every name key blanked when they
-// are not, so a reader under a numbers-only consent has no way to read a name.
-// Nil for a format that declares no grammar.
-func factsGrammarFor(format string, names bool) *folderdigest.ProjectFacts {
-	grammar := factsGrammar(format)
-	if names {
-		return grammar
-	}
-	return grammar.WithoutNames()
-}
-
 // factsWanted says a song's stored facts still need reading under a grant: it has
-// none, or it was read under numbers only, the grant now covers names, and the
-// format has names to give. A song that was not read, or whose format gives no
-// names, is never read again for this (the same unchanged file gives the same).
-func factsWanted(f *ObservedFacts, names bool, format string) bool {
+// none, or it was read under numbers only and the grant now covers names. A song
+// that was not read is never read again for this (the same unchanged file gives
+// the same).
+func factsWanted(f *ObservedFacts, names bool) bool {
 	if f == nil {
 		return true
 	}
-	return names && f.Names == nil && f.NotRead == "" && factsGrammar(format).HasNames()
-}
-
-// songFactsOutcome is what one pass did, for the log and tests. Counts only.
-type songFactsOutcome struct {
-	// Read counts files that gave facts; Skipped the rest of the targets (not
-	// read, or not reached). Saved is how many records the write attached, and
-	// Readable how many of those hold facts (the others record why a file was not
-	// read).
-	Targets, Opened, Read, Skipped int
-	Bytes                          int64
-	Stopped                        string // "", "time", "bytes", "cancelled", "authority"
-	Saved, Readable                int
+	return names && f.Names == nil && f.NotRead == ""
 }
 
 // SongFactsProgress is where one scan's pass has got to, for a caller that
@@ -130,6 +91,9 @@ type SongFactsProgress struct {
 	Skipped  int
 	Finished bool
 	Stopped  string
+	// Reader is the agent reading the songs (the Home's app assistant, which
+	// reads them through its plugin); empty when it is not known.
+	Reader string
 }
 
 type songFactsProgressKey struct{}
@@ -159,47 +123,9 @@ func songFactsName(target songFactsTarget) string {
 	return name
 }
 
-func (r *Roots) songFactsBudgetOrDefault() songFactsBudget {
-	if r.factsBudget.Duration > 0 && r.factsBudget.Bytes > 0 {
-		return r.factsBudget
-	}
-	return defaultSongFactsBudget
-}
-
-// readSongFactsAfterScan runs the pass for a consenting Home and saves what it
-// read. Every failure leaves the listing and older facts as they are; the
-// caller publishes the scan either way.
-func (r *Roots) readSongFactsAfterScan(ctx context.Context, scope Scope, scan Scan, observed Discovery, root Root) songFactsOutcome {
-	targets, grant, ok := r.songFactsTargets(scope, scan, observed)
-	if !ok || len(targets) == 0 {
-		return songFactsOutcome{}
-	}
-	started := time.Now()
-	reads, outcome := r.songFactsPass(ctx, scope, root, targets, grant)
-	if len(reads) > 0 {
-		saved, readable, err := r.saveSongFacts(scope, scan, reads, grant)
-		if err != nil {
-			logger.Warn("Project library could not save song facts", logger.Fields{"home_id": scope.HomeID,
-				"scan_id": scan.ID, "error": err.Error()})
-		}
-		outcome.Saved, outcome.Readable = saved, readable
-	}
-	if report := songFactsProgressFrom(ctx); report != nil {
-		// Read counts the songs that gave facts; a song recorded as not read (or
-		// not reached) is part of Skipped, so "i of N" and "Learned K" are honest.
-		report(SongFactsProgress{Done: outcome.Targets, Targets: outcome.Targets, Read: outcome.Readable,
-			Skipped: outcome.Targets - outcome.Readable, Finished: true, Stopped: outcome.Stopped})
-	}
-	logger.Info("Project library read song facts", logger.Fields{"home_id": scope.HomeID, "scan_id": scan.ID,
-		"targets": outcome.Targets, "opened": outcome.Opened, "read": outcome.Read, "skipped": outcome.Skipped,
-		"saved": outcome.Saved, "readable": outcome.Readable, "bytes": outcome.Bytes, "stopped": outcome.Stopped,
-		"elapsed_ms": time.Since(started).Milliseconds()})
-	return outcome
-}
-
-// songFactsTargets lists this scan's songs of a facts-declaring format whose
-// facts are still wanted under the Home's grant (none stored, or stored under
-// numbers only while the grant now covers names), most recently saved first. A
+// songFactsTargets lists this scan's songs whose facts are still wanted under
+// the Home's grant (none stored, or stored under numbers only while the grant
+// now covers names), most recently saved first. A
 // Home without an active consent has none: the pass opens nothing for it. It
 // also returns the grant the targets were chosen under.
 func (r *Roots) songFactsTargets(scope Scope, scan Scan, observed Discovery) ([]songFactsTarget, songFactsGrant, bool) {
@@ -217,7 +143,7 @@ func (r *Roots) songFactsTargets(scope Scope, scan Scan, observed Discovery) ([]
 			continue
 		}
 		observation := scanObservation(doc, scan, candidate.RelativeFolder, candidate.FileIdentity)
-		if observation == nil || !factsWanted(observation.Facts, grant.names, candidate.Format) ||
+		if observation == nil || !factsWanted(observation.Facts, grant.names) ||
 			!factsCanAttach(*observation, *candidate.DatedFile) {
 			continue
 		}
@@ -251,115 +177,7 @@ func factsCanAttach(o Observation, file FactsSource) bool {
 		slices.Contains(o.Alternates, file.File) && o.FileModifiedAt.Equal(file.ModifiedAt)
 }
 
-// songFactsPass reads the targets in batches under the root gate. A batch is
-// kept only when the root and consent still hold after it.
-func (r *Roots) songFactsPass(ctx context.Context, scope Scope, root Root, targets []songFactsTarget, grant songFactsGrant) ([]songFactsRead, songFactsOutcome) {
-	budget := r.songFactsBudgetOrDefault()
-	outcome := songFactsOutcome{Targets: len(targets)}
-	passCtx, cancel := context.WithTimeout(ctx, budget.Duration)
-	defer cancel()
-	var reads []songFactsRead
-	for start := 0; start < len(targets) && outcome.Stopped == ""; start += songFactsBatch {
-		end := min(start+songFactsBatch, len(targets))
-		batch, stopped := r.songFactsBatch(passCtx, ctx, scope, root, targets[start:end], grant, budget, &outcome)
-		reads = append(reads, batch...)
-		outcome.Stopped = stopped
-	}
-	return reads, outcome
-}
-
-func (r *Roots) songFactsBatch(passCtx, ctx context.Context, scope Scope, root Root, targets []songFactsTarget,
-	grant songFactsGrant, budget songFactsBudget, outcome *songFactsOutcome) ([]songFactsRead, string) {
-	gate := rootAccessGate(scope)
-	gate.RLock()
-	defer gate.RUnlock()
-	if !r.songFactsAuthorityNoGate(scope, root, grant) {
-		return nil, "authority"
-	}
-	var reads []songFactsRead
-	stopped := ""
-	report := songFactsProgressFrom(ctx)
-	for _, target := range targets {
-		if stopped = songFactsStop(passCtx, ctx); stopped != "" {
-			break
-		}
-		if target.File.Size > DefaultSongFactsLimits.MaxBytes {
-			// Over the cap: never opened, never facts, and remembered as too large
-			// so the same unchanged file is not looked at again.
-			outcome.Skipped++
-			reads = append(reads, songFactsRead{songFactsTarget: target, NotRead: NotReadTooLarge})
-			continue
-		}
-		if outcome.Bytes+target.File.Size > budget.Bytes {
-			stopped = "bytes"
-			break
-		}
-		if report != nil {
-			report(SongFactsProgress{Song: songFactsName(target), Done: outcome.Read + outcome.Skipped,
-				Targets: outcome.Targets, Read: outcome.Read, Skipped: outcome.Skipped})
-		}
-		read, ok := r.readOneSongFacts(root, target, grant, outcome)
-		if !ok {
-			outcome.Skipped++
-			continue
-		}
-		reads = append(reads, read)
-	}
-	// Results from a root revoked, swapped or switched off during the batch
-	// are dropped, as readDirectoryWithIdentity drops its rows.
-	if !r.songFactsAuthorityNoGate(scope, root, grant) {
-		return nil, "authority"
-	}
-	return reads, stopped
-}
-
-func songFactsStop(passCtx, ctx context.Context) string {
-	switch {
-	case ctx.Err() != nil:
-		return "cancelled"
-	case passCtx.Err() != nil:
-		return "time"
-	}
-	return ""
-}
-
-// readOneSongFacts opens one dated file, reads it within the per-file caps and
-// re-checks it afterwards. An I/O failure or a changed file is skipped. The
-// grammar the reader gets is chosen by the grant, so under a consent that does
-// not cover names the reader cannot return one.
-func (r *Roots) readOneSongFacts(root Root, target songFactsTarget, grant songFactsGrant, outcome *songFactsOutcome) (songFactsRead, bool) {
-	if r.factsOpened != nil {
-		r.factsOpened(target.Relative, target.File.File)
-	}
-	file, err := openPinnedProjectFile(root, target.Relative, target.FolderIdentity, target.File)
-	if err != nil {
-		return songFactsRead{}, false
-	}
-	defer func() { _ = file.Close() }()
-	outcome.Opened++
-	outcome.Bytes += target.File.Size
-	facts, names, err := ReadSongDetails(file, factsGrammarFor(target.Format, grant.names), DefaultSongFactsLimits)
-	if err != nil && !errors.Is(err, ErrSongFactsUnreadable) {
-		return songFactsRead{}, false // an I/O failure says nothing about the file: tried again next scan
-	}
-	if !pinnedFileStillMatches(file, target.File) {
-		return songFactsRead{}, false // re-saved while it was read
-	}
-	if err != nil {
-		// The content gave nothing: over a cap, or not a project of its format, or
-		// malformed. Remembered with the file's identity and the reason.
-		reason := NotReadUnreadable
-		if errors.Is(err, errSongFactsOverCap) {
-			reason = NotReadTooLarge
-		}
-		outcome.Skipped++
-		return songFactsRead{songFactsTarget: target, NotRead: reason}, true
-	}
-	outcome.Read++
-	return songFactsRead{songFactsTarget: target, Facts: facts, Names: names}, true
-}
-
-// songFactsAuthorityNoGate is the pass's authority: the root is the one the scan
+// songFactsAuthorityNoGate is the read's authority: the root is the one the scan
 // used and still connected, and the Home's consent is still active and still
 // covers what the pass began with (names, if it is reading names). The caller
 // holds the root gate. A consent switched off, or narrowed, during a pass stops
@@ -460,7 +278,7 @@ func attachSongFacts(doc *Document, scan Scan, read songFactsRead) bool {
 			if o.RootID != scan.RootID || o.RelativeFolder != read.Relative || o.FileIdentity != read.FolderIdentity {
 				continue
 			}
-			if o.ScanID != scan.ID || !attachWanted(o.Facts, read, o.Format) || !factsCanAttach(*o, read.File) {
+			if o.ScanID != scan.ID || !attachWanted(o.Facts, read) || !factsCanAttach(*o, read.File) {
 				return false
 			}
 			o.Facts = &ObservedFacts{SongFacts: read.Facts, Names: read.Names.clone(), NotRead: read.NotRead, ReadFrom: read.File}
@@ -474,9 +292,9 @@ func attachSongFacts(doc *Document, scan Scan, read songFactsRead) bool {
 // with facts follows factsWanted. A read that records a refusal replaces nothing
 // but the empty record an older build kept for a file that gave no facts (which
 // is what a names consent would otherwise read again on every scan).
-func attachWanted(stored *ObservedFacts, read songFactsRead, format string) bool {
+func attachWanted(stored *ObservedFacts, read songFactsRead) bool {
 	if read.NotRead != "" {
 		return stored == nil || (stored.NotRead == "" && stored.empty() && stored.Names == nil)
 	}
-	return factsWanted(stored, read.Names != nil, format)
+	return factsWanted(stored, read.Names != nil)
 }

@@ -10,6 +10,7 @@ import {
   projectTeamURL,
   libraryDigestText,
   movedNoteText,
+  libraryFactsReadView,
   libraryOpenAction,
   libraryOpenChoices,
   libraryOpenRoute,
@@ -26,6 +27,8 @@ import {
   libraryBriefView,
   libraryIntroText,
   SONG_DETAILS_QUESTION,
+  songDetailsQuestion,
+  songDetailsReaderNotice,
   songDetailsStatus,
   songDetailsSwitchView
 } from './project-library.js';
@@ -3678,6 +3681,26 @@ test('a row offers Open only when the server says it can be opened', () => {
     libraryOpenAction({ ...song, connection: 'connected' }, false).ariaLabel,
     'Open Song 002'
   );
+  // assistant-reads-projects FR19: the label promises an assistant only when
+  // opening will add one.
+  assert.equal(
+    libraryOpenAction(song, false, { state: 'on' }).ariaLabel,
+    'Open Song 002: makes its workspace and adds your assistant'
+  );
+  for (const sharing of [
+    null,
+    { state: 'off' },
+    { state: 'none' },
+    { state: 'stale' },
+    { state: 'unavailable' },
+    { state: 'on', assistant_missing: true }
+  ]) {
+    assert.equal(
+      libraryOpenAction(song, false, sharing).ariaLabel,
+      'Open Song 002: makes its workspace',
+      JSON.stringify(sharing)
+    );
+  }
   // Read-only Home, unsupported format or a lost source: Details explain it.
   assert.equal(libraryOpenAction(song, true), null);
   assert.equal(libraryOpenAction({ ...song, can_open: false }, false), null);
@@ -3711,8 +3734,14 @@ test('the status line says how the assistant came to the song', () => {
   assert.match(libraryOpenedMessage(name, { staffing: 'off' }), /switched off, so no agent/);
   assert.match(libraryOpenedMessage(name, { staffing: 'consent_stale' }), /review it on this Home/);
   assert.match(libraryOpenedMessage(name, { staffing: 'assistant_missing' }), /gone, so no agent/);
-  assert.equal(
+  // A Home never asked no longer reads as a bare "is ready." (FR18).
+  assert.match(
     libraryOpenedMessage(name, { staffing: 'none', created: true }),
+    /^Song 002 is open\. No assistant was added: this Home has not been asked yet\./
+  );
+  // Not a shared song at all: nothing about an assistant to say.
+  assert.equal(
+    libraryOpenedMessage(name, { staffing: 'not_shared', created: true }),
     'Song 002 is ready.'
   );
   for (const staffing of ['added', 'joined', 'off', 'consent_stale', 'assistant_missing']) {
@@ -3799,10 +3828,18 @@ test('the shared-assistant switch says where the Home stands and offers the one 
   const off = librarySharingView({ ...base, state: 'off', agent_name: 'REAPER Assistant' });
   assert.equal(off.checked, false);
   assert.match(off.note, /get no agent/);
-  // A Home built before sharing existed opts in with the same switch.
+  // A Home built before sharing existed is offered its assistant once
+  // (assistant-reads-projects FR16); once answered, the plain switch stays.
   const none = librarySharingView({ ...base, state: 'none' });
   assert.equal(none.checked, false);
-  assert.match(none.note, /Turn this on/);
+  assert.match(none.note, /This Home has no REAPER Assistant yet/);
+  assert.deepEqual(none.action, { id: 'hire', label: 'Add your REAPER Assistant' });
+  assert.deepEqual(none.dismiss, { id: 'dismiss_offer', label: 'Not now' });
+  const answered = librarySharingView({ ...base, state: 'none', offer_dismissed: true });
+  assert.match(answered.note, /Turn this on/);
+  assert.equal(answered.action, null);
+  assert.equal(answered.dismiss, null);
+  assert.equal(on.dismiss, null);
   const stale = librarySharingView({ ...base, state: 'stale', agent_name: 'REAPER Assistant' });
   assert.equal(stale.switchDisabled, true);
   assert.deepEqual(stale.action, { id: 'review', label: 'Review the updated assistant' });
@@ -3814,6 +3851,92 @@ test('the shared-assistant switch says where the Home stands and offers the one 
   });
   assert.deepEqual(missing.action, { id: 'readd', label: 'Add the assistant again' });
   assert.match(missing.note, /is gone/);
+  assert.equal(missing.hired, null);
+});
+
+// assistant-reads-projects FR13, FR15: the Home lists the assistant it hired at
+// setup, with what it does; each note follows its own switch; there is nothing
+// to chat with here.
+test('the Home lists its hired assistant, and each note follows its own switch', () => {
+  const base = {
+    role_label: 'REAPER Assistant',
+    team_digest: 'd1',
+    agent_name: 'REAPER Assistant'
+  };
+  const detailsOn = { state: 'on', names: true };
+  const listed = librarySharingView({ ...base, state: 'on', hired: true }, false, detailsOn);
+  assert.deepEqual(listed.hired, {
+    name: 'REAPER Assistant',
+    notes: ['Joins each song you open', 'Reads your songs']
+  });
+  // Joining switched off: it still reads while song details are on.
+  assert.deepEqual(
+    librarySharingView({ ...base, state: 'off', hired: true }, false, detailsOn).hired.notes,
+    ['Not added to songs you open', 'Reads your songs']
+  );
+  // Song details off: it joins songs and reads nothing until they are on.
+  assert.deepEqual(
+    librarySharingView({ ...base, state: 'on', hired: true }, false, { state: 'off' }).hired.notes,
+    ['Joins each song you open', 'Reads your songs once song details are on']
+  );
+  // Not hired (never recorded, or gone): no row.
+  assert.equal(librarySharingView({ ...base, state: 'on' }, false, detailsOn).hired, null);
+  assert.equal(librarySharingView({ ...base, state: 'none', agent_name: '' }).hired, null);
+  // A read-only Home shows nothing at all.
+  assert.equal(
+    librarySharingView({ ...base, state: 'on', hired: true }, true, detailsOn).hired,
+    undefined
+  );
+});
+
+// assistant-reads-projects FR33, FR35: the Home says who is reading while it
+// runs, and each way a read stopped has its sentence and its one action. Try
+// again on the Home is the root's own Scan.
+test('the Home words the assistant read, and every way it stopped', () => {
+  const run = (overrides = {}) => ({
+    status: 'stopped',
+    agent_name: 'REAPER Assistant',
+    targets: 500,
+    left: 288,
+    ...overrides
+  });
+  assert.equal(libraryFactsReadView(null), null);
+  assert.equal(libraryFactsReadView(run({ status: 'finished', left: 0 })), null);
+  assert.deepEqual(libraryFactsReadView(run({ status: 'started', left: 0 }), 'REAPER Assistant'), {
+    status: 'running',
+    text: 'REAPER Assistant is reading 500 songs…',
+    action: null
+  });
+  const retry = { id: 'rescan', label: 'Try again' };
+  const cases = [
+    ['plugin_failed', 'Reading stopped after 212 of 500 songs.', retry],
+    ['time_limit', 'Reading stopped after 212 of 500 songs.', retry],
+    ['restarted', 'Reading stopped when Ori restarted.', retry],
+    ['no_call', 'REAPER Assistant did not start the reading.', retry],
+    ['model_error', 'REAPER Assistant did not start the reading.', retry],
+    [
+      'no_model',
+      'REAPER Assistant has no model, so the songs were not read.',
+      { id: 'link', label: 'Choose a model', href: '/settings' }
+    ],
+    [
+      'plugin_update',
+      'The plugin cannot read songs yet. Update it to read them.',
+      { id: 'link', label: 'Update', href: '/plugins' }
+    ],
+    ['details_off', 'Song details are off for this Home.', null],
+    ['no_assistant', 'This Home has no assistant to read the songs yet.', null]
+  ];
+  for (const [reason, text, action] of cases) {
+    const view = libraryFactsReadView(run({ reason }));
+    assert.equal(view.text, text, reason);
+    assert.deepEqual(view.action, action, reason);
+  }
+  // A missing assistant and a missing model also offer Try again beside their fix.
+  assert.deepEqual(libraryFactsReadView(run({ reason: 'no_model' })).retry, retry);
+  assert.deepEqual(libraryFactsReadView(run({ reason: 'assistant_missing' })).retry, retry);
+  // A reason this page has no words for says nothing rather than something wrong.
+  assert.equal(libraryFactsReadView(run({ reason: 'something_new' })), null);
 });
 
 test('the switch sends the team it showed, and a stale review asks before renewing', async () => {
@@ -4257,25 +4380,33 @@ test('the song-details switch shows only on a Home that agreed at setup', () => 
     assert.deepEqual(songDetailsSwitchView(songDetails), { visible: false });
   }
   // The older card's consent covers the numbers only: its label and note say so,
-  // and the switch can be widened.
-  assert.deepEqual(songDetailsSwitchView({ state: 'on', names: false, app_name: 'REAPER' }), {
-    visible: true,
-    checked: true,
-    disabled: false,
-    label: 'Read song details when scanning',
-    note: "Ori reads each REAPER project's tempo, length and track count. Nothing is changed.",
-    upgrade: 'Also read track names, markers and regions'
-  });
+  // and the switch can be widened. The app plugin does the reading.
+  assert.deepEqual(
+    songDetailsSwitchView({ state: 'on', names: false, app_name: 'REAPER', reader_name: 'REAPER' }),
+    {
+      visible: true,
+      checked: true,
+      disabled: false,
+      label: 'Read song details when scanning',
+      note: "REAPER reads each REAPER project's tempo, length and track count. Ori keeps only those facts. Nothing is changed.",
+      upgrade: 'Also read track names, markers and regions',
+      notice: null
+    }
+  );
   // A consent that reaches names says so in the label and the note; nothing to widen.
-  assert.deepEqual(songDetailsSwitchView({ state: 'on', names: true, app_name: 'REAPER' }), {
-    visible: true,
-    checked: true,
-    disabled: false,
-    label: 'Read song details, track names and markers when scanning',
-    note: "Ori reads each REAPER project's tempo, length and track count, and the track names, markers and regions typed into it. Nothing is changed.",
-    upgrade: ''
-  });
-  const off = songDetailsSwitchView({ state: 'off', app_name: 'REAPER' });
+  assert.deepEqual(
+    songDetailsSwitchView({ state: 'on', names: true, app_name: 'REAPER', reader_name: 'REAPER' }),
+    {
+      visible: true,
+      checked: true,
+      disabled: false,
+      label: 'Read song details, track names and markers when scanning',
+      note: "REAPER reads each REAPER project's tempo, length and track count, and the track names, markers and regions typed into it. Ori keeps only those facts. Nothing is changed.",
+      upgrade: '',
+      notice: null
+    }
+  );
+  const off = songDetailsSwitchView({ state: 'off', app_name: 'REAPER', reader_name: 'REAPER' });
   assert.equal(off.checked, false);
   assert.match(off.label, /track names and markers/);
   assert.match(off.note, /^Scans read no project files\./);
@@ -4285,8 +4416,8 @@ test('the song-details switch shows only on a Home that agreed at setup', () => 
   assert.equal(readOnly.disabled, true, 'read-only: disabled');
   assert.equal(readOnly.upgrade, '', 'read-only: nothing to widen');
   assert.equal(
-    songDetailsSwitchView({ state: 'on' }).note,
-    "Ori reads each project's tempo, length and track count. Nothing is changed."
+    songDetailsSwitchView({ state: 'on', reader_name: 'REAPER' }).note,
+    "REAPER reads each project's tempo, length and track count. Ori keeps only those facts. Nothing is changed."
   );
   assert.equal(
     songDetailsStatus(false),
@@ -4301,6 +4432,174 @@ test('the song-details switch shows only on a Home that agreed at setup', () => 
   );
   assert.match(SONG_DETAILS_QUESTION, /Nothing is changed, and audio is not opened/);
   assert.match(SONG_DETAILS_QUESTION, /clears everything it read/);
+});
+
+// FR49: Ori has no reader of its own. With no installed plugin that reads, the
+// switch says what to do about it, and is never blank or a claim that Ori reads.
+test('with no plugin that reads, the switch says to update it, or to install one', () => {
+  const update = songDetailsSwitchView({
+    state: 'on',
+    names: true,
+    app_name: 'REAPER',
+    reader_update: 'REAPER'
+  });
+  assert.equal(update.note, 'Update REAPER to read songs.');
+  assert.equal(
+    songDetailsSwitchView({ state: 'off', reader_update: 'REAPER' }).note,
+    'Update REAPER to read songs.',
+    'off or on, a plugin that cannot read is not a reason to promise a reading'
+  );
+  assert.equal(
+    songDetailsSwitchView({ state: 'on', names: true, app_name: 'REAPER' }).note,
+    'No installed plugin reads these songs yet. Install the app plugin to read them.'
+  );
+  // A plugin that reads wins: there is nothing to update.
+  assert.match(
+    songDetailsSwitchView({
+      state: 'on',
+      names: true,
+      reader_name: 'REAPER',
+      reader_update: 'REAPER'
+    }).note,
+    /^REAPER reads /
+  );
+  for (const note of [update.note, songDetailsSwitchView({ state: 'on' }).note]) {
+    assert.doesNotMatch(note, /Ori reads/);
+  }
+});
+
+test('the approval names the plugin that reads and says Ori keeps only the listed facts', () => {
+  // No plugin named: the plugin-neutral wording stands; it never says Ori reads.
+  assert.match(songDetailsQuestion({ state: 'off' }), /^The app plugin reads /);
+  assert.equal(songDetailsQuestion({ state: 'off' }), SONG_DETAILS_QUESTION);
+  assert.equal(songDetailsQuestion(undefined), SONG_DETAILS_QUESTION);
+  assert.equal(songDetailsQuestion({ reader_name: '  ' }), SONG_DETAILS_QUESTION);
+  const question = songDetailsQuestion({ state: 'off', reader_name: 'REAPER' });
+  assert.match(
+    question,
+    /^REAPER reads tempo, length, track count, track names, markers and regions/
+  );
+  assert.match(question, /Ori keeps only those/);
+  assert.match(question, /Nothing is changed, and audio is not opened/);
+  assert.match(question, /clears everything it read/);
+
+  // The switch's note names the reader and says what Ori keeps.
+  const view = songDetailsSwitchView({
+    state: 'on',
+    names: true,
+    app_name: 'REAPER',
+    reader_name: 'REAPER Plugin'
+  });
+  assert.match(view.note, /^REAPER Plugin reads /);
+  assert.match(view.note, /Ori keeps only those facts\. Nothing is changed\.$/);
+  assert.doesNotMatch(view.note, /^Ori reads/);
+  assert.equal(view.notice, null, 'no notice unless the server says so');
+  const numbers = songDetailsSwitchView({ state: 'on', reader_name: 'REAPER Plugin' });
+  assert.match(numbers.note, /^REAPER Plugin reads /);
+});
+
+test('a Home that approved before the plugin read gets one notice, with one way to dismiss it', () => {
+  assert.equal(songDetailsReaderNotice(undefined), null);
+  assert.equal(songDetailsReaderNotice({ reader_name: 'REAPER Plugin' }), null);
+  assert.equal(songDetailsReaderNotice({ reader_notice: true }), null, 'no reader, no notice');
+  const notice = songDetailsReaderNotice({ reader_notice: true, reader_name: 'REAPER Plugin' });
+  assert.match(notice.text, /^Song details are now read by REAPER Plugin, not by Ori itself\./);
+  assert.match(notice.text, /Ori keeps only those/);
+  assert.equal(notice.dismiss, 'Got it');
+  const shown = songDetailsSwitchView({
+    state: 'on',
+    names: true,
+    reader_name: 'REAPER Plugin',
+    reader_notice: true
+  });
+  assert.equal(shown.notice.dismiss, 'Got it');
+});
+
+test('"Got it" records the notice once and changes nothing that is read', async () => {
+  const previousDocument = globalThis.document;
+  const makeElement = () => ({
+    textContent: '',
+    hidden: false,
+    checked: false,
+    disabled: false,
+    dataset: {},
+    append() {},
+    replaceChildren() {},
+    addEventListener() {},
+    setAttribute() {},
+    focus() {}
+  });
+  const elements = {};
+  for (const id of [
+    'projectLibraryIntro',
+    'projectLibrarySongDetails',
+    'projectLibrarySongDetailsSwitch',
+    'projectLibrarySongDetailsLabel',
+    'projectLibrarySongDetailsNote',
+    'projectLibrarySongDetailsNotice',
+    'projectLibrarySongDetailsNoticeText',
+    'projectLibrarySongDetailsNoticeDismiss',
+    'projectLibrarySongDetailsUpgrade',
+    'projectLibrarySongDetailsAsk',
+    'projectLibraryStatus'
+  ]) {
+    elements[id] = makeElement();
+  }
+  globalThis.document = {
+    createElement: makeElement,
+    getElementById: id => elements[id] || null,
+    querySelectorAll: () => []
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = {
+      initialized: true,
+      provider_read_only: false,
+      song_details: {
+        state: 'on',
+        names: true,
+        app_name: 'REAPER',
+        reader_name: 'REAPER Plugin',
+        reader_notice: true
+      }
+    };
+    const posts = [];
+    panel.post = async (path, body) => {
+      posts.push({ path, body });
+      return {
+        song_details: {
+          state: 'on',
+          names: true,
+          app_name: 'REAPER',
+          reader_name: 'REAPER Plugin',
+          reader_notice: false
+        }
+      };
+    };
+    panel.refresh = async () => assert.fail('dismissing the notice does not re-read the library');
+    panel.renderSongDetails();
+    assert.equal(elements.projectLibrarySongDetailsNotice.hidden, false);
+    assert.match(
+      elements.projectLibrarySongDetailsNoticeText.textContent,
+      /now read by REAPER Plugin/
+    );
+    assert.equal(elements.projectLibrarySongDetailsNoticeDismiss.textContent, 'Got it');
+
+    await panel.dismissSongDetailsNotice(elements.projectLibrarySongDetailsNoticeDismiss);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].path, '/song-details/notice');
+    assert.match(posts[0].body.request_id, /^song-details-notice-/);
+    assert.equal(panel.state.song_details.reader_notice, false);
+    assert.equal(panel.state.song_details.state, 'on', 'the switch is where it was');
+    assert.equal(elements.projectLibrarySongDetailsNotice.hidden, true);
+    assert.equal(elements.projectLibrarySongDetailsSwitch.checked, true);
+
+    // Nothing to dismiss: no request.
+    await panel.dismissSongDetailsNotice(elements.projectLibrarySongDetailsNoticeDismiss);
+    assert.equal(posts.length, 1);
+  } finally {
+    globalThis.document = previousDocument;
+  }
 });
 
 test('the library intro says what a scan reads', () => {

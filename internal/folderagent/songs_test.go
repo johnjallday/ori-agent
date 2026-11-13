@@ -37,6 +37,24 @@ type fakeSongs struct {
 	// offAfterFacts turns the Home's switch off right after the facts are handed
 	// over: the owner switches off while the agent is writing from them.
 	offAfterFacts bool
+	// noReader says no installed plugin reads any format; update names a
+	// reviewed plugin that is installed without a reader for REAPER songs.
+	noReader bool
+	update   string
+}
+
+// ReaderFor answers as an installed plugin whose reader covers REAPER songs
+// would, unless the test says nothing reads or that the plugin needs an update.
+func (f *fakeSongs) ReaderFor(format string) (string, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	switch {
+	case format != "reaper" || f.noReader:
+		return "none", ""
+	case f.update != "":
+		return ReaderUpdatePlugin, f.update
+	}
+	return ReaderReady, ""
 }
 
 func (f *fakeSongs) Facts(context.Context, Record, string) ([]folderlook.Song, error) {
@@ -201,7 +219,7 @@ func TestSongsOffer_WordsAndCounts(t *testing.T) {
 		Count:   7,
 		Noun:    "songs",
 		Ask:     "Want me to learn the 7 songs?",
-		Reads:   "I'll read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened.",
+		Reads:   "The app plugin reads tempo, length, track count, track names, markers and regions from each project file, and Ori keeps only those. Nothing is changed, and audio is not opened.",
 		NotRead: "1 Logic Pro song can't be read this way.",
 	}
 	if *offer != want {

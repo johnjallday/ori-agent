@@ -128,8 +128,8 @@ func installPublishedRelease(t *testing.T, entry reviewedintegration.Entry, rele
 	if len(artifacts) != 1 || !artifacts[0].Available {
 		t.Fatalf("unexpected verified release artifact: %#v", artifacts)
 	}
-	if fallback && (artifacts[0].Size != 8780098 ||
-		artifacts[0].SHA256 != "dd0df90c1735e9a059e61b2aa0c69bc4f128122ffc56d9ed1f3969a261d52ed7") {
+	if fallback && (artifacts[0].Size != 9459650 ||
+		artifacts[0].SHA256 != "29d2f5320f890a3067f674421d3239ce1debf4a0a46bd3baa379de1587c4c478") {
 		t.Fatalf("fallback release artifact changed: %#v", artifacts)
 	}
 	// Whatever the release, the managed bytes must hash to the digest its own

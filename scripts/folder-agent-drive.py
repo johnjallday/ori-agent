@@ -13,6 +13,9 @@ Usage:
   --plan       print the offered steps and the plan, then stop before Set it up
   --workspace  the folder workspace of an earlier --plan run: set it up without
                a second look (FOLDER_PATH is still checked)
+  --existing   hire this saved agent (the card's "One of your agents") instead
+               of a new "<folder> Manager"; the look then runs on that agent's
+               own model
 
 It hires "<folder> Manager" on the given model (the look is a real model turn),
 waits for the report, sets it up, waits for the run to finish, then prints the
@@ -46,7 +49,8 @@ def call(url, method="GET", body=None):
 
 
 def main(argv):
-    args, opts = [], {"--steps": None, "--provider": "claude", "--model": "claude-sonnet-5-5", "--workspace": None}
+    args, opts = [], {"--steps": None, "--provider": "claude", "--model": "claude-sonnet-5-5", "--workspace": None,
+                      "--existing": None}
     plan_only = False
     i = 0
     while i < len(argv):
@@ -81,10 +85,13 @@ def main(argv):
         card = chosen.get("card") or {}
         if status != 200 or not card.get("choice_token"):
             die("choose %s: %s" % (status, chosen))
-        name = os.path.basename(folder) + " Manager"
+        if opts["--existing"]:
+            hire = {"existing": opts["--existing"]}
+        else:
+            hire = {"name": os.path.basename(folder) + " Manager", "provider": opts["--provider"],
+                    "model": opts["--model"]}
         status, started = call(api + "/start", "POST", {
-            "choice_token": card["choice_token"], "brief": "",
-            "hire": {"name": name, "provider": opts["--provider"], "model": opts["--model"]}})
+            "choice_token": card["choice_token"], "brief": "", "hire": hire})
         view = started.get("folder_agent") or {}
         if status != 201 or not view.get("workspace_id"):
             die("start %s: %s" % (status, started))

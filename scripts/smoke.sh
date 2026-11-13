@@ -3416,19 +3416,25 @@ PY
 # songs for the upgrade offer and the composer's Add folder entry, and, when a
 # server URL is given, the saved folder agents "Music Manager" and "Beats
 # Manager" on the Claude API (the server needs its key in its environment).
+#
+# The optional fifth argument <bulk-songs> adds a folder Bulk of that many small
+# valid projects (500 for the scale check of assistant-reads-projects), and its
+# saved folder agent "Bulk Manager".
 smoke_learn_songs_fixture() {
-  local sandbox="${2:-}" url="${3:-}" longs="${4:-0}" here
-  [[ -n "$sandbox" && -d "$sandbox" && "$sandbox" == *"/ori-demo."* && "$longs" =~ ^[0-9]+$ ]] ||
-    fail "usage: $0 learn-songs-fixture <ori-demo-sandbox> [<server-url> [long-takes]]"
+  local sandbox="${2:-}" url="${3:-}" longs="${4:-0}" bulk="${5:-0}" here
+  [[ -n "$sandbox" && -d "$sandbox" && "$sandbox" == *"/ori-demo."* && "$longs" =~ ^[0-9]+$ && "$bulk" =~ ^[0-9]+$ ]] ||
+    fail "usage: $0 learn-songs-fixture <ori-demo-sandbox> [<server-url> [long-takes [bulk-songs]]]"
   here="$(cd "$(dirname "$0")" && pwd)"
   mkdir -p "$sandbox/Downloads"
   "$here/demo-song-folder.sh" "$sandbox" >/dev/null
-  python3 -I "$here/learn-songs-fixture.py" "$sandbox" "$longs"
+  python3 -I "$here/learn-songs-fixture.py" "$sandbox" "$longs" 30 "$bulk"
   "$here/demo-song-folder.sh" "$sandbox" "Beats/REAPER Projects" >/dev/null
   if [[ -n "$url" ]]; then
-    "$here/folder-agent-demo-setup.sh" "$url" --provider claude --model claude-sonnet-5-5 Music Beats
+    local -a folders=(Music Beats)
+    ((bulk > 0)) && folders+=(Bulk)
+    "$here/folder-agent-demo-setup.sh" "$url" --provider claude --model claude-sonnet-5-5 "${folders[@]}"
   fi
-  echo "ok   learn-songs fixture ready in $sandbox (Music and Beats${url:+, agents seeded on $url})"
+  echo "ok   learn-songs fixture ready in $sandbox (Music and Beats${bulk:+, $bulk bulk songs}${url:+, agents seeded on $url})"
 }
 
 smoke_agent_files() {

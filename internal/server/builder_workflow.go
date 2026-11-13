@@ -649,8 +649,14 @@ func (b *ServerBuilder) initializeTaskExecution() {
 	b.installScriptedTaskHandler()
 	b.taskHandler = workspace.NewLLMTaskHandler(b.st, b.llmFactory, b.workspaceStore)
 	b.taskHandler.SetEventBus(b.eventBus)
-	// The folder's own agent is told what the Home learned about the folder's songs.
-	b.taskHandler.SetSongFactsReader(folderAgentTicketSongFacts{builder: b})
+	// The folder's own agent is told what the Home learned about the folder's
+	// songs, and the Home's app assistant in a song what it learned about that
+	// one song (assistant-reads-projects). Chat gets the same reader.
+	songFacts := songAssistantTicketFacts{folder: folderAgentTicketSongFacts{builder: b}, builder: b}
+	b.taskHandler.SetSongFactsReader(songFacts)
+	if b.chatHandler != nil {
+		b.chatHandler.SetSongFactsReader(songAssistantChatFacts{builder: b})
+	}
 	b.taskHandler.SetMCPRegistry(b.mcpRegistry)
 	b.taskHandler.SetUtilityToolProvider(b.utilityToolRegistry)
 	// A software project's first assessment runs under this recipe and no other
@@ -974,6 +980,7 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 		b.sessionHandler.SetResourceCatalogFolderCheck(newTypedFolderPaths(guards).catalogFolder)
 		b.sessionHandler.SetTrustedPathSelectionResolver(b.pathSelectionStore)
 		b.sessionHandler.ConfigureAssistantLibraryRoots(nativeFolderPicker{}, b.pathSelectionStore, guards)
+		b.wireFactsRead()
 	}
 	if b.workspaceFileStore != nil {
 		b.workspaceHandler.SetFolderStore(b.workspaceFileStore)

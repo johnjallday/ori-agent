@@ -63,21 +63,20 @@ func TestSongFacts_UnreadableFilesGiveNoFactsAndNoError(t *testing.T) {
 	writeSong(t, dir, "Not REAPER", "Song.rpp", []byte("<Ableton MajorVersion=\"5\">\n"), saved)
 	writeSong(t, dir, "Binary", "Song.rpp", []byte("<REAPER_PROJECT 0.1\n\x00\x01\x02\n>\n"), saved)
 	writeSong(t, dir, "Long Line", "Song.rpp",
-		[]byte("<REAPER_PROJECT 0.1\n  NOTES "+strings.Repeat("x", DefaultSongFactsLimits.MaxLineBytes+1)+"\n>\n"), saved)
+		[]byte("<REAPER_PROJECT 0.1\n  NOTES "+strings.Repeat("x", fixtureMaxLine+1)+"\n>\n"), saved)
 	writeSong(t, dir, "Empty", "Song.rpp", nil, saved)
 	huge := writeSong(t, dir, "Huge", "Song.rpp", []byte(rppProject("92", nil, nil)), saved)
-	if err := os.Truncate(huge, DefaultSongFactsLimits.MaxBytes+1); err != nil { // sparse: no disk used
+	if err := os.Truncate(huge, maxSongFileBytes+1); err != nil { // sparse: no disk used
 		t.Fatal(err)
 	}
 	setSaved(t, huge, saved)
-	r, scope, _, root := connectedRootAt(t, dir)
-	opens := &openCounter{}
-	r.factsOpened = opens.hook
-	if scan := scanRoot(t, r, scope, root.ID, "unreadable"); scan.Status != "complete" {
+	r, scope, file, root := connectedRootAt(t, dir)
+	f, reader := newFileReadFixtureAt(t, r, scope, file, root)
+	if scan := f.scan(t, "unreadable"); scan.Status != "complete" {
 		t.Fatalf("an unreadable file failed the scan: %+v", scan)
 	}
-	if got := opens.take(); slices.Contains(got, filepath.Join("Huge", "Song.rpp")) {
-		t.Fatalf("a file over the cap was opened: %v", got)
+	if got := reader.take(); slices.Contains(got, filepath.Join("Huge", "Song.rpp")) {
+		t.Fatalf("a file over the cap was sent to the plugin: %v", got)
 	}
 	page, err := r.library.Query(scope, Search{PageSize: 50})
 	if err != nil {
@@ -94,7 +93,7 @@ func TestSongFacts_UnreadableFilesGiveNoFactsAndNoError(t *testing.T) {
 		}
 	}
 	// Every refused file is remembered with the reason, the oversized one without
-	// ever being opened, so the same unchanged file is not looked at again.
+	// ever being sent, so the same unchanged file is not looked at again.
 	for relative, reason := range map[string]string{
 		"Not REAPER": NotReadUnreadable, "Binary": NotReadUnreadable, "Empty": NotReadUnreadable,
 		"Long Line": NotReadTooLarge, "Huge": NotReadTooLarge,
@@ -107,13 +106,13 @@ func TestSongFacts_UnreadableFilesGiveNoFactsAndNoError(t *testing.T) {
 	if good := factsAt(t, r, scope, root.ID, "Good"); good == nil || good.NotRead != "" || good.TempoBPM != 92 {
 		t.Fatalf("the readable song: %+v", good)
 	}
-	scanRoot(t, r, scope, root.ID, "unreadable-again")
-	if got := opens.take(); len(got) != 0 {
-		t.Fatalf("a rescan opened unchanged files: %v", got)
+	f.scan(t, "unreadable-again")
+	if got := reader.take(); len(got) != 0 {
+		t.Fatalf("a rescan asked the plugin to read unchanged files: %v", got)
 	}
 }
 
-func TestSongFacts_FilesThatMoveUnderThePassAreReadNextScan(t *testing.T) {
+func TestSongFacts_FilesThatMoveDuringTheReadAreReadNextScan(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		change func(t *testing.T, path string)
@@ -156,16 +155,16 @@ func TestSongFacts_FilesThatMoveUnderThePassAreReadNextScan(t *testing.T) {
 			dir := filepath.Join(t.TempDir(), "Songs")
 			saved := time.Date(2026, time.August, 1, 10, 0, 0, 0, time.UTC)
 			path := writeSong(t, dir, "Song", "Song.rpp", []byte(rppProject("92", nil, [][][2]string{{{"0", "60"}}})), saved)
-			r, scope, _, root := connectedRootAt(t, dir)
+			r, scope, file, root := connectedRootAt(t, dir)
+			f, reader := newFileReadFixtureAt(t, r, scope, file, root)
 			changed := false
-			opens := &openCounter{before: func(string, string) {
+			reader.before = func(string) {
 				if !changed {
 					changed = true
 					tc.change(t, path)
 				}
-			}}
-			r.factsOpened = opens.hook
-			if scan := scanRoot(t, r, scope, root.ID, "moving"); scan.Status != "complete" {
+			}
+			if scan := f.scan(t, "moving"); scan.Status != "complete" {
 				t.Fatalf("scan: %+v", scan)
 			}
 			if facts := factsAt(t, r, scope, root.ID, "Song"); facts != nil {
@@ -174,7 +173,7 @@ func TestSongFacts_FilesThatMoveUnderThePassAreReadNextScan(t *testing.T) {
 			if tc.name == "deleted" || tc.name == "swapped for a symlink" {
 				return // the next scan lists no such project file
 			}
-			scanRoot(t, r, scope, root.ID, "after-move")
+			f.scan(t, "after-move")
 			if facts := factsAt(t, r, scope, root.ID, "Song"); facts == nil {
 				t.Fatal("the next scan did not read the changed file")
 			}
@@ -182,7 +181,7 @@ func TestSongFacts_FilesThatMoveUnderThePassAreReadNextScan(t *testing.T) {
 	}
 }
 
-func TestSongFacts_SymlinksAndBackupsAreNeverOpened(t *testing.T) {
+func TestSongFacts_SymlinksAndBackupsAreNeverSentToThePlugin(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Songs")
 	older := time.Date(2026, time.August, 1, 10, 0, 0, 0, time.UTC)
 	newer := older.Add(time.Hour)
@@ -194,109 +193,19 @@ func TestSongFacts_SymlinksAndBackupsAreNeverOpened(t *testing.T) {
 	if err := os.Symlink(real, filepath.Join(dir, "Song", "Link.rpp")); err != nil {
 		t.Fatal(err)
 	}
-	r, scope, _, root := connectedRootAt(t, dir)
-	opens := &openCounter{}
-	r.factsOpened = opens.hook
-	scanRoot(t, r, scope, root.ID, "links")
-	if got := opens.take(); !slices.Equal(got, []string{filepath.Join("Song", "Take A.rpp")}) {
-		t.Fatalf("opened %v, want only the real project file", got)
+	r, scope, file, root := connectedRootAt(t, dir)
+	f, reader := newFileReadFixtureAt(t, r, scope, file, root)
+	f.scan(t, "links")
+	if got := reader.take(); !slices.Equal(got, []string{filepath.Join("Song", "Take A.rpp")}) {
+		t.Fatalf("the plugin was asked to read %v, want only the real project file", got)
 	}
 	if facts := factsAt(t, r, scope, root.ID, "Song"); facts == nil || facts.TempoBPM != 92 {
 		t.Fatalf("facts = %+v", facts)
 	}
 }
 
-func TestSongFacts_BudgetStopsThePassAndTheNextScanReadsTheRest(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "Songs")
-	base := time.Date(2026, time.August, 1, 10, 0, 0, 0, time.UTC)
-	content := []byte(rppProject("92", nil, [][][2]string{{{"0", "60"}}}))
-	for i := 0; i < 5; i++ {
-		writeSong(t, dir, fmt.Sprintf("Song %d", i), "Song.rpp", content, base.Add(time.Duration(i)*time.Hour))
-	}
-	r, scope, _, root := connectedRootAt(t, dir)
-	r.factsBudget = songFactsBudget{Duration: time.Minute, Bytes: int64(2 * len(content))}
-	opens := &openCounter{}
-	r.factsOpened = opens.hook
-	scanRoot(t, r, scope, root.ID, "budget-1")
-	first := opens.take()
-	if !slices.Equal(first, []string{filepath.Join("Song 3", "Song.rpp"), filepath.Join("Song 4", "Song.rpp")}) {
-		t.Fatalf("first pass opened %v, want the two most recently saved", first)
-	}
-	scanRoot(t, r, scope, root.ID, "budget-2")
-	if second := opens.take(); len(second) != 2 || slices.Contains(second, first[0]) || slices.Contains(second, first[1]) {
-		t.Fatalf("second pass opened %v, want two songs it had not read", second)
-	}
-	scanRoot(t, r, scope, root.ID, "budget-3")
-	if third := opens.take(); !slices.Equal(third, []string{filepath.Join("Song 0", "Song.rpp")}) {
-		t.Fatalf("third pass opened %v, want the last one", third)
-	}
-	scanRoot(t, r, scope, root.ID, "budget-4")
-	if fourth := opens.take(); len(fourth) != 0 {
-		t.Fatalf("every song read, yet a pass opened %v", fourth)
-	}
-}
-
-// A realistic project: plugin state as wrapped base64 lines, so the file is
-// about size bytes.
-func sizedProject(i, size int) []byte {
-	var b strings.Builder
-	fmt.Fprintf(&b, "<REAPER_PROJECT 0.1 \"7.27/macOS-arm64\" 1727800000\n  TEMPO %d 4 4\n", 80+i%90)
-	for track := 0; b.Len() < size; track++ {
-		b.WriteString("  <TRACK\n    <FXCHAIN\n      <VST \"VST: ReaComp\" reacomp.vst 0 \"\" 1\n")
-		for line := 0; line < 40; line++ {
-			b.WriteString("        " + strings.Repeat("QUJDREVGR0hJSktMTU5PUA", 6) + "\n")
-		}
-		b.WriteString("      >\n    >\n    <ITEM\n      POSITION 0\n      LENGTH 180\n    >\n  >\n")
-	}
-	b.WriteString(">\n")
-	return []byte(b.String())
-}
-
-func TestSongFacts_TwoHundredSongsFitTheBudget(t *testing.T) {
-	if testing.Short() {
-		t.Skip("measures a 200-song pass")
-	}
-	dir := filepath.Join(t.TempDir(), "Songs")
-	base := time.Date(2026, time.August, 1, 10, 0, 0, 0, time.UTC)
-	for i := 0; i < 200; i++ {
-		writeSong(t, dir, fmt.Sprintf("Song %03d", i), "Song.rpp", sizedProject(i, 256<<10), base.Add(time.Duration(i)*time.Minute))
-	}
-	r, scope, _, root := connectedRootAt(t, dir)
-	doc, err := r.library.Read(scope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	review, err := r.ReviewScan(scope, root.ID, doc.Revision)
-	if err != nil {
-		t.Fatal(err)
-	}
-	started := time.Now()
-	scan, _, err := r.CommitScan(context.Background(), scope, root.ID, review.Token, "two-hundred")
-	elapsed := time.Since(started)
-	if err != nil || scan.Status != "complete" {
-		t.Fatalf("scan: %+v %v", scan, err)
-	}
-	doc, err = r.library.Read(scope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	withFacts := 0
-	for _, entry := range doc.Entries {
-		if entry.Observations[0].Facts != nil && !entry.Observations[0].Facts.empty() {
-			withFacts++
-		}
-	}
-	t.Logf("200 songs × 256 KiB: scan with fact pass %v, %d with facts", elapsed, withFacts)
-	if withFacts < 190 {
-		t.Fatalf("only %d of 200 songs got facts in one pass", withFacts)
-	}
-}
-
-func TestSongFacts_AnOlderHomeOpensNothingAndKeepsTodaysTurn(t *testing.T) {
+func TestSongFacts_AnOlderHomeReadsNothingAndKeepsTodaysTurn(t *testing.T) {
 	f := newRunFixture(t) // a Home built before song details: no consent record
-	f.roots.factsOpened = (&openCounter{before: func(relative, file string) {
-		t.Errorf("an older Home opened %s/%s", relative, file)
-	}}).hook
 	factsMusicTree(t, f.tree)
 	doc := f.doc(t)
 	review, err := f.roots.ReviewScan(f.scope, doc.Roots[0].ID, doc.Revision)
@@ -329,11 +238,10 @@ func TestSongFacts_AnAbletonCollectionGetsNoFactsButABrief(t *testing.T) {
 		writeSong(t, dir, fmt.Sprintf("Set %d", i), "Set.als", []byte("ableton"), base.Add(time.Duration(i)*time.Hour))
 	}
 	r, scope, file, root := connectedRootAt(t, dir)
-	opens := &openCounter{}
-	r.factsOpened = opens.hook
-	scan := scanRoot(t, r, scope, root.ID, "ableton")
-	if got := opens.take(); len(got) != 0 {
-		t.Fatalf("an Ableton set was opened: %v", got)
+	reading, reader := newFileReadFixtureAt(t, r, scope, file, root)
+	scan := reading.scan(t, "ableton")
+	if got := reader.take(); len(got) != 0 {
+		t.Fatalf("an Ableton set was sent to the REAPER plugin: %v", got)
 	}
 	if storedFacts(t, file, scope) != 0 {
 		t.Fatal("Ableton sets got facts")
@@ -361,16 +269,14 @@ func TestSongFacts_AnAbletonCollectionGetsNoFactsButABrief(t *testing.T) {
 }
 
 func TestSongFacts_SourceFilesAreUnchangedAcrossScanAndRescan(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	before := treeHashes(t, tree)
-	scanRoot(t, r, scope, root.ID, "hash-1")
-	writeSongProject(t, filepath.Join(tree.single, "Song.rpp"), rppProject("100", nil, nil), time.Now().UTC().Truncate(time.Second))
-	before[filepath.Join(tree.single, "Song.rpp")] = fileDigest(t, filepath.Join(tree.single, "Song.rpp"))
-	scanRoot(t, r, scope, root.ID, "hash-2")
-	scanRoot(t, r, scope, root.ID, "hash-3")
-	after := treeHashes(t, tree)
+	f, _ := newFileReadFixture(t)
+	before := treeHashes(t, f.tree)
+	f.scan(t, "hash-1")
+	writeSongProject(t, filepath.Join(f.tree.single, "Song.rpp"), rppProject("100", nil, nil), time.Now().UTC().Truncate(time.Second))
+	before[filepath.Join(f.tree.single, "Song.rpp")] = fileDigest(t, filepath.Join(f.tree.single, "Song.rpp"))
+	f.scan(t, "hash-2")
+	f.scan(t, "hash-3")
+	after := treeHashes(t, f.tree)
 	if len(after) != len(before) {
 		t.Fatalf("files added or removed: %d → %d", len(before), len(after))
 	}

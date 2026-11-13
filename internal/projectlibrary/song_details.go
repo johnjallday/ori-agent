@@ -75,9 +75,12 @@ func (s *Store) SetSongDetails(scope Scope, enabled, names bool) (string, error)
 			// The owner's answer to the switch's own question, written as a grant
 			// at the scope they agreed to; an older record's source and time never
 			// stand for a wider one.
-			next := &workspace.SongDetailsConsent{GrantedAt: now, Source: consent.Source, Scope: workspace.SongDetailsScopeNumbers, OfferID: consent.OfferID}
+			next := &workspace.SongDetailsConsent{GrantedAt: now, Source: consent.Source, Scope: workspace.SongDetailsScopeNumbers, OfferID: consent.OfferID, ReaderNoticeAt: consent.ReaderNoticeAt}
 			if names {
 				next.Source, next.Scope, next.OfferID = workspace.SongDetailsConsentLearnSongs, workspace.SongDetailsScopeNames, "switch"
+				// The full question names the plugin that reads and says Ori keeps
+				// only the listed facts, so this owner was told in the answer itself.
+				next.ReaderNoticeAt = &now
 			}
 			consent = next
 		} else {

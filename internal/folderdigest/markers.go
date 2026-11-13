@@ -58,75 +58,10 @@ type Marker struct {
 	// ProjectBundle allows a recognized project format to be a directory
 	// marker. Other project-format globs match regular files only.
 	ProjectBundle bool
-	// Facts, when set, says where a project file of this format keeps its
-	// tempo, length and track count, and its track names, markers and regions.
-	// It is inert: generic code interprets it, and a Home reads facts only with
-	// the user's song-details consent (names only when that consent covers them).
-	Facts *ProjectFacts
 	// Repository says the entry marks a version-control checkout. The scan
 	// records it on the candidate even when a more specific marker names the
 	// project. It is a name on disk: it does not prove the checkout is valid.
 	Repository bool
-}
-
-// ProjectFacts describes, as data, where a song's details sit in a
-// block-structured text project file: its tempo, length and track count, and,
-// under a consent that covers names, its track names, markers and regions. A
-// block opens with a "<NAME …" line and closes with a ">" line, and an
-// attribute is a "KEY value …" line. The root is the block the file opens
-// with. Every field is a block name, an attribute key or a 1-based position of
-// a value on a line; nothing here is a pattern or code. An empty key or a zero
-// position means the format gives none of that.
-type ProjectFacts struct {
-	// Root is the first word of the file's first non-empty line ("<NAME").
-	Root string
-	// Tempo is the root's attribute whose first value is the base tempo.
-	Tempo string
-	// TempoChanges is the block in the root holding tempo points; TempoPoint
-	// is its point attribute, whose second value is a tempo.
-	TempoChanges string
-	TempoPoint   string
-	// Track is a block in the root; each one is one track.
-	Track string
-	// Item is a block in a track; ItemStart + ItemLength is where it ends.
-	Item       string
-	ItemStart  string
-	ItemLength string
-	// TrackName is the attribute directly in a Track block whose first value is
-	// the track's name. Empty: the format gives no track names.
-	TrackName string
-	// Marker is the attribute of the root that holds one marker or region. Its
-	// values are picked by 1-based position: MarkerIndex is its number,
-	// MarkerPosition its time in seconds, MarkerName its name, MarkerFlags an
-	// integer in which the bit MarkerRegionBit says the entry starts a region. A
-	// region is two entries with the same number: the first carries its start,
-	// the second its end. Empty Marker: the format gives no markers or regions.
-	Marker          string
-	MarkerIndex     int
-	MarkerPosition  int
-	MarkerName      int
-	MarkerFlags     int
-	MarkerRegionBit uint
-}
-
-// HasNames says the grammar names track names, markers or regions: the details
-// that are read only under a consent that covers names.
-func (f *ProjectFacts) HasNames() bool {
-	return f != nil && (f.TrackName != "" || f.Marker != "")
-}
-
-// WithoutNames returns a copy of the grammar that gives no track names,
-// markers or regions, so a reader holding it cannot read them. A nil grammar
-// stays nil.
-func (f *ProjectFacts) WithoutNames() *ProjectFacts {
-	if f == nil {
-		return nil
-	}
-	copied := *f
-	copied.TrackName = ""
-	copied.Marker, copied.MarkerIndex, copied.MarkerPosition, copied.MarkerName, copied.MarkerFlags = "", 0, 0, 0, 0
-	copied.MarkerRegionBit = 0
-	return &copied
 }
 
 // ProjectSummaryForFile reads summary copy from the same recognition table.
@@ -144,26 +79,16 @@ func ProjectSummaryForFile(name string) (shape Shape, title, guidance string, ok
 	return "", "", "", false
 }
 
-// FactsMarker returns the project marker of format that declares facts, so
-// a caller can read and name that format's files without naming it.
-func FactsMarker(format string) (Marker, bool) {
-	if format == "" {
-		return Marker{}, false
-	}
+// ReviewedAppName is the application whose project files a reviewed app plugin
+// can read, as the tool table names it ("" when none is), so a screen can say
+// whose files a Home reads without naming the application in code. The host
+// does not read project files itself: this names the app, the plugin reads it.
+func ReviewedAppName() string {
 	for _, marker := range Markers {
-		if marker.ProjectFormat == format && marker.Facts != nil && !marker.ProjectBundle && marker.Kind == MarkerGlob {
-			return marker, true
+		if marker.Kind != MarkerGlob || !strings.HasPrefix(marker.Name, "*.") {
+			continue
 		}
-	}
-	return Marker{}, false
-}
-
-// FactsAppName is the application whose project files declare facts, as the
-// tool table names it ("" when none does), so a screen can say whose files a
-// Home reads without naming the application in code.
-func FactsAppName() string {
-	for _, marker := range Markers {
-		if marker.Facts == nil || marker.Kind != MarkerGlob || !strings.HasPrefix(marker.Name, "*.") {
+		if _, owned := IntegrationKeyForProjectFormat(marker.ProjectFormat); !owned {
 			continue
 		}
 		extension := strings.ToLower(strings.TrimPrefix(marker.Name, "*"))

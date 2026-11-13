@@ -23,22 +23,27 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testi
 	}
 	// The floor moves only when a release needs a new host feature, blueprint
 	// minimum, program schema or protocol. A change here is a review decision.
-	if entry.MinimumVersion != "0.9.0" || entry.MinimumBlueprintVersion != 10 ||
+	if entry.MinimumVersion != "0.12.0" || entry.MinimumBlueprintVersion != 10 ||
 		entry.ExpectedProgramSchema != 1 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
 		t.Fatalf("reviewed floor versions drifted: %#v", entry)
 	}
-	if entry.FallbackCommit != "0a597684f3b181735c961bfb44ed5c2b80994814" {
+	// The tag's own commit (the squash merge of the plugin PR), never the PR's
+	// last commit: the published asset was verified against this one's manifest.
+	if entry.FallbackCommit != "ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3" {
 		t.Fatalf("reviewed fallback commit drifted: %q", entry.FallbackCommit)
 	}
 	if !entry.ReleaseReady || entry.FallbackSource() != entry.SourceRepository+"#sha="+entry.FallbackCommit {
 		t.Fatalf("published release missing immutable fallback source: ready=%v source=%q", entry.ReleaseReady, entry.FallbackSource())
 	}
-	// The floor must require exactly what the v0.9.0 manifest declares: a
+	// The floor must require exactly what the v0.12.0 manifest declares: a
 	// narrower list would accept a plugin this host cannot honor, a wider one
-	// would refuse the published release.
+	// would refuse the published release. (Sorted, as the registry keeps it.)
 	expectedFeatures := []string{
 		plugin.HostFeatureBlueprintInputsV1,
+		plugin.HostFeatureHomeProfileV1,
 		plugin.HostFeatureIndependentProgramHomesV1,
+		plugin.HostFeatureProjectFactsV1,
+		plugin.HostFeatureResourceWorkspacesV1,
 		plugin.HostFeatureSetupQuestsV2,
 		plugin.HostFeatureSpecialistSetupJourneyV1,
 		plugin.HostFeatureTemplateGroupRequirementsV1,

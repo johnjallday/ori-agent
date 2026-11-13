@@ -1232,6 +1232,7 @@ func (s *Service) SweepInterrupted() int {
 			// whatever it read is kept, and the goal offer is no longer held.
 			if learningRunning(r) {
 				r.Learning.Status, r.Learning.Song, r.Learning.FinishedAt = LearningStopped, "", s.deps.Now().UTC()
+				r.Learning.Reason = LearningReasonRestarted
 			}
 			switch r.State {
 			case StateLooking:
