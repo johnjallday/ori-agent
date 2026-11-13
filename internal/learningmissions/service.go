@@ -91,11 +91,10 @@ func (s *Service) Status(ctx context.Context, owner string) (Status, error) {
 	if s == nil || s.store == nil {
 		return Status{}, ErrUnavailable
 	}
-	o, err := s.store.Owner(ctx, owner)
+	o, instances, err := s.store.statusSnapshot(ctx, owner)
 	if err != nil {
 		return Status{}, err
 	}
-	instances, err := s.store.Instances(ctx, owner)
 	for n := range instances {
 		instances[n] = s.visibleInstance(ctx, owner, instances[n])
 	}

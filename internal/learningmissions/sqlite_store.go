@@ -107,7 +107,11 @@ func (s *SQLiteStore) Instances(ctx context.Context, owner string) ([]Instance, 
 	if s == nil || s.db == nil || !validID(owner) {
 		return nil, ErrUnavailable
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT `+instanceColumns+` FROM learning_instances WHERE owner_id=?
+	return readInstances(ctx, s.db, owner)
+}
+
+func readInstances(ctx context.Context, q queryer, owner string) ([]Instance, error) {
+	rows, err := q.QueryContext(ctx, `SELECT `+instanceColumns+` FROM learning_instances WHERE owner_id=?
  ORDER BY CASE WHEN state IN ('active','blocked') THEN 0 WHEN state='offered' THEN 1 ELSE 2 END, created_at_ms DESC,id LIMIT 100`, owner)
 	if err != nil {
 		return nil, ErrUnavailable
@@ -125,6 +129,33 @@ func (s *SQLiteStore) Instances(ctx context.Context, owner string) ([]Instance, 
 		return nil, ErrUnavailable
 	}
 	return out, nil
+}
+
+// statusSnapshot keeps the command revisions together. Reconciliation can
+// publish a result between separate reads of the owner and its instances;
+// pairing that result with the old owner revision makes review conflict.
+// End the read transaction before any cross-store visibility/model checks.
+func (s *SQLiteStore) statusSnapshot(ctx context.Context, owner string) (Owner, []Instance, error) {
+	if s == nil || s.db == nil || !validID(owner) {
+		return Owner{}, nil, ErrUnavailable
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return Owner{}, nil, ErrUnavailable
+	}
+	defer func() { _ = tx.Rollback() }()
+	o, err := readOwner(ctx, tx, owner)
+	if err != nil {
+		return Owner{}, nil, err
+	}
+	instances, err := readInstances(ctx, tx, owner)
+	if err != nil {
+		return Owner{}, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Owner{}, nil, ErrUnavailable
+	}
+	return o, instances, nil
 }
 
 // Mutation is only valid inside Change's callback. No external work may be

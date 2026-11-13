@@ -243,6 +243,11 @@ func (s *SQLiteStore) AddMessage(ctx context.Context, sessionID string, message 
 		return fmt.Errorf("failed to check session: %w", err)
 	}
 
+	// SQLite orders these timestamps as text. Match the typed turn writers'
+	// UTC representation without changing the supplied instant or precision;
+	// the hybrid cache receives the same normalized timestamp as storage.
+	message.CreatedAt = message.CreatedAt.UTC()
+
 	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
 		// Insert message
 		_, err := tx.ExecContext(ctx, `
