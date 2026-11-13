@@ -14,6 +14,14 @@ var ErrUnavailable = errors.New("known folder is not present")
 // Resolve still requires an existing directory distinct from the user's home.
 type Lookup func(home, id string) (string, error)
 
+func englishPath(home, id string) (string, error) {
+	name := map[string]string{"desktop": "Desktop", "documents": "Documents", "downloads": "Downloads"}[id]
+	if name == "" {
+		return "", ErrUnavailable
+	}
+	return filepath.Join(home, name), nil
+}
+
 // Resolve locates Desktop, Documents or Downloads without listing contents.
 // A missing/disabled folder is absent, never a reason to reject other folders.
 // Tests inject the platform lookup and a synthetic home.
