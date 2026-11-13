@@ -233,9 +233,13 @@ test('an explicit Notes entry hands the drawer to the assistant and keeps the ma
     await choose(page, /Portfolio Manager/);
   await input(page).fill('What should I mix first?');
   await page.locator('#personalAssistantSend').click();
+  // The deterministic manager welcome and its reply are separate messages.
+  // Assert the reply's actual author without assuming only one message exists.
   await expect(
-    page.locator('#homeAssistantConversation [data-message-author="Portfolio Manager"]')
-  ).toContainText('Fixture reply from the manager.');
+    page
+      .locator('#homeAssistantConversation [data-message-author="Portfolio Manager"]')
+      .filter({ hasText: 'Fixture reply from the manager.' })
+  ).toHaveCount(1);
   expect(traffic.chats).toBe(1);
   const sessionKey = `ori.personalAssistant.recipientSession.${commander.id}`;
   const session = await page.evaluate(key => sessionStorage.getItem(key), sessionKey);
@@ -299,8 +303,10 @@ test('a Notes entry while the manager is replying changes nothing and says how t
 
   traffic.release();
   await expect(
-    page.locator('#homeAssistantConversation [data-message-author="Portfolio Manager"]')
-  ).toContainText('Fixture reply from the manager.');
+    page
+      .locator('#homeAssistantConversation [data-message-author="Portfolio Manager"]')
+      .filter({ hasText: 'Fixture reply from the manager.' })
+  ).toHaveCount(1);
   // Once the reply lands, the same entry goes through.
   await page.evaluate(() =>
     (

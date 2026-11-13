@@ -1,5 +1,7 @@
 <!-- Ori Dashboard — Command Bridge -->
 <div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
+  <!-- Only the HQ-owned result moves here; conversation and Today stay in the drawer. -->
+  <aside id="personalHQResultHost" class="pa-hq-result" aria-label="Personal HQ setup result" hidden></aside>
   <!--
     Home's command strip used to sit here: a second composer, labelled
     Workspace Manager, beside the global Ask Ori launcher. Issue #350 retired

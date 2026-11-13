@@ -34,6 +34,11 @@
   <!-- The hired assistant proposes HQ before any folder work is available. -->
   <section id="personalAssistantHQCard" class="pa-specialist-offer pa-hq-card"
            aria-labelledby="personalAssistantHQHeadline" hidden>
+    <div id="personalAssistantHQWelcome" class="pa-hq-result__welcome" hidden>
+      <span id="personalAssistantHQAvatar" aria-hidden="true"></span>
+      <p id="personalAssistantHQWelcomeCopy"></p>
+      <button type="button" id="personalAssistantHQDismiss" class="btn btn-sm btn-outline-secondary" aria-label="Dismiss HQ welcome">Close</button>
+    </div>
     <span id="personalAssistantHQEyebrow" class="personal-assistant-today__eyebrow"></span>
     <h4 id="personalAssistantHQHeadline" class="pa-specialist-offer__headline"></h4>
     <div id="personalAssistantHQPlan">
@@ -78,7 +83,11 @@
         </details>
       </section>
     </div>
-    <ul id="personalAssistantHQReceipt" hidden></ul>
+    <details id="personalAssistantHQDetails" class="pa-hq-result__details" hidden>
+      <summary>Setup details</summary>
+      <ul id="personalAssistantHQReceipt" hidden></ul>
+    </details>
+    <button type="button" id="personalAssistantHQSkip" class="btn btn-sm btn-link" hidden>Skip animation</button>
     <div id="personalAssistantHQNotesResult" class="pa-hq-card__notes-result" hidden>
       <p id="personalAssistantHQNotesResultText" role="status" aria-live="polite" tabindex="-1"></p>
       <button type="button" id="personalAssistantHQNotesRetry" class="btn btn-sm btn-primary pa-hq-card__notes-retry" hidden>Retry notes setup</button>
@@ -88,28 +97,28 @@
          it is pressed. hqFirstActionView decides which choices show. -->
     <div id="personalAssistantHQFirst" class="pa-hq-card__first" hidden>
       <p id="personalAssistantHQFirstLead" class="pa-hq-card__first-lead"></p>
-      <div class="pa-hq-card__choices">
+      <div id="personalAssistantHQFirstChoices" class="pa-hq-card__choices">
         <button type="button" id="personalAssistantHQFirstNote" class="pa-hq-card__choice" hidden>
-          <strong>Save a quick note</strong><span>An idea, a reminder, anything.</span>
+          <strong>Save a first note</strong><span>An idea, a reminder, anything.</span>
         </button>
         <a id="personalAssistantHQFirstOpenNotes" class="pa-hq-card__choice" href="#" hidden>
           <strong>Open Notes</strong><span>See your notes in your HQ.</span>
         </a>
-        <button type="button" id="personalAssistantHQFirstSetupNotes" class="pa-hq-card__choice" hidden>
+        <button type="button" id="personalAssistantHQFirstSetupNotes" class="btn btn-sm btn-link" hidden>
           <strong>Set up notes</strong><span>Choose where your notes live, whenever you like.</span>
         </button>
         <button type="button" id="personalAssistantHQFirstFolder" class="pa-hq-card__choice">
           <strong>Show me a project folder</strong><span>Start with something you already have.</span>
         </button>
       </div>
-      <button type="button" id="personalAssistantHQFirstExplore" class="btn btn-sm btn-link pa-hq-card__explore">I’ll explore for now</button>
+      <a id="personalAssistantHQFirstExplore" class="btn btn-sm btn-outline-secondary pa-hq-card__explore" href="#">Explore HQ</a>
       <form id="personalAssistantHQNoteForm" class="pa-hq-card__note" hidden>
         <label for="personalAssistantHQNoteText">Anything worth keeping?</label>
         <textarea id="personalAssistantHQNoteText" class="modern-input w-100" rows="4" maxlength="4000"
                   placeholder="I had an idea…"></textarea>
         <small class="pa-hq-card__note-hint">Saves to your Notes inbox.</small>
         <p id="personalAssistantHQNoteError" class="pa-specialist-offer__error" role="alert" hidden></p>
-        <div class="pa-specialist-offer__actions">
+        <div id="personalAssistantHQNoteActions" class="pa-specialist-offer__actions">
           <button type="submit" id="personalAssistantHQNoteSave" class="btn btn-sm btn-primary">Save note</button>
           <button type="button" id="personalAssistantHQNoteBack" class="btn btn-sm btn-outline-secondary">Back</button>
         </div>
@@ -123,7 +132,7 @@
         </div>
       </div>
     </div>
-    <div class="pa-specialist-offer__actions">
+    <div id="personalAssistantHQBuildActions" class="pa-specialist-offer__actions">
       <button type="button" id="personalAssistantHQBuild" class="btn btn-sm btn-primary" disabled>Build my HQ</button>
       <button type="button" id="personalAssistantHQAdjust" class="btn btn-sm btn-outline-secondary">Customize setup</button>
       <button type="button" id="personalAssistantHQNotNow" class="btn btn-sm btn-outline-secondary">Not now</button>

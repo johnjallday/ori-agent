@@ -11203,9 +11203,54 @@
         })
       : lastWorldLayout && lastWorldLayout.hqSite;
     if (!node) return false;
-    setCamera(centerOn(camera, { x: node.x + CELL_W / 2, y: node.y + CELL_H / 2 }), container, {
-      persist: false
-    });
+    var framed = centerOn(camera, node);
+    setCamera(framed, container, { persist: false });
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    var result = document.getElementById('personalHQResultHost');
+    if (canvas && result && !result.hidden) {
+      if (window.innerWidth <= 640 || (window.innerWidth <= 900 && window.innerHeight < 600)) {
+        // Canonical refresh can add header readouts after the pending stage.
+        // Finish the same foreground framing after that real layout exists.
+        var navbar = document.querySelector('.navbar');
+        var navHeight = navbar ? navbar.getBoundingClientRect().height : 0;
+        window.scrollBy({
+          top: canvas.getBoundingClientRect().top - navHeight - 12,
+          behavior: 'instant'
+        });
+      }
+      var bounds = canvas.getBoundingClientRect();
+      var overlay = result.getBoundingClientRect();
+      var middleX = bounds.left + bounds.width / 2;
+      // The desktop card sits beside the HQ. A phone's bottom surface spans
+      // the canvas, so frame in the visible space above it, never behind it.
+      if (overlay.left < middleX && overlay.right > middleX) {
+        var top = Math.max(0, bounds.top);
+        var bottom = Math.min(bounds.bottom, overlay.top, window.innerHeight);
+        var targetX = null;
+        var tile =
+          workspaceId &&
+          Array.from(container.querySelectorAll('.ws-map-tile[data-ws-id]')).find(
+            function (element) {
+              return element.getAttribute('data-ws-id') === workspaceId;
+            }
+          );
+        if (tile) {
+          var tileBounds = tile.getBoundingClientRect();
+          // Narrow desktops / browser zoom can fit HQ beside the surface even
+          // when there is too little vertical room above it.
+          if (overlay.left - bounds.left >= tileBounds.width + 24) {
+            targetX = (bounds.left + overlay.left) / 2;
+            bottom = Math.min(bounds.bottom, window.innerHeight - 80);
+          }
+          if (bottom - top < 100) return true;
+          if (targetX !== null)
+            framed.centerX += (tileBounds.left + tileBounds.width / 2 - targetX) / framed.zoom;
+          framed.centerY +=
+            (tileBounds.top + tileBounds.height / 2 - (top + bottom) / 2) / framed.zoom;
+          setCamera(framed, container, { persist: false });
+        }
+      }
+    }
     return true;
   }
 

@@ -176,8 +176,12 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
   page,
   request
 }) => {
+  const mobile = process.env.ORI_HQ_REVEAL_MOBILE === '1';
+  if (mobile) await page.setViewportSize({ width: 390, height: 844 });
   const reopen = process.env.ORI_HQ_REVEAL_REOPEN === '1';
   const reduced = process.env.ORI_HQ_REVEAL_REDUCED === '1';
+  const capture = (group: number, name: string) =>
+    `tasks/evidence-hq-onboarding-reveal/group-${group}/${test.info().project.name}-${mobile ? '390' : 'desktop'}-${name}.png`;
   if (reduced) await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
   await page.locator('[data-cockpit-view="tree"]').click();
@@ -187,7 +191,7 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
   if (await page.locator('#personalAssistantHQPlan').isHidden())
     await page.locator('#personalAssistantHQBuild').click();
   await expect(page.locator('#personalAssistantHQNotesPath')).toBeVisible();
-  await page.locator('#personalAssistantExpand').click();
+  if (!mobile) await page.locator('#personalAssistantExpand').click();
   const notesPath = await page.locator('#personalAssistantHQNotesPath').innerText();
   await page.locator('#personalAssistantHQAdjust').click();
   await page.locator('#hqBuildName').fill('Quiet HQ');
@@ -230,8 +234,8 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
   }
   fs.mkdirSync('tasks/evidence-hq-onboarding-reveal/group-2', { recursive: true });
   await page.screenshot({
-    path: `tasks/evidence-hq-onboarding-reveal/group-2/pending${reopen ? '-reopened' : ''}.png`,
-    fullPage: true
+    path: capture(2, `pending${reopen ? '-reopened' : ''}`),
+    fullPage: false
   });
   await expect
     .poll(
@@ -257,16 +261,19 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
   if (reopen) {
     await page.waitForTimeout(1500); // allow injected response + canonical refresh to finish
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-    await expect(page.locator('#personalAssistantExpand')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#personalAssistantExpand')).toHaveAttribute(
+      'aria-pressed',
+      mobile ? 'false' : 'true'
+    );
     await expect(page.locator('[data-creation-map-status]')).toBeHidden();
     await page.screenshot({
-      path: 'tasks/evidence-hq-onboarding-reveal/group-2/explicit-reopen.png',
-      fullPage: true
+      path: capture(2, 'explicit-reopen'),
+      fullPage: false
     });
     return;
   }
-  await expect(page.locator('[data-creation-map-status]')).toContainText('Your HQ is ready');
-  await expect(page.locator('[data-creation-map-status] .agent-avatar')).toBeVisible();
+  await expect(page.locator('#personalHQResultHost')).toContainText('Your HQ is ready');
+  await expect(page.locator('#personalHQResultHost .agent-avatar')).toBeVisible();
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
   fs.mkdirSync('tasks/evidence-hq-onboarding-reveal/group-3', { recursive: true });
   const art = page.locator('.ws-map-tile svg[data-building-variant="hq"]');
@@ -274,14 +281,15 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
   if (!reduced) {
     await expect(art).toHaveClass(/is-assembling/);
     await page.screenshot({
-      path: 'tasks/evidence-hq-onboarding-reveal/group-3/assembly.png',
-      fullPage: true
+      path: capture(3, 'assembly'),
+      fullPage: false
     });
     if (process.env.ORI_HQ_REVEAL_SKIP === '1') {
       await page.getByRole('button', { name: 'Skip animation' }).click();
     } else if (process.env.ORI_HQ_REVEAL_INTERRUPT === '1') {
       await page.locator('[data-cockpit-view="tree"]').click();
       await expect(page.locator('[data-creation-map-status]')).toBeHidden();
+      await expect(page.locator('#personalHQResultHost')).toBeHidden();
       await expect(page.locator('.is-assembling')).toHaveCount(0);
       return;
     } else {
@@ -292,27 +300,78 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
   }
   await expect(art).not.toHaveClass(/is-assembling/);
   await page.screenshot({
-    path: `tasks/evidence-hq-onboarding-reveal/group-3/${reduced ? 'reduced' : 'final'}.png`,
-    fullPage: true
+    path: capture(3, reduced ? 'reduced' : 'final'),
+    fullPage: false
   });
   const hq = page.locator('.ws-map-tile').filter({ has: page.locator('.ws-map-tile-hq-badge') });
   await expect(hq).toBeVisible();
+  if (mobile) {
+    const bounds = await hq.boundingBox();
+    const canvas = await page.locator('[data-ws-map-viewport]').boundingBox();
+    const result = await page.locator('#personalHQResultHost').boundingBox();
+    expect(bounds!.y).toBeGreaterThanOrEqual(canvas!.y);
+    expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(result!.y);
+  }
   await expect
-    .poll(() =>
-      hq.evaluate(el => {
-        const box = el.getBoundingClientRect();
-        return el.contains(
-          document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
-        );
-      })
+    .poll(
+      () =>
+        hq.evaluate(el => {
+          const box = el.getBoundingClientRect();
+          return el.contains(
+            document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+          );
+        }),
+      {
+        message: JSON.stringify(
+          await hq.evaluate(el => ({
+            tile: el.getBoundingClientRect(),
+            result: document.getElementById('personalHQResultHost')?.getBoundingClientRect(),
+            canvas: document.querySelector('[data-ws-map-viewport]')?.getBoundingClientRect()
+          }))
+        )
+      }
     )
     .toBe(true);
   await page.screenshot({
-    path: 'tasks/evidence-hq-onboarding-reveal/group-2/ready.png',
-    fullPage: true
+    path: capture(2, 'ready'),
+    fullPage: false
   });
-  await page.reload();
+  fs.mkdirSync('tasks/evidence-hq-onboarding-reveal/group-4', { recursive: true });
+  await page.locator('#personalAssistantHQFirstNote').click();
+  await expect(page.locator('#personalAssistantHQNoteText')).toBeFocused();
+  await page
+    .locator('#personalAssistantHQNoteText')
+    .fill('A real first note from the HQ reveal sandbox.');
+  await page.locator('#personalAssistantHQNoteBack').click();
+  await page.locator('#personalAssistantHQFirstNote').click();
+  await expect(page.locator('#personalAssistantHQNoteText')).toHaveValue(
+    'A real first note from the HQ reveal sandbox.'
+  );
+  await page.screenshot({
+    path: capture(4, 'editor'),
+    fullPage: false
+  });
+  const savedResponse = page.waitForResponse(
+    r => r.request().method() === 'POST' && r.url().endsWith('/second-brain/capture')
+  );
+  await page.locator('#personalAssistantHQNoteSave').click();
+  const saved = (await (await savedResponse).json()).capture;
+  await expect(page.locator('#personalAssistantHQNoteSavedTitle')).toContainText('Saved to Inbox');
+  expect(fs.readFileSync(`${notesPath}/${saved.note}`, 'utf8')).toContain(
+    'A real first note from the HQ reveal sandbox.'
+  );
+  await page.screenshot({
+    path: capture(4, 'saved'),
+    fullPage: false
+  });
+  const route = await page.locator('#personalAssistantHQFirstExplore').getAttribute('href');
+  expect(route).toMatch(/^\/workspaces\//);
+  await page.locator('#personalAssistantHQFirstExplore').click();
+  await page.waitForURL(url => url.pathname === route);
+  await page.goto('/');
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.isOpen));
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
   await expect(page.locator('[data-creation-map-status]')).toHaveCount(0);
+  await expect(page.locator('#personalHQResultHost')).toBeHidden();
+  await expect(page.locator('.is-assembling')).toHaveCount(0);
 });

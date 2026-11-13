@@ -42,9 +42,48 @@ function fixture(overrides = {}) {
       foreground = false;
       interrupt?.();
     },
-    interrupt: () => interrupt?.()
+    interrupt: options => interrupt?.(options)
   };
 }
+
+test('only the current verified result can adopt the existing first-note surface', () => {
+  const f = fixture();
+  const intent = f.begin();
+  assert.equal(f.flow.adoptResult(intent), false);
+  f.flow.ready(intent, { workspaceId: 'hq' });
+  assert.equal(f.flow.adoptResult(intent), true);
+  assert.equal(intent.externalResult, true);
+  assert.equal(f.events.at(-1), 'hide');
+  const newer = f.transition.enter({ owner: 'folder', token: 'new' });
+  assert.equal(f.flow.adoptResult(intent), false);
+  assert.equal(f.transition.isCurrent(newer), true);
+});
+
+test('reload preserves only the optional receipt marker, never foreground ownership', () => {
+  const f = fixture();
+  const intent = f.begin();
+  f.flow.ready(intent, { workspaceId: 'hq' });
+  f.interrupt({ preserveResult: true });
+  assert.equal(intent.preserveResult, true);
+  assert.equal(f.flow.current(intent), false);
+  assert.equal(f.flow.ready(intent, { workspaceId: 'hq' }), false);
+  const dismissed = f.begin();
+  f.interrupt();
+  assert.equal(dismissed.preserveResult, false);
+  f.interrupt({ preserveResult: true });
+  assert.equal(dismissed.preserveResult, false, 'pagehide cannot revive a dismissed result');
+});
+
+test('focus origin is captured before the disabled build control loses browser focus', () => {
+  let captured;
+  const f = fixture({
+    captureFocus: value => {
+      captured = value;
+    }
+  });
+  f.flow.begin({ token: 'reviewed', focusOwned: true });
+  assert.equal(captured, true);
+});
 
 test('explicit HQ intent steps chat aside without doing domain work or waiting on map', () => {
   const f = fixture();

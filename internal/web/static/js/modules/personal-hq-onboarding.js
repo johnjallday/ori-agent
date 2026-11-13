@@ -579,7 +579,7 @@ export async function checkHQSetup() {
   return projectHQResult();
 }
 
-export function submitReviewedHQ(target, form, { root = '' } = {}) {
+export function submitReviewedHQ(target, form, { root = '', focusOwned = false } = {}) {
   if (hqFlight) return hqFlight;
   if (!target?.paf) throw new Error('This action requires a Personal Assistant setup.');
   const retrying = hasPendingHQRequest();
@@ -596,6 +596,7 @@ export function submitReviewedHQ(target, form, { root = '' } = {}) {
     foregroundHQIntent = hqPresentation()?.begin({
       token: body.request_id || `resume-${Date.now()}`,
       resume: !!target.resuming,
+      focusOwned,
       route: window.location.pathname + window.location.search
     });
   hqFlight = (async () => {
@@ -804,11 +805,11 @@ export function followUpView(f) {
     });
   }
 
-  async function resumeHQSetup() {
+  async function resumeHQSetup({ focusOwned = false } = {}) {
     const target = await refreshBuildTarget();
     if (!target.paf || !target.resuming)
       throw new Error('There is no paused Personal HQ setup to resume.');
-    const result = await submitReviewedHQ(target, {});
+    const result = await submitReviewedHQ(target, {}, { focusOwned });
     const relationship = result && result.personal_assistant;
     if (relationship?.state === 'active') emitHQQuestSignal('setup-succeeded');
     if (!result.presentation && relationship?.state === 'active')
@@ -1116,6 +1117,7 @@ export function followUpView(f) {
       }
       const errorBox = document.getElementById('hqBuildError');
       let modalClosed = null;
+      const focusOwned = document.getElementById('hqBuildModal').contains(document.activeElement);
       submitBtn.disabled = true;
       if (errorBox) errorBox.hidden = true;
       try {
@@ -1141,7 +1143,8 @@ export function followUpView(f) {
           );
           bootstrapModal('hqBuildModal')?.hide();
           const observed = await submitReviewedHQ(target, form, {
-            root: document.getElementById('hqBuildWorkspaceRoot').value
+            root: document.getElementById('hqBuildWorkspaceRoot').value,
+            focusOwned
           });
           if (observed.personal_assistant?.state === 'active') emitHQQuestSignal('setup-succeeded');
           if (!observed.presentation && observed.personal_assistant?.state === 'active')

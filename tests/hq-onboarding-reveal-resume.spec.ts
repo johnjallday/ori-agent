@@ -63,7 +63,7 @@ test('a paused HQ resumes the same operation after sandbox permissions recover',
     .locator('[data-creation-map-status]')
     .getByRole('button', { name: 'Resume setup', exact: true })
     .click();
-  await expect(page.locator('[data-creation-map-status]')).toContainText('Your HQ is ready');
+  await expect(page.locator('#personalHQResultHost')).toContainText('Your HQ is ready');
   expect(bodies).toHaveLength(2);
   expect(bodies[1]).toEqual({ mode: 'resume' });
   const active = (await (await request.get('/api/personal-assistant')).json()).personal_assistant;

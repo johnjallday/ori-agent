@@ -8,6 +8,7 @@ export function createHQPresentation({
   frame = () => false,
   play = () => null,
   avatar = () => null,
+  notify = () => {},
   focusPending = () => {},
   commitFolded = () => {},
   listen = () => () => {}
@@ -17,12 +18,14 @@ export function createHQPresentation({
   const owns = intent =>
     Boolean(intent && active === intent && transition?.isCurrent(intent.handle));
   const current = intent => owns(intent) && !intent.yielded && foreground(intent);
-  function yieldIntent(intent, { reopen = false } = {}) {
+  function yieldIntent(intent, { reopen = false, preserveResult = false } = {}) {
     if (!intent || intent.yielded) return;
     intent.yielded = true;
+    intent.preserveResult = preserveResult;
     intent.motion?.skip?.();
     intent.cleanup?.();
     if (owns(intent)) transition.release(intent.handle, { reveal: reopen });
+    notify();
   }
   function show(intent, view) {
     if (!current(intent)) return false;
@@ -34,7 +37,7 @@ export function createHQPresentation({
     }
   }
   return {
-    begin({ token, route = '', resume = false } = {}) {
+    begin({ token, route = '', resume = false, focusOwned = false } = {}) {
       if (!transition || !token || !foreground({ route })) return null;
       if (active) yieldIntent(active);
       const intent = {
@@ -46,7 +49,7 @@ export function createHQPresentation({
         outcome: 'pending'
       };
       try {
-        captureFocus();
+        captureFocus(focusOwned);
         intent.handle = transition.enter({
           owner: 'personal-hq',
           generation: intent.generation,
@@ -72,7 +75,7 @@ export function createHQPresentation({
         } catch (_) {
           /* Focus is optional. */
         }
-        intent.cleanup = listen(() => yieldIntent(intent));
+        intent.cleanup = listen(options => yieldIntent(intent, options));
       } catch (_) {
         // Presentation failure never turns a valid request into a failed build.
         yieldIntent(intent);
@@ -81,6 +84,15 @@ export function createHQPresentation({
     },
     current,
     yield: yieldIntent,
+    adoptResult(intent) {
+      if (!current(intent) || intent.outcome !== 'ready') return false;
+      intent.externalResult = true;
+      transition.clearStatus(intent.handle);
+      return true;
+    },
+    skip(intent) {
+      if (current(intent)) intent.motion?.skip?.();
+    },
     refused(intent) {
       if (!current(intent)) return false;
       intent.outcome = 'refused';
@@ -121,8 +133,12 @@ export function createHQPresentation({
       } catch (_) {
         /* Browser preference is optional. */
       }
-      const renderResult = () =>
-        show(intent, {
+      const renderResult = () => {
+        if (intent.externalResult) {
+          if (current(intent)) notify();
+          return current(intent);
+        }
+        return show(intent, {
           title: stale ? 'HQ was built; the view needs refreshing' : 'Your HQ is ready',
           leading: stale ? null : avatar(assistant),
           detail: stale
@@ -139,6 +155,7 @@ export function createHQPresentation({
             { label: 'Dismiss', run: () => yieldIntent(intent) }
           ]
         });
+      };
       if (!stale && workspaceId && !intent.framingStarted) {
         intent.framingStarted = true;
         let attempts = 0;
@@ -163,7 +180,9 @@ export function createHQPresentation({
         };
         tryFrame();
       }
-      return renderResult();
+      const shown = renderResult();
+      notify();
+      return shown;
     }
   };
 }
@@ -178,17 +197,35 @@ export function hqPresentation() {
     foreground: intent =>
       !document.hidden &&
       (!intent.route || intent.route === window.location.pathname + window.location.search),
-    captureFocus: () => {
+    captureFocus: focusOwned => {
       const panel = document.getElementById('personalAssistantPanel');
       moveFocus =
         !!panel?.contains(document.activeElement) ||
-        !!document.activeElement?.closest?.('#hqBuildModal');
+        !!document.activeElement?.closest?.('#hqBuildModal') ||
+        (focusOwned && document.activeElement === document.body);
     },
     prepareMap: () => {
-      window.OriHomeCockpit?.showHQCreationMap?.();
+      const shown = window.OriHomeCockpit?.showHQCreationMap?.();
+      // On phones the ordinary Home header is taller than the available map
+      // stage. Scroll this explicit foreground gesture to the real canvas;
+      // do not change the saved view/camera or scroll on reload/status updates.
+      if (
+        shown &&
+        window.matchMedia('(max-width: 640px), (max-width: 900px) and (max-height: 599px)').matches
+      ) {
+        document.body.classList.add('hq-reveal-active');
+        const canvas = document.querySelector('[data-ws-map-viewport]');
+        const navHeight = document.querySelector('.navbar')?.getBoundingClientRect().height || 0;
+        if (canvas)
+          window.scrollBy({
+            top: canvas.getBoundingClientRect().top - navHeight - 12,
+            behavior: 'instant'
+          });
+      }
     },
     frame: id => window.OriWorkspaceMap?.frameHQCreation?.(id),
     play: id => window.OriWorkspaceMap?.playHQAssembly?.(id),
+    notify: () => document.dispatchEvent(new CustomEvent('personal-hq:presentation')),
     avatar: assistant => {
       if (!window.AgentAvatar?.markup || !assistant) return null;
       const node = document.createElement('span');
@@ -208,7 +245,11 @@ export function hqPresentation() {
           status.focus({ preventScroll: true });
         }
       };
-      const modal = document.querySelector('.modal.show, .modal[aria-modal="true"]');
+      // Several unrelated modal templates declare aria-modal even while hidden.
+      // Only an actually open/closing dialog may delay this focus handoff.
+      const modal = document.querySelector(
+        '.modal.show, .modal[aria-modal="true"]:not([aria-hidden="true"])'
+      );
       if (modal) modal.addEventListener('hidden.bs.modal', focus, { once: true });
       else focus();
     },
@@ -221,9 +262,9 @@ export function hqPresentation() {
       };
       on(document, 'ori:home-view-changed', yieldPresentation);
       on(document, 'visibilitychange', () => {
-        if (document.hidden) yieldPresentation();
+        if (document.hidden) yieldPresentation({ preserveResult: true });
       });
-      on(window, 'pagehide', yieldPresentation);
+      on(window, 'pagehide', () => yieldPresentation({ preserveResult: true }));
       on(window, 'popstate', yieldPresentation);
       on(document, 'click', event => {
         if (event.target?.closest?.('a[href]:not([href="#"])')) yieldPresentation();
@@ -241,7 +282,10 @@ export function hqPresentation() {
           },
           { passive: true }
         );
-      return () => disposers.splice(0).forEach(dispose => dispose());
+      return () => {
+        document.body.classList.remove('hq-reveal-active');
+        disposers.splice(0).forEach(dispose => dispose());
+      };
     }
   });
   return browserPresentation;

@@ -19,11 +19,14 @@ import {
   forgetFirstAction,
   hqFirstActionView,
   hqNotesOutcome,
+  hqLiveNotesOutcome,
   hqNotesPayload,
   hqNotesReviewView,
   readFirstAction,
   rememberFirstAction
 } from './personal-hq-notes-review.js';
+
+import { hqPresentation } from './personal-hq-reveal.js';
 
 const NOTES_ENDPOINT = '/api/personal-assistant/second-brain';
 
@@ -76,7 +79,22 @@ export function hqReceiptRows(status, plan, directory) {
       route: slug ? `/workspaces/${encodeURIComponent(slug)}` : ''
     },
     ...(plan.time
-      ? [{ kind: 'schedule', name: `Daily Brief at ${plan.time} on weekdays`, detail: '' }]
+      ? [
+          {
+            kind: 'schedule',
+            name: `Daily Brief at ${plan.time}${plan.schedule_days?.length ? ` · ${plan.schedule_days.join(', ')}` : ''}${plan.timezone ? ` · ${plan.timezone}` : ''}`,
+            detail: ''
+          }
+        ]
+      : []),
+    ...(plan.scope
+      ? [
+          {
+            kind: 'scope',
+            name: `${hqReviewSummary(plan).scope} ${hqReviewSummary(plan).notification}`,
+            detail: ''
+          }
+        ]
       : []),
     ...(directory ? [{ kind: 'directory', name: String(directory), detail: '' }] : [])
   ];
@@ -96,7 +114,7 @@ export function hqReviewDraft(values = {}) {
 
 export function hqReviewSummary(draft) {
   return {
-    schedule: `${draft.schedule_days.join(', ') || 'No days selected'} · ${draft.schedule_time} · ${draft.timezone}`,
+    schedule: `${(draft.schedule_days || []).join(', ') || 'No days selected'} · ${draft.schedule_time || draft.time || ''} · ${draft.timezone || ''}`,
     scope: `${draft.scope === 'all' ? 'All eligible workspaces' : 'Selected workspaces (choose in HQ settings)'}${draft.include_future_workspaces ? ', including future ones' : '; future workspaces are not included'}.`,
     notification: draft.notify_on_ready
       ? 'Notify in Action Center when ready.'
@@ -126,13 +144,29 @@ const plan = {
   firstAction: false,
   firstPhase: 'choices',
   saved: null,
-  noteError: ''
+  noteError: '',
+  compact: false,
+  compactYielded: false,
+  firstActionEnded: false
 };
 
 // The quick note's draft and its one request id, kept for this tab so Back,
 // a failure or a reload never loses the text, and a retry after a lost
 // response replays the same save instead of writing a second note.
 const NOTE_DRAFT_KEY = 'ori.hq.firstNote.v1';
+const COMPACT_RESULT_KEY = 'ori.hq.compactResult.v1';
+let memoryNoteDraft = null;
+function compactRecord(value) {
+  try {
+    if (value !== undefined) {
+      if (value) window.sessionStorage.setItem(COMPACT_RESULT_KEY, value);
+      else window.sessionStorage.removeItem(COMPACT_RESULT_KEY);
+    }
+    return window.sessionStorage.getItem(COMPACT_RESULT_KEY) || '';
+  } catch (_) {
+    return '';
+  }
+}
 
 function newNoteRequestID() {
   const random = Math.random().toString(36).slice(2, 10);
@@ -140,18 +174,22 @@ function newNoteRequestID() {
 }
 
 function readNoteDraft() {
+  if (memoryNoteDraft) return { ...memoryNoteDraft };
   try {
     const parsed = JSON.parse(window.sessionStorage.getItem(NOTE_DRAFT_KEY) || 'null');
     if (parsed && typeof parsed.text === 'string' && typeof parsed.requestId === 'string') {
-      return parsed;
+      memoryNoteDraft = parsed;
+      return { ...parsed };
     }
   } catch (_) {
     // A draft is a convenience; a fresh one is fine.
   }
-  return { text: '', requestId: newNoteRequestID() };
+  memoryNoteDraft = { text: '', requestId: newNoteRequestID() };
+  return { ...memoryNoteDraft };
 }
 
 function writeNoteDraft(draft) {
+  memoryNoteDraft = { ...draft };
   try {
     window.sessionStorage.setItem(NOTE_DRAFT_KEY, JSON.stringify(draft));
   } catch (_) {
@@ -219,7 +257,8 @@ function renderNotes(view) {
   const result = el('NotesResult');
   if (!result) return;
   const outcome = plan.notesOutcome;
-  result.hidden = !outcome || !outcome.line || !view.receipt;
+  result.hidden =
+    !outcome || !outcome.line || !view.receipt || (plan.compact && outcome.status === 'ready');
   if (!result.hidden) {
     el('NotesResultText').textContent = outcome.line;
     el('NotesRetry').hidden = !outcome.canRetry;
@@ -258,38 +297,63 @@ function renderFirst(view, resultActive) {
   const choicesView = hqFirstActionView(plan.notesOutcome, { hqRoute: hqRoute() });
   const phase = plan.firstPhase;
   const choosing = phase === 'choices';
+  el('FirstChoices').hidden = !choosing;
+  // Keep the same real link/handler, alongside Back while editing so a phone
+  // keyboard does not spend an extra row on navigation above the field.
+  const explore = el('FirstExplore');
+  if (phase === 'note') {
+    if (explore.parentNode !== el('NoteActions')) el('NoteActions').append(explore);
+  } else if (explore.parentNode !== first) first.insertBefore(explore, el('NoteForm'));
   el('FirstLead').textContent = choicesView.lead;
   el('FirstLead').hidden = !choosing;
   el('FirstNote').hidden = !choosing || !choicesView.note;
   el('FirstOpenNotes').hidden = !choosing || !choicesView.openNotes;
   if (choicesView.openNotes) el('FirstOpenNotes').href = choicesView.openNotes;
   el('FirstSetupNotes').hidden = !choosing || !choicesView.setupNotes;
-  el('FirstFolder').hidden = !choosing;
-  el('FirstExplore').hidden = !choosing;
+  el('FirstFolder').hidden = true; // Folder setup remains in its existing entry points.
+  el('FirstExplore').hidden = !hqRoute();
+  el('FirstExplore').href = hqRoute() || '#';
+  el('FirstExplore').setAttribute('aria-disabled', String(state.busy));
   for (const id of ['FirstNote', 'FirstSetupNotes', 'FirstFolder', 'FirstExplore']) {
     el(id).disabled = state.busy;
   }
   el('NoteForm').hidden = phase !== 'note';
   el('NoteError').textContent = plan.noteError;
   el('NoteError').hidden = !plan.noteError;
-  el('NoteSave').disabled = state.busy;
+  const draft = readNoteDraft();
+  el('NoteSave').disabled =
+    state.busy ||
+    !plan.notesOutcome?.writable ||
+    Boolean(draft.sourceId && draft.sourceId !== state.notes?.source?.id);
+  // An uncertain save must replay the original payload, not edited text under
+  // an already-used request ID. Back/reload retain that exact pending note.
+  el('NoteText').readOnly = state.busy || Boolean(draft.pendingText);
   el('NoteSave').setAttribute('aria-busy', state.busy && phase === 'note' ? 'true' : 'false');
   el('NoteBack').disabled = state.busy;
   el('NoteSaved').hidden = phase !== 'saved' || !plan.saved;
   if (phase === 'saved' && plan.saved) {
-    el('NoteSavedTitle').textContent = `✓ Saved to Notes · ${plan.saved.note}`;
+    el('NoteSavedTitle').textContent = `Saved to Inbox · ${plan.saved.note}`;
     el('NoteSavedText').textContent = plan.saved.text;
   }
 }
 
 // Ends the first step. The HQ and notes stay exactly as they are; only this
 // browser's presentation record goes, so the card does not come back.
-function endFirstAction() {
+function endFirstAction({ focus = true } = {}) {
+  const wasCompact = plan.compact;
+  plan.firstActionEnded = true;
+  compactRecord('');
   forgetFirstAction(firstActionStorage());
   plan.firstAction = false;
   plan.firstPhase = 'choices';
   plan.justBuilt = false;
+  if (wasCompact) hqPresentation()?.yield(currentHQIntent());
   render();
+  if (!focus) return;
+  if (wasCompact) {
+    document.querySelector('[data-ws-map-viewport]')?.focus?.({ preventScroll: true });
+    return;
+  }
   // The pressed control is gone with the card; hand focus to what leads now:
   // Today's strip, else the composer.
   const strip = document.getElementById('personalAssistantTodayStripToggle');
@@ -300,9 +364,24 @@ function endFirstAction() {
   next?.focus?.({ preventScroll: true });
 }
 
-function openNoteComposer() {
+async function openNoteComposer() {
+  const wasCompact = plan.compact;
+  state.notes = await readNotesStatus();
+  plan.notesOutcome = hqLiveNotesOutcome(state.notes);
+  if (!plan.firstAction || (wasCompact && !plan.compact)) return;
+  if (!plan.notesOutcome.writable) {
+    plan.firstPhase = 'choices';
+    error('Notes are not currently writable. Your existing files are unchanged.');
+    render();
+    return;
+  }
+  const draft = readNoteDraft();
+  if (!draft.sourceId) writeNoteDraft({ ...draft, sourceId: state.notes.source.id });
   plan.firstPhase = 'note';
-  plan.noteError = '';
+  plan.noteError =
+    draft.sourceId && draft.sourceId !== state.notes.source.id
+      ? 'Your Notes connection changed. Your draft is still here; check Notes before saving.'
+      : '';
   render();
   const text = el('NoteText');
   text.value = readNoteDraft().text;
@@ -312,8 +391,10 @@ function openNoteComposer() {
 async function saveNote(event) {
   event?.preventDefault?.();
   if (state.busy) return;
-  const text = el('NoteText').value;
-  const draft = { ...readNoteDraft(), text };
+  const wasCompact = plan.compact;
+  const previous = readNoteDraft();
+  const text = previous.pendingText || el('NoteText').value;
+  const draft = { ...previous, text };
   writeNoteDraft(draft);
   if (!text.trim()) {
     plan.noteError = 'Write something to save, or go back.';
@@ -326,7 +407,19 @@ async function saveNote(event) {
   render();
   let uncertain = false;
   try {
+    state.notes = await readNotesStatus();
+    plan.notesOutcome = hqLiveNotesOutcome(state.notes);
+    if (
+      !plan.notesOutcome.writable ||
+      !draft.sourceId ||
+      draft.sourceId !== state.notes?.source?.id
+    ) {
+      throw new Error(
+        'Your Notes connection changed or is not writable. Your draft is still here; check Notes before saving.'
+      );
+    }
     let response;
+    writeNoteDraft({ ...draft, pendingText: text });
     try {
       response = await fetch(`${NOTES_ENDPOINT}/capture`, {
         method: 'POST',
@@ -343,11 +436,17 @@ async function saveNote(event) {
     if (!response.ok) {
       // A 5xx may have written the note before failing; the same request id
       // makes a second press replay it rather than write another.
-      uncertain = response.status >= 500;
+      uncertain = response.status >= 500 || response.status === 409;
       throw new Error(body.error || 'Ori could not save the note. Your text is still here.');
     }
     const capture = body.capture || {};
-    plan.saved = { text: text.trim(), note: String(capture.note || capture.name || 'Inbox') };
+    if (typeof capture.note !== 'string' || !capture.note.startsWith('Inbox/')) {
+      uncertain = true;
+      throw new Error(
+        'Ori could not confirm the saved note. Retry the same save; your draft is still here.'
+      );
+    }
+    plan.saved = { text: text.trim(), note: capture.note };
     // Saved: the next note is a new one.
     writeNoteDraft({ text: '', requestId: newNoteRequestID() });
     plan.firstPhase = 'saved';
@@ -357,8 +456,10 @@ async function saveNote(event) {
   } finally {
     state.busy = false;
     render();
-    if (plan.firstPhase === 'saved') el('NoteSavedTitle')?.focus?.();
-    else el('NoteText')?.focus?.();
+    if ((!wasCompact || plan.compact) && !document.hidden) {
+      const next = plan.firstPhase === 'saved' ? el('NoteSavedTitle') : el('NoteText');
+      if (next?.getClientRects?.().length) next.focus();
+    }
   }
 }
 
@@ -371,10 +472,21 @@ function error(message) {
 function renderReceipt(rows) {
   const list = el('Receipt');
   list.replaceChildren();
-  for (const row of rows) {
+  const detailRows = plan.notesOutcome?.path
+    ? [...rows, { kind: 'notes', name: plan.notesOutcome.path }]
+    : rows;
+  for (const row of detailRows) {
     const item = document.createElement('li');
     const label =
-      row.kind === 'workspace' ? 'Workspace' : row.kind === 'schedule' ? 'Schedule' : 'Directory';
+      row.kind === 'workspace'
+        ? 'Workspace'
+        : row.kind === 'schedule'
+          ? 'Schedule'
+          : row.kind === 'scope'
+            ? 'Scope'
+            : row.kind === 'notes'
+              ? 'Notes'
+              : 'Directory';
     item.append(`${label} · `);
     if (row.route) {
       const link = document.createElement('a');
@@ -399,15 +511,57 @@ function render() {
   const notesNeedsYou =
     !!plan.notesOutcome && ['failed', 'pending'].includes(plan.notesOutcome.status);
   const resultActive = view.receipt && (plan.firstAction || notesNeedsYou);
+  const host = document.getElementById('personalHQResultHost');
+  const pendingHadFocus = document
+    .querySelector('[data-creation-map-status]')
+    ?.contains(document.activeElement);
+  const intent = currentHQIntent();
+  if (intent?.yielded) {
+    if (!intent.preserveResult) compactRecord('');
+    plan.compactYielded = true;
+  }
+  const ownsPresentation =
+    intent && intent.outcome === 'ready' && hqPresentation()?.current(intent);
+  const adoptingResult = ownsPresentation && !intent.externalResult;
+  const restoreCompact =
+    !intent &&
+    !plan.compactYielded &&
+    compactRecord() === plan.receiptWorkspaceID &&
+    !window.PersonalAssistantPanel?.isOpen?.();
+  plan.compact = !!host && resultActive && (ownsPresentation || restoreCompact);
+  if (host) {
+    host.hidden = !plan.compact;
+    host.dataset.phase = plan.firstPhase;
+    if (plan.compact) {
+      hqPresentation()?.adoptResult(intent);
+      compactRecord(plan.receiptWorkspaceID);
+      if (card.parentNode !== host) host.append(card);
+    } else if (card.parentNode === host)
+      document.getElementById('personalAssistantNeedsYouCards')?.append(card);
+  }
+  el('Welcome').hidden = !plan.compact;
+  el('Eyebrow').hidden = plan.compact;
+  el('Details').hidden = !view.receipt;
+  el('Skip').hidden = !plan.compact || !intent?.motion;
+  if (plan.compact) {
+    el('WelcomeCopy').textContent = `${view.name} has a home base. Welcome to your HQ.`;
+    const avatar = window.AgentAvatar;
+    el('Avatar').innerHTML = avatar?.markup
+      ? avatar.markup(
+          { name: view.name, appearance: state.relationship?.appearance || {} },
+          { size: 40 }
+        )
+      : '';
+  }
   card.hidden = !view.visible || (view.receipt && !resultActive);
   card.dataset.result = resultActive ? 'active' : '';
   renderNotes(view);
   renderFirst(view, resultActive);
-  announceResult(resultActive && !card.hidden && !currentHQIntent());
+  announceResult(resultActive && !card.hidden && !plan.compact && !currentHQIntent());
   if (!view.visible) return;
   el('Eyebrow').textContent = state.justHired ? '✓ Mission 01 complete' : 'Personal HQ';
   el('Headline').textContent = view.receipt
-    ? `${view.name}’s Personal HQ is ready.`
+    ? 'Your HQ is ready'
     : view.collapsed
       ? 'Build My HQ'
       : hqHeadline(view.name);
@@ -446,6 +600,7 @@ function render() {
   el('Build').setAttribute('aria-busy', String(state.busy));
   for (const id of ['Name', 'Time']) el(id).disabled = state.busy;
   el('Build').hidden = view.receipt;
+  el('BuildActions').hidden = view.receipt;
   el('Adjust').hidden = view.collapsed || view.receipt;
   el('NotNow').hidden = view.collapsed || view.receipt;
   el('Change').hidden = view.paused;
@@ -457,6 +612,19 @@ function render() {
   el('NotNow').disabled = state.busy || view.building;
   el('Status').textContent = view.status;
   document.dispatchEvent(new CustomEvent('personal-assistant:hq-receipt'));
+  if (plan.compact && adoptingResult) {
+    // One reframe after the compact surface has its real dimensions. Neither
+    // polling, editor changes nor restoring a tab may recenter the map.
+    try {
+      window.OriWorkspaceMap?.frameHQCreation?.(intent.workspaceId);
+    } catch (_) {
+      // A missing/broken renderer cannot change the confirmed HQ/Notes result.
+    }
+  }
+  if (plan.compact && pendingHadFocus && !document.hidden) {
+    el('Headline').tabIndex = -1;
+    el('Headline').focus({ preventScroll: true });
+  }
 }
 
 async function readJSON(url, options) {
@@ -483,31 +651,23 @@ async function load(relationship = null) {
     state.notes = notes;
     // The notes half from the record alone: an unfinished setup, else the
     // connection, else nothing. HQ success never stands in for it.
-    if (notes?.setup) {
-      plan.notesOutcome = hqNotesOutcome(notes.setup);
-    } else if (notes?.source) {
-      plan.notesOutcome = hqNotesOutcome({
-        status: 'ready',
-        path: notes.source.path,
-        writable: notes.source.origin === 'created_by_ori' && notes.status === 'connected'
-      });
-    } else if (notes) {
-      plan.notesOutcome = null;
-    }
+    plan.notesOutcome = hqLiveNotesOutcome(notes);
     // The first step shows only for the HQ this browser just built.
     const record = readFirstAction(firstActionStorage());
     plan.firstAction =
       current?.state === 'active' &&
       !!hq?.status?.valid &&
-      !!record &&
-      record.workspaceId === String(hq.status.workspace?.id || hq.status.workspace_id || '');
+      !plan.firstActionEnded &&
+      ((!!record &&
+        record.workspaceId === String(hq.status.workspace?.id || hq.status.workspace_id || '')) ||
+        currentHQIntent()?.workspaceId === hq.status.workspace?.id);
     if (current?.state === 'active' && hq?.status?.valid) {
       // After a reload the HQ and its schedule are still canonical, but the
       // current workspace-root setting is not proof of the original directory.
       // Keep that third row only for the fresh build in this session.
       if (!plan.receipt.length || plan.receiptWorkspaceID !== hq.status.workspace?.id) {
         const time = String(current.daily_brief?.schedule_time || '').trim();
-        plan.receipt = hqReceiptRows(hq.status, { time }, '');
+        plan.receipt = hqReceiptRows(hq.status, { ...current.daily_brief, time }, '');
         plan.receiptWorkspaceID = hq.status.workspace?.id || '';
       }
     } else {
@@ -554,13 +714,14 @@ async function build() {
     return;
   }
   if (state.pendingRoot !== null || !view.canBuild) return;
+  const focusOwned = el('Card').contains(document.activeElement);
   if (view.paused) {
     state.busy = true;
     plan.busy = true;
     error('');
     render();
     try {
-      const relationship = await window.PersonalHQOnboarding?.resumeHQSetup?.();
+      const relationship = await window.PersonalHQOnboarding?.resumeHQSetup?.({ focusOwned });
       if (!relationship) throw new Error('Could not resume Personal HQ setup. Try again.');
       await load(relationship);
     } catch (cause) {
@@ -615,7 +776,7 @@ async function build() {
         ...hqReviewDraft(plan),
         notes: hqNotesPayload(current)
       },
-      { root: hqWorkspaceRootView(root).path }
+      { root: hqWorkspaceRootView(root).path, focusOwned }
     );
     const relationship = result.personal_assistant;
     if (relationship) state.relationship = relationship;
@@ -633,12 +794,14 @@ async function build() {
     plan.receipt = rows;
     plan.receiptWorkspaceID = hq?.workspace?.id || '';
     // HQ is built whatever the notes half says; its outcome is shown on its own.
-    plan.notesOutcome = result.notes_setup ? hqNotesOutcome(result.notes_setup) : null;
+    state.notes = await readNotesStatus();
+    plan.notesOutcome = hqLiveNotesOutcome(state.notes);
     plan.justBuilt = true;
     // The first step belongs to this build: remembered for this HQ until the
     // user leaves it, so a reload brings it back and a later visit does not.
     rememberFirstAction(firstActionStorage(), hq?.workspace?.id || '');
     plan.firstAction = true;
+    plan.firstActionEnded = false;
     plan.firstPhase = 'choices';
     state.relationship = relationship;
     for (const name of [
@@ -719,6 +882,7 @@ async function chooseNotesLocation() {
 // schedule and the assistant are never touched by this.
 async function retryNotes() {
   if (state.busy) return;
+  const wasCompact = plan.compact;
   state.busy = true;
   render();
   let retried = false;
@@ -730,6 +894,7 @@ async function retryNotes() {
     });
     plan.notesOutcome = hqNotesOutcome(body.notes_setup);
     state.notes = await readNotesStatus();
+    if (state.notes) plan.notesOutcome = hqLiveNotesOutcome(state.notes);
     await window.PersonalAssistantToday?.refresh?.();
     retried = true;
   } catch (cause) {
@@ -748,7 +913,13 @@ async function retryNotes() {
       plan.firstPhase = 'choices';
     }
     render();
-    if (retried) el('NotesResultText')?.focus?.();
+    if (
+      retried &&
+      (!wasCompact || plan.compact) &&
+      !document.hidden &&
+      el('NotesResultText')?.getClientRects?.().length
+    )
+      el('NotesResultText').focus();
   }
 }
 
@@ -846,10 +1017,35 @@ function init() {
     openNoteComposer();
   });
   el('NoteDone')?.addEventListener('click', endFirstAction);
-  el('FirstExplore')?.addEventListener('click', endFirstAction);
-  el('FirstOpenNotes')?.addEventListener('click', () => {
-    forgetFirstAction(firstActionStorage());
+  el('FirstExplore')?.addEventListener('click', event => {
+    if (state.busy) {
+      event.preventDefault();
+      return;
+    }
+    endFirstAction({ focus: false });
   });
+  el('Dismiss')?.addEventListener('click', () => endFirstAction());
+  el('Skip')?.addEventListener('click', () => hqPresentation()?.skip(currentHQIntent()));
+  document.addEventListener('personal-hq:presentation', render);
+  const fitResult = () => {
+    const host = document.getElementById('personalHQResultHost');
+    const viewport = window.visualViewport;
+    if (!host || !viewport) return;
+    host.style.setProperty(
+      '--hq-keyboard-offset',
+      `${Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)}px`
+    );
+    host.style.setProperty('--hq-visible-height', `${viewport.height}px`);
+  };
+  window.visualViewport?.addEventListener('resize', fitResult);
+  window.visualViewport?.addEventListener('scroll', fitResult);
+  fitResult();
+  document.addEventListener('personal-assistant:opened', () => {
+    compactRecord('');
+    plan.compactYielded = true;
+    render();
+  });
+  el('FirstOpenNotes')?.addEventListener('click', () => endFirstAction({ focus: false }));
   el('FirstFolder')?.addEventListener('click', () => {
     // The existing guarded folder chooser; it reads nothing until a folder is
     // chosen and reviewed there.

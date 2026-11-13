@@ -34,7 +34,9 @@ test('standalone Personal Assistant build yields its modal and preserves omitted
   expect((await posted).postDataJSON()).not.toHaveProperty('notes');
   await expect(page.locator('#hqBuildModal')).toBeHidden();
   await expect(page.locator('.modal-backdrop')).toHaveCount(0);
-  await expect(page.locator('[data-creation-map-status]')).toContainText('Your HQ is ready');
+  await expect(page.locator('#personalHQResultHost')).toContainText('Your HQ is ready');
+  await expect(page.locator('#personalAssistantHQFirstNote')).toBeHidden();
+  await expect(page.locator('#personalAssistantHQFirstExplore')).toBeVisible();
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
   fs.mkdirSync('tasks/evidence-hq-onboarding-reveal/group-2', { recursive: true });
   await page.screenshot({
