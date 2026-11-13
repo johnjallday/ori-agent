@@ -429,7 +429,7 @@ func TestLearningView_Words(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec.Learning = tc.l
-			got := learningViewWith(rec, func(format string) bool { return format == "reaper" })
+			got := learningViewWith(rec, &fakeSongs{})
 			if tc.l == nil {
 				if got != nil {
 					t.Fatalf("view = %+v, want nil", got)
@@ -440,5 +440,52 @@ func TestLearningView_Words(t *testing.T) {
 				t.Fatalf("line %q / not read %q, want %q / %q", got.Line, got.NotRead, tc.line, tc.notRead)
 			}
 		})
+	}
+}
+
+// Songs learned before the installed REAPER plugin lost its reader (an Ori
+// upgrade over a plugin without one) are not "songs that can't be read this
+// way": once the reading ended, the card says to update the plugin (FR49). A
+// reading that stopped for that very reason says so in its own sentence, so
+// the update is not offered twice.
+func TestLearningView_SaysUpdateThePluginInsteadOfUnreadable(t *testing.T) {
+	rec := doneRecord()
+	cases := []struct {
+		name    string
+		l       *Learning
+		songs   *fakeSongs
+		notRead string
+		update  string
+	}{
+		{"learned, and the plugin cannot read now", &Learning{Status: LearningDone, Total: 7, Done: 7, Read: 5},
+			&fakeSongs{update: "REAPER"}, "1 Logic Pro song can't be read this way.", "REAPER"},
+		{"stopped for another reason", &Learning{Status: LearningStopped, Total: 7, Done: 3, Read: 3, Reason: LearningReasonRestarted},
+			&fakeSongs{update: "REAPER"}, "1 Logic Pro song can't be read this way.", "REAPER"},
+		{"stopped because the plugin cannot read", &Learning{Status: LearningStopped, Total: 7, Reason: LearningReasonPluginUpdate},
+			&fakeSongs{update: "REAPER"}, "1 Logic Pro song can't be read this way.", ""},
+		{"the plugin reads", &Learning{Status: LearningDone, Total: 7, Done: 7, Read: 7},
+			&fakeSongs{}, "1 Logic Pro song can't be read this way.", ""},
+		{"nothing reads and nothing to update", &Learning{Status: LearningDone, Total: 7, Done: 7, Read: 7},
+			&fakeSongs{noReader: true}, "7 REAPER songs and 1 Logic Pro song can't be read this way.", ""},
+		{"still reading", &Learning{Status: LearningRunning, Total: 7}, &fakeSongs{update: "REAPER"}, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec.Learning = tc.l
+			got := learningViewWith(rec, tc.songs)
+			if got.NotRead != tc.notRead || got.Update != tc.update {
+				t.Fatalf("not read %q / update %q, want %q / %q", got.NotRead, got.Update, tc.notRead, tc.update)
+			}
+		})
+	}
+	// The view carries it to the card: the service's own readers decide.
+	rec.Learning = &Learning{Status: LearningDone, Total: 7, Done: 7, Read: 7}
+	view := learningViewWith(rec, songsService(&fakeSongs{update: "REAPER"}).songsReaders())
+	if view.Update != "REAPER" {
+		t.Fatalf("service readers: update %q, want REAPER", view.Update)
+	}
+	if none := learningViewWith(rec, songsService(nil).songsReaders()); none.Update != "" ||
+		none.NotRead != "7 REAPER songs and 1 Logic Pro song can't be read this way." {
+		t.Fatalf("no readers: update %q / not read %q", none.Update, none.NotRead)
 	}
 }

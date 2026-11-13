@@ -225,9 +225,9 @@ func mapProjectFacts(target songFactsTarget, result projectFactsResult, grant so
 	return read, true
 }
 
-// projectFactsNames bounds a reader's names exactly as the host's own reader
-// does: each name cleaned (songName), path-shaped ones dropped, at most 128 of
-// each kind within its byte budget, the rest counted as left out, project order
+// projectFactsNames bounds a reader's names with the stored names' own limits:
+// each name cleaned (songName), path-shaped ones dropped, at most 128 of each
+// kind within its byte budget, the rest counted as left out, project order
 // kept. A result that still fails the loader's check keeps no names, but is
 // marked as read under names.
 func projectFactsNames(result projectFactsResult) *SongNames {

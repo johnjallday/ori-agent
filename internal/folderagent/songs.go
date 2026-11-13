@@ -269,8 +269,8 @@ func (s *Service) songsOffer(ctx context.Context, rec *Record) *SongsOfferView {
 	if homeID == "" {
 		return nil
 	}
-	readers, _ := s.deps.Songs.(SongsReaders)
-	readability := rec.Facts.Readability(s.songsReadable())
+	readers := s.songsReaders()
+	readability := rec.Facts.Readability(readableBy(readers))
 	if readability.Readable <= 0 {
 		return s.songsUpdateOffer(ctx, rec, homeID, readability, readers)
 	}
@@ -293,10 +293,16 @@ func (s *Service) songsOffer(ctx context.Context, rec *Record) *SongsOfferView {
 	}
 }
 
-// songsReadable says whether an installed app plugin reads a project format. Nil
-// deps, or deps that cannot say, read nothing: the host has no reader of its own.
-func (s *Service) songsReadable() func(format string) bool {
+// songsReaders is the deps' answer to which installed plugin reads a format,
+// nil when they cannot say. Nil reads nothing: the host has no reader of its own.
+func (s *Service) songsReaders() SongsReaders {
 	readers, _ := s.deps.Songs.(SongsReaders)
+	return readers
+}
+
+// readableBy says whether an installed app plugin reads a project format, nil
+// (which reads nothing) when readers cannot say.
+func readableBy(readers SongsReaders) func(format string) bool {
 	if readers == nil {
 		return nil
 	}
@@ -306,6 +312,29 @@ func (s *Service) songsReadable() func(format string) bool {
 	}
 }
 
+// splitUpdatable takes, out of the songs nothing reads, the ones whose format's
+// reviewed plugin is installed without a reader: updating that plugin reads them,
+// so they are not songs that "can't be read this way". It returns the rest, how
+// many it took, and the plugin to update (the first one found).
+func splitUpdatable(r foldermap.Readability, readers SongsReaders) (rest foldermap.Readability, count int, plugin string) {
+	if readers == nil {
+		return r, 0, ""
+	}
+	rest = r
+	rest.Unreadable = nil
+	for _, unread := range r.Unreadable {
+		if status, name := readers.ReaderFor(unread.Format); status == ReaderUpdatePlugin && name != "" {
+			count += unread.Count
+			if plugin == "" {
+				plugin = name
+			}
+			continue
+		}
+		rest.Unreadable = append(rest.Unreadable, unread)
+	}
+	return rest, count, plugin
+}
+
 // songsUpdateOffer is what the offer's place says when no installed plugin reads
 // any of the songs but a reviewed plugin that owns their format is installed
 // without a reader: "Update <plugin> to read the N songs." It is never a silent
@@ -313,18 +342,7 @@ func (s *Service) songsReadable() func(format string) bool {
 // not installed, or the songs are of a format none owns), or when the Home
 // already holds a consent that reaches names (nothing was promised to ask).
 func (s *Service) songsUpdateOffer(ctx context.Context, rec *Record, homeID string, readability foldermap.Readability, readers SongsReaders) *SongsOfferView {
-	if readers == nil {
-		return nil
-	}
-	count, plugin := 0, ""
-	for _, unread := range readability.Unreadable {
-		if status, name := readers.ReaderFor(unread.Format); status == ReaderUpdatePlugin && name != "" {
-			count += unread.Count
-			if plugin == "" {
-				plugin = name
-			}
-		}
-	}
+	_, count, plugin := splitUpdatable(readability, readers)
 	if count <= 0 {
 		return nil
 	}
@@ -642,6 +660,12 @@ type LearningView struct {
 	Reader string `json:"reader,omitempty"`
 	Reason string `json:"reason,omitempty"`
 	Action string `json:"action,omitempty"`
+	// Update names the reviewed app plugin that owns some of the songs and is
+	// installed without a reader, once the reading ended: the card says to update
+	// it, with the update, instead of counting those songs as ones that cannot be
+	// read this way (FR49). Empty when nothing needs it, or when the reading
+	// stopped for that reason and its own sentence already says so.
+	Update string `json:"update,omitempty"`
 }
 
 // learningView words a record's reading, or nil when none was started.
@@ -653,15 +677,16 @@ type LearningView struct {
 //	stopped      "Stopped before it finished. Learned 3 of 7 songs"
 func learningView(rec *Record) *LearningView { return learningViewWith(rec, nil) }
 
-// learningViewWith is learningView with the installed readers' answer to "does
-// an app plugin read this format", which only the closing sentence about the
-// songs that cannot be read this way needs.
-func learningViewWith(rec *Record, readable func(format string) bool) *LearningView {
+// learningViewWith is learningView with the installed readers, which only the
+// closing sentences need: the songs that cannot be read this way, and the plugin
+// to update for the songs its installed copy cannot read yet. Nil readers read
+// nothing.
+func learningViewWith(rec *Record, readers SongsReaders) *LearningView {
 	l := rec.Learning
 	if l == nil {
 		return nil
 	}
-	readability := rec.Facts.Readability(readable)
+	readability := rec.Facts.Readability(readableBy(readers))
 	noun := func(n int) string { return foldermap.ShapeNoun(readability.Shape, n) }
 	view := &LearningView{Status: l.Status, Done: l.Done, Total: l.Total, Reader: l.Reader}
 	switch l.Status {
@@ -712,7 +737,11 @@ func learningViewWith(rec *Record, readable func(format string) bool) *LearningV
 				view.Summary, view.SummaryBy = l.Summary, SummaryByAgent
 			}
 		}
-		view.NotRead = notReadSentence(readability)
+		rest, _, plugin := splitUpdatable(readability, readers)
+		view.NotRead = notReadSentence(rest)
+		if view.Action != LearningActionUpdatePlugin {
+			view.Update = plugin
+		}
 	}
 	return view
 }

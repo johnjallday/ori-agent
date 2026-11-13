@@ -326,6 +326,48 @@ test('a stopped reading says why and offers the one action that fits', () => {
   assert.equal(running.querySelector('.folder-agent-card__learning-actions'), null);
 });
 
+// Songs learned before the installed plugin lost its reader: once the reading
+// ended, the card says to update the plugin, with the update (FR49), next to
+// the songs nothing can read.
+test('a reading that ended while the plugin cannot read says to update it', () => {
+  const draw = overrides =>
+    renderFolderAgentReport(
+      folderAgentReportView(
+        done({
+          learning: learning({
+            status: 'done',
+            line: 'Learned 117 of 500 songs',
+            done: 500,
+            total: 500,
+            update: 'REAPER',
+            ...overrides
+          })
+        })
+      ),
+      stubDocument(),
+      {}
+    );
+  const section = draw({}).querySelector('.folder-agent-card__learning');
+  assert.equal(text(section, '.folder-agent-card__learning-line'), 'Learned 117 of 500 songs');
+  assert.equal(text(section, '.folder-agent-card__songs-not-read'), 'Update REAPER to read songs.');
+  assert.deepEqual(
+    section
+      .querySelector('.folder-agent-card__learning-actions')
+      .children.map(node => [node.tagName, node.textContent, node.href || '']),
+    [['A', 'Update', '/plugins']]
+  );
+  // The songs no plugin reads keep their own sentence, before the update.
+  const mixed = draw({ not_read: "1 Logic Pro song can't be read this way." });
+  assert.deepEqual(
+    mixed.querySelectorAll('.folder-agent-card__songs-not-read').map(node => node.textContent),
+    ["1 Logic Pro song can't be read this way.", 'Update REAPER to read songs.']
+  );
+  // While it still reads, nothing is said about the plugin.
+  const running = draw({ status: 'running', line: 'Learning the 500 songs…' });
+  assert.equal(running.querySelector('.folder-agent-card__songs-not-read'), null);
+  assert.equal(running.querySelector('.folder-agent-card__learning-actions'), null);
+});
+
 test('Try again posts the retry answer to the songs endpoint', async () => {
   const view = folderAgentReportView(done());
   const posts = [];
@@ -355,7 +397,8 @@ test('a reading shows its line and a progress bar, then how it ended', () => {
     summaryBy: '',
     reader: '',
     reason: '',
-    action: ''
+    action: '',
+    update: ''
   });
   const card = renderFolderAgentReport(running, stubDocument(), {});
   const section = card.querySelector('.folder-agent-card__learning');

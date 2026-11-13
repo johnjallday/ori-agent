@@ -382,8 +382,9 @@ func (r *Roots) commitScan(ctx context.Context, scope Scope, rootID, scopeID, to
 		// The listing is saved. A consenting Home now reads song facts, so the
 		// Manager turn the event starts sees this scan's facts: songs an app
 		// plugin reads go to the Home assistant's read, and the event waits for
-		// it; the rest are read by the host's own pass. Neither changes the
-		// listing, and the event is published whatever they did.
+		// it; songs no installed plugin reads are not read (Ori has no reader of
+		// its own). The read never changes the listing, and the event is
+		// published whatever it did.
 		r.afterScanFacts(ctx, scope, finished, observed, root, *completed)
 	}
 	return finished, false, nil

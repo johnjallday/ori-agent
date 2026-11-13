@@ -293,7 +293,7 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	v.Plan = planViewOf(plan)
 	v.Landing = landingOf(rec, plan)
 	v.SongsOffer = s.songsOffer(ctx, rec)
-	v.Learning = learningViewWith(rec, s.songsReadable())
+	v.Learning = learningViewWith(rec, s.songsReaders())
 	if s.goalOffered(ctx, rec) {
 		goal, basis := offeredGoal(rec)
 		v.GoalOffer = &GoalOfferView{Goal: goal, MaxRunes: personalassistant.BriefMaxRunes, Basis: basis}

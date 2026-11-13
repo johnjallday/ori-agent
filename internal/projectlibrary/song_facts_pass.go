@@ -91,8 +91,8 @@ type SongFactsProgress struct {
 	Skipped  int
 	Finished bool
 	Stopped  string
-	// Reader is the agent reading the songs, when the Home's app assistant reads
-	// them through its plugin; empty for the host's own pass.
+	// Reader is the agent reading the songs (the Home's app assistant, which
+	// reads them through its plugin); empty when it is not known.
 	Reader string
 }
 

@@ -236,7 +236,11 @@ export function folderAgentReportView(view) {
           // FR33, FR35). The host's words; the card only draws them.
           reader: String(view.learning.reader || ''),
           reason: String(view.learning.reason || ''),
-          action: String(view.learning.action || '')
+          action: String(view.learning.action || ''),
+          // The reviewed app plugin that owns some of these songs and is
+          // installed without a reader, once the reading ended: the card says
+          // to update it rather than calling those songs unreadable (FR49).
+          update: String(view.learning.update || '')
         }
       : null
   };
@@ -1738,8 +1742,21 @@ function learningSection(doc, learning, onAction = null, homeRoute = '') {
   if (learning.summary && learning.summaryBy === 'agent') {
     section.append(el(doc, 'p', 'folder-agent-card__learning-summary', learning.summary));
   }
-  if (learning.notRead && learning.status !== 'running' && learning.status !== 'summarizing') {
+  const ended = learning.status !== 'running' && learning.status !== 'summarizing';
+  if (learning.notRead && ended) {
     section.append(el(doc, 'p', 'folder-agent-card__songs-not-read', learning.notRead));
+  }
+  // Songs the installed plugin cannot read yet: the way to fix it, with the
+  // update, never a silent blank (FR49).
+  if (learning.update && ended) {
+    section.append(
+      el(doc, 'p', 'folder-agent-card__songs-not-read', `Update ${learning.update} to read songs.`)
+    );
+    const row = el(doc, 'div', 'folder-agent-card__actions folder-agent-card__learning-actions');
+    const update = el(doc, 'a', 'btn btn-sm folder-agent-card__secondary', 'Update');
+    update.href = '/plugins';
+    row.append(update);
+    section.append(row);
   }
   return section;
 }
