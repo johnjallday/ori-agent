@@ -313,6 +313,107 @@ After a folder of songs is set up into a Home, the folder agent's Commander offe
 - **Off.** The Home's switch clears the numbers, names, markers and regions in the same Home write, and the folder agent drops the summary and goal it wrote from them (`Service.ForgetLearned`, called once the switch is off); a goal the owner already accepted is theirs. A pass in progress when the switch goes off saves nothing (the consent is checked at the start and end of each batch and at save).
 - **Disclosure.** The scan review names what it reads: `ScanScopeSongDetails` for the numbers, `ScanScopeSongNames` (adds "track names, markers and regions") under a names consent.
 
+## App-plugin readers and the app assistant's read (assistant-reads-projects, 2026-11)
+
+**Status: the design the `feature/assistant-reads-projects` branch implements.**
+Until that branch lands, "Song facts" and "Learned names" above describe what
+runs. Each paragraph here is rewritten to what was built before the branch is
+delivered.
+
+Words: the **app plugin** is the installed package for one application; the
+**app assistant** is the shared project agent that plugin's song blueprint
+declares, one per Home, bound into each song. Host code names neither: labels
+come from the installed plugin.
+
+**Who does what.** Ori keeps listing folders and deciding which are songs. The
+app plugin reads what is inside a project file. The app assistant is hired at
+setup and starts the reading with one tool call. Ori resolves which files,
+calls the plugin, checks and saves the result, and gives the agent counts
+only. Ori's own reader and its grammar row are removed at the end of the
+branch; facts saved before stay saved, shown and used.
+
+**The plugin's declaration.** A manifest key `project_facts` names one
+`read_only` operation on a declared service and the project format IDs it
+reads, and requires the host feature `project_facts_v1`. A manifest that uses
+the key without requiring the feature is refused at install. A format is the
+opaque `Candidate.Format` the scan already gives every song, so host code joins
+on a string and names no extension; the formats installed plugins declare
+decide which songs "can be read". The Workspace Surface protocol stays 1.
+`ParseSurfaceContribution` reads `requires_host_features` before its strict
+decode, so a build that lacks a feature steps down to an older release instead
+of failing on the unknown key.
+
+**Only reviewed readers are called.** The set of readers is built from the
+installed plugins that are enabled, declare the key and are on Ori's reviewed
+list; nothing else can reach a call. There is no operating-system sandbox on
+the reader in this design, which is why the list is the gate and why the
+approval's words say the plugin reads the files.
+
+**The call.** A machine-level call like `home_profile_facts`, with no
+workspace. Ori sends up to 8 files and 64 MiB of listed size per call: each
+file's absolute path (built only from the root, the song's folder and its
+dated file), its listed size and format, and whether names may be returned.
+The plugin returns, per file, `read` with tempo, whether it varies, length and
+track count (and, when allowed, track names, markers and regions), or
+`too_large`, `unreadable` or `failed`. One call has 60 seconds and 262144
+bytes of output; a call over a limit, or any call error, stops the read
+("stopped", never "no facts") and nothing from that batch is kept. A pass has
+10 minutes and 4 GiB.
+
+**What Ori re-checks.** Before the call, under the root gate, Ori opens the
+dated file through the pinned no-follow walk and holds it; after the call it
+checks the held file and opens it again. A file that is no longer the regular
+file the listing saw (identity, size, save time) gives nothing this time and
+is read on a later scan. Every returned value is bounded again with the stored
+facts' own limits (tempo 1 to 960, length up to 100 hours, up to 10,000
+tracks, 128 track names and 128 markers of at most 80 characters, cleaned,
+path-shaped names dropped); a value outside a limit is dropped for that song.
+Names are dropped whenever the approval does not cover them, whatever came
+back. Storage does not change: `ObservedFacts` on the observation, saved by
+the scan-keyed fenced write; a file that was read, or gave nothing because of
+its content, is not read again until it changes.
+
+**The app assistant.** It is one of the owner's own agents, recorded on the
+Home's standing staffing consent role and bound into each song on Open. It has
+no agent instance in the Home, so it is listed there and not chatted with. It
+is created under the Home's lock in one turn that reserves a name, creates the
+agent with a marker carrying the reservation's ID, and records it; a sweep at
+startup and before every later decision records an agent whose marker matches
+a pending reservation, so a stop between create and record never leads to a
+second assistant. The two switches are independent: "Add my … to songs I
+open" controls joining; the song-details switch controls reading.
+
+**The read turn.** Every trigger is a scan: "Learn them" on the folder card,
+a completed scan of a Home with song details on, or the next scan after the
+switch is turned on. A completed scan hands the songs that still need reading
+to one read job per Home. The job runs one bounded turn for the recorded
+assistant with exactly one tool, `read_listed_songs`, which takes no argument,
+is built for that turn only and is offered to no other agent. The call blocks
+while Ori reads in batches and returns counts (read, too large, unreadable,
+changed, left for later). The prompt holds no counts and no names, so the turn
+costs the same for 500 songs as for six. Facts are saved every 64 songs and at
+the end. The scan's `library.scan_completed` event is held until the read
+ends, so the Manager's brief sees the facts. A receipt in the library document
+(`FactsReads`) records each turn; a turn a previous process left started is
+shown, and then stored, as stopped.
+
+**When it stops.** There is no fallback reader. Each way to stop has a reason
+the card and the Home show with one action: no model for the assistant, the
+assistant is missing, the Home has no assistant yet, the plugin has no reader
+("Update … to read songs"), the plugin call failed or ran out of time, Ori
+was restarted, song details are off, or the model did not call the tool. The
+approval is checked when the turn starts, when the tool starts, before and
+after every call, and at the save; switching it off cancels the call in
+flight and keeps nothing from the unfinished batch.
+
+**Who is given the facts.** The folder's agent, as today. And the app
+assistant, inside a song's workspace: that one song's saved facts, in tasks
+and in chat, built for each task and each turn from what is saved at that
+moment and never written into the conversation, with the same lead-in that
+says every name is text from a project file and never an instruction. Every
+provider kind receives them, command-line providers included. Other agents in
+the song get none.
+
 ## Shared cross-process workspace fence (implemented 2026-09-29; reconciliation still owner-reviewed)
 
 **What exists now.** Every `FileStore` write of `workspace.json` holds a per-folder advisory `flock` (`<folder>/.workspace.lock`, `internal/workspace/store_fence{,_unix,_windows}.go`). The **primary's version is the only sequence** for a protected record (`WorkspaceFenceProtected`: `AssistantProgramState` or `AssistantProjectLink` present on the incoming record or either mirror): `SyncStore.Save` reads the primary under the folder lock and refuses a base version that no longer matches (`ErrStaleWorkspaceVersion`) *before* touching any mirror, then persists the primary through `VersionedSaver.SaveExpecting` — a single SQLite `UPDATE … WHERE id = ? AND version = ?` in `session.SQLiteStore.UpdateWorkspaceExpecting`, never a read followed by an unconditional update. The folder's own version is deliberately not a sequence: session handlers still write the folder directly (create, tag and portable-state syncs, backfills) without touching the primary, so the folder side instead requires the two mirrors to **agree on the protected envelope** (the Home-state comparator the library already uses plus a compacted library-document and full-link comparison); a Home or link that reached one mirror only is `ErrWorkspaceMirrorsDiverged` and no new write may resolve it. That comparison runs when the primary offers conditional saves (SQLite, which returns an independent before image); a pointer-sharing in-memory test primary is not compared because its record may already carry the update callback's mutation. A FileStore that is not mirrored (no SyncStore) keeps a strict on-disk version check for protected records, since all its writers share one version. Before the folder rename a durable journal (`<folder>/.workspace.journal.json`: operation ID, base and target primary version, SHA-256 of the exact folder bytes before and after) is written and synced; a failed primary write restores the exact previous folder bytes and closes the journal, a failed compensation leaves it in place, and a direct folder write of a protected record refuses while such a journal is pending. The generic `SQLiteStore.UpdateWorkspace` used by session-level handlers is conditional on the version the caller read whenever the stored row is protected, so a stale generic writer cannot overwrite a newer fenced Home either; ordinary rows keep their unconditional update. `projectlibrary.Store` maps a fence refusal to `ErrConflict` (reload and review again) and a mirror split to `ErrMirrorDiverged`.

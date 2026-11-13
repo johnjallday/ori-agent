@@ -357,6 +357,55 @@ only when the root's recorded last scan differs from the one before the review.
   arrive on the placement plan's Home (`input_defaults`) after the server
   checked each one against the blueprint's own input declaration.
 
+### S4d. The app assistant: named on the plan, hired by Set up (assistant-reads-projects)
+
+**Status: the design the `feature/assistant-reads-projects` branch implements.**
+It applies to the folder agent's plan card and its Home step. It is rewritten
+to what was built before the branch is delivered. The reading itself is in
+`project-library.md`, "App-plugin readers and the app assistant's read".
+
+- **Owner:** `AssistantProgramState.project_staffing_consent` on the Home (the
+  standing approval and the recorded assistant) and the folder agent's Home
+  step (`runFolderAgentHome`).
+- **Before, as observed on 2026-11-12:** the Home step installed only the
+  Home's provider, hired the Home's own roles and recorded no assistant
+  approval. With only the Home step ticked, the app plugin was not installed
+  and the library reported `project_provider_unavailable`; opening a song
+  afterwards added nobody.
+- **The plan card:** when the plan creates or joins a Home whose song team
+  requires a shared assistant the Home does not have, the hires list gains one
+  row: the role's label, the role's own description as its job, the model, and
+  the note "Joins each song you open." The "Hires N agents" count includes it.
+  It is one more row in the existing list, never a new block. A Home that
+  already has its assistant gets no row. A Home whose "Add my … to songs I
+  open" switch is off is not switched on: the card says so in one line and
+  names the switch.
+- **What the Home step installs:** the Home's provider, and now also the app
+  plugin that provides the song team when it is not installed and the plan's
+  tools step is not ticked. The card's install list and its closing "Ori adds
+  …" line count it, so the press approves it. Which plugin comes from the
+  folder's own recognised format through the reviewed list; host code names no
+  product.
+- **Set up:** pressing it is the approval for every hire the card lists. After
+  the Home's own roles are hired, the run records the Home's assistant
+  approval (source `folder_offer`, citing this run) and creates the assistant,
+  on its own plan line. With no model ready the run stops with the existing
+  "needs a model" stop before any hire. If the song team still cannot be found
+  the assistant's line fails with that reason, the Home and the agents already
+  hired stay, the folder is still added and listed, and the run ends stopped;
+  Set up again retries. Running Set up again, or setting up a second folder
+  into the same Home, never makes a second assistant.
+- **On the Home:** the library panel lists the assistant as hired, beside the
+  existing switch, with "Joins each song you open" and "Reads your songs". It
+  has no chat entry point on the Home; the person talks to it inside a song.
+- **Homes set up before this:** they have no assistant approval. The Home
+  shows one offer, "Add your <assistant>". Accepting records the approval and
+  hires it; dismissing is remembered. Nothing is granted silently.
+- **Opening a song:** binds that same agent. The message after opening covers
+  every outcome in plain words (added, already there, switched off, approved
+  for an older team, assistant missing, needs a model, never approved) and
+  says where to fix it.
+
 ### S5. Catalog-only (unsupported format, or no compatible provider)
 
 - **Owner:** the catalog entry (`projectlibrary` query) and the provider-eligibility
