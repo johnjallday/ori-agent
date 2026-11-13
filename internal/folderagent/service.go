@@ -283,6 +283,12 @@ func (s *Service) ChooseFrom(ctx context.Context, userID string, c personalassis
 	if from := strings.TrimSpace(fromWorkspaceID); from != "" && s.deps.Homes != nil {
 		fedFromHome = s.deps.Homes.HomeProviderOf(ctx, userID, from)
 	}
+	return s.choosePath(ctx, userID, path, fedFromHome), nil
+}
+
+// choosePath issues a volatile hire card for an already host-validated path.
+// Only chooser resolution and recorded project-holder resolution call it.
+func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome string) *Chosen {
 	identity := ResolveRootIdentity(path, s.deps.KnownFolderRoot)
 	purpose, brief := knownFolderHire(identity.Policy)
 	token := newToken()
@@ -305,7 +311,7 @@ func (s *Service) ChooseFrom(ctx context.Context, userID string, c personalassis
 		Purpose: purpose, Brief: brief, BriefMax: personalassistant.BriefMaxRunes, Action: "Hire & start",
 		Note: "Nothing is created until you hire. It looks before it touches anything, and you confirm every step after.",
 		Hire: hire,
-	}, nil
+	}
 }
 
 func (s *Service) takeChoice(userID, token string) (choice, error) {

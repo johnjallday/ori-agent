@@ -102,6 +102,34 @@ func (h *Handler) Choose(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"card": chosen})
 }
 
+type projectHolderRequest struct {
+	ReportKey   string `json:"report_key"`
+	FolderIndex *int   `json:"folder_index"`
+}
+
+// ProjectHolder accepts only a saved walk position, never a relative or absolute
+// path. The service checks ownership and that exact report before issuing a card.
+func (h *Handler) ProjectHolder(w http.ResponseWriter, r *http.Request) {
+	userID, ok := h.user(w, r)
+	if !ok {
+		return
+	}
+	var req projectHolderRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.FolderIndex == nil || *req.FolderIndex < 0 || req.ReportKey == "" {
+		fail(w, http.StatusBadRequest, "Choose a project folder from this report")
+		return
+	}
+	card, err := h.service.ChooseProjectHolder(r.Context(), userID, r.PathValue("workspaceID"), req.ReportKey, *req.FolderIndex)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"card": card})
+}
+
 type startRequest struct {
 	ChoiceToken string       `json:"choice_token"`
 	Brief       string       `json:"brief"`

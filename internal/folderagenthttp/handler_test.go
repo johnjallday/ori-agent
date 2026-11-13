@@ -27,6 +27,18 @@ func TestChoose_RefusesAPathAndAnEmptyChoice(t *testing.T) {
 	}
 }
 
+func TestProjectHolder_RefusesPathsAndMissingWalkPosition(t *testing.T) {
+	for _, body := range []string{`{"path":"/private/elsewhere"}`, `{"relative_folder":"../escape"}`, `{"report_key":"saved","folder_index":"../escape"}`, `{"report_key":"saved","folder_index":-1}`, `{"report_key":"saved"}`, `{"folder_index":0}`} {
+		req := httptest.NewRequest(http.MethodPost, "/folder-agent/ws/project-holder", strings.NewReader(body))
+		req.SetPathValue("workspaceID", "ws")
+		rec := httptest.NewRecorder()
+		handler().ProjectHolder(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s → %d %s", body, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestStart_RefusesAPathField(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler().Start(rec, httptest.NewRequest(http.MethodPost, "/start", strings.NewReader(`{"choice_token":"x","path":"/tmp"}`)))

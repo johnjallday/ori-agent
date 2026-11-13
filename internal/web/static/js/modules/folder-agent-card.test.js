@@ -143,6 +143,50 @@ const reported = (overrides = {}) => ({
   ...overrides
 });
 
+test('project holders open only a saved index, and Cancel restores focus without a hire', async () => {
+  const doc = stubDocument();
+  const calls = [];
+  const view = folderAgentReportView(
+    reported({
+      project_holders: {
+        report_key: 'saved-walk',
+        rows: [{ index: 4, name: 'Projects', count: 7, kinds: '7 songs' }],
+        more: 2
+      }
+    })
+  );
+  const card = renderFolderAgentReport(view, doc, {
+    fetchImpl: async (url, options) => {
+      calls.push({ url, body: JSON.parse(options.body) });
+      return {
+        ok: true,
+        json: async () => ({
+          card: { choice_token: 'child', folder_name: 'Projects', brief: 'Explore' }
+        })
+      };
+    }
+  });
+  const holders = card.querySelector('.folder-agent-card__project-holders');
+  const open = holders.querySelector('button');
+  await open.listeners.click();
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /\/project-holder$/);
+  assert.deepEqual(calls[0].body, { report_key: 'saved-walk', folder_index: 4 });
+  assert.equal(
+    holders.querySelector('.folder-agent-card__title').textContent,
+    'Start an agent on Projects'
+  );
+  const cancel = holders.querySelectorAll('button').find(node => node.textContent === 'Cancel');
+  let focused = false;
+  open.focus = () => {
+    focused = true;
+  };
+  cancel.listeners.click();
+  assert.equal(focused, true);
+  assert.equal(holders.querySelector('.folder-agent-card__title'), null);
+  assert.equal(calls.length, 1);
+});
+
 test('Documents offers an unticked optional step and reuses stored protection without a scan', async () => {
   const doc = stubDocument();
   const calls = [];

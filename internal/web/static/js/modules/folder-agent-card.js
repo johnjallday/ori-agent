@@ -169,6 +169,7 @@ export function folderAgentReportView(view) {
     progress: '',
     facts: String(view.facts_line || ''),
     stage: String(view.stage_line || ''),
+    projectHolders: view.project_holders || null,
     rootPolicy: String(view.root_policy || ''),
     policyNote: String(view.policy_note || ''),
     exploreFolder: Boolean(view.explore_folder),
@@ -1840,6 +1841,87 @@ function goalOfferSection(doc, offer, onAction) {
   return section;
 }
 
+function renderProjectHolders(doc, view, fetchImpl) {
+  const section = el(doc, 'section', 'folder-agent-card__project-holders');
+  section.append(el(doc, 'h4', '', 'Projects inside'));
+  const list = el(doc, 'ul', 'folder-agent-card__holder-list');
+  section.append(list);
+  for (const holder of view.projectHolders.rows.slice(0, 3)) {
+    const row = el(doc, 'li', 'folder-agent-card__holder-row');
+    row.append(el(doc, 'strong', '', String(holder.name)), el(doc, 'p', '', String(holder.kinds)));
+    const setup = el(
+      doc,
+      'button',
+      'btn btn-sm folder-agent-card__secondary',
+      `Set up ${holder.name}`
+    );
+    setup.type = 'button';
+    const choiceHost = el(doc, 'div', 'folder-agent-card__holder-choice');
+    let active = true;
+    setup.addEventListener('click', async () => {
+      setup.disabled = true;
+      choiceHost.replaceChildren();
+      try {
+        const { ok, payload } = await post(
+          `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(view.workspaceID)}/project-holder`,
+          { report_key: view.projectHolders.report_key, folder_index: holder.index },
+          fetchImpl
+        );
+        if (!ok || !payload?.card) {
+          choiceHost.append(
+            el(
+              doc,
+              'p',
+              'folder-agent-card__error',
+              payload?.error || 'That project folder could not be chosen.'
+            )
+          );
+          return;
+        }
+        active = true;
+        const hireHost = el(doc, 'div', '');
+        const cancel = el(doc, 'button', 'btn btn-sm folder-agent-card__secondary', 'Cancel');
+        cancel.type = 'button';
+        cancel.addEventListener('click', () => {
+          active = false;
+          choiceHost.replaceChildren();
+          setup.focus?.();
+        });
+        choiceHost.append(hireHost, cancel);
+        await mountFolderAgentChoice(hireHost, null, {
+          doc,
+          fetchImpl,
+          initialCard: payload.card,
+          isActive: () => active,
+          onStarting: busy => {
+            cancel.disabled = busy;
+          },
+          onStarted: () => {
+            cancel.remove?.();
+          }
+        });
+        hireHost.querySelector?.('.folder-agent-card__brief')?.focus?.();
+      } catch (_) {
+        choiceHost.append(
+          el(
+            doc,
+            'p',
+            'folder-agent-card__error',
+            'That project folder could not be chosen right now.'
+          )
+        );
+      } finally {
+        setup.disabled = false;
+      }
+    });
+    row.append(setup, choiceHost);
+    list.append(row);
+  }
+  if (view.projectHolders.more > 0)
+    section.append(el(doc, 'p', '', `and ${view.projectHolders.more} more`));
+  return section;
+}
+
 export function renderFolderAgentReport(
   view,
   doc = document,
@@ -2025,6 +2107,9 @@ export function renderFolderAgentReport(
   if (!premiseLine && view.facts && (!view.whatItIs || view.policyNote))
     card.append(el(doc, 'p', 'folder-agent-card__facts', view.facts));
   if (view.policyNote) card.append(el(doc, 'p', 'folder-agent-card__note', view.policyNote));
+  if (view.projectHolders?.rows?.length) {
+    card.append(renderProjectHolders(doc, view, fetchImpl));
+  }
   if (view.rootPolicy === 'documents_inbox' && fetchImpl) {
     const protection = el(doc, 'p', 'folder-agent-card__protection');
     card.append(protection);
@@ -2815,6 +2900,8 @@ export async function mountFolderAgentChoice(
     fetchImpl = globalThis.fetch,
     isActive = () => true,
     onStarted,
+    onStarting,
+    initialCard = null,
     pollMs,
     openPlace,
     navigate,
@@ -2824,7 +2911,7 @@ export async function mountFolderAgentChoice(
   if (!host) return { error: 'That folder could not be chosen.' };
   let chosen;
   try {
-    chosen = await chooseFolder(body, fetchImpl);
+    chosen = initialCard ? { card: initialCard } : await chooseFolder(body, fetchImpl);
   } catch (_) {
     chosen = { error: 'That folder could not be chosen right now.' };
   }
@@ -2834,13 +2921,19 @@ export async function mountFolderAgentChoice(
   }
   const card = folderAgentCardView(chosen.card);
   let busy = false;
-  const draw = (error = '') => {
+  const draw = (error = '', duplicate = null) => {
     host.hidden = false;
     host.replaceChildren(renderFolderAgentCard(card, doc, { error, onStart }));
+    if (duplicate?.route?.startsWith('/workspaces/') && !duplicate.route.includes('\\')) {
+      const open = el(doc, 'a', 'folder-agent-card__open', 'Open it');
+      open.href = duplicate.route;
+      host.append(open);
+    }
   };
   const onStart = async (brief, button, hire) => {
     if (busy) return;
     busy = true;
+    onStarting?.(true);
     if (button) button.disabled = true;
     let result;
     try {
@@ -2849,11 +2942,12 @@ export async function mountFolderAgentChoice(
       result = { error: 'The agent could not be started right now.' };
     }
     busy = false;
+    onStarting?.(false);
     if (!isActive()) return;
     if (result.error || !result.view?.workspace_id) {
       card.brief = brief;
       const error = result.error || 'The agent could not be started right now.';
-      draw(result.duplicate?.name ? `${error} Open ${result.duplicate.name} from the map.` : error);
+      draw(error, result.duplicate);
       return;
     }
     onStarted?.(result.view);
