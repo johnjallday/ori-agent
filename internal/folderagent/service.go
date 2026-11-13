@@ -222,6 +222,8 @@ type choice struct {
 	// fedFromHome is the Home provider key of the Home the folder was chosen
 	// from inside, resolved on the server; empty otherwise.
 	fedFromHome string
+	// policy supplies editable defaults only, never mutation authority.
+	policy folderlook.RootPolicy
 }
 
 // Homes tells which reviewed Home provider a workspace is a Home of, for the
@@ -249,6 +251,7 @@ type Chosen struct {
 	Token      string `json:"choice_token"`
 	FolderName string `json:"folder_name"`
 	Title      string `json:"title"`
+	Purpose    string `json:"purpose,omitempty"`
 	Field      string `json:"field"`
 	Brief      string `json:"brief"`
 	BriefMax   int    `json:"brief_max"`
@@ -280,6 +283,8 @@ func (s *Service) ChooseFrom(ctx context.Context, userID string, c personalassis
 	if from := strings.TrimSpace(fromWorkspaceID); from != "" && s.deps.Homes != nil {
 		fedFromHome = s.deps.Homes.HomeProviderOf(ctx, userID, from)
 	}
+	identity := ResolveRootIdentity(path, s.deps.KnownFolderRoot)
+	purpose, brief := knownFolderHire(identity.Policy)
 	token := newToken()
 	s.mu.Lock()
 	now := s.deps.Now()
@@ -288,14 +293,18 @@ func (s *Service) ChooseFrom(ctx context.Context, userID string, c personalassis
 			delete(s.choices, key)
 		}
 	}
-	s.choices[token] = choice{userID: userID, path: path, expires: now.Add(choiceTTL), fedFromHome: fedFromHome}
+	s.choices[token] = choice{userID: userID, path: path, expires: now.Add(choiceTTL), fedFromHome: fedFromHome, policy: identity.Policy}
 	s.mu.Unlock()
 	name := filepath.Base(path)
+	hire := s.hireOptions(ctx, userID, name)
+	if identity.Policy.IsCatchAll() {
+		hire.Mandate = brief
+	}
 	return &Chosen{
 		Token: token, FolderName: name, Title: "Start an agent on " + name, Field: "What should it do?",
-		Brief: DefaultBrief, BriefMax: personalassistant.BriefMaxRunes, Action: "Hire & start",
+		Purpose: purpose, Brief: brief, BriefMax: personalassistant.BriefMaxRunes, Action: "Hire & start",
 		Note: "Nothing is created until you hire. It looks before it touches anything, and you confirm every step after.",
-		Hire: s.hireOptions(ctx, userID, name),
+		Hire: hire,
 	}, nil
 }
 
@@ -332,7 +341,7 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string, hire H
 		return View{}, err
 	}
 	if brief == "" {
-		brief = DefaultBrief
+		_, brief = knownFolderHire(held.policy)
 	}
 	folder := filepath.Base(path)
 	req, err := s.resolveHire(ctx, userID, folder, brief, hire)

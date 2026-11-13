@@ -6,11 +6,27 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
 // AgentNameMaxRunes bounds a hired agent's name on the card.
 const AgentNameMaxRunes = 60
+
+// knownFolderHire provides editable defaults before the hire. Identity comes
+// from the host's disk comparison, never the folder's name or a browser flag.
+func knownFolderHire(policy folderlook.RootPolicy) (purpose, brief string) {
+	switch policy {
+	case folderlook.RootDownloads:
+		return "Downloads is an inbox. This agent sorts what lands here, and you approve every move.", "Keep Downloads sorted"
+	case folderlook.RootDesktop:
+		return "Desktop is a workbench. This agent files screenshots and loose files by kind, and you approve every move.", "Keep the Desktop clear"
+	case folderlook.RootDocuments:
+		return "Documents is where you keep things. This agent points out the projects in it and whether Ori can see a backup.", "Show me what I keep here"
+	default:
+		return "", DefaultBrief
+	}
+}
 
 // HireModel is one model the card offers for a new agent.
 type HireModel struct {

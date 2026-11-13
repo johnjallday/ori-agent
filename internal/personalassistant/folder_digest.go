@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
+	"github.com/johnjallday/ori-agent/internal/knownfolder"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -66,9 +67,8 @@ type FolderChip struct {
 	Label string `json:"label"`
 }
 
-// folderChips is the fixed chip set (decision 2 in the PRD). Each resolves
-// to a folder under the user's home on the server; the browser only ever
-// names the identifier.
+// folderChips is the fixed chip set. Catch-all chips use the same host-owned
+// platform lookup as folder recognition; the browser names only the identifier.
 var folderChips = []struct {
 	ID, Label, Dir string
 }{
@@ -307,7 +307,9 @@ type FolderDigestDeps struct {
 	// path. Nil refuses every selection.
 	ResolveSelection func(token string) (string, error)
 	HomeDir          func() (string, error)
-	Scan             func(root string) (folderdigest.Result, error)
+	// KnownFolderLookup overrides platform location lookup, not validation.
+	KnownFolderLookup knownfolder.Lookup
+	Scan              func(root string) (folderdigest.Result, error)
 	// ScanObservation captures bounded entry relationships in the same scan.
 	ScanObservation func(root string) (folderdigest.Result, error)
 	Now             func() time.Time
@@ -2935,8 +2937,7 @@ func FolderProjectFactText(folderName string) string {
 }
 
 // KnownFolderRoot resolves a server-known folder without scanning it or
-// accepting a browser path. Authority is the configured home plus the chip's
-// directory name, not a platform redirected-folder API.
+// accepting a browser path. It uses the exact same locations as chooser chips.
 func (s *FolderDigestService) KnownFolderRoot(id string) (string, error) {
 	path, err := s.chipPath(id)
 	if err != nil {
@@ -2954,6 +2955,13 @@ func (s *FolderDigestService) chipPath(id string) (string, error) {
 		home, err := s.deps.HomeDir()
 		if err != nil || strings.TrimSpace(home) == "" {
 			return "", ErrFolderChipMissing
+		}
+		if id != "music" {
+			path, err := knownfolder.Resolve(home, id, s.deps.KnownFolderLookup)
+			if err != nil {
+				return "", ErrFolderChipMissing
+			}
+			return path, nil
 		}
 		path := filepath.Join(home, chip.Dir)
 		info, err := os.Stat(path)

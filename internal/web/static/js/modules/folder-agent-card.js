@@ -5,6 +5,7 @@
 // tools); this module only lays them out.
 
 import { publishFolderAgentChat } from './folder-agent-chat.js';
+import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 
 export const FOLDER_AGENT_ENDPOINT = '/api/personal-assistant/folder-agent';
 // How many times the workspace page asks again for the report's message after
@@ -49,6 +50,7 @@ export function folderAgentCardView(card) {
     token: String(card.choice_token),
     folder: String(card.folder_name || ''),
     title: String(card.title || `Start an agent on ${card.folder_name || 'this folder'}`),
+    purpose: String(card.purpose || ''),
     field: String(card.field || 'What should it do?'),
     brief: String(card.brief || ''),
     max: Number(card.brief_max) > 0 ? Number(card.brief_max) : 300,
@@ -167,6 +169,7 @@ export function folderAgentReportView(view) {
     progress: '',
     facts: String(view.facts_line || ''),
     stage: String(view.stage_line || ''),
+    rootPolicy: String(view.root_policy || ''),
     policyNote: String(view.policy_note || ''),
     exploreFolder: Boolean(view.explore_folder),
     tools: [],
@@ -269,7 +272,8 @@ export function folderAgentReportView(view) {
   if (view.plan) {
     out.plan = planView(view.plan);
     // Set it up waits for a plan that can run; the card says why it cannot.
-    if (!out.plan.runnable) out.actions = out.actions.filter(a => a.id !== 'set_up');
+    if (!out.plan.runnable && out.rootPolicy !== 'documents_inbox')
+      out.actions = out.actions.filter(a => a.id !== 'set_up');
     // The button says what it confirms: how many plugins it installs.
     out.actions = out.actions.map(a =>
       a.id === 'set_up' ? { ...a, label: folderAgentSetUpLabel(out.plan) } : a
@@ -891,7 +895,9 @@ export function renderFolderAgentCard(
     onStart?.(String(input.value || ''), start, folderAgentHireChoice(view.hire))
   );
   actions.append(start);
-  card.append(title, label);
+  card.append(title);
+  if (view.purpose) card.append(el(doc, 'p', 'folder-agent-card__purpose', view.purpose));
+  card.append(label);
   if (hire) card.append(hire);
   card.append(note, actions);
   if (error) {
@@ -1858,7 +1864,7 @@ export function renderFolderAgentReport(
   card.dataset.workspaceId = view.workspaceID;
   // The steps left ticked, and the plan they make: a tick asks the server
   // for the plan (and digest) with that choice.
-  const selecting = Boolean(view.plan?.runnable) && view.actions.some(a => a.id === 'set_up');
+  const selecting = Boolean(view.plan?.steps?.length) && view.actions.some(a => a.id === 'set_up');
   const selected = new Set(view.plan?.selected || []);
   let planHost = null;
   let setUpButton = null;
@@ -2019,6 +2025,22 @@ export function renderFolderAgentReport(
   if (!premiseLine && view.facts && (!view.whatItIs || view.policyNote))
     card.append(el(doc, 'p', 'folder-agent-card__facts', view.facts));
   if (view.policyNote) card.append(el(doc, 'p', 'folder-agent-card__note', view.policyNote));
+  if (view.rootPolicy === 'documents_inbox' && fetchImpl) {
+    const protection = el(doc, 'p', 'folder-agent-card__protection');
+    card.append(protection);
+    // Same stored-only fact and navigation as the workspace's Protection
+    // line: no scan, metadata refresh, provider read or folder path here.
+    void fetchWorkspaceProtection(view.workspaceID, fetchImpl).then(fact => {
+      const current = protectionFactView(fact);
+      if (!current) return;
+      protection.append(el(doc, 'span', '', current.sentence));
+      if (current.route) {
+        const link = el(doc, 'a', 'folder-agent-card__protection-link', current.routeLabel);
+        link.href = current.route;
+        protection.append(el(doc, 'span', '', ' '), link);
+      }
+    });
+  }
   if (view.exploreFolder) {
     // The normal chooser performs a new explicit selection; opening it neither
     // reanchors this workspace nor consents to a look or structural setup.
@@ -2185,7 +2207,10 @@ export function renderFolderAgentReport(
       );
       button.type = 'button';
       button.dataset.folderAgentAction = action.id;
-      if (action.id === 'set_up') setUpButton = button;
+      if (action.id === 'set_up') {
+        setUpButton = button;
+        button.disabled = !view.plan?.runnable;
+      }
       button.addEventListener('click', () => {
         // Set it up carries only the steps the owner left selected.
         const extra = action.id === 'set_up' ? { selected: [...selected] } : undefined;

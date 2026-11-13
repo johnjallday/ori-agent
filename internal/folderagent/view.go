@@ -41,6 +41,7 @@ type View struct {
 	Progress     Progress `json:"progress"`
 	ProgressLine string   `json:"progress_line,omitempty"`
 
+	RootPolicy    folderlook.RootPolicy  `json:"root_policy,omitempty"`
 	PolicyNote    string                 `json:"policy_note,omitempty"`
 	ExploreFolder bool                   `json:"explore_folder,omitempty"`
 	FactsLine     string                 `json:"facts_line,omitempty"`
@@ -252,8 +253,12 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	v.FactsLine = foldermap.FactsLine(rec.Facts)
 	v.Stage = rec.Stage
 	v.StageLine = folderlook.DefaultLine(folderlook.StepsForPolicy(rec.RootPolicy, rec.FolderName, rec.Facts, rec.Candidates))
+	v.RootPolicy = rec.RootPolicy
 	v.PolicyNote = folderlook.PolicyLine(rec.RootPolicy)
-	v.ExploreFolder = rec.RootPolicy == folderlook.RootDownloads
+	v.ExploreFolder = rec.RootPolicy.IsCatchAll()
+	if rec.RootPolicy == folderlook.RootDocuments {
+		v.StageLine = "Documents stays a folder with its agent."
+	}
 	v.Candidates = rec.Candidates
 	v.NextFolders = nextFolders(rec.Facts)
 	v.ModelSentence = modelSentence(rec)
@@ -859,6 +864,9 @@ func BuildPlan(rec Record, selected []string) Plan {
 	}
 	if rec.RootPolicy != folderlook.RootOrdinary {
 		plan.DefaultReason = "Ori refreshed the setup choices for this folder. Review and confirm the current plan."
+		if rec.RootPolicy == folderlook.RootDocuments {
+			plan.DefaultReason = "Documents stays a folder with its agent. File Janitor is optional."
+		}
 		if rec.RootPolicy == folderlook.RootUnresolved {
 			plan.Unavailable = folderlook.PolicyLine(rec.RootPolicy)
 		}

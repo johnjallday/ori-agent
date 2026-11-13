@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -22,18 +23,10 @@ type RootIdentity struct {
 // symlink aliases and the actual volume's case rules). It never scans contents.
 func ResolveRootIdentity(root string, known func(string) (string, error)) RootIdentity {
 	unknown := RootIdentity{Policy: folderlook.RootUnresolved}
-	if known == nil || !filepath.IsAbs(root) {
+	if !filepath.IsAbs(root) {
 		return unknown
 	}
-	downloads, err := known("downloads")
-	if err != nil || !filepath.IsAbs(downloads) {
-		return unknown
-	}
-	root, err = filepath.EvalSymlinks(root)
-	if err != nil {
-		return unknown
-	}
-	downloads, err = filepath.EvalSymlinks(downloads)
+	root, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return unknown
 	}
@@ -41,15 +34,38 @@ func ResolveRootIdentity(root string, known func(string) (string, error)) RootId
 	if err != nil || !r.IsDir() {
 		return unknown
 	}
-	d, err := os.Stat(downloads) // #nosec G304 G703 -- server-known folder resolver
-	if err != nil || !d.IsDir() {
-		return unknown
-	}
 	policy := folderlook.RootOrdinary
-	if os.SameFile(r, d) {
-		policy = folderlook.RootDownloads
+	parts := []string{"folder-root-policy-v2", root}
+	for _, candidate := range []struct {
+		id     string
+		policy folderlook.RootPolicy
+	}{{"downloads", folderlook.RootDownloads}, {"desktop", folderlook.RootDesktop}, {"documents", folderlook.RootDocuments}} {
+		parts = append(parts, candidate.id)
+		path := ""
+		if known != nil {
+			path, err = known(candidate.id)
+		}
+		if known == nil || err != nil || !filepath.IsAbs(path) {
+			parts = append(parts, "absent")
+			continue
+		}
+		path, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			parts = append(parts, "absent")
+			continue
+		}
+		d, err := os.Stat(path) // #nosec G304 G703 -- server-known folder resolver
+		if err != nil || !d.IsDir() {
+			parts = append(parts, "absent")
+			continue
+		}
+		parts = append(parts, path)
+		if policy == folderlook.RootOrdinary && os.SameFile(r, d) {
+			policy = candidate.policy
+		}
 	}
-	sum := sha256.Sum256([]byte("folder-root-policy-v1\x00" + root + "\x00" + downloads + "\x00" + string(policy)))
+	parts = append(parts, string(policy))
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return RootIdentity{Policy: policy, Binding: hex.EncodeToString(sum[:])}
 }
 
