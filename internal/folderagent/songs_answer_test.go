@@ -429,7 +429,7 @@ func TestLearningView_Words(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rec.Learning = tc.l
-			got := learningView(rec)
+			got := learningViewWith(rec, func(format string) bool { return format == "reaper" })
 			if tc.l == nil {
 				if got != nil {
 					t.Fatalf("view = %+v, want nil", got)

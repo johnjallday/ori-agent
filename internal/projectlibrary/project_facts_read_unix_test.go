@@ -120,7 +120,7 @@ func TestProjectFactsBatch_SendsTheListedFilesAndStoresWhatCameBack(t *testing.T
 	// The plugin was told the absolute paths the host resolved, the listed
 	// sizes, the format, and that names are not allowed.
 	in := reader.inputs[0]
-	if in.Names || in.MaxFileBytes != DefaultSongFactsLimits.MaxBytes || len(in.Files) != 3 {
+	if in.Names || in.MaxFileBytes != maxSongFileBytes || len(in.Files) != 3 {
 		t.Fatalf("input = %+v", in)
 	}
 	if in.Files[0].Path != filepath.Join(root.Path, "One", "One.zz") || in.Files[0].Size != targets[0].File.Size || in.Files[0].Format != "zzfmt" {
@@ -130,7 +130,7 @@ func TestProjectFactsBatch_SendsTheListedFilesAndStoresWhatCameBack(t *testing.T
 
 func TestProjectFactsBatch_AFileOverTheCapIsNeverSent(t *testing.T) {
 	root, targets := readerRoot(t, "Big", "Small")
-	targets[0].File.Size = DefaultSongFactsLimits.MaxBytes + 1
+	targets[0].File.Size = maxSongFileBytes + 1
 	reader := &fakeReader{}
 	reads, counts, err := readProjectFactsBatch(context.Background(), root, targets, songFactsGrant{}, testReader, reader.call)
 	if err != nil {

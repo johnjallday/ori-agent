@@ -123,16 +123,18 @@ func learningReasonWords(reason, reader string, done, total int) (sentence, acti
 	return "", ""
 }
 
-// songsReads is what the offer says it will read, and what it will not touch.
-// It is the one sentence that promises the limit, so it names exactly what the
-// reader takes from a project file under the consent "Learn them" grants: the
-// three numbers, and the names a person typed (tracks, markers and regions).
-const songsReads = "I'll read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened."
+// songsReads is what the offer says it will read, and what it will not touch,
+// when no particular plugin is named. It is the one sentence that promises the
+// limit, so it names exactly what the reader takes from a project file under the
+// consent "Learn them" grants: the three numbers, and the names a person typed
+// (tracks, markers and regions). Ori has no reader of its own: an app plugin
+// reads, and Ori keeps only those facts.
+const songsReads = "The app plugin reads tempo, length, track count, track names, markers and regions from each project file, and Ori keeps only those. Nothing is changed, and audio is not opened."
 
-// songsReadsBy is the same promise when an installed app plugin does the
-// reading (assistant-reads-projects FR44): it names that plugin, says Ori keeps
-// only the listed facts, and keeps the two limits. With no plugin to name, the
-// original sentence stands.
+// songsReadsBy is the same promise naming the app plugin that does the reading
+// (assistant-reads-projects FR44): it names that plugin, says Ori keeps only the
+// listed facts, and keeps the two limits. With no plugin to name, "The app
+// plugin" stands in.
 func songsReadsBy(reader string) string {
 	reader = strings.TrimSpace(reader)
 	if reader == "" {
@@ -146,6 +148,26 @@ func songsReadsBy(reader string) string {
 // reads the songs, as the reviewed list gives its name; "" when none does.
 type SongsReaderNamer interface {
 	ReaderName() string
+}
+
+// Whether an installed app plugin reads a project format (the values of
+// projectlibrary.ReaderStatus).
+const (
+	// ReaderReady: an installed, reviewed plugin's reader covers the format.
+	ReaderReady = "ready"
+	// ReaderUpdatePlugin: the format's reviewed plugin is installed but has no
+	// reader; updating it would add one.
+	ReaderUpdatePlugin = "update_plugin"
+)
+
+// SongsReaders is the optional part of Songs that says which installed app
+// plugin reads a project format. The host reads no project file itself, so
+// without it nothing counts as readable: a Home that cannot ask makes no offer.
+type SongsReaders interface {
+	// ReaderFor is ReaderReady, ReaderUpdatePlugin or neither ("none"), and, for
+	// ReaderUpdatePlugin, the name of the plugin to update as the reviewed list
+	// gives it.
+	ReaderFor(format string) (status, plugin string)
 }
 
 // Songs is the Home's song-details consent as the folder agent needs it: the
@@ -186,6 +208,11 @@ type SongsOfferView struct {
 	// NotRead names the songs that cannot be read this way, by format; empty
 	// when every song can.
 	NotRead string `json:"not_read,omitempty"`
+	// Update names the reviewed app plugin that owns these songs' format and is
+	// installed but cannot read them yet. When it is set there is nothing to learn
+	// (no Learn them, no Not now): Ask says to update the plugin, and the card
+	// offers the update. It goes away once an installed plugin reads the songs.
+	Update string `json:"update,omitempty"`
 }
 
 // songsAnswerable says the offer can still be answered: nobody has answered it,
@@ -242,9 +269,10 @@ func (s *Service) songsOffer(ctx context.Context, rec *Record) *SongsOfferView {
 	if homeID == "" {
 		return nil
 	}
-	readability := rec.Facts.Readability()
+	readers, _ := s.deps.Songs.(SongsReaders)
+	readability := rec.Facts.Readability(s.songsReadable())
 	if readability.Readable <= 0 {
-		return nil
+		return s.songsUpdateOffer(ctx, rec, homeID, readability, readers)
 	}
 	state, names, err := s.deps.Songs.Consent(ctx, rec.OwnerUserID, rec.WorkspaceID, homeID)
 	// No consent at all, or the numbers-only one (the upgrade).
@@ -262,6 +290,54 @@ func (s *Service) songsOffer(ctx context.Context, rec *Record) *SongsOfferView {
 		Ask:     fmt.Sprintf("Want me to learn the %d %s?", readability.Readable, foldermap.ShapeNoun(readability.Shape, readability.Readable)),
 		Reads:   songsReadsBy(reader),
 		NotRead: notReadSentence(readability),
+	}
+}
+
+// songsReadable says whether an installed app plugin reads a project format. Nil
+// deps, or deps that cannot say, read nothing: the host has no reader of its own.
+func (s *Service) songsReadable() func(format string) bool {
+	readers, _ := s.deps.Songs.(SongsReaders)
+	if readers == nil {
+		return nil
+	}
+	return func(format string) bool {
+		status, _ := readers.ReaderFor(format)
+		return status == ReaderReady
+	}
+}
+
+// songsUpdateOffer is what the offer's place says when no installed plugin reads
+// any of the songs but a reviewed plugin that owns their format is installed
+// without a reader: "Update <plugin> to read the N songs." It is never a silent
+// blank. Nil when no installed reviewed plugin could read them (the plugin is
+// not installed, or the songs are of a format none owns), or when the Home
+// already holds a consent that reaches names (nothing was promised to ask).
+func (s *Service) songsUpdateOffer(ctx context.Context, rec *Record, homeID string, readability foldermap.Readability, readers SongsReaders) *SongsOfferView {
+	if readers == nil {
+		return nil
+	}
+	count, plugin := 0, ""
+	for _, unread := range readability.Unreadable {
+		if status, name := readers.ReaderFor(unread.Format); status == ReaderUpdatePlugin && name != "" {
+			count += unread.Count
+			if plugin == "" {
+				plugin = name
+			}
+		}
+	}
+	if count <= 0 {
+		return nil
+	}
+	state, names, err := s.deps.Songs.Consent(ctx, rec.OwnerUserID, rec.WorkspaceID, homeID)
+	if err != nil || (state != workspace.SongDetailsNone && (state != workspace.SongDetailsOn || names)) {
+		return nil
+	}
+	noun := foldermap.ShapeNoun(readability.Shape, count)
+	return &SongsOfferView{
+		Count:  count,
+		Noun:   noun,
+		Ask:    fmt.Sprintf("Update %s to read the %d %s.", plugin, count, noun),
+		Update: plugin,
 	}
 }
 
@@ -304,7 +380,9 @@ func (s *Service) AnswerSongs(ctx context.Context, userID, workspaceID string, l
 		return View{}, err
 	}
 	offer := s.songsOffer(ctx, current)
-	if offer == nil {
+	if offer == nil || offer.Update != "" {
+		// Nothing to answer: no offer, or only the sentence that says to update the
+		// plugin first.
 		return View{}, ErrWrongState
 	}
 	if !learn {
@@ -491,7 +569,7 @@ func (s *Service) summarize(ctx context.Context, rec Record, homeID string) (tex
 		return hostText, hostBy, ""
 	}
 	reference, _ := folderlook.BuildSongsReference(folderlook.SongsReferenceInput{
-		FolderName: rec.FolderName, Noun: foldermap.ShapeNoun(rec.Facts.Readability().Shape, 2), Songs: songs,
+		FolderName: rec.FolderName, Noun: foldermap.ShapeNoun(rec.Facts.PortfolioShape(), 2), Songs: songs,
 	})
 	result := folderlook.RunSummaryTurn(ctx, folderlook.SummaryTurnInput{
 		Chat: resolved.chat, Model: resolved.name, AgentName: rec.AgentName, Reference: reference,
@@ -573,12 +651,17 @@ type LearningView struct {
 //	done         "Learned 7 songs"  /  "Learned 5 of 7 songs"  /  "No song could be read",
 //	             and, when the host wrote the summary, "Learned 7 songs: 6–24 tracks, 84–128 BPM"
 //	stopped      "Stopped before it finished. Learned 3 of 7 songs"
-func learningView(rec *Record) *LearningView {
+func learningView(rec *Record) *LearningView { return learningViewWith(rec, nil) }
+
+// learningViewWith is learningView with the installed readers' answer to "does
+// an app plugin read this format", which only the closing sentence about the
+// songs that cannot be read this way needs.
+func learningViewWith(rec *Record, readable func(format string) bool) *LearningView {
 	l := rec.Learning
 	if l == nil {
 		return nil
 	}
-	readability := rec.Facts.Readability()
+	readability := rec.Facts.Readability(readable)
 	noun := func(n int) string { return foldermap.ShapeNoun(readability.Shape, n) }
 	view := &LearningView{Status: l.Status, Done: l.Done, Total: l.Total, Reader: l.Reader}
 	switch l.Status {

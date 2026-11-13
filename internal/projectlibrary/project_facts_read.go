@@ -103,12 +103,12 @@ func readProjectFactsBatch(ctx context.Context, root Root, targets []songFactsTa
 			_ = h.file.Close()
 		}
 	}()
-	input := projectFactsInput{SchemaVersion: 1, Names: grant.names, MaxFileBytes: DefaultSongFactsLimits.MaxBytes}
+	input := projectFactsInput{SchemaVersion: 1, Names: grant.names, MaxFileBytes: maxSongFileBytes}
 	for _, target := range targets {
 		if len(open) >= reader.batch || len(open) >= plugin.ProjectFactsMaxFilesPerCall {
 			break
 		}
-		if target.File.Size > DefaultSongFactsLimits.MaxBytes {
+		if target.File.Size > maxSongFileBytes {
 			counts.TooLarge++
 			reads = append(reads, songFactsRead{songFactsTarget: target, NotRead: NotReadTooLarge})
 			continue
@@ -231,7 +231,7 @@ func mapProjectFacts(target songFactsTarget, result projectFactsResult, grant so
 // kept. A result that still fails the loader's check keeps no names, but is
 // marked as read under names.
 func projectFactsNames(result projectFactsResult) *SongNames {
-	collector := newNameCollector(nil)
+	collector := newNameCollector()
 	for _, raw := range result.Tracks {
 		collector.noteTrack([]byte(raw))
 	}

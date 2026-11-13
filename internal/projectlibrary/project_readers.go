@@ -83,6 +83,48 @@ const (
 	ReaderNone = "none"
 )
 
+// ReaderFor is ReaderStatus together with, for ReaderUpdatePlugin, the name of
+// the plugin to update as the reviewed list gives it, so a sentence can say
+// "Update <plugin> to read songs".
+func ReaderFor(installed []plugin.InstalledPlugin, format string) (status, name string) {
+	status = ReaderStatus(installed, format)
+	if status != ReaderUpdatePlugin {
+		return status, ""
+	}
+	key, ok := folderdigest.IntegrationKeyForProjectFormat(format)
+	if !ok {
+		return status, ""
+	}
+	entry, ok := reviewedintegration.Get(key)
+	if !ok {
+		return status, ""
+	}
+	return status, entry.DisplayName
+}
+
+// ReaderUpdateName is the name, as the reviewed list gives it, of an installed,
+// enabled reviewed app plugin that declares no reader, so the page can say
+// "Update <plugin> to read songs" where a Home's song details would be. It is
+// empty when some installed plugin does read songs (nothing to update) and when
+// no reviewed app plugin is installed. When several lack a reader, the first by
+// plugin name.
+func ReaderUpdateName(installed []plugin.InstalledPlugin) string {
+	if len(projectReadersFrom(installed)) > 0 {
+		return ""
+	}
+	sorted := append([]plugin.InstalledPlugin(nil), installed...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+	for _, candidate := range sorted {
+		if !candidate.Enabled {
+			continue
+		}
+		if entry, reviewed := reviewedintegration.ForPlugin(candidate.Name); reviewed && entry.DisplayName != "" {
+			return entry.DisplayName
+		}
+	}
+	return ""
+}
+
 // ReaderStatus says whether the songs of format can be read through an
 // installed app plugin.
 func ReaderStatus(installed []plugin.InstalledPlugin, format string) string {

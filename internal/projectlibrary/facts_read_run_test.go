@@ -13,6 +13,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/plugin"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // assistant-reads-projects group 5: the Home's app assistant reads the listed
@@ -28,6 +29,9 @@ type fakeAssistantChat struct {
 	mu        sync.Mutex
 	responses []*llm.ChatResponse
 	requests  []llm.ChatRequest
+	// alwaysCalls makes every call the scripted responses do not cover call the
+	// tool, for tests about what the library does with the facts the read saves.
+	alwaysCalls bool
 }
 
 func (f *fakeAssistantChat) chat(_ context.Context, request llm.ChatRequest) (*llm.ChatResponse, error) {
@@ -35,6 +39,9 @@ func (f *fakeAssistantChat) chat(_ context.Context, request llm.ChatRequest) (*l
 	defer f.mu.Unlock()
 	f.requests = append(f.requests, request)
 	if len(f.responses) == 0 {
+		if f.alwaysCalls {
+			return callsTheTool(), nil
+		}
 		return &llm.ChatResponse{Content: "done", Usage: llm.Usage{TotalTokens: 100}}, nil
 	}
 	next := f.responses[0]
@@ -97,22 +104,48 @@ type readFixture struct {
 	reader    *pluginReader
 	runner    *FactsReadRunner
 	published *factsAtPublish
-	opens     *openCounter
 	assistant string // reason the host gives; "" means hired
 	model     bool
+	file      workspace.Store
+	tree      musicTree
+	saved     time.Time // when factsMusicTree saved the fixture's projects
 }
 
-func newReadFixture(t *testing.T) *readFixture {
+// fixtureOptions says how newReadFixtureWith differs from newReadFixture.
+type fixtureOptions struct {
+	// reader replaces the plugin's reader (a file-parsing stand-in, say).
+	reader ProjectFactsCaller
+	// noConsent leaves the Home without a song-details consent.
+	noConsent bool
+}
+
+func newReadFixture(t *testing.T) *readFixture { return newReadFixtureWith(t, fixtureOptions{}) }
+
+func newReadFixtureWith(t *testing.T, options fixtureOptions) *readFixture {
 	t.Helper()
 	r, scope, file, tree, root := connectedMusicRoot(t)
-	factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	f := &readFixture{r: r, scope: scope, root: root, chat: &fakeAssistantChat{}, reader: &pluginReader{}, model: true}
+	saved := factsMusicTree(t, tree)
+	f := wireReadFixture(t, r, scope, file, root, options)
+	f.tree, f.saved = tree, saved
+	return f
+}
+
+// wireReadFixture gives a connected root a read turn whose assistant, model and
+// plugin reader are fakes. A fixture for any root can use it, not only the music
+// tree's.
+func wireReadFixture(t *testing.T, r *Roots, scope Scope, file workspace.Store, root Root, options fixtureOptions) *readFixture {
+	t.Helper()
+	if !options.noConsent {
+		grantSongDetails(t, file, scope)
+	}
+	f := &readFixture{r: r, scope: scope, root: root, chat: &fakeAssistantChat{}, reader: &pluginReader{}, model: true, file: file}
+	reader := options.reader
+	if reader == nil {
+		reader = f.reader.call
+	}
 	f.published = &factsAtPublish{store: r.library, scope: scope}
 	r.library.WithEventBus(f.published)
 	r.library.WithInstalledPlugins(installedList{readerPlugin(reviewedPluginID(t), true, 262144, "reaper")})
-	f.opens = &openCounter{}
-	r.factsOpened = f.opens.hook
 	f.runner = NewFactsReadRunner(r, FactsReadHost{
 		Team: func(Scope) (FactsReadTeam, bool) {
 			return FactsReadTeam{PluginID: "app", BlueprintID: "song", Label: "App Assistant"}, true
@@ -129,24 +162,37 @@ func newReadFixture(t *testing.T) *readFixture {
 			}
 			return f.chat.chat, "test-model", nil
 		},
-		Reader: f.reader.call,
+		Reader: reader,
 	})
 	r.SetFactsReadRunner(f.runner)
 	return f
 }
 
 // waitPublished waits for the scan's held event.
-func (f *readFixture) waitPublished(t *testing.T) []bool {
+func (f *readFixture) waitPublished(t *testing.T) []bool { return f.waitEvents(t, 1) }
+
+// waitEvents waits until n scan events have been published in all.
+func (f *readFixture) waitEvents(t *testing.T, n int) []bool {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if events := f.published.all(); len(events) >= 1 {
+		if events := f.published.all(); len(events) >= n {
 			return events
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("the scan's event was not published (%d of 1)", len(f.published.all()))
+	t.Fatalf("the scan's event was not published (%d of %d)", len(f.published.all()), n)
 	return nil
+}
+
+// scan commits a scan of the fixture's root and waits for its event, which
+// waits for the read the scan starts.
+func (f *readFixture) scan(t *testing.T, key string) Scan {
+	t.Helper()
+	before := len(f.published.all())
+	scan := scanRoot(t, f.r, f.scope, f.root.ID, key)
+	f.waitEvents(t, before+1)
+	return scan
 }
 
 func (f *readFixture) latest(t *testing.T) FactsReadRun {
@@ -159,16 +205,13 @@ func (f *readFixture) latest(t *testing.T) FactsReadRun {
 }
 
 // FR30, FR39, contract item 5: a completed scan hands the plugin's songs to the
-// assistant's read; the host opens none of them; the event waits for the facts.
+// assistant's read; the event waits for the facts.
 func TestFactsRead_AScanIsReadByTheAssistantAndTheEventWaits(t *testing.T) {
 	f := newReadFixture(t)
 	f.chat.responses = []*llm.ChatResponse{callsTheTool()}
 	scanRoot(t, f.r, f.scope, f.root.ID, "assistant-scan")
 	if events := f.waitPublished(t); !reflect.DeepEqual(events, []bool{true}) {
 		t.Fatalf("published %v, want once with the facts already saved", events)
-	}
-	if got := f.opens.take(); len(got) != 0 {
-		t.Fatalf("the host opened %v itself: a song must have one reader", got)
 	}
 	if files := f.reader.read(); len(files) != 2 {
 		t.Fatalf("the plugin read %v, want each song's dated file", files)
@@ -220,7 +263,7 @@ func TestFactsRead_NoToolCallNudgesOnceThenStops(t *testing.T) {
 	if run.Status != factsReadStopped || run.Reason != FactsReadNoCall || run.Left != 2 || len(f.chat.requests) != 2 {
 		t.Fatalf("receipt = %+v, calls %d", run, len(f.chat.requests))
 	}
-	if len(f.reader.read()) != 0 || len(f.opens.take()) != 0 {
+	if len(f.reader.read()) != 0 {
 		t.Fatal("a song was read without the tool being called")
 	}
 	if !strings.Contains(f.chat.requests[1].Messages[len(f.chat.requests[1].Messages)-1].Content, FactsReadToolName) {
@@ -253,7 +296,7 @@ func TestFactsRead_PreflightStopsSayWhy(t *testing.T) {
 			if run.Status != factsReadStopped || run.Reason != name || run.Left != 2 || run.Read != 0 {
 				t.Fatalf("receipt = %+v", run)
 			}
-			if len(f.reader.read()) != 0 || len(f.opens.take()) != 0 || len(f.chat.requests) != 0 {
+			if len(f.reader.read()) != 0 || len(f.chat.requests) != 0 {
 				t.Fatal("something was read, or the model was called")
 			}
 		})
@@ -420,9 +463,6 @@ func TestFactsRead_WhatTheReadSavedIsWhatTheFolderAgentIsGiven(t *testing.T) {
 	f.chat.responses = []*llm.ChatResponse{callsTheTool()}
 	scanRoot(t, f.r, f.scope, f.root.ID, "agent-facts")
 	f.waitPublished(t)
-	if got := f.opens.take(); len(got) != 0 {
-		t.Fatalf("the host opened %v itself, so these facts did not come from the read", got)
-	}
 	songs, err := f.r.library.LearnedSongsInRoot(f.scope, f.root.ID)
 	if err != nil {
 		t.Fatal(err)

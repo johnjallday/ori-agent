@@ -55,6 +55,44 @@ func TestProjectReaders_OnlyReviewedPluginsAreChosen(t *testing.T) {
 	}
 }
 
+// FR49: a format's reviewed plugin that is installed without a reader is told as
+// an update, by its reviewed name; nothing else carries a name.
+func TestReaderFor_NamesThePluginToUpdate(t *testing.T) {
+	entry, _ := reviewedintegration.Get("ori_reaper")
+	old := plugin.InstalledPlugin{Name: entry.PluginID, Enabled: true}
+	if status, name := ReaderFor([]plugin.InstalledPlugin{old}, "reaper"); status != ReaderUpdatePlugin || name != entry.DisplayName || name == "" {
+		t.Fatalf("installed without a reader = %q, %q", status, name)
+	}
+	if status, name := ReaderFor([]plugin.InstalledPlugin{readerPlugin(entry.PluginID, true, 262144, "reaper")}, "reaper"); status != ReaderReady || name != "" {
+		t.Fatalf("a reader = %q, %q", status, name)
+	}
+	if status, name := ReaderFor(nil, "reaper"); status != ReaderNone || name != "" {
+		t.Fatalf("nothing installed = %q, %q", status, name)
+	}
+	// A format no reviewed plugin owns cannot be updated into readability.
+	if status, name := ReaderFor([]plugin.InstalledPlugin{old}, "logic"); status != ReaderNone || name != "" {
+		t.Fatalf("a format no plugin owns = %q, %q", status, name)
+	}
+}
+
+func TestReaderUpdateName(t *testing.T) {
+	entry, _ := reviewedintegration.Get("ori_reaper")
+	old := plugin.InstalledPlugin{Name: entry.PluginID, Enabled: true}
+	if got := ReaderUpdateName([]plugin.InstalledPlugin{old}); got != entry.DisplayName {
+		t.Fatalf("a reviewed plugin without a reader = %q, want %q", got, entry.DisplayName)
+	}
+	for name, installed := range map[string][]plugin.InstalledPlugin{
+		"nothing installed":     nil,
+		"disabled":              {{Name: entry.PluginID, Enabled: false}},
+		"not a reviewed plugin": {{Name: "someone-elses-plugin", Enabled: true}},
+		"a plugin reads":        {readerPlugin(entry.PluginID, true, 262144, "reaper")},
+	} {
+		if got := ReaderUpdateName(installed); got != "" {
+			t.Errorf("%s: %q, want nothing to update", name, got)
+		}
+	}
+}
+
 // G6: a made-up format becomes readable by a reviewed plugin declaring it.
 func TestReaderStatus_FollowsWhatPluginsDeclare(t *testing.T) {
 	reviewed := reviewedPluginID(t)

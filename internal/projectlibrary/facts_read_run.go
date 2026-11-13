@@ -776,27 +776,22 @@ func (r *FactsReadRunner) Sweep() int {
 
 // afterScanFacts runs after a completed scan is recorded. Songs whose format an
 // installed app plugin reads go to the read turn (one reader per song, FR39),
-// and the scan's event waits for it; other songs keep the host's own pass until
-// it is retired. With nothing for the plugin to read, the event goes now.
+// and the scan's event waits for it. The host has no reader of its own, so a
+// song no installed plugin reads is not read at all; the page says why through
+// ReaderStatus. With nothing for a plugin to read, the event goes now.
 func (r *Roots) afterScanFacts(ctx context.Context, scope Scope, scan Scan, observed Discovery, root Root, digest LibraryDigest) {
 	publish := func() { r.library.publishScanCompleted(scope, digest) }
 	targets, grant, ok := r.songFactsTargets(scope, scan, observed)
 	if !ok || r.factsRead == nil {
-		r.readSongFactsAfterScan(ctx, scope, scan, observed, root)
 		publish()
 		return
 	}
 	readers := r.factsRead.readers()
-	var covered, uncovered []songFactsTarget
+	var covered []songFactsTarget
 	for _, target := range targets {
 		if _, ok := readers[target.Format]; ok {
 			covered = append(covered, target)
-		} else {
-			uncovered = append(uncovered, target)
 		}
-	}
-	if len(uncovered) > 0 {
-		r.readSongFactsTargets(ctx, scope, scan, root, uncovered, grant)
 	}
 	if len(covered) == 0 {
 		publish()

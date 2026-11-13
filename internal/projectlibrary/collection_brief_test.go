@@ -103,7 +103,11 @@ func newBriefFixture(t *testing.T) *runFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.scanID = scanRoot(t, roots, scope, doc.Roots[0].ID, "brief-fixture-scan").ID
+	scan := scanRoot(t, roots, scope, doc.Roots[0].ID, "brief-fixture-scan")
+	f.scanID = scan.ID
+	// The listing scan reads nothing itself (an app plugin does the reading); the
+	// brief's tests need the facts a read would have saved.
+	seedMusicTreeFacts(t, roots, scope, scan, doc.Roots[0])
 	f.runner = f.newBriefRunner(f.library)
 	return f
 }

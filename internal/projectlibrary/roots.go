@@ -50,10 +50,6 @@ type Roots struct {
 	guards     filejanitor.RootGuards
 	mu         sync.Mutex
 	pending    map[string]string // review token -> native picker reference (never a path)
-	// factsBudget bounds a scan's fact pass; zero means defaultSongFactsBudget.
-	// factsOpened, when set, sees every project file the pass opens (tests).
-	factsBudget songFactsBudget
-	factsOpened func(relative, file string)
 	// factsRead, when set, reads the songs an installed app plugin can read
 	// through the Home's shared assistant (assistant-reads-projects).
 	factsRead *FactsReadRunner

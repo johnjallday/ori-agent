@@ -352,7 +352,9 @@ nothing. Ori re-checks the file around the call, bounds every value and keeps
 only those facts. Only a plugin on Ori's reviewed list is called, which is why
 the approval's words name the plugin: the person is told that it reads their
 project files. A plugin that does not declare the key shows "Update <plugin> to
-read songs" where the facts would be. The field-level contract is in
+read songs" where the facts would be: on the folder card in place of the offer
+to learn the songs, and in the Home's song-details note. Ori has no reader of
+its own to fall back on. The field-level contract is in
 [plugin-workspace-surfaces-v1.md](architecture/plugin-workspace-surfaces-v1.md#project-facts-reader).
 
 ### Browser SDK and frame lifecycle

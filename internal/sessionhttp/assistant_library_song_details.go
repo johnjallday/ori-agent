@@ -37,6 +37,12 @@ type librarySongDetailsView struct {
 	// app plugin read them: the page tells it so and links the switch. It is not
 	// asked again; acknowledging it is recorded on the consent (FR46).
 	ReaderNotice bool `json:"reader_notice,omitempty"`
+	// ReaderUpdate names a reviewed app plugin that is installed but declares no
+	// reader, so no installed plugin reads this Home's songs: the page says
+	// "Update <plugin> to read songs" where the details would be, never a silent
+	// blank (assistant-reads-projects FR49). Empty when a plugin reads, or none
+	// is installed.
+	ReaderUpdate string `json:"reader_update,omitempty"`
 }
 
 // librarySongDetailsFor is librarySongDetails with the app plugin that reads the
@@ -47,6 +53,9 @@ func (h *Handler) librarySongDetailsFor(home *workspace.Workspace) librarySongDe
 	if h != nil && h.installedPluginLister != nil {
 		if installed, err := h.installedPluginLister.List(); err == nil {
 			view.ReaderName = projectlibrary.ReaderDisplayName(installed)
+			if view.ReaderName == "" {
+				view.ReaderUpdate = projectlibrary.ReaderUpdateName(installed)
+			}
 		}
 	}
 	if view.ReaderName != "" && view.State == workspace.SongDetailsOn && home != nil {
@@ -85,7 +94,7 @@ func (h *Handler) AcknowledgeSongDetailsReaderNotice(w http.ResponseWriter, r *h
 
 // librarySongDetails reads the switch from the Home the request resolved.
 func librarySongDetails(home *workspace.Workspace) librarySongDetailsView {
-	view := librarySongDetailsView{State: workspace.SongDetailsNone, AppName: folderdigest.FactsAppName()}
+	view := librarySongDetailsView{State: workspace.SongDetailsNone, AppName: folderdigest.ReviewedAppName()}
 	if home != nil {
 		consent := home.GetAssistantProgramState().GetSongDetailsConsent()
 		view.State, view.Names = consent.State(), consent.CoversNames()

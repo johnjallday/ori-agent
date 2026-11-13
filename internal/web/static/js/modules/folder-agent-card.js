@@ -211,7 +211,10 @@ export function folderAgentReportView(view) {
           noun: String(view.songs_offer.noun || 'songs'),
           ask: String(view.songs_offer.ask),
           reads: String(view.songs_offer.reads || ''),
-          notRead: String(view.songs_offer.not_read || '')
+          notRead: String(view.songs_offer.not_read || ''),
+          // The reviewed app plugin that is installed but cannot read these songs
+          // yet: the card says to update it, and there is nothing to learn.
+          update: String(view.songs_offer.update || '')
         }
       : null,
     // The reading of the songs once "Learn them" was said: the line to show
@@ -1630,6 +1633,17 @@ function songsOfferSection(doc, offer, onAction) {
   const section = el(doc, 'section', 'folder-agent-card__songs-offer');
   section.setAttribute('aria-label', 'Learn the songs');
   section.append(el(doc, 'p', 'folder-agent-card__songs-lead', offer.ask));
+  if (offer.update) {
+    // An installed plugin that cannot read these songs yet: no Learn them, no
+    // Not now, only the way to fix it. Never a silent blank.
+    section.dataset.songsOffer = 'update';
+    const updateRow = el(doc, 'div', 'folder-agent-card__actions folder-agent-card__songs-actions');
+    const update = el(doc, 'a', 'btn btn-primary btn-sm', 'Update');
+    update.href = '/plugins';
+    updateRow.append(update);
+    section.append(updateRow);
+    return section;
+  }
   if (offer.reads) section.append(el(doc, 'p', 'folder-agent-card__songs-reads', offer.reads));
   if (offer.notRead) {
     section.append(el(doc, 'p', 'folder-agent-card__songs-not-read', offer.notRead));

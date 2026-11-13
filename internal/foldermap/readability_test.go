@@ -7,9 +7,13 @@ import (
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
 
+// readsReaper stands in for an installed app plugin whose reader covers the one
+// format of the demo layout's songs.
+func readsReaper(format string) bool { return format == "reaper" }
+
 func TestReadability_DemoFolderSplitsReadableFromNot(t *testing.T) {
 	_, facts := walk(t, demoLayout(t))
-	got := facts.Readability()
+	got := facts.Readability(readsReaper)
 	if got.Shape != folderdigest.ShapeAudio {
 		t.Fatalf("shape = %q, want audio", got.Shape)
 	}
@@ -32,11 +36,27 @@ func TestReadability_NothingWithoutAPortfolio(t *testing.T) {
 	if facts.Portfolio != nil {
 		t.Fatalf("fixture drifted: portfolio = %+v", facts.Portfolio)
 	}
-	if got := facts.Readability(); got.Readable != 0 || len(got.Unreadable) != 0 || got.Shape != "" {
+	if got := facts.Readability(readsReaper); got.Readable != 0 || len(got.Unreadable) != 0 || got.Shape != "" {
 		t.Fatalf("readability without a portfolio = %+v", got)
 	}
-	if got := (Facts{}).Readability(); got.Readable != 0 || got.UnreadableTotal() != 0 {
+	if got := (Facts{}).Readability(readsReaper); got.Readable != 0 || got.UnreadableTotal() != 0 {
 		t.Fatalf("zero facts = %+v", got)
+	}
+}
+
+func TestReadability_TheHostReadsNothingItself(t *testing.T) {
+	// Ori has no reader of its own: with no installed plugin's answer, nothing
+	// counts as readable, whatever the format.
+	_, facts := walk(t, demoLayout(t))
+	got := facts.Readability(nil)
+	if got.Readable != 0 || got.UnreadableTotal() != 8 {
+		t.Fatalf("readability with no readers = %+v, want 0 readable and all 8 unreadable", got)
+	}
+	if shape := facts.PortfolioShape(); shape != folderdigest.ShapeAudio {
+		t.Fatalf("portfolio shape = %q, want audio", shape)
+	}
+	if shape := (Facts{}).PortfolioShape(); shape != "" {
+		t.Fatalf("a map with no portfolio has shape %q", shape)
 	}
 }
 
@@ -57,7 +77,7 @@ func TestReadability_OnlyThePortfolioShapeCounts(t *testing.T) {
 			{Shape: folderdigest.ShapeAudio, Format: "reaper", Count: 0},
 		},
 	}
-	got := facts.Readability()
+	got := facts.Readability(readsReaper)
 	if got.Readable != 4 {
 		t.Fatalf("readable = %d, want 4 (other shapes and empty rows do not count)", got.Readable)
 	}
@@ -82,7 +102,7 @@ func TestReadability_TheRootProjectNamesItsFormat(t *testing.T) {
 		RootProject: &root,
 		Shapes:      []ShapeCount{{Shape: folderdigest.ShapeAudio, Format: "logic", Count: 1}},
 	}
-	got := facts.Readability()
+	got := facts.Readability(readsReaper)
 	want := []FormatCount{{Format: "logic", Name: "Logic Pro", Count: 1}}
 	if got.Readable != 0 || !reflect.DeepEqual(got.Unreadable, want) {
 		t.Fatalf("readability = %+v, want only %+v unreadable", got, want)

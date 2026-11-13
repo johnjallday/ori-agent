@@ -16,6 +16,10 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// What the library does with the song facts an installed app plugin's reader
+// returns. The host reads no project file; these tests use fileReader, a stand-in
+// for the plugin over the fixture projects (song_fixture_reader_test.go).
+
 // grantSongDetails records the consent a folder card's Set up gives a new Home.
 func grantSongDetails(t *testing.T, store workspace.Store, scope Scope) {
 	t.Helper()
@@ -59,32 +63,6 @@ func factsMusicTree(t *testing.T, tree musicTree) time.Time {
 	writeSongProject(t, filepath.Join(tree.alternate, "Take B.RPP"),
 		rppProject("96", []string{"0 96 1", "30 100 1"}, [][][2]string{{{"0", "60"}}, {{"10", "65"}}, {}}), saved.Add(-time.Hour))
 	return saved
-}
-
-// openCounter is the opener seam: every project file the pass opens.
-type openCounter struct {
-	mu     sync.Mutex
-	opened []string
-	before func(relative, file string)
-}
-
-func (c *openCounter) hook(relative, file string) {
-	c.mu.Lock()
-	c.opened = append(c.opened, filepath.Join(relative, file))
-	before := c.before
-	c.mu.Unlock()
-	if before != nil {
-		before(relative, file)
-	}
-}
-
-func (c *openCounter) take() []string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	opened := c.opened
-	c.opened = nil
-	slices.Sort(opened)
-	return opened
 }
 
 // factsAtPublish records, for each published scan, whether the Home already
@@ -167,53 +145,47 @@ func treeHashes(t *testing.T, tree musicTree) map[string][32]byte {
 }
 
 func TestSongFacts_AConsentingHomeReadsFactsBeforeTheScanIsPublished(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	saved := factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	published := &factsAtPublish{store: r.library, scope: scope}
-	r.library.WithEventBus(published)
-	opens := &openCounter{}
-	r.factsOpened = opens.hook
-	before := treeHashes(t, tree)
+	f, reader := newFileReadFixture(t)
+	before := treeHashes(t, f.tree)
 
-	if scan := scanRoot(t, r, scope, root.ID, "facts-scan"); scan.Status != "complete" {
+	if scan := f.scan(t, "facts-scan"); scan.Status != "complete" {
 		t.Fatalf("scan: %+v", scan)
 	}
-	if got := opens.take(); !slices.Equal(got, []string{filepath.Join("Alternates", "Take B.RPP"), filepath.Join("Single", "Song.rpp")}) {
-		t.Fatalf("opened %v, want only each song's dated REAPER file", got)
+	if got := reader.take(); !slices.Equal(got, []string{filepath.Join("Alternates", "Take B.RPP"), filepath.Join("Single", "Song.rpp")}) {
+		t.Fatalf("the plugin was asked to read %v, want only each song's dated REAPER file", got)
 	}
-	single := factsAt(t, r, scope, root.ID, "Single")
+	single := factsAt(t, f.r, f.scope, f.root.ID, "Single")
 	if single == nil || single.SongFacts != (SongFacts{TempoBPM: 92, LengthSeconds: 221, TrackCount: 2}) ||
-		single.ReadFrom.File != "Song.rpp" || !single.ReadFrom.ModifiedAt.Equal(saved) || single.ReadFrom.Identity == "" {
+		single.ReadFrom.File != "Song.rpp" || !single.ReadFrom.ModifiedAt.Equal(f.saved) || single.ReadFrom.Identity == "" {
 		t.Fatalf("Single facts = %+v", single)
 	}
-	alternates := factsAt(t, r, scope, root.ID, "Alternates")
+	alternates := factsAt(t, f.r, f.scope, f.root.ID, "Alternates")
 	if alternates == nil || alternates.SongFacts != (SongFacts{TempoBPM: 96, TempoVaries: true, LengthSeconds: 75, TrackCount: 3}) ||
 		alternates.ReadFrom.File != "Take B.RPP" {
 		t.Fatalf("Alternates facts = %+v", alternates)
 	}
 	for _, other := range []string{"Ableton", "Logic"} {
-		if facts := factsAt(t, r, scope, root.ID, other); facts != nil {
+		if facts := factsAt(t, f.r, f.scope, f.root.ID, other); facts != nil {
 			t.Fatalf("%s is not a REAPER song but has facts %+v", other, facts)
 		}
 	}
-	if events := published.all(); len(events) != 1 || !events[0] {
+	if events := f.published.all(); len(events) != 1 || !events[0] {
 		t.Fatalf("events %v: want one event, published after the facts were saved", events)
 	}
-	doc, err := r.library.Read(scope)
+	doc, err := f.r.library.Read(f.scope)
 	if err != nil {
 		t.Fatal(err)
 	}
 	keys := 0
 	for _, op := range doc.Operations {
-		if op.Action == "scan_facts" && op.Key == doc.Scans[len(doc.Scans)-1].ID+":facts" {
+		if op.Action == "scan_facts" && strings.HasPrefix(op.Key, doc.Scans[len(doc.Scans)-1].ID+":facts") {
 			keys++
 		}
 	}
 	if keys != 1 {
 		t.Fatalf("facts were not saved in their own fenced write: %+v", doc.Operations)
 	}
-	if after := treeHashes(t, tree); len(after) != len(before) {
+	if after := treeHashes(t, f.tree); len(after) != len(before) {
 		t.Fatalf("the scan added or removed files: %d → %d", len(before), len(after))
 	} else {
 		for path, hash := range before {
@@ -224,39 +196,35 @@ func TestSongFacts_AConsentingHomeReadsFactsBeforeTheScanIsPublished(t *testing.
 	}
 }
 
-func TestSongFacts_AnUnchangedRescanKeepsFactsAndOpensNothing(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	saved := factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	opens := &openCounter{}
-	r.factsOpened = opens.hook
-	scanRoot(t, r, scope, root.ID, "first")
-	first := factsAt(t, r, scope, root.ID, "Single")
-	opens.take()
+func TestSongFacts_AnUnchangedRescanKeepsFactsAndAsksForNothing(t *testing.T) {
+	f, reader := newFileReadFixture(t)
+	f.scan(t, "first")
+	first := factsAt(t, f.r, f.scope, f.root.ID, "Single")
+	reader.take()
 
-	scanRoot(t, r, scope, root.ID, "unchanged")
-	if got := opens.take(); len(got) != 0 {
-		t.Fatalf("an unchanged rescan opened %v", got)
+	f.scan(t, "unchanged")
+	if got := reader.take(); len(got) != 0 {
+		t.Fatalf("an unchanged rescan asked the plugin to read %v", got)
 	}
-	if kept := factsAt(t, r, scope, root.ID, "Single"); kept == nil || *kept != *first {
+	if kept := factsAt(t, f.r, f.scope, f.root.ID, "Single"); kept == nil || *kept != *first {
 		t.Fatalf("facts after an unchanged rescan = %+v, want %+v", kept, first)
 	}
 
 	// A re-saved song is read again on the same scan, and only that song.
-	writeSongProject(t, filepath.Join(tree.single, "Song.rpp"),
-		rppProject("140", nil, [][][2]string{{{"0", "90"}}}), saved.Add(time.Hour))
-	scanRoot(t, r, scope, root.ID, "resaved")
-	if got := opens.take(); !slices.Equal(got, []string{filepath.Join("Single", "Song.rpp")}) {
-		t.Fatalf("after a re-save opened %v", got)
+	writeSongProject(t, filepath.Join(f.tree.single, "Song.rpp"),
+		rppProject("140", nil, [][][2]string{{{"0", "90"}}}), f.saved.Add(time.Hour))
+	f.scan(t, "resaved")
+	if got := reader.take(); !slices.Equal(got, []string{filepath.Join("Single", "Song.rpp")}) {
+		t.Fatalf("after a re-save the plugin was asked to read %v", got)
 	}
-	if updated := factsAt(t, r, scope, root.ID, "Single"); updated == nil ||
+	if updated := factsAt(t, f.r, f.scope, f.root.ID, "Single"); updated == nil ||
 		updated.SongFacts != (SongFacts{TempoBPM: 140, LengthSeconds: 90, TrackCount: 1}) {
 		t.Fatalf("facts after a re-save = %+v", updated)
 	}
 }
 
 // finishWithoutPass records one scan through finishScan, which reconciles but
-// runs no fact pass, so carry-over is visible on its own.
+// starts no read, so carry-over is visible on its own.
 func finishWithoutPass(t *testing.T, r *Roots, scope Scope, root Root, key string) {
 	t.Helper()
 	started := runningScanRecord(t, r, scope, root, key)
@@ -270,10 +238,9 @@ func finishWithoutPass(t *testing.T, r *Roots, scope Scope, root Root, key strin
 }
 
 func TestReconcile_FactsStayOnlyWhileTheDatedFileIsUnchanged(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	saved := factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "facts")
+	f, _ := newFileReadFixture(t)
+	r, scope, root, tree := f.r, f.scope, f.root, f.tree
+	f.scan(t, "facts")
 	if factsAt(t, r, scope, root.ID, "Single") == nil || factsAt(t, r, scope, root.ID, "Alternates") == nil {
 		t.Fatal("fixture has no facts")
 	}
@@ -284,8 +251,8 @@ func TestReconcile_FactsStayOnlyWhileTheDatedFileIsUnchanged(t *testing.T) {
 		t.Fatal("unchanged songs lost their facts")
 	}
 
-	// Re-saved: dropped until the next pass reads the new file.
-	writeSongProject(t, filepath.Join(tree.single, "Song.rpp"), rppProject("92", nil, nil), saved.Add(time.Hour))
+	// Re-saved: dropped until the next read picks up the new file.
+	writeSongProject(t, filepath.Join(tree.single, "Song.rpp"), rppProject("92", nil, nil), f.saved.Add(time.Hour))
 	// The dated file is gone: the older take dates the song now, and its facts
 	// were never read.
 	if err := os.Remove(filepath.Join(tree.alternate, "Take B.RPP")); err != nil {
@@ -301,7 +268,7 @@ func TestReconcile_FactsStayOnlyWhileTheDatedFileIsUnchanged(t *testing.T) {
 
 	// An appended observation (a second root over the same folder) starts
 	// without facts.
-	scanRoot(t, r, scope, root.ID, "reread")
+	f.scan(t, "reread")
 	picker := r.picker.(*testRootPicker)
 	var err error
 	if picker.path, err = filepath.EvalSymlinks(tree.single); err != nil {
@@ -337,7 +304,7 @@ func TestReconcile_FactsStayOnlyWhileTheDatedFileIsUnchanged(t *testing.T) {
 	}
 }
 
-func TestSongFacts_AHomeWithoutConsentOpensNoFile(t *testing.T) {
+func TestSongFacts_AHomeWithoutConsentAsksForNothing(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		setup func(t *testing.T, store workspace.Store, scope Scope)
@@ -359,36 +326,29 @@ func TestSongFacts_AHomeWithoutConsentOpensNoFile(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r, scope, file, tree, root := connectedMusicRoot(t)
-			factsMusicTree(t, tree)
-			tc.setup(t, file, scope)
-			events := &eventRecorder{}
-			r.library.WithEventBus(events)
-			opens := &openCounter{}
-			r.factsOpened = opens.hook
-			scanRoot(t, r, scope, root.ID, "scan")
-			scanRoot(t, r, scope, root.ID, "rescan")
-			if got := opens.take(); len(got) != 0 {
-				t.Fatalf("opened %v", got)
+			f, reader := newFileReadFixtureWithoutConsent(t)
+			tc.setup(t, f.file, f.scope)
+			f.scan(t, "scan")
+			f.scan(t, "rescan")
+			if got := reader.take(); len(got) != 0 {
+				t.Fatalf("the plugin was asked to read %v", got)
 			}
-			if len(events.all()) != 2 {
-				t.Fatalf("events = %d, want one per scan", len(events.all()))
+			if len(f.chat.requests) != 0 {
+				t.Fatalf("the assistant was called %d times for a Home that did not consent", len(f.chat.requests))
 			}
-			if count := storedFacts(t, file, scope); count != 0 {
+			if events := f.published.all(); len(events) != 2 {
+				t.Fatalf("events = %d, want one per scan", len(events))
+			}
+			if count := storedFacts(t, f.file, f.scope); count != 0 {
 				t.Fatalf("a Home without consent stored %d facts", count)
 			}
 		})
 	}
 }
 
-func TestSongFacts_AReplayedCommitRunsNoPassAndPublishesNothing(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	events := &eventRecorder{}
-	r.library.WithEventBus(events)
-	opens := &openCounter{}
-	r.factsOpened = opens.hook
+func TestSongFacts_AReplayedCommitStartsNoReadAndPublishesNothing(t *testing.T) {
+	f, reader := newFileReadFixture(t)
+	r, scope, root := f.r, f.scope, f.root
 	doc, err := r.library.Read(scope)
 	if err != nil {
 		t.Fatal(err)
@@ -400,101 +360,37 @@ func TestSongFacts_AReplayedCommitRunsNoPassAndPublishesNothing(t *testing.T) {
 	if _, replay, err := r.CommitScan(context.Background(), scope, root.ID, review.Token, "once"); err != nil || replay {
 		t.Fatalf("first commit: %v %v", replay, err)
 	}
-	if len(opens.take()) != 2 || len(events.all()) != 1 {
-		t.Fatal("first commit did not read and publish")
+	f.waitEvents(t, 1)
+	if got := reader.take(); len(got) != 2 {
+		t.Fatalf("first commit read %v", got)
 	}
+	requests := len(f.chat.requests)
 	if _, replay, err := r.CommitScan(context.Background(), scope, root.ID, review.Token, "once"); err != nil || !replay {
 		t.Fatalf("retry: %v %v", replay, err)
 	}
-	if got := opens.take(); len(got) != 0 || len(events.all()) != 1 {
-		t.Fatalf("a replay opened %v and published %d events", got, len(events.all()))
+	time.Sleep(150 * time.Millisecond)
+	if got := reader.take(); len(got) != 0 || len(f.published.all()) != 1 || len(f.chat.requests) != requests {
+		t.Fatalf("a replay read %v, published %d events and made %d calls", got, len(f.published.all()), len(f.chat.requests)-requests)
 	}
-}
-
-func TestSongFacts_AStoppedPassKeepsTheListingAndStillPublishes(t *testing.T) {
-	t.Run("out of time", func(t *testing.T) {
-		r, scope, file, tree, root := connectedMusicRoot(t)
-		factsMusicTree(t, tree)
-		grantSongDetails(t, file, scope)
-		events := &eventRecorder{}
-		r.library.WithEventBus(events)
-		r.factsBudget = songFactsBudget{Duration: time.Nanosecond, Bytes: 1 << 20}
-		scan := scanRoot(t, r, scope, root.ID, "late")
-		if scan.Status != "complete" || len(events.all()) != 1 {
-			t.Fatalf("scan %+v, events %d", scan, len(events.all()))
-		}
-		doc, err := r.library.Read(scope)
-		if err != nil || len(doc.Entries) != 4 {
-			t.Fatalf("listing: %d entries %v", len(doc.Entries), err)
-		}
-		if facts := factsAt(t, r, scope, root.ID, "Single"); facts != nil {
-			t.Fatalf("a pass out of time saved %+v", facts)
-		}
-	})
-	t.Run("switched off during the pass", func(t *testing.T) {
-		r, scope, file, tree, root := connectedMusicRoot(t)
-		factsMusicTree(t, tree)
-		grantSongDetails(t, file, scope)
-		scanRoot(t, r, scope, root.ID, "facts")
-		older := factsAt(t, r, scope, root.ID, "Alternates")
-		writeSongProject(t, filepath.Join(tree.single, "Song.rpp"), rppProject("70", nil, nil), time.Now().UTC().Add(time.Hour).Truncate(time.Second))
-		events := &eventRecorder{}
-		r.library.WithEventBus(events)
-		opens := &openCounter{before: func(string, string) { switchSongDetailsOff(t, file, scope) }}
-		r.factsOpened = opens.hook
-		scanRoot(t, r, scope, root.ID, "off-mid-pass")
-		if got := opens.take(); len(got) != 1 || len(events.all()) != 1 {
-			t.Fatalf("opened %v, events %d", got, len(events.all()))
-		}
-		if facts := factsAt(t, r, scope, root.ID, "Single"); facts != nil {
-			t.Fatalf("a batch read while the switch went off was saved: %+v", facts)
-		}
-		if kept := factsAt(t, r, scope, root.ID, "Alternates"); kept == nil || *kept != *older {
-			t.Fatalf("older facts were not left intact: %+v", kept)
-		}
-	})
-	t.Run("cancelled request", func(t *testing.T) {
-		r, scope, file, tree, root := connectedMusicRoot(t)
-		factsMusicTree(t, tree)
-		grantSongDetails(t, file, scope)
-		events := &eventRecorder{}
-		r.library.WithEventBus(events)
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		started := runningScanRecord(t, r, scope, root, "cancel-start")
-		observed, err := r.Discover(ctx, scope, root.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		finished, completed, err := r.recordScanFinish(scope, started, observed, "complete", "")
-		if err != nil || completed == nil {
-			t.Fatalf("finish: %+v %v", finished, err)
-		}
-		cancel()
-		if outcome := r.readSongFactsAfterScan(ctx, scope, finished, observed, root); outcome.Stopped != "cancelled" || outcome.Opened != 0 {
-			t.Fatalf("a cancelled pass: %+v", outcome)
-		}
-	})
 }
 
 func TestSongFacts_ContentWithoutFactsIsRememberedUntilTheFileChanges(t *testing.T) {
-	r, scope, file, _, root := connectedMusicRoot(t)
-	grantSongDetails(t, file, scope)
-	opens := &openCounter{}
-	r.factsOpened = opens.hook
-	// The fixture's REAPER files are plain text, not projects.
-	scanRoot(t, r, scope, root.ID, "first")
-	if got := opens.take(); len(got) != 2 {
-		t.Fatalf("opened %v", got)
+	f, reader := newFileReadFixture(t)
+	// The fixture's REAPER files are plain text here, not projects.
+	writeSongProject(t, filepath.Join(f.tree.single, "Song.rpp"), "not a project\n", f.saved)
+	writeSongProject(t, filepath.Join(f.tree.alternate, "Take B.RPP"), "not a project either\n", f.saved.Add(-time.Hour))
+	f.scan(t, "first")
+	if got := reader.take(); len(got) != 2 {
+		t.Fatalf("the plugin was asked to read %v", got)
 	}
-	if facts := factsAt(t, r, scope, root.ID, "Single"); facts == nil || !facts.empty() {
-		t.Fatalf("unreadable content facts = %+v, want an empty record", facts)
+	if facts := factsAt(t, f.r, f.scope, f.root.ID, "Single"); facts == nil || !facts.empty() || facts.NotRead != NotReadUnreadable {
+		t.Fatalf("unreadable content facts = %+v, want an empty record that says why", facts)
 	}
-	scanRoot(t, r, scope, root.ID, "again")
-	if got := opens.take(); len(got) != 0 {
-		t.Fatalf("an unchanged unreadable file was opened again: %v", got)
+	f.scan(t, "again")
+	if got := reader.take(); len(got) != 0 {
+		t.Fatalf("an unchanged unreadable file was read again: %v", got)
 	}
-	page, err := r.library.Query(scope, Search{})
+	page, err := f.r.library.Query(f.scope, Search{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,10 +402,9 @@ func TestSongFacts_ContentWithoutFactsIsRememberedUntilTheFileChanges(t *testing
 }
 
 func TestStore_ForgedFactsMakeTheDocumentInvalid(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "facts")
+	f, _ := newFileReadFixture(t)
+	scope, file := f.scope, f.file
+	f.scan(t, "facts")
 	home, err := file.Get(scope.HomeID)
 	if err != nil {
 		t.Fatal(err)
@@ -552,7 +447,7 @@ func TestStore_ForgedFactsMakeTheDocumentInvalid(t *testing.T) {
 		},
 		"another format": func(_, o map[string]any) { o["format"] = "ableton" },
 		"over the size cap": func(f, _ map[string]any) {
-			f["read_from"].(map[string]any)["size"] = DefaultSongFactsLimits.MaxBytes + 1
+			f["read_from"].(map[string]any)["size"] = maxSongFileBytes + 1
 		},
 		"no save time":    func(f, _ map[string]any) { delete(f["read_from"].(map[string]any), "modified_at") },
 		"no identity":     func(f, _ map[string]any) { f["read_from"].(map[string]any)["identity"] = "" },
@@ -588,13 +483,11 @@ func TestDigest_FactsAreNotAChange(t *testing.T) {
 		t.Fatal("facts alone counted as a changed song")
 	}
 
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	saved := factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "facts")
-	writeSongProject(t, filepath.Join(tree.single, "Song.rpp"), rppProject("150", nil, nil), saved.Add(time.Hour))
-	scanRoot(t, r, scope, root.ID, "new-facts")
-	doc, err := r.library.Read(scope)
+	f, _ := newFileReadFixture(t)
+	f.scan(t, "facts")
+	writeSongProject(t, filepath.Join(f.tree.single, "Song.rpp"), rppProject("150", nil, nil), f.saved.Add(time.Hour))
+	f.scan(t, "new-facts")
+	doc, err := f.r.library.Read(f.scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -702,8 +595,8 @@ func TestQuery_FactsComeFromTheSourceThatDatesTheSong(t *testing.T) {
 }
 
 func TestSetSongDetails_OffClearsFactsAndOnReadsThemOnTheNextScan(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	factsMusicTree(t, tree)
+	f, reader := newFileReadFixtureWithoutConsent(t)
+	r, scope, file, root := f.r, f.scope, f.file, f.root
 	store := r.library
 	for _, enabled := range []bool{true, false} {
 		if _, err := store.SetSongDetails(scope, enabled, false); !errors.Is(err, ErrSongDetailsNotGranted) {
@@ -711,10 +604,8 @@ func TestSetSongDetails_OffClearsFactsAndOnReadsThemOnTheNextScan(t *testing.T) 
 		}
 	}
 	grantSongDetails(t, file, scope)
-	opens := &openCounter{}
-	r.factsOpened = opens.hook
-	scanRoot(t, r, scope, root.ID, "facts")
-	opens.take()
+	f.scan(t, "facts")
+	reader.take()
 	before, err := store.Read(scope)
 	if err != nil {
 		t.Fatal(err)
@@ -745,41 +636,39 @@ func TestSetSongDetails_OffClearsFactsAndOnReadsThemOnTheNextScan(t *testing.T) 
 	if again, _ := store.Read(scope); again.Revision != after.Revision {
 		t.Fatalf("off again moved the revision %d→%d", after.Revision, again.Revision)
 	}
-	// Off means off: the next scan opens nothing.
-	scanRoot(t, r, scope, root.ID, "while-off")
-	if got := opens.take(); len(got) != 0 {
-		t.Fatalf("a scan with the switch off opened %v", got)
+	// Off means off: the next scan asks for nothing.
+	f.scan(t, "while-off")
+	if got := reader.take(); len(got) != 0 {
+		t.Fatalf("a scan with the switch off asked the plugin to read %v", got)
 	}
 
 	// On: no scan starts, no facts until the next scan, then they come back.
 	if state, err := store.SetSongDetails(scope, true, false); err != nil || state != workspace.SongDetailsOn {
 		t.Fatalf("on: %q %v", state, err)
 	}
-	if got := opens.take(); len(got) != 0 || factsAt(t, r, scope, root.ID, "Single") != nil {
+	if got := reader.take(); len(got) != 0 || factsAt(t, r, scope, root.ID, "Single") != nil {
 		t.Fatalf("turning on read files (%v) or showed facts", got)
 	}
 	if state, err := store.SetSongDetails(scope, true, false); err != nil || state != workspace.SongDetailsOn {
 		t.Fatalf("on again: %q %v", state, err)
 	}
-	scanRoot(t, r, scope, root.ID, "back-on")
-	if got := opens.take(); len(got) != 2 || factsAt(t, r, scope, root.ID, "Single") == nil {
-		t.Fatalf("after turning on, the next scan opened %v", got)
+	f.scan(t, "back-on")
+	if got := reader.take(); len(got) != 2 || factsAt(t, r, scope, root.ID, "Single") == nil {
+		t.Fatalf("after turning on, the next scan asked the plugin to read %v", got)
 	}
 }
 
 func TestSetSongDetails_AReadOnlyHomeCanTurnOffButNotOn(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "facts")
-	readOnly := NewStore(file).WithProviderEvidence(func(Scope, *workspace.Workspace) bool { return false })
-	if state, err := readOnly.SetSongDetails(scope, false, false); err != nil || state != workspace.SongDetailsOff {
+	f, _ := newFileReadFixture(t)
+	f.scan(t, "facts")
+	readOnly := NewStore(f.file).WithProviderEvidence(func(Scope, *workspace.Workspace) bool { return false })
+	if state, err := readOnly.SetSongDetails(f.scope, false, false); err != nil || state != workspace.SongDetailsOff {
 		t.Fatalf("off on a read-only Home: %q %v", state, err)
 	}
-	if _, err := readOnly.SetSongDetails(scope, true, false); !errors.Is(err, ErrUnavailable) {
+	if _, err := readOnly.SetSongDetails(f.scope, true, false); !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("on on a read-only Home: %v", err)
 	}
-	if state, err := readOnly.SongDetailsState(scope); err != nil || state != workspace.SongDetailsOff {
+	if state, err := readOnly.SongDetailsState(f.scope); err != nil || state != workspace.SongDetailsOff {
 		t.Fatalf("state: %q %v", state, err)
 	}
 }

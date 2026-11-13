@@ -205,12 +205,12 @@ type FactsSource struct {
 	ModifiedAt time.Time `json:"modified_at"`
 }
 
-// Facts are valid only for a format whose marker declares them, read from one
-// of the observation's listed files of that format.
+// Facts are valid only for a project file of the observation's format, one of
+// the observation's listed files of that format.
 func (f *ObservedFacts) valid(o Observation) bool {
 	source := f.ReadFrom
 	// Only a file that was too large to read may be larger than the read cap.
-	sizeOK := source.Size >= 0 && (source.Size <= DefaultSongFactsLimits.MaxBytes || f.NotRead == NotReadTooLarge)
+	sizeOK := source.Size >= 0 && (source.Size <= maxSongFileBytes || f.NotRead == NotReadTooLarge)
 	return f.SongFacts.valid() && f.notReadValid() && f.Names.valid() &&
 		source.File != "" && filepath.Base(source.File) == source.File && validText(source.File, 240) &&
 		factsFile(o.Format, source.File) && slices.Contains(o.Alternates, source.File) &&

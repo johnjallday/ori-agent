@@ -253,9 +253,11 @@ only when the root's recorded last scan differs from the one before the review.
 - **The switch:** the library panel's song-details switch (only on a Home that
   consented; disabled on a read-only Home). The card's consent covers the numbers
   only, so on such a Home the label reads "Read song details when scanning" with
-  the note "Ori reads each REAPER project's tempo, length and track count.
-  Nothing is changed." and an "Also read track names, markers and regions"
-  button. A consent that covers names (the owner's yes to the folder agent's
+  the note "REAPER reads each REAPER project's tempo, length and track count.
+  Ori keeps only those facts. Nothing is changed." and an "Also read track
+  names, markers and regions" button. With no installed plugin that reads, the
+  note says "Update REAPER to read songs." (or that no installed plugin reads
+  them yet), never a blank and never a claim that Ori reads. A consent that covers names (the owner's yes to the folder agent's
   offer to learn the songs, or to the switch's own question) reads "Read song
   details, track names and markers when scanning" and says so in its note. Off
   clears every stored fact (numbers, track names, markers and regions) and the

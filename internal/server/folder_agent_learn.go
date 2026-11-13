@@ -88,6 +88,22 @@ func (f folderAgentSongs) ReaderName() string {
 	return projectlibrary.ReaderDisplayName(installed)
 }
 
+// ReaderFor says whether an installed app plugin reads a project format, and
+// for a reviewed plugin that is installed without a reader, its name, so the
+// offer's place can say "Update <plugin> to read the songs" and never stay
+// blank. The host reads no project file itself, so with the installed plugins
+// unknown nothing counts as readable.
+func (f folderAgentSongs) ReaderFor(format string) (string, string) {
+	if f.installed == nil {
+		return "none", ""
+	}
+	installed, err := f.installed()
+	if err != nil {
+		return "none", ""
+	}
+	return projectlibrary.ReaderFor(installed, format)
+}
+
 // Consent is the Home's song-details state and whether it reaches names.
 func (f folderAgentSongs) Consent(_ context.Context, _, _, homeID string) (string, bool, error) {
 	return f.consents.ReadScope(homeID)

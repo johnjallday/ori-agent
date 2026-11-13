@@ -107,6 +107,34 @@ func TestLibrarySongDetails_NamesThePluginThatReadsAndNoticesOnlyAnOlderApproval
 
 }
 
+// FR49: a reviewed plugin that is installed without a reader is told as an update
+// where the Home's song details would be; once a plugin reads, it goes away.
+func TestLibrarySongDetails_APluginWithoutAReaderIsToldAsAnUpdate(t *testing.T) {
+	handler, store, station := songDetailsHome(t)
+	if err := workspace.NewSongDetailsConsents(store).GrantScope(station.ID, workspace.SongDetailsConsentLearnSongs, "offer-1", workspace.SongDetailsScopeNames); err != nil {
+		t.Fatal(err)
+	}
+	if view := rootsSongDetailsView(t, handler, station.ID); view["reader_update"] != nil || view["reader_name"] != nil {
+		t.Fatalf("no plugin installed, yet the view says %v", view)
+	}
+	entry, _ := reviewedintegration.Get("ori_reaper")
+	lister, ok := handler.installedPluginLister.(assistantInstalledPluginLister)
+	if !ok {
+		t.Fatalf("lister = %T", handler.installedPluginLister)
+	}
+	withoutReader := plugin.InstalledPlugin{Name: entry.PluginID, Enabled: true}
+	handler.SetInstalledPluginLister(assistantInstalledPluginLister{installed: append(append([]plugin.InstalledPlugin{}, lister.installed...), withoutReader)})
+	view := rootsSongDetailsView(t, handler, station.ID)
+	if view["reader_update"] != entry.DisplayName || view["reader_name"] != nil || view["reader_notice"] != nil {
+		t.Fatalf("a reviewed plugin without a reader: %v", view)
+	}
+	name := installReader(t, handler)
+	view = rootsSongDetailsView(t, handler, station.ID)
+	if view["reader_update"] != nil || view["reader_name"] != name {
+		t.Fatalf("once a plugin reads: %v", view)
+	}
+}
+
 // A Home that approves now is told in the question itself, so it gets no notice.
 func TestLibrarySongDetails_ANewApprovalIsNotFollowedByTheNotice(t *testing.T) {
 	handler, store, station := songDetailsHome(t)

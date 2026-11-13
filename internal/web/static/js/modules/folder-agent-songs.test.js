@@ -134,7 +134,8 @@ test('a done run offers to learn the songs: what it reads, what it cannot, and t
     noun: 'songs',
     ask: 'Want me to learn the 7 songs?',
     reads: songsOffer.reads,
-    notRead: "1 Logic Pro song can't be read this way."
+    notRead: "1 Logic Pro song can't be read this way.",
+    update: ''
   });
   const calls = [];
   const card = renderFolderAgentReport(view, stubDocument(), {
@@ -166,6 +167,36 @@ test('a done run offers to learn the songs: what it reads, what it cannot, and t
     ['learn_songs', {}],
     ['dismiss_songs', {}]
   ]);
+});
+
+// FR49: songs an installed app plugin owns but cannot read yet are never a silent
+// blank. The offer's place says to update the plugin and offers nothing to answer.
+test('songs a plugin cannot read yet are told as an update, with nothing to learn', () => {
+  const view = folderAgentReportView(
+    done({
+      songs_offer: {
+        count: 7,
+        noun: 'songs',
+        ask: 'Update REAPER to read the 7 songs.',
+        reads: '',
+        update: 'REAPER'
+      }
+    })
+  );
+  assert.equal(view.songsOffer.update, 'REAPER');
+  const card = renderFolderAgentReport(view, stubDocument(), {});
+  const offer = card.querySelector('.folder-agent-card__songs-offer');
+  assert.ok(offer, 'the place of the offer is never blank');
+  assert.equal(offer.dataset.songsOffer, 'update');
+  assert.equal(text(offer, '.folder-agent-card__songs-lead'), 'Update REAPER to read the 7 songs.');
+  assert.equal(offer.querySelectorAll('button').length, 0, 'there is nothing to learn or dismiss');
+  assert.deepEqual(
+    offer
+      .querySelector('.folder-agent-card__songs-actions')
+      .children.map(node => [node.tagName.toLowerCase(), node.textContent, node.href]),
+    [['a', 'Update', '/plugins']]
+  );
+  assert.equal(offer.querySelector('.folder-agent-card__songs-reads'), null);
 });
 
 test('the offer is hidden when the server makes none, and so is the reading', () => {

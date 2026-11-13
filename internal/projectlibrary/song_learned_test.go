@@ -128,7 +128,7 @@ func TestSongLearned_ASongThatWasNotReadSaysWhy(t *testing.T) {
 			setSongRecord(t, s, scope, func(f *ObservedFacts) {
 				f.SongFacts, f.Names, f.NotRead = SongFacts{}, nil, reason
 				if reason == NotReadTooLarge {
-					f.ReadFrom.Size = DefaultSongFactsLimits.MaxBytes + 1
+					f.ReadFrom.Size = maxSongFileBytes + 1
 				}
 			})
 			card, err := s.SongCard(scope, "child-a", musicWordsForTest())

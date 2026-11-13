@@ -710,13 +710,12 @@ export function libraryIntroText(songDetails) {
 
 // The question the switch asks before it turns on, and before it adds names to a
 // consent that has only the numbers: the same words as the Commander's offer to
-// learn the songs. Nothing is read until the owner allows it.
+// learn the songs. Nothing is read until the owner allows it. An app plugin does
+// the reading (assistant-reads-projects FR44, FR45): the question names the
+// plugin, says Ori keeps only those facts, and keeps the two limits. Ori has no
+// reader of its own, so with no plugin named it says "The app plugin".
 export const SONG_DETAILS_QUESTION =
-  'Ori will read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened. Turning this off clears everything it read.';
-
-// The same question once an app plugin does the reading (assistant-reads-projects
-// FR44, FR45): it names the plugin, says Ori keeps only those facts, and keeps
-// the two limits. With no plugin named, the original words stand.
+  'The app plugin reads tempo, length, track count, track names, markers and regions from each project file, and Ori keeps only those. Nothing is changed, and audio is not opened. Turning this off clears everything it read.';
 export function songDetailsQuestion(songDetails) {
   const reader = String(songDetails?.reader_name || '').trim();
   if (!reader) return SONG_DETAILS_QUESTION;
@@ -746,15 +745,21 @@ export function songDetailsSwitchView(songDetails, readOnly = false) {
   const on = state === 'on';
   const names = on && Boolean(songDetails?.names);
   const numbersOnly = on && !names;
-  // Who reads: the app plugin by its own name, when one does; Ori's own pass
-  // until then. Either way Ori keeps only the listed facts.
+  // Who reads: the app plugin, by its own name. Ori keeps only the listed facts.
+  // With no installed plugin that reads, nothing reads, and the note says what to
+  // do: update the reviewed plugin that is installed, or install one. It is never
+  // a silent blank (FR49).
   const reader = String(songDetails?.reader_name || '').trim();
-  const reads = reader ? `${reader} reads` : 'Ori reads';
-  const keeps = reader ? ' Ori keeps only those facts.' : '';
+  const update = String(songDetails?.reader_update || '').trim();
   let note;
-  if (names) note = `${reads} ${songDetailsReads(songDetails, true)}.${keeps} Nothing is changed.`;
+  if (!reader) {
+    note = update
+      ? `Update ${update} to read songs.`
+      : 'No installed plugin reads these songs yet. Install the app plugin to read them.';
+  } else if (names)
+    note = `${reader} reads ${songDetailsReads(songDetails, true)}. Ori keeps only those facts. Nothing is changed.`;
   else if (numbersOnly)
-    note = `${reads} ${songDetailsReads(songDetails, false)}.${keeps} Nothing is changed.`;
+    note = `${reader} reads ${songDetailsReads(songDetails, false)}. Ori keeps only those facts. Nothing is changed.`;
   else
     note = `Scans read no project files. Turn this on to read ${songDetailsReads(songDetails, true)}, on the next scan.`;
   return {

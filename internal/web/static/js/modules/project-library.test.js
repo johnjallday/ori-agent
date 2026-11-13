@@ -4380,27 +4380,33 @@ test('the song-details switch shows only on a Home that agreed at setup', () => 
     assert.deepEqual(songDetailsSwitchView(songDetails), { visible: false });
   }
   // The older card's consent covers the numbers only: its label and note say so,
-  // and the switch can be widened.
-  assert.deepEqual(songDetailsSwitchView({ state: 'on', names: false, app_name: 'REAPER' }), {
-    visible: true,
-    checked: true,
-    disabled: false,
-    label: 'Read song details when scanning',
-    note: "Ori reads each REAPER project's tempo, length and track count. Nothing is changed.",
-    upgrade: 'Also read track names, markers and regions',
-    notice: null
-  });
+  // and the switch can be widened. The app plugin does the reading.
+  assert.deepEqual(
+    songDetailsSwitchView({ state: 'on', names: false, app_name: 'REAPER', reader_name: 'REAPER' }),
+    {
+      visible: true,
+      checked: true,
+      disabled: false,
+      label: 'Read song details when scanning',
+      note: "REAPER reads each REAPER project's tempo, length and track count. Ori keeps only those facts. Nothing is changed.",
+      upgrade: 'Also read track names, markers and regions',
+      notice: null
+    }
+  );
   // A consent that reaches names says so in the label and the note; nothing to widen.
-  assert.deepEqual(songDetailsSwitchView({ state: 'on', names: true, app_name: 'REAPER' }), {
-    visible: true,
-    checked: true,
-    disabled: false,
-    label: 'Read song details, track names and markers when scanning',
-    note: "Ori reads each REAPER project's tempo, length and track count, and the track names, markers and regions typed into it. Nothing is changed.",
-    upgrade: '',
-    notice: null
-  });
-  const off = songDetailsSwitchView({ state: 'off', app_name: 'REAPER' });
+  assert.deepEqual(
+    songDetailsSwitchView({ state: 'on', names: true, app_name: 'REAPER', reader_name: 'REAPER' }),
+    {
+      visible: true,
+      checked: true,
+      disabled: false,
+      label: 'Read song details, track names and markers when scanning',
+      note: "REAPER reads each REAPER project's tempo, length and track count, and the track names, markers and regions typed into it. Ori keeps only those facts. Nothing is changed.",
+      upgrade: '',
+      notice: null
+    }
+  );
+  const off = songDetailsSwitchView({ state: 'off', app_name: 'REAPER', reader_name: 'REAPER' });
   assert.equal(off.checked, false);
   assert.match(off.label, /track names and markers/);
   assert.match(off.note, /^Scans read no project files\./);
@@ -4410,8 +4416,8 @@ test('the song-details switch shows only on a Home that agreed at setup', () => 
   assert.equal(readOnly.disabled, true, 'read-only: disabled');
   assert.equal(readOnly.upgrade, '', 'read-only: nothing to widen');
   assert.equal(
-    songDetailsSwitchView({ state: 'on' }).note,
-    "Ori reads each project's tempo, length and track count. Nothing is changed."
+    songDetailsSwitchView({ state: 'on', reader_name: 'REAPER' }).note,
+    "REAPER reads each project's tempo, length and track count. Ori keeps only those facts. Nothing is changed."
   );
   assert.equal(
     songDetailsStatus(false),
@@ -4428,8 +4434,43 @@ test('the song-details switch shows only on a Home that agreed at setup', () => 
   assert.match(SONG_DETAILS_QUESTION, /clears everything it read/);
 });
 
+// FR49: Ori has no reader of its own. With no installed plugin that reads, the
+// switch says what to do about it, and is never blank or a claim that Ori reads.
+test('with no plugin that reads, the switch says to update it, or to install one', () => {
+  const update = songDetailsSwitchView({
+    state: 'on',
+    names: true,
+    app_name: 'REAPER',
+    reader_update: 'REAPER'
+  });
+  assert.equal(update.note, 'Update REAPER to read songs.');
+  assert.equal(
+    songDetailsSwitchView({ state: 'off', reader_update: 'REAPER' }).note,
+    'Update REAPER to read songs.',
+    'off or on, a plugin that cannot read is not a reason to promise a reading'
+  );
+  assert.equal(
+    songDetailsSwitchView({ state: 'on', names: true, app_name: 'REAPER' }).note,
+    'No installed plugin reads these songs yet. Install the app plugin to read them.'
+  );
+  // A plugin that reads wins: there is nothing to update.
+  assert.match(
+    songDetailsSwitchView({
+      state: 'on',
+      names: true,
+      reader_name: 'REAPER',
+      reader_update: 'REAPER'
+    }).note,
+    /^REAPER reads /
+  );
+  for (const note of [update.note, songDetailsSwitchView({ state: 'on' }).note]) {
+    assert.doesNotMatch(note, /Ori reads/);
+  }
+});
+
 test('the approval names the plugin that reads and says Ori keeps only the listed facts', () => {
-  // No reading plugin installed: the older wording stands.
+  // No plugin named: the plugin-neutral wording stands; it never says Ori reads.
+  assert.match(songDetailsQuestion({ state: 'off' }), /^The app plugin reads /);
   assert.equal(songDetailsQuestion({ state: 'off' }), SONG_DETAILS_QUESTION);
   assert.equal(songDetailsQuestion(undefined), SONG_DETAILS_QUESTION);
   assert.equal(songDetailsQuestion({ reader_name: '  ' }), SONG_DETAILS_QUESTION);
