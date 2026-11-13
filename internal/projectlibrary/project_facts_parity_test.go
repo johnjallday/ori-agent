@@ -415,6 +415,66 @@ func TestProjectFactsParity_ThroughTheHostsOwnBatch(t *testing.T) {
 	}
 }
 
+// Task 5.7: a folder of songs read through the host's own batch path and the
+// real plugin service, eight at a time as the read turn does, and compared with
+// what Ori's reader stores for each file. It times the read itself: no model
+// turn and no scan (the scan's own 3 s listing budget lists fewer than 500 songs
+// of the fixture on a slow disk). Needs the songs fixture's Bulk folder:
+// ORI_PROJECT_FACTS_PARITY_BULK_DIR=<sandbox>/Bulk/REAPER Projects.
+func TestProjectFactsParity_AFolderOfSongsThroughTheHostsBatchPath(t *testing.T) {
+	dir := os.Getenv("ORI_PROJECT_FACTS_PARITY_BULK_DIR")
+	if dir == "" {
+		t.Skip("set ORI_PROJECT_FACTS_PARITY_BULK_DIR to the songs fixture's Bulk/REAPER Projects folder")
+	}
+	rig := newParityRig(t)
+	var rootStat unix.Stat_t
+	if err := unix.Stat(dir, &rootStat); err != nil {
+		t.Fatal(err)
+	}
+	root := Root{ID: "root", Path: dir, FileIdentity: unixIdentity(&rootStat)}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var targets []songFactsTarget
+	for _, entry := range entries {
+		if entry.IsDir() {
+			targets = append(targets, rppTarget(t, root, entry.Name()))
+		}
+	}
+	if len(targets) < 100 {
+		t.Fatalf("only %d songs in %s", len(targets), dir)
+	}
+	reader := projectReader{plugin: rig.installed, batch: 8}
+	started := time.Now()
+	var reads []songFactsRead
+	for start := 0; start < len(targets); start += 8 {
+		batch, counts, err := readProjectFactsBatch(context.Background(), root, targets[start:min(start+8, len(targets))],
+			songFactsGrant{names: true}, reader, rig.lifecycle.ProjectFacts)
+		if err != nil || counts.Read != len(batch) {
+			t.Fatalf("batch at %d: %v %+v", start, err, counts)
+		}
+		reads = append(reads, batch...)
+	}
+	elapsed := time.Since(started)
+	differences := 0
+	for _, read := range reads {
+		content, err := os.ReadFile(filepath.Join(dir, read.Relative, read.File.File))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ori, _ := oriStored(content, true, DefaultSongFactsLimits.MaxBytes)
+		if diff := storedDifference(read, true, ori, true); diff != "" {
+			differences++
+			if differences <= 5 {
+				t.Errorf("%s: %s", read.Relative, diff)
+			}
+		}
+	}
+	t.Logf("SCALE: %d songs read through the host's batch path in %s (%.1f ms per song, %d plugin calls); %d differences from Ori's reader",
+		len(reads), elapsed.Round(time.Millisecond), float64(elapsed.Milliseconds())/float64(len(reads)), (len(targets)+7)/8, differences)
+}
+
 func TestProjectFactsParity_WhatTheReaderWillNotOpen(t *testing.T) {
 	rig := newParityRig(t)
 	real := []byte(realSavedProject)
