@@ -1116,6 +1116,15 @@ export class ProjectLibraryPanel {
     const section = document.getElementById('projectLibrarySharing');
     if (!section) return;
     const view = librarySharingView(this.state?.sharing, this.readOnly, this.state?.song_details);
+    // An Open label promises an assistant only while one will be added
+    // (FR19): it follows the switch without fetching the songs again.
+    for (const button of document.querySelectorAll('[data-library-open]')) {
+      const row = (this.recentRows || []).find(
+        item => String(item.id) === button.dataset.libraryOpen
+      );
+      const open = row ? libraryOpenAction(row, this.readOnly, this.state?.sharing) : null;
+      if (open) button.setAttribute('aria-label', open.ariaLabel);
+    }
     section.hidden = !view.visible;
     if (!view.visible) return;
     const hired = document.getElementById('projectLibrarySharingHired');
@@ -2148,6 +2157,7 @@ export class ProjectLibraryPanel {
     }
     container.replaceChildren();
     section.hidden = !view.visible;
+    this.recentRows = view.cards.map(card => card.row);
     for (const card of view.cards) {
       const item = node('article', 'project-library-resume-card project-library-recent-card');
       const text = node('div', 'project-library-recent-text');
@@ -2511,7 +2521,12 @@ export class ProjectLibraryPanel {
       trigger.disabled = true;
       trigger.textContent = 'Opening…';
     }
-    this.status(`Opening ${row.name}… making its workspace and adding your assistant.`);
+    const sharing = this.state?.sharing;
+    this.status(
+      sharing?.state === 'on' && !sharing.assistant_missing
+        ? `Opening ${row.name}… making its workspace and adding your assistant.`
+        : `Opening ${row.name}… making its workspace.`
+    );
     try {
       const result = await this.post(`/projects/${encodeURIComponent(row.id)}/open`, body);
       this.openRequests.delete(row.id);
