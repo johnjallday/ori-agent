@@ -2973,25 +2973,25 @@
     return (
       '<svg class="ws-map-struct is-hq-struct" width="118" height="104" viewBox="0 0 118 110" aria-hidden="true">' +
       // ground pad
-      '<polygon points="59,64 109,86 59,108 9,86" fill="#2a2109" stroke="#e8b54b" stroke-opacity=".55"/>' +
+      '<g data-hq-part="foundation"><polygon points="59,64 109,86 59,108 9,86" fill="#2a2109" stroke="#e8b54b" stroke-opacity=".55"/>' +
       // base block
       '<polygon points="19,72 19,88 59,108 59,92" fill="#4c3c17"/>' +
       '<polygon points="99,72 99,88 59,108 59,92" fill="#372c11"/>' +
-      '<polygon points="59,52 99,72 59,92 19,72" fill="#7a5f22" stroke="#e8b54b" stroke-opacity=".35"/>' +
+      '<polygon points="59,52 99,72 59,92 19,72" fill="#7a5f22" stroke="#e8b54b" stroke-opacity=".35"/></g>' +
       // tower walls
-      '<polygon points="37,40 37,68 59,79 59,51" fill="#9c7a2c"/>' +
-      '<polygon points="81,40 81,68 59,79 59,51" fill="#785e22"/>' +
+      '<g data-hq-part="walls"><polygon points="37,40 37,68 59,79 59,51" fill="#9c7a2c"/>' +
+      '<polygon points="81,40 81,68 59,79 59,51" fill="#785e22"/></g>' +
       // tower windows (lit)
-      '<circle cx="46" cy="53" r="1.5" fill="#ffe08a"/>' +
+      '<g data-hq-part="lights"><circle cx="46" cy="53" r="1.5" fill="#ffe08a"/>' +
       '<circle cx="46" cy="62" r="1.5" fill="#ffe08a"/>' +
       '<circle cx="72" cy="53" r="1.5" fill="#ffe08a"/>' +
-      '<circle cx="72" cy="62" r="1.5" fill="#ffe08a"/>' +
+      '<circle cx="72" cy="62" r="1.5" fill="#ffe08a"/></g>' +
       // gold roof
-      '<polygon points="59,29 81,40 59,51 37,40" fill="#f2c85c" stroke="#ffe08a" stroke-opacity=".5"/>' +
+      '<g data-hq-part="roof"><polygon points="59,29 81,40 59,51 37,40" fill="#f2c85c" stroke="#ffe08a" stroke-opacity=".5"/>' +
       // spire + pennant + beacon
       '<line x1="59" y1="29" x2="59" y2="10" stroke="#ffd469" stroke-width="2.4" stroke-linecap="round"/>' +
       '<polygon points="59,12 74,17 59,22" fill="#ffd469"/>' +
-      '<circle cx="59" cy="9" r="3.4" fill="#ffe08a" stroke="#ffd469"/>' +
+      '<circle cx="59" cy="9" r="3.4" fill="#ffe08a" stroke="#ffd469"/></g>' +
       '</svg>'
     );
   }
@@ -11119,6 +11119,72 @@
     return true;
   }
 
+  // Post-success flourish only. Remounted tiles inherit elapsed time, never a
+  // second entrance. The coordinator owns eligibility, never the SVG.
+  function playHQAssembly(workspaceId) {
+    var container = lastMount && lastMount.container;
+    if (!container || workspaceId !== hqWorkspaceId) return null;
+    function findTile() {
+      return Array.from(container.querySelectorAll('[data-ws-id]')).find(function (el) {
+        return (
+          el.getAttribute('data-ws-id') === workspaceId &&
+          el.querySelector('[data-building-variant="hq"], .is-hq-struct')
+        );
+      });
+    }
+    var tile = findTile();
+    if (!tile) return null;
+    var art = tile.querySelector('[data-building-variant="hq"], .is-hq-struct');
+    var reduced =
+      window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var complete;
+    var done = new Promise(function (resolve) {
+      complete = resolve;
+    });
+    var timer = null;
+    var observer = null;
+    var settled = false;
+    var started = Date.now();
+    function bindArt() {
+      tile.classList.remove('is-growing-in');
+      tile.dataset.hqReveal = 'playing';
+      art.style.setProperty('--hq-assembly-offset', '-' + (Date.now() - started) + 'ms');
+      art.classList.add('is-assembling');
+    }
+    function skip() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (observer) observer.disconnect();
+      art.classList.remove('is-assembling');
+      art.style.removeProperty('--hq-assembly-offset');
+      tile.dataset.hqReveal = 'settled';
+      complete();
+    }
+    tile.classList.remove('is-growing-in');
+    tile.dataset.hqReveal = reduced ? 'settled' : 'playing';
+    if (reduced) skip();
+    else {
+      bindArt();
+      timer = setTimeout(skip, 1600);
+      if (typeof MutationObserver === 'function') {
+        observer = new MutationObserver(function () {
+          if (tile.isConnected) return;
+          var replacement = findTile();
+          if (!replacement || Date.now() - started >= 1600) {
+            skip();
+            return;
+          }
+          tile = replacement;
+          art = tile.querySelector('[data-building-variant="hq"], .is-hq-struct');
+          bindArt();
+        });
+        observer.observe(container, { childList: true, subtree: true });
+      }
+    }
+    return { skip: skip, done: done };
+  }
+
   // HQ presentation frames the reserved site or verified canonical tile, never
   // selecting it, persisting a camera, or joining a layout transaction.
   function frameHQCreation(workspaceId) {
@@ -12307,6 +12373,7 @@
     beginMove: beginMove,
     reveal: reveal,
     frameHQCreation: frameHQCreation,
+    playHQAssembly: playHQAssembly,
     canPresentHQCreation: function () {
       return !scopeGroupId && !placementSession && !moveState;
     },

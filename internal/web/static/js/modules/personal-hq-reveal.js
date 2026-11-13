@@ -6,6 +6,8 @@ export function createHQPresentation({
   prepareMap = () => {},
   captureFocus = () => {},
   frame = () => false,
+  play = () => null,
+  avatar = () => null,
   focusPending = () => {},
   commitFolded = () => {},
   listen = () => () => {}
@@ -18,6 +20,7 @@ export function createHQPresentation({
   function yieldIntent(intent, { reopen = false } = {}) {
     if (!intent || intent.yielded) return;
     intent.yielded = true;
+    intent.motion?.skip?.();
     intent.cleanup?.();
     if (owns(intent)) transition.release(intent.handle, { reveal: reopen });
   }
@@ -108,7 +111,7 @@ export function createHQPresentation({
         ]
       });
     },
-    ready(intent, { workspaceId, route, stale = false, refresh, explore } = {}) {
+    ready(intent, { workspaceId, route, stale = false, refresh, explore, assistant = null } = {}) {
       if (!current(intent)) return false;
       intent.outcome = stale ? 'stale' : 'ready';
       intent.workspaceId = workspaceId;
@@ -118,13 +121,41 @@ export function createHQPresentation({
       } catch (_) {
         /* Browser preference is optional. */
       }
+      const renderResult = () =>
+        show(intent, {
+          title: stale ? 'HQ was built; the view needs refreshing' : 'Your HQ is ready',
+          leading: stale ? null : avatar(assistant),
+          detail: stale
+            ? 'Refresh the view. There is no need to build again.'
+            : `${assistant?.display_name || 'Your assistant'} has a home base. Welcome to your HQ.`,
+          actions: [
+            ...(stale && refresh ? [{ label: 'Refresh view', run: refresh }] : []),
+            ...(!stale && route && explore
+              ? [{ label: 'Explore HQ', primary: true, run: explore }]
+              : []),
+            ...(intent.motion
+              ? [{ label: 'Skip animation', run: () => intent.motion?.skip?.() }]
+              : []),
+            { label: 'Dismiss', run: () => yieldIntent(intent) }
+          ]
+        });
       if (!stale && workspaceId && !intent.framingStarted) {
         intent.framingStarted = true;
         let attempts = 0;
         const tryFrame = () => {
           if (!current(intent)) return;
           try {
-            if (frame(workspaceId)) return;
+            if (frame(workspaceId)) {
+              if (intent.eligible !== false) {
+                intent.motion = play(workspaceId);
+                intent.motion?.done?.then(() => {
+                  intent.motion = null;
+                  renderResult();
+                });
+              }
+              renderResult();
+              return;
+            }
           } catch (_) {
             return;
           }
@@ -132,19 +163,7 @@ export function createHQPresentation({
         };
         tryFrame();
       }
-      return show(intent, {
-        title: stale ? 'HQ was built; the view needs refreshing' : 'Your HQ is ready',
-        detail: stale
-          ? 'Refresh the view. There is no need to build again.'
-          : 'Your assistant has a home base.',
-        actions: [
-          ...(stale && refresh ? [{ label: 'Refresh view', run: refresh }] : []),
-          ...(!stale && route && explore
-            ? [{ label: 'Explore HQ', primary: true, run: explore }]
-            : []),
-          { label: 'Dismiss', run: () => yieldIntent(intent) }
-        ]
-      });
+      return renderResult();
     }
   };
 }
@@ -169,6 +188,16 @@ export function hqPresentation() {
       window.OriHomeCockpit?.showHQCreationMap?.();
     },
     frame: id => window.OriWorkspaceMap?.frameHQCreation?.(id),
+    play: id => window.OriWorkspaceMap?.playHQAssembly?.(id),
+    avatar: assistant => {
+      if (!window.AgentAvatar?.markup || !assistant) return null;
+      const node = document.createElement('span');
+      node.innerHTML = window.AgentAvatar.markup(
+        { name: assistant.display_name, appearance: assistant.appearance || {} },
+        { size: 40 }
+      );
+      return node;
+    },
     focusPending: () => {
       if (!moveFocus) return;
       const focus = () => {

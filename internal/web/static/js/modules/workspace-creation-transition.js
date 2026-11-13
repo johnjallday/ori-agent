@@ -25,6 +25,9 @@ export function createCreationStatusSurface(doc = globalThis.document) {
     root.dataset.creationMapStatus = '';
     root.setAttribute('aria-label', 'Workspace setup status');
     root.hidden = true;
+    const leading = doc.createElement('div');
+    leading.className = 'creation-map-status__leading';
+    leading.hidden = true;
     const copy = doc.createElement('div');
     copy.className = 'creation-map-status__copy';
     copy.setAttribute('role', 'status');
@@ -36,14 +39,17 @@ export function createCreationStatusSurface(doc = globalThis.document) {
     copy.append(title, detail);
     const actions = doc.createElement('div');
     actions.className = 'creation-map-status__actions';
-    root.append(copy, actions);
+    root.append(leading, copy, actions);
     doc.body.append(root);
     return root;
   };
   return {
-    show({ tone = 'progress', title = '', detail = '', actions = [] } = {}) {
+    show({ tone = 'progress', title = '', detail = '', actions = [], leading = null } = {}) {
       const host = root || build();
       host.dataset.tone = tone;
+      const decoration = host.querySelector('.creation-map-status__leading');
+      decoration.replaceChildren(...(leading ? [leading] : []));
+      decoration.hidden = !leading;
       host.querySelector('.creation-map-status__title').textContent = title;
       const line = host.querySelector('.creation-map-status__detail');
       line.textContent = detail;
@@ -66,9 +72,10 @@ export function createCreationStatusSurface(doc = globalThis.document) {
       host.hidden = false;
       // Redrawing the row must not drop keyboard users back to the page.
       if (focused)
-        Array.from(row.children)
-          .find(button => button.textContent === focused)
-          ?.focus({ preventScroll: true });
+        (
+          Array.from(row.children).find(button => button.textContent === focused) ||
+          row.firstElementChild
+        )?.focus({ preventScroll: true });
     },
     hide() {
       if (root) root.hidden = true;

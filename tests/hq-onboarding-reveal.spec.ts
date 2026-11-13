@@ -177,6 +177,8 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
   request
 }) => {
   const reopen = process.env.ORI_HQ_REVEAL_REOPEN === '1';
+  const reduced = process.env.ORI_HQ_REVEAL_REDUCED === '1';
+  if (reduced) await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
   await page.locator('[data-cockpit-view="tree"]').click();
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantHQCard?.show));
@@ -264,7 +266,35 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
     return;
   }
   await expect(page.locator('[data-creation-map-status]')).toContainText('Your HQ is ready');
+  await expect(page.locator('[data-creation-map-status] .agent-avatar')).toBeVisible();
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  fs.mkdirSync('tasks/evidence-hq-onboarding-reveal/group-3', { recursive: true });
+  const art = page.locator('.ws-map-tile svg[data-building-variant="hq"]');
+  await expect(art.locator('[data-hq-part]')).toHaveCount(4);
+  if (!reduced) {
+    await expect(art).toHaveClass(/is-assembling/);
+    await page.screenshot({
+      path: 'tasks/evidence-hq-onboarding-reveal/group-3/assembly.png',
+      fullPage: true
+    });
+    if (process.env.ORI_HQ_REVEAL_SKIP === '1') {
+      await page.getByRole('button', { name: 'Skip animation' }).click();
+    } else if (process.env.ORI_HQ_REVEAL_INTERRUPT === '1') {
+      await page.locator('[data-cockpit-view="tree"]').click();
+      await expect(page.locator('[data-creation-map-status]')).toBeHidden();
+      await expect(page.locator('.is-assembling')).toHaveCount(0);
+      return;
+    } else {
+      // Controlled ordinary status remount: it may inherit elapsed motion, not
+      // acquire a second reveal or another camera/focus operation.
+      await page.evaluate(() => (window as any).PersonalHQOnboarding.refreshHQStatus());
+    }
+  }
+  await expect(art).not.toHaveClass(/is-assembling/);
+  await page.screenshot({
+    path: `tasks/evidence-hq-onboarding-reveal/group-3/${reduced ? 'reduced' : 'final'}.png`,
+    fullPage: true
+  });
   const hq = page.locator('.ws-map-tile').filter({ has: page.locator('.ws-map-tile-hq-badge') });
   await expect(hq).toBeVisible();
   await expect

@@ -172,6 +172,52 @@ test('missing map readiness is bounded and repeated ready refresh never reframes
   }
 });
 
+test('verified intent plays once; yielding skips motion and late completion cannot render', async () => {
+  let finish;
+  let plays = 0;
+  let skips = 0;
+  const done = new Promise(resolve => {
+    finish = resolve;
+  });
+  const f = fixture({
+    play: () => {
+      plays++;
+      return {
+        done,
+        skip: () => {
+          skips++;
+          finish();
+        }
+      };
+    }
+  });
+  const intent = f.begin();
+  f.flow.ready(intent, { workspaceId: 'hq' });
+  assert.equal(plays, 1);
+  assert.ok(f.events.at(-1)[1].actions.some(a => a.label === 'Skip animation'));
+  f.flow.ready(intent, { workspaceId: 'hq' });
+  assert.equal(plays, 1);
+  f.interrupt();
+  assert.equal(skips, 1);
+  const snapshot = [...f.events];
+  await done;
+  await Promise.resolve();
+  assert.deepEqual(f.events, snapshot);
+});
+
+test('status-only recovery does not acquire playback eligibility', () => {
+  let plays = 0;
+  const f = fixture({
+    play: () => {
+      plays++;
+    }
+  });
+  const intent = f.begin();
+  intent.eligible = false;
+  f.flow.ready(intent, { workspaceId: 'hq' });
+  assert.equal(plays, 0);
+});
+
 test('ordinary refresh has no eligible intent, and new controller instances cannot replay', () => {
   const f = fixture();
   assert.equal(f.flow.ready(null, { workspaceId: 'existing' }), false);

@@ -522,6 +522,7 @@ async function projectHQResult(result = {}, code = '') {
     ]);
     flow?.ready(intent, {
       workspaceId: status?.workspace?.id,
+      assistant: relationship,
       stale: outcome === 'stale',
       route: status?.workspace?.folder_slug
         ? `/workspaces/${encodeURIComponent(status.workspace.folder_slug)}`

@@ -2218,6 +2218,84 @@
   line-height: 1.4;
 }
 
+/* A confirmed HQ assembles once, without replacing its canonical artwork.
+   All stages are decorative; controls and the final workspace are live now. */
+.ws-map-tile[data-hq-reveal] {
+  animation: none !important;
+}
+.ws-map-struct.is-assembling {
+  animation: none !important;
+}
+.ws-map-struct.is-assembling [data-hq-part] {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  animation-duration: 1600ms;
+  animation-delay: var(--hq-assembly-offset, 0ms);
+  animation-timing-function: ease-out;
+  animation-fill-mode: both;
+}
+.is-assembling [data-hq-part="foundation"] {
+  animation-name: hq-foundation;
+}
+.is-assembling [data-hq-part="walls"] {
+  animation-name: hq-walls;
+}
+.is-assembling [data-hq-part="roof"] {
+  animation-name: hq-roof;
+}
+.is-assembling [data-hq-part="lights"] {
+  animation-name: hq-lights;
+}
+@keyframes hq-foundation {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scaleY(0.7);
+  }
+  22%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes hq-walls {
+  0%,
+  18% {
+    opacity: 0;
+    transform: scaleY(0.2);
+  }
+  48%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes hq-roof {
+  0%,
+  42% {
+    opacity: 0;
+    transform: translateY(-9px);
+  }
+  74%,
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes hq-lights {
+  0%,
+  70% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ws-map-struct.is-assembling [data-hq-part] {
+    animation: none;
+  }
+}
+
 /* The HQ citadel is taller than a standard tile block, so its beacon rises
    above neighbouring buildings. A warm gold glow (vs. the neutral drop-shadow
    on ordinary structs) marks it as the map's capital. */
