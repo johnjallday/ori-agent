@@ -48,6 +48,11 @@ type SongDetailsConsent struct {
 	Scope     string     `json:"scope,omitempty"`
 	OfferID   string     `json:"offer_id,omitempty"`
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	// ReaderNoticeAt is when the owner was told that the app plugin, not Ori
+	// itself, now reads the project files (assistant-reads-projects FR46). A
+	// consent granted under those words carries its grant time; one granted
+	// before has none, so its Home shows the notice once and is not asked again.
+	ReaderNoticeAt *time.Time `json:"reader_notice_at,omitempty"`
 }
 
 // Clone returns a deep copy.
@@ -60,7 +65,17 @@ func (c *SongDetailsConsent) Clone() *SongDetailsConsent {
 		value := *c.RevokedAt
 		clone.RevokedAt = &value
 	}
+	if c.ReaderNoticeAt != nil {
+		value := *c.ReaderNoticeAt
+		clone.ReaderNoticeAt = &value
+	}
 	return &clone
+}
+
+// NeedsReaderNotice is true for a valid consent whose Home was never told that
+// the app plugin now reads the files.
+func (c *SongDetailsConsent) NeedsReaderNotice() bool {
+	return c != nil && c.Validate() == nil && c.ReaderNoticeAt == nil
 }
 
 // Validate keeps a consent bounded and well formed.
@@ -167,6 +182,37 @@ func (c *SongDetailsConsents) Grant(homeID, offerID string) error {
 	return err
 }
 
+// AcknowledgeReaderNotice records that the owner saw the notice that the app
+// plugin now reads their project files. It changes nothing else: not the scope,
+// not the switch. A Home already told, or with no consent, is left as it is.
+func (c *SongDetailsConsents) AcknowledgeReaderNotice(homeID string) error {
+	if c == nil || c.store == nil || strings.TrimSpace(homeID) == "" {
+		return ErrAssistantStationNotFound
+	}
+	err := c.store.Update(strings.TrimSpace(homeID), func(home *Workspace) error {
+		state := home.GetAssistantProgramState()
+		if state == nil || home.GetAssistantProjectLink() != nil {
+			return ErrAssistantStationNotFound
+		}
+		current := state.GetSongDetailsConsent()
+		if !current.NeedsReaderNotice() {
+			return errConsentUnchanged
+		}
+		at := c.now().UTC()
+		if at.Before(current.GrantedAt) {
+			at = current.GrantedAt
+		}
+		current.ReaderNoticeAt = &at
+		state.SongDetailsConsent = current
+		home.SetAssistantProgramState(state)
+		return nil
+	})
+	if errors.Is(err, errConsentUnchanged) {
+		return nil
+	}
+	return err
+}
+
 // GrantScope records a person's answer to an offer to read song details, at the
 // given scope (empty reads as numbers).
 //
@@ -184,7 +230,10 @@ func (c *SongDetailsConsents) GrantScope(homeID, source, offerID, scope string) 
 	if scope == "" {
 		scope = SongDetailsScopeNumbers
 	}
-	next := &SongDetailsConsent{GrantedAt: c.now().UTC(), Source: source, Scope: scope, OfferID: offerID}
+	granted := c.now().UTC()
+	// A grant made now is made under the words that say the app plugin reads the
+	// files, so it needs no notice.
+	next := &SongDetailsConsent{GrantedAt: granted, Source: source, Scope: scope, OfferID: offerID, ReaderNoticeAt: &granted}
 	if err := next.Validate(); err != nil {
 		return err
 	}

@@ -27,6 +27,8 @@ import {
   libraryBriefView,
   libraryIntroText,
   SONG_DETAILS_QUESTION,
+  songDetailsQuestion,
+  songDetailsReaderNotice,
   songDetailsStatus,
   songDetailsSwitchView
 } from './project-library.js';
@@ -4385,7 +4387,8 @@ test('the song-details switch shows only on a Home that agreed at setup', () => 
     disabled: false,
     label: 'Read song details when scanning',
     note: "Ori reads each REAPER project's tempo, length and track count. Nothing is changed.",
-    upgrade: 'Also read track names, markers and regions'
+    upgrade: 'Also read track names, markers and regions',
+    notice: null
   });
   // A consent that reaches names says so in the label and the note; nothing to widen.
   assert.deepEqual(songDetailsSwitchView({ state: 'on', names: true, app_name: 'REAPER' }), {
@@ -4394,7 +4397,8 @@ test('the song-details switch shows only on a Home that agreed at setup', () => 
     disabled: false,
     label: 'Read song details, track names and markers when scanning',
     note: "Ori reads each REAPER project's tempo, length and track count, and the track names, markers and regions typed into it. Nothing is changed.",
-    upgrade: ''
+    upgrade: '',
+    notice: null
   });
   const off = songDetailsSwitchView({ state: 'off', app_name: 'REAPER' });
   assert.equal(off.checked, false);
@@ -4422,6 +4426,139 @@ test('the song-details switch shows only on a Home that agreed at setup', () => 
   );
   assert.match(SONG_DETAILS_QUESTION, /Nothing is changed, and audio is not opened/);
   assert.match(SONG_DETAILS_QUESTION, /clears everything it read/);
+});
+
+test('the approval names the plugin that reads and says Ori keeps only the listed facts', () => {
+  // No reading plugin installed: the older wording stands.
+  assert.equal(songDetailsQuestion({ state: 'off' }), SONG_DETAILS_QUESTION);
+  assert.equal(songDetailsQuestion(undefined), SONG_DETAILS_QUESTION);
+  assert.equal(songDetailsQuestion({ reader_name: '  ' }), SONG_DETAILS_QUESTION);
+  const question = songDetailsQuestion({ state: 'off', reader_name: 'REAPER' });
+  assert.match(
+    question,
+    /^REAPER reads tempo, length, track count, track names, markers and regions/
+  );
+  assert.match(question, /Ori keeps only those/);
+  assert.match(question, /Nothing is changed, and audio is not opened/);
+  assert.match(question, /clears everything it read/);
+
+  // The switch's note names the reader and says what Ori keeps.
+  const view = songDetailsSwitchView({
+    state: 'on',
+    names: true,
+    app_name: 'REAPER',
+    reader_name: 'REAPER Plugin'
+  });
+  assert.match(view.note, /^REAPER Plugin reads /);
+  assert.match(view.note, /Ori keeps only those facts\. Nothing is changed\.$/);
+  assert.doesNotMatch(view.note, /^Ori reads/);
+  assert.equal(view.notice, null, 'no notice unless the server says so');
+  const numbers = songDetailsSwitchView({ state: 'on', reader_name: 'REAPER Plugin' });
+  assert.match(numbers.note, /^REAPER Plugin reads /);
+});
+
+test('a Home that approved before the plugin read gets one notice, with one way to dismiss it', () => {
+  assert.equal(songDetailsReaderNotice(undefined), null);
+  assert.equal(songDetailsReaderNotice({ reader_name: 'REAPER Plugin' }), null);
+  assert.equal(songDetailsReaderNotice({ reader_notice: true }), null, 'no reader, no notice');
+  const notice = songDetailsReaderNotice({ reader_notice: true, reader_name: 'REAPER Plugin' });
+  assert.match(notice.text, /^Song details are now read by REAPER Plugin, not by Ori itself\./);
+  assert.match(notice.text, /Ori keeps only those/);
+  assert.equal(notice.dismiss, 'Got it');
+  const shown = songDetailsSwitchView({
+    state: 'on',
+    names: true,
+    reader_name: 'REAPER Plugin',
+    reader_notice: true
+  });
+  assert.equal(shown.notice.dismiss, 'Got it');
+});
+
+test('"Got it" records the notice once and changes nothing that is read', async () => {
+  const previousDocument = globalThis.document;
+  const makeElement = () => ({
+    textContent: '',
+    hidden: false,
+    checked: false,
+    disabled: false,
+    dataset: {},
+    append() {},
+    replaceChildren() {},
+    addEventListener() {},
+    setAttribute() {},
+    focus() {}
+  });
+  const elements = {};
+  for (const id of [
+    'projectLibraryIntro',
+    'projectLibrarySongDetails',
+    'projectLibrarySongDetailsSwitch',
+    'projectLibrarySongDetailsLabel',
+    'projectLibrarySongDetailsNote',
+    'projectLibrarySongDetailsNotice',
+    'projectLibrarySongDetailsNoticeText',
+    'projectLibrarySongDetailsNoticeDismiss',
+    'projectLibrarySongDetailsUpgrade',
+    'projectLibrarySongDetailsAsk',
+    'projectLibraryStatus'
+  ]) {
+    elements[id] = makeElement();
+  }
+  globalThis.document = {
+    createElement: makeElement,
+    getElementById: id => elements[id] || null,
+    querySelectorAll: () => []
+  };
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    panel.state = {
+      initialized: true,
+      provider_read_only: false,
+      song_details: {
+        state: 'on',
+        names: true,
+        app_name: 'REAPER',
+        reader_name: 'REAPER Plugin',
+        reader_notice: true
+      }
+    };
+    const posts = [];
+    panel.post = async (path, body) => {
+      posts.push({ path, body });
+      return {
+        song_details: {
+          state: 'on',
+          names: true,
+          app_name: 'REAPER',
+          reader_name: 'REAPER Plugin',
+          reader_notice: false
+        }
+      };
+    };
+    panel.refresh = async () => assert.fail('dismissing the notice does not re-read the library');
+    panel.renderSongDetails();
+    assert.equal(elements.projectLibrarySongDetailsNotice.hidden, false);
+    assert.match(
+      elements.projectLibrarySongDetailsNoticeText.textContent,
+      /now read by REAPER Plugin/
+    );
+    assert.equal(elements.projectLibrarySongDetailsNoticeDismiss.textContent, 'Got it');
+
+    await panel.dismissSongDetailsNotice(elements.projectLibrarySongDetailsNoticeDismiss);
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].path, '/song-details/notice');
+    assert.match(posts[0].body.request_id, /^song-details-notice-/);
+    assert.equal(panel.state.song_details.reader_notice, false);
+    assert.equal(panel.state.song_details.state, 'on', 'the switch is where it was');
+    assert.equal(elements.projectLibrarySongDetailsNotice.hidden, true);
+    assert.equal(elements.projectLibrarySongDetailsSwitch.checked, true);
+
+    // Nothing to dismiss: no request.
+    await panel.dismissSongDetailsNotice(elements.projectLibrarySongDetailsNoticeDismiss);
+    assert.equal(posts.length, 1);
+  } finally {
+    globalThis.document = previousDocument;
+  }
 });
 
 test('the library intro says what a scan reads', () => {

@@ -348,6 +348,109 @@ func TestFactsRead_TheSummaryCarriesTheNewestReceipt(t *testing.T) {
 	}
 }
 
+// FR41 to FR43: the saved facts of ONE song, found by the workspace linked to
+// it, and nothing once song details are off.
+func TestLearnedSongForWorkspace(t *testing.T) {
+	f := newReadFixture(t)
+	f.chat.responses = []*llm.ChatResponse{callsTheTool()}
+	scanRoot(t, f.r, f.scope, f.root.ID, "for-workspace")
+	f.waitPublished(t, 1)
+
+	// Link two songs to their own workspaces, as opening them does.
+	doc, err := f.r.library.Read(f.scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := func(relative, workspaceID string) {
+		t.Helper()
+		entry, _, ok := observationAt(doc, f.root.ID, relative)
+		if !ok {
+			t.Fatalf("no entry for %q", relative)
+		}
+		current, _ := f.r.library.Read(f.scope)
+		_, _, err := f.r.library.mutateWithHomePolicy(f.scope, current.Revision,
+			operation{key: "test-link:" + workspaceID, action: "test_link", digest: proposalRunOpDigest(f.scope, workspaceID)}, nil,
+			func(d *Document) (string, error) {
+				for i := range d.Entries {
+					if d.Entries[i].ID == entry.ID {
+						d.Entries[i].Link = &ExactLink{WorkspaceID: workspaceID, LinkID: "link-" + workspaceID, Revision: 1}
+					}
+				}
+				return entry.ID, nil
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	link("Single", "ws-single")
+	link("Alternates", "ws-alternates")
+
+	song, ok, err := f.r.library.LearnedSongForWorkspace(f.scope, "ws-single")
+	if err != nil || !ok || song.Name != "Single" || song.Facts == nil || song.Facts.TempoBPM != 120 || song.Facts.TrackCount != 4 {
+		t.Fatalf("song = %+v ok=%v err=%v", song, ok, err)
+	}
+	// Names only under a consent that covers them: the numbers-only consent has none.
+	if song.Names != nil && (len(song.Names.Tracks) > 0 || len(song.Names.Markers) > 0) {
+		t.Fatalf("names under a numbers-only consent: %+v", song.Names)
+	}
+	// Another workspace gets its own song, never this one's.
+	other, ok, _ := f.r.library.LearnedSongForWorkspace(f.scope, "ws-alternates")
+	if !ok || other.Name != "Alternates" || other.Name == song.Name {
+		t.Fatalf("other song = %+v ok=%v", other, ok)
+	}
+	// A workspace no song is linked to, or no workspace at all.
+	for _, id := range []string{"ws-nowhere", "", "  "} {
+		if got, ok, err := f.r.library.LearnedSongForWorkspace(f.scope, id); ok || err != nil || got.Name != "" {
+			t.Fatalf("%q = %+v ok=%v err=%v", id, got, ok, err)
+		}
+	}
+	// FR43: song details off, and the next ask has nothing.
+	switchSongDetailsOff(t, f.r.library.workspaces, f.scope)
+	if got, ok, err := f.r.library.LearnedSongForWorkspace(f.scope, "ws-single"); ok || err != nil || got.Name != "" {
+		t.Fatalf("after song details went off = %+v ok=%v err=%v", got, ok, err)
+	}
+}
+
+// assistant-reads-projects 6.1: the folder's agent is given what the app
+// assistant's read saved, through the same listing it always used. Nothing in
+// that path knows who read the file, so the summary and the goal are written from
+// the same facts as before.
+func TestFactsRead_WhatTheReadSavedIsWhatTheFolderAgentIsGiven(t *testing.T) {
+	f := newReadFixture(t)
+	f.chat.responses = []*llm.ChatResponse{callsTheTool()}
+	scanRoot(t, f.r, f.scope, f.root.ID, "agent-facts")
+	f.waitPublished(t, 1)
+	if got := f.opens.take(); len(got) != 0 {
+		t.Fatalf("the host opened %v itself, so these facts did not come from the read", got)
+	}
+	songs, err := f.r.library.LearnedSongsInRoot(f.scope, f.root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName, withFacts := map[string]LearnedSong{}, 0
+	for _, song := range songs {
+		byName[song.Name] = song
+		if song.Facts != nil {
+			withFacts++
+		}
+	}
+	if withFacts != 2 {
+		t.Fatalf("the folder agent is given facts for %d of %+v, want the 2 the plugin read", withFacts, songs)
+	}
+	single := byName["Single"]
+	if single.NotRead != "" || single.Facts == nil || single.Facts.TempoBPM != 120 || single.Facts.TrackCount != 4 {
+		t.Fatalf("Single = %+v", single)
+	}
+	if other := byName["Alternates"]; other.NotRead != "" || other.Facts == nil {
+		t.Fatalf("Alternates = %+v", other)
+	}
+	// Song details off: the next ask has nothing, as for any other reader.
+	switchSongDetailsOff(t, f.r.library.workspaces, f.scope)
+	if songs, err := f.r.library.LearnedSongsInRoot(f.scope, f.root.ID); err != nil || len(songs) != 0 {
+		t.Fatalf("after song details went off the folder agent is given %d songs (%v)", len(songs), err)
+	}
+}
+
 // One press, one turn: a collector gathers the scans of a listing and keeps
 // one target per song.
 func TestFactsRead_ACollectorMakesOneTurnForSeveralScans(t *testing.T) {

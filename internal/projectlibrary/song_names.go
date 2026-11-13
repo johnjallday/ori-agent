@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -153,6 +154,62 @@ func (s *Store) LearnedSongsInRoot(scope Scope, rootID string) ([]LearnedSong, e
 		songs = songs[:maxLearnedSongs]
 	}
 	return songs, nil
+}
+
+// LearnedSongForWorkspace is what the Home saved about the one song linked to
+// workspaceID, as the Home's app assistant may be given it inside that song:
+// its name, the numbers, and under a consent that covers them the names read
+// from its project file, or why it was not read. It gives nothing unless the
+// Home's consent is active, so the next task or turn after the switch goes off
+// has none (assistant-reads-projects FR43). Only that one song: never another
+// song's facts. ok is false when no song of this Home is linked to the workspace.
+func (s *Store) LearnedSongForWorkspace(scope Scope, workspaceID string) (LearnedSong, bool, error) {
+	doc, state, err := s.readSnapshot(scope)
+	if err != nil {
+		return LearnedSong{}, false, err
+	}
+	consent := state.GetSongDetailsConsent()
+	if !consent.Active() || strings.TrimSpace(workspaceID) == "" {
+		return LearnedSong{}, false, nil
+	}
+	views := newProjectionMaps(doc, state)
+	for _, entry := range doc.Entries {
+		if entry.Link == nil || entry.Link.WorkspaceID != workspaceID {
+			continue
+		}
+		// The song's usable source that dates it, the rule every other reader uses.
+		rootID := ""
+		var newest time.Time
+		for _, observed := range entry.Observations {
+			root := views.roots[observed.RootID]
+			usable := root.RevokedAt == nil && !views.inactive[root.ID] &&
+				(observed.Availability == "available" || observed.Availability == "ambiguous")
+			if usable && !observed.FileModifiedAt.IsZero() && (rootID == "" || observed.FileModifiedAt.After(newest)) {
+				rootID, newest = observed.RootID, observed.FileModifiedAt
+			}
+		}
+		if rootID == "" {
+			return LearnedSong{}, false, nil
+		}
+		inRoot := entry
+		inRoot.Observations = nil
+		for _, observed := range entry.Observations {
+			if observed.RootID == rootID {
+				inRoot.Observations = append(inRoot.Observations, observed)
+			}
+		}
+		row := s.projectSearchRowInRoot(scope, inRoot, views.roots, views.linked, views.inactive, rootID, true)
+		song := LearnedSong{Name: row.Name, Facts: row.Facts}
+		if learned := learnedFrom(inRoot, views.roots, views.inactive, consent); learned != nil {
+			song.NotRead = learned.NotRead
+			if learned.NotRead == "" {
+				names := learned.SongNames
+				song.Names = &names
+			}
+		}
+		return song, true, nil
+	}
+	return LearnedSong{}, false, nil
 }
 
 // clone copies the names so a copy shares no slice with the original.

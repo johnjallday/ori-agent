@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -42,7 +43,9 @@ type folderAgentSongs struct {
 	library func() folderAgentLearnLibrary
 	// runner is the Home assistant's read turn, resolved when used.
 	runner func() *projectlibrary.FactsReadRunner
-	token  func() string
+	// installed lists the installed plugins, for naming the one that reads.
+	installed func() ([]plugin.InstalledPlugin, error)
+	token     func() string
 }
 
 func newFolderAgentSongs(b *ServerBuilder) folderAgentSongs {
@@ -62,8 +65,27 @@ func newFolderAgentSongs(b *ServerBuilder) folderAgentSongs {
 			}
 			return b.sessionHandler.FactsReadRunner()
 		},
+		installed: func() ([]plugin.InstalledPlugin, error) {
+			if b.pluginHandler == nil {
+				return nil, nil
+			}
+			return b.pluginHandler.Manager().List()
+		},
 		token: func() string { return strconv.FormatInt(time.Now().UnixNano(), 36) },
 	}
+}
+
+// ReaderName is the app plugin that reads the songs, as the reviewed list names
+// it, for the offer's words; "" when no installed plugin reads them.
+func (f folderAgentSongs) ReaderName() string {
+	if f.installed == nil {
+		return ""
+	}
+	installed, err := f.installed()
+	if err != nil {
+		return ""
+	}
+	return projectlibrary.ReaderDisplayName(installed)
 }
 
 // Consent is the Home's song-details state and whether it reaches names.

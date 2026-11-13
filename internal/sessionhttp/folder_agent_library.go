@@ -93,6 +93,18 @@ func (h *Handler) FolderAgentSongs(ownerUserID, homeID, rootID string) ([]projec
 	return h.assistantLibraryStore().LearnedSongsInRoot(scope, rootID)
 }
 
+// SongFactsForWorkspace is what the Home saved about the one song linked to a
+// song workspace, for the Home's app assistant working inside that song. The
+// Home is the one the song's own link names, resolved for its owner. Nothing
+// here is a route, and nothing but that assistant's tasks and chat reach it.
+func (h *Handler) SongFactsForWorkspace(ownerUserID, homeID, workspaceID string) (projectlibrary.LearnedSong, bool, error) {
+	scope, err := h.portfolioLibraryScope(ownerUserID, homeID)
+	if err != nil {
+		return projectlibrary.LearnedSong{}, false, ErrPortfolioSetupUnavailable
+	}
+	return h.assistantLibraryStore().LearnedSongForWorkspace(scope, workspaceID)
+}
+
 // ScanFolderAgentRoot reviews and commits one whole-root listing under the
 // owner's Set it up, re-reading the library's revision before each attempt.
 // It returns how many projects the library lists under the root.

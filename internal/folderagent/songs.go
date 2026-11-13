@@ -129,6 +129,25 @@ func learningReasonWords(reason, reader string, done, total int) (sentence, acti
 // three numbers, and the names a person typed (tracks, markers and regions).
 const songsReads = "I'll read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened."
 
+// songsReadsBy is the same promise when an installed app plugin does the
+// reading (assistant-reads-projects FR44): it names that plugin, says Ori keeps
+// only the listed facts, and keeps the two limits. With no plugin to name, the
+// original sentence stands.
+func songsReadsBy(reader string) string {
+	reader = strings.TrimSpace(reader)
+	if reader == "" {
+		return songsReads
+	}
+	return reader + " reads tempo, length, track count, track names, markers and regions from each project file, " +
+		"and Ori keeps only those. Nothing is changed, and audio is not opened."
+}
+
+// SongsReaderNamer is the optional part of Songs that names the app plugin that
+// reads the songs, as the reviewed list gives its name; "" when none does.
+type SongsReaderNamer interface {
+	ReaderName() string
+}
+
 // Songs is the Home's song-details consent as the folder agent needs it: the
 // offer to learn the songs is made only while the Home holds none.
 type Songs interface {
@@ -233,11 +252,15 @@ func (s *Service) songsOffer(ctx context.Context, rec *Record) *SongsOfferView {
 	if err != nil || !eligible {
 		return nil
 	}
+	reader := ""
+	if namer, ok := s.deps.Songs.(SongsReaderNamer); ok {
+		reader = namer.ReaderName()
+	}
 	return &SongsOfferView{
 		Count:   readability.Readable,
 		Noun:    foldermap.ShapeNoun(readability.Shape, readability.Readable),
 		Ask:     fmt.Sprintf("Want me to learn the %d %s?", readability.Readable, foldermap.ShapeNoun(readability.Shape, readability.Readable)),
-		Reads:   songsReads,
+		Reads:   songsReadsBy(reader),
 		NotRead: notReadSentence(readability),
 	}
 }

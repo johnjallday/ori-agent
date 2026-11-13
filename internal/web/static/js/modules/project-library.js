@@ -714,6 +714,27 @@ export function libraryIntroText(songDetails) {
 export const SONG_DETAILS_QUESTION =
   'Ori will read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened. Turning this off clears everything it read.';
 
+// The same question once an app plugin does the reading (assistant-reads-projects
+// FR44, FR45): it names the plugin, says Ori keeps only those facts, and keeps
+// the two limits. With no plugin named, the original words stand.
+export function songDetailsQuestion(songDetails) {
+  const reader = String(songDetails?.reader_name || '').trim();
+  if (!reader) return SONG_DETAILS_QUESTION;
+  return `${reader} reads tempo, length, track count, track names, markers and regions from each project file, and Ori keeps only those. Nothing is changed, and audio is not opened. Turning this off clears everything it read.`;
+}
+
+// The one notice a Home gets when it approved song details before an app plugin
+// read them (FR46): who reads now, that it is the same facts, and where the
+// switch is. Null when there is nothing to say.
+export function songDetailsReaderNotice(songDetails) {
+  const reader = String(songDetails?.reader_name || '').trim();
+  if (!songDetails?.reader_notice || !reader) return null;
+  return {
+    text: `Song details are now read by ${reader}, not by Ori itself. It reads the same facts, and Ori keeps only those.`,
+    dismiss: 'Got it'
+  };
+}
+
 // songDetailsSwitchView words the Home's song-details switch from the library
 // read's `song_details`. Only a Home that agreed (on its setup card, or to the
 // offer to learn the songs) has it (state on or off); a read-only Home shows it
@@ -725,10 +746,15 @@ export function songDetailsSwitchView(songDetails, readOnly = false) {
   const on = state === 'on';
   const names = on && Boolean(songDetails?.names);
   const numbersOnly = on && !names;
+  // Who reads: the app plugin by its own name, when one does; Ori's own pass
+  // until then. Either way Ori keeps only the listed facts.
+  const reader = String(songDetails?.reader_name || '').trim();
+  const reads = reader ? `${reader} reads` : 'Ori reads';
+  const keeps = reader ? ' Ori keeps only those facts.' : '';
   let note;
-  if (names) note = `Ori reads ${songDetailsReads(songDetails, true)}. Nothing is changed.`;
+  if (names) note = `${reads} ${songDetailsReads(songDetails, true)}.${keeps} Nothing is changed.`;
   else if (numbersOnly)
-    note = `Ori reads ${songDetailsReads(songDetails, false)}. Nothing is changed.`;
+    note = `${reads} ${songDetailsReads(songDetails, false)}.${keeps} Nothing is changed.`;
   else
     note = `Scans read no project files. Turn this on to read ${songDetailsReads(songDetails, true)}, on the next scan.`;
   return {
@@ -739,7 +765,8 @@ export function songDetailsSwitchView(songDetails, readOnly = false) {
       ? 'Read song details when scanning'
       : 'Read song details, track names and markers when scanning',
     note,
-    upgrade: numbersOnly && !readOnly ? 'Also read track names, markers and regions' : ''
+    upgrade: numbersOnly && !readOnly ? 'Also read track names, markers and regions' : '',
+    notice: songDetailsReaderNotice(songDetails)
   };
 }
 
@@ -1163,6 +1190,9 @@ export class ProjectLibraryPanel {
       .getElementById('projectLibrarySongDetailsSwitch')
       ?.addEventListener('change', event => void this.setSongDetails(event.currentTarget));
     document
+      .getElementById('projectLibrarySongDetailsNoticeDismiss')
+      ?.addEventListener('click', event => void this.dismissSongDetailsNotice(event.currentTarget));
+    document
       .getElementById('projectLibrarySongDetailsUpgrade')
       ?.addEventListener('click', () => this.askSongDetails(true));
     document
@@ -1257,6 +1287,18 @@ export class ProjectLibraryPanel {
     if (label) label.textContent = view.label;
     const note = document.getElementById('projectLibrarySongDetailsNote');
     if (note) note.textContent = view.note;
+    // The one notice a Home gets when the app plugin took over the reading (FR46).
+    const notice = document.getElementById('projectLibrarySongDetailsNotice');
+    if (notice) {
+      notice.hidden = !view.notice;
+      const noticeText = document.getElementById('projectLibrarySongDetailsNoticeText');
+      if (noticeText) noticeText.textContent = view.notice?.text || '';
+      const noticeDismiss = document.getElementById('projectLibrarySongDetailsNoticeDismiss');
+      if (noticeDismiss) {
+        noticeDismiss.textContent = view.notice?.dismiss || '';
+        noticeDismiss.disabled = this.busy;
+      }
+    }
     // A numbers-only Home can be widened to names, with the same question.
     const upgrade = document.getElementById('projectLibrarySongDetailsUpgrade');
     if (upgrade) {
@@ -1268,7 +1310,7 @@ export class ProjectLibraryPanel {
     if (ask) {
       ask.hidden = !this.songDetailsAsking;
       const text = document.getElementById('projectLibrarySongDetailsAskText');
-      if (text) text.textContent = SONG_DETAILS_QUESTION;
+      if (text) text.textContent = songDetailsQuestion(this.state?.song_details);
       for (const id of ['projectLibrarySongDetailsAllow', 'projectLibrarySongDetailsDecline']) {
         const button = document.getElementById(id);
         if (button) button.disabled = this.busy;
@@ -1293,6 +1335,25 @@ export class ProjectLibraryPanel {
     this.renderSongDetails();
     if (!allowed) return;
     await this.changeSongDetails(button, true, true);
+  }
+
+  // "Got it" on the one notice: recorded on the Home's consent, so it is not shown
+  // again. It changes nothing that is read and leaves the switch where it was.
+  async dismissSongDetailsNotice(trigger) {
+    if (!this.state?.song_details?.reader_notice || this.busy || this.readOnly) return;
+    await this.run(trigger, 'Saving…', async () => {
+      try {
+        const result = await this.post('/song-details/notice', {
+          request_id: `song-details-notice-${globalThis.crypto.randomUUID()}`
+        });
+        if (result?.song_details) this.state.song_details = result.song_details;
+      } catch (error) {
+        if (error.payload?.song_details) this.state.song_details = error.payload.song_details;
+        throw error;
+      } finally {
+        this.renderSongDetails();
+      }
+    });
   }
 
   async setSongDetails(toggle) {

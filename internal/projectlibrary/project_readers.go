@@ -50,6 +50,28 @@ func projectReadersFrom(installed []plugin.InstalledPlugin) map[string]projectRe
 	return readers
 }
 
+// ReaderDisplayName is the name, as the reviewed list gives it, of the app
+// plugin that would read songs for the installed plugins: the first reviewed
+// plugin by name that declares a reader. Empty when none does. The approval's
+// words use it, so a person is told which plugin reads their project files
+// (assistant-reads-projects FR44, FR45).
+func ReaderDisplayName(installed []plugin.InstalledPlugin) string {
+	readers := projectReadersFrom(installed)
+	best := ""
+	for _, reader := range readers {
+		if best == "" || reader.plugin.Name < best {
+			best = reader.plugin.Name
+		}
+	}
+	if best == "" {
+		return ""
+	}
+	if entry, ok := reviewedintegration.ForPlugin(best); ok && entry.DisplayName != "" {
+		return entry.DisplayName
+	}
+	return ""
+}
+
 // What ReaderStatus says about one project format.
 const (
 	// ReaderReady: a reviewed plugin's reader covers it.

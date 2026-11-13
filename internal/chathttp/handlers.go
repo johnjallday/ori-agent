@@ -56,17 +56,20 @@ const (
 )
 
 type Handler struct {
-	utilityRegistry        *UtilityToolRegistry
-	utilityTelemetry       *utilitytelemetry.Tracker
-	settingsMu             sync.RWMutex
-	browserMCPPref         string
-	store                  store.Store
-	clientFactory          *client.Factory
-	llmFactory             *llm.Factory
-	commandHandler         *CommandHandler
-	orchestrator           *orchestration.Orchestrator
-	costTracker            *llm.CostTracker
-	sessionStore           session.HybridStore
+	utilityRegistry  *UtilityToolRegistry
+	utilityTelemetry *utilitytelemetry.Tracker
+	settingsMu       sync.RWMutex
+	browserMCPPref   string
+	store            store.Store
+	clientFactory    *client.Factory
+	llmFactory       *llm.Factory
+	commandHandler   *CommandHandler
+	orchestrator     *orchestration.Orchestrator
+	costTracker      *llm.CostTracker
+	sessionStore     session.HybridStore
+	// songFacts gives a Home's app assistant, inside one song's workspace, that
+	// song's saved facts for each turn. The reader decides who may have them.
+	songFacts              workspace.SongFactsReader
 	workspaceStore         workspace.Store
 	fileStore              *workspace.FileStore
 	userProfileStore       userprofile.UserStore
@@ -135,6 +138,29 @@ func NewHandler(store store.Store, clientFactory *client.Factory) *Handler {
 // writeJSONResponse writes a JSON response and logs errors if encoding fails
 func writeJSONResponse(w http.ResponseWriter, data any) {
 	orihttp.WriteJSON(w, data)
+}
+
+// SetSongFactsReader supplies the reader that gives a Home's app assistant the
+// saved facts of the one song it is working in (assistant-reads-projects FR41).
+func (h *Handler) SetSongFactsReader(reader workspace.SongFactsReader) {
+	h.songFacts = reader
+}
+
+// songFactsPromptSection is the facts section for one chat turn: built from
+// what is saved at this moment, appended to the turn's runtime prompt and never
+// written into the conversation, so a switch turned off means the next turn has
+// none (FR43). The reader answers only for the Home's app assistant inside one
+// of that Home's songs; for everyone else it is empty.
+func (h *Handler) songFactsPromptSection(ctx context.Context, workspaceID, agentName string) string {
+	if h == nil || h.songFacts == nil || strings.TrimSpace(workspaceID) == "" || strings.TrimSpace(agentName) == "" {
+		return ""
+	}
+	section := strings.TrimSpace(h.songFacts.SongFacts(ctx, workspaceID, agentName))
+	if section != "" {
+		// Sizes only, like the ticket path: no song name, track or path is logged.
+		logger.Info("Chat prompt carries song facts", logger.Fields{"workspace_id": workspaceID, "agent": agentName, "bytes": len(section)})
+	}
+	return section
 }
 
 // SetLLMFactory sets the LLM factory
@@ -1251,6 +1277,12 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 	// snapshot. Authored prompt variables must not suppress its guidance.
 	if assessmentPrompt := workspaceAssessmentPrompt(ag); assessmentPrompt != "" {
 		toolRuntimeSystemPrompt = strings.TrimSpace(toolRuntimeSystemPrompt + "\n\n" + assessmentPrompt)
+	}
+	// A song's facts for the Home's app assistant working in that song, like the
+	// assessment guidance above: authored prompt variables must not suppress them,
+	// and they are rebuilt every turn, never stored in the conversation.
+	if songFacts := h.songFactsPromptSection(ctx, normalizedRouteContext.WorkspaceID, current); songFacts != "" {
+		toolRuntimeSystemPrompt = strings.TrimSpace(toolRuntimeSystemPrompt + "\n\n" + songFacts)
 	}
 	providerName, providerErr := resolveChatProviderName(current, ag, h.llmFactory)
 	if providerErr != nil {

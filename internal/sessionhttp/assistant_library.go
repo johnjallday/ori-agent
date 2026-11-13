@@ -370,7 +370,7 @@ func (h *Handler) ListAssistantLibraryRoots(w http.ResponseWriter, r *http.Reque
 			_ = orihttp.RespondSuccess(w, map[string]any{"initialized": false,
 				"provider_read_only": !h.assistantLibraryProviderEvidence(scope, station),
 				"picker_available":   h.assistantLibraryRoots.PickerAvailable(),
-				"song_details":       librarySongDetails(station)})
+				"song_details":       h.librarySongDetailsFor(station)})
 			return
 		}
 		respondLibraryReadError(w, err)
@@ -438,7 +438,7 @@ func (h *Handler) ListAssistantLibraryRoots(w http.ResponseWriter, r *http.Reque
 		"picker_available": h.assistantLibraryRoots.PickerAvailable(),
 		// The shared-assistant and song-details switches ride this read: no
 		// extra fetch on load.
-		"sharing": h.librarySharing(scope, station), "song_details": librarySongDetails(station)})
+		"sharing": h.librarySharing(scope, station), "song_details": h.librarySongDetailsFor(station)})
 }
 
 // ListAssistantLibraryScanScopes is a read-only, revision-bound page of
