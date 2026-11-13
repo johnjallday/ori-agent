@@ -3145,7 +3145,7 @@
         el(
           'p',
           'fj-setting-help',
-          'A Curator is helping in this workspace. It explains proposals and answers questions; ' +
+          `${guidance.agent_name || 'A Curator'} is helping in this workspace. It explains proposals and answers questions; ` +
             'it cannot approve, move, or delete anything. Built-in filing and backup guidance is available. ' +
             'This is product advice, not an enabled user skill or permission to act.'
         )

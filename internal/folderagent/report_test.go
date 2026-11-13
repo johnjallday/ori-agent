@@ -101,14 +101,14 @@ func TestLook_WithoutReportsPostsNothingAndViewsHaveNoChat(t *testing.T) {
 
 func TestReportText_SaysWhatItFoundSuggestsAndWhereToChoose(t *testing.T) {
 	plan := &PlanView{Steps: []folderlook.Step{
-		{Title: "Add File Janitor to Downloads, with File Curator", Chosen: true},
+		{Title: "Add File Janitor to Downloads", Chosen: true},
 		{Title: "Make a group", Chosen: false},
 	}}
 	text := ReportText(View{FolderName: "Downloads", State: StateReported, FactsLine: "205 loose files of 21 kinds", Plan: plan,
 		ModelSentence: "Downloads Manager could not look itself: No API key is set. This is what Ori found."})
 	// The card under the message carries the cause sentence; the message does not repeat it.
 	want := "I looked around Downloads. I found 205 loose files of 21 kinds.\n\n" +
-		"I suggest one step: Add File Janitor to Downloads, with File Curator.\n\n" +
+		"I suggest one step: Add File Janitor to Downloads.\n\n" +
 		"Choose Set it up, Keep the folder as it is, or Look further below."
 	if text != want {
 		t.Fatalf("text =\n%s\nwant\n%s", text, want)

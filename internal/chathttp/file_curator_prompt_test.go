@@ -24,12 +24,24 @@ func (r *capturedCuratorProtection) ReadProtection(_ context.Context, owner, id 
 
 func TestCuratorAdviceReachesActualChatProviderRequests(t *testing.T) {
 	for _, providerName := range []string{"claude", "codex", "claude_code"} {
-		for _, scenario := range []string{"associated", "same-name skill", "unrelated", "ambiguous", "detached after resolution", "removed after resolution"} {
+		for _, scenario := range []string{"associated", "folder lead", "same agent other workspace", "same-name skill", "unrelated", "ambiguous", "detached after resolution", "removed after resolution"} {
 			t.Run(providerName+"/"+scenario, func(t *testing.T) {
 				base := &agent.Agent{Settings: types.Settings{Provider: providerName, Model: "test-model", SystemPrompt: "USER AUTHORED PROMPT"}}
 				agents := newPreflightStore("My helper", base)
 				s := workspace.NewInMemoryStore()
 				ws := &workspace.Workspace{ID: "curator-chat", OwnerUserID: "local", AgentInstances: []workspace.AgentInstance{{ID: "lead", Name: "Someone else", NodeID: "lead", EntryPoint: true}, {ID: "helper", Name: "My helper", NodeID: "helper"}}, InstalledCapabilities: []workspace.InstalledCapability{{ID: workspace.CapabilityFileJanitor, Version: 1, Source: workspace.InstallSourceInPlace, InstalledAt: time.Now(), OwnedResources: []workspace.CapabilityResource{{Kind: workspace.ResourceCompanionAgent, ID: "helper", Shared: true}}}}}
+				if scenario == "folder lead" || scenario == "same agent other workspace" {
+					base.Role = types.RoleOrchestrator
+					ws.AgentInstances = ws.AgentInstances[1:]
+					ws.AgentInstances[0].EntryPoint = true
+					if scenario == "same agent other workspace" {
+						if err := s.Save(ws); err != nil {
+							t.Fatal(err)
+						}
+						ws.ID = "unrelated-workspace"
+						ws.InstalledCapabilities = nil
+					}
+				}
 				if scenario == "unrelated" {
 					ws.InstalledCapabilities[0].OwnedResources = nil
 				}
@@ -79,7 +91,7 @@ func TestCuratorAdviceReachesActualChatProviderRequests(t *testing.T) {
 				}
 				prompt := provider.requests[0].SystemPrompt
 				want := 0
-				if scenario == "associated" || scenario == "same-name skill" {
+				if scenario == "associated" || scenario == "folder lead" || scenario == "same-name skill" {
 					want = 1
 				}
 				if strings.Count(prompt, "## File Janitor managed-folder protection") != want || protection.calls != want {

@@ -14,7 +14,7 @@
 #   Label 2026/               six songs six folders deep (Home stage at depth 6)
 #   Three Drafts/             three manuscripts under Drafts/ (Group stage)
 #   Messy/                    many boxes, nothing recognized near the top
-#   Loose Files/              36 loose files of six kinds (a dump: File Curator)
+#   Loose Files/              36 loose files of six kinds (a dump: File Janitor)
 #
 # Files are tiny placeholders; nothing is read by the walk.
 set -euo pipefail
@@ -75,7 +75,7 @@ done
 put "Messy/Clients/Folder 40/Deep/repo/go.mod" "module example.com/repo"
 
 # 36 loose files of six kinds sitting directly in the folder: a dump (Tools
-# stage, File Janitor in place with File Curator).
+# stage, File Janitor in place with the hired agent as Curator).
 for i in $(seq -w 1 6); do
   for kind in pdf jpg zip docx dmg csv; do put "Loose Files/file-$i.$kind"; done
 done

@@ -55,7 +55,7 @@ func TestBuildPlan_DumpAddsFileJanitorInPlaceWithFileCurator(t *testing.T) {
 	for _, l := range plan.Lines {
 		names = append(names, l.Name)
 	}
-	want := []string{"Adds File Janitor to Messy", "Adds File Curator", "Nothing in Messy is moved, copied or read"}
+	want := []string{"Adds File Janitor to Messy", "Messy Manager explains proposed filing", "Nothing in Messy is moved, copied or read"}
 	if !plan.Runnable || plan.Unavailable != "" || !reflect.DeepEqual(names, want) {
 		t.Fatalf("plan runnable=%v unavailable=%q lines=%v", plan.Runnable, plan.Unavailable, names)
 	}

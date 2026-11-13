@@ -93,7 +93,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
     .filter({ hasText: 'Downloads stays an inbox' });
   await expect(report).toBeVisible({ timeout: 30_000 });
   await expect(report.locator('[data-step]')).toHaveCount(1);
-  await expect(report).toContainText('Add File Janitor to Downloads, with File Curator');
+  await expect(report).toContainText('Add File Janitor to Downloads');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('7 software projects');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('5 REAPER songs');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('3 manuscripts');

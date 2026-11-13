@@ -814,8 +814,8 @@ func BuildPlan(rec Record, selected []string) Plan {
 			}
 		case folderlook.KindFileCurator:
 			// File Janitor goes into this workspace in place (the folder is
-			// already its anchor), and File Curator joins as its companion.
-			janitor, curator := "Adds File Janitor to "+rec.WorkspaceName, "Adds File Curator"
+			// already its anchor); the hired agent explains proposed filing.
+			janitor, curator := "Adds File Janitor to "+rec.WorkspaceName, rec.AgentName+" explains proposed filing"
 			plan.Lines = append(plan.Lines,
 				personalassistant.FolderPlanLine{
 					Kind: FolderPlanCapability, Name: janitor, Outcome: janitor,
@@ -823,7 +823,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 				},
 				personalassistant.FolderPlanLine{
 					Kind: personalassistant.FolderPlanAgents, Name: curator, Outcome: curator,
-					Detail: "It explains proposed filing; you approve every move.",
+					Detail: "You approve every move.",
 				})
 		case folderlook.KindSkill, folderlook.KindMCP, folderlook.KindPlugin:
 			line := addOnLine(c, rec.WorkspaceName)

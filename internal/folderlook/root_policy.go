@@ -29,8 +29,8 @@ func PolicyLine(policy RootPolicy) string {
 func CandidatesForPolicy(policy RootPolicy, facts foldermap.Facts, ready Readiness) []Candidate {
 	switch policy {
 	case RootDownloads:
-		return []Candidate{{ID: "file-curator", Kind: KindFileCurator, Name: "File Curator", Source: SourceTable,
-			Action: ActionAdd, Required: true, Detail: "adds File Janitor with File Curator",
+		return []Candidate{{ID: "file-curator", Kind: KindFileCurator, Name: "File Janitor", Source: SourceTable,
+			Action: ActionAdd, Required: true, Detail: "adds File Janitor; the folder's agent explains proposed filing",
 			Why: "Downloads is an inbox, even when it contains projects."}}
 	case RootUnresolved:
 		return nil

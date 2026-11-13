@@ -528,9 +528,10 @@ func (s folderAgentSetups) HomeHireModel() string {
 
 // addFolderAgentFileCurator installs File Janitor in place on the folder's
 // workspace (the install writes its record only: no folder access, watcher or
-// schedule until its own setup) and adds File Curator as its companion. A
-// repeat is success: both steps are idempotent.
-func (b *ServerBuilder) addFolderAgentFileCurator(workspaceID string, set func(kind, state, progress string)) error {
+// schedule until its own setup) and gives the hired agent the Curator role.
+// No agent is created or attached. A repeat keeps the same shared association.
+func (b *ServerBuilder) addFolderAgentFileCurator(rec folderagent.Record, set func(kind, state, progress string)) error {
+	workspaceID := rec.WorkspaceID
 	service := b.workspaceCapabilityService
 	if service == nil {
 		return errors.New("workspace capabilities are not wired")
@@ -543,9 +544,27 @@ func (b *ServerBuilder) addFolderAgentFileCurator(workspaceID string, set func(k
 	}
 	set(folderagent.FolderPlanCapability, personalassistant.FolderLineDone, "")
 	set(personalassistant.FolderPlanAgents, personalassistant.FolderLineWorking, "")
-	if _, err := service.AddCompanion(workspaceID, workspace.CapabilityFileJanitor); err != nil {
-		set(personalassistant.FolderPlanAgents, personalassistant.FolderLineFailed, "")
+	fail := func(err error) error {
+		message := "The Curator role could not be saved. Choose the folder's agent in File Janitor settings. File Janitor still works without an agent."
+		var capabilityErr *workspacecapability.Error
+		if errors.As(err, &capabilityErr) {
+			message = capabilityErr.Message
+		}
+		set(personalassistant.FolderPlanAgents, personalassistant.FolderLineFailed, message)
 		return err
+	}
+	ws, err := b.workspaceStore.Get(workspaceID)
+	if err != nil {
+		return fail(err)
+	}
+	instance, unique := ws.FindUniqueAgentInstance(rec.AgentName, "")
+	if !unique {
+		return fail(&workspacecapability.Error{Code: workspacecapability.CodeCompanionFailed,
+			Message: "The folder's agent attachment is missing or ambiguous. Choose one current workspace agent in File Janitor settings. File Janitor still works without an agent."})
+	}
+	if _, err := service.AssociateCompanion(workspaceID, workspace.CapabilityFileJanitor, instance.ID,
+		workspacecapability.CompanionAssociationOptions{ExpectedLead: rec.AgentName}); err != nil {
+		return fail(err)
 	}
 	set(personalassistant.FolderPlanAgents, personalassistant.FolderLineDone, "")
 	return nil
@@ -763,7 +782,7 @@ func (s folderAgentSetups) run(ctx context.Context, rec folderagent.Record, plan
 			update(append([]personalassistant.FolderPlanLine(nil), lines...))
 			continue
 		case folderlook.KindFileCurator:
-			if err := b.addFolderAgentFileCurator(rec.WorkspaceID, set); err != nil {
+			if err := b.addFolderAgentFileCurator(rec, set); err != nil {
 				return stop(folderagent.FolderPlanCapability, personalassistant.FolderStopFailed, err)
 			}
 			continue

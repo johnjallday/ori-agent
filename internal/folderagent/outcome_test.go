@@ -155,7 +155,7 @@ func TestOutcomes_FileCuratorAndAddOnsSayWhatTheyAdd(t *testing.T) {
 	}}
 	curator := stepHandleOfKind(t, rec, folderlook.StepFileCurator)
 	plan := BuildPlan(rec, nil)
-	if got := outcomesOf(plan, curator); !reflect.DeepEqual(got, []string{"Adds File Janitor to Loose Files", "Adds File Curator"}) {
+	if got := outcomesOf(plan, curator); !reflect.DeepEqual(got, []string{"Adds File Janitor to Loose Files", "Loose Files Manager explains proposed filing"}) {
 		t.Fatalf("file curator outcomes = %q", got)
 	}
 	var skill, kit string

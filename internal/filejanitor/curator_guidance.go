@@ -8,6 +8,7 @@ type CuratorGuidanceStatus struct {
 	Bundled         bool               `json:"bundled"`
 	Available       bool               `json:"available"`
 	AgentInstanceID string             `json:"agent_instance_id,omitempty"`
+	AgentName       string             `json:"agent_name,omitempty"`
 	Candidates      []CuratorCandidate `json:"candidates,omitempty"`
 }
 
@@ -28,6 +29,7 @@ func (s *Service) CuratorGuidance(workspaceID string) CuratorGuidanceStatus {
 	if curator, ok := ws.FileCurator(); ok && out.Bundled {
 		out.Available = true
 		out.AgentInstanceID = curator.ID
+		out.AgentName = curator.Name
 		return out
 	}
 	for _, instance := range ws.AgentInstances {

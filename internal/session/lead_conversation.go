@@ -25,8 +25,9 @@ type LeadConversationResult struct {
 }
 
 // EnsureLeadConversation atomically delivers an introduction and at most one
-// assessment into an ordinary session. Existing conversations suppress seeding;
-// deleted/moved sessions and replacement leads never inherit delivery. The
+// assessment into an ordinary session. User conversations suppress seeding; an
+// enrolled folder lead's host-report-only thread can receive its later welcome.
+// Deleted/moved sessions and replacement leads never inherit delivery. The
 // receipt survives session deletion, so reloads cannot recreate a dismissed chat.
 func (h *hybridStore) EnsureLeadConversation(ctx context.Context, in LeadConversationInput) (LeadConversationResult, error) {
 	var out LeadConversationResult
@@ -64,6 +65,21 @@ func (h *hybridStore) EnsureLeadConversation(ctx context.Context, in LeadConvers
 			}
 			if existing == 0 {
 				sessionID = uuid.NewString()
+			} else if existing == 1 && enrollmentErr == nil {
+				// A fast folder look can publish before the welcome worker. Only
+				// reuse its verified host-only thread, never a user's conversation.
+				// The enrollment above still fences the original owner and lead.
+				err := tx.QueryRowContext(ctx, `SELECT s.id FROM sessions s
+					WHERE s.workspace_id=? AND s.agent_name=? COLLATE NOCASE
+					AND EXISTS (SELECT 1 FROM workspace_folder_reports r JOIN messages m ON m.id=r.message_id AND m.session_id=r.session_id
+						WHERE r.workspace_id=s.workspace_id AND r.session_id=s.id)
+					AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id=s.id AND
+						(m.role!='assistant' OR NOT EXISTS (SELECT 1 FROM workspace_folder_reports r
+						 WHERE r.workspace_id=s.workspace_id AND r.session_id=s.id AND r.message_id=m.id)))`,
+					in.WorkspaceID, in.AgentName).Scan(&sessionID)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
 			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_lead_conversations(workspace_id,owner_user_id,agent_instance_id,agent_name,session_id) VALUES(?,?,?,?,?)`, in.WorkspaceID, in.OwnerUserID, in.AgentInstanceID, in.AgentName, sessionID); err != nil {
 				return err
@@ -72,8 +88,10 @@ func (h *hybridStore) EnsureLeadConversation(ctx context.Context, in LeadConvers
 				return nil
 			}
 			now := time.Now().UTC()
-			if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(id,title,agent_name,workspace_id,message_count,created_at,updated_at) VALUES(?,?,?,?,0,?,?)`, sessionID, "Getting started", in.AgentName, in.WorkspaceID, now, now); err != nil {
-				return err
+			if existing == 0 {
+				if _, err := tx.ExecContext(ctx, `INSERT INTO sessions(id,title,agent_name,workspace_id,message_count,created_at,updated_at) VALUES(?,?,?,?,0,?,?)`, sessionID, "Getting started", in.AgentName, in.WorkspaceID, now, now); err != nil {
+					return err
+				}
 			}
 			content := in.Introduction
 			if in.Assessment != "" {
