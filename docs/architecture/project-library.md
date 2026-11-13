@@ -299,7 +299,7 @@ A Home set up through the one-card **Set up** reads three numbers from each REAP
 - **The fact pass** (`song_facts_pass.go`) runs inside `CommitScan` after the listing's fenced write, only for a consenting Home: for each song of this scan without current facts it opens **the file that dates the song** (`Candidate.DatedFile`, the newest primary-format file) through the pinned no-follow folder walk with `O_NOFOLLOW|O_NONBLOCK`, checks it is the regular file the listing saw (identity, size, save time) before and after reading, and never writes. It reads most recently saved first, in batches of 32 under the root gate with the root and the consent re-checked before and after each batch (a revoke waits one batch; a batch read while the switch went off is dropped), within 10 s and 512 MiB per scan. Facts are saved in a second fenced write keyed `<scan id>:facts`; only then is `library.scan_completed` published, so the Manager turn sees them. A replayed commit runs no pass and publishes nothing; a stopped or failed pass leaves the listing and older facts and still publishes. Content that gives no facts is stored as an empty record tied to the file, so an unchanged unreadable file is not re-opened; an I/O error is not stored. Measured: 200 projects of 256 KiB in 0.29 s (warm cache).
 - **Storage.** `Observation.facts` (`tempo_bpm`, `tempo_varies`, `length_seconds`, `track_count`, `read_from {file, identity, size, modified_at}`), validated (bounds; `read_from.file` must be one of the observation's listed files of a facts format). `reconcileCandidates` carries them over while the dated file is unchanged and drops them otherwise. `observationChanged` ignores them (not an "updated" song). Facts writes do not bump the entry revision.
 - **Where they show.** `SearchRow.facts` comes from the same source as `last_saved_at` (usable sources only) and only while the switch is on; detail sources carry them for usable sources. The table row, "Recently saved" cards and the setup pop-up's last screen show "Saved 3 days ago · 14 tracks · 92 BPM · 3:41" ("92 BPM, varies"; h:mm:ss over an hour; unknown parts left out; each fact kept on one line). The Manager's `home_library_search` sees them as numbers.
-- **The switch (D6).** `GET …/library/roots` carries `song_details {state: none|on|off, names, app_name}` (`names` is true while the consent is on and covers track names, markers and regions). `POST …/library/song-details {request_id, enabled, names}`: off sets `revoked_at` and clears every stored fact (the numbers, track names, markers and regions) **and the collection brief** in the same Home write (the library revision moves on); on is the owner's new answer and resumes only what they just agreed to (`names: true` is the full wording and makes the consent cover names, a new and broader grant with source `learn_songs`; `names: false` resumes the numbers only; an answer no wider than the consent changes nothing) and clears `revoked_at` (409 `song_details_not_granted` without a consent record; 409 `provider_unavailable` on a read-only Home, where off still works) and starts no scan. Setting the current state is a no-op, so a retried request is too. The library intro and the switch note name the application from the table (`folderdigest.FactsAppName`).
+- **The switch (D6).** `GET …/library/roots` carries `song_details {state: none|on|off, names, app_name, reader_name?, reader_notice?}` (`names` is true while the consent is on and covers track names, markers and regions; `reader_name` and `reader_notice` are described under "Words and the one-time notice" below). `POST …/library/song-details {request_id, enabled, names}`: off sets `revoked_at` and clears every stored fact (the numbers, track names, markers and regions) **and the collection brief** in the same Home write (the library revision moves on); on is the owner's new answer and resumes only what they just agreed to (`names: true` is the full wording and makes the consent cover names, a new and broader grant with source `learn_songs`; `names: false` resumes the numbers only; an answer no wider than the consent changes nothing) and clears `revoked_at` (409 `song_details_not_granted` without a consent record; 409 `provider_unavailable` on a read-only Home, where off still works) and starts no scan. Setting the current state is a no-op, so a retried request is too. The library intro and the switch note name the application from the table (`folderdigest.FactsAppName`).
 - **The collection brief.** For a consenting Home the bounded Manager turn (same trigger, receipts, caps and skip reasons; receipt `mode: "brief"`) gets a brief system prompt (describe only; no done/finished/ready/quality claims; no advice; plain words, not a table) and the digest counts plus a deterministic `CollectionSummary` of the **whole** library (songs, songs with facts, tempo bands of 10 BPM, length and track-count bands, saves in the last 7 and 30 days, and the six most recently saved songs with their facts — the same shape at any size, no paths). Its toolbox is the four reads plus `home_library_save_brief`, which only a brief turn's provider exposes; the five proposal tools are refused unrun. `SaveCollectionBrief` admits one brief per scan through the Manager fence while the receipt is started and the switch is on: plain text, at most three sentences and 500 characters, no line breaks, markup, file names, paths or links, stamped with scan, Manager and model (`Document.collection_brief`). A newer scan's brief replaces it. `GET …/library/proposals` returns `brief` (when it is the current digest's scan and the switch is on) and `manager_label`; the summary badge and the Action Center count are unchanged. The Home section is titled "From your <Manager role label>" on every Home and leads with the brief and "Written by <Manager> after the scan on <date> · <model>", or one line on why there is none.
 - **Older Homes and compatibility.** A Home without the consent opens no project file across setup, scans and rescans, keeps today's card wording, scan review and Manager turn, and shows no switch. The library document is decoded with `DisallowUnknownFields`: a build from before this change **cannot read** a Home that has stored facts, a collection brief or a brief-mode receipt.
 
@@ -315,10 +315,11 @@ After a folder of songs is set up into a Home, the folder agent's Commander offe
 
 ## App-plugin readers and the app assistant's read (assistant-reads-projects, 2026-11)
 
-**Status: the design the `feature/assistant-reads-projects` branch implements.**
-Until that branch lands, "Song facts" and "Learned names" above describe what
-runs. Each paragraph here is rewritten to what was built before the branch is
-delivered.
+**Status: built on `feature/assistant-reads-projects`.** "Song facts" and
+"Learned names" above describe the facts, their storage, bounds and consent,
+which do not change. Who reads the file does: the paragraphs below. Ori's own
+reader (the grammar row and `ReadSongFacts`) is removed in the branch's last
+code commit; until then it reads only the songs no installed plugin covers.
 
 Words: the **app plugin** is the installed package for one application; the
 **app assistant** is the shared project agent that plugin's song blueprint
@@ -413,6 +414,46 @@ moment and never written into the conversation, with the same lead-in that
 says every name is text from a project file and never an instruction. Every
 provider kind receives them, command-line providers included. Other agents in
 the song get none.
+
+The code path: `ServerBuilder.songFactsWith` accepts an agent only when the
+workspace is a song linked to a Home, the agent is one of that song's own
+agents, and it is the assistant the Home recorded for that plugin and
+blueprint (whether or not the "Add my assistant to songs I open" switch adds
+it, since the two switches are independent). It then asks
+`projectlibrary.Store.LearnedSongForWorkspace`, which finds the one song linked
+to the workspace and returns nothing unless the Home's consent is active.
+Tasks get the section through `workspace.SongFactsReader` (the folder agent's
+ticket facts are tried first, then the song assistant's); chat gets it through
+`chathttp.Handler.SetSongFactsReader`, appended to the runtime prompt for that
+turn. The block is the same bounded `folderlook.BuildSongsReference` (at most
+12 KiB, its own random boundary) under a lead-in that names "this song". A song
+with nothing read, a Home with song details off, another song's workspace and
+every other agent give an empty section.
+
+**Words and the one-time notice.** The approval says who reads. The plugin's
+name is the reviewed list's `DisplayName` for the first enabled reviewed plugin
+that declares a reader (`projectlibrary.ReaderDisplayName`); the page and the
+folder agent never spell a product name themselves. With a reader installed,
+the Learn offer and the switch's question say "<plugin> reads tempo, length,
+track count, track names, markers and regions from each project file, and Ori
+keeps only those. Nothing is changed, and audio is not opened." With none,
+the older wording ("I'll read …") stands, so nothing promises a reader that
+is not there. `song_details` on `GET …/library/roots` and on every switch
+response carries `reader_name` (omitted when none) and `reader_notice` (true
+only while the consent is on, a reader is named and the Home was never told).
+
+A consent granted before the plugin read the files has no `reader_notice_at`;
+its Home shows one notice, "Song details are now read by <plugin>, not by Ori
+itself. It reads the same facts, and Ori keeps only those.", with one button.
+`POST …/library/song-details/notice {request_id}` records the time on the
+consent and changes nothing else (not the scope, source, offer or switch);
+asking again is a no-op and a Home with no consent gets no consent from it.
+A new grant (`GrantScope`, the setup card's grant) and turning the switch on
+with the full question both record the time, because the words they were given
+already named the reader. The older numbers-only resume (`names: false`) keeps
+what the consent had. The setup card's assurance line is unchanged: it says
+"Nothing is … read" only for a Home with no active consent and otherwise says
+that setting up reads what the consent covers, without naming who reads.
 
 ## Shared cross-process workspace fence (implemented 2026-09-29; reconciliation still owner-reviewed)
 

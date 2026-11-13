@@ -269,6 +269,19 @@ only when the root's recorded last scan differs from the one before the review.
   everything it read.") with Allow and Not now; nothing is read until Allow. Off,
   the Home behaves like a Home without the consent, including the Manager's
   post-scan turn.
+- **Who reads (assistant-reads-projects):** when an installed app plugin reads
+  the project files, the Learn offer, the switch's question and the note under
+  the switch name it: "<plugin> reads tempo, length, track count, track names,
+  markers and regions from each project file, and Ori keeps only those. Nothing
+  is changed, and audio is not opened." The name is the reviewed list's, never
+  typed in host code; with no reader installed the "Ori will read" wording
+  above stands. A Home that approved before the plugin read the files sees one
+  notice above the switch, "Song details are now read by <plugin>, not by Ori
+  itself. It reads the same facts, and Ori keeps only those." with a **Got it**
+  button; it is recorded on the consent and never shown again, and the switch
+  and what is read stay as they were. A Home that approves now, or turns the
+  switch on through the question, is told in the question itself and sees no
+  notice. The card's line (Nothing is moved, copied or read) is unchanged.
 - **The brief:** after each completed scan of a Home whose switch is on, the
   Manager's turn writes one short description of the whole collection, shown at
   the top of "From your {Manager}" with where it came from, or one line on why
@@ -359,9 +372,8 @@ only when the root's recorded last scan differs from the one before the review.
 
 ### S4d. The app assistant: named on the plan, hired by Set up (assistant-reads-projects)
 
-**Status: the design the `feature/assistant-reads-projects` branch implements.**
-It applies to the folder agent's plan card and its Home step. It is rewritten
-to what was built before the branch is delivered. The reading itself is in
+**Status: built on `feature/assistant-reads-projects`.** It applies to the
+folder agent's plan card and its Home step. The reading itself is in
 `project-library.md`, "App-plugin readers and the app assistant's read".
 
 - **Owner:** `AssistantProgramState.project_staffing_consent` on the Home (the
