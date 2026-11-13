@@ -40,7 +40,9 @@ type folderAgentSongs struct {
 	// library is resolved when used: the session handler may not exist yet when
 	// the folder agent is wired.
 	library func() folderAgentLearnLibrary
-	token   func() string
+	// runner is the Home assistant's read turn, resolved when used.
+	runner func() *projectlibrary.FactsReadRunner
+	token  func() string
 }
 
 func newFolderAgentSongs(b *ServerBuilder) folderAgentSongs {
@@ -53,6 +55,12 @@ func newFolderAgentSongs(b *ServerBuilder) folderAgentSongs {
 				return nil
 			}
 			return b.sessionHandler
+		},
+		runner: func() *projectlibrary.FactsReadRunner {
+			if b.sessionHandler == nil {
+				return nil
+			}
+			return b.sessionHandler.FactsReadRunner()
 		},
 		token: func() string { return strconv.FormatInt(time.Now().UnixNano(), 36) },
 	}
@@ -110,9 +118,20 @@ func (f folderAgentSongs) Learn(ctx context.Context, rec folderagent.Record, hom
 	}
 	key := "folder-agent-" + rec.WorkspaceID + "-learn-" + f.token()
 	ctx = projectlibrary.WithSongFactsProgress(ctx, progress.note)
+	// The songs an app plugin reads are gathered across the listing's scans and
+	// read in one turn by the Home's assistant, so one press makes one turn. The
+	// scans' events are held until that read ends.
+	ctx, collector := projectlibrary.WithDeferredFactsRead(ctx)
 	listing, err := listFolderAgentSongs(ctx, library, rec, rec.OwnerUserID, homeID, state.RootID, key, "", "", func(string, string, string) {})
 	if err != nil {
 		logger.Warn("Folder agent could not list the songs to read them", logger.Fields{"workspace_id": rec.WorkspaceID, "error": err.Error()})
+	}
+	// Whatever was gathered is read (or stopped with its reason) and its held
+	// events published, even when the listing ended early.
+	if slices := collector.Slices(); len(slices) > 0 && f.runner != nil {
+		if runner := f.runner(); runner != nil {
+			progress.readEnded(runner.Read(ctx, slices, projectlibrary.FactsReadByLearn))
+		}
 	}
 	// A folder of songs the listing never reached is a reading that did not
 	// happen, not one that found nothing to read: it ends "stopped", and what was
@@ -187,10 +206,30 @@ type learnProgress struct {
 	current                projectlibrary.SongFactsProgress
 	song                   string
 	stopped                bool
+	// reader is the app assistant reading the songs; reason why its read
+	// stopped (a folderagent.LearningReason* code), "" when it did not.
+	reader, reason string
+}
+
+// readEnded takes the outcome of the Home assistant's read turn. Its reason
+// codes are the library's, which the folder agent names the same way.
+func (p *learnProgress) readEnded(run projectlibrary.FactsReadRun) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if run.AgentName != "" {
+		p.reader = run.AgentName
+	}
+	if run.Status == "stopped" {
+		p.stopped = true
+		p.reason = run.Reason
+	}
 }
 
 func (p *learnProgress) note(sp projectlibrary.SongFactsProgress) {
 	p.mu.Lock()
+	if sp.Reader != "" {
+		p.reader = sp.Reader
+	}
 	if sp.Finished {
 		p.doneBefore += sp.Targets
 		p.readBefore += sp.Read
@@ -212,7 +251,7 @@ func (p *learnProgress) snapshotLocked(status string) folderagent.Learning {
 		Status: status, Total: p.total,
 		Done: min(p.total, p.doneBefore+p.current.Done),
 		Read: min(p.total, p.readBefore+p.current.Read),
-		Song: p.song,
+		Song: p.song, Reader: p.reader,
 	}
 }
 
@@ -229,6 +268,8 @@ func (p *learnProgress) final(listed bool) folderagent.Learning {
 	l.Song = ""
 	if status == folderagent.LearningDone {
 		l.Done = p.total
+	} else {
+		l.Reason = p.reason
 	}
 	return l
 }

@@ -98,6 +98,9 @@ func TestSongs_TakesLearnOrDismissOnly(t *testing.T) {
 		`{"answer":"learn","scope":"names"}`: http.StatusBadRequest,
 		`{"answer":"learn"}`:                 http.StatusNotFound,
 		`{"answer":"dismiss"}`:               http.StatusNotFound,
+		// Try again on a stopped reading reaches the service too.
+		`{"answer":"retry"}`:                 http.StatusNotFound,
+		`{"answer":"retry","scope":"names"}`: http.StatusBadRequest,
 	}
 	for body, want := range cases {
 		req := httptest.NewRequest(http.MethodPost, "/folder-agent/ws-1/songs", strings.NewReader(body))

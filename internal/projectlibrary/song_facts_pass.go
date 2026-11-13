@@ -130,6 +130,9 @@ type SongFactsProgress struct {
 	Skipped  int
 	Finished bool
 	Stopped  string
+	// Reader is the agent reading the songs, when the Home's app assistant reads
+	// them through its plugin; empty for the host's own pass.
+	Reader string
 }
 
 type songFactsProgressKey struct{}
@@ -174,6 +177,13 @@ func (r *Roots) readSongFactsAfterScan(ctx context.Context, scope Scope, scan Sc
 	if !ok || len(targets) == 0 {
 		return songFactsOutcome{}
 	}
+	return r.readSongFactsTargets(ctx, scope, scan, root, targets, grant)
+}
+
+// readSongFactsTargets is the host's own pass over the given targets: the songs
+// of a scan that no installed app plugin reads (assistant-reads-projects keeps
+// it for those until it is retired).
+func (r *Roots) readSongFactsTargets(ctx context.Context, scope Scope, scan Scan, root Root, targets []songFactsTarget, grant songFactsGrant) songFactsOutcome {
 	started := time.Now()
 	reads, outcome := r.songFactsPass(ctx, scope, root, targets, grant)
 	if len(reads) > 0 {

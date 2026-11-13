@@ -54,6 +54,9 @@ type Roots struct {
 	// factsOpened, when set, sees every project file the pass opens (tests).
 	factsBudget songFactsBudget
 	factsOpened func(relative, file string)
+	// factsRead, when set, reads the songs an installed app plugin can read
+	// through the Home's shared assistant (assistant-reads-projects).
+	factsRead *FactsReadRunner
 }
 
 func NewRoots(library *Store, picker FolderPicker, selections *pathselection.Store, guards filejanitor.RootGuards) *Roots {

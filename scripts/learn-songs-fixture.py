@@ -1,6 +1,6 @@
 """Writes the "learn the songs" demo songs into a demo sandbox's Music folder.
 
-Usage: python3 -I scripts/learn-songs-fixture.py <ori-demo-sandbox> [long-takes] [mib-each]
+Usage: python3 -I scripts/learn-songs-fixture.py <ori-demo-sandbox> [long-takes] [mib-each] [bulk-songs]
 
 Run it through `./scripts/smoke.sh learn-songs-fixture`, which also creates the
 sandbox's Downloads folder, the six standard songs and the Beats folder, and seeds
@@ -18,6 +18,11 @@ the folder agents. It adds to <sandbox>/Music/REAPER Projects:
                 the card's per-song progress line to be seen. At most 480 MiB in
                 all (15 x 30): one pass reads at most 512 MiB.
   Logic Sketch  a Logic Pro bundle: a song in a format with no offline grammar
+  Bulk Song N   optional, in <sandbox>/Bulk/REAPER Projects (its own folder, so
+                Music and Beats stay the clean fixtures): <bulk-songs> small
+                valid projects with named tracks and markers, for reading a
+                whole library with one press (500 for the scale check). Each
+                has a different tempo, track count and length.
 
 The sandbox path must contain "/ori-demo."; nothing outside it is written.
 """
@@ -132,6 +137,28 @@ if long_count * long_size > 480:
     sys.exit(f"{long_count} x {long_size} MiB is over the 512 MiB read budget of one pass; use at most 480 MiB in all (for example 15 x 30)")
 for n in range(1, long_count + 1):
     write_long(f"Long Take {n}", when(5, min(n, 28)), long_size)
+
+
+def write_bulk(n, saved):
+    """One small valid project: a tempo, 2 to 17 named tracks and 1 to 8 markers,
+    all derived from n so a run is repeatable and no two songs read alike."""
+    song = f"Bulk Song {n:03d}"
+    folder = os.path.join(sandbox, "Bulk", "REAPER Projects", song)
+    os.makedirs(folder, exist_ok=True)
+    tracks = [track(f"Bulk {n:03d} Track {k + 1}", 120 + (n % 90) if k == 0 else None) for k in range(2 + n % 16)]
+    markers = [marker(k + 1, str(10 * (k + 1)), f"Section {k + 1}") for k in range(1 + n % 8)]
+    path = os.path.join(folder, song + ".rpp")
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(project(str(70 + n % 80), markers, tracks))
+    os.utime(path, (saved, saved))
+    os.utime(folder, (saved, saved))
+
+
+bulk_count = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+if bulk_count < 0 or bulk_count > 2000:
+    sys.exit("bulk-songs must be between 0 and 2000")
+for n in range(1, bulk_count + 1):
+    write_bulk(n, when(4, 1 + n % 28))
 
 # A file that is not a project of its format, and one over the size cap.
 write("Broken Take", '<Ableton MajorVersion="5">\n', when(7, 2))

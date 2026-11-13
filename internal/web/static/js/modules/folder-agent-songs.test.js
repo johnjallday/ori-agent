@@ -215,6 +215,103 @@ test('the answers post to the songs endpoint', async () => {
   ]);
 });
 
+// assistant-reads-projects FR33, FR35: the card names who is reading, and every
+// way a reading can stop has its sentence and its one action.
+test('a reading names the assistant that is reading', () => {
+  const view = folderAgentReportView(
+    done({
+      learning: learning({
+        line: 'REAPER Assistant is reading 7 songs…',
+        reader: 'REAPER Assistant'
+      })
+    })
+  );
+  assert.equal(view.learning.reader, 'REAPER Assistant');
+  const card = renderFolderAgentReport(view, stubDocument(), {});
+  assert.equal(
+    text(card, '.folder-agent-card__learning-line'),
+    'REAPER Assistant is reading 7 songs…'
+  );
+});
+
+test('a stopped reading says why and offers the one action that fits', () => {
+  const stopped = (reason, action, line) =>
+    folderAgentReportView(
+      done({
+        setup: {
+          status: 'done',
+          lines: [],
+          receipt: { home: { name: 'Music Production Home', route: '/workspaces/home-1' } }
+        },
+        learning: learning({ status: 'stopped', line, reason, action, reader: 'REAPER Assistant' })
+      })
+    );
+  const calls = [];
+  const draw = view =>
+    renderFolderAgentReport(view, stubDocument(), {
+      onAction: (action, _button, extra) => calls.push([action, extra])
+    });
+  const controls = card =>
+    card
+      .querySelector('.folder-agent-card__learning-actions')
+      .children.map(node => [node.tagName, node.textContent, node.href || '']);
+
+  const retry = draw(stopped('plugin_failed', 'retry', 'Reading stopped after 2 of 7 songs.'));
+  assert.equal(
+    retry.querySelector('.folder-agent-card__learning').dataset.learningReason,
+    'plugin_failed'
+  );
+  assert.deepEqual(controls(retry), [['BUTTON', 'Try again', '']]);
+  retry.querySelector('.folder-agent-card__learning-actions').children[0].listeners.click();
+  assert.deepEqual(plain(calls), [['retry_songs', {}]]);
+
+  assert.deepEqual(controls(draw(stopped('no_model', 'choose_model', 'x has no model.'))), [
+    ['A', 'Choose a model', '/settings'],
+    ['BUTTON', 'Try again', '']
+  ]);
+  assert.deepEqual(controls(draw(stopped('no_assistant', 'add_assistant', 'No assistant.'))), [
+    ['A', 'Add it', '/workspaces/home-1'],
+    ['BUTTON', 'Try again', '']
+  ]);
+  assert.deepEqual(controls(draw(stopped('plugin_update', 'update_plugin', 'Update it.'))), [
+    ['A', 'Update', '/plugins']
+  ]);
+  assert.deepEqual(controls(draw(stopped('details_off', 'open_switch', 'Song details are off.'))), [
+    ['A', "Open the Home's switch", '/workspaces/home-1']
+  ]);
+  // A stop with no named reason keeps its line and offers nothing to press.
+  const plainStop = draw(
+    folderAgentReportView(
+      done({ learning: learning({ status: 'stopped', line: 'Stopped before it finished' }) })
+    )
+  );
+  assert.equal(plainStop.querySelector('.folder-agent-card__learning-actions'), null);
+  // A reading that is still running never shows an action.
+  const running = draw(
+    folderAgentReportView(
+      done({ learning: learning({ action: 'retry', reason: 'plugin_failed' }) })
+    )
+  );
+  assert.equal(running.querySelector('.folder-agent-card__learning-actions'), null);
+});
+
+test('Try again posts the retry answer to the songs endpoint', async () => {
+  const view = folderAgentReportView(done());
+  const posts = [];
+  await postFolderAgentAction(
+    view,
+    'retry_songs',
+    async (url, init) => {
+      posts.push([url, JSON.parse(init.body)]);
+      return okJSON({ folder_agent: null });
+    },
+    {}
+  );
+  assert.deepEqual(posts, [
+    ['/api/personal-assistant/folder-agent/ws-1/songs', { answer: 'retry' }]
+  ]);
+});
+
 test('a reading shows its line and a progress bar, then how it ended', () => {
   const running = folderAgentReportView(done({ learning: learning() }));
   assert.deepEqual(plain(running.learning), {
@@ -224,7 +321,10 @@ test('a reading shows its line and a progress bar, then how it ended', () => {
     total: 7,
     notRead: '',
     summary: '',
-    summaryBy: ''
+    summaryBy: '',
+    reader: '',
+    reason: '',
+    action: ''
   });
   const card = renderFolderAgentReport(running, stubDocument(), {});
   const section = card.querySelector('.folder-agent-card__learning');

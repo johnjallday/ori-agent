@@ -615,6 +615,71 @@ export function librarySharingView(sharing, readOnly = false, songDetails = null
   return view;
 }
 
+// libraryFactsReadView words the Home assistant's newest song-reading turn
+// (assistant-reads-projects FR33, FR35): who is reading while it runs, and for
+// a stopped one why, with the one thing to do about it. Nothing when the read
+// finished or there is none. Try again on the Home is the root's own Scan; there
+// is no fallback reader behind any reason.
+export function libraryFactsReadView(run, role = 'assistant') {
+  if (!run || typeof run !== 'object') return null;
+  const who = String(run.agent_name || '').trim() || `Your ${role}`;
+  const targets = Number(run.targets) || 0;
+  const done = Math.max(0, targets - (Number(run.left) || 0));
+  if (run.status === 'started') {
+    return {
+      status: 'running',
+      text: `${who} is reading ${targets} ${targets === 1 ? 'song' : 'songs'}…`,
+      action: null
+    };
+  }
+  if (run.status !== 'stopped') return null;
+  const retry = { id: 'rescan', label: 'Try again' };
+  switch (run.reason) {
+    case 'no_model':
+      return {
+        status: 'stopped',
+        text: `${who} has no model, so the songs were not read.`,
+        action: { id: 'link', label: 'Choose a model', href: '/settings' },
+        retry
+      };
+    case 'assistant_missing':
+      return {
+        status: 'stopped',
+        text: `Your ${role} is gone, so the songs were not read.`,
+        action: null,
+        retry
+      };
+    case 'no_assistant':
+      return {
+        status: 'stopped',
+        text: `This Home has no ${role} to read the songs yet.`,
+        action: null
+      };
+    case 'plugin_update':
+      return {
+        status: 'stopped',
+        text: 'The plugin cannot read songs yet. Update it to read them.',
+        action: { id: 'link', label: 'Update', href: '/plugins' }
+      };
+    case 'plugin_failed':
+    case 'time_limit':
+      return {
+        status: 'stopped',
+        text: `Reading stopped after ${done} of ${targets} songs.`,
+        action: retry
+      };
+    case 'restarted':
+      return { status: 'stopped', text: 'Reading stopped when Ori restarted.', action: retry };
+    case 'details_off':
+      return { status: 'stopped', text: 'Song details are off for this Home.', action: null };
+    case 'no_call':
+    case 'model_error':
+      return { status: 'stopped', text: `${who} did not start the reading.`, action: retry };
+    default:
+      return null;
+  }
+}
+
 // The library's intro: what reading this Home's folders does. A Home whose
 // song-details switch is on also reads each project file's tempo, length and
 // track count and, when the owner agreed to it, the track names, markers and
@@ -1091,6 +1156,9 @@ export class ProjectLibraryPanel {
     document
       .getElementById('projectLibrarySharingDismiss')
       ?.addEventListener('click', event => void this.runSharingAction(event.currentTarget));
+    document
+      .getElementById('projectLibraryFactsReadRetry')
+      ?.addEventListener('click', event => void this.rescanAll(event.currentTarget));
     document
       .getElementById('projectLibrarySongDetailsSwitch')
       ?.addEventListener('change', event => void this.setSongDetails(event.currentTarget));
@@ -1786,6 +1854,35 @@ export class ProjectLibraryPanel {
     return projectWords(this.summary?.words);
   }
 
+  // The Home assistant's song-reading turn: who is reading while it runs, and
+  // why a stopped one stopped with its one action. It rides the summary read:
+  // no extra request. Try again is this Home's own Scan.
+  renderFactsRead() {
+    const box = document.getElementById('projectLibraryFactsRead');
+    if (!box) return;
+    const role = String(this.state?.sharing?.role_label || 'assistant');
+    const view = this.readOnly ? null : libraryFactsReadView(this.summary?.facts_read, role);
+    box.hidden = !view;
+    if (!view) return;
+    box.dataset.factsReadStatus = view.status;
+    const text = document.getElementById('projectLibraryFactsReadText');
+    if (text) text.textContent = view.text;
+    const link = document.getElementById('projectLibraryFactsReadLink');
+    const linkAction = view.action?.id === 'link' ? view.action : null;
+    if (link) {
+      link.hidden = !linkAction;
+      link.textContent = linkAction?.label || '';
+      link.href = linkAction?.href || '#';
+    }
+    const retryAction = view.action?.id === 'rescan' ? view.action : view.retry || null;
+    const retry = document.getElementById('projectLibraryFactsReadRetry');
+    if (retry) {
+      retry.hidden = !retryAction;
+      retry.textContent = retryAction?.label || '';
+      retry.disabled = this.busy;
+    }
+  }
+
   async renderProposals({ loaded = false } = {}) {
     const section = document.getElementById('projectLibraryProposals');
     const container = document.getElementById('projectLibraryProposalRows');
@@ -1798,6 +1895,7 @@ export class ProjectLibraryPanel {
     // read, so there is no extra request.
     const summary = loaded ? this.summary : await this.loadSummary();
     this.renderFreshness();
+    this.renderFactsRead();
     const digestText = libraryDigestText(summary?.digest, this.state?.roots);
     const digestLine = document.getElementById('projectLibraryDigest');
     if (digestLine) {

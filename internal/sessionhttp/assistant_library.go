@@ -221,6 +221,28 @@ func (h *Handler) ConfigureAssistantLibraryRoots(picker projectlibrary.FolderPic
 	h.assistantLibraryRoots = projectlibrary.NewRoots(h.assistantLibraryStore(), picker, selections, guards)
 }
 
+// SetFactsReadHost makes the Home library's completed scans hand the songs an
+// installed app plugin can read to the Home's shared assistant
+// (assistant-reads-projects), and returns the runner (nil when the library is
+// not configured). The caller sweeps receipts a previous process left started.
+func (h *Handler) SetFactsReadHost(host projectlibrary.FactsReadHost) *projectlibrary.FactsReadRunner {
+	if h == nil || h.assistantLibraryRoots == nil {
+		return nil
+	}
+	runner := projectlibrary.NewFactsReadRunner(h.assistantLibraryRoots, host)
+	h.assistantLibraryRoots.SetFactsReadRunner(runner)
+	h.factsReadRunner = runner
+	return runner
+}
+
+// FactsReadRunner is the runner SetFactsReadHost made, or nil.
+func (h *Handler) FactsReadRunner() *projectlibrary.FactsReadRunner {
+	if h == nil {
+		return nil
+	}
+	return h.factsReadRunner
+}
+
 func (h *Handler) SetAssistantLibraryPortfolioResolver(resolver projectlibrary.PortfolioRootResolver) {
 	if h != nil {
 		h.assistantLibraryOfferResolver = resolver

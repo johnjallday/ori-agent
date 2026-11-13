@@ -974,6 +974,7 @@ func (b *ServerBuilder) initializeWorkspaceOrchestrator() {
 		b.sessionHandler.SetResourceCatalogFolderCheck(newTypedFolderPaths(guards).catalogFolder)
 		b.sessionHandler.SetTrustedPathSelectionResolver(b.pathSelectionStore)
 		b.sessionHandler.ConfigureAssistantLibraryRoots(nativeFolderPicker{}, b.pathSelectionStore, guards)
+		b.wireFactsRead()
 	}
 	if b.workspaceFileStore != nil {
 		b.workspaceHandler.SetFolderStore(b.workspaceFileStore)

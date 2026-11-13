@@ -10,6 +10,7 @@ import {
   projectTeamURL,
   libraryDigestText,
   movedNoteText,
+  libraryFactsReadView,
   libraryOpenAction,
   libraryOpenChoices,
   libraryOpenRoute,
@@ -3884,6 +3885,56 @@ test('the Home lists its hired assistant, and each note follows its own switch',
     librarySharingView({ ...base, state: 'on', hired: true }, true, detailsOn).hired,
     undefined
   );
+});
+
+// assistant-reads-projects FR33, FR35: the Home says who is reading while it
+// runs, and each way a read stopped has its sentence and its one action. Try
+// again on the Home is the root's own Scan.
+test('the Home words the assistant read, and every way it stopped', () => {
+  const run = (overrides = {}) => ({
+    status: 'stopped',
+    agent_name: 'REAPER Assistant',
+    targets: 500,
+    left: 288,
+    ...overrides
+  });
+  assert.equal(libraryFactsReadView(null), null);
+  assert.equal(libraryFactsReadView(run({ status: 'finished', left: 0 })), null);
+  assert.deepEqual(libraryFactsReadView(run({ status: 'started', left: 0 }), 'REAPER Assistant'), {
+    status: 'running',
+    text: 'REAPER Assistant is reading 500 songs…',
+    action: null
+  });
+  const retry = { id: 'rescan', label: 'Try again' };
+  const cases = [
+    ['plugin_failed', 'Reading stopped after 212 of 500 songs.', retry],
+    ['time_limit', 'Reading stopped after 212 of 500 songs.', retry],
+    ['restarted', 'Reading stopped when Ori restarted.', retry],
+    ['no_call', 'REAPER Assistant did not start the reading.', retry],
+    ['model_error', 'REAPER Assistant did not start the reading.', retry],
+    [
+      'no_model',
+      'REAPER Assistant has no model, so the songs were not read.',
+      { id: 'link', label: 'Choose a model', href: '/settings' }
+    ],
+    [
+      'plugin_update',
+      'The plugin cannot read songs yet. Update it to read them.',
+      { id: 'link', label: 'Update', href: '/plugins' }
+    ],
+    ['details_off', 'Song details are off for this Home.', null],
+    ['no_assistant', 'This Home has no assistant to read the songs yet.', null]
+  ];
+  for (const [reason, text, action] of cases) {
+    const view = libraryFactsReadView(run({ reason }));
+    assert.equal(view.text, text, reason);
+    assert.deepEqual(view.action, action, reason);
+  }
+  // A missing assistant and a missing model also offer Try again beside their fix.
+  assert.deepEqual(libraryFactsReadView(run({ reason: 'no_model' })).retry, retry);
+  assert.deepEqual(libraryFactsReadView(run({ reason: 'assistant_missing' })).retry, retry);
+  // A reason this page has no words for says nothing rather than something wrong.
+  assert.equal(libraryFactsReadView(run({ reason: 'something_new' })), null);
 });
 
 test('the switch sends the team it showed, and a stale review asks before renewing', async () => {

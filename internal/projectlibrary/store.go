@@ -237,7 +237,8 @@ func (s *Store) mutateWithHomeEffect(scope Scope, expected int64, op operation, 
 			op.action != "review_forget_entry" && op.action != "forget_entry" &&
 			op.action != "discard_activation_queue" && op.action != "proposal_run_claim" &&
 			op.action != "proposal_run_finish" && op.action != "proposal_run_sweep" &&
-			op.action != "dismiss_proposal") &&
+			op.action != "dismiss_proposal" && op.action != "facts_read_finish" &&
+			op.action != "facts_read_sweep") &&
 			!s.providerWritable(scope, home)) || (policy != nil && !policy(state, home)) {
 			return ErrUnavailable
 		}

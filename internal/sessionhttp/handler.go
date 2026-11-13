@@ -99,6 +99,8 @@ type Handler struct {
 	// sharedAgentCreator creates the Home's shared assistant before any song
 	// exists, for the Home's offer to add it (assistant-reads-projects FR16).
 	sharedAgentCreator projectstaffing.SharedCreate
+	// factsReadRunner runs the Home assistant's read turns.
+	factsReadRunner *projectlibrary.FactsReadRunner
 	// staffingReceipts refuses a finish request_id reused for another song or
 	// approval; staffingProviderOverride replaces the finish's installed
 	// provider check in tests.

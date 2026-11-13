@@ -259,7 +259,10 @@ func TestAnswerSongs_ASweepClosesAReadingAPreviousProcessLeftRunning(t *testing.
 		t.Fatalf("sweep closed %d, want 1", closed)
 	}
 	view, _ := h.svc.View(context.Background(), "u1", id)
-	if view.Learning == nil || view.Learning.Status != LearningStopped || view.Learning.Line != "Stopped before it finished. Learned 2 of 7 songs" {
+	// FR37: a restart is a named reason, and Try again is offered for it.
+	if view.Learning == nil || view.Learning.Status != LearningStopped ||
+		view.Learning.Line != "Reading stopped when Ori restarted. Learned 2 of 7 songs." ||
+		view.Learning.Reason != LearningReasonRestarted || view.Learning.Action != LearningActionRetry {
 		t.Fatalf("after the sweep = %+v", view.Learning)
 	}
 	if view.GoalOffer == nil {
@@ -290,6 +293,117 @@ func TestAnswerSongs_AYesThatNeverGrantedIsOfferedAgain(t *testing.T) {
 	if grants, learns := songs.counts(); grants != 1 || learns != 1 {
 		t.Fatalf("grants %d, reads %d; want one each", grants, learns)
 	}
+}
+
+// assistant-reads-projects FR33, FR35: the card names the reader, and each way a
+// reading stops has its own sentence and its one action.
+func TestLearningView_NamesTheReaderAndEachWayItStops(t *testing.T) {
+	rec := doneRecord()
+	reading := func(l Learning) *LearningView {
+		rec.Learning = &l
+		return learningView(rec)
+	}
+	if got := reading(Learning{Status: LearningRunning, Total: 6, Reader: "REAPER Assistant"}); got.Line != "REAPER Assistant is reading 6 songs…" || got.Reader != "REAPER Assistant" {
+		t.Fatalf("starting = %+v", got)
+	}
+	if got := reading(Learning{Status: LearningRunning, Total: 7, Done: 2, Song: "Night Drive", Reader: "REAPER Assistant"}); got.Line != "REAPER Assistant is reading Night Drive… (3 of 7)" {
+		t.Fatalf("on a song = %+v", got)
+	}
+	for _, tc := range []struct {
+		reason, line, action string
+		learning             Learning
+	}{
+		{LearningReasonNoModel, "REAPER Assistant has no model, so the songs were not read.", LearningActionChooseModel, Learning{}},
+		{LearningReasonAssistantMissing, "Your assistant is gone, so the songs were not read.", LearningActionAddAssistant, Learning{}},
+		{LearningReasonNoAssistant, "This Home has no assistant to read the songs yet.", LearningActionAddAssistant, Learning{}},
+		{LearningReasonPluginUpdate, "The plugin cannot read songs yet. Update it to read them.", LearningActionUpdatePlugin, Learning{}},
+		{LearningReasonPluginFailed, "Reading stopped after 3 of 7 songs. Learned 3 of 7 songs.", LearningActionRetry, Learning{Done: 3, Read: 3}},
+		{LearningReasonTimeLimit, "Reading stopped after 0 of 7 songs.", LearningActionRetry, Learning{}},
+		{LearningReasonDetailsOff, "Song details are off for this Home.", LearningActionOpenSwitch, Learning{}},
+		{LearningReasonNoCall, "REAPER Assistant did not start the reading.", LearningActionRetry, Learning{}},
+		{LearningReasonModelError, "REAPER Assistant did not start the reading.", LearningActionRetry, Learning{}},
+	} {
+		l := tc.learning
+		l.Status, l.Total, l.Reason, l.Reader = LearningStopped, 7, tc.reason, "REAPER Assistant"
+		if got := reading(l); got.Line != tc.line || got.Action != tc.action || got.Reason != tc.reason {
+			t.Errorf("%s = %+v, want %q / %s", tc.reason, got, tc.line, tc.action)
+		}
+	}
+	// A stop with no named reason keeps today's words and offers no action.
+	if got := reading(Learning{Status: LearningStopped, Total: 7, Done: 3, Read: 3}); got.Action != "" || got.Reason != "" {
+		t.Fatalf("an unnamed stop = %+v", got)
+	}
+}
+
+// FR35: Try again runs the reading again without a second grant, only while the
+// owner's yes stands and the Home's switch is on.
+func TestRetryLearning(t *testing.T) {
+	stopped := func(r *Record) error {
+		r.SongsAnswer = SongsLearn
+		r.Learning = &Learning{Status: LearningStopped, Total: 7, Done: 2, Read: 2, Reason: LearningReasonPluginFailed}
+		return nil
+	}
+	t.Run("reads again without granting again", func(t *testing.T) {
+		songs := &fakeSongs{state: workspace.SongDetailsOn, names: true}
+		h, id := songsHarness(t, songs)
+		if _, err := h.svc.deps.Store.Update(id, stopped); err != nil {
+			t.Fatal(err)
+		}
+		view, err := h.svc.RetryLearning(context.Background(), "u1", id)
+		if err != nil || view.Learning == nil || view.Learning.Status != LearningRunning {
+			t.Fatalf("retry = %+v %v", view.Learning, err)
+		}
+		h.svc.Wait()
+		if grants, learns := songs.counts(); grants != 0 || learns != 1 {
+			t.Fatalf("grants %d, reads %d; want no grant and one read", grants, learns)
+		}
+		rec, _ := h.svc.Record("u1", id)
+		if rec.Learning.Status != LearningDone || rec.Learning.Reason != "" {
+			t.Fatalf("after the retry = %+v", rec.Learning)
+		}
+	})
+	t.Run("refused when the switch is off", func(t *testing.T) {
+		songs := &fakeSongs{state: workspace.SongDetailsOff}
+		h, id := songsHarness(t, songs)
+		_, _ = h.svc.deps.Store.Update(id, stopped)
+		if _, err := h.svc.RetryLearning(context.Background(), "u1", id); !errors.Is(err, ErrWrongState) {
+			t.Fatalf("retry with the switch off = %v", err)
+		}
+		if _, learns := songs.counts(); learns != 0 {
+			t.Fatal("a read started with the switch off")
+		}
+	})
+	t.Run("refused unless a reading stopped", func(t *testing.T) {
+		songs := &fakeSongs{state: workspace.SongDetailsOn, names: true}
+		h, id := songsHarness(t, songs)
+		if _, err := h.svc.RetryLearning(context.Background(), "u1", id); !errors.Is(err, ErrWrongState) {
+			t.Fatalf("retry before any reading = %v", err)
+		}
+		_, _ = h.svc.deps.Store.Update(id, func(r *Record) error {
+			r.SongsAnswer = SongsLearn
+			r.Learning = &Learning{Status: LearningRunning, Total: 7}
+			return nil
+		})
+		if _, err := h.svc.RetryLearning(context.Background(), "u1", id); !errors.Is(err, ErrWrongState) {
+			t.Fatalf("retry while reading = %v", err)
+		}
+	})
+	t.Run("two presses read once", func(t *testing.T) {
+		songs := &fakeSongs{state: workspace.SongDetailsOn, names: true, block: make(chan struct{})}
+		h, id := songsHarness(t, songs)
+		_, _ = h.svc.deps.Store.Update(id, stopped)
+		if _, err := h.svc.RetryLearning(context.Background(), "u1", id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.svc.RetryLearning(context.Background(), "u1", id); !errors.Is(err, ErrWrongState) {
+			t.Fatalf("second press = %v", err)
+		}
+		close(songs.block)
+		h.svc.Wait()
+		if _, learns := songs.counts(); learns != 1 {
+			t.Fatalf("reads = %d", learns)
+		}
+	})
 }
 
 func TestLearningView_Words(t *testing.T) {

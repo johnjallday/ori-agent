@@ -62,6 +62,65 @@ type Learning struct {
 	Summary   string `json:"summary,omitempty"`
 	SummaryBy string `json:"summary_by,omitempty"`
 	Goal      string `json:"goal,omitempty"`
+	// Reader is the agent reading the songs through its app plugin (the Home's
+	// app assistant), empty when Ori's own pass reads them. Reason is why a
+	// reading stopped, one of the LearningReason* codes; empty otherwise.
+	Reader string `json:"reader,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// Why a reading of the songs stopped (assistant-reads-projects FR35). They are
+// the library's read-turn reason codes; there is no fallback reader behind any
+// of them.
+const (
+	LearningReasonNoModel          = "no_model"
+	LearningReasonAssistantMissing = "assistant_missing"
+	LearningReasonNoAssistant      = "no_assistant"
+	LearningReasonPluginUpdate     = "plugin_update"
+	LearningReasonPluginFailed     = "plugin_failed"
+	LearningReasonTimeLimit        = "time_limit"
+	LearningReasonRestarted        = "restarted"
+	LearningReasonDetailsOff       = "details_off"
+	LearningReasonNoCall           = "no_call"
+	LearningReasonModelError       = "model_error"
+)
+
+// Actions a stopped reading offers (LearningView.Action).
+const (
+	LearningActionRetry        = "retry"
+	LearningActionChooseModel  = "choose_model"
+	LearningActionAddAssistant = "add_assistant"
+	LearningActionUpdatePlugin = "update_plugin"
+	LearningActionOpenSwitch   = "open_switch"
+)
+
+// learningReasonWords is the one sentence and the one action for a stopped
+// reading. reader is the app assistant's name, "" when unknown; read and total
+// are the songs the reading got through and had.
+func learningReasonWords(reason, reader string, done, total int) (sentence, action string) {
+	who := reader
+	if who == "" {
+		who = "The assistant"
+	}
+	switch reason {
+	case LearningReasonNoModel:
+		return who + " has no model, so the songs were not read.", LearningActionChooseModel
+	case LearningReasonAssistantMissing:
+		return "Your assistant is gone, so the songs were not read.", LearningActionAddAssistant
+	case LearningReasonNoAssistant:
+		return "This Home has no assistant to read the songs yet.", LearningActionAddAssistant
+	case LearningReasonPluginUpdate:
+		return "The plugin cannot read songs yet. Update it to read them.", LearningActionUpdatePlugin
+	case LearningReasonPluginFailed, LearningReasonTimeLimit:
+		return fmt.Sprintf("Reading stopped after %d of %d songs.", min(done, total), total), LearningActionRetry
+	case LearningReasonRestarted:
+		return "Reading stopped when Ori restarted.", LearningActionRetry
+	case LearningReasonDetailsOff:
+		return "Song details are off for this Home.", LearningActionOpenSwitch
+	case LearningReasonNoCall, LearningReasonModelError:
+		return who + " did not start the reading.", LearningActionRetry
+	}
+	return "", ""
 }
 
 // songsReads is what the offer says it will read, and what it will not touch.
@@ -264,6 +323,41 @@ func (s *Service) AnswerSongs(ctx context.Context, userID, workspaceID string, l
 	return s.viewOf(ctx, rec), nil
 }
 
+// RetryLearning is "Try again" on a stopped reading (assistant-reads-projects
+// FR35). AnswerSongs refuses once the Home holds the consent, so this is its
+// own entry point: the owner already said yes, so nothing is granted again. It
+// needs a reading that stopped and a consent that is still on (a switch the
+// owner turned off stays off), and reads only the songs that still need it, as
+// the saved facts make the rest unwanted.
+func (s *Service) RetryLearning(ctx context.Context, userID, workspaceID string) (View, error) {
+	current, err := s.Record(userID, workspaceID)
+	if err != nil {
+		return View{}, err
+	}
+	homeID := songsHome(current)
+	if s.deps.Songs == nil || homeID == "" || current.SongsAnswer != SongsLearn ||
+		current.Learning == nil || current.Learning.Status != LearningStopped {
+		return View{}, ErrWrongState
+	}
+	if state, _, err := s.deps.Songs.Consent(ctx, userID, workspaceID, homeID); err != nil || state != workspace.SongDetailsOn {
+		return View{}, ErrWrongState
+	}
+	total := current.Learning.Total
+	rec, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
+		if r.Learning == nil || r.Learning.Status != LearningStopped {
+			return ErrWrongState
+		}
+		r.Learning = &Learning{Status: LearningRunning, Total: total, StartedAt: s.deps.Now().UTC()}
+		return nil
+	})
+	if err != nil {
+		return View{}, err
+	}
+	s.wg.Add(1)
+	go s.runLearning(context.WithoutCancel(ctx), *rec, homeID, total)
+	return s.viewOf(ctx, rec), nil
+}
+
 // runLearning reads the songs and keeps the record's Learning current. The
 // library reports from inside its own gate, so a report only notes the latest
 // progress; a timer writes it to the record, and the end is written last.
@@ -441,6 +535,12 @@ type LearningView struct {
 	// empty, so it is said once.
 	Summary   string `json:"summary,omitempty"`
 	SummaryBy string `json:"summary_by,omitempty"`
+	// Reader names the app assistant reading the songs; Reason says why a
+	// stopped reading stopped, with its one Action (LearningAction*). Empty when
+	// the reading did not stop for a named reason.
+	Reader string `json:"reader,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	Action string `json:"action,omitempty"`
 }
 
 // learningView words a record's reading, or nil when none was started.
@@ -457,13 +557,18 @@ func learningView(rec *Record) *LearningView {
 	}
 	readability := rec.Facts.Readability()
 	noun := func(n int) string { return foldermap.ShapeNoun(readability.Shape, n) }
-	view := &LearningView{Status: l.Status, Done: l.Done, Total: l.Total}
+	view := &LearningView{Status: l.Status, Done: l.Done, Total: l.Total, Reader: l.Reader}
 	switch l.Status {
 	case LearningRunning:
 		position := min(l.Done+1, l.Total)
-		if l.Song == "" {
+		switch {
+		case l.Reader != "" && l.Song == "":
+			view.Line = fmt.Sprintf("%s is reading %d %s…", l.Reader, l.Total, noun(l.Total))
+		case l.Reader != "":
+			view.Line = fmt.Sprintf("%s is reading %s… (%d of %d)", l.Reader, l.Song, position, l.Total)
+		case l.Song == "":
 			view.Line = fmt.Sprintf("Learning the %d %s…", l.Total, noun(l.Total))
-		} else {
+		default:
 			view.Line = fmt.Sprintf("Learning %s… (%d of %d)", l.Song, position, l.Total)
 		}
 	case LearningSummarizing:
@@ -480,7 +585,14 @@ func learningView(rec *Record) *LearningView {
 		default:
 			learned = fmt.Sprintf("Learned %d of %d %s", l.Read, l.Total, noun(l.Total))
 		}
+		sentence, action := learningReasonWords(l.Reason, l.Reader, l.Done, l.Total)
 		switch {
+		case l.Status == LearningStopped && sentence != "":
+			// A named reason: its own sentence, and the one thing to do about it.
+			view.Line, view.Reason, view.Action = sentence, l.Reason, action
+			if learned != "" {
+				view.Line += " " + learned + "."
+			}
 		case l.Status == LearningStopped && learned == "":
 			view.Line = "Stopped before it finished"
 		case l.Status == LearningStopped:
