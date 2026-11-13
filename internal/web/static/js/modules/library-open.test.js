@@ -260,10 +260,21 @@ test('an opened song without its assistant is never called ready', () => {
     'needs_model',
     'reconcile',
     'unsettled',
-    'failed'
+    'failed',
+    'none'
   ]) {
     const message = libraryOpenedMessage('Album-1', { staffing, created: true });
     assert.doesNotMatch(message, /\bready\b/, staffing);
     assert.match(message, /^Album-1 is open/, staffing);
   }
+});
+
+// assistant-reads-projects FR18: a Home never asked says so and where to fix it,
+// instead of a bare "is ready."
+test('a song opened in a Home never asked says why no assistant was added', () => {
+  const message = libraryOpenedMessage('Album-1', { staffing: 'none', created: true });
+  assert.equal(
+    message,
+    'Album-1 is open. No assistant was added: this Home has not been asked yet. Turn on "Add my assistant to songs I open" on this Home to add one.'
+  );
 });

@@ -136,6 +136,15 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 		setLine(providerLine, personalassistant.FolderLineDone, "")
 	}
 
+	// The app plugin the Home's songs get their team from, when the plan's own
+	// tools step does not install it (it would have run first).
+	if toolsLine := line(folderagent.FolderPlanHomeTools); toolsLine != "" {
+		if err := b.installFolderAgentHomeTools(ctx, rec, home.ProjectIntegrationKey, toolsLine, setLine); err != nil {
+			setLine(toolsLine, personalassistant.FolderLineFailed, "")
+			return stop(personalassistant.FolderStopInstallFailed, err)
+		}
+	}
+
 	// The Home: the user's one Home of this provider, or a new one.
 	homeLine := first(createLine, rootLine)
 	station, err := b.folderSetupHost.station(owner, provider)
@@ -179,9 +188,12 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 		setLine(first(append(hireLines, rootLine)...), personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopFailed, err)
 	}
-	if len(missing) > 0 && !staffing.ModelReady(ctx) {
-		setLine(first(append(hireLines, rootLine)...), personalassistant.FolderLineFailed, "")
-		return stop(personalassistant.FolderStopNeedsModel, errors.New("the Home's roles need a model"))
+	// The shared assistant the card named: hired after the Home's own roles,
+	// only when the plan has its line (the press approved exactly that).
+	assistant := b.folderAgentHomeAssistant(homeID, line(folderagent.FolderPlanAssistant))
+	if (len(missing) > 0 || assistant.creates()) && !staffing.ModelReady(ctx) {
+		setLine(first(append(append(hireLines, assistant.line), rootLine)...), personalassistant.FolderLineFailed, "")
+		return stop(personalassistant.FolderStopNeedsModel, errors.New("the Home's agents need a model"))
 	}
 	hired, err := hireFolderAgentRoles(missing, hireLines, rootLine, setLine, func(role foldersetup.HomeRole) error {
 		return staffing.Staff(ctx, homeID, role)
@@ -189,6 +201,19 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	receipt.hired = hired
 	if err != nil {
 		return stop(personalassistant.FolderStopFailed, err)
+	}
+	if note := line(folderagent.FolderPlanAssistantNote); note != "" {
+		setLine(note, personalassistant.FolderLineDone, "")
+	}
+	// A failed assistant hire keeps the Home and its roles, and the folder is
+	// still added and listed; the run then ends stopped so Set up again retries.
+	var assistantStop *homeStageStop
+	if assistant.line != "" {
+		name, stopped := b.hireFolderAgentAssistant(ctx, rec, assistant, staffing.ModelReady(ctx), setLine)
+		if name != "" {
+			receipt.hired = append(receipt.hired, name)
+		}
+		assistantStop = stopped
 	}
 
 	// The fed folder as a root of the Home's library.
@@ -249,6 +274,9 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 		return stop(personalassistant.FolderStopFailed, err)
 	}
 	setLine(placeLine, personalassistant.FolderLineDone, "Placed "+rec.WorkspaceName+" inside your "+homeName)
+	if assistantStop != nil {
+		return receipt, assistantStop
+	}
 	return receipt, nil
 }
 

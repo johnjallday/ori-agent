@@ -1046,6 +1046,27 @@
   margin: 0.4rem 0 0;
   color: var(--assistant-muted);
 }
+/* The Home's shared assistant, listed once it is hired: a name and two
+   muted notes, never a chat entry point (assistant-reads-projects FR13). */
+.project-library-sharing-hired {
+  margin: 0.5rem 0 0;
+}
+.project-library-sharing-hired-name {
+  font-weight: 600;
+}
+.project-library-sharing-hired-notes {
+  margin: 0.15rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--assistant-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.4rem;
+}
+.project-library-sharing-hired-notes li + li::before {
+  content: "·";
+  margin-right: 0.4rem;
+}
 .project-library-sharing .modern-btn {
   margin-top: 0.6rem;
 }

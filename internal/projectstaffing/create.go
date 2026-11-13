@@ -109,6 +109,12 @@ func (tx *Tx) FillCreated(projectID string, explicit map[string]bool, grant *Gra
 	if home := tx.s.homeOf(projectID); home != tx.home {
 		return nil, ErrNotShared
 	}
+	// A Home hire that stopped before it was recorded holds its name. Finish it
+	// first: fillCreated would otherwise read the held name as "give this
+	// project its own agent" and make a second assistant under the next name.
+	if err := tx.s.settleShared(tx.home); err != nil {
+		return nil, err
+	}
 	return tx.s.fillCreated(projectID, explicit, grant, modelReady)
 }
 

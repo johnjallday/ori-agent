@@ -3678,6 +3678,26 @@ test('a row offers Open only when the server says it can be opened', () => {
     libraryOpenAction({ ...song, connection: 'connected' }, false).ariaLabel,
     'Open Song 002'
   );
+  // assistant-reads-projects FR19: the label promises an assistant only when
+  // opening will add one.
+  assert.equal(
+    libraryOpenAction(song, false, { state: 'on' }).ariaLabel,
+    'Open Song 002: makes its workspace and adds your assistant'
+  );
+  for (const sharing of [
+    null,
+    { state: 'off' },
+    { state: 'none' },
+    { state: 'stale' },
+    { state: 'unavailable' },
+    { state: 'on', assistant_missing: true }
+  ]) {
+    assert.equal(
+      libraryOpenAction(song, false, sharing).ariaLabel,
+      'Open Song 002: makes its workspace',
+      JSON.stringify(sharing)
+    );
+  }
   // Read-only Home, unsupported format or a lost source: Details explain it.
   assert.equal(libraryOpenAction(song, true), null);
   assert.equal(libraryOpenAction({ ...song, can_open: false }, false), null);
@@ -3711,8 +3731,14 @@ test('the status line says how the assistant came to the song', () => {
   assert.match(libraryOpenedMessage(name, { staffing: 'off' }), /switched off, so no agent/);
   assert.match(libraryOpenedMessage(name, { staffing: 'consent_stale' }), /review it on this Home/);
   assert.match(libraryOpenedMessage(name, { staffing: 'assistant_missing' }), /gone, so no agent/);
-  assert.equal(
+  // A Home never asked no longer reads as a bare "is ready." (FR18).
+  assert.match(
     libraryOpenedMessage(name, { staffing: 'none', created: true }),
+    /^Song 002 is open\. No assistant was added: this Home has not been asked yet\./
+  );
+  // Not a shared song at all: nothing about an assistant to say.
+  assert.equal(
+    libraryOpenedMessage(name, { staffing: 'not_shared', created: true }),
     'Song 002 is ready.'
   );
   for (const staffing of ['added', 'joined', 'off', 'consent_stale', 'assistant_missing']) {
@@ -3799,10 +3825,18 @@ test('the shared-assistant switch says where the Home stands and offers the one 
   const off = librarySharingView({ ...base, state: 'off', agent_name: 'REAPER Assistant' });
   assert.equal(off.checked, false);
   assert.match(off.note, /get no agent/);
-  // A Home built before sharing existed opts in with the same switch.
+  // A Home built before sharing existed is offered its assistant once
+  // (assistant-reads-projects FR16); once answered, the plain switch stays.
   const none = librarySharingView({ ...base, state: 'none' });
   assert.equal(none.checked, false);
-  assert.match(none.note, /Turn this on/);
+  assert.match(none.note, /This Home has no REAPER Assistant yet/);
+  assert.deepEqual(none.action, { id: 'hire', label: 'Add your REAPER Assistant' });
+  assert.deepEqual(none.dismiss, { id: 'dismiss_offer', label: 'Not now' });
+  const answered = librarySharingView({ ...base, state: 'none', offer_dismissed: true });
+  assert.match(answered.note, /Turn this on/);
+  assert.equal(answered.action, null);
+  assert.equal(answered.dismiss, null);
+  assert.equal(on.dismiss, null);
   const stale = librarySharingView({ ...base, state: 'stale', agent_name: 'REAPER Assistant' });
   assert.equal(stale.switchDisabled, true);
   assert.deepEqual(stale.action, { id: 'review', label: 'Review the updated assistant' });
@@ -3814,6 +3848,42 @@ test('the shared-assistant switch says where the Home stands and offers the one 
   });
   assert.deepEqual(missing.action, { id: 'readd', label: 'Add the assistant again' });
   assert.match(missing.note, /is gone/);
+  assert.equal(missing.hired, null);
+});
+
+// assistant-reads-projects FR13, FR15: the Home lists the assistant it hired at
+// setup, with what it does; each note follows its own switch; there is nothing
+// to chat with here.
+test('the Home lists its hired assistant, and each note follows its own switch', () => {
+  const base = {
+    role_label: 'REAPER Assistant',
+    team_digest: 'd1',
+    agent_name: 'REAPER Assistant'
+  };
+  const detailsOn = { state: 'on', names: true };
+  const listed = librarySharingView({ ...base, state: 'on', hired: true }, false, detailsOn);
+  assert.deepEqual(listed.hired, {
+    name: 'REAPER Assistant',
+    notes: ['Joins each song you open', 'Reads your songs']
+  });
+  // Joining switched off: it still reads while song details are on.
+  assert.deepEqual(
+    librarySharingView({ ...base, state: 'off', hired: true }, false, detailsOn).hired.notes,
+    ['Not added to songs you open', 'Reads your songs']
+  );
+  // Song details off: it joins songs and reads nothing until they are on.
+  assert.deepEqual(
+    librarySharingView({ ...base, state: 'on', hired: true }, false, { state: 'off' }).hired.notes,
+    ['Joins each song you open', 'Reads your songs once song details are on']
+  );
+  // Not hired (never recorded, or gone): no row.
+  assert.equal(librarySharingView({ ...base, state: 'on' }, false, detailsOn).hired, null);
+  assert.equal(librarySharingView({ ...base, state: 'none', agent_name: '' }).hired, null);
+  // A read-only Home shows nothing at all.
+  assert.equal(
+    librarySharingView({ ...base, state: 'on', hired: true }, true, detailsOn).hired,
+    undefined
+  );
 });
 
 test('the switch sends the team it showed, and a stale review asks before renewing', async () => {

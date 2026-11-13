@@ -320,6 +320,10 @@ type AssistantProgramState struct {
 	// role is filled, on every project opened in this Home, by the one agent the
 	// consent created. Written only through ProjectStaffingConsents.
 	ProjectStaffingConsent *ProjectStaffingConsent `json:"project_staffing_consent,omitempty"`
+	// ProjectStaffingOfferDismissedAt is when the owner said "Not now" to the
+	// Home's one offer to add its shared assistant (a Home set up before Homes
+	// hired it at setup). The offer is not shown again; the switch stays.
+	ProjectStaffingOfferDismissedAt *time.Time `json:"project_staffing_offer_dismissed_at,omitempty"`
 	// SongDetailsConsent lets each scan read tempo, length and track count from
 	// the Home's project files and, when its Scope is names, the track names,
 	// markers and regions typed into them. Granted by a folder card that created
@@ -378,6 +382,10 @@ func CloneAssistantProgramState(source *AssistantProgramState) *AssistantProgram
 	clone.ProjectLibraryInitReviews = append([]AssistantProjectLibraryInitReview(nil), source.ProjectLibraryInitReviews...)
 	clone.ProjectLibraryInactiveRoots = append([]string(nil), source.ProjectLibraryInactiveRoots...)
 	clone.ProjectStaffingConsent = source.ProjectStaffingConsent.Clone()
+	if source.ProjectStaffingOfferDismissedAt != nil {
+		value := *source.ProjectStaffingOfferDismissedAt
+		clone.ProjectStaffingOfferDismissedAt = &value
+	}
 	clone.SongDetailsConsent = source.SongDetailsConsent.Clone()
 	clone.HomeProfile = source.HomeProfile.Clone()
 	clone.ProjectCardWords = source.ProjectCardWords.Clone()

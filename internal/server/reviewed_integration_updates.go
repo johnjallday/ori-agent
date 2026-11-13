@@ -86,6 +86,10 @@ type verifiedRelease struct {
 	// from it before anything is installed. It is nil for a release that was
 	// not inspected here.
 	surfaces *plugin.SurfaceContribution
+	// blueprints are the release's resolved blueprints, read only: the folder
+	// card names the shared assistant a song team declares before the plugin
+	// that declares it is installed. Nil for a release not inspected here.
+	blueprints []plugin.ResolvedBlueprint
 }
 
 func (u *reviewedIntegrationUpdates) integrationRelease(entry reviewedintegration.Entry) reviewedRelease {
@@ -195,7 +199,7 @@ func (u *reviewedIntegrationUpdates) newestLoadable(ctx context.Context, target 
 		switch target.verify(candidate.Version, candidate.Source, descriptor, report, inspectErr) {
 		case releaseLoadable:
 			return verifiedRelease{version: candidate.Version, source: candidate.Source, report: report,
-				surfaces: descriptor.WorkspaceSurfaces}, true, nil
+				surfaces: descriptor.WorkspaceSurfaces, blueprints: descriptor.ResolvedBlueprints}, true, nil
 		case releaseNeedsNewerHost:
 			continue
 		default:
@@ -225,6 +229,16 @@ func (u *reviewedIntegrationUpdates) homeProviderInstall(ctx context.Context, pr
 		return verifiedRelease{}, false, nil
 	}
 	return u.newestLoadable(ctx, homeProviderRelease(provider), func(string) bool { return true })
+}
+
+// integrationInstall returns the newest reviewed release of a project
+// integration that this build can install, for a first install. ok is false
+// when nothing can be offered.
+func (u *reviewedIntegrationUpdates) integrationInstall(ctx context.Context, entry reviewedintegration.Entry) (verifiedRelease, bool, error) {
+	if u == nil || u.releases == nil {
+		return verifiedRelease{}, false, nil
+	}
+	return u.newestLoadable(ctx, u.integrationRelease(entry), func(string) bool { return true })
 }
 
 // availability is the update checker override for reviewed installs. Every

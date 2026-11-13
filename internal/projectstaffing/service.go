@@ -185,19 +185,31 @@ func (s *Service) Plan(projectID string, roleIDs []string) ([]Fill, error) {
 // decide is the per-role decision Fill and Plan share; reserve records a
 // create's name before returning.
 func (s *Service) decide(song Song, consent *workspace.ProjectStaffingConsent, roleIDs []string, reserve bool) ([]Fill, error) {
+	team := Team{
+		PluginID: song.Provider.PluginID, BlueprintID: song.Provider.BlueprintID, Digest: song.Provider.ProjectTeamDigest,
+		Roles: song.RequiredRoles(),
+	}
+	return s.decideTeam(song.Home.ID, team, consent, roleIDs, s.nameTaken(song), reserve)
+}
+
+// decideTeam is decide for a team that need not belong to a project yet: the
+// same rule table, whether a song is being staffed or the Home hires its
+// shared assistant before any song exists. taken is the create's collision
+// rule for where the decision is made.
+func (s *Service) decideTeam(homeID string, team Team, consent *workspace.ProjectStaffingConsent, roleIDs []string,
+	taken func(string) bool, reserve bool) ([]Fill, error) {
 	roles := map[string]workspace.AssistantProgramRoleSpec{}
-	for _, role := range song.RequiredRoles() {
+	for _, role := range team.Roles {
 		roles[role.ID] = role
 	}
 	fills := make([]Fill, 0, len(roleIDs))
-	taken := s.nameTaken(song)
 	for _, roleID := range roleIDs {
 		role, declared := roles[roleID]
 		if !declared {
 			return nil, ErrNotShared
 		}
 		decision := workspace.DecideProjectStaffing(consent, workspace.ProjectStaffingFacts{
-			PluginID: song.Provider.PluginID, BlueprintID: song.Provider.BlueprintID, TeamDigest: song.Provider.ProjectTeamDigest,
+			PluginID: team.PluginID, BlueprintID: team.BlueprintID, TeamDigest: team.Digest,
 			RoleID: role.ID, RoleLabel: role.Label, AgentExists: s.agentExists, NameTaken: taken,
 		})
 		switch decision.Action {
@@ -210,8 +222,8 @@ func (s *Service) decide(song Song, consent *workspace.ProjectStaffingConsent, r
 				return nil, ErrReservationHeld
 			}
 			if reserve {
-				if err := s.consents.ReserveAgent(song.Home.ID, song.Provider.PluginID, song.Provider.BlueprintID,
-					song.Provider.ProjectTeamDigest, role.ID, decision.AgentName); err != nil {
+				if err := s.consents.ReserveAgent(homeID, team.PluginID, team.BlueprintID,
+					team.Digest, role.ID, decision.AgentName); err != nil {
 					return nil, err
 				}
 			}
@@ -285,10 +297,14 @@ func (s *Service) settle(projectID string) error {
 // but never recorded (a stop between the bind and Settle): every project linked
 // to homeID is settled, which records a pending name only from a created
 // binding of that exact name, the same proof Settle always requires. It does
-// nothing while no role of the consent has a pending name.
+// nothing while no role of the consent has a pending name. A hire the Home made
+// with no project is finished first, by its own proof (see settleShared).
 func (s *Service) recoverHome(homeID string) error {
 	if s == nil || s.workspaces == nil {
 		return nil
+	}
+	if err := s.settleShared(homeID); err != nil {
+		return err
 	}
 	consent, err := s.consents.Read(homeID)
 	if err != nil || consent == nil {

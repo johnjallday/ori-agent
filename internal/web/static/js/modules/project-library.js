@@ -556,7 +556,7 @@ export function proposalSourceLabel(proposal) {
 // librarySharingView words the Home's shared-assistant switch from the
 // library read's `sharing`. Hidden when no installed blueprint opens this Home's
 // songs, or the Home is read-only.
-export function librarySharingView(sharing, readOnly = false) {
+export function librarySharingView(sharing, readOnly = false, songDetails = null) {
   const state = String(sharing?.state || '');
   if (readOnly || !state || state === 'unavailable') return { visible: false };
   const role = String(sharing.role_label || 'assistant').trim();
@@ -567,8 +567,24 @@ export function librarySharingView(sharing, readOnly = false) {
     switchDisabled: state === 'stale',
     switchLabel: `Add my ${role} to songs I open`,
     note: '',
-    action: null
+    action: null,
+    dismiss: null,
+    hired: null
   };
+  // The Home has its assistant (assistant-reads-projects FR13): listed here,
+  // with what it does, and never chatted with on the Home. The two switches
+  // are independent (FR15): joining songs is this one, reading is song details.
+  if (sharing.hired && agent) {
+    view.hired = {
+      name: agent,
+      notes: [
+        state === 'on' ? 'Joins each song you open' : 'Not added to songs you open',
+        songDetails?.state === 'on'
+          ? 'Reads your songs'
+          : 'Reads your songs once song details are on'
+      ]
+    };
+  }
   switch (state) {
     case 'on':
       view.note = agent
@@ -584,6 +600,13 @@ export function librarySharingView(sharing, readOnly = false) {
       break;
     default:
       view.note = `Turn this on and your ${role} joins each song you open.`;
+      // A Home set up before Homes hired their assistant: one offer, until it is
+      // answered (assistant-reads-projects FR16). Nothing is granted silently.
+      if (!sharing.offer_dismissed) {
+        view.note = `This Home has no ${role} yet. Add it now and it joins each song you open, and reads your songs when song details are on.`;
+        view.action = { id: 'hire', label: `Add your ${role}` };
+        view.dismiss = { id: 'dismiss_offer', label: 'Not now' };
+      }
   }
   if (sharing.assistant_missing && state === 'on') {
     view.note = `${agent || `Your ${role}`} is gone, so songs you open get no agent. The next one can get a new ${role}.`;
@@ -713,7 +736,7 @@ export function readActivationQueue(homeID, storage = globalThis.sessionStorage,
 // up to six songs with a save time, each with Open where the Home can open it,
 // and its song facts when they are known. A read-only Home still shows its
 // songs, without Open. No dated song: hidden.
-export function recentlySavedView(page, now = new Date(), words = null) {
+export function recentlySavedView(page, now = new Date(), words = null, sharing = null) {
   const readOnly = page?.provider_read_only !== false;
   const rows = (Array.isArray(page?.rows) ? page.rows : []).filter(Boolean);
   const picks = readOnly
@@ -726,7 +749,7 @@ export function recentlySavedView(page, now = new Date(), words = null) {
       name: String(row.name || '').trim() || 'This song',
       saved: lastSavedLabel(row.last_saved_at, now),
       facts: songFactsLabel(row.facts, words),
-      open: libraryOpenAction(row, readOnly)
+      open: libraryOpenAction(row, readOnly, sharing)
     }))
   };
 }
@@ -1066,6 +1089,9 @@ export class ProjectLibraryPanel {
       .getElementById('projectLibrarySharingAction')
       ?.addEventListener('click', event => void this.runSharingAction(event.currentTarget));
     document
+      .getElementById('projectLibrarySharingDismiss')
+      ?.addEventListener('click', event => void this.runSharingAction(event.currentTarget));
+    document
       .getElementById('projectLibrarySongDetailsSwitch')
       ?.addEventListener('change', event => void this.setSongDetails(event.currentTarget));
     document
@@ -1089,9 +1115,25 @@ export class ProjectLibraryPanel {
   renderSharing() {
     const section = document.getElementById('projectLibrarySharing');
     if (!section) return;
-    const view = librarySharingView(this.state?.sharing, this.readOnly);
+    const view = librarySharingView(this.state?.sharing, this.readOnly, this.state?.song_details);
     section.hidden = !view.visible;
     if (!view.visible) return;
+    const hired = document.getElementById('projectLibrarySharingHired');
+    if (hired) {
+      hired.hidden = !view.hired;
+      const name = document.getElementById('projectLibrarySharingHiredName');
+      if (name) name.textContent = view.hired?.name || '';
+      const notes = document.getElementById('projectLibrarySharingHiredNotes');
+      if (notes) {
+        notes.replaceChildren(
+          ...(view.hired?.notes || []).map(text => {
+            const item = document.createElement('li');
+            item.textContent = text;
+            return item;
+          })
+        );
+      }
+    }
     const toggle = document.getElementById('projectLibrarySharingSwitch');
     if (toggle) {
       toggle.checked = view.checked;
@@ -1108,11 +1150,20 @@ export class ProjectLibraryPanel {
       action.dataset.sharingAction = view.action?.id || '';
       action.disabled = this.busy;
     }
+    const dismiss = document.getElementById('projectLibrarySharingDismiss');
+    if (dismiss) {
+      dismiss.hidden = !view.dismiss;
+      dismiss.textContent = view.dismiss?.label || '';
+      dismiss.dataset.sharingAction = view.dismiss?.id || '';
+      dismiss.disabled = this.busy;
+    }
   }
 
   // The Home's song-details switch and the intro that says what a scan reads.
   // Both ride the library read.
   renderSongDetails() {
+    // The shared assistant's "Reads your songs" note follows this switch.
+    this.renderSharing();
     const intro = document.getElementById('projectLibraryIntro');
     if (intro) intro.textContent = libraryIntroText(this.state?.song_details);
     const section = document.getElementById('projectLibrarySongDetails');
@@ -1282,6 +1333,38 @@ export class ProjectLibraryPanel {
         try {
           await this.postSharing('/sharing/assistant', {});
           this.status(`The next song you open gets a new ${sharing.role_label || 'assistant'}.`);
+        } finally {
+          this.renderSharing();
+        }
+      });
+      return;
+    }
+    // The Home's offer (FR16): yes hires the assistant now; Not now is remembered.
+    if (id === 'hire') {
+      const role = sharing.role_label || 'assistant';
+      await this.run(trigger, `Adding your ${role}…`, async () => {
+        try {
+          const result = await this.postSharing('/sharing', {
+            enabled: true,
+            hire: true,
+            team_digest: sharing.team_digest
+          });
+          const name = result?.sharing?.agent_name || `Your ${role}`;
+          this.status(`${name} is hired. It joins each song you open.`);
+        } catch (error) {
+          if (error.payload?.sharing && this.state) this.state.sharing = error.payload.sharing;
+          throw error;
+        } finally {
+          this.renderSharing();
+        }
+      });
+      return;
+    }
+    if (id === 'dismiss_offer') {
+      await this.run(trigger, 'Saving your answer…', async () => {
+        try {
+          await this.postSharing('/sharing/offer', {});
+          this.status('Not now. The switch stays here if you change your mind.');
         } finally {
           this.renderSharing();
         }
@@ -2057,7 +2140,8 @@ export class ProjectLibraryPanel {
       view = recentlySavedView(
         await this.request(`/projects?${RECENT_SONGS_QUERY}`),
         new Date(),
-        this.projectWords()
+        this.projectWords(),
+        this.state?.sharing
       );
     } catch (_) {
       view = { visible: false, cards: [] };

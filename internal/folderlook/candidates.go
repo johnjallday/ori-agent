@@ -55,7 +55,11 @@ type Candidate struct {
 	// up run acts on. Never shown.
 	IntegrationKey  string `json:"integration_key,omitempty"`
 	HomeProviderKey string `json:"home_provider_key,omitempty"`
-	App             string `json:"app,omitempty"`
+	// ProjectIntegrationKey, on a Home provider's candidate, is the reviewed
+	// integration whose blueprint gives the Home's songs their team: the Home
+	// step installs it when the plan's own tools step does not. Never shown.
+	ProjectIntegrationKey string `json:"project_integration_key,omitempty"`
+	App                   string `json:"app,omitempty"`
 	// Ref is a search hit's own marketplace id, case kept, for the install.
 	Ref string `json:"ref,omitempty"`
 	// Home is what the host knew about a Home provider's candidate when it
@@ -126,6 +130,61 @@ type HomeFacts struct {
 	// release, so it is known before the Home exists. An older record has
 	// MissingRoles and no Hires.
 	Hires []HomeHire `json:"hires,omitempty"`
+	// Assistant is the shared assistant the Home's song team requires, and
+	// where it stands for this Home. Nil when the host could not tell (the
+	// team's plugin cannot be read), and the plan then says nothing about it.
+	Assistant *HomeAssistant `json:"assistant,omitempty"`
+}
+
+// HomeAssistant is the shared assistant a Home's song blueprint declares (one
+// agent, bound into every song the Home opens) as the plan words it.
+type HomeAssistant struct {
+	// Label is the role's own label; Name the name a hire would use, or the
+	// agent the Home already has.
+	Label string `json:"label"`
+	Name  string `json:"name"`
+	// Job is one line on what it does, cut from the role's description.
+	Job string `json:"job,omitempty"`
+	// Taken is the role's label when one of the owner's agents holds it, so
+	// the hire takes another name.
+	Taken string `json:"taken,omitempty"`
+	// State is one of the Assistant* states.
+	State string `json:"state"`
+}
+
+// Where a Home's shared assistant stands for the plan.
+const (
+	// AssistantHire: the Home has none; Set up hires it.
+	AssistantHire = "hire"
+	// AssistantHas: the Home already has it; nothing to do.
+	AssistantHas = "has"
+	// AssistantOff: the Home's switch for adding it to songs is off. Set up
+	// never turns it on.
+	AssistantOff = "off"
+	// AssistantStale: the Home approved it for an older version of the team.
+	AssistantStale = "stale"
+	// AssistantHeld: an agent holds the name a hire reserved, without proof the
+	// Home made it. The owner decides on the Home.
+	AssistantHeld = "held"
+)
+
+// cleanAssistant bounds what a host reported about the shared assistant; nil
+// when it does not pass.
+func cleanAssistant(in *HomeAssistant) *HomeAssistant {
+	if in == nil {
+		return nil
+	}
+	out := HomeAssistant{Label: homeFactText(in.Label), Name: homeFactText(in.Name), Job: JobLine(in.Job),
+		Taken: homeFactText(in.Taken), State: in.State}
+	switch out.State {
+	case AssistantHire, AssistantHas, AssistantOff, AssistantStale, AssistantHeld:
+	default:
+		return nil
+	}
+	if out.Label == "" || (out.Name == "" && (out.State == AssistantHire || out.State == AssistantHas)) {
+		return nil
+	}
+	return &out
 }
 
 // HomeHire is one agent the Home step would hire, in plain words.
@@ -215,6 +274,7 @@ func cleanHomeFacts(in HomeFacts) *HomeFacts {
 	if in.HomeExists && (in.SongDetails == SongDetailsNumbers || in.SongDetails == SongDetailsNames) {
 		out.SongDetails = in.SongDetails
 	}
+	out.Assistant = cleanAssistant(in.Assistant)
 	if out.RolesKnown {
 		for _, hire := range hires {
 			name := homeFactText(hire.Name)
@@ -246,6 +306,10 @@ type Readiness struct {
 	// or a Home provider (KindHomeProvider) by its key; false when the host
 	// does not know it. Nil asks nothing.
 	Release func(kind, key string) (ReleaseFacts, bool)
+	// Assistant reports the shared assistant a Home provider's Home would
+	// have for the song team of a reviewed integration, and where it stands;
+	// false when the host could not tell. Nil asks nothing.
+	Assistant func(providerKey, integrationKey string) (HomeAssistant, bool)
 }
 
 // releaseOf asks the host for a reviewed release, bounded; nil when unknown.
@@ -296,9 +360,19 @@ func RequiredCandidates(facts foldermap.Facts, ready Readiness) []Candidate {
 		if c.Release != nil && c.Release.Version == "" && c.Home != nil {
 			c.Release.Version = c.Home.ProviderVersion
 		}
+		// The portfolio's own project format still needs its tools, and its
+		// songs' team (the shared assistant) comes from them.
+		integration, hasTools := integrationFor(dominantProject(facts), ready)
+		if hasTools {
+			c.ProjectIntegrationKey = integration.IntegrationKey
+			if c.Home != nil && ready.Assistant != nil {
+				if assistant, ok := ready.Assistant(p.HomeProviderKey, integration.IntegrationKey); ok {
+					c.Home.Assistant = cleanAssistant(&assistant)
+				}
+			}
+		}
 		out = append(out, c)
-		// The portfolio's own project format still needs its tools.
-		if integration, ok := integrationFor(dominantProject(facts), ready); ok {
+		if hasTools {
 			out = append(out, integration)
 		}
 	}

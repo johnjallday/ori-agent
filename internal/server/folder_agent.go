@@ -608,6 +608,9 @@ func (s folderAgentSetups) Readiness(ctx context.Context, userID string) folderl
 	ready.Home = func(providerKey string) (folderlook.HomeFacts, bool) {
 		return folderAgentHomeFacts(ctx, b, userID, providerKey)
 	}
+	ready.Assistant = func(providerKey, integrationKey string) (folderlook.HomeAssistant, bool) {
+		return folderAgentAssistantFacts(ctx, b, userID, providerKey, integrationKey)
+	}
 	return ready
 }
 
@@ -637,7 +640,7 @@ func installedFrom(lines []personalassistant.FolderPlanLine) []string {
 			continue
 		}
 		if line.Kind != personalassistant.FolderPlanIntegration && line.Kind != personalassistant.FolderPlanProvider &&
-			line.Kind != personalassistant.FolderPlanHome {
+			line.Kind != personalassistant.FolderPlanHome && line.Kind != folderagent.FolderPlanHomeTools {
 			continue
 		}
 		if name, ok := strings.CutPrefix(line.Progress, "Installed "); ok && name != "" {

@@ -34,17 +34,21 @@ export function libraryRequestError(response, result = {}) {
 
 // libraryOpenAction is the row's one-click Open, or null when the row cannot be
 // opened here (read-only Home, unsupported format, source unavailable): such a
-// row keeps its Details, which explain why.
-export function libraryOpenAction(row, readOnly) {
+// row keeps its Details, which explain why. Its label promises an assistant
+// only when opening will add one: the Home's shared-assistant switch is on and
+// its assistant is not gone (assistant-reads-projects FR19). sharing is the
+// Home's `sharing` read; without it nothing is promised.
+export function libraryOpenAction(row, readOnly, sharing = null) {
   if (readOnly || !row?.can_open) return null;
   const name = String(row.name || 'this project');
-  return {
-    label: 'Open',
-    ariaLabel:
-      row.connection === 'connected'
-        ? `Open ${name}`
-        : `Open ${name}: makes its workspace and adds your assistant`
-  };
+  const addsAssistant = sharing?.state === 'on' && !sharing.assistant_missing;
+  let ariaLabel = `Open ${name}`;
+  if (row.connection !== 'connected') {
+    ariaLabel = addsAssistant
+      ? `Open ${name}: makes its workspace and adds your assistant`
+      : `Open ${name}: makes its workspace`;
+  }
+  return { label: 'Open', ariaLabel };
 }
 
 // A route the open action may navigate to: one workspace, nothing else.
@@ -70,6 +74,10 @@ export function libraryOpenedMessage(name, result) {
       return `${song} is open. Your assistant changed in a plugin update; review it on this Home to add it.`;
     case 'assistant_missing':
       return `${song} is open. Your shared assistant is gone, so no agent was added.`;
+    // A Home that was never asked (set up before Homes hired their assistant):
+    // where to say yes is this Home's switch (assistant-reads-projects FR18).
+    case 'none':
+      return `${song} is open. No assistant was added: this Home has not been asked yet. Turn on "Add my assistant to songs I open" on this Home to add one.`;
     case 'needs_model':
       return `${song} is open, but no assistant was added: set up a model first.`;
     case 'reconcile':

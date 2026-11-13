@@ -123,10 +123,24 @@ func TestLibrarySharing_AMissingAssistantIsAddedAgainOnTheNextOpen(t *testing.T)
 	if code, _ := f.open(t, openHomeID, "two", `{"request_id":"r2"}`); code != http.StatusOK {
 		t.Fatal("first open failed")
 	}
+	// assistant-reads-projects FR13: once recorded and present, the Home lists it
+	// as hired, also with its switch off (FR15).
+	if view := f.sharing(t); !view.Hired || view.AgentName != "REAPER Assistant" {
+		t.Fatalf("recorded assistant = %+v", view)
+	}
+	if code, _ := f.post(t, "/sharing", `{"request_id":"off","enabled":false}`, f.handler.SetAssistantLibrarySharing); code != http.StatusOK {
+		t.Fatal("switching off failed")
+	}
+	if view := f.sharing(t); !view.Hired || view.State != sharingOff {
+		t.Fatalf("switched off = %+v", view)
+	}
+	if code, _ := f.post(t, "/sharing", `{"request_id":"on","enabled":true,"team_digest":"`+openDigest+`"}`, f.handler.SetAssistantLibrarySharing); code != http.StatusOK {
+		t.Fatal("switching on failed")
+	}
 	f.agents.mu.Lock()
 	delete(f.agents.names, "REAPER Assistant")
 	f.agents.mu.Unlock()
-	if view := f.sharing(t); !view.AssistantMissing || view.State != sharingOn {
+	if view := f.sharing(t); !view.AssistantMissing || view.State != sharingOn || view.Hired {
 		t.Fatalf("after the delete = %+v", view)
 	}
 	code, payload := f.open(t, openHomeID, "three", `{"request_id":"r3"}`)

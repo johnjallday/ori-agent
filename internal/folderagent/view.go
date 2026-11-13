@@ -567,6 +567,14 @@ func homeHires(rec Record, home folderlook.Candidate, step string) ([]HireEntry,
 			}
 			out = append(out, entry)
 		}
+		// The shared assistant is one more row of the same list (FR1, FR6).
+		if a := facts.Assistant; assistantHires(facts) == 1 {
+			entry := HireEntry{Step: step, Name: a.Name, Job: a.Job, Model: model, Note: AssistantJoins}
+			if a.Taken != "" {
+				entry.Note += " Your existing " + a.Taken + " stays as it is."
+			}
+			out = append(out, entry)
+		}
 		return out, ""
 	}
 	if hiresAgents(home) {
@@ -734,6 +742,12 @@ func BuildPlan(rec Record, selected []string) Plan {
 	for _, c := range rec.Candidates {
 		candidates[c.ID] = c
 	}
+	chosenCandidates := make(map[string]bool, len(order))
+	for _, h := range order {
+		if id := steps[byHandle[h]].CandidateID; id != "" {
+			chosenCandidates[id] = true
+		}
+	}
 	stage := foldermap.Stage("")
 	type bound struct {
 		handle string
@@ -776,7 +790,23 @@ func BuildPlan(rec Record, selected []string) Plan {
 				Detail: rec.AgentName + " can use them in this workspace.",
 			})
 		case folderlook.KindHomeProvider:
-			plan.Lines = append(plan.Lines, homeLines(rec, c)...)
+			lines := homeLines(rec, c)
+			// The Home's songs get their team from the app plugin: without it the
+			// Home cannot name, hire or open with its shared assistant. When the
+			// plan does not run the tools step, the Home step installs it, after
+			// its own provider, under the same press (FR12).
+			if tools, ok := homeTools(c, candidates, chosenCandidates); ok {
+				plan.Installs = append(plan.Installs, installEntryOf(h, tools))
+				plan.Installs[len(plan.Installs)-1].Line = FolderPlanHomeTools
+				at := 0
+				if len(lines) > 0 && lines[0].Kind == personalassistant.FolderPlanProvider {
+					at = 1
+				}
+				install := personalassistant.FolderPlanLine{Kind: FolderPlanHomeTools, Name: "Installs " + tools.Name,
+					Detail: "Your " + homeName(c) + "'s songs get their assistant from it. " + folderlook.AppToolsSentence(tools)}
+				lines = append(lines[:at], append([]personalassistant.FolderPlanLine{install}, lines[at:]...)...)
+			}
+			plan.Lines = append(plan.Lines, lines...)
 			hires, note := homeHires(rec, c, h)
 			plan.Hires = append(plan.Hires, hires...)
 			if note != "" {
@@ -839,7 +869,8 @@ func BuildPlan(rec Record, selected []string) Plan {
 			}
 		}
 	}
-	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder, Name: assuranceLine(rec, plan.Candidates, len(plan.Hires))})
+	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder,
+		Name: assuranceLine(rec, plan.Candidates, len(plan.Installs), len(plan.Hires))})
 	sort.Strings(plan.Selected)
 	plan.Digest = planDigest(plan)
 	return plan
@@ -906,7 +937,7 @@ func toolsBeforeHome(order []string, steps []folderlook.Step, byHandle map[strin
 // song details. A folder placed in a Home whose song-details consent is active is
 // read by that Home's own scans as it is set up, so the line then says what they
 // read instead of promising nothing is read.
-func assuranceLine(rec Record, candidates []folderlook.Candidate, hires int) string {
+func assuranceLine(rec Record, candidates []folderlook.Candidate, installs, hires int) string {
 	folder := strings.TrimSpace(rec.FolderName)
 	anonymous := folder == "" || strings.ContainsAny(folder, "/\\\x00\r\n")
 	reads := readsSentence(candidates)
@@ -924,7 +955,7 @@ func assuranceLine(rec Record, candidates []folderlook.Candidate, hires int) str
 	if reads != "" {
 		line += ". " + reads
 	}
-	if adds := addsSentence(candidates, hires); adds != "" {
+	if adds := addsSentence(candidates, installs, hires); adds != "" {
 		line += ". " + adds
 	} else if reads != "" {
 		// The reads sentence is the last one: it ends like the adds sentence would.
@@ -954,12 +985,14 @@ func readsSentence(candidates []folderlook.Candidate) string {
 }
 
 // addsSentence is the assurance's second half: "Ori adds 2 plugins, <Home>,
-// and 1 agent." Agents are counted when the plan names them, also for a Home
-// that already exists; when it cannot, a Home it creates still adds "its
-// agents". Empty when the plan adds none of them.
-func addsSentence(candidates []folderlook.Candidate, hires int) string {
+// and 1 agent." Plugins are the plan's install rows (installs), so a plugin
+// the Home step installs for its songs is counted too. Agents are counted when
+// the plan names them, also for a Home that already exists; when it cannot, a
+// Home it creates still adds "its agents". Empty when the plan adds none of
+// them.
+func addsSentence(candidates []folderlook.Candidate, installs, hires int) string {
 	var parts []string
-	if n := len(pluginInstalls(candidates)); n > 0 {
+	if n := installs; n > 0 {
 		parts = append(parts, fmt.Sprintf("%d %s", n, plural(n, "plugin", "plugins")))
 	}
 	unnamed := false
@@ -985,19 +1018,6 @@ func addsSentence(candidates []folderlook.Candidate, hires int) string {
 		return "Ori adds " + parts[0] + " and " + parts[1] + "."
 	}
 	return "Ori adds " + strings.Join(parts[:len(parts)-1], ", ") + ", and " + parts[len(parts)-1] + "."
-}
-
-// pluginInstalls are the plan's candidates whose step downloads and installs
-// a plugin, in run order: an integration whose tools are not in place, a Home
-// provider that is not ready, and a plugin add-on.
-func pluginInstalls(candidates []folderlook.Candidate) []folderlook.Candidate {
-	var out []folderlook.Candidate
-	for _, c := range candidates {
-		if installsPlugin(c) {
-			out = append(out, c)
-		}
-	}
-	return out
 }
 
 // installsPlugin reports whether a candidate's step downloads and installs a
@@ -1029,7 +1049,21 @@ func hiresAgents(home folderlook.Candidate) bool {
 	if home.Home == nil {
 		return createsHome(home)
 	}
-	return !home.Home.RolesKnown || len(home.Home.MissingRoles) > 0
+	return !home.Home.RolesKnown || len(home.Home.MissingRoles) > 0 || assistantHires(home.Home) == 1
+}
+
+// homeTools is the integration candidate a Home step installs itself: the one
+// that gives the Home's songs their team, when it still needs installing and
+// the plan does not run its own tools step (which installs it first).
+func homeTools(home folderlook.Candidate, candidates map[string]folderlook.Candidate, chosen map[string]bool) (folderlook.Candidate, bool) {
+	if home.ProjectIntegrationKey == "" {
+		return folderlook.Candidate{}, false
+	}
+	tools, ok := candidates["integration:"+home.ProjectIntegrationKey]
+	if !ok || !folderlook.IntegrationInstalls(tools) || chosen[tools.ID] {
+		return folderlook.Candidate{}, false
+	}
+	return tools, true
 }
 
 // defaultReason says why Ori's own plan is shown rather than the agent's.
