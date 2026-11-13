@@ -95,24 +95,26 @@ func (s Scope) valid() bool {
 // Document is stored in the Home's canonical assistant-program envelope. Its
 // independent revision covers observations as well as reviewed user edits.
 type Document struct {
-	SchemaVersion int                      `json:"schema_version"`
-	OwnerUserID   string                   `json:"owner_user_id"`
-	HomeID        string                   `json:"home_id"`
-	ProviderID    string                   `json:"provider_id"`
-	ProgramID     string                   `json:"program_id"`
-	Revision      int64                    `json:"revision"`
-	Roots         []Root                   `json:"roots,omitempty"`
-	Entries       []Entry                  `json:"entries,omitempty"`
-	Scans         []Scan                   `json:"scans,omitempty"`
-	Digest        *LibraryDigest           `json:"library_digest,omitempty"`
-	ProposalRuns  []ProposalRun            `json:"proposal_runs,omitempty"`
-	Dismissals    []ProposalDismissal      `json:"proposal_dismissals,omitempty"`
-	Sessions      []StudioSession          `json:"sessions,omitempty"`
-	Queue         *ActivationQueue         `json:"activation_queue,omitempty"`
-	QueueHistory  []ActivationQueueOutcome `json:"queue_history,omitempty"`
-	Proposals     []ManagerProposal        `json:"proposals,omitempty"`
-	Reviews       []ReviewReceipt          `json:"reviews,omitempty"`
-	Operations    []OperationReceipt       `json:"operations,omitempty"`
+	SchemaVersion int            `json:"schema_version"`
+	OwnerUserID   string         `json:"owner_user_id"`
+	HomeID        string         `json:"home_id"`
+	ProviderID    string         `json:"provider_id"`
+	ProgramID     string         `json:"program_id"`
+	Revision      int64          `json:"revision"`
+	Roots         []Root         `json:"roots,omitempty"`
+	Entries       []Entry        `json:"entries,omitempty"`
+	Scans         []Scan         `json:"scans,omitempty"`
+	Digest        *LibraryDigest `json:"library_digest,omitempty"`
+	ProposalRuns  []ProposalRun  `json:"proposal_runs,omitempty"`
+	// FactsReads are the app assistant's read turns (assistant-reads-projects).
+	FactsReads   []FactsReadRun           `json:"facts_reads,omitempty"`
+	Dismissals   []ProposalDismissal      `json:"proposal_dismissals,omitempty"`
+	Sessions     []StudioSession          `json:"sessions,omitempty"`
+	Queue        *ActivationQueue         `json:"activation_queue,omitempty"`
+	QueueHistory []ActivationQueueOutcome `json:"queue_history,omitempty"`
+	Proposals    []ManagerProposal        `json:"proposals,omitempty"`
+	Reviews      []ReviewReceipt          `json:"reviews,omitempty"`
+	Operations   []OperationReceipt       `json:"operations,omitempty"`
 	// CollectionBrief is the Manager's description of the library after the
 	// latest scan whose turn wrote one (Homes that read song facts only).
 	CollectionBrief *CollectionBrief    `json:"collection_brief,omitempty"`
@@ -203,12 +205,12 @@ type FactsSource struct {
 	ModifiedAt time.Time `json:"modified_at"`
 }
 
-// Facts are valid only for a format whose marker declares them, read from one
-// of the observation's listed files of that format.
+// Facts are valid only for a project file of the observation's format, one of
+// the observation's listed files of that format.
 func (f *ObservedFacts) valid(o Observation) bool {
 	source := f.ReadFrom
 	// Only a file that was too large to read may be larger than the read cap.
-	sizeOK := source.Size >= 0 && (source.Size <= DefaultSongFactsLimits.MaxBytes || f.NotRead == NotReadTooLarge)
+	sizeOK := source.Size >= 0 && (source.Size <= maxSongFileBytes || f.NotRead == NotReadTooLarge)
 	return f.SongFacts.valid() && f.notReadValid() && f.Names.valid() &&
 		source.File != "" && filepath.Base(source.File) == source.File && validText(source.File, 240) &&
 		factsFile(o.Format, source.File) && slices.Contains(o.Alternates, source.File) &&
@@ -606,7 +608,7 @@ func (d Document) valid(scope Scope) bool {
 	if d.Digest != nil && !d.Digest.valid(d.Scans) {
 		return false
 	}
-	if !proposalRunsValid(d.ProposalRuns, scans) || !dismissalsValid(d.Dismissals) {
+	if !proposalRunsValid(d.ProposalRuns, scans) || !dismissalsValid(d.Dismissals) || !factsReadsValid(d.FactsReads) {
 		return false
 	}
 	if d.CollectionBrief != nil && !d.CollectionBrief.valid(scans) {

@@ -5,12 +5,11 @@ import (
 	"math"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -36,8 +35,12 @@ type SongMarker struct {
 	End  float64 `json:"end,omitempty"`
 }
 
-// NotReadNoGrammar is shown for a song whose project format has no reading
-// grammar at all: it is known from the format, so it is never stored.
+// NotReadNoGrammar is shown for a song whose project format no reviewed app
+// plugin reads at all: it is known from the format, so it is never stored. (The
+// value keeps the name stored data and the page already use.) A format a
+// reviewed plugin owns but that plugin has no reader for is not this: it is
+// told as an update (ReaderUpdatePlugin), because installing a newer plugin
+// would read it.
 const NotReadNoGrammar = "no_grammar"
 
 // SongLearned is what a song's own page shows under "Learned from the project
@@ -77,7 +80,7 @@ func learnedFrom(entry Entry, roots map[string]Root, inactive map[string]bool, c
 	}
 	switch facts := dating.Facts; {
 	case facts == nil:
-		if factsGrammar(dating.Format) == nil {
+		if !formatHasReviewedPlugin(dating.Format) {
 			return &SongLearned{NotRead: NotReadNoGrammar}
 		}
 		return nil
@@ -153,6 +156,62 @@ func (s *Store) LearnedSongsInRoot(scope Scope, rootID string) ([]LearnedSong, e
 		songs = songs[:maxLearnedSongs]
 	}
 	return songs, nil
+}
+
+// LearnedSongForWorkspace is what the Home saved about the one song linked to
+// workspaceID, as the Home's app assistant may be given it inside that song:
+// its name, the numbers, and under a consent that covers them the names read
+// from its project file, or why it was not read. It gives nothing unless the
+// Home's consent is active, so the next task or turn after the switch goes off
+// has none (assistant-reads-projects FR43). Only that one song: never another
+// song's facts. ok is false when no song of this Home is linked to the workspace.
+func (s *Store) LearnedSongForWorkspace(scope Scope, workspaceID string) (LearnedSong, bool, error) {
+	doc, state, err := s.readSnapshot(scope)
+	if err != nil {
+		return LearnedSong{}, false, err
+	}
+	consent := state.GetSongDetailsConsent()
+	if !consent.Active() || strings.TrimSpace(workspaceID) == "" {
+		return LearnedSong{}, false, nil
+	}
+	views := newProjectionMaps(doc, state)
+	for _, entry := range doc.Entries {
+		if entry.Link == nil || entry.Link.WorkspaceID != workspaceID {
+			continue
+		}
+		// The song's usable source that dates it, the rule every other reader uses.
+		rootID := ""
+		var newest time.Time
+		for _, observed := range entry.Observations {
+			root := views.roots[observed.RootID]
+			usable := root.RevokedAt == nil && !views.inactive[root.ID] &&
+				(observed.Availability == "available" || observed.Availability == "ambiguous")
+			if usable && !observed.FileModifiedAt.IsZero() && (rootID == "" || observed.FileModifiedAt.After(newest)) {
+				rootID, newest = observed.RootID, observed.FileModifiedAt
+			}
+		}
+		if rootID == "" {
+			return LearnedSong{}, false, nil
+		}
+		inRoot := entry
+		inRoot.Observations = nil
+		for _, observed := range entry.Observations {
+			if observed.RootID == rootID {
+				inRoot.Observations = append(inRoot.Observations, observed)
+			}
+		}
+		row := s.projectSearchRowInRoot(scope, inRoot, views.roots, views.linked, views.inactive, rootID, true)
+		song := LearnedSong{Name: row.Name, Facts: row.Facts}
+		if learned := learnedFrom(inRoot, views.roots, views.inactive, consent); learned != nil {
+			song.NotRead = learned.NotRead
+			if learned.NotRead == "" {
+				names := learned.SongNames
+				song.Names = &names
+			}
+		}
+		return song, true, nil
+	}
+	return LearnedSong{}, false, nil
 }
 
 // clone copies the names so a copy shares no slice with the original.
@@ -436,87 +495,20 @@ func songNameCost(name string) int {
 	return cost
 }
 
-// lineValues reads the values of an attribute line whose first word is key:
-// whitespace-separated, except that a value opening with a double quote, a single
-// quote or a backtick runs to the next copy of that character (no escapes), and
-// the closing quote must be followed by whitespace or the end of the line. It
-// fills out with subslices of the line (nothing is allocated and the work is one
-// pass over the line) and returns how many it filled.
-//
-// matched says the line is the key's; ok is false when it is but a quote was
-// never closed, so the caller skips that entry and goes on. An empty key never
-// matches.
-func lineValues(line []byte, key string, out [][]byte) (n int, matched, ok bool) {
-	if key == "" || !bytes.HasPrefix(line, []byte(key)) || len(line) == len(key) ||
-		(line[len(key)] != ' ' && line[len(key)] != '\t') {
-		return 0, false, false
-	}
-	rest := line[len(key):]
-	i := 0
-	for n < len(out) {
-		for i < len(rest) && (rest[i] == ' ' || rest[i] == '\t') {
-			i++
-		}
-		if i >= len(rest) {
-			break
-		}
-		switch quote := rest[i]; quote {
-		case '"', '\'', '`':
-			end := bytes.IndexByte(rest[i+1:], quote)
-			if end < 0 {
-				return n, true, false
-			}
-			closing := i + 1 + end
-			if after := closing + 1; after < len(rest) && rest[after] != ' ' && rest[after] != '\t' {
-				return n, true, false
-			}
-			out[n] = rest[i+1 : closing]
-			i = closing + 1
-		default:
-			start := i
-			for i < len(rest) && rest[i] != ' ' && rest[i] != '\t' {
-				i++
-			}
-			out[n] = rest[start:i]
-		}
-		n++
-	}
-	return n, true, true
-}
-
-// markerSlot is one collected marker or region while the file is read: the
-// project's own number for it pairs a region's end line with its start.
-type markerSlot struct {
-	SongMarker
-	index uint32
-	open  bool
-}
-
-// nameCollector gathers a song's names under fixed caps while the reader streams
-// the file. Everything in it is bounded: 128 track names, 128 markers and
-// regions, each kind within its byte budget, and a few counters. It never grows
-// with the file.
+// nameCollector bounds the track names a reader returned: each cleaned with
+// songName, at most 128 within the byte budget, the rest counted as left out.
+// Markers and regions are bounded the same way by projectFactsNames. Everything
+// in it is bounded and it never grows with the input.
 type nameCollector struct {
-	grammar *folderdigest.ProjectFacts
-
 	tracks        []string
 	trackBytes    int
 	tracksLeftOut int
 
-	markers        [maxSongMarkers]markerSlot
-	markerCount    int
-	markerBytes    int
-	markersLeftOut int
-	// leftOutRegion is the number of a region whose start a cap cut off, so its
-	// end line is not counted as a marker of its own.
-	leftOutRegion    uint32
-	hasLeftOutRegion bool
-
 	scratch songNameScratch
 }
 
-func newNameCollector(grammar *folderdigest.ProjectFacts) *nameCollector {
-	return &nameCollector{grammar: grammar, tracks: make([]string, 0, maxSongTracks)}
+func newNameCollector() *nameCollector {
+	return &nameCollector{tracks: make([]string, 0, maxSongTracks)}
 }
 
 func addLeftOut(n int) int { return min(n+1, maxSongLeftOut) }
@@ -534,90 +526,4 @@ func (c *nameCollector) noteTrack(raw []byte) {
 	}
 	c.tracks = append(c.tracks, name)
 	c.trackBytes += cost
-}
-
-// noteMarker takes the values of one marker line. A line whose number, time or
-// flags cannot be read is skipped.
-func (c *nameCollector) noteMarker(values [][]byte) {
-	g := c.grammar
-	if len(values) < max(g.MarkerIndex, g.MarkerPosition, g.MarkerName, g.MarkerFlags) {
-		return
-	}
-	index, ok := markerUint(values[g.MarkerIndex-1], 32)
-	if !ok {
-		return
-	}
-	at, ok := songNumber(values[g.MarkerPosition-1])
-	if !ok || at > maxSongLength {
-		return
-	}
-	at = math.Round(at*1000) / 1000
-	flags, ok := markerUint(values[g.MarkerFlags-1], 64)
-	if !ok {
-		return
-	}
-	region := flags&uint64(g.MarkerRegionBit) != 0
-	// markerUint read it with a 32-bit limit, so this holds; the check says so where
-	// the conversion is.
-	if index > math.MaxUint32 {
-		return
-	}
-	number := uint32(index)
-
-	if region {
-		// A region is two lines with one number: its start, then its end.
-		if c.hasLeftOutRegion && c.leftOutRegion == number {
-			c.hasLeftOutRegion = false
-			return
-		}
-		for i := c.markerCount - 1; i >= 0; i-- {
-			if m := &c.markers[i]; m.open && m.index == number {
-				m.open = false
-				// An end at or before its start leaves a plain marker.
-				if at > m.At {
-					m.End = at
-				}
-				return
-			}
-		}
-	}
-	// A name the project gives but that is dropped (a path, nothing but control
-	// characters) leaves the marker with its time and no name.
-	name, _ := songName(values[g.MarkerName-1], &c.scratch)
-	cost := songNameCost(name)
-	if c.markerCount >= maxSongMarkers || c.markerBytes+cost > maxSongNameBytes {
-		c.markersLeftOut = addLeftOut(c.markersLeftOut)
-		if region {
-			c.leftOutRegion, c.hasLeftOutRegion = number, true
-		}
-		return
-	}
-	c.markers[c.markerCount] = markerSlot{SongMarker: SongMarker{Name: name, At: at}, index: number, open: region}
-	c.markerCount++
-	c.markerBytes += cost
-}
-
-// markerUint parses a short unsigned integer a marker line holds.
-func markerUint(value []byte, bits int) (uint64, bool) {
-	if len(value) == 0 || len(value) > 20 {
-		return 0, false
-	}
-	number, err := strconv.ParseUint(string(value), 10, bits)
-	return number, err == nil
-}
-
-// names is what was collected. A region still open at the end of the file keeps
-// no end and stays a plain marker.
-func (c *nameCollector) names() *SongNames {
-	names := &SongNames{TracksLeftOut: c.tracksLeftOut, MarkersLeftOut: c.markersLeftOut}
-	if len(c.tracks) > 0 {
-		names.Tracks = c.tracks
-	}
-	if c.markerCount > 0 {
-		names.Markers = make([]SongMarker, c.markerCount)
-		for i := range names.Markers {
-			names.Markers[i] = c.markers[i].SongMarker
-		}
-	}
-	return names
 }

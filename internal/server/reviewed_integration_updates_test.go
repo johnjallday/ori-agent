@@ -125,13 +125,26 @@ func reviewedInstall(entry reviewedintegration.Entry, version, source string) pl
 	return plugin.InstalledPlugin{Name: entry.PluginID, Version: version, Source: source, Format: entry.SourceFormat}
 }
 
+// reviewedFloor is the registry's minimum reviewed version, so a test that
+// means "at the floor" says so and survives a floor move. A release below it is
+// never offered, so an install the tests want below the floor is 0.11.0, under
+// every floor from 0.12.0 on.
+func reviewedFloor() string {
+	entry, ok := reviewedintegration.Get("ori_reaper")
+	if !ok {
+		panic("reviewed integration fixture is missing")
+	}
+	return entry.MinimumVersion
+}
+
 func TestReviewedIntegrationUpdatesOfferOnlyANewerReleaseForExactOfficialCommits(t *testing.T) {
-	updates, releases, entry := reviewedUpdatesFixture("0.9.1")
-	older := reviewedInstall(entry, "0.8.0", entry.PinnedSource(strings.Repeat("a", 40)))
+	floor := reviewedFloor()
+	updates, releases, entry := reviewedUpdatesFixture(floor)
+	older := reviewedInstall(entry, "0.11.0", entry.PinnedSource(strings.Repeat("a", 40)))
 
 	availability, ok, err := updates.availability(older)
 	if err != nil || !ok || availability != (plugin.UpdateAvailability{
-		Name: entry.PluginID, InstalledVersion: "0.8.0", AvailableVersion: "0.9.1", Available: true, ReviewedRelease: true,
+		Name: entry.PluginID, InstalledVersion: "0.11.0", AvailableVersion: floor, Available: true, ReviewedRelease: true,
 	}) {
 		t.Fatalf("availability = %+v ok=%v err=%v", availability, ok, err)
 	}
@@ -141,7 +154,7 @@ func TestReviewedIntegrationUpdatesOfferOnlyANewerReleaseForExactOfficialCommits
 
 	// Same or newer installed versions are reviewed but have nothing to offer,
 	// and the handler keeps its recorded-source path instead of downgrading.
-	for _, version := range []string{"0.9.1", "1.0.0", "unknown"} {
+	for _, version := range []string{floor, "1.0.0", "unknown"} {
 		installed := reviewedInstall(entry, version, entry.PinnedSource(strings.Repeat("c", 40)))
 		availability, ok, err := updates.availability(installed)
 		if err != nil || !ok || availability.Available || availability.AvailableVersion != version {
@@ -183,6 +196,7 @@ func TestReviewedIntegrationUpdatesAnswerUnpinnedOfficialInstallsFromReleasesOnl
 	floorOf := func(entry reviewedintegration.Entry) integrationrelease.Resolution {
 		return integrationrelease.Floor(entry)
 	}
+	floor := reviewedFloor()
 	cases := []struct {
 		name          string
 		installed     string
@@ -193,10 +207,10 @@ func TestReviewedIntegrationUpdatesAnswerUnpinnedOfficialInstallsFromReleasesOnl
 		{name: "current release while main is ahead", installed: "1.0.0"},
 		{name: "ahead of the latest release", installed: "1.1.0"},
 		{name: "installed version not comparable", installed: "unknown"},
-		{name: "resolver fallback at the floor", installed: "0.9.0", resolution: floorOf},
+		{name: "resolver fallback at the floor", installed: floor, resolution: floorOf},
 		{
-			name: "resolver fallback above the install", installed: "0.8.0", resolution: floorOf,
-			wantAvailable: "0.9.0", wantSource: func(entry reviewedintegration.Entry) string { return entry.FallbackSource() },
+			name: "resolver fallback above the install", installed: "0.11.0", resolution: floorOf,
+			wantAvailable: floor, wantSource: func(entry reviewedintegration.Entry) string { return entry.FallbackSource() },
 		},
 		{
 			name: "resolver source outside the repository", installed: "0.9.0",
@@ -329,7 +343,7 @@ var installForms = []struct {
 	},
 }
 
-// walkFixture publishes 1.1.0 (c), 1.0.0 (b) and the 0.9.0 floor, newest first.
+// walkFixture publishes 1.1.0 (c), 1.0.0 (b) and the floor, newest first.
 func walkFixture() (reviewedIntegrationUpdates, *fixedReleases, reviewedintegration.Entry, []integrationrelease.Resolution) {
 	updates, releases, entry := reviewedUpdatesFixture("1.1.0")
 	releases.candidates = []integrationrelease.Resolution{
@@ -382,19 +396,20 @@ func TestReviewedIntegrationUpdatesOfferNothingWhenNoNewerReleaseCanLoad(t *test
 			updates, releases, entry, published := walkFixture()
 			releases.inspectErr[published[0].Source] = &plugin.ContributionError{Code: plugin.CodeHostFeatureUnsupported}
 			releases.incompatible[published[1].Source] = true
-			installed := reviewedInstall(entry, "0.9.0", form.source(entry))
+			floor := reviewedFloor()
+			installed := reviewedInstall(entry, floor, form.source(entry))
 
 			availability, ok, err := updates.availability(installed)
 			if err != nil || !ok || availability != (plugin.UpdateAvailability{
-				Name: entry.PluginID, InstalledVersion: "0.9.0", AvailableVersion: "0.9.0", ReviewedRelease: true,
+				Name: entry.PluginID, InstalledVersion: floor, AvailableVersion: floor, ReviewedRelease: true,
 			}) {
 				t.Fatalf("availability = %+v ok=%v err=%v, want a terminal nothing-available", availability, ok, err)
 			}
 			if got := updates.replacement(context.Background(), installed); got != form.nothing {
 				t.Fatalf("replacement = %+v, want %+v", got, form.nothing)
 			}
-			// The walk ends at the floor, which is not newer than 0.9.0: it is
-			// never inspected.
+			// The walk ends at the floor, which is not newer than the installed
+			// floor: it is never inspected.
 			for _, source := range releases.inspected {
 				if source == published[2].Source {
 					t.Fatal("the floor, equal to the installed version, was inspected")

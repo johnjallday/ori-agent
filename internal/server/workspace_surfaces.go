@@ -128,6 +128,9 @@ func (b *ServerBuilder) wireWorkspaceSurfaces() {
 			b.workspaceSurfaceHandler.InvalidateOwner(pluginID, generation)
 		})
 		b.pluginHandler.Manager().SetSurfaceLifecycle(lifecycle)
+		// The Home assistant's read calls an app plugin's project reader
+		// (assistant-reads-projects); the runner looks this up per call.
+		b.projectFactsCall = lifecycle.ProjectFacts
 		// A Home profile reads facts about a project plugin's own application
 		// through that plugin's one declared read-only operation.
 		if b.sessionHandler != nil {

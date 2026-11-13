@@ -70,9 +70,14 @@ func (tx *Tx) owns(projectID string) error {
 	return nil
 }
 
-// Fill is Service.Fill inside this turn.
+// Fill is Service.Fill inside this turn. A hire the Home made with no project,
+// and that stopped before it was recorded, is finished first: otherwise its
+// held name would stop this fill, or send a reviewed create around it.
 func (tx *Tx) Fill(projectID string, roleIDs []string, grant *Grant) ([]Fill, error) {
 	if err := tx.owns(projectID); err != nil {
+		return nil, err
+	}
+	if err := tx.s.settleShared(tx.home); err != nil {
 		return nil, err
 	}
 	return tx.s.fill(projectID, roleIDs, grant)

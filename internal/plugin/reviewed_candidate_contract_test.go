@@ -33,7 +33,10 @@ func TestReviewedCandidateHostContract(t *testing.T) {
 		!slices.Contains(descriptor.WorkspaceSurfaces.RequiresHostFeatures, HostFeatureSetupQuestsV2) {
 		t.Fatalf("candidate identity/host contract = %#v", descriptor)
 	}
-	if len(descriptor.ResolvedBlueprints) != 1 {
+	// 0.11.0 added a second blueprint (the REAPER Studio's, behind
+	// resource_workspaces_v1). The song blueprint stays first and is the one the
+	// reviewed floor names, so it is the one asserted below.
+	if len(descriptor.ResolvedBlueprints) < 1 {
 		t.Fatalf("candidate blueprints = %#v", descriptor.ResolvedBlueprints)
 	}
 	blueprint := descriptor.ResolvedBlueprints[0]

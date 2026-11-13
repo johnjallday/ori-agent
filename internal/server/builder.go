@@ -84,6 +84,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/privateservices"
 	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/progressionhttp"
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
@@ -414,8 +415,11 @@ type ServerBuilder struct {
 	setupJourneyHandler       *setupjourneyhttp.Handler
 	// assistantStaffing is the one staffing seam (review → commit) and
 	// projectStaffing decides how a project's roles share the Home's assistant.
-	assistantStaffing    *setupjourney.AssistantStaffingAdapter
-	projectStaffing      *projectstaffing.Service
+	assistantStaffing *setupjourney.AssistantStaffingAdapter
+	projectStaffing   *projectstaffing.Service
+	// projectFactsCall calls an app plugin's project reader (set with the
+	// plugins' surface lifecycle; nil until then).
+	projectFactsCall     projectlibrary.ProjectFactsCaller
 	sampleLibraryService *samplelibrary.Service
 	sampleLibraryHandler *samplelibraryhttp.Handler
 

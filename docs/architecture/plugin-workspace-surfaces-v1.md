@@ -300,6 +300,59 @@ component, inventories regular non-symlink skeleton files, and fingerprints
 all bytes. Blueprint data cannot name a service command, artifact, operation
 implementation, route, module, or raw scope/path.
 
+### Project facts reader
+
+An app plugin MAY declare that it reads what is inside the project files of its
+application, so Ori does not parse them itself. The declaration is one optional
+top-level key and needs the host feature `project_facts_v1` in
+`requires_host_features`; a manifest that uses the key without requiring the
+feature is refused at install (`host_feature_unsupported`). The protocol stays
+`1`: an Ori build that lacks the feature reads `requires_host_features` before
+the strict decode and steps down to an older release.
+
+```json
+"project_facts": {
+  "service_id": "app-service",
+  "operation": "project.facts.read",
+  "formats": ["app-format"]
+}
+```
+
+- `service_id` and `operation` MUST name a declared service and one of its
+  operations. The operation MUST be `read_only`, declare no scopes, use the
+  `long` timeout class (60 seconds a call) and allow at least 32768 bytes of
+  output. One call carries as many files as the declared `max_output_bytes`
+  holds at 32768 bytes each, at most 8 (262144 bytes holds all 8).
+- `formats` lists 1 to 8 opaque project format IDs, the same `Candidate.Format`
+  string Ori's scan gives each song. Host code joins on the string and names no
+  application or extension; the formats installed readers declare decide which
+  songs "can be read".
+- Only an installed, enabled plugin that is on Ori's reviewed list is ever
+  called. Nothing else can reach the operation.
+
+The call is a machine-level operation (no workspace, empty `context`). Input:
+`{schema_version: 1, names, max_file_bytes, files: [{id, format, path, size}]}`
+with 1 to 8 files, an absolute path built only from the root, the song's folder
+and its dated file, and the size Ori's listing saw; `names` is false when the
+person approved numbers only. Output: `{schema_version: 1, files: [...]}` with
+exactly one entry per input `id`: `result` is `read` (with `tempo_bpm`,
+`tempo_varies`, `length_seconds`, `track_count` and, only when `names` is true,
+`tracks`, `tracks_left_out`, `markers`, `markers_left_out`), `too_large`,
+`unreadable` or `failed`; any result other than `read` carries `id` and `result`
+only. The plugin opens each file by the given path without following links,
+requires a regular file of the given size, opens nothing else and writes
+nothing.
+
+Ori holds the file open before the call and checks it again after, bounds every
+returned value with the stored facts' own limits, drops names the approval does
+not cover whatever came back, and treats a call error or a call over a limit as
+a stopped read, never as "no facts". `ProjectFactsRef`, `validateProjectFacts`
+and the call live in `internal/plugin/project_facts.go`; the reader set and the
+checks in `internal/projectlibrary/project_readers.go` and
+`project_facts_read.go`. The reading as a whole, and who is given the facts, is
+in [project-library.md](project-library.md), "App-plugin readers and the app
+assistant's read".
+
 ## JSON Schema subset
 
 V1 operation schemas allow only:

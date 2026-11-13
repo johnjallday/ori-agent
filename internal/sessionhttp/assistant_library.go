@@ -221,6 +221,28 @@ func (h *Handler) ConfigureAssistantLibraryRoots(picker projectlibrary.FolderPic
 	h.assistantLibraryRoots = projectlibrary.NewRoots(h.assistantLibraryStore(), picker, selections, guards)
 }
 
+// SetFactsReadHost makes the Home library's completed scans hand the songs an
+// installed app plugin can read to the Home's shared assistant
+// (assistant-reads-projects), and returns the runner (nil when the library is
+// not configured). The caller sweeps receipts a previous process left started.
+func (h *Handler) SetFactsReadHost(host projectlibrary.FactsReadHost) *projectlibrary.FactsReadRunner {
+	if h == nil || h.assistantLibraryRoots == nil {
+		return nil
+	}
+	runner := projectlibrary.NewFactsReadRunner(h.assistantLibraryRoots, host)
+	h.assistantLibraryRoots.SetFactsReadRunner(runner)
+	h.factsReadRunner = runner
+	return runner
+}
+
+// FactsReadRunner is the runner SetFactsReadHost made, or nil.
+func (h *Handler) FactsReadRunner() *projectlibrary.FactsReadRunner {
+	if h == nil {
+		return nil
+	}
+	return h.factsReadRunner
+}
+
 func (h *Handler) SetAssistantLibraryPortfolioResolver(resolver projectlibrary.PortfolioRootResolver) {
 	if h != nil {
 		h.assistantLibraryOfferResolver = resolver
@@ -348,7 +370,7 @@ func (h *Handler) ListAssistantLibraryRoots(w http.ResponseWriter, r *http.Reque
 			_ = orihttp.RespondSuccess(w, map[string]any{"initialized": false,
 				"provider_read_only": !h.assistantLibraryProviderEvidence(scope, station),
 				"picker_available":   h.assistantLibraryRoots.PickerAvailable(),
-				"song_details":       librarySongDetails(station)})
+				"song_details":       h.librarySongDetailsFor(station)})
 			return
 		}
 		respondLibraryReadError(w, err)
@@ -416,7 +438,7 @@ func (h *Handler) ListAssistantLibraryRoots(w http.ResponseWriter, r *http.Reque
 		"picker_available": h.assistantLibraryRoots.PickerAvailable(),
 		// The shared-assistant and song-details switches ride this read: no
 		// extra fetch on load.
-		"sharing": h.librarySharing(scope, station), "song_details": librarySongDetails(station)})
+		"sharing": h.librarySharing(scope, station), "song_details": h.librarySongDetailsFor(station)})
 }
 
 // ListAssistantLibraryScanScopes is a read-only, revision-bound page of

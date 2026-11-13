@@ -1004,6 +1004,8 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		// plugin update) and the way back when the assistant was deleted.
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/sharing", s.Handlers.Session.SetAssistantLibrarySharing)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/sharing/assistant", s.Handlers.Session.ReAddAssistantLibrarySharing)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/sharing/offer", s.Handlers.Session.DismissAssistantLibrarySharingOffer)
+		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/song-details/notice", s.Handlers.Session.AcknowledgeSongDetailsReaderNotice)
 		// The Home's song-details switch: off clears every stored song fact.
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/library/song-details", s.Handlers.Session.SetAssistantLibrarySongDetails)
 		// The Home's resource workspaces (one optional per attachment): whether

@@ -96,6 +96,11 @@ type Handler struct {
 	// Home's assistant; staffingModelReady says a new agent would have a model.
 	projectStaffing    *projectstaffing.Service
 	staffingModelReady func() bool
+	// sharedAgentCreator creates the Home's shared assistant before any song
+	// exists, for the Home's offer to add it (assistant-reads-projects FR16).
+	sharedAgentCreator projectstaffing.SharedCreate
+	// factsReadRunner runs the Home assistant's read turns.
+	factsReadRunner *projectlibrary.FactsReadRunner
 	// staffingReceipts refuses a finish request_id reused for another song or
 	// approval; staffingProviderOverride replaces the finish's installed
 	// provider check in tests.
@@ -373,6 +378,12 @@ func (h *Handler) SetAssistantWorkspaceRoleStaffer(staff func(context.Context, s
 func (h *Handler) SetSharedProjectStaffing(service *projectstaffing.Service, modelReady func() bool) {
 	h.projectStaffing = service
 	h.staffingModelReady = modelReady
+}
+
+// SetSharedAgentCreator supplies the create a Home's shared assistant gets when
+// the owner accepts the Home's offer to add it before any song is opened.
+func (h *Handler) SetSharedAgentCreator(create projectstaffing.SharedCreate) {
+	h.sharedAgentCreator = create
 }
 
 // SetOpenedSongFileOnly supplies the File-only selection an opened song gets,

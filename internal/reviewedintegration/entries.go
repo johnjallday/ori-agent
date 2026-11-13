@@ -4,16 +4,16 @@ package reviewedintegration
 // Ori installs the latest stable release at or above MinimumVersion and falls
 // back to FallbackCommit when that release cannot be resolved. A fallback commit
 // is recorded only after verifying the published asset against that commit's
-// manifest. See docs/reaper-integration.md for the v0.9.0 verification evidence.
+// manifest. See docs/reaper-integration.md for the v0.12.0 verification evidence.
 var builtInEntries = mustRegistry([]Entry{
 	{
-		Key: "ori_reaper", PluginID: "reaper-plugin", MinimumVersion: "0.9.0",
+		Key: "ori_reaper", PluginID: "reaper-plugin", MinimumVersion: "0.12.0",
 		DisplayName:  "REAPER",
 		InstallTitle: "Install Ori REAPER Plugin",
 		InstallDescription: "Ori's REAPER integration is a local integration for Ori, not an audio plug-in, VST, " +
 			"effect, or instrument. It will not appear in REAPER's FX browser.",
 		SourceRepository: "https://github.com/johnjallday/reaper-plugin",
-		FallbackCommit:   "0a597684f3b181735c961bfb44ed5c2b80994814", SourceFormat: reviewedClaudeFormat,
+		FallbackCommit:   "ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3", SourceFormat: reviewedClaudeFormat,
 		PublisherLabel: "Ori", SourceLabel: "johnjallday/reaper-plugin",
 		ExpectedBlueprintID: "reaper-song", MinimumBlueprintVersion: 10,
 		ExpectedProgramID: "music-producer-assistant", ExpectedProgramSchema: 1,
@@ -23,6 +23,9 @@ var builtInEntries = mustRegistry([]Entry{
 			"setup_quests_v2",
 			"template_group_requirements_v1",
 			"blueprint_inputs_v1",
+			"home_profile_v1",
+			"resource_workspaces_v1",
+			"project_facts_v1",
 		},
 		ExpectedProtocol: 1, SupportedPlatforms: []string{"darwin/arm64"},
 		ReleaseReady: true,

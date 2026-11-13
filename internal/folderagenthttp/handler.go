@@ -324,7 +324,8 @@ func (h *Handler) Goal(w http.ResponseWriter, r *http.Request) {
 }
 
 type songsRequest struct {
-	// Answer is "learn" (Learn them) or "dismiss" (Not now).
+	// Answer is "learn" (Learn them), "dismiss" (Not now) or "retry" (Try again
+	// on a reading that stopped; the owner already said yes).
 	Answer string `json:"answer"`
 }
 
@@ -340,11 +341,17 @@ func (h *Handler) Songs(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.Answer != "learn" && req.Answer != "dismiss" {
-		fail(w, http.StatusBadRequest, "Answer learn or dismiss")
+	if req.Answer != "learn" && req.Answer != "dismiss" && req.Answer != "retry" {
+		fail(w, http.StatusBadRequest, "Answer learn, dismiss or retry")
 		return
 	}
-	view, err := h.service.AnswerSongs(r.Context(), userID, r.PathValue("workspaceID"), req.Answer == "learn")
+	var view folderagent.View
+	var err error
+	if req.Answer == "retry" {
+		view, err = h.service.RetryLearning(r.Context(), userID, r.PathValue("workspaceID"))
+	} else {
+		view, err = h.service.AnswerSongs(r.Context(), userID, r.PathValue("workspaceID"), req.Answer == "learn")
+	}
 	if err != nil {
 		writeError(w, err)
 		return

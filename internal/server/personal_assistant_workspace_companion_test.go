@@ -56,7 +56,7 @@ func TestAssistantWorkspaceCompanion_ExplicitSourceReadContract(t *testing.T) {
 		}
 	}
 	read(filepath.Join(reaperSource, ".ori-plugin", "plugin.json"), &manifest)
-	if manifest.Name != entry.PluginID || !reviewedintegration.AtLeast(manifest.Version, entry.MinimumVersion) || len(manifest.Blueprints) != 1 ||
+	if manifest.Name != entry.PluginID || !reviewedintegration.AtLeast(manifest.Version, entry.MinimumVersion) || len(manifest.Blueprints) < 1 ||
 		manifest.Blueprints[0].ID != entry.ExpectedBlueprintID || manifest.Blueprints[0].Version < entry.MinimumBlueprintVersion {
 		t.Fatalf("REAPER source does not meet the host floor: %+v", manifest)
 	}

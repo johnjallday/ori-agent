@@ -26,10 +26,11 @@ func sameConsent(a, b *workspace.SongDetailsConsent) bool {
 // consent's scope stays as it was, only its switch moves, and what agents are
 // given from the library is empty at once.
 func TestSetSongDetails_OffClearsTheNamesToo(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	namedMusicTree(t, tree)
+	f, _ := newFileReadFixtureWithoutConsent(t)
+	r, scope, file, root := f.r, f.scope, f.file, f.root
+	namedMusicTree(t, f.tree)
 	grantNames(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "names")
+	f.scan(t, "names")
 	if single := storedFactsAt(t, r, scope, root.ID, "Single"); single == nil || single.Names == nil {
 		t.Fatalf("setup: the names were not read: %+v", single)
 	}
@@ -60,8 +61,9 @@ func TestSetSongDetails_OffClearsTheNamesToo(t *testing.T) {
 // numbers wording (names false) resumes the numbers only, so a switch turned on
 // without the question never starts reading names on the strength of an older yes.
 func TestSetSongDetails_OnResumesExactlyWhatTheOwnerAgreedTo(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	namedMusicTree(t, tree)
+	f, _ := newFileReadFixtureWithoutConsent(t)
+	r, scope, file, root := f.r, f.scope, f.file, f.root
+	namedMusicTree(t, f.tree)
 	grantNames(t, file, scope)
 	if _, err := r.library.SetSongDetails(scope, false, false); err != nil {
 		t.Fatal(err)
@@ -74,7 +76,7 @@ func TestSetSongDetails_OnResumesExactlyWhatTheOwnerAgreedTo(t *testing.T) {
 	if consent := homeConsent(t, file, scope); consent.CoversNames() || !consent.Active() {
 		t.Fatalf("a numbers-only turn-on covers names: %+v", consent)
 	}
-	scanRoot(t, r, scope, root.ID, "numbers-again")
+	f.scan(t, "numbers-again")
 	if single := storedFactsAt(t, r, scope, root.ID, "Single"); single == nil || single.TempoBPM != 92 || single.Names != nil {
 		t.Fatalf("after a numbers-only turn-on: %+v", single)
 	}
@@ -90,7 +92,7 @@ func TestSetSongDetails_OnResumesExactlyWhatTheOwnerAgreedTo(t *testing.T) {
 	if !consent.CoversNames() || consent.Source != workspace.SongDetailsConsentLearnSongs || consent.OfferID != "switch" || consent.RevokedAt != nil {
 		t.Fatalf("consent after agreeing to names = %+v", consent)
 	}
-	scanRoot(t, r, scope, root.ID, "names-again")
+	f.scan(t, "names-again")
 	if single := storedFactsAt(t, r, scope, root.ID, "Single"); single == nil || single.Names == nil || len(single.Names.Tracks) != 2 {
 		t.Fatalf("after agreeing to names: %+v", single)
 	}
@@ -100,8 +102,9 @@ func TestSetSongDetails_OnResumesExactlyWhatTheOwnerAgreedTo(t *testing.T) {
 // the same answer, from the switch, with no off in between; asking for nothing
 // wider than it has changes nothing.
 func TestSetSongDetails_ANumbersOnlyHomeIsWidenedByTheOwnersAnswer(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	namedMusicTree(t, tree)
+	f, _ := newFileReadFixtureWithoutConsent(t)
+	r, scope, file, root := f.r, f.scope, f.file, f.root
+	namedMusicTree(t, f.tree)
 	grantSongDetails(t, file, scope)
 	before := homeConsent(t, file, scope)
 	if before.Source != workspace.SongDetailsConsentFolderOffer || before.CoversNames() {
@@ -129,7 +132,7 @@ func TestSetSongDetails_ANumbersOnlyHomeIsWidenedByTheOwnersAnswer(t *testing.T)
 	if again := homeConsent(t, file, scope); !sameConsent(again, widened) {
 		t.Fatalf("a repeated widening rewrote the consent: %+v → %+v", widened, again)
 	}
-	scanRoot(t, r, scope, root.ID, "widened")
+	f.scan(t, "widened")
 	if single := storedFactsAt(t, r, scope, root.ID, "Single"); single == nil || single.Names == nil {
 		t.Fatalf("after widening the next scan read no names: %+v", single)
 	}

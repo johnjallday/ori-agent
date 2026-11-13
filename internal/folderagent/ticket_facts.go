@@ -51,7 +51,7 @@ func (s *Service) TicketSongFacts(ctx context.Context, workspaceID, agentName st
 		return ""
 	}
 	reference, _ := folderlook.BuildSongsReference(folderlook.SongsReferenceInput{
-		FolderName: rec.FolderName, Noun: foldermap.ShapeNoun(rec.Facts.Readability().Shape, 2), Songs: songs,
+		FolderName: rec.FolderName, Noun: foldermap.ShapeNoun(rec.Facts.PortfolioShape(), 2), Songs: songs,
 	})
 	return ticketSongFactsIntro + reference
 }

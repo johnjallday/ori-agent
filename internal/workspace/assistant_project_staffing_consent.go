@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -57,8 +59,13 @@ type ProjectStaffingConsentRole struct {
 	// carry the role's label), so it is never recorded. A record from before
 	// this field keeps the name-only proof.
 	ReservedAt *time.Time `json:"reserved_at,omitempty"`
-	Provider   string     `json:"provider,omitempty"`
-	Model      string     `json:"model,omitempty"`
+	// ReservationID is a random ID set with PendingName. A create that binds the
+	// agent into no project (the Home's hire, before any song exists) stamps it
+	// on the agent it makes, so that agent can be recorded after a stop with no
+	// project to prove it. It is cleared with PendingName.
+	ReservationID string `json:"reservation_id,omitempty"`
+	Provider      string `json:"provider,omitempty"`
+	Model         string `json:"model,omitempty"`
 	// Copies are the projects holding their own copy of AgentName, each with the
 	// digest of that copy as Ori last wrote it. An edit to the agent is carried
 	// to a copy only while the copy still has that digest: a copy the user
@@ -124,8 +131,12 @@ func (c *ProjectStaffingConsent) Validate() error {
 	for _, role := range c.Roles {
 		if !consentText(role.RoleID, 80, false) || role.RoleID != strings.ToLower(role.RoleID) ||
 			!consentText(role.AgentName, 80, true) || !consentText(role.PendingName, 80, true) ||
+			!consentText(role.ReservationID, 80, true) ||
 			!consentText(role.Provider, 120, true) || !consentText(role.Model, 240, true) {
 			return invalid("role")
+		}
+		if role.ReservationID != "" && role.PendingName == "" {
+			return invalid("reservation")
 		}
 		if _, duplicate := seen[role.RoleID]; duplicate {
 			return invalid("duplicate role")
@@ -419,14 +430,29 @@ func (c *ProjectStaffingConsents) Grant(homeID string, grant ProjectStaffingCons
 	})
 }
 
+// newReservationID is a random ID for one reservation.
+func newReservationID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw[:]), nil
+}
+
 // ReserveAgent records the name a create is about to use for a role, before the
 // create runs. It writes only while the role has no agent yet; a later
-// reservation replaces an earlier one that never became an agent.
+// reservation replaces an earlier one that never became an agent. Every
+// reservation carries a random ReservationID: reserving the same name again
+// keeps it, and a reservation from before the ID existed gains one.
 func (c *ProjectStaffingConsents) ReserveAgent(homeID, pluginID, blueprintID, teamDigest, roleID, agentName string) error {
 	if !consentText(agentName, 80, false) {
 		return ErrProjectStaffingConsentInvalid
 	}
-	_, err := c.update(homeID, func(current *ProjectStaffingConsent) (*ProjectStaffingConsent, bool, error) {
+	reservationID, err := newReservationID()
+	if err != nil {
+		return err
+	}
+	_, err = c.update(homeID, func(current *ProjectStaffingConsent) (*ProjectStaffingConsent, bool, error) {
 		if current == nil || !current.Covers(pluginID, blueprintID) || current.TeamDigest != teamDigest {
 			return current, false, ErrProjectStaffingConsentInvalid
 		}
@@ -439,10 +465,15 @@ func (c *ProjectStaffingConsents) ReserveAgent(homeID, pluginID, blueprintID, te
 				return current, false, ErrProjectStaffingConsentInvalid
 			}
 			if next.Roles[i].PendingName == agentName && next.Roles[i].ReservedAt != nil {
-				return current, false, nil
+				if next.Roles[i].ReservationID != "" {
+					return current, false, nil
+				}
+				next.Roles[i].ReservationID = reservationID
+				return next, true, nil
 			}
 			now := c.now().UTC()
 			next.Roles[i].PendingName, next.Roles[i].ReservedAt = agentName, &now
+			next.Roles[i].ReservationID = reservationID
 			return next, true, nil
 		}
 		return current, false, ErrProjectStaffingConsentInvalid
@@ -463,7 +494,7 @@ func (c *ProjectStaffingConsents) RecordAgent(homeID, pluginID, blueprintID, tea
 		for i := range next.Roles {
 			role := &next.Roles[i]
 			if role.RoleID == roleID && role.AgentName == "" && role.PendingName != "" && role.PendingName == agentName {
-				role.AgentName, role.PendingName, role.ReservedAt = agentName, "", nil
+				role.AgentName, role.PendingName, role.ReservedAt, role.ReservationID = agentName, "", nil, ""
 				return next, true, nil
 			}
 		}
@@ -485,7 +516,7 @@ func (c *ProjectStaffingConsents) ReleaseReservation(homeID, roleID, agentName s
 		for i := range next.Roles {
 			role := &next.Roles[i]
 			if role.RoleID == roleID && role.AgentName == "" && role.PendingName == agentName {
-				role.PendingName, role.ReservedAt = "", nil
+				role.PendingName, role.ReservedAt, role.ReservationID = "", nil, ""
 				return next, true, nil
 			}
 		}
@@ -511,7 +542,7 @@ func (c *ProjectStaffingConsents) ForgetAgent(homeID, pluginID, blueprintID, rol
 			if role.AgentName != agentName || agentName == "" {
 				return current, false, ErrProjectStaffingConsentInvalid
 			}
-			role.AgentName, role.PendingName, role.ReservedAt, role.Copies = "", "", nil, nil
+			role.AgentName, role.PendingName, role.ReservedAt, role.ReservationID, role.Copies = "", "", nil, "", nil
 			return next, true, nil
 		}
 		return current, false, ErrProjectStaffingConsentInvalid

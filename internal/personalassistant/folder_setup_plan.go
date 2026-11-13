@@ -83,6 +83,11 @@ const (
 	// FolderStopAssistantMissing: the shared assistant the Home's consent created
 	// was deleted or renamed.
 	FolderStopAssistantMissing = "assistant_missing"
+	// FolderStopAssistantUnavailable: the Home's shared assistant could not be
+	// hired at setup (its song team cannot be read, or an agent Ori did not make
+	// holds its name). The Home, its roles and the folder's listing are kept;
+	// Set up again retries the hire.
+	FolderStopAssistantUnavailable = "assistant_unavailable"
 	// FolderStopMemberFailed: a structure's run could not create or link one
 	// member's workspace. What finished is kept; Continue carries on from there.
 	FolderStopMemberFailed = "member_failed"

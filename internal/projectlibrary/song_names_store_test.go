@@ -73,10 +73,9 @@ func storedLibrary(t *testing.T, store workspace.Store, scope Scope) json.RawMes
 // A song read under a names consent that holds the most names it ever keeps fits
 // the document, its size check and the mirror, and reads back unchanged.
 func TestStore_AMaxedSongFitsTheDocumentAndTheMirror(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "maxed")
+	f, _ := newFileReadFixture(t)
+	r, scope, file := f.r, f.scope, f.file
+	f.scan(t, "maxed")
 	before := len(storedLibrary(t, file, scope))
 
 	maxed := maxedNames()
@@ -97,7 +96,7 @@ func TestStore_AMaxedSongFitsTheDocumentAndTheMirror(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the store cannot read a library with a maxed song: %v", err)
 	}
-	_, observation, ok := observationAt(doc, root.ID, "Single")
+	_, observation, ok := observationAt(doc, f.root.ID, "Single")
 	if !ok || observation.Facts == nil || observation.Facts.Names == nil {
 		t.Fatalf("names did not survive the write: %+v", observation.Facts)
 	}
@@ -120,10 +119,9 @@ func TestStore_AMaxedSongFitsTheDocumentAndTheMirror(t *testing.T) {
 // Names are additive: a record read under numbers only is byte-for-byte what it
 // was before names existed.
 func TestStore_ANumbersOnlyRecordStoresNoNamesKeys(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "numbers")
+	f, _ := newFileReadFixture(t)
+	file, scope := f.file, f.scope
+	f.scan(t, "numbers")
 	stored := string(storedLibrary(t, file, scope))
 	if !strings.Contains(stored, `"tempo_bpm":92`) {
 		t.Fatalf("the fixture stored no facts: %.300s", stored)
@@ -164,10 +162,9 @@ func forgeStored(t *testing.T, stored json.RawMessage, relative string, edit fun
 }
 
 func TestStore_ForgedNamesAndNotReadMakeTheDocumentInvalid(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	factsMusicTree(t, tree)
-	grantSongDetails(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "forge")
+	f, _ := newFileReadFixture(t)
+	r, scope, file := f.r, f.scope, f.file
+	f.scan(t, "forge")
 	if err := setNames(t, r, scope, "Single", smallNames()); err != nil {
 		t.Fatal(err)
 	}
@@ -218,10 +215,10 @@ func TestStore_ForgedNamesAndNotReadMakeTheDocumentInvalid(t *testing.T) {
 			clearNumbers(f)
 			delete(f, "names")
 			f["not_read"] = NotReadUnreadable
-			f["read_from"].(map[string]any)["size"] = DefaultSongFactsLimits.MaxBytes + 1
+			f["read_from"].(map[string]any)["size"] = maxSongFileBytes + 1
 		},
 		"names over the size cap": func(f, _ map[string]any) {
-			f["read_from"].(map[string]any)["size"] = DefaultSongFactsLimits.MaxBytes + 1
+			f["read_from"].(map[string]any)["size"] = maxSongFileBytes + 1
 		},
 	}
 	for name, edit := range bad {
@@ -249,7 +246,7 @@ func TestStore_ForgedNamesAndNotReadMakeTheDocumentInvalid(t *testing.T) {
 			clearNumbers(f)
 			delete(f, "names")
 			f["not_read"] = NotReadTooLarge
-			f["read_from"].(map[string]any)["size"] = DefaultSongFactsLimits.MaxBytes + 1
+			f["read_from"].(map[string]any)["size"] = maxSongFileBytes + 1
 		},
 		"unreadable, within the cap": func(f, _ map[string]any) {
 			clearNumbers(f)

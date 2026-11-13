@@ -63,10 +63,11 @@ func TestSongFactsPass_ANumbersOnlyConsentReadsNoNames(t *testing.T) {
 		"the folder agent's, numbers": grantNumbers,
 	} {
 		t.Run(name, func(t *testing.T) {
-			r, scope, file, tree, root := connectedMusicRoot(t)
-			namedMusicTree(t, tree)
+			f, _ := newFileReadFixtureWithoutConsent(t)
+			r, scope, file, root := f.r, f.scope, f.file, f.root
+			namedMusicTree(t, f.tree)
 			grant(t, file, scope)
-			scanRoot(t, r, scope, root.ID, "numbers-only")
+			f.scan(t, "numbers-only")
 
 			single := storedFactsAt(t, r, scope, root.ID, "Single")
 			if single == nil || single.TempoBPM != 92 || single.TrackCount != 2 || single.LengthSeconds != 221 {
@@ -87,15 +88,14 @@ func TestSongFactsPass_ANumbersOnlyConsentReadsNoNames(t *testing.T) {
 }
 
 func TestSongFactsPass_ANamesConsentReadsNamesAndMarkersFromTheDatingFileOnly(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	namedMusicTree(t, tree)
+	f, reader := newFileReadFixtureWithoutConsent(t)
+	r, scope, file, root := f.r, f.scope, f.file, f.root
+	namedMusicTree(t, f.tree)
 	grantNames(t, file, scope)
-	opens := &openCounter{}
-	r.factsOpened = opens.hook
-	scanRoot(t, r, scope, root.ID, "names")
+	f.scan(t, "names")
 
-	if got := opens.take(); !slices.Equal(got, []string{filepath.Join("Alternates", "Take B.RPP"), filepath.Join("Single", "Song.rpp")}) {
-		t.Fatalf("opened %v, want each song's dated file only", got)
+	if got := reader.take(); !slices.Equal(got, []string{filepath.Join("Alternates", "Take B.RPP"), filepath.Join("Single", "Song.rpp")}) {
+		t.Fatalf("the plugin was asked to read %v, want each song's dated file only", got)
 	}
 	single := storedFactsAt(t, r, scope, root.ID, "Single")
 	want := &SongNames{
@@ -113,16 +113,16 @@ func TestSongFactsPass_ANamesConsentReadsNamesAndMarkersFromTheDatingFileOnly(t 
 	if strings.Contains(string(storedLibrary(t, file, scope)), "Older take, never read") {
 		t.Fatal("the older take was read")
 	}
-	// Songs in a format with no reading grammar are never opened or recorded.
+	// Songs in a format no installed plugin reads are never sent or recorded.
 	for _, other := range []string{"Ableton", "Logic"} {
 		if facts := storedFactsAt(t, r, scope, root.ID, other); facts != nil {
 			t.Fatalf("%s has facts %+v", other, facts)
 		}
 	}
-	// A rescan of unchanged files opens nothing: the names stay.
-	scanRoot(t, r, scope, root.ID, "names-again")
-	if got := opens.take(); len(got) != 0 {
-		t.Fatalf("an unchanged rescan opened %v", got)
+	// A rescan of unchanged files asks for nothing: the names stay.
+	f.scan(t, "names-again")
+	if got := reader.take(); len(got) != 0 {
+		t.Fatalf("an unchanged rescan asked the plugin to read %v", got)
 	}
 	if again := storedFactsAt(t, r, scope, root.ID, "Single"); again == nil || !reflect.DeepEqual(again.Names, want) {
 		t.Fatalf("an unchanged rescan lost the names: %+v", again)
@@ -130,13 +130,12 @@ func TestSongFactsPass_ANamesConsentReadsNamesAndMarkersFromTheDatingFileOnly(t 
 }
 
 func TestSongFactsPass_UpgradingToNamesReadsEachSongOnceMoreAndNeverAgain(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	namedMusicTree(t, tree)
+	f, reader := newFileReadFixtureWithoutConsent(t)
+	r, scope, file, root := f.r, f.scope, f.file, f.root
+	namedMusicTree(t, f.tree)
 	grantNumbers(t, file, scope)
-	opens := &openCounter{}
-	r.factsOpened = opens.hook
-	scanRoot(t, r, scope, root.ID, "before-upgrade")
-	opens.take()
+	f.scan(t, "before-upgrade")
+	reader.take()
 	before := storedFactsAt(t, r, scope, root.ID, "Single")
 	if before == nil || before.Names != nil {
 		t.Fatalf("setup: %+v", before)
@@ -144,9 +143,9 @@ func TestSongFactsPass_UpgradingToNamesReadsEachSongOnceMoreAndNeverAgain(t *tes
 
 	// The owner agrees to names: a numbers record is read once more, each song once.
 	grantNames(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "after-upgrade")
-	if got := opens.take(); !slices.Equal(got, []string{filepath.Join("Alternates", "Take B.RPP"), filepath.Join("Single", "Song.rpp")}) {
-		t.Fatalf("the upgrade opened %v, want the two REAPER songs once", got)
+	f.scan(t, "after-upgrade")
+	if got := reader.take(); !slices.Equal(got, []string{filepath.Join("Alternates", "Take B.RPP"), filepath.Join("Single", "Song.rpp")}) {
+		t.Fatalf("the upgrade asked the plugin to read %v, want the two REAPER songs once", got)
 	}
 	after := storedFactsAt(t, r, scope, root.ID, "Single")
 	if after == nil || after.Names == nil || !reflect.DeepEqual(after.Names.Tracks, []string{"Kick", "Bass"}) {
@@ -155,28 +154,29 @@ func TestSongFactsPass_UpgradingToNamesReadsEachSongOnceMoreAndNeverAgain(t *tes
 	if after.SongFacts != before.SongFacts {
 		t.Fatalf("the upgrade changed the numbers: %+v -> %+v", before.SongFacts, after.SongFacts)
 	}
-	// And then it is done: two more scans open nothing (no upgrade loop), including
-	// the formats that have no grammar and so never had a record to upgrade.
+	// And then it is done: two more scans ask for nothing (no upgrade loop),
+	// including the formats no plugin reads, which never had a record to upgrade.
 	for i := 0; i < 2; i++ {
-		scanRoot(t, r, scope, root.ID, fmt.Sprintf("settled-%d", i))
-		if got := opens.take(); len(got) != 0 {
-			t.Fatalf("scan %d after the upgrade opened %v", i, got)
+		f.scan(t, fmt.Sprintf("settled-%d", i))
+		if got := reader.take(); len(got) != 0 {
+			t.Fatalf("scan %d after the upgrade asked the plugin to read %v", i, got)
 		}
 	}
 }
 
 func TestSongFactsPass_ASongWhoseFileChangedIsReadAgainUnderTheGrantItHas(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	namedMusicTree(t, tree)
+	f, _ := newFileReadFixtureWithoutConsent(t)
+	r, scope, file, root := f.r, f.scope, f.file, f.root
+	namedMusicTree(t, f.tree)
 	grantNames(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "first")
+	f.scan(t, "first")
 
 	// The person saves the project again with a new track.
 	saved := time.Date(2026, time.October, 5, 10, 0, 0, 0, time.UTC)
-	writeSongProject(t, filepath.Join(tree.single, "Song.rpp"), namedProject("100", nil, []namedTrack{
+	writeSongProject(t, filepath.Join(f.tree.single, "Song.rpp"), namedProject("100", nil, []namedTrack{
 		{lines: []string{nameLine("Kick")}}, {lines: []string{nameLine("Bass")}}, {lines: []string{nameLine("Synth")}},
 	}), saved)
-	scanRoot(t, r, scope, root.ID, "second")
+	f.scan(t, "second")
 	single := storedFactsAt(t, r, scope, root.ID, "Single")
 	if single == nil || single.TempoBPM != 100 || single.Names == nil || !reflect.DeepEqual(single.Names.Tracks, []string{"Kick", "Bass", "Synth"}) ||
 		len(single.Names.Markers) != 0 {
@@ -184,18 +184,19 @@ func TestSongFactsPass_ASongWhoseFileChangedIsReadAgainUnderTheGrantItHas(t *tes
 	}
 }
 
-// The consent is checked again during the pass: switched off while a names read
+// The consent is checked again during the read: switched off while a names read
 // is under way, nothing it read is kept, numbers or names.
 func TestSongFactsPass_ASwitchOffDuringANamesPassStoresNothing(t *testing.T) {
-	r, scope, file, tree, root := connectedMusicRoot(t)
-	namedMusicTree(t, tree)
-	grantNames(t, file, scope)
+	f, reader := newFileReadFixtureWithoutConsent(t)
+	file := f.file
+	namedMusicTree(t, f.tree)
+	grantNames(t, file, f.scope)
 	var once sync.Once
-	opens := &openCounter{before: func(string, string) {
-		once.Do(func() { switchSongDetailsOff(t, file, scope) })
-	}}
-	r.factsOpened = opens.hook
-	scanRoot(t, r, scope, root.ID, "switch-off")
+	reader.before = func(string) {
+		once.Do(func() { switchSongDetailsOff(t, file, f.scope) })
+	}
+	f.scan(t, "switch-off")
+	scope := f.scope
 
 	if count := storedFacts(t, file, scope); count != 0 {
 		t.Fatalf("a pass whose consent was switched off stored %d records", count)
@@ -225,14 +226,15 @@ func TestSongFactsPass_NamesAreCutToTheLibraryBudget(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		markers = append(markers, marker(i+1, fmt.Sprintf("%d", i*10), fmt.Sprintf(`"Mark %d"`, i), 0))
 	}
-	r, scope, file, tree, root := connectedMusicRoot(t)
+	f, _ := newFileReadFixtureWithoutConsent(t)
+	r, scope, file, tree, root := f.r, f.scope, f.file, f.tree, f.root
 	saved := time.Date(2026, time.September, 1, 10, 0, 0, 0, time.UTC)
 	writeSongProject(t, filepath.Join(tree.single, "Song.rpp"), namedProject("92", markers, tracks), saved)
 	// Take A is older than Take B, so Take B dates the song and is the one read.
 	writeSongProject(t, filepath.Join(tree.alternate, "Take A.rpp"), namedProject("120", nil, nil), saved.Add(-48*time.Hour))
 	writeSongProject(t, filepath.Join(tree.alternate, "Take B.RPP"), namedProject("96", markers, tracks), saved.Add(-time.Hour))
 	grantNames(t, file, scope)
-	scanRoot(t, r, scope, root.ID, "budget")
+	f.scan(t, "budget")
 
 	doc, err := r.library.Read(scope)
 	if err != nil {
@@ -389,7 +391,13 @@ func TestSongFactsPass_ALibraryTooFullKeepsTheNumbersAndCountsTheNames(t *testin
 		t.Fatalf("setup needs a complete listing: scan %q, discovery %q", scan.Status, observed.PartialReason)
 	}
 	grantNames(t, file, scope)
-	targets, grant, ok := r.songFactsTargets(scope, scan, observed)
+	all, grant, ok := r.songFactsTargets(scope, scan, observed)
+	var targets []songFactsTarget
+	for _, target := range all {
+		if target.Format == "reaper" { // the songs a plugin reads; the others are never sent to one
+			targets = append(targets, target)
+		}
+	}
 	if !ok || !grant.names || len(targets) != 2 {
 		t.Fatalf("targets = %d under grant %+v (ok %v), want the two REAPER songs under names", len(targets), grant, ok)
 	}
@@ -491,41 +499,23 @@ func TestFactsWanted(t *testing.T) {
 	withNames := &ObservedFacts{SongFacts: SongFacts{TempoBPM: 92}, Names: &SongNames{}, ReadFrom: source}
 	notRead := &ObservedFacts{NotRead: NotReadUnreadable, ReadFrom: source}
 	cases := []struct {
-		name   string
-		facts  *ObservedFacts
-		names  bool
-		format string
-		want   bool
+		name  string
+		facts *ObservedFacts
+		names bool
+		want  bool
 	}{
-		{"nothing stored, numbers", nil, false, "reaper", true},
-		{"nothing stored, names", nil, true, "reaper", true},
-		{"numbers stored, numbers asked", numbersOnly, false, "reaper", false},
-		{"numbers stored, names asked: the upgrade", numbersOnly, true, "reaper", true},
-		{"names stored, names asked", withNames, true, "reaper", false},
-		{"names stored, numbers asked", withNames, false, "reaper", false},
-		{"not read, names asked", notRead, true, "reaper", false},
-		{"numbers stored, names asked, a format with no names to give", numbersOnly, true, "logic", false},
+		{"nothing stored, numbers", nil, false, true},
+		{"nothing stored, names", nil, true, true},
+		{"numbers stored, numbers asked", numbersOnly, false, false},
+		{"numbers stored, names asked: the upgrade", numbersOnly, true, true},
+		{"names stored, names asked", withNames, true, false},
+		{"names stored, numbers asked", withNames, false, false},
+		{"not read, names asked", notRead, true, false},
 	}
 	for _, tc := range cases {
-		if got := factsWanted(tc.facts, tc.names, tc.format); got != tc.want {
+		if got := factsWanted(tc.facts, tc.names); got != tc.want {
 			t.Errorf("%s: factsWanted = %v, want %v", tc.name, got, tc.want)
 		}
-	}
-}
-
-func TestFactsGrammarFor(t *testing.T) {
-	if factsGrammarFor("reaper", true) != factsGrammar("reaper") {
-		t.Fatal("under a names grant the reader gets the format's own grammar")
-	}
-	numbers := factsGrammarFor("reaper", false)
-	if numbers == nil || numbers.HasNames() || numbers == factsGrammar("reaper") {
-		t.Fatalf("under numbers only the reader must get a blanked copy: %+v", numbers)
-	}
-	if numbers.Tempo == "" || numbers.Track == "" {
-		t.Fatalf("the blanked copy lost the numbers' keys: %+v", numbers)
-	}
-	if factsGrammarFor("logic", true) != nil || factsGrammarFor("logic", false) != nil || factsGrammarFor("", true) != nil {
-		t.Fatal("a format with no grammar gave one")
 	}
 }
 

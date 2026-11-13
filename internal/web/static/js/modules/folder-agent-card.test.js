@@ -3325,6 +3325,47 @@ test('several hires keep their order; a missing job, model or note leaves its pa
   assert.equal(text(rows[0], '.folder-agent-card__hire-model'), MODEL);
 });
 
+// assistant-reads-projects FR1, FR2, FR6: the Home's shared assistant is one
+// more row of the same list, in the same layout, with its note; the count
+// includes it and no second block appears.
+test("the Home's shared assistant is one more row of the same list", () => {
+  const card = hiresCard([
+    hire('Portfolio Manager', { job: 'Plans the work.' }),
+    hire('REAPER Assistant', {
+      job: 'Handles everything REAPER-related for this project.',
+      note: 'Joins each song you open.'
+    })
+  ]);
+  assert.equal(card.querySelectorAll('.folder-agent-card__hires').length, 1);
+  const block = hiresBlock(card);
+  assert.equal(text(block, '.folder-agent-card__heading'), 'Hires 2 agents');
+  const rows = block.querySelectorAll('.folder-agent-card__hire');
+  assert.equal(rows.length, 2);
+  const assistant = rows[1];
+  assert.equal(text(assistant, '.folder-agent-card__hire-name'), 'REAPER Assistant');
+  assert.equal(
+    text(assistant, '.folder-agent-card__hire-job'),
+    'Handles everything REAPER-related for this project.'
+  );
+  assert.equal(text(assistant, '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(text(assistant, '.folder-agent-card__hire-note'), 'Joins each song you open.');
+  assert.equal(assistant.dataset.step, HOME);
+  // The same row layout as the Home's own roles: name, job, model, note.
+  assert.deepEqual(
+    assistant.children.map(child =>
+      classesOf(child).find(name => name.startsWith('folder-agent-card__hire-'))
+    ),
+    [
+      'folder-agent-card__hire-name',
+      'folder-agent-card__hire-job',
+      'folder-agent-card__hire-model',
+      'folder-agent-card__hire-note'
+    ]
+  );
+  for (const tag of ['input', 'select', 'button', 'textarea'])
+    assert.equal(block.querySelectorAll(tag).length, 0, `a ${tag} in the hires block`);
+});
+
 test('when the host cannot name the hires it says so in one sentence, with no rows and no link', () => {
   const sentence = "Hires the Home's agents; each is named as it is hired";
   const block = hiresBlock(hiresCard([], sentence));

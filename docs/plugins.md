@@ -281,7 +281,12 @@ The Ori manifest's top-level fields are:
 - `capabilities`: owner-scoped display metadata and surfaces;
 - `services`: MCP stdio entrypoints, platform artifacts, and operations;
 - `blueprints`: bounded inert template references;
-- `requires_host_features`: explicit host feature requirements; and
+- `requires_host_features`: explicit host feature requirements;
+- `project_facts`: optional; names one `read_only` operation that reads tempo,
+  length, track count and, when the person allowed it, track names, markers and
+  regions from the project files of the formats it lists, requiring
+  `project_facts_v1` (see [Reading project files](#reading-project-files-project_facts));
+  and
 - `setup_quests`: optional bounded pre-workspace setup declarations, requiring `setup_quests_v2`. Each is a four-step `project_setup` quest; `setup_quests_v1` and its five-step layout are retired, so a manifest requiring v1 is refused.
 
 [Plugin-owned setup quests](plugin-setup-quests.md) are shared across Plugins,
@@ -325,6 +330,32 @@ workspace selectors in operation metadata. Ori obtains user/workspace/plugin
 identity and canonical roots from the authenticated session and injects context
 after authorization. A frame may invoke only operations listed on that exact
 surface. Output is schema/size checked and sanitized again before returning.
+
+### Reading project files (`project_facts`)
+
+An app plugin can read what is inside its application's project files, so Ori
+does not carry a parser for the format. Declare one `read_only` operation with no
+scopes, the `long` timeout class and at least 32768 bytes of output, list the
+project format IDs it reads, and require `project_facts_v1`:
+
+```json
+"requires_host_features": ["project_facts_v1"],
+"project_facts": { "service_id": "my-service", "operation": "project.facts.read", "formats": ["my-format"] }
+```
+
+Ori sends up to 8 files a call, each by absolute path with its listed size, and
+whether track names, markers and regions may be returned; the plugin answers per
+file with tempo, length and track count, plus those names only when allowed, or
+`too_large`, `unreadable` or `failed`. The plugin opens only the given files
+(without following links, as regular files of the given size) and writes
+nothing. Ori re-checks the file around the call, bounds every value and keeps
+only those facts. Only a plugin on Ori's reviewed list is called, which is why
+the approval's words name the plugin: the person is told that it reads their
+project files. A plugin that does not declare the key shows "Update <plugin> to
+read songs" where the facts would be: on the folder card in place of the offer
+to learn the songs, and in the Home's song-details note. Ori has no reader of
+its own to fall back on. The field-level contract is in
+[plugin-workspace-surfaces-v1.md](architecture/plugin-workspace-surfaces-v1.md#project-facts-reader).
 
 ### Browser SDK and frame lifecycle
 

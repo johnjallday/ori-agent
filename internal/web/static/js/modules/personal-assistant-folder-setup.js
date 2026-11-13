@@ -173,6 +173,7 @@ const STOPPED_BECAUSE = {
   plan_changed: 'the reviewed plan changed',
   consent_stale: 'its consent is out of date',
   assistant_missing: 'its assistant is missing',
+  assistant_unavailable: 'its assistant could not be hired',
   interrupted: 'it was interrupted'
 };
 

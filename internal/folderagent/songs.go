@@ -62,13 +62,113 @@ type Learning struct {
 	Summary   string `json:"summary,omitempty"`
 	SummaryBy string `json:"summary_by,omitempty"`
 	Goal      string `json:"goal,omitempty"`
+	// Reader is the agent reading the songs through its app plugin (the Home's
+	// app assistant), empty when Ori's own pass reads them. Reason is why a
+	// reading stopped, one of the LearningReason* codes; empty otherwise.
+	Reader string `json:"reader,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
-// songsReads is what the offer says it will read, and what it will not touch.
-// It is the one sentence that promises the limit, so it names exactly what the
-// reader takes from a project file under the consent "Learn them" grants: the
-// three numbers, and the names a person typed (tracks, markers and regions).
-const songsReads = "I'll read tempo, length, track count, track names, markers and regions from each project file. Nothing is changed, and audio is not opened."
+// Why a reading of the songs stopped (assistant-reads-projects FR35). They are
+// the library's read-turn reason codes; there is no fallback reader behind any
+// of them.
+const (
+	LearningReasonNoModel          = "no_model"
+	LearningReasonAssistantMissing = "assistant_missing"
+	LearningReasonNoAssistant      = "no_assistant"
+	LearningReasonPluginUpdate     = "plugin_update"
+	LearningReasonPluginFailed     = "plugin_failed"
+	LearningReasonTimeLimit        = "time_limit"
+	LearningReasonRestarted        = "restarted"
+	LearningReasonDetailsOff       = "details_off"
+	LearningReasonNoCall           = "no_call"
+	LearningReasonModelError       = "model_error"
+)
+
+// Actions a stopped reading offers (LearningView.Action).
+const (
+	LearningActionRetry        = "retry"
+	LearningActionChooseModel  = "choose_model"
+	LearningActionAddAssistant = "add_assistant"
+	LearningActionUpdatePlugin = "update_plugin"
+	LearningActionOpenSwitch   = "open_switch"
+)
+
+// learningReasonWords is the one sentence and the one action for a stopped
+// reading. reader is the app assistant's name, "" when unknown; read and total
+// are the songs the reading got through and had.
+func learningReasonWords(reason, reader string, done, total int) (sentence, action string) {
+	who := reader
+	if who == "" {
+		who = "The assistant"
+	}
+	switch reason {
+	case LearningReasonNoModel:
+		return who + " has no model, so the songs were not read.", LearningActionChooseModel
+	case LearningReasonAssistantMissing:
+		return "Your assistant is gone, so the songs were not read.", LearningActionAddAssistant
+	case LearningReasonNoAssistant:
+		return "This Home has no assistant to read the songs yet.", LearningActionAddAssistant
+	case LearningReasonPluginUpdate:
+		return "The plugin cannot read songs yet. Update it to read them.", LearningActionUpdatePlugin
+	case LearningReasonPluginFailed, LearningReasonTimeLimit:
+		return fmt.Sprintf("Reading stopped after %d of %d songs.", min(done, total), total), LearningActionRetry
+	case LearningReasonRestarted:
+		return "Reading stopped when Ori restarted.", LearningActionRetry
+	case LearningReasonDetailsOff:
+		return "Song details are off for this Home.", LearningActionOpenSwitch
+	case LearningReasonNoCall, LearningReasonModelError:
+		return who + " did not start the reading.", LearningActionRetry
+	}
+	return "", ""
+}
+
+// songsReads is what the offer says it will read, and what it will not touch,
+// when no particular plugin is named. It is the one sentence that promises the
+// limit, so it names exactly what the reader takes from a project file under the
+// consent "Learn them" grants: the three numbers, and the names a person typed
+// (tracks, markers and regions). Ori has no reader of its own: an app plugin
+// reads, and Ori keeps only those facts.
+const songsReads = "The app plugin reads tempo, length, track count, track names, markers and regions from each project file, and Ori keeps only those. Nothing is changed, and audio is not opened."
+
+// songsReadsBy is the same promise naming the app plugin that does the reading
+// (assistant-reads-projects FR44): it names that plugin, says Ori keeps only the
+// listed facts, and keeps the two limits. With no plugin to name, "The app
+// plugin" stands in.
+func songsReadsBy(reader string) string {
+	reader = strings.TrimSpace(reader)
+	if reader == "" {
+		return songsReads
+	}
+	return reader + " reads tempo, length, track count, track names, markers and regions from each project file, " +
+		"and Ori keeps only those. Nothing is changed, and audio is not opened."
+}
+
+// SongsReaderNamer is the optional part of Songs that names the app plugin that
+// reads the songs, as the reviewed list gives its name; "" when none does.
+type SongsReaderNamer interface {
+	ReaderName() string
+}
+
+// Whether an installed app plugin reads a project format (the values of
+// projectlibrary.ReaderStatus).
+const (
+	// ReaderReady: an installed, reviewed plugin's reader covers the format.
+	ReaderReady = "ready"
+	// ReaderUpdatePlugin: the format's reviewed plugin is installed but has no
+	// reader; updating it would add one.
+	ReaderUpdatePlugin = "update_plugin"
+)
+
+// SongsReaders is the optional part of Songs that says which installed app
+// plugin reads a project format. The host reads no project file itself, so
+// without it nothing counts as readable: a Home that cannot ask makes no offer.
+type SongsReaders interface {
+	// ReaderFor is ReaderReady, ReaderUpdatePlugin or neither ("none"), and, for
+	// ReaderUpdatePlugin, the name of the plugin to update as the reviewed list
+	// gives it.
+	ReaderFor(format string) (status, plugin string)
+}
 
 // Songs is the Home's song-details consent as the folder agent needs it: the
 // offer to learn the songs is made only while the Home holds none.
@@ -108,6 +208,11 @@ type SongsOfferView struct {
 	// NotRead names the songs that cannot be read this way, by format; empty
 	// when every song can.
 	NotRead string `json:"not_read,omitempty"`
+	// Update names the reviewed app plugin that owns these songs' format and is
+	// installed but cannot read them yet. When it is set there is nothing to learn
+	// (no Learn them, no Not now): Ask says to update the plugin, and the card
+	// offers the update. It goes away once an installed plugin reads the songs.
+	Update string `json:"update,omitempty"`
 }
 
 // songsAnswerable says the offer can still be answered: nobody has answered it,
@@ -164,9 +269,10 @@ func (s *Service) songsOffer(ctx context.Context, rec *Record) *SongsOfferView {
 	if homeID == "" {
 		return nil
 	}
-	readability := rec.Facts.Readability()
+	readers := s.songsReaders()
+	readability := rec.Facts.Readability(readableBy(readers))
 	if readability.Readable <= 0 {
-		return nil
+		return s.songsUpdateOffer(ctx, rec, homeID, readability, readers)
 	}
 	state, names, err := s.deps.Songs.Consent(ctx, rec.OwnerUserID, rec.WorkspaceID, homeID)
 	// No consent at all, or the numbers-only one (the upgrade).
@@ -174,12 +280,82 @@ func (s *Service) songsOffer(ctx context.Context, rec *Record) *SongsOfferView {
 	if err != nil || !eligible {
 		return nil
 	}
+	reader := ""
+	if namer, ok := s.deps.Songs.(SongsReaderNamer); ok {
+		reader = namer.ReaderName()
+	}
 	return &SongsOfferView{
 		Count:   readability.Readable,
 		Noun:    foldermap.ShapeNoun(readability.Shape, readability.Readable),
 		Ask:     fmt.Sprintf("Want me to learn the %d %s?", readability.Readable, foldermap.ShapeNoun(readability.Shape, readability.Readable)),
-		Reads:   songsReads,
+		Reads:   songsReadsBy(reader),
 		NotRead: notReadSentence(readability),
+	}
+}
+
+// songsReaders is the deps' answer to which installed plugin reads a format,
+// nil when they cannot say. Nil reads nothing: the host has no reader of its own.
+func (s *Service) songsReaders() SongsReaders {
+	readers, _ := s.deps.Songs.(SongsReaders)
+	return readers
+}
+
+// readableBy says whether an installed app plugin reads a project format, nil
+// (which reads nothing) when readers cannot say.
+func readableBy(readers SongsReaders) func(format string) bool {
+	if readers == nil {
+		return nil
+	}
+	return func(format string) bool {
+		status, _ := readers.ReaderFor(format)
+		return status == ReaderReady
+	}
+}
+
+// splitUpdatable takes, out of the songs nothing reads, the ones whose format's
+// reviewed plugin is installed without a reader: updating that plugin reads them,
+// so they are not songs that "can't be read this way". It returns the rest, how
+// many it took, and the plugin to update (the first one found).
+func splitUpdatable(r foldermap.Readability, readers SongsReaders) (rest foldermap.Readability, count int, plugin string) {
+	if readers == nil {
+		return r, 0, ""
+	}
+	rest = r
+	rest.Unreadable = nil
+	for _, unread := range r.Unreadable {
+		if status, name := readers.ReaderFor(unread.Format); status == ReaderUpdatePlugin && name != "" {
+			count += unread.Count
+			if plugin == "" {
+				plugin = name
+			}
+			continue
+		}
+		rest.Unreadable = append(rest.Unreadable, unread)
+	}
+	return rest, count, plugin
+}
+
+// songsUpdateOffer is what the offer's place says when no installed plugin reads
+// any of the songs but a reviewed plugin that owns their format is installed
+// without a reader: "Update <plugin> to read the N songs." It is never a silent
+// blank. Nil when no installed reviewed plugin could read them (the plugin is
+// not installed, or the songs are of a format none owns), or when the Home
+// already holds a consent that reaches names (nothing was promised to ask).
+func (s *Service) songsUpdateOffer(ctx context.Context, rec *Record, homeID string, readability foldermap.Readability, readers SongsReaders) *SongsOfferView {
+	_, count, plugin := splitUpdatable(readability, readers)
+	if count <= 0 {
+		return nil
+	}
+	state, names, err := s.deps.Songs.Consent(ctx, rec.OwnerUserID, rec.WorkspaceID, homeID)
+	if err != nil || (state != workspace.SongDetailsNone && (state != workspace.SongDetailsOn || names)) {
+		return nil
+	}
+	noun := foldermap.ShapeNoun(readability.Shape, count)
+	return &SongsOfferView{
+		Count:  count,
+		Noun:   noun,
+		Ask:    fmt.Sprintf("Update %s to read the %d %s.", plugin, count, noun),
+		Update: plugin,
 	}
 }
 
@@ -222,7 +398,9 @@ func (s *Service) AnswerSongs(ctx context.Context, userID, workspaceID string, l
 		return View{}, err
 	}
 	offer := s.songsOffer(ctx, current)
-	if offer == nil {
+	if offer == nil || offer.Update != "" {
+		// Nothing to answer: no offer, or only the sentence that says to update the
+		// plugin first.
 		return View{}, ErrWrongState
 	}
 	if !learn {
@@ -261,6 +439,41 @@ func (s *Service) AnswerSongs(ctx context.Context, userID, workspaceID string, l
 	// The reading outlives the request that asked for it: the request's values
 	// travel with it, its cancellation does not.
 	go s.runLearning(context.WithoutCancel(ctx), *rec, homeID, offer.Count)
+	return s.viewOf(ctx, rec), nil
+}
+
+// RetryLearning is "Try again" on a stopped reading (assistant-reads-projects
+// FR35). AnswerSongs refuses once the Home holds the consent, so this is its
+// own entry point: the owner already said yes, so nothing is granted again. It
+// needs a reading that stopped and a consent that is still on (a switch the
+// owner turned off stays off), and reads only the songs that still need it, as
+// the saved facts make the rest unwanted.
+func (s *Service) RetryLearning(ctx context.Context, userID, workspaceID string) (View, error) {
+	current, err := s.Record(userID, workspaceID)
+	if err != nil {
+		return View{}, err
+	}
+	homeID := songsHome(current)
+	if s.deps.Songs == nil || homeID == "" || current.SongsAnswer != SongsLearn ||
+		current.Learning == nil || current.Learning.Status != LearningStopped {
+		return View{}, ErrWrongState
+	}
+	if state, _, err := s.deps.Songs.Consent(ctx, userID, workspaceID, homeID); err != nil || state != workspace.SongDetailsOn {
+		return View{}, ErrWrongState
+	}
+	total := current.Learning.Total
+	rec, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
+		if r.Learning == nil || r.Learning.Status != LearningStopped {
+			return ErrWrongState
+		}
+		r.Learning = &Learning{Status: LearningRunning, Total: total, StartedAt: s.deps.Now().UTC()}
+		return nil
+	})
+	if err != nil {
+		return View{}, err
+	}
+	s.wg.Add(1)
+	go s.runLearning(context.WithoutCancel(ctx), *rec, homeID, total)
 	return s.viewOf(ctx, rec), nil
 }
 
@@ -374,7 +587,7 @@ func (s *Service) summarize(ctx context.Context, rec Record, homeID string) (tex
 		return hostText, hostBy, ""
 	}
 	reference, _ := folderlook.BuildSongsReference(folderlook.SongsReferenceInput{
-		FolderName: rec.FolderName, Noun: foldermap.ShapeNoun(rec.Facts.Readability().Shape, 2), Songs: songs,
+		FolderName: rec.FolderName, Noun: foldermap.ShapeNoun(rec.Facts.PortfolioShape(), 2), Songs: songs,
 	})
 	result := folderlook.RunSummaryTurn(ctx, folderlook.SummaryTurnInput{
 		Chat: resolved.chat, Model: resolved.name, AgentName: rec.AgentName, Reference: reference,
@@ -441,6 +654,18 @@ type LearningView struct {
 	// empty, so it is said once.
 	Summary   string `json:"summary,omitempty"`
 	SummaryBy string `json:"summary_by,omitempty"`
+	// Reader names the app assistant reading the songs; Reason says why a
+	// stopped reading stopped, with its one Action (LearningAction*). Empty when
+	// the reading did not stop for a named reason.
+	Reader string `json:"reader,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	Action string `json:"action,omitempty"`
+	// Update names the reviewed app plugin that owns some of the songs and is
+	// installed without a reader, once the reading ended: the card says to update
+	// it, with the update, instead of counting those songs as ones that cannot be
+	// read this way (FR49). Empty when nothing needs it, or when the reading
+	// stopped for that reason and its own sentence already says so.
+	Update string `json:"update,omitempty"`
 }
 
 // learningView words a record's reading, or nil when none was started.
@@ -450,20 +675,31 @@ type LearningView struct {
 //	done         "Learned 7 songs"  /  "Learned 5 of 7 songs"  /  "No song could be read",
 //	             and, when the host wrote the summary, "Learned 7 songs: 6–24 tracks, 84–128 BPM"
 //	stopped      "Stopped before it finished. Learned 3 of 7 songs"
-func learningView(rec *Record) *LearningView {
+func learningView(rec *Record) *LearningView { return learningViewWith(rec, nil) }
+
+// learningViewWith is learningView with the installed readers, which only the
+// closing sentences need: the songs that cannot be read this way, and the plugin
+// to update for the songs its installed copy cannot read yet. Nil readers read
+// nothing.
+func learningViewWith(rec *Record, readers SongsReaders) *LearningView {
 	l := rec.Learning
 	if l == nil {
 		return nil
 	}
-	readability := rec.Facts.Readability()
+	readability := rec.Facts.Readability(readableBy(readers))
 	noun := func(n int) string { return foldermap.ShapeNoun(readability.Shape, n) }
-	view := &LearningView{Status: l.Status, Done: l.Done, Total: l.Total}
+	view := &LearningView{Status: l.Status, Done: l.Done, Total: l.Total, Reader: l.Reader}
 	switch l.Status {
 	case LearningRunning:
 		position := min(l.Done+1, l.Total)
-		if l.Song == "" {
+		switch {
+		case l.Reader != "" && l.Song == "":
+			view.Line = fmt.Sprintf("%s is reading %d %s…", l.Reader, l.Total, noun(l.Total))
+		case l.Reader != "":
+			view.Line = fmt.Sprintf("%s is reading %s… (%d of %d)", l.Reader, l.Song, position, l.Total)
+		case l.Song == "":
 			view.Line = fmt.Sprintf("Learning the %d %s…", l.Total, noun(l.Total))
-		} else {
+		default:
 			view.Line = fmt.Sprintf("Learning %s… (%d of %d)", l.Song, position, l.Total)
 		}
 	case LearningSummarizing:
@@ -480,7 +716,14 @@ func learningView(rec *Record) *LearningView {
 		default:
 			learned = fmt.Sprintf("Learned %d of %d %s", l.Read, l.Total, noun(l.Total))
 		}
+		sentence, action := learningReasonWords(l.Reason, l.Reader, l.Done, l.Total)
 		switch {
+		case l.Status == LearningStopped && sentence != "":
+			// A named reason: its own sentence, and the one thing to do about it.
+			view.Line, view.Reason, view.Action = sentence, l.Reason, action
+			if learned != "" {
+				view.Line += " " + learned + "."
+			}
 		case l.Status == LearningStopped && learned == "":
 			view.Line = "Stopped before it finished"
 		case l.Status == LearningStopped:
@@ -494,7 +737,11 @@ func learningView(rec *Record) *LearningView {
 				view.Summary, view.SummaryBy = l.Summary, SummaryByAgent
 			}
 		}
-		view.NotRead = notReadSentence(readability)
+		rest, _, plugin := splitUpdatable(readability, readers)
+		view.NotRead = notReadSentence(rest)
+		if view.Action != LearningActionUpdatePlugin {
+			view.Update = plugin
+		}
 	}
 	return view
 }

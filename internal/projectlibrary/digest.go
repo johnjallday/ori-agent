@@ -227,6 +227,10 @@ type LibrarySummary struct {
 	// ProposalRun is the Manager review receipt for the digest's scan, if any:
 	// the shelf shows its skipped reason or its source.
 	ProposalRun *ProposalRun `json:"proposal_run,omitempty"`
+	// FactsRead is the Home assistant's newest song-reading turn, shown as it is
+	// now (a turn a previous process cut off reads as stopped by a restart). Nil
+	// when no read has been recorded (assistant-reads-projects).
+	FactsRead *FactsReadRun `json:"facts_read,omitempty"`
 	// LastCompleteScanAt is when the newest complete scan of a connected root
 	// finished. The shelf's freshness line and the map badge's age read it; a
 	// partial, failed or cancelled scan never moves it. Nil means no root has
@@ -271,6 +275,10 @@ func (s *Store) Summary(scope Scope) (LibrarySummary, error) {
 	}
 	summary := LibrarySummary{Initialized: true, Revision: doc.Revision,
 		LastCompleteScanAt: lastCompleteScanAt(doc, state)}
+	if run, ok := latestFactsRead(doc); ok {
+		presented := presentFactsRead(run, currentFactsReadBoot)
+		summary.FactsRead = &presented
+	}
 	if doc.Digest != nil && digestRootActive(doc, state, doc.Digest.RootID) {
 		current := digestWithLinks(doc, *doc.Digest)
 		summary.Digest = &current
