@@ -292,6 +292,25 @@ export function hqBuildRequestPayload(target, form, requestID) {
   return { ...body, request_id: String(requestID || '').trim(), if_version: target.stateVersion };
 }
 
+export async function defaultHQTimezone(fetchImpl = globalThis.fetch) {
+  try {
+    const response = await fetchImpl('/api/user/profile', {
+      headers: { Accept: 'application/json' }
+    });
+    if (response.ok) {
+      const body = await response.json();
+      if (body?.profile?.timezone) return body.profile.timezone;
+    }
+  } catch (_) {
+    // Profile defaults are optional.
+  }
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch (_) {
+    return 'UTC';
+  }
+}
+
 export function hqWorkspaceRootView(state) {
   const source = String(state?.source || 'unconfirmed')
     .trim()
@@ -608,31 +627,6 @@ export function followUpView(f) {
     return null;
   }
 
-  function browserTimezone() {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    } catch (_) {
-      return 'UTC';
-    }
-  }
-
-  // Prefer the user's already-stored profile timezone (PRD FR25: derive
-  // defaults from the current user profile) and fall back to the browser's
-  // detected zone only when the profile has none set yet.
-  async function defaultTimezone() {
-    try {
-      const res = await fetch('/api/user/profile', { headers: { Accept: 'application/json' } });
-      if (res.ok) {
-        const body = await res.json();
-        const tz = body && body.profile && body.profile.timezone;
-        if (tz) return tz;
-      }
-    } catch (_) {
-      /* fall through to browser detection */
-    }
-    return browserTimezone();
-  }
-
   function showBuildWorkspaceRootError(message) {
     const errorBox = document.getElementById('hqBuildWorkspaceRootError');
     if (!errorBox) return;
@@ -701,12 +695,32 @@ export function followUpView(f) {
     }
   }
 
-  async function openBuildModal() {
+  // Only a card-origin editor returns a draft. Standalone forms retain their
+  // original confirmation boundary and never acquire an implicit Notes choice.
+  let reviewEditor = null;
+
+  function fillBuildRequest(draft) {
+    for (const [id, key] of [
+      ['Name', 'name'],
+      ['Timezone', 'timezone'],
+      ['Time', 'schedule_time'],
+      ['Scope', 'scope']
+    ])
+      document.getElementById(`hqBuild${id}`).value = draft[key];
+    document.getElementById('hqBuildIncludeFuture').checked = draft.include_future_workspaces;
+    document.getElementById('hqBuildNotify').checked = draft.notify_on_ready;
+    for (const input of document.querySelectorAll('#hqBuildAdvanced .hq-build-days input')) {
+      input.checked = draft.schedule_days.includes(input.value);
+    }
+  }
+
+  async function openBuildModal(editor = null) {
+    reviewEditor = editor?.onReturn ? editor : null;
     const tzInput = document.getElementById('hqBuildTimezone');
     const tasks = [];
     if (tzInput && !tzInput.value)
       tasks.push(
-        defaultTimezone().then(timezone => {
+        defaultHQTimezone().then(timezone => {
           tzInput.value = timezone;
         })
       );
@@ -719,9 +733,22 @@ export function followUpView(f) {
     const errorBox = document.getElementById('hqBuildError');
     if (errorBox) errorBox.hidden = true;
     applyBuildAssistantCopy();
+    if (reviewEditor) {
+      fillBuildRequest(reviewEditor.draft);
+      document.getElementById('hqBuildWorkspaceRoot').value = reviewEditor.root;
+      document.getElementById('hqBuildModalTitle').textContent = 'Customize setup';
+      document.getElementById('hqBuildSubmitBtn').textContent = 'Return to review';
+      document.getElementById('hqBuildAssistantIntro').textContent =
+        'Edit your setup, then review it with your Notes choice. Nothing is built here.';
+    }
     buildModalStartedForPAF = !!buildTarget.paf;
     const modal = requireModal('hqBuildModal');
-    if (modal) modal.show();
+    if (modal) {
+      // Bootstrap ignores hide while its entrance is transitioning. Do not
+      // expose a submit action that can silently lose the user's click.
+      document.getElementById('hqBuildSubmitBtn').disabled = true;
+      modal.show();
+    }
     // Observational: Ori's HQ walkthrough uses this to advance to its final
     // step, where the existing form owns all editing and confirmation.
     if (modal) emitHQQuestSignal('build-form-opened');
@@ -818,6 +845,18 @@ export function followUpView(f) {
   }
 
   function wireBuildModal() {
+    document.getElementById('hqBuildModal')?.addEventListener('shown.bs.modal', () => {
+      document.getElementById('hqBuildSubmitBtn').disabled = !!buildTarget.unavailable;
+    });
+    document.getElementById('hqBuildModal')?.addEventListener('hidden.bs.modal', () => {
+      const editor = reviewEditor;
+      reviewEditor = null;
+      if (editor)
+        editor.onReturn(
+          collectBuildRequest(),
+          document.getElementById('hqBuildWorkspaceRoot').value.trim()
+        );
+    });
     const browseButton = document.getElementById('hqBuildWorkspaceRootBrowseBtn');
     if (browseButton) browseButton.addEventListener('click', () => browseBuildWorkspaceRoot());
     const workspaceRootInput = document.getElementById('hqBuildWorkspaceRoot');
@@ -844,6 +883,10 @@ export function followUpView(f) {
     const submitBtn = document.getElementById('hqBuildSubmitBtn');
     if (!submitBtn) return;
     submitBtn.addEventListener('click', async () => {
+      if (reviewEditor) {
+        bootstrapModal('hqBuildModal')?.hide();
+        return;
+      }
       const errorBox = document.getElementById('hqBuildError');
       submitBtn.disabled = true;
       if (errorBox) errorBox.hidden = true;

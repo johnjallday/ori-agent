@@ -934,6 +934,48 @@ body.home-command-page .home-command-bridge * {
   margin-left: 4px;
 }
 
+.pa-hq-card {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.pa-hq-card__path,
+.pa-hq-card__intro,
+.pa-hq-card__brief p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--hc-ink-dim);
+}
+
+.pa-hq-card__path {
+  color: var(--hc-ink);
+  overflow-wrap: anywhere;
+}
+
+.pa-hq-card__brief {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--hc-line);
+}
+
+.pa-hq-card__brief h5 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.pa-hq-card .pa-specialist-offer__actions {
+  flex-wrap: wrap;
+}
+
+.pa-hq-card button:focus-visible,
+.pa-hq-card input:focus-visible,
+.pa-hq-card summary:focus-visible {
+  outline: 2px solid var(--hc-signal);
+  outline-offset: 3px;
+}
+
 .pa-hq-card #personalAssistantHQPlan {
   display: grid;
   gap: 0.45rem;
@@ -946,6 +988,7 @@ body.home-command-page .home-command-bridge * {
 
 .pa-hq-card__root {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   min-width: 0;
 }

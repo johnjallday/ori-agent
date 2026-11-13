@@ -3,6 +3,7 @@
 import {
   chooseHQWorkspaceRoot,
   clearHQRequestID,
+  defaultHQTimezone,
   hqBuildRequestPayload,
   hqBuildTarget,
   hqRequestID,
@@ -59,7 +60,7 @@ export function hqCardView(relationship, rootState, plan = {}) {
 // Daily Brief is where it lands second.
 export function hqHeadline(name) {
   const who = String(name || '').trim() || 'Your assistant';
-  return `${who} is hired. Give me a home base: My HQ is where I keep what I learn about the folders you show me, and where your Daily Brief lands.`;
+  return `A home base for ${who}`;
 }
 
 export function hqReceiptRows(status, plan, directory) {
@@ -80,10 +81,33 @@ export function hqReceiptRows(status, plan, directory) {
   ];
 }
 
+export function hqReviewDraft(values = {}) {
+  return {
+    name: values.name ?? 'My HQ',
+    timezone: values.timezone ?? '',
+    schedule_days: [...(values.schedule_days ?? ['mon', 'tue', 'wed', 'thu', 'fri'])],
+    schedule_time: values.schedule_time ?? '08:00',
+    scope: values.scope ?? 'all',
+    include_future_workspaces: values.include_future_workspaces ?? true,
+    notify_on_ready: values.notify_on_ready ?? false
+  };
+}
+
+export function hqReviewSummary(draft) {
+  return {
+    schedule: `${draft.schedule_days.join(', ') || 'No days selected'} · ${draft.schedule_time} · ${draft.timezone}`,
+    scope: `${draft.scope === 'all' ? 'All eligible workspaces' : 'Selected workspaces (choose in HQ settings)'}${draft.include_future_workspaces ? ', including future ones' : '; future workspaces are not included'}.`,
+    notification: draft.notify_on_ready
+      ? 'Notify in Action Center when ready.'
+      : 'No brief notifications.'
+  };
+}
+
 const plan = {
-  name: 'My HQ',
+  ...hqReviewDraft(),
   time: '08:00',
   collapsed: false,
+  reviewOpened: false,
   failed: false,
   receipt: [],
   receiptWorkspaceID: '',
@@ -147,7 +171,8 @@ const state = {
   notes: null,
   busy: false,
   sequence: 0,
-  justHired: false
+  justHired: false,
+  pendingRoot: null
 };
 
 function notesView() {
@@ -390,16 +415,29 @@ function render() {
   if (view.receipt) renderReceipt(plan.receipt);
   el('Name').value = plan.name;
   el('Time').value = plan.time;
-  el('Root').value = view.root.path;
-  el('RootStatus').textContent = view.root.status;
+  el('Root').value = state.pendingRoot ?? view.root.path;
+  el('RootPath').textContent = state.pendingRoot ?? view.root.path;
+  el('RootStatus').textContent =
+    state.pendingRoot !== null
+      ? 'Directory changed. Confirm it, then review the updated Notes location.'
+      : view.root.status;
+  el('Change').textContent = state.pendingRoot !== null ? 'Confirm directory' : 'Change';
+  const summary = hqReviewSummary(plan);
+  el('BriefSummary').textContent = summary.schedule;
+  el('Scope').textContent = `${summary.scope} ${summary.notification}`;
   el('Build').textContent = view.building
     ? 'Resuming…'
     : view.paused
       ? 'Resume setup'
       : view.collapsed
         ? 'Build My HQ'
-        : 'Build';
-  el('Build').disabled = state.busy || (!view.collapsed && !view.canBuild);
+        : state.busy
+          ? 'Checking setup…'
+          : 'Build my HQ';
+  el('Build').disabled =
+    state.busy || state.pendingRoot !== null || (!view.collapsed && !view.canBuild);
+  el('Build').setAttribute('aria-busy', String(state.busy));
+  for (const id of ['Name', 'Time']) el(id).disabled = state.busy;
   el('Build').hidden = view.receipt;
   el('Adjust').hidden = view.collapsed || view.receipt;
   el('NotNow').hidden = view.collapsed || view.receipt;
@@ -427,6 +465,7 @@ async function load(relationship = null) {
     const current =
       relationship || (await readJSON('/api/personal-assistant')).personal_assistant || null;
     const root = await loadHQWorkspaceRoot();
+    if (!plan.timezone) plan.timezone = await defaultHQTimezone();
     const hq = await readJSON('/api/personal-hq/status');
     // The notes status is read for the review, never the notes themselves. A
     // failed read leaves notes out of the build rather than guessing.
@@ -468,7 +507,8 @@ async function load(relationship = null) {
       plan.receipt = [];
       plan.receiptWorkspaceID = '';
     }
-    plan.collapsed = hq?.status?.hq_onboarding_state === 'skipped' && !plan.receipt.length;
+    plan.collapsed =
+      !plan.reviewOpened && hq?.status?.hq_onboarding_state === 'skipped' && !plan.receipt.length;
     if (['needs_hq', 'provisioning_hq'].includes(current?.state) && !plan.collapsed) {
       try {
         state.justHired = window.sessionStorage.getItem(JUST_HIRED_FLAG) === '1';
@@ -490,12 +530,13 @@ async function load(relationship = null) {
 
 async function build() {
   if (plan.collapsed) {
+    plan.reviewOpened = true;
     plan.collapsed = false;
     render();
     return;
   }
   const view = hqCardView(state.relationship, state.root, plan);
-  if (state.busy || !view.canBuild) return;
+  if (state.busy || state.pendingRoot !== null || !view.canBuild) return;
   if (view.paused) {
     state.busy = true;
     plan.busy = true;
@@ -516,6 +557,7 @@ async function build() {
   }
   plan.name = el('Name').value.trim() || 'My HQ';
   plan.time = el('Time').value || '08:00';
+  plan.schedule_time = plan.time;
   state.busy = true;
   plan.failed = false;
   error('');
@@ -529,6 +571,8 @@ async function build() {
       !hqWorkspaceRootView(root).confirmed ||
       root.workspace_root !== state.root?.workspace_root
     ) {
+      state.root = root;
+      state.relationship = latest;
       throw new Error('The workspace directory or relationship changed. Check the plan and retry.');
     }
     // Notes: re-read right before confirming. If what the review showed is no
@@ -540,17 +584,13 @@ async function build() {
     if (
       reviewed.mode !== current.mode ||
       reviewed.path !== current.path ||
-      reviewed.include !== current.include
+      reviewed.include !== current.include ||
+      reviewed.writable !== current.writable ||
+      reviewed.sourceName !== current.sourceName
     ) {
       throw new Error(
         'Your notes setup changed since you reviewed it. Check the plan and build again.'
       );
-    }
-    let timezone = 'UTC';
-    try {
-      timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    } catch (_) {
-      // The server validates the fallback too.
     }
     const result = await readJSON(target.endpoint, {
       method: 'POST',
@@ -559,13 +599,7 @@ async function build() {
         hqBuildRequestPayload(
           target,
           {
-            name: plan.name,
-            timezone,
-            schedule_days: ['mon', 'tue', 'wed', 'thu', 'fri'],
-            schedule_time: plan.time,
-            scope: 'all',
-            include_future_workspaces: true,
-            notify_on_ready: false,
+            ...hqReviewDraft(plan),
             notes: hqNotesPayload(current)
           },
           hqRequestID(window.localStorage)
@@ -707,9 +741,12 @@ async function changeRoot() {
   error('');
   render();
   try {
-    const path = await chooseHQWorkspaceRoot();
+    const path = state.pendingRoot ?? (await chooseHQWorkspaceRoot());
+    if (state.pendingRoot !== null && !path)
+      throw new Error('Choose a workspace directory in Customize setup.');
     if (path) {
       state.root = await saveHQWorkspaceRoot(path);
+      state.pendingRoot = null;
       // The default notes place follows the directory; review it again.
       state.notes = await readNotesStatus();
     }
@@ -728,6 +765,7 @@ async function notNow() {
   render();
   try {
     await skipHQObjective();
+    plan.reviewOpened = false;
     plan.collapsed = true;
     window.dispatchEvent(new CustomEvent('ori:progression-refresh'));
   } catch (cause) {
@@ -742,13 +780,19 @@ async function adjust() {
   if (state.busy) return;
   plan.name = el('Name').value.trim() || 'My HQ';
   plan.time = el('Time').value || '08:00';
-  el('Name').value = plan.name;
-  const modalName = document.getElementById('hqBuildName');
-  const modalTime = document.getElementById('hqBuildTime');
-  if (modalName) modalName.value = plan.name;
-  if (modalTime) modalTime.value = plan.time;
+  plan.schedule_time = plan.time;
   if (window.PersonalHQOnboarding?.openBuildModal) {
-    await window.PersonalHQOnboarding.openBuildModal();
+    await window.PersonalHQOnboarding.openBuildModal({
+      draft: hqReviewDraft(plan),
+      root: state.pendingRoot ?? hqWorkspaceRootView(state.root).path,
+      onReturn: (draft, root) => {
+        Object.assign(plan, hqReviewDraft(draft));
+        plan.time = draft.schedule_time;
+        state.pendingRoot = root !== hqWorkspaceRootView(state.root).path ? root : null;
+        render();
+        el('Adjust').focus({ preventScroll: true });
+      }
+    });
   } else {
     error('The HQ form is unavailable. Reload to try again.');
   }
@@ -805,6 +849,9 @@ function init() {
   ]) {
     el(field).addEventListener('input', event => {
       plan[key] = event.target.value;
+      if (key === 'time') plan.schedule_time = event.target.value;
+      const summary = hqReviewSummary(plan);
+      el('BriefSummary').textContent = summary.schedule;
     });
   }
   document.addEventListener('personal-assistant:status', event => {
@@ -823,12 +870,14 @@ const api = {
   receiptRows: () =>
     state.relationship?.state === 'active' ? plan.receipt.map(row => ({ ...row })) : [],
   show: () => {
+    plan.reviewOpened = true;
     plan.collapsed = false;
     render();
   },
   // expand re-opens the card the user deferred with Not now and brings it into
   // view: the locked folder mission's one action. It never builds anything.
   expand: () => {
+    plan.reviewOpened = true;
     plan.collapsed = false;
     render();
     const card = el('Card');

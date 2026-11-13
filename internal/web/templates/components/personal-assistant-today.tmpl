@@ -35,21 +35,26 @@
   <section id="personalAssistantHQCard" class="pa-specialist-offer pa-hq-card"
            aria-labelledby="personalAssistantHQHeadline" hidden>
     <span id="personalAssistantHQEyebrow" class="personal-assistant-today__eyebrow"></span>
-    <p id="personalAssistantHQHeadline" class="pa-specialist-offer__headline"></p>
+    <h4 id="personalAssistantHQHeadline" class="pa-specialist-offer__headline"></h4>
     <div id="personalAssistantHQPlan">
-      <!-- The directory leads: it is the one thing the user must confirm. The
-           brief time is the last field. -->
+      <p class="pa-hq-card__intro">Review your home base for the Daily Brief and what your assistant learns about the folders you choose to share. No model is needed to set up HQ.</p>
+      <label for="personalAssistantHQName">HQ name</label>
+      <input id="personalAssistantHQName" class="modern-input w-100" value="My HQ" maxlength="100">
       <label for="personalAssistantHQRoot">Workspace directory</label>
       <div class="pa-hq-card__root">
         <input id="personalAssistantHQRoot" class="modern-input w-100" readonly>
         <button type="button" id="personalAssistantHQChange" class="btn btn-sm btn-outline-secondary">Change</button>
       </div>
+      <p id="personalAssistantHQRootPath" class="pa-hq-card__path"></p>
       <small id="personalAssistantHQRootStatus" aria-live="polite"></small>
-      <label for="personalAssistantHQName">HQ name</label>
-      <input id="personalAssistantHQName" class="modern-input w-100" value="My HQ" maxlength="100">
-      <label for="personalAssistantHQTime">Daily Brief time (weekdays)</label>
-      <input id="personalAssistantHQTime" type="time" class="modern-input" value="08:00">
-      <p id="personalAssistantHQScope">All workspaces, including future ones.</p>
+      <section class="pa-hq-card__brief" aria-labelledby="personalAssistantHQBriefTitle">
+        <h5 id="personalAssistantHQBriefTitle">Daily Brief</h5>
+        <p id="personalAssistantHQBriefSummary"></p>
+        <label for="personalAssistantHQTime">Brief time</label>
+        <input id="personalAssistantHQTime" type="time" class="modern-input" value="08:00">
+        <p id="personalAssistantHQScope">All eligible workspaces, including future ones.</p>
+        <p class="pa-hq-card__intro">A curated workspace snapshot, not automatic access to every project's tools or files.</p>
+      </section>
       <!-- Notes are part of the HQ review (assistant-hq-onboarding 3.5). The
            review shows where they go and what Ori keeps up to date before
            anything is written; an existing folder is shown as it is and never
@@ -119,8 +124,8 @@
       </div>
     </div>
     <div class="pa-specialist-offer__actions">
-      <button type="button" id="personalAssistantHQBuild" class="btn btn-sm btn-primary" disabled>Build</button>
-      <button type="button" id="personalAssistantHQAdjust" class="btn btn-sm btn-outline-secondary">Adjust…</button>
+      <button type="button" id="personalAssistantHQBuild" class="btn btn-sm btn-primary" disabled>Build my HQ</button>
+      <button type="button" id="personalAssistantHQAdjust" class="btn btn-sm btn-outline-secondary">Customize setup</button>
       <button type="button" id="personalAssistantHQNotNow" class="btn btn-sm btn-outline-secondary">Not now</button>
     </div>
     <p id="personalAssistantHQStatus" role="status" aria-live="polite"></p>
