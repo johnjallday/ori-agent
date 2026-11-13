@@ -20,9 +20,11 @@ The contract was revalidated on 2026-09-22 against these exact published sources
 | REAPER Plugin | release `v0.8.0`, commit `3e3234bfae3465f909fe2aa5189f685a41c7a2ed` | Reaper Song project declaration, project roles, project connection, setup quest, capabilities, inputs, skeleton, and verified service artifact. |
 | Reviewed REAPER floor | `v0.8.0` at `3e3234bfae3465f909fe2aa5189f685a41c7a2ed` | Published minimum release and immutable fallback source for the split contract. |
 
-Since 2026-09-30 the reviewed REAPER floor is `v0.9.0` at
+From 2026-09-30 the reviewed REAPER floor was `v0.9.0` at
 `0a597684f3b181735c961bfb44ed5c2b80994814` (blueprint v10, one REAPER Assistant
-project role, same project team schema/version 1), and Music Project Management
+project role, same project team schema/version 1); it is now `v0.12.0` at
+`ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3`, the first release with the project
+reader, with the same blueprint and team. Music Project Management
 `v0.1.1` is a guidance-only update that existing Homes take through §6.1.
 
 The design baseline, REAPER 0.7.0, used Reaper Song blueprint version 8 and one

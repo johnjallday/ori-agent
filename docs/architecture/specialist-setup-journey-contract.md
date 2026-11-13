@@ -939,7 +939,7 @@ The REAPER v2 declaration has:
 | `mix_engineer`           | `project` |      yes |      no |
 | `songwriter`             | `project` |      yes |      no |
 
-REAPER 0.9.0 (blueprint v10, the reviewed floor since 2026-09-30) replaces the
+REAPER 0.9.0 (blueprint v10, the reviewed floor from 2026-09-30 until 0.12.0) replaces the
 three project rows with one: `reaper-assistant` (REAPER Assistant), project
 scope, required and primary. A child created from an earlier release keeps its
 recorded roles.
