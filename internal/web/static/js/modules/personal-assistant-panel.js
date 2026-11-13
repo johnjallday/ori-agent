@@ -1942,6 +1942,7 @@ function open(trigger, options = {}) {
   if (!creationTransition.isReopening() && (state.suspended || creationTransition.blocksReveal())) {
     creationTransition.requestOpen();
     if (state.open) {
+      saveTabValue(PANEL_OPEN_KEY, '1');
       if (options.focus !== false) focusOnOpen();
       return true;
     }
@@ -2743,6 +2744,14 @@ const api = {
   },
   isOpen: () => state.open,
   isSuspended: () => Boolean(state.suspended),
+  // HQ alone commits a folded completion preference. Shared creation callers
+  // still retain their prior open preference through ordinary suspension.
+  commitHQFolded: () => {
+    if (!state.open) {
+      resume({ reveal: false });
+      saveTabValue(PANEL_OPEN_KEY, '');
+    }
+  },
   // The `panel` value this page load arrived with ('today', 'assistant' or '').
   arrival: () => state.arrival || '',
   // Whether this opening came from a link to what needs the user

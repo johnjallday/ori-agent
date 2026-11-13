@@ -147,14 +147,45 @@ test('review and Customize retain consent without creating anything', async ({ p
   expect(fs.existsSync(path)).toBe(false);
 });
 
-test('confirmed customized payload builds exactly one real HQ with reviewed Notes', async ({
+test('a real validation refusal restores the same review without creating HQ', async ({
   page,
   request
 }) => {
   await page.goto('/');
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantHQCard?.show));
   await page.locator('#cockpitWelcome [data-home-welcome-action="primary"]').click();
+  await page.locator('#personalAssistantHQAdjust').click();
+  await page.locator('#hqBuildTimezone').fill('not/a/timezone');
+  await page.locator('#hqBuildSubmitBtn').click();
+  await expect(page.locator('#hqBuildModal')).toBeHidden();
+  await page.locator('#personalAssistantHQBuild').click();
+  await expect(page.locator('#personalAssistantHQError')).toContainText('daily rhythm');
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+  await expect(page.locator('#personalAssistantHQBriefSummary')).toContainText('not/a/timezone');
+  expect(
+    (await (await request.get('/api/personal-assistant')).json()).personal_assistant.state
+  ).toBe('needs_hq');
+  fs.mkdirSync('tasks/evidence-hq-onboarding-reveal/group-2', { recursive: true });
+  await page.screenshot({
+    path: 'tasks/evidence-hq-onboarding-reveal/group-2/refused.png',
+    fullPage: true
+  });
+});
+
+test('confirmed customized payload builds exactly one real HQ with reviewed Notes', async ({
+  page,
+  request
+}) => {
+  const reopen = process.env.ORI_HQ_REVEAL_REOPEN === '1';
+  await page.goto('/');
+  await page.locator('[data-cockpit-view="tree"]').click();
+  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantHQCard?.show));
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(page.locator('#personalAssistantHQCard')).toBeVisible();
+  if (await page.locator('#personalAssistantHQPlan').isHidden())
+    await page.locator('#personalAssistantHQBuild').click();
   await expect(page.locator('#personalAssistantHQNotesPath')).toBeVisible();
+  await page.locator('#personalAssistantExpand').click();
   const notesPath = await page.locator('#personalAssistantHQNotesPath').innerText();
   await page.locator('#personalAssistantHQAdjust').click();
   await page.locator('#hqBuildName').fill('Quiet HQ');
@@ -169,12 +200,37 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
   await page.locator('#hqBuildNotify').check();
   await page.locator('#hqBuildSubmitBtn').click();
   await expect(page.locator('#hqBuildModal')).toBeHidden();
+  await page.route('**/api/personal-assistant/hq', async route => {
+    const response = await route.fetch();
+    await new Promise(resolve => setTimeout(resolve, 900)); // injected response delay, real write
+    await route.fulfill({ response });
+  });
   const builds: Record<string, unknown>[] = [];
+  const forbidden: string[] = [];
   page.on('request', r => {
+    if (
+      r.method() !== 'GET' &&
+      /\/api\/(workspace-map\/layout|chat|ori-guide|.*\/scan)/.test(new URL(r.url()).pathname)
+    )
+      forbidden.push(r.url());
     if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/personal-assistant/hq')
       builds.push(r.postDataJSON());
   });
   await page.locator('#personalAssistantHQBuild').click();
+  await expect(page.locator('[data-creation-map-status]')).toContainText('Setting up your HQ…');
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await expect(page.locator('.modal-backdrop')).toHaveCount(0);
+  await expect(page.locator('#homeCockpit')).toHaveAttribute('data-view', 'map');
+  await expect(page.locator('#cockpitWelcome')).toBeHidden();
+  if (reopen) {
+    await page.locator('#personalAssistantLauncher').click();
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+  }
+  fs.mkdirSync('tasks/evidence-hq-onboarding-reveal/group-2', { recursive: true });
+  await page.screenshot({
+    path: `tasks/evidence-hq-onboarding-reveal/group-2/pending${reopen ? '-reopened' : ''}.png`,
+    fullPage: true
+  });
   await expect
     .poll(
       async () =>
@@ -182,6 +238,8 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
     )
     .toBe('active');
   expect(builds).toHaveLength(1);
+  expect(forbidden).toEqual([]);
+  expect(new URL(page.url()).searchParams.get('view')).toBe('tree');
   expect(builds[0]).toMatchObject({
     name: 'Quiet HQ',
     timezone: 'Pacific/Auckland',
@@ -194,4 +252,37 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
   });
   expect(builds[0].request_id).toBeTruthy();
   await expect.poll(() => fs.existsSync(`${notesPath}/Inbox/README.md`)).toBe(true);
+  if (reopen) {
+    await page.waitForTimeout(1500); // allow injected response + canonical refresh to finish
+    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+    await expect(page.locator('#personalAssistantExpand')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('[data-creation-map-status]')).toBeHidden();
+    await page.screenshot({
+      path: 'tasks/evidence-hq-onboarding-reveal/group-2/explicit-reopen.png',
+      fullPage: true
+    });
+    return;
+  }
+  await expect(page.locator('[data-creation-map-status]')).toContainText('Your HQ is ready');
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  const hq = page.locator('.ws-map-tile').filter({ has: page.locator('.ws-map-tile-hq-badge') });
+  await expect(hq).toBeVisible();
+  await expect
+    .poll(() =>
+      hq.evaluate(el => {
+        const box = el.getBoundingClientRect();
+        return el.contains(
+          document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+        );
+      })
+    )
+    .toBe(true);
+  await page.screenshot({
+    path: 'tasks/evidence-hq-onboarding-reveal/group-2/ready.png',
+    fullPage: true
+  });
+  await page.reload();
+  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.isOpen));
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await expect(page.locator('[data-creation-map-status]')).toHaveCount(0);
 });

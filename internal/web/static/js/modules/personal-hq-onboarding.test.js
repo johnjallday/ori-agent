@@ -14,8 +14,100 @@ import {
   hqWorkspaceRootView,
   hqBuildTarget,
   hqBuildAssistantCopy,
-  hqBuildRequestPayload
+  hqBuildRequestPayload,
+  hqRequestOutcome,
+  hqRequestID,
+  clearHQRequestID,
+  submitReviewedHQ
 } from './personal-hq-onboarding.js';
+
+test('HQ outcome distinguishes refusal, unknown, partial, stale and verified identity', () => {
+  assert.equal(hqRequestOutcome(null, null, 'invalid_hq_setup_request'), 'refused');
+  assert.equal(hqRequestOutcome(null, null, 'hq_setup_conflict'), 'uncertain');
+  assert.equal(hqRequestOutcome(null, null, 'hq_setup_unavailable'), 'uncertain');
+  assert.equal(
+    hqRequestOutcome({ state: 'provisioning_hq' }, null, 'invalid_hq_setup_request'),
+    'paused'
+  );
+  const active = { state: 'active', hq_workspace_id: 'hq' };
+  assert.equal(hqRequestOutcome(active, null), 'stale');
+  assert.equal(
+    hqRequestOutcome(active, { valid: true, workspace: { id: 'wrong', folder_slug: 'other' } }),
+    'stale'
+  );
+  assert.equal(
+    hqRequestOutcome(active, { valid: true, workspace: { id: 'hq', folder_slug: 'my-hq' } }),
+    'ready'
+  );
+});
+
+test('request identity survives unavailable browser storage until canonical success', () => {
+  const storage = {
+    getItem() {
+      throw new Error('off');
+    },
+    setItem() {
+      throw new Error('off');
+    },
+    removeItem() {
+      throw new Error('off');
+    }
+  };
+  clearHQRequestID(storage);
+  const id = hqRequestID(storage);
+  assert.equal(hqRequestID(storage), id);
+  clearHQRequestID(storage);
+  assert.notEqual(hqRequestID(storage), id);
+  clearHQRequestID(storage);
+});
+
+test('lost responses reconcile canonical HQ and an uncertain retry keeps exact reviewed bytes', async () => {
+  const previousWindow = globalThis.window;
+  const previousFetch = globalThis.fetch;
+  const previousEvent = globalThis.CustomEvent;
+  const sent = [];
+  let active = false;
+  globalThis.window = { location: { pathname: '/', search: '' }, dispatchEvent() {} };
+  globalThis.CustomEvent = class {
+    constructor(name, detail) {
+      this.type = name;
+      this.detail = detail;
+    }
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    if (options.method === 'POST') {
+      sent.push(options.body);
+      if (sent.length === 2) active = true;
+      throw new Error('injected lost response');
+    }
+    return {
+      ok: true,
+      json: async () =>
+        url === '/api/personal-assistant'
+          ? {
+              personal_assistant: {
+                state: active ? 'active' : 'needs_hq',
+                hq_workspace_id: active ? 'hq' : ''
+              }
+            }
+          : { status: { valid: true, workspace: { id: 'hq', folder_slug: 'hq' } } }
+    };
+  };
+  try {
+    const target = hqBuildTarget({ state: 'needs_hq', state_version: 2 });
+    const first = await submitReviewedHQ(target, { name: 'Reviewed', notes: { include: false } });
+    assert.equal(first.outcome, 'uncertain');
+    const retry = await submitReviewedHQ(target, { name: 'Must not replace confirmed request' });
+    assert.equal(retry.outcome, 'ready');
+    assert.equal(sent.length, 2);
+    assert.equal(sent[0], sent[1]);
+    assert.equal(JSON.parse(sent[1]).name, 'Reviewed');
+  } finally {
+    globalThis.window = previousWindow;
+    globalThis.fetch = previousFetch;
+    globalThis.CustomEvent = previousEvent;
+  }
+});
 
 test('hqBuildTarget routes a hired assistant with no home base to the PAF endpoint', () => {
   const target = hqBuildTarget({

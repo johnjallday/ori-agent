@@ -174,6 +174,7 @@ export default defineConfig([
       'internal/web/static/js/modules/onboarding-gate.js',
       'internal/web/static/js/modules/onboarding.js',
       'internal/web/static/js/modules/personal-hq-onboarding.js',
+      'internal/web/static/js/modules/personal-hq-reveal.js',
       'internal/web/static/js/modules/personal-assistant-home.js',
       'internal/web/static/js/modules/workspace-build-resume.js',
       'internal/web/static/js/modules/personal-assistant-hq-card.js',

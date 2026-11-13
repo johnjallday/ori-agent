@@ -2313,7 +2313,11 @@ import {
       view: state.view === VIEW_TREE ? 'tree' : 'map',
       intent: state.welcomeIntent,
       exploredStage: readExploredStage(welcomeStorage),
-      modalOpen: !!(state.modalVisible || state.modalRequested),
+      modalOpen: !!(
+        state.modalVisible ||
+        state.modalRequested ||
+        window.OriCreationTransition?.owner?.() === 'personal-hq'
+      ),
       drawerOpen: !!window.PersonalAssistantPanel?.isOpen?.()
     });
   }
@@ -3624,11 +3628,11 @@ import {
 
   // ---- view state ----
 
-  function applyView(view, { pushUrl = true } = {}) {
+  function applyView(view, { pushUrl = true, transient = false } = {}) {
     // Leaving Tree saves the note being edited first (home-file-tree FR43).
     // The note stays mounted, hidden with the rest of the Tree, so its text is
     // still there on the way back whether or not the save worked.
-    if (view !== VIEW_TREE && state.view === VIEW_TREE) void noteController.flush();
+    if (!transient && view !== VIEW_TREE && state.view === VIEW_TREE) void noteController.flush();
     if (view === VIEW_TREE && state.view === VIEW_MAP)
       window.OriWorkspaceMap?.suspendDraftPlacement?.();
     state.view = view === VIEW_TREE ? VIEW_TREE : VIEW_MAP;
@@ -5946,6 +5950,11 @@ import {
     refreshLibraryBadges,
     getState: () => state,
     setView: applyView,
+    showHQCreationMap: () => {
+      if (!window.OriWorkspaceMap?.canPresentHQCreation?.()) return false;
+      applyView(VIEW_MAP, { pushUrl: false, transient: true });
+      return window.OriWorkspaceMap.frameHQCreation();
+    },
     setSignal: applySignal,
     select: selectItem,
     clearSelection,

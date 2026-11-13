@@ -2,11 +2,12 @@
 // reuse the HQ form's request identity, root confirmation, and PAF payload.
 import {
   chooseHQWorkspaceRoot,
-  clearHQRequestID,
   defaultHQTimezone,
-  hqBuildRequestPayload,
   hqBuildTarget,
-  hqRequestID,
+  submitReviewedHQ,
+  checkHQSetup,
+  hasPendingHQRequest,
+  currentHQIntent,
   hqWorkspaceRootView,
   loadHQWorkspaceRoot,
   saveHQWorkspaceRoot,
@@ -242,7 +243,7 @@ function announceResult(active) {
   );
   // Now leading (Home has just moved it up): show it from its top, not at the
   // drawer's restored scroll offset. No focus is taken by a load.
-  if (active) el('Card')?.scrollIntoView?.({ block: 'start' });
+  if (active && !currentHQIntent()) el('Card')?.scrollIntoView?.({ block: 'start' });
 }
 
 function hqRoute() {
@@ -402,7 +403,7 @@ function render() {
   card.dataset.result = resultActive ? 'active' : '';
   renderNotes(view);
   renderFirst(view, resultActive);
-  announceResult(resultActive && !card.hidden);
+  announceResult(resultActive && !card.hidden && !currentHQIntent());
   if (!view.visible) return;
   el('Eyebrow').textContent = state.justHired ? '✓ Mission 01 complete' : 'Personal HQ';
   el('Headline').textContent = view.receipt
@@ -436,6 +437,12 @@ function render() {
           : 'Build my HQ';
   el('Build').disabled =
     state.busy || state.pendingRoot !== null || (!view.collapsed && !view.canBuild);
+  if (hasPendingHQRequest() && !view.receipt && !view.paused) {
+    el('Build').textContent = 'Check setup status';
+    el('Build').disabled = state.busy;
+    el('Plan').hidden = true;
+    el('Adjust').hidden = true;
+  }
   el('Build').setAttribute('aria-busy', String(state.busy));
   for (const id of ['Name', 'Time']) el(id).disabled = state.busy;
   el('Build').hidden = view.receipt;
@@ -443,7 +450,7 @@ function render() {
   el('NotNow').hidden = view.collapsed || view.receipt;
   el('Change').hidden = view.paused;
   // Build-time controls belong to the review, never to the built result.
-  el('Adjust').hidden = view.paused || view.collapsed || view.receipt;
+  el('Adjust').hidden = hasPendingHQRequest() || view.paused || view.collapsed || view.receipt;
   el('NotNow').hidden = view.paused || view.collapsed || view.receipt;
   el('Change').disabled = state.busy || view.building;
   el('Adjust').disabled = state.busy || view.building;
@@ -536,7 +543,17 @@ async function build() {
     return;
   }
   const view = hqCardView(state.relationship, state.root, plan);
-  if (state.busy || state.pendingRoot !== null || !view.canBuild) return;
+  if (state.busy) return;
+  if (hasPendingHQRequest() && !view.paused) {
+    const result = await checkHQSetup();
+    await load(result.personal_assistant);
+    if (result.outcome === 'uncertain')
+      error(
+        'Setup could not be confirmed. The saved request has not been changed. Check again or reload.'
+      );
+    return;
+  }
+  if (state.pendingRoot !== null || !view.canBuild) return;
   if (view.paused) {
     state.busy = true;
     plan.busy = true;
@@ -569,7 +586,7 @@ async function build() {
     if (
       !target.paf ||
       !hqWorkspaceRootView(root).confirmed ||
-      root.workspace_root !== state.root?.workspace_root
+      hqWorkspaceRootView(root).path !== hqWorkspaceRootView(state.root).path
     ) {
       state.root = root;
       state.relationship = latest;
@@ -592,25 +609,25 @@ async function build() {
         'Your notes setup changed since you reviewed it. Check the plan and build again.'
       );
     }
-    const result = await readJSON(target.endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(
-        hqBuildRequestPayload(
-          target,
-          {
-            ...hqReviewDraft(plan),
-            notes: hqNotesPayload(current)
-          },
-          hqRequestID(window.localStorage)
-        )
-      )
-    });
+    const result = await submitReviewedHQ(
+      target,
+      {
+        ...hqReviewDraft(plan),
+        notes: hqNotesPayload(current)
+      },
+      { root: hqWorkspaceRootView(root).path }
+    );
     const relationship = result.personal_assistant;
-    if (relationship?.state !== 'active')
-      throw new Error('HQ is still being built. Retry this request.');
-    clearHQRequestID(window.localStorage);
-    const hq = (await readJSON('/api/personal-hq/status')).status;
+    if (relationship) state.relationship = relationship;
+    if (result.outcome !== 'ready') {
+      error(
+        result.outcome === 'stale'
+          ? 'HQ was built; refresh the view. Do not build again.'
+          : 'Setup is not yet confirmed. Check setup status or resume the saved setup.'
+      );
+      return;
+    }
+    const hq = result.hq;
     const rows = hqReceiptRows(hq, plan, hqWorkspaceRootView(root).path);
     if (!rows.length) throw new Error('HQ was built. Reload to see its workspace.');
     plan.receipt = rows;
@@ -643,7 +660,7 @@ async function build() {
   } finally {
     state.busy = false;
     render();
-    if (plan.justBuilt) focusResult();
+    if (plan.justBuilt && !currentHQIntent()) focusResult();
   }
 }
 

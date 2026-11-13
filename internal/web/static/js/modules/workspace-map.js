@@ -11119,6 +11119,30 @@
     return true;
   }
 
+  // HQ presentation frames the reserved site or verified canonical tile, never
+  // selecting it, persisting a camera, or joining a layout transaction.
+  function frameHQCreation(workspaceId) {
+    var container = lastMount && lastMount.container;
+    if (
+      !container ||
+      scopeGroupId ||
+      placementSession ||
+      moveState ||
+      layoutState.status !== 'ready'
+    )
+      return false;
+    var node = workspaceId
+      ? ((lastWorldLayout && lastWorldLayout.nodes) || []).find(function (item) {
+          return item.id === workspaceId;
+        })
+      : lastWorldLayout && lastWorldLayout.hqSite;
+    if (!node) return false;
+    setCamera(centerOn(camera, { x: node.x + CELL_W / 2, y: node.y + CELL_H / 2 }), container, {
+      persist: false
+    });
+    return true;
+  }
+
   // Reveal a real building or district (including an empty/collapsed Home).
   // Navigation is not a layout write, nor consent to complete a move.
   function reveal(workspaceId, options) {
@@ -12282,6 +12306,10 @@
     // Arrow keys move it and Enter saves; Escape or leaving writes nothing.
     beginMove: beginMove,
     reveal: reveal,
+    frameHQCreation: frameHQCreation,
+    canPresentHQCreation: function () {
+      return !scopeGroupId && !placementSession && !moveState;
+    },
     // panBy moves the camera by screen pixels, for an overlay that must bring
     // a building into the part of the map it can see (the Commander's Show).
     // Navigation only: nothing is selected and the camera is not saved.

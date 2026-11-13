@@ -112,12 +112,12 @@ export function createCreationTransition({ panel, status } = {}) {
      * supersedes an older one: the older handle goes stale, and the drawer
      * stays suspended for the newer owner rather than flashing back.
      */
-    enter({ owner, generation, token, onExplicitReopen } = {}) {
+    enter({ owner, generation, token, onExplicitReopen, onUserOpen } = {}) {
       if (!owner || !token) return null;
       if (active) active.phase = 'superseded';
       statusSurface()?.hide?.();
       if (!suspended) suspended = surface()?.suspend?.() === true;
-      active = { owner, generation, token, phase: 'placing', onExplicitReopen };
+      active = { owner, generation, token, phase: 'placing', onExplicitReopen, onUserOpen };
       return active;
     },
 
@@ -180,7 +180,11 @@ export function createCreationTransition({ panel, status } = {}) {
     requestOpen() {
       if (reopening) return true;
       const handle = active;
-      if (handle?.phase === 'placing') {
+      // Optional notification for flows that yield presentation permanently on
+      // explicit opening, even while dispatch is unresolved. Existing placement
+      // owners keep their phase-specific Back behavior below.
+      handle?.onUserOpen?.();
+      if (active === handle && handle?.phase === 'placing') {
         reopening = true;
         try {
           handle.onExplicitReopen?.();
