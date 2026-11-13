@@ -136,16 +136,16 @@ func newReadFixture(t *testing.T) *readFixture {
 }
 
 // waitPublished waits for the scan's held event.
-func (f *readFixture) waitPublished(t *testing.T, n int) []bool {
+func (f *readFixture) waitPublished(t *testing.T) []bool {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if events := f.published.all(); len(events) >= n {
+		if events := f.published.all(); len(events) >= 1 {
 			return events
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("the scan's event was not published (%d of %d)", len(f.published.all()), n)
+	t.Fatalf("the scan's event was not published (%d of 1)", len(f.published.all()))
 	return nil
 }
 
@@ -164,7 +164,7 @@ func TestFactsRead_AScanIsReadByTheAssistantAndTheEventWaits(t *testing.T) {
 	f := newReadFixture(t)
 	f.chat.responses = []*llm.ChatResponse{callsTheTool()}
 	scanRoot(t, f.r, f.scope, f.root.ID, "assistant-scan")
-	if events := f.waitPublished(t, 1); !reflect.DeepEqual(events, []bool{true}) {
+	if events := f.waitPublished(t); !reflect.DeepEqual(events, []bool{true}) {
 		t.Fatalf("published %v, want once with the facts already saved", events)
 	}
 	if got := f.opens.take(); len(got) != 0 {
@@ -215,7 +215,7 @@ func TestFactsRead_NoToolCallNudgesOnceThenStops(t *testing.T) {
 	f := newReadFixture(t)
 	f.chat.responses = []*llm.ChatResponse{saysNothing(), saysNothing()}
 	scanRoot(t, f.r, f.scope, f.root.ID, "silent")
-	f.waitPublished(t, 1)
+	f.waitPublished(t)
 	run := f.latest(t)
 	if run.Status != factsReadStopped || run.Reason != FactsReadNoCall || run.Left != 2 || len(f.chat.requests) != 2 {
 		t.Fatalf("receipt = %+v, calls %d", run, len(f.chat.requests))
@@ -230,7 +230,7 @@ func TestFactsRead_NoToolCallNudgesOnceThenStops(t *testing.T) {
 	f2 := newReadFixture(t)
 	f2.chat.responses = []*llm.ChatResponse{saysNothing(), callsTheTool()}
 	scanRoot(t, f2.r, f2.scope, f2.root.ID, "nudged")
-	f2.waitPublished(t, 1)
+	f2.waitPublished(t)
 	if run := f2.latest(t); run.Status != factsReadFinished || run.Read != 2 {
 		t.Fatalf("nudged receipt = %+v", run)
 	}
@@ -248,7 +248,7 @@ func TestFactsRead_PreflightStopsSayWhy(t *testing.T) {
 			f := newReadFixture(t)
 			set(f)
 			scanRoot(t, f.r, f.scope, f.root.ID, "preflight")
-			f.waitPublished(t, 1)
+			f.waitPublished(t)
 			run := f.latest(t)
 			if run.Status != factsReadStopped || run.Reason != name || run.Left != 2 || run.Read != 0 {
 				t.Fatalf("receipt = %+v", run)
@@ -269,7 +269,7 @@ func TestFactsRead_DetailsOffMidCallKeepsNothingFromThatBatch(t *testing.T) {
 		switchSongDetailsOff(t, f.r.library.workspaces, f.scope)
 	}
 	scanRoot(t, f.r, f.scope, f.root.ID, "off")
-	f.waitPublished(t, 1)
+	f.waitPublished(t)
 	run := f.latest(t)
 	if run.Status != factsReadStopped || run.Reason != FactsReadDetailsOff || run.Read != 0 {
 		t.Fatalf("receipt = %+v", run)
@@ -285,7 +285,7 @@ func TestFactsRead_APluginFailureStops(t *testing.T) {
 	f.chat.responses = []*llm.ChatResponse{callsTheTool()}
 	f.reader.err = errors.New("service exited")
 	scanRoot(t, f.r, f.scope, f.root.ID, "broken-plugin")
-	f.waitPublished(t, 1)
+	f.waitPublished(t)
 	if run := f.latest(t); run.Status != factsReadStopped || run.Reason != FactsReadPluginFailed || run.Left != 2 {
 		t.Fatalf("receipt = %+v", run)
 	}
@@ -296,7 +296,7 @@ func TestFactsRead_APluginFailureStops(t *testing.T) {
 func TestFactsRead_ARestartIsShownThenSweptAsStopped(t *testing.T) {
 	f := newReadFixture(t)
 	scanRoot(t, f.r, f.scope, f.root.ID, "before-restart")
-	f.waitPublished(t, 1)
+	f.waitPublished(t)
 	left := FactsReadRun{ID: "left-started", Boot: "previous-process", Trigger: FactsReadByLearn, Status: factsReadStarted,
 		Targets: 10, StartedAt: time.Now().UTC().Add(time.Minute)}
 	if err := f.r.library.claimFactsRead(f.scope, left); err != nil {
@@ -325,7 +325,7 @@ func TestFactsRead_TheSummaryCarriesTheNewestReceipt(t *testing.T) {
 	f := newReadFixture(t)
 	f.assistant = FactsReadNoAssistant
 	scanRoot(t, f.r, f.scope, f.root.ID, "summary")
-	f.waitPublished(t, 1)
+	f.waitPublished(t)
 	summary, err := f.r.library.Summary(f.scope)
 	if err != nil {
 		t.Fatal(err)
@@ -354,7 +354,7 @@ func TestLearnedSongForWorkspace(t *testing.T) {
 	f := newReadFixture(t)
 	f.chat.responses = []*llm.ChatResponse{callsTheTool()}
 	scanRoot(t, f.r, f.scope, f.root.ID, "for-workspace")
-	f.waitPublished(t, 1)
+	f.waitPublished(t)
 
 	// Link two songs to their own workspaces, as opening them does.
 	doc, err := f.r.library.Read(f.scope)
@@ -419,7 +419,7 @@ func TestFactsRead_WhatTheReadSavedIsWhatTheFolderAgentIsGiven(t *testing.T) {
 	f := newReadFixture(t)
 	f.chat.responses = []*llm.ChatResponse{callsTheTool()}
 	scanRoot(t, f.r, f.scope, f.root.ID, "agent-facts")
-	f.waitPublished(t, 1)
+	f.waitPublished(t)
 	if got := f.opens.take(); len(got) != 0 {
 		t.Fatalf("the host opened %v itself, so these facts did not come from the read", got)
 	}

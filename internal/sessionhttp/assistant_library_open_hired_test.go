@@ -118,8 +118,11 @@ func TestOpenLibrarySong_BindsTheAssistantHiredAtSetup(t *testing.T) {
 			Scope: agentworkspace.AssistantRoleScopeProject, Required: true, Primary: true}}}
 	create := func(_ context.Context, _ agentworkspace.AssistantProgramRoleSpec, name string, _ *agent.AssistantSetupProvenance) (bool, error) {
 		f.agents.mu.Lock()
+		defer f.agents.mu.Unlock()
+		if f.agents.names[name] {
+			return false, errors.New("a second agent named " + name + " was created")
+		}
 		f.agents.names[name] = true
-		f.agents.mu.Unlock()
 		return true, nil
 	}
 	if err := f.staffs.WithHome(openHomeID, func(tx *projectstaffing.Tx) error {
