@@ -21,6 +21,22 @@ or ambiguous association is not guessed from an agent's name. Removing the
 attachment or capability removes its host context, including from cached runtime
 resolution.
 
+## Fed folders keep their own agent
+
+On the **Start an agent on a folder** path, adding File Janitor does not hire
+or attach a second agent. The agent chosen on the hire card holds the Curator
+role in that workspace. **File Janitor → Settings → Curator** names it, and
+its chat receives the saved filing welcome once the folder's explicitly approved
+preparation has finished. Opening chat does not scan or approve anything.
+
+The role is attached to the workspace instance, not the shared definition. The
+same saved agent in another workspace is unaffected. Removing File Janitor drops
+the role but never detaches the folder's agent. Repeating setup creates nothing
+extra. A missing/ambiguous attachment, changed lead or conflicting association
+stops the role step with a settings recovery message; File Janitor remains
+installed and usable without an agent. Existing completed two-agent workspaces,
+the File Janitor blueprint and manual **Add a Curator** are unchanged.
+
 ## Bundled content, not imported-skill trust
 
 The installed binary embeds

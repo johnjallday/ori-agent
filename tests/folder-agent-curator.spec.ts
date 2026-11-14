@@ -6,17 +6,24 @@ import { installLocalCdn } from './helpers/offline-cdn';
 // Real sandbox APIs, no model: ./scripts/e2e-fresh.sh --sandbox-env ORI_FOLDER_CURATOR_SANDBOX tests/folder-agent-curator.spec.ts
 const sandbox = process.env.ORI_FOLDER_CURATOR_SANDBOX || '';
 const endpoint = '/api/personal-assistant/folder-agent';
-const evidence = resolve('tasks/evidence-one-agent-per-folder');
+const live = process.env.ORI_CURATOR_LIVE === '1';
+const evidence = resolve('tasks/evidence-one-agent-per-folder', live ? 'live-claude' : '.');
 
 test('fed folders keep their hired agent as Curator, with Settings and a saved welcome', async ({
   page,
   request
 }) => {
   test.skip(!sandbox, 'requires the isolated server HOME');
-  test.setTimeout(150_000);
+  test.setTimeout(live ? 300_000 : 150_000);
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   await installLocalCdn(page);
   await request.post('/api/onboarding/skip');
+  if (live) {
+    const configured = await request.post('/api/settings/system-model', {
+      data: { provider: 'claude', model: 'claude-sonnet-4-6' }
+    });
+    expect(configured.ok(), await configured.text()).toBe(true);
+  }
   const assistant = (await (await request.get('/api/personal-assistant')).json())
     .personal_assistant;
   const hire = await request.post('/api/personal-assistant/hire', {
@@ -39,7 +46,7 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
   });
   expect(hq.status(), await hq.text()).toBe(201);
 
-  for (const folder of ['Downloads', 'Loose Files']) {
+  for (const folder of live ? ['Downloads', 'Desktop'] : ['Downloads', 'Loose Files']) {
     const root = join(sandbox, folder);
     await mkdir(root, { recursive: true, mode: 0o750 });
     const old = new Date(Date.now() - 3_600_000);
@@ -63,7 +70,9 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
       (await (await request.get(endpoint)).json()).folder_agents.find(
         (v: { folder_name: string }) => v.folder_name === folder
       );
-    await expect.poll(async () => (await get())?.state).toBe('reported');
+    await expect
+      .poll(async () => (await get())?.state, { timeout: live ? 120_000 : 15_000 })
+      .toBe('reported');
     let view = await get();
     await page.goto(`${view.route}?view=details`);
     const closeAssistant = page.getByRole('button', {
@@ -134,6 +143,49 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
       path: join(evidence, `${folder}-curator-welcome.png`),
       fullPage: true
     });
+    if (live) {
+      // One real Claude answer per known folder. No request made by opening
+      // chat or discussing the saved batch may operate the filing controls.
+      const actions: string[] = [];
+      const track = (req: { method(): string; url(): string }) => {
+        if (
+          req.method() === 'POST' &&
+          /file-janitor\/(scan|prepare-review|decisions|preview|apply|setup)/.test(req.url())
+        )
+          actions.push(req.url());
+      };
+      page.on('request', track);
+      const sessions = (
+        await (await request.get(`/api/sessions?folder_id=${view.workspace_id}`)).json()
+      ).sessions;
+      const session = sessions[0].id;
+      const before = (await (await request.get(`/api/sessions/${session}`)).json()).messages.length;
+      await page
+        .locator('#personalAssistantInput')
+        .fill('Explain why a file can need review. Can you approve or move it for me?');
+      await page.locator('#personalAssistantSend').click();
+      await expect
+        .poll(
+          async () => {
+            const saved = await (await request.get(`/api/sessions/${session}`)).json();
+            return (
+              saved.messages.length > before + 1 && saved.messages.at(-1)?.role === 'assistant'
+            );
+          },
+          { timeout: 90_000 }
+        )
+        .toBe(true);
+      const saved = await (await request.get(`/api/sessions/${session}`)).json();
+      const answer = saved.messages.at(-1).content;
+      expect(answer).toMatch(/approv|review|Janitor/i);
+      expect(actions).toEqual([]);
+      page.off('request', track);
+      await writeFile(join(evidence, `${folder}-answer.txt`), answer, { mode: 0o600 });
+      await page.screenshot({
+        path: join(evidence, `${folder}-filing-answer.png`),
+        fullPage: true
+      });
+    }
     const actual = await readdir(root);
     expect(actual.filter(name => name !== 'Filed').sort()).toEqual(names.sort());
     for (const name of names)

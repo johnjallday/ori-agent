@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, chromium, type Page, type Locator } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
@@ -7,6 +7,64 @@ import { installLocalCdn } from './helpers/offline-cdn';
 const sandbox = process.env.ORI_KNOWN_FOLDERS_SANDBOX || '';
 const endpoint = '/api/personal-assistant/folder-agent';
 const evidence = resolve('tasks/evidence-one-agent-per-folder');
+test.describe.configure({ mode: 'serial' });
+
+async function captureThemes(page: Page, surface: Locator, name: string, scope: string) {
+  await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+  for (const [theme, width, zoom] of [
+    ['light', 1280, 1],
+    ['dark', 1280, 1],
+    ['dark', 390, 1]
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(
+      ({ theme, zoom }) => {
+        document.documentElement.setAttribute('data-bs-theme', theme);
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.style.zoom = String(zoom);
+      },
+      { theme, zoom }
+    );
+    await page.evaluate(async () => {
+      await new Promise(requestAnimationFrame);
+      await Promise.race([
+        Promise.all(
+          document
+            .getAnimations()
+            .filter(
+              animation => animation instanceof CSSTransition && animation.playState === 'running'
+            )
+            .map(animation => animation.finished.catch(() => {}))
+        ),
+        new Promise(resolve => setTimeout(resolve, 1000))
+      ]);
+    });
+    expect(await surface.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    const violations = await page.evaluate(
+      async scope =>
+        (
+          await (window as any).axe.run(scope, {
+            runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] }
+          })
+        ).violations.map(
+          (v: { id: string; nodes: { target: string[]; failureSummary: string }[] }) => ({
+            id: v.id,
+            nodes: v.nodes.map(n => ({ target: n.target, summary: n.failureSummary }))
+          })
+        ),
+      scope
+    );
+    expect(violations).toEqual([]);
+    await page.screenshot({
+      path: join(evidence, `${name}-${theme}-${width}-${zoom}x.png`),
+      fullPage: true
+    });
+  }
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = '';
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
+}
 
 test('Desktop and Documents know their jobs before hire and refuse whole-folder project setup', async ({
   page,
@@ -69,6 +127,7 @@ test('Desktop and Documents know their jobs before hire and refuse whole-folder 
       card.getByRole('textbox', { name: 'What should it do?', exact: true })
     ).toHaveValue(brief);
     await expect(card).toContainText('Nothing is created until you hire.');
+    await captureThemes(page, card, `${folder}-hire`, '.folder-agent-card__purpose');
     await page.setViewportSize({ width: 390, height: 900 });
     expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     await card.getByRole('button', { name: 'Hire & start', exact: true }).focus();
@@ -122,6 +181,12 @@ test('Desktop and Documents know their jobs before hire and refuse whole-folder 
       await expect(checkbox).toBeChecked();
       await expect(report).toContainText('Filed');
     }
+    await captureThemes(
+      page,
+      report,
+      `${folder}-report`,
+      '.folder-agent-card__protection, .folder-agent-card__project-holders'
+    );
     await page.screenshot({ path: join(evidence, `${folder}-known-report.png`), fullPage: true });
   }
   // This sandbox deliberately has no Downloads. Missing known locations must
@@ -155,3 +220,113 @@ test('Desktop and Documents know their jobs before hire and refuse whole-folder 
   expect(setup.ok(), await setup.text()).toBe(true);
   await expect.poll(async () => (await getOrdinary()).setup?.status).toBe('done');
 });
+
+for (const theme of ['light', 'dark']) {
+  test(`known-folder controls work at native Chromium 200% zoom ${theme}`, async ({
+    browserName,
+    request
+  }, testInfo) => {
+    test.skip(
+      !sandbox || browserName !== 'chromium',
+      'requires the isolated server HOME and Chromium'
+    );
+    const context = await chromium.launchPersistentContext(
+      testInfo.outputPath(`zoom-profile-${theme}`),
+      {
+        channel: 'chromium',
+        headless: true,
+        viewport: null,
+        deviceScaleFactor: undefined,
+        baseURL: testInfo.project.use.baseURL,
+        args: ['--window-size=1280,900']
+      }
+    );
+    try {
+      const page = await context.newPage();
+      await installLocalCdn(page);
+      await page.addInitScript(theme => localStorage.setItem('ori-theme', theme), theme);
+      await page.goto('/');
+      const before = await page.evaluate(() => ({ innerWidth, outerWidth, devicePixelRatio }));
+      const settings = await context.newPage();
+      await settings.goto('chrome://settings/appearance');
+      await settings.getByRole('combobox', { name: 'Page zoom' }).selectOption('2');
+      await page.goto('/?panel=today&folder=show');
+      const entry = page.locator('#personalAssistantFolderPathEntry');
+      await entry.locator('input').fill(join(sandbox, 'Desktop'));
+      await entry.getByRole('button').click();
+      const card = page.locator('#personalAssistantFolderAgent');
+      await expect(card).toContainText('Desktop is a workbench.');
+      const after = await page.evaluate(() => ({ innerWidth, outerWidth, devicePixelRatio }));
+      expect(after.outerWidth).toBe(before.outerWidth);
+      expect(after.innerWidth).toBeCloseTo(before.innerWidth / 2, 0);
+      expect(after.devicePixelRatio).toBeCloseTo(before.devicePixelRatio * 2, 2);
+      const assertReachable = async (control: Locator) => {
+        for (let n = 0; n < 80; n++) {
+          if (await control.evaluate(el => el === document.activeElement)) break;
+          await page.keyboard.press('Tab');
+        }
+        await expect(control, 'reachable by keyboard').toBeFocused();
+        await expect
+          .poll(async () => {
+            const geometry = await control.evaluate(el => {
+              const box = el.getBoundingClientRect();
+              const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+              return {
+                top: box.top,
+                bottom: box.bottom,
+                innerHeight,
+                target: el.textContent,
+                hit: hit?.className,
+                visible:
+                  box.top >= 0 &&
+                  box.bottom <= innerHeight &&
+                  Boolean(hit && (el === hit || el.contains(hit)))
+              };
+            });
+            return geometry.visible ? 'ready' : JSON.stringify(geometry);
+          })
+          .toBe('ready');
+      };
+      const captureNative = async (suffix: string) => {
+        const capture = await context.newCDPSession(page);
+        const image = await capture.send('Page.captureScreenshot', {
+          format: 'png',
+          captureBeyondViewport: false
+        });
+        await writeFile(
+          join(evidence, `known-native-zoom-${theme}-${suffix}.png`),
+          Buffer.from(image.data, 'base64'),
+          { mode: 0o600 }
+        );
+        await capture.detach();
+      };
+      const brief = card.getByRole('textbox', { name: 'What should it do?', exact: true });
+      await assertReachable(brief);
+      await brief.fill('Editable at browser zoom');
+      await expect(brief).toHaveValue('Editable at browser zoom');
+      await captureNative('brief');
+      await assertReachable(card.getByRole('button', { name: 'Hire & start', exact: true }));
+      await captureNative('hire');
+      const docs = (await (await request.get(endpoint)).json()).folder_agents.find(
+        (v: { folder_name: string }) => v.folder_name === 'Documents'
+      );
+      await page.goto(docs.route);
+      const close = page.getByRole('button', { name: 'Close personal assistant', exact: true });
+      if (await close.isVisible()) await close.click();
+      await page.getByRole('button', { name: 'Open in chat', exact: true }).click();
+      const report = page.locator('.folder-agent-card--report:visible');
+      await assertReachable(report.getByRole('button', { name: 'Set up Projects', exact: true }));
+      await assertReachable(report.getByRole('link', { name: 'Check protection', exact: true }));
+      await assertReachable(report.getByRole('checkbox'));
+      await captureNative('report');
+      // No hire or setup is submitted by this native zoom check.
+      expect((await (await request.get(endpoint)).json()).folder_agents).toHaveLength(3);
+      await testInfo.attach('native-zoom-metrics', {
+        contentType: 'application/json',
+        body: JSON.stringify({ before, after })
+      });
+    } finally {
+      await context.close();
+    }
+  });
+}

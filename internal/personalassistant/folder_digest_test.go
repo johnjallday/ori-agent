@@ -101,7 +101,14 @@ func (f *folderDigestFixture) buildService() *FolderDigestService {
 			return resolved, nil
 		},
 		HomeDir: func() (string, error) { return f.home, nil },
-		Now:     func() time.Time { return f.now },
+		KnownFolderLookup: func(home, id string) (string, error) {
+			name := map[string]string{"desktop": "Desktop", "documents": "Documents", "downloads": "Downloads"}[id]
+			if name == "" {
+				return "", ErrFolderChipUnknown
+			}
+			return filepath.Join(home, name), nil
+		},
+		Now: func() time.Time { return f.now },
 		NewID: func() string {
 			f.ids++
 			return fmt.Sprintf("offer-%d", f.ids)

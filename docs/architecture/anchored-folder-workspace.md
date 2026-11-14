@@ -103,7 +103,7 @@ second managed project-folder skeleton.
 
 Home's Explore a folder (and, as the other entries move, every folder entry)
 shows one card for every folder: **Start an agent on <folder>**, one field
-**What should it do?**, and **Start** (`internal/folderagent`,
+**What should it do?**, and **Hire & start** (`internal/folderagent`,
 `POST /api/personal-assistant/folder-agent/start`). No request carries a path:
 the server chooses the folder (dialog, known folder or a typed path's
 selection token) and Start names only the server's short-lived choice token.
@@ -113,9 +113,10 @@ selection token) and Start names only the server's short-lived choice token.
   validated first, so a refusal (inside the Workspace Directory, a symlink, a
   folder already owned, a folder holding `workspace.json`) leaves no agent or
   workspace behind and is shown in its existing sentence. The workspace gets
-  one agent, `<folder> Manager` (orchestrator, the user's default model; a
-  saved agent of that exact name is bound instead), the brief as its goal, and
-  a host-owned first ticket, `Look around <folder>`.
+  one agent chosen on the hire card: a new `<folder> Manager` (orchestrator,
+  the chosen model) or one of the user's existing agents. The brief stays the
+  look instruction, not the workspace goal, and a host-owned first ticket is
+  opened: `Look around <folder>`.
 - **The walk** (`internal/foldermap`) starts immediately in the server, with no
   model: breadth-first, metadata only (names, kinds, sizes, dates), never a
   symbolic link, the digest's skipped folders and hidden/cloud placeholders
@@ -139,6 +140,41 @@ selection token) and Start names only the server's short-lived choice token.
   `get_file_info`, `list_allowed_directories`). Set it up or Look further adds
   the content tools to the pin; a completed Set it up releases it. The binding
   itself never changes: the pin is what narrows.
+
+### Known catch-all folders and projects inside
+
+Before the hire, the user's own **Desktop**, **Documents** and **Downloads** get
+purpose-specific, editable defaults; the agent name stays `<folder> Manager`.
+Recognition compares disk identity, including symlink aliases, never labels or
+basenames. The chooser's chips and recognition share one host lookup: English
+home names on macOS, Windows known-folder locations (including redirected ones),
+and Linux XDG user-folder settings with English home fallback. An absent or
+disabled known folder does not block another folder.
+
+These three roots stay folders with their hired agents: the host never offers
+or runs whole-root project tools, Home membership or group conversion, including
+old pending reports or forged selections. Downloads and Desktop default to
+File Janitor; Documents offers it unticked and shows the existing stored backup
+protection fact and navigation. Nothing is installed with no step selected.
+File Janitor still requires its own explicit folder preparation and separate
+filing approval. On Desktop its existing `Filed/` destination is disclosed before
+setup. Adding it assigns the workspace's existing hired agent as Curator, with
+no second hire; uninstall leaves that agent attached.
+
+**Projects inside** lists up to three direct child folders, largest first, with
+found-project counts and kinds, plus a remainder. **Set up <name>** opens a
+separate normal hire card. The request carries only a saved walk index and report
+key; stale, foreign, unrecorded, vanished or link-swapped children are refused.
+Opening or cancelling creates nothing and never changes the original anchor.
+The list is limited to what the bounded walk found; Look further remains explicit.
+
+Saved waiting reports are projected from existing evidence without a scan,
+model call or write-on-read; old confirmations must review the current plan.
+Completed receipts and existing workspace/agent structures are not migrated.
+Ordinary folders, including Music, retain their previous setup behavior. Moving
+an ordinary-folder hire to a project holder (**Switch to**) is **not implemented**:
+existing profile/sidecar rename primitives cannot guarantee an unchanged original
+on every partial failure. No switch prompt or in-place reanchor is offered.
 
 ## Lifecycle and recovery
 

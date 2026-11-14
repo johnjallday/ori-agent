@@ -4379,7 +4379,10 @@ a.quest-title:focus-visible {
   font-size: 12px;
 }
 
-.folder-agent-card__explore {
+.folder-agent-card__explore,
+.folder-agent-card__protection-link,
+.folder-agent-card__protection-link:hover,
+.folder-agent-card__protection-link:focus {
   color: var(--hc-ink, var(--cozy-ink));
   text-decoration: underline;
 }

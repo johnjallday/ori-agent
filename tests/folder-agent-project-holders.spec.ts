@@ -79,6 +79,61 @@ test('a known folder points at a saved holder without creating anything until it
   await expect(holders).not.toContainText('Start an agent on Projects');
   expect(await get()).toHaveLength(1);
   await page.screenshot({ path: join(evidence, 'project-holder-cancelled.png'), fullPage: true });
+  await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+  for (const [theme, width, zoom] of [
+    ['light', 1280, 1],
+    ['dark', 1280, 1],
+    ['dark', 390, 1]
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.evaluate(
+      ({ theme, zoom }) => {
+        document.documentElement.setAttribute('data-bs-theme', theme);
+        document.documentElement.setAttribute('data-theme', theme);
+        document.documentElement.style.zoom = String(zoom);
+      },
+      { theme, zoom }
+    );
+    // Inspect settled theme colors, not an intermediate transition frame.
+    await page.evaluate(async () => {
+      await new Promise(requestAnimationFrame);
+      await Promise.race([
+        Promise.all(
+          document
+            .getAnimations()
+            .filter(
+              animation => animation instanceof CSSTransition && animation.playState === 'running'
+            )
+            .map(animation => animation.finished.catch(() => {}))
+        ),
+        new Promise(resolve => setTimeout(resolve, 1000))
+      ]);
+    });
+    await setup.focus();
+    await expect(setup).toBeFocused();
+    expect(await holders.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    const violations = await page.evaluate(async () =>
+      (
+        await (window as any).axe.run('.folder-agent-card__project-holders', {
+          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] }
+        })
+      ).violations.map(
+        (v: { id: string; nodes: { target: string[]; failureSummary: string }[] }) => ({
+          id: v.id,
+          nodes: v.nodes.map(n => ({ target: n.target, summary: n.failureSummary }))
+        })
+      )
+    );
+    expect(violations).toEqual([]);
+    await page.screenshot({
+      path: join(evidence, `holders-${theme}-${width}-${zoom}x.png`),
+      fullPage: true
+    });
+  }
+  await page.evaluate(() => {
+    document.documentElement.style.zoom = '';
+  });
+  await page.setViewportSize({ width: 1280, height: 900 });
   await setup.click();
   await holders.getByRole('button', { name: 'Hire & start', exact: true }).click();
   await expect.poll(async () => (await get()).length).toBe(2);
