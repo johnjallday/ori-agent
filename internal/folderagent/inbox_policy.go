@@ -101,7 +101,7 @@ func (s *Service) effectiveRecord(rec *Record) *Record {
 	if identity.Policy != folderlook.RootOrdinary {
 		copy.Candidates = folderlook.CandidatesForPolicy(identity.Policy, rec.Facts, folderlook.Readiness{})
 		copy.Stage = "folder"
-		if rec.State == StateSetUp && rec.Setup != nil && rec.Setup.Status == personalassistant.FolderSetupStopped {
+		if rec.State == StateSetUp && rec.Setup != nil && rec.Setup.Status == personalassistant.FolderSetupStopped && !setupMatchesPolicy(&copy) {
 			// An incomplete run is not a historical completed receipt. Project
 			// current choices rather than presenting old lines as a retry.
 			copy.Setup, copy.State = nil, StateReported
@@ -116,6 +116,27 @@ func (s *Service) effectiveRecord(rec *Record) *Record {
 		}
 	}
 	return &copy
+}
+
+// setupMatchesPolicy preserves current partial-run progress and recovery
+// messages. Only a stopped plan whose consequences no longer match the host's
+// current policy is replaced by fresh choices; a modern association failure
+// must not disappear merely because its root is a catch-all folder.
+func setupMatchesPolicy(rec *Record) bool {
+	if rec.Setup == nil {
+		return false
+	}
+	plan := BuildPlan(*rec, rec.Setup.Selected)
+	if !plan.Runnable || plan.Stage != rec.Setup.Stage || len(plan.Lines) != len(rec.Setup.Lines) {
+		return false
+	}
+	for i, line := range plan.Lines {
+		saved := rec.Setup.Lines[i]
+		if line.Kind != saved.Kind || line.Name != saved.Name || line.Outcome != saved.Outcome || line.Step != saved.Step {
+			return false
+		}
+	}
+	return true
 }
 
 // CheckPlan rebinds just before dispatch. Production uses it before any install,
