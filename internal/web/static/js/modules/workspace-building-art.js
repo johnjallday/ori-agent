@@ -48,17 +48,17 @@
     hq: Object.freeze({
       color: '#e8b54b',
       markup: `
-        <g data-hq-part="foundation"><polygon points="60 50 112 70 60 87 8 70" fill="currentColor" opacity=".16" stroke="currentColor" stroke-opacity=".52"/>
+        <g data-build-part="foundation"><polygon points="60 50 112 70 60 87 8 70" fill="currentColor" opacity=".16" stroke="currentColor" stroke-opacity=".52"/>
         <polygon points="20 54 60 70 60 84 20 68" fill="currentColor" opacity=".45"/>
         <polygon points="100 54 60 70 60 84 100 68" fill="currentColor" opacity=".28"/>
         <polygon points="60 40 100 54 60 70 20 54" fill="currentColor" opacity=".7"/></g>
-        <g data-hq-part="walls"><polygon points="38 31 60 40 60 67 38 58" fill="currentColor" opacity=".88"/>
+        <g data-build-part="walls"><polygon points="38 31 60 40 60 67 38 58" fill="currentColor" opacity=".88"/>
         <polygon points="82 31 60 40 60 67 82 58" fill="currentColor" opacity=".56"/></g>
-        <g data-hq-part="roof"><polygon points="60 20 84 30 60 42 36 30" fill="currentColor"/>
+        <g data-build-part="roof"><polygon points="60 20 84 30 60 42 36 30" fill="currentColor"/>
         <path d="M60 21V5" fill="none" stroke="currentColor" stroke-width="2"/>
         <path d="M60 7l15 5-15 5z" fill="currentColor"/>
         <circle cx="60" cy="4" r="2.4" fill="currentColor"/></g>
-        <g data-hq-part="lights"><path d="M27 60v11M93 60v11M45 55v18M75 55v18" fill="none" stroke="currentColor" stroke-width="2" opacity=".7"/>
+        <g data-build-part="finish"><path d="M27 60v11M93 60v11M45 55v18M75 55v18" fill="none" stroke="currentColor" stroke-width="2" opacity=".7"/>
         <g data-building-emblem="hq">
           <circle cx="60" cy="50" r="9" fill="#101619" fill-opacity=".78" stroke="currentColor" stroke-width="1.2"/>
           <path d="M60 43l1.9 5.1L67 50l-5.1 1.9L60 57l-1.9-5.1L53 50l5.1-1.9z" fill="#f6f0df" fill-opacity=".88"/>

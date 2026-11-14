@@ -820,6 +820,20 @@ test('a hired tile under the drawer is panned into the map beside it; one in vie
   assert.equal(await revealHiredTile('ws-1', { doc: stuck.doc, win: stuck.win }), false);
 });
 
+test('a building tile pans on arrival without waiting for its assembly to settle', async () => {
+  const h = hiredTileHarness({
+    tile: { left: 900, top: 300, width: 120, height: 100 },
+    drawer: DRAWER,
+    drawn: false
+  });
+  h.win.OriWorkspaceMap.isAssembling = id => id === 'ws-1';
+  h.win.OriWorkspaceMap.whenMotionSettled = () => new Promise(() => {});
+  const result = revealHiredTile('ws-1', { doc: h.doc, win: h.win });
+  h.mount();
+  assert.equal(await result, true);
+  assert.deepEqual(h.calls, [['panBy', 564, -100]]);
+});
+
 test('revealing a hired tile never selects it, refits the map or frames it, whatever the page does (FR17)', async () => {
   for (const tile of [
     { left: 900, top: 300, width: 120, height: 100 },

@@ -167,6 +167,11 @@ export function commanderSpeech(view) {
   }
 }
 
+// Decorative entrance copy belongs to the tile, never the drawer's status.
+export function commanderBuildingLine(workspace) {
+  return `Building ${workspace || 'workspace'}…`;
+}
+
 // commanderOneLine is the shrunk card (FR13, FR15): the Commander's line in
 // the third person with one action. null when there is nothing to say.
 export function commanderOneLine(view) {

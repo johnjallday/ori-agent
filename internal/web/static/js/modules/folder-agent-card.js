@@ -1997,8 +1997,15 @@ function renderProjectHolders(doc, view, fetchImpl) {
           onStarting: busy => {
             cancel.disabled = busy;
           },
-          onStarted: () => {
+          onStarted: view => {
             cancel.remove?.();
+            const win = doc.defaultView || globalThis.window;
+            if (win?.CustomEvent)
+              win.dispatchEvent?.(
+                new win.CustomEvent('ori:folder-agent-started', {
+                  detail: { workspaceID: view?.workspace_id, built: true }
+                })
+              );
           }
         });
         hireHost.querySelector?.('.folder-agent-card__brief')?.focus?.();

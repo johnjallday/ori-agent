@@ -14,6 +14,12 @@ test('a known folder points at a saved holder without creating anything until it
   test.skip(!sandbox, 'requires the isolated server HOME');
   test.setTimeout(120_000);
   await installLocalCdn(page);
+  await page.addInitScript(() => {
+    (window as any).__folderBuildEvents = [];
+    window.addEventListener('ori:folder-agent-started', event =>
+      (window as any).__folderBuildEvents.push((event as CustomEvent).detail)
+    );
+  });
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   const root = join(sandbox, 'Downloads');
   for (const [kind, count, marker] of [
@@ -148,4 +154,17 @@ test('a known folder points at a saved holder without creating anything until it
     )
     .toBe('reported');
   await page.screenshot({ path: join(evidence, 'project-holder-hired.png'), fullPage: true });
+  const child = (await get()).find((v: { folder_name: string }) => v.folder_name === 'Projects');
+  expect(await page.evaluate(() => (window as any).__folderBuildEvents)).toEqual([
+    { workspaceID: child.workspace_id, built: true }
+  ]);
+  await expect(page.locator('#cockpitMap')).toHaveCount(0);
+  await expect(page.locator('.is-assembling')).toHaveCount(0);
+  const buildEvidence = 'tasks/evidence-folder-build-animation/group-3';
+  await mkdir(buildEvidence, { recursive: true, mode: 0o750 });
+  await page.screenshot({ path: join(buildEvidence, 'workspace-page-hire-no-home-build.png') });
+  await page.goto('/');
+  await expect(page.locator(`.ws-map-tile[data-ws-id="${child.workspace_id}"]`)).toBeVisible();
+  await expect(page.locator('.is-assembling')).toHaveCount(0);
+  await page.screenshot({ path: join(buildEvidence, 'workspace-entry-return-home-finished.png') });
 });
