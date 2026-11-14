@@ -11,7 +11,7 @@ type Scenario = {
 // Use only an isolated app with LM_STUDIO_BASE_URL=http://127.0.0.1:8940/v1
 // and LM_STUDIO_MODEL=ori-synthetic-model. Never change production settings.
 export async function startJanitorBuildModel(
-  options: { nonBuildReply?: Record<string, unknown> } = {}
+  options: { nonBuildReply?: Record<string, unknown>; nonBuildText?: string } = {}
 ) {
   let sequence = 0;
   let buildCalls = 0;
@@ -106,11 +106,13 @@ export async function startJanitorBuildModel(
             message: {
               role: 'assistant',
               content:
-                selected.mode === 'failure'
-                  ? 'not valid JSON'
-                  : JSON.stringify(
-                      !isBuild && options.nonBuildReply ? options.nonBuildReply : reply
-                    )
+                !isBuild && options.nonBuildText !== undefined
+                  ? options.nonBuildText
+                  : selected.mode === 'failure'
+                    ? 'not valid JSON'
+                    : JSON.stringify(
+                        !isBuild && options.nonBuildReply ? options.nonBuildReply : reply
+                      )
             },
             finish_reason: 'stop'
           }
