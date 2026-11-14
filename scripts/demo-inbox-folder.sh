@@ -167,7 +167,7 @@ stop_server() {
 trap stop_server EXIT
 
 # No model provider reaches the server: no Codex home and no provider API key,
-# so the card and its Hire and start are shown working with no model at all.
+# so the card and its Hire and build are shown working with no model at all.
 demo_args=("$port" "$sandbox")
 if [[ "$native_picker" == 1 ]]; then demo_args=(--native-picker "${demo_args[@]}"); fi
 echo "NATIVE_PICKER=$native_picker"

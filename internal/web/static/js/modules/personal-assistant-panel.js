@@ -876,7 +876,7 @@ function toggleDrawerExpanded() {
 }
 
 /**
- * After Hire & start on Home, narrow the box so the map and the new tile show
+ * After Hire & build on Home, narrow the box so the map and the new tile show
  * (FR15). The caller has already checked that Home's map is on screen and that
  * the hire was accepted. Answers 'narrowed' (the width moved), 'already' (it was
  * narrow, or an earlier hire's narrowing now follows this one) or 'skipped' (the

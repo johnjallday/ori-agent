@@ -1,4 +1,4 @@
-// Package folderagenthttp serves "Start an agent on <folder>": choosing the
+// Package folderagenthttp serves "Hire an agent for <folder>": choosing the
 // folder, Start, the report and its actions. No request carries a path: the
 // folder is chosen on the server (dialog, known folder, or a typed path's
 // selection token) and Start names only the server's choice token.

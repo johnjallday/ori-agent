@@ -55,7 +55,7 @@ test('a known folder points at a saved holder without creating anything until it
   await entry.getByRole('button').click();
   await page
     .locator('#personalAssistantFolderAgent')
-    .getByRole('button', { name: 'Hire & start', exact: true })
+    .locator('[data-folder-agent-action="start"]')
     .click();
   const get = async () => (await (await request.get(endpoint)).json()).folder_agents;
   await expect.poll(async () => (await get())[0]?.state).toBe('reported');
@@ -72,11 +72,11 @@ test('a known folder points at a saved holder without creating anything until it
   await expect(holders).toContainText('Projects inside');
   const setup = holders.getByRole('button', { name: 'Set up Projects', exact: true });
   await setup.click();
-  await expect(holders).toContainText('Start an agent on Projects');
+  await expect(holders).toContainText('Hire an agent for Projects');
   expect(await get()).toHaveLength(1);
   await holders.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(setup).toBeFocused();
-  await expect(holders).not.toContainText('Start an agent on Projects');
+  await expect(holders).not.toContainText('Hire an agent for Projects');
   expect(await get()).toHaveLength(1);
   await page.screenshot({ path: join(evidence, 'project-holder-cancelled.png'), fullPage: true });
   await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
@@ -135,7 +135,7 @@ test('a known folder points at a saved holder without creating anything until it
   });
   await page.setViewportSize({ width: 1280, height: 900 });
   await setup.click();
-  await holders.getByRole('button', { name: 'Hire & start', exact: true }).click();
+  await holders.locator('[data-folder-agent-action="start"]').click();
   await expect.poll(async () => (await get()).length).toBe(2);
   const after = await (await request.get(`/api/workspaces/${parent.workspace_id}`)).json();
   expect(after.agent_instances).toEqual(before.agent_instances);

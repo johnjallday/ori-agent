@@ -45,7 +45,7 @@ type HireAgent struct {
 }
 
 // HireOptions is the card's Hire section: who would be hired, and the
-// choices. Nothing is created until Hire & start.
+// choices. Nothing is created until Hire & build.
 type HireOptions struct {
 	// AgentName is the new agent's prefilled name ("<folder> Manager").
 	AgentName string `json:"agent_name"`

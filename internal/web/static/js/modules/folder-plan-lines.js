@@ -300,8 +300,8 @@
               ? 'Assign & set up'
               : 'Hire & set up'
           : hire.mode === 'bind'
-            ? 'Assign & start'
-            : 'Hire & start',
+            ? 'Assign & build'
+            : 'Hire & build',
       headline,
       agent: { initials: initialsOf(name || role || 'Agent'), detail },
       brief: brief

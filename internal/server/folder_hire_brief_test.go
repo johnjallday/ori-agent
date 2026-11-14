@@ -37,7 +37,7 @@ func (f *softwareCardFixture) firstLookRecord(t *testing.T) map[string]any {
 	return nil
 }
 
-// hireAndStart presses Hire and start on the plan the offer shows now, with the
+// hireAndStart presses Hire and build on the plan the offer shows now, with the
 // brief the user typed.
 func (f *softwareCardFixture) hireAndStart(t *testing.T, brief string) (int, map[string]any) {
 	const requestID = "hire-1"

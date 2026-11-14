@@ -224,7 +224,7 @@ test('fixture review preserves exact Unicode drafts and only submits the reviewe
   });
   const card = await mountReview(page);
   const brief = card.getByLabel('What should it do with it?');
-  const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+  const confirm = card.getByRole('button', { name: 'Hire & build', exact: true });
   await expect(card.getByRole('heading', { name: 'Confirm setup', exact: true })).toBeVisible();
   await expect(card.getByText('Setup effects', { exact: true })).toBeVisible();
   await expect(card.locator('#personalAssistantFolderConsequences')).toContainText(
@@ -277,7 +277,7 @@ test('fixture late confirmation response cannot reopen a parked review or replac
   });
   const card = await mountReview(page);
   await card.getByLabel('What should it do with it?').fill('Exact unsent goal');
-  const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+  const confirm = card.getByRole('button', { name: 'Hire & build', exact: true });
   await confirm.click();
   await expect.poll(() => calls).toBe(1);
   await expect(confirm).toBeDisabled();
@@ -312,7 +312,7 @@ test('fixture review cannot mutate during conversation hydration and keeps the e
       document.dispatchEvent(new CustomEvent('personal-assistant:conversation-loading'));
     }, loading);
   await hydrate(true);
-  const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+  const confirm = card.getByRole('button', { name: 'Hire & build', exact: true });
   await expect(confirm).toBeDisabled();
   await confirm.dispatchEvent('click');
   expect(requests).toHaveLength(0);
@@ -457,8 +457,8 @@ test('fixture non-Home drawer keeps the same facts and one review owner', async 
   const drawer = await mountReview(page, reviewOffer(), '/agents?panel=today');
   await expect(drawer.locator('.folder-visual figcaption')).toHaveText(summary!);
   await expect(page.locator('#personalAssistantFolderBrief')).toHaveCount(1);
-  await drawer.getByRole('button', { name: 'Hire & start', exact: true }).focus();
-  await expect(drawer.getByRole('button', { name: 'Hire & start', exact: true })).toBeFocused();
+  await drawer.getByRole('button', { name: 'Hire & build', exact: true }).focus();
+  await expect(drawer.getByRole('button', { name: 'Hire & build', exact: true })).toBeFocused();
   if (process.env.ORI_VISUAL_EVIDENCE) {
     await page.setViewportSize({ width: 1440, height: 1100 });
     await page.evaluate(() =>
@@ -509,9 +509,9 @@ test('fixture New Workspace uses identical facts without another confirmation or
   const review = page.locator('#workspaceBuildPlanReview');
   await expect(review).toBeVisible();
   await expect(review.locator('.folder-visual figcaption')).toHaveText(summary!);
-  await expect(page.locator('#workspaceBuildPlanReviewSetup')).toHaveText('Hire & start');
+  await expect(page.locator('#workspaceBuildPlanReviewSetup')).toHaveText('Hire & build');
   await expect(
-    page.locator('#workspaceBuildPane button:visible').filter({ hasText: /^Hire & start$/ })
+    page.locator('#workspaceBuildPane button:visible').filter({ hasText: /^Hire & build$/ })
   ).toHaveCount(0);
   const brief = page.locator('#workspaceBuildPlanReviewBrief');
   const exact = `  ${'😀'.repeat(297)} `;
@@ -533,7 +533,7 @@ test('fixture New Workspace uses identical facts without another confirmation or
   await page.locator('#workspaceBuildPlanReviewBack').click();
   await expect(review).toBeHidden();
   await expect(
-    page.locator('#addFolderModal').getByRole('button', { name: 'Hire & start', exact: true })
+    page.locator('#addFolderModal').getByRole('button', { name: 'Hire & build', exact: true })
   ).toHaveCount(1);
   await page.locator('#workspaceBuildReturnToReview').click();
   await expect(review).toBeVisible();
@@ -677,7 +677,7 @@ test('fixture lost response can retry; a late acceptance never reopens the close
     route.fulfill({ json: { folder_digest: { offer: accepted } } })
   );
   const card = await mountReview(page, offer);
-  const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+  const confirm = card.getByRole('button', { name: 'Hire & build', exact: true });
   await confirm.click();
   await expect(card.locator('#personalAssistantFolderOfferError')).toContainText(
     'could not be started'
@@ -741,7 +741,7 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
     route.fulfill({ json: { folder_digest: { offer: run(false) } } })
   );
   const card = await mountReview(page, offer);
-  await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
+  await card.getByRole('button', { name: 'Hire & build', exact: true }).click();
   await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
     'Home plugin · Did not finish'
   );
@@ -803,7 +803,7 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
 
 test('fixture bind and pending reviews do not invent a completed hire', async ({ page }) => {
   const card = await mountReview(page, reviewOffer('bind'));
-  await expect(card.getByRole('button', { name: 'Assign & start', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Assign & build', exact: true })).toBeVisible();
   await expect(card.locator('.folder-visual__agent')).toContainText('Already hired');
   await expect(card.locator('.folder-visual__agent')).toContainText('Assign on setup');
   await page.evaluate(
@@ -812,7 +812,7 @@ test('fixture bind and pending reviews do not invent a completed hire', async ({
   );
   await expect(card.locator('.folder-visual__agent')).toContainText('Identity pending');
   await expect(card.locator('.folder-visual__agent')).not.toContainText('Ari');
-  await expect(card.getByRole('button', { name: 'Hire & start', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Hire & build', exact: true })).toBeVisible();
 });
 
 test('fixture agent existence and exact workspace membership stay distinct on reload', async ({
@@ -1583,7 +1583,7 @@ for (const theme of ['light', 'dark']) {
         }
         const brief = card.getByLabel('What should it do with it?');
         await brief.focus();
-        const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+        const confirm = card.getByRole('button', { name: 'Hire & build', exact: true });
         await keyboardReach(page, confirm);
         await expect(confirm).toBeFocused();
         const layout = await card.evaluate(node => {

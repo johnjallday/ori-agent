@@ -306,7 +306,7 @@ export function homeTileAnchor(root, workspaceID) {
 }
 
 // homeMapShowing is whether Home's map is on screen: its map is on the page and
-// the Tree view is not showing. It is the check behind Hire & start narrowing the
+// the Tree view is not showing. It is the check behind Hire & build narrowing the
 // chat box (visual-hire FR15, FR21): the workspace page, Needs you and any page
 // without the Home map answer false. Same rule as homeCommanderMap's showing().
 export function homeMapShowing({ hasMap = false, view = '' } = {}) {

@@ -1350,7 +1350,7 @@ test('the build file chooser precedes consequences and keeps the typed brief whe
   assert.equal(pane.setupBrief(), 'Keep my arrangement.');
 });
 
-test('a plan that names a hire shows it above the sketch and Hire and start sends the brief', () => {
+test('a plan that names a hire shows it above the sketch and Hire and build sends the brief', () => {
   const { pane, root, events, document } = loadPane();
   pane.mount({ assistant, folders: true });
   const byId = (tag, id) => root.querySelectorAll(tag).find(node => node.id === id);
@@ -1390,7 +1390,7 @@ test('a plan that names a hire shows it above the sketch and Hire and start send
       body.children.findIndex(node => node.classList.contains('workspace-build-plan__sketch'))
   );
   assert.equal(brief.value, 'Keep the session tidy.');
-  assert.equal(control('setup').textContent, 'Hire & start');
+  assert.equal(control('setup').textContent, 'Hire & build');
   // The draft's goal stands in for the plan's own until the user types.
   pane.applySession({ ...session, draft: { mission: 'Finish three demos.' } });
   assert.equal(brief.value, 'Finish three demos.');

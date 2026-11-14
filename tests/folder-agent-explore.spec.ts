@@ -47,12 +47,19 @@ test('Explore a folder starts an agent and reports what it found without a model
   });
   expect(hq.status(), await hq.text()).toBe(201);
 
+  const reusable = await request.post('/api/agents', {
+    data: { name: 'Folder Reader', catalog_role: 'orchestrator' }
+  });
+  expect(reusable.ok(), await reusable.text()).toBeTruthy();
+
   const starts: string[] = [];
   page.on('request', req => {
     if (req.url().includes('/folder-digest/scan')) throw new Error('the digest must not be called');
     if (req.url().endsWith('/folder-agent/start')) starts.push(req.postData() || '');
   });
 
+  if (process.env.ORI_HIRE_CARD_EVIDENCE)
+    await page.setViewportSize({ width: 1440, height: 1200 });
   await page.goto('/?panel=today&folder=show');
   const entry = page.locator('#personalAssistantFolderPathEntry');
   await expect(entry).toBeVisible();
@@ -60,23 +67,36 @@ test('Explore a folder starts an agent and reports what it found without a model
   await entry.getByRole('button').click();
 
   const host = page.locator('#personalAssistantFolderAgent');
-  await expect(host.locator('.folder-agent-card__title')).toHaveText('Start an agent on One Song');
+  await expect(host.locator('.folder-agent-card__title')).toHaveText('Hire an agent for One Song');
   await expect(host.locator('.folder-agent-card__brief')).toHaveValue(
     "Find out what's here and set it up"
   );
-  await expect(host).toContainText('Nothing is created until you hire.');
+  await expect(host).toContainText('Nothing is built until you hire.');
   // The Hire step: who is hired, before anything exists.
   await expect(host.locator('.folder-agent-card__who-title')).toHaveText('Hire');
   await expect(host.locator('.folder-agent-card__who-name')).toHaveValue('One Song Manager');
+  const start = host.locator('[data-folder-agent-action="start"]');
+  await expect(start).toHaveText('Hire & build');
+  if (process.env.ORI_HIRE_CARD_EVIDENCE)
+    await host.screenshot({ path: `${process.env.ORI_HIRE_CARD_EVIDENCE}/words-new.png` });
+  const reuse = host.getByRole('radio', { name: /^Folder Reader/ });
+  await reuse.focus();
+  await page.keyboard.press('Space');
+  await expect(reuse).toBeChecked();
+  await expect(start).toHaveText('Assign & build');
+  if (process.env.ORI_HIRE_CARD_EVIDENCE)
+    await host.screenshot({ path: `${process.env.ORI_HIRE_CARD_EVIDENCE}/words-reuse.png` });
+  await host.locator('.folder-agent-card__who-name').click();
+  await expect(start).toHaveText('Hire & build');
   const before = await page.request.get('/api/personal-assistant/folder-agent');
   expect((await before.json()).folder_agents).toHaveLength(0);
   await host.locator('.folder-agent-card__brief').fill('Help me finish this song');
   // Role waits behind Customize until it has text.
   await host.locator('.folder-agent-card__who-customize-toggle').click();
   await host.locator('.folder-agent-card__who-role').fill('Help me finish songs');
-  await host.getByRole('button', { name: 'Hire & start', exact: true }).click();
+  await host.locator('[data-folder-agent-action="start"]').click();
 
-  // Hire & start sends the server's choice token, the brief and the hire,
+  // Hire & build sends the server's choice token, the brief and the hire,
   // never the path.
   await expect.poll(() => starts.length).toBe(1);
   expect(starts[0]).not.toContain(folder);
@@ -105,6 +125,8 @@ test('Explore a folder starts an agent and reports what it found without a model
   ).toHaveText(/REAPER tools (to|and connect them to) One Song$/);
   await expect(report.locator('[data-step="reaper-tools"] input')).toBeChecked();
   await expect(report.locator('.folder-agent-card__run-head')).toHaveText('Plan · 1 step');
+  if (process.env.ORI_HIRE_CARD_EVIDENCE)
+    await report.screenshot({ path: `${process.env.ORI_HIRE_CARD_EVIDENCE}/words-report.png` });
   await expect(report.locator('.folder-agent-card__run')).not.toContainText("Ori's default plan");
   // The primary button counts the plugins it installs: one while the REAPER
   // tools are not in place (the sandbox's usual state).

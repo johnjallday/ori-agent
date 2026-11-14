@@ -611,7 +611,7 @@ type folderSetupRequest struct {
 	Open bool `json:"open"`
 }
 
-// SetupFolderDigest is the click on Set up (Hire and start). The body carries
+// SetupFolderDigest is the click on Set up (Hire and build). The body carries
 // the digest of the plan the card showed, a request id, optionally the project
 // file chosen from the names the server offered, and the brief the user typed;
 // the folder itself is never accepted. A digest that no longer matches is a 409

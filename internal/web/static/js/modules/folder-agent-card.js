@@ -1,4 +1,4 @@
-// Start an agent on <folder>: the one card every folder entry shows, the
+// Hire an agent for <folder>: the one card every folder entry shows, the
 // receipt after Start, and the folder agent's report with Set it up, Keep the
 // folder as it is and Look further. The server holds the folder; nothing here
 // sends a path. Words come from the server's view (facts line, stage line,
@@ -49,12 +49,13 @@ export function folderAgentCardView(card) {
   return {
     token: String(card.choice_token),
     folder: String(card.folder_name || ''),
-    title: String(card.title || `Start an agent on ${card.folder_name || 'this folder'}`),
+    title: String(card.title || `Hire an agent for ${card.folder_name || 'this folder'}`),
     purpose: String(card.purpose || ''),
     field: String(card.field || 'What should it do?'),
     brief: String(card.brief || ''),
     max: Number(card.brief_max) > 0 ? Number(card.brief_max) : 300,
-    action: String(card.action || 'Hire & start'),
+    action: String(card.action || 'Hire & build'),
+    actionExisting: String(card.action_existing || 'Assign & build'),
     note: String(card.note || ''),
     hire: folderAgentHireView(card.hire, card.folder_name)
   };
@@ -659,7 +660,7 @@ function cardWindow(doc, win) {
 // beside it; clicking or typing there chooses a new agent. The owner's own
 // agents are a row of faces under "Or one of your agents"; choosing one dims
 // the new agent. fetchImpl reads the agents' appearance (once per card).
-function renderHire(doc, hire, win, fetchImpl) {
+function renderHire(doc, hire, win, fetchImpl, onSelect) {
   const group = `folder-agent-hire-${++hireSeq}`;
   const box = el(doc, 'fieldset', 'folder-agent-card__who');
   box.append(el(doc, 'legend', 'folder-agent-card__who-title', 'Hire'));
@@ -828,6 +829,7 @@ function renderHire(doc, hire, win, fetchImpl) {
     const chosen =
       mode === 'existing' ? choices.find(choice => choice.agent.name === hire.existing) : null;
     hire.mode = chosen ? 'existing' : 'new';
+    onSelect?.(hire.mode);
     fresh.dataset.selected = String(!chosen);
     // Role belongs to the new agent, so it dims with it.
     customize.dataset.selected = String(!chosen);
@@ -862,7 +864,7 @@ function renderHire(doc, hire, win, fetchImpl) {
 }
 
 // renderFolderAgentCard draws the card before Start. onStart(brief, button,
-// hire) posts Hire & start; the caller swaps in the receipt. win is the window
+// hire) posts Hire & build; the caller swaps in the receipt. win is the window
 // whose avatar renderer and catalogs draw the hire section's faces (the page's
 // own by default); fetchImpl reads the owner's agents' appearance (the page's
 // own fetch by default, none without a window).
@@ -884,12 +886,20 @@ export function renderFolderAgentCard(
   input.setAttribute('aria-label', view.field);
   label.append(caption, input);
   const hireWindow = cardWindow(doc, win);
+  const start = el(doc, 'button', 'btn btn-primary folder-agent-card__start', view.action);
   const hire = view.hire
-    ? renderHire(doc, view.hire, hireWindow, fetchImpl || hireWindow?.fetch?.bind(hireWindow))
+    ? renderHire(
+        doc,
+        view.hire,
+        hireWindow,
+        fetchImpl || hireWindow?.fetch?.bind(hireWindow),
+        mode => {
+          start.textContent = mode === 'existing' ? view.actionExisting : view.action;
+        }
+      )
     : null;
   const note = el(doc, 'p', 'folder-agent-card__note', view.note);
   const actions = el(doc, 'div', 'folder-agent-card__actions');
-  const start = el(doc, 'button', 'btn btn-primary folder-agent-card__start', view.action);
   start.type = 'button';
   start.dataset.folderAgentAction = 'start';
   start.addEventListener('click', () =>

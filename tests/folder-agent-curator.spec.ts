@@ -64,8 +64,8 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
     await entry.locator('input').fill(root);
     await entry.getByRole('button').click();
     const card = page.locator('#personalAssistantFolderAgent');
-    await expect(card).toContainText(`Start an agent on ${folder}`);
-    await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
+    await expect(card).toContainText(`Hire an agent for ${folder}`);
+    await card.locator('[data-folder-agent-action="start"]').click();
     const get = async () =>
       (await (await request.get(endpoint)).json()).folder_agents.find(
         (v: { folder_name: string }) => v.folder_name === folder

@@ -8,7 +8,7 @@ import { startJanitorBuildModel } from './helpers/janitor-build-model';
  * (tasks/prd-folder-hire-brief.md), and the Map places it by itself, with Move.
  *
  * No folder turn is sent: attaching a recognized folder already gives the build
- * its host plan, the in-pane review names the workspace, and Hire & start
+ * its host plan, the in-pane review names the workspace, and Hire & build
  * runs Home's real setup journey (the hired agent's first look then runs on the
  * sandbox's model). Run it against the
  * narrated demo sandbox, which installs the plugins and seeds the folders:
@@ -178,7 +178,7 @@ test('the build path recognizes the song, hires with a brief, and the Map places
   await expect(brief).toHaveValue(/\S/);
   await brief.fill('Mix the chorus first.');
   const setUp = page.locator('#workspaceBuildPlanReviewSetup');
-  await expect(setUp).toHaveText('Hire & start');
+  await expect(setUp).toHaveText('Hire & build');
   await expect(setUp).toBeEnabled({ timeout: 15_000 });
   const positions = await layoutPositions(page);
   await setUp.click();

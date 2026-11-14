@@ -174,7 +174,7 @@ test('project holders open only a saved index, and Cancel restores focus without
   assert.deepEqual(calls[0].body, { report_key: 'saved-walk', folder_index: 4 });
   assert.equal(
     holders.querySelector('.folder-agent-card__title').textContent,
-    'Start an agent on Projects'
+    'Hire an agent for Projects'
   );
   const cancel = holders.querySelectorAll('button').find(node => node.textContent === 'Cancel');
   let focused = false;
@@ -255,7 +255,7 @@ test('known-folder purpose and brief are text, editable, and separate from the h
     folder_name: 'Desktop',
     purpose: 'Desktop is a workbench. You approve every move.',
     brief: 'Keep the Desktop clear',
-    note: 'Nothing is created until you hire.',
+    note: 'Nothing is built until you hire.',
     hire: { agent_name: 'Desktop Manager', mandate: 'Keep the Desktop clear' }
   });
   let started;
@@ -280,12 +280,12 @@ test('the card before Start reads the server card and refuses one without a toke
   const view = folderAgentCardView({
     choice_token: 'fa-1',
     folder_name: 'Ori Music Demo',
-    title: 'Start an agent on Ori Music Demo',
+    title: 'Hire an agent for Ori Music Demo',
     field: 'What should it do?',
     brief: "Find out what's here and set it up",
     brief_max: 300,
-    action: 'Hire & start',
-    note: 'Nothing is created until you hire.',
+    action: 'Hire & build',
+    note: 'Nothing is built until you hire.',
     hire: {
       agent_name: 'Ori Music Demo Manager',
       mandate: '',
@@ -302,13 +302,14 @@ test('the card before Start reads the server card and refuses one without a toke
   assert.deepEqual(plain(view), {
     token: 'fa-1',
     folder: 'Ori Music Demo',
-    title: 'Start an agent on Ori Music Demo',
+    title: 'Hire an agent for Ori Music Demo',
     purpose: '',
     field: 'What should it do?',
     brief: "Find out what's here and set it up",
     max: 300,
-    action: 'Hire & start',
-    note: 'Nothing is created until you hire.',
+    action: 'Hire & build',
+    actionExisting: 'Assign & build',
+    note: 'Nothing is built until you hire.',
     hire: {
       name: 'Ori Music Demo Manager',
       nameMax: 60,
@@ -329,8 +330,8 @@ test('the card before Start reads the server card and refuses one without a toke
   const card = renderFolderAgentCard(view, doc, {
     onStart: (brief, _button, hire) => (started = { brief, hire })
   });
-  assert.equal(text(card, '.folder-agent-card__title'), 'Start an agent on Ori Music Demo');
-  assert.equal(text(card, '.folder-agent-card__start'), 'Hire & start');
+  assert.equal(text(card, '.folder-agent-card__title'), 'Hire an agent for Ori Music Demo');
+  assert.equal(text(card, '.folder-agent-card__start'), 'Hire & build');
   assert.equal(text(card, '.folder-agent-card__who-title'), 'Hire');
   const input = card.querySelector('.folder-agent-card__brief');
   assert.equal(input.maxLength, 300);
@@ -369,6 +370,9 @@ test('the card before Start reads the server card and refuses one without a toke
   assert.equal(atlas.checked, true);
   card.querySelector('.folder-agent-card__start').listeners.click();
   assert.deepEqual(plain(started.hire), { existing: 'Atlas' });
+  assert.equal(text(card, '.folder-agent-card__start'), 'Assign & build');
+  name.listeners.input();
+  assert.equal(text(card, '.folder-agent-card__start'), 'Hire & build');
 });
 
 test('a saved manager is preselected, and no model still lets the agent be hired', () => {
@@ -2159,7 +2163,7 @@ test('Create Workspace mounts the same card, and Start swaps in the receipt', as
           card: {
             choice_token: 'tok',
             folder_name: 'Songs',
-            title: 'Start an agent on Songs',
+            title: 'Hire an agent for Songs',
             brief: "Find out what's here and set it up"
           }
         }
@@ -2174,9 +2178,9 @@ test('Create Workspace mounts the same card, and Start swaps in the receipt', as
     { chip: 'downloads' },
     { doc, fetchImpl, onStarted: view => started.push(view.workspace_id) }
   );
-  assert.equal(result.card.title, 'Start an agent on Songs');
+  assert.equal(result.card.title, 'Hire an agent for Songs');
   assert.equal(host.hidden, false);
-  assert.equal(text(host, '.folder-agent-card__title'), 'Start an agent on Songs');
+  assert.equal(text(host, '.folder-agent-card__title'), 'Hire an agent for Songs');
   assert.equal(host.querySelector('textarea').value, "Find out what's here and set it up");
   await host.querySelector('.folder-agent-card__start').listeners.click();
   await new Promise(resolve => setTimeout(resolve, 0));

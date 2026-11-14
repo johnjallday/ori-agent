@@ -38,7 +38,7 @@ func TestHire_CardOffersAgentModelsAndRoster(t *testing.T) {
 		t.Fatal(err)
 	}
 	hire := chosen.Hire
-	if chosen.Action != "Hire & start" || hire == nil || hire.AgentName != "Ori Music Demo Manager" ||
+	if chosen.Action != "Hire & build" || hire == nil || hire.AgentName != "Ori Music Demo Manager" ||
 		hire.Model != "claude-sonnet-5-5" || hire.Provider != "claude" || len(hire.Models) != 2 ||
 		len(hire.Agents) != 1 || hire.Existing != "" || hire.NameMax != AgentNameMaxRunes {
 		t.Fatalf("card hire = %+v", hire)

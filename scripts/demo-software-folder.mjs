@@ -196,7 +196,7 @@ const list = id => page.locator(`${id} li`).allInnerTexts();
 const buttons = () =>
   card.locator('#personalAssistantFolderOfferActions').locator('button, a').allInnerTexts();
 const press = name => card.getByRole('button', { name, exact: true }).click();
-const isSetupAction = name => /^(Set up|Hire & start|Assign & start)$/.test(name);
+const isSetupAction = name => /^(Set up|Hire & build|Assign & build)$/.test(name);
 async function confirmSetup() {
   const label = (await buttons())[0];
   expect(isSetupAction(label), `no reviewed setup action: ${label}`);

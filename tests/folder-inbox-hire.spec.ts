@@ -296,7 +296,7 @@ test('a second inbox folder is an Assign, and the same folder again is already t
   );
   await expect(
     panel(page).getByRole('button', {
-      name: /Hire & start|Assign & start|Review setup|Use automatic placement/
+      name: /Hire & build|Assign & build|Review setup|Use automatic placement/
     })
   ).toHaveCount(0);
   expect(await count(page, 'workspaces', 'Downloads')).toBe(1);

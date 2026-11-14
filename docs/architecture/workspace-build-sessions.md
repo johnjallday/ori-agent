@@ -211,13 +211,13 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   through the same reviewed-release service (`buildHomeProviders` over
   `folderHomeProviderSetup`). The cached plan facts are dropped (`folderSetupHost.forgetAll`), so
   the response's plan is ready and says the plugin is installed; the transcript gets "Installed
-  <plugin> <version>. Hire and start can run the plan now." The client names only the build. While the
+  <plugin> <version>. Hire and build can run the plan now." The client names only the build. While the
   plan waits, the prompt tells the model the form offers the install, not to choose Blank or
   another blueprint unless the user asks, and not to ask about the group, and no
   `group_prerequisite` is sent (the plan sets the group up once installed).
 - **Review in place**: "Review or edit draft" opens the plan review inside the dialog (the
   lines read-only, name and description editable, "Why this suggestion?"), not the wizard. While
-  it is open it stands in for the conversation, with its own Hire and start.
+  it is open it stands in for the conversation, with its own Hire and build.
 - **The hire**: a ready plan carries `hire` (who the setup hires: `create`, `bind` or `pending`,
   the agent's name, role and model) and `brief_default`, outside its digest, read from the same
   host plan as Home's card. A separately validated material model witness, when
@@ -226,7 +226,7 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   it?" above the "You'll get" sketch; the folder review, which a recognized folder opens
   directly, shows the same block (`renderReviewHire`, `#workspaceBuildPlanReviewHire`), titled the
   same, and both fields edit one brief. The field starts from the draft's goal, else
-  `brief_default`, and keeps what was typed for this build. The button is **Hire and start**
+  `brief_default`, and keeps what was typed for this build. The button is **Hire and build**
   (**Set it up** for a plan that names no hire). The model is told the plan column answers the
   setup request: it never names the hired agent, counts the plan's steps or describes its
   controls, and its `<setup_plan>` carries no hire or brief.
@@ -238,7 +238,7 @@ it (`folder-recognition-lines.js`, the same words Home's card uses); the prompt 
   only the file choice. The browser flushes draft edits first; the request does
   not change the draft/transcript, claim setup, run inference or create resources.
   The choice changes the plan digest and survives live/restored plan reads.
-- **Hire and start**: `POST …/{id}/setup {version, plan_digest, entry_name?, brief?}` writes the build's
+- **Hire and build**: `POST …/{id}/setup {version, plan_digest, entry_name?, brief?}` writes the build's
   `setup` claim (offer, digest, request id) and runs **Home's own setup journey** on the build's
   held folder: the build's review target is `build:<session id>`, and Home's setup reads that
   folder only while this build stands behind it (`ConfigureBuildReviews`). The session is
@@ -420,7 +420,7 @@ counts, and field or section names, never message text, draft values, or folder 
   build endpoints (golden path, form-edit acknowledgement, resume, manual fallbacks, the
   `build_workspace` hand-off). Run it against a fresh sandbox.
   `tests/narrated-folder-setup.spec.ts` fakes nothing and sends no model turn: both entries on
-  a song folder, through Hire and start, the automatic Map placement and its Move link, against
+  a song folder, through Hire and build, the automatic Map placement and its Move link, against
   `scripts/narrated-folder-demo.sh` (its header has the commands).
 - Live demos: `scripts/demo-build-assistant.mjs` drives the real pane against a demo
   server with a real model; `scripts/smoke.sh build-session <url> seed` hires an assistant

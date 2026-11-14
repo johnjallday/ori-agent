@@ -383,7 +383,7 @@ type ServerBuilder struct {
 	// personalAssistantFolderDigest is "show me a folder": chooser, scan,
 	// offers, and decisions over the HQ sidecar.
 	personalAssistantFolderDigest *personalassistant.FolderDigestService
-	// folderAgentService is "Start an agent on <folder>": the anchored
+	// folderAgentService is "Hire an agent for <folder>": the anchored
 	// workspace, its agent, the walk, the report and Set it up.
 	folderAgentService           *folderagent.Service
 	folderAgentHandler           *folderagenthttp.Handler

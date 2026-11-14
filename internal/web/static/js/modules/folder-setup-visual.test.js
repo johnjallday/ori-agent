@@ -361,7 +361,7 @@ test('requirements distinguish install/update/enable/ready from unchecked, unava
     assert.equal(view.downloads, ['install', 'update'].includes(operation) ? 1 : 0);
     assert.equal(view.complete, ['install', 'update', 'enable', 'ready'].includes(operation));
     assert.equal(view.summary === 'Nothing to download', ['enable', 'ready'].includes(operation));
-    if (!view.complete) assert.equal(requirementsActionLabel(plan, 'Hire & start'), 'Hire & start');
+    if (!view.complete) assert.equal(requirementsActionLabel(plan, 'Hire & build'), 'Hire & build');
   }
 });
 
@@ -545,7 +545,7 @@ test('requirements actions name only the checked operations and keep complete se
   plan.visual.plugins[1].operation = 'enable';
   assert.equal(requirementsActionLabel(plan), 'Enable 1 plugin & set up');
   plan.visual.plugins[1].operation = 'ready';
-  assert.equal(requirementsActionLabel(plan, 'Assign & start'), 'Assign & start');
+  assert.equal(requirementsActionLabel(plan, 'Assign & build'), 'Assign & build');
 });
 
 test('requirement identity, purpose and source are literal inert text with stable disclosures', () => {

@@ -795,7 +795,7 @@ function homeUpgradeFirstView(offer, view) {
 
 // inboxConfirmView is an inbox folder's hire card: Hire File Curator (or
 // Assign it, when a saved File Curator exists), the one question, the plan's
-// lines and Hire & start or Not now. It installs nothing and has no
+// lines and Hire & build or Not now. It installs nothing and has no
 // step-by-step journey, so there is no Adjust.
 function inboxConfirmView(offer, base, subject) {
   if (offer.placement_handoff && offer.status !== 'resolved')
@@ -1022,7 +1022,7 @@ export function folderSetupDestinationLabel(offer) {
 // the card is the one consent: Set up runs the whole setup on the server and
 // Adjust… opens the step-by-step journey. Without one it opens the existing
 // install → project-setup journey. It never uses the blank-workspace creator.
-// A plan that names a hire is shown as one: Hire and start, Not now, and Adjust
+// A plan that names a hire is shown as one: Hire and build, Not now, and Adjust
 // beside the plan's lines.
 function capabilityConfirmView(offer, base, subject) {
   const capability = offer.capability;
@@ -2975,7 +2975,7 @@ export function folderProjectModalOptions(offer) {
 }
 
 const state = {
-  // Start an agent on <folder>: the chosen folder's card, then the folder
+  // Hire an agent for <folder>: the chosen folder's card, then the folder
   // agent's view (receipt, report) once Start went through.
   agent: { card: null, view: null, error: '', busy: false, poll: 0 },
   reviewSlot: null,
@@ -3846,7 +3846,7 @@ function renderHire(els, hire, offer) {
 
 // planWithWatching is the offer's plan as the card shows it: with the fifth line
 // "Watching turned on" once the user ticked watching, so every list of what
-// Hire and start will do says it. The digest is the plan's own; the tick is not in it.
+// Hire and build will do says it. The digest is the plan's own; the tick is not in it.
 export function planWithWatching(offer, chosen = monitoringChosen(offer)) {
   const plan = offer?.plan;
   if (!plan?.monitoring || !chosen) return plan || null;

@@ -9799,7 +9799,7 @@ test('a build file choice saves a fresh plan without setup or another model turn
   assert.deepEqual(lines, []);
 });
 
-test('Hire and start sends the brief the pane shows, from either button', async () => {
+test('Hire and build sends the brief the pane shows, from either button', async () => {
   const manager = loadSessionManager();
   let paneBrief = 'Mix the chorus first.';
   manager.workspaceBuildPane = () => ({
@@ -10328,7 +10328,7 @@ test('a folder chosen in the pane shows the one folder card and never reaches th
       mountFolderAgentChoice: async (target, sent) => {
         mounts.push(sent);
         assert.equal(target, host);
-        return { card: { title: 'Start an agent on Songs' } };
+        return { card: { title: 'Hire an agent for Songs' } };
       }
     };
     await manager.attachWorkspaceBuildFolder(detail);
@@ -10540,7 +10540,7 @@ test('folder review shows the actual effective team and constrains recognized pl
   assert.equal(nodes.get('workspaceBuildFolderGoalField').hidden, true);
   assert.equal(nodes.get('workspaceBuildFolderPlacement').textContent, 'Music Production Home');
   // A plan that names a hire titles the review with it, shows its agent and
-  // question (drawn by the pane), and is pressed as Hire and start.
+  // question (drawn by the pane), and is pressed as Hire and build.
   for (const id of [
     'workspaceBuildPlanReviewTitle',
     'workspaceBuildPlanReviewSetup',
@@ -10551,7 +10551,7 @@ test('folder review shows the actual effective team and constrains recognized pl
   const pane = manager.workspaceBuildPane;
   const hosts = [];
   const hire = {
-    confirmLabel: 'Hire & start',
+    confirmLabel: 'Hire & build',
     headline: [
       { text: 'Hire ' },
       { text: 'Song Assistant' },
@@ -10570,8 +10570,8 @@ test('folder review shows the actual effective team and constrains recognized pl
     nodes.get('workspaceBuildPlanReviewTitle').textContent,
     'Hire Song Assistant for Ori Music Demo'
   );
-  assert.equal(nodes.get('workspaceBuildPlanReviewSetup').textContent, 'Hire & start');
-  assert.match(nodes.get('workspaceBuildFolderEffects').textContent, /^Only Hire & start runs/);
+  assert.equal(nodes.get('workspaceBuildPlanReviewSetup').textContent, 'Hire & build');
+  assert.match(nodes.get('workspaceBuildFolderEffects').textContent, /^Only Hire & build runs/);
   manager.workspaceBuildPane = pane;
   delete manager.workspaceBuild.session.plan.hire;
   manager.workspaceBuild.session.plan.ready = false;
@@ -10626,7 +10626,7 @@ test('generic folder actions open review rather than claiming consent to create;
   };
   manager.workspaceBuild.session.folder.recognition = { verdict: 'project' };
   manager.syncWorkspaceBuildFolderReview();
-  assert.equal(action(), 'Hire & start');
+  assert.equal(action(), 'Hire & build');
 });
 
 test('changing purpose cannot refill earlier explicitly cleared name or description', () => {

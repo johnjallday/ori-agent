@@ -31,7 +31,7 @@ const (
 	InboxFirstLookDetail = "No model is called, and no file is opened, moved or deleted. You review the batch in File Janitor."
 )
 
-// BuildInboxPlan lists every consequence of Hire and start for an inbox folder
+// BuildInboxPlan lists every consequence of Hire and build for an inbox folder
 // and the machine-readable promise the run is held to. Nothing is installed
 // and no model is needed: the requirements say so, and the plan carries no
 // model witness to wait on. Every string is plain text and names no path.

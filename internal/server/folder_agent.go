@@ -28,7 +28,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
-// wireFolderAgent builds "Start an agent on <folder>" over the folder
+// wireFolderAgent builds "Hire an agent for <folder>" over the folder
 // digest's chooser (picker, chips, typed-path tokens), the ordinary anchored
 // creation pipeline, and the workspace store. Every dependency that a later
 // phase wires is looked up at call time.

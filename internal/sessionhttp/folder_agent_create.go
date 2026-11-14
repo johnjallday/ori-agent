@@ -16,7 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
-// FolderAgentWorkspaceRequest is the workspace "Start an agent on <folder>"
+// FolderAgentWorkspaceRequest is the workspace "Hire an agent for <folder>"
 // creates: anchored on the folder the server holds, with one agent.
 type FolderAgentWorkspaceRequest struct {
 	Name       string

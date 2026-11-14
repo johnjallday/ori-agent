@@ -535,7 +535,7 @@ A second source (a mission finding, a folder offer) reuses this by publishing it
 
 ### The folder agent's first look: the second instance (folder-agent-evolution)
 
-Feeding a folder to Ori ("Start an agent on <folder>", `internal/folderagent`) is the second source of the harness. It follows the same six points with its own records instead of a shared package: the extraction this section asked for is still open, because the two turns share the shape (caps, receipt, allowlist, provenance, truthful degradation) but not their stores or surfaces.
+Feeding a folder to Ori ("Hire an agent for <folder>", `internal/folderagent`) is the second source of the harness. It follows the same six points with its own records instead of a shared package: the extraction this section asked for is still open, because the two turns share the shape (caps, receipt, allowlist, provenance, truthful degradation) but not their stores or surfaces.
 
 1. **Signal:** the host's walk of the fed folder finishing (no event bus: the same background job runs the turn).
 2. **Bounded look:** one turn per look with the folder agent's own provider (resolved as the Manager's is), one tool (`folder_look`, one folder of the map, through the workspace's own anchor), and caps of 6 model calls, 12 tool calls, 8 looks, 90 seconds and `first_look_token_budget` (only ever lower than 20,000).

@@ -568,7 +568,7 @@ test('an opening the rules call for waits until the tile is drawn', () => {
   const host = fakeHost();
   const presenter = commanderPresenter(map, { action: 'Show on map' });
   const looking = folderAgentReportView(raw({ state: 'looking' }));
-  // The owner pressed Hire & start: followed, but the tile is not drawn yet.
+  // The owner pressed Hire & build: followed, but the tile is not drawn yet.
   presenter.present(args(map, host, { view: looking, followed: true }));
   assert.equal(map.balloon.expanded, false);
   assert.equal(host.shown.kind, 'full');

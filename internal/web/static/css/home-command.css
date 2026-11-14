@@ -3381,7 +3381,7 @@ a.quest-title:focus-visible {
 }
 
 /*
- * Start an agent on <folder> (folder-agent-card.js): the card, the receipt
+ * Hire an agent for <folder> (folder-agent-card.js): the card, the receipt
  * and the folder agent's report. Same paper as the first-look report; the
  * fallbacks keep it readable in the drawer on other pages.
  */

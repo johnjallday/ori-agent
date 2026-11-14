@@ -248,15 +248,16 @@ func NewService(deps Deps) *Service {
 
 // Chosen is the card for a chosen folder.
 type Chosen struct {
-	Token      string `json:"choice_token"`
-	FolderName string `json:"folder_name"`
-	Title      string `json:"title"`
-	Purpose    string `json:"purpose,omitempty"`
-	Field      string `json:"field"`
-	Brief      string `json:"brief"`
-	BriefMax   int    `json:"brief_max"`
-	Action     string `json:"action"`
-	Note       string `json:"note"`
+	Token          string `json:"choice_token"`
+	FolderName     string `json:"folder_name"`
+	Title          string `json:"title"`
+	Purpose        string `json:"purpose,omitempty"`
+	Field          string `json:"field"`
+	Brief          string `json:"brief"`
+	BriefMax       int    `json:"brief_max"`
+	Action         string `json:"action"`
+	ActionExisting string `json:"action_existing"`
+	Note           string `json:"note"`
 	// Hire is who the owner hires before anything is created.
 	Hire *HireOptions `json:"hire"`
 }
@@ -307,9 +308,9 @@ func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome stri
 		hire.Mandate = brief
 	}
 	return &Chosen{
-		Token: token, FolderName: name, Title: "Start an agent on " + name, Field: "What should it do?",
-		Purpose: purpose, Brief: brief, BriefMax: personalassistant.BriefMaxRunes, Action: "Hire & start",
-		Note: "Nothing is created until you hire. It looks before it touches anything, and you confirm every step after.",
+		Token: token, FolderName: name, Title: "Hire an agent for " + name, Field: "What should it do?",
+		Purpose: purpose, Brief: brief, BriefMax: personalassistant.BriefMaxRunes, Action: "Hire & build", ActionExisting: "Assign & build",
+		Note: "Nothing is built until you hire. It looks before it touches anything, and you confirm every step after.",
 		Hire: hire,
 	}
 }
@@ -330,7 +331,7 @@ func (s *Service) dropChoice(token string) {
 	s.mu.Unlock()
 }
 
-// Start is the card's one action, Hire & start (PRD FR2): the agent the owner
+// Start is the card's one action, Hire & build (PRD FR2): the agent the owner
 // hired on the card, an anchored workspace on the chosen folder with that
 // agent, the first ticket, and the walk, started now.
 func (s *Service) Start(ctx context.Context, userID, token, brief string, hire Hire) (View, error) {
