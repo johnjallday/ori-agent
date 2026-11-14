@@ -7,10 +7,12 @@ import {
   FIRST_ACTION_KEY,
   NOTES_SCOPE_SENTENCE,
   forgetFirstAction,
+  hqFirstActionMatches,
   hqFirstActionView,
   readFirstAction,
   rememberFirstAction,
   hqNotesOutcome,
+  hqLiveNotesOutcome,
   hqNotesPayload,
   hqNotesReviewView,
   notesSeedSentence
@@ -118,7 +120,7 @@ test('the first step follows canonical notes states, never treating HQ success a
     [writable.note, writable.openNotes, writable.setupNotes, writable.retry],
     [true, '', false, false]
   );
-  assert.match(writable.lead, /No setup questions left/);
+  assert.match(writable.lead, /Notes are ready/);
   const readOnly = hqFirstActionView({ status: 'ready', writable: false }, { hqRoute: route });
   assert.deepEqual(
     [readOnly.note, readOnly.openNotes],
@@ -134,9 +136,42 @@ test('the first step follows canonical notes states, never treating HQ success a
   const stopped = hqFirstActionView({ status: 'stopped' }, { hqRoute: route });
   assert.deepEqual([stopped.note, stopped.retry, stopped.openNotes !== ''], [false, false, true]);
   for (const view of [writable, readOnly, deferred, stopped]) {
-    assert.equal(view.folder, true, 'a project folder is always offered');
+    assert.equal(view.folder, false, 'folder setup stays in its existing entry points');
     assert.equal(view.explore, true, 'exploring is always possible');
   }
+});
+
+test('live Notes capability, not a historical ready receipt, gates capture', () => {
+  const source = { id: 'notes', path: '/notes', origin: 'created_by_ori' };
+  assert.equal(hqLiveNotesOutcome({ status: 'connected', source }).writable, true);
+  assert.equal(
+    hqLiveNotesOutcome({ status: 'connected', source: { ...source, origin: 'connected' } })
+      .writable,
+    false
+  );
+  for (const notes of [
+    null,
+    { status: 'missing', source },
+    { status: 'stopped', source },
+    { status: 'not_connected', setup: { status: 'ready', writable: true } }
+  ]) {
+    const result = hqLiveNotesOutcome(notes);
+    assert.notEqual(result.writable, true);
+    assert.equal(hqFirstActionView(result, { hqRoute: '/workspaces/hq' }).note, false);
+  }
+  for (const status of ['failed', 'pending'])
+    assert.equal(hqLiveNotesOutcome({ setup: { status } }).canRetry, true);
+});
+
+test('first-action ownership requires a nonempty canonical identity, never missing equals missing', () => {
+  for (const id of [undefined, null, '', '   ']) {
+    assert.equal(hqFirstActionMatches(id, null, undefined), false);
+    assert.equal(hqFirstActionMatches(id, { workspaceId: id }, id), false);
+  }
+  assert.equal(hqFirstActionMatches('hq-1', null, undefined), false, 'ordinary returning HQ');
+  assert.equal(hqFirstActionMatches('hq-1', { workspaceId: 'hq-2' }, 'hq-2'), false);
+  assert.equal(hqFirstActionMatches('hq-1', { workspaceId: 'hq-1' }), true);
+  assert.equal(hqFirstActionMatches('hq-1', null, 'hq-1'), true, 'storage-free current intent');
 });
 
 test('the first-action record is per HQ, survives a reload, and is forgotten on leaving', () => {

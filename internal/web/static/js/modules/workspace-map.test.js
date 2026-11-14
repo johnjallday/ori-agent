@@ -2793,6 +2793,10 @@ test('tileHTML marks the designated Personal HQ workspace with a badge, aria-lab
   assert.match(hqTile, /ws-map-tile-hq-badge/);
   assert.match(hqTile, /data-building-variant="hq"/);
   assert.match(hqTile, /data-building-emblem="hq"/);
+  for (const part of ['foundation', 'walls', 'roof', 'lights'])
+    assert.match(hqTile, new RegExp(`data-hq-part="${part}"`));
+  assert.doesNotMatch(hqTile, /is-assembling/);
+  assert.equal(api.playHQAssembly('ws-hq'), null, 'unmounted map cannot start motion');
   assert.match(hqTile, />HQ</);
   assert.match(hqTile, /, Personal HQ/);
 

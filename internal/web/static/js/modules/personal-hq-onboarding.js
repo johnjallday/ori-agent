@@ -8,6 +8,8 @@
 
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
 import { renderRelatedTicket, startMakeTicket } from './follow-up-ticket.js';
+import { hqPresentation } from './personal-hq-reveal.js';
+import { rememberFirstAction } from './personal-hq-notes-review.js';
 
 // upgradeView turns an upgrade plan (from GET /api/personal-hq/upgrade/preview)
 // into the view-model the DOM code renders, so all the branching lives here and
@@ -292,6 +294,25 @@ export function hqBuildRequestPayload(target, form, requestID) {
   return { ...body, request_id: String(requestID || '').trim(), if_version: target.stateVersion };
 }
 
+export async function defaultHQTimezone(fetchImpl = globalThis.fetch) {
+  try {
+    const response = await fetchImpl('/api/user/profile', {
+      headers: { Accept: 'application/json' }
+    });
+    if (response.ok) {
+      const body = await response.json();
+      if (body?.profile?.timezone) return body.profile.timezone;
+    }
+  } catch (_) {
+    // Profile defaults are optional.
+  }
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch (_) {
+    return 'UTC';
+  }
+}
+
 export function hqWorkspaceRootView(state) {
   const source = String(state?.source || 'unconfirmed')
     .trim()
@@ -359,6 +380,14 @@ export async function skipHQObjective(fetchImpl = globalThis.fetch) {
 }
 
 export const HQ_REQUEST_ID_KEY = 'ori.personalAssistantHQRequestId';
+let memoryHQRequestID = '';
+export function hqStorage() {
+  try {
+    return window.localStorage;
+  } catch (_) {
+    return null;
+  }
+}
 
 export function hqRequestID(storage) {
   let id = '';
@@ -369,24 +398,237 @@ export function hqRequestID(storage) {
   }
   if (!id) {
     id =
-      globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
+      memoryHQRequestID ||
+      (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function'
         ? globalThis.crypto.randomUUID()
-        : `hq-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        : `hq-${Date.now()}-${Math.random().toString(16).slice(2)}`);
     try {
       storage?.setItem(HQ_REQUEST_ID_KEY, id);
     } catch (_) {
       // The server still owns the durable operation.
     }
   }
+  memoryHQRequestID = id;
   return id;
 }
 
 export function clearHQRequestID(storage) {
+  memoryHQRequestID = '';
   try {
     storage?.removeItem(HQ_REQUEST_ID_KEY);
   } catch (_) {
     // Storage cleanup is not part of the durable setup transaction.
   }
+}
+
+// The request owner, not the presentation phase, classifies server truth.
+export function hqRequestOutcome(relationship, status, errorCode = '') {
+  if (relationship?.state === 'active') {
+    const id = String(relationship.hq_workspace_id || '');
+    return status?.valid && id && status.workspace?.id === id && status.workspace?.folder_slug
+      ? 'ready'
+      : 'stale';
+  }
+  if (relationship?.state === 'provisioning_hq') return 'paused';
+  if (
+    [
+      'invalid_hq_setup_request',
+      'notes_destination_changed',
+      'notes_selection_unavailable',
+      'notes_folder_invalid',
+      'notes_unavailable'
+    ].includes(errorCode)
+  )
+    return 'refused';
+  return 'uncertain';
+}
+
+let foregroundHQIntent = null;
+let pendingHQBody = null;
+let pendingHQRoot = '';
+let hqFlight = null;
+const PENDING_HQ_KEY = 'ori.hq.pendingRequest.v1';
+function pendingHQ(body) {
+  pendingHQBody = body;
+  try {
+    if (body)
+      window.sessionStorage.setItem(PENDING_HQ_KEY, JSON.stringify({ body, root: pendingHQRoot }));
+    else window.sessionStorage.removeItem(PENDING_HQ_KEY);
+  } catch (_) {
+    /* Keep the same request in memory when storage is unavailable. */
+  }
+}
+export function hasPendingHQRequest() {
+  if (!pendingHQBody && typeof window !== 'undefined') {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(PENDING_HQ_KEY) || 'null');
+      pendingHQBody = saved?.body || null;
+      pendingHQRoot = String(saved?.root || '');
+    } catch (_) {
+      /* optional */
+    }
+  }
+  return !!pendingHQBody;
+}
+export function currentHQIntent() {
+  return foregroundHQIntent;
+}
+
+async function hqRead(url) {
+  const response = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!response.ok) throw new Error('Could not verify HQ setup. Check again.');
+  return response.json();
+}
+
+async function projectHQResult(result = {}, code = '') {
+  let relationship = result.personal_assistant;
+  let status = null;
+  if (!relationship) {
+    try {
+      relationship = (await hqRead('/api/personal-assistant')).personal_assistant;
+    } catch (_) {
+      /* unknown */
+    }
+  }
+  if (relationship?.state === 'active') {
+    try {
+      status = (await hqRead('/api/personal-hq/status')).status;
+    } catch (_) {
+      /* stale */
+    }
+  }
+  const outcome = hqRequestOutcome(relationship, status, code);
+  const flow = hqPresentation();
+  const intent = foregroundHQIntent;
+  if (outcome === 'ready' || outcome === 'stale') {
+    // An active relationship is never offered another build, even if projection failed.
+    if (outcome === 'ready') {
+      clearHQRequestID(hqStorage());
+      pendingHQ(null);
+      if (intent && intent.eligible !== false)
+        rememberFirstAction(hqStorage(), status.workspace.id);
+    }
+    for (const name of [
+      'ori:personal-hq-changed',
+      'ori:workspaces-changed',
+      'ori:progression-refresh'
+    ]) {
+      window.dispatchEvent(new CustomEvent(name, { detail: { source: 'personal_hq_setup' } }));
+    }
+    await Promise.allSettled([
+      window.PersonalHQOnboarding?.refreshHQStatus?.(),
+      window.OriHomeCockpit?.refresh?.(),
+      window.PersonalAssistantPanel?.refresh?.()
+    ]);
+    flow?.ready(intent, {
+      workspaceId: status?.workspace?.id,
+      assistant: relationship,
+      stale: outcome === 'stale',
+      route: status?.workspace?.folder_slug
+        ? `/workspaces/${encodeURIComponent(status.workspace.folder_slug)}`
+        : '',
+      refresh: () => checkHQSetup(),
+      explore: () => {
+        window.location.href = `/workspaces/${encodeURIComponent(status.workspace.folder_slug)}`;
+      }
+    });
+    return {
+      ...result,
+      personal_assistant: relationship,
+      hq: status,
+      outcome,
+      presentation: intent
+    };
+  }
+  if (outcome === 'refused') {
+    pendingHQ(null);
+    flow?.refused(intent);
+  } else {
+    flow?.unresolved(intent, {
+      title:
+        code === 'root_changed'
+          ? 'The workspace directory changed'
+          : outcome === 'paused'
+            ? 'Your confirmed HQ setup is paused'
+            : 'Setup needs checking',
+      detail:
+        code === 'root_changed'
+          ? 'The saved request has not changed. Restore its reviewed workspace directory before retrying, or check for a saved setup to resume.'
+          : undefined,
+      check: () => checkHQSetup(),
+      retry:
+        outcome === 'paused'
+          ? () => submitReviewedHQ({ paf: true, resuming: true }, {})
+          : code !== 'root_changed' && hasPendingHQRequest() && relationship?.state === 'needs_hq'
+            ? () => submitReviewedHQ({ paf: true }, {})
+            : null,
+      retryLabel: outcome === 'paused' ? 'Resume setup' : 'Retry same request'
+    });
+  }
+  return { ...result, personal_assistant: relationship, outcome, presentation: intent };
+}
+
+export async function checkHQSetup() {
+  if (!foregroundHQIntent && hasPendingHQRequest()) {
+    foregroundHQIntent = hqPresentation()?.begin({
+      token: 'status-check',
+      route: window.location.pathname + window.location.search
+    });
+    if (foregroundHQIntent) foregroundHQIntent.eligible = false;
+  }
+  return projectHQResult();
+}
+
+export function submitReviewedHQ(target, form, { root = '', focusOwned = false } = {}) {
+  if (hqFlight) return hqFlight;
+  if (!target?.paf) throw new Error('This action requires a Personal Assistant setup.');
+  const retrying = hasPendingHQRequest();
+  if (!retrying) pendingHQRoot = root;
+  const body = target.resuming
+    ? { mode: 'resume' }
+    : hasPendingHQRequest()
+      ? pendingHQBody
+      : hqBuildRequestPayload(target, form, hqRequestID(hqStorage()));
+  pendingHQ(body);
+  // Only an explicit new action gets a presentation lifetime. A retry keeps its
+  // old yielded token so late work cannot reclaim a conversation or camera.
+  if (!foregroundHQIntent)
+    foregroundHQIntent = hqPresentation()?.begin({
+      token: body.request_id || `resume-${Date.now()}`,
+      resume: !!target.resuming,
+      focusOwned,
+      route: window.location.pathname + window.location.search
+    });
+  hqFlight = (async () => {
+    let result = {};
+    let code = '';
+    try {
+      if (retrying && !target.resuming && pendingHQRoot) {
+        const currentRoot = hqWorkspaceRootView(await loadHQWorkspaceRoot());
+        if (!currentRoot.confirmed || currentRoot.path !== pendingHQRoot) {
+          return projectHQResult({}, 'root_changed');
+        }
+      }
+      const response = await fetch('/api/personal-assistant/hq', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body)
+      });
+      result = await response.json();
+      if (!response.ok) code = result.code || 'unknown';
+    } catch (_) {
+      code = 'unknown';
+    }
+    const observed = await projectHQResult(result, code);
+    if (observed.outcome === 'refused') {
+      foregroundHQIntent = null;
+      throw new Error(result.error || 'Review the setup and try again. Nothing was created.');
+    }
+    return observed;
+  })().finally(() => {
+    hqFlight = null;
+  });
+  return hqFlight;
 }
 
 // followUpView turns a follow-up record into a Home projection card view-model.
@@ -563,15 +805,15 @@ export function followUpView(f) {
     });
   }
 
-  async function resumeHQSetup() {
+  async function resumeHQSetup({ focusOwned = false } = {}) {
     const target = await refreshBuildTarget();
     if (!target.paf || !target.resuming)
       throw new Error('There is no paused Personal HQ setup to resume.');
-    const result = await postJSON(target.endpoint, { mode: 'resume' });
+    const result = await submitReviewedHQ(target, {}, { focusOwned });
     const relationship = result && result.personal_assistant;
-    if (relationship?.state === 'active') clearHQRequestID(window.localStorage);
-    emitHQQuestSignal('setup-succeeded');
-    await completePAFHQTransition(relationship);
+    if (relationship?.state === 'active') emitHQQuestSignal('setup-succeeded');
+    if (!result.presentation && relationship?.state === 'active')
+      await completePAFHQTransition(relationship);
     return relationship;
   }
 
@@ -606,31 +848,6 @@ export function followUpView(f) {
       'error'
     );
     return null;
-  }
-
-  function browserTimezone() {
-    try {
-      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-    } catch (_) {
-      return 'UTC';
-    }
-  }
-
-  // Prefer the user's already-stored profile timezone (PRD FR25: derive
-  // defaults from the current user profile) and fall back to the browser's
-  // detected zone only when the profile has none set yet.
-  async function defaultTimezone() {
-    try {
-      const res = await fetch('/api/user/profile', { headers: { Accept: 'application/json' } });
-      if (res.ok) {
-        const body = await res.json();
-        const tz = body && body.profile && body.profile.timezone;
-        if (tz) return tz;
-      }
-    } catch (_) {
-      /* fall through to browser detection */
-    }
-    return browserTimezone();
   }
 
   function showBuildWorkspaceRootError(message) {
@@ -701,12 +918,32 @@ export function followUpView(f) {
     }
   }
 
-  async function openBuildModal() {
+  // Only a card-origin editor returns a draft. Standalone forms retain their
+  // original confirmation boundary and never acquire an implicit Notes choice.
+  let reviewEditor = null;
+
+  function fillBuildRequest(draft) {
+    for (const [id, key] of [
+      ['Name', 'name'],
+      ['Timezone', 'timezone'],
+      ['Time', 'schedule_time'],
+      ['Scope', 'scope']
+    ])
+      document.getElementById(`hqBuild${id}`).value = draft[key];
+    document.getElementById('hqBuildIncludeFuture').checked = draft.include_future_workspaces;
+    document.getElementById('hqBuildNotify').checked = draft.notify_on_ready;
+    for (const input of document.querySelectorAll('#hqBuildAdvanced .hq-build-days input')) {
+      input.checked = draft.schedule_days.includes(input.value);
+    }
+  }
+
+  async function openBuildModal(editor = null) {
+    reviewEditor = editor?.onReturn ? editor : null;
     const tzInput = document.getElementById('hqBuildTimezone');
     const tasks = [];
     if (tzInput && !tzInput.value)
       tasks.push(
-        defaultTimezone().then(timezone => {
+        defaultHQTimezone().then(timezone => {
           tzInput.value = timezone;
         })
       );
@@ -719,9 +956,22 @@ export function followUpView(f) {
     const errorBox = document.getElementById('hqBuildError');
     if (errorBox) errorBox.hidden = true;
     applyBuildAssistantCopy();
+    if (reviewEditor) {
+      fillBuildRequest(reviewEditor.draft);
+      document.getElementById('hqBuildWorkspaceRoot').value = reviewEditor.root;
+      document.getElementById('hqBuildModalTitle').textContent = 'Customize setup';
+      document.getElementById('hqBuildSubmitBtn').textContent = 'Return to review';
+      document.getElementById('hqBuildAssistantIntro').textContent =
+        'Edit your setup, then review it with your Notes choice. Nothing is built here.';
+    }
     buildModalStartedForPAF = !!buildTarget.paf;
     const modal = requireModal('hqBuildModal');
-    if (modal) modal.show();
+    if (modal) {
+      // Bootstrap ignores hide while its entrance is transitioning. Do not
+      // expose a submit action that can silently lose the user's click.
+      document.getElementById('hqBuildSubmitBtn').disabled = true;
+      modal.show();
+    }
     // Observational: Ori's HQ walkthrough uses this to advance to its final
     // step, where the existing form owns all editing and confirmation.
     if (modal) emitHQQuestSignal('build-form-opened');
@@ -818,6 +1068,18 @@ export function followUpView(f) {
   }
 
   function wireBuildModal() {
+    document.getElementById('hqBuildModal')?.addEventListener('shown.bs.modal', () => {
+      document.getElementById('hqBuildSubmitBtn').disabled = !!buildTarget.unavailable;
+    });
+    document.getElementById('hqBuildModal')?.addEventListener('hidden.bs.modal', () => {
+      const editor = reviewEditor;
+      reviewEditor = null;
+      if (editor)
+        editor.onReturn(
+          collectBuildRequest(),
+          document.getElementById('hqBuildWorkspaceRoot').value.trim()
+        );
+    });
     const browseButton = document.getElementById('hqBuildWorkspaceRootBrowseBtn');
     if (browseButton) browseButton.addEventListener('click', () => browseBuildWorkspaceRoot());
     const workspaceRootInput = document.getElementById('hqBuildWorkspaceRoot');
@@ -844,7 +1106,18 @@ export function followUpView(f) {
     const submitBtn = document.getElementById('hqBuildSubmitBtn');
     if (!submitBtn) return;
     submitBtn.addEventListener('click', async () => {
+      if (reviewEditor) {
+        bootstrapModal('hqBuildModal')?.hide();
+        return;
+      }
+      if (hasPendingHQRequest()) {
+        bootstrapModal('hqBuildModal')?.hide();
+        await checkHQSetup();
+        return;
+      }
       const errorBox = document.getElementById('hqBuildError');
+      let modalClosed = null;
+      const focusOwned = document.getElementById('hqBuildModal').contains(document.activeElement);
       submitBtn.disabled = true;
       if (errorBox) errorBox.hidden = true;
       try {
@@ -862,31 +1135,38 @@ export function followUpView(f) {
           const workspaceRootSaved = await saveBuildWorkspaceRoot();
           if (!workspaceRootSaved) return;
         }
-        const requestID = target.paf ? hqRequestID(window.localStorage) : '';
-        const result = await postJSON(
-          target.endpoint,
-          hqBuildRequestPayload(target, collectBuildRequest(), requestID)
-        );
+        if (target.paf) {
+          const form = collectBuildRequest(); // Standalone still intentionally omits Notes.
+          const element = document.getElementById('hqBuildModal');
+          modalClosed = new Promise(resolve =>
+            element.addEventListener('hidden.bs.modal', resolve, { once: true })
+          );
+          bootstrapModal('hqBuildModal')?.hide();
+          const observed = await submitReviewedHQ(target, form, {
+            root: document.getElementById('hqBuildWorkspaceRoot').value,
+            focusOwned
+          });
+          if (observed.personal_assistant?.state === 'active') emitHQQuestSignal('setup-succeeded');
+          if (!observed.presentation && observed.personal_assistant?.state === 'active')
+            await completePAFHQTransition(observed.personal_assistant);
+          return;
+        }
+        await postJSON(target.endpoint, hqBuildRequestPayload(target, collectBuildRequest(), ''));
 
         const modal = bootstrapModal('hqBuildModal');
         if (modal) modal.hide();
         emitHQQuestSignal('setup-succeeded');
 
-        if (!target.paf) {
-          // Legacy path: unchanged, including its reload.
-          toast('Your Personal HQ is ready.', 'Personal HQ built');
-          window.setTimeout(() => {
-            window.location.href = '/';
-          }, 700);
-          return;
-        }
-
-        // The PAF path transitions in place. Only clear the request ID once the
-        // server has actually returned an active relationship.
-        const relationship = result && result.personal_assistant;
-        if (relationship && relationship.state === 'active') clearHQRequestID(window.localStorage);
-        await completePAFHQTransition(relationship);
+        // Legacy path: unchanged, including its reload and omitted Notes.
+        toast('Your Personal HQ is ready.', 'Personal HQ built');
+        window.setTimeout(() => {
+          window.location.href = '/';
+        }, 700);
       } catch (err) {
+        if (modalClosed) {
+          await modalClosed;
+          bootstrapModal('hqBuildModal')?.show();
+        }
         if (errorBox) {
           errorBox.textContent =
             err && err.message ? err.message : 'Could not build your Personal HQ. Try again.';

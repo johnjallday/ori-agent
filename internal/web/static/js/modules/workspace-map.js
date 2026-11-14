@@ -2973,25 +2973,25 @@
     return (
       '<svg class="ws-map-struct is-hq-struct" width="118" height="104" viewBox="0 0 118 110" aria-hidden="true">' +
       // ground pad
-      '<polygon points="59,64 109,86 59,108 9,86" fill="#2a2109" stroke="#e8b54b" stroke-opacity=".55"/>' +
+      '<g data-hq-part="foundation"><polygon points="59,64 109,86 59,108 9,86" fill="#2a2109" stroke="#e8b54b" stroke-opacity=".55"/>' +
       // base block
       '<polygon points="19,72 19,88 59,108 59,92" fill="#4c3c17"/>' +
       '<polygon points="99,72 99,88 59,108 59,92" fill="#372c11"/>' +
-      '<polygon points="59,52 99,72 59,92 19,72" fill="#7a5f22" stroke="#e8b54b" stroke-opacity=".35"/>' +
+      '<polygon points="59,52 99,72 59,92 19,72" fill="#7a5f22" stroke="#e8b54b" stroke-opacity=".35"/></g>' +
       // tower walls
-      '<polygon points="37,40 37,68 59,79 59,51" fill="#9c7a2c"/>' +
-      '<polygon points="81,40 81,68 59,79 59,51" fill="#785e22"/>' +
+      '<g data-hq-part="walls"><polygon points="37,40 37,68 59,79 59,51" fill="#9c7a2c"/>' +
+      '<polygon points="81,40 81,68 59,79 59,51" fill="#785e22"/></g>' +
       // tower windows (lit)
-      '<circle cx="46" cy="53" r="1.5" fill="#ffe08a"/>' +
+      '<g data-hq-part="lights"><circle cx="46" cy="53" r="1.5" fill="#ffe08a"/>' +
       '<circle cx="46" cy="62" r="1.5" fill="#ffe08a"/>' +
       '<circle cx="72" cy="53" r="1.5" fill="#ffe08a"/>' +
-      '<circle cx="72" cy="62" r="1.5" fill="#ffe08a"/>' +
+      '<circle cx="72" cy="62" r="1.5" fill="#ffe08a"/></g>' +
       // gold roof
-      '<polygon points="59,29 81,40 59,51 37,40" fill="#f2c85c" stroke="#ffe08a" stroke-opacity=".5"/>' +
+      '<g data-hq-part="roof"><polygon points="59,29 81,40 59,51 37,40" fill="#f2c85c" stroke="#ffe08a" stroke-opacity=".5"/>' +
       // spire + pennant + beacon
       '<line x1="59" y1="29" x2="59" y2="10" stroke="#ffd469" stroke-width="2.4" stroke-linecap="round"/>' +
       '<polygon points="59,12 74,17 59,22" fill="#ffd469"/>' +
-      '<circle cx="59" cy="9" r="3.4" fill="#ffe08a" stroke="#ffd469"/>' +
+      '<circle cx="59" cy="9" r="3.4" fill="#ffe08a" stroke="#ffd469"/></g>' +
       '</svg>'
     );
   }
@@ -11119,6 +11119,141 @@
     return true;
   }
 
+  // Post-success flourish only. Remounted tiles inherit elapsed time, never a
+  // second entrance. The coordinator owns eligibility, never the SVG.
+  function playHQAssembly(workspaceId) {
+    var container = lastMount && lastMount.container;
+    if (!container || workspaceId !== hqWorkspaceId) return null;
+    function findTile() {
+      return Array.from(container.querySelectorAll('[data-ws-id]')).find(function (el) {
+        return (
+          el.getAttribute('data-ws-id') === workspaceId &&
+          el.querySelector('[data-building-variant="hq"], .is-hq-struct')
+        );
+      });
+    }
+    var tile = findTile();
+    if (!tile) return null;
+    var art = tile.querySelector('[data-building-variant="hq"], .is-hq-struct');
+    var reduced =
+      window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var complete;
+    var done = new Promise(function (resolve) {
+      complete = resolve;
+    });
+    var timer = null;
+    var observer = null;
+    var settled = false;
+    var started = Date.now();
+    function bindArt() {
+      tile.classList.remove('is-growing-in');
+      tile.dataset.hqReveal = 'playing';
+      art.style.setProperty('--hq-assembly-offset', '-' + (Date.now() - started) + 'ms');
+      art.classList.add('is-assembling');
+    }
+    function skip() {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (observer) observer.disconnect();
+      art.classList.remove('is-assembling');
+      art.style.removeProperty('--hq-assembly-offset');
+      tile.dataset.hqReveal = 'settled';
+      complete();
+    }
+    tile.classList.remove('is-growing-in');
+    tile.dataset.hqReveal = reduced ? 'settled' : 'playing';
+    if (reduced) skip();
+    else {
+      bindArt();
+      timer = setTimeout(skip, 1600);
+      if (typeof MutationObserver === 'function') {
+        observer = new MutationObserver(function () {
+          if (tile.isConnected) return;
+          var replacement = findTile();
+          if (!replacement || Date.now() - started >= 1600) {
+            skip();
+            return;
+          }
+          tile = replacement;
+          art = tile.querySelector('[data-building-variant="hq"], .is-hq-struct');
+          bindArt();
+        });
+        observer.observe(container, { childList: true, subtree: true });
+      }
+    }
+    return { skip: skip, done: done };
+  }
+
+  // HQ presentation frames the reserved site or verified canonical tile, never
+  // selecting it, persisting a camera, or joining a layout transaction.
+  function frameHQCreation(workspaceId) {
+    var container = lastMount && lastMount.container;
+    if (
+      !container ||
+      scopeGroupId ||
+      placementSession ||
+      moveState ||
+      layoutState.status !== 'ready'
+    )
+      return false;
+    var node = workspaceId
+      ? ((lastWorldLayout && lastWorldLayout.nodes) || []).find(function (item) {
+          return item.id === workspaceId;
+        })
+      : lastWorldLayout && lastWorldLayout.hqSite;
+    if (!node) return false;
+    var framed = centerOn(camera, node);
+    setCamera(framed, container, { persist: false });
+    var canvas = container.querySelector('[data-ws-map-viewport]');
+    var result = document.getElementById('personalHQResultHost');
+    if (canvas && result && !result.hidden) {
+      if (window.innerWidth <= 640 || (window.innerWidth <= 900 && window.innerHeight < 600)) {
+        // Canonical refresh can add header readouts after the pending stage.
+        // Finish the same foreground framing after that real layout exists.
+        var navbar = document.querySelector('.navbar');
+        var navHeight = navbar ? navbar.getBoundingClientRect().height : 0;
+        window.scrollBy({
+          top: canvas.getBoundingClientRect().top - navHeight - 12,
+          behavior: 'instant'
+        });
+      }
+      var bounds = canvas.getBoundingClientRect();
+      var overlay = result.getBoundingClientRect();
+      var middleX = bounds.left + bounds.width / 2;
+      // The desktop card sits beside the HQ. A phone's bottom surface spans
+      // the canvas, so frame in the visible space above it, never behind it.
+      if (overlay.left < middleX && overlay.right > middleX) {
+        var top = Math.max(0, bounds.top);
+        var bottom = Math.min(bounds.bottom, overlay.top, window.innerHeight);
+        var targetX = null;
+        var tile =
+          workspaceId &&
+          Array.from(container.querySelectorAll('.ws-map-tile[data-ws-id]')).find(
+            function (element) {
+              return element.getAttribute('data-ws-id') === workspaceId;
+            }
+          );
+        if (tile) {
+          var tileBounds = tile.getBoundingClientRect();
+          // Narrow desktops / browser zoom can fit HQ beside the surface even
+          // when there is too little vertical room above it.
+          if (overlay.left - bounds.left >= tileBounds.width + 24) {
+            targetX = (bounds.left + overlay.left) / 2;
+            bottom = Math.min(bounds.bottom, window.innerHeight - 80);
+          }
+          if (bottom - top < 100) return true;
+          if (targetX !== null)
+            framed.centerX += (tileBounds.left + tileBounds.width / 2 - targetX) / framed.zoom;
+          framed.centerY +=
+            (tileBounds.top + tileBounds.height / 2 - (top + bottom) / 2) / framed.zoom;
+          setCamera(framed, container, { persist: false });
+        }
+      }
+    }
+    return true;
+  }
+
   // Reveal a real building or district (including an empty/collapsed Home).
   // Navigation is not a layout write, nor consent to complete a move.
   function reveal(workspaceId, options) {
@@ -12282,6 +12417,11 @@
     // Arrow keys move it and Enter saves; Escape or leaving writes nothing.
     beginMove: beginMove,
     reveal: reveal,
+    frameHQCreation: frameHQCreation,
+    playHQAssembly: playHQAssembly,
+    canPresentHQCreation: function () {
+      return !scopeGroupId && !placementSession && !moveState;
+    },
     // panBy moves the camera by screen pixels, for an overlay that must bring
     // a building into the part of the map it can see (the Commander's Show).
     // Navigation only: nothing is selected and the camera is not saved.

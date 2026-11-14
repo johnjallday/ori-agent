@@ -871,6 +871,54 @@ test('diffAnnouncements reports a newly completed quest', () => {
   assert.deepEqual(diff.newCompletions, [{ id: 'a', title: 'First quest' }]);
 });
 
+test('HQ-owned completions stay recorded without duplicate toasts or a later replay', () => {
+  const ids = ['renamed-hq', 'renamed-notes', 'renamed-capture'];
+  const routes = ['/?quest=build-hq', '/?quest=second-brain'];
+  const status = {
+    tiers: [
+      tier({
+        tier: 1,
+        complete: true,
+        quests: ids.map((id, i) =>
+          quest({ id, status: 'completed', action_url: routes[i ? 1 : 0] })
+        )
+      })
+    ]
+  };
+  const diff = diffAnnouncements(status, new Set(), { 1: false }, routes);
+  assert.deepEqual([...diff.completedNow], ids);
+  assert.deepEqual(diff.newCompletions, []);
+  assert.deepEqual(diff.newTierCompletions, []);
+  assert.deepEqual(diff.nextKnownTierComplete, { 1: true });
+  const later = diffAnnouncements(status, diff.completedNow, diff.nextKnownTierComplete);
+  assert.deepEqual(later.newCompletions, []);
+  assert.deepEqual(later.newTierCompletions, []);
+  assert.equal(
+    diffAnnouncements(status, new Set(), {}).newCompletions.length,
+    3,
+    'ordinary Notes/HQ flows still announce their own results'
+  );
+});
+
+test('an HQ-owned completion does not silence unrelated progress in the same refresh', () => {
+  const status = {
+    tiers: [
+      tier({
+        tier: 1,
+        complete: true,
+        quests: [
+          quest({ id: 'pa-second-brain', status: 'completed', action_url: '/?quest=second-brain' }),
+          quest({ id: 'other', title: 'Another result', status: 'completed' })
+        ]
+      })
+    ]
+  };
+  const diff = diffAnnouncements(status, new Set(), {}, ['/?quest=second-brain']);
+  assert.deepEqual(diff.newCompletions, [{ id: 'other', title: 'Another result' }]);
+  assert.equal(diff.newTierCompletions.length, 1);
+  assert.equal(diff.completedNow.has('pa-second-brain'), true);
+});
+
 test('diffAnnouncements never reports a skip as a completion', () => {
   const status = {
     tiers: [tier({ quests: [quest({ id: 'a', status: 'skipped' })] })]

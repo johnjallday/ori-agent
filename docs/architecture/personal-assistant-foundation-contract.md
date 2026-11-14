@@ -366,6 +366,39 @@ HQ stays active whatever it reports (`notes_setup`), and only
 `POST /api/personal-assistant/second-brain/setup/retry` repeats it. See
 `docs/architecture/second-brain.md`, "Set up with Personal HQ".
 
+### Foreground HQ reveal
+
+The normal review has one **Build my HQ** confirmation owner. **Customize
+setup** returns its edited name, directory and brief settings to that review;
+it never silently drops the reviewed Notes choice. The standalone alternate
+form still omits Notes, which authorizes no Notes setup.
+
+After revalidation, an explicit Personal Assistant build/resume may transiently
+show Home's Map and suspend the conversation through `OriCreationTransition`.
+`personal-hq-onboarding.js` retains request identity, exact retry payload and
+canonical outcome checks; `personal-hq-reveal.js` owns only presentation.
+Known pre-acceptance refusal restores the review. Unknown responses require
+status/recovery; an active HQ with a stale projection offers refresh, not a
+second build. Missing map/rendering never invalidates a successful operation.
+
+Only a verified, eligible foreground success assembles the existing HQ art for
+1.6 seconds, with the saved assistant appearance and deterministic welcome.
+Skip/reduced motion render the final scene. A remount inherits elapsed motion;
+reload, import, repair, active visits and Notes retry never restart it. Explicit
+chat reopening, navigation, map interaction, backgrounding or a newer owner
+permanently yield that presentation. Successful foreground completion keeps
+chat folded without discarding its draft/recipient/expanded-state preference.
+Neither transient framing nor the greeting writes layout or calls a provider.
+
+The single existing HQ card/form can move into a compact Home result outside
+chat. It offers **Save a first note** only for currently writable Notes, plus a
+canonical **Explore HQ** link and explicit **Setup details**. Today/Done retains
+ordinary receipt access; it does not compete with the foreground result.
+Matching HQ/Notes mission toasts stay quiet while this presentation owns the
+feedback, so they cannot cover its controls. Progression still records those
+completions without a delayed replay; unrelated progress stays unchanged. See
+“Set up with Personal HQ” in the Notes contract for capture/retry safeguards.
+
 The first-assignment quest keeps its existing shape: its three category screens
 mutate only the browser draft; review persists the existing bounded preview
 journal, and final confirmation remains the sole path to atomic canonical apply.

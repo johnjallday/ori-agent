@@ -126,14 +126,21 @@ test.describe('Personal HQ with notes included', () => {
     expect(hqRequests).toHaveLength(1);
     const sent = JSON.parse(hqRequests[0]);
     expect(sent.notes).toEqual({ include: true, witness: reviewed });
-    // The result takes focus, and the keyboard reaches its notes retry next.
+    // Focus leaves the hidden pending status for the compact result. No chat
+    // drawer or backdrop covers the real HQ or the independent Notes warning.
+    await expect(page.locator('#personalHQResultHost')).toBeVisible();
+    await expect(page.locator('#personalAssistantPanel')).toBeHidden();
     await expect(page.locator('#personalAssistantHQHeadline')).toBeFocused();
-    await expect(page.locator('#personalAssistantHQHeadline')).toHaveText(/Personal HQ is ready/);
+    await expect(page.locator('#personalAssistantHQHeadline')).toHaveText('Your HQ is ready');
     const retry = page.getByRole('button', { name: 'Retry notes setup' });
-    for (let i = 0; i < 4 && !(await retry.evaluate(n => n === document.activeElement)); i += 1) {
+    for (let i = 0; i < 6 && !(await retry.evaluate(n => n === document.activeElement)); i += 1) {
       await page.keyboard.press('Tab');
     }
     await expect(retry).toBeFocused();
+    fs.mkdirSync('tasks/evidence-hq-onboarding-reveal/group-4', { recursive: true });
+    await page.screenshot({
+      path: `tasks/evidence-hq-onboarding-reveal/group-4/${test.info().project.name}-occupied-notes.png`
+    });
 
     const status = await notesStatus(page);
     expect(status.status).toBe('not_connected');
@@ -152,16 +159,20 @@ test.describe('Personal HQ with notes included', () => {
     // The user moves their folder out of the way.
     fs.renameSync(reviewed, `${reviewed} (mine)`);
 
+    // New test context restores only the presentation markers of the prior
+    // browser; the occupied folder and HQ remain the real server's state.
+    await page.addInitScript(id => {
+      localStorage.setItem('ori.hq.firstAction.v1', JSON.stringify({ workspaceId: id }));
+      sessionStorage.setItem('ori.hq.compactResult.v1', id);
+    }, before.hq_workspace_id);
     await page.goto('/');
-    await page.waitForFunction(() => Boolean((window as any).PersonalAssistantHQCard?._state));
-    const retried = await page.evaluate(async () => {
-      const response = await fetch('/api/personal-assistant/second-brain/setup/retry', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: '{}'
-      });
-      return { status: response.status, body: await response.json() };
-    });
+    await expect(page.locator('#personalHQResultHost')).toBeVisible();
+    const retryResponse = page.waitForResponse(
+      r => r.url().endsWith('/second-brain/setup/retry') && r.request().method() === 'POST'
+    );
+    await page.locator('#personalAssistantHQNotesRetry').click();
+    const response = await retryResponse;
+    const retried = { status: response.status(), body: await response.json() };
     expect(retried.status).toBe(200);
     expect(retried.body.notes_setup.status).toBe('ready');
     expect(retried.body.notes_setup.path).toBe(reviewed);
@@ -178,6 +189,12 @@ test.describe('Personal HQ with notes included', () => {
     const after = await relationship(request);
     expect(after.state).toBe('active');
     expect(after.hq_workspace_id).toBe(before.hq_workspace_id);
+    expect(after.daily_brief).toEqual(before.daily_brief);
+    await expect(page.locator('.is-assembling')).toHaveCount(0);
+    await expect(page.locator('#personalAssistantHQFirstNote')).toBeVisible();
+    await page.screenshot({
+      path: `tasks/evidence-hq-onboarding-reveal/group-4/${test.info().project.name}-notes-recovered.png`
+    });
     if (workspaces !== null) {
       expect((await ok(await request.get('/api/workspaces'))).length).toBe(workspaces);
     }
@@ -204,28 +221,21 @@ test.describe('Personal HQ with notes included', () => {
       if (sessionStorage.getItem('spec-seeded')) return;
       sessionStorage.setItem('spec-seeded', '1');
       localStorage.setItem('ori.hq.firstAction.v1', JSON.stringify({ workspaceId: id }));
+      sessionStorage.setItem('ori.hq.compactResult.v1', id);
     }, workspaceId);
     await page.goto('/');
-    await openDrawer(page);
+    await expect(page.locator('#personalHQResultHost')).toBeVisible();
+    await expect(page.locator('#personalAssistantPanel')).toBeHidden();
     const card = page.locator('#personalAssistantHQCard');
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute('data-result', 'active');
-    // It leads: above the strip, which is folded away meanwhile.
-    expect(
-      await page.evaluate(() => {
-        const c = document.getElementById('personalAssistantHQCard')!;
-        const s = document.getElementById('personalAssistantTodayStrip')!;
-        return Boolean(c.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_FOLLOWING);
-      })
-    ).toBe(true);
-    await expect(page.locator('#personalAssistantTodayStrip')).toBeHidden();
-    await expect(page.locator('#personalAssistantHQFirstLead')).toContainText(
-      'No setup questions left'
-    );
+    expect(await card.evaluate(c => c.parentElement?.id)).toBe('personalHQResultHost');
+    await expect(page.locator('.is-assembling')).toHaveCount(0);
+    await expect(page.locator('#personalAssistantHQFirstLead')).toContainText('Notes are ready');
     await expect(page.locator('#personalAssistantHQAdjust')).toBeHidden();
-    const note = page.getByRole('button', { name: /Save a quick note/ });
+    const note = page.getByRole('button', { name: /Save a first note/ });
     await expect(note).toBeVisible();
-    await expect(page.getByRole('button', { name: /Show me a project folder/ })).toBeVisible();
+    await expect(page.locator('#personalAssistantHQFirstFolder')).toBeHidden();
     // The result card has no A/AA violations in this state.
     await page.addScriptTag({ url: AXE_URL });
     const violations = await page.evaluate(async () =>
@@ -268,10 +278,20 @@ test.describe('Personal HQ with notes included', () => {
     expect(fs.readdirSync(inbox).filter(name => name !== 'README.md')).toHaveLength(
       before.length + 1
     );
+    // Back and reload retain the exact uncertain payload and request ID.
+    // Editing it would turn a replay into a different logical write.
+    await expect(text).toHaveAttribute('readonly', '');
+    await page.locator('#personalAssistantHQNoteBack').click();
+    await note.click();
+    await expect(text).toHaveValue('Call the venue about Friday');
+    await page.reload();
+    await note.click();
+    await expect(text).toHaveValue('Call the venue about Friday');
+    await expect(text).toHaveAttribute('readonly', '');
     // Saving again replays the same save: still exactly one new note.
     await page.locator('#personalAssistantHQNoteSave').click();
     const saved = page.locator('#personalAssistantHQNoteSavedTitle');
-    await expect(saved).toContainText('Saved to Notes · Inbox/');
+    await expect(saved).toContainText('Saved to Inbox · Inbox/');
     await expect(saved).toBeFocused();
     await expect(page.locator('#personalAssistantHQNoteSavedText')).toHaveText(
       'Call the venue about Friday'
@@ -284,18 +304,12 @@ test.describe('Personal HQ with notes included', () => {
 
     // A reload keeps the first step; leaving it ends it for good.
     await page.reload();
-    await openDrawer(page);
     await expect(page.locator('#personalAssistantHQFirst')).toBeVisible();
-    await page.getByRole('button', { name: 'I’ll explore for now' }).click();
+    await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+    await expect(page.locator('.is-assembling')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Dismiss HQ welcome' }).click();
     await expect(card).toBeHidden();
-    // Focus goes to what leads now, never to the page body.
-    expect(
-      await page.evaluate(() =>
-        ['personalAssistantTodayStripToggle', 'personalAssistantInput'].includes(
-          document.activeElement?.id || ''
-        )
-      )
-    ).toBe(true);
+    await expect(page.locator('[data-ws-map-viewport]')).toBeFocused();
     expect(await page.evaluate(() => localStorage.getItem('ori.hq.firstAction.v1'))).toBeNull();
     await page.reload();
     await openDrawer(page);

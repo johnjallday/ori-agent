@@ -138,6 +138,13 @@ export function readFirstAction(storage) {
   }
 }
 
+// Missing identifiers must never match each other and manufacture a first
+// action for a returning HQ (including older, top-level-ID projections).
+export function hqFirstActionMatches(workspaceId, record, intentWorkspaceId) {
+  const id = String(workspaceId || '').trim();
+  return Boolean(id && (record?.workspaceId === id || intentWorkspaceId === id));
+}
+
 export function rememberFirstAction(storage, workspaceId) {
   const id = String(workspaceId || '').trim();
   if (!storage || !id) return false;
@@ -172,13 +179,13 @@ export function hqFirstActionView(notes, { hqRoute = '' } = {}) {
     openNotes: '',
     setupNotes: false,
     retry: false,
-    folder: true,
+    folder: false,
     explore: true
   };
   if (status === 'ready' && notes.writable) {
     return {
       ...base,
-      lead: 'Your notes have a home. No setup questions left: start with whatever is on your mind.',
+      lead: 'Notes are ready for your first idea or reminder.',
       note: true
     };
   }
@@ -192,10 +199,10 @@ export function hqFirstActionView(notes, { hqRoute = '' } = {}) {
   if (status === 'failed' || status === 'pending') {
     return { ...base, lead: 'Your HQ is ready. Notes still need one step.', retry: true };
   }
-  if (status === 'stopped') {
+  if (['stopped', 'missing', 'unavailable'].includes(status)) {
     return {
       ...base,
-      lead: 'Your HQ is ready. Your notes stay as they are.',
+      lead: notes?.line || 'Your HQ is ready. Your notes stay as they are.',
       openNotes: notesRoute
     };
   }
@@ -204,6 +211,35 @@ export function hqFirstActionView(notes, { hqRoute = '' } = {}) {
     lead: 'Make yourself at home. Start wherever you like; you can set up notes later.',
     setupNotes: true
   };
+}
+
+// Current source/capability wins over a saved setup receipt. In particular,
+// an old successful setup never authorizes writing to a missing/changed source.
+export function hqLiveNotesOutcome(notes) {
+  if (!notes)
+    return {
+      status: 'unavailable',
+      writable: false,
+      canRetry: false,
+      line: 'Notes status is unavailable. Open Notes to check the connection.'
+    };
+  if (notes.setup && ['failed', 'pending', 'stopped'].includes(notes.setup.status))
+    return hqNotesOutcome(notes.setup);
+  if (notes.source && notes.status === 'connected')
+    return hqNotesOutcome({
+      status: 'ready',
+      path: notes.source.path,
+      writable: notes.source.origin === 'created_by_ori'
+    });
+  if (notes.source)
+    return {
+      status: 'missing',
+      path: notes.source.path,
+      writable: false,
+      canRetry: false,
+      line: 'Your notes connection needs attention. Open Notes to check or reconnect it; existing files are unchanged.'
+    };
+  return hqNotesOutcome(null);
 }
 
 /** What a build's notes result means for the receipt and the retry. */

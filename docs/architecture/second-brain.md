@@ -442,14 +442,28 @@ user sets notes up from Notes. Nothing is duplicated.
 
 The setup receipt is the same rules-only `RunSetup` over Ori's new folder — no
 model, no read of any folder the user already had — and the project question is
-recorded `deferred`. After the build the HQ card leads the drawer with the
-result (Today's strip folds meanwhile and the notes ask waits): **Save a quick
-note** (writable notes; the existing `/capture` with one request id kept across
-retries, so a lost response never saves twice), **Open Notes** (a read-only or
-other connected folder), **Set up notes** (deferred), **Retry notes setup**
-(failed/pending), **Show me a project folder** (the existing chooser) and **I’ll
-explore for now**. Leaving it clears `ori.hq.firstAction.v1`, a per-browser
-presentation record set only by the build, so returning users never see it.
+recorded `deferred`. After a foreground build, the existing HQ card/form moves
+into a compact Home result outside the folded drawer. **Save a first note**
+expands that same editor, not a second capture owner. It re-reads current Notes
+writability/source identity at open and save; an old ready receipt grants no
+write permission. The existing `/capture` keeps one request ID and exact
+uncertain text across Back/reload/retry, so a lost response never saves twice.
+Only a canonical `Inbox/…` capture shows **Saved to Inbox**; errors retain text.
+**Add another note** starts a new draft identity. No note is saved automatically.
+
+**Explore HQ** is the verified workspace link, always available after a valid
+route is observed. Read-only or missing/stopped connections offer **Open Notes**,
+omitted Notes may offer **Set up notes**, and failed/pending setup keeps the
+independent **Retry notes setup** warning visible. Folder setup stays in its
+existing entry points rather than becoming a third onboarding CTA. Setup details
+are explicit; ordinary Today/Done receipts remain available without a competing
+full-size result or automatic panel opening.
+
+Done, Explore or dismiss clears `ori.hq.firstAction.v1` and this tab's compact
+presentation marker, not durable Notes warnings. Reload may restore an unfinished
+optional action/draft in compact form without focus or construction replay.
+Explicitly reopening chat yields the compact presentation; a settled returning
+HQ never starts onboarding again.
 
 ### What Ori writes, and when
 
