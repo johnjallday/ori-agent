@@ -321,7 +321,7 @@ test('the card before Start reads the server card and refuses one without a toke
         { provider: 'claude', model: 'claude-sonnet-5-5', label: 'claude-sonnet-5-5 (claude)' },
         { provider: 'openai', model: 'gpt-x', label: 'gpt-x (openai)' }
       ],
-      agents: [{ name: 'Atlas', model: 'claude-sonnet-5-5' }],
+      agents: [{ name: 'Atlas', model: 'claude-sonnet-5-5', runs: '' }],
       existing: '',
       mode: 'new'
     }
@@ -715,6 +715,56 @@ test('Role waits behind Customize, closed unless it already holds text', () => {
   );
 });
 
+test('Customize stays closed for a role identical to the brief and offers the same face chooser', async () => {
+  const view = hireCardView({ mandate: 'Keep this tidy' });
+  view.brief = 'Keep this tidy';
+  const win = faceWindow();
+  let options;
+  win.CharacterPicker = {
+    open: async value => {
+      options = value;
+      return { action: 'skip' };
+    }
+  };
+  const card = renderFolderAgentCard(view, stubDocument(), { win });
+  const details = card.querySelector('.folder-agent-card__who-customize');
+  assert.equal(details.open, false);
+  const button = details.querySelector('.folder-agent-card__who-change-face');
+  assert.equal(button.textContent, 'Change face');
+  button.listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(options.trigger, button);
+  assert.equal(view.hire.character, '');
+});
+
+test('an existing manager opens reuse and includes its runs in visible and accessible copy', () => {
+  const name = 'Albums Manager with a long name';
+  const view = hireCardView({
+    agents: [{ name, model: 'claude-sonnet-5-5', runs: 'Albums and 2 more' }],
+    existing: name
+  });
+  const card = renderFolderAgentCard(view, stubDocument());
+  assert.equal(card.querySelector('.folder-agent-card__who-reuse').open, true);
+  assert.equal(text(card, '.folder-agent-card__who-heading'), `Using ${name}`);
+  const radio = card.querySelector('.folder-agent-card__who-agent-radio');
+  assert.equal(
+    radio.attributes['aria-label'],
+    `${name}, claude-sonnet-5-5, runs Albums and 2 more`
+  );
+  assert.equal(text(card, '.folder-agent-card__who-agent-runs'), 'runs Albums and 2 more');
+  assert.equal(card.querySelector('.folder-agent-card__who-agent').attributes.title, name);
+});
+
+test('the hire card clamps agent names to two lines and separates keyboard focus from selection', () => {
+  const css = readFileSync(new URL('../../css/home-command.css', import.meta.url), 'utf8');
+  assert.match(css, /\.folder-agent-card__who-agent-name\s*\{[^}]*-webkit-line-clamp: 2;/);
+  assert.match(
+    css,
+    /\.folder-agent-card__who-chip:has\(:focus-visible\):not\(\[data-pointer-focus="true"\]\)\s*\{[^}]*outline: 2px solid var\(--hc-ink/
+  );
+  assert.doesNotMatch(css, /\.folder-agent-card__who-chip:focus-within/);
+});
+
 test('the model chip lists the same models, and what it picks is what Start sends', () => {
   const view = hireCardView({
     models: [
@@ -732,6 +782,14 @@ test('the model chip lists the same models, and what it picks is what Start send
   assert.equal(folderAgentHireChoice(view.hire).model, undefined);
   const chipText = () => card.querySelector('.folder-agent-card__who-chip-text').textContent;
   assert.equal(chipText(), 'No model yet');
+  const container = chip.parentElement;
+  chip.listeners.pointerdown();
+  assert.equal(container.dataset.pointerFocus, 'true');
+  chip.listeners.keydown();
+  assert.equal(container.dataset.pointerFocus, undefined);
+  chip.listeners.pointerdown();
+  chip.listeners.blur();
+  assert.equal(container.dataset.pointerFocus, undefined);
   chip.value = ['openai', 'gpt-x'].join(String.fromCharCode(0));
   chip.listeners.change();
   assert.equal(chipText(), 'gpt-x (openai)');
@@ -769,14 +827,23 @@ const listOf = agents => async () => ({ ok: true, json: async () => ({ agents })
 const settle = () => new Promise(resolve => setTimeout(resolve, 100));
 const agentDraws = win => win.drawn.filter(draw => draw.options.size === 40);
 
-test('your agents are a row of faces under "Or one of your agents", not a dropdown', () => {
+test('your agents are folded under a counted summary, with the same radio group', () => {
   const win = faceWindow();
   const card = renderFolderAgentCard(hireCardView({ agents: SAVED }), stubDocument(), {
     win,
     fetchImpl: listOf([])
   });
   const heading = card.querySelector('.folder-agent-card__who-heading');
-  assert.equal(heading.textContent, 'Or one of your agents');
+  assert.equal(heading.textContent, 'Use one of your agents (3)');
+  const reuse = card.querySelector('.folder-agent-card__who-reuse');
+  assert.equal(reuse.tagName, 'DETAILS');
+  assert.equal(reuse.open, false);
+  assert.equal(heading.tagName, 'SUMMARY');
+  pick(card, 'Beta');
+  assert.equal(heading.textContent, 'Using Beta');
+  assert.equal(reuse.open, false, 'a folded summary still names the choice');
+  card.querySelector('.folder-agent-card__who-name').listeners.input();
+  assert.equal(heading.textContent, 'Use one of your agents (3)');
   const row = card.querySelector('.folder-agent-card__who-agents');
   assert.equal(row.attributes.role, 'radiogroup');
   assert.equal(row.attributes['aria-labelledby'], heading.id);

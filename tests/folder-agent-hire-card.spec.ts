@@ -13,6 +13,16 @@ async function capture(page: Page, name: string) {
   await page.screenshot({ path: join(evidence, `${name}.png`), fullPage: true });
 }
 
+async function feedFolder(page: Page, name: string) {
+  await page.goto('/?panel=today&folder=show');
+  const entry = page.locator('#personalAssistantFolderPathEntry');
+  await entry.locator('input').fill(join(sandbox, name));
+  await entry.getByRole('button').click();
+  const card = page.locator('#personalAssistantFolderAgent');
+  await expect(card.locator('.folder-agent-card__title')).toHaveText(`Hire an agent for ${name}`);
+  return card;
+}
+
 // Real sandbox, real picker, real single-request hire. No provider credentials.
 test('folder hire picks a character, preserves it on creation, and offers generated faces', async ({
   page,
@@ -47,15 +57,7 @@ test('folder hire picks a character, preserves it on creation, and offers genera
   });
   expect(hq.status(), await hq.text()).toBe(201);
 
-  async function feed(name: string) {
-    await page.goto('/?panel=today&folder=show');
-    const entry = page.locator('#personalAssistantFolderPathEntry');
-    await entry.locator('input').fill(join(sandbox, name));
-    await entry.getByRole('button').click();
-    const card = page.locator('#personalAssistantFolderAgent');
-    await expect(card.locator('.folder-agent-card__title')).toHaveText(`Hire an agent for ${name}`);
-    return card;
-  }
+  const feed = (name: string) => feedFolder(page, name);
   const liveModel = process.env.ORI_HIRE_CARD_PROVIDER;
   if (liveModel) {
     const configured = await request.post('/api/settings/system-model', {
@@ -194,4 +196,84 @@ test('Create Workspace keeps the face picker above the sheet with independent fo
   await page.keyboard.press('Escape');
   await expect(page.locator('#charPicker')).toHaveCount(0);
   await expect(sheet).toBeVisible();
+});
+
+test('reuse folds a large roster without hiding selection, runs or keyboard focus', async ({
+  page,
+  request
+}) => {
+  test.skip(!sandbox, 'requires --sandbox-env ORI_HIRE_CARD_SANDBOX');
+  await installLocalCdn(page);
+  const cleared = await request.post('/api/settings/system-model', {
+    data: { provider: '', model: '' }
+  });
+  expect(cleared.ok(), await cleared.text()).toBeTruthy();
+  const longName = 'Albums Manager for recordings and reviews';
+  for (const name of [
+    longName,
+    'Albums Manager for recordings and releases',
+    'Birch',
+    'Cedar',
+    'Dove',
+    'Elm',
+    'Saved Folder Manager'
+  ]) {
+    const created = await request.post('/api/agents', {
+      data: { name, catalog_role: 'orchestrator' }
+    });
+    expect(created.ok(), await created.text()).toBeTruthy();
+  }
+  const workspace = await request.post('/api/workspaces', {
+    data: { name: 'Albums', entry_agent_name: longName }
+  });
+  expect(workspace.ok(), await workspace.text()).toBeTruthy();
+  for (const folder of ['Tidy Folder', 'Saved Folder'])
+    await mkdir(join(sandbox, folder), { recursive: true, mode: 0o750 });
+  const card = await feedFolder(page, 'Tidy Folder');
+  const reuse = card.locator('.folder-agent-card__who-reuse');
+  const heading = card.locator('.folder-agent-card__who-heading');
+  await expect(reuse).not.toHaveAttribute('open', '');
+  await expect(heading).toHaveText(/Use one of your agents \(\d+\)/);
+  expect(await card.locator('.folder-agent-card__who-agent').count()).toBeGreaterThanOrEqual(7);
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(theme => {
+      document.documentElement.setAttribute('data-bs-theme', theme);
+      document.documentElement.setAttribute('data-theme', theme);
+    }, theme);
+    await capture(page, `tidy-folded-${theme}`);
+    await heading.click();
+    const item = card.locator(`.folder-agent-card__who-agent[title="${longName}"]`);
+    await expect(item.locator('.folder-agent-card__who-agent-runs')).toHaveText('runs Albums');
+    await item.scrollIntoViewIfNeeded();
+    expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await expect(card.locator('.folder-agent-card__title')).toBeInViewport();
+    await capture(page, `tidy-open-${theme}`);
+    const radio = item.getByRole('radio');
+    await expect(radio).toHaveAccessibleName(new RegExp(`${longName}, .*runs Albums`));
+    await radio.focus();
+    await page.keyboard.press('Space');
+    await expect(heading).toHaveText(`Using ${longName}`);
+    await expect(card.locator('[data-folder-agent-action="start"]')).toHaveText('Assign & build');
+    await heading.click();
+    await capture(page, `tidy-selected-${theme}`);
+    const name = card.locator('.folder-agent-card__who-name');
+    await name.click();
+    const model = card.locator('.folder-agent-card__who-model');
+    const chip = card.locator('.folder-agent-card__who-chip');
+    await model.click();
+    expect(await chip.evaluate(el => getComputedStyle(el).outlineStyle)).toBe('none');
+    await capture(page, `tidy-model-mouse-${theme}`);
+    await name.click();
+    await page.keyboard.press('Tab');
+    await expect(model).toBeFocused();
+    expect(await chip.evaluate(el => getComputedStyle(el).outlineStyle)).toBe('solid');
+    await capture(page, `tidy-model-keyboard-${theme}`);
+  }
+  const saved = await feedFolder(page, 'Saved Folder');
+  await expect(saved.locator('.folder-agent-card__who-reuse')).toHaveAttribute('open', '');
+  await expect(saved.locator('.folder-agent-card__who-heading')).toHaveText(
+    'Using Saved Folder Manager'
+  );
+  await expect(saved.locator('[data-folder-agent-action="start"]')).toHaveText('Assign & build');
+  await capture(page, 'tidy-saved-manager');
 });

@@ -2236,7 +2236,7 @@ The body is one of `{ "chip": "downloads" }`, `{ "picker": true }` or `{ "select
 `hire` is the card's Hire step: who is hired before anything is created.
 - `models` lists the models a new agent can have. Only tool-capable providers are included. Cloud and CLI providers appear only with credentials. A local server appears only when the system model is on it.
 - `provider` and `model` are the system model (`default: true`). Both are empty when no system model is set; the card then preselects "No model yet".
-- `agents` lists the owner's own agents. The built-in assistant and agents that only a workspace holds are left out.
+- `agents` lists the owner's own agents, idle agents first then by name. Each optional `runs` names the workspaces where it is the entry agent, skipping trash (for example `Albums` or `Albums and 2 more`). The built-in assistant and agents that only a workspace holds are left out.
 - `existing` preselects a saved agent that already has the default name, so it is reused rather than hired twice.
 - `character` suggests a working catalog ID, choosing the least-worn faces first, then the folder's affinity (Downloads: operations-keeper; Desktop: automation-specialist; Documents: research-archivist; other: project-coordinator), then catalog order. Only active character appearances count. An absent suggestion offers the generated face.
 

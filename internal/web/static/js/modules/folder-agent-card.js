@@ -74,7 +74,7 @@ export function folderAgentHireView(hire, folderName = '') {
     }));
   const agents = (Array.isArray(source.agents) ? source.agents : [])
     .filter(a => a && a.name)
-    .map(a => ({ name: String(a.name), model: String(a.model || '') }));
+    .map(a => ({ name: String(a.name), model: String(a.model || ''), runs: String(a.runs || '') }));
   const existing = agents.some(a => a.name === source.existing) ? String(source.existing) : '';
   return {
     name: String(source.agent_name || `${folderName || 'Folder'} Manager`),
@@ -664,9 +664,9 @@ function cardWindow(doc, win) {
 // renderHire draws the Hire section and keeps hire (the view's own object)
 // in step with what the owner picks. The new agent is a face with its name
 // beside it; clicking or typing there chooses a new agent. The owner's own
-// agents are a row of faces under "Or one of your agents"; choosing one dims
+// agents are folded under a counted summary; choosing one dims
 // the new agent. fetchImpl reads the agents' appearance (once per card).
-function renderHire(doc, hire, win, fetchImpl, onSelect) {
+function renderHire(doc, hire, win, fetchImpl, onSelect, brief) {
   const group = `folder-agent-hire-${++hireSeq}`;
   const box = el(doc, 'fieldset', 'folder-agent-card__who');
   box.append(el(doc, 'legend', 'folder-agent-card__who-title', 'Hire'));
@@ -723,6 +723,17 @@ function renderHire(doc, hire, win, fetchImpl, onSelect) {
     const chipText = el(doc, 'span', 'folder-agent-card__who-chip-text');
     chipText.setAttribute('aria-hidden', 'true');
     chip.append(chipText, model);
+    // Native selects can retain :focus-visible after a pointer click (notably
+    // following text input). Suppress only that pointer-origin ring; keyboard
+    // interaction or leaving the chip restores the usual focus-visible rule.
+    model.addEventListener('pointerdown', () => {
+      chip.dataset.pointerFocus = 'true';
+    });
+    const keyboardFocus = () => {
+      delete chip.dataset.pointerFocus;
+    };
+    model.addEventListener('keydown', keyboardFocus);
+    model.addEventListener('blur', keyboardFocus);
     const chipLabel = () =>
       hire.models.find(item => item.provider === hire.provider && item.model === hire.model)
         ?.label || 'No model yet';
@@ -772,14 +783,21 @@ function renderHire(doc, hire, win, fetchImpl, onSelect) {
     hire.mandate = String(mandate.value || '');
     select('new');
   });
-  // Role is rarely needed, so it waits behind Customize; it starts open when it
-  // already holds text (FR6).
+  // Only a role that differs from the visible brief needs the extra row open.
   const customize = el(doc, 'details', 'folder-agent-card__who-customize');
-  customize.open = Boolean(hire.mandate);
-  customize.append(
-    el(doc, 'summary', 'folder-agent-card__who-customize-toggle', 'Customize'),
-    hireField(doc, 'Role', mandate)
+  customize.open = Boolean(
+    hire.mandate.trim() && hire.mandate.trim() !== String(brief || '').trim()
   );
+  customize.append(el(doc, 'summary', 'folder-agent-card__who-customize-toggle', 'Customize'));
+  if (canPick) {
+    const changeFace = el(doc, 'button', 'folder-agent-card__who-change-face', 'Change face');
+    changeFace.type = 'button';
+    changeFace.addEventListener('click', () => {
+      void chooseFace(changeFace);
+    });
+    customize.append(changeFace);
+  }
+  customize.append(hireField(doc, 'Role', mandate));
   box.append(customize);
 
   // The owner's own agents: one row of faces, each a visually hidden radio in a
@@ -787,9 +805,12 @@ function renderHire(doc, hire, win, fetchImpl, onSelect) {
   // browser. Each choice is announced with the agent's name and model. The row
   // scrolls sideways and never wraps (FR8, FR11, FR13).
   const choices = [];
+  let reuse = null;
+  let heading = null;
   if (hire.agents.length) {
-    const reuse = el(doc, 'div', 'folder-agent-card__who-reuse');
-    const heading = el(doc, 'p', 'folder-agent-card__who-heading', 'Or one of your agents');
+    reuse = el(doc, 'details', 'folder-agent-card__who-reuse');
+    reuse.open = hire.mode === 'existing';
+    heading = el(doc, 'summary', 'folder-agent-card__who-heading');
     heading.id = `${group}-heading`;
     const row = el(doc, 'div', 'folder-agent-card__who-agents');
     row.setAttribute('role', 'radiogroup');
@@ -802,7 +823,10 @@ function renderHire(doc, hire, win, fetchImpl, onSelect) {
       radio.name = group;
       radio.value = agent.name;
       radio.className = 'folder-agent-card__who-agent-radio';
-      radio.setAttribute('aria-label', agent.model ? `${agent.name}, ${agent.model}` : agent.name);
+      radio.setAttribute(
+        'aria-label',
+        [agent.name, agent.model, agent.runs ? `runs ${agent.runs}` : ''].filter(Boolean).join(', ')
+      );
       const agentFaceBox = el(doc, 'span', 'folder-agent-card__who-agent-face');
       agentFaceBox.setAttribute('aria-hidden', 'true');
       item.append(
@@ -810,6 +834,8 @@ function renderHire(doc, hire, win, fetchImpl, onSelect) {
         agentFaceBox,
         el(doc, 'span', 'folder-agent-card__who-agent-name', agent.name)
       );
+      if (agent.runs)
+        item.append(el(doc, 'span', 'folder-agent-card__who-agent-runs', `runs ${agent.runs}`));
       radio.addEventListener('change', () => {
         if (!radio.checked) return;
         select('existing', agent.name);
@@ -890,6 +916,10 @@ function renderHire(doc, hire, win, fetchImpl, onSelect) {
       mode === 'existing' ? choices.find(choice => choice.agent.name === hire.existing) : null;
     hire.mode = chosen ? 'existing' : 'new';
     onSelect?.(hire.mode);
+    if (heading)
+      heading.textContent = chosen
+        ? `Using ${chosen.agent.name}`
+        : `Use one of your agents (${hire.agents.length})`;
     fresh.dataset.selected = String(!chosen);
     // Role belongs to the new agent, so it dims with it.
     customize.dataset.selected = String(!chosen);
@@ -955,7 +985,8 @@ export function renderFolderAgentCard(
         fetchImpl || hireWindow?.fetch?.bind(hireWindow),
         mode => {
           start.textContent = mode === 'existing' ? view.actionExisting : view.action;
-        }
+        },
+        view.brief
       )
     : null;
   const note = el(doc, 'p', 'folder-agent-card__note', view.note);

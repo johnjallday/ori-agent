@@ -58,6 +58,7 @@ type HireModel struct {
 type HireAgent struct {
 	Name  string `json:"name"`
 	Model string `json:"model,omitempty"`
+	Runs  string `json:"runs,omitempty"`
 }
 
 // HireOptions is the card's Hire section: who would be hired, and the

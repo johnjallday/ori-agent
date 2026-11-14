@@ -314,12 +314,27 @@ func (h folderAgentHiring) Models(context.Context) []folderagent.HireModel {
 
 // Agents is the owner's own agents: the built-in assistant and agents that
 // only a workspace holds are never offered.
-func (h folderAgentHiring) Agents(context.Context, string) []folderagent.HireAgent {
+func (h folderAgentHiring) Agents(_ context.Context, userID string) []folderagent.HireAgent {
 	st := h.builder.st
 	if st == nil {
 		return nil
 	}
 	root, hasRoot := st.(interface{ RootAgentFolder(string) (string, bool) })
+	runs := map[string][]string{}
+	if workspaces := h.builder.workspaceStore; workspaces != nil {
+		ids, _ := workspaces.List()
+		for _, id := range ids {
+			ws, err := workspaces.Get(id)
+			if err != nil || ws == nil || ws.GetStatus() == workspace.StatusTrashed ||
+				(ws.OwnerUserID != "" && ws.OwnerUserID != userID) {
+				continue
+			}
+			key := strings.ToLower(ws.EntryAgentName())
+			if key != "" {
+				runs[key] = append(runs[key], ws.Name)
+			}
+		}
+	}
 	var out []folderagent.HireAgent
 	for _, name := range st.ListAgents() {
 		if systemassistant.IsCanonicalName(name) {
@@ -339,8 +354,23 @@ func (h folderAgentHiring) Agents(context.Context, string) []folderagent.HireAge
 		if agent.Metadata != nil && personalassistant.ProfileProvenanceFromTags(name, agent.Metadata.Tags).AssistantID != "" {
 			continue
 		}
-		out = append(out, folderagent.HireAgent{Name: name, Model: agent.Settings.Model})
+		names := runs[strings.ToLower(name)]
+		sort.Slice(names, func(i, j int) bool { return strings.ToLower(names[i]) < strings.ToLower(names[j]) })
+		running := ""
+		if len(names) > 0 {
+			running = names[0]
+			if len(names) > 1 {
+				running += fmt.Sprintf(" and %d more", len(names)-1)
+			}
+		}
+		out = append(out, folderagent.HireAgent{Name: name, Model: agent.Settings.Model, Runs: running})
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if (out[i].Runs == "") != (out[j].Runs == "") {
+			return out[i].Runs == ""
+		}
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
 	return out
 }
 

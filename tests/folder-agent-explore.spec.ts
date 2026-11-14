@@ -58,8 +58,7 @@ test('Explore a folder starts an agent and reports what it found without a model
     if (req.url().endsWith('/folder-agent/start')) starts.push(req.postData() || '');
   });
 
-  if (process.env.ORI_HIRE_CARD_EVIDENCE)
-    await page.setViewportSize({ width: 1440, height: 1200 });
+  if (process.env.ORI_HIRE_CARD_EVIDENCE) await page.setViewportSize({ width: 1440, height: 1200 });
   await page.goto('/?panel=today&folder=show');
   const entry = page.locator('#personalAssistantFolderPathEntry');
   await expect(entry).toBeVisible();
@@ -79,6 +78,7 @@ test('Explore a folder starts an agent and reports what it found without a model
   await expect(start).toHaveText('Hire & build');
   if (process.env.ORI_HIRE_CARD_EVIDENCE)
     await host.screenshot({ path: `${process.env.ORI_HIRE_CARD_EVIDENCE}/words-new.png` });
+  await host.locator('.folder-agent-card__who-heading').click();
   const reuse = host.getByRole('radio', { name: /^Folder Reader/ });
   await reuse.focus();
   await page.keyboard.press('Space');
