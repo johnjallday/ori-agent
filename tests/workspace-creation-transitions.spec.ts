@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { attachPlacementFolder, placementJSON } from './helpers/assisted-workspace-placement';
+import { randomUUID } from 'node:crypto';
+import { placementJSON } from './helpers/assisted-workspace-placement';
 
 // Real server, real gestures. Runs against scripts/demo-inbox-folder.sh, whose
 // sandbox has a hired assistant and seeded folders but no model provider.
@@ -323,8 +324,34 @@ test('a receipt survives a resize and Dismiss leaves an ordinary closed drawer',
   await expect(page.locator('#personalAssistantInput')).toHaveValue(UNSENT);
 });
 
-test('the inbox review keeps chat behind it until the user chooses the Map', async ({ page }) => {
-  await attachPlacementFolder(page, 'Downloads', true);
+test('an existing inbox offer keeps chat behind its review until the user chooses the Map', async ({
+  page
+}) => {
+  // New folder picks now enter Hire & start, not this older placement review.
+  // Seed a real retained conversation review through the supported metadata
+  // selection/review boundaries; neither call hires or creates a workspace.
+  const draft_id = randomUUID();
+  const selectedResponse = await page.request.post('/api/home-assistant/folder-context/select', {
+    data: { draft_id, revision: '', mode: 'chip', chip: 'downloads' }
+  });
+  expect(selectedResponse.ok(), await selectedResponse.text()).toBeTruthy();
+  const selected = await selectedResponse.json();
+  expect(selected.hire_candidate).toBeTruthy();
+  const reviewResponse = await page.request.post('/api/home-assistant/folder-context/review', {
+    data: {
+      draft_id,
+      revision: '',
+      selection_id: selected.observation.id,
+      candidate_id: selected.hire_candidate
+    }
+  });
+  expect(reviewResponse.ok(), await reviewResponse.text()).toBeTruthy();
+  const reviewed = await reviewResponse.json();
+  await openExpandedChat(page);
+  await page.evaluate(
+    id => (window as any).PersonalAssistantConversation.resume(id),
+    reviewed.conversation.id
+  );
   await page.locator('#personalAssistantInput').fill(UNSENT);
   await page.getByRole('button', { name: 'Review setup', exact: true }).click();
   const review = page.locator('#assistedWorkspacePlacementPanel');

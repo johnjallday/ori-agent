@@ -304,6 +304,8 @@ async function installFixtureRoutes(page: Page) {
         status: {
           valid: true,
           workspace_id: README_SCENES.personal_hq.id,
+          // Keep this older top-level-ID projection: a missing nested id must
+          // not match a missing creation intent and invent a first-action card.
           // The drawer's brief row links to the Daily Brief station by slug.
           workspace: { folder_slug: 'northstar-personal-hq' },
           hq_onboarding_state: 'complete'
@@ -318,6 +320,12 @@ async function installFixtureRoutes(page: Page) {
         assistant_name: 'Ori',
         timezone: 'UTC'
       });
+      return;
+    }
+    if (url.pathname === '/api/user/profile') {
+      // The HQ review reads the optional profile timezone even on a settled
+      // visit. This is metadata only, consistent with the capture environment.
+      await json(route, { profile: { timezone: 'UTC' } });
       return;
     }
     // Home's README scenes use the established Personal HQ relationship so
@@ -1332,6 +1340,11 @@ async function expectFinalHomePrimary(page: Page) {
   const primary = page.locator('#cockpitPrimaryActionBtn');
   await expect(primary).toBeVisible();
   await expect(primary).toHaveText('Hire an agent');
+  await expect(page.locator('#personalHQResultHost')).toBeHidden();
+  await expect(page.locator('#personalAssistantHQCard')).not.toHaveAttribute(
+    'data-result',
+    'active'
+  );
 }
 
 test.afterAll(() => {

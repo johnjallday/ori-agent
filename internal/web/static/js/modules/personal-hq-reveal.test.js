@@ -76,13 +76,22 @@ test('reload preserves only the optional receipt marker, never foreground owners
 
 test('focus origin is captured before the disabled build control loses browser focus', () => {
   let captured;
+  let focusIntent;
   const f = fixture({
     captureFocus: value => {
       captured = value;
+    },
+    focusPending: intent => {
+      focusIntent = intent;
     }
   });
-  f.flow.begin({ token: 'reviewed', focusOwned: true });
+  const intent = f.flow.begin({ token: 'reviewed', focusOwned: true });
   assert.equal(captured, true);
+  assert.equal(
+    focusIntent,
+    intent,
+    'deferred modal focus must guard the exact owner, not its name'
+  );
 });
 
 test('explicit HQ intent steps chat aside without doing domain work or waiting on map', () => {

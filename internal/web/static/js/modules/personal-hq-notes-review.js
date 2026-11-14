@@ -138,6 +138,13 @@ export function readFirstAction(storage) {
   }
 }
 
+// Missing identifiers must never match each other and manufacture a first
+// action for a returning HQ (including older, top-level-ID projections).
+export function hqFirstActionMatches(workspaceId, record, intentWorkspaceId) {
+  const id = String(workspaceId || '').trim();
+  return Boolean(id && (record?.workspaceId === id || intentWorkspaceId === id));
+}
+
 export function rememberFirstAction(storage, workspaceId) {
   const id = String(workspaceId || '').trim();
   if (!storage || !id) return false;

@@ -17,6 +17,7 @@ import { JUST_HIRED_FLAG } from './personal-assistant-hire.js';
 import { FOLDER_PATH_ENDPOINT, folderDialogOffNote } from './folder-path-entry.js';
 import {
   forgetFirstAction,
+  hqFirstActionMatches,
   hqFirstActionView,
   hqNotesOutcome,
   hqLiveNotesOutcome,
@@ -526,6 +527,7 @@ function render() {
   const restoreCompact =
     !intent &&
     !plan.compactYielded &&
+    !!plan.receiptWorkspaceID &&
     compactRecord() === plan.receiptWorkspaceID &&
     !window.PersonalAssistantPanel?.isOpen?.();
   plan.compact = !!host && resultActive && (ownsPresentation || restoreCompact);
@@ -654,21 +656,20 @@ async function load(relationship = null) {
     plan.notesOutcome = hqLiveNotesOutcome(notes);
     // The first step shows only for the HQ this browser just built.
     const record = readFirstAction(firstActionStorage());
+    const workspaceId = String(hq?.status?.workspace?.id || hq?.status?.workspace_id || '');
     plan.firstAction =
       current?.state === 'active' &&
       !!hq?.status?.valid &&
       !plan.firstActionEnded &&
-      ((!!record &&
-        record.workspaceId === String(hq.status.workspace?.id || hq.status.workspace_id || '')) ||
-        currentHQIntent()?.workspaceId === hq.status.workspace?.id);
+      hqFirstActionMatches(workspaceId, record, currentHQIntent()?.workspaceId);
     if (current?.state === 'active' && hq?.status?.valid) {
       // After a reload the HQ and its schedule are still canonical, but the
       // current workspace-root setting is not proof of the original directory.
       // Keep that third row only for the fresh build in this session.
-      if (!plan.receipt.length || plan.receiptWorkspaceID !== hq.status.workspace?.id) {
+      if (!plan.receipt.length || plan.receiptWorkspaceID !== workspaceId) {
         const time = String(current.daily_brief?.schedule_time || '').trim();
         plan.receipt = hqReceiptRows(hq.status, { ...current.daily_brief, time }, '');
-        plan.receiptWorkspaceID = hq.status.workspace?.id || '';
+        plan.receiptWorkspaceID = workspaceId;
       }
     } else {
       plan.receipt = [];
@@ -1031,11 +1032,16 @@ function init() {
     const host = document.getElementById('personalHQResultHost');
     const viewport = window.visualViewport;
     if (!host || !viewport) return;
-    host.style.setProperty(
-      '--hq-keyboard-offset',
-      `${Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)}px`
-    );
+    const keyboardOffset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+    host.style.setProperty('--hq-keyboard-offset', `${keyboardOffset}px`);
     host.style.setProperty('--hq-visible-height', `${viewport.height}px`);
+    // Overlay keyboards leave innerHeight unchanged. Keep the editor below
+    // the sticky navigation as well as above that smaller visual viewport.
+    const navHeight =
+      keyboardOffset > 0
+        ? document.querySelector('.navbar')?.getBoundingClientRect().height || 0
+        : 0;
+    host.style.setProperty('--hq-keyboard-nav-height', `${navHeight}px`);
   };
   window.visualViewport?.addEventListener('resize', fitResult);
   window.visualViewport?.addEventListener('scroll', fitResult);

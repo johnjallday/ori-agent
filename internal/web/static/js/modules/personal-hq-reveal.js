@@ -71,7 +71,7 @@ export function createHQPresentation({
           actions: [{ label: 'Dismiss', run: () => yieldIntent(intent) }]
         });
         try {
-          focusPending();
+          focusPending(intent);
         } catch (_) {
           /* Focus is optional. */
         }
@@ -235,10 +235,10 @@ export function hqPresentation() {
       );
       return node;
     },
-    focusPending: () => {
+    focusPending: intent => {
       if (!moveFocus) return;
       const focus = () => {
-        if (document.hidden || window.OriCreationTransition?.owner() !== 'personal-hq') return;
+        if (!browserPresentation?.current(intent)) return;
         const status = document.querySelector('[data-creation-map-status]');
         if (status && !status.hidden) {
           status.tabIndex = -1;

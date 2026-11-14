@@ -950,7 +950,10 @@ body.home-command-page .home-command-bridge * {
   right: max(1rem, env(safe-area-inset-right));
   bottom: calc(5rem + var(--hq-keyboard-offset, 0px) + env(safe-area-inset-bottom));
   width: min(26rem, calc(100vw - 2rem));
-  max-height: min(46dvh, calc(var(--hq-visible-height, 100dvh) - 2rem));
+  max-height: min(
+    46dvh,
+    max(10rem, calc(var(--hq-visible-height, 100dvh) - var(--hq-keyboard-nav-height, 0px) - 7rem))
+  );
   overflow: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--hc-line-bright);
@@ -1033,7 +1036,7 @@ body.home-command-page .home-command-bridge * {
 }
 .pa-hq-result textarea {
   min-height: 4rem;
-  height: clamp(4rem, 12dvh, 7rem);
+  height: clamp(4rem, calc(var(--hq-visible-height, 100dvh) * 0.12), 7rem);
   max-height: min(8rem, 24dvh);
 }
 .pa-hq-result[data-phase="note"] .pa-hq-card__explore {
@@ -1044,7 +1047,7 @@ body.home-command-page .home-command-bridge * {
 }
 .pa-hq-result .pa-hq-card__note .pa-specialist-offer__actions {
   position: sticky;
-  bottom: -1rem;
+  bottom: 0;
   padding: 0.5rem 0;
   background: var(--hc-panel);
 }

@@ -14,6 +14,8 @@ let notes: any;
 
 async function restoreResult(page: Page) {
   await page.addInitScript(id => {
+    if (sessionStorage.getItem('hq-result-fixture-seeded')) return;
+    sessionStorage.setItem('hq-result-fixture-seeded', '1');
     localStorage.setItem('ori.hq.firstAction.v1', JSON.stringify({ workspaceId: id }));
     sessionStorage.setItem('ori.hq.compactResult.v1', id);
   }, workspaceId);
@@ -209,6 +211,17 @@ test('result/editor layouts: themes, narrow widths, long details, reduced keyboa
   page
 }) => {
   await restoreResult(page);
+  await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+  const accessible = async () =>
+    expect(
+      await page.evaluate(async () =>
+        (
+          await (window as any).axe.run('#personalHQResultHost', {
+            runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
+          })
+        ).violations.map((v: any) => ({ id: v.id, targets: v.nodes.map((n: any) => n.target) }))
+      )
+    ).toEqual([]);
   for (const [width, height] of [
     [1440, 1000],
     [820, 900],
@@ -229,6 +242,7 @@ test('result/editor layouts: themes, narrow widths, long details, reduced keyboa
       const host = page.locator('#personalHQResultHost');
       await expect(host).toBeVisible();
       expect(await host.evaluate(n => n.scrollWidth <= n.clientWidth + 1)).toBe(true);
+      await accessible();
       await page.screenshot({ path: `${evidence}/result-${width}-${theme}.png` });
       await page.locator('#personalAssistantHQDetails summary').click();
       await expect(page.locator('#personalAssistantHQReceipt')).toBeVisible();
@@ -244,6 +258,7 @@ test('result/editor layouts: themes, narrow widths, long details, reduced keyboa
           return n.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
         })
       ).toBe(true);
+      await accessible();
       await page.screenshot({ path: `${evidence}/editor-${width}-${theme}.png` });
       await page.locator('#personalAssistantHQNoteBack').click();
     }
@@ -255,4 +270,108 @@ test('result/editor layouts: themes, narrow widths, long details, reduced keyboa
   await expect(page.locator('#personalAssistantHQNoteText')).toBeFocused();
   await expect(page.locator('#personalAssistantHQNoteSave')).toBeInViewport();
   await page.screenshot({ path: `${evidence}/editor-keyboard-viewport.png` });
+  // Separately inject an overlay-style visualViewport: unlike resize, the
+  // layout viewport remains 844px tall. This exercises the real resize handler,
+  // not a claim that a physical iOS/Android keyboard was opened.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => {
+    const actual = window.visualViewport!;
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        width: 390,
+        height: 480,
+        offsetTop: 0,
+        offsetLeft: 0,
+        scale: 1
+      }
+    });
+    actual.dispatchEvent(new Event('resize'));
+  });
+  const bounds = await page.locator('#personalHQResultHost').boundingBox();
+  const nav = await page.locator('.navbar').boundingBox();
+  const save = await page.locator('#personalAssistantHQNoteSave').boundingBox();
+  expect(bounds!.y).toBeGreaterThanOrEqual(nav!.y + nav!.height);
+  expect(save!.y + save!.height).toBeLessThanOrEqual(480);
+  // Bounding boxes alone miss clipping by the scrolling card or sticky footer.
+  // Check all four edge midpoints simultaneously, without scrolling (rounded
+  // corners intentionally don't belong to the control's hit target).
+  for (const id of [
+    'personalAssistantHQNoteText',
+    'personalAssistantHQNoteSave',
+    'personalAssistantHQNoteBack',
+    'personalAssistantHQFirstExplore'
+  ]) {
+    expect(
+      await page.locator(`#${id}`).evaluate(el => {
+        const b = el.getBoundingClientRect();
+        return [
+          [b.left + b.width / 2, b.top + 2],
+          [b.left + b.width / 2, b.bottom - 2],
+          [b.left + 2, b.top + b.height / 2],
+          [b.right - 2, b.top + b.height / 2]
+        ].every(([x, y]) => el.contains(document.elementFromPoint(x, y)));
+      }),
+      `${id} is fully visible in the injected overlay viewport`
+    ).toBe(true);
+  }
+  await expect(page.locator('#personalAssistantHQNoteText')).toBeFocused();
+  await page.screenshot({ path: `${evidence}/editor-injected-overlay-viewport.png` });
 });
+
+for (const touch of [false, true])
+  test(`${touch ? 'Touch' : 'Keyboard'} can open, back out and Explore without any note write`, async ({
+    browser,
+    baseURL
+  }) => {
+    const context = await browser.newContext({
+      baseURL,
+      viewport: { width: 390, height: 844 },
+      hasTouch: touch,
+      isMobile: touch
+    });
+    try {
+      const page = await context.newPage();
+      await installLocalCdn(page);
+      const writes: string[] = [];
+      page.on('request', r => {
+        if (
+          r.method() === 'POST' &&
+          /second-brain\/(capture|connect|setup)|personal-assistant\/hq/.test(r.url())
+        )
+          writes.push(r.url());
+      });
+      await restoreResult(page);
+      const note = page.locator('#personalAssistantHQFirstNote');
+      await expect(note).toBeVisible();
+      if (touch) await note.tap();
+      else {
+        for (let i = 0; i < 40 && !(await note.evaluate(n => n === document.activeElement)); i++)
+          await page.keyboard.press('Tab');
+        await expect(note).toBeFocused();
+        await page.keyboard.press('Enter');
+      }
+      const text = page.locator('#personalAssistantHQNoteText');
+      await expect(text).toBeFocused();
+      await text.pressSequentially('An optional unsaved draft.');
+      if (touch) {
+        await page.locator('#personalAssistantHQNoteBack').tap();
+        await page.locator('#personalAssistantHQFirstExplore').tap();
+      } else {
+        await page.keyboard.press('Tab');
+        await expect(page.locator('#personalAssistantHQNoteSave')).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(page.locator('#personalAssistantHQNoteBack')).toBeFocused();
+        await page.keyboard.press('Enter');
+        await expect(note).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(page.locator('#personalAssistantHQFirstExplore')).toBeFocused();
+        await page.keyboard.press('Enter');
+      }
+      await page.waitForURL(url => url.pathname === workspaceRoute);
+      expect(writes).toEqual([]);
+      expect(await page.evaluate(() => localStorage.getItem('ori.hq.firstAction.v1'))).toBeNull();
+    } finally {
+      await context.close();
+    }
+  });

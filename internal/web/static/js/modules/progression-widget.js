@@ -383,7 +383,7 @@ export function renderQuestRow(q, { doc = document, onSkip = () => {} } = {}) {
 // complete solely because its last open quest was skipped must not toast,
 // since skipping the optional HQ objective should not read as an
 // achievement.
-export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
+export function diffAnnouncements(status, knownCompleted, knownTierComplete, quietActionURLs = []) {
   const completedNow = new Set();
   (status.tiers || []).forEach(t => {
     (t.quests || []).forEach(q => {
@@ -397,7 +397,11 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
     (status.tiers || []).forEach(t => {
       let tierHasNewCompletion = false;
       (t.quests || []).forEach(q => {
-        if (q.status === 'completed' && !knownCompleted.has(q.id)) {
+        if (
+          q.status === 'completed' &&
+          !knownCompleted.has(q.id) &&
+          !quietActionURLs.includes(q.action_url)
+        ) {
           newCompletions.push({ id: q.id, title: q.title });
           tierHasNewCompletion = true;
         }
@@ -477,7 +481,18 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete) {
   // Diff the incoming status against what we last knew and toast new wins.
   // Skipped on the very first load so a returning user isn't flooded.
   function announceChanges(status) {
-    const diff = diffAnnouncements(status, knownCompleted, knownTierComplete);
+    const result = document.getElementById('personalHQResultHost');
+    const hqOwnsResult =
+      window.OriCreationTransition?.owner?.() === 'personal-hq' || (result && !result.hidden);
+    // The HQ welcome/save already announces these results. A second decorative
+    // toast can cover its controls at zoom/mobile sizes. Still advance the known
+    // completion baseline so it does not replay when that presentation ends.
+    const diff = diffAnnouncements(
+      status,
+      knownCompleted,
+      knownTierComplete,
+      hqOwnsResult ? ['/?quest=build-hq', '/?quest=second-brain'] : []
+    );
     diff.newCompletions.forEach(q => toast(q.title, 'Quest complete'));
     diff.newTierCompletions.forEach(t =>
       toast(t.name ? `${t.name} complete` : 'Tier complete', t.name ? 'Missions' : 'Tier complete')

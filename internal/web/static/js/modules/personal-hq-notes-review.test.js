@@ -7,6 +7,7 @@ import {
   FIRST_ACTION_KEY,
   NOTES_SCOPE_SENTENCE,
   forgetFirstAction,
+  hqFirstActionMatches,
   hqFirstActionView,
   readFirstAction,
   rememberFirstAction,
@@ -160,6 +161,17 @@ test('live Notes capability, not a historical ready receipt, gates capture', () 
   }
   for (const status of ['failed', 'pending'])
     assert.equal(hqLiveNotesOutcome({ setup: { status } }).canRetry, true);
+});
+
+test('first-action ownership requires a nonempty canonical identity, never missing equals missing', () => {
+  for (const id of [undefined, null, '', '   ']) {
+    assert.equal(hqFirstActionMatches(id, null, undefined), false);
+    assert.equal(hqFirstActionMatches(id, { workspaceId: id }, id), false);
+  }
+  assert.equal(hqFirstActionMatches('hq-1', null, undefined), false, 'ordinary returning HQ');
+  assert.equal(hqFirstActionMatches('hq-1', { workspaceId: 'hq-2' }, 'hq-2'), false);
+  assert.equal(hqFirstActionMatches('hq-1', { workspaceId: 'hq-1' }), true);
+  assert.equal(hqFirstActionMatches('hq-1', null, 'hq-1'), true, 'storage-free current intent');
 });
 
 test('the first-action record is per HQ, survives a reload, and is forgotten on leaving', () => {

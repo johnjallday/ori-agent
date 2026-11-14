@@ -92,6 +92,28 @@ test('200% Chromium browser zoom: real HQ stays visible beside the result and ed
     await expect(page.locator('#personalAssistantHQNoteSave')).toBeInViewport();
     await checkHQ();
     await text.fill('Saved at two hundred percent browser zoom.');
+    // A visible/in-viewport action can still be partly covered by a duplicate
+    // completion toast. Hit-test every edge, not just its clickable centre.
+    for (const id of [
+      'personalAssistantHQNoteText',
+      'personalAssistantHQNoteSave',
+      'personalAssistantHQNoteBack',
+      'personalAssistantHQFirstExplore'
+    ]) {
+      expect(
+        await page.locator(`#${id}`).evaluate(el => {
+          const b = el.getBoundingClientRect();
+          return [
+            [b.left + b.width / 2, b.top + 2],
+            [b.left + b.width / 2, b.bottom - 2],
+            [b.left + 2, b.top + b.height / 2],
+            [b.right - 2, b.top + b.height / 2]
+          ].every(([x, y]) => el.contains(document.elementFromPoint(x, y)));
+        }),
+        `${id} is not covered at 200% zoom`
+      ).toBe(true);
+    }
+    await expect(page.locator('.toast-title').filter({ hasText: 'Quest complete' })).toHaveCount(0);
     await capture('editor');
     const response = page.waitForResponse(
       r => r.url().endsWith('/second-brain/capture') && r.request().method() === 'POST'
