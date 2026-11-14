@@ -2218,35 +2218,35 @@
   line-height: 1.4;
 }
 
-/* A confirmed HQ assembles once, without replacing its canonical artwork.
+/* A confirmed building assembles once, without replacing its canonical artwork.
    All stages are decorative; controls and the final workspace are live now. */
-.ws-map-tile[data-hq-reveal] {
+.ws-map-tile[data-build-reveal] {
   animation: none !important;
 }
 .ws-map-struct.is-assembling {
   animation: none !important;
 }
-.ws-map-struct.is-assembling [data-hq-part] {
+.ws-map-struct.is-assembling [data-build-part] {
   transform-box: fill-box;
   transform-origin: center bottom;
   animation-duration: 1600ms;
-  animation-delay: var(--hq-assembly-offset, 0ms);
+  animation-delay: var(--build-assembly-offset, 0ms);
   animation-timing-function: ease-out;
   animation-fill-mode: both;
 }
-.is-assembling [data-hq-part="foundation"] {
-  animation-name: hq-foundation;
+.is-assembling [data-build-part="foundation"] {
+  animation-name: build-foundation;
 }
-.is-assembling [data-hq-part="walls"] {
-  animation-name: hq-walls;
+.is-assembling [data-build-part="walls"] {
+  animation-name: build-walls;
 }
-.is-assembling [data-hq-part="roof"] {
-  animation-name: hq-roof;
+.is-assembling [data-build-part="roof"] {
+  animation-name: build-roof;
 }
-.is-assembling [data-hq-part="lights"] {
-  animation-name: hq-lights;
+.is-assembling [data-build-part="finish"] {
+  animation-name: build-finish;
 }
-@keyframes hq-foundation {
+@keyframes build-foundation {
   0% {
     opacity: 0;
     transform: translateY(8px) scaleY(0.7);
@@ -2257,7 +2257,7 @@
     transform: none;
   }
 }
-@keyframes hq-walls {
+@keyframes build-walls {
   0%,
   18% {
     opacity: 0;
@@ -2269,7 +2269,7 @@
     transform: none;
   }
 }
-@keyframes hq-roof {
+@keyframes build-roof {
   0%,
   42% {
     opacity: 0;
@@ -2281,7 +2281,7 @@
     transform: none;
   }
 }
-@keyframes hq-lights {
+@keyframes build-finish {
   0%,
   70% {
     opacity: 0;
@@ -2291,7 +2291,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ws-map-struct.is-assembling [data-hq-part] {
+  .ws-map-struct.is-assembling [data-build-part] {
     animation: none;
   }
 }
