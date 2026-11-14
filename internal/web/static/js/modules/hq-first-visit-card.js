@@ -55,6 +55,11 @@ export class HQFirstVisitCard {
   ensure() {
     if (this.state !== 'pending' || this.started || !this.owner.isPersonalHQ()) return;
     this.started = true;
+    if (typeof window !== 'undefined') {
+      window.addEventListener?.('pageshow', event => {
+        if (event.persisted) void this.load();
+      });
+    }
     this.owner.requestNotesData();
     this.owner.requestDailyBriefStationData();
     void this.load();
@@ -177,6 +182,12 @@ export class HQFirstVisitCard {
       this.briefOpened = true;
       this.owner.openDailyBriefPanel(trigger);
     } else if (action === 'tickets') this.owner.setCommandViewMode('tickets');
+  }
+
+  async briefClosed() {
+    if (!this.briefOpened) return;
+    this.briefOpened = false;
+    await this.load({ focus: true });
   }
 
   async save() {

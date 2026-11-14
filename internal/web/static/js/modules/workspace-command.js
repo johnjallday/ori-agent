@@ -4119,7 +4119,9 @@ export class WorkspaceCommandView {
     if (section === NOTES_STATION) {
       return notesPanelHTML({
         secondBrain: this.notesState().secondBrain,
-        panel: this.notesPanel()
+        panel: this.notesPanel(),
+        hideChecklist:
+          this.viewMode === 'details' && this.firstVisit?.view().layout.hideNotesChecklist
       });
     }
     // The Tools modal groups every capability provider (MCP, Skills, Plugins) plus the
@@ -8185,6 +8187,7 @@ export class WorkspaceCommandView {
         action: trigger => this.openDailyBriefPanel(trigger),
         onPanelClosed: () => {
           if (this._dailyBriefPanel) this._dailyBriefPanel.brief.setOnScreen(false);
+          void this.firstVisit?.briefClosed();
         }
       }
     ];
@@ -16130,6 +16133,8 @@ export class WorkspaceCommandView {
     this._hqNotesMounted = true;
     this.bindInlineNotes(node);
     this.settleInlineNotes(node);
+    const checklist = node.querySelector?.('[data-notes-checklist-host]');
+    if (checklist) checklist.hidden = Boolean(this.firstVisit?.view().layout.hideNotesChecklist);
     // Back from another mode: a look that ran meanwhile is read again in place.
     if (returning) void this.refreshOpenNotesPanel();
     if (focus && focus.el && typeof focus.el.focus === 'function' && node.contains(focus.el)) {
@@ -16213,7 +16218,11 @@ export class WorkspaceCommandView {
     }
     // The station panel's own markup, with the folder's name and badge under
     // its header (FR15): the same badge the station shows, stale tone and all.
-    return notesPanelHTML({ secondBrain, panel: this.notesPanel() }).replace(
+    return notesPanelHTML({
+      secondBrain,
+      panel: this.notesPanel(),
+      hideChecklist: this.firstVisit?.view().layout.hideNotesChecklist
+    }).replace(
       '</header>',
       '</header><p class="ws-hq-notes-meta" data-cmd-hq-notes-meta>' +
         this.inlineNotesMetaHTML() +

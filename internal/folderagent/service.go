@@ -198,7 +198,10 @@ type Deps struct {
 	// Reports posts a look's report into the Commander's conversation when the
 	// look ends (workspace chat sync). Nil posts nothing.
 	Reports Reports
-	Now     func() time.Time
+	// OnReported observes a successfully persisted read-only look. Choosing a
+	// folder, starting a look, and failed or unsaved looks never call it.
+	OnReported func(ctx context.Context, userID, workspaceID string)
+	Now        func() time.Time
 	// KnownFolderRoot shares the chooser's trusted configured-home resolver.
 	KnownFolderRoot func(string) (string, error)
 	// Walk overrides the walk options (tests).
@@ -554,6 +557,9 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	if err != nil {
 		logger.Warn("Folder agent could not save its look", logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
 		return
+	}
+	if s.deps.OnReported != nil {
+		s.deps.OnReported(ctx, updated.OwnerUserID, updated.WorkspaceID)
 	}
 	updated = s.effectiveRecord(updated)
 	s.remember(updated)

@@ -30,6 +30,64 @@ function fixture() {
   return { owner, card: owner.firstVisit };
 }
 
+test('brief uses the existing panel and refreshes canonical missions on close', async () => {
+  const { owner, card } = fixture();
+  card.missions = missionRows('completed');
+  card.resolvedOnLoad = false;
+  const trigger = {};
+  owner.openDailyBriefPanel = value => assert.equal(value, trigger);
+  let completed = false;
+  owner.stationJSON = async () => ({
+    missions: missionRows('completed').map(m =>
+      m.id === FIRST_VISIT_MISSIONS.brief && completed ? { ...m, status: 'completed' } : m
+    )
+  });
+  let focused = false;
+  card.focus = () => {
+    focused = true;
+  };
+  await card.act('brief', trigger);
+  await card.briefClosed();
+  assert.equal(card.view().steps[1].resolved, false, 'failed brief cannot tick the step');
+  completed = true;
+  await card.act('brief', trigger);
+  await card.briefClosed();
+  assert.equal(card.view().steps[1].resolved, true);
+  assert.ok(card.view().layout.stationKeys.includes('daily-brief'));
+  assert.equal(focused, true);
+});
+
+test('last mission resolves to the finished card; already-resolved arrival records done silently', async () => {
+  const { owner, card } = fixture();
+  const all = missionRows('completed').map(m => ({
+    ...m,
+    status: m.id === FIRST_VISIT_MISSIONS.folder ? 'skipped' : 'completed'
+  }));
+  owner.stationJSON = async () => ({ missions: all });
+  card.resolvedOnLoad = false;
+  await card.load();
+  assert.equal(card.view().card, 'finished');
+  assert.match(card.html(), /Your HQ is yours now/);
+  const previous = globalThis.fetch;
+  let posts = 0;
+  globalThis.fetch = async () => {
+    posts++;
+    return { ok: true };
+  };
+  try {
+    await card.act('done');
+    assert.equal(card.view().card, 'none');
+    const arriving = fixture();
+    arriving.owner.stationJSON = async () => ({ missions: all });
+    await arriving.card.load();
+    assert.equal(arriving.card.state, 'done');
+    assert.equal(arriving.card.html(), '');
+    assert.equal(posts, 2);
+  } finally {
+    globalThis.fetch = previous;
+  }
+});
+
 test('HQ card loads missions, escapes content and uses the real avatar presentation', async () => {
   const { owner, card } = fixture();
   assert.match(card.html(), /disabled/);

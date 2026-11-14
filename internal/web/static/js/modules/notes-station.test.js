@@ -371,6 +371,24 @@ test('an empty Inbox of a folder Ori set up shows the first-week checklist', () 
   assert.equal(checklistHTML({ show: false, rows: [] }), '');
 });
 
+test('the first visit hides the duplicate checklist without changing the Notes draft', () => {
+  const panel = {
+    status: 'ready',
+    tab: 'inbox',
+    inbox: { notes: [], total: 0 },
+    look: { state: 'none' },
+    captureText: 'Keep this draft'
+  };
+  const options = { secondBrain: created(), now: NOW, panel };
+  assert.match(
+    notesPanelHTML({ ...options, hideChecklist: true }),
+    /data-notes-checklist-host hidden/
+  );
+  assert.match(notesPanelHTML(options), /data-notes-checklist-host>/);
+  assert.equal(panel.captureText, 'Keep this draft');
+  assert.equal(panel.hideChecklist, undefined);
+});
+
 test('the header has Open folder for any connected folder', () => {
   for (const secondBrain of [created(), vault()]) {
     const html = notesPanelHTML({ secondBrain, now: NOW, panel: { status: 'loading' } });
