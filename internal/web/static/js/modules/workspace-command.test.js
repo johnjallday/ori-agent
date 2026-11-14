@@ -2544,9 +2544,10 @@ test('presentRailSections lists the rows renderRail draws, in order, with the sa
   globalThis.window = {};
   try {
     const drawn = html =>
-      [
-        ...html.matchAll(/data-cmd-manage-section="([^"]+)"[\s\S]*?ws-cmd-panel-count">(\d+)</g)
-      ].map(match => ({ key: match[1], count: Number(match[2]) }));
+      [...html.matchAll(/data-cmd-manage-section="([^"]+)"[^>]*>(.*?)<\/button>/g)].map(match => ({
+        key: match[1],
+        count: Number(match[2].match(/ws-cmd-panel-count">(\d+)</)?.[1] || 0)
+      }));
     const content = {
       notes: [{ id: 'n1' }, { id: 'n2' }],
       sessions: [{ id: 's1' }],
@@ -10078,7 +10079,7 @@ function hqDetailsMarkup({
   return { html: container.innerHTML, commandView };
 }
 
-test('HQ Details: the header comes first, with the HQ chips, facts line and edit controls (FR5, FR9)', () => {
+test('HQ Overview: the header keeps identity and Settings, without facts or a workflow subtitle', () => {
   const { html } = hqDetailsMarkup({
     window: {
       workspaceMission: { getSummary: () => ({ mission: 'Keep my week on track' }) },
@@ -10093,16 +10094,15 @@ test('HQ Details: the header comes first, with the HQ chips, facts line and edit
   );
   assert.match(html, /<h2>My HQ<\/h2>/);
   assert.match(html, /ws-cmd-hq-badge">Personal HQ<\/span>/);
-  assert.match(html, /Workflow · Guided<\/span>/);
+  assert.doesNotMatch(html, /id="workspace-command-subtitle"/);
   assert.match(html, /Where my day starts\./);
   assert.match(html, /data-cmd-settings aria-haspopup="dialog"/);
   assert.doesNotMatch(html.split('</header>')[0], /data-cmd-edit-identity=/);
-  assert.match(html, /data-cmd-hq-goal-edit aria-label="Edit goal"/);
-  const facts = html.match(/<p class="ws-hq-facts" data-cmd-hq-facts>(.*?)<\/p>/)[1];
-  assert.match(facts, /Lead<\/span> <span class="ws-hq-fact-value">Atlas</);
-  assert.match(facts, /Goal<\/span> <span class="ws-hq-fact-value">Keep my week on track</);
-  assert.match(facts, /Portability<\/span> <span class="ws-hq-fact-value">Ready to move</);
-  // No timestamp in the header (FR5), and no continuity chip mount there.
+  assert.doesNotMatch(html, /ws-hq-facts|data-cmd-hq-goal-edit/);
+  assert.match(html, /ws-hq-team-name[^>]*>Atlas</);
+  assert.match(html, /data-cmd-hq-rail="goal"[\s\S]*Keep my week on track/);
+  assert.match(html, /ws-hq-portability[\s\S]*data-cmd-continuity-mount/);
+  // The complete portability status is in the rail, not the header.
   assert.doesNotMatch(html.split('</header>')[0], /as of|data-cmd-continuity-mount/);
   // The agent-first composition is gone from the HQ (FR2).
   assert.doesNotMatch(html, /ws-cmd-garrison|ws-cmd-work-first|data-cmd-admin|ws-cmd-mission"/);
@@ -10310,7 +10310,7 @@ test('HQ Details main column: Needs you, Notes, Follow-ups, then the stations gr
   assert.doesNotMatch(html, /ws-cmd-garrison|data-cmd-agent-tab|ws-cmd-roster/);
 });
 
-test('HQ Details: the stations grid shows every station but Notes as a card with a state word (FR17)', () => {
+test('HQ Details: configured and checking stations are cards; Notes remains its own panel', () => {
   const { html } = hqDetailsMarkup();
   const grid = html.match(/<ul class="ws-hq-station-grid">(.*?)<\/ul>/)[1];
   const cards = [...grid.matchAll(/data-cmd-hq-card="([^"]+)"/g)].map(match => match[1]);
@@ -10321,14 +10321,14 @@ test('HQ Details: the stations grid shows every station but Notes as a card with
   for (const card of grid.split('</li>').filter(Boolean)) {
     assert.match(
       card,
-      /<span class="ws-hq-station-state">(Ready|Needs you|Running|Checking|Not set up|Error)<\/span>/
+      /<span class="ws-hq-station-state">(Ready|Needs you|Running|Checking|Error)<\/span>/
     );
     assert.match(card, /<button type="button" class="ws-hq-station /, 'the whole card is a button');
     assert.match(card, /<span class="ws-hq-station-action" aria-hidden="true">[^<]+<\/span>/);
   }
 });
 
-test('HQ Details: the grid orders Needs you first and Not set up last, dashed', () => {
+test('HQ Details: the grid orders Needs you first and folds Not set up into setup buttons', () => {
   const { commandView } = hqDetailsMarkup();
   commandView.mapStationRegistry = () => [
     { key: 'email', label: 'Email', state: () => ({ value: 'Set up Email Ops' }) },
@@ -10349,8 +10349,13 @@ test('HQ Details: the grid orders Needs you first and Not set up last, dashed', 
     [...grid.matchAll(/data-cmd-hq-card="([^"]+)"/g)].map(match => match[1]),
     ['calendar-ops', 'watchtower', 'email']
   );
-  assert.match(grid, /class="ws-hq-station is-not-set-up is-unset" data-cmd-hq-card="email"/);
-  assert.match(grid, /aria-label="Email: Not set up\. Set up Email Ops\. Set up"/);
+  assert.doesNotMatch(grid, /ws-hq-station is-not-set-up/);
+  assert.match(grid, /Not in use yet/);
+  assert.match(
+    grid,
+    /class="ws-hq-unused-action" data-cmd-hq-card="email" aria-label="Set up Email">Email<\/button>/
+  );
+  assert.match(grid, /Set them up when you want them\./);
 
   // The station asking for the user is a Needs you row whose action is the
   // station's own (FR14).
@@ -10369,6 +10374,29 @@ test('HQ Details: the grid orders Needs you first and Not set up last, dashed', 
     commandView.hqNeedsYouInnerHTML(),
     /<p class="ws-hq-empty">Nothing needs you right now\.<\/p>/
   );
+});
+
+test('HQ Details: only unused stations still have setup actions; no stations means no section', () => {
+  const { commandView } = hqDetailsMarkup();
+  commandView.mapStationRegistry = () => [
+    { key: 'email', label: 'Email', state: () => ({ value: 'Set up Email Ops' }) }
+  ];
+  const html = commandView.hqStationsGridHTML();
+  assert.doesNotMatch(html, /<ul/);
+  assert.match(html, /data-cmd-hq-card="email"/);
+  commandView.mapStationRegistry = () => [
+    { key: 'email', label: 'Email', state: () => ({ value: 'All clear', tone: 'clear' }) }
+  ];
+  assert.doesNotMatch(commandView.hqStationsGridHTML(), /ws-hq-unused|Not in use yet/);
+  commandView.firstVisit = { view: () => ({ layout: { stationKeys: [], foldedStations: false } }) };
+  assert.equal(
+    commandView.hqStationsGridHTML(),
+    '',
+    'unrevealed stations stay absent during guidance'
+  );
+  commandView.firstVisit = null;
+  commandView.mapStationRegistry = () => [];
+  assert.equal(commandView.hqStationsGridHTML(), '');
 });
 
 test('HQ Details: a focused station card keeps focus through a re-render', () => {
@@ -10439,15 +10467,21 @@ test('HQ Details rail: Team first and open, the lead marked, Give work for each 
   assert.doesNotMatch(rail, /data-cmd-manage-section="team"/);
 });
 
-test('HQ Details rail: content rows, then Setup, and no Stations or Systems row (FR20, FR22)', () => {
-  const { html } = hqDetailsMarkup();
-  const rail = html.match(/<aside class="ws-cmd-rail ws-hq-rail">(.*)<\/aside>/)[1];
-  const names = [
-    ...rail.matchAll(
+function hqRailNames(html) {
+  return [
+    ...html.matchAll(
       /<span class="ws-cmd-panel-name"[^>]*>([^<]+)<\/span>|<span class="ws-hq-link-label">([^<]+)<\/span>/g
     )
   ].map(match => match[1] || match[2]);
-  assert.deepEqual(names, [
+}
+
+test('HQ Details rail: empty rows fold in order, without zero counters or empty headings', () => {
+  const { html } = hqDetailsMarkup();
+  const rail = html.match(/<aside class="ws-cmd-rail ws-hq-rail">(.*)<\/aside>/)[1];
+  const [visible, folded] = rail.split('<section class="ws-hq-rail-more">');
+  assert.deepEqual(hqRailNames(visible), ['Portability']);
+  assert.doesNotMatch(visible, /aria-label="Workspace"/);
+  assert.deepEqual(hqRailNames(folded), [
     'Workspace notes',
     'Sessions',
     'Files',
@@ -10457,15 +10491,106 @@ test('HQ Details rail: content rows, then Setup, and no Stations or Systems row 
     'Capabilities',
     'Triggers and automation',
     'Schedules',
+    'Goal'
+  ]);
+  assert.match(folded, /aria-expanded="false" aria-controls="hq-rail-more-rows"/);
+  assert.match(folded, /Workspace notes, Sessions, Files and 7 more/);
+  assert.match(folded, /id="hq-rail-more-rows" hidden/);
+  assert.doesNotMatch(rail, /panel-count">0<|data-cmd-manage-section="(stations|systems)"/);
+  assert.match(visible, /ws-hq-portability[\s\S]*data-cmd-continuity-mount/);
+  assert.match(folded, /data-cmd-hq-rail="tools"/);
+  assert.match(folded, /data-cmd-hq-rail="goal"/);
+});
+
+test('HQ Details rail: populated rows stay outside More; guided visits fold them too', () => {
+  const { commandView } = hqDetailsMarkup();
+  Object.assign(commandView.page, {
+    notes: [{ id: 'n1' }],
+    files: [{ id: 'f1' }],
+    schedules: [{ id: 's1' }],
+    directories: [{ id: 'd1', path: '/sandbox/project' }]
+  });
+  commandView.computeStats = () => ({ tools: 2 });
+  commandView.missionSummary = () => ({ mission: 'Keep work small' });
+  const rail = commandView.renderHQRail();
+  const [visible, folded] = rail.split('<section class="ws-hq-rail-more">');
+  assert.deepEqual(hqRailNames(visible), [
+    'Workspace notes',
+    'Files',
+    'Linked folders',
+    'Tools',
+    'Schedules',
     'Goal',
     'Portability'
   ]);
-  assert.ok(rail.indexOf('Backlog') < rail.indexOf('id="ws-hq-setup-title">Setup<'));
-  assert.doesNotMatch(rail, /data-cmd-manage-section="(stations|systems)"/);
-  // Portability's row holds the chip's mount, which carries the full status.
-  assert.match(rail, /ws-hq-portability[\s\S]*data-cmd-continuity-mount/);
-  assert.match(rail, /data-cmd-hq-rail="tools"/);
-  assert.match(rail, /data-cmd-hq-rail="goal"/);
+  assert.deepEqual(hqRailNames(folded), [
+    'Sessions',
+    'Backlog',
+    'Capabilities',
+    'Triggers and automation'
+  ]);
+  assert.match(folded, /Sessions, Backlog, Capabilities and 1 more/);
+  assert.doesNotMatch(rail, /panel-count">0</);
+  const ids = [...rail.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(ids.length, new Set(ids).size, 'split Setup groups have distinct heading IDs');
+  commandView.firstVisit = { view: () => ({ layout: { guided: true, railAllUnderMore: true } }) };
+  const [guided, more] = commandView.renderHQRail().split('<section class="ws-hq-rail-more">');
+  assert.match(guided, /ws-hq-team/);
+  assert.deepEqual(hqRailNames(guided), []);
+  assert.doesNotMatch(guided, /aria-label="Workspace"|ws-hq-setup-title/);
+  assert.equal(hqRailNames(more).length, 11);
+  assert.match(more, /Workspace notes, Sessions, Files and 8 more/);
+});
+
+test('HQ Details rail: remembered folded sections open More, but guidance has no default', () => {
+  for (const guided of [false, true]) {
+    withRailStorage({ [RAIL_KEY]: 'notes' }, () => {
+      const view = makeRailView({ workspace: { designation: 'personal_hq' } });
+      view.firstVisit = { view: () => ({ layout: { guided, railAllUnderMore: guided } }) };
+      view.settleRailSection();
+      assert.equal(view.activeRailSection, 'notes');
+      const html = view.renderHQRail();
+      assert.match(html, /data-cmd-hq-rail-more aria-expanded="true"/);
+      assert.match(html, /data-cmd-manage-section="notes" aria-expanded="true"/);
+    });
+  }
+  withRailStorage({}, () => {
+    const view = makeRailView({ workspace: { designation: 'personal_hq' }, notes: [{ id: 'n1' }] });
+    view.firstVisit = { view: () => ({ layout: { guided: true, railAllUnderMore: true } }) };
+    view.settleRailSection();
+    assert.equal(view.activeRailSection, '');
+    assert.match(view.renderHQRail(), /data-cmd-hq-rail-more aria-expanded="false"/);
+  });
+});
+
+test('HQ Details rail: closing More collapses its child; an explicit open reveals it again', () => {
+  const { commandView } = hqDetailsMarkup();
+  commandView.activeRailSection = 'notes';
+  let html = commandView.renderHQRail();
+  let click;
+  commandView.container = {
+    querySelector: selector =>
+      selector === '.ws-hq-rail'
+        ? {
+            addEventListener: (_type, handler) => {
+              click = handler;
+            }
+          }
+        : null
+  };
+  commandView.watchHQSources = () => {};
+  commandView.syncHQGitHubSurface = () => {};
+  commandView.render = () => {
+    html = commandView.renderHQRail();
+  };
+  commandView.bindHQDetails();
+  click({ target: { closest: selector => (selector === '[data-cmd-hq-rail-more]' ? {} : null) } });
+  assert.equal(commandView.activeRailSection, '');
+  assert.match(html, /id="hq-rail-more-rows" hidden/);
+  commandView.toggleRailManager('hq-triggers');
+  assert.equal(commandView.activeRailSection, 'hq-triggers');
+  assert.match(html, /data-cmd-hq-rail-more aria-expanded="true"/);
+  assert.match(html, /data-cmd-manage-section="hq-triggers" aria-expanded="true"/);
 });
 
 test('HQ Details: Capabilities and Triggers rows open the Systems surface on their tab', () => {
@@ -10501,6 +10626,45 @@ test('HQ Details: closing a station panel returns focus to its card, even one re
   // A trigger still in the page is itself.
   fresh.isConnected = true;
   assert.equal(commandView.resolveStatModalTrigger(fresh), fresh);
+});
+
+test('HQ Notes first load reveals only its still-focused offscreen deep-linked follow-up', () => {
+  const originals = { document: globalThis.document, window: globalThis.window };
+  try {
+    for (const scenario of [
+      { scroll: true },
+      { bounds: { top: 100, bottom: 200 } },
+      { selected: false },
+      { contained: false },
+      { inline: false },
+      { stale: true }
+    ]) {
+      const calls = [];
+      const card = {
+        matches: selector =>
+          selector === '.workspace-followup-card.is-deep-linked' && scenario.selected !== false,
+        getBoundingClientRect: () => scenario.bounds || { top: 1300, bottom: 1400 },
+        scrollIntoView: options => calls.push(options)
+      };
+      globalThis.document = { activeElement: card };
+      globalThis.window = { innerHeight: 900 };
+      const view = Object.create(WorkspaceCommandView.prototype);
+      const panel = {};
+      view._notesPanel = panel;
+      view.notesInlineNode = () => scenario.inline !== false;
+      view.container = { contains: node => node === card && scenario.contained !== false };
+      view.revealFocusedFollowUpAfterNotes(scenario.stale ? {} : panel);
+      assert.deepEqual(
+        calls,
+        scenario.scroll ? [{ block: 'center' }] : [],
+        JSON.stringify(scenario)
+      );
+      assert.equal(globalThis.document.activeElement, card, 'scroll never changes focus');
+    }
+  } finally {
+    globalThis.document = originals.document;
+    globalThis.window = originals.window;
+  }
 });
 
 test('HQ Details: follow-ups made elsewhere show at once; the last one gone hides the panel', () => {

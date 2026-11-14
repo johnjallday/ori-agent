@@ -9826,7 +9826,30 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: var(--ws-ink-dim);
 }
 
-/* The HQ rail: Team first and always open, then the content rows, then Setup. */
+/* Unconfigured stations keep their setup actions without empty cards. */
+.ws-hq-unused {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin: 12px 0 0;
+  color: var(--ws-ink-dim);
+  font-size: 13px;
+}
+.ws-hq-unused-action {
+  border: 0;
+  padding: 2px 0;
+  background: none;
+  color: var(--ws-faction);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ws-hq-unused-action:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 3px;
+}
+/* The HQ rail: Team first and always open, then content and the More disclosure. */
 .ws-hq-team,
 .ws-hq-rail-group {
   margin-bottom: 14px;
@@ -10080,6 +10103,18 @@ button.ws-cmd-rpg-class-card:focus-visible {
   width: 100%;
   text-align: left;
   padding: 12px;
+  border: 1px solid var(--ws-line);
+  background: var(--ws-panel-2);
+  color: var(--ws-ink);
+}
+.ws-hq-rail-more-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+#hq-rail-more-rows {
+  padding-top: 10px;
 }
 .ws-hq-rail-more small {
   display: block;
@@ -10091,8 +10126,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
   display: none;
 }
 
-/* Below the rail breakpoint the layout is one column in source order: header,
-   strip, Needs you, Notes, Follow-ups, stations, then the rail (FR26). */
+/* Below the rail breakpoint: header, welcome when offered, Needs you, Notes,
+   Follow-ups, stations, then the rail. */
 @media (max-width: 900px) {
   .ws-cmd-layout.is-hq {
     grid-template-columns: minmax(0, 1fr);

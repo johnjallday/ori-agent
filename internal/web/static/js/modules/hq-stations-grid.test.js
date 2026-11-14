@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import {
   STATE_WORDS,
   hqStationCards,
+  hqStationGroups,
   stationCard,
   stationStateWord,
   stationsNeedingYou
 } from './hq-stations-grid.js';
+import { notesBadge } from './notes-station.js';
 
 test('each tone maps to its state word', () => {
   assert.equal(stationStateWord({ value: 'All clear', tone: 'clear' }), 'Ready');
@@ -40,6 +42,43 @@ test('a station saying it is not set up is Not set up, whatever its tone', () =>
     stationStateWord({ value: 'Finish setup', description: 'one step left', tone: 'attention' }),
     'Needs you'
   );
+});
+
+test('a folder set up by Ori is configured, with or without a Notes nudge', () => {
+  const now = Date.parse('2026-11-01T12:00:00Z');
+  const source = {
+    status: 'connected',
+    source: { name: 'My Brain', origin: 'created_by_ori', kind: 'obsidian' },
+    inbox_count: 12,
+    last_look: { at: '2026-11-01T10:00:00Z', open_items: 4, handled: 0 }
+  };
+  const ready = notesBadge(source, now);
+  assert.equal(ready.description, 'set up by Ori · last look 2h');
+  assert.equal(stationStateWord(ready), STATE_WORDS.ready);
+  const needs = notesBadge({ ...source, nudge: { stale: true, days: 8, came_due: 0 } }, now);
+  assert.equal(needs.description, 'set up by Ori · last look 2h · looked 8d ago');
+  assert.equal(stationStateWord(needs), STATE_WORDS.needsYou);
+  assert.equal(stationStateWord({ value: 'Set up by you', tone: 'clear' }), STATE_WORDS.ready);
+});
+
+test('only Not set up folds; checking and errors remain visible, in their existing order', () => {
+  const cards = hqStationCards([
+    { key: 'unused', state: { value: 'Set up Email Ops' } },
+    { key: 'error', state: { value: 'Unavailable', tone: 'degraded' } },
+    { key: 'ready', state: { value: 'Ready', tone: 'clear' } },
+    { key: 'checking', state: { value: 'Loading…', tone: 'loading' } },
+    { key: 'unused2', state: { value: 'Not set up' } }
+  ]);
+  const { active, unused } = hqStationGroups(cards);
+  assert.deepEqual(
+    active.map(card => card.key),
+    ['error', 'ready', 'checking']
+  );
+  assert.deepEqual(
+    unused.map(card => card.key),
+    ['unused', 'unused2']
+  );
+  assert.deepEqual(hqStationGroups(null), { active: [], unused: [] });
 });
 
 test('loading is Running when the station says work is under way, else Checking', () => {

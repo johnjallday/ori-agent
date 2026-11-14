@@ -196,6 +196,8 @@ for (const theme of ['light', 'dark']) {
       const header = page.locator('.ws-hq-header');
       await expect(header).toBeVisible();
       await expect(page.locator('body')).toHaveAttribute('data-hq-details', '1');
+      await expect(header.locator('.ws-hq-facts, #workspace-command-subtitle')).toHaveCount(0);
+      await expect(page.locator('.ws-hq-portability [data-cmd-continuity-mount]')).toHaveCount(1);
 
       const needs = page.locator('[data-cmd-hq-needs]');
       // Hide only the synthetic setup inputs before exercising the first-task
@@ -303,9 +305,49 @@ for (const theme of ['light', 'dark']) {
       await expect(team).toBeVisible();
       await expect(team.getByRole('heading', { name: /^Team/ })).toBeVisible();
       await expect(team.getByRole('button', { name: `Give work to ${agentName}` })).toBeVisible();
+      expect(
+        await team.evaluate(node => {
+          const heading = node.querySelector('h3').getBoundingClientRect();
+          const firstAgent = node.querySelector('.ws-hq-team-row').getBoundingClientRect();
+          return firstAgent.top >= heading.bottom;
+        }),
+        'Team keeps its heading above its agents'
+      ).toBe(true);
       await expect(page.locator('[data-cmd-manage-section="team"]')).toHaveCount(0);
       await expect(page.locator('[data-cmd-manage-section="stations"]')).toHaveCount(0);
-      await expect(page.getByRole('button', { name: /^Workspace notes/ })).toBeVisible();
+      const railMore = page.locator('[data-cmd-hq-rail-more]');
+      const workspaceNotes = page.locator('[data-cmd-manage-section="notes"]');
+      await expect(railMore).toHaveAttribute('aria-expanded', 'false');
+      await expect(workspaceNotes).not.toBeVisible();
+      await railMore.focus();
+      await page.keyboard.press('Enter');
+      await expect(workspaceNotes).toBeVisible();
+      await expect(railMore).toBeFocused();
+      await workspaceNotes.focus();
+      await page.keyboard.press(' ');
+      await expect(workspaceNotes).toHaveAttribute('aria-expanded', 'true');
+      await expect(workspaceNotes).toBeFocused();
+      await page.reload();
+      await expect(railMore).toHaveAttribute('aria-expanded', 'true');
+      await expect(workspaceNotes).toBeVisible();
+      await expect(workspaceNotes).toHaveAttribute('aria-expanded', 'true');
+      // The parent can close with an open child; another row uses the same
+      // one-open-section accordion, even under More.
+      await railMore.focus();
+      await page.keyboard.press('Enter');
+      await expect(workspaceNotes).not.toBeVisible();
+      await expect(railMore).toBeFocused();
+      await page.keyboard.press('Enter');
+      const capabilities = page.locator('[data-cmd-manage-section="hq-capabilities"]');
+      const triggers = page.locator('[data-cmd-manage-section="hq-triggers"]');
+      await capabilities.click();
+      await expect(capabilities).toHaveAttribute('aria-expanded', 'true');
+      await triggers.click();
+      await expect(triggers).toHaveAttribute('aria-expanded', 'true');
+      await expect(capabilities).toHaveAttribute('aria-expanded', 'false');
+      expect(await page.locator('.ws-hq-rail .ws-cmd-panel-count').allTextContents()).not.toContain(
+        '0'
+      );
 
       // Shared secondary navigation is a native disclosure with real links.
       const more = page.locator('[data-cmd-disclosure="views"] > summary');

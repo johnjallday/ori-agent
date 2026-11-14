@@ -76,7 +76,9 @@ test.beforeAll(async ({ request }) => {
   const status = (await json(request, 'get', '/api/personal-hq/status')).status;
   hqPath = `/workspaces/${status.workspace.folder_slug}`;
   // This is the normal Overview regression, not the new-HQ welcome journey.
-  await json(request, 'post', '/api/personal-hq/first-visit-state', { state: 'done' });
+  if (status.first_visit_state) {
+    await json(request, 'post', '/api/personal-hq/first-visit-state', { state: 'done' });
+  }
   followUps = (await json(request, 'get', `/api/workspaces/${status.workspace_id}/followups`))
     .followups;
   expect(followUps.filter(item => item.source.type === 'note_item').length).toBeGreaterThanOrEqual(
@@ -189,7 +191,14 @@ test('keyboard: the toggle, the chips and the cards are reachable and operable',
 test('the follow_up deep link focuses its card in the new place', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const target = followUps[followUps.length - 1];
+  // The quiet rail is short before Notes loads. Keep the selected follow-up
+  // visible after that real read grows the panel above it, not only before.
+  await page.route(`**${BRAIN}/look`, async route => {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await route.continue();
+  });
   await openHQ(page, `?follow_up=${encodeURIComponent(target.id)}`, 'dark');
+  await expect(page.locator('[data-cmd-hq-host="notes"] .ws-notes-section').first()).toBeVisible();
   const card = panel(page).locator(`[data-followup-id="${target.id}"]`);
   await expect(card).toBeFocused();
   await expect(card).toHaveClass(/is-deep-linked/);

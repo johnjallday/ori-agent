@@ -149,7 +149,7 @@ import { HQ_LABELS, portabilityWord } from './hq-labels.js';
 import { HQFirstVisitCard } from './hq-first-visit-card.js';
 import { WORK_LABELS, startFromBacklogLabel } from './work-labels.js';
 import { hqNeedsYouRows } from './hq-attention.js';
-import { hqStationCards, stationsNeedingYou } from './hq-stations-grid.js';
+import { hqStationCards, hqStationGroups, stationsNeedingYou } from './hq-stations-grid.js';
 import {
   briefScopeHasOthers,
   flowModel,
@@ -2004,10 +2004,8 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-header-status">' +
       this.groupTemplateStatusHTML({ quietSuccess: true }) +
       this.anchorDetailsHTML({ quiet: mapTab }) +
-      (hqDetails
-        ? '<p class="ws-hq-facts" data-cmd-hq-facts>' + this.hqFactsHTML() + '</p>'
-        : '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>') +
-      (mapTab
+      (hqDetails ? '' : '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>') +
+      (mapTab || hqDetails
         ? ''
         : '<span class="ws-sub" id="workspace-command-subtitle" data-workflow-label="' +
           escapeHtml(mode ? 'Workflow · ' + mode : '') +
@@ -4746,11 +4744,6 @@ export class WorkspaceCommandView {
   // something opened it while this was waiting, is left alone.
   settleRailSection() {
     if (this.railSectionSettled) return;
-    if (this.isPersonalHQ() && this.firstVisit?.view().layout.guided) {
-      this.activeRailSection = '';
-      this.railSectionSettled = true;
-      return;
-    }
     if (this.activeRailSection) {
       this.railSectionSettled = true;
       return;
@@ -4758,6 +4751,11 @@ export class WorkspaceCommandView {
     const sections = this.railDefaultSections();
     const saved = readRailSection(this.railStorage(), this.workspaceId());
     const savedDecides = saved === '' || sections.some(section => section.key === saved);
+    if (!savedDecides && this.isPersonalHQ() && this.firstVisit?.view().layout.guided) {
+      this.activeRailSection = '';
+      this.railSectionSettled = true;
+      return;
+    }
     if (!savedDecides && !(this.page && this.page.initialListsLoaded)) return;
     this.activeRailSection = resolveRailSection({
       saved,
@@ -8465,7 +8463,27 @@ export class WorkspaceCommandView {
       panel.status = 'error';
     }
     this.paintNotesPanel(panel);
+    this.revealFocusedFollowUpAfterNotes(panel);
     this.pollNotesPanelLook(panel);
+  }
+
+  // The short rail no longer reserves space while Notes loads. Its first
+  // result can push a deep-linked follow-up below the viewport. Keep that
+  // arrival visible only if it still owns focus; never refocus on polling or
+  // steal focus from a note draft or any subsequent user action.
+  revealFocusedFollowUpAfterNotes(panel) {
+    if (panel !== this._notesPanel || !this.notesInlineNode()) return;
+    const card = typeof document !== 'undefined' ? document.activeElement : null;
+    if (
+      !card?.matches?.('.workspace-followup-card.is-deep-linked') ||
+      !this.container?.contains?.(card)
+    )
+      return;
+    const bounds = card.getBoundingClientRect?.();
+    const height = typeof window !== 'undefined' ? window.innerHeight : 0;
+    if (bounds && height && (bounds.bottom <= 0 || bounds.top >= height)) {
+      card.scrollIntoView?.({ block: 'center' });
+    }
   }
 
   // Another surface changed the connection or the look (the drawer's Look again,
@@ -13269,9 +13287,9 @@ export class WorkspaceCommandView {
       '">' +
       escapeHtml(spec.title) +
       '</span>' +
-      '<span class="ws-cmd-panel-count">' +
-      count +
-      '</span>' +
+      (count || !(this.viewMode === 'details' && this.isPersonalHQ())
+        ? '<span class="ws-cmd-panel-count">' + count + '</span>'
+        : '') +
       '</button>' +
       '</h4>' +
       add +
@@ -14928,69 +14946,137 @@ export class WorkspaceCommandView {
     );
   }
 
-  // ── HQ rail (FR19–FR22) ──
-  // Team first and always open; then the content rows; then Setup. The rows
-  // are the ordinary rail rows (same renderers, same accordion), so opening
-  // one never waits on more than its own list.
-
+  // Team stays first. Empty rows keep their existing renderers and accordion
+  // under More; a guided visit folds every row, including Portability.
   renderHQRail() {
-    const rows =
-      '<div class="ws-hq-rail-group" role="group" aria-label="Workspace">' +
-      this.renderNotesPanel() +
-      this.renderSessionsPanel() +
-      this.renderFilesPanel() +
-      this.renderBacklogPanel() +
-      '</div>' +
-      '<div class="ws-hq-rail-group ws-hq-setup" role="group" aria-labelledby="ws-hq-setup-title">' +
-      '<h3 class="ws-hq-rail-group-title" id="ws-hq-setup-title">' +
-      escapeHtml(HQ_LABELS.setup) +
-      '</h3>' +
-      this.renderFoldersPanel({ title: HQ_LABELS.linkedFolders }) +
-      this.hqRailLinkRow({
-        key: 'tools',
-        label: HQ_LABELS.tools,
-        count: this.computeStats().tools,
-        aria: 'Open tools: MCP, skills, plugins, and find tools'
-      }) +
-      this.hqSystemsRowHTML('hq-capabilities', HQ_LABELS.capabilities, 'capabilities') +
-      this.hqSystemsRowHTML('hq-triggers', HQ_LABELS.triggers, 'triggers') +
-      this.renderSchedulesPanel() +
-      this.hqRailLinkRow({
-        key: 'goal',
-        label: HQ_LABELS.goal,
-        detail: String(this.missionSummary().mission || '').trim() || 'Not set',
-        aria: 'Open the goal'
-      }) +
-      // The full portability status, timestamp and all, is this row's chip:
-      // workspace-continuity-status.js places it in the mount (FR5, FR20).
-      '<section class="ws-cmd-panel ws-hq-link-row ws-hq-portability">' +
-      '<div class="ws-cmd-panel-head is-toggle-only">' +
-      '<h4 class="ws-cmd-panel-title"><span class="ws-hq-link-label">' +
-      escapeHtml(HQ_LABELS.portability) +
-      '</span></h4>' +
-      '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>' +
-      '</div>' +
-      '</section>' +
-      '</div>';
-    if (!this.firstVisit?.view().layout.railAllUnderMore) return this.hqTeamHTML() + rows;
+    const counts = new Map(this.presentRailSections().map(row => [row.key, row.count]));
+    const goal = String(this.missionSummary().mission || '').trim();
+    const tools = this.computeStats().tools;
+    const row = (key, label, group, html, empty = !counts.get(key)) => ({
+      key,
+      label,
+      group,
+      html,
+      empty
+    });
+    const rows = [
+      row('notes', HQ_LABELS.workspaceNotes, 'workspace', this.renderNotesPanel()),
+      row('sessions', HQ_LABELS.sessions, 'workspace', this.renderSessionsPanel()),
+      row('files', HQ_LABELS.files, 'workspace', this.renderFilesPanel()),
+      row('backlog', HQ_LABELS.backlog, 'workspace', this.renderBacklogPanel()),
+      row(
+        'folders',
+        HQ_LABELS.linkedFolders,
+        'setup',
+        this.renderFoldersPanel({ title: HQ_LABELS.linkedFolders })
+      ),
+      row(
+        'tools',
+        HQ_LABELS.tools,
+        'setup',
+        this.hqRailLinkRow({
+          key: 'tools',
+          label: HQ_LABELS.tools,
+          count: tools,
+          aria: 'Open tools: MCP, skills, plugins, and find tools'
+        }),
+        !tools
+      ),
+      row(
+        'hq-capabilities',
+        HQ_LABELS.capabilities,
+        'setup',
+        this.hqSystemsRowHTML('hq-capabilities', HQ_LABELS.capabilities, 'capabilities'),
+        true
+      ),
+      row(
+        'hq-triggers',
+        HQ_LABELS.triggers,
+        'setup',
+        this.hqSystemsRowHTML('hq-triggers', HQ_LABELS.triggers, 'triggers'),
+        true
+      ),
+      row('schedules', HQ_LABELS.schedules, 'setup', this.renderSchedulesPanel()),
+      row(
+        'goal',
+        HQ_LABELS.goal,
+        'setup',
+        this.hqRailLinkRow({
+          key: 'goal',
+          label: HQ_LABELS.goal,
+          detail: goal || 'Not set',
+          aria: 'Open the goal'
+        }),
+        !goal
+      ),
+      // The live portability mount is never empty, even when not ready to move.
+      row(
+        'portability',
+        HQ_LABELS.portability,
+        'setup',
+        '<section class="ws-cmd-panel ws-hq-link-row ws-hq-portability">' +
+          '<div class="ws-cmd-panel-head is-toggle-only">' +
+          '<h4 class="ws-cmd-panel-title"><span class="ws-hq-link-label">' +
+          escapeHtml(HQ_LABELS.portability) +
+          '</span></h4>' +
+          '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>' +
+          '</div></section>',
+        false
+      )
+    ];
+    const guided = this.firstVisit?.view().layout.railAllUnderMore;
+    const folded = rows.filter(row => guided || row.empty);
+    const visible = rows.filter(row => !guided && !row.empty);
+    this._hqFoldedRailKeys = new Set(folded.map(row => row.key));
+    // A remembered or explicitly opened section may be under More. Its
+    // accordion body must be reachable; no additional storage key is needed.
+    if (this._hqFoldedRailKeys.has(this.activeRailSection)) this.hqRailMoreOpen = true;
+    const groups = (list, suffix = '') =>
+      ['workspace', 'setup']
+        .map(group => {
+          const members = list.filter(row => row.group === group);
+          if (!members.length) return '';
+          const titleID = 'ws-hq-setup-title' + suffix;
+          return group === 'workspace'
+            ? '<div class="ws-hq-rail-group" role="group" aria-label="Workspace">' +
+                members.map(row => row.html).join('') +
+                '</div>'
+            : '<div class="ws-hq-rail-group ws-hq-setup" role="group" aria-labelledby="' +
+                titleID +
+                '">' +
+                '<h3 class="ws-hq-rail-group-title" id="' +
+                titleID +
+                '">' +
+                escapeHtml(HQ_LABELS.setup) +
+                '</h3>' +
+                members.map(row => row.html).join('') +
+                '</div>';
+        })
+        .join('');
+    const names =
+      folded
+        .slice(0, 3)
+        .map(row => row.label)
+        .join(', ') +
+      (folded.length > 3 ? ' ' + HQ_LABELS.moreCount.replace('{count}', folded.length - 3) : '');
     return (
       this.hqTeamHTML() +
-      '<section class="ws-hq-rail-more"><button type="button" class="ws-cmd-panel-toggle" data-cmd-hq-rail-more aria-expanded="' +
-      Boolean(this.hqRailMoreOpen) +
-      '" aria-controls="hq-rail-more-rows">' +
-      escapeHtml(HQ_LABELS.more) +
-      '<small>' +
-      escapeHtml(
-        [HQ_LABELS.workspaceNotes, HQ_LABELS.sessions, HQ_LABELS.files].join(', ') +
-          ' ' +
-          HQ_LABELS.moreCount.replace('{count}', 8)
-      ) +
-      '</small></button>' +
-      '<div id="hq-rail-more-rows"' +
-      (this.hqRailMoreOpen ? '' : ' hidden') +
-      '>' +
-      rows +
-      '</div></section>'
+      groups(visible) +
+      (folded.length
+        ? '<section class="ws-hq-rail-more"><button type="button" class="ws-cmd-panel-toggle" data-cmd-hq-rail-more aria-expanded="' +
+          Boolean(this.hqRailMoreOpen) +
+          '" aria-controls="hq-rail-more-rows">' +
+          '<span class="ws-hq-rail-more-label"><span class="ws-cmd-panel-chevron" aria-hidden="true">▸</span>' +
+          escapeHtml(HQ_LABELS.more) +
+          '</span><small>' +
+          escapeHtml(names) +
+          '</small></button>' +
+          '<div id="hq-rail-more-rows"' +
+          (this.hqRailMoreOpen ? '' : ' hidden') +
+          '>' +
+          groups(folded, '-more') +
+          '</div></section>'
+        : '')
     );
   }
 
@@ -15044,9 +15130,8 @@ export class WorkspaceCommandView {
       '<section class="ws-hq-team" aria-labelledby="ws-hq-team-title">' +
       '<h3 class="ws-hq-rail-group-title" id="ws-hq-team-title">' +
       escapeHtml(HQ_LABELS.team) +
-      ' <span class="ws-hq-panel-count">' +
-      agents.length +
-      '</span></h3>' +
+      (agents.length ? ' <span class="ws-hq-panel-count">' + agents.length + '</span>' : '') +
+      '</h3>' +
       (rows
         ? '<ul class="ws-hq-team-list">' + rows + '</ul>'
         : '<p class="ws-hq-empty">' +
@@ -15072,9 +15157,9 @@ export class WorkspaceCommandView {
       '<span class="ws-cmd-panel-name">' +
       escapeHtml(label) +
       '</span>' +
-      (count === undefined
-        ? ''
-        : '<span class="ws-cmd-panel-count">' + escapeHtml(String(count)) + '</span>') +
+      (Number(count) > 0
+        ? '<span class="ws-cmd-panel-count">' + escapeHtml(String(count)) + '</span>'
+        : '') +
       (detail ? '<span class="ws-hq-link-detail">' + escapeHtml(detail) + '</span>' : '') +
       '</button>' +
       '</h4>' +
@@ -15437,9 +15522,13 @@ export class WorkspaceCommandView {
   }
 
   hqStationsGridHTML() {
-    const revealed = this.firstVisit?.view().layout.stationKeys;
-    const cards = this.hqCards().filter(card => !revealed || revealed.includes(card.key));
-    if (!cards.length) return '';
+    const layout = this.firstVisit?.view().layout;
+    const revealed = layout?.stationKeys;
+    const all = this.hqCards().filter(card => !revealed || revealed.includes(card.key));
+    const { active, unused } = hqStationGroups(all);
+    const cards = revealed ? all : active;
+    const folded = layout?.foldedStations === false ? [] : unused;
+    if (!cards.length && !folded.length) return '';
     return (
       '<section class="ws-hq-panel ws-hq-stations" aria-labelledby="ws-hq-stations-title">' +
       '<header class="ws-hq-panel-head">' +
@@ -15447,45 +15536,69 @@ export class WorkspaceCommandView {
       escapeHtml(HQ_LABELS.stations) +
       '</h3>' +
       '<span class="ws-hq-panel-count">' +
-      cards.length +
+      (cards.length + folded.length) +
       '</span>' +
       '</header>' +
-      '<ul class="ws-hq-station-grid">' +
-      cards
-        .map(card => {
-          const stateClass = card.stateWord.toLowerCase().replace(/\s+/g, '-');
-          return (
-            '<li class="ws-hq-station-cell">' +
-            '<button type="button" class="ws-hq-station is-' +
-            escapeHtml(stateClass) +
-            (card.configured ? '' : ' is-unset') +
-            '" data-cmd-hq-card="' +
-            escapeHtml(card.key) +
-            '" aria-label="' +
-            escapeHtml(
-              [card.label + ': ' + card.stateWord, ...card.summary, card.action].join('. ')
-            ) +
-            '">' +
-            '<span class="ws-hq-station-head">' +
-            '<span class="ws-hq-station-name">' +
-            escapeHtml(card.label) +
-            '</span>' +
-            '<span class="ws-hq-station-state">' +
-            escapeHtml(card.stateWord) +
-            '</span>' +
-            '</span>' +
-            card.summary
-              .map(line => '<span class="ws-hq-station-summary">' + escapeHtml(line) + '</span>')
-              .join('') +
-            '<span class="ws-hq-station-action" aria-hidden="true">' +
-            escapeHtml(card.action) +
-            '</span>' +
-            '</button>' +
-            '</li>'
-          );
-        })
-        .join('') +
-      '</ul>' +
+      (cards.length
+        ? '<ul class="ws-hq-station-grid">' +
+          cards
+            .map(card => {
+              const stateClass = card.stateWord.toLowerCase().replace(/\s+/g, '-');
+              return (
+                '<li class="ws-hq-station-cell">' +
+                '<button type="button" class="ws-hq-station is-' +
+                escapeHtml(stateClass) +
+                (card.configured ? '' : ' is-unset') +
+                '" data-cmd-hq-card="' +
+                escapeHtml(card.key) +
+                '" aria-label="' +
+                escapeHtml(
+                  [card.label + ': ' + card.stateWord, ...card.summary, card.action].join('. ')
+                ) +
+                '">' +
+                '<span class="ws-hq-station-head">' +
+                '<span class="ws-hq-station-name">' +
+                escapeHtml(card.label) +
+                '</span>' +
+                '<span class="ws-hq-station-state">' +
+                escapeHtml(card.stateWord) +
+                '</span>' +
+                '</span>' +
+                card.summary
+                  .map(
+                    line => '<span class="ws-hq-station-summary">' + escapeHtml(line) + '</span>'
+                  )
+                  .join('') +
+                '<span class="ws-hq-station-action" aria-hidden="true">' +
+                escapeHtml(card.action) +
+                '</span>' +
+                '</button>' +
+                '</li>'
+              );
+            })
+            .join('') +
+          '</ul>'
+        : '') +
+      (folded.length
+        ? '<p class="ws-hq-unused"><span>' +
+          escapeHtml(HQ_LABELS.stationsUnused) +
+          '</span> ' +
+          folded
+            .map(
+              card =>
+                '<button type="button" class="ws-hq-unused-action" data-cmd-hq-card="' +
+                escapeHtml(card.key) +
+                '" aria-label="' +
+                escapeHtml(card.action + ' ' + card.label) +
+                '">' +
+                escapeHtml(card.label) +
+                '</button>'
+            )
+            .join(' ') +
+          ' <span>' +
+          escapeHtml(HQ_LABELS.stationsUnusedHint) +
+          '</span></p>'
+        : '') +
       '</section>'
     );
   }
@@ -15684,15 +15797,6 @@ export class WorkspaceCommandView {
         this.rememberHQFocus();
         needsPanel.innerHTML = html;
         this.restoreHQFocus();
-      }
-    }
-    const facts = root.querySelector('[data-cmd-hq-facts]');
-    if (facts) {
-      const html = this.hqFactsHTML();
-      const focused = typeof document !== 'undefined' ? document.activeElement : null;
-      // Never rebuild the line under a focused Edit goal button.
-      if (facts.innerHTML !== html && !(focused && facts.contains?.(focused))) {
-        facts.innerHTML = html;
       }
     }
     const tiles = root.querySelector('.ws-hq-tiles');
@@ -15898,6 +16002,11 @@ export class WorkspaceCommandView {
     rail?.addEventListener?.('click', event => {
       if (event.target.closest?.('[data-cmd-hq-rail-more]')) {
         this.hqRailMoreOpen = !this.hqRailMoreOpen;
+        if (!this.hqRailMoreOpen && this._hqFoldedRailKeys?.has(this.activeRailSection)) {
+          // Closing the parent folds its open child, without overwriting the
+          // user's remembered section. A later explicit open reveals More.
+          this.activeRailSection = '';
+        }
         this.render();
         return;
       }

@@ -51,6 +51,7 @@ export const HQ_LABELS = Object.freeze({
 
   // Setup rows
   linkedFolders: 'Linked folders',
+  schedules: 'Schedules',
   tools: 'Tools',
   capabilities: 'Capabilities',
   triggers: 'Triggers and automation',
