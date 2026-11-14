@@ -196,6 +196,22 @@ test('Create Workspace keeps the face picker above the sheet with independent fo
   await page.keyboard.press('Escape');
   await expect(page.locator('#charPicker')).toHaveCount(0);
   await expect(sheet).toBeVisible();
+  await expect(sheetCard.locator('[data-folder-agent-action="start"]')).toHaveText('Hire & build');
+  await expect(sheetCard.locator('.folder-agent-card__who-reuse')).not.toHaveAttribute('open', '');
+  await sheetCard.getByRole('button', { name: 'Change face', exact: true }).click();
+  await page.locator('[data-char-id="decision-strategist"]').click();
+  await page.locator('#charPickerConfirm').click();
+  await expect(sheetCard.locator('[data-aa-character="decision-strategist"]')).toBeVisible();
+  await capture(page, 'entry-sheet-hire');
+  const response = page.waitForResponse(r => r.url().endsWith('/folder-agent/start'));
+  await sheetCard.locator('[data-folder-agent-action="start"]').click();
+  const started = await response;
+  expect(started.status(), await started.text()).toBe(201);
+  const records = (await (await request.get('/api/agents/dashboard/list')).json()).agents;
+  expect(
+    records.find((a: any) => a.name === 'Sheet Folder Manager')?.appearance?.character?.catalog_id
+  ).toBe('decision-strategist');
+  await capture(page, 'entry-sheet-receipt');
 });
 
 test('reuse folds a large roster without hiding selection, runs or keyboard focus', async ({
