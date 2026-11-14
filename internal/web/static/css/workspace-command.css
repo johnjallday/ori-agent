@@ -9586,48 +9586,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
   box-shadow: inset 0 0 0 2px var(--ws-faction);
 }
 
-/* The attention strip: calm, neutral, one accent per category chip. */
-/* HQ surfaces sit on --ws-panel-2, the station panels' own surface, so their
-   amber and orange text keeps 4.5:1 in the light theme too. */
-.ws-hq-attention {
-  margin: 0 0 18px;
-  padding: 12px 14px;
-  border: 1px solid var(--ws-line);
-  background: var(--ws-panel-2);
-}
-.ws-hq-attention[hidden] {
-  display: none;
-}
-.ws-hq-attention-title {
-  margin: 0 0 8px;
-  color: var(--ws-ink-dim);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
-.ws-hq-attention-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.ws-hq-attention-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-}
-.ws-hq-attention-text {
-  flex: 1 1 220px;
-  min-width: 0;
-  color: var(--ws-ink);
-  font-size: 13.5px;
-  overflow-wrap: anywhere;
-}
-.ws-hq-attention-actions {
+/* The single Needs you list keeps each source's action(s) together. */
+.ws-hq-needs-actions {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -9655,22 +9615,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-hq-chip.is-notes {
   border-color: var(--ws-keeper);
   color: var(--ws-keeper);
-}
-.ws-hq-attention-more {
-  margin-top: 8px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ws-faction);
-  font: inherit;
-  font-size: 13px;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-.ws-hq-attention-more:focus-visible {
-  outline: 2px solid var(--ws-faction);
-  outline-offset: 2px;
 }
 .ws-hq-github-host {
   margin: 0 0 18px;

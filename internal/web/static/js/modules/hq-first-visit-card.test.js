@@ -110,7 +110,6 @@ test('HQ card loads missions, escapes content and uses the real avatar presentat
 test('pending layout leaves out Notes until capture completion, without changing the station source', () => {
   const { owner, card } = fixture();
   card.missions = missionRows();
-  owner.hqAttentionHTML = () => '';
   owner.hqNeedsYouHTML = () => '';
   owner.renderHQGitHubHost = () => '';
   owner.renderFollowUpsHost = () => '';

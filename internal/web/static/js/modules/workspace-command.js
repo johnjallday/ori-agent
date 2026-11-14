@@ -148,7 +148,7 @@ import { readRailSection, resolveRailSection, writeRailSection } from './workspa
 import { HQ_LABELS, portabilityWord } from './hq-labels.js';
 import { HQFirstVisitCard } from './hq-first-visit-card.js';
 import { WORK_LABELS, startFromBacklogLabel } from './work-labels.js';
-import { capAttentionLines, hqAttentionLines, hqNeedsYouRows } from './hq-attention.js';
+import { hqNeedsYouRows } from './hq-attention.js';
 import { hqStationCards, stationsNeedingYou } from './hq-stations-grid.js';
 import {
   briefScopeHasOthers,
@@ -14910,7 +14910,6 @@ export class WorkspaceCommandView {
 
   renderHQDetails() {
     return (
-      this.hqAttentionHTML() +
       this.renderHQGitHubHost() +
       '<div class="ws-cmd-layout is-hq">' +
       '<main class="ws-cmd-main ws-hq-main">' +
@@ -15258,9 +15257,7 @@ export class WorkspaceCommandView {
     return raw === undefined || raw === '' ? null : Number(raw) || 0;
   }
 
-  // How many things want the user. Until the Needs you panel exists this is
-  // the attention strip's line count.
-  // What the Needs you tile counts: the Needs you panel's rows (FR7, FR14).
+  // What the Needs you tile counts: the Needs you panel's rows.
   hqNeedsYouCount() {
     return this.hqNeedsYou().total;
   }
@@ -15310,7 +15307,14 @@ export class WorkspaceCommandView {
   }
 
   hqNeedsYou({ all = false } = {}) {
+    const first = this.firstVisit?.view();
+    // Flow keeps its existing inbox/station/notes count. Tickets and today's
+    // brief have their own nodes there; only Overview merges those sources.
+    const overview = this.viewMode !== 'map';
     return hqNeedsYouRows({
+      ...(overview ? this.hqAttentionState() : {}),
+      suppressBrief:
+        first?.card === 'full' && !first.steps.find(step => step.key === 'brief')?.resolved,
       mail: this.hqMailRows(),
       stations: stationsNeedingYou(this.hqCards()),
       notes: notesNudge(this.notesState().secondBrain),
@@ -15319,9 +15323,11 @@ export class WorkspaceCommandView {
   }
 
   hqNeedsYouHTML() {
-    if (this.firstVisit?.view().layout.hideEmptyNeeds && !this.hqNeedsYou().total) return '';
+    const hidden = this.firstVisit?.view().layout.hideEmptyNeeds && !this.hqNeedsYou().total;
     return (
-      '<section class="ws-hq-panel ws-hq-needs" data-cmd-hq-needs aria-labelledby="ws-hq-needs-title">' +
+      '<section class="ws-hq-panel ws-hq-needs" data-cmd-hq-needs aria-labelledby="ws-hq-needs-title"' +
+      (hidden ? ' hidden' : '') +
+      '>' +
       this.hqNeedsYouInnerHTML() +
       '</section>' +
       // After "Show all", the inbox's own full list (its FYI and ignorable
@@ -15370,13 +15376,18 @@ export class WorkspaceCommandView {
             '<span class="ws-hq-needs-text">' +
             escapeHtml(row.sentence) +
             '</span>' +
-            (row.actions[0]
-              ? '<button type="button" class="ws-cmd-agent-action" data-cmd-hq-needs-action="' +
-                escapeHtml(row.key) +
-                '">' +
-                escapeHtml(row.actions[0].label) +
-                '</button>'
-              : '') +
+            '<span class="ws-hq-needs-actions">' +
+            row.actions
+              .map(
+                (action, index) =>
+                  '<button type="button" class="ws-cmd-agent-action" data-cmd-hq-needs-action="' +
+                  escapeHtml(row.key + '#' + index) +
+                  '">' +
+                  escapeHtml(action.label) +
+                  '</button>'
+              )
+              .join('') +
+            '</span>' +
             '</li>'
         )
         .join('') +
@@ -15385,8 +15396,9 @@ export class WorkspaceCommandView {
   }
 
   runHQNeedsYouAction(key, trigger) {
-    const row = (this._hqNeedsYouRows || []).find(item => item.key === key);
-    const action = row && row.actions[0];
+    const [rowKey, indexText = '0'] = String(key || '').split('#');
+    const row = (this._hqNeedsYouRows || []).find(item => item.key === rowKey);
+    const action = row && row.actions[Number(indexText)];
     if (!action) return;
     if (action.kind === 'station') {
       this.runHQStationAction(action.key, trigger);
@@ -15409,7 +15421,9 @@ export class WorkspaceCommandView {
         '.needs-you__actions button, .needs-you__actions a[href]'
       );
       control?.click?.();
+      return;
     }
+    this.runHQAttentionAction(key, trigger);
   }
 
   // The inbox's own Needs you surface, under the panel after "Show all".
@@ -15539,9 +15553,8 @@ export class WorkspaceCommandView {
     );
   }
 
-  // ── Attention strip (FR10–FR13) ──
-
-  // Plain values for hqAttentionLines, read from what the page already has.
+  // Extra Overview inputs for the single Needs you builder, read from the
+  // page's existing sources. The Map keeps these in its own lane nodes.
   hqAttentionState() {
     const waiting = this.hqWaitingItems();
     const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
@@ -15555,6 +15568,12 @@ export class WorkspaceCommandView {
     const brief = briefData.status === 'ready' ? dailyBriefStatus(briefData) : null;
     return {
       waiting,
+      review: (Array.isArray(this.page?.tasks) ? this.page.tasks : [])
+        .filter(task => String(task.ticket_state || '').toLowerCase() === 'review')
+        .map(task => ({
+          taskId: String(task.id || ''),
+          title: String(task.description || task.title || '').trim()
+        })),
       setup: this.hqMountSignals(),
       goal: { reason: String((goalState && goalState.needs_attention) || '').trim() },
       brief:
@@ -15565,8 +15584,8 @@ export class WorkspaceCommandView {
     };
   }
 
-  // The tickets waiting on the user's answer, and whose they are: the strip's
-  // Lead line and the Flow map's lead card read the same list.
+  // The tickets waiting on the user's answer, and whose they are: Needs you
+  // and the Flow map's lead card read the same list.
   hqWaitingItems() {
     const page = this.page || {};
     const tasks = Array.isArray(page.tasks) ? page.tasks : [];
@@ -15585,10 +15604,6 @@ export class WorkspaceCommandView {
           taskId: String(task.id || '')
         };
       });
-  }
-
-  hqAttentionAll() {
-    return hqAttentionLines(this.hqAttentionState());
   }
 
   // The visible controls of a top mount, in document order.
@@ -15652,98 +15667,18 @@ export class WorkspaceCommandView {
     return { installed: true, count: pending.length };
   }
 
-  // Hidden entirely when there is nothing to say (FR10).
-  hqAttentionHTML() {
-    const inner = this.hqAttentionInnerHTML();
-    return (
-      '<section class="ws-hq-attention" data-cmd-hq-attention aria-labelledby="ws-hq-attention-title"' +
-      (inner ? '' : ' hidden') +
-      '>' +
-      inner +
-      '</section>'
-    );
-  }
-
-  hqAttentionInnerHTML() {
-    const lines = this.hqAttentionAll();
-    this._hqAttentionLines = lines;
-    if (!lines.length) return '';
-    const { shown, hidden } = capAttentionLines(lines, { expanded: this.hqAttentionExpanded });
-    return (
-      '<h3 class="ws-hq-attention-title" id="ws-hq-attention-title">' +
-      escapeHtml(HQ_LABELS.needsYourAttention) +
-      '</h3>' +
-      '<ul class="ws-hq-attention-list">' +
-      shown
-        .map(
-          entry =>
-            '<li class="ws-hq-attention-line">' +
-            '<span class="ws-hq-chip is-' +
-            escapeHtml(entry.category.toLowerCase()) +
-            '">' +
-            escapeHtml(entry.category) +
-            '</span>' +
-            '<span class="ws-hq-attention-text">' +
-            escapeHtml(entry.sentence) +
-            '</span>' +
-            '<span class="ws-hq-attention-actions">' +
-            entry.actions
-              .map(
-                (action, index) =>
-                  '<button type="button" class="ws-cmd-agent-action' +
-                  (index === 0 ? ' is-primary' : '') +
-                  '" data-cmd-hq-attention-action="' +
-                  escapeHtml(entry.key + '#' + index) +
-                  '">' +
-                  escapeHtml(action.label) +
-                  '</button>'
-              )
-              .join('') +
-            '</span>' +
-            '</li>'
-        )
-        .join('') +
-      '</ul>' +
-      (hidden
-        ? '<button type="button" class="ws-hq-attention-more" data-cmd-hq-attention-more aria-expanded="false">and ' +
-          hidden +
-          ' more</button>'
-        : '')
-    );
-  }
-
-  // Repaints the parts of the HQ header and strip that other modules change
+  // Repaints the parts of the HQ header and Needs you that other modules change
   // (setup mounts, the goal, follow-ups, portability) without a full render,
   // so nothing else on the page moves. Focus stays on the same action.
   paintHQLive() {
     if (!this.active || this.viewMode !== 'details' || !this.isPersonalHQ()) return;
     const root = this.container;
     if (!root || typeof root.querySelector !== 'function') return;
-    const strip = root.querySelector('[data-cmd-hq-attention]');
-    if (strip) {
-      const active = typeof document !== 'undefined' ? document.activeElement : null;
-      const focusKey =
-        active && strip.contains?.(active)
-          ? active.getAttribute?.('data-cmd-hq-attention-action') ||
-            (active.hasAttribute?.('data-cmd-hq-attention-more') ? 'more' : '')
-          : '';
-      const html = this.hqAttentionInnerHTML();
-      if (strip.innerHTML !== html) {
-        strip.innerHTML = html;
-        if (focusKey) {
-          const target =
-            focusKey === 'more'
-              ? strip.querySelector('[data-cmd-hq-attention-more]')
-              : Array.from(strip.querySelectorAll('[data-cmd-hq-attention-action]')).find(
-                  el => el.getAttribute('data-cmd-hq-attention-action') === focusKey
-                );
-          target?.focus?.({ preventScroll: true });
-        }
-      }
-      strip.hidden = !this._hqAttentionLines.length;
-    }
     const needsPanel = root.querySelector('[data-cmd-hq-needs]');
     if (needsPanel) {
+      needsPanel.hidden = Boolean(
+        this.firstVisit?.view().layout.hideEmptyNeeds && !this.hqNeedsYou().total
+      );
       const html = this.hqNeedsYouInnerHTML();
       if (needsPanel.innerHTML !== html) {
         this.rememberHQFocus();
@@ -15844,7 +15779,7 @@ export class WorkspaceCommandView {
   }
 
   // GitHub proposals live in their own mount, hidden above the header on the
-  // HQ; "Review" brings that live panel under the strip until it is empty.
+  // HQ; "Review" brings that live panel into the Overview until it is empty.
   renderHQGitHubHost() {
     return this.hqGitHubShown
       ? '<div class="ws-hq-panel-host ws-hq-github-host" data-cmd-hq-host="github"></div>'
@@ -15852,8 +15787,8 @@ export class WorkspaceCommandView {
   }
 
   runHQAttentionAction(key, trigger) {
-    const [lineKey, indexText] = String(key || '').split('#');
-    const entry = (this._hqAttentionLines || []).find(item => item.key === lineKey);
+    const [lineKey, indexText = '0'] = String(key || '').split('#');
+    const entry = (this._hqNeedsYouRows || []).find(item => item.key === lineKey);
     const action = entry && entry.actions[Number(indexText)];
     if (!action) return;
     const mission = typeof window !== 'undefined' ? window.workspaceMission : null;
@@ -15997,21 +15932,6 @@ export class WorkspaceCommandView {
           ?.focus?.({ preventScroll: true });
       }
     });
-    const strip = root.querySelector('[data-cmd-hq-attention]');
-    if (strip) {
-      strip.addEventListener('click', event => {
-        const btn = event.target.closest?.('[data-cmd-hq-attention-action]');
-        if (btn) {
-          this.runHQAttentionAction(btn.getAttribute('data-cmd-hq-attention-action'), btn);
-          return;
-        }
-        if (event.target.closest?.('[data-cmd-hq-attention-more]')) {
-          this.hqAttentionExpanded = true;
-          this.paintHQLive();
-          strip.querySelectorAll?.('[data-cmd-hq-attention-action]')[3]?.focus?.();
-        }
-      });
-    }
     this.syncHQGitHubSurface();
   }
 

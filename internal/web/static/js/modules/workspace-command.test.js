@@ -10133,13 +10133,10 @@ test('HQ Overview keeps counts with Tickets and the specialized content instead 
   assert.equal(commandView.hqTilesValues().followups.value, '—');
 });
 
-test('HQ Details: no lines means no strip; the no-model goal reason is one line (FR8, FR10)', () => {
+test('HQ Overview has one Needs you panel, including the no-model setup action', () => {
   const quiet = hqDetailsMarkup().html;
-  assert.match(
-    quiet,
-    /<section class="ws-hq-attention" data-cmd-hq-attention [^>]* hidden><\/section>/
-  );
-
+  assert.doesNotMatch(quiet, /data-cmd-hq-attention|Needs your attention/);
+  assert.match(quiet, /Nothing needs you right now\./);
   const { html, commandView } = hqDetailsMarkup({
     window: {
       workspaceMission: {
@@ -10148,19 +10145,11 @@ test('HQ Details: no lines means no strip; the no-model goal reason is one line 
       }
     }
   });
-  const strip = html.match(/<section class="ws-hq-attention"[^>]*>(.*?)<\/section>/);
-  assert.doesNotMatch(strip[0], / hidden>/);
-  assert.match(
-    strip[1],
-    /<h3 class="ws-hq-attention-title" id="ws-hq-attention-title">Needs your attention<\/h3>/
-  );
-  assert.match(strip[1], /<span class="ws-hq-chip is-setup">Setup<\/span>/);
-  assert.match(strip[1], /Set up a model to get suggestions\./);
-  assert.match(strip[1], /data-cmd-hq-attention-action="setup:goal#0">Set up a model</);
-  assert.equal(commandView._hqAttentionLines.length, 1);
-  // The strip sits right under the header, before the main column.
-  assert.ok(html.indexOf('</header>') < html.indexOf('ws-hq-attention'));
-  assert.ok(html.indexOf('ws-hq-attention') < html.indexOf('ws-cmd-layout is-hq'));
+  assert.equal((html.match(/data-cmd-hq-needs /g) || []).length, 1);
+  assert.match(html, /<span class="ws-hq-chip is-setup">Setup<\/span>/);
+  assert.match(html, /data-cmd-hq-needs-action="setup:goal#0">Set up a model</);
+  assert.equal(commandView._hqNeedsYouRows.length, 1);
+  assert.doesNotMatch(html, /data-cmd-hq-attention/);
 });
 
 function fakeMount({ text, buttons = [], hidden = false }) {
@@ -10187,7 +10176,7 @@ function fakeMount({ text, buttons = [], hidden = false }) {
   };
 }
 
-test('HQ Details: the hidden setup mounts become strip lines whose actions click the mount (FR11, FR13)', () => {
+test('HQ Details: setup rows retain both actions, delegated to their existing mount', () => {
   const wizard = fakeMount({ text: 'Setup · 2 of 4 steps done', buttons: ['Continue setup'] });
   const email = fakeMount({ text: 'Connect your inbox', buttons: ['Connect', 'Later', 'Help'] });
   const janitorLike = fakeMount({ text: 'Hidden one', hidden: true });
@@ -10199,21 +10188,21 @@ test('HQ Details: the hidden setup mounts become strip lines whose actions click
   const doc = { getElementById: id => mounts[id] || null };
   const { html, commandView } = hqDetailsMarkup({ document: doc });
   assert.deepEqual(
-    commandView._hqAttentionLines.map(entry => [entry.key, entry.category, entry.sentence]),
+    commandView._hqNeedsYouRows.map(entry => [entry.key, entry.category, entry.sentence]),
     [
       ['setup:wizard', 'Setup', 'Setup · 2 of 4 steps done'],
       ['setup:email', 'Email', 'Connect your inbox']
     ]
   );
   // At most two actions per line.
-  assert.match(html, /data-cmd-hq-attention-action="setup:email#1">Later</);
+  assert.match(html, /data-cmd-hq-needs-action="setup:email#1">Later</);
   assert.doesNotMatch(html, />Help</);
 
   const originalDocument = globalThis.document;
   globalThis.document = doc;
   try {
-    commandView.runHQAttentionAction('setup:email#1');
-    commandView.runHQAttentionAction('setup:wizard#0');
+    commandView.runHQNeedsYouAction('setup:email#1');
+    commandView.runHQNeedsYouAction('setup:wizard#0');
   } finally {
     globalThis.document = originalDocument;
   }
@@ -10221,36 +10210,92 @@ test('HQ Details: the hidden setup mounts become strip lines whose actions click
   assert.equal(wizard.controls[0].clicks, 1, 'and the wizard’s Continue setup');
 });
 
-test('HQ Details: more than three lines collapse behind "and N more" (FR12)', () => {
-  const tasks = [
-    { id: 't1', status: 'waiting_for_choice', description: 'Approve the plan', to: 'Atlas' }
-  ];
+test('HQ Needs you merges waiting and Review tickets, caps at five, and opens the specific ticket', () => {
   const mounts = {
     setupWizardBanner: fakeMount({ text: 'Finish setup', buttons: ['Continue'] }),
-    blueprintIntakePending: fakeMount({ text: '2 changes', buttons: ['Review changes'] }),
-    workspaceFirstTaskBanner: fakeMount({ text: 'Atlas is reading the folder' })
+    blueprintIntakePending: fakeMount({ text: '2 changes', buttons: ['Review changes'] })
   };
   const doc = { getElementById: id => mounts[id] || null };
-  const { html, commandView } = hqDetailsMarkup({ document: doc });
-  assert.equal(commandView._hqAttentionLines.length, 3);
-  assert.doesNotMatch(html, /and \d+ more/);
-
-  commandView.page.tasks = tasks;
+  const { commandView } = hqDetailsMarkup({ document: doc });
+  commandView.page.tasks = [
+    { id: 't1', status: 'waiting_for_choice', description: 'Approve the plan', to: 'Atlas' },
+    ...['r1', 'r2', 'r3'].map(id => ({
+      id,
+      ticket_state: 'review',
+      status: 'completed',
+      description: id
+    })),
+    { id: 'done', ticket_state: 'done', status: 'completed', description: 'Already accepted' }
+  ];
   const originalDocument = globalThis.document;
   globalThis.document = doc;
   try {
-    const inner = commandView.hqAttentionInnerHTML();
-    assert.equal(commandView._hqAttentionLines.length, 4);
-    assert.match(inner, /data-cmd-hq-attention-more aria-expanded="false">and 1 more</);
-    assert.equal((inner.match(/class="ws-hq-attention-line"/g) || []).length, 3);
+    const inner = commandView.hqNeedsYouInnerHTML();
+    assert.match(inner, /Show all \(6\)/);
+    assert.equal(commandView._hqNeedsYouRows.length, 5);
+    assert.equal((inner.match(/class="ws-hq-needs-row"/g) || []).length, 5);
     assert.match(inner, /Atlas \(Lead\) is waiting on you: Approve the plan\./);
-    commandView.hqAttentionExpanded = true;
-    const open = commandView.hqAttentionInnerHTML();
-    assert.equal((open.match(/class="ws-hq-attention-line"/g) || []).length, 4);
-    assert.doesNotMatch(open, /and 1 more/);
+    assert.match(inner, /Ready for review: r1\./);
+    assert.doesNotMatch(inner, /Already accepted/);
+    const opened = [];
+    commandView.runWorkAction = (...args) => opened.push(args);
+    commandView.runHQNeedsYouAction('ticket:r1#0', 'review-button');
+    assert.deepEqual(opened, [['open', 'r1', 'review-button']]);
+    commandView.hqNeedsYouExpanded = true;
+    const all = commandView.hqNeedsYouInnerHTML();
+    assert.equal((all.match(/class="ws-hq-needs-row"/g) || []).length, 6);
+    assert.doesNotMatch(all, /Show all/);
   } finally {
     globalThis.document = originalDocument;
   }
+});
+
+test('the welcome suppresses only the ready-brief duplicate, and the live empty panel can become needed', () => {
+  const { commandView } = hqDetailsMarkup();
+  commandView.hqAttentionState = () => ({ brief: { readyToday: true } });
+  commandView.firstVisit = {
+    view: () => ({
+      card: 'full',
+      steps: [{ key: 'brief', resolved: false }],
+      layout: { hideEmptyNeeds: true }
+    })
+  };
+  assert.equal(commandView.hqNeedsYou().total, 0);
+  assert.match(commandView.hqNeedsYouHTML(), /data-cmd-hq-needs[^>]* hidden>/);
+  const needs = { innerHTML: '', hidden: false };
+  commandView.container = {
+    querySelector: selector => (selector === '[data-cmd-hq-needs]' ? needs : null)
+  };
+  commandView.active = true;
+  commandView.rememberHQFocus = () => {};
+  commandView.restoreHQFocus = () => {};
+  commandView.paintHQLive();
+  assert.equal(needs.hidden, true);
+  commandView.hqAttentionState = () => ({ goal: { reason: 'Set up a model' } });
+  commandView.paintHQLive();
+  assert.equal(needs.hidden, false);
+  assert.match(needs.innerHTML, /Set up a model/);
+  commandView.hqAttentionState = () => ({ brief: { readyToday: true } });
+  commandView.firstVisit.view = () => ({ card: 'bar', steps: [], layout: {} });
+  assert.equal(commandView.hqNeedsYou().total, 1);
+});
+
+test('Flow keeps its own ticket and brief nodes, without adding those rows to Needs you', () => {
+  const { commandView } = hqDetailsMarkup();
+  commandView.hqMailRows = () => [{ index: 0, subject: 'Reply please' }];
+  commandView.hqAttentionState = () => ({
+    waiting: [{ taskId: 'answer' }],
+    review: [{ taskId: 'review' }],
+    brief: { readyToday: true },
+    goal: { reason: 'Set up a model' }
+  });
+  assert.equal(commandView.hqNeedsYou().total, 5);
+  commandView.viewMode = 'map';
+  assert.equal(commandView.hqNeedsYou().total, 1);
+  assert.deepEqual(
+    commandView.hqFlowModel([]).needs.map(node => node.key),
+    ['needs-you', 'follow-ups', 'brief', 'tasks']
+  );
 });
 
 test('HQ Details main column: Needs you, Notes, Follow-ups, then the stations grid (FR14–FR18)', () => {
