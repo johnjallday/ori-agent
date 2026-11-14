@@ -774,7 +774,7 @@
 
     const head = el('div', 'fj-head');
     const heading = el('div', 'fj-heading');
-    const title = el('h2', 'fj-title', 'File Janitor');
+    const title = el('h2', 'fj-title', 'Filing');
     title.id = 'fileJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
@@ -2951,19 +2951,19 @@
   // FR-119).
   function removalSection() {
     const section = el('div', 'fj-setting fj-setting-removal');
-    section.appendChild(el('h4', 'fj-setting-heading', 'Remove File Janitor'));
+    section.appendChild(el('h4', 'fj-setting-heading', 'Remove Filing'));
 
     if (!removalConfirming) {
       section.appendChild(
         el(
           'p',
           'fj-setting-help',
-          'Stops managing this folder and removes File Janitor from this workspace. ' +
+          'Stops managing this folder and removes Filing from this workspace. ' +
             'Your files are not moved or deleted.'
         )
       );
       const start = button(
-        'Remove File Janitor',
+        'Remove Filing',
         'fj-btn fj-btn-secondary fj-btn-destructive',
         () => void beginRemoval()
       );
@@ -2975,7 +2975,7 @@
     const summary = removalSummary || {};
     const confirmation = el('div', 'fj-removal-confirm');
     confirmation.setAttribute('role', 'group');
-    confirmation.setAttribute('aria-label', 'Confirm removing File Janitor');
+    confirmation.setAttribute('aria-label', 'Confirm removing Filing');
 
     // Name the folder. A confirmation the user cannot evaluate is not one.
     confirmation.appendChild(
@@ -2984,7 +2984,7 @@
         'fj-removal-lead',
         summary.managed_folder
           ? 'Ori will stop managing ' + safeName(summary.managed_folder) + '.'
-          : 'Ori will remove File Janitor from this workspace.'
+          : 'Ori will remove Filing from this workspace.'
       )
     );
 
@@ -3038,12 +3038,12 @@
 
     const buttons = el('div', 'fj-settings-actions');
     const confirm = button(
-      'Remove File Janitor',
+      'Remove Filing',
       'fj-btn fj-btn-destructive',
       () => void completeRemoval()
     );
     confirm.id = 'fileJanitorRemoveConfirm';
-    const cancel = button('Keep File Janitor', 'fj-btn fj-btn-secondary', () => {
+    const cancel = button('Keep Filing', 'fj-btn fj-btn-secondary', () => {
       removalConfirming = false;
       removalSummary = null;
       removalCompanionChecked = false;
@@ -3093,7 +3093,7 @@
     const id = wsId();
     if (!id || busy) return;
     busy = true;
-    setSettingsMessage('Removing File Janitor…');
+    setSettingsMessage('Removing Filing…');
     try {
       const response = await fetch(
         '/api/workspaces/' + encodeURIComponent(id) + '/capabilities/file-janitor',
@@ -3105,7 +3105,7 @@
       );
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(body.message || 'Ori could not remove File Janitor.');
+        throw new Error(body.message || 'Ori could not remove Filing.');
       }
       removalConfirming = false;
       removalSummary = null;
@@ -3121,7 +3121,7 @@
       const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
       if (catalog && typeof catalog.reload === 'function') await catalog.reload();
     } catch (error) {
-      setSettingsMessage(error.message || 'Ori could not remove File Janitor.');
+      setSettingsMessage(error.message || 'Ori could not remove Filing.');
       renderSettings();
     } finally {
       busy = false;
@@ -3157,7 +3157,7 @@
       el(
         'p',
         'fj-setting-help',
-        'No Curator in this workspace. File Janitor works fully without one — a Curator only ' +
+        'No Curator in this workspace. Filing works fully without one — a Curator only ' +
           'helps you understand what is proposed, and can never act on your files.'
       )
     );
@@ -4050,7 +4050,7 @@
   function compactPrimaryAction(status) {
     const configured = isConfigured(status);
     const activity = activityState(status);
-    if (!configured) return { label: 'Set up File Janitor', tab: '' };
+    if (!configured) return { label: 'Set up Filing', tab: '' };
     if (activity.id === 'needs_attention') return { label: 'Repair setup', tab: 'review' };
     if (activity.id === 'consent_required') return { label: 'Review consent', tab: 'settings' };
     const waiting = pendingCount();
@@ -4078,8 +4078,7 @@
     const head = el('div', 'fj-card-head');
     head.appendChild(compactDepotMark());
     const heading = el('div', 'fj-card-heading');
-    heading.appendChild(el('span', 'fj-card-kicker', 'File depot'));
-    const title = el('h2', 'fj-card-title', 'File Janitor');
+    const title = el('h2', 'fj-card-title', 'Filing');
     title.id = 'fileJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
@@ -4803,7 +4802,7 @@
     const header = el('header', 'fj-console-head');
 
     const heading = el('div', 'fj-console-heading');
-    const title = el('h2', 'fj-console-title', 'File Janitor');
+    const title = el('h2', 'fj-console-title', 'Filing');
     title.id = CONSOLE_TITLE_ID;
     heading.appendChild(title);
     // The managed folder is shown by its display name, cleaned the same way a
@@ -4835,7 +4834,7 @@
     }
     const closeButton = button('Close', 'fj-btn fj-btn-secondary', () => close());
     closeButton.setAttribute('data-fj-console-close', '');
-    closeButton.setAttribute('aria-label', 'Close File Janitor');
+    closeButton.setAttribute('aria-label', 'Close Filing');
     consoleCloseButton = closeButton;
     actions.appendChild(closeButton);
     header.appendChild(actions);
@@ -4854,7 +4853,7 @@
   function renderConsoleTabs() {
     const list = el('div', 'fj-console-tabs');
     list.setAttribute('role', 'tablist');
-    list.setAttribute('aria-label', 'File Janitor sections');
+    list.setAttribute('aria-label', 'Filing sections');
     const labels = { review: 'Review', history: 'History', settings: 'Settings' };
     CONSOLE_TABS.forEach(tab => {
       const active = tab === consoleTab;
@@ -5035,16 +5034,16 @@
       const failed = sources.some(source => source.state === 'unavailable');
       const loading = sources.some(source => source.state === 'loading');
       const text = failed
-        ? 'File Janitor information is unavailable. Last known details may be out of date.'
+        ? 'Filing information is unavailable. Last known details may be out of date.'
         : loading
-          ? 'Checking File Janitor. Last known details may be out of date.'
+          ? 'Checking Filing. Last known details may be out of date.'
           : '';
       if (notice.getAttribute('data-read-status') !== text) {
         notice.setAttribute('data-read-status', text);
         notice.textContent = text;
         if (failed)
           notice.appendChild(
-            button('Retry File Janitor', 'fj-btn fj-btn-secondary', () => void refresh())
+            button('Retry Filing', 'fj-btn fj-btn-secondary', () => void refresh())
           );
       }
       notice.hidden = !text;
@@ -5196,7 +5195,7 @@
     )
       return false;
     const card = el('section', 'fj-setup-review');
-    card.setAttribute('aria-label', 'Review File Janitor permissions');
+    card.setAttribute('aria-label', 'Review Filing permissions');
     card.appendChild(
       el(
         'h3',
@@ -5444,7 +5443,7 @@
     const card = el('section', 'fj-card');
     const head = el('div', 'fj-head');
     const heading = el('div', 'fj-heading');
-    const title = el('h2', 'fj-title', 'File Janitor');
+    const title = el('h2', 'fj-title', 'Filing');
     title.id = 'fileJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
@@ -6116,7 +6115,7 @@
       return {
         applies: true,
         value: 'Needs attention',
-        description: firstProblem(readiness) || 'File Janitor needs attention',
+        description: firstProblem(readiness) || 'Filing needs attention',
         tone: 'degraded'
       };
     }
@@ -6589,7 +6588,7 @@
             : status.folder_display_name || '';
         return {
           key: 'file-janitor',
-          label: 'File Janitor',
+          label: 'Filing',
           location: folder || 'No folder approved',
           icon: 'bi-folder-symlink',
           visualVariant: 'depot',

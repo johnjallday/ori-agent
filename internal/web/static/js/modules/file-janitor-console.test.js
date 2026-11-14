@@ -546,11 +546,11 @@ test('a preset suggestion still pre-fills and is immediately approvable', () => 
   assert.equal(confirm.disabled, false);
 });
 
-test('the setup card is titled File Janitor, not Downloads Janitor', () => {
+test('the setup card is titled Filing, not Downloads Janitor', () => {
   const doc = setup();
   openConsole(setupRequiredStatus);
   const title = doc.getElementById('fileJanitorTitle');
-  assert.equal(title.textContent, 'File Janitor');
+  assert.equal(title.textContent, 'Filing');
 });
 
 test('the folder input is labelled and described for screen readers', () => {
@@ -2969,7 +2969,7 @@ test('the console is a labelled modal dialog', () => {
   // The accessible name is the visible title, not a separate string that could
   // drift away from what is on screen.
   const labelledBy = dialog.getAttribute('aria-labelledby');
-  assert.equal(doc.getElementById(labelledBy).textContent, 'File Janitor');
+  assert.equal(doc.getElementById(labelledBy).textContent, 'Filing');
 });
 
 test('a late status repaint after closing preserves focus on the live compact opener', () => {
@@ -3212,7 +3212,7 @@ test('the station keeps product identity, managed folder, depot art, and state d
   );
 
   const station = adapter.station();
-  assert.equal(station.label, 'File Janitor');
+  assert.equal(station.label, 'Filing');
   assert.equal(station.location, 'A very long approved inbox folder');
   assert.equal(station.visualVariant, 'depot');
   assert.equal(station.state().value, '2 files ready for review');
@@ -3257,8 +3257,8 @@ test('Workspace Details carries no review table and no settings form', () => {
   const card = doc.getElementById('fileJanitorMount');
 
   // The compact card answers "is anything waiting?" and offers a way in.
-  assert.match(card.textContent, /File depot/);
-  assert.match(card.textContent, /File Janitor/);
+  assert.doesNotMatch(card.textContent, /File depot/);
+  assert.match(card.textContent, /Filing/);
   assert.match(card.textContent, /Current status Review ready/);
   assert.match(card.textContent, /Managed folder Inbox/);
   assert.match(card.textContent, /Review queue 2 files waiting for review/);

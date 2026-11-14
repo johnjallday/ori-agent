@@ -822,7 +822,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 		case folderlook.KindFileCurator:
 			// File Janitor goes into this workspace in place (the folder is
 			// already its anchor); the hired agent explains proposed filing.
-			janitor, curator := "Adds File Janitor to "+rec.WorkspaceName, rec.AgentName+" explains proposed filing"
+			janitor, curator := "Adds filing to "+rec.WorkspaceName, rec.AgentName+" explains proposed filing"
 			plan.Lines = append(plan.Lines,
 				personalassistant.FolderPlanLine{
 					Kind: FolderPlanCapability, Name: janitor, Outcome: janitor,
@@ -867,7 +867,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 	if rec.RootPolicy != folderlook.RootOrdinary {
 		plan.DefaultReason = "Ori refreshed the setup choices for this folder. Review and confirm the current plan."
 		if rec.RootPolicy == folderlook.RootDocuments {
-			plan.DefaultReason = "Documents stays a folder with its agent. File Janitor is optional."
+			plan.DefaultReason = "Documents stays a folder with its agent. Filing is optional."
 		}
 		if rec.RootPolicy == folderlook.RootUnresolved {
 			plan.Unavailable = folderlook.PolicyLine(rec.RootPolicy)

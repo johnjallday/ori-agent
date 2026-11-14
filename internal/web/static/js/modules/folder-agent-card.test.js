@@ -244,8 +244,8 @@ test('Documents offers an unticked optional step and reuses stored protection wi
         steps: [
           {
             handle: 'file-curator',
-            name: 'File Janitor',
-            title: 'Add File Janitor to Documents',
+            name: 'Filing',
+            title: 'File loose files in Documents (you approve every move)',
             kind: 'file_curator',
             chosen: false
           }
@@ -1848,7 +1848,7 @@ test('a running setup shows the working action with its words and time, and a do
             progress: 'Enabling it in One Song',
             started_at: iso(t0 + 6000)
           },
-          { kind: 'capability', step: 'curator', name: 'Adds File Janitor', state: 'waiting' },
+          { kind: 'capability', step: 'curator', name: 'Adds filing', state: 'waiting' },
           { kind: 'folder', name: 'Nothing in One Song is moved, copied or read', state: 'waiting' }
         ]
       }

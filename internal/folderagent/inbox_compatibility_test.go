@@ -15,6 +15,55 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
+func TestDownloads_PreFilingReportRequiresFreshConfirmation(t *testing.T) {
+	h := downloadsHarness(t, build(t, "a.pdf", "b.png"))
+	v := h.start(t, "")
+	// Persist the old candidate exactly as an upgraded workspace would have it.
+	if _, err := h.svc.deps.Store.Update(v.WorkspaceID, func(r *Record) error {
+		r.Candidates[0].Name = "File Janitor"
+		r.Candidates[0].Detail = "adds File Janitor; the folder's agent explains proposed filing"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := h.svc.deps.Store.Read(v.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldPlan := BuildPlan(*saved, nil)
+	found := false
+	for i := range oldPlan.Lines {
+		if oldPlan.Lines[i].Kind == FolderPlanCapability {
+			found = true
+			oldPlan.Lines[i].Name = "Adds File Janitor to " + saved.WorkspaceName
+			oldPlan.Lines[i].Outcome = oldPlan.Lines[i].Name
+		}
+	}
+	if !found {
+		t.Fatal("fixture has no filing outcome")
+	}
+	oldPlan.Digest = planDigest(oldPlan)
+	restarted := NewService(h.svc.deps)
+	if _, err := restarted.SetUp(t.Context(), "u1", v.WorkspaceID, SetUpRequest{PlanDigest: oldPlan.Digest}); !errors.Is(err, personalassistant.ErrFolderPlanChanged) {
+		t.Fatalf("old display outcome must require a fresh confirmation: %v", err)
+	}
+	restarted.Wait()
+	fresh, err := restarted.View(t.Context(), "u1", v.WorkspaceID)
+	if err != nil || fresh.Plan == nil || fresh.Plan.Digest == oldPlan.Digest {
+		t.Fatalf("fresh plan unavailable: %+v, %v", fresh, err)
+	}
+	if fresh.State != StateReported || fresh.Setup != nil || len(h.setups.runs) != 0 {
+		t.Fatal("stale confirmation installed something", fresh.Setup, h.setups.runs)
+	}
+	if got := fresh.Plan.Lines[0].Outcome; got != "Adds filing to "+saved.WorkspaceName {
+		t.Fatalf("refreshed outcome = %q", got)
+	}
+	after, err := h.svc.deps.Store.Read(v.WorkspaceID)
+	if err != nil || !reflect.DeepEqual(saved, after) {
+		t.Fatal("refusal or viewing the fresh plan rewrote saved data", err)
+	}
+}
+
 func TestDownloads_StoppedLegacyRetryNeedsFreshChoicesAndDoesNotReviveGoal(t *testing.T) {
 	root := demo(t)
 	h := newHarness(t, root)

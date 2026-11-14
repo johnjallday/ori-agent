@@ -407,6 +407,34 @@ func TestLegacyPersistedValuesAreFrozen(t *testing.T) {
 	}
 }
 
+// Cosmetic renames must never rename a route, install, automation identity,
+// or a notification title used to find an existing record.
+func TestCanonicalPersistedValuesAreFrozen(t *testing.T) {
+	def := workspacecapability.FileJanitorDefinition()
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"capability ID", def.ID, "file-janitor"},
+		{"API prefix", def.API.Prefix, "file-janitor"},
+		{"legacy API prefix", workspacecapability.LegacyAPIPrefixDownloadsJanitor, "downloads-janitor"},
+		{"setup adapter", def.Setup.AdapterID, "file_janitor"},
+		{"legacy setup adapter", workspacecapability.LegacySetupAdapterDownloadsJanitor, "downloads_janitor"},
+		{"directory key", def.Setup.DirectoryRequirementKey, "file-janitor-root"},
+		{"console panel", def.Console.PanelID, "file-janitor"},
+		{"watcher", def.Automation.WatcherID, "file-janitor-watcher"},
+		{"schedule", def.Automation.ScheduleID, "file-janitor-daily-catchup"},
+		{"real companion agent default", def.Companion.DefaultDisplayName, "File Curator"},
+		{"needs-attention opportunity dedup title", needsAttentionText, "File Janitor needs attention"},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("%s = %q, want frozen value %q", c.name, c.got, c.want)
+		}
+	}
+}
+
 // ------------------------------------------------------- restart boundaries
 
 // Restart at each boundary must never repeat a mutation or report an

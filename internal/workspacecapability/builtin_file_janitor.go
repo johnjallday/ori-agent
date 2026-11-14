@@ -47,7 +47,7 @@ func FileJanitorDefinition() Definition {
 		ID:      workspace.CapabilityFileJanitor,
 		Version: FileJanitorDefinitionVersion,
 		Display: Display{
-			Name:    "File Janitor",
+			Name:    "Filing",
 			Tagline: "Review and file one intake folder safely.",
 			Summary: "Watches one inbox-style folder, proposes where each new file should go, and files only what you approve.",
 			Highlights: []string{
@@ -72,7 +72,7 @@ func FileJanitorDefinition() Definition {
 			LegacyPrefixes: []string{LegacyAPIPrefixDownloadsJanitor},
 		},
 		Station: StationDescriptor{
-			Title:                 "File Janitor",
+			Title:                 "Filing",
 			ShowFolderDisplayName: true,
 		},
 		Console: ConsoleDescriptor{

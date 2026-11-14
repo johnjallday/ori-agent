@@ -194,7 +194,7 @@ func TestListCapabilities_ReturnsCatalogForOwnedWorkspace(t *testing.T) {
 	// The catalog item must carry the safety copy the user needs before
 	// installing (FR-18).
 	display := definition["display"].(map[string]any)
-	if display["name"] != "File Janitor" {
+	if display["name"] != "Filing" {
 		t.Fatalf("unexpected display name: %v", display["name"])
 	}
 	if highlights, ok := display["highlights"].([]any); !ok || len(highlights) == 0 {

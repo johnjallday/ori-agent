@@ -383,8 +383,8 @@ func RequiredCandidates(facts foldermap.Facts, ready Readiness) []Candidate {
 	}
 	if facts.Dump && facts.RootProject == nil {
 		out = append(out, Candidate{
-			ID: "file-curator", Kind: KindFileCurator, Name: "File Janitor", Source: SourceTable,
-			Action: ActionAdd, Required: true, Detail: "adds File Janitor; the folder's agent explains proposed filing",
+			ID: "file-curator", Kind: KindFileCurator, Name: "Filing", Source: SourceTable,
+			Action: ActionAdd, Required: true, Detail: "adds filing; the folder's agent explains proposed filing",
 			Why: "The files sitting directly in this folder are of many kinds.",
 		})
 	}

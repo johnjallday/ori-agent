@@ -93,7 +93,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
     .filter({ hasText: 'Downloads stays an inbox' });
   await expect(report).toBeVisible({ timeout: 30_000 });
   await expect(report.locator('[data-step]')).toHaveCount(1);
-  await expect(report).toContainText('Add File Janitor to Downloads');
+  await expect(report).toContainText('File loose files in Downloads (you approve every move)');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('7 software projects');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('5 REAPER songs');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('3 manuscripts');
@@ -312,7 +312,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   await page.goto(`${view.route}?view=details`);
   if (await closeAssistant.isVisible()) await closeAssistant.click();
   await page.locator('#fileJanitorCardOpen').click();
-  const permissions = page.getByRole('region', { name: 'Review File Janitor permissions' });
+  const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
   await expect(permissions).toContainText('Use your attached folder');
   await expect(permissions).toContainText('No file contents are opened');
   await expect(permissions).toContainText(
@@ -320,7 +320,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   );
   await expect(permissions.getByRole('checkbox')).not.toBeChecked();
   await page.screenshot({ path: join(evidence, 'janitor-needs-grant.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Close File Janitor', exact: true }).click();
+  await page.getByRole('button', { name: 'Close Filing', exact: true }).click();
   await page.locator('#fileJanitorCardOpen').click();
   await expect(permissions.getByRole('checkbox')).not.toBeChecked();
   expect(

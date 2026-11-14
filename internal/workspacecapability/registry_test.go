@@ -49,7 +49,7 @@ func TestBuiltinRegistry_RegistersFileJanitorVersion1(t *testing.T) {
 	if def.Version != 1 {
 		t.Fatalf("definition version = %d, want 1", def.Version)
 	}
-	if def.Display.Name != "File Janitor" {
+	if def.Display.Name != "Filing" || def.Station.Title != "Filing" {
 		t.Fatalf("display name = %q", def.Display.Name)
 	}
 	if def.Requirements.MaxInstallsPerWorkspace != 1 {
@@ -382,7 +382,7 @@ func TestDefinitionClone_IsIndependent(t *testing.T) {
 	first.Companion.DefaultDisplayName = "mutated"
 
 	second, _ := r.Definition(workspace.CapabilityFileJanitor)
-	if second.Display.Name != "File Janitor" {
+	if second.Display.Name != "Filing" {
 		t.Fatalf("registry definition was mutated through a returned copy: %q", second.Display.Name)
 	}
 	if second.Display.Highlights[0] == "mutated" || second.Console.Tabs[0] == "mutated" {

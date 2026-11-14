@@ -112,7 +112,7 @@ function fileJanitorItem(overrides = {}) {
       id: 'file-janitor',
       version: 1,
       display: {
-        name: 'File Janitor',
+        name: 'Filing',
         tagline: 'Review and file one intake folder safely.',
         summary: 'Watches one inbox-style folder.',
         highlights: [
@@ -199,7 +199,7 @@ test('the catalog renders each capability with the facts needed before installin
   assert.ok(card, 'expected a capability card');
   const text = card.textContent;
 
-  assert.match(text, /File Janitor/);
+  assert.match(text, /Filing/);
   assert.match(text, /Review and file one intake folder safely\./);
   // FR-18: the one-folder limit, metadata-first behavior, the approval
   // requirement, and the fixed Filed/ destination must all be visible.
@@ -252,7 +252,7 @@ test('an installed but unconfigured capability offers Set up rather than Open', 
 
   const open = host.querySelector('[data-capability-open]');
   assert.ok(open);
-  assert.match(open.textContent, /Set up File Janitor/);
+  assert.match(open.textContent, /Set up Filing/);
 });
 
 test('a configured capability offers Open', async () => {
@@ -268,7 +268,7 @@ test('a configured capability offers Open', async () => {
 
   const open = host.querySelector('[data-capability-open]');
   assert.ok(open);
-  assert.match(open.textContent, /Open File Janitor/);
+  assert.match(open.textContent, /Open Filing/);
 });
 
 // FR-8/FR-9 at the UI layer: repeatedly activating Install must not produce a
