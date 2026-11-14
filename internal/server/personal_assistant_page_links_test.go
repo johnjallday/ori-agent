@@ -67,6 +67,23 @@ func TestPersonalHQPageEntryLinksRequireCurrentHiredHQAndEntryAgent(t *testing.T
 		t.Fatalf("HQ workspace missing: %+v %v", ws, err)
 	}
 	workspacePath := "/workspaces/" + ws.FolderSlug
+	if !strings.Contains(get(workspacePath), `data-hq-first-visit="pending"`) {
+		t.Fatal("new HQ must carry its pending first visit before paint")
+	}
+	finish := httptest.NewRecorder()
+	handler.ServeHTTP(finish, httptest.NewRequest(http.MethodPost, "/api/personal-hq/first-visit-state", strings.NewReader(`{"state":"done"}`)))
+	if finish.Code != http.StatusOK || strings.Contains(get(workspacePath), `data-hq-first-visit=`) {
+		t.Fatalf("done first visit must not carry the attribute: %d %s", finish.Code, finish.Body.String())
+	}
+	// A replay cannot reopen a first visit the user has dismissed.
+	replay := httptest.NewRecorder()
+	handler.ServeHTTP(replay, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hq", bytes.NewReader(payload)))
+	if replay.Code != http.StatusOK {
+		t.Fatalf("replay: %d %s", replay.Code, replay.Body.String())
+	}
+	if strings.Contains(get(workspacePath), `data-hq-first-visit=`) {
+		t.Fatal("HQ setup replay reopened first visit")
+	}
 	// The HQ page no longer opens with a knowledge card above its own title;
 	// its Memory station links to the dossier and the interview instead, from
 	// the memory payload's is_personal_hq (PRD hq-details-landing FR18, FR19).
@@ -102,6 +119,9 @@ func TestPersonalHQPageEntryLinksRequireCurrentHiredHQAndEntryAgent(t *testing.T
 	}
 	if err := builder.userStore.(*userprofile.SQLiteStore).SetPersonalWorkspaceID(ctx, "local", ""); err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(get(workspacePath), `data-hq-first-visit=`) {
+		t.Fatal("a non-HQ workspace inherited the first visit attribute")
 	}
 	if strings.Contains(get(entry), `id="personalHQAgentKnowledgeEntry"`) ||
 		strings.Contains(get(workspacePath), `id="personalHQKnowledgeEntry"`) ||

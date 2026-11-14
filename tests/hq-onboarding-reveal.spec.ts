@@ -453,7 +453,8 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
   const route = await page.locator('#personalAssistantHQFirstExplore').getAttribute('href');
   expect(route).toMatch(/^\/workspaces\//);
   await page.locator('#personalAssistantHQFirstExplore').click();
-  await page.waitForURL(url => url.pathname === route);
+  await page.waitForURL(url => url.pathname + url.search === route);
+  expect(new URL(page.url()).searchParams.get('mode')).toBe('details');
   await page.goto('/');
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.isOpen));
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();

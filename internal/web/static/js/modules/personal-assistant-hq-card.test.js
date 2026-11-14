@@ -140,7 +140,7 @@ test('HQ receipt uses only canonical workspace facts, schedule and selected dire
       '/workspaces'
     ),
     [
-      { kind: 'workspace', name: 'My HQ', detail: '', route: '/workspaces/my%20hq' },
+      { kind: 'workspace', name: 'My HQ', detail: '', route: '/workspaces/my%20hq?mode=details' },
       { kind: 'schedule', name: 'Daily Brief at 08:00', detail: '' },
       { kind: 'directory', name: '/workspaces', detail: '' }
     ]
@@ -152,7 +152,7 @@ test('HQ receipt uses only canonical workspace facts, schedule and selected dire
       ''
     ),
     [
-      { kind: 'workspace', name: 'My HQ', detail: '', route: '/workspaces/my%20hq' },
+      { kind: 'workspace', name: 'My HQ', detail: '', route: '/workspaces/my%20hq?mode=details' },
       { kind: 'schedule', name: 'Daily Brief at 09:30', detail: '' }
     ],
     'reloaded receipts must not misidentify the current workspace root as the setup directory'

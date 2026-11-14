@@ -146,6 +146,7 @@ import {
 } from './workspace-url-state.js';
 import { readRailSection, resolveRailSection, writeRailSection } from './workspace-command-rail.js';
 import { HQ_LABELS, portabilityWord } from './hq-labels.js';
+import { HQFirstVisitCard } from './hq-first-visit-card.js';
 import { WORK_LABELS, startFromBacklogLabel } from './work-labels.js';
 import { capAttentionLines, hqAttentionLines, hqNeedsYouRows } from './hq-attention.js';
 import { hqStationCards, stationsNeedingYou } from './hq-stations-grid.js';
@@ -169,6 +170,8 @@ const HQ_SETUP_MOUNTS = [
 ];
 // The HQ controls whose focus a re-render carries to their replacement.
 const HQ_FOCUS_ATTRS = [
+  'data-hq-firstvisit-action',
+  'data-cmd-hq-rail-more',
   'data-cmd-hq-card',
   'data-cmd-hq-needs-action',
   'data-cmd-hq-needs-all',
@@ -325,6 +328,7 @@ export class WorkspaceCommandView {
     this.page = page || null;
     this.container = document.getElementById('workspaceCommandView');
     this.active = false;
+    this.firstVisit = new HQFirstVisitCard(this);
     // URL/history restoration (group 6): read the URL once at boot. `mode`
     // wins over the localStorage preference (FR85); panel/task/agent/run are
     // held pending until page data is available to sanitize against (FR91).
@@ -2878,6 +2882,7 @@ export class WorkspaceCommandView {
     // station owns the map DOM, but an external Details-only summary still
     // needs the authoritative view immediately.
     this.publishWorkspaceViewMode();
+    this.firstVisit?.ensure();
     // An active station drag owns the DOM: render() rebuilds it wholesale,
     // which would tear the dragged element out mid-gesture. Skip background
     // re-renders while dragging; the drop path re-renders once the gesture
@@ -4739,6 +4744,11 @@ export class WorkspaceCommandView {
   // something opened it while this was waiting, is left alone.
   settleRailSection() {
     if (this.railSectionSettled) return;
+    if (this.isPersonalHQ() && this.firstVisit?.view().layout.guided) {
+      this.activeRailSection = '';
+      this.railSectionSettled = true;
+      return;
+    }
     if (this.activeRailSection) {
       this.railSectionSettled = true;
       return;
@@ -8764,6 +8774,7 @@ export class WorkspaceCommandView {
     ) {
       this.boundNotesChanged = () => {
         this.requestNotesData(true);
+        void this.firstVisit?.load();
         void this.refreshOpenNotesPanel();
       };
       document.addEventListener('personal-assistant:second-brain', this.boundNotesChanged);
@@ -14900,8 +14911,9 @@ export class WorkspaceCommandView {
       this.renderHQGitHubHost() +
       '<div class="ws-cmd-layout is-hq">' +
       '<main class="ws-cmd-main ws-hq-main">' +
+      (this.firstVisit?.html() || '') +
       this.hqNeedsYouHTML() +
-      this.renderHQNotesHost() +
+      (this.firstVisit?.view().layout.notes === false ? '' : this.renderHQNotesHost()) +
       this.renderFollowUpsHost() +
       this.hqStationsGridHTML() +
       '</main>' +
@@ -14920,8 +14932,7 @@ export class WorkspaceCommandView {
   // one never waits on more than its own list.
 
   renderHQRail() {
-    return (
-      this.hqTeamHTML() +
+    const rows =
       '<div class="ws-hq-rail-group" role="group" aria-label="Workspace">' +
       this.renderNotesPanel() +
       this.renderSessionsPanel() +
@@ -14958,7 +14969,26 @@ export class WorkspaceCommandView {
       '<span class="ws-cmd-continuity-mount" data-cmd-continuity-mount></span>' +
       '</div>' +
       '</section>' +
-      '</div>'
+      '</div>';
+    if (!this.firstVisit?.view().layout.railAllUnderMore) return this.hqTeamHTML() + rows;
+    return (
+      this.hqTeamHTML() +
+      '<section class="ws-hq-rail-more"><button type="button" class="ws-cmd-panel-toggle" data-cmd-hq-rail-more aria-expanded="' +
+      Boolean(this.hqRailMoreOpen) +
+      '" aria-controls="hq-rail-more-rows">' +
+      escapeHtml(HQ_LABELS.more) +
+      '<small>' +
+      escapeHtml(
+        [HQ_LABELS.workspaceNotes, HQ_LABELS.sessions, HQ_LABELS.files].join(', ') +
+          ' ' +
+          HQ_LABELS.moreCount.replace('{count}', 8)
+      ) +
+      '</small></button>' +
+      '<div id="hq-rail-more-rows"' +
+      (this.hqRailMoreOpen ? '' : ' hidden') +
+      '>' +
+      rows +
+      '</div></section>'
     );
   }
 
@@ -15286,6 +15316,7 @@ export class WorkspaceCommandView {
   }
 
   hqNeedsYouHTML() {
+    if (this.firstVisit?.view().layout.hideEmptyNeeds && !this.hqNeedsYou().total) return '';
     return (
       '<section class="ws-hq-panel ws-hq-needs" data-cmd-hq-needs aria-labelledby="ws-hq-needs-title">' +
       this.hqNeedsYouInnerHTML() +
@@ -15389,7 +15420,8 @@ export class WorkspaceCommandView {
   }
 
   hqStationsGridHTML() {
-    const cards = this.hqCards();
+    const revealed = this.firstVisit?.view().layout.stationKeys;
+    const cards = this.hqCards().filter(card => !revealed || revealed.includes(card.key));
     if (!cards.length) return '';
     return (
       '<section class="ws-hq-panel ws-hq-stations" aria-labelledby="ws-hq-stations-title">' +
@@ -15871,6 +15903,7 @@ export class WorkspaceCommandView {
 
   bindHQDetails() {
     this.watchHQSources();
+    this.firstVisit?.bind();
     const root = this.container;
     if (!root || typeof root.querySelector !== 'function') return;
     const header = root.querySelector('.ws-hq-header');
@@ -15925,6 +15958,11 @@ export class WorkspaceCommandView {
     });
     const rail = root.querySelector('.ws-hq-rail');
     rail?.addEventListener?.('click', event => {
+      if (event.target.closest?.('[data-cmd-hq-rail-more]')) {
+        this.hqRailMoreOpen = !this.hqRailMoreOpen;
+        this.render();
+        return;
+      }
       const give = event.target.closest?.('[data-cmd-add-task]');
       if (give) {
         const page = this.page || {};
@@ -16030,6 +16068,7 @@ export class WorkspaceCommandView {
   // Before a rebuild or a mode switch: remember a focused control (and a caret
   // in the capture box), then put the panel home so the write cannot detach it.
   parkHQPanels() {
+    this.firstVisit?.captureFocus();
     this.rememberHQFocus();
     this.restoreSharedSurface('hq-github');
     this.restoreSharedSurface('hq-needs-you');

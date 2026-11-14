@@ -8,6 +8,19 @@ import (
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
+// currentHQFirstVisitForPage supplies the pre-paint hint from the same current
+// user's canonical designation. A failed read never manufactures an offer.
+func (s *Server) currentHQFirstVisitForPage(workspaceID string) string {
+	if s == nil || s.Storage == nil || s.Storage.PersonalHQ == nil {
+		return ""
+	}
+	status, err := s.Storage.PersonalHQ.Status(context.Background(), userprofile.LocalUserID)
+	if err != nil || status == nil || !status.Valid || status.WorkspaceID != workspaceID {
+		return ""
+	}
+	return string(status.FirstVisitState)
+}
+
 // currentPersonalHQForPage is a navigation hint, never an authorization gate.
 // Resolve the live hired relationship instead of trusting a portable workspace
 // marker or a matching agent name. The dossier API revalidates independently.
