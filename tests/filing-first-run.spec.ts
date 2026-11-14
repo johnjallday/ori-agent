@@ -183,6 +183,7 @@ test('capability-only filing asks for a folder and never prefills access', async
 }) => {
   test.skip(!sandbox, 'requires the isolated server HOME');
   await installLocalCdn(page);
+  await request.post('/api/onboarding/skip');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   const created = await request.post('/api/workspaces', {
     data: { name: 'Filing without a folder' }
