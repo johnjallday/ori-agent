@@ -65,11 +65,13 @@ type CreateRequest struct {
 	// AgentName is the agent the owner hired on the card: one of their own
 	// agents (BindExisting), or a new one created with Provider, Model and
 	// Mandate (empty model: the store's default).
-	AgentName    string
-	BindExisting bool
-	Provider     string
-	Model        string
-	Mandate      string
+	AgentName        string
+	BindExisting     bool
+	Provider         string
+	Model            string
+	Mandate          string
+	Character        string
+	CharacterVersion int
 }
 
 // Created is what the creation made.
@@ -304,6 +306,9 @@ func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome stri
 	s.mu.Unlock()
 	name := filepath.Base(path)
 	hire := s.hireOptions(ctx, userID, name)
+	if s.deps.Hiring != nil {
+		hire.Character = s.deps.Hiring.Character(ctx, userID, identity.Policy)
+	}
 	if identity.Policy.IsCatchAll() {
 		hire.Mandate = brief
 	}

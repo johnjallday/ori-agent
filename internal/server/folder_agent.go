@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/charactercatalog"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderagenthttp"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -24,6 +25,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
@@ -148,6 +150,7 @@ func (w folderAgentWorkspaces) CreateAnchored(ctx context.Context, req folderage
 	created, err := b.sessionHandler.CreateFolderAgentWorkspace(ctx, sessionhttp.FolderAgentWorkspaceRequest{
 		Name: req.Name, AnchorPath: req.AnchorPath, Mission: req.Mission, AgentName: req.AgentName,
 		BindExisting: req.BindExisting, Provider: req.Provider, Model: req.Model, Mandate: req.Mandate,
+		Character: req.Character, CharacterVersion: req.CharacterVersion,
 	})
 	var refusal *sessionhttp.FolderAgentRefusal
 	if errors.As(err, &refusal) {
@@ -339,6 +342,31 @@ func (h folderAgentHiring) Agents(context.Context, string) []folderagent.HireAge
 		out = append(out, folderagent.HireAgent{Name: name, Model: agent.Settings.Model})
 	}
 	return out
+}
+
+// Character prefers an underused face before the folder's own affinity. An
+// inactive saved character is not a face that an agent currently wears.
+func (h folderAgentHiring) Character(ctx context.Context, userID string, policy folderlook.RootPolicy) string {
+	catalog, err := charactercatalog.Load()
+	if err != nil {
+		return ""
+	}
+	counts := map[string]int{}
+	for _, offered := range h.Agents(ctx, userID) {
+		ag, ok := h.builder.st.GetAgent(offered.Name)
+		if ok && ag != nil && ag.Appearance != nil && ag.Appearance.Mode == types.AppearanceModeCharacter {
+			counts[ag.Appearance.CharacterCatalogID()]++
+		}
+	}
+	preferred := folderagent.PreferredCharacter(policy)
+	best, least := "", int(^uint(0)>>1)
+	for _, ch := range catalog.Working() {
+		id := string(ch.ID)
+		if count := counts[id]; count < least || (count == least && id == preferred) {
+			best, least = id, count
+		}
+	}
+	return best
 }
 
 func (h folderAgentHiring) AgentExists(name string) bool {

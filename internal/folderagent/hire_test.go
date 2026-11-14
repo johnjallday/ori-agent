@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/charactercatalog"
+	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
@@ -13,6 +15,10 @@ type fakeHiring struct {
 	models []HireModel
 	agents []HireAgent
 	taken  map[string]bool
+}
+
+func (f fakeHiring) Character(context.Context, string, folderlook.RootPolicy) string {
+	return "project-coordinator"
 }
 
 func (f fakeHiring) Models(context.Context) []HireModel         { return f.models }
@@ -40,7 +46,7 @@ func TestHire_CardOffersAgentModelsAndRoster(t *testing.T) {
 	hire := chosen.Hire
 	if chosen.Action != "Hire & build" || hire == nil || hire.AgentName != "Ori Music Demo Manager" ||
 		hire.Model != "claude-sonnet-5-5" || hire.Provider != "claude" || len(hire.Models) != 2 ||
-		len(hire.Agents) != 1 || hire.Existing != "" || hire.NameMax != AgentNameMaxRunes {
+		len(hire.Agents) != 1 || hire.Existing != "" || hire.NameMax != AgentNameMaxRunes || hire.Character != "project-coordinator" {
 		t.Fatalf("card hire = %+v", hire)
 	}
 	// Nothing is created by choosing.
@@ -56,12 +62,12 @@ func TestHire_SavedManagerIsPreselectedAndReused(t *testing.T) {
 	if chosen.Hire.Existing != "Ori Music Demo Manager" {
 		t.Fatalf("existing = %q", chosen.Hire.Existing)
 	}
-	if _, err := h.svc.Start(context.Background(), "u1", chosen.Token, "", Hire{Existing: "ori music demo manager"}); err != nil {
+	if _, err := h.svc.Start(context.Background(), "u1", chosen.Token, "", Hire{Existing: "ori music demo manager", Character: "not-a-character"}); err != nil {
 		t.Fatal(err)
 	}
 	h.svc.Wait()
 	req := h.ws.created[0]
-	if !req.BindExisting || req.AgentName != "Ori Music Demo Manager" || req.Model != "" {
+	if !req.BindExisting || req.AgentName != "Ori Music Demo Manager" || req.Model != "" || req.Character != "" || req.CharacterVersion != 0 {
 		t.Fatalf("create = %+v", req)
 	}
 }
@@ -70,14 +76,16 @@ func TestHire_NewAgentCarriesNameModelAndMandate(t *testing.T) {
 	h := hiringHarness(t, fakeHiring{models: []HireModel{sonnet, {Provider: "openai", Model: "gpt-x"}}, agents: []HireAgent{}})
 	chosen, _ := h.svc.Choose(context.Background(), "u1", personalassistant.FolderChoice{Picker: true})
 	view, err := h.svc.Start(context.Background(), "u1", chosen.Token, "List the songs",
-		Hire{Name: "  Song   Keeper ", Provider: "openai", Model: "gpt-x", Mandate: "Keep my songs moving"})
+		Hire{Name: "  Song   Keeper ", Provider: "openai", Model: "gpt-x", Mandate: "Keep my songs moving", Character: "operations-keeper"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.svc.Wait()
 	req := h.ws.created[0]
+	character, _ := charactercatalog.MustLoad().Get("operations-keeper")
 	if req.BindExisting || req.AgentName != "Song Keeper" || req.Provider != "openai" || req.Model != "gpt-x" ||
-		req.Mandate != "Keep my songs moving" || req.Mission != "" || view.AgentName != "Song Keeper" {
+		req.Mandate != "Keep my songs moving" || req.Mission != "" || view.AgentName != "Song Keeper" ||
+		req.Character != "operations-keeper" || req.CharacterVersion != character.EntryVersion {
 		t.Fatalf("create = %+v view agent %q", req, view.AgentName)
 	}
 	// No mandate: the brief is the mandate; no model sent: "No model yet".
@@ -87,7 +95,7 @@ func TestHire_NewAgentCarriesNameModelAndMandate(t *testing.T) {
 		t.Fatal(err)
 	}
 	h2.svc.Wait()
-	if r := h2.ws.created[0]; r.Mandate != DefaultBrief || r.Model != "" || r.Provider != "" {
+	if r := h2.ws.created[0]; r.Mandate != DefaultBrief || r.Model != "" || r.Provider != "" || r.Character != "" || r.CharacterVersion != 0 {
 		t.Fatalf("defaults = %+v", r)
 	}
 }
@@ -112,6 +120,8 @@ func TestHire_RefusalsCreateNothingAndKeepTheChoice(t *testing.T) {
 		{Hire{Name: "a/b"}, "agent_name_invalid"},
 		{Hire{Name: strings.Repeat("n", AgentNameMaxRunes+1)}, "agent_name_invalid"},
 		{Hire{Model: "made-up"}, "agent_model_unknown"},
+		{Hire{Character: "made-up"}, "agent_character_unknown"},
+		{Hire{Character: string(charactercatalog.MustLoad().ReservedGuideID)}, "agent_character_unknown"},
 		{Hire{Existing: "Someone Else"}, "agent_unknown"},
 	} {
 		_, err := h.svc.Start(context.Background(), "u1", chosen.Token, "", tc.hire)

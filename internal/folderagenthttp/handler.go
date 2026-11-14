@@ -137,13 +137,14 @@ type startRequest struct {
 }
 
 // hireRequest is the card's Hire section: {existing} reuses one of the owner's
-// agents; otherwise a new agent with {name, provider, model, mandate}.
+// agents; otherwise a new agent with {name, provider, model, mandate, character}.
 type hireRequest struct {
-	Existing string `json:"existing"`
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-	Mandate  string `json:"mandate"`
+	Existing  string `json:"existing"`
+	Name      string `json:"name"`
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	Mandate   string `json:"mandate"`
+	Character string `json:"character"`
 }
 
 // Start hires the agent the card names, creates the workspace with it and its
@@ -160,7 +161,7 @@ func (h *Handler) Start(w http.ResponseWriter, r *http.Request) {
 	var hire folderagent.Hire
 	if req.Hire != nil {
 		hire = folderagent.Hire{Existing: req.Hire.Existing, Name: req.Hire.Name, Provider: req.Hire.Provider,
-			Model: req.Hire.Model, Mandate: req.Hire.Mandate}
+			Model: req.Hire.Model, Mandate: req.Hire.Mandate, Character: req.Hire.Character}
 	}
 	view, err := h.service.Start(r.Context(), userID, req.ChoiceToken, req.Brief, hire)
 	if err != nil {

@@ -313,6 +313,7 @@ test('the card before Start reads the server card and refuses one without a toke
     hire: {
       name: 'Ori Music Demo Manager',
       nameMax: 60,
+      character: '',
       mandate: '',
       provider: 'claude',
       model: 'claude-sonnet-5-5',
@@ -357,6 +358,7 @@ test('the card before Start reads the server card and refuses one without a toke
     hire: {
       name: 'Song Keeper',
       mandate: 'Keep my songs moving',
+      character: '',
       provider: 'openai',
       model: 'gpt-x'
     }
@@ -392,7 +394,11 @@ test('a saved manager is preselected, and no model still lets the agent be hired
   assert.equal(card.querySelector('.folder-agent-card__who-model'), null);
   assert.match(text(card, '.folder-agent-card__who-note'), /No model is set up yet/);
   view.hire.mode = 'new';
-  assert.deepEqual(plain(folderAgentHireChoice(view.hire)), { name: 'Songs Manager', mandate: '' });
+  assert.deepEqual(plain(folderAgentHireChoice(view.hire)), {
+    name: 'Songs Manager',
+    mandate: '',
+    character: ''
+  });
 
   // Models but no system model: "No model yet" is preselected.
   const unset = folderAgentCardView({
@@ -548,6 +554,151 @@ test('without the shared renderer the face is the first letter of the name', () 
   assert.equal(faceOf(card).textContent, '?');
 });
 
+test('a suggested character arrives late, follows the name, and can fall back to generated', () => {
+  const win = faceWindow();
+  const card = hireCard(win, { character: 'operations-keeper' });
+  assert.equal(lastFace(win).input.appearance.mode, 'generated');
+  win.characters.byId['operations-keeper'] = { id: 'operations-keeper' };
+  win.characters.listeners[0]();
+  assert.equal(lastFace(win).input.appearance.mode, 'character');
+  assert.equal(lastFace(win).input.character.id, 'operations-keeper');
+  const name = card.querySelector('.folder-agent-card__who-name');
+  name.value = 'My Keeper';
+  name.listeners.input();
+  assert.equal(lastFace(win).input.name, 'My Keeper');
+  assert.equal(lastFace(win).input.roleEmblem, 'compass');
+  name.value = '';
+  name.listeners.input();
+  assert.deepEqual(lastFace(win).input, { name: '' });
+  const generated = faceWindow();
+  generated.characters.byId['operations-keeper'] = { id: 'operations-keeper' };
+  hireCard(generated, { character: '' });
+  assert.equal(lastFace(generated).input.appearance.mode, 'generated');
+});
+
+for (const answer of [
+  { action: 'choose', catalogId: 'research-archivist' },
+  { action: 'skip' },
+  { action: 'cancel' }
+]) {
+  test(`the face picker ${answer.action} keeps the one-request hire choice`, async () => {
+    const win = faceWindow();
+    const doc = stubDocument();
+    const added = [],
+      removed = [];
+    doc.addEventListener = (...args) => added.push(args);
+    doc.removeEventListener = (...args) => removed.push(args);
+    let opened;
+    win.CharacterPicker = {
+      open: async options => {
+        opened = options;
+        return answer;
+      }
+    };
+    const view = hireCardView({
+      character: 'operations-keeper',
+      agents: [{ name: 'Saved' }],
+      existing: 'Saved'
+    });
+    const card = renderFolderAgentCard(view, doc, {
+      win,
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({
+          agents: [
+            {
+              name: 'Worn',
+              appearance: { mode: 'character', character: { catalog_id: 'operations-keeper' } }
+            },
+            {
+              name: 'Inactive',
+              appearance: { mode: 'generated', character: { catalog_id: 'research-archivist' } }
+            }
+          ]
+        })
+      })
+    });
+    const button = faceOf(card);
+    assert.equal(button.tagName, 'BUTTON');
+    assert.equal(button.attributes['aria-label'], 'Change face');
+    let stopped = false;
+    button.listeners.click({
+      stopPropagation: () => {
+        stopped = true;
+      }
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(stopped, true);
+    assert.equal(opened.selectedId, 'operations-keeper');
+    assert.deepEqual(plain(opened.taken), ['operations-keeper']);
+    assert.equal(opened.role, 'orchestrator');
+    assert.equal(opened.trigger, button);
+    assert.equal(opened.showSkip, true);
+    assert.equal(added[0][0], 'focusin');
+    assert.equal(added[0][2], true);
+    assert.deepEqual(removed, added);
+    let intercepted = false;
+    added[0][1]({
+      target: { closest: () => true },
+      stopImmediatePropagation: () => {
+        intercepted = true;
+      }
+    });
+    assert.equal(intercepted, true);
+    if (answer.action === 'cancel') {
+      assert.equal(view.hire.mode, 'existing');
+      assert.equal(view.hire.character, 'operations-keeper');
+      assert.deepEqual(plain(folderAgentHireChoice(view.hire)), { existing: 'Saved' });
+    } else {
+      assert.equal(view.hire.mode, 'new');
+      assert.equal(folderAgentHireChoice(view.hire).character, answer.catalogId || '');
+      assert.equal(text(card, '.folder-agent-card__start'), 'Hire & build');
+    }
+  });
+}
+
+test('the picker fetches taken faces even with no reusable agents; missing picker is not a button', async () => {
+  const win = faceWindow();
+  let calls = 0;
+  let opened;
+  win.CharacterPicker = {
+    open: async options => {
+      opened = options;
+      return { action: 'cancel' };
+    }
+  };
+  const card = renderFolderAgentCard(hireCardView(), stubDocument(), {
+    win,
+    fetchImpl: async () => {
+      calls++;
+      return { ok: true, json: async () => [] };
+    }
+  });
+  faceOf(card).listeners.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(calls, 1);
+  assert.deepEqual(plain(opened.taken), []);
+  assert.equal(faceOf(hireCard(null)).tagName, 'SPAN');
+});
+
+test('a refused character redraws the typed hire and the server message', () => {
+  const view = hireCardView({
+    character: 'unavailable',
+    agent_name: 'My typed name',
+    mandate: 'My typed role'
+  });
+  const card = renderFolderAgentCard(view, stubDocument(), {
+    error: 'That face is not available here. Choose another.'
+  });
+  assert.equal(card.querySelector('.folder-agent-card__who-name').value, 'My typed name');
+  assert.equal(card.querySelector('.folder-agent-card__who-role').value, 'My typed role');
+  assert.equal(folderAgentHireChoice(view.hire).character, 'unavailable');
+  assert.equal(
+    text(card, '.folder-agent-card__error'),
+    'That face is not available here. Choose another.'
+  );
+});
+
 test('Role waits behind Customize, closed unless it already holds text', () => {
   const closed = hireCard(null);
   const details = closed.querySelector('.folder-agent-card__who-customize');
@@ -587,6 +738,7 @@ test('the model chip lists the same models, and what it picks is what Start send
   assert.deepEqual(plain(folderAgentHireChoice(view.hire)), {
     name: 'Downloads Manager',
     mandate: '',
+    character: '',
     provider: 'openai',
     model: 'gpt-x'
   });
@@ -649,7 +801,7 @@ test('your agents are a row of faces under "Or one of your agents", not a dropdo
   );
 });
 
-test('with no agents of your own there is no row, no heading and no request for them', async () => {
+test('with no agents of your own there is no row, but faces are fetched for the picker', async () => {
   let asked = 0;
   const card = renderFolderAgentCard(hireCardView(), stubDocument(), {
     win: faceWindow(),
@@ -662,7 +814,7 @@ test('with no agents of your own there is no row, no heading and no request for 
   assert.equal(card.querySelector('.folder-agent-card__who-heading'), null);
   assert.equal(card.querySelector('.folder-agent-card__who-agents'), null);
   await settle();
-  assert.equal(asked, 0);
+  assert.equal(asked, 1);
 });
 
 test('each agent shows its real face once the list answers, and a fallback face until then', async () => {
@@ -827,7 +979,11 @@ test('exactly one of the new agent and your agents is chosen; typing in the new 
   name.value = 'Mine';
   name.listeners.input();
   only(fresh, 'new');
-  assert.deepEqual(plain(folderAgentHireChoice(view.hire)), { name: 'Mine', mandate: '' });
+  assert.deepEqual(plain(folderAgentHireChoice(view.hire)), {
+    name: 'Mine',
+    mandate: '',
+    character: ''
+  });
 
   pick(card, 'Atlas');
   fresh.listeners.click();
@@ -2192,7 +2348,7 @@ test('Create Workspace mounts the same card, and Start swaps in the receipt', as
       {
         choice_token: 'tok',
         brief: "Find out what's here and set it up",
-        hire: { name: 'Songs Manager', mandate: '' }
+        hire: { name: 'Songs Manager', mandate: '', character: '' }
       }
     ]
   ]);

@@ -33,7 +33,9 @@ type FolderAgentWorkspaceRequest struct {
 	Provider     string
 	Model        string
 	// Mandate is the new agent's one-line mandate (its declared purpose).
-	Mandate string
+	Mandate          string
+	Character        string
+	CharacterVersion int
 	// ParentID places the workspace inside a group (a promoted folder
 	// workspace's member).
 	ParentID string
@@ -81,8 +83,15 @@ func folderAgentConfig(folder string, req FolderAgentWorkspaceRequest) *store.Cr
 	if mandate != "" {
 		prompt += " The owner's mandate for you: " + mandate
 	}
+	appearance := types.NewAgentAppearance()
+	if req.Character != "" {
+		appearance.SetCharacter(req.Character, req.CharacterVersion)
+		appearance.Mode = types.AppearanceModeCharacter
+	}
+	appearance.Normalize()
 	return &store.CreateAgentConfig{
-		Role: types.RoleOrchestrator, SystemPrompt: prompt, Description: mandate,
+		Appearance: appearance,
+		Role:       types.RoleOrchestrator, SystemPrompt: prompt, Description: mandate,
 		Model: strings.TrimSpace(req.Model), LLMProvider: strings.TrimSpace(req.Provider),
 	}
 }

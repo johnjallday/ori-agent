@@ -2220,6 +2220,7 @@ The body is one of `{ "chip": "downloads" }`, `{ "picker": true }` or `{ "select
     "note": "…",
     "hire": {
       "agent_name": "Ori Music Demo Manager",
+      "character": "project-coordinator",
       "mandate": "",
       "provider": "claude",
       "model": "claude-sonnet-5-5",
@@ -2237,6 +2238,7 @@ The body is one of `{ "chip": "downloads" }`, `{ "picker": true }` or `{ "select
 - `provider` and `model` are the system model (`default: true`). Both are empty when no system model is set; the card then preselects "No model yet".
 - `agents` lists the owner's own agents. The built-in assistant and agents that only a workspace holds are left out.
 - `existing` preselects a saved agent that already has the default name, so it is reused rather than hired twice.
+- `character` suggests a working catalog ID, choosing the least-worn faces first, then the folder's affinity (Downloads: operations-keeper; Desktop: automation-specialist; Documents: research-archivist; other: project-coordinator), then catalog order. Only active character appearances count. An absent suggestion offers the generated face.
 
 ### Start (Hire & build)
 
@@ -2246,11 +2248,13 @@ The body is one of `{ "chip": "downloads" }`, `{ "picker": true }` or `{ "select
 {
   "choice_token": "…",
   "brief": "Find out what's here and set it up",
-  "hire": { "name": "Ori Music Demo Manager", "provider": "claude", "model": "claude-sonnet-5-5", "mandate": "Keep these songs moving" }
+  "hire": { "name": "Ori Music Demo Manager", "provider": "claude", "model": "claude-sonnet-5-5", "mandate": "Keep these songs moving", "character": "project-coordinator" }
 }
 ```
 
 or, to reuse one of the owner's agents, `"hire": { "existing": "Journal" }`.
+
+`hire.character` selects a working catalog ID for a new agent; omitted or empty means the generated face. The server assigns the catalog entry version. A reused agent ignores this field and keeps its own appearance. No image upload is part of a hire.
 
 `201` with `{ "success": true, "folder_agent": <view> }` in state `looking`. The brief and the mandate must each be one line, without paths, under 300 characters (`400` otherwise). An empty mandate uses the brief. An empty model hires the agent without one, and the report still runs without a model.
 
@@ -2258,6 +2262,7 @@ Hire refusals change nothing and keep the choice token:
 - `agent_name_taken` (`409`): a new name that an agent already has.
 - `agent_name_invalid` (`400`): longer than 60 characters, or contains a slash or a colon.
 - `agent_model_unknown` (`400`): a model the card did not offer.
+- `agent_character_unknown` (`400`): an unknown or unassignable character ID. Message: "That face is not available here. Choose another."
 - `agent_unknown` (`400`): an `existing` agent that is not the owner's.
 
 A new agent is created with the role orchestrator, the chosen model, the mandate as its description, and the host's explorer prompt plus the mandate. A missing `hire` hires a new agent with the default name and no model.

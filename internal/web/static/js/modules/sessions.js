@@ -884,6 +884,7 @@ const sessionManager = {
     // handler still owns focus. Handle Escape on the dialog itself so ordinary
     // drafts always close, while an accepted create remains atomic.
     addFolderModal?.addEventListener('keydown', event => {
+      if (window.CharacterPicker?.isOpen?.()) return;
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
@@ -902,7 +903,7 @@ const sessionManager = {
     window.addEventListener(
       'keydown',
       event => {
-        if (addFolderModal?.dataset.sourceSetupOwner) return;
+        if (addFolderModal?.dataset.sourceSetupOwner || window.CharacterPicker?.isOpen?.()) return;
         if (event.key !== 'Escape' || !addFolderModal?.classList.contains('show')) return;
         event.preventDefault();
         event.stopPropagation();

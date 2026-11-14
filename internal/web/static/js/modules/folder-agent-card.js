@@ -79,6 +79,7 @@ export function folderAgentHireView(hire, folderName = '') {
   return {
     name: String(source.agent_name || `${folderName || 'Folder'} Manager`),
     nameMax: Number(source.name_max) > 0 ? Number(source.name_max) : 60,
+    character: String(source.character || ''),
     mandate: String(source.mandate || ''),
     provider: String(source.model ? source.provider || '' : ''),
     model: String(source.model || ''),
@@ -95,7 +96,8 @@ export function folderAgentHireChoice(hire) {
   if (hire.mode === 'existing' && hire.existing) return { existing: hire.existing };
   const choice = {
     name: String(hire.name || '').trim(),
-    mandate: String(hire.mandate || '').trim()
+    mandate: String(hire.mandate || '').trim(),
+    character: String(hire.character || '')
   };
   if (hire.model) {
     choice.provider = hire.provider;
@@ -500,18 +502,22 @@ function hiredName(value) {
 // hireFace is the renderer's input for the name typed. It is the neutral face
 // while there is no name, and while the role catalog that shapes the ring has
 // not arrived: never a wrong face (FR3, FR4).
-function hireFace(name, win) {
+function hireFace(name, win, characterId = '') {
   const who = hiredName(name);
   const roles = win?.RoleCatalog;
   if (!who || !roles?.isLoaded?.()) return NEUTRAL_FACE;
   const role = roles.entry?.(HIRED_AGENT_ROLE) || null;
+  const character = characterId ? win.CharacterCatalog?.get?.(characterId) : null;
   return {
     name: who,
     source: HIRED_AGENT_SOURCE,
     role: HIRED_AGENT_ROLE,
     roleAccent: role?.accent_color || '',
     roleEmblem: role?.emblem || '',
-    appearance: { mode: 'generated', generated: {} }
+    appearance: character
+      ? { mode: 'character', generated: {}, character: { catalog_id: characterId } }
+      : { mode: 'generated', generated: {} },
+    ...(character ? { character } : {})
   };
 }
 
@@ -667,8 +673,19 @@ function renderHire(doc, hire, win, fetchImpl, onSelect) {
 
   const fresh = el(doc, 'div', 'folder-agent-card__who-new');
   fresh.dataset.folderAgentHire = 'new';
-  const face = el(doc, 'span', 'folder-agent-card__who-face');
-  face.setAttribute('aria-hidden', 'true');
+  const canPick = typeof win?.CharacterPicker?.open === 'function';
+  const face = el(doc, canPick ? 'button' : 'span', 'folder-agent-card__who-face');
+  if (canPick) {
+    face.type = 'button';
+    face.setAttribute('aria-label', 'Change face');
+    face.addEventListener('click', event => {
+      event?.stopPropagation?.();
+      void chooseFace(face);
+    });
+    // Focusing the chooser must not silently replace an existing-agent choice
+    // when the person then cancels the picker.
+    face.addEventListener('focusin', event => event?.stopPropagation?.());
+  } else face.setAttribute('aria-hidden', 'true');
   const main = el(doc, 'div', 'folder-agent-card__who-main');
   const name = doc.createElement('input');
   name.type = 'text';
@@ -679,7 +696,11 @@ function renderHire(doc, hire, win, fetchImpl, onSelect) {
   name.placeholder = 'Name';
   name.setAttribute('aria-label', 'Name');
   const drawFace = () => {
-    const markup = faceMarkup(win, hireFace(hire.name, win), 'folder-agent-card__who-avatar');
+    const markup = faceMarkup(
+      win,
+      hireFace(hire.name, win, hire.character),
+      'folder-agent-card__who-avatar'
+    );
     if (markup) face.innerHTML = markup;
     else face.textContent = (hiredName(hire.name)[0] || '?').toUpperCase();
   };
@@ -803,6 +824,45 @@ function renderHire(doc, hire, win, fetchImpl, onSelect) {
 
   // The owner's agents as the list answered them, by name; empty until it does.
   let records = new Map();
+  const recordsReady = fetchImpl ? fetchAgentRecords(fetchImpl) : Promise.resolve(null);
+  let picking = false;
+  async function chooseFace(trigger) {
+    if (!canPick || picking) return;
+    picking = true;
+    // Bootstrap's sheet traps document focus. The shared picker mounts beside
+    // it, so let focus reach only that overlay without disabling the sheet's
+    // trap or relying on Bootstrap's private fields. Restore normal handling
+    // as soon as the picker resolves (including cancellation).
+    const pickerFocus = event => {
+      if (event.target?.closest?.('#charPickerHost')) event.stopImmediatePropagation();
+    };
+    try {
+      const found = await recordsReady;
+      if (found) records = found;
+      if (box.isConnected === false) return;
+      const taken = [...records.values()]
+        .filter(record => record.appearance?.mode === 'character')
+        .map(record => record.appearance.character?.catalog_id)
+        .filter(Boolean);
+      doc.addEventListener?.('focusin', pickerFocus, true);
+      const answer = await win.CharacterPicker.open({
+        selectedId: hire.character,
+        taken,
+        role: HIRED_AGENT_ROLE,
+        trigger,
+        showSkip: true
+      });
+      if (box.isConnected === false) return;
+      if (answer?.action === 'choose' || answer?.action === 'skip') {
+        hire.character = answer.action === 'choose' ? String(answer.catalogId || '') : '';
+        select('new');
+        drawFace();
+      }
+    } finally {
+      doc.removeEventListener?.('focusin', pickerFocus, true);
+      picking = false;
+    }
+  }
   const drawAgentFaces = () => {
     choices.forEach(({ agent, face: agentFaceBox }) => {
       const markup = faceMarkup(
@@ -853,8 +913,8 @@ function renderHire(doc, hire, win, fetchImpl, onSelect) {
       preselected.item.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
     );
   }
-  if (choices.length && fetchImpl) {
-    void fetchAgentRecords(fetchImpl).then(found => {
+  if (fetchImpl) {
+    void recordsReady.then(found => {
       if (!found || box.isConnected === false) return;
       records = found;
       drawAgentFaces();

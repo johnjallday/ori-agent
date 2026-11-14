@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/types"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -20,6 +21,7 @@ func TestCreateFolderAgentWorkspace_AnchorsTheFolderWithItsAgent(t *testing.T) {
 	created, err := h.CreateFolderAgentWorkspace(t.Context(), FolderAgentWorkspaceRequest{
 		Name: "Ori Music Demo", AnchorPath: anchor, Mission: "Find out what's here and set it up", AgentName: "Ori Music Demo Manager",
 		Provider: "openai", Model: "gpt-4o-mini", Mandate: "Keep my songs moving",
+		Character: "operations-keeper", CharacterVersion: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +46,11 @@ func TestCreateFolderAgentWorkspace_AnchorsTheFolderWithItsAgent(t *testing.T) {
 		t.Fatalf("hired agent settings = %+v metadata = %+v", agent.Settings, agent.Metadata)
 	}
 
+	if agent.Appearance == nil || agent.Appearance.Mode != types.AppearanceModeCharacter ||
+		agent.Appearance.CharacterCatalogID() != "operations-keeper" || agent.Appearance.Character.CatalogVersion != 1 {
+		t.Fatalf("appearance = %+v", agent.Appearance)
+	}
+
 	// A new hire never silently takes over a saved agent of the same name.
 	nested := filepath.Join(anchor, "Albums")
 	if err := os.MkdirAll(nested, 0o750); err != nil {
@@ -61,12 +68,17 @@ func TestCreateFolderAgentWorkspace_AnchorsTheFolderWithItsAgent(t *testing.T) {
 	// is allowed and names its parent's workspace.
 	second, err := h.CreateFolderAgentWorkspace(t.Context(), FolderAgentWorkspaceRequest{
 		Name: "Albums", AnchorPath: nested, AgentName: "Ori Music Demo Manager", BindExisting: true,
+		Character: "research-archivist", CharacterVersion: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if second.AgentCreated || second.Nested == nil || second.Nested.WorkspaceID != created.ID {
 		t.Fatalf("second = %+v", second)
+	}
+	reused, _ := h.agentStore.GetAgent("Ori Music Demo Manager")
+	if reused.Appearance.CharacterCatalogID() != "operations-keeper" {
+		t.Fatalf("reuse changed the agent's face: %+v", reused.Appearance)
 	}
 }
 
@@ -81,6 +93,10 @@ func TestCreateFolderAgentWorkspace_MemberUnderAGroupHasNoAgent(t *testing.T) {
 	group, err := h.CreateFolderAgentWorkspace(t.Context(), FolderAgentWorkspaceRequest{Name: "Three Drafts", AnchorPath: root, AgentName: "Three Drafts Manager"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	ag, _ := h.agentStore.GetAgent("Three Drafts Manager")
+	if ag.Appearance == nil || ag.Appearance.Mode != types.AppearanceModeGenerated {
+		t.Fatalf("no character must keep the generated default: %+v", ag.Appearance)
 	}
 	// The group is a promoted folder workspace; members need a group parent.
 	if err := h.workspaceStore.Update(group.ID, func(ws *agentworkspace.Workspace) error { ws.Kind = "group"; return nil }); err != nil {

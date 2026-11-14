@@ -3485,6 +3485,8 @@ a.quest-title:focus-visible {
 }
 
 .folder-agent-card__who-face {
+  padding: 0;
+  border: 0;
   display: grid;
   flex: 0 0 48px;
   width: 48px;
@@ -3494,6 +3496,15 @@ a.quest-title:focus-visible {
   background: var(--hc-panel-raised, var(--cozy-paper-raised));
   color: var(--hc-ink-dim, var(--cozy-ink-dim));
   font-weight: 600;
+}
+
+button.folder-agent-card__who-face {
+  cursor: pointer;
+}
+
+button.folder-agent-card__who-face:focus-visible {
+  outline: 2px solid var(--hc-ink, var(--cozy-ink));
+  outline-offset: 3px;
 }
 
 .folder-agent-card__who-main {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/johnjallday/ori-agent/internal/agentappearance"
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
@@ -25,6 +26,21 @@ func knownFolderHire(policy folderlook.RootPolicy) (purpose, brief string) {
 		return "Documents is where you keep things. This agent points out the projects in it and whether Ori can see a backup.", "Show me what I keep here"
 	default:
 		return "", DefaultBrief
+	}
+}
+
+// PreferredCharacter is a presentation hint, never a role or a permission.
+// Keep the folder defaults together with knownFolderHire.
+func PreferredCharacter(policy folderlook.RootPolicy) string {
+	switch policy {
+	case folderlook.RootDownloads:
+		return "operations-keeper"
+	case folderlook.RootDesktop:
+		return "automation-specialist"
+	case folderlook.RootDocuments:
+		return "research-archivist"
+	default:
+		return "project-coordinator"
 	}
 }
 
@@ -58,18 +74,20 @@ type HireOptions struct {
 	Agents   []HireAgent `json:"agents"`
 	// Existing preselects one of Agents (a saved "<folder> Manager" is reused
 	// rather than hired twice).
-	Existing string `json:"existing,omitempty"`
-	NameMax  int    `json:"name_max"`
+	Existing  string `json:"existing,omitempty"`
+	NameMax   int    `json:"name_max"`
+	Character string `json:"character,omitempty"`
 }
 
 // Hire is the owner's choice on the card: one of their agents (Existing), or
 // a new agent with a name, a model and a mandate.
 type Hire struct {
-	Existing string
-	Name     string
-	Provider string
-	Model    string
-	Mandate  string
+	Existing  string
+	Name      string
+	Provider  string
+	Model     string
+	Mandate   string
+	Character string
 }
 
 // Hiring is the server side of the Hire section.
@@ -80,6 +98,8 @@ type Hiring interface {
 	Agents(ctx context.Context, userID string) []HireAgent
 	// AgentExists reports any agent of that name, compared case-insensitively.
 	AgentExists(name string) bool
+	// Character suggests a least-worn working character for this folder kind.
+	Character(ctx context.Context, userID string, policy folderlook.RootPolicy) string
 }
 
 func (s *Service) hireOptions(ctx context.Context, userID, folder string) *HireOptions {
@@ -131,6 +151,14 @@ func (s *Service) resolveHire(ctx context.Context, userID, folder, brief string,
 	// The card always sends the model it shows; an empty model is "No model
 	// yet", hired without one.
 	req := CreateRequest{AgentName: name}
+	if id := strings.TrimSpace(hire.Character); id != "" {
+		version, err := agentappearance.ResolveAssignableCharacter(id)
+		if err != nil {
+			return CreateRequest{}, &Refusal{Code: "agent_character_unknown", Status: http.StatusBadRequest,
+				Message: "That face is not available here. Choose another."}
+		}
+		req.Character, req.CharacterVersion = id, version
+	}
 	if model := strings.TrimSpace(hire.Model); model != "" {
 		found := false
 		for _, offered := range options.Models {
