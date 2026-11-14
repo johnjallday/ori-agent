@@ -98,10 +98,12 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
 
     await page.reload();
     if (await closeAssistant.isVisible()) await closeAssistant.click();
-    await page.locator('#fileJanitorCardOpen').click();
-    const permissions = page.getByRole('region', { name: 'Review File Janitor permissions' });
+    await page.locator('#workspaceNextAction').click();
+    const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
     await expect(permissions).toContainText('Every move into Filed/');
-    await permissions.getByRole('button', { name: `Use attached ${folder}`, exact: true }).click();
+    await permissions
+      .getByRole('button', { name: `Allow filing in ${folder}`, exact: true })
+      .click();
     await expect(permissions).toBeHidden();
     // Permission acceptance can hide this card before preparation's async
     // handoff opens Review. Wait for that real completion, not an intermediate
@@ -118,7 +120,7 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
       path: join(evidence, `${folder}-curator-settings.png`),
       fullPage: true
     });
-    await page.getByRole('button', { name: 'Close File Janitor', exact: true }).click();
+    await page.getByRole('button', { name: 'Close Filing', exact: true }).click();
 
     // Preparation's saved-batch welcome is delivered asynchronously. Do not
     // mistake the earlier folder-look report for that later filing message.

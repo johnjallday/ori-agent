@@ -262,7 +262,9 @@ export function folderAgentReportView(view) {
   } else if (out.state === 'setting_up') {
     out.title = `Setting up ${out.workspace}`;
   } else if (out.state === 'set_up') {
-    out.title = `${out.workspace} is set up`;
+    out.title = view.filing_permission_required
+      ? `${agent} is hired. One step left: allow filing.`
+      : `${out.workspace} is set up`;
   } else {
     out.title = `${agent} looked around ${folder}`;
   }
@@ -2787,6 +2789,7 @@ export function followFolderAgent(
 // Each Needs you host's follows, by workspace: a look or a run in progress is
 // polled until it is final, across the list's redraws.
 const reportFollows = new WeakMap();
+const workspacePermissionWatches = new WeakMap();
 
 // mountFolderAgentReports draws every folder agent report among Today items
 // into host, wiring the actions. onDone runs after an action posted and when
@@ -2889,6 +2892,7 @@ export async function mountWorkspaceFolderAgent(
   } = {}
 ) {
   if (!host || !workspaceID) return null;
+  workspacePermissionWatches.get(host)?.();
   let raw;
   try {
     raw = await fetchFolderAgent(workspaceID, fetchImpl);
@@ -2936,7 +2940,9 @@ export async function mountWorkspaceFolderAgent(
       else lookMessage = null;
     }, pollMs);
   };
+  let latestRaw = raw;
   const draw = (current, error = '', opening = false) => {
+    latestRaw = current;
     const view = folderAgentReportView(current);
     const onAction = async (action, button, extra) => {
       if (button) button.disabled = true;
@@ -2989,6 +2995,37 @@ export async function mountWorkspaceFolderAgent(
   };
   draw(raw);
   follow(raw);
+  // The install finishes before consent. Follow only an actual saved-grant
+  // transition, not every scan/count notification, to refresh the banner.
+  let stopped = false;
+  let checking = false;
+  const permissionChanged = async event => {
+    const state = event.detail?.state?.actionState;
+    if (
+      stopped ||
+      checking ||
+      !isActive() ||
+      host.isConnected === false ||
+      state?.workspaceId !== workspaceID ||
+      state.status?.state !== 'ready' ||
+      latestRaw?.setup?.status !== 'done' ||
+      !latestRaw?.plan?.steps?.some(step => step.kind === 'file_curator' && step.chosen) ||
+      state.configured === !latestRaw.filing_permission_required
+    )
+      return;
+    checking = true;
+    try {
+      const next = await fetchFolderAgent(workspaceID, fetchImpl).catch(() => null);
+      if (next && !stopped && isActive()) draw(next);
+    } finally {
+      checking = false;
+    }
+  };
+  doc.addEventListener?.('ori:file-janitor-changed', permissionChanged);
+  workspacePermissionWatches.set(host, () => {
+    stopped = true;
+    doc.removeEventListener?.('ori:file-janitor-changed', permissionChanged);
+  });
   return raw;
 }
 

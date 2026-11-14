@@ -311,7 +311,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   expect(structure(await (await request.get('/api/workspaces')).json())).toEqual(structureBefore);
   await page.goto(`${view.route}?view=details`);
   if (await closeAssistant.isVisible()) await closeAssistant.click();
-  await page.locator('#fileJanitorCardOpen').click();
+  await page.locator('#workspaceNextAction').click();
   const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
   await expect(permissions).toContainText('Allow filing in Downloads');
   await expect(permissions).toContainText('No file contents are opened');
@@ -321,7 +321,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   await expect(permissions.getByRole('checkbox')).not.toBeChecked();
   await page.screenshot({ path: join(evidence, 'janitor-needs-grant.png'), fullPage: true });
   await page.getByRole('button', { name: 'Close Filing', exact: true }).click();
-  await page.locator('#fileJanitorCardOpen').click();
+  await page.locator('#workspaceNextAction').click();
   await expect(permissions.getByRole('checkbox')).not.toBeChecked();
   expect(
     (await (await request.get(`/api/workspaces/${id}/file-janitor/protection`)).json()).state

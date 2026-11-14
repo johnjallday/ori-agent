@@ -615,7 +615,18 @@
     if (disposed) return;
     const host = mount();
     if (!host) return;
-    host.hidden = !status?.applies || workspaceViewMode() !== 'details';
+    const settings = status?.settings || {};
+    const neverSetUp =
+      !isConfigured(status) &&
+      (!settings.setup_completed_at || settings.setup_completed_at.startsWith('0001-')) &&
+      (!settings.access_revoked_at || settings.access_revoked_at.startsWith('0001-')) &&
+      status?.readiness?.state !== 'needs_attention';
+    const nextActionAsks =
+      document
+        .getElementById('workspaceNextActionRegion')
+        ?.getAttribute('data-filing-setup-ask') === 'true';
+    host.hidden =
+      !status?.applies || workspaceViewMode() !== 'details' || (neverSetUp && nextActionAsks);
   }
 
   function el(tag, className, text) {
@@ -3335,7 +3346,7 @@
       const response = await fetch('/api/folder-picker/select-path', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Choose a different folder to tidy' })
+        body: JSON.stringify({ title: 'Choose a different folder to file' })
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.success)
@@ -4025,7 +4036,7 @@
     if (mode === 'metadata_only') {
       return {
         value: 'Local only · file details',
-        note: 'Names, types, sizes, and dates; no file contents are read.'
+        note: 'No file contents are read. Names, types, sizes and dates only.'
       };
     }
     if (mode === 'local_model') {
@@ -4072,7 +4083,12 @@
     const activity = activityState(status);
     const privacy = compactPrivacy(status);
     const managedFolderPath = configured ? safeName(settings.root_path) : 'Not connected';
-    const managedFolder = configured ? compactFolderName(settings.root_path) : managedFolderPath;
+    const linkedFolder = reviewedFolderName();
+    const managedFolder = configured
+      ? compactFolderName(settings.root_path)
+      : linkedFolder
+        ? linkedFolder + ' · not allowed yet'
+        : managedFolderPath;
 
     const card = el('section', 'fj-card is-' + activity.id.replace(/_/g, '-'));
     card.setAttribute('role', 'group');
@@ -4092,7 +4108,9 @@
           ? 'Sort proposed destinations, then decide what moves.'
           : settings.access_revoked_at && !settings.access_revoked_at.startsWith('0001-')
             ? 'Folder access was revoked. Choose a folder again to grant fresh permission; nothing is scanned or moved.'
-            : 'No folder chosen yet. Nothing is scanned or moved until you choose one.'
+            : linkedFolder
+              ? `Filing is not allowed in ${linkedFolder} yet. Nothing is scanned or moved.`
+              : 'No folder chosen yet. Nothing is scanned or moved until you choose one.'
       )
     );
     head.appendChild(heading);
@@ -5551,7 +5569,7 @@
     if (!id || busy) return;
     const trimmed = String(path || '').trim();
     if (!trimmed) {
-      showError('Choose a folder to tidy.');
+      showError('Choose a folder to file.');
       return;
     }
     busy = true;
@@ -5971,6 +5989,7 @@
   if (typeof document !== 'undefined') {
     window.addEventListener?.('pageshow', () => void resumeProtectionTrip());
     document.addEventListener(WORKSPACE_VIEW_MODE_EVENT, () => syncSummaryVisibility());
+    document.addEventListener('ori:workspace-next-action-rendered', () => syncSummaryVisibility());
     document.addEventListener('ori:filing-protection-ready', () => {
       void loadProtection().then(() => resumeProtectionTrip());
     });
@@ -6143,7 +6162,7 @@
       return {
         applies: true,
         value: 'Setup needed',
-        description: 'waiting for you to choose a folder to tidy',
+        description: 'waiting for you to choose a folder to file',
         tone: 'attention'
       };
     }

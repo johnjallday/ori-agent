@@ -2179,8 +2179,8 @@ test('the card always states what Ori reads, without opening settings', () => {
   );
   const body = cardText(doc);
   assert.match(body, /Local only · file details/);
-  assert.match(body, /Names, types, sizes, and dates/);
-  assert.match(body, /no file contents are read/);
+  assert.match(body, /Names, types, sizes and dates only/);
+  assert.match(body, /No file contents are read/);
 });
 
 test('a cloud provider is named, and the pending confirmation is the action', () => {
@@ -3433,6 +3433,34 @@ test('the compact card sends consent-required work to Settings', () => {
   assert.equal(action.textContent, 'Review consent');
   action.click();
   assert.equal(panel.activeTab(), 'settings');
+});
+
+test('the never-configured summary hides only when Next action actually shows the setup ask', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  const next = doc.register('workspaceNextActionRegion');
+  next.setAttribute('data-filing-setup-ask', 'true');
+  panel.render(setupRequiredStatus);
+  const card = doc.getElementById('fileJanitorMount');
+  assert.equal(card.hidden, true);
+  // A ticket outranks setup; the fallback card is now the only setup ask.
+  next.setAttribute('data-filing-setup-ask', 'false');
+  panel._syncSummaryVisibility();
+  assert.equal(card.hidden, false);
+  panel._setSetupReview(attachedReview());
+  panel.render(setupRequiredStatus);
+  assert.match(card.textContent, /Synthetic Inbox · not allowed yet/);
+  assert.match(
+    card.textContent,
+    /Filing is not allowed in Synthetic Inbox yet. Nothing is scanned or moved./
+  );
+  next.setAttribute('data-filing-setup-ask', 'true');
+  panel.render(statusFixture());
+  assert.equal(card.hidden, false, 'after setup the summary stays');
+  panel.render({ ...setupRequiredStatus, settings: { access_revoked_at: '2026-11-14T12:00:00Z' } });
+  assert.equal(card.hidden, false, 'revoked access keeps its fallback');
+  panel.render({ ...setupRequiredStatus, readiness: { state: 'needs_attention' } });
+  assert.equal(card.hidden, false, 'repair keeps its fallback');
 });
 
 test('the configured summary is visible only in Details across status refreshes', () => {

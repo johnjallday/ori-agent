@@ -78,13 +78,15 @@ test('a fed Downloads folder offers Filing and asks permission for that folder o
   await page.reload();
   if (await closeAssistant.isVisible()) await closeAssistant.click();
   const summary = page.locator('#fileJanitorMount');
-  await expect(summary.locator('.fj-card-title')).toHaveText('Filing');
-  await expect(summary).not.toContainText('File depot');
+  await expect(summary).toBeHidden();
+  await expect(page.locator('#workspaceFolderAgentReport')).toContainText(
+    'Downloads Manager is hired. One step left: allow filing.'
+  );
   await expect(page.locator('#workspaceNextAction')).toHaveText('Review permission');
   await expect(
     page.getByText('Let Downloads Manager file Downloads', { exact: true })
   ).toBeVisible();
-  await page.screenshot({ path: join(evidence, '04-named-folder-ask.png'), fullPage: true });
+  await page.screenshot({ path: join(evidence, '09-single-ask.png'), fullPage: true });
   const mutations: string[] = [];
   page.on('request', req => {
     if (
@@ -110,6 +112,38 @@ test('a fed Downloads folder offers Filing and asks permission for that folder o
   expect(mutations.filter(url => /\/(apply|preview|scan|setup)$/.test(url))).toEqual([]);
   expect(mutations.filter(url => url.endsWith('/prepare-review'))).toHaveLength(1);
   await page.screenshot({ path: join(evidence, '06-first-review.png'), fullPage: true });
+  await console.getByRole('button', { name: 'Close Filing', exact: true }).click();
+  await expect(page.locator('#workspaceFolderAgentReport')).toContainText('Downloads is set up');
+  await expect(summary).toBeVisible();
+  await expect(summary).toContainText('Downloads');
+  await expect(summary).toContainText('36 files waiting for review');
+  await page.screenshot({ path: join(evidence, '10-after-permission.png'), fullPage: true });
+  const note = summary.locator('.fj-card-fact-note');
+  for (const width of [360, 1120, 1440, 2240]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(note).toHaveText('No file contents are read. Names, types, sizes and dates only.');
+    const unclipped = await note.evaluate(node => {
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rects = [...range.getClientRects()];
+      return ['.fj-card-fact', '.fj-card-facts', '.fj-card'].every(selector => {
+        const parent = node.closest(selector)!;
+        const bounds = parent.getBoundingClientRect();
+        return (
+          parent.scrollWidth <= parent.clientWidth + 1 &&
+          rects.every(
+            rect =>
+              rect.left >= bounds.left - 1 &&
+              rect.right <= bounds.right + 1 &&
+              rect.top >= bounds.top - 1 &&
+              rect.bottom <= bounds.bottom + 1
+          )
+        );
+      });
+    });
+    expect(unclipped, `privacy note clipped at ${width}px`).toBe(true);
+    await page.screenshot({ path: join(evidence, `11-privacy-${width}.png`), fullPage: true });
+  }
 });
 
 test('capability-only filing asks for a folder and never prefills access', async ({

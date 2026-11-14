@@ -4029,6 +4029,55 @@ test('"Use this instead" swaps the plan in place and swapping back restores the 
   );
 });
 
+test('completed filing setup names the remaining permission, then returns to set up', () => {
+  const raw = reported({ state: 'set_up', filing_permission_required: true });
+  assert.equal(
+    folderAgentReportView(raw).title,
+    'Ori Music Demo Manager is hired. One step left: allow filing.'
+  );
+  assert.equal(
+    folderAgentReportView({ ...raw, filing_permission_required: false }).title,
+    'Ori Music Demo is set up'
+  );
+});
+
+test('a saved-grant transition refreshes the completed banner without polling', async () => {
+  const doc = stubDocument();
+  const listeners = new Map();
+  doc.addEventListener = (type, handler) => listeners.set(type, handler);
+  doc.removeEventListener = type => listeners.delete(type);
+  const host = doc.createElement('div');
+  let raw = reported({
+    state: 'set_up',
+    filing_permission_required: true,
+    setup: { status: 'done', lines: [] },
+    plan: { steps: [{ kind: 'file_curator', chosen: true }], lines: [] }
+  });
+  let reads = 0;
+  await mountWorkspaceFolderAgent(host, 'ws-1', {
+    doc,
+    fetchImpl: async () => {
+      reads++;
+      return { ok: true, json: async () => ({ folder_agent: raw }) };
+    }
+  });
+  assert.match(text(host, '.folder-agent-card__title'), /One step left/);
+  const notify = configured =>
+    listeners.get('ori:file-janitor-changed')({
+      detail: {
+        state: { actionState: { workspaceId: 'ws-1', status: { state: 'ready' }, configured } }
+      }
+    });
+  await notify(false);
+  assert.equal(reads, 1);
+  raw = { ...raw, filing_permission_required: false };
+  await notify(true);
+  assert.equal(reads, 2);
+  assert.equal(text(host, '.folder-agent-card__title'), 'Ori Music Demo is set up');
+  await notify(true);
+  assert.equal(reads, 2, 'queue notifications do not reread the banner');
+});
+
 test('a plan that changed after it was shown is redrawn on the owner’s own choice, not Ori’s default', async () => {
   const calls = [];
   const raw = reported({ model_sentence: '', tools_sentence: '', plan: swapPlan(GROUP) });

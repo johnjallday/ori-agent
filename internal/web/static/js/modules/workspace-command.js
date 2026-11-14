@@ -2600,7 +2600,9 @@ export class WorkspaceCommandView {
       // On the Map the card is one row above the map (is-map), whatever it says.
       (onMap ? ' is-map' : '') +
       (onMap && action?.owner === 'workspace' && action.kind === 'create' ? ' is-quiet' : '') +
-      '" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending">' +
+      '" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending"' +
+      (view.kind === 'setup' && action?.owner === 'console' ? ' data-filing-setup-ask="true"' : '') +
+      '>' +
       '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
       '<button type="button" class="ws-cmd-agent-action" data-cmd-open-tickets data-cmd-work-key="tickets">All tickets</button></div>' +
       (this.workNotice ? `<p role="status">${escapeHtml(this.workNotice)}</p>` : '') +
@@ -2984,6 +2986,9 @@ export class WorkspaceCommandView {
     this.bindConfigDrafts();
     this.bindWorkFirst();
     bindOverview(this);
+    if (typeof document !== 'undefined' && typeof CustomEvent === 'function') {
+      document.dispatchEvent?.(new CustomEvent('ori:workspace-next-action-rendered'));
+    }
     this.announceNextAction();
     if (workFocus) {
       const key = workFocus === 'next-pending' ? 'next' : workFocus;

@@ -270,7 +270,9 @@ async function openWorkspace(page: Page, workspaceId: string, query = '') {
 }
 
 async function openConsoleFromCard(page: Page) {
-  await page.locator('#fileJanitorCardOpen').click();
+  const summaryAction = page.locator('#fileJanitorCardOpen');
+  if (await summaryAction.isVisible()) await summaryAction.click();
+  else await page.locator('#workspaceNextAction').click();
   await expect(console_(page)).toBeVisible({ timeout: 15000 });
   await allFiles(page);
 }
@@ -739,9 +741,8 @@ test.describe('File Janitor capability', () => {
     // The compact card appears on nothing but the persisted install record —
     // this workspace has no blueprint, no folder, and no janitor state.
     const card = page.locator('#fileJanitorMount');
-    await expect(card).toBeVisible({ timeout: 15000 });
-    await expect(card).toContainText('Filing');
-    await expect(card).toContainText('No folder chosen yet');
+    await expect(page.locator('#workspaceNextAction')).toHaveText('Set up filing');
+    await expect(card).toBeHidden();
 
     // And Details carries a summary only: no review table, no settings form.
     await expect(card.locator('table')).toHaveCount(0);
@@ -749,7 +750,7 @@ test.describe('File Janitor capability', () => {
     await expect(page.locator('#fileJanitorBatch')).toHaveCount(0);
 
     // The single action leads into the real setup surface.
-    await expect(page.locator('#fileJanitorCardOpen')).toHaveText('Set up Filing');
+    await expect(page.locator('#workspaceNextAction')).toHaveText('Set up filing');
     await openConsoleFromCard(page);
     await expect(consoleBody(page).locator('#fileJanitorPath')).toBeVisible();
   });
