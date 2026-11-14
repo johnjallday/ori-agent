@@ -88,7 +88,9 @@ test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`
   if (await closeAssistant.isVisible()) await closeAssistant.click();
   await page.getByRole('button', { name: 'Open in chat', exact: true }).click();
   const report = page.locator('.folder-agent-card--report:visible');
-  await expect(report).toContainText(`File loose files in ${folderName} (you approve every move)`);
+  await expect(report).toContainText(
+    `Organize loose files in ${folderName} (you approve every move)`
+  );
   await expect(report).toContainText(`Adds filing to ${folderName}`);
   await page.screenshot({ path: join(evidence, '01-downloads-hire.png'), fullPage: true });
   await report.getByRole('button', { name: 'Set it up', exact: true }).click();

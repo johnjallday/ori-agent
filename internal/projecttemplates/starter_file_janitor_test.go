@@ -33,6 +33,9 @@ func TestFileJanitorStarterTemplate_Identity(t *testing.T) {
 	if tpl.Name != "Filing" {
 		t.Fatalf("display name = %q, want %q", tpl.Name, "Filing")
 	}
+	if tpl.Tagline != "Organize loose files in one folder, with your approval for every move." {
+		t.Fatalf("tagline = %q", tpl.Tagline)
+	}
 	if !tpl.Builtin {
 		t.Fatal("file-janitor must be a built-in template")
 	}

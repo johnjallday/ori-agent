@@ -2,7 +2,7 @@
   "name": "Filing",
   "description": "Local-first filing for one inbox-style folder — Downloads, Desktop, Scans, an upload drop. It prepares review batches from file names and metadata alone, with optional watching and daily catch-up after explicit approval. Approved files are filed into Filed/<category> inside the same folder, or sent to the system Trash when you explicitly choose it. Nothing is moved, trashed, or read without your say-so, and every applied action is journaled so you can undo it.",
   "icon": "🧹",
-  "tagline": "File loose files in one folder, with your approval for every move.",
+  "tagline": "Organize loose files in one folder, with your approval for every move.",
   "behavior_profile": "general",
   "builtin": true,
   "builtin_version": 6,

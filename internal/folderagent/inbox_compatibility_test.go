@@ -15,6 +15,26 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 )
 
+func TestDownloads_OrganizeStepCopyKeepsPlanConfirmation(t *testing.T) {
+	h := downloadsHarness(t, build(t, "a.pdf", "b.png"))
+	v := h.start(t, "")
+	record, err := h.svc.deps.Store.Read(v.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := BuildPlan(*record, nil)
+	want := "Organize loose files in " + record.FolderName + " (you approve every move)"
+	if len(plan.Steps) != 1 || plan.Steps[0].Title != want {
+		t.Fatalf("organize step = %+v", plan.Steps)
+	}
+	oldPlan := plan
+	oldPlan.Steps = append([]folderlook.Step(nil), plan.Steps...)
+	oldPlan.Steps[0].Title = "File loose files in " + record.FolderName + " (you approve every move)"
+	if got := planDigest(oldPlan); got != plan.Digest {
+		t.Fatalf("display-only step copy changed confirmation: %s != %s", got, plan.Digest)
+	}
+}
+
 func TestDownloads_PreFilingReportRequiresFreshConfirmation(t *testing.T) {
 	h := downloadsHarness(t, build(t, "a.pdf", "b.png"))
 	v := h.start(t, "")

@@ -245,7 +245,7 @@ test('Documents offers an unticked optional step and reuses stored protection wi
           {
             handle: 'file-curator',
             name: 'Filing',
-            title: 'File loose files in Documents (you approve every move)',
+            title: 'Organize loose files in Documents (you approve every move)',
             kind: 'file_curator',
             chosen: false
           }
