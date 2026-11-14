@@ -81,12 +81,37 @@ func NormalizeHQOnboardingState(value string) HQOnboardingState {
 	return HQOnboardingUnseen
 }
 
+// HQFirstVisitState records whether the post-build welcome was offered. Mission
+// completion remains owned by progression, never by this presentation state.
+type HQFirstVisitState string
+
+const (
+	HQFirstVisitUnoffered HQFirstVisitState = ""
+	HQFirstVisitPending   HQFirstVisitState = "pending"
+	HQFirstVisitDone      HQFirstVisitState = "done"
+)
+
+func ParseHQFirstVisitState(value string) (HQFirstVisitState, bool) {
+	switch state := HQFirstVisitState(strings.TrimSpace(value)); state {
+	case HQFirstVisitUnoffered, HQFirstVisitPending, HQFirstVisitDone:
+		return state, true
+	default:
+		return HQFirstVisitUnoffered, false
+	}
+}
+
+func NormalizeHQFirstVisitState(value string) HQFirstVisitState {
+	state, _ := ParseHQFirstVisitState(value)
+	return state
+}
+
 // PersonalHQState is the read-time view of a user's Personal HQ designation
 // and onboarding status, as persisted on the user profile row.
 type PersonalHQState struct {
 	PersonalWorkspaceID string            `json:"personal_workspace_id,omitempty"`
 	OnboardingState     HQOnboardingState `json:"hq_onboarding_state"`
 	OnboardingUpdatedAt time.Time         `json:"hq_onboarding_updated_at,omitempty"`
+	FirstVisitState     HQFirstVisitState `json:"hq_first_visit_state"`
 }
 
 type UserProfile struct {

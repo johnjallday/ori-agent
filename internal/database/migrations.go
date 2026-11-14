@@ -12,7 +12,7 @@ import (
 
 // schemaVersion is the current database schema version.
 // Increment this when adding new migrations.
-const schemaVersion = 90
+const schemaVersion = 91
 
 // migrate runs all pending migrations to bring the database up to the current schema.
 func (db *DB) migrate(ctx context.Context) error {
@@ -247,6 +247,8 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		return db.migration089LearningMissions(ctx)
 	case 90:
 		return db.migration090WorkspaceFolderReports(ctx)
+	case 91:
+		return db.migration091HQFirstVisit(ctx)
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
 	}
@@ -3407,6 +3409,35 @@ func (db *DB) migration057UserSetupQuestBindings(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// migration091HQFirstVisit grandfathers existing HQs. Column creation and the
+// backfill are atomic; replay after a lost migration marker cannot mark a newly
+// offered first visit done.
+func (db *DB) migration091HQFirstVisit(ctx context.Context) error {
+	// Like migration 30, tolerate partial legacy schemas without profiles.
+	hasUsers, err := db.tableExists(ctx, "users")
+	if err != nil || !hasUsers {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'hq_first_visit_state'`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE users ADD COLUMN hq_first_visit_state TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add hq first visit state: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE users SET hq_first_visit_state = 'done' WHERE hq_onboarding_state = 'completed'`); err != nil {
+			return fmt.Errorf("backfill hq first visit state: %w", err)
+		}
+	}
+	return tx.Commit()
 }
 
 // GetSchemaVersion returns the current database schema version.

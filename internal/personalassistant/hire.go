@@ -12,6 +12,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/charactercatalog"
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
+	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -89,6 +90,7 @@ type HireHQManager interface {
 	Status(ctx context.Context, userID string) (*personalhq.Status, error)
 	Designate(ctx context.Context, userID, workspaceID string) (*personalhq.Status, error)
 	SetOnboardingState(ctx context.Context, userID string, state userprofile.HQOnboardingState) (*personalhq.Status, error)
+	OfferHQFirstVisit(ctx context.Context, userID string) error
 }
 
 // HireBriefManager is the canonical Daily Brief config boundary.
@@ -324,6 +326,9 @@ func (c *HireCoordinator) resumeLegacyAutoHQ(ctx context.Context, userID string,
 
 	if _, err := c.hq.SetOnboardingState(ctx, userID, userprofile.HQOnboardingCompleted); err != nil {
 		return nil, c.partial(ctx, state, RepairFinalization, err)
+	}
+	if err := c.hq.OfferHQFirstVisit(ctx, userID); err != nil {
+		logger.Warn("personal assistant: failed to offer hq first visit", logger.Fields{"user_id": userID, "error": err})
 	}
 
 	final := state.Clone()

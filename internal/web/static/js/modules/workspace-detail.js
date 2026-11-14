@@ -6328,7 +6328,9 @@ export class WorkspaceDetailPage {
       const result = await response.json().catch(() => ({}));
       if (!result?.started || !result?.task_id) return false;
       await this.loadTasks();
-      if (window.Toast) {
+      // This server-owned hint is emitted only for the current HQ. Its card
+      // explains the starter tickets; a second, unexplained toast adds noise.
+      if (window.Toast && document.body?.dataset?.hqFirstVisit !== 'pending') {
         window.Toast.info('Setup run started — the workspace agent is getting things ready.');
       }
       // Land where the setup conversation surfaces: the same execution monitor

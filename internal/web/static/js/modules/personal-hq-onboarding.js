@@ -525,11 +525,11 @@ async function projectHQResult(result = {}, code = '') {
       assistant: relationship,
       stale: outcome === 'stale',
       route: status?.workspace?.folder_slug
-        ? `/workspaces/${encodeURIComponent(status.workspace.folder_slug)}`
+        ? `/workspaces/${encodeURIComponent(status.workspace.folder_slug)}?mode=details`
         : '',
       refresh: () => checkHQSetup(),
       explore: () => {
-        window.location.href = `/workspaces/${encodeURIComponent(status.workspace.folder_slug)}`;
+        window.location.href = `/workspaces/${encodeURIComponent(status.workspace.folder_slug)}?mode=details`;
       }
     });
     return {

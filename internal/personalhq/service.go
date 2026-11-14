@@ -68,6 +68,8 @@ type ProfileStore interface {
 	GetPersonalHQState(ctx context.Context, userID string) (*userprofile.PersonalHQState, error)
 	SetPersonalWorkspaceID(ctx context.Context, userID, workspaceID string) error
 	SetHQOnboardingState(ctx context.Context, userID string, state userprofile.HQOnboardingState) error
+	OfferHQFirstVisit(ctx context.Context, userID string) error
+	FinishHQFirstVisit(ctx context.Context, userID string) error
 }
 
 // DesignationSyncer projects a designation transition onto the target
@@ -122,6 +124,7 @@ type Status struct {
 	InvalidReason string `json:"invalid_reason,omitempty"`
 
 	OnboardingState userprofile.HQOnboardingState `json:"hq_onboarding_state"`
+	FirstVisitState userprofile.HQFirstVisitState `json:"first_visit_state"`
 }
 
 // HasDesignation reports whether the user has ever pointed at a workspace,
@@ -285,6 +288,7 @@ func (s *Service) Status(ctx context.Context, userID string) (*Status, error) {
 		UserID:          userID,
 		WorkspaceID:     state.PersonalWorkspaceID,
 		OnboardingState: userprofile.NormalizeHQOnboardingState(string(state.OnboardingState)),
+		FirstVisitState: userprofile.NormalizeHQFirstVisitState(string(state.FirstVisitState)),
 	}
 	if !out.HasDesignation() {
 		return out, nil
@@ -394,6 +398,25 @@ func (s *Service) SetOnboardingState(ctx context.Context, userID string, state u
 		logger.Info("personal hq: onboarding state changed", logger.Fields{
 			"user_id": userID, "from": string(previous.OnboardingState), "to": string(state),
 		})
+	}
+	return s.Status(ctx, userID)
+}
+
+// OfferHQFirstVisit is called only by server-owned activation paths.
+func (s *Service) OfferHQFirstVisit(ctx context.Context, userID string) error {
+	if s == nil || s.profiles == nil {
+		return errors.New("personal hq service is not configured")
+	}
+	return s.profiles.OfferHQFirstVisit(ctx, normalizeUserID(userID))
+}
+
+func (s *Service) FinishHQFirstVisit(ctx context.Context, userID string) (*Status, error) {
+	if s == nil || s.profiles == nil {
+		return nil, errors.New("personal hq service is not configured")
+	}
+	userID = normalizeUserID(userID)
+	if err := s.profiles.FinishHQFirstVisit(ctx, userID); err != nil {
+		return nil, err
 	}
 	return s.Status(ctx, userID)
 }

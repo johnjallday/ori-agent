@@ -404,6 +404,8 @@ export function assistantNeedsLine(today, { failed = false } = {}) {
 
 /** Where "Explore a folder" goes from a page that is not Home. */
 export const EXPLORE_FOLDER_URL = '/?panel=today&folder=show';
+// An explicit shortcut to the existing Documents pre-hire card, never Start.
+export const DOCUMENTS_FOLDER_URL = `${EXPLORE_FOLDER_URL}&suggest=documents`;
 
 /**
  * The one suggestion above the composer, "Explore a folder". It is offered when

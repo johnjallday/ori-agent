@@ -5,7 +5,7 @@ import { installLocalCdn } from './helpers/offline-cdn';
 
 // HQ Details landing (PRD hq-details-landing FR21, FR22, FR25): the Personal HQ
 // with the second brain's suggested items accepted as follow-ups opens on its
-// own header, with the follow-ups panel below the Goal panel.
+// own header, with follow-ups after Notes in the HQ main column.
 //
 // Run against the sandbox scripts/second-brain-demo.sh prints:
 //
@@ -75,6 +75,10 @@ test.beforeAll(async ({ request }) => {
 
   const status = (await json(request, 'get', '/api/personal-hq/status')).status;
   hqPath = `/workspaces/${status.workspace.folder_slug}`;
+  // This is the normal Overview regression, not the new-HQ welcome journey.
+  if (status.first_visit_state) {
+    await json(request, 'post', '/api/personal-hq/first-visit-state', { state: 'done' });
+  }
   followUps = (await json(request, 'get', `/api/workspaces/${status.workspace_id}/followups`))
     .followups;
   expect(followUps.filter(item => item.source.type === 'note_item').length).toBeGreaterThanOrEqual(
@@ -124,7 +128,7 @@ async function expandPanel(page: Page) {
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 }
 
-test('the HQ opens on its header, with follow-ups below the Goal panel', async ({ page }) => {
+test('the HQ opens on its header, with follow-ups below Notes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openHQ(page);
 
@@ -133,15 +137,21 @@ test('the HQ opens on its header, with follow-ups below the Goal panel', async (
   expect(await topOf(header)).toBeLessThan(300);
   await expect(page.locator('#personalHQKnowledgeEntry')).toHaveCount(0);
 
-  // One panel, in the main column, between the Goal panel and the agent deck.
+  // One panel, in the main column, after Notes and before the stations.
+  await expect(page.locator('[data-cmd-hq-attention]')).toHaveCount(0);
+  await expect(page.locator('[data-cmd-hq-needs]')).toHaveCount(1);
   await expect(page.locator('#workspaceFollowupMount')).toHaveCount(1);
   await expect(
     page.locator('.ws-cmd-main [data-cmd-followups-host] #workspaceFollowupMount')
   ).toHaveCount(1);
-  const goalBottom = await bottomOf(page.locator('.ws-cmd-mission'));
+  // Station sources hydrate independently of follow-ups; an empty host is
+  // intentionally hidden until the configured/folded stations arrive.
+  const stations = page.locator('.ws-hq-stations');
+  await expect(stations).toBeVisible();
+  const notesBottom = await bottomOf(page.locator('[data-cmd-hq-host="notes"]'));
   const panelTop = await topOf(panel(page));
-  expect(panelTop).toBeGreaterThanOrEqual(goalBottom);
-  expect(await topOf(page.locator('.ws-cmd-garrison'))).toBeGreaterThan(panelTop);
+  expect(panelTop).toBeGreaterThanOrEqual(notesBottom);
+  expect(await topOf(stations)).toBeGreaterThan(panelTop);
 
   await expect(panel(page).locator('.workspace-followups-summary')).toContainText(/\d+ open/);
   await expandPanel(page);
@@ -185,7 +195,14 @@ test('keyboard: the toggle, the chips and the cards are reachable and operable',
 test('the follow_up deep link focuses its card in the new place', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const target = followUps[followUps.length - 1];
+  // The quiet rail is short before Notes loads. Keep the selected follow-up
+  // visible after that real read grows the panel above it, not only before.
+  await page.route(`**${BRAIN}/look`, async route => {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    await route.continue();
+  });
   await openHQ(page, `?follow_up=${encodeURIComponent(target.id)}`, 'dark');
+  await expect(page.locator('[data-cmd-hq-host="notes"] .ws-notes-section').first()).toBeVisible();
   const card = panel(page).locator(`[data-followup-id="${target.id}"]`);
   await expect(card).toBeFocused();
   await expect(card).toHaveClass(/is-deep-linked/);

@@ -26,6 +26,7 @@ import {
   readFirstAction,
   rememberFirstAction
 } from './personal-hq-notes-review.js';
+import { readNoteDraft, writeNoteDraft, saveFirstNote } from './hq-first-note.js';
 
 import { hqPresentation } from './personal-hq-reveal.js';
 
@@ -77,7 +78,7 @@ export function hqReceiptRows(status, plan, directory) {
       kind: 'workspace',
       name: String(workspace.name || plan.name || 'My HQ'),
       detail: '',
-      route: slug ? `/workspaces/${encodeURIComponent(slug)}` : ''
+      route: slug ? `/workspaces/${encodeURIComponent(slug)}?mode=details` : ''
     },
     ...(plan.time
       ? [
@@ -154,9 +155,7 @@ const plan = {
 // The quick note's draft and its one request id, kept for this tab so Back,
 // a failure or a reload never loses the text, and a retry after a lost
 // response replays the same save instead of writing a second note.
-const NOTE_DRAFT_KEY = 'ori.hq.firstNote.v1';
 const COMPACT_RESULT_KEY = 'ori.hq.compactResult.v1';
-let memoryNoteDraft = null;
 function compactRecord(value) {
   try {
     if (value !== undefined) {
@@ -166,35 +165,6 @@ function compactRecord(value) {
     return window.sessionStorage.getItem(COMPACT_RESULT_KEY) || '';
   } catch (_) {
     return '';
-  }
-}
-
-function newNoteRequestID() {
-  const random = Math.random().toString(36).slice(2, 10);
-  return `hq-note-${Date.now().toString(36)}-${random}`;
-}
-
-function readNoteDraft() {
-  if (memoryNoteDraft) return { ...memoryNoteDraft };
-  try {
-    const parsed = JSON.parse(window.sessionStorage.getItem(NOTE_DRAFT_KEY) || 'null');
-    if (parsed && typeof parsed.text === 'string' && typeof parsed.requestId === 'string') {
-      memoryNoteDraft = parsed;
-      return { ...parsed };
-    }
-  } catch (_) {
-    // A draft is a convenience; a fresh one is fine.
-  }
-  memoryNoteDraft = { text: '', requestId: newNoteRequestID() };
-  return { ...memoryNoteDraft };
-}
-
-function writeNoteDraft(draft) {
-  memoryNoteDraft = { ...draft };
-  try {
-    window.sessionStorage.setItem(NOTE_DRAFT_KEY, JSON.stringify(draft));
-  } catch (_) {
-    // Storage is optional.
   }
 }
 
@@ -406,54 +376,17 @@ async function saveNote(event) {
   state.busy = true;
   plan.noteError = '';
   render();
-  let uncertain = false;
   try {
-    state.notes = await readNotesStatus();
-    plan.notesOutcome = hqLiveNotesOutcome(state.notes);
-    if (
-      !plan.notesOutcome.writable ||
-      !draft.sourceId ||
-      draft.sourceId !== state.notes?.source?.id
-    ) {
-      throw new Error(
-        'Your Notes connection changed or is not writable. Your draft is still here; check Notes before saving.'
-      );
-    }
-    let response;
-    writeNoteDraft({ ...draft, pendingText: text });
-    try {
-      response = await fetch(`${NOTES_ENDPOINT}/capture`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ text, request_id: draft.requestId })
-      });
-    } catch (_) {
-      uncertain = true;
-      throw new Error(
-        'Ori could not confirm the note was saved. Save again: the same note is never saved twice.'
-      );
-    }
-    const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      // A 5xx may have written the note before failing; the same request id
-      // makes a second press replay it rather than write another.
-      uncertain = response.status >= 500 || response.status === 409;
-      throw new Error(body.error || 'Ori could not save the note. Your text is still here.');
-    }
-    const capture = body.capture || {};
-    if (typeof capture.note !== 'string' || !capture.note.startsWith('Inbox/')) {
-      uncertain = true;
-      throw new Error(
-        'Ori could not confirm the saved note. Retry the same save; your draft is still here.'
-      );
-    }
-    plan.saved = { text: text.trim(), note: capture.note };
-    // Saved: the next note is a new one.
-    writeNoteDraft({ text: '', requestId: newNoteRequestID() });
+    plan.saved = await saveFirstNote(text, {
+      readStatus: async () => {
+        state.notes = await readNotesStatus();
+        plan.notesOutcome = hqLiveNotesOutcome(state.notes);
+        return state.notes;
+      }
+    });
     plan.firstPhase = 'saved';
   } catch (cause) {
     plan.noteError = cause?.message || 'Ori could not save the note. Your text is still here.';
-    if (!uncertain) writeNoteDraft(draft);
   } finally {
     state.busy = false;
     render();

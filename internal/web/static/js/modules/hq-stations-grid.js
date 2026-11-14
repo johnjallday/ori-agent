@@ -26,8 +26,9 @@ export const STATE_WORDS = Object.freeze({
 
 // "Set up", "Set up Email Ops", "Not set up", "… is not set up yet". A station
 // that still needs connecting says so in its own words, whatever its tone
-// (Calendar Ops asks to be set up with an attention tone).
-const NOT_SET_UP = /^(not )?set up\b|\bnot set up\b/i;
+// (Calendar Ops asks to be set up with an attention tone). "Set up by Ori"
+// reports an already-connected Notes folder, not an instruction to connect.
+const NOT_SET_UP = /^set up\b(?!\s+by\b)|\bnot set up\b/i;
 // A station whose own words say work is under way, while its tone is "loading".
 const RUNNING = /^(preparing|running|reading|scanning|looking|generating)\b/i;
 
@@ -108,6 +109,16 @@ export function hqStationCards(stations) {
     .map((station, index) => ({ card: stationCard(station), index }))
     .sort((a, b) => GROUP[a.card.stateWord] - GROUP[b.card.stateWord] || a.index - b.index)
     .map(entry => entry.card);
+}
+
+// Quiet Overview keeps configured/error/checking stations as cards. Only the
+// explicit Not set up word folds; Map still uses stationCard without folding.
+export function hqStationGroups(cards) {
+  const all = Array.isArray(cards) ? cards : [];
+  return {
+    active: all.filter(card => card.stateWord !== STATE_WORDS.notSetUp),
+    unused: all.filter(card => card.stateWord === STATE_WORDS.notSetUp)
+  };
 }
 
 /**

@@ -124,6 +124,37 @@ func (h *Handler) SetOnboardingState(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"status": status})
 }
 
+// SetFirstVisitState finishes the welcome. Offering it is server-owned; the
+// browser cannot reset or manufacture a pending first visit.
+func (h *Handler) SetFirstVisitState(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.service == nil {
+		orihttp.ServiceUnavailable(w, "personal hq service is unavailable")
+		return
+	}
+	var req map[string]string
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if len(req) != 1 || req["state"] != string(userprofile.HQFirstVisitDone) {
+		orihttp.BadRequest(w, "state must be done")
+		return
+	}
+	userID, err := h.currentUserID(r.Context())
+	if err != nil {
+		orihttp.InternalError(w, "Failed to resolve current user")
+		return
+	}
+	status, err := h.service.FinishHQFirstVisit(r.Context(), userID)
+	if err != nil {
+		orihttp.InternalError(w, "Failed to finish first visit")
+		return
+	}
+	orihttp.Success(w, map[string]any{"status": status})
+}
+
 // Designate handles POST /api/personal-hq/designate.
 func (h *Handler) Designate(w http.ResponseWriter, r *http.Request) {
 	h.handleDesignation(w, r, false)

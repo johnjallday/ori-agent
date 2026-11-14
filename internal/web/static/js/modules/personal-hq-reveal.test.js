@@ -2,6 +2,32 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHQPresentation } from './personal-hq-reveal.js';
 import { createCreationTransition } from './workspace-creation-transition.js';
+import { hqReceiptRows } from './personal-assistant-hq-card.js';
+import { WorkspaceCommandView } from './workspace-command.js';
+
+test('Explore HQ opens Overview without replacing the saved Map preference', () => {
+  const previous = {
+    document: globalThis.document,
+    window: globalThis.window,
+    localStorage: globalThis.localStorage
+  };
+  const route = hqReceiptRows({ valid: true, workspace: { folder_slug: 'my-hq' } }, {}, '')[0]
+    .route;
+  const values = new Map([['oriWorkspaceCommandViewMode', 'map']]);
+  try {
+    globalThis.document = { getElementById: () => null };
+    globalThis.window = { location: { search: new URL(route, 'http://localhost').search } };
+    globalThis.localStorage = {
+      getItem: key => values.get(key),
+      setItem: (key, value) => values.set(key, value)
+    };
+    const command = new WorkspaceCommandView(null);
+    assert.equal(command.viewMode, 'details');
+    assert.equal(values.get('oriWorkspaceCommandViewMode'), 'map');
+  } finally {
+    Object.assign(globalThis, previous);
+  }
+});
 
 function fixture(overrides = {}) {
   const events = [];

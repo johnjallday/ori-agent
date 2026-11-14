@@ -221,6 +221,9 @@ func (c *SetupCoordinator) Setup(ctx context.Context, userID string, req SetupRe
 	if _, err := c.service.SetOnboardingState(ctx, userID, userprofile.HQOnboardingCompleted); err != nil {
 		logger.Warn("personal hq: failed to mark onboarding completed", logger.Fields{"user_id": userID, "error": err})
 	}
+	if err := c.service.OfferHQFirstVisit(ctx, userID); err != nil {
+		logger.Warn("personal hq: failed to offer first visit", logger.Fields{"user_id": userID, "error": err})
+	}
 
 	finalStatus, err := c.service.Status(ctx, userID)
 	if err != nil {

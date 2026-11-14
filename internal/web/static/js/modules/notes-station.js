@@ -608,7 +608,7 @@ export function previewHTML(preview, key) {
 // checklistHTML is the empty Inbox of a folder Ori set up: the first week's
 // three rows with their check marks. Capture focuses the box above; the project
 // question opens in the assistant's drawer.
-export function checklistHTML(checklist) {
+export function checklistHTML(checklist, hidden = false) {
   if (!checklist?.show || !checklist.rows.length) return '';
   const rows = checklist.rows
     .map(row => {
@@ -638,9 +638,12 @@ export function checklistHTML(checklist) {
     })
     .join('');
   return (
+    '<div data-notes-checklist-host' +
+    (hidden ? ' hidden' : '') +
+    '>' +
     '<p class="ws-notes-line">Three things to try this week:</p><ul class="ws-notes-checklist" data-notes-checklist>' +
     rows +
-    '</ul>'
+    '</ul></div>'
   );
 }
 
@@ -651,7 +654,7 @@ function inboxHTML(section, now, panel) {
       '<p class="ws-notes-empty">' +
       escapeHtml(section.empty) +
       '</p>' +
-      checklistHTML(section.checklist)
+      checklistHTML(section.checklist, panel.hideChecklist)
     );
   const rows = section.notes
     .map(
@@ -884,7 +887,13 @@ function oneLinerHTML(secondBrain) {
     : '';
 }
 
-export function notesPanelHTML({ secondBrain, panel = {}, now = Date.now() } = {}) {
+export function notesPanelHTML({
+  secondBrain,
+  panel = {},
+  now = Date.now(),
+  hideChecklist = false
+} = {}) {
+  panel = { ...panel, hideChecklist };
   const look = panel.look || null;
   const sections = notesSections({
     secondBrain,

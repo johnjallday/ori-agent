@@ -35,7 +35,12 @@ export const HQ_LABELS = Object.freeze({
   setup: 'Setup',
   stations: 'Stations',
   needsYou: 'Needs you',
-  needsYourAttention: 'Needs your attention',
+  ticket: WORK_LABELS.ticket,
+  anAgent: 'An agent',
+  answer: 'Answer',
+  review: 'Review',
+  ticketWaiting: '{agent} is waiting on you{title}.',
+  ticketReadyForReview: 'Ready for review: {title}.',
   followUps: 'Follow-ups',
   notes: 'Notes',
   goal: 'Goal',
@@ -46,6 +51,7 @@ export const HQ_LABELS = Object.freeze({
 
   // Setup rows
   linkedFolders: 'Linked folders',
+  schedules: 'Schedules',
   tools: 'Tools',
   capabilities: 'Capabilities',
   triggers: 'Triggers and automation',
@@ -70,6 +76,44 @@ export const HQ_LABELS = Object.freeze({
   inventory: 'Inventory',
   // "New task" in the PRD; work is a ticket on the HQ page.
   newTask: WORK_LABELS.newTicket,
+
+  // On-demand first-visit suggestions. Existing surfaces own every action.
+  firstVisitTitle: 'Things to try',
+  firstVisitLead: 'Whenever something feels useful.',
+  firstVisitClose: 'Close suggestions',
+  firstNoteTitle: 'Save an idea',
+  firstNoteHint: 'A quick note in your Inbox.',
+  firstNoteDone: 'Your first note is in your Inbox.',
+  firstNotesSetupTitle: 'Set up your notes',
+  firstNotesSetupHint: 'Plain Markdown, in a folder you own.',
+  firstNotesOwnVault: 'Your own vault is connected. Ori does not write there.',
+  firstBriefTitle: 'Read your Daily Brief',
+  firstBriefHint: 'A little perspective on your day.',
+  firstBriefDone: 'Your first brief is ready.',
+  firstFolderTitle: 'Explore a folder with Ori',
+  firstFolderHint: 'Review the agent and model first. Nothing starts until you approve.',
+  firstFolderChoose: 'Choose another folder',
+  firstFolderDocuments: 'Explore Documents',
+  firstFolderDone: 'Your folder is on the map.',
+  firstVisitHide: 'Hide suggestions',
+  firstVisitCompleted: 'Completed',
+  firstVisitSkipped: 'Skipped',
+  firstVisitLoading: 'Loading suggestions…',
+  firstVisitLoadError: 'Your progress could not be loaded. Try again.',
+  firstVisitRetry: 'Try again',
+  firstNoteEmpty: 'Write something to save, or go back.',
+  firstNoteChanged:
+    'Your Notes connection changed or is not writable. Your draft is still here; check Notes before saving.',
+  firstNoteUncertain:
+    'Ori could not confirm the note was saved. Save again: the same note is never saved twice.',
+  firstNoteError: 'Ori could not save the note. Your text is still here.',
+  firstNoteReceiptError:
+    'Ori could not confirm the saved note. Retry the same save; your draft is still here.',
+  firstVisitFinishError: 'Your suggestions could not be dismissed. Try again.',
+  more: 'More',
+  moreCount: 'and {count} more',
+  stationsUnused: 'Not in use yet',
+  stationsUnusedHint: 'Set them up when you want them.',
 
   // Station state words
   notSetUp: 'Not set up',

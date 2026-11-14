@@ -7,9 +7,10 @@
 // today's brief when it loads (personal-assistant-home.js), because the
 // drawer's lists are built from the brief's items.
 //
-// Nothing here runs on import. Pure rendering/decision helpers are exported so
-// home-daily-brief.test.js can exercise them under plain Node with no DOM or
-// network.
+// Pure rendering/decision helpers are exported so home-daily-brief.test.js can
+// exercise them under plain Node with no DOM or network.
+
+import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
 
 // parseContent safely decodes a Revision's ContentJSON. Returns {} (never
 // throws) on missing/invalid JSON so a corrupt revision degrades to an
@@ -847,9 +848,29 @@ export function mountDailyBrief(els, options = {}) {
     if (!modalEl) return;
     loadSettingsAndHistory();
     if (window.bootstrap && window.bootstrap.Modal) {
+      // The brief panel marks body siblings inert. Register this Bootstrap
+      // child with the same coordinator so the panel suspends, then resumes
+      // on the real hidden event; a higher z-index alone cannot release inert.
+      const overlays = workspaceOverlayCoordinator();
+      const id = 'daily-brief-settings';
+      overlays.open({
+        id,
+        kind: 'modal',
+        container: modalEl,
+        canEscape: () => false,
+        onClose: info => {
+          modalEl.style.visibility = info.reason === 'suspended' ? 'hidden' : '';
+          modalEl.inert = info.reason === 'suspended';
+        },
+        onResume: () => {
+          modalEl.style.visibility = '';
+          modalEl.inert = false;
+        }
+      });
       modalEl.addEventListener(
         'hidden.bs.modal',
         () => {
+          overlays.close(id);
           // Back to the button that opened it, when that button is still shown.
           if (settingsBtn?.isConnected && settingsBtn.getClientRects().length) settingsBtn.focus();
         },

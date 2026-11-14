@@ -2631,3 +2631,38 @@ test('a linked song shows the Song card above the Command view; other workspaces
     assert.equal(mount.hidden, true);
   });
 });
+
+test('template setup still starts and monitors, but only a pending HQ first visit suppresses the toast', async () => {
+  const originals = { fetch: global.fetch, body: document.body, toast: window.Toast };
+  try {
+    for (const state of ['pending', 'done', undefined]) {
+      document.body = { dataset: state ? { hqFirstVisit: state } : {} };
+      const calls = [],
+        notices = [],
+        monitored = [];
+      window.Toast = { info: message => notices.push(message) };
+      global.fetch = async (url, options) => {
+        calls.push([url, options.method]);
+        return { ok: true, json: async () => ({ started: true, task_id: 'setup' }) };
+      };
+      const page = new WorkspaceDetailPage('hq');
+      let loaded = 0;
+      page.loadTasks = async () => {
+        loaded++;
+      };
+      page.startExecutionMonitor = id => monitored.push(id);
+      assert.equal(await page.maybeStartTemplateSetup(), true);
+      assert.deepEqual(calls, [['/api/workspaces/hq/template-setup/start', 'POST']]);
+      assert.deepEqual(monitored, ['setup']);
+      assert.equal(loaded, 1);
+      assert.equal(notices.length, state === 'pending' ? 0 : 1);
+      global.fetch = async () => ({ ok: true, json: async () => ({ started: false }) });
+      assert.equal(await page.maybeStartTemplateSetup(), false);
+      assert.deepEqual(monitored, ['setup'], 'no duplicate monitor after the consumed start');
+    }
+  } finally {
+    global.fetch = originals.fetch;
+    document.body = originals.body;
+    window.Toast = originals.toast;
+  }
+});

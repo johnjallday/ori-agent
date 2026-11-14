@@ -87,6 +87,8 @@ type fakeHireHQ struct {
 	onboardingErr   error
 	designateCalls  int
 	onboardingCalls int
+	firstVisitCalls int
+	firstVisitErr   error
 }
 
 func (f *fakeHireHQ) Status(context.Context, string) (*personalhq.Status, error) {
@@ -109,6 +111,11 @@ func (f *fakeHireHQ) Designate(_ context.Context, userID, workspaceID string) (*
 func (f *fakeHireHQ) SetOnboardingState(context.Context, string, userprofile.HQOnboardingState) (*personalhq.Status, error) {
 	f.onboardingCalls++
 	return f.status, f.onboardingErr
+}
+
+func (f *fakeHireHQ) OfferHQFirstVisit(context.Context, string) error {
+	f.firstVisitCalls++
+	return f.firstVisitErr
 }
 
 type fakeHireBriefs struct {
@@ -609,6 +616,9 @@ func TestHireCoordinator_ResumesPreAmendmentOperationWithARecordedWorkspace(t *t
 	if fixture.creator.calls != 1 || fixture.hq.designateCalls != 1 || fixture.briefs.updateCalls != 1 {
 		t.Fatalf("legacy resume side effects: creator=%d designate=%d brief=%d",
 			fixture.creator.calls, fixture.hq.designateCalls, fixture.briefs.updateCalls)
+	}
+	if fixture.hq.firstVisitCalls != 1 {
+		t.Fatalf("legacy activation offer calls = %d", fixture.hq.firstVisitCalls)
 	}
 	// The profile-only path must not also run: that would be a second profile.
 	if fixture.profiles.calls != 0 {

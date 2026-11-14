@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
 // The Notes station's panel as the HQ page's home for the second brain (PRD
-// notes-station-panel FR29): it opens from the Details rail row and from the Map
-// building, files a line as a follow-up, answers a Look again inside the rate
-// limit with the wait, opens from ?station=second-brain, and the badge under the
-// building reads like the rail row.
+// notes-station-panel FR29): it lives inline on Overview and opens from the Free
+// Map building, files a line as a follow-up, answers Look again inside the rate
+// limit with the wait, and opens from ?station=second-brain. The building's
+// badge agrees with the inline panel. The retired Stations rail is not used.
 //
 // Run against the sandbox scripts/second-brain-demo.sh prints:
 //
@@ -69,11 +69,18 @@ test.beforeAll(async ({ request }) => {
     .toBe('finished');
   const status = (await json(request, 'get', '/api/personal-hq/status')).status;
   hqPath = `/workspaces/${status.workspace.folder_slug}`;
+  if (status.first_visit_state) {
+    await json(request, 'post', '/api/personal-hq/first-visit-state', { state: 'done' });
+  }
   mkdirSync(EVIDENCE, { recursive: true });
 });
 
 test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
+  await page.addInitScript(() => {
+    const slug = decodeURIComponent(location.pathname.split('/')[2] || '');
+    if (slug) localStorage.setItem('oriWorkspaceMapArrangement:' + slug, 'free');
+  });
   const axeFile = process.env.AXE_CORE_FILE || '';
   if (axeFile && existsSync(axeFile)) {
     await page.route(AXE_URL, route =>
@@ -86,10 +93,9 @@ test.beforeEach(async ({ page }) => {
   }
 });
 
-const panel = (page: Page) => page.locator('.ws-cmd-modal-panel.is-station');
+const panel = (page: Page) =>
+  page.locator('.ws-cmd-modal-panel.is-station:visible, [data-cmd-hq-host="notes"]:visible');
 const section = (page: Page, key: string) => panel(page).locator(`[data-notes-section="${key}"]`);
-const railRow = (page: Page) =>
-  page.locator('.ws-cmd-rail-item[data-cmd-hq-station="second-brain"]');
 const building = (page: Page) =>
   page.locator('.ws-cmd-map-hq-station[data-cmd-hq-station="second-brain"]');
 
@@ -106,31 +112,17 @@ async function openHQ(page: Page, query = '', theme = 'light') {
   await expect(page.locator('.ws-cmd-topbar')).toBeVisible({ timeout: 30_000 });
 }
 
-async function showStationsRail(page: Page) {
-  await page.locator('[data-cmd-view-mode="details"]').first().click();
-  const row = railRow(page);
-  if (!(await row.isVisible())) {
-    await page.locator('[data-cmd-rail-section="stations"]').first().click();
-  }
-  await expect(row).toBeVisible();
-  // The badge has read the connection once the row names an open count.
-  await expect(row.locator('.ws-cmd-rail-m')).toHaveText(/\d+ open/);
-  return row;
-}
-
 async function expectNotesPanel(page: Page) {
   await expect(panel(page).locator('.ws-cmd-modal-title')).toHaveText('Notes');
   await expect(section(page, 'loops').locator('.ws-notes-item').first()).toBeVisible();
 }
 
-test('the Details rail row opens the panel with the look, and Escape returns to the row', async ({
-  page
-}) => {
+test('Overview owns the Notes panel inline, with the real read-only look', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openHQ(page, '?mode=details');
-  const row = await showStationsRail(page);
-  await row.click();
   await expectNotesPanel(page);
+  await expect(page.locator('[data-cmd-hq-host="notes"]')).toBeVisible();
+  await expect(page.locator('[data-cmd-hq-station="second-brain"]')).toHaveCount(0);
 
   const footer = section(page, 'footer');
   await expect(footer).toContainText(/open items? in \d+ notes?/);
@@ -153,25 +145,25 @@ test('the Details rail row opens the panel with the look, and Escape returns to 
   );
   const link = section(page, 'loops').locator('.ws-notes-link').first();
   await expect(link).toHaveAttribute('href', /^obsidian:\/\/open\?/);
-  await page.screenshot({ path: join(EVIDENCE, 'spec-details-rail-1440-light.png') });
-
+  await page.screenshot({ path: join(EVIDENCE, 'spec-overview-inline-1440-light.png') });
   await page.keyboard.press('Escape');
-  await expect(panel(page)).toBeHidden();
-  await expect(railRow(page)).toBeFocused();
+  await expect(panel(page)).toBeVisible();
+  await expect(page.locator('.ws-cmd-modal-panel.is-station')).toHaveCount(0);
 });
 
-test('the Map building opens the same panel, and its badge reads like the rail row', async ({
+test('the Free Map building opens the same panel and its badge matches Overview', async ({
   page
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await openHQ(page, '?mode=details');
-  const rail = (await (await showStationsRail(page)).locator('.ws-cmd-rail-m').textContent()) || '';
-  const railName = (await railRow(page).getAttribute('aria-label')) || '';
+  const badge = page.locator('[data-cmd-hq-notes-meta] .ws-hq-notes-badge');
+  await expect(badge).toHaveText(/\d+ open/);
+  const value = (await badge.textContent()) || '';
+  const description = (await badge.getAttribute('title')) || '';
 
   await page.locator('[data-cmd-view-mode="map"]').first().click();
   await expect(building(page)).toBeVisible();
-  await expect(building(page).locator('.ws-cmd-map-hq-station-state')).toHaveText(rail);
-  const description = railName.replace(/^Notes station, /, '');
+  await expect(building(page).locator('.ws-cmd-map-hq-station-state')).toHaveText(value);
   expect(description).not.toBe('');
   await expect(building(page)).toHaveAttribute('aria-label', new RegExp(escapeRegExp(description)));
 
@@ -292,9 +284,9 @@ for (const theme of ['light', 'dark']) {
       expect(fits.right).toBeLessThanOrEqual(width + 1);
       if (width === 1440 || width === 390) {
         await page.addScriptTag({ url: AXE_URL });
-        const violations = await page.evaluate(async () =>
+        const violations = await panel(page).evaluate(async node =>
           (
-            await (window as any).axe.run('.ws-cmd-modal-panel.is-station', {
+            await (window as any).axe.run(node, {
               runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] }
             })
           ).violations.map((v: { id: string; nodes: { target: string[] }[] }) => ({

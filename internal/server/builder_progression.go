@@ -340,6 +340,10 @@ func (b *ServerBuilder) completeProgressionWiring() {
 			engine.Complete(progression.ConnectSourceQuestID)
 		}
 	}
+	// Recover a durable folder-agent report whose hook was missed (or predates
+	// that wiring). Like the durable hire above, this must not require another
+	// paid look. Complete is idempotent and never reopens a skipped mission.
+	b.reconcileFolderAgentMissions(context.Background())
 }
 
 // scanProgression gathers a best-effort Snapshot of existing state for the

@@ -105,7 +105,7 @@ func (s *SQLiteStore) Upsert(ctx context.Context, profile *UserProfile) error {
 }
 
 // GetPersonalHQState reads the Personal HQ designation and onboarding status
-// for a user. It intentionally selects only these two columns (not the full
+// for a user. It intentionally selects only HQ columns (not the full
 // profile row) so it stays independent of the generic Get/Upsert round trip
 // and of agent-editable profile fields.
 func (s *SQLiteStore) GetPersonalHQState(ctx context.Context, userID string) (*PersonalHQState, error) {
@@ -113,13 +113,13 @@ func (s *SQLiteStore) GetPersonalHQState(ctx context.Context, userID string) (*P
 		return nil, errors.New("user profile store is not configured")
 	}
 	userID = normalizeUserID(userID)
-	var workspaceID, onboardingState string
+	var workspaceID, onboardingState, firstVisitState string
 	var updatedAtRaw any
 	err := s.db.QueryRowContext(ctx, `
-		SELECT personal_workspace_id, hq_onboarding_state, hq_onboarding_updated_at
+		SELECT personal_workspace_id, hq_onboarding_state, hq_onboarding_updated_at, hq_first_visit_state
 		FROM users
 		WHERE id = ?
-	`, userID).Scan(&workspaceID, &onboardingState, &updatedAtRaw)
+	`, userID).Scan(&workspaceID, &onboardingState, &updatedAtRaw, &firstVisitState)
 	if err == sql.ErrNoRows {
 		return &PersonalHQState{OnboardingState: HQOnboardingUnseen}, nil
 	}
@@ -129,6 +129,7 @@ func (s *SQLiteStore) GetPersonalHQState(ctx context.Context, userID string) (*P
 	state := &PersonalHQState{
 		PersonalWorkspaceID: workspaceID,
 		OnboardingState:     NormalizeHQOnboardingState(onboardingState),
+		FirstVisitState:     NormalizeHQFirstVisitState(firstVisitState),
 	}
 	if updatedAtRaw != nil {
 		if updatedAt, err := parseTime(updatedAtRaw); err == nil {
@@ -184,6 +185,44 @@ func (s *SQLiteStore) SetHQOnboardingState(ctx context.Context, userID string, s
 	`, userID, string(normalized), now, now, now)
 	if err != nil {
 		return fmt.Errorf("failed to set hq onboarding state: %w", err)
+	}
+	return nil
+}
+
+// OfferHQFirstVisit only offers once, atomically. Rebuilding or concurrent
+// activation must never reopen a welcome the user already finished.
+func (s *SQLiteStore) OfferHQFirstVisit(ctx context.Context, userID string) error {
+	if s == nil || s.db == nil {
+		return errors.New("user profile store is not configured")
+	}
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO users (id, hq_first_visit_state, created_at, updated_at)
+		VALUES (?, 'pending', ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			hq_first_visit_state = 'pending', updated_at = excluded.updated_at
+		WHERE users.hq_first_visit_state = ''
+	`, normalizeUserID(userID), now, now)
+	if err != nil {
+		return fmt.Errorf("failed to offer hq first visit: %w", err)
+	}
+	return nil
+}
+
+// FinishHQFirstVisit is the only client-writable transition.
+func (s *SQLiteStore) FinishHQFirstVisit(ctx context.Context, userID string) error {
+	if s == nil || s.db == nil {
+		return errors.New("user profile store is not configured")
+	}
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO users (id, hq_first_visit_state, created_at, updated_at)
+		VALUES (?, 'done', ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			hq_first_visit_state = 'done', updated_at = excluded.updated_at
+	`, normalizeUserID(userID), now, now)
+	if err != nil {
+		return fmt.Errorf("failed to finish hq first visit: %w", err)
 	}
 	return nil
 }

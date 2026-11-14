@@ -1985,13 +1985,16 @@ test('Set up sends only the plan digest and a chosen file name, and polls while 
 test('Home Explore opens its own chooser, whose choice starts an agent on the folder', () => {
   const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
   const body = source.slice(
-    source.indexOf('function openChooser()'),
+    source.indexOf('function openChooser('),
     source.indexOf('async function load()')
   );
   // Explore no longer attaches the folder to the conversation (the composer's
   // Add folder still does); without a relationship it keeps the HQ fallback.
   assert.doesNotMatch(body, /PersonalAssistantFolderContext/);
   assert.match(body, /openHQCard\(\)/);
+  assert.match(body, /if \(suggestion === 'documents'\)/);
+  assert.match(body, /void chooseForAgent\(\{ chip: 'documents' \}\)/);
+  assert.doesNotMatch(body, /startAgent\(|\.click\(/);
   // A chip, the dialog or a typed path goes to the folder agent, not the digest.
   const scan = source.slice(source.indexOf('async function scan('), source.indexOf('// postOffer'));
   assert.match(scan, /if \(!body\.file\) \{\s*await chooseForAgent\(body\);\s*return;/);

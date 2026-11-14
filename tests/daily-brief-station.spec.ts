@@ -1,4 +1,15 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
+
+// These building-geometry assertions exercise Free, not the newer default
+// Flow arrangement. Overview has station cards rather than a Stations rail.
+test.beforeEach(async ({ page }) => {
+  await installLocalCdn(page);
+  await page.addInitScript(() => {
+    const slug = decodeURIComponent(location.pathname.split('/')[2] || '');
+    if (slug) localStorage.setItem('oriWorkspaceMapArrangement:' + slug, 'free');
+  });
+});
 
 /**
  * The Daily Brief station in My HQ (tasks/prd-assistant-drawer-redesign.md,
@@ -77,7 +88,7 @@ async function briefShown(page: Page) {
 test.describe.serial('Daily Brief station in My HQ', () => {
   let slug = '';
 
-  test('the station is a building in the fourth map slot and a row in the Stations rail', async ({
+  test('the station is a building in the fourth Free Map slot and an Overview card', async ({
     page,
     request
   }) => {
@@ -106,24 +117,20 @@ test.describe.serial('Daily Brief station in My HQ', () => {
       ['email', '39.00%'],
       ['calendar-ops', '56.00%'],
       ['daily-brief', '73.00%'],
-      ['memory', '90.00%']
+      ['memory', '90.00%'],
+      ['second-brain', '39.00%']
     ]);
 
-    await page.goto(`/workspaces/${slug}`);
-    // The rail is an accordion: a station is a row inside the Stations
-    // section, which may or may not be the one that is open on arrival. The
-    // section to open is chosen once the page's lists have loaded, so wait
-    // for that before asking; a click that raced it would close the section.
-    const stations = page.locator('[data-cmd-manage-section="stations"]');
-    await expect(stations).toBeVisible();
-    await page.waitForFunction(
-      () =>
-        (window as unknown as { workspaceDetail?: { initialListsLoaded?: boolean } })
-          .workspaceDetail?.initialListsLoaded === true
-    );
-    if ((await stations.getAttribute('aria-expanded')) === 'false') await stations.click();
-    await expect(stations).toHaveAttribute('aria-expanded', 'true');
-    const row = page.locator(`.ws-cmd-panel.is-hq-stations ${STATION}`);
+    // This suite exercises the normal station surface. The first-visit journey
+    // separately verifies that opening its brief step reveals this card.
+    const { status: hqStatus } = await (await request.get('/api/personal-hq/status')).json();
+    if (hqStatus.first_visit_state) {
+      expect(
+        (await request.post('/api/personal-hq/first-visit-state', { data: { state: 'done' } })).ok()
+      ).toBeTruthy();
+    }
+    await page.goto(`/workspaces/${slug}?mode=details`);
+    const row = page.locator('[data-cmd-hq-card="daily-brief"]');
     await expect(row).toBeVisible();
     await expect(row).toContainText('Daily Brief');
     await row.click();
