@@ -144,10 +144,14 @@ test('the HQ opens on its header, with follow-ups below Notes', async ({ page })
   await expect(
     page.locator('.ws-cmd-main [data-cmd-followups-host] #workspaceFollowupMount')
   ).toHaveCount(1);
+  // Station sources hydrate independently of follow-ups; an empty host is
+  // intentionally hidden until the configured/folded stations arrive.
+  const stations = page.locator('.ws-hq-stations');
+  await expect(stations).toBeVisible();
   const notesBottom = await bottomOf(page.locator('[data-cmd-hq-host="notes"]'));
   const panelTop = await topOf(panel(page));
   expect(panelTop).toBeGreaterThanOrEqual(notesBottom);
-  expect(await topOf(page.locator('.ws-hq-stations'))).toBeGreaterThan(panelTop);
+  expect(await topOf(stations)).toBeGreaterThan(panelTop);
 
   await expect(panel(page).locator('.workspace-followups-summary')).toContainText(/\d+ open/);
   await expandPanel(page);
