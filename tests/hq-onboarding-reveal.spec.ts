@@ -357,7 +357,7 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
   if (!reduced && !noMap) {
     await expect(art).toHaveClass(/is-assembling/);
     await page.clock.install();
-    await page.clock.pauseAt(new Date());
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
     fs.mkdirSync('tasks/evidence-folder-build-animation/group-1', { recursive: true });
     for (const offset of [400, 900, 1400]) {
       // A canonical status response can replace the SVG during capture. A

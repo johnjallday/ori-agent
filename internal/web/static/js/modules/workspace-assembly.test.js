@@ -138,14 +138,16 @@ test('generic house keeps the exact original geometry and paint order inside fou
 });
 
 test('both HQ renderers declare the same four assembly parts', () => {
-  const window = {};
-  vm.runInNewContext(buildingArt, { window });
-  vm.runInNewContext(source, { window, document: {} });
-  const api = window.OriWorkspaceMap;
-  api._setHQWorkspaceIdForTest('hq');
-  const hq = api.tileHTML({ ws: { id: 'hq', name: 'HQ' }, col: 0, row: 0 });
-  for (const part of parts) assert.match(hq, new RegExp(`data-build-part="${part}"`));
-  for (const part of parts) assert.match(buildingArt, new RegExp(`data-build-part="${part}"`));
+  for (const blueprintArtLoaded of [false, true]) {
+    const window = {};
+    if (blueprintArtLoaded) vm.runInNewContext(buildingArt, { window });
+    vm.runInNewContext(source, { window, document: {} });
+    const api = window.OriWorkspaceMap;
+    api._setHQWorkspaceIdForTest('hq');
+    const hq = api.tileHTML({ ws: { id: 'hq', name: 'HQ' }, col: 0, row: 0 });
+    assert.equal([...hq.matchAll(/data-build-part=/g)].length, 4);
+    for (const part of parts) assert.match(hq, new RegExp(`data-build-part="${part}"`));
+  }
 });
 
 for (const id of ['generic', 'hq'])
