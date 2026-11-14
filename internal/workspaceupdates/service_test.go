@@ -228,6 +228,62 @@ func TestWelcomeRecoveryNoWizardCommitFailureAndDelayedAssessment(t *testing.T) 
 	}
 }
 
+func TestWelcomeReconcileReportsProgressOnlyWhenSomethingChanged(t *testing.T) {
+	f := newRecoveryFixture(t)
+	f.create(false)
+	progressed := func() bool {
+		t.Helper()
+		_, did, err := f.service.reconcile(t.Context(), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return did
+	}
+	if !progressed() {
+		t.Fatal("writing the introduction was not progress")
+	}
+	// Introduction delivered, no assessment yet: the pass revisits the workspace
+	// and finds nothing to change. This is the state that used to repeat forever.
+	if progressed() {
+		t.Fatal("an unchanged awaiting enrollment counted as progress")
+	}
+	f.assessed.Store(true)
+	if !progressed() {
+		t.Fatal("delivering the assessment was not progress")
+	}
+	// Nothing pending: an idle service must not report progress either.
+	if progressed() {
+		t.Fatal("an empty keyset counted as progress")
+	}
+}
+
+func TestWelcomeWorkerBacksOffWhileIdleAndRecoversOnProgress(t *testing.T) {
+	f := newRecoveryFixture(t)
+	s := f.service
+	wait := s.interval
+	var seen []time.Duration
+	for range 8 {
+		wait = s.nextWait(wait, false)
+		seen = append(seen, wait)
+	}
+	for i := 1; i < len(seen); i++ {
+		if seen[i] < seen[i-1] || seen[i] > s.maxInterval {
+			t.Fatalf("backoff not monotonic and capped: %v", seen)
+		}
+	}
+	if seen[len(seen)-1] != s.maxInterval {
+		t.Fatalf("idle backoff never reached its cap %s: %v", s.maxInterval, seen)
+	}
+	if got := s.nextWait(wait, true); got != s.interval {
+		t.Fatalf("progress left the wait at %s, want the base %s", got, s.interval)
+	}
+	// A configured cap below the base cadence must never speed the worker up.
+	s.maxInterval = time.Second
+	if got := s.nextWait(s.interval, false); got != s.interval {
+		t.Fatalf("cap below base interval sped the worker up to %s", got)
+	}
+}
+
 func TestWelcomeRecoveryDoesNotEnrollLegacyOrTransferToReplacement(t *testing.T) {
 	f := newRecoveryFixture(t)
 	f.create(false)

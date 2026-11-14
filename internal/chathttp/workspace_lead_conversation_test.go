@@ -34,11 +34,18 @@ func TestLeadConversationOpen_SpeaksFirstWithoutRunningAnything(t *testing.T) {
 	h.SetWorkspaceStore(store)
 	h.SetSessionStore(sessions)
 	ag, _ := h.store.GetAgent("cli-agent")
-	h.SetRuntimeResolver(&stubChatRuntimeResolver{resolved: &workspace.ResolvedAgentRuntime{Agent: ag, AgentInstance: &ws.AgentInstances[0], FromWorkspaceCopy: true}})
+	resolver := &stubChatRuntimeResolver{resolved: &workspace.ResolvedAgentRuntime{Agent: ag, AgentInstance: &ws.AgentInstances[0], FromWorkspaceCopy: true}}
+	h.SetRuntimeResolver(resolver)
 	// Server hooks use this composition directly, not a fabricated request.
 	input, state, err := h.ComposeLeadWelcome(t.Context(), "local", ws.ID)
 	if err != nil || state != "ready" || input.AgentInstanceID != ws.AgentInstances[0].ID || input.WorkspaceVersion != ws.Version {
 		t.Fatalf("host composition: %+v %s %v", input, state, err)
+	}
+	// The welcome worker retries this for every enrolled workspace until an
+	// assessment exists. It may read the saved definition, but must not resolve
+	// the full runtime (skills, MCP bindings, tool set) just to learn the lead.
+	if len(resolver.calls) != 0 || len(resolver.definitionCalls) != 1 {
+		t.Fatalf("composition resolved the full runtime: full=%v definition=%v", resolver.calls, resolver.definitionCalls)
 	}
 	var count int
 	if err := sessions.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM sessions`).Scan(&count); err != nil || count != 0 {
@@ -96,6 +103,10 @@ func TestLeadConversationOpen_RefusesOtherOwnersUnreadySetupAndGlobalNamesakes(t
 				ws.Kind = "group"
 			case "trashed":
 				ws.Status = workspace.StatusTrashed
+			case "global":
+				// The agent exists only in the global store: the roster holds no
+				// instance for it, so there is no lead identity to welcome.
+				ws.AgentInstances = nil
 			}
 			if err := store.Save(ws); err != nil {
 				t.Fatal(err)
@@ -107,10 +118,11 @@ func TestLeadConversationOpen_RefusesOtherOwnersUnreadySetupAndGlobalNamesakes(t
 			h.SetWorkspaceStore(store)
 			h.SetSessionStore(sessions)
 			ag, _ := h.store.GetAgent("cli-agent")
-			resolved := &workspace.ResolvedAgentRuntime{Agent: ag, AgentInstance: &ws.AgentInstances[0], FromWorkspaceCopy: true}
+			resolved := &workspace.ResolvedAgentRuntime{Agent: ag, FromWorkspaceCopy: true}
 			if mode == "global" {
-				resolved.AgentInstance = nil
 				resolved.FromWorkspaceCopy = false
+			} else {
+				resolved.AgentInstance = &ws.AgentInstances[0]
 			}
 			h.SetRuntimeResolver(&stubChatRuntimeResolver{resolved: resolved})
 			body := ""
