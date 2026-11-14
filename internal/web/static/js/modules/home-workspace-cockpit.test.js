@@ -23,6 +23,7 @@ import {
   updatesBadgeView,
   contextModalShouldShow,
   cockpitFolderActionView,
+  folderSuggestion,
   cockpitPrimaryActionView,
   cockpitPrimaryPresentation,
   parseViewFromQuery,
@@ -256,6 +257,19 @@ test('Show on map deep links name a district independently from explicit Move', 
     false,
     'wait for the badge read'
   );
+});
+
+test('HQ Documents intent is narrowly parsed and never accepts an arbitrary path', () => {
+  assert.equal(folderSuggestion('?panel=today&folder=show&suggest=documents'), 'documents');
+  for (const search of [
+    '',
+    '?suggest=documents',
+    '?folder=show&suggest=downloads',
+    '?folder=show&suggest=/Users/me/Documents',
+    '?folder=start&suggest=documents'
+  ]) {
+    assert.equal(folderSuggestion(search), '');
+  }
 });
 
 test('moveDeepLinkTarget: a folder setup’s Move link names the workspace to move', () => {

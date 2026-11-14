@@ -191,6 +191,9 @@ func TestSetupCreatesDesignatesAndCompletesOnboarding(t *testing.T) {
 	if got.Status.OnboardingState != userprofile.HQOnboardingCompleted {
 		t.Fatalf("expected onboarding state completed, got %q", got.Status.OnboardingState)
 	}
+	if got.Status.FirstVisitState != userprofile.HQFirstVisitPending {
+		t.Fatalf("expected pending first visit, got %q", got.Status.FirstVisitState)
+	}
 	if got.BriefConfig.Timezone != "America/New_York" {
 		t.Fatalf("expected timezone to round-trip, got %q", got.BriefConfig.Timezone)
 	}

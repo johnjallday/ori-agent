@@ -900,7 +900,11 @@ func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID, worksp
 	data.BrandText = "Ori Agent"
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
-	data.Extra["IsPersonalHQ"] = s.currentPersonalHQForPage(workspaceID, "")
+	isHQ := s.currentPersonalHQForPage(workspaceID, "")
+	data.Extra["IsPersonalHQ"] = isHQ
+	if isHQ {
+		data.Extra["HQFirstVisit"] = s.currentHQFirstVisitForPage(workspaceID)
+	}
 	s.renderAndWritePage(w, "workspace-detail", data)
 }
 

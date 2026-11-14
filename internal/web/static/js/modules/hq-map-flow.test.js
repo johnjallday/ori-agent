@@ -10,6 +10,7 @@ import {
   writeMapArrangement
 } from './hq-map-flow.js';
 import { tacticalTermsIn } from './hq-labels.js';
+import { notesBadge } from './notes-station.js';
 
 // The HQ's stations in registry order, as mapStationRegistry() lists them.
 function stations(overrides = {}) {
@@ -96,6 +97,25 @@ test('source state words match the Details grid and dashed follows configured', 
   assert.equal(byKey.memory.dashed, false);
   // "14 entries" is said by the description, so it is not said twice.
   assert.equal(byKey.memory.subtitle, '14 entries, 2 watching');
+});
+
+test('Notes created by Ori is never dashed, including when a nudge needs the person', () => {
+  for (const nudge of [null, { stale: true, days: 8, came_due: 0 }]) {
+    const state = notesBadge(
+      {
+        status: 'connected',
+        source: { name: 'My Brain', origin: 'created_by_ori', kind: 'obsidian' },
+        last_look: { at: '2026-11-01T10:00:00Z' },
+        nudge
+      },
+      Date.parse('2026-11-01T12:00:00Z')
+    );
+    const { sources } = flowModel({ stations: stations({ 'second-brain': state }) });
+    const notes = sources.find(node => node.key === 'second-brain');
+    assert.equal(notes.stateWord, nudge ? 'Needs you' : 'Ready');
+    assert.equal(notes.dashed, false);
+    assert.match(notes.subtitle, /Set up by Ori/);
+  }
 });
 
 test('a node subtitle never repeats the label or the state word', () => {

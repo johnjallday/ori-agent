@@ -1,6 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 // The Notes station's panel, in the browser, against the sandboxes that
 // scripts/second-brain-demo.sh prints. One spec file covers both shapes; each
@@ -20,6 +21,7 @@ const vault = process.env.SECOND_BRAIN_VAULT || '';
 const create = process.env.SECOND_BRAIN_CREATE === '1';
 
 test.describe.configure({ mode: 'serial' });
+test.beforeEach(async ({ page }) => installLocalCdn(page));
 
 const ENDPOINT = '/api/personal-assistant/second-brain';
 
@@ -64,12 +66,15 @@ async function hqSlug(request: APIRequestContext): Promise<string> {
   return slug;
 }
 
-const panel = (page: Page) => page.locator('.ws-cmd-modal-panel.is-station');
+// Home's result link can land in Overview's inline panel. The direct panel
+// cases below explicitly use Map so their modal scrolling assertions stay real.
+const panel = (page: Page) =>
+  page.locator('.ws-cmd-modal-panel.is-station:visible, [data-cmd-hq-host="notes"]:visible');
 const section = (page: Page, key: string) => panel(page).locator(`[data-notes-section="${key}"]`);
 const tab = (page: Page, key: string) => panel(page).locator(`#notes-tab-${key}`);
 
 async function openPanel(page: Page, request: APIRequestContext) {
-  await page.goto(`/workspaces/${await hqSlug(request)}?station=second-brain`);
+  await page.goto(`/workspaces/${await hqSlug(request)}?mode=map&station=second-brain`);
   await expect(panel(page).locator('.ws-cmd-modal-title')).toHaveText('Notes');
 }
 
@@ -79,8 +84,15 @@ test.describe('a connected vault', () => {
   test.beforeAll(async ({ request }) => {
     const current = await secondBrain(request);
     if (current.status === 'not_connected') {
+      // The research fixture is Logseq, not an automatically detected Obsidian
+      // vault. Approve the exact sandbox folder through the normal picker API.
+      const picked = await request.post('/api/folder-picker/select-path', {
+        data: { path: vault }
+      });
+      expect(picked.ok(), await picked.text()).toBeTruthy();
+      const { selection_token } = await picked.json();
       const response = await request.post(`${ENDPOINT}/connect`, {
-        data: { detected_id: current.detected[0]?.id, request_id: `spec-connect-${Date.now()}` }
+        data: { selection_token, request_id: `spec-connect-${Date.now()}` }
       });
       expect(response.ok(), await response.text()).toBeTruthy();
     }

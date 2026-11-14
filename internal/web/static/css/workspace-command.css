@@ -9586,48 +9586,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
   box-shadow: inset 0 0 0 2px var(--ws-faction);
 }
 
-/* The attention strip: calm, neutral, one accent per category chip. */
-/* HQ surfaces sit on --ws-panel-2, the station panels' own surface, so their
-   amber and orange text keeps 4.5:1 in the light theme too. */
-.ws-hq-attention {
-  margin: 0 0 18px;
-  padding: 12px 14px;
-  border: 1px solid var(--ws-line);
-  background: var(--ws-panel-2);
-}
-.ws-hq-attention[hidden] {
-  display: none;
-}
-.ws-hq-attention-title {
-  margin: 0 0 8px;
-  color: var(--ws-ink-dim);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
-.ws-hq-attention-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.ws-hq-attention-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-}
-.ws-hq-attention-text {
-  flex: 1 1 220px;
-  min-width: 0;
-  color: var(--ws-ink);
-  font-size: 13.5px;
-  overflow-wrap: anywhere;
-}
-.ws-hq-attention-actions {
+/* The single Needs you list keeps each source's action(s) together. */
+.ws-hq-needs-actions {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -9655,22 +9615,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-hq-chip.is-notes {
   border-color: var(--ws-keeper);
   color: var(--ws-keeper);
-}
-.ws-hq-attention-more {
-  margin-top: 8px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ws-faction);
-  font: inherit;
-  font-size: 13px;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-.ws-hq-attention-more:focus-visible {
-  outline: 2px solid var(--ws-faction);
-  outline-offset: 2px;
 }
 .ws-hq-github-host {
   margin: 0 0 18px;
@@ -9882,7 +9826,30 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: var(--ws-ink-dim);
 }
 
-/* The HQ rail: Team first and always open, then the content rows, then Setup. */
+/* Unconfigured stations keep their setup actions without empty cards. */
+.ws-hq-unused {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 12px;
+  margin: 12px 0 0;
+  color: var(--ws-ink-dim);
+  font-size: 13px;
+}
+.ws-hq-unused-action {
+  border: 0;
+  padding: 2px 0;
+  background: none;
+  color: var(--ws-faction);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.ws-hq-unused-action:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 3px;
+}
+/* The HQ rail: Team first and always open, then content and the More disclosure. */
 .ws-hq-team,
 .ws-hq-rail-group {
   margin-bottom: 14px;
@@ -10022,8 +9989,139 @@ button.ws-cmd-rpg-class-card:focus-visible {
   overflow-x: auto;
 }
 
-/* Below the rail breakpoint the layout is one column in source order: header,
-   strip, Needs you, Notes, Follow-ups, stations, then the rail (FR26). */
+/* The first visit uses the HQ's own surfaces and semantic theme tokens. */
+.ws-hq-firstvisit {
+  padding: clamp(18px, 3vw, 32px);
+  border-top: 2px solid var(--ws-faction);
+  overflow-wrap: anywhere;
+}
+.ws-hq-firstvisit h3 {
+  color: var(--ws-ink);
+  font-size: 22px;
+  margin: 0 0 10px;
+}
+.ws-hq-firstvisit p {
+  color: var(--ws-ink-dim);
+  line-height: 1.6;
+  margin: 0 0 12px;
+}
+.ws-hq-firstvisit-intro {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+.ws-hq-firstvisit-avatar {
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  object-fit: contain;
+}
+.ws-hq-firstvisit-lead {
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+}
+.ws-hq-firstvisit-steps {
+  list-style: none;
+  padding: 0;
+  margin: 18px 0;
+}
+.ws-hq-firstvisit-step {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 12px;
+  padding: 18px 0;
+  border-top: 1px solid var(--ws-line);
+}
+.ws-hq-firstvisit-step h4 {
+  font-size: 17px;
+  margin: 0 0 6px;
+}
+.ws-hq-firstvisit-check {
+  color: var(--ws-ink-dim);
+  font-size: 20px;
+  line-height: 1.2;
+}
+.ws-hq-firstvisit-step.is-resolved .ws-hq-firstvisit-check {
+  color: var(--ws-faction);
+}
+.ws-hq-firstvisit .ws-hq-firstvisit-privacy {
+  font-size: 12px;
+  margin-top: 10px;
+}
+.ws-hq-firstvisit-step label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.ws-hq-firstvisit-step textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  min-height: 72px;
+  background: var(--ws-bg);
+  color: var(--ws-ink);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.ws-hq-firstvisit :is(button, a, textarea):focus-visible,
+.ws-hq-rail-more > button:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 3px;
+}
+.ws-hq-firstvisit-controls {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.ws-hq-firstvisit .ws-hq-firstvisit-status:empty {
+  margin: 0;
+}
+.ws-hq-firstvisit .ws-hq-firstvisit-status:not(:empty) {
+  margin-top: 12px;
+}
+.ws-hq-firstvisit.is-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+}
+.ws-hq-firstvisit.is-bar h3 {
+  font-size: 16px;
+  margin: 0 auto 0 0;
+}
+.ws-hq-rail-more > button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 12px;
+  border: 1px solid var(--ws-line);
+  background: var(--ws-panel-2);
+  color: var(--ws-ink);
+}
+.ws-hq-rail-more-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+#hq-rail-more-rows {
+  padding-top: 10px;
+}
+.ws-hq-rail-more small {
+  display: block;
+  color: var(--ws-ink-dim);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.ws-hq-rail-more [hidden] {
+  display: none;
+}
+
+/* Below the rail breakpoint: header, welcome when offered, Needs you, Notes,
+   Follow-ups, stations, then the rail. */
 @media (max-width: 900px) {
   .ws-cmd-layout.is-hq {
     grid-template-columns: minmax(0, 1fr);

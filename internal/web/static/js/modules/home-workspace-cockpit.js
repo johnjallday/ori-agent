@@ -191,6 +191,15 @@ export function cockpitPrimaryPresentation(personalAssistant, welcome) {
   return { ...action, visible: action.visible && !cardOwnsAction, cardOwnsAction };
 }
 
+// Only this explicit known-folder hint can prepare a pre-hire card. The URL
+// never carries a filesystem path or authorizes starting an agent.
+export function folderSuggestion(search) {
+  const params = new URLSearchParams(search);
+  return params.get('folder') === 'show' && params.get('suggest') === 'documents'
+    ? 'documents'
+    : '';
+}
+
 // The drawer-opening subset of the primary, which the /?folder=show deep link
 // and window.OriHomeFolder.open still consume whatever the primary reads.
 export function cockpitFolderActionView(personalAssistant) {
@@ -5726,7 +5735,7 @@ import {
   // launcher, and the Map's empty hint. There is no second chooser here.
   let folderAction = { visible: false, target: '' };
   let primaryAction = cockpitPrimaryActionView(null);
-  function openHomeFolder(invoker = els.primaryActionBtn) {
+  function openHomeFolder(invoker = els.primaryActionBtn, suggestion = '') {
     if (!folderAction.visible) return false;
     // Module initialization and relationship status may race on a deep link.
     // Do not consume its intent until the actual card/chooser controller is
@@ -5737,7 +5746,7 @@ import {
     const opened = window.PersonalAssistantPanel?.open?.(invoker);
     if (!opened) return false;
     if (folderAction.target === 'hq') window.PersonalAssistantHQCard.show();
-    else window.PersonalAssistantFolder.openChooser();
+    else window.PersonalAssistantFolder.openChooser(suggestion);
     return true;
   }
   let folderDeepLinkRetries = 0;
@@ -5747,9 +5756,11 @@ import {
       !folderAction.visible
     )
       return;
-    if (openHomeFolder()) {
+    const suggestion = folderSuggestion(window.location.search);
+    if (openHomeFolder(els.primaryActionBtn, suggestion)) {
       const url = new URL(window.location.href);
       url.searchParams.delete('folder');
+      if (suggestion) url.searchParams.delete('suggest');
       window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash);
     } else if (folderDeepLinkRetries++ < 20) {
       window.setTimeout(consumeFolderDeepLink, 100);

@@ -190,7 +190,7 @@ test('injected Notes outcome matrix never grants writes from a historical receip
     await expect(page.locator('#personalAssistantHQFirstNote')).toBeHidden();
     await expect(page.locator('#personalAssistantHQFirstExplore')).toHaveAttribute(
       'href',
-      workspaceRoute
+      workspaceRoute + '?mode=details'
     );
     await expect(page.locator('#personalAssistantHQFirstOpenNotes')).toBeVisible({
       visible: !!item.open

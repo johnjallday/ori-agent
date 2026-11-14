@@ -257,6 +257,9 @@ func (c *HQSetupCoordinator) Setup(ctx context.Context, userID string, request H
 	if _, err := c.hq.SetOnboardingState(ctx, userID, userprofile.HQOnboardingCompleted); err != nil {
 		return nil, c.partial(ctx, state, RepairFinalization, err)
 	}
+	if err := c.hq.OfferHQFirstVisit(ctx, userID); err != nil {
+		logger.Warn("personal assistant: failed to offer hq first visit", logger.Fields{"user_id": userID, "error": err})
+	}
 
 	final := state.Clone()
 	final.Status = StatusActive

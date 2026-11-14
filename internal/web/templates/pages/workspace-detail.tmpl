@@ -6,7 +6,7 @@
      an agent's face is the same here as on /agents and Home (PRD FR-99). Its
      stylesheet and scripts come from head.tmpl, which every page shares. -->
 
-<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}"{{if .Extra.IsPersonalHQ}} data-hq-details="1"{{end}}>
+<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}"{{if .Extra.IsPersonalHQ}} data-hq-details="1"{{if eq .Extra.HQFirstVisit "pending"}} data-hq-first-visit="pending"{{end}}{{end}}>
   <script>
     // Publish server-resolved route identity before deferred page scripts run.
     // Browser links use the slug; every API and in-memory relationship uses the UUID.

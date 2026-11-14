@@ -1,19 +1,9 @@
-/*
- * hq-attention.js — the lines of the Personal HQ's "Needs your attention" strip.
- *
- * Pure: workspace-command.js reads each source (the tickets waiting on the
- * user, the setup mounts the HQ hides above its header, the goal's status, the
- * Daily Brief and GitHub proposals) and passes plain values in. This decides
- * which lines show, in what order, and how they are capped. Each action is a
- * descriptor the command view dispatches to the handler the source already
- * has; nothing here acts.
- *
- * Priority (PRD 766 FR11): the lead waiting on input, then setup still needed
- * (wizard, blueprint intake, group requirement, Email connect, first task, no
- * model), then a brief ready today, then GitHub proposals.
- */
+// One pure builder for the HQ's Needs you rows. Sources supply facts and
+// action descriptors; workspace-command.js dispatches to their existing owners.
+// Priority: waiting tickets, Review, mail, stations, notes, setup, brief, GitHub.
+import { HQ_LABELS as L } from './hq-labels.js';
 
-export const ATTENTION_LIMIT = 3;
+export const NEEDS_YOU_LIMIT = 5;
 const SENTENCE_LIMIT = 160;
 const MAX_ACTIONS = 2;
 
@@ -48,24 +38,37 @@ function plural(count, one, many) {
   return count + ' ' + (count === 1 ? one : many);
 }
 
-function leadLine(waiting) {
-  const items = (Array.isArray(waiting) ? waiting : []).filter(item => item && item.taskId);
-  if (!items.length) return null;
-  // The lead's own ticket first; the rest are counted.
-  const first = items.find(item => item.isLead) || items[0];
-  const who = String(first.agent || '').trim() || 'An agent';
-  const title = String(first.title || '').trim();
-  const rest = items.length - 1;
-  const sentence =
-    who +
-    (first.isLead ? ' (Lead)' : '') +
-    ' is waiting on you' +
-    (title ? ': ' + title : '') +
-    (rest > 0 ? ', and ' + plural(rest, 'other ticket', 'other tickets') : '') +
-    '.';
-  const actions = [{ label: 'Answer', kind: 'ticket', id: String(first.taskId) }];
-  if (rest > 0) actions.push({ label: 'See all', kind: 'tickets-waiting' });
-  return line('lead', 'Lead', sentence, actions);
+function ticketRows(waiting, review) {
+  const seen = new Set();
+  const rows = [];
+  const input = (Array.isArray(waiting) ? waiting : [])
+    .filter(Boolean)
+    .slice()
+    .sort((a, b) => Number(Boolean(b.isLead)) - Number(Boolean(a.isLead)));
+  for (const [items, reviewing] of [
+    [input, false],
+    [Array.isArray(review) ? review : [], true]
+  ]) {
+    for (const item of items) {
+      const id = String(item?.taskId || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const title = String(item.title || '').trim();
+      const who =
+        (String(item.agent || '').trim() || L.anAgent) + (item.isLead ? ' (' + L.lead + ')' : '');
+      rows.push(
+        line(
+          'ticket:' + id,
+          item.isLead ? L.lead : L.ticket,
+          reviewing
+            ? L.ticketReadyForReview.replace('{title}', title || L.ticket)
+            : L.ticketWaiting.replace('{agent}', who).replace('{title}', title ? ': ' + title : ''),
+          [{ label: reviewing ? L.review : L.answer, kind: 'ticket', id }]
+        )
+      );
+    }
+  }
+  return rows;
 }
 
 function setupLines(setup, goal) {
@@ -115,38 +118,6 @@ function githubLine(github) {
   );
 }
 
-/**
- * Every line the strip could show, highest priority first.
- *
- * @param {object} state
- * @param {{agent:string,isLead:boolean,title:string,taskId:string}[]} [state.waiting]
- * @param {{key:string,category?:string,sentence:string,actions?:object[]}[]} [state.setup]
- * @param {{reason:string,model?:boolean}|null} [state.goal]
- * @param {{readyToday:boolean,time?:string}|null} [state.brief]
- * @param {{installed:boolean,count:number}|null} [state.github]
- */
-export function hqAttentionLines(state = {}) {
-  return [
-    leadLine(state.waiting),
-    ...setupLines(state.setup, state.goal),
-    briefLine(state.brief),
-    githubLine(state.github)
-  ].filter(Boolean);
-}
-
-/**
- * The lines to show and how many wait behind "and N more". Expanded shows all.
- */
-export function capAttentionLines(lines, { expanded = false, limit = ATTENTION_LIMIT } = {}) {
-  const all = Array.isArray(lines) ? lines : [];
-  if (expanded || all.length <= limit) return { shown: all, hidden: 0 };
-  return { shown: all.slice(0, limit), hidden: all.length - limit };
-}
-
-// ── Needs you panel (FR14) ──────────────────────────────────────────────────
-
-export const NEEDS_YOU_LIMIT = 5;
-
 // A station's chip in the Needs you panel; others use their own name.
 const STATION_CHIPS = {
   email: 'Email',
@@ -156,9 +127,9 @@ const STATION_CHIPS = {
 };
 
 /**
- * The Needs you panel's rows: what the inbox says needs the user, then the
- * stations asking for the user (Needs you or Error), then the stale-notes
- * nudge. Each row is a chip, one sentence and one action descriptor.
+ * The single Needs you list, capped at five unless expanded. Every actionable
+ * row has a chip, a sentence and up to two actions. Non-actionable setup progress
+ * is not something that needs the person. The count is the number of rows.
  *
  * @param {object} input
  * @param {{from?:string,subject?:string,why?:string,action?:string,index:number}[]} [input.mail]
@@ -169,12 +140,19 @@ const STATION_CHIPS = {
  * @returns {{rows: object[], total: number, more: number}}
  */
 export function hqNeedsYouRows({
+  waiting = [],
+  review = [],
+  setup = [],
+  goal = null,
+  brief = null,
+  github = null,
+  suppressBrief = false,
   mail = [],
   stations = [],
   notes = null,
   limit = NEEDS_YOU_LIMIT
 } = {}) {
-  const rows = [];
+  const rows = ticketRows(waiting, review);
   for (const item of Array.isArray(mail) ? mail : []) {
     const subject = String(item.subject || '').trim() || '(no subject)';
     const from = String(item.from || '').trim();
@@ -208,9 +186,15 @@ export function hqNeedsYouRows({
     );
     if (row) rows.push(row);
   }
+  rows.push(
+    ...setupLines(setup, goal),
+    suppressBrief ? null : briefLine(brief),
+    githubLine(github)
+  );
+  const actionable = rows.filter(row => row && row.actions.length);
   return {
-    rows: rows.slice(0, limit),
-    total: rows.length,
-    more: Math.max(0, rows.length - limit)
+    rows: actionable.slice(0, limit),
+    total: actionable.length,
+    more: Math.max(0, actionable.length - limit)
   };
 }

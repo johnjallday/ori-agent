@@ -4335,7 +4335,57 @@ agent_state_digest() {
   (cd "$dir" && find . -type f -name '*.json' -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256)
 }
 
+# Prepare only an isolated demo started by demo-server.sh / wt demo. No model
+# is configured or called here; the default mode leaves the HQ for Home to build.
+smoke_hq_first_visit() {
+  local port="${2:-}" mode="${3:-home}"
+  [[ "$port" =~ ^[0-9]+$ && "$port" -gt 0 && "$port" -le 65535 ]] ||
+    fail "usage: $0 hq-first-visit <port> [home|built]"
+  [[ "$mode" == home || "$mode" == built ]] || fail "mode must be home or built"
+  python3 - "$port" "$mode" <<'PY'
+import json
+import sys
+import urllib.error
+import urllib.request
+
+base = "http://localhost:" + sys.argv[1]
+
+def api(method, path, body=None):
+    request = urllib.request.Request(
+        base + path, method=method,
+        data=None if body is None else json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        raise SystemExit(f"{method} {path}: HTTP {error.code}: {error.read().decode()}")
+
+api("POST", "/api/onboarding/skip", {})
+root = api("GET", "/api/settings/workspace-root")["default_workspace_root"]
+api("POST", "/api/settings/workspace-root", {"workspace_root": root})
+state = api("GET", "/api/personal-assistant")["personal_assistant"]
+if state["state"] == "needs_hire":
+    api("POST", "/api/personal-assistant/hire", {
+        "request_id": "hq-first-visit-hire", "if_version": state.get("state_version", 0),
+        "display_name": "Atlas", "mandate": "Keep my week moving.",
+        "focus_areas": ["plan_my_day"]})
+    state = api("GET", "/api/personal-assistant")["personal_assistant"]
+if sys.argv[2] == "built":
+    notes = api("GET", "/api/personal-assistant/second-brain")["second_brain"]
+    api("POST", "/api/personal-assistant/hq", {
+        "request_id": "hq-first-visit-build", "if_version": state["state_version"],
+        "name": "My HQ", "timezone": "UTC", "scope": "all",
+        "include_future_workspaces": True,
+        "notes": {"include": True, "witness": notes["setup_default"]["path"]}})
+    print("HQ built with notes:", base)
+else:
+    print("Assistant ready; build the HQ through Home:", base)
+PY
+}
+
 case "${1:-}" in
+hq-first-visit) smoke_hq_first_visit "$@" ;;
 serve) serve_isolated "${2:-8931}" "${3:-default}" ;;
 serve-split) serve_split "${2:-8931}" "${3:-split}" ;;
 seed-import) smoke_seed_import "$@" ;;
@@ -4409,6 +4459,7 @@ seed-recap) smoke_seed_recap "$@" ;;
 propose-fields) smoke_propose_fields "$@" ;;
 *)
   echo "usage:" >&2
+  echo "  $0 hq-first-visit <port> [home|built]     # prepare a fresh isolated sandbox; optionally build its HQ with notes" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
   echo "  $0 serve-split [port] [sandbox-name]     # skills: isolated server with HOME and the data dir apart" >&2
   echo "  $0 seed-import <sandbox-dir>             # skills: fill the split sandbox's ~/.agents/skills for the import panel" >&2

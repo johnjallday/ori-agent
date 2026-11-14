@@ -6738,7 +6738,7 @@ function openHQCard() {
 // (one card for every folder, folder-agent-card.js); the receipt and the
 // report follow in the conversation and the status line under it. Offers made
 // before this change keep their own controls until they are decided.
-function openChooser() {
+function openChooser(suggestion = '') {
   if (!state.available) {
     openHQCard();
     return;
@@ -6750,6 +6750,12 @@ function openChooser() {
   render();
   const els = elements();
   els?.root?.scrollIntoView?.({ block: 'nearest' });
+  // This explicit HQ shortcut only prepares the existing consent card. It
+  // cannot hire/start an agent; missing Documents leaves this chooser open.
+  if (suggestion === 'documents') {
+    void chooseForAgent({ chip: 'documents' });
+    return;
+  }
   // The first folder, or the typed path when there are none to offer.
   const first = els?.chips?.querySelector('button') || els?.typedFolder?.querySelector('input');
   first?.focus?.();
@@ -6974,7 +6980,11 @@ async function chooseForAgent(body) {
     }
     const result = await chooseFolder(from ? { ...body, from_workspace_id: from } : body);
     if (result.error) {
-      showStatus(result.error);
+      showStatus(
+        body.chip === 'documents'
+          ? 'Documents could not be chosen. Choose another folder, or try again.'
+          : result.error
+      );
       return;
     }
     if (result.cancelled || !result.card) {

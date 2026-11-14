@@ -2692,6 +2692,25 @@ When the first look a hire started finishes, `GET /api/personal-assistant/today`
 
 Both take an empty body (`{}`; anything else is `400`) and act only on a finished first look that one of this user's hires started, found on the server, never from what the browser sends. Start this reads the suggestion again from the look's report, creates it as a task in that workspace (Ready, assigned to the agent that made the look, `source_type: "first_look_suggestion"` with the look's task id), and starts it through the orchestration start path (admission, local activation and backlog checks included). The task runs under the workspace's own autonomy gate, Watch by default, which the look itself is held to as well; the workspace's autonomy is not changed. Answers `200` with `{ "started": true, "task": { "task_id", "workspace_id", "route" } }`; `"started": false` when the task was made but its start was refused (it waits, Ready, in its workspace). Not now answers `{ "dismissed": true }`: it records the suggestion's normalized title in the workspace's dismissed suggestions, so later goal runs do not suggest it again, and the report stays readable. Refusals: `404` (no such look of this user's), `409` with `code` `already_acted` (Start this or Not now was already pressed; carries the `task` Start this made), `no_suggestion` or `not_finished`; `503` when the report could not be updated.
 
+## Personal HQ First Visit API
+
+`GET /api/personal-hq/status` returns the current user's HQ status in `status`.
+Alongside `hq_onboarding_state`, `first_visit_state` is always present:
+
+- `""`: never offered.
+- `"pending"`: offered after HQ activation, not yet dismissed or finished.
+- `"done"`: finished or dismissed. Existing completed HQs are migrated to this value.
+
+`POST /api/personal-hq/first-visit-state` accepts only `{"state":"done"}` and
+returns the updated `status`. Other values, missing state, and extra fields are
+`400`. It is idempotent and user-scoped; no user/workspace ID is accepted. Only
+server-owned HQ activation may offer `pending`, and only from `""`.
+
+The three welcome steps read canonical `missions[]` from `GET /api/progression`
+(`pa-capture-first-note`, `pa-first-brief`, `pa-show-folder`). This field does not
+store or alter mission completion. "Show everything" is a browser preference,
+not a server state.
+
 ## Personal Assistant Second Brain API
 
 Connect your second brain: the user's notes (an Obsidian vault found in Obsidian's own vault list, or a Markdown folder chosen through the folder picker) connected read-only to the Personal HQ. Contract: [docs/architecture/second-brain.md](../architecture/second-brain.md).

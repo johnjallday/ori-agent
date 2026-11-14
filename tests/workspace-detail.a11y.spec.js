@@ -132,7 +132,7 @@ for (const theme of ['light', 'dark']) {
     }
   });
   // PRD 766 FR29: the Personal HQ's Details page, header first and station-first.
-  test(`Personal HQ Details mount contract: header first, attention strip, main column and rail (${theme})`, async ({
+  test(`Personal HQ Details mount contract: header first, one Needs you panel, main column and rail (${theme})`, async ({
     page
   }, testInfo) => {
     await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
@@ -171,7 +171,7 @@ for (const theme of ['light', 'dark']) {
       await page.waitForFunction(() => Boolean(window.workspaceCommand?.page?.initialListsLoaded));
       // Display fixture only, as above: the canonical HQ designation on this
       // workspace, without building an HQ. The goal's own status line is
-      // silenced so the strip starts empty, and every top mount is given
+      // silenced so Needs you starts empty, and every top mount is given
       // content so "nothing above the header" is tested with all of them full.
       await page.evaluate(() => {
         if (window.workspaceMission) window.workspaceMission.getState = () => ({});
@@ -196,12 +196,14 @@ for (const theme of ['light', 'dark']) {
       const header = page.locator('.ws-hq-header');
       await expect(header).toBeVisible();
       await expect(page.locator('body')).toHaveAttribute('data-hq-details', '1');
+      await expect(header.locator('.ws-hq-facts, #workspace-command-subtitle')).toHaveCount(0);
+      await expect(page.locator('.ws-hq-portability [data-cmd-continuity-mount]')).toHaveCount(1);
 
-      const strip = page.locator('[data-cmd-hq-attention]');
+      const needs = page.locator('[data-cmd-hq-needs]');
       // Hide only the synthetic setup inputs before exercising the first-task
       // mount. Live owners may independently report real setup/unavailable
       // attention, so do not pretend the whole HQ is clear. The known-empty
-      // strip contract is pinned in workspace-command.test.js (FR8/FR10).
+      // panel contract is pinned in workspace-command.test.js.
       await page.evaluate(() => {
         for (const id of [
           'workspaceGroupRequirementStatus',
@@ -213,16 +215,26 @@ for (const theme of ['light', 'dark']) {
         }
         window.workspaceCommand.render();
       });
-      await expect(strip).not.toContainText('Fixture mount');
-      // A first-task banner is a setup line: the strip appears under the header.
+      await expect(needs).not.toContainText('Fixture mount');
+      // A setup source with an action repaints the single panel live.
       await page.evaluate(() => {
         const banner = document.getElementById('workspaceFirstTaskBanner');
-        banner.textContent = 'Your lead is reading the folder you added.';
+        banner.textContent = 'Your lead needs an answer about the folder.';
+        const action = document.createElement('button');
+        action.textContent = 'Answer the lead';
+        action.onclick = () => {
+          window.__hqSetupAnswered = true;
+        };
+        banner.append(action);
         banner.hidden = false;
       });
-      await expect(strip).toBeVisible();
-      await expect(strip).toContainText('Needs your attention');
-      await expect(strip).toContainText('Your lead is reading the folder you added.');
+      await expect(needs).toBeVisible();
+      await expect(needs).toHaveCount(1);
+      await expect(page.locator('[data-cmd-hq-attention]')).toHaveCount(0);
+      await expect(needs).toContainText('Needs you');
+      await expect(needs).toContainText('Your lead needs an answer about the folder.');
+      await needs.getByRole('button', { name: 'Answer the lead', exact: true }).click();
+      await expect.poll(() => page.evaluate(() => window.__hqSetupAnswered)).toBe(true);
 
       for (const width of [375, 768, 1280]) {
         await page.setViewportSize({ width, height: 900 });
@@ -257,16 +269,12 @@ for (const theme of ['light', 'dark']) {
                 )
             );
           const commandFirst = document.querySelector('#workspaceCommandView').firstElementChild;
-          const stripNode = document.querySelector('[data-cmd-hq-attention]');
           return {
             above,
             headerTop: box(header).top,
             headerIsFirst: commandFirst === header,
-            stripAfterHeader: Boolean(
-              header.compareDocumentPosition(stripNode) & Node.DOCUMENT_POSITION_FOLLOWING
-            ),
-            stripBeforeMain: Boolean(
-              stripNode.compareDocumentPosition(order[0]) & Node.DOCUMENT_POSITION_FOLLOWING
+            needsAfterHeader: Boolean(
+              header.compareDocumentPosition(order[0]) & Node.DOCUMENT_POSITION_FOLLOWING
             ),
             inOrder,
             present: order.map(Boolean),
@@ -276,7 +284,7 @@ for (const theme of ['light', 'dark']) {
         expect(layout.above, `nothing above the header at ${width}`).toEqual([]);
         expect(layout.headerIsFirst).toBe(true);
         expect(layout.headerTop).toBeLessThan(900);
-        expect(layout.stripAfterHeader && layout.stripBeforeMain).toBe(true);
+        expect(layout.needsAfterHeader).toBe(true);
         expect(layout.present[0], 'Needs you').toBe(true);
         expect(layout.present[1], 'Notes host').toBe(true);
         expect(layout.present[2], 'Follow-ups host').toBe(true);
@@ -297,9 +305,49 @@ for (const theme of ['light', 'dark']) {
       await expect(team).toBeVisible();
       await expect(team.getByRole('heading', { name: /^Team/ })).toBeVisible();
       await expect(team.getByRole('button', { name: `Give work to ${agentName}` })).toBeVisible();
+      expect(
+        await team.evaluate(node => {
+          const heading = node.querySelector('h3').getBoundingClientRect();
+          const firstAgent = node.querySelector('.ws-hq-team-row').getBoundingClientRect();
+          return firstAgent.top >= heading.bottom;
+        }),
+        'Team keeps its heading above its agents'
+      ).toBe(true);
       await expect(page.locator('[data-cmd-manage-section="team"]')).toHaveCount(0);
       await expect(page.locator('[data-cmd-manage-section="stations"]')).toHaveCount(0);
-      await expect(page.getByRole('button', { name: /^Workspace notes/ })).toBeVisible();
+      const railMore = page.locator('[data-cmd-hq-rail-more]');
+      const workspaceNotes = page.locator('[data-cmd-manage-section="notes"]');
+      await expect(railMore).toHaveAttribute('aria-expanded', 'false');
+      await expect(workspaceNotes).not.toBeVisible();
+      await railMore.focus();
+      await page.keyboard.press('Enter');
+      await expect(workspaceNotes).toBeVisible();
+      await expect(railMore).toBeFocused();
+      await workspaceNotes.focus();
+      await page.keyboard.press(' ');
+      await expect(workspaceNotes).toHaveAttribute('aria-expanded', 'true');
+      await expect(workspaceNotes).toBeFocused();
+      await page.reload();
+      await expect(railMore).toHaveAttribute('aria-expanded', 'true');
+      await expect(workspaceNotes).toBeVisible();
+      await expect(workspaceNotes).toHaveAttribute('aria-expanded', 'true');
+      // The parent can close with an open child; another row uses the same
+      // one-open-section accordion, even under More.
+      await railMore.focus();
+      await page.keyboard.press('Enter');
+      await expect(workspaceNotes).not.toBeVisible();
+      await expect(railMore).toBeFocused();
+      await page.keyboard.press('Enter');
+      const capabilities = page.locator('[data-cmd-manage-section="hq-capabilities"]');
+      const triggers = page.locator('[data-cmd-manage-section="hq-triggers"]');
+      await capabilities.click();
+      await expect(capabilities).toHaveAttribute('aria-expanded', 'true');
+      await triggers.click();
+      await expect(triggers).toHaveAttribute('aria-expanded', 'true');
+      await expect(capabilities).toHaveAttribute('aria-expanded', 'false');
+      expect(await page.locator('.ws-hq-rail .ws-cmd-panel-count').allTextContents()).not.toContain(
+        '0'
+      );
 
       // Shared secondary navigation is a native disclosure with real links.
       const more = page.locator('[data-cmd-disclosure="views"] > summary');
@@ -692,7 +740,7 @@ for (const theme of ['light', 'dark']) {
         expect(style.agentBackgroundImage).not.toContain('rgba(0, 0, 0, 0.16)');
         expect(style.agentNameColor).toBe(expectedNameColor);
         expect(style.agentStatusBackground).toBe('rgba(255, 255, 255, 0.88)');
-        expect(style.toolbarBackground).toBe('rgb(236, 239, 242)');
+        expect(style.toolbarBackground).toBe('rgba(0, 0, 0, 0)');
         expect(style.resourcesButtonColor).toBe('rgb(92, 92, 94)');
         expect(style.captureButtonColor).toBe(expectedCaptureColor);
         expect(style.viewSwitchBackground).toBe('rgba(0, 0, 0, 0)');
@@ -701,7 +749,7 @@ for (const theme of ['light', 'dark']) {
         expect(style.agentBackgroundImage).toContain('rgba(0, 0, 0, 0.16)');
         expect(style.agentNameColor).toBe(expectedNameColor);
         expect(style.agentStatusBackground).toBe('rgba(0, 0, 0, 0.24)');
-        expect(style.toolbarBackground).toBe('rgb(22, 24, 29)');
+        expect(style.toolbarBackground).toBe('rgba(0, 0, 0, 0)');
         expect(style.resourcesButtonColor).toBe('rgb(139, 144, 154)');
         expect(style.captureButtonColor).toBe(expectedCaptureColor);
         expect(style.viewSwitchBackground).toBe('rgba(0, 0, 0, 0)');
