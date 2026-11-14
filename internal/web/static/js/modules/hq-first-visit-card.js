@@ -1,28 +1,17 @@
-// Stateful adapter for the pure first-visit model. Workspace Command owns the
-// page and its existing panels; this card never creates an alternate station.
+// On-demand suggestions. The header owns only the door; the persistent overlay
+// survives HQ repaints and hands every action to its existing owner.
 import { HQ_LABELS as L } from './hq-labels.js';
-import {
-  firstVisitView,
-  firstVisitResolved,
-  firstVisitShowAll,
-  rememberFirstVisitShowAll
-} from './hq-first-visit.js';
-import { readNoteDraft, writeNoteDraft, saveFirstNote } from './hq-first-note.js';
-import { dailyBriefStatus } from './daily-brief-station.js';
+import { firstVisitView, firstVisitResolved } from './hq-first-visit.js';
 import { EXPLORE_FOLDER_URL, DOCUMENTS_FOLDER_URL } from './personal-assistant-panel.js';
+import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
 
 const escape = value =>
   String(value ?? '').replace(
     /[&<>"']/g,
     ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]
   );
-const storage = () => {
-  try {
-    return window.localStorage;
-  } catch (_) {
-    return null;
-  }
-};
+const DOOR = '[data-hq-firstvisit-action="open"]';
+const OVERLAY = 'hq-suggestions';
 
 export class HQFirstVisitCard {
   constructor(owner) {
@@ -32,41 +21,43 @@ export class HQFirstVisitCard {
     this.started = false;
     this.busy = false;
     this.error = '';
-    this.savedText = '';
     this.resolvedOnLoad = null;
-    this.showAll = null;
-    this.noteOpen = false;
+    this.node = null;
   }
 
   view() {
-    const owner = this.owner;
-    if (this.showAll === null) this.showAll = firstVisitShowAll(storage(), owner.workspaceId());
     return firstVisitView({
       state: this.state,
       missions: this.missions,
-      notes: owner.notesState().secondBrain,
-      hasBrief: dailyBriefStatus(owner.dailyBriefStationData()).today === true,
-      showAll: this.showAll,
-      resolvedOnLoad: this.resolvedOnLoad === true && !this.error,
-      savedText: this.savedText,
-      tickets: owner.page?.tasks || []
+      notes: this.owner.notesState().secondBrain,
+      resolvedOnLoad: this.resolvedOnLoad === true && !this.error
     });
   }
 
   ensure() {
+    if (
+      this.node &&
+      (!this.owner.active ||
+        this.owner.viewMode !== 'details' ||
+        this.id !== this.owner.workspaceId())
+    )
+      this.close(false);
     if (this.state !== 'pending' || this.started || !this.owner.isPersonalHQ()) return;
     this.started = true;
     if (typeof window !== 'undefined') {
+      window.addEventListener?.('pagehide', () => this.close(false));
       window.addEventListener?.('pageshow', event => {
-        if (event.persisted) void this.load();
+        if (event.persisted) {
+          this.close(false);
+          void this.load();
+        }
       });
     }
     this.owner.requestNotesData();
-    this.owner.requestDailyBriefStationData();
     void this.load();
   }
 
-  async load({ focus = false } = {}) {
+  async load() {
     if (this.loading || this.state !== 'pending') return;
     const id = this.owner.workspaceId();
     this.loading = true;
@@ -84,153 +75,203 @@ export class HQFirstVisitCard {
     }
     if (this.view().finishSilently) await this.finish();
     else if (this.owner.active) this.owner.render();
-    if (focus) this.focus();
+    this.paint();
   }
 
-  focus(action) {
-    const selector =
-      action === 'note-input'
-        ? '[data-hq-firstvisit-note]'
-        : action
-          ? `[data-hq-firstvisit-action="${action}"]`
-          : '[data-hq-firstvisit]';
-    this.owner.container?.querySelector?.(selector)?.focus?.({ preventScroll: true });
+  door() {
+    return this.owner.container?.querySelector?.(DOOR);
   }
 
-  captureFocus() {
-    const input = this.owner.container?.querySelector?.('[data-hq-firstvisit-note]');
-    if (input && typeof document !== 'undefined' && document.activeElement === input)
-      this.caret = [input.selectionStart, input.selectionEnd];
+  headerHTML() {
+    if (this.view().card === 'none') return '';
+    return `<button type="button" class="ws-cmd-nav-btn ws-hq-suggestions-trigger" data-hq-firstvisit-action="open" aria-haspopup="dialog" aria-controls="${OVERLAY}" aria-expanded="${Boolean(this.node)}">${escape(L.firstVisitTitle)}</button>`;
   }
 
   html() {
     const v = this.view();
     if (v.card === 'none') return '';
-    const button = (action, label, disabled = false) =>
-      `<button type="button" class="ws-cmd-agent-action" data-hq-firstvisit-action="${action}"${disabled || this.busy ? ' disabled' : ''}>${escape(label)}</button>`;
-    const live = `<p class="ws-hq-firstvisit-status${this.error ? '' : ' visually-hidden'}" aria-live="polite" aria-atomic="true">${escape(this.error || (this.busy ? L.firstVisitSaving : v.loading ? L.firstVisitLoading : this.savedText ? L.firstNoteSaved.replace('{text}', this.savedText) : ''))}</p>`;
-    const start = `<section class="ws-hq-panel ws-hq-firstvisit is-${v.card}" data-hq-firstvisit tabindex="-1" aria-labelledby="hq-firstvisit-title">`;
-    if (v.card === 'bar')
-      return (
-        start +
-        `<h3 id="hq-firstvisit-title">${escape(L.firstVisitTitle)}</h3><div class="ws-hq-firstvisit-controls">${button('continue', L.firstVisitContinue)}${button('hide', L.firstVisitHide)}</div>${live}</section>`
-      );
-    if (v.card === 'finished')
-      return (
-        start +
-        `<h3 id="hq-firstvisit-title">${escape(L.firstVisitFinishedTitle)}</h3><p>${escape(L.firstVisitFinishedText)}</p>${button('done', L.firstVisitDone)}${live}</section>`
-      );
-    const lead = this.owner.hqTeam().find(agent => agent.isLead);
-    const face =
-      (lead &&
-        this.owner.page
-          ?.getAgentAvatarPresentation?.(lead.name)
-          ?.markup?.('ws-hq-firstvisit-avatar')) ||
-      '';
-    const draft = readNoteDraft();
-    const source = this.owner.notesState().secondBrain?.source;
-    if (!draft.sourceId && source?.origin === 'created_by_ori')
-      writeNoteDraft({ ...draft, sourceId: source.id });
-    return (
-      start +
-      `<header class="ws-hq-firstvisit-intro">${face}<div>${lead ? `<span class="ws-hq-firstvisit-lead">${escape(lead.name)}</span>` : ''}<h3 id="hq-firstvisit-title">${escape(L.firstVisitTitle)}</h3><p>${escape(L.firstVisitLead)}</p></div></header>` +
-      `<ul class="ws-hq-firstvisit-steps">${v.steps
-        .map(step => {
-          let action = '';
-          if (step.action === 'save')
-            action =
-              this.noteOpen || draft.text
-                ? `<label for="hq-firstvisit-note">${escape(L.firstNoteField)}</label><textarea id="hq-firstvisit-note" data-hq-firstvisit-note maxlength="4000" rows="2"${this.busy || draft.pendingText ? ' readonly' : ''}>${escape(draft.text)}</textarea>${button('save', step.button, step.disabled)}`
-                : button('note', L.firstNoteOpen, step.disabled);
-          else if (step.action === 'folder')
-            action = step.disabled
-              ? button('folder', L.firstFolderDocuments, true) + button('folder', step.button, true)
-              : `<div class="ws-hq-firstvisit-controls"><a class="ws-cmd-agent-action" href="${DOCUMENTS_FOLDER_URL}">${escape(L.firstFolderDocuments)}</a><a class="ws-cmd-agent-action" href="${EXPLORE_FOLDER_URL}">${escape(step.button)}</a></div><p class="ws-hq-firstvisit-privacy">${escape(L.firstFolderPrivacy)}</p>`;
-          else if (step.action === 'home')
-            action = `<a class="ws-cmd-agent-action" href="/">${escape(step.button)}</a>`;
-          else if (step.action) action = button(step.action, step.button, step.disabled);
-          return `<li class="ws-hq-firstvisit-step${step.resolved ? ' is-resolved' : ''}"><span class="ws-hq-firstvisit-check" aria-hidden="true">${step.resolved ? '✓' : '□'}</span><div><h4>${escape(step.title)}${step.resolved ? `<span class="visually-hidden"> — ${escape(step.state === 'skipped' ? L.firstVisitSkipped : L.firstVisitCompleted)}</span>` : ''}</h4><p>${escape(step.hint)}</p>${action}</div></li>`;
-        })
-        .join('')}</ul>` +
-      (v.footer
-        ? `<p class="ws-hq-firstvisit-footer">${escape(v.footer)} ${button('tickets', L.firstVisitSeeTickets)}</p>`
-        : '') +
-      `<div class="ws-hq-firstvisit-controls">${button('hide', L.firstVisitHide)}${button('show-all', L.firstVisitShowAll)}${this.error === L.firstVisitLoadError ? button('retry', L.firstVisitRetry) : ''}</div>${live}</section>`
-    );
+    const row = step => {
+      const icon = { folder: 'folder2', brief: 'sun', note: 'pencil' }[step.key];
+      const mark = step.state === 'completed' ? '✓' : step.state === 'skipped' ? '—' : '';
+      const status = step.resolved
+        ? `<span class="visually-hidden"> — ${escape(step.state === 'skipped' ? L.firstVisitSkipped : L.firstVisitCompleted)}</span>`
+        : '';
+      const body = `<span class="ws-hq-suggestion-icon" aria-hidden="true">${mark || `<i class="bi bi-${icon}"></i>`}</span><span><strong>${escape(step.title)}${status}</strong><small>${escape(step.hint)}</small></span><span aria-hidden="true">→</span>`;
+      const href =
+        step.action === 'folder' ? DOCUMENTS_FOLDER_URL : step.action === 'home' ? '/' : '';
+      const control =
+        href && !step.disabled
+          ? `<a class="ws-hq-suggestion" data-hq-firstvisit-action="${step.action}" href="${href}">${body}</a>`
+          : `<button type="button" class="ws-hq-suggestion" data-hq-firstvisit-action="${step.action}"${step.disabled ? ' disabled' : ''}>${body}</button>`;
+      const alternative =
+        step.action === 'folder' && !step.disabled
+          ? `<a class="ws-hq-suggestion-alternative" data-hq-firstvisit-action="folder" href="${EXPLORE_FOLDER_URL}">${escape(L.firstFolderChoose)}</a>`
+          : '';
+      return `<li${step.resolved ? ' class="is-resolved"' : ''}>${control}${alternative}</li>`;
+    };
+    return `<section id="${OVERLAY}" class="ws-hq-suggestions" data-hq-firstvisit role="dialog"${this.sheet ? ' aria-modal="true"' : ''} aria-labelledby="hq-suggestions-title" aria-describedby="hq-suggestions-hint" tabindex="-1">
+      <header><div><h2 id="hq-suggestions-title">${escape(L.firstVisitTitle)}</h2><p id="hq-suggestions-hint">${escape(L.firstVisitLead)}</p></div><button type="button" data-hq-firstvisit-action="close" aria-label="${escape(L.firstVisitClose)}">×</button></header>
+      <ul>${v.steps.map(row).join('')}</ul>
+      <footer><button type="button" data-hq-firstvisit-action="hide"${this.busy ? ' disabled' : ''}>${escape(L.firstVisitHide)}</button>${this.error === L.firstVisitLoadError ? `<button type="button" data-hq-firstvisit-action="retry">${escape(L.firstVisitRetry)}</button>` : ''}</footer>
+      <p class="ws-hq-suggestions-status${this.error ? '' : ' visually-hidden'}" role="status">${escape(this.error || (v.loading ? L.firstVisitLoading : ''))}</p>
+    </section>`;
   }
 
   bind() {
-    const root = this.owner.container?.querySelector?.('[data-hq-firstvisit]');
-    root?.addEventListener?.('click', event => {
-      const button = event.target.closest?.('[data-hq-firstvisit-action]');
-      if (button && !button.disabled)
-        void this.act(button.getAttribute('data-hq-firstvisit-action'), button);
-    });
-    const input = root?.querySelector?.('[data-hq-firstvisit-note]');
-    input?.addEventListener?.('input', () =>
-      writeNoteDraft({ ...readNoteDraft(), text: input.value })
-    );
-    if (input && this.caret) {
-      input.focus({ preventScroll: true });
-      input.setSelectionRange?.(...this.caret);
-      this.caret = null;
-    }
+    this.door()?.addEventListener?.('click', () => (this.node ? this.close() : this.open()));
+    this.paint();
   }
 
-  async act(action, trigger) {
-    if (this.busy) return;
-    if (action === 'note') {
-      this.noteOpen = true;
-      this.owner.render();
-      this.focus('note-input');
+  open() {
+    if (this.node || this.view().card === 'none') return;
+    this.id = this.owner.workspaceId();
+    this.sheet = window.matchMedia('(max-width: 600px)').matches;
+    this.node = document.createElement('div');
+    this.node.className = `ws-cmd ws-hq-suggestions-layer${this.sheet ? ' is-sheet' : ''}`;
+    document.body.appendChild(this.node);
+    this.paint();
+    this.node.addEventListener('click', event => {
+      const control = event.target.closest('[data-hq-firstvisit-action]');
+      if (!control || control.disabled) return;
+      const action = control.getAttribute('data-hq-firstvisit-action');
+      if (control.tagName === 'A') {
+        // Let the browser own links (including modifier-click); no folder work
+        // starts here. The existing Home consent card owns the next action.
+        if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) this.close(false);
+      } else void this.act(action);
+    });
+    this.node.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        workspaceOverlayCoordinator().escapeTopmost();
+      }
+    });
+    this.node.addEventListener('focusout', event => {
+      if (
+        !this.sheet &&
+        event.relatedTarget &&
+        !this.node?.contains(event.relatedTarget) &&
+        event.relatedTarget !== this.door()
+      )
+        this.close(false);
+    });
+    this.outside = event => {
+      if (!this.node?.contains(event.target) && !this.door()?.contains(event.target))
+        this.close(false);
+      else if (event.target === this.node) {
+        // Backdrop presses must not move focus to body after close restores
+        // the trigger (the pointer's default focus happens after this handler).
+        event.preventDefault();
+        this.close();
+      }
+    };
+    this.resize = () => {
+      if (this.sheet !== window.matchMedia('(max-width: 600px)').matches) this.close();
+      else this.position();
+    };
+    document.addEventListener('pointerdown', this.outside, true);
+    window.addEventListener('resize', this.resize);
+    window.addEventListener('scroll', this.resize, true);
+    workspaceOverlayCoordinator().open({
+      id: OVERLAY,
+      kind: this.sheet ? 'modal' : 'popover',
+      container: this.sheet ? this.node : null,
+      // The header is replaced by live updates. Resolve its current button,
+      // never return focus to a detached original trigger.
+      trigger: {
+        focus: () => {
+          if (this.restoreOnClose !== false) this.door()?.focus({ preventScroll: true });
+        }
+      },
+      onClose: info => {
+        if (info.reason === 'suspended') this.node.hidden = true;
+        else this.cleanup();
+      },
+      onResume: () => {
+        this.node.hidden = false;
+        this.node.querySelector('[role="dialog"]').focus();
+      }
+    });
+    this.restoreOnClose = true;
+    this.door()?.setAttribute('aria-expanded', 'true');
+    this.node.querySelector('[role="dialog"]').focus({ preventScroll: true });
+    void this.load();
+  }
+
+  position() {
+    if (!this.node || this.sheet) return;
+    const dialog = this.node.querySelector('[role="dialog"]');
+    const anchor = this.door()?.getBoundingClientRect();
+    if (!anchor) return;
+    const width = dialog.getBoundingClientRect().width;
+    const height = dialog.getBoundingClientRect().height;
+    dialog.style.left = `${Math.max(12, Math.min(anchor.right - width, window.innerWidth - width - 12))}px`;
+    dialog.style.top = `${Math.max(12, Math.min(anchor.bottom + 8, window.innerHeight - height - 12))}px`;
+  }
+
+  paint() {
+    if (!this.node) return;
+    if (this.view().card === 'none') {
+      this.close();
       return;
     }
-    if (action === 'save') return this.save();
-    if (action === 'hide' || action === 'done') return this.finish();
+    const html = this.html();
+    if (html !== this.lastHTML) {
+      const active = document.activeElement;
+      const focused = this.node.contains(active);
+      const action = focused && active?.getAttribute('data-hq-firstvisit-action');
+      this.node.innerHTML = html;
+      this.lastHTML = html;
+      if (focused)
+        (
+          this.node.querySelector(
+            action ? `[data-hq-firstvisit-action="${action}"]` : '[role="dialog"]'
+          ) || this.node.querySelector('[role="dialog"]')
+        ).focus({ preventScroll: true });
+    }
+    this.position();
+  }
+
+  cleanup() {
+    document.removeEventListener('pointerdown', this.outside, true);
+    window.removeEventListener('resize', this.resize);
+    window.removeEventListener('scroll', this.resize, true);
+    this.node?.remove();
+    this.node = null;
+    this.lastHTML = '';
+    this.door()?.setAttribute('aria-expanded', 'false');
+  }
+
+  close(restore = true) {
+    if (!this.node) return;
+    this.restoreOnClose = restore;
+    workspaceOverlayCoordinator().close(OVERLAY);
+  }
+
+  async act(action) {
+    if (action === 'close') return this.close();
+    if (this.busy) return;
+    if (action === 'hide') return this.finish();
     if (action === 'retry') return this.load();
-    if (action === 'show-all' || action === 'continue') {
-      this.showAll = action === 'show-all';
-      rememberFirstVisitShowAll(storage(), this.owner.workspaceId(), this.showAll);
-      this.owner.render();
-      this.focus(this.showAll ? 'continue' : 'show-all');
-    } else if (action === 'notes') this.owner.openNotesStation(trigger);
-    else if (action === 'brief') {
-      this.briefOpened = true;
-      this.owner.openDailyBriefPanel(trigger);
-    } else if (action === 'tickets') this.owner.setCommandViewMode('tickets');
+    const trigger = this.door();
+    this.close(false);
+    if (action === 'note') this.owner.focusHQNoteCapture(trigger);
+    else if (action === 'notes') this.owner.openNotesStation(trigger);
+    else if (action === 'brief') this.owner.openDailyBriefPanel(trigger);
   }
 
   async briefClosed() {
-    if (!this.briefOpened) return;
-    this.briefOpened = false;
-    await this.load({ focus: true });
-  }
-
-  async save() {
-    this.busy = true;
-    this.error = '';
-    this.owner.render();
-    try {
-      const saved = await saveFirstNote(readNoteDraft().text, {
-        readStatus: async () =>
-          (await this.owner.stationJSON('/api/personal-assistant/second-brain')).second_brain
-      });
-      this.savedText = saved.text;
-      await this.load();
-      await this.owner.refreshOpenNotesInbox();
-      this.owner.requestNotesData(true);
-      this.owner.notesChanged();
-    } catch (error) {
-      this.error = error.message || L.firstNoteError;
-    } finally {
-      this.busy = false;
-      this.owner.render();
-      this.focus(this.savedText ? undefined : 'save');
-    }
+    // Ordinary station use counts too, without opening suggestions or moving
+    // focus away from the panel's own restored trigger.
+    await this.load();
   }
 
   async finish() {
+    if (this.busy) return;
     this.busy = true;
+    this.error = '';
+    this.paint();
     try {
       const response = await fetch('/api/personal-hq/first-visit-state', {
         method: 'POST',
@@ -241,12 +282,20 @@ export class HQFirstVisitCard {
       this.state = 'done';
       if (typeof document !== 'undefined' && document.body?.dataset)
         delete document.body.dataset.hqFirstVisit;
-      rememberFirstVisitShowAll(storage(), this.owner.workspaceId(), false);
+      const hadFocus = this.node?.contains(document.activeElement);
+      this.close(false);
+      if (this.owner.active) this.owner.render();
+      if (hadFocus)
+        this.owner.container
+          ?.querySelector?.('[data-cmd-view-mode="details"]')
+          ?.focus({ preventScroll: true });
     } catch (_) {
       this.error = L.firstVisitFinishError;
+      // A silent finish failure leaves a usable door; never force it open.
+      if (this.owner.active) this.owner.render();
     } finally {
       this.busy = false;
-      if (this.owner.active) this.owner.render();
+      this.paint();
     }
   }
 }

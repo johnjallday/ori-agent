@@ -1988,6 +1988,7 @@ export class WorkspaceCommandView {
         : '') +
       (tags.length ? '<div class="ws-cmd-tags">' + this.commandTagsHTML(tags) + '</div>' : '') +
       '</div><div class="ws-cmd-header-actions">' +
+      (hqDetails ? this.firstVisit?.headerHTML?.() || '' : '') +
       workspaceSettingsHTML({
         diagnostics: this.workspaceRoute('/diagnostics'),
         workflow: this.workflowHref()
@@ -3613,6 +3614,12 @@ export class WorkspaceCommandView {
       has('data-cmd-edit-identity')
     ) {
       return this.container?.querySelector?.('[data-cmd-settings]') || null;
+    }
+    if (
+      has('data-hq-firstvisit-action') &&
+      trigger.getAttribute('data-hq-firstvisit-action') === 'open'
+    ) {
+      return this.firstVisit?.door() || null;
     }
     if (trigger.isConnected !== false) return trigger;
     const attr = has('data-cmd-hq-card')
@@ -8512,23 +8519,6 @@ export class WorkspaceCommandView {
     this.paintNotesPanel(panel);
     // Polling replaces any timer already set, so a look is never read twice.
     this.pollNotesPanelLook(panel);
-  }
-
-  // A welcome capture now happens beside an already-mounted Notes panel.
-  // Refresh its Inbox without replacing the connection, tab or capture draft.
-  async refreshOpenNotesInbox() {
-    const panel = this._notesPanel;
-    const source = this.notesState().secondBrain?.source?.id;
-    if (!panel || !this.notesPanelOpen() || !isCreatedByOri(this.notesState().secondBrain)) return;
-    try {
-      const payload = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/inbox', true);
-      if (panel !== this._notesPanel || source !== this.notesState().secondBrain?.source?.id)
-        return;
-      panel.inbox = payload?.inbox || panel.inbox;
-      this.paintNotesPanel(panel);
-    } catch {
-      // Capture already succeeded. A failed read must not offer another write.
-    }
   }
 
   // A running look is read again until it ends, at the drawer's pace and for
@@ -14949,7 +14939,6 @@ export class WorkspaceCommandView {
       this.renderHQGitHubHost() +
       '<div class="ws-cmd-layout is-hq">' +
       '<main class="ws-cmd-main ws-hq-main">' +
-      (this.firstVisit?.html() || '') +
       this.hqNeedsYouHTML() +
       (this.firstVisit?.view().layout.notes === false ? '' : this.renderHQNotesHost()) +
       this.renderFollowUpsHost() +
@@ -15410,14 +15399,11 @@ export class WorkspaceCommandView {
   }
 
   hqNeedsYou({ all = false } = {}) {
-    const first = this.firstVisit?.view();
     // Flow keeps its existing inbox/station/notes count. Tickets and today's
     // brief have their own nodes there; only Overview merges those sources.
     const overview = this.viewMode !== 'map';
     return hqNeedsYouRows({
       ...(overview ? this.hqAttentionState() : {}),
-      suppressBrief:
-        first?.card === 'full' && !first.steps.find(step => step.key === 'brief')?.resolved,
       mail: this.hqMailRows(),
       stations: stationsNeedingYou(this.hqCards()),
       notes: notesNudge(this.notesState().secondBrain),
@@ -16118,7 +16104,6 @@ export class WorkspaceCommandView {
   // Before a rebuild or a mode switch: remember a focused control (and a caret
   // in the capture box), then put the panel home so the write cannot detach it.
   parkHQPanels() {
-    this.firstVisit?.captureFocus();
     this.rememberHQFocus();
     this.restoreSharedSurface('hq-github');
     this.restoreSharedSurface('hq-needs-you');
@@ -16398,6 +16383,21 @@ export class WorkspaceCommandView {
         );
       }
     });
+  }
+
+  // Suggestions point at the existing capture, never create a second editor.
+  // Switching to Inbox preserves the panel's draft and existing save owner.
+  focusHQNoteCapture(trigger) {
+    const node = this.notesInlineNode();
+    if (!node || !isCreatedByOri(this.notesState().secondBrain)) {
+      this.openNotesStation(trigger);
+      return;
+    }
+    this.setNotesTab('inbox');
+    node.scrollIntoView?.({ block: 'start' });
+    const input = node.querySelector?.('[data-notes-capture]');
+    if (input) input.focus({ preventScroll: true });
+    else this.focusInlineNotesPanel();
   }
 
   // Brings the inline panel into view and focus; false when it is not mounted.

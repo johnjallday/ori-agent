@@ -9989,108 +9989,150 @@ button.ws-cmd-rpg-class-card:focus-visible {
   overflow-x: auto;
 }
 
-/* The first visit uses the HQ's own surfaces and semantic theme tokens. */
-.ws-hq-firstvisit {
-  padding: clamp(18px, 3vw, 32px);
-  border-top: 2px solid var(--ws-faction);
+/* Suggestions take no page space beyond their quiet header door. Mount on
+   body like workspace panels, above the app shell rather than a clipped header. */
+.ws-cmd.ws-hq-suggestions-layer {
+  position: fixed;
+  inset: 0;
+  z-index: var(--app-modal-layer, 30000);
+  pointer-events: none;
+  letter-spacing: normal;
+  font-family: var(--font-body, system-ui, sans-serif);
+}
+.ws-hq-suggestions {
+  position: absolute;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: auto;
+  color: var(--ws-ink);
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 10px;
+  box-shadow: var(--ws-glow);
+  padding: 18px 8px 8px;
   overflow-wrap: anywhere;
 }
-.ws-hq-firstvisit h3 {
-  color: var(--ws-ink);
-  font-size: 22px;
-  margin: 0 0 10px;
-}
-.ws-hq-firstvisit p {
-  color: var(--ws-ink-dim);
-  line-height: 1.6;
-  margin: 0 0 12px;
-}
-.ws-hq-firstvisit-intro {
+.ws-hq-suggestions > header {
   display: flex;
-  gap: 18px;
   align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 8px 12px;
 }
-.ws-hq-firstvisit-avatar {
-  width: 64px;
-  height: 64px;
-  flex: 0 0 64px;
-  object-fit: contain;
-}
-.ws-hq-firstvisit-lead {
-  color: var(--ws-ink-dim);
-  font-size: 12px;
-}
-.ws-hq-firstvisit-steps {
-  list-style: none;
-  padding: 0;
-  margin: 18px 0;
-}
-.ws-hq-firstvisit-step {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 12px;
-  padding: 18px 0;
-  border-top: 1px solid var(--ws-line);
-}
-.ws-hq-firstvisit-step h4 {
-  font-size: 17px;
-  margin: 0 0 6px;
-}
-.ws-hq-firstvisit-check {
-  color: var(--ws-ink-dim);
+.ws-hq-suggestions h2 {
+  font-family: var(--font-display, Georgia, serif);
   font-size: 20px;
-  line-height: 1.2;
-}
-.ws-hq-firstvisit-step.is-resolved .ws-hq-firstvisit-check {
-  color: var(--ws-faction);
-}
-.ws-hq-firstvisit .ws-hq-firstvisit-privacy {
-  font-size: 12px;
-  margin-top: 10px;
-}
-.ws-hq-firstvisit-step label {
-  display: block;
-  font-size: 13px;
-  margin-bottom: 6px;
-}
-.ws-hq-firstvisit-step textarea {
-  display: block;
-  width: 100%;
-  resize: vertical;
-  min-height: 72px;
-  background: var(--ws-bg);
+  margin: 0 0 6px;
   color: var(--ws-ink);
-  border: 1px solid var(--ws-line-bright);
-  border-radius: 6px;
-  padding: 12px;
-  margin-bottom: 10px;
 }
-.ws-hq-firstvisit :is(button, a, textarea):focus-visible,
-.ws-hq-rail-more > button:focus-visible {
-  outline: 2px solid var(--ws-faction);
-  outline-offset: 3px;
-}
-.ws-hq-firstvisit-controls {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.ws-hq-firstvisit .ws-hq-firstvisit-status:empty {
+.ws-hq-suggestions p {
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  line-height: 1.5;
   margin: 0;
 }
-.ws-hq-firstvisit .ws-hq-firstvisit-status:not(:empty) {
-  margin-top: 12px;
+.ws-hq-suggestions > header button {
+  border: 0;
+  background: transparent;
+  color: var(--ws-ink-dim);
+  font-size: 22px;
+  min-width: 36px;
+  min-height: 36px;
+  margin-top: -8px;
+  border-radius: 6px;
 }
-.ws-hq-firstvisit.is-bar {
+.ws-hq-suggestions ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.ws-hq-suggestions li + li {
+  border-top: 1px solid var(--ws-line);
+}
+.ws-hq-suggestions .ws-hq-suggestion {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 14px;
+  align-items: start;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ws-ink);
+  text-align: left;
+  text-decoration: none;
+  font: inherit;
+  line-height: 1.45;
+}
+.ws-hq-suggestion strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+}
+.ws-hq-suggestion small {
+  display: block;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  margin-top: 3px;
+}
+.ws-hq-suggestion-icon {
+  color: var(--ws-faction);
+}
+.ws-hq-suggestions .ws-hq-suggestion-alternative {
+  display: inline-block;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  padding: 4px 8px 12px;
+  margin: -8px 0 0 32px;
+  text-underline-offset: 3px;
+}
+.ws-hq-suggestions > footer {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 18px;
+  gap: 8px;
+  justify-content: space-between;
+  border-top: 1px solid var(--ws-line);
+  padding-top: 4px;
 }
-.ws-hq-firstvisit.is-bar h3 {
-  font-size: 16px;
-  margin: 0 auto 0 0;
+.ws-hq-suggestions > footer button {
+  border: 0;
+  background: transparent;
+  color: var(--ws-ink-dim);
+  font-size: 12px;
+  padding: 10px 8px;
+  border-radius: 6px;
+}
+.ws-hq-suggestions :is(button, a):hover {
+  background: var(--ws-panel-2);
+  color: var(--ws-ink);
+}
+.ws-hq-suggestions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.ws-hq-suggestions :is(button, a):focus-visible,
+.ws-hq-rail-more > button:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: -2px;
+}
+.ws-hq-suggestions-status:not(.visually-hidden) {
+  padding: 8px;
+}
+.ws-cmd.ws-hq-suggestions-layer.is-sheet {
+  background: rgb(0 0 0 / 30%);
+  pointer-events: auto;
+}
+.ws-hq-suggestions-layer.is-sheet .ws-hq-suggestions {
+  left: 12px;
+  right: 12px;
+  bottom: max(12px, env(safe-area-inset-bottom));
+  width: auto;
+}
+.ws-hq-suggestions-layer.is-sheet :is(header button, footer button) {
+  min-height: 44px;
+  min-width: 44px;
 }
 .ws-hq-rail-more > button {
   display: block;

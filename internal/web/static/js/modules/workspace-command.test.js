@@ -10250,7 +10250,7 @@ test('HQ Needs you merges waiting and Review tickets, caps at five, and opens th
   }
 });
 
-test('the welcome suppresses only the ready-brief duplicate, and the live empty panel can become needed', () => {
+test('on-demand suggestions never suppress a ready brief; the Needs you panel still updates live', () => {
   const { commandView } = hqDetailsMarkup();
   commandView.hqAttentionState = () => ({ brief: { readyToday: true } });
   commandView.firstVisit = {
@@ -10260,8 +10260,8 @@ test('the welcome suppresses only the ready-brief duplicate, and the live empty 
       layout: { hideEmptyNeeds: true }
     })
   };
-  assert.equal(commandView.hqNeedsYou().total, 0);
-  assert.match(commandView.hqNeedsYouHTML(), /data-cmd-hq-needs[^>]* hidden>/);
+  assert.equal(commandView.hqNeedsYou().total, 1);
+  assert.doesNotMatch(commandView.hqNeedsYouHTML(), /data-cmd-hq-needs[^>]* hidden>/);
   const needs = { innerHTML: '', hidden: false };
   commandView.container = {
     querySelector: selector => (selector === '[data-cmd-hq-needs]' ? needs : null)
@@ -10270,7 +10270,7 @@ test('the welcome suppresses only the ready-brief duplicate, and the live empty 
   commandView.rememberHQFocus = () => {};
   commandView.restoreHQFocus = () => {};
   commandView.paintHQLive();
-  assert.equal(needs.hidden, true);
+  assert.equal(needs.hidden, false);
   commandView.hqAttentionState = () => ({ goal: { reason: 'Set up a model' } });
   commandView.paintHQLive();
   assert.equal(needs.hidden, false);
