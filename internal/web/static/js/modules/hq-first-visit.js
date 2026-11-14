@@ -1,7 +1,6 @@
 // First-visit presentation only. Progression owns completion; the server owns
 // offering/finishing the welcome. No DOM, requests or duplicate mission state.
 import { HQ_LABELS as L } from './hq-labels.js';
-import { JOURNEY_STEPS } from './home-welcome.js';
 
 export const FIRST_VISIT_KEY = 'ori.hq.firstVisit.v1';
 export const FIRST_VISIT_MISSIONS = Object.freeze({
@@ -133,7 +132,6 @@ export function firstVisitView({
         : showAll
           ? 'bar'
           : 'full';
-  const guided = card === 'full';
   const ticketTitles = firstVisitTicketTitles(tickets);
   const titles =
     ticketTitles.length > 1
@@ -141,14 +139,12 @@ export function firstVisitView({
       : ticketTitles[0] || '';
   return {
     card,
-    steps,
+    // Suggestions, not prerequisites: the concrete folder action comes first.
+    steps: [folder, brief, note],
     count,
     loading,
     allResolved,
     finishSilently: state === 'pending' && allResolved && resolvedOnLoad,
-    journey: JOURNEY_STEPS,
-    progress: L.firstVisitProgress.replace('{count}', count),
-    barProgress: L.firstVisitBarProgress.replace('{count}', count),
     ticketTitles,
     footer: ticketTitles.length
       ? (ticketTitles.length === 1 ? L.firstVisitTicket : L.firstVisitTickets)
@@ -156,15 +152,12 @@ export function firstVisitView({
           .replace('{titles}', titles)
       : '',
     layout: {
-      guided,
-      notes: !guided || note.state === 'completed',
-      hideEmptyNeeds: guided,
-      railAllUnderMore: guided,
-      foldedStations: !guided,
-      // null means the quiet layout's normal station filtering.
-      stationKeys: guided
-        ? [brief.resolved && 'daily-brief', folder.resolved && 'watchtower'].filter(Boolean)
-        : null,
+      guided: false,
+      notes: true,
+      hideEmptyNeeds: false,
+      railAllUnderMore: false,
+      foldedStations: true,
+      stationKeys: null,
       hideNotesChecklist: card === 'full' || card === 'bar'
     }
   };

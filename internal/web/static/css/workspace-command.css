@@ -10005,19 +10005,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
   line-height: 1.6;
   margin: 0 0 12px;
 }
-.ws-hq-firstvisit-journey {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 22px;
-  padding: 0;
-  margin: 0 0 24px;
-  list-style: none;
-  color: var(--ws-ink-dim);
-  font-size: 13px;
-}
-.ws-hq-firstvisit-journey [aria-current] {
-  color: var(--ws-faction);
-}
 .ws-hq-firstvisit-intro {
   display: flex;
   gap: 18px;
@@ -10049,10 +10036,17 @@ button.ws-cmd-rpg-class-card:focus-visible {
   font-size: 17px;
   margin: 0 0 6px;
 }
-.ws-hq-firstvisit-number {
+.ws-hq-firstvisit-check {
+  color: var(--ws-ink-dim);
+  font-size: 20px;
+  line-height: 1.2;
+}
+.ws-hq-firstvisit-step.is-resolved .ws-hq-firstvisit-check {
   color: var(--ws-faction);
-  font-family: var(--ws-font-mono);
-  padding-top: 2px;
+}
+.ws-hq-firstvisit .ws-hq-firstvisit-privacy {
+  font-size: 12px;
+  margin-top: 10px;
 }
 .ws-hq-firstvisit-step label {
   display: block;

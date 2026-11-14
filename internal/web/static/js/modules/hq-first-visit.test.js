@@ -8,7 +8,6 @@ import {
   FIRST_VISIT_KEY,
   FIRST_VISIT_MISSIONS
 } from './hq-first-visit.js';
-import { JOURNEY_STEPS } from './home-welcome.js';
 
 const notes = { status: 'connected', source: { origin: 'created_by_ori' } };
 const missions = (note = 'open', brief = 'open', folder = 'open') =>
@@ -19,28 +18,31 @@ const missions = (note = 'open', brief = 'open', folder = 'open') =>
 const view = (options = {}) =>
   firstVisitView({ state: 'pending', missions: missions(), notes, ...options });
 
-test('pending first visit reveals only completed notes and resolved stations', () => {
+test('optional suggestions offer Documents first and never gate the normal HQ', () => {
   const first = view();
   assert.equal(first.card, 'full');
   assert.equal(first.count, 0);
-  assert.equal(first.journey, JOURNEY_STEPS);
+  assert.deepEqual(
+    first.steps.map(s => s.key),
+    ['folder', 'brief', 'note']
+  );
   assert.deepEqual(first.layout, {
-    guided: true,
-    notes: false,
-    hideEmptyNeeds: true,
-    railAllUnderMore: true,
-    foldedStations: false,
-    stationKeys: [],
+    guided: false,
+    notes: true,
+    hideEmptyNeeds: false,
+    railAllUnderMore: false,
+    foldedStations: true,
+    stationKeys: null,
     hideNotesChecklist: true
   });
   const one = view({ missions: missions('completed') });
   assert.equal(one.layout.notes, true);
   assert.equal(one.count, 1);
   assert.deepEqual(
-    view({ missions: missions('open', 'completed', 'skipped') }).layout.stationKeys,
-    ['daily-brief', 'watchtower']
+    view({ missions: missions('open', 'completed', 'skipped') }).layout,
+    first.layout
   );
-  assert.equal(view({ missions: missions('skipped') }).layout.notes, false);
+  assert.equal(view({ missions: missions('skipped') }).layout.notes, true);
 });
 
 test('show everything keeps a bar but uses the quiet layout', () => {
@@ -94,32 +96,32 @@ test('loading cannot manufacture ticks or silently finish; tier locks do not dis
 });
 
 test('note step saves into Ori notes and distinguishes current-visit receipt from later visits', () => {
-  assert.equal(view().steps[0].action, 'save');
-  assert.equal(view().steps[0].title, 'Save a first note');
+  assert.equal(view().steps[2].action, 'save');
+  assert.equal(view().steps[2].title, 'Save an idea or reminder');
   assert.equal(
-    view({ missions: missions('completed'), savedText: '<a note>' }).steps[0].hint,
+    view({ missions: missions('completed'), savedText: '<a note>' }).steps[2].hint,
     'Saved to your Inbox: “<a note>”'
   );
   assert.equal(
-    view({ missions: missions('completed') }).steps[0].hint,
+    view({ missions: missions('completed') }).steps[2].hint,
     'Your first note is in your Inbox.'
   );
-  assert.equal(view({ missions: missions('completed') }).steps[0].action, '');
+  assert.equal(view({ missions: missions('completed') }).steps[2].action, '');
 });
 
 test('note setup and skipped variants never offer a write to someone else’s vault', () => {
-  const setup = view({ notes: { status: 'not_connected' } }).steps[0];
+  const setup = view({ notes: { status: 'not_connected' } }).steps[2];
   assert.equal(setup.title, 'Set up your notes');
   assert.equal(setup.button, 'Set up notes');
   assert.equal(setup.action, 'notes');
-  const skipped = view({ missions: missions('skipped'), notes: { status: 'declined' } }).steps[0];
+  const skipped = view({ missions: missions('skipped'), notes: { status: 'declined' } }).steps[2];
   assert.equal(skipped.hint, 'Notes are off. Set them up any time.');
   assert.equal(skipped.action, 'notes');
   const own = view({ missions: missions('skipped'), notes: { source: { origin: 'connected' } } })
-    .steps[0];
+    .steps[2];
   assert.equal(own.hint, 'Your own vault is connected. Ori does not write there.');
   assert.equal(own.action, '');
-  assert.equal(view({ notes: { ...notes, status: 'missing' } }).steps[0].action, 'notes');
+  assert.equal(view({ notes: { ...notes, status: 'missing' } }).steps[2].action, 'notes');
 });
 
 test('brief and folder actions follow canonical outcomes, not presentation locks', () => {
@@ -128,8 +130,8 @@ test('brief and folder actions follow canonical outcomes, not presentation locks
   const result = view({ missions: missions('open', 'completed', 'completed') });
   assert.equal(result.steps[1].button, 'Open it');
   assert.equal(result.steps[1].action, 'brief');
-  assert.equal(result.steps[2].button, 'Open Home');
-  assert.equal(result.steps[2].action, 'home');
+  assert.equal(result.steps[0].button, 'Open Home');
+  assert.equal(result.steps[0].action, 'home');
   assert.equal(firstVisitResolved(missions('skipped', 'completed', 'completed')), true);
   assert.equal(firstVisitResolved(null), false);
   assert.equal(firstVisitResolved([]), false);

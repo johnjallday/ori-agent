@@ -170,6 +170,7 @@ const HQ_SETUP_MOUNTS = [
 ];
 // The HQ controls whose focus a re-render carries to their replacement.
 const HQ_FOCUS_ATTRS = [
+  'data-hq-firstvisit',
   'data-hq-firstvisit-action',
   'data-cmd-hq-rail-more',
   'data-cmd-hq-card',
@@ -8511,6 +8512,23 @@ export class WorkspaceCommandView {
     this.paintNotesPanel(panel);
     // Polling replaces any timer already set, so a look is never read twice.
     this.pollNotesPanelLook(panel);
+  }
+
+  // A welcome capture now happens beside an already-mounted Notes panel.
+  // Refresh its Inbox without replacing the connection, tab or capture draft.
+  async refreshOpenNotesInbox() {
+    const panel = this._notesPanel;
+    const source = this.notesState().secondBrain?.source?.id;
+    if (!panel || !this.notesPanelOpen() || !isCreatedByOri(this.notesState().secondBrain)) return;
+    try {
+      const payload = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/inbox', true);
+      if (panel !== this._notesPanel || source !== this.notesState().secondBrain?.source?.id)
+        return;
+      panel.inbox = payload?.inbox || panel.inbox;
+      this.paintNotesPanel(panel);
+    } catch {
+      // Capture already succeeded. A failed read must not offer another write.
+    }
   }
 
   // A running look is read again until it ends, at the drawer's pace and for

@@ -1,13 +1,16 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 // Real, credential-free journey on a fresh isolated server. Run twice to cover
 // the two irreversible exits without resetting the user's persisted state:
-// ./scripts/e2e-fresh.sh tests/hq-first-visit.spec.ts -- --workers=1
-// ./scripts/e2e-fresh.sh --env ORI_HQ_FIRST_VISIT_HIDE=1 tests/hq-first-visit.spec.ts -- --workers=1
+// ./scripts/e2e-fresh.sh --sandbox-env ORI_HQ_FIRST_VISIT_SANDBOX tests/hq-first-visit.spec.ts -- --workers=1
+// ./scripts/e2e-fresh.sh --sandbox-env ORI_HQ_FIRST_VISIT_SANDBOX --env ORI_HQ_FIRST_VISIT_HIDE=1 tests/hq-first-visit.spec.ts -- --workers=1
 // Done uses the existing optional-folder mission's Skip, NOT a fake report or
 // another model look. Actual folder completion is covered by the paid demo.
 const hide = process.env.ORI_HQ_FIRST_VISIT_HIDE === '1';
+const natural = process.env.ORI_HQ_FIRST_VISIT_NATURAL === '1';
 const BRAIN = '/api/personal-assistant/second-brain';
 const FINISH = '/api/personal-hq/first-visit-state';
 let hqPath = '';
@@ -53,6 +56,10 @@ async function accessible(page: Page) {
 }
 
 test.beforeAll(async ({ request }) => {
+  const sandbox = process.env.ORI_HQ_FIRST_VISIT_SANDBOX;
+  expect(sandbox, 'use e2e-fresh --sandbox-env ORI_HQ_FIRST_VISIT_SANDBOX').toBeTruthy();
+  // Only the explicitly handed-off disposable HOME gets a fixture folder.
+  if (!hide) mkdirSync(join(sandbox!, 'Documents'), { recursive: true, mode: 0o750 });
   await json(request, 'post', '/api/onboarding/skip', {});
   const root = (await json(request, 'get', '/api/settings/workspace-root')).default_workspace_root;
   await json(request, 'post', '/api/settings/workspace-root', { workspace_root: root });
@@ -81,24 +88,30 @@ test.beforeAll(async ({ request }) => {
   hqPath = `/workspaces/${encodeURIComponent(status.workspace.folder_slug)}?mode=details`;
 });
 
-test(`welcome, retry-safe note, real brief, preferences and ${hide ? 'Hide' : 'Done'}`, async ({
+test(`optional suggestions, Documents consent and ${natural ? 'natural note completion' : hide ? 'Not now' : 'retry-safe note / Done'}`, async ({
   page,
   request
 }, testInfo) => {
   await page.addInitScript(() => localStorage.setItem('oriWorkspaceCommandViewMode', 'map'));
   await page.goto(hqPath);
   await expect(page.locator('body')).toHaveAttribute('data-hq-first-visit', 'pending');
-  await expect(card(page)).toContainText('Welcome to your HQ.');
-  await expect(card(page)).toContainText('Make it yours · 0 of 3');
-  await expect(action(page, 'save')).toBeEnabled();
+  await expect(card(page)).toContainText('Things to try');
+  await expect(card(page)).toContainText('in any order');
+  await expect(card(page)).not.toContainText(/of 3/);
+  await expect(action(page, 'note')).toBeEnabled();
+  await expect(page.locator('[data-hq-firstvisit-note]')).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('oriWorkspaceCommandViewMode'))).toBe(
     'map'
   );
   await expect(page.locator('.ws-hq-rail > .ws-hq-team')).toBeVisible();
-  await expect(page.locator('.ws-hq-rail > .ws-hq-rail-group')).toHaveCount(0);
   await expect(page.locator('[data-cmd-hq-rail-more]')).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.locator('[data-cmd-hq-host="notes"], .ws-hq-stations')).toHaveCount(0);
-  await expect(card(page).getByRole('link', { name: 'Choose a folder' })).toHaveAttribute(
+  await expect(page.locator('[data-cmd-hq-host="notes"]')).toBeVisible();
+  await expect(page.locator('.ws-hq-stations')).toBeVisible();
+  await expect(card(page).getByRole('link', { name: 'Choose Documents' })).toHaveAttribute(
+    'href',
+    '/?panel=today&folder=show&suggest=documents'
+  );
+  await expect(card(page).getByRole('link', { name: 'Choose another folder' })).toHaveAttribute(
     'href',
     '/?panel=today&folder=show'
   );
@@ -108,6 +121,65 @@ test(`welcome, retry-safe note, real brief, preferences and ${hide ? 'Hide' : 'D
     fullPage: true,
     animations: 'disabled'
   });
+
+  // Selecting Documents prepares the real pre-hire card (or a safe fallback),
+  // never starts a look, creates a workspace or completes the folder mission.
+  const folderCalls: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && req.url().includes('/folder-agent/'))
+      folderCalls.push(req.url());
+  });
+  await card(page).getByRole('link', { name: 'Choose Documents' }).click();
+  if (hide) {
+    await expect(
+      page.getByText('Documents could not be chosen. Choose another folder, or try again.')
+    ).toBeVisible();
+    await expect(page.locator('#personalAssistantFolderPathEntry input')).toBeVisible();
+  } else {
+    const consent = page.locator('[data-folder-agent-card="choose"]');
+    await expect(consent).toContainText('Start an agent on Documents');
+    await expect(consent).toContainText('Nothing is created until you hire');
+    await expect(consent.getByRole('button', { name: 'Hire & start' })).toBeVisible();
+  }
+  expect(folderCalls).toHaveLength(1);
+  expect(folderCalls[0]).toContain('/choose');
+  expect(await mission(request, 'pa-show-folder')).not.toBe('completed');
+  // Close the real drawer before returning; its remembered open state is
+  // independent of HQ suggestions and can otherwise cover their controls.
+  await page.locator('#personalAssistantClose').click();
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await page.goto(hqPath);
+  if (natural) {
+    const notes = page.locator('[data-cmd-hq-host="notes"]');
+    await notes.locator('[data-notes-capture]').fill('An idea saved through normal Notes.');
+    await notes.locator('[data-cmd-modal-action="notes-capture"]').click();
+    await expect(notes).toContainText('An idea saved through normal Notes.');
+    await expect(card(page)).toContainText('Your first note is in your Inbox.');
+    await expect(page.locator('[data-hq-firstvisit-note]')).toHaveCount(0);
+  }
+  if (hide || natural) {
+    const beforeMissions = (await json(request, 'get', '/api/progression')).missions;
+    await action(page, 'hide').click(); // directly available with zero actions completed
+    await expect(card(page)).toHaveCount(0);
+    expect(await state(request)).toBe('done');
+    expect((await json(request, 'get', '/api/progression')).missions).toEqual(beforeMissions);
+    await page.reload();
+    await expect(card(page)).toHaveCount(0);
+    return;
+  }
+
+  // A brief can be the first thing tried: no note is required to use it.
+  await action(page, 'brief').click();
+  const brief = page.locator('.ws-cmd-modal-panel.is-daily-brief');
+  await expect(brief).toBeVisible();
+  await expect(brief.locator('[data-brief="body"]')).not.toContainText(/Loading|Generating/, {
+    timeout: 30_000
+  });
+  await expect(brief.locator('[data-brief="body"]')).not.toBeEmpty();
+  await page.getByRole('button', { name: 'Close Daily Brief' }).click();
+  await expect(card(page)).toContainText('Your first brief is ready.');
+  await expect.poll(() => mission(request, 'pa-first-brief')).toBe('completed');
+  expect(await mission(request, 'pa-capture-first-note')).not.toBe('completed');
 
   const before = (await json(request, 'get', `${BRAIN}/inbox`)).inbox.total;
   const captures: { text: string; request_id: string }[] = [];
@@ -122,24 +194,29 @@ test(`welcome, retry-safe note, real brief, preferences and ${hide ? 'Hide' : 'D
     else await route.fulfill({ response });
   });
   const text = 'Remember the quiet HQ journey.';
+  const inlineDraft = page.locator('[data-cmd-hq-host="notes"] [data-notes-capture]');
+  await inlineDraft.fill('Keep this separate Notes draft.');
+  await action(page, 'note').click();
   const input = page.locator('[data-hq-firstvisit-note]');
+  await expect(input).toBeFocused();
   await input.fill(text);
   await action(page, 'save').click();
   await expect(card(page).locator('[aria-live="polite"]')).toContainText('could not confirm');
   await expect(input).toHaveValue(text);
   await expect(input).toHaveAttribute('readonly', '');
   await action(page, 'save').click();
-  await expect(card(page)).toContainText('Make it yours · 1 of 3');
+  await expect(card(page)).toContainText('Saved to your Inbox');
   expect(captures).toHaveLength(2);
   expect(captures[1]).toEqual(captures[0]);
   expect(receipts[1]).toBe(receipts[0]);
   expect((await json(request, 'get', `${BRAIN}/inbox`)).inbox.total).toBe(before + 1);
   await expect.poll(() => mission(request, 'pa-capture-first-note')).toBe('completed');
   await expect(page.locator('[data-cmd-hq-host="notes"]')).toContainText(text);
-  await expect(action(page, 'brief')).toBeFocused();
+  await expect(inlineDraft).toHaveValue('Keep this separate Notes draft.');
+  await expect(card(page)).toBeFocused();
   await page.reload();
   await expect(card(page)).toContainText('Your first note is in your Inbox.');
-  await expect(card(page)).toContainText('Make it yours · 1 of 3');
+  await expect(card(page)).toContainText('Your first brief is ready.');
 
   await action(page, 'show-all').click();
   await expect(card(page)).toHaveClass(/is-bar/);
@@ -153,7 +230,7 @@ test(`welcome, retry-safe note, real brief, preferences and ${hide ? 'Hide' : 'D
   );
   await action(page, 'hide').click();
   await expect(card(page)).toHaveClass(/is-bar/);
-  await expect(card(page)).toContainText('could not be finished');
+  await expect(card(page)).toContainText('could not be dismissed');
   expect(await state(request)).toBe('pending');
   await page.unroute(`**${FINISH}`);
   await action(page, 'continue').click();
@@ -162,14 +239,12 @@ test(`welcome, retry-safe note, real brief, preferences and ${hide ? 'Hide' : 'D
   await expect(card(page)).toHaveClass(/is-full/);
 
   await action(page, 'brief').click();
-  const brief = page.locator('.ws-cmd-modal-panel.is-daily-brief');
   await expect(brief).toBeVisible();
   await expect(brief.locator('[data-brief="body"]')).not.toContainText(/Loading|Generating/, {
     timeout: 30_000
   });
   await expect(brief.locator('[data-brief="body"]')).not.toBeEmpty();
   await page.getByRole('button', { name: 'Close Daily Brief' }).click();
-  await expect(card(page)).toContainText('Make it yours · 2 of 3');
   await expect(card(page)).toContainText('Your first brief is ready.');
   await expect(page.locator('[data-cmd-hq-card="daily-brief"]')).toBeVisible();
   await expect.poll(() => mission(request, 'pa-first-brief')).toBe('completed');
@@ -189,7 +264,7 @@ test(`welcome, retry-safe note, real brief, preferences and ${hide ? 'Hide' : 'D
     await expect(brief).toBeVisible();
     await json(request, 'post', '/api/progression/skip', { quest_id: 'pa-show-folder' });
     await page.getByRole('button', { name: 'Close Daily Brief' }).click();
-    await expect(card(page)).toContainText('Your HQ is yours now.');
+    await expect(card(page)).toContainText('Ready when you are.');
     await action(page, 'done').click();
   }
   await expect(card(page)).toHaveCount(0);

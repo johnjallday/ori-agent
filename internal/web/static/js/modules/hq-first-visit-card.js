@@ -9,7 +9,7 @@ import {
 } from './hq-first-visit.js';
 import { readNoteDraft, writeNoteDraft, saveFirstNote } from './hq-first-note.js';
 import { dailyBriefStatus } from './daily-brief-station.js';
-import { EXPLORE_FOLDER_URL } from './personal-assistant-panel.js';
+import { EXPLORE_FOLDER_URL, DOCUMENTS_FOLDER_URL } from './personal-assistant-panel.js';
 
 const escape = value =>
   String(value ?? '').replace(
@@ -35,6 +35,7 @@ export class HQFirstVisitCard {
     this.savedText = '';
     this.resolvedOnLoad = null;
     this.showAll = null;
+    this.noteOpen = false;
   }
 
   view() {
@@ -87,7 +88,12 @@ export class HQFirstVisitCard {
   }
 
   focus(action) {
-    const selector = action ? `[data-hq-firstvisit-action="${action}"]` : '[data-hq-firstvisit]';
+    const selector =
+      action === 'note-input'
+        ? '[data-hq-firstvisit-note]'
+        : action
+          ? `[data-hq-firstvisit-action="${action}"]`
+          : '[data-hq-firstvisit]';
     this.owner.container?.querySelector?.(selector)?.focus?.({ preventScroll: true });
   }
 
@@ -107,7 +113,7 @@ export class HQFirstVisitCard {
     if (v.card === 'bar')
       return (
         start +
-        `<h3 id="hq-firstvisit-title">${escape(v.journey[2])} · ${escape(v.barProgress)}</h3><div class="ws-hq-firstvisit-controls">${button('continue', L.firstVisitContinue)}${button('hide', L.firstVisitHide)}</div>${live}</section>`
+        `<h3 id="hq-firstvisit-title">${escape(L.firstVisitTitle)}</h3><div class="ws-hq-firstvisit-controls">${button('continue', L.firstVisitContinue)}${button('hide', L.firstVisitHide)}</div>${live}</section>`
       );
     if (v.card === 'finished')
       return (
@@ -127,25 +133,29 @@ export class HQFirstVisitCard {
       writeNoteDraft({ ...draft, sourceId: source.id });
     return (
       start +
-      `<ol class="ws-hq-firstvisit-journey">${v.journey.map((label, index) => `<li${index === 2 ? ' aria-current="step"' : ''}>${index < 2 ? '<span aria-hidden="true">✓</span> ' : ''}${escape(label)}${index === 2 ? ' · ' + escape(v.progress) : ''}</li>`).join('')}</ol>` +
       `<header class="ws-hq-firstvisit-intro">${face}<div>${lead ? `<span class="ws-hq-firstvisit-lead">${escape(lead.name)}</span>` : ''}<h3 id="hq-firstvisit-title">${escape(L.firstVisitTitle)}</h3><p>${escape(L.firstVisitLead)}</p></div></header>` +
-      `<ol class="ws-hq-firstvisit-steps">${v.steps
-        .map((step, index) => {
+      `<ul class="ws-hq-firstvisit-steps">${v.steps
+        .map(step => {
           let action = '';
           if (step.action === 'save')
-            action = `<label for="hq-firstvisit-note">${escape(L.firstNoteField)}</label><textarea id="hq-firstvisit-note" data-hq-firstvisit-note maxlength="4000" rows="2"${this.busy || draft.pendingText ? ' readonly' : ''}>${escape(draft.text)}</textarea>${button('save', step.button, step.disabled)}`;
-          else if (step.action === 'folder' || step.action === 'home')
+            action =
+              this.noteOpen || draft.text
+                ? `<label for="hq-firstvisit-note">${escape(L.firstNoteField)}</label><textarea id="hq-firstvisit-note" data-hq-firstvisit-note maxlength="4000" rows="2"${this.busy || draft.pendingText ? ' readonly' : ''}>${escape(draft.text)}</textarea>${button('save', step.button, step.disabled)}`
+                : button('note', L.firstNoteOpen, step.disabled);
+          else if (step.action === 'folder')
             action = step.disabled
-              ? button(step.action, step.button, true)
-              : `<a class="ws-cmd-agent-action" href="${step.action === 'folder' ? EXPLORE_FOLDER_URL : '/'}">${escape(step.button)}</a>`;
+              ? button('folder', L.firstFolderDocuments, true) + button('folder', step.button, true)
+              : `<div class="ws-hq-firstvisit-controls"><a class="ws-cmd-agent-action" href="${DOCUMENTS_FOLDER_URL}">${escape(L.firstFolderDocuments)}</a><a class="ws-cmd-agent-action" href="${EXPLORE_FOLDER_URL}">${escape(step.button)}</a></div><p class="ws-hq-firstvisit-privacy">${escape(L.firstFolderPrivacy)}</p>`;
+          else if (step.action === 'home')
+            action = `<a class="ws-cmd-agent-action" href="/">${escape(step.button)}</a>`;
           else if (step.action) action = button(step.action, step.button, step.disabled);
-          return `<li class="ws-hq-firstvisit-step${step.resolved ? ' is-resolved' : ''}"><span class="ws-hq-firstvisit-number" aria-hidden="true">${step.resolved ? '✓' : index + 1}</span><div><h4>${escape(step.title)}</h4><p>${escape(step.hint)}</p>${action}</div></li>`;
+          return `<li class="ws-hq-firstvisit-step${step.resolved ? ' is-resolved' : ''}"><span class="ws-hq-firstvisit-check" aria-hidden="true">${step.resolved ? '✓' : '□'}</span><div><h4>${escape(step.title)}${step.resolved ? `<span class="visually-hidden"> — ${escape(step.state === 'skipped' ? L.firstVisitSkipped : L.firstVisitCompleted)}</span>` : ''}</h4><p>${escape(step.hint)}</p>${action}</div></li>`;
         })
-        .join('')}</ol>` +
+        .join('')}</ul>` +
       (v.footer
         ? `<p class="ws-hq-firstvisit-footer">${escape(v.footer)} ${button('tickets', L.firstVisitSeeTickets)}</p>`
         : '') +
-      `<div class="ws-hq-firstvisit-controls">${button('show-all', L.firstVisitShowAll)}${this.error === L.firstVisitLoadError ? button('retry', L.firstVisitRetry) : ''}</div>${live}</section>`
+      `<div class="ws-hq-firstvisit-controls">${button('hide', L.firstVisitHide)}${button('show-all', L.firstVisitShowAll)}${this.error === L.firstVisitLoadError ? button('retry', L.firstVisitRetry) : ''}</div>${live}</section>`
     );
   }
 
@@ -169,6 +179,12 @@ export class HQFirstVisitCard {
 
   async act(action, trigger) {
     if (this.busy) return;
+    if (action === 'note') {
+      this.noteOpen = true;
+      this.owner.render();
+      this.focus('note-input');
+      return;
+    }
     if (action === 'save') return this.save();
     if (action === 'hide' || action === 'done') return this.finish();
     if (action === 'retry') return this.load();
@@ -201,6 +217,7 @@ export class HQFirstVisitCard {
       });
       this.savedText = saved.text;
       await this.load();
+      await this.owner.refreshOpenNotesInbox();
       this.owner.requestNotesData(true);
       this.owner.notesChanged();
     } catch (error) {
@@ -208,7 +225,7 @@ export class HQFirstVisitCard {
     } finally {
       this.busy = false;
       this.owner.render();
-      this.focus(this.savedText ? 'brief' : 'save');
+      this.focus(this.savedText ? undefined : 'save');
     }
   }
 

@@ -53,7 +53,7 @@ test('brief uses the existing panel and refreshes canonical missions on close', 
   await card.act('brief', trigger);
   await card.briefClosed();
   assert.equal(card.view().steps[1].resolved, true);
-  assert.ok(card.view().layout.stationKeys.includes('daily-brief'));
+  assert.equal(card.view().layout.stationKeys, null, 'all normal stations stay available');
   assert.equal(focused, true);
 });
 
@@ -67,7 +67,7 @@ test('last mission resolves to the finished card; already-resolved arrival recor
   card.resolvedOnLoad = false;
   await card.load();
   assert.equal(card.view().card, 'finished');
-  assert.match(card.html(), /Your HQ is yours now/);
+  assert.match(card.html(), /Ready when you are/);
   const previous = globalThis.fetch;
   let posts = 0;
   globalThis.fetch = async () => {
@@ -107,7 +107,7 @@ test('HQ card loads missions, escapes content and uses the real avatar presentat
   assert.match(html, /href="\/\?panel=today&folder=show"/);
 });
 
-test('pending layout leaves out Notes until capture completion, without changing the station source', () => {
+test('pending suggestions keep Notes available before capture completion', () => {
   const { owner, card } = fixture();
   card.missions = missionRows();
   owner.hqNeedsYouHTML = () => '';
@@ -115,13 +115,13 @@ test('pending layout leaves out Notes until capture completion, without changing
   owner.renderFollowUpsHost = () => '';
   owner.hqCards = () => [];
   owner.renderHQRail = () => '';
-  assert.doesNotMatch(owner.renderHQDetails(), /data-cmd-hq-host="notes"/);
+  assert.match(owner.renderHQDetails(), /data-cmd-hq-host="notes"/);
   card.missions = missionRows('completed');
   assert.match(owner.renderHQDetails(), /data-cmd-hq-host="notes"/);
   assert.match(owner.renderHQDetails(), /Your first note is in your Inbox/);
 });
 
-test('successful save refreshes missions and Notes and moves focus to the brief action', async () => {
+test('successful save refreshes missions and Notes without pushing another suggestion', async () => {
   const { owner, card } = fixture();
   card.missions = missionRows();
   card.resolvedOnLoad = false;
@@ -145,8 +145,70 @@ test('successful save refreshes missions and Notes and moves focus to the brief 
   assert.match(card.html(), /Saved to your Inbox: “A reminder”/);
   assert.deepEqual(actions, [
     ['notes', true],
-    ['focus', 'brief']
+    ['focus', undefined]
   ]);
+});
+
+test('a completed suggestion can retain card focus across asynchronous HQ repaints', () => {
+  const { owner } = fixture();
+  const previous = globalThis.document;
+  const focus = [];
+  const card = {
+    hasAttribute: attr => attr === 'data-hq-firstvisit',
+    getAttribute: () => '',
+    focus: options => focus.push(options)
+  };
+  try {
+    globalThis.document = { activeElement: card };
+    owner.container = {
+      contains: node => node === card,
+      querySelectorAll: selector => {
+        assert.equal(selector, '[data-hq-firstvisit]');
+        return [card];
+      }
+    };
+    owner.rememberHQFocus();
+    owner.restoreHQFocus();
+    assert.deepEqual(focus, [{ preventScroll: true }]);
+  } finally {
+    globalThis.document = previous;
+  }
+});
+
+test('refreshing the mounted Inbox preserves its tab and draft, and ignores stale connections', async () => {
+  const { owner } = fixture();
+  const panel = {
+    status: 'ready',
+    tab: 'more',
+    captureDraft: 'Do not lose this',
+    inbox: { total: 0 }
+  };
+  owner._notesPanel = panel;
+  owner.notesPanelOpen = () => true;
+  const painted = [];
+  owner.paintNotesPanel = value => painted.push(value);
+  owner.stationJSON = async path => {
+    assert.equal(path, '/api/personal-assistant/second-brain/inbox');
+    return { inbox: { notes: [{ name: 'saved.md' }], total: 1 } };
+  };
+  await owner.refreshOpenNotesInbox();
+  assert.equal(panel.inbox.total, 1);
+  assert.equal(panel.tab, 'more');
+  assert.equal(panel.captureDraft, 'Do not lose this');
+  assert.deepEqual(painted, [panel]);
+  owner.stationJSON = async () => {
+    owner._notesPanel = { status: 'loading' };
+    return { inbox: { total: 99 } };
+  };
+  await owner.refreshOpenNotesInbox();
+  assert.equal(panel.inbox.total, 1);
+  assert.equal(painted.length, 1);
+  owner._notesPanel = panel;
+  owner.stationJSON = async () => {
+    throw Error('offline');
+  };
+  await assert.doesNotReject(() => owner.refreshOpenNotesInbox());
+  assert.equal(panel.inbox.total, 1);
 });
 
 test('a refused save keeps the draft and server message, ready to retry', async () => {
@@ -188,7 +250,7 @@ test('show everything and Continue stay usable without storage; Hide waits for s
   try {
     await card.act('hide');
     assert.equal(card.state, 'pending');
-    assert.match(card.html(), /could not be finished/);
+    assert.match(card.html(), /could not be dismissed/);
     ok = true;
     await card.act('hide');
     assert.equal(card.view().card, 'none');
@@ -206,4 +268,41 @@ test('failed progression reads cannot mark progress complete and offer an explic
   assert.equal(card.missions, null);
   assert.match(card.html(), /data-hq-firstvisit-action="retry"/);
   assert.equal(card.view().count, 0);
+});
+
+test('suggestions are unnumbered, dismissible and keep the note field behind explicit intent', async () => {
+  const { card } = fixture();
+  card.missions = missionRows();
+  writeNoteDraft({ text: '', requestId: 'optional', sourceId: 'notes' });
+  const html = card.html();
+  assert.match(html, /Things to try/);
+  assert.match(html, /Not now/);
+  assert.doesNotMatch(html, /<textarea|aria-current|of 3|firstvisit-journey/);
+  assert.ok(html.indexOf('Explore a folder with Ori') < html.indexOf('Read your first brief'));
+  assert.match(html, /href="\/\?panel=today&folder=show&suggest=documents"/);
+  const focused = [];
+  card.focus = target => focused.push(target);
+  await card.act('note');
+  assert.match(card.html(), /<textarea/);
+  assert.deepEqual(focused, ['note-input']);
+});
+
+test('Not now dismisses untouched suggestions without skipping or completing missions', async () => {
+  const { card } = fixture();
+  card.missions = missionRows();
+  const before = structuredClone(card.missions);
+  const calls = [];
+  const previous = globalThis.fetch;
+  globalThis.fetch = async (path, options) => {
+    calls.push([path, JSON.parse(options.body)]);
+    return { ok: true };
+  };
+  try {
+    await card.act('hide');
+    assert.equal(card.state, 'done');
+    assert.deepEqual(card.missions, before);
+    assert.deepEqual(calls, [['/api/personal-hq/first-visit-state', { state: 'done' }]]);
+  } finally {
+    globalThis.fetch = previous;
+  }
 });
