@@ -5478,7 +5478,7 @@ function renderSourceCreationReview() {
       canShowOnMap: Boolean(review.home && review.result?.id),
       canMoveGroup: Boolean(review.home && review.result?.id),
       positionFailed: review.positionFailed,
-      busy: review.observing,
+      busy: review.observing || state.busy,
       message:
         review.message ||
         'Observing the original setup. Reading status never starts or continues work.'
@@ -6001,6 +6001,22 @@ export function setupEntryName(offer, action) {
 }
 
 async function startOneCardSetup(action) {
+  const offer = state.offer;
+  if (!offer?.id || state.busy || conversationReviewLoading() || prerequisites.active()) return;
+  // Refuse invalid local input before entering or latching the reviewed
+  // confirmation. Otherwise an overlong brief can strand the inert review in
+  // its accepted/pending state even though no request was dispatched.
+  const briefProblem = globalThis.OriFolderSetupVisual.briefError(briefFor(offer));
+  if (briefProblem) {
+    if (sourceCreationReview && sourceReviewCurrent(sourceCreationReview)) {
+      sourceCreationReview.pending = false;
+      sourceCreationReview.message = briefProblem;
+    }
+    showError(briefProblem);
+    render();
+    elements()?.brief?.focus();
+    return;
+  }
   if (
     musicSetupOffer(state.offer) &&
     !action?.reviewedSourceKey &&
@@ -6043,7 +6059,6 @@ async function startOneCardSetup(action) {
     )
       return;
   }
-  const offer = state.offer;
   const owner =
     sourceCreationReview && sourceReviewCurrent(sourceCreationReview) ? sourceCreationReview : null;
   const responseCurrent = reviewResponseGuard(offer);
@@ -6061,12 +6076,6 @@ async function startOneCardSetup(action) {
   const digest = String(offer.plan?.digest || offer.setup?.plan_digest || '');
   if (!digest) {
     showError('This setup has no plan to confirm. Choose Adjust… to set it up step by step.');
-    return;
-  }
-  const briefProblem = globalThis.OriFolderSetupVisual.briefError(briefFor(offer));
-  if (briefProblem) {
-    showError(briefProblem);
-    elements()?.brief?.focus();
     return;
   }
   state.busy = true;
