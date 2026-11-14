@@ -17,9 +17,8 @@ test('Explore a folder starts an agent and reports what it found without a model
   request
 }) => {
   test.skip(!sandbox, 'needs the sandbox path: --sandbox-env ORI_FOLDER_AGENT_SANDBOX');
-  // The server's known-folder identity must be resolvable even for an
-  // ordinary folder. Never borrow the developer's real Downloads directory.
-  await mkdir(join(sandbox, 'Downloads'), { recursive: true, mode: 0o750 });
+  // Missing known folders must not block this ordinary folder. The sandbox
+  // never borrows the developer's real Downloads directory.
   const folder = join(sandbox, 'Music', 'One Song');
   await mkdir(join(folder, 'Audio'), { recursive: true, mode: 0o750 });
   await writeFile(join(folder, 'Song.rpp'), '<REAPER_PROJECT\n>\n', { mode: 0o600 });
@@ -98,9 +97,11 @@ test('Explore a folder starts an agent and reports what it found without a model
   await expect(report).toContainText('Search for more tools needs a model');
   // Without a model the steps are Ori's default: the one REAPER step, ticked,
   // and no reason line (there was no agent plan to fall back from).
-  await expect(report.locator('.folder-agent-card__run').getByRole('heading')).toHaveText('Steps');
   await expect(
-    report.locator('[data-step="reaper-tools"] .folder-agent-card__line-name')
+    report.locator('.folder-agent-card__run').getByRole('heading', { name: 'Steps', exact: true })
+  ).toHaveText('Steps');
+  await expect(
+    report.locator('[data-step="reaper-tools"] .folder-agent-card__line-name').first()
   ).toHaveText(/REAPER tools (to|and connect them to) One Song$/);
   await expect(report.locator('[data-step="reaper-tools"] input')).toBeChecked();
   await expect(report.locator('.folder-agent-card__run-head')).toHaveText('Plan · 1 step');

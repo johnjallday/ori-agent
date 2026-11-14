@@ -67,6 +67,76 @@ func TestLeadConversation_OnceAcrossTabsAndDeletedHistory(t *testing.T) {
 	}
 }
 
+func TestLeadConversation_FolderReportBeforeWelcome(t *testing.T) {
+	for _, mode := range []string{"report only", "user replied", "other assistant message", "not enrolled", "second conversation", "deleted report"} {
+		t.Run(mode, func(t *testing.T) {
+			store, cleanup := setupHybridStore(t, 10)
+			defer cleanup()
+			h := store.(*hybridStore)
+			if err := store.CreateWorkspace(t.Context(), &Workspace{ID: "ws", Name: "Downloads", OwnerUserID: "local", Status: WorkspaceStatusActive}); err != nil {
+				t.Fatal(err)
+			}
+			in := LeadConversationInput{WorkspaceID: "ws", OwnerUserID: "local", AgentName: "Downloads Manager", AgentInstanceID: "hired", Introduction: "Hello."}
+			if mode != "not enrolled" {
+				if err := h.EnrollWelcome(t.Context(), WelcomeScope{WorkspaceID: "ws", OwnerUserID: "local", AgentName: in.AgentName, AgentInstanceID: "hired"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			report, _, err := h.DeliverFolderReport(t.Context(), FolderReportInput{WorkspaceID: "ws", AgentName: in.AgentName, ReportKey: "look-1", Content: "Folder look report."})
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch mode {
+			case "user replied", "other assistant message":
+				role := RoleUser
+				if mode == "other assistant message" {
+					role = RoleAssistant
+				}
+				if err := store.AddMessage(t.Context(), report.SessionID, &Message{Role: role, Content: "Another conversation", CreatedAt: time.Now()}); err != nil {
+					t.Fatal(err)
+				}
+			case "second conversation":
+				if err := store.CreateSession(t.Context(), &Session{AgentName: in.AgentName, FolderID: "ws"}); err != nil {
+					t.Fatal(err)
+				}
+			case "deleted report":
+				if err := store.DeleteSession(t.Context(), report.SessionID); err != nil {
+					t.Fatal(err)
+				}
+				// An existing conversation is never adopted merely because an
+				// old folder-report receipt exists for the same workspace.
+				if err := store.CreateSession(t.Context(), &Session{AgentName: in.AgentName, FolderID: "ws"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			first, err := h.EnsureLeadConversation(t.Context(), in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode != "report only" {
+				if first.Changed || first.SessionID != "" {
+					t.Fatal("adopted an unproven or user-owned conversation", first)
+				}
+				return
+			}
+			if first.SessionID != report.SessionID || !first.Changed || !first.AwaitingAssessment {
+				t.Fatal("host report suppressed the pending welcome", first)
+			}
+			in.Assessment = "Saved filing batch ready for review."
+			for run := range 2 {
+				out, err := h.EnsureLeadConversation(t.Context(), in)
+				if err != nil || out.SessionID != report.SessionID || out.Changed != (run == 0) || out.AwaitingAssessment {
+					t.Fatal("filing welcome missing or repeated", out, err)
+				}
+			}
+			conversation, err := store.GetSession(t.Context(), report.SessionID)
+			if err != nil || len(conversation.Messages) != 3 || conversation.Messages[2].Content != in.Assessment {
+				t.Fatal("unexpected conversation", conversation, err)
+			}
+		})
+	}
+}
+
 func TestLeadConversation_FencesOwnershipVersionAndUserConversations(t *testing.T) {
 	for _, mode := range []string{"existing", "user replied", "owner", "version", "moved", "replacement"} {
 		t.Run(mode, func(t *testing.T) {

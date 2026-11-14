@@ -29,7 +29,7 @@ function fixture(t) {
   executable(join(bin, 'lsof'), 'exit 1'); // The fake server binds no socket.
   executable(
     join(repo, 'bin/ori-agent'),
-    'trap "exit 0" TERM INT; printf "%s:%s:%s\\n" "$$" "$HOME" "$PWD" >> "$HOME/runs"; while :; do sleep 0.1; done'
+    'trap "exit 0" TERM INT; printf "%s:%s:%s:%s\\n" "$$" "$HOME" "$PWD" "$XDG_CONFIG_HOME" >> "$HOME/runs"; while :; do sleep 0.1; done'
   );
   executable(
     join(repo, 'scripts/e2e.sh'),
@@ -49,7 +49,8 @@ function fixture(t) {
           ...process.env,
           PATH: `${bin}:${process.env.PATH}`,
           TMPDIR: temp,
-          E2E_TEST_REPO: repo
+          E2E_TEST_REPO: repo,
+          XDG_CONFIG_HOME: join(root, 'unrelated-user-config')
         }
       }
     );
@@ -65,9 +66,10 @@ test('explicit reuse starts and stops a new server in the same owned HOME', t =>
   const runs = readFileSync(join(owned, 'runs'), 'utf8').trim().split('\n');
   assert.equal(runs.length, 2);
   const pids = runs.map(row => {
-    const [pid, home, cwd] = row.split(':');
+    const [pid, home, cwd, xdgConfig] = row.split(':');
     assert.equal(home, owned);
     assert.equal(cwd, owned);
+    assert.equal(xdgConfig, join(owned, '.config'));
     assert.throws(() => process.kill(Number(pid), 0), { code: 'ESRCH' });
     return pid;
   });

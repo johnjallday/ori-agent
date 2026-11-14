@@ -326,7 +326,7 @@ func releaseOf(ready Readiness, kind, key string) *ReleaseFacts {
 
 // RequiredCandidates are the candidates the stage needs (FR20): the
 // integration for a project at the fed folder, the Home provider for a
-// portfolio, File Curator for a dump. They come from the host's capability
+// portfolio, File Janitor for a dump. They come from the host's capability
 // table and installed-app check only, so they exist with or without a model.
 func RequiredCandidates(facts foldermap.Facts, ready Readiness) []Candidate {
 	var out []Candidate
@@ -383,8 +383,8 @@ func RequiredCandidates(facts foldermap.Facts, ready Readiness) []Candidate {
 	}
 	if facts.Dump && facts.RootProject == nil {
 		out = append(out, Candidate{
-			ID: "file-curator", Kind: KindFileCurator, Name: "File Curator", Source: SourceTable,
-			Action: ActionAdd, Required: true, Detail: "keeps the loose files here tidy",
+			ID: "file-curator", Kind: KindFileCurator, Name: "File Janitor", Source: SourceTable,
+			Action: ActionAdd, Required: true, Detail: "adds File Janitor; the folder's agent explains proposed filing",
 			Why: "The files sitting directly in this folder are of many kinds.",
 		})
 	}

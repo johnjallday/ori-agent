@@ -87,6 +87,11 @@ gains no tool for backups. A decline never hides this line. Covered means a
 configured source contains the folder and a completed backup was observed; it
 is computed from stored evidence only and never checks a drive.
 
+A fed **Documents** folder shows this same stored sentence and protection link
+on its folder report, next to the optional, unticked File Janitor step. Showing
+the report makes no new backup check. Documents remains in the general adopted-
+folder count unless the owner explicitly sets up File Janitor to manage it.
+
 ## Optional protection advice while filing
 
 File Janitor review has its own **Check protection** note for the exact folder

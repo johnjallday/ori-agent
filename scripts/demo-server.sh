@@ -106,6 +106,6 @@ cd "$sandbox"
 desktop_off=1
 if [[ "$native_picker" == "1" ]]; then desktop_off=0; fi
 if [[ "$open_browser" == "1" ]]; then
-	exec env -u NO_BROWSER HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary"
+	exec env -u NO_BROWSER HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/.config" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary"
 fi
-exec env HOME="$sandbox" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary"
+exec env HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/.config" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary"

@@ -61,7 +61,7 @@ func TestRootIdentity_ExactPhysicalKnownRoot(t *testing.T) {
 		t.Fatalf("case=%+v want %s", got, want)
 	}
 	for _, resolver := range []func(string) (string, error){nil, func(string) (string, error) { return "", errors.New("unavailable") }, func(string) (string, error) { return filepath.Join(home, "missing"), nil }} {
-		if got := ResolveRootIdentity(downloads, resolver); got.Policy != folderlook.RootUnresolved || got.Binding != "" {
+		if got := ResolveRootIdentity(downloads, resolver); got.Policy != folderlook.RootOrdinary || got.Binding == "" {
 			t.Fatalf("failure=%+v", got)
 		}
 	}
@@ -164,8 +164,8 @@ func TestDownloads_SparseRootMarkerAndUnavailableIdentity(t *testing.T) {
 		assertInbox(t, report)
 		h.svc.deps.KnownFolderRoot = func(string) (string, error) { return "", errors.New("missing") }
 		unknown, _ := h.svc.View(t.Context(), "u1", v.WorkspaceID)
-		if unknown.Plan.Runnable || !strings.Contains(unknown.PolicyNote, "could not verify") {
-			t.Fatalf("unknown=%+v", unknown)
+		if unknown.PolicyNote != "" {
+			t.Fatalf("missing peer made this available folder unresolved: %+v", unknown)
 		}
 		if _, err := h.svc.SetUp(t.Context(), "u1", v.WorkspaceID, SetUpRequest{PlanDigest: report.Plan.Digest}); !errors.Is(err, personalassistant.ErrFolderPlanChanged) {
 			t.Fatal(err)

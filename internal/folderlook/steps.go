@@ -106,7 +106,7 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 			}
 		case KindFileCurator:
 			step.Kind = StepFileCurator
-			step.Title = fmt.Sprintf("Add File Janitor to %s, with File Curator", folderName)
+			step.Title = fmt.Sprintf("Add File Janitor to %s", folderName)
 		case KindSkill, KindMCP, KindPlugin:
 			step.Kind = StepAddOn
 			step.Default = c.Ranked
@@ -124,7 +124,12 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 		default:
 			continue
 		}
-		step.Handle = handles.take(c.Name, step.Kind)
+		handleName := c.Name
+		if c.Kind == KindFileCurator {
+			// Keep saved reports' issued handle when the display name changes.
+			handleName = "file-curator"
+		}
+		step.Handle = handles.take(handleName, step.Kind)
 		if step.Kind == StepHome {
 			homeHandle, homeLabel = step.Handle, c.Name
 		}

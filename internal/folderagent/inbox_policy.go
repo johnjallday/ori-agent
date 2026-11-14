@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -22,18 +23,10 @@ type RootIdentity struct {
 // symlink aliases and the actual volume's case rules). It never scans contents.
 func ResolveRootIdentity(root string, known func(string) (string, error)) RootIdentity {
 	unknown := RootIdentity{Policy: folderlook.RootUnresolved}
-	if known == nil || !filepath.IsAbs(root) {
+	if !filepath.IsAbs(root) {
 		return unknown
 	}
-	downloads, err := known("downloads")
-	if err != nil || !filepath.IsAbs(downloads) {
-		return unknown
-	}
-	root, err = filepath.EvalSymlinks(root)
-	if err != nil {
-		return unknown
-	}
-	downloads, err = filepath.EvalSymlinks(downloads)
+	root, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return unknown
 	}
@@ -41,15 +34,38 @@ func ResolveRootIdentity(root string, known func(string) (string, error)) RootId
 	if err != nil || !r.IsDir() {
 		return unknown
 	}
-	d, err := os.Stat(downloads) // #nosec G304 G703 -- server-known folder resolver
-	if err != nil || !d.IsDir() {
-		return unknown
-	}
 	policy := folderlook.RootOrdinary
-	if os.SameFile(r, d) {
-		policy = folderlook.RootDownloads
+	parts := []string{"folder-root-policy-v2", root}
+	for _, candidate := range []struct {
+		id     string
+		policy folderlook.RootPolicy
+	}{{"downloads", folderlook.RootDownloads}, {"desktop", folderlook.RootDesktop}, {"documents", folderlook.RootDocuments}} {
+		parts = append(parts, candidate.id)
+		path := ""
+		if known != nil {
+			path, err = known(candidate.id)
+		}
+		if known == nil || err != nil || !filepath.IsAbs(path) {
+			parts = append(parts, "absent")
+			continue
+		}
+		path, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			parts = append(parts, "absent")
+			continue
+		}
+		d, err := os.Stat(path) // #nosec G304 G703 -- server-known folder resolver
+		if err != nil || !d.IsDir() {
+			parts = append(parts, "absent")
+			continue
+		}
+		parts = append(parts, path)
+		if policy == folderlook.RootOrdinary && os.SameFile(r, d) {
+			policy = candidate.policy
+		}
 	}
-	sum := sha256.Sum256([]byte("folder-root-policy-v1\x00" + root + "\x00" + downloads + "\x00" + string(policy)))
+	parts = append(parts, string(policy))
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
 	return RootIdentity{Policy: policy, Binding: hex.EncodeToString(sum[:])}
 }
 
@@ -85,7 +101,7 @@ func (s *Service) effectiveRecord(rec *Record) *Record {
 	if identity.Policy != folderlook.RootOrdinary {
 		copy.Candidates = folderlook.CandidatesForPolicy(identity.Policy, rec.Facts, folderlook.Readiness{})
 		copy.Stage = "folder"
-		if rec.State == StateSetUp && rec.Setup != nil && rec.Setup.Status == personalassistant.FolderSetupStopped {
+		if rec.State == StateSetUp && rec.Setup != nil && rec.Setup.Status == personalassistant.FolderSetupStopped && !setupMatchesPolicy(&copy) {
 			// An incomplete run is not a historical completed receipt. Project
 			// current choices rather than presenting old lines as a retry.
 			copy.Setup, copy.State = nil, StateReported
@@ -100,6 +116,27 @@ func (s *Service) effectiveRecord(rec *Record) *Record {
 		}
 	}
 	return &copy
+}
+
+// setupMatchesPolicy preserves current partial-run progress and recovery
+// messages. Only a stopped plan whose consequences no longer match the host's
+// current policy is replaced by fresh choices; a modern association failure
+// must not disappear merely because its root is a catch-all folder.
+func setupMatchesPolicy(rec *Record) bool {
+	if rec.Setup == nil {
+		return false
+	}
+	plan := BuildPlan(*rec, rec.Setup.Selected)
+	if !plan.Runnable || plan.Stage != rec.Setup.Stage || len(plan.Lines) != len(rec.Setup.Lines) {
+		return false
+	}
+	for i, line := range plan.Lines {
+		saved := rec.Setup.Lines[i]
+		if line.Kind != saved.Kind || line.Name != saved.Name || line.Outcome != saved.Outcome || line.Step != saved.Step {
+			return false
+		}
+	}
+	return true
 }
 
 // CheckPlan rebinds just before dispatch. Production uses it before any install,

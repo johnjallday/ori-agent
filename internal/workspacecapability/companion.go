@@ -187,9 +187,18 @@ func (s *Service) companionNameFor(ws *workspace.Workspace, instanceID string) s
 	return name
 }
 
-// AssociateCompanion is explicit recovery for a legacy or ambiguous association.
-// It replaces only the association, never an attachment, definition or tool grant.
-func (s *Service) AssociateCompanion(workspaceID, capabilityID, instanceID string) (CompanionResult, error) {
+// CompanionAssociationOptions constrains a host-driven association. Manual
+// recovery omits it so the user can explicitly replace an old association.
+type CompanionAssociationOptions struct {
+	// ExpectedLead is the agent chosen when the folder was hired. Check it
+	// under the same lock as the write; never adopt a changed lead or replace
+	// another companion on behalf of a saved folder plan.
+	ExpectedLead string
+}
+
+// AssociateCompanion replaces only the association, never an attachment,
+// definition or tool grant. Without options it is explicit settings recovery.
+func (s *Service) AssociateCompanion(workspaceID, capabilityID, instanceID string, options ...CompanionAssociationOptions) (CompanionResult, error) {
 	def, err := s.resolveInstallable(capabilityID)
 	if err != nil {
 		return CompanionResult{}, err
@@ -203,6 +212,21 @@ func (s *Service) AssociateCompanion(workspaceID, capabilityID, instanceID strin
 		if !ok {
 			return &Error{Code: CodeCapabilityNotInstalled, Message: "The capability is no longer installed."}
 		}
+		if len(options) > 0 {
+			instance, unique := w.FindUniqueAgentInstance(options[0].ExpectedLead, "")
+			if !unique || instance.ID != instanceID {
+				return &Error{Code: CodeCompanionFailed, Message: "The folder's agent attachment is missing or ambiguous. Choose one current workspace agent in File Janitor settings. File Janitor still works without an agent."}
+			}
+			lead, unique := w.FindUniqueAgentInstance(w.EntryAgentName(), "")
+			if !unique || lead.ID != instanceID {
+				return &Error{Code: CodeCompanionFailed, Message: "The folder's lead agent changed. Choose the intended Curator in File Janitor settings. File Janitor still works without an agent."}
+			}
+			existing := record.ResourcesOfKind(workspace.ResourceCompanionAgent)
+			if len(existing) > 1 || (len(existing) == 1 && existing[0].ID != instanceID) {
+				return &Error{Code: CodeCompanionFailed, Message: "File Janitor already has a different or ambiguous Curator. Choose the intended agent in File Janitor settings. File Janitor still works without an agent."}
+			}
+			result.AlreadyPresent = len(existing) == 1
+		}
 		name := s.companionNameFor(w, instanceID)
 		if name == "" {
 			return &Error{Code: CodeCompanionFailed, Message: "Choose one current workspace agent. The selected attachment is unavailable or ambiguous."}
@@ -212,7 +236,7 @@ func (s *Service) AssociateCompanion(workspaceID, capabilityID, instanceID strin
 		}
 		// Recovery never acquires ownership of an existing attachment.
 		w.RecordCapabilityResource(def.ID, workspace.CapabilityResource{Kind: workspace.ResourceCompanionAgent, ID: instanceID, Shared: true})
-		result = CompanionResult{AgentInstanceID: instanceID, DisplayName: name}
+		result.AgentInstanceID, result.DisplayName = instanceID, name
 		return nil
 	})
 	return result, err

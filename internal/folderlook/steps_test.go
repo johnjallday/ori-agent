@@ -119,7 +119,7 @@ func TestSteps_IntegrationTitleFollowsThePlugin(t *testing.T) {
 func TestSteps_DumpAndSingleProject(t *testing.T) {
 	dump := Steps("Messy", foldermap.Facts{Dump: true, RootLooseFiles: 36, RootLooseKinds: 6},
 		RequiredCandidates(foldermap.Facts{Dump: true}, Readiness{}))
-	if len(dump) != 1 || dump[0].Handle != "file-curator" || !dump[0].Default || dump[0].Title != "Add File Janitor to Messy, with File Curator" {
+	if len(dump) != 1 || dump[0].Handle != "file-curator" || !dump[0].Default || dump[0].Title != "Add File Janitor to Messy" {
 		t.Fatalf("dump steps = %+v", dump)
 	}
 	song := foldermap.Facts{RootProject: &foldermap.Project{Shape: "audio", Format: "reaper", Marker: "*.rpp"}}

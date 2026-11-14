@@ -14,10 +14,12 @@
 #   Label 2026/               six songs six folders deep (Home stage at depth 6)
 #   Three Drafts/             three manuscripts under Drafts/ (Group stage)
 #   Messy/                    many boxes, nothing recognized near the top
-#   Loose Files/              36 loose files of six kinds (a dump: File Curator)
+#   Loose Files/              36 loose files of six kinds (a dump: File Janitor)
+#   Desktop/, Downloads/, Documents/, Music/  four one-agent-per-folder shapes
 #
 # Files are tiny placeholders; nothing is read by the walk.
 set -euo pipefail
+umask 027
 
 dir="${1:-}"
 if [[ -z "$dir" || ! -d "$dir" ]]; then
@@ -37,6 +39,7 @@ esac
 put() {
   mkdir -p "$(dirname "$dir/$1")"
   printf '%s\n' "${2:-x}" >"$dir/$1"
+  chmod 600 "$dir/$1"
 }
 
 put "One Song/Song.rpp" "<REAPER_PROJECT"
@@ -75,12 +78,32 @@ done
 put "Messy/Clients/Folder 40/Deep/repo/go.mod" "module example.com/repo"
 
 # 36 loose files of six kinds sitting directly in the folder: a dump (Tools
-# stage, File Janitor in place with File Curator).
+# stage, File Janitor in place with the hired agent as Curator).
 for i in $(seq -w 1 6); do
   for kind in pdf jpg zip docx dmg csv; do put "Loose Files/file-$i.$kind"; done
 done
 
+# Known-folder shapes: intended only beneath an isolated sandbox HOME.
+for n in $(seq 1 8); do put "Desktop/Projects/Song-$n/Song.rpp" "<REAPER_PROJECT"; done
+for n in $(seq 1 12); do put "Desktop/screenshot-$n.png"; done
+for n in $(seq 1 7); do put "Downloads/Projects/Software/Project-$n/go.mod" "module fixture"; done
+for n in $(seq 1 5); do put "Downloads/Projects/Songs/Song-$n/Song.rpp" "<REAPER_PROJECT"; done
+for n in $(seq 1 3); do put "Downloads/Projects/Writing/Draft-$n/outline.md" "# Draft"; done
+for n in $(seq 1 35); do
+  for kind in pdf png zip dmg csv txt; do put "Downloads/loose-$n.$kind"; done
+done
+put "Documents/Projects/Song.rpp" "<REAPER_PROJECT"
+for n in $(seq 1 5); do
+  for kind in pdf png zip docx csv txt jpg; do put "Documents/loose-$n.$kind"; done
+done
+for n in $(seq 1 600); do
+  for child in 1 2 3 4; do mkdir -p "$dir/Documents/Unopened-$n/Child-$child"; done
+done
+for n in 1 2; do put "Music/Projects/Song-$n/Song.rpp" "<REAPER_PROJECT"; done
+put "Music/Other/audio.wav"
+put "Music/Notes/notes.txt"
+
 echo "Fixtures written under $dir:"
-for name in "One Song" "Ori Music Demo" "Label 2026" "Three Drafts" "Messy" "Loose Files"; do
+for name in "One Song" "Ori Music Demo" "Label 2026" "Three Drafts" "Messy" "Loose Files" "Desktop" "Downloads" "Documents" "Music"; do
   echo "  $dir/$name"
 done

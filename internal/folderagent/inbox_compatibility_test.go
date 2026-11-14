@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -60,6 +61,53 @@ func TestDownloads_StoppedLegacyRetryNeedsFreshChoicesAndDoesNotReviveGoal(t *te
 	}
 	if done.Plan.Runnable || strings.Contains(done.StageLine, "group") || strings.Contains(done.StageLine, "Home") {
 		t.Fatal("completed receipt became a new structural offer")
+	}
+}
+
+func TestDownloads_CurrentStoppedPlanKeepsItsRecoveryMessage(t *testing.T) {
+	root := build(t, "a.pdf", "b.png")
+	h := downloadsHarness(t, root)
+	v := h.start(t, "")
+	view, _ := h.svc.View(t.Context(), "u1", v.WorkspaceID)
+	message := "The folder's agent attachment is missing or ambiguous. File Janitor still works without an agent."
+	_, err := h.svc.deps.Store.Update(v.WorkspaceID, func(r *Record) error {
+		r.State = StateSetUp
+		lines := append([]personalassistant.FolderPlanLine(nil), view.Plan.Lines...)
+		for i := range lines {
+			if lines[i].Kind == personalassistant.FolderPlanAgents {
+				lines[i].State, lines[i].Progress = personalassistant.FolderLineFailed, message
+			}
+		}
+		r.Setup = &Setup{Stage: view.Plan.Stage, Selected: view.Plan.Selected, Lines: lines,
+			Status: personalassistant.FolderSetupStopped, StopReason: personalassistant.FolderStopFailed}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := h.svc.deps.Store.Read(v.WorkspaceID)
+	restarted := NewService(h.svc.deps)
+	stopped, err := restarted.View(t.Context(), "u1", v.WorkspaceID)
+	if err != nil || stopped.Setup == nil || stopped.Setup.Status != personalassistant.FolderSetupStopped {
+		t.Fatal("current failure was replaced by fresh choices", stopped.Setup, err)
+	}
+	found := false
+	for _, line := range stopped.Setup.Lines {
+		found = found || line.Progress == message
+	}
+	if !found {
+		t.Fatal("plain recovery message was hidden", stopped.Setup.Lines)
+	}
+	after, _ := h.svc.deps.Store.Read(v.WorkspaceID)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatal("reading the failure rewrote its evidence")
+	}
+	if _, err := restarted.SetUp(t.Context(), "u1", v.WorkspaceID, SetUpRequest{PlanDigest: stopped.Plan.Digest, Selected: stopped.Plan.Selected}); err != nil {
+		t.Fatal("current stopped plan cannot retry", err)
+	}
+	restarted.Wait()
+	if len(h.setups.runs) != 1 {
+		t.Fatal("retry did not dispatch exactly once")
 	}
 }
 

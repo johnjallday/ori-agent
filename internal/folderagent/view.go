@@ -41,21 +41,23 @@ type View struct {
 	Progress     Progress `json:"progress"`
 	ProgressLine string   `json:"progress_line,omitempty"`
 
-	PolicyNote    string                 `json:"policy_note,omitempty"`
-	ExploreFolder bool                   `json:"explore_folder,omitempty"`
-	FactsLine     string                 `json:"facts_line,omitempty"`
-	StageLine     string                 `json:"stage_line,omitempty"`
-	Stage         foldermap.Stage        `json:"stage,omitempty"`
-	Candidates    []folderlook.Candidate `json:"candidates,omitempty"`
-	NextFolders   []string               `json:"next_folders,omitempty"`
-	ModelSentence string                 `json:"model_sentence,omitempty"`
-	ToolsSentence string                 `json:"tools_sentence,omitempty"`
-	Actions       []string               `json:"actions,omitempty"`
-	Plan          *PlanView              `json:"plan,omitempty"`
-	Setup         *Setup                 `json:"setup,omitempty"`
-	Failure       string                 `json:"failure,omitempty"`
-	Nested        *WorkspaceRef          `json:"nested,omitempty"`
-	UpdatedAt     time.Time              `json:"updated_at"`
+	ProjectHolders *ProjectHoldersView    `json:"project_holders,omitempty"`
+	RootPolicy     folderlook.RootPolicy  `json:"root_policy,omitempty"`
+	PolicyNote     string                 `json:"policy_note,omitempty"`
+	ExploreFolder  bool                   `json:"explore_folder,omitempty"`
+	FactsLine      string                 `json:"facts_line,omitempty"`
+	StageLine      string                 `json:"stage_line,omitempty"`
+	Stage          foldermap.Stage        `json:"stage,omitempty"`
+	Candidates     []folderlook.Candidate `json:"candidates,omitempty"`
+	NextFolders    []string               `json:"next_folders,omitempty"`
+	ModelSentence  string                 `json:"model_sentence,omitempty"`
+	ToolsSentence  string                 `json:"tools_sentence,omitempty"`
+	Actions        []string               `json:"actions,omitempty"`
+	Plan           *PlanView              `json:"plan,omitempty"`
+	Setup          *Setup                 `json:"setup,omitempty"`
+	Failure        string                 `json:"failure,omitempty"`
+	Nested         *WorkspaceRef          `json:"nested,omitempty"`
+	UpdatedAt      time.Time              `json:"updated_at"`
 
 	// Premise is "This looks like a <kind> folder" and its answer
 	// (confirm-and-visible-installs FR1–FR6); nil when the folder is not asked.
@@ -252,8 +254,13 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	v.FactsLine = foldermap.FactsLine(rec.Facts)
 	v.Stage = rec.Stage
 	v.StageLine = folderlook.DefaultLine(folderlook.StepsForPolicy(rec.RootPolicy, rec.FolderName, rec.Facts, rec.Candidates))
+	v.ProjectHolders = projectHoldersView(rec)
+	v.RootPolicy = rec.RootPolicy
 	v.PolicyNote = folderlook.PolicyLine(rec.RootPolicy)
-	v.ExploreFolder = rec.RootPolicy == folderlook.RootDownloads
+	v.ExploreFolder = rec.RootPolicy.IsCatchAll()
+	if rec.RootPolicy == folderlook.RootDocuments {
+		v.StageLine = "Documents stays a folder with its agent."
+	}
 	v.Candidates = rec.Candidates
 	v.NextFolders = nextFolders(rec.Facts)
 	v.ModelSentence = modelSentence(rec)
@@ -814,8 +821,8 @@ func BuildPlan(rec Record, selected []string) Plan {
 			}
 		case folderlook.KindFileCurator:
 			// File Janitor goes into this workspace in place (the folder is
-			// already its anchor), and File Curator joins as its companion.
-			janitor, curator := "Adds File Janitor to "+rec.WorkspaceName, "Adds File Curator"
+			// already its anchor); the hired agent explains proposed filing.
+			janitor, curator := "Adds File Janitor to "+rec.WorkspaceName, rec.AgentName+" explains proposed filing"
 			plan.Lines = append(plan.Lines,
 				personalassistant.FolderPlanLine{
 					Kind: FolderPlanCapability, Name: janitor, Outcome: janitor,
@@ -823,7 +830,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 				},
 				personalassistant.FolderPlanLine{
 					Kind: personalassistant.FolderPlanAgents, Name: curator, Outcome: curator,
-					Detail: "It explains proposed filing; you approve every move.",
+					Detail: "You approve every move.",
 				})
 		case folderlook.KindSkill, folderlook.KindMCP, folderlook.KindPlugin:
 			line := addOnLine(c, rec.WorkspaceName)
@@ -859,6 +866,9 @@ func BuildPlan(rec Record, selected []string) Plan {
 	}
 	if rec.RootPolicy != folderlook.RootOrdinary {
 		plan.DefaultReason = "Ori refreshed the setup choices for this folder. Review and confirm the current plan."
+		if rec.RootPolicy == folderlook.RootDocuments {
+			plan.DefaultReason = "Documents stays a folder with its agent. File Janitor is optional."
+		}
 		if rec.RootPolicy == folderlook.RootUnresolved {
 			plan.Unavailable = folderlook.PolicyLine(rec.RootPolicy)
 		}

@@ -3953,12 +3953,19 @@ test('Settings reports built-in guidance for the verified Curator', () => {
   });
   panel._setBatch(null, [], CATEGORIES);
   openConsole(
-    statusFixture({ guidance: { bundled: true, available: true, agent_instance_id: 'agent-1' } })
+    statusFixture({
+      guidance: {
+        bundled: true,
+        available: true,
+        agent_instance_id: 'agent-1',
+        agent_name: 'Downloads Manager'
+      }
+    })
   );
   panel._selectTab('settings');
 
   const body = text(doc);
-  assert.match(body, /A Curator is helping in this workspace/);
+  assert.match(body, /Downloads Manager is helping in this workspace/);
   assert.match(body, /cannot approve, move, or delete/);
   assert.match(body, /Built-in filing and backup guidance is available/);
   assert.match(body, /not an enabled user skill or permission/);

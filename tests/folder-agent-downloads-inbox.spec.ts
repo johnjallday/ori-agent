@@ -93,7 +93,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
     .filter({ hasText: 'Downloads stays an inbox' });
   await expect(report).toBeVisible({ timeout: 30_000 });
   await expect(report.locator('[data-step]')).toHaveCount(1);
-  await expect(report).toContainText('Add File Janitor to Downloads, with File Curator');
+  await expect(report).toContainText('Add File Janitor to Downloads');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('7 software projects');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('5 REAPER songs');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('3 manuscripts');
@@ -117,6 +117,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
     exact: true
   });
   if (await closeAssistant.isVisible()) await closeAssistant.click();
+  await page.getByRole('button', { name: 'Open in chat', exact: true }).click();
   await expect(report).toBeVisible();
   await page.screenshot({ path: join(evidence, 'fresh-downloads.png'), fullPage: true });
   const workspacesBefore = await (await request.get('/api/workspaces')).json();
@@ -160,11 +161,18 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
       return views.find((v: { folder_name: string }) => v.folder_name === 'Music')?.state;
     })
     .toBe('reported');
-  await host.getByRole('button', { name: 'Show on map' }).click();
-  await expect(
-    page.locator('.folder-agent-card--report').filter({ hasText: 'Music Production Home' })
-  ).toBeVisible({ timeout: 30_000 });
-  await page.screenshot({ path: join(evidence, 'separate-music-folder.png'), fullPage: true });
+  const musicRoute = (await (await request.get(endpoint)).json()).folder_agents.find(
+    (v: { folder_name: string }) => v.folder_name === 'Music'
+  ).route;
+  await page.goto(musicRoute);
+  const openMusicChat = page.getByRole('button', { name: 'Open in chat', exact: true });
+  const musicPremise = page.getByRole('button', { name: 'Manage them as songs', exact: true });
+  await expect(openMusicChat.or(musicPremise).first()).toBeVisible();
+  if (await openMusicChat.isVisible()) await openMusicChat.click({ timeout: 10_000 });
+  await musicPremise.click({ timeout: 10_000 });
+  await expect(page.locator('.folder-agent-card--report:visible')).toContainText(
+    'Music Production Home'
+  );
   expect((await get()).plan.selected).toEqual(['file-curator']);
   const all = (await (await request.get(endpoint)).json()).folder_agents;
   expect(all).toHaveLength(2);
@@ -172,9 +180,9 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   expect(music.plan.steps.some((s: { kind: string }) => s.kind === 'home')).toBe(true);
   expect(music.plan.steps.some((s: { kind: string }) => s.kind === 'group')).toBe(true);
   expect(music.policy_note).toBeUndefined();
-  await page.goto(`${music.route}?view=details`);
-  if (await closeAssistant.isVisible()) await closeAssistant.click();
-  await expect(page.locator('.folder-agent-card--report')).toContainText('Music Production Home');
+  await expect(page.locator('.folder-agent-card--report:visible')).toContainText(
+    'Music Production Home'
+  );
   await page.screenshot({ path: join(evidence, 'separate-music-folder.png'), fullPage: true });
 
   // Seed an actual version-1 pending sidecar, as a pre-change server could
@@ -218,6 +226,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   expect((await stale.json()).folder_agent.plan.selected).toEqual(['file-curator']);
   await page.goto(`${view.route}?view=details`);
   if (await closeAssistant.isVisible()) await closeAssistant.click();
+  await page.getByRole('button', { name: 'Open in chat', exact: true }).click();
   await expect(report).toBeVisible();
   await expect(report).not.toContainText('Release all songs');
   await page.screenshot({ path: join(evidence, 'legacy-refreshed.png'), fullPage: true });

@@ -66,7 +66,8 @@ cp "$FAKE_SERVER" bin/ori-agent
 import json, os
 from pathlib import Path
 Path(os.environ['ADAPTER_RECORD']).write_text(json.dumps(dict(cwd=os.getcwd(),
-    HOME=os.environ['HOME'], ORI_DATA_DIR=os.environ['ORI_DATA_DIR'], PORT=os.environ['PORT'],
+    HOME=os.environ['HOME'], XDG_CONFIG_HOME=os.environ.get('XDG_CONFIG_HOME'),
+    ORI_DATA_DIR=os.environ['ORI_DATA_DIR'], PORT=os.environ['PORT'],
     NO_BROWSER=os.environ.get('NO_BROWSER'), ORI_NO_DESKTOP_OPEN=os.environ.get('ORI_NO_DESKTOP_OPEN'),
     CODEX_HOME=os.environ.get('CODEX_HOME'))))
 raise SystemExit(int(os.environ.get('SERVER_EXIT', '0')))
@@ -130,11 +131,12 @@ raise SystemExit(int(os.environ.get('SERVER_EXIT', '0')))
         codex.mkdir()
         for extra, port in (({}, "8931"), ({"ORI_DEMO_OPEN": "1", "NO_BROWSER": "1"}, "9111"),
                             ({"ORI_DEMO_NO_CODEX": "1", "CODEX_HOME": str(codex)}, "9112")):
-            self.adapter("demo", port, env=dict(extra, SERVER_EXIT="23"), status=23)
+            self.adapter("demo", port, env=dict(extra, SERVER_EXIT="23", XDG_CONFIG_HOME=str(self.home / ".config")), status=23)
             record = json.loads((self.root / "server.json").read_text())
             sandbox = Path(record["HOME"])
             self.assertEqual(record["cwd"], str(sandbox))
             self.assertEqual(record["ORI_DATA_DIR"], str(sandbox))
+            self.assertEqual(record["XDG_CONFIG_HOME"], str(sandbox / ".config"))
             self.assertEqual(record["PORT"], port)
             self.assertEqual(record["ORI_NO_DESKTOP_OPEN"], "1")
             self.assertEqual(record["NO_BROWSER"], None if extra.get("ORI_DEMO_OPEN") else "1")
@@ -169,6 +171,8 @@ raise SystemExit(int(os.environ.get('SERVER_EXIT', '0')))
         sandbox = Path(result.stdout.splitlines()[0].removeprefix("SANDBOX="))
         self.assertTrue(sandbox.name.startswith("ori-demo."))
         self.assertEqual((sandbox / ".ori-demo-owner").read_text(), f"worktree={self.feature}\n")
+        record = json.loads((self.root / "server.json").read_text())
+        self.assertEqual(record["XDG_CONFIG_HOME"], str(sandbox / ".config"))
         reused = self.sandbox("ori-demo.reused", "/elsewhere")
         self.command(["bash", self.feature / "scripts/demo-server.sh", "9301", reused], self.feature)
         self.assertEqual((reused / ".ori-demo-owner").read_text(), "worktree=/elsewhere\n")
