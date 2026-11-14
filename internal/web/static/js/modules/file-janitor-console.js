@@ -761,7 +761,10 @@
   function renderSetupCard(host, status) {
     const suggestion = status.suggestion || {};
     const settings = status.settings || {};
-    const label = suggestion.label || 'Folder to tidy';
+    const label =
+      suggestion.label && suggestion.label !== 'Folder to tidy'
+        ? suggestion.label
+        : 'Folder to file';
     // Only a preset may pre-fill a path. A generic in-place install starts
     // empty rather than proposing ~/Downloads: pre-filling a real folder the
     // user never chose, next to a button that grants access to it, turns an
@@ -778,7 +781,7 @@
     title.id = 'fileJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
-      el('p', 'fj-sub', 'Choose the folder to tidy. Nothing is scanned or moved until you do.')
+      el('p', 'fj-sub', 'Choose the folder to file. Nothing is scanned or moved until you do.')
     );
     heading.appendChild(
       el(
@@ -4159,7 +4162,7 @@
     renderSetupCard(host, {
       settings,
       suggestion: {
-        label: 'Folder to tidy',
+        label: 'Folder to file',
         suggested_path: settings.root_path || '',
         filing_root_name: settings.filing_root_name,
         daily_scan_local_time: settings.daily_scan_local_time
@@ -5118,9 +5121,13 @@
           if (['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state))
             window.SetupWizard?.registerStepRenderer?.('automation_review', automationStepRenderer);
         }
+        notifySubscribers();
       }
     } catch (error) {
-      if (sequence === setupReviewRequest) setupReview = null;
+      if (!disposed && sequence === setupReviewRequest && id === wsId()) {
+        setupReview = null;
+        notifySubscribers();
+      }
       if (choice) throw error;
     }
     return setupReview;
@@ -5194,6 +5201,9 @@
       ].includes(review.state)
     )
       return false;
+    const selectedFolder = (review.candidates || []).find(
+      item => item.reference_id === review.reference_id
+    );
     const card = el('section', 'fj-setup-review');
     card.setAttribute('aria-label', 'Review Filing permissions');
     card.appendChild(
@@ -5204,11 +5214,10 @@
           ? 'Preparation changed'
           : review.operation_id
             ? 'Finish preparing your review'
-            : 'Use your attached folder'
+            : selectedFolder
+              ? 'Allow filing in ' + safeName(selectedFolder.name)
+              : 'Choose which folder to file'
       )
-    );
-    const selectedFolder = (review.candidates || []).find(
-      item => item.reference_id === review.reference_id
     );
     const candidate = selectedFolder || (review.candidates || [])[0];
     const message = el('p', 'fj-sub');
@@ -5238,7 +5247,7 @@
       const label = el('label', 'fj-label', 'Attached folder');
       const select = el('select', 'fj-input');
       select.setAttribute('aria-label', 'Attached folder');
-      const placeholder = el('option', '', 'Choose which folder to tidy');
+      const placeholder = el('option', '', 'Choose which folder to file');
       placeholder.value = '';
       select.appendChild(placeholder);
       review.candidates.forEach(item => {
@@ -5312,7 +5321,7 @@
     const confirm = button(
       review.operation_id
         ? 'Retry preparation'
-        : 'Use attached ' + safeName(candidate?.name, 'folder'),
+        : 'Allow filing in ' + safeName(candidate?.name, 'folder'),
       'fj-btn fj-btn-primary',
       async () => {
         if (busy || !['review', 'preparation_incomplete'].includes(review.state)) return;
@@ -5522,7 +5531,7 @@
       const response = await fetch('/api/folder-picker/select-path', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Choose the folder to tidy' })
+        body: JSON.stringify({ title: 'Choose the folder to file' })
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.success)
@@ -6037,6 +6046,16 @@
   /** Public, immutable summary. No candidate content, folder paths, or approvals.
    * @returns {ConsoleActionState}
    */
+  function reviewedFolderName() {
+    if (setupReview?.state !== 'review' || !setupReview.reference_id) return '';
+    const selected = (setupReview.candidates || []).filter(
+      item => item.reference_id === setupReview.reference_id
+    );
+    return selected.length === 1 && String(selected[0].name || '').trim()
+      ? safeName(selected[0].name)
+      : '';
+  }
+
   function getActionState() {
     const applies = typeof lastStatus?.applies === 'boolean' ? lastStatus.applies : null;
     const absent = statusLoadState === 'ready' && applies === false;
@@ -6084,6 +6103,7 @@
       history: source(historyState, historyState !== 'ready' && receiptLoaded),
       historyList: source(historyListLoadState, historyListLoadState !== 'ready' && historyLoaded),
       rootId: String(settings.root_id || ''),
+      linkedFolderName: reviewedFolderName(),
       batchId: String(lastBatch?.id || ''),
       pendingCount: batchLoaded ? pendingCount() : null,
       needsReviewCount: batchLoaded ? Number(lastBatch?.summary?.needs_review) || 0 : null,
@@ -6226,7 +6246,7 @@
       const picker = await fetch('/api/folder-picker/select-path', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Choose the folder to tidy' })
+        body: JSON.stringify({ title: 'Choose the folder to file' })
       });
       const chosen = await picker.json().catch(() => ({}));
       if (!picker.ok || !chosen.success) {

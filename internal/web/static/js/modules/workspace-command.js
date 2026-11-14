@@ -2525,6 +2525,11 @@ export class WorkspaceCommandView {
       workspaceId: this.workspaceId(),
       tasks: { state, items },
       console: this.janitorActionState(),
+      leadAgentName:
+        (page.buildAgentGroups?.() || []).find(group => this.isEntryAgentGroup(group))?.name ||
+        page.workspace?.entry_agent_name ||
+        page.workspace?.shared_data?.entry_agent_name ||
+        '',
       updates: this.updatesView()
     });
     view.narratedElsewhere = Array.isArray(page.tasks) && items.length !== page.tasks.length;

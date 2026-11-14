@@ -257,6 +257,50 @@ function attachedReview(overrides = {}) {
   };
 }
 
+test('setup-review completion notifies subscribers with only the selected display name', async () => {
+  setup();
+  panel.render(setupRequiredStatus);
+  const seen = [];
+  panel.subscribe(snapshot => seen.push(snapshot.actionState));
+  let review = attachedReview();
+  globalThis.fetch = async url => ({
+    ok: true,
+    json: async () =>
+      String(url).endsWith('/setup-review')
+        ? { review }
+        : String(url).endsWith('/file-janitor')
+          ? { status: setupRequiredStatus }
+          : { batches: [], actions: [], candidates: [] }
+  });
+  await panel.refresh();
+  assert.ok(seen.some(snapshot => snapshot.linkedFolderName === 'Synthetic Inbox'));
+  assert.equal(panel.getActionState().linkedFolderName, 'Synthetic Inbox');
+  assert.doesNotMatch(JSON.stringify(seen), /\/tmp\/Synthetic Inbox/);
+  for (const state of [
+    'choose_folder',
+    'prepared',
+    'preparation_incomplete',
+    'preparation_changed',
+    'folder_unavailable',
+    'folder_conflict'
+  ]) {
+    review = attachedReview({ state });
+    await panel.refresh();
+    assert.equal(panel.getActionState().linkedFolderName, '', state);
+    assert.equal(seen.at(-1).linkedFolderName, '', state);
+  }
+  for (const overrides of [
+    { reference_id: '' },
+    { reference_id: 'missing' },
+    { candidates: [] },
+    { candidates: [...attachedReview().candidates, ...attachedReview().candidates] }
+  ]) {
+    review = attachedReview(overrides);
+    await panel.refresh();
+    assert.equal(panel.getActionState().linkedFolderName, '');
+  }
+});
+
 test('attached folder review is default-off and discloses its actual filesystem change', () => {
   const doc = setup();
   panel._setSetupReview(attachedReview());
@@ -267,7 +311,11 @@ test('attached folder review is default-off and discloses its actual filesystem 
     throw new Error('a pure render must not call an endpoint');
   };
   assert.equal(panel._renderSetupReview(host), true);
-  assert.match(host.textContent, /Use attached Synthetic Inbox/);
+  assert.match(host.textContent, /Allow filing in Synthetic Inbox/);
+  assert.equal(
+    host.all(node => node.tagName === 'H3')[0].textContent,
+    'Allow filing in Synthetic Inbox'
+  );
   assert.match(host.textContent, /Create or reuse Filed/);
   assert.match(host.textContent, /No file contents are opened/);
   assert.match(host.textContent, /separate approval/);
@@ -289,7 +337,7 @@ test('a malformed success response cannot invent a prepared result', async () =>
   });
   panel._renderSetupReview(host);
   host
-    .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Use attached'))[0]
+    .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Allow filing in'))[0]
     .click();
   await settle();
   assert.match(host.textContent, /initial result could not be confirmed/);
@@ -344,7 +392,7 @@ test('a newly linked empty folder retains its verified initial result through st
   const host = doc.createElement('div');
   panel._renderSetupReview(host);
   host
-    .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Use attached'))[0]
+    .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Allow filing in'))[0]
     .click();
   await settle();
   await settle();
@@ -380,7 +428,7 @@ test('ambiguous attached folders require a choice before confirmation', () => {
   panel._renderSetupReview(host);
   assert.equal(host.all(node => node.tagName === 'SELECT')[0].value, '');
   assert.equal(
-    host.all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Use attached'))[0]
+    host.all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Allow filing in'))[0]
       .disabled,
     true
   );

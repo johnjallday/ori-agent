@@ -8,7 +8,7 @@ const sandbox = process.env.ORI_FILING_SANDBOX || '';
 const endpoint = '/api/personal-assistant/folder-agent';
 const evidence = resolve('tasks/evidence-filing-first-run');
 
-test('a fed Downloads folder offers Filing without granting access at hire', async ({
+test('a fed Downloads folder offers Filing and asks permission for that folder once hired', async ({
   page,
   request
 }) => {
@@ -80,16 +80,63 @@ test('a fed Downloads folder offers Filing without granting access at hire', asy
   const summary = page.locator('#fileJanitorMount');
   await expect(summary.locator('.fj-card-title')).toHaveText('Filing');
   await expect(summary).not.toContainText('File depot');
-  await expect(page.locator('#workspaceNextAction')).toHaveText('Set up filing');
-  await page.screenshot({ path: join(evidence, '02-downloads-workspace.png'), fullPage: true });
+  await expect(page.locator('#workspaceNextAction')).toHaveText('Review permission');
+  await expect(
+    page.getByText('Let Downloads Manager file Downloads', { exact: true })
+  ).toBeVisible();
+  await page.screenshot({ path: join(evidence, '04-named-folder-ask.png'), fullPage: true });
+  const mutations: string[] = [];
+  page.on('request', req => {
+    if (
+      req.method() === 'POST' &&
+      /file-janitor\/(scan|preview|apply|setup|prepare-review)/.test(req.url())
+    )
+      mutations.push(req.url());
+  });
   await page.locator('#workspaceNextAction').click();
   const console = page.getByRole('dialog', { name: 'Filing', exact: true });
   await expect(console).toBeVisible();
   await expect(console.locator('.fj-console-title')).toHaveText('Filing');
-  await expect(page.getByRole('region', { name: 'Review Filing permissions' })).toBeVisible();
-  await page.screenshot({ path: join(evidence, '03-filing-console.png'), fullPage: true });
-  const status = (
-    await (await request.get(`/api/workspaces/${view.workspace_id}/file-janitor`)).json()
-  ).status;
-  expect(status.settings.root_path || '').toBe('');
+  const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
+  await expect(permissions.getByRole('heading')).toHaveText('Allow filing in Downloads');
+  await page.screenshot({ path: join(evidence, '05-named-folder-consent.png'), fullPage: true });
+  const status = async () =>
+    (await (await request.get(`/api/workspaces/${view.workspace_id}/file-janitor`)).json()).status;
+  expect((await status()).settings.root_path || '').toBe('');
+  expect(mutations).toEqual([]);
+  await permissions.getByRole('button', { name: 'Allow filing in Downloads', exact: true }).click();
+  await expect(console).toContainText('Your first review is ready. Nothing was moved.');
+  expect((await status()).settings.root_path).toBe(root);
+  expect(mutations.filter(url => /\/(apply|preview|scan|setup)$/.test(url))).toEqual([]);
+  expect(mutations.filter(url => url.endsWith('/prepare-review'))).toHaveLength(1);
+  await page.screenshot({ path: join(evidence, '06-first-review.png'), fullPage: true });
+});
+
+test('capability-only filing asks for a folder and never prefills access', async ({
+  page,
+  request
+}) => {
+  test.skip(!sandbox, 'requires the isolated server HOME');
+  await installLocalCdn(page);
+  await mkdir(evidence, { recursive: true, mode: 0o750 });
+  const created = await request.post('/api/workspaces', {
+    data: { name: 'Filing without a folder' }
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const workspace = (await created.json()).folder;
+  const installed = await request.post(
+    `/api/workspaces/${workspace.id}/capabilities/file-janitor/install`,
+    { data: {} }
+  );
+  expect(installed.ok(), await installed.text()).toBeTruthy();
+  await page.goto(`/workspaces/${workspace.folder_slug}?view=details`);
+  const gate = page.locator('#workspace-detail-task-confirm-modal');
+  await expect(gate).toBeVisible();
+  await gate.getByRole('button', { name: 'Not now' }).click();
+  await expect(gate).toBeHidden();
+  await expect(page.getByText('Choose the folder to file', { exact: true })).toBeVisible();
+  await page.locator('#workspaceNextAction').click();
+  await expect(page.locator('#fileJanitorPath')).toHaveValue('');
+  await expect(page.getByLabel('Folder to file', { exact: true })).toBeVisible();
+  await page.screenshot({ path: join(evidence, '07-no-attached-folder.png'), fullPage: true });
 });

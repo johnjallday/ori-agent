@@ -313,7 +313,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   if (await closeAssistant.isVisible()) await closeAssistant.click();
   await page.locator('#fileJanitorCardOpen').click();
   const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
-  await expect(permissions).toContainText('Use your attached folder');
+  await expect(permissions).toContainText('Allow filing in Downloads');
   await expect(permissions).toContainText('No file contents are opened');
   await expect(permissions).toContainText(
     'Every move into Filed/ or action to Trash needs your separate approval'
@@ -331,7 +331,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   ).toEqual([]);
   // This separate explicit confirmation discloses Filed/ creation and one
   // metadata-only scan. It still grants no moves, Trash or monitoring.
-  await permissions.getByRole('button', { name: 'Use attached Downloads', exact: true }).click();
+  await permissions.getByRole('button', { name: 'Allow filing in Downloads', exact: true }).click();
   await expect(permissions).toBeHidden();
   const configured = (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json())
     .status;

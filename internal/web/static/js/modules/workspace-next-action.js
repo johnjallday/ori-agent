@@ -228,9 +228,13 @@ export function resolveWorkspaceNextAction(input) {
     if (!janitor.configured || janitor.readiness === 'setup_required')
       return consoleDescriptor(
         'setup',
-        'Choose the folder to tidy',
-        'Finish setup in Filing. Opening setup starts nothing.',
-        'Set up filing'
+        janitor.linkedFolderName
+          ? `Let ${String(input.leadAgentName || '').trim() || 'Ori'} file ${janitor.linkedFolderName}`
+          : 'Choose the folder to file',
+        janitor.linkedFolderName
+          ? 'Review what Ori may read and change. Nothing moves until you approve it.'
+          : 'Nothing is scanned or moved until you choose one.',
+        janitor.linkedFolderName ? 'Review permission' : 'Set up filing'
       );
     if (janitor.consentRequired)
       return consoleDescriptor(

@@ -55,6 +55,33 @@ function consoleState(overrides = {}) {
 function guidance(tasks = [], console = absent, taskState = 'ready') {
   return resolve({ workspaceId: 'w', tasks: { state: taskState, items: tasks }, console });
 }
+test('setup names the reviewed linked folder and the lead, with an Ori fallback', () => {
+  const input = {
+    workspaceId: 'w',
+    tasks: { state: 'ready', items: [] },
+    console: consoleState({ configured: false, linkedFolderName: 'Downloads' }),
+    leadAgentName: 'Downloads Manager'
+  };
+  const view = resolve(input);
+  assert.equal(view.kind, 'setup');
+  assert.equal(view.title, 'Let Downloads Manager file Downloads');
+  assert.equal(
+    view.description,
+    'Review what Ori may read and change. Nothing moves until you approve it.'
+  );
+  assert.equal(view.action.label, 'Review permission');
+  assert.equal(view.action.owner, 'console');
+  assert.equal(resolve({ ...input, leadAgentName: '' }).title, 'Let Ori file Downloads');
+});
+
+test('setup without a reviewed folder asks for one, without suggesting access', () => {
+  const view = guidance([], consoleState({ configured: false, linkedFolderName: '' }));
+  assert.equal(view.title, 'Choose the folder to file');
+  assert.equal(view.description, 'Nothing is scanned or moved until you choose one.');
+  assert.equal(view.action.label, 'Set up filing');
+  assert.equal(view.action.owner, 'console');
+});
+
 const task = (status, id = status, overrides = {}) => ({ id, status, to: 'Curator', ...overrides });
 const receipt = (id, completedAt, extra = {}) => ({
   id,
