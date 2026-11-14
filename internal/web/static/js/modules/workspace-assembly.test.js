@@ -10,11 +10,19 @@ const parts = ['foundation', 'walls', 'roof', 'finish'];
 function harness({ reduced = false } = {}) {
   let now = 0;
   let observer;
+  const docListeners = {};
+  const doc = {
+    getElementById: () => null,
+    visibilityState: 'visible',
+    addEventListener: (type, fn) => {
+      docListeners[type] = fn;
+    }
+  };
   const timers = new Set();
   const window = { addEventListener() {}, matchMedia: () => ({ matches: reduced }) };
   const sandbox = {
     window,
-    document: { getElementById: () => null },
+    document: doc,
     fetch: () => new Promise(() => {}),
     Date: { now: () => now },
     setTimeout: (fn, ms) => {
@@ -64,7 +72,9 @@ function harness({ reduced = false } = {}) {
       isConnected: true,
       art,
       properties,
-      classList: { add() {}, remove() {} },
+      classList: { add() {}, remove() {}, contains: () => false, toggle() {} },
+      addEventListener() {},
+      hasAttribute: () => false,
       getAttribute: name => (name === 'data-ws-id' ? id : null),
       querySelector: selector => (hasParts && selector.startsWith('.ws-map-struct') ? art : null)
     };
@@ -74,6 +84,12 @@ function harness({ reduced = false } = {}) {
   return {
     api,
     tile,
+    mount: () => api.mount(container, { workspaces: [], hideChrome: true, noAutoSelect: true }),
+    unmount: () => api.unmount(container),
+    hide() {
+      doc.visibilityState = 'hidden';
+      docListeners.visibilitychange();
+    },
     advance(ms) {
       now += ms;
       for (const timer of [...timers])
@@ -154,6 +170,74 @@ test('HQ entry refuses other workspaces; missing tiles and art without parts hav
   assert.equal(h.api.playAssembly('missing'), null);
   assert.equal(h.api.playAssembly('plain'), null);
   assert.equal(h.api.playHQAssembly('generic'), null);
+});
+
+test('arrival registers before refresh and starts on the first mount that draws the tile', () => {
+  const h = harness();
+  assert.equal(h.api.buildOnArrival('new'), true);
+  const tile = h.tile('new');
+  assert.equal(tile.dataset.buildReveal, undefined);
+  h.mount();
+  assert.equal(tile.dataset.buildReveal, 'playing');
+  assert.equal(h.api.isAssembling('new'), true);
+  assert.equal(h.api.buildOnArrival('new'), false);
+  const controller = h.api.playAssembly('new');
+  assert.equal(h.api.playAssembly('new'), controller, 'duplicate cannot restart');
+  h.advance(800);
+  h.mount();
+  assert.equal(tile.properties.get('--build-assembly-offset'), '-800ms');
+  h.advance(800);
+  h.mount();
+  assert.equal(tile.dataset.buildReveal, 'settled');
+  assert.equal(h.api.isAssembling('new'), false);
+  assert.equal(h.api.buildOnArrival('new'), false);
+});
+
+test('existing tiles, hidden hires and expired registrations never assemble on a later visit', () => {
+  const h = harness();
+  h.tile('existing');
+  assert.equal(h.api.buildOnArrival('existing'), false);
+  assert.equal(h.api.buildOnArrival('late'), true);
+  h.advance(5000);
+  const late = h.tile('late');
+  h.mount();
+  assert.equal(late.dataset.buildReveal, undefined);
+  h.hide();
+  assert.equal(h.api.buildOnArrival('hidden'), false);
+});
+
+test('visibility loss and unmount finish active builds and discard pending arrivals', async () => {
+  for (const action of ['hide', 'unmount']) {
+    const h = harness();
+    h.api.buildOnArrival('pending');
+    const tile = h.tile('active');
+    const controller = h.api.playAssembly('active');
+    h[action]();
+    await controller.done;
+    assert.equal(tile.dataset.buildReveal, 'settled');
+    assert.equal(h.api.isAssembling('active'), false);
+    const pending = h.tile('pending');
+    h.mount();
+    assert.equal(pending.dataset.buildReveal, undefined);
+  }
+});
+
+test('two close hires have independent clocks and never restart one another', () => {
+  const h = harness();
+  h.api.buildOnArrival('first');
+  const first = h.tile('first');
+  h.mount();
+  h.advance(600);
+  h.api.buildOnArrival('second');
+  const second = h.tile('second');
+  h.mount();
+  assert.equal(first.properties.get('--build-assembly-offset'), '-600ms');
+  assert.equal(second.properties.get('--build-assembly-offset'), '-0ms');
+  h.advance(1000);
+  assert.equal(first.dataset.buildReveal, 'settled');
+  assert.equal(second.dataset.buildReveal, 'playing');
+  h.advance(600);
+  assert.equal(second.dataset.buildReveal, 'settled');
 });
 
 test('reduced motion settles immediately', async () => {

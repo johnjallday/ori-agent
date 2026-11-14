@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { folderAgentReportView } from './folder-agent-card.js';
 import {
   commanderAutoOpen,
+  commanderBuildingLine,
   commanderOneLine,
   commanderQueue,
   commanderSpeech,
@@ -11,6 +12,18 @@ import {
   lookLine,
   renderCommanderOneLine
 } from './commander-speech.js';
+
+test('the entrance line names the workspace without changing the drawer status', () => {
+  assert.equal(commanderBuildingLine('One Song'), 'Building One Song…');
+  const view = folderAgentReportView({
+    workspace_id: 'new',
+    workspace_name: 'One Song',
+    folder_name: 'Music',
+    agent_name: 'Mira',
+    state: 'looking'
+  });
+  assert.equal(commanderOneLine(view).text, 'Mira is looking around Music');
+});
 
 const raw = (overrides = {}) => ({
   workspace_id: 'ws-1',

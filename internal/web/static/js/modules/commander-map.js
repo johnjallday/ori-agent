@@ -10,6 +10,7 @@
 import { BALLOON_NARROW_PX, commanderBalloon } from './commander-balloon.js';
 import {
   commanderAutoOpen,
+  commanderBuildingLine,
   commanderQueue,
   commanderSpeech,
   renderCommanderOneLine
@@ -359,7 +360,7 @@ export async function revealHiredTile(
     });
     if (!found) return false;
   }
-  await map?.whenMotionSettled?.(1000);
+  if (!map?.isAssembling?.(workspaceID)) await map?.whenMotionSettled?.(1000);
   await new Promise(resolve =>
     win?.requestAnimationFrame ? win.requestAnimationFrame(() => resolve()) : resolve()
   );
@@ -397,6 +398,12 @@ export function homeCommanderMap(
   return {
     balloon,
     narrow,
+    // The drawer owns the followed tile's presenter, so it reads the same
+    // transient override as the cockpit's openings map for other tiles.
+    openingLine: view =>
+      win?.OriWorkspaceMap?.isAssembling?.(workspaceID)
+        ? commanderBuildingLine(view.workspace)
+        : '',
     // Home shows its map (FR10's "on this map"), drawn or about to be.
     showing: () =>
       Boolean(doc?.getElementById?.('cockpitMap')) &&
@@ -437,7 +444,7 @@ export function homeCommanderMap(
           balloon.holdUntil(win?.OriWorkspaceMap?.whenMotionSettled?.(1000));
         }, 0);
       };
-      const docEvents = [MAP_MOUNTED_EVENT, HOME_VIEW_EVENT];
+      const docEvents = [MAP_MOUNTED_EVENT, HOME_VIEW_EVENT, 'ori:map-build-changed'];
       const winEvents = [
         'resize',
         'scroll',
@@ -640,18 +647,19 @@ export function commanderPresenter(
       // announcement but carries no body, so the plan's controls exist in one
       // place (visual-hire FR24, FR25: the arrival is announced once, here).
       const held = chatHeld();
+      const entrance = map.openingLine?.(view) || '';
       return {
         speaker: { name: view.agent, role: 'Commander' },
         // A balloon leaving with its run says where it goes (a line); the
         // workspace page's own follower passes true and keeps its speech.
-        line: typeof opening === 'string' && opening ? opening : item.speech.line,
-        headline: item.speech.headline,
-        announce: item.speech.announce,
+        line: entrance || (typeof opening === 'string' && opening ? opening : item.speech.line),
+        headline: entrance || item.speech.headline,
+        announce: entrance || item.speech.announce,
         signature: `report|${JSON.stringify(raw)}|${error}|${opening}|${index}|${held}`,
         // A new phase (the plan becoming the run, the run the receipt)
         // starts at its top, not at the old scroll position.
         scrollKey: `report|${item.speech.phase}`,
-        body: held ? null : () => card(true),
+        body: held || entrance ? null : () => card(true),
         more,
         onMore
       };
@@ -789,7 +797,7 @@ export function commanderPresenter(
     tickets = ticketItems && activity ? ticketItems(activity) : [];
     draw({ refresh: true });
   };
-  const stopMap = map.onChange(() => draw());
+  const stopMap = map.onChange(() => draw({ refresh: true }));
   const stopActivity =
     ticketItems && map.onActivity
       ? map.onActivity(next => {

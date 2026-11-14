@@ -4433,6 +4433,10 @@
   }
 
   var lastMount = null; // { container, state }
+  // Entrance intent is page-local, never saved with a workspace or camera.
+  var arrivingBuilds = new Map();
+  var activeBuilds = new Map();
+  var settledBuilds = new Set();
 
   // Keeping the view centred when the container resizes.
   //
@@ -11127,6 +11131,7 @@
   }
 
   function playAssembly(workspaceId) {
+    if (activeBuilds.has(workspaceId)) return activeBuilds.get(workspaceId).controller;
     var container = lastMount && lastMount.container;
     if (!container) return null;
     function findTile() {
@@ -11150,6 +11155,18 @@
     var observer = null;
     var settled = false;
     var started = Date.now();
+    var controller = { skip: skip, done: done };
+    activeBuilds.set(workspaceId, { controller: controller, bind: rebindArt });
+    function rebindArt() {
+      var replacement = findTile();
+      if (!replacement || Date.now() - started >= 1600) {
+        skip();
+        return;
+      }
+      tile = replacement;
+      art = tile.querySelector('.ws-map-struct');
+      bindArt();
+    }
     function bindArt() {
       tile.classList.remove('is-growing-in');
       tile.dataset.buildReveal = 'playing';
@@ -11164,7 +11181,11 @@
       art.classList.remove('is-assembling');
       art.style.removeProperty('--build-assembly-offset');
       tile.dataset.buildReveal = 'settled';
+      tile.classList.add('is-settled');
+      activeBuilds.delete(workspaceId);
+      settledBuilds.add(workspaceId);
       complete();
+      announceMapEvent(container, 'ori:map-build-changed');
     }
     tile.classList.remove('is-growing-in');
     tile.dataset.buildReveal = reduced ? 'settled' : 'playing';
@@ -11174,20 +11195,80 @@
       timer = setTimeout(skip, 1600);
       if (typeof MutationObserver === 'function') {
         observer = new MutationObserver(function () {
-          if (tile.isConnected) return;
-          var replacement = findTile();
-          if (!replacement || Date.now() - started >= 1600) {
-            skip();
-            return;
-          }
-          tile = replacement;
-          art = tile.querySelector('.ws-map-struct');
-          bindArt();
+          if (!tile.isConnected) rebindArt();
         });
         observer.observe(container, { childList: true, subtree: true });
       }
     }
-    return { skip: skip, done: done };
+    announceMapEvent(container, 'ori:map-build-changed');
+    return controller;
+  }
+
+  // Register before the refresh that first draws this workspace. An existing
+  // tile, a repeated event or an offscreen hire is never another entrance.
+  function buildOnArrival(workspaceId) {
+    var id = String(workspaceId || '').trim();
+    var container = lastMount && lastMount.container;
+    if (
+      !id ||
+      !container ||
+      document.visibilityState === 'hidden' ||
+      arrivingBuilds.has(id) ||
+      activeBuilds.has(id) ||
+      settledBuilds.has(id) ||
+      Array.from(container.querySelectorAll('[data-ws-id]')).some(function (tile) {
+        return tile.getAttribute('data-ws-id') === id;
+      })
+    )
+      return false;
+    arrivingBuilds.set(
+      id,
+      setTimeout(function () {
+        arrivingBuilds.delete(id);
+      }, 5000)
+    );
+    return true;
+  }
+
+  // Synchronous after HTML replacement: no finished-house flash and no replay
+  // when polling, badge responses or placement motion replace the tile.
+  function bindBuilds(container) {
+    settledBuilds.forEach(function (id) {
+      Array.from(container.querySelectorAll('[data-ws-id]')).forEach(function (tile) {
+        if (tile.getAttribute('data-ws-id') === id) {
+          tile.dataset.buildReveal = 'settled';
+          tile.classList.add('is-settled');
+        }
+      });
+    });
+    activeBuilds.forEach(function (build) {
+      build.bind();
+    });
+    arrivingBuilds.forEach(function (timer, id) {
+      var present = Array.from(container.querySelectorAll('[data-ws-id]')).some(function (tile) {
+        return tile.getAttribute('data-ws-id') === id;
+      });
+      if (!present) return;
+      clearTimeout(timer);
+      arrivingBuilds.delete(id);
+      playAssembly(id);
+    });
+  }
+
+  function finishBuilds() {
+    arrivingBuilds.forEach(function (timer) {
+      clearTimeout(timer);
+    });
+    arrivingBuilds.clear();
+    activeBuilds.forEach(function (build) {
+      build.controller.skip();
+    });
+  }
+
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') finishBuilds();
+    });
   }
 
   // HQ presentation frames the reserved site or verified canonical tile, never
@@ -11981,7 +12062,7 @@
     });
     plan.added.forEach(function (key) {
       var el = byKey[key];
-      if (el && el.classList) el.classList.add('is-growing-in');
+      if (el && el.classList && !el.dataset?.buildReveal) el.classList.add('is-growing-in');
     });
     // Commit the starting positions before the transition begins.
     void container.offsetWidth;
@@ -12184,6 +12265,7 @@
       viewport,
       state
     );
+    bindBuilds(container);
     settleRenderedBuildings(container, onScreen);
     bindCreate(container);
     bindTiles(container, workspaces, state);
@@ -12266,6 +12348,7 @@
   /** Tear down the map view (called when switching away). */
   function unmount(container, options) {
     if (!container) return;
+    finishBuilds();
     if (
       options &&
       options.preservePresentation &&
@@ -12425,6 +12508,10 @@
     frameHQCreation: frameHQCreation,
     playHQAssembly: playHQAssembly,
     playAssembly: playAssembly,
+    buildOnArrival: buildOnArrival,
+    isAssembling: function (id) {
+      return activeBuilds.has(id);
+    },
     canPresentHQCreation: function () {
       return !scopeGroupId && !placementSession && !moveState;
     },

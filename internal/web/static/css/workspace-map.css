@@ -2220,7 +2220,7 @@
 
 /* A confirmed building assembles once, without replacing its canonical artwork.
    All stages are decorative; controls and the final workspace are live now. */
-.ws-map-tile[data-build-reveal] {
+.ws-map-tile[data-build-reveal="playing"] {
   animation: none !important;
 }
 .ws-map-struct.is-assembling {
@@ -4432,6 +4432,20 @@
   --aa-size: 32px;
   border-radius: 50%;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+.ws-map-tile[data-build-reveal="playing"] {
+  outline: none;
+  box-shadow: none;
+}
+.ws-map-tile[data-build-reveal="playing"] .ws-map-tile-face {
+  opacity: 0;
+  visibility: hidden;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ws-map-tile[data-build-reveal="settled"] .ws-map-tile-face {
+    transition: opacity 180ms ease-out;
+  }
 }
 
 /* A tile that was just put on the map from the setup sheet: a ring that fades

@@ -34,8 +34,8 @@ for (const theme of ['light', 'dark']) {
       },
       { id, theme }
     );
-    await page.clock.install();
-    await page.clock.pauseAt(new Date());
+    await page.clock.install({ time: new Date('2030-01-01T00:00:00Z') });
+    await page.clock.pauseAt(new Date('2030-01-01T00:00:01Z'));
     await page.evaluate(id => {
       (window as any).__assembly = (window as any).OriWorkspaceMap.playAssembly(id);
     }, id);

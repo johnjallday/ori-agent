@@ -7004,8 +7004,8 @@ async function chooseForAgent(body) {
 // After a hire is accepted on Home with the map showing, the chat box narrows so
 // the map and the new tile are visible, and the tile is brought into the part of
 // the map beside it (visual-hire FR15, FR17). The panel answers 'skipped' when
-// the box is closed, stepped aside or on the phone sheet: nothing moved, so no
-// tile work. The workspace page, Needs you and any page without Home's map never
+// the box is closed, stepped aside or on the phone sheet: the tile still builds
+// and pans without waiting for a narrowing that will not happen. The workspace page, Needs you and any page without Home's map never
 // get this far (FR21).
 function narrowForHiredAgent(workspaceID) {
   const id = String(workspaceID || '').trim();
@@ -7015,8 +7015,8 @@ function narrowForHiredAgent(workspaceID) {
     view: document.getElementById('homeCockpit')?.dataset?.view || ''
   });
   if (!showing) return;
-  const outcome = window.PersonalAssistantPanel?.narrowForHire?.(id);
-  if (outcome === 'narrowed' || outcome === 'already') void revealHiredTile(id);
+  window.PersonalAssistantPanel?.narrowForHire?.(id);
+  void revealHiredTile(id);
 }
 
 async function startAgent(brief, button, hire) {
@@ -7042,7 +7042,7 @@ async function startAgent(brief, button, hire) {
     );
     window.dispatchEvent?.(
       new CustomEvent('ori:folder-agent-started', {
-        detail: { workspaceID: result.view?.workspace_id }
+        detail: { workspaceID: result.view?.workspace_id, built: true }
       })
     );
     narrowForHiredAgent(result.view?.workspace_id);
