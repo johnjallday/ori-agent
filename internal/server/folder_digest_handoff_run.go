@@ -9,6 +9,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/projectlibrary"
 )
 
 // songLibrary is the Home library for one song's own folder: a root of this
@@ -96,6 +97,18 @@ func (h *folderSetupHost) songRun(ctx context.Context, req personalassistant.Fol
 	}
 	if req.Offer.DecidedAt != nil {
 		config.AcceptedAfter = *req.Offer.DecidedAt
+	}
+	if facts := b.sessionHandler.FactsReadRunner(); req.Open && facts != nil {
+		// Do not let this run's own scan readers/events race the reviewed
+		// catalog association. Release them even after a stopped run. Genuine
+		// competing edits still invalidate the activation token; never retry it.
+		deferredCtx, collected := projectlibrary.WithDeferredFactsRead(ctx)
+		ctx = deferredCtx
+		defer func() {
+			for _, slice := range collected.Slices() {
+				facts.Enqueue(slice)
+			}
+		}()
 	}
 	result, err := runner.Run(ctx, config)
 	if result.Cause != nil {

@@ -86,3 +86,58 @@ func TestFolderConversationDestination_StaleLibraryConfirmationKeepsCanonicalCar
 		t.Fatal("stale confirmation produced effects")
 	}
 }
+
+// The host's reviewed staffing guard re-stamps the accepted plan before any
+// resumed effect. Omitting its lines makes valid Home handoffs appear stale.
+type stampedConversationDestinationGuard struct {
+	fakeFolderSetup
+	calls int
+}
+
+func (g *stampedConversationDestinationGuard) ValidateSetupDestination(_ context.Context, req FolderSetupRequest) error {
+	g.calls++
+	if req.Plan.Digest == "" || req.Plan.Stamped().Digest != req.Plan.Digest {
+		return ErrFolderPlanChanged
+	}
+	return nil
+}
+
+func TestFolderConversationDestination_NewHomeResumeCarriesAcceptedStaffingPlan(t *testing.T) {
+	f, _, _ := observationFixture(t)
+	guard := &stampedConversationDestinationGuard{}
+	f.service.deps.Setup = guard
+	plan := homeStaffingPlanFixture()
+	plan.EntryName = "Song.rpp"
+	plan.EntryCandidates = []string{"Song.rpp", "Alternate.rpp"}
+	plan = plan.Stamped()
+	if plan.Digest == "" {
+		t.Fatal("invalid staffing fixture")
+	}
+	offer := FolderOffer{
+		Status: FolderOfferAwaitingOutcome,
+		ConversationReview: &FolderConversationReview{
+			Target: foldercontext.Target{UserID: "local"}, Destination: plan.Destination,
+		},
+		Setup: &FolderSetupRun{
+			PlanDigest: plan.Digest, Lines: append([]FolderPlanLine(nil), plan.Lines...), Intent: plan.Intent, EntryName: plan.EntryName,
+		},
+	}
+	// Progress is expected after creating/staffing the Home; its original
+	// material terms, not an empty or freshly planned projection, are guarded.
+	offer.Setup.Lines[0].State = FolderLineDone
+	if err := f.service.checkReviewDestination(t.Context(), offer); err != nil {
+		t.Fatalf("valid accepted Home staffing was rejected: %v", err)
+	}
+	if guard.calls != 1 {
+		t.Fatalf("destination guard calls = %d, want 1", guard.calls)
+	}
+	offer.Setup.Lines[0].Name = "Different unreviewed staffing"
+	if err := f.service.checkReviewDestination(t.Context(), offer); !errors.Is(err, ErrFolderPlanChanged) {
+		t.Fatalf("changed material terms were accepted: %v", err)
+	}
+	offer.Setup.Lines[0].Name = plan.Lines[0].Name
+	offer.Setup.EntryName = "Alternate.rpp"
+	if err := f.service.checkReviewDestination(t.Context(), offer); !errors.Is(err, ErrFolderPlanChanged) {
+		t.Fatalf("changed project file was accepted: %v", err)
+	}
+}

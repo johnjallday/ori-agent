@@ -790,7 +790,12 @@ func (s *FolderDigestService) checkReviewDestination(ctx context.Context, offer 
 			return ErrFolderOutcomeUnavailable
 		}
 		request := s.setupRequest(ctx, review.Target.UserID, offer)
-		request.Plan = FolderSetupPlan{Digest: offer.Setup.PlanDigest, Destination: offer.Setup.Intent.Destination, Intent: offer.Setup.Intent}
+		// Staffing consent is stamped over the accepted lines, intent and project
+		// file. Keep those terms on resume; progress never replaces the plan.
+		request.Plan = FolderSetupPlan{
+			Lines: append([]FolderPlanLine(nil), offer.Setup.Lines...), Digest: offer.Setup.PlanDigest,
+			Destination: offer.Setup.Intent.Destination, Intent: offer.Setup.Intent, EntryName: offer.Setup.EntryName,
+		}
 		return guard.ValidateSetupDestination(ctx, request)
 	}
 	reader, ok := s.deps.Setup.(FolderSetupDestinationReader)

@@ -52,7 +52,7 @@ type BuildFolderPlan struct {
 	// is no plan; UnavailableSubject names what it waits on.
 	Unavailable        string `json:"unavailable,omitempty"`
 	UnavailableSubject string `json:"unavailable_subject,omitempty"`
-	// Hire is who Hire and start hires for the folder and BriefDefault the goal
+	// Hire is who Hire and build hires for the folder and BriefDefault the goal
 	// its question starts with, as on Home's card; neither is in the digest.
 	Hire         *FolderHire `json:"hire,omitempty"`
 	BriefDefault string      `json:"brief_default,omitempty"`

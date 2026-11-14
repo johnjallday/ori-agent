@@ -126,12 +126,12 @@ test('Desktop and Documents know their jobs before hire and refuse whole-folder 
     await expect(
       card.getByRole('textbox', { name: 'What should it do?', exact: true })
     ).toHaveValue(brief);
-    await expect(card).toContainText('Nothing is created until you hire.');
+    await expect(card).toContainText('Nothing is built until you hire.');
     await captureThemes(page, card, `${folder}-hire`, '.folder-agent-card__purpose');
     await page.setViewportSize({ width: 390, height: 900 });
     expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-    await card.getByRole('button', { name: 'Hire & start', exact: true }).focus();
-    await expect(card.getByRole('button', { name: 'Hire & start', exact: true })).toBeFocused();
+    await card.locator('[data-folder-agent-action="start"]').focus();
+    await expect(card.locator('[data-folder-agent-action="start"]')).toBeFocused();
     await page.screenshot({ path: join(evidence, `${folder}-before-hire.png`), fullPage: true });
     await page.keyboard.press('Enter');
     await page.setViewportSize({ width: 1280, height: 900 });
@@ -204,8 +204,8 @@ test('Desktop and Documents know their jobs before hire and refuse whole-folder 
   await entry.locator('input').fill(ordinary);
   await entry.getByRole('button').click();
   const hireCard = page.locator('#personalAssistantFolderAgent');
-  await expect(hireCard).toContainText('Start an agent on Inbox');
-  await hireCard.getByRole('button', { name: 'Hire & start', exact: true }).click();
+  await expect(hireCard).toContainText('Hire an agent for Inbox');
+  await hireCard.locator('[data-folder-agent-action="start"]').click();
   const getOrdinary = async () =>
     (await (await request.get(endpoint)).json()).folder_agents.find(
       (v: { folder_name: string }) => v.folder_name === 'Inbox'
@@ -305,7 +305,7 @@ for (const theme of ['light', 'dark']) {
       await brief.fill('Editable at browser zoom');
       await expect(brief).toHaveValue('Editable at browser zoom');
       await captureNative('brief');
-      await assertReachable(card.getByRole('button', { name: 'Hire & start', exact: true }));
+      await assertReachable(card.locator('[data-folder-agent-action="start"]'));
       await captureNative('hire');
       const docs = (await (await request.get(endpoint)).json()).folder_agents.find(
         (v: { folder_name: string }) => v.folder_name === 'Documents'

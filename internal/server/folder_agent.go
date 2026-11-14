@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/charactercatalog"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderagenthttp"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -24,11 +25,12 @@ import (
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
 )
 
-// wireFolderAgent builds "Start an agent on <folder>" over the folder
+// wireFolderAgent builds "Hire an agent for <folder>" over the folder
 // digest's chooser (picker, chips, typed-path tokens), the ordinary anchored
 // creation pipeline, and the workspace store. Every dependency that a later
 // phase wires is looked up at call time.
@@ -148,6 +150,7 @@ func (w folderAgentWorkspaces) CreateAnchored(ctx context.Context, req folderage
 	created, err := b.sessionHandler.CreateFolderAgentWorkspace(ctx, sessionhttp.FolderAgentWorkspaceRequest{
 		Name: req.Name, AnchorPath: req.AnchorPath, Mission: req.Mission, AgentName: req.AgentName,
 		BindExisting: req.BindExisting, Provider: req.Provider, Model: req.Model, Mandate: req.Mandate,
+		Character: req.Character, CharacterVersion: req.CharacterVersion,
 	})
 	var refusal *sessionhttp.FolderAgentRefusal
 	if errors.As(err, &refusal) {
@@ -311,12 +314,27 @@ func (h folderAgentHiring) Models(context.Context) []folderagent.HireModel {
 
 // Agents is the owner's own agents: the built-in assistant and agents that
 // only a workspace holds are never offered.
-func (h folderAgentHiring) Agents(context.Context, string) []folderagent.HireAgent {
+func (h folderAgentHiring) Agents(_ context.Context, userID string) []folderagent.HireAgent {
 	st := h.builder.st
 	if st == nil {
 		return nil
 	}
 	root, hasRoot := st.(interface{ RootAgentFolder(string) (string, bool) })
+	runs := map[string][]string{}
+	if workspaces := h.builder.workspaceStore; workspaces != nil {
+		ids, _ := workspaces.List()
+		for _, id := range ids {
+			ws, err := workspaces.Get(id)
+			if err != nil || ws == nil || ws.GetStatus() == workspace.StatusTrashed ||
+				(ws.OwnerUserID != "" && ws.OwnerUserID != userID) {
+				continue
+			}
+			key := strings.ToLower(ws.EntryAgentName())
+			if key != "" {
+				runs[key] = append(runs[key], ws.Name)
+			}
+		}
+	}
 	var out []folderagent.HireAgent
 	for _, name := range st.ListAgents() {
 		if systemassistant.IsCanonicalName(name) {
@@ -336,9 +354,56 @@ func (h folderAgentHiring) Agents(context.Context, string) []folderagent.HireAge
 		if agent.Metadata != nil && personalassistant.ProfileProvenanceFromTags(name, agent.Metadata.Tags).AssistantID != "" {
 			continue
 		}
-		out = append(out, folderagent.HireAgent{Name: name, Model: agent.Settings.Model})
+		names := runs[strings.ToLower(name)]
+		sort.Slice(names, func(i, j int) bool { return strings.ToLower(names[i]) < strings.ToLower(names[j]) })
+		running := ""
+		if len(names) > 0 {
+			running = names[0]
+			if len(names) > 1 {
+				running += fmt.Sprintf(" and %d more", len(names)-1)
+			}
+		}
+		out = append(out, folderagent.HireAgent{Name: name, Model: agent.Settings.Model, Runs: running})
 	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if (out[i].Runs == "") != (out[j].Runs == "") {
+			return out[i].Runs == ""
+		}
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
 	return out
+}
+
+// Character prefers an underused face before the folder's own affinity. An
+// inactive saved character is not a face that an agent currently wears.
+func (h folderAgentHiring) Character(_ context.Context, _ string, policy folderlook.RootPolicy) string {
+	catalog, err := charactercatalog.Load()
+	if err != nil {
+		return ""
+	}
+	counts := map[string]int{}
+	// Count faces across the visible roster, not just agents offered for reuse.
+	// A personal assistant profile keeps its job, but still wears its face.
+	if st := h.builder.st; st != nil {
+		for _, name := range st.ListAgents() {
+			if systemassistant.IsCanonicalName(name) {
+				continue
+			}
+			ag, ok := st.GetAgent(name)
+			if ok && ag != nil && ag.Appearance != nil && ag.Appearance.Mode == types.AppearanceModeCharacter {
+				counts[ag.Appearance.CharacterCatalogID()]++
+			}
+		}
+	}
+	preferred := folderagent.PreferredCharacter(policy)
+	best, least := "", int(^uint(0)>>1)
+	for _, ch := range catalog.Working() {
+		id := string(ch.ID)
+		if count := counts[id]; count < least || (count == least && id == preferred) {
+			best, least = id, count
+		}
+	}
+	return best
 }
 
 func (h folderAgentHiring) AgentExists(name string) bool {

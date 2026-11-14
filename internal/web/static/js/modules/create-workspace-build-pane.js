@@ -707,7 +707,7 @@
   }
 
   // planHireView is the ready plan presented as a hire, as Home's card shows it
-  // (folder-plan-lines.js), while Hire and start can still be pressed; null
+  // (folder-plan-lines.js), while Hire and build can still be pressed; null
   // once the setup started or when the plan names no hire.
   function planHireView() {
     const session = state.session || {};
@@ -719,7 +719,7 @@
     return shared.hireView(plan, planProjectName() || 'this folder', { needs: plan.needs });
   }
 
-  // setupBrief is the brief Hire and start sends: what the user typed for this
+  // setupBrief is the brief Hire and build sends: what the user typed for this
   // build, else the draft's goal, else the plan's own. null when the plan asks
   // no question, so the server keeps its own.
   function setupBrief() {
@@ -1539,7 +1539,7 @@
           emit('workspace-build-configure-model');
         else if (kind === 'recheck' && !control.disabled) emit('workspace-build-recheck');
         else if (kind === 'setup' && !control.disabled) {
-          // Hire and start sends the brief; a Retry continues with the one sent.
+          // Hire and build sends the brief; a Retry continues with the one sent.
           const brief = setupBrief();
           emit('workspace-build-setup', brief === null ? {} : { brief });
         } else if (kind === 'setup-retry' && !control.disabled) {

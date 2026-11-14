@@ -409,7 +409,7 @@ Run directly through `scripts/e2e.sh`, the spec skips unless
 The shared [visual setup contract](../architecture/visual-folder-setup.md) keeps
 review, saved milestones, recovery and the canonical result on one card. Use
 **Full setup details** for the complete plan/receipt. Create/bind plans use
-**Hire & start** / **Assign & start**; unknown staffing retains a generic setup
+**Hire & build** / **Assign & build**; unknown staffing retains a generic setup
 action. Setup completion is separate from the first look and its report.
 
 With an explicitly intended real model, the whole journey in one command:

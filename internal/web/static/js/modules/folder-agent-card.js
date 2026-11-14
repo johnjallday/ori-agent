@@ -1,4 +1,4 @@
-// Start an agent on <folder>: the one card every folder entry shows, the
+// Hire an agent for <folder>: the one card every folder entry shows, the
 // receipt after Start, and the folder agent's report with Set it up, Keep the
 // folder as it is and Look further. The server holds the folder; nothing here
 // sends a path. Words come from the server's view (facts line, stage line,
@@ -49,12 +49,13 @@ export function folderAgentCardView(card) {
   return {
     token: String(card.choice_token),
     folder: String(card.folder_name || ''),
-    title: String(card.title || `Start an agent on ${card.folder_name || 'this folder'}`),
+    title: String(card.title || `Hire an agent for ${card.folder_name || 'this folder'}`),
     purpose: String(card.purpose || ''),
     field: String(card.field || 'What should it do?'),
     brief: String(card.brief || ''),
     max: Number(card.brief_max) > 0 ? Number(card.brief_max) : 300,
-    action: String(card.action || 'Hire & start'),
+    action: String(card.action || 'Hire & build'),
+    actionExisting: String(card.action_existing || 'Assign & build'),
     note: String(card.note || ''),
     hire: folderAgentHireView(card.hire, card.folder_name)
   };
@@ -73,11 +74,12 @@ export function folderAgentHireView(hire, folderName = '') {
     }));
   const agents = (Array.isArray(source.agents) ? source.agents : [])
     .filter(a => a && a.name)
-    .map(a => ({ name: String(a.name), model: String(a.model || '') }));
+    .map(a => ({ name: String(a.name), model: String(a.model || ''), runs: String(a.runs || '') }));
   const existing = agents.some(a => a.name === source.existing) ? String(source.existing) : '';
   return {
     name: String(source.agent_name || `${folderName || 'Folder'} Manager`),
     nameMax: Number(source.name_max) > 0 ? Number(source.name_max) : 60,
+    character: String(source.character || ''),
     mandate: String(source.mandate || ''),
     provider: String(source.model ? source.provider || '' : ''),
     model: String(source.model || ''),
@@ -94,7 +96,8 @@ export function folderAgentHireChoice(hire) {
   if (hire.mode === 'existing' && hire.existing) return { existing: hire.existing };
   const choice = {
     name: String(hire.name || '').trim(),
-    mandate: String(hire.mandate || '').trim()
+    mandate: String(hire.mandate || '').trim(),
+    character: String(hire.character || '')
   };
   if (hire.model) {
     choice.provider = hire.provider;
@@ -499,18 +502,22 @@ function hiredName(value) {
 // hireFace is the renderer's input for the name typed. It is the neutral face
 // while there is no name, and while the role catalog that shapes the ring has
 // not arrived: never a wrong face (FR3, FR4).
-function hireFace(name, win) {
+function hireFace(name, win, characterId = '') {
   const who = hiredName(name);
   const roles = win?.RoleCatalog;
   if (!who || !roles?.isLoaded?.()) return NEUTRAL_FACE;
   const role = roles.entry?.(HIRED_AGENT_ROLE) || null;
+  const character = characterId ? win.CharacterCatalog?.get?.(characterId) : null;
   return {
     name: who,
     source: HIRED_AGENT_SOURCE,
     role: HIRED_AGENT_ROLE,
     roleAccent: role?.accent_color || '',
     roleEmblem: role?.emblem || '',
-    appearance: { mode: 'generated', generated: {} }
+    appearance: character
+      ? { mode: 'character', generated: {}, character: { catalog_id: characterId } }
+      : { mode: 'generated', generated: {} },
+    ...(character ? { character } : {})
   };
 }
 
@@ -657,17 +664,28 @@ function cardWindow(doc, win) {
 // renderHire draws the Hire section and keeps hire (the view's own object)
 // in step with what the owner picks. The new agent is a face with its name
 // beside it; clicking or typing there chooses a new agent. The owner's own
-// agents are a row of faces under "Or one of your agents"; choosing one dims
+// agents are folded under a counted summary; choosing one dims
 // the new agent. fetchImpl reads the agents' appearance (once per card).
-function renderHire(doc, hire, win, fetchImpl) {
+function renderHire(doc, hire, win, fetchImpl, onSelect, brief) {
   const group = `folder-agent-hire-${++hireSeq}`;
   const box = el(doc, 'fieldset', 'folder-agent-card__who');
   box.append(el(doc, 'legend', 'folder-agent-card__who-title', 'Hire'));
 
   const fresh = el(doc, 'div', 'folder-agent-card__who-new');
   fresh.dataset.folderAgentHire = 'new';
-  const face = el(doc, 'span', 'folder-agent-card__who-face');
-  face.setAttribute('aria-hidden', 'true');
+  const canPick = typeof win?.CharacterPicker?.open === 'function';
+  const face = el(doc, canPick ? 'button' : 'span', 'folder-agent-card__who-face');
+  if (canPick) {
+    face.type = 'button';
+    face.setAttribute('aria-label', 'Change face');
+    face.addEventListener('click', event => {
+      event?.stopPropagation?.();
+      void chooseFace(face);
+    });
+    // Focusing the chooser must not silently replace an existing-agent choice
+    // when the person then cancels the picker.
+    face.addEventListener('focusin', event => event?.stopPropagation?.());
+  } else face.setAttribute('aria-hidden', 'true');
   const main = el(doc, 'div', 'folder-agent-card__who-main');
   const name = doc.createElement('input');
   name.type = 'text';
@@ -678,7 +696,11 @@ function renderHire(doc, hire, win, fetchImpl) {
   name.placeholder = 'Name';
   name.setAttribute('aria-label', 'Name');
   const drawFace = () => {
-    const markup = faceMarkup(win, hireFace(hire.name, win), 'folder-agent-card__who-avatar');
+    const markup = faceMarkup(
+      win,
+      hireFace(hire.name, win, hire.character),
+      'folder-agent-card__who-avatar'
+    );
     if (markup) face.innerHTML = markup;
     else face.textContent = (hiredName(hire.name)[0] || '?').toUpperCase();
   };
@@ -701,6 +723,17 @@ function renderHire(doc, hire, win, fetchImpl) {
     const chipText = el(doc, 'span', 'folder-agent-card__who-chip-text');
     chipText.setAttribute('aria-hidden', 'true');
     chip.append(chipText, model);
+    // Native selects can retain :focus-visible after a pointer click (notably
+    // following text input). Suppress only that pointer-origin ring; keyboard
+    // interaction or leaving the chip restores the usual focus-visible rule.
+    model.addEventListener('pointerdown', () => {
+      chip.dataset.pointerFocus = 'true';
+    });
+    const keyboardFocus = () => {
+      delete chip.dataset.pointerFocus;
+    };
+    model.addEventListener('keydown', keyboardFocus);
+    model.addEventListener('blur', keyboardFocus);
     const chipLabel = () =>
       hire.models.find(item => item.provider === hire.provider && item.model === hire.model)
         ?.label || 'No model yet';
@@ -750,14 +783,21 @@ function renderHire(doc, hire, win, fetchImpl) {
     hire.mandate = String(mandate.value || '');
     select('new');
   });
-  // Role is rarely needed, so it waits behind Customize; it starts open when it
-  // already holds text (FR6).
+  // Only a role that differs from the visible brief needs the extra row open.
   const customize = el(doc, 'details', 'folder-agent-card__who-customize');
-  customize.open = Boolean(hire.mandate);
-  customize.append(
-    el(doc, 'summary', 'folder-agent-card__who-customize-toggle', 'Customize'),
-    hireField(doc, 'Role', mandate)
+  customize.open = Boolean(
+    hire.mandate.trim() && hire.mandate.trim() !== String(brief || '').trim()
   );
+  customize.append(el(doc, 'summary', 'folder-agent-card__who-customize-toggle', 'Customize'));
+  if (canPick) {
+    const changeFace = el(doc, 'button', 'folder-agent-card__who-change-face', 'Change face');
+    changeFace.type = 'button';
+    changeFace.addEventListener('click', () => {
+      void chooseFace(changeFace);
+    });
+    customize.append(changeFace);
+  }
+  customize.append(hireField(doc, 'Role', mandate));
   box.append(customize);
 
   // The owner's own agents: one row of faces, each a visually hidden radio in a
@@ -765,9 +805,12 @@ function renderHire(doc, hire, win, fetchImpl) {
   // browser. Each choice is announced with the agent's name and model. The row
   // scrolls sideways and never wraps (FR8, FR11, FR13).
   const choices = [];
+  let reuse = null;
+  let heading = null;
   if (hire.agents.length) {
-    const reuse = el(doc, 'div', 'folder-agent-card__who-reuse');
-    const heading = el(doc, 'p', 'folder-agent-card__who-heading', 'Or one of your agents');
+    reuse = el(doc, 'details', 'folder-agent-card__who-reuse');
+    reuse.open = hire.mode === 'existing';
+    heading = el(doc, 'summary', 'folder-agent-card__who-heading');
     heading.id = `${group}-heading`;
     const row = el(doc, 'div', 'folder-agent-card__who-agents');
     row.setAttribute('role', 'radiogroup');
@@ -780,7 +823,10 @@ function renderHire(doc, hire, win, fetchImpl) {
       radio.name = group;
       radio.value = agent.name;
       radio.className = 'folder-agent-card__who-agent-radio';
-      radio.setAttribute('aria-label', agent.model ? `${agent.name}, ${agent.model}` : agent.name);
+      radio.setAttribute(
+        'aria-label',
+        [agent.name, agent.model, agent.runs ? `runs ${agent.runs}` : ''].filter(Boolean).join(', ')
+      );
       const agentFaceBox = el(doc, 'span', 'folder-agent-card__who-agent-face');
       agentFaceBox.setAttribute('aria-hidden', 'true');
       item.append(
@@ -788,6 +834,8 @@ function renderHire(doc, hire, win, fetchImpl) {
         agentFaceBox,
         el(doc, 'span', 'folder-agent-card__who-agent-name', agent.name)
       );
+      if (agent.runs)
+        item.append(el(doc, 'span', 'folder-agent-card__who-agent-runs', `runs ${agent.runs}`));
       radio.addEventListener('change', () => {
         if (!radio.checked) return;
         select('existing', agent.name);
@@ -802,6 +850,45 @@ function renderHire(doc, hire, win, fetchImpl) {
 
   // The owner's agents as the list answered them, by name; empty until it does.
   let records = new Map();
+  const recordsReady = fetchImpl ? fetchAgentRecords(fetchImpl) : Promise.resolve(null);
+  let picking = false;
+  async function chooseFace(trigger) {
+    if (!canPick || picking) return;
+    picking = true;
+    // Bootstrap's sheet traps document focus. The shared picker mounts beside
+    // it, so let focus reach only that overlay without disabling the sheet's
+    // trap or relying on Bootstrap's private fields. Restore normal handling
+    // as soon as the picker resolves (including cancellation).
+    const pickerFocus = event => {
+      if (event.target?.closest?.('#charPickerHost')) event.stopImmediatePropagation();
+    };
+    try {
+      const found = await recordsReady;
+      if (found) records = found;
+      if (box.isConnected === false) return;
+      const taken = [...records.values()]
+        .filter(record => record.appearance?.mode === 'character')
+        .map(record => record.appearance.character?.catalog_id)
+        .filter(Boolean);
+      doc.addEventListener?.('focusin', pickerFocus, true);
+      const answer = await win.CharacterPicker.open({
+        selectedId: hire.character,
+        taken,
+        role: HIRED_AGENT_ROLE,
+        trigger,
+        showSkip: true
+      });
+      if (box.isConnected === false) return;
+      if (answer?.action === 'choose' || answer?.action === 'skip') {
+        hire.character = answer.action === 'choose' ? String(answer.catalogId || '') : '';
+        select('new');
+        drawFace();
+      }
+    } finally {
+      doc.removeEventListener?.('focusin', pickerFocus, true);
+      picking = false;
+    }
+  }
   const drawAgentFaces = () => {
     choices.forEach(({ agent, face: agentFaceBox }) => {
       const markup = faceMarkup(
@@ -828,6 +915,11 @@ function renderHire(doc, hire, win, fetchImpl) {
     const chosen =
       mode === 'existing' ? choices.find(choice => choice.agent.name === hire.existing) : null;
     hire.mode = chosen ? 'existing' : 'new';
+    onSelect?.(hire.mode);
+    if (heading)
+      heading.textContent = chosen
+        ? `Using ${chosen.agent.name}`
+        : `Use one of your agents (${hire.agents.length})`;
     fresh.dataset.selected = String(!chosen);
     // Role belongs to the new agent, so it dims with it.
     customize.dataset.selected = String(!chosen);
@@ -851,8 +943,8 @@ function renderHire(doc, hire, win, fetchImpl) {
       preselected.item.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
     );
   }
-  if (choices.length && fetchImpl) {
-    void fetchAgentRecords(fetchImpl).then(found => {
+  if (fetchImpl) {
+    void recordsReady.then(found => {
       if (!found || box.isConnected === false) return;
       records = found;
       drawAgentFaces();
@@ -862,7 +954,7 @@ function renderHire(doc, hire, win, fetchImpl) {
 }
 
 // renderFolderAgentCard draws the card before Start. onStart(brief, button,
-// hire) posts Hire & start; the caller swaps in the receipt. win is the window
+// hire) posts Hire & build; the caller swaps in the receipt. win is the window
 // whose avatar renderer and catalogs draw the hire section's faces (the page's
 // own by default); fetchImpl reads the owner's agents' appearance (the page's
 // own fetch by default, none without a window).
@@ -884,12 +976,21 @@ export function renderFolderAgentCard(
   input.setAttribute('aria-label', view.field);
   label.append(caption, input);
   const hireWindow = cardWindow(doc, win);
+  const start = el(doc, 'button', 'btn btn-primary folder-agent-card__start', view.action);
   const hire = view.hire
-    ? renderHire(doc, view.hire, hireWindow, fetchImpl || hireWindow?.fetch?.bind(hireWindow))
+    ? renderHire(
+        doc,
+        view.hire,
+        hireWindow,
+        fetchImpl || hireWindow?.fetch?.bind(hireWindow),
+        mode => {
+          start.textContent = mode === 'existing' ? view.actionExisting : view.action;
+        },
+        view.brief
+      )
     : null;
   const note = el(doc, 'p', 'folder-agent-card__note', view.note);
   const actions = el(doc, 'div', 'folder-agent-card__actions');
-  const start = el(doc, 'button', 'btn btn-primary folder-agent-card__start', view.action);
   start.type = 'button';
   start.dataset.folderAgentAction = 'start';
   start.addEventListener('click', () =>

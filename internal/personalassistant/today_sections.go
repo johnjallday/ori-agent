@@ -140,7 +140,7 @@ func (s *TodayService) buildTodaySections(ctx context.Context, userID string, re
 	needs = append(needs, hireNeeds...)
 	working = append(working, hireWorking...)
 	folderResults = append(folderResults, hireDone...)
-	// A folder fed to "Start an agent on <folder>" reports the same way: its
+	// A folder fed to "Hire an agent for <folder>" reports the same way: its
 	// look under Working on, its report under Needs you.
 	if s.folderAgentItems != nil {
 		agentNeeds, agentWorking, agentDone := s.folderAgentItems(ctx, userID)

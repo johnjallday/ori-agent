@@ -209,14 +209,14 @@ const hireOffer = (hire = {}, overrides = {}) => ({
   ...overrides
 });
 
-test('a plan that names a hire is a hire card: Hire and start, Not now, and Adjust beside its lines', () => {
+test('a plan that names a hire is a hire card: Hire and build, Not now, and Adjust beside its lines', () => {
   const view = folderOfferView(hireOffer());
   assert.equal(text(view.headline), 'Hire Song Assistant for My Song');
   assert.deepEqual(strong(view.headline), ['Song Assistant', 'My Song']);
   assert.deepEqual(
     view.actions.map(action => [action.id, action.label]),
     [
-      ['setup', 'Hire & start'],
+      ['setup', 'Hire & build'],
       ['no', 'Not now']
     ]
   );
@@ -242,8 +242,8 @@ test('the agent row names the role and the model, or that there is no model yet'
 test('an existing agent is assigned, and a plugin not installed yet names the capability', () => {
   const assigned = hireView(hireOffer({ mode: 'bind', agent_name: 'Studio Lead' }).plan, 'My Song');
   assert.equal(text(assigned.headline), 'Assign Studio Lead to My Song');
-  assert.equal(assigned.confirmLabel, 'Assign & start');
-  assert.equal(folderOfferView(hireOffer({ mode: 'bind' })).actions[0].label, 'Assign & start');
+  assert.equal(assigned.confirmLabel, 'Assign & build');
+  assert.equal(folderOfferView(hireOffer({ mode: 'bind' })).actions[0].label, 'Assign & build');
   const pending = hireView(
     hireOffer({ mode: 'pending', agent_name: '', role_label: 'REAPER song', model: '' }).plan,
     'My Song'
@@ -399,7 +399,7 @@ test('after Adjust… the hire keeps its plan beside Continue setup', () => {
   const view = folderOfferView(hireOffer({}, { status: 'awaiting_outcome', decision: 'yes' }));
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Hire & start', 'Continue setup']
+    ['Hire & build', 'Continue setup']
   );
   assert.equal(view.hire.adjust, null);
 });
@@ -448,7 +448,7 @@ test('a reviewed software project is hired the same way, keeping what was read',
   assert.equal(view.question, 'What I read in widget:');
   assert.deepEqual(
     view.actions.map(action => action.label),
-    ['Hire & start', 'Not now', 'Review again']
+    ['Hire & build', 'Not now', 'Review again']
   );
   assert.equal(view.hire.adjust.softwareAdjust, true);
   assert.ok(view.evidence.length > 0);
@@ -460,7 +460,7 @@ test('a reviewed software project is hired the same way, keeping what was read',
   assert.ok(!unavailable.actions.some(action => action.oneCard));
 });
 
-test('Hire and start sends the brief only when the user changed it', () => {
+test('Hire and build sends the brief only when the user changed it', () => {
   const body = source.slice(
     source.indexOf('async function startOneCardSetup('),
     source.indexOf('function syncSetupPolling(')
@@ -814,14 +814,14 @@ const inboxOffer = (hire = {}, overrides = {}) => ({
   ...overrides
 });
 
-test('an inbox folder is a hire card for File Curator: Hire & start or Not now, no Adjust', () => {
+test('an inbox folder is a hire card for File Curator: Hire & build or Not now, no Adjust', () => {
   assert.equal(isInboxFolderOffer(inboxOffer()), true);
   const view = folderOfferView(inboxOffer());
   assert.equal(text(view.headline), 'Hire File Curator for Downloads');
   assert.deepEqual(
     view.actions.map(action => [action.id, action.label]),
     [
-      ['setup', 'Hire & start'],
+      ['setup', 'Hire & build'],
       ['no', 'Not now']
     ]
   );
@@ -834,7 +834,7 @@ test('an inbox folder is a hire card for File Curator: Hire & start or Not now, 
   // A saved File Curator is assigned, never hired twice.
   const assigned = folderOfferView(inboxOffer({ mode: 'bind', model: 'gpt-5-mini' }));
   assert.equal(text(assigned.headline), 'Assign File Curator to Downloads');
-  assert.equal(assigned.actions[0].label, 'Assign & start');
+  assert.equal(assigned.actions[0].label, 'Assign & build');
   // Another kind of folder is never mistaken for one.
   assert.equal(isInboxFolderOffer(hireOffer()), false);
   assert.equal(isInboxFolderOffer(reviewedSoftware()), false);
@@ -909,7 +909,7 @@ test('a folder with a project beside loose files shows why one hire leads and th
   assert.deepEqual(
     tidy.actions.map(action => [action.id, action.label, action.swapCandidate || '']),
     [
-      ['setup', 'Hire & start', ''],
+      ['setup', 'Hire & build', ''],
       ['no', 'Not now', ''],
       ['lead-swap', 'Or: hire Development Assistant for widget instead', 'candidate-1']
     ]

@@ -242,7 +242,7 @@ type HandlerFacade struct {
 	PersonalAssistant   *personalassistanthttp.Handler
 	SetupJourney        *setupjourneyhttp.Handler
 	SampleLibrary       *samplelibraryhttp.Handler
-	// FolderAgent serves "Start an agent on <folder>".
+	// FolderAgent serves "Hire an agent for <folder>".
 	FolderAgent *folderagenthttp.Handler
 	PersonalHQ  *personalhqhttp.Handler
 	DailyBrief  *dailybriefhttp.Handler

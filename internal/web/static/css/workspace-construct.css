@@ -2589,7 +2589,7 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
   overflow: hidden;
   background: var(--wc-bg-2);
 }
-/* The one folder card ("Start an agent on <folder>") under the pane. */
+/* The one folder card ("Hire an agent for <folder>") under the pane. */
 .workspace-create-modal .workspace-build-folder-agent {
   flex: 0 0 auto;
   max-height: 60vh;

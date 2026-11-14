@@ -240,7 +240,7 @@ func TestStart_DemoFolderCreatesWorkspaceAgentTicketAndReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if chosen.Title != "Start an agent on Ori Music Demo" || chosen.Brief != DefaultBrief || chosen.Action != "Hire & start" || chosen.BriefMax != personalassistant.BriefMaxRunes {
+	if chosen.Title != "Hire an agent for Ori Music Demo" || chosen.Brief != DefaultBrief || chosen.Action != "Hire & build" || chosen.ActionExisting != "Assign & build" || chosen.BriefMax != personalassistant.BriefMaxRunes {
 		t.Fatalf("card = %+v", chosen)
 	}
 	view, err := h.svc.Start(context.Background(), "u1", chosen.Token, "", Hire{})

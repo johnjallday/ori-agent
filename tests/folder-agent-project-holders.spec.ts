@@ -78,11 +78,11 @@ test('a known folder points at a saved holder without creating anything until it
   await expect(holders).toContainText('Projects inside');
   const setup = holders.getByRole('button', { name: 'Set up Projects', exact: true });
   await setup.click();
-  await expect(holders).toContainText('Start an agent on Projects');
+  await expect(holders).toContainText('Hire an agent for Projects');
   expect(await get()).toHaveLength(1);
   await holders.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(setup).toBeFocused();
-  await expect(holders).not.toContainText('Start an agent on Projects');
+  await expect(holders).not.toContainText('Hire an agent for Projects');
   expect(await get()).toHaveLength(1);
   await page.screenshot({ path: join(evidence, 'project-holder-cancelled.png'), fullPage: true });
   await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });

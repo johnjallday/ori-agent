@@ -3,6 +3,7 @@ import { chooseAttach, openFolderAttach } from './helpers/assistant-menus';
 import { mockHiredAssistant } from './helpers/hired-assistant';
 import { writeFile } from 'node:fs/promises';
 import { revealFolderSetupDetails } from './helpers/folder-setup-card';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 // Deterministic presentation fixtures against the real application. These prove
 // rendering/no unintended browser requests, not native selection or live setup.
@@ -21,6 +22,7 @@ const observation = {
 async function preview(page: Page, value = observation) {
   const forbidden: string[] = [];
   const errors: string[] = [];
+  await installLocalCdn(page);
   await mockHiredAssistant(page);
   page.on('pageerror', error => errors.push(error.message));
   // No setup, model, install or file-read request is allowed by this fixture.
@@ -113,6 +115,7 @@ const reviewOffer = (mode = 'create') => ({
 });
 
 async function mountReview(page: Page, offer = reviewOffer(), route = '/?panel=today') {
+  await installLocalCdn(page);
   await mockHiredAssistant(page);
   await page.goto(route);
   await page.waitForFunction(() =>
@@ -126,6 +129,24 @@ async function mountReview(page: Page, offer = reviewOffer(), route = '/?panel=t
     (window as any).PersonalAssistantTranscript?.revealControl(slot, true);
   }, offer);
   return page.locator('#personalAssistantFolderOffer');
+}
+
+// A folder hire enters its source-owned review first. Neither entering it nor
+// choosing automatic placement is consent to run the reviewed setup.
+async function confirmSetup(page: Page, card: Locator, { keyboard = false } = {}) {
+  const activate = async (button: Locator) => {
+    if (keyboard) {
+      await keyboardReach(page, button);
+      await page.keyboard.press('Enter');
+    } else await button.click();
+  };
+  await activate(card.getByRole('button', { name: 'Hire & build', exact: true }));
+  return confirmSourceSetup(page, card, keyboard);
+}
+
+async function editSource(card: Locator) {
+  await card.locator('[data-source-creation-review] [data-placement-action="details"]').click();
+  await expect(card.getByLabel('What should it do with it?')).toBeVisible();
 }
 
 // The offer's first action opens an inert source-owned review. Only this
@@ -152,7 +173,7 @@ test.beforeEach(async ({ request }) => {
 });
 
 for (const theme of ['light', 'dark']) {
-  test(`fixture package wizard preserves keyboard focus and newer typing ${theme}`, async ({
+  test(`fixture plugin wizard preserves keyboard focus and ignores a cancelled late review ${theme}`, async ({
     page
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -199,29 +220,33 @@ for (const theme of ['light', 'dark']) {
     await page.keyboard.press('Enter');
     const wizard = page.locator('#pluginSetupWizard');
     const heading = wizard.locator('#pluginSetupWizardTitle');
-    await expect(heading).toBeFocused();
     await expect(wizard.getByRole('heading', { name: 'Update REAPER', exact: true })).toBeVisible();
+    await expect(heading).toBeFocused();
+    await keyboardReach(page, wizard.getByRole('button', { name: 'Confirm update', exact: true }));
     await keyboardReach(page, wizard.getByRole('button', { name: 'Cancel', exact: true }));
     await page.keyboard.press('Escape');
+    await expect(wizard).toBeHidden();
     await expect(card).toBeVisible();
+    await expect(input).toHaveValue('  Inline 🎼 draft\nkept exact  ');
     await expect(update).toBeFocused();
     expect(writes).toHaveLength(1);
     expect(writes[0].confirm).toBeUndefined();
     hold = true;
     await update.click();
     await expect.poll(() => Boolean(release)).toBe(true);
-    // A native modal makes the composer inert. Cancel the outstanding read
-    // before typing there, just as a person must; its late reply stays cancelled.
-    await page.keyboard.press('Escape');
-    await expect(wizard).not.toBeVisible();
+    // The modal makes the conversation inert. Cancel its pending preview,
+    // then type a newer draft before that old response is released.
+    await wizard.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(wizard).toBeHidden();
     await expect(update).toBeFocused();
     await input.fill('  Newer 界 draft\nnot stolen  ');
     const response = page.waitForResponse('**/folder-digest/offers/*/prerequisites');
     release!();
     await (await response).finished();
-    await expect(wizard).not.toBeVisible();
+    await expect(wizard).toBeHidden();
     await expect(input).toBeFocused();
     await expect(input).toHaveValue('  Newer 界 draft\nnot stolen  ');
+    await expect(update).toBeEnabled();
     expect(writes).toHaveLength(2);
     expect(writes.some(body => body.confirm)).toBe(false);
     expect(await page.locator('img[src="x"]').count()).toBe(0);
@@ -250,7 +275,7 @@ test('fixture review preserves exact Unicode drafts and only submits the reviewe
   });
   const card = await mountReview(page);
   const brief = card.getByLabel('What should it do with it?');
-  const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+  const confirm = card.getByRole('button', { name: 'Hire & build', exact: true });
   await expect(card.getByRole('heading', { name: 'Confirm setup', exact: true })).toBeVisible();
   await expect(card.getByText('Setup effects', { exact: true })).toBeVisible();
   await expect(card.locator('#personalAssistantFolderConsequences')).toContainText(
@@ -279,26 +304,60 @@ test('fixture review preserves exact Unicode drafts and only submits the reviewe
   await brief.fill('🎼'.repeat(300));
   await confirm.click();
   expect(requests).toHaveLength(0);
-  const review = await confirmSourceSetup(page, card);
+  const reviewed = await confirmSourceSetup(page, card);
   await expect.poll(() => requests.length).toBe(1);
   expect(requests[0].brief).toBe('🎼'.repeat(300));
-  await expect(review.locator('.assisted-placement__status')).toContainText('Fixture failure');
-  await review.getByRole('button', { name: 'Edit with the source owner', exact: true }).click();
-  await expect(brief).toBeVisible();
+  await expect(reviewed.locator('.assisted-placement__status')).toContainText('Fixture failure');
+  await editSource(card);
   await expect(brief).toHaveValue('🎼'.repeat(300));
   await brief.fill('  A precise\nbrief  ');
   stale = true;
   await confirm.click();
   expect(requests).toHaveLength(1);
   await confirmSourceSetup(page, card);
-  await expect(review.locator('.assisted-placement__status')).toContainText('changed plan');
-  await review.getByRole('button', { name: 'Edit with the source owner', exact: true }).click();
+  await expect(reviewed.locator('.assisted-placement__status')).toContainText('changed plan');
+  await editSource(card);
+  await expect(card.getByRole('alert')).toContainText('changed plan');
   await expect(brief).toHaveValue('  A precise\nbrief  ');
   expect(requests).toHaveLength(2);
   expect(Object.keys(requests[1]).sort()).toEqual(['brief', 'plan_digest', 'request_id']);
   expect(requests[1].plan_digest).toBe('fixture-reviewed-digest');
   expect(requests[1].brief).toBe('  A precise\nbrief  ');
   await expect(confirm).toBeEnabled(); // Stale response never automatically reconfirms.
+});
+
+test('fixture an invalid edited brief cannot latch reviewed setup as accepted', async ({
+  page
+}) => {
+  const requests: any[] = [];
+  await page.route('**/folder-digest/offers/visual-review-fixture/setup', route => {
+    requests.push(route.request().postDataJSON());
+    return route.fulfill({ status: 503, json: { error: 'Fixture refusal' } });
+  });
+  const card = await mountReview(page);
+  await card.getByRole('button', { name: 'Hire & build', exact: true }).click();
+  const review = card.locator('[data-source-creation-review]');
+  const goal = review.locator('[data-placement-field="mission"]');
+  await goal.fill('🎼'.repeat(301));
+  await goal.blur();
+  await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  const confirm = review.locator('[data-placement-action="confirm"]');
+  await confirm.click();
+  await expect(review.locator('[data-placement-focus="status"]')).toContainText('300');
+  expect(requests).toHaveLength(0);
+  await expect(goal).toBeEnabled();
+  await expect(goal).toHaveValue('🎼'.repeat(301));
+  await expect(review.locator('[data-placement-action="read-status"]')).toHaveCount(0);
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await review.locator('[data-placement-focus="status"]').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/invalid-edited-brief.png` });
+  }
+  await goal.fill('🎼'.repeat(300));
+  await goal.blur();
+  await confirm.click();
+  await expect.poll(() => requests.length).toBe(1);
+  expect(requests[0].brief).toBe('🎼'.repeat(300));
+  await expect(review).toContainText('Fixture refusal');
 });
 
 for (const action of ['confirm', 'place']) {
@@ -314,7 +373,7 @@ for (const action of ['confirm', 'place']) {
       ...offer,
       plan: { ...offer.plan, destination: undefined }
     });
-    await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
+    await card.getByRole('button', { name: 'Hire & build', exact: true }).click();
     const review = card.locator('[data-source-creation-review]');
     const goal = review.locator('[data-placement-field="mission"]');
     await goal.fill('🎼'.repeat(301));
@@ -366,12 +425,22 @@ test('fixture late confirmation response cannot reopen a parked review or replac
   });
   const card = await mountReview(page);
   await card.getByLabel('What should it do with it?').fill('Exact unsent goal');
-  const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
-  await confirm.click();
+  await card.getByRole('button', { name: 'Hire & build', exact: true }).click();
   expect(calls).toBe(0);
-  await confirmSourceSetup(page, card);
+  const reviewed = await confirmSourceSetup(page, card);
   await expect.poll(() => calls).toBe(1);
-  await expect(card.locator('[data-placement-action="confirm"]')).toHaveCount(0);
+  await expect(reviewed.locator('[data-placement-action="confirm"]')).toHaveCount(0);
+  await expect(
+    reviewed.getByRole('button', { name: 'Read saved status', exact: true })
+  ).toBeDisabled();
+  if (process.env.ORI_VISUAL_EVIDENCE) {
+    await reviewed
+      .getByRole('button', { name: 'Read saved status', exact: true })
+      .scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: `${process.env.ORI_VISUAL_EVIDENCE}/confirmation-in-flight.png`
+    });
+  }
   await page.evaluate(() => (window as any).PersonalAssistantFolder.parkConversation());
   await respond!();
   await expect(card).toBeHidden();
@@ -394,7 +463,7 @@ test('fixture source review retains unblurred goals and cannot confirm during hy
     return route.fulfill({ status: 503, json: { error: 'Fixture failure' } });
   });
   const card = await mountReview(page, reviewOffer());
-  await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
+  await card.getByRole('button', { name: 'Hire & build', exact: true }).click();
   const review = card.locator('[data-source-creation-review]');
   await review.locator('[data-placement-action="suggested"]').click();
   const goal = review.locator('[data-placement-field="mission"]');
@@ -440,7 +509,7 @@ test('fixture review cannot mutate during conversation hydration and keeps the e
       document.dispatchEvent(new CustomEvent('personal-assistant:conversation-loading'));
     }, loading);
   await hydrate(true);
-  const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+  const confirm = card.getByRole('button', { name: 'Hire & build', exact: true });
   await expect(confirm).toBeDisabled();
   await confirm.dispatchEvent('click');
   expect(requests).toHaveLength(0);
@@ -587,8 +656,8 @@ test('fixture non-Home drawer keeps the same facts and one review owner', async 
   const drawer = await mountReview(page, reviewOffer(), '/agents?panel=today');
   await expect(drawer.locator('.folder-visual figcaption')).toHaveText(summary!);
   await expect(page.locator('#personalAssistantFolderBrief')).toHaveCount(1);
-  await drawer.getByRole('button', { name: 'Hire & start', exact: true }).focus();
-  await expect(drawer.getByRole('button', { name: 'Hire & start', exact: true })).toBeFocused();
+  await drawer.getByRole('button', { name: 'Hire & build', exact: true }).focus();
+  await expect(drawer.getByRole('button', { name: 'Hire & build', exact: true })).toBeFocused();
   if (process.env.ORI_VISUAL_EVIDENCE) {
     await page.setViewportSize({ width: 1440, height: 1100 });
     await page.evaluate(() =>
@@ -639,9 +708,9 @@ test('fixture New Workspace uses identical facts without another confirmation or
   const review = page.locator('#workspaceBuildPlanReview');
   await expect(review).toBeVisible();
   await expect(review.locator('.folder-visual figcaption')).toHaveText(summary!);
-  await expect(page.locator('#workspaceBuildPlanReviewSetup')).toHaveText('Hire & start');
+  await expect(page.locator('#workspaceBuildPlanReviewSetup')).toHaveText('Hire & build');
   await expect(
-    page.locator('#workspaceBuildPane button:visible').filter({ hasText: /^Hire & start$/ })
+    page.locator('#workspaceBuildPane button:visible').filter({ hasText: /^Hire & build$/ })
   ).toHaveCount(0);
   const brief = page.locator('#workspaceBuildPlanReviewBrief');
   const exact = `  ${'😀'.repeat(297)} `;
@@ -663,7 +732,7 @@ test('fixture New Workspace uses identical facts without another confirmation or
   await page.locator('#workspaceBuildPlanReviewBack').click();
   await expect(review).toBeHidden();
   await expect(
-    page.locator('#addFolderModal').getByRole('button', { name: 'Hire & start', exact: true })
+    page.locator('#addFolderModal').getByRole('button', { name: 'Hire & build', exact: true })
   ).toHaveCount(1);
   await page.locator('#workspaceBuildReturnToReview').click();
   await expect(review).toBeVisible();
@@ -776,7 +845,7 @@ test('fixture New Workspace rechecks only its own requirements and preserves bot
   await expect(home.getByLabel('What should it do with it?')).toHaveValue('  Assistant 🎼 brief  ');
 });
 
-test('fixture lost confirmation reads saved status; late acceptance never reopens the drawer', async ({
+test('fixture lost response is read back without re-confirming; late status never reopens the drawer', async ({
   page
 }) => {
   const offer = reviewOffer();
@@ -808,19 +877,20 @@ test('fixture lost confirmation reads saved status; late acceptance never reopen
     await route.fulfill({ json: { folder_digest: { offer: accepted } } });
   });
   const card = await mountReview(page, offer);
-  await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
+  await card.getByRole('button', { name: 'Hire & build', exact: true }).click();
   expect(requests).toHaveLength(0);
-  const review = await confirmSourceSetup(page, card);
-  await expect(review).toContainText('Confirmation delivery is unknown');
-  await expect(review.locator('[data-placement-action="confirm"]')).toHaveCount(0);
+  const reviewed = await confirmSourceSetup(page, card);
+  await expect(reviewed).toContainText('Confirmation delivery is unknown');
+  await expect(reviewed.locator('[data-placement-action="confirm"]')).toHaveCount(0);
   expect(reads).toBe(0);
-  await review.getByRole('button', { name: 'Read saved status', exact: true }).click();
+  await reviewed.getByRole('button', { name: 'Read saved status', exact: true }).click();
   await expect.poll(() => reads).toBe(1);
   expect(requests).toHaveLength(1);
   await page.locator('#personalAssistantClose').click();
   const response = page.waitForResponse('**/folder-digest?*');
   release();
   await (await response).finished();
+  await expect(reviewed).toContainText('Reading status never continues creation.');
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
   await expect(page.locator('#folderSetupRunModal')).toBeHidden();
   await page.evaluate(() =>
@@ -828,10 +898,13 @@ test('fixture lost confirmation reads saved status; late acceptance never reopen
       document.getElementById('personalAssistantLauncher')
     )
   );
-  await expect(review).toBeVisible();
-  // Closing the shared shell exposes its canonical source receipt, not a new
-  // draft or another confirmation of the operation whose response was lost.
-  await review.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(reviewed).toBeVisible();
+  await expect(
+    reviewed.getByRole('button', { name: 'Read saved status', exact: true })
+  ).toBeVisible();
+  await expect(reviewed.locator('[data-placement-action="confirm"]')).toHaveCount(0);
+  // Closing exposes the canonical source receipt, not another confirmation.
+  await reviewed.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(card.locator('#personalAssistantFolderProgress')).toBeVisible();
   await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
     'Workspace · Waiting'
@@ -880,7 +953,7 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
     route.fulfill({ json: { folder_digest: { offer: run(false) } } })
   );
   const card = await mountReview(page, offer);
-  await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
+  await card.getByRole('button', { name: 'Hire & build', exact: true }).click();
   expect(requests).toHaveLength(0);
   await confirmSourceSetup(page, card);
   await expect(card.locator('#personalAssistantFolderProgress')).toContainText(
@@ -944,7 +1017,7 @@ test('fixture update failure and retry keep one surface and the same reviewed pl
 
 test('fixture bind and pending reviews do not invent a completed hire', async ({ page }) => {
   const card = await mountReview(page, reviewOffer('bind'));
-  await expect(card.getByRole('button', { name: 'Assign & start', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Assign & build', exact: true })).toBeVisible();
   await expect(card.locator('.folder-visual__agent')).toContainText('Already hired');
   await expect(card.locator('.folder-visual__agent')).toContainText('Assign on setup');
   await page.evaluate(
@@ -953,7 +1026,7 @@ test('fixture bind and pending reviews do not invent a completed hire', async ({
   );
   await expect(card.locator('.folder-visual__agent')).toContainText('Identity pending');
   await expect(card.locator('.folder-visual__agent')).not.toContainText('Ari');
-  await expect(card.getByRole('button', { name: 'Hire & start', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Hire & build', exact: true })).toBeVisible();
 });
 
 test('fixture agent existence and exact workspace membership stay distinct on reload', async ({
@@ -1726,7 +1799,7 @@ for (const theme of ['light', 'dark']) {
         }
         const brief = card.getByLabel('What should it do with it?');
         await brief.focus();
-        const confirm = card.getByRole('button', { name: 'Hire & start', exact: true });
+        const confirm = card.getByRole('button', { name: 'Hire & build', exact: true });
         await keyboardReach(page, confirm);
         await expect(confirm).toBeFocused();
         const layout = await card.evaluate(node => {

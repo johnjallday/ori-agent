@@ -13,8 +13,9 @@ import (
 // byte: the collection rewrite (PRD FR15) must not touch them. The hire card
 // rule (folder-hire-brief FR27) is a deliberate change, and the mixed-folder
 // sentence (folder-inbox-hire FR13: the model restates the host's lead, never
-// re-chooses) the other.
-const singleFolderInstructionsSHA256 = "b7088e09552c2af7b944f6e32582c5673057e1745e1d4d5e3d715ac035f7b1db"
+// re-chooses) the other. Folder-hire-card changes only the control's name
+// from Hire and start to Hire and build.
+const singleFolderInstructionsSHA256 = "74d41dd99abd7992ae4af215a14ad283594c466a0419b7a7c4a7bcf21c057e92"
 
 func TestFolderTurnInstructions_ACollectionReplySpeaksOverTheCardOriShowed(t *testing.T) {
 	structure := []personalassistant.FolderReviewOption{{CandidateID: "candidate-0", Presentation: &personalassistant.FolderReviewPresentation{

@@ -290,7 +290,7 @@ func projectReviewContext(view *personalassistant.FolderOfferView, active bool) 
 				if view.Plan != nil && view.Plan.Hire != nil {
 					// A plan that names a hire is a hire card: its brief field
 					// is the one question, Adjust sits beside the plan's lines.
-					result.Controls = []string{"Hire and start", "Adjust", "Keep chatting"}
+					result.Controls = []string{"Hire and build", "Adjust", "Keep chatting"}
 				} else if view.Plan != nil {
 					result.Controls = []string{"Set up", "Adjust…", "Keep chatting"}
 				} else {
@@ -299,7 +299,7 @@ func projectReviewContext(view *personalassistant.FolderOfferView, active bool) 
 			} else if view.Plan != nil && view.Plan.Hire != nil && view.Subject.IsRoot && view.Subject.Shape == "inbox" {
 				// An inbox folder's hire card: the host's own File Janitor plan,
 				// with no step-by-step journey to adjust.
-				result.Controls = []string{"Hire and start", "Keep chatting"}
+				result.Controls = []string{"Hire and build", "Keep chatting"}
 			} else if view.CreateAvailable {
 				if view.Operation == personalassistant.FolderOperationSupport {
 					result.Controls = []string{"Link supporting folder", "Keep chatting"}

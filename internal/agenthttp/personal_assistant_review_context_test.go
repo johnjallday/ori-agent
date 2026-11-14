@@ -127,7 +127,7 @@ func TestReviewContext_AHiredPlanIsDescribedWithHireAndStart(t *testing.T) {
 		plan     *personalassistant.FolderSetupPlan
 		controls []string
 	}{
-		{&hired, []string{"Hire and start", "Adjust", "Keep chatting"}},
+		{&hired, []string{"Hire and build", "Adjust", "Keep chatting"}},
 		{plan, []string{"Set up", "Adjust…", "Keep chatting"}},
 	} {
 		view := &personalassistant.FolderOfferView{Status: personalassistant.FolderOfferPending, Subject: personalassistant.FolderSubjectView{Name: "My Song"},
@@ -140,7 +140,7 @@ func TestReviewContext_AHiredPlanIsDescribedWithHireAndStart(t *testing.T) {
 	// no plain create, and no journey to adjust. It is never "unavailable".
 	inbox := &personalassistant.FolderOfferView{Status: personalassistant.FolderOfferPending,
 		Subject: personalassistant.FolderSubjectView{Name: "Downloads", Kind: personalassistant.FolderChoiceProject, Shape: "inbox", IsRoot: true}, Plan: &hired}
-	if got := projectReviewContext(inbox, true); got.Status != "awaiting_confirmation" || !reflect.DeepEqual(got.Controls, []string{"Hire and start", "Keep chatting"}) {
+	if got := projectReviewContext(inbox, true); got.Status != "awaiting_confirmation" || !reflect.DeepEqual(got.Controls, []string{"Hire and build", "Keep chatting"}) {
 		t.Fatalf("inbox hire: %+v", got)
 	}
 	inbox.Plan = nil

@@ -47,6 +47,19 @@ func TestStart_RefusesAPathField(t *testing.T) {
 	}
 }
 
+func TestStart_AcceptsCharacterForTheServiceToValidate(t *testing.T) {
+	for _, id := range []string{"operations-keeper", "", "unknown"} {
+		rec := httptest.NewRecorder()
+		handler().Start(rec, httptest.NewRequest(http.MethodPost, "/start", strings.NewReader(
+			fmt.Sprintf(`{"choice_token":"x","hire":{"name":"A","character":%q}}`, id))))
+		// This service deliberately has no dependencies. A schema rejection
+		// would be 400; acceptance reaches the service's unavailable response.
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%q: status %d body %s", id, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestStart_HireRefusesAPathFieldToo(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler().Start(rec, httptest.NewRequest(http.MethodPost, "/start",

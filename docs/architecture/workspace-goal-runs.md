@@ -49,7 +49,7 @@ parts and their meanings live in `internal/workspace/goal_charter.go` only
   grows into a charter through the suggested charter (below), not by typing one
   into the hire card.
 
-A folder setup presented as a hire (**Hire and start**, on Home's card, the
+A folder setup presented as a hire (**Hire and build**, on Home's card, the
 assistant's folder card and the Create Workspace build) asks one question,
 "What should it do with it?". The answer, the **brief**, is the new workspace's
 goal (at most 300 characters, line breaks folded; an empty answer takes the

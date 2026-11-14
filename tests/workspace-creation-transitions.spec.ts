@@ -327,7 +327,7 @@ test('a receipt survives a resize and Dismiss leaves an ordinary closed drawer',
 test('an existing inbox offer keeps chat behind its review until the user chooses the Map', async ({
   page
 }) => {
-  // New folder picks now enter Hire & start, not this older placement review.
+  // New folder picks now enter Hire & build, not this older placement review.
   // Seed a real retained conversation review through the supported metadata
   // selection/review boundaries; neither call hires or creates a workspace.
   const draft_id = randomUUID();

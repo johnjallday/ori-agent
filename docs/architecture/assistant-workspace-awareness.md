@@ -63,7 +63,7 @@ new permission boundary.
   successful atomic attributed save exposes the card. No additional Profile/HQ
   memory read, catalog scan, native authority or alternate provider is
   introduced; the offer is text and cannot create, read, install or pick a
-  model. The card's **Hire and start** is the user's own
+  model. The card's **Hire and build** is the user's own
   `POST /api/agents/hire` with the offer's id as the request id (the hire then
   marks the offer hired); **Not now** records the offer as put aside and the
   model is told, for the rest of that conversation, not to offer that work

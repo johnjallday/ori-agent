@@ -64,8 +64,8 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
     await entry.locator('input').fill(root);
     await entry.getByRole('button').click();
     const card = page.locator('#personalAssistantFolderAgent');
-    await expect(card).toContainText(`Start an agent on ${folder}`);
-    await card.getByRole('button', { name: 'Hire & start', exact: true }).click();
+    await expect(card).toContainText(`Hire an agent for ${folder}`);
+    await card.locator('[data-folder-agent-action="start"]').click();
     const get = async () =>
       (await (await request.get(endpoint)).json()).folder_agents.find(
         (v: { folder_name: string }) => v.folder_name === folder
@@ -103,8 +103,15 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
     await expect(permissions).toContainText('Every move into Filed/');
     await permissions.getByRole('button', { name: `Use attached ${folder}`, exact: true }).click();
     await expect(permissions).toBeHidden();
-    await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+    // Permission acceptance can hide this card before preparation's async
+    // handoff opens Review. Wait for that real completion, not an intermediate
+    // repaint that can reclaim a Settings click made too early.
     const settings = page.locator('#fileJanitorConsoleBody');
+    await expect(settings).toContainText('Your first review is ready. Nothing was moved.');
+    const settingsTab = page.getByRole('tab', { name: 'Settings', exact: true });
+    await settingsTab.click();
+    await expect(settingsTab).toHaveAttribute('aria-selected', 'true');
+    await expect(settings).toHaveAttribute('aria-labelledby', 'fileJanitorTab-settings');
     await expect(settings).toContainText(`${folder} Manager is helping in this workspace`);
     await settings.locator('.fj-setting-curator').scrollIntoViewIfNeeded();
     await page.screenshot({

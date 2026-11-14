@@ -2485,7 +2485,7 @@ test('the chat box returns once, when the look ends, and the presenter is told w
   assert.match(render, /state: shown\.state/);
 });
 
-test('Hire & start narrows the box only after an accepted hire, and only on Home with the map showing (visual-hire FR15, FR20, FR21)', () => {
+test('Hire & build narrows the box only after an accepted hire, and only on Home with the map showing (visual-hire FR15, FR20, FR21)', () => {
   const source = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
   const body = name =>
     source.match(

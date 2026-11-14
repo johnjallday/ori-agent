@@ -23,7 +23,7 @@ resolution.
 
 ## Fed folders keep their own agent
 
-On the **Start an agent on a folder** path, adding File Janitor does not hire
+On the **Hire an agent for a folder** path, adding File Janitor does not hire
 or attach a second agent. The agent chosen on the hire card holds the Curator
 role in that workspace. **File Janitor → Settings → Curator** names it, and
 its chat receives the saved filing welcome once the folder's explicitly approved

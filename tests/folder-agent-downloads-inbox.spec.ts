@@ -84,8 +84,8 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   await entry.locator('input').fill(root);
   await entry.getByRole('button').click();
   const host = page.locator('#personalAssistantFolderAgent');
-  await expect(host).toContainText('Start an agent on Downloads');
-  await host.getByRole('button', { name: 'Hire & start', exact: true }).click();
+  await expect(host).toContainText('Hire an agent for Downloads');
+  await host.locator('[data-folder-agent-action="start"]').click();
   await expect(host.getByRole('button', { name: 'Show on map' })).toBeVisible();
   await host.getByRole('button', { name: 'Show on map' }).click();
   const report = page
@@ -152,9 +152,9 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   await page.goto('/?panel=today&folder=show');
   await entry.locator('input').fill(join(root, 'Music'));
   await entry.getByRole('button').click();
-  await expect(host).toContainText('Start an agent on Music');
+  await expect(host).toContainText('Hire an agent for Music');
   expect((await (await request.get(endpoint)).json()).folder_agents).toHaveLength(1);
-  await host.getByRole('button', { name: 'Hire & start', exact: true }).click();
+  await host.locator('[data-folder-agent-action="start"]').click();
   await expect
     .poll(async () => {
       const views = (await (await request.get(endpoint)).json()).folder_agents;

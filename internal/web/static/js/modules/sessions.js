@@ -884,6 +884,7 @@ const sessionManager = {
     // handler still owns focus. Handle Escape on the dialog itself so ordinary
     // drafts always close, while an accepted create remains atomic.
     addFolderModal?.addEventListener('keydown', event => {
+      if (window.CharacterPicker?.isOpen?.()) return;
       if (event.key !== 'Escape') return;
       event.preventDefault();
       event.stopPropagation();
@@ -902,7 +903,7 @@ const sessionManager = {
     window.addEventListener(
       'keydown',
       event => {
-        if (addFolderModal?.dataset.sourceSetupOwner) return;
+        if (addFolderModal?.dataset.sourceSetupOwner || window.CharacterPicker?.isOpen?.()) return;
         if (event.key !== 'Escape' || !addFolderModal?.classList.contains('show')) return;
         event.preventDefault();
         event.stopPropagation();
@@ -16567,7 +16568,7 @@ const sessionManager = {
           ? planReady
             ? session.plan?.hire
               ? hire?.confirmLabel ||
-                (session.plan.hire.mode === 'bind' ? 'Assign & start' : 'Hire & start')
+                (session.plan.hire.mode === 'bind' ? 'Assign & build' : 'Hire & build')
               : 'Set it up'
             : softwareReview
               ? 'Review software setup'
@@ -18474,7 +18475,7 @@ const sessionManager = {
           ''
       ).trim();
       if (entry) body.entry_name = entry;
-      // Hire and start sends the brief the pane shows, from either button; a
+      // Hire and build sends the brief the pane shows, from either button; a
       // Retry sends none and continues with the one the run was given.
       if (typeof brief === 'string' && !build.session.setup) body.brief = brief;
       try {

@@ -99,11 +99,11 @@ assistant setup with no selected folder are not converted. Blueprint agents,
 capabilities and tools still install; an explicit anchor skips the blueprint's
 second managed project-folder skeleton.
 
-## Created from a feed: Start an agent on a folder
+## Created from a feed: Hire an agent for a folder
 
 Home's Explore a folder (and, as the other entries move, every folder entry)
-shows one card for every folder: **Start an agent on <folder>**, one field
-**What should it do?**, and **Hire & start** (`internal/folderagent`,
+shows one card for every folder: **Hire an agent for <folder>**, one field
+**What should it do?**, and **Hire & build** (`internal/folderagent`,
 `POST /api/personal-assistant/folder-agent/start`). No request carries a path:
 the server chooses the folder (dialog, known folder or a typed path's
 selection token) and Start names only the server's short-lived choice token.

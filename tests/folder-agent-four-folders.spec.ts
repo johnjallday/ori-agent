@@ -65,7 +65,7 @@ test('four synthetic fed folders run their defaults with four agents and unchang
     await entry.getByRole('button').click();
     await page
       .locator('#personalAssistantFolderAgent')
-      .getByRole('button', { name: 'Hire & start', exact: true })
+      .locator('[data-folder-agent-action="start"]')
       .click();
     const get = async () =>
       (await (await request.get(endpoint)).json()).folder_agents.find(
