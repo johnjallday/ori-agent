@@ -376,16 +376,23 @@ func (h folderAgentHiring) Agents(_ context.Context, userID string) []folderagen
 
 // Character prefers an underused face before the folder's own affinity. An
 // inactive saved character is not a face that an agent currently wears.
-func (h folderAgentHiring) Character(ctx context.Context, userID string, policy folderlook.RootPolicy) string {
+func (h folderAgentHiring) Character(_ context.Context, _ string, policy folderlook.RootPolicy) string {
 	catalog, err := charactercatalog.Load()
 	if err != nil {
 		return ""
 	}
 	counts := map[string]int{}
-	for _, offered := range h.Agents(ctx, userID) {
-		ag, ok := h.builder.st.GetAgent(offered.Name)
-		if ok && ag != nil && ag.Appearance != nil && ag.Appearance.Mode == types.AppearanceModeCharacter {
-			counts[ag.Appearance.CharacterCatalogID()]++
+	// Count faces across the visible roster, not just agents offered for reuse.
+	// A personal assistant profile keeps its job, but still wears its face.
+	if st := h.builder.st; st != nil {
+		for _, name := range st.ListAgents() {
+			if systemassistant.IsCanonicalName(name) {
+				continue
+			}
+			ag, ok := st.GetAgent(name)
+			if ok && ag != nil && ag.Appearance != nil && ag.Appearance.Mode == types.AppearanceModeCharacter {
+				counts[ag.Appearance.CharacterCatalogID()]++
+			}
 		}
 	}
 	preferred := folderagent.PreferredCharacter(policy)

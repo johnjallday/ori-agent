@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/charactercatalog"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderlook"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -38,6 +40,14 @@ func TestFolderAgentHiring_CharacterSuggestion(t *testing.T) {
 			}
 			appearance.Mode = types.AppearanceModeCharacter
 			if err := st.CreateAgent("Wearing preferred", &store.CreateAgentConfig{Appearance: appearance}); err != nil {
+				t.Fatal(err)
+			}
+			// The assistant profile cannot be reused, but its active face still
+			// counts toward the least-worn suggestion, like the picker's taken list.
+			if err := st.UpdateAgent("Wearing preferred", func(ag *agent.Agent) error {
+				ag.Metadata = &types.AgentMetadata{Tags: []string{personalassistant.ProfileAssistantMarker("pa-1")}}
+				return nil
+			}); err != nil {
 				t.Fatal(err)
 			}
 			want := ""
