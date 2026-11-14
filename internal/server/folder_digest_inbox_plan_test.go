@@ -24,7 +24,7 @@ func TestInboxPlan_LinesInTheCardsOrderWithNoModelAndNoDownload(t *testing.T) {
 	}
 	want := []string{
 		"agents: Hire File Curator",
-		"workspace: A File Janitor workspace named Downloads",
+		"workspace: A Filing workspace named Downloads",
 		"folder: Linked where it is",
 		"task: A first look: a metadata-only scan that proposes the first filing batch",
 	}
@@ -43,7 +43,7 @@ func TestInboxPlan_LinesInTheCardsOrderWithNoModelAndNoDownload(t *testing.T) {
 		t.Fatalf("inbox intent = %+v", intent.Inbox)
 	}
 	visual := plan.Visual
-	if visual == nil || !visual.RequirementsChecked || len(visual.Plugins) != 0 || visual.Builtin != "File Janitor" ||
+	if visual == nil || !visual.RequirementsChecked || len(visual.Plugins) != 0 || visual.Builtin != "Filing" ||
 		visual.Model == nil || visual.Model.State != personalassistant.FolderSetupModelNotNeeded || visual.Placement != "standalone" ||
 		visual.Entity == nil || visual.Entity.Name != "Downloads" || visual.Entity.Operation != "create" {
 		t.Fatalf("visual = %+v model=%+v", visual, visual.Model)
@@ -86,7 +86,7 @@ func TestInboxPlan_ATakenNameGetsTheNextFreeOne(t *testing.T) {
 	f := newInboxFixture(t, "create")
 	f.team.taken["Downloads"], f.team.taken["Downloads 2"] = true, true
 	plan := f.plan(t)
-	if plan.Intent.Inbox.WorkspaceName != "Downloads 3" || plan.Lines[1].Name != "A File Janitor workspace named Downloads 3" {
+	if plan.Intent.Inbox.WorkspaceName != "Downloads 3" || plan.Lines[1].Name != "A Filing workspace named Downloads 3" {
 		t.Fatalf("name = %q, line %q", plan.Intent.Inbox.WorkspaceName, plan.Lines[1].Name)
 	}
 }

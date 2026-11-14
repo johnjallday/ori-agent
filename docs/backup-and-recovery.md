@@ -19,7 +19,7 @@ files stay in the external folder you selected. Backing up or syncing the Ori
 sidecar covers **that state only**, not the anchor's files. Protect the external
 folder independently with your backup application. A copied sidecar may require
 Relink on the destination machine; it does not restore a missing anchor.
-File Janitor filing is not a backup.
+Filing is not a backup.
 
 ## Supported integrations
 
@@ -67,7 +67,7 @@ see", naming up to three workspaces. **Check protection** opens the **Protect
 your folders** chooser when no Backup & Recovery workspace exists, otherwise
 the owning console's Overview at its coverage section. **Not now** hides the
 line; it returns once, when five project folders are uncovered, and a second
-"Not now" is final. Downloads, File Janitor folders, a workspace's own Ori
+"Not now" is final. Downloads, Filing folders, a workspace's own Ori
 folder and folders Ori only scanned never count.
 
 The chooser lists **Time Machine (built into this Mac)** first on a Mac, then
@@ -88,13 +88,13 @@ configured source contains the folder and a completed backup was observed; it
 is computed from stored evidence only and never checks a drive.
 
 A fed **Documents** folder shows this same stored sentence and protection link
-on its folder report, next to the optional, unticked File Janitor step. Showing
+on its folder report, next to the optional, unticked Filing step. Showing
 the report makes no new backup check. Documents remains in the general adopted-
-folder count unless the owner explicitly sets up File Janitor to manage it.
+folder count unless the owner explicitly allows Filing to manage it.
 
 ## Optional protection advice while filing
 
-File Janitor review has its own **Check protection** note for the exact folder
+Filing review has its own **Check protection** note for the exact folder
 approved in that workspace. It uses saved settings and backup evidence, not the
 workspace's Ori storage folder. **Covered**, **configured without an observed
 completion**, **unknown**, and **unavailable** are different states. Observation
@@ -112,7 +112,7 @@ is verified and offers explicit recovery when it is not. See
 for the owner/workspace/folder generation, not per batch; a passive link remains.
 A relinked folder may prompt again. If browser storage is blocked, dismissal is
 page-only and says so. This is separate from Today's adopted-folder policy above:
-File Janitor folders still do not enter that generic coverage count.
+Filing folders still do not enter that generic coverage count.
 
 **Check protection** opens the existing chooser or an owned, in-scope Backup &
 Recovery console. It does not create a workspace, approve metadata access or run
@@ -120,7 +120,7 @@ a backup. Explicit creation and provider approval remain separate controls.
 **Return to filing review** reloads the original batch and current category
 choices, retains eligible move/Trash selections, and explains dropped or stale
 choices. A new preview and fresh confirmation—including Trash acknowledgement—are
-always required. Ordinary File Janitor close/reopen is unchanged.
+always required. Ordinary Filing close/reopen is unchanged.
 
 Same-page return uses memory. Cross-page return uses one same-tab browser record,
 expiring after 30 minutes and limited to 64 KiB. It contains opaque IDs and review
@@ -142,7 +142,7 @@ card as before. No model is called to build it. **Not now** takes the card away;
 the review's own Check protection note is unaffected. The card lives for the
 folder receipt's seven days.
 
-In the File Janitor workspace, a goal run (on first open or **Run now**) is told
+In the Filing workspace, a goal run (on first open or **Run now**) is told
 the same fact and suggests the backup task first. If its answer leaves the task
 out, or the run fails or answers unreadably, Ori adds it itself, first in the
 Backlog. The ticket's **Back up** opens the chooser or the Backup & Recovery

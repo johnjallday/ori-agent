@@ -131,7 +131,7 @@ func (s *Service) AddCompanion(workspaceID, capabilityID string) (CompanionResul
 	}
 	for _, resource := range existing {
 		if s.companionNameFor(ws, resource.ID) != "" {
-			return CompanionResult{}, &Error{Code: CodeCompanionFailed, Message: "The companion association is ambiguous. Choose the intended agent in File Janitor settings. Filing still works without an agent."}
+			return CompanionResult{}, &Error{Code: CodeCompanionFailed, Message: "The companion association is ambiguous. Choose the intended agent in Filing settings. Filing still works without an agent."}
 		}
 	}
 
@@ -140,7 +140,7 @@ func (s *Service) AddCompanion(workspaceID, capabilityID string) (CompanionResul
 	if err != nil || strings.TrimSpace(instanceID) == "" {
 		return CompanionResult{}, &Error{
 			Code:    CodeCompanionFailed,
-			Message: "The agent could not be added. File Janitor still works without one.",
+			Message: "The agent could not be added. Filing still works without one.",
 			Err:     err,
 		}
 	}
@@ -163,7 +163,7 @@ func (s *Service) AddCompanion(workspaceID, capabilityID string) (CompanionResul
 		return nil
 	}); updateErr != nil {
 		return CompanionResult{}, &Error{Code: CodeCompanionFailed,
-			Message: "The agent was attached, but its companion association could not be saved. Choose that agent in File Janitor settings to retry; filing is unaffected.", Err: updateErr}
+			Message: "The agent was attached, but its companion association could not be saved. Choose that agent in Filing settings to retry; filing is unaffected.", Err: updateErr}
 	}
 
 	return CompanionResult{AgentInstanceID: instanceID, DisplayName: displayName}, nil
@@ -215,15 +215,15 @@ func (s *Service) AssociateCompanion(workspaceID, capabilityID, instanceID strin
 		if len(options) > 0 {
 			instance, unique := w.FindUniqueAgentInstance(options[0].ExpectedLead, "")
 			if !unique || instance.ID != instanceID {
-				return &Error{Code: CodeCompanionFailed, Message: "The folder's agent attachment is missing or ambiguous. Choose one current workspace agent in File Janitor settings. File Janitor still works without an agent."}
+				return &Error{Code: CodeCompanionFailed, Message: "The folder's agent attachment is missing or ambiguous. Choose one current workspace agent in Filing settings. Filing still works without an agent."}
 			}
 			lead, unique := w.FindUniqueAgentInstance(w.EntryAgentName(), "")
 			if !unique || lead.ID != instanceID {
-				return &Error{Code: CodeCompanionFailed, Message: "The folder's lead agent changed. Choose the intended Curator in File Janitor settings. File Janitor still works without an agent."}
+				return &Error{Code: CodeCompanionFailed, Message: "The folder's lead agent changed. Choose the intended agent in Filing settings. Filing still works without an agent."}
 			}
 			existing := record.ResourcesOfKind(workspace.ResourceCompanionAgent)
 			if len(existing) > 1 || (len(existing) == 1 && existing[0].ID != instanceID) {
-				return &Error{Code: CodeCompanionFailed, Message: "File Janitor already has a different or ambiguous Curator. Choose the intended agent in File Janitor settings. File Janitor still works without an agent."}
+				return &Error{Code: CodeCompanionFailed, Message: "Filing already has a different or ambiguous agent. Choose the intended agent in Filing settings. Filing still works without an agent."}
 			}
 			result.AlreadyPresent = len(existing) == 1
 		}

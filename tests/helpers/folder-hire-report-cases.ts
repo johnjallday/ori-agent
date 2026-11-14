@@ -186,7 +186,7 @@ export type FirstBatchItem = {
 // that did not complete. Each is told apart by the primary the card offers.
 export const INBOX_FIRST_BATCH_CASES = {
   batch: { action: 'review_batch', primary: 'Review batch', link: true },
-  empty: { action: 'open_janitor', primary: 'Open File Janitor', link: true },
+  empty: { action: 'open_janitor', primary: 'Open Filing', link: true },
   failed: { action: 'retry', primary: 'Retry', link: false }
 } as const;
 

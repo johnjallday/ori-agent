@@ -128,7 +128,7 @@ func TestBackground_AJanitorScanDeliversOnlyWhenThereIsSomethingToReview(t *test
 		"outcome": "succeeded", "count": 4, "ref_id": "batch-3",
 	}))
 	parcels := unopenedParcels(t, h.store)
-	if len(parcels) != 1 || parcels[0].Summary != "4 files are ready to review." || parcels[0].RefID != "batch-3" || parcels[0].Title != "File Janitor" {
+	if len(parcels) != 1 || parcels[0].Summary != "4 files are ready to review." || parcels[0].RefID != "batch-3" || parcels[0].Title != "Filing" {
 		t.Fatalf("parcels = %+v", parcels)
 	}
 

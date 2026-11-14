@@ -243,9 +243,9 @@ func writeAssistantSetupServiceError(w http.ResponseWriter, err error, projectio
 	case errors.Is(err, assistantsetup.ErrAssistantRepair):
 		writeAssistantSetupError(w, http.StatusConflict, "assistant_repair_required", "Repair the assistant relationship before starting this setup.", false, projection)
 	case errors.Is(err, assistantsetup.ErrAmbiguousTarget):
-		writeAssistantSetupError(w, http.StatusConflict, "ambiguous_target", "Choose which File Janitor workspace to continue.", false, projection)
+		writeAssistantSetupError(w, http.StatusConflict, "ambiguous_target", "Choose which Filing workspace to continue.", false, projection)
 	case errors.Is(err, assistantsetup.ErrUnsupportedTarget):
-		writeAssistantSetupError(w, http.StatusConflict, "unsupported_target", "This File Janitor workspace needs manual review.", false, projection)
+		writeAssistantSetupError(w, http.StatusConflict, "unsupported_target", "This Filing workspace needs manual review.", false, projection)
 	case errors.Is(err, assistantsetup.ErrStaleProposal):
 		writeAssistantSetupError(w, http.StatusConflict, "stale_proposal", "The setup plan changed. Review it again before continuing.", false, projection)
 	case errors.Is(err, assistantsetup.ErrInvalidAction):
@@ -253,9 +253,9 @@ func writeAssistantSetupServiceError(w http.ResponseWriter, err error, projectio
 	case errors.Is(err, assistantsetup.ErrStaleRun), errors.Is(err, assistantsetup.ErrConflict):
 		writeAssistantSetupError(w, http.StatusConflict, "stale_run", "Setup changed in another window. Review the current state.", false, projection)
 	case errors.Is(err, assistantsetup.ErrPrivacyReview):
-		writeAssistantSetupError(w, http.StatusConflict, "privacy_review_required", "Review File Janitor privacy settings before continuing.", false, projection)
+		writeAssistantSetupError(w, http.StatusConflict, "privacy_review_required", "Review Filing privacy settings before continuing.", false, projection)
 	case errors.Is(err, assistantsetup.ErrFolderChanged), errors.Is(err, assistantsetup.ErrFolderConflict):
-		writeAssistantSetupError(w, http.StatusConflict, "folder_changed", "The File Janitor folder changed. Review it before continuing.", false, projection)
+		writeAssistantSetupError(w, http.StatusConflict, "folder_changed", "The Filing folder changed. Review it before continuing.", false, projection)
 	case errors.Is(err, assistantsetup.ErrAgentRootUnavailable):
 		writeAssistantSetupError(w, http.StatusServiceUnavailable, "agent_root_unavailable", "Ori could not reach your agents folder, so nothing was created.", true, projection)
 	case errors.Is(err, assistantsetup.ErrTeamConflict):
@@ -263,7 +263,7 @@ func writeAssistantSetupServiceError(w http.ResponseWriter, err error, projectio
 	case errors.Is(err, assistantsetup.ErrReconcileRequired):
 		writeAssistantSetupError(w, http.StatusConflict, "reconcile_required", "Ori cannot safely prove the last setup result. Review the saved workspace before retrying.", false, projection)
 	case errors.Is(err, assistantsetup.ErrNoLongerAvailable):
-		writeAssistantSetupError(w, http.StatusConflict, "no_longer_available", "The reviewed File Janitor workspace is no longer available.", false, projection)
+		writeAssistantSetupError(w, http.StatusConflict, "no_longer_available", "The reviewed Filing workspace is no longer available.", false, projection)
 	case errors.Is(err, resetstate.ErrWorkFenced), errors.Is(err, resetstate.ErrWorkUntracked):
 		writeAssistantSetupError(w, http.StatusServiceUnavailable, "work_fenced", "Setup cannot start while Ori is resetting or shutting down.", true, projection)
 	default:

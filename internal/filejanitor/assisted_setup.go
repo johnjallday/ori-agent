@@ -137,10 +137,10 @@ func (s *Service) ApplyReviewedAutomationTimezone(workspaceID, rootID string, pr
 	_, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
 		if settings.RootID != strings.TrimSpace(rootID) || settings.ContentMode != privacy ||
 			settings.DailyScanLocalTime != strings.TrimSpace(dailyTime) {
-			return setupErr(CodeFolderChanged, "The File Janitor folder, privacy, or schedule changed. Review monitoring again.", RepairRetry, nil)
+			return setupErr(CodeFolderChanged, "The Filing folder, privacy, or schedule changed. Review monitoring again.", RepairRetry, nil)
 		}
 		if current := strings.TrimSpace(settings.Timezone); current != "" && current != timezone {
-			return setupErr(CodeFolderChanged, "The File Janitor timezone changed. Review monitoring again.", RepairRetry, nil)
+			return setupErr(CodeFolderChanged, "The Filing timezone changed. Review monitoring again.", RepairRetry, nil)
 		}
 		settings.Timezone = timezone
 		settings.LastAssistedAutomation = nil
@@ -153,7 +153,7 @@ func (s *Service) ApplyReviewedAutomationTimezone(workspaceID, rootID string, pr
 func validateReviewedAutomation(settings *JanitorSettings, rootID string, privacy ContentMode, dailyTime, timezone string) error {
 	if settings == nil || settings.RootID != strings.TrimSpace(rootID) || settings.ContentMode != privacy ||
 		settings.DailyScanLocalTime != strings.TrimSpace(dailyTime) || strings.TrimSpace(settings.Timezone) != strings.TrimSpace(timezone) {
-		return setupErr(CodeFolderChanged, "The File Janitor folder, privacy, or schedule changed. Review monitoring again.", RepairRetry, nil)
+		return setupErr(CodeFolderChanged, "The Filing folder, privacy, or schedule changed. Review monitoring again.", RepairRetry, nil)
 	}
 	return nil
 }
@@ -183,13 +183,13 @@ func (s *Service) RecordReviewedAutomationApprovalPaused(workspaceID, rootID str
 		}
 		if settings.RootID != strings.TrimSpace(rootID) || settings.ContentMode != privacy ||
 			settings.DailyScanLocalTime != strings.TrimSpace(dailyTime) {
-			return setupErr(CodeFolderChanged, "The File Janitor folder, privacy, or schedule changed. Review monitoring again.", RepairRetry, nil)
+			return setupErr(CodeFolderChanged, "The Filing folder, privacy, or schedule changed. Review monitoring again.", RepairRetry, nil)
 		}
 		if current := strings.TrimSpace(settings.Timezone); current != "" && current != timezone {
-			return setupErr(CodeFolderChanged, "The File Janitor timezone changed. Review monitoring again.", RepairRetry, nil)
+			return setupErr(CodeFolderChanged, "The Filing timezone changed. Review monitoring again.", RepairRetry, nil)
 		}
 		if (!settings.AutomationApprovedAt.IsZero()) != expectedApproved || settings.Paused != expectedPaused {
-			return setupErr(CodeFolderChanged, "The File Janitor monitoring state changed. Review it again.", RepairRetry, nil)
+			return setupErr(CodeFolderChanged, "The Filing monitoring state changed. Review it again.", RepairRetry, nil)
 		}
 		settings.Timezone = timezone
 		if settings.AutomationApprovedAt.IsZero() {
@@ -250,7 +250,7 @@ func (s *Service) PauseReviewedAutomation(workspaceID, rootID string, privacy Co
 		}
 		if !automationReceiptMatches(settings.LastAssistedAutomation, operation) ||
 			(settings.LastAssistedAutomation.State != AssistedAutomationApprovalPaused && settings.LastAssistedAutomation.State != AssistedAutomationActive) {
-			return setupErr(CodeFolderChanged, "The File Janitor monitoring state changed. Review it again.", RepairRetry, nil)
+			return setupErr(CodeFolderChanged, "The Filing monitoring state changed. Review it again.", RepairRetry, nil)
 		}
 		settings.Paused = true
 		settings.LastAssistedAutomation = automationReceipt(operation, AssistedAutomationFailedPaused, s.clock())

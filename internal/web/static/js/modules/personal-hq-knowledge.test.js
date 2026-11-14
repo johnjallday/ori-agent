@@ -79,7 +79,7 @@ test('every approved global fact names its origin', () => {
   assert.equal(chip('workspace_agent'), 'From a workspace');
   assert.equal(chip('folder_scan'), 'From a folder scan');
   assert.equal(chip('saved_app'), 'From saved apps');
-  assert.equal(chip('file_janitor'), 'From File Janitor');
+  assert.equal(chip('file_janitor'), 'From Filing');
   // An older server without the source object still labels by source_kind.
   assert.equal(approvedSourceChip({ source_kind: 'saved_app' }), 'From saved apps');
   assert.equal(chip('something_new'), '');

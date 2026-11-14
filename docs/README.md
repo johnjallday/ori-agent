@@ -51,7 +51,7 @@ This directory contains detailed documentation for Ori Agent.
   Production Home, project roles and Sample Library
 - [Backup & Recovery](./backup-and-recovery.md) - Observing an external backup application's
   metadata and guiding recovery
-- [File Curator Guidance](./file-curator-guidance.md) - File Janitor's optional Curator: what it
+- [File Curator Guidance](./file-curator-guidance.md) - Filing's optional Curator: what it
   explains and what it cannot approve
 - [Premium Features](./premium_features.md) - Premium feature overview
 
@@ -125,7 +125,7 @@ This directory contains detailed documentation for Ori Agent.
 - [Workspace Build Sessions](./architecture/workspace-build-sessions.md) - "Build with your assistant": the draft is the create request, validation, storage, privacy
 - [Workspace Goal Runs](./architecture/workspace-goal-runs.md) - How a goal run turns the workspace goal into Backlog suggestions and findings, and when it starts
 - [Assisted Workspace Placement](./architecture/assisted-workspace-placement.md) - Propose →
-  review/edit → click to place and create, for the built-in File Janitor inbox-folder proposal
+  review/edit → click to place and create, for the built-in Filing inbox-folder proposal
 - [Unified Workspace Placement](./architecture/unified-workspace-placement.md) - The same review
   and map placement for every other creation flow
 - [Visual Folder Setup](./architecture/visual-folder-setup.md) - One display seam for folder
@@ -150,9 +150,9 @@ This directory contains detailed documentation for Ori Agent.
 - [User-owned Setup Quests](./architecture/user-owned-setup-quests.md) - One inert quest
   declaration embedded in a user-owned project template
 - [Assistant-led Setup Contract](./architecture/assistant-led-setup-contract.md) - Assistant-led
-  File Janitor setup: findings baseline and delivered contract
-- [File Janitor Creation Flow](./architecture/file-janitor-creation-flow.md) - Reviewed File
-  Janitor creation and preparation from an attached folder
+  Filing setup: findings baseline and delivered contract
+- [Filing Creation Flow](./architecture/file-janitor-creation-flow.md) - Reviewed Filing
+  creation and preparation from an attached folder
 - [Music Setup Onboarding](./architecture/music-setup-onboarding.md) - State and consent contract
   for the Music Production Home onboarding journey
 - [Blueprint Intake](./architecture/blueprint-intake.md) - Setup step kinds, Create Workspace
@@ -241,7 +241,7 @@ docs/
 ├── user-setup-quests.md                # Setup quests for user-owned templates
 ├── reaper-integration.md               # Ori's REAPER integration
 ├── backup-and-recovery.md              # Backup & Recovery guide
-├── file-curator-guidance.md            # File Janitor's optional Curator
+├── file-curator-guidance.md            # Filing's optional Curator
 ├── workspace-next-action.md            # Map/Overview Next action
 ├── workspace-team-readiness.md         # Create Workspace staffing contract
 │

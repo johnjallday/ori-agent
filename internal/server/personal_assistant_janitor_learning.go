@@ -78,7 +78,7 @@ func janitorKnowledgeProposal(pattern janitorKnowledgeEvidence) (personalassista
 	proposal := personalassistant.KnowledgeProposal{
 		SourceKind: "file_janitor", ScopeID: pattern.WorkspaceID + ":" + pattern.RootID,
 		SubjectID: string(pattern.Category), Predicate: "prefers filing", Value: string(pattern.Category),
-		Category: "how_you_work", Text: "You may prefer filing " + strings.ToLower(label) + " in your approved File Janitor folder.",
+		Category: "how_you_work", Text: "You may prefer filing " + strings.ToLower(label) + " in your approved Filing folder.",
 	}
 	for index, id := range pattern.ActionIDs {
 		proposal.Evidence = append(proposal.Evidence, personalassistant.KnowledgeEvidence{

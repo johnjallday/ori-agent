@@ -58,7 +58,7 @@ export function assistantSetupMilestoneView(milestone) {
   const status = Object.hasOwn(STATUS_LABELS, milestone?.status)
     ? milestone.status
     : 'needs_review';
-  const fallbackName = milestone?.kind === 'workspace' ? 'File Janitor' : 'Team member';
+  const fallbackName = milestone?.kind === 'workspace' ? 'Filing' : 'Team member';
   const details = [];
   if (milestone?.needs_model) details.push('Configured; chat needs a model');
   const blueprint = milestone?.blueprint_id
@@ -98,7 +98,7 @@ export function requestedMilestones(proposal) {
       {
         id: 'workspace',
         kind: 'workspace',
-        name: 'File Janitor',
+        name: 'Filing',
         action: 'reuse',
         status: 'pending'
       },
@@ -125,7 +125,7 @@ export function requestedMilestones(proposal) {
     {
       id: 'workspace',
       kind: 'workspace',
-      name: 'File Janitor',
+      name: 'Filing',
       action: 'create',
       status: 'pending',
       ...blueprint

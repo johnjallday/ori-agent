@@ -46,15 +46,15 @@ func (f ProtectionFact) Prompt() string {
 	var sentence string
 	switch f.State {
 	case "covered":
-		sentence = "Stored evidence reports coverage of the approved File Janitor folder."
+		sentence = "Stored evidence reports coverage of the approved Filing folder."
 	case "configured":
 		sentence = "A covering backup source is configured, but no completed backup is observed. Configuration is not a backup."
 	case "not_covered":
-		sentence = "The approved File Janitor folder is not covered by the backup evidence Ori observes. This does not prove no backup exists elsewhere."
+		sentence = "The approved Filing folder is not covered by the backup evidence Ori observes. This does not prove no backup exists elsewhere."
 	default:
-		sentence = "Protection of the approved File Janitor folder is unknown; stored evidence is unavailable or insufficient."
+		sentence = "Protection of the approved Filing folder is unknown; stored evidence is unavailable or insufficient."
 	}
-	text := fmt.Sprintf("\n\n## File Janitor managed-folder protection\nAs of %s (stored metadata only, not a new check): %s", f.AsOf.UTC().Format(time.RFC3339), sentence)
+	text := fmt.Sprintf("\n\n## Filing managed-folder protection\nAs of %s (stored metadata only, not a new check): %s", f.AsOf.UTC().Format(time.RFC3339), sentence)
 	if f.ObservedAt != nil {
 		text += " Evidence observed at " + f.ObservedAt.UTC().Format(time.RFC3339) + "."
 	}

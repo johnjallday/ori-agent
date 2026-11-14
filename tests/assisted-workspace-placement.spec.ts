@@ -603,7 +603,7 @@ test('a lost real confirmation is observed without replay; failed position repai
     )
       filingWrites.push(request.url());
   });
-  const filing = page.getByRole('link', { name: 'Open File Janitor', exact: true });
+  const filing = page.getByRole('link', { name: 'Open Filing', exact: true });
   expect(
     new URL((await filing.getAttribute('href'))!, page.url()).searchParams.get('preparation')
   ).toBe(setup.review.operation_id);

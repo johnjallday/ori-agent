@@ -39,10 +39,10 @@ export function sourceCardSummary(kind, source) {
     if (status === 'healthy_empty')
       return 'Approved folder access is ready; no currently supported three-move pattern. No suggestion is inferred.';
     if (status === 'not_configured')
-      return 'No eligible built-in File Janitor is selected in Personal HQ’s Daily Brief scope.';
+      return 'No eligible built-in Filing workspace is selected in Personal HQ’s Daily Brief scope.';
     if (status === 'revoked')
-      return 'File Janitor folder read access is missing or revoked. Review its setup before checking for suggestions.';
-    return 'File Janitor evidence is unavailable or its ownership, scope or folder access could not be verified.';
+      return 'Filing folder read access is missing or revoked. Review its setup before checking for suggestions.';
+    return 'Filing evidence is unavailable or its ownership, scope or folder access could not be verified.';
   }
   if (status === 'available' || status === 'healthy_empty')
     return 'Connected for existing assistant workflows. Reviewed memory suggestions from this source are not enabled here.';
@@ -127,7 +127,7 @@ export function renderDossierSources(container, sources, capabilities, { onNotes
     },
     {
       key: 'file_janitor',
-      label: 'File Janitor',
+      label: 'Filing',
       data: sources?.file_janitor,
       action: 'Review workspaces and brief scope',
       route: '/'

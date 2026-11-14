@@ -284,7 +284,7 @@ type FirstResult struct {
 // WorkspaceName is the reviewed name of the File Janitor workspace the setup
 // creates. The creator adapter and the milestone list both read this constant so
 // the name the user reviewed is the name the sequence shows.
-const WorkspaceName = "File Janitor"
+const WorkspaceName = "Filing"
 
 type MilestoneKind string
 

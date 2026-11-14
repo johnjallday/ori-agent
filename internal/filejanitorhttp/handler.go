@@ -289,7 +289,7 @@ func (h *Handler) SetPaused(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) resolveWorkspace(w http.ResponseWriter, r *http.Request) (string, bool) {
 	if h == nil || h.service == nil {
 		_ = orihttp.RespondAPIError(w, http.StatusServiceUnavailable,
-			orihttp.NewAPIError("unavailable", "File Janitor is not available."))
+			orihttp.NewAPIError("unavailable", "Filing is not available."))
 		return "", false
 	}
 	workspaceID := strings.TrimSpace(r.PathValue("workspaceID"))
@@ -423,9 +423,9 @@ func (h *Handler) respondError(w http.ResponseWriter, err error, fallback string
 		return
 	}
 	if errors.Is(err, filejanitor.ErrInvalidSettings) {
-		_ = orihttp.RespondBadRequest(w, err.Error())
+		_ = orihttp.RespondBadRequest(w, strings.ReplaceAll(err.Error(), "file janitor", "filing"))
 		return
 	}
 	logger.Error(fallback, logger.Fields{"error": err})
-	_ = orihttp.RespondInternalError(w, fallback)
+	_ = orihttp.RespondInternalError(w, strings.ReplaceAll(fallback, "File Janitor", "Filing"))
 }

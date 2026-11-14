@@ -64,13 +64,13 @@ func (h *Handler) handleWorkspaceAnchorRelink(w http.ResponseWriter, r *http.Req
 		// Use the capability's real lifecycle: stop watching, invalidate pending
 		// approvals, retain history and require a fresh monitoring decision.
 		if h.workspaceBuild == nil || h.workspaceBuild.FileJanitor == nil {
-			_ = orihttp.RespondConflict(w, "File Janitor is unavailable; the anchor was not changed.")
+			_ = orihttp.RespondConflict(w, "Filing is unavailable; the anchor was not changed.")
 			return
 		}
 		service, automation := h.workspaceBuild.FileJanitor()
 		lifecycle, ok := automation.(filejanitor.WatcherLifecycle)
 		if service == nil || (automation != nil && !ok) {
-			_ = orihttp.RespondConflict(w, "File Janitor could not safely stop watching; the anchor was not changed.")
+			_ = orihttp.RespondConflict(w, "Filing could not safely stop watching; the anchor was not changed.")
 			return
 		}
 		_, err = service.Relink(lifecycle, filejanitor.RelinkRequest{WorkspaceID: id, Path: path, AnchorDirectoryReferenceID: ref.ID})

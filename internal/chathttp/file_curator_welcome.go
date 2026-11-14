@@ -40,11 +40,11 @@ func (h *Handler) leadWelcomeContext(ctx context.Context, ws *workspace.Workspac
 }
 
 func fileCuratorWelcomeText(saved filejanitor.CuratorWelcome, available bool) string {
-	text := "I can’t verify the saved filing state right now. Check File Janitor’s Review tab or try again later."
+	text := "I can’t verify the saved filing state right now. Check Filing’s Review tab or try again later."
 	switch {
 	case !available:
 	case !saved.Configured:
-		text = "Folder setup isn’t verified yet. Use File Janitor’s existing setup controls when you’re ready."
+		text = "Folder setup isn’t verified yet. Use Filing’s existing setup controls when you’re ready."
 	case saved.Pending > 0:
 		text = fmt.Sprintf("The saved filing batch has %d %s ready for review.", saved.Pending, curatorItems(saved.Pending))
 		if saved.NeedsReview > 0 {
@@ -54,9 +54,9 @@ func fileCuratorWelcomeText(saved filejanitor.CuratorWelcome, available bool) st
 	default:
 		text = "There’s no pending filing batch in the saved records. That doesn’t mean the folder is empty. Choose Scan now explicitly if you want fresh proposals."
 	}
-	text += "\n\nYou can ask about filing rules or uncertain files. Nothing moves without your explicit approval in File Janitor. Opening this conversation does not scan the folder or read file contents."
+	text += "\n\nYou can ask about filing rules or uncertain files. Nothing moves without your explicit approval in Filing. Opening this conversation does not scan the folder or read file contents."
 	if available && saved.Configured {
-		text += "\n\nSource: saved File Janitor records"
+		text += "\n\nSource: saved Filing records"
 		if saved.Pending > 0 {
 			if saved.BatchCompletedAt.IsZero() {
 				text += "; batch date unavailable"

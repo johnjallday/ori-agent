@@ -4139,11 +4139,11 @@ test('a refused Curator request is reported, not swallowed', async () => {
 
 const REMOVAL_SUMMARY = {
   capability_id: 'file-janitor',
-  display_name: 'File Janitor',
+  display_name: 'Filing',
   installed: true,
   managed_folder: 'Inbox',
   stops_automation: ['Watching this folder for new files.', 'The daily catch-up scan.'],
-  retained_audit: ['The history of everything File Janitor filed, trashed, or restored.'],
+  retained_audit: ['The history of everything Filing filed, trashed, or restored.'],
   moves_files: false
 };
 
@@ -4159,7 +4159,7 @@ test('Settings offers removal and says plainly that files are not touched', () =
   const doc = setup();
   const restore = openSettings();
 
-  assert.ok(doc.getElementById('fileJanitorRemove'), 'expected a Remove File Janitor control');
+  assert.ok(doc.getElementById('fileJanitorRemove'), 'expected a Remove Filing control');
   assert.match(text(doc), /Your files are not moved or deleted/);
   restore();
 });
@@ -4190,7 +4190,7 @@ test('the confirmation is built from the server dry run', async () => {
   assert.match(body, /Watching this folder for new files/);
   assert.match(body, /gives up its access/);
   assert.match(body, /No files are moved, renamed, deleted, or restored/);
-  assert.match(body, /history of everything File Janitor filed/);
+  assert.match(body, /history of everything Filing filed/);
   restore();
 });
 
@@ -4270,8 +4270,7 @@ test('an adopted Curator is described as left alone, with no checkbox', async ()
         companion: {
           agent_instance_id: 'agent-1',
           removable: false,
-          reason:
-            'This agent existed before File Janitor was installed, so removing it leaves it alone.'
+          reason: 'This agent existed before Filing was installed, so removing it leaves it alone.'
         }
       }
     })
@@ -4281,7 +4280,7 @@ test('an adopted Curator is described as left alone, with no checkbox', async ()
   await settle();
 
   assert.equal(doc.getElementById('fileJanitorRemoveCompanion'), null);
-  assert.match(text(doc), /existed before File Janitor was installed/);
+  assert.match(text(doc), /existed before Filing was installed/);
   restore();
 });
 

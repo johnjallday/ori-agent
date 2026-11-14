@@ -722,7 +722,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	if buildPreparationContextFrom(r.Context()) != nil && (!templateResolved || !resolvedTemplate.Builtin ||
 		!isReviewedJanitorBlueprint(resolvedTemplate.ID) || resolvedTemplate.GroupRequirement != nil) {
-		respondBuildPreparationError(w, "blueprint_changed", "This blueprint no longer supports reviewed File Janitor creation.", http.StatusConflict, nil)
+		respondBuildPreparationError(w, "blueprint_changed", "This blueprint no longer supports reviewed Filing creation.", http.StatusConflict, nil)
 		return
 	}
 

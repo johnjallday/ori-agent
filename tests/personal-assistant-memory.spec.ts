@@ -576,7 +576,7 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     const checked = await request.post('/api/personal-assistant/knowledge/check-janitor');
     expect(checked.ok(), await checked.text()).toBeTruthy();
     await page.goto('/profile');
-    await expect(page.locator('#reviewedKnowledgeQueue')).toContainText('File Janitor');
+    await expect(page.locator('#reviewedKnowledgeQueue')).toContainText('Filing');
     await expect(page.locator('#reviewedDossierSources')).toContainText(
       'Eligible approved filing decisions exist'
     );

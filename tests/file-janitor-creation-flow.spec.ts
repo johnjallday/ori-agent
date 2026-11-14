@@ -633,7 +633,7 @@ test.describe('attached creation with a scripted local model', () => {
       await page
         .locator('#templatePicker .workspace-template-card')
         .filter({
-          has: page.locator('.workspace-template-card-label', { hasText: /^File Janitor$/ })
+          has: page.locator('.workspace-template-card-label', { hasText: /^Filing$/ })
         })
         .click();
       await page.locator('#workspaceBuildWithBtn').click();

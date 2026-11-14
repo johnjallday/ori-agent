@@ -94,7 +94,7 @@ func TestCuratorAdviceReachesActualChatProviderRequests(t *testing.T) {
 				if scenario == "associated" || scenario == "folder lead" || scenario == "same-name skill" {
 					want = 1
 				}
-				if strings.Count(prompt, "## File Janitor managed-folder protection") != want || protection.calls != want {
+				if strings.Count(prompt, "## Filing managed-folder protection") != want || protection.calls != want {
 					t.Fatal("role-scoped managed facts missing or leaked", prompt, protection.calls)
 				}
 				if strings.Count(prompt, filecuratorguidance.Heading) != want || !strings.Contains(prompt, "USER AUTHORED PROMPT") {

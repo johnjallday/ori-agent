@@ -209,7 +209,7 @@ func (h *Handler) acquirePlacementBuild(w http.ResponseWriter, r *http.Request, 
 	switch action {
 	case "draft", "folder", "detach", "abandon", "pause", "janitor-review", "janitor-prepare", "janitor-defer":
 	default:
-		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"code": "placement_only", "error": "This proposal uses reviewed File Janitor setup, not inference or another setup engine."})
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"code": "placement_only", "error": "This proposal uses reviewed Filing setup, not inference or another setup engine."})
 		return nil, false
 	}
 	if h.workspaceBuild.Placement == nil {

@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	metadataDisclosure   = "File Janitor classifies files from names, types, sizes, and dates only. It does not read file contents or send them to a model."
+	metadataDisclosure   = "Filing classifies files from names, types, sizes, and dates only. It does not read file contents or send them to a model."
 	folderDisclosure     = "You will choose one folder next. Granting it allows Ori to list immediate-child metadata and create or reuse Filed inside that folder; it does not start monitoring."
 	monitoringDisclosure = "Monitoring is a separate decision. If approved, Ori groups create and rename activity for five minutes, proposes only settled files, and runs a daily catch-up at 09:00 local time."
-	fileReviewDisclosure = "Setup only prepares proposals. Every move or send-to-Trash still requires your separate approval in File Janitor review."
+	fileReviewDisclosure = "Setup only prepares proposals. Every move or send-to-Trash still requires your separate approval in Filing review."
 )
 
 type RelationshipReader interface {
@@ -209,9 +209,9 @@ func (s *Service) Get(ctx context.Context, ownerUserID, selectedWorkspaceID stri
 		projection.Target = &target
 		projection.ViewState = "current_status"
 		if target.Paused {
-			projection.StatusMessage = "This File Janitor workspace is set up and paused. Opening it will not resume monitoring or start a scan."
+			projection.StatusMessage = "This Filing workspace is set up and paused. Opening it will not resume monitoring or start a scan."
 		} else {
-			projection.StatusMessage = "This File Janitor workspace is already set up. Opening it will not reprovision it or start a scan."
+			projection.StatusMessage = "This Filing workspace is already set up. Opening it will not reprovision it or start a scan."
 		}
 		projection.Health = &Health{
 			Fresh: true, Readiness: target.Readiness, Paused: target.Paused,
@@ -233,7 +233,7 @@ func (s *Service) Get(ctx context.Context, ownerUserID, selectedWorkspaceID stri
 		}
 		if deferred {
 			projection.ViewState = "recommendation_deferred"
-			projection.StatusMessage = "File Janitor setup is saved for later. You can revisit it from your assistant at any time."
+			projection.StatusMessage = "Filing setup is saved for later. You can revisit it from your assistant at any time."
 			projection.Actions = []Action{{ID: "accept", Label: "Set up now", Enabled: proposal.Mode != TargetChoose}, {ID: "manual", Label: "Customize manually", Enabled: true, Route: proposalManualRoute(proposal)}}
 			return projection, nil
 		}
@@ -241,18 +241,18 @@ func (s *Service) Get(ctx context.Context, ownerUserID, selectedWorkspaceID stri
 	switch proposal.Mode {
 	case TargetChoose:
 		projection.ViewState = "decision_required"
-		projection.StatusMessage = "Choose which File Janitor workspace your assistant should continue."
+		projection.StatusMessage = "Choose which Filing workspace your assistant should continue."
 		projection.Actions = []Action{{ID: "choose_target", Label: "Choose workspace", Enabled: true}, {ID: "manual", Label: "Review workspaces manually", Enabled: true, Route: "/workspaces"}}
 	case TargetAdopt:
 		target := proposal.Targets[0]
 		projection.Target = &target
 		if !target.Supported {
 			projection.ViewState = "manual_required"
-			projection.StatusMessage = "This File Janitor workspace needs a manual review before assisted setup can continue."
+			projection.StatusMessage = "This Filing workspace needs a manual review before assisted setup can continue."
 			projection.Actions = []Action{{ID: "manual", Label: "Review setup", Enabled: target.Route != "", Route: target.Route}}
 		} else {
 			projection.ViewState = "proposed"
-			projection.StatusMessage = "Your assistant can continue the existing File Janitor workspace without changing it just by opening this review."
+			projection.StatusMessage = "Your assistant can continue the existing Filing workspace without changing it just by opening this review."
 			projection.Actions = proposalActions(target.Route)
 		}
 	default:
@@ -350,7 +350,7 @@ func (s *Service) buildProposal(ctx context.Context, ownerUserID string, relatio
 		proposal.SelectedWorkspaceID = targets[0].WorkspaceID
 		proposal.Targets = []Target{targets[0]}
 		if targets[0].Reason == "privacy_customized" {
-			proposal.MetadataDisclosure = "This workspace has a customized privacy mode. Your assistant will not inspect or reset it; review the existing File Janitor settings manually."
+			proposal.MetadataDisclosure = "This workspace has a customized privacy mode. Your assistant will not inspect or reset it; review the existing Filing settings manually."
 			proposal.MonitoringDisclosure = "Existing monitoring and schedule settings are preserved until you review them in the workspace."
 		}
 	default:
@@ -608,7 +608,7 @@ func (s *Service) DeferRecommendation(ctx context.Context, ownerUserID, proposal
 		return nil, ErrUnavailable
 	}
 	fresh.ViewState = "recommendation_deferred"
-	fresh.StatusMessage = "File Janitor setup is saved for later. You can revisit it from your assistant at any time."
+	fresh.StatusMessage = "Filing setup is saved for later. You can revisit it from your assistant at any time."
 	fresh.Actions = []Action{{ID: "accept", Label: "Set up now", Enabled: true}, {ID: "manual", Label: "Customize manually", Enabled: true, Route: "/workspaces/new?template=file-janitor"}}
 	return fresh, nil
 }
@@ -898,7 +898,7 @@ func (s *Service) projectRunState(ctx context.Context, projection *Projection, r
 		projection.StatusMessage = "Setup is saved for later. Existing access or monitoring was not changed."
 		projection.Actions = []Action{{ID: "resume", Label: "Resume setup", Enabled: true}, {ID: "manual", Label: "Continue manually", Enabled: projection.Target != nil, Route: targetRoute(projection.Target)}}
 		if facts.MonitoringActive {
-			projection.StatusMessage += " Monitoring is still active; pause it separately in File Janitor if you want it stopped."
+			projection.StatusMessage += " Monitoring is still active; pause it separately in Filing if you want it stopped."
 			projection.Actions = append(projection.Actions, Action{ID: "pause_monitoring", Label: "Pause monitoring", Enabled: projection.Target != nil, Route: targetTabRoute(projection.Target, "settings")})
 		}
 		return projection, nil
@@ -912,8 +912,8 @@ func (s *Service) projectRunState(ctx context.Context, projection *Projection, r
 		if (facts.FirstOutcome != "batch" && facts.FirstOutcome != "no_eligible") || facts.FirstCompletedAt.IsZero() ||
 			(facts.FirstOutcome == "batch" && strings.TrimSpace(facts.FirstBatchID) == "") {
 			projection.ViewState = "needs_attention"
-			projection.StatusMessage = "Ori cannot verify the saved first-scan result. Open File Janitor to review its current state."
-			projection.Actions = []Action{{ID: "manual", Label: "Review File Janitor", Enabled: projection.Target != nil, Route: targetRoute(projection.Target)}}
+			projection.StatusMessage = "Ori cannot verify the saved first-scan result. Open Filing to review its current state."
+			projection.Actions = []Action{{ID: "manual", Label: "Review Filing", Enabled: projection.Target != nil, Route: targetRoute(projection.Target)}}
 			break
 		}
 		projection.FirstResult = &FirstResult{
@@ -944,12 +944,12 @@ func (s *Service) projectRunState(ctx context.Context, projection *Projection, r
 		}
 	case run.CurrentStep == StepFolder:
 		projection.ViewState = "needs_permission"
-		projection.StatusMessage = "Workspace prepared. Choose the folder to tidy when you are ready."
+		projection.StatusMessage = "Workspace prepared. Choose the folder to file when you are ready."
 		projection.Actions = []Action{{ID: "choose_folder", Label: "Choose folder", Enabled: true}, {ID: "finish_later", Label: "Finish later", Enabled: true}, {ID: "manual_takeover", Label: "Continue manually", Enabled: projection.Target != nil}}
 	case run.CurrentStep == StepMonitoring:
 		if !facts.FolderReady || strings.TrimSpace(facts.RootGenerationID) == "" || strings.TrimSpace(facts.DirectoryReference) == "" {
 			projection.ViewState = "needs_attention"
-			projection.StatusMessage = "File Janitor folder access needs attention. Review or relink it manually; Ori will not restore access on its own."
+			projection.StatusMessage = "Filing folder access needs attention. Review or relink it manually; Ori will not restore access on its own."
 			projection.Actions = []Action{{ID: "manual_takeover", Label: "Manage access manually", Enabled: projection.Target != nil}}
 			break
 		}
@@ -990,7 +990,7 @@ func (s *Service) projectRunState(ctx context.Context, projection *Projection, r
 		projection.Actions = []Action{{ID: "prepare_review", Label: label, Enabled: true}, {ID: "finish_later", Label: "Finish later", Enabled: true}, {ID: "manual_takeover", Label: "Continue manually", Enabled: projection.Target != nil}}
 	default:
 		projection.ViewState = "setting_up"
-		projection.StatusMessage = "Preparing the reviewed File Janitor workspace."
+		projection.StatusMessage = "Preparing the reviewed Filing workspace."
 		projection.Actions = []Action{{ID: "finish_later", Label: "Finish later", Enabled: true}}
 	}
 	return projection, nil

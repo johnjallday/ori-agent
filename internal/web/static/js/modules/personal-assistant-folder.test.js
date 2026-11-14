@@ -126,7 +126,7 @@ test('setup busy text names the reviewed project, not its observation root', () 
   );
   assert.equal(
     folderDecisionProgress(offer, { walkthrough: true }),
-    'Setting up File Janitor for Album-5…'
+    'Setting up Filing for Album-5…'
   );
   assert.equal(folderDecisionProgress(offer, {}), '');
   assert.equal(
@@ -1699,7 +1699,7 @@ test('a tidy is confirmed as a plan: Set up shows the setup, Adjust… opens the
   };
   const confirm = folderOfferView(dump, { confirm: 'tidy' });
   assert.equal(confirm.confirming, true);
-  assert.equal(headlineText(confirm), 'Set up File Janitor for Downloads?');
+  assert.equal(headlineText(confirm), 'Set up filing for Downloads?');
   assert.deepEqual(strongText(confirm), ['Downloads']);
   assert.match(confirm.question, /File Curator/);
   assert.match(confirm.question, /nothing moves until you approve a batch/);
@@ -1729,7 +1729,7 @@ test('a tidy is confirmed as a plan: Set up shows the setup, Adjust… opens the
     },
     { confirm: 'tidy' }
   );
-  assert.equal(headlineText(mixed), 'Set up File Janitor for Documents?');
+  assert.equal(headlineText(mixed), 'Set up filing for Documents?');
   const ambiguous = folderOfferView({ ...dump, verdict: 'ambiguous' }, { confirm: 'tidy' });
   assert.equal(ambiguous.actions[0].id, 'setup');
   // A project verdict has no tidy plan, and a lost folder comes first.
@@ -1809,7 +1809,7 @@ test('an ambiguous offer asks rather than guesses', () => {
     reason: '31 PDF files, last edited in March'
   });
   assert.equal(headlineText(view), 'I am not sure what Scans is.');
-  assert.equal(view.question, 'Is this a project you work in, or a folder to tidy?');
+  assert.equal(view.question, 'Is this a project you work in, or a folder to file?');
   assert.deepEqual(
     view.actions.map(a => [a.label, a.decision || '', a.choice || '']),
     [

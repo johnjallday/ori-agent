@@ -706,7 +706,7 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		if errors.As(err, &domainError) {
 			return Status{}, domainError
 		}
-		return Status{}, setupErr(CodePersistenceFailed, "Ori could not save this workspace's File Janitor settings.", RepairRetry, err)
+		return Status{}, setupErr(CodePersistenceFailed, "Ori could not save this workspace's Filing settings.", RepairRetry, err)
 	}
 
 	return s.Status(workspaceID)
@@ -1187,11 +1187,11 @@ func (s *Service) checkBinding(settings JanitorSettings) ComponentCheck {
 			return fail(CodeBindingFailed, "Folder access for this workspace is turned off.")
 		}
 		if !bindingToolsAreReadOnly(binding) {
-			return fail(CodeBindingFailed, "This workspace's folder access no longer matches what File Janitor requires. Relink the folder to repair it.")
+			return fail(CodeBindingFailed, "This workspace's folder access no longer matches what Filing requires. Relink the folder to repair it.")
 		}
 		return check
 	}
-	return fail(CodeBindingFailed, "This workspace has no folder access for File Janitor yet.")
+	return fail(CodeBindingFailed, "This workspace has no folder access for Filing yet.")
 }
 
 // bindingToolsAreReadOnly reports whether a binding exposes exactly the Janitor
@@ -1305,14 +1305,14 @@ func (s *Service) checkPersistence(settings JanitorSettings) ComponentCheck {
 	check := ComponentCheck{Component: ComponentPersistence, Status: ComponentOK}
 	dir, err := s.store.StateDir(settings.WorkspaceID)
 	if err != nil {
-		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori could not find where to store this workspace's File Janitor state.", Repair: RepairRetry}
+		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori could not find where to store this workspace's Filing state.", Repair: RepairRetry}
 	}
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's File Janitor state.", Repair: RepairRetry}
+		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's Filing state.", Repair: RepairRetry}
 	}
 	probe := filepath.Join(dir, ".write-probe")
 	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil { // #nosec G304 -- resolved state dir plus a fixed name
-		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's File Janitor state.", Repair: RepairRetry}
+		return ComponentCheck{Component: ComponentPersistence, Status: ComponentFailed, Code: CodePersistenceFailed, Message: "Ori cannot save this workspace's Filing state.", Repair: RepairRetry}
 	}
 	_ = os.Remove(probe)
 	return check

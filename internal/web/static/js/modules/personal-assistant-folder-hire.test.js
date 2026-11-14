@@ -689,7 +689,7 @@ test('an inbox hire ends on its first batch: Review batch, never Start first loo
   const empty = folderReceiptView(
     inboxHire({ outcome: 'no_eligible', route: '/workspaces/downloads?panel=file-janitor' })
   );
-  assert.equal(empty.openLabel, 'Open File Janitor');
+  assert.equal(empty.openLabel, 'Open Filing');
   assert.equal(empty.route, '/workspaces/downloads?panel=file-janitor');
   // A route that is not a File Janitor review is never followed.
   const elsewhere = folderReceiptView(
@@ -1012,7 +1012,7 @@ test('a stopped inbox run says what finished and offers its own recovery', () =>
     ]
   );
   const changed = stopped('plan_changed');
-  assert.match(changed.question, /File Janitor will not take this folder/);
+  assert.match(changed.question, /Filing will not take this folder/);
   assert.deepEqual(
     changed.actions.map(action => [action.id, action.label]),
     [

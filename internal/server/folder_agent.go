@@ -624,7 +624,7 @@ func (b *ServerBuilder) addFolderAgentFileCurator(rec folderagent.Record, set fu
 	set(folderagent.FolderPlanCapability, personalassistant.FolderLineDone, "")
 	set(personalassistant.FolderPlanAgents, personalassistant.FolderLineWorking, "")
 	fail := func(err error) error {
-		message := "The Curator role could not be saved. Choose the folder's agent in File Janitor settings. File Janitor still works without an agent."
+		message := rec.AgentName + " could not be linked to filing. Choose the folder's agent in Filing settings. Filing still works without an agent."
 		var capabilityErr *workspacecapability.Error
 		if errors.As(err, &capabilityErr) {
 			message = capabilityErr.Message
@@ -639,7 +639,7 @@ func (b *ServerBuilder) addFolderAgentFileCurator(rec folderagent.Record, set fu
 	instance, unique := ws.FindUniqueAgentInstance(rec.AgentName, "")
 	if !unique {
 		return fail(&workspacecapability.Error{Code: workspacecapability.CodeCompanionFailed,
-			Message: "The folder's agent attachment is missing or ambiguous. Choose one current workspace agent in File Janitor settings. File Janitor still works without an agent."})
+			Message: rec.AgentName + " could not be linked to filing. Choose the folder's agent in Filing settings. Filing still works without an agent."})
 	}
 	if _, err := service.AssociateCompanion(workspaceID, workspace.CapabilityFileJanitor, instance.ID,
 		workspacecapability.CompanionAssociationOptions{ExpectedLead: rec.AgentName}); err != nil {

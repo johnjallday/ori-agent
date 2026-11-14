@@ -359,7 +359,7 @@ async function installFixtureRoutes(page: Page) {
           capability_id: 'file-janitor',
           view_state: 'recommendation_deferred',
           stale: false,
-          status_message: 'File Janitor setup is saved for later.',
+          status_message: 'Filing setup is saved for later.',
           relationship: {
             assistant_id: 'assistant-readme',
             display_name: 'Mira',

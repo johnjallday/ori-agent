@@ -98,7 +98,7 @@ func TestFolderAgentFileCurator_AssociatesOnlyTheHiredAgent(t *testing.T) {
 						t.Fatal("role survived uninstall")
 					}
 				} else {
-					if states[personalassistant.FolderPlanAgents] != personalassistant.FolderLineFailed || !strings.Contains(progress[personalassistant.FolderPlanAgents], "File Janitor still works without an agent.") {
+					if states[personalassistant.FolderPlanAgents] != personalassistant.FolderLineFailed || !strings.Contains(progress[personalassistant.FolderPlanAgents], "Filing still works without an agent.") {
 						t.Fatal("missing plain failure message", states, progress)
 					}
 					if scenario == "existing companion" {

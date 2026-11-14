@@ -87,7 +87,7 @@ func (r folderTidyRunner) TidyFolder(ctx context.Context, req personalassistant.
 		return personalassistant.FolderTidyResult{}, personalassistant.ErrFolderPathLost
 	}
 	if owner, ok := janitor.FolderOwner(root); ok && owner != nil {
-		return r.existing(owner.WorkspaceID, "Another File Janitor already tidies this folder, so I opened it.")
+		return r.existing(owner.WorkspaceID, "Filing already manages this folder in another workspace, so I opened it.")
 	}
 
 	projection, err := coordinator.Get(ctx, req.UserID, "")
@@ -113,12 +113,12 @@ func (r folderTidyRunner) TidyFolder(ctx context.Context, req personalassistant.
 		default:
 			// A setup in flight past its folder finishes from its own
 			// workspace rather than being restarted here.
-			return r.existing(run.TargetWorkspaceID, "A File Janitor setup is already in progress, so I opened it.")
+			return r.existing(run.TargetWorkspaceID, "Filing setup is already in progress, so I opened it.")
 		}
 	}
 	if projection.Proposal == nil {
 		if projection.Target != nil && projection.Target.WorkspaceID != "" {
-			return r.existing(projection.Target.WorkspaceID, "File Janitor is already set up for another folder. Change its folder there to tidy this one.")
+			return r.existing(projection.Target.WorkspaceID, "Filing is already set up for another folder. Change its folder there to file this one.")
 		}
 		return personalassistant.FolderTidyResult{}, personalassistant.ErrFolderOutcomeUnavailable
 	}
@@ -179,7 +179,7 @@ func (r folderTidyRunner) continueRun(ctx context.Context, req personalassistant
 			})
 		if err != nil {
 			if conflict != nil {
-				return r.existing(conflict.ConflictWorkspaceID, "Another File Janitor already tidies this folder, so I opened it.")
+				return r.existing(conflict.ConflictWorkspaceID, "Filing already manages this folder in another workspace, so I opened it.")
 			}
 			return personalassistant.FolderTidyResult{}, err
 		}
@@ -191,17 +191,17 @@ func (r folderTidyRunner) continueRun(ctx context.Context, req personalassistant
 		// gets a first review here.
 		status, statusErr := janitor.Status(workspaceID)
 		if statusErr != nil || !filejanitor.RootsOverlap(status.Settings.RootPath, root) {
-			return r.existing(workspaceID, "File Janitor is already set up for another folder. Change its folder there to tidy this one.")
+			return r.existing(workspaceID, "Filing is already set up for another folder. Change its folder there to file this one.")
 		}
 	}
 
 	if current == nil || current.Monitoring == nil || run == nil {
-		return r.existing(workspaceID, "The folder is linked; open File Janitor to review its first scan.")
+		return r.existing(workspaceID, "The folder is linked; open Filing to review its first scan.")
 	}
 	reviewed, err := coordinator.PrepareReview(ctx, req.UserID, run.ID, run.Revision, current.Monitoring.Revision)
 	if err != nil {
 		logger.Warn("First File Janitor review did not complete for a shown folder", logger.Fields{"workspace_id": workspaceID, "error": err.Error()})
-		return r.existing(workspaceID, "The folder is linked; open File Janitor to review its first scan.")
+		return r.existing(workspaceID, "The folder is linked; open Filing to review its first scan.")
 	}
 	route := r.route(workspaceID)
 	if route == "" {

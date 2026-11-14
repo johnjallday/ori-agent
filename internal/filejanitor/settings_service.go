@@ -199,7 +199,7 @@ func (s *Service) Relink(automation WatcherLifecycle, req RelinkRequest) (Status
 	}
 
 	if req.AnchorDirectoryReferenceID != "" && req.AnchorDirectoryReferenceID != current.DirectoryReferenceID {
-		return Status{}, setupErr(CodeFolderChanged, "File Janitor no longer manages this anchor. Review its folder settings first.", RepairChooseFolder, nil)
+		return Status{}, setupErr(CodeFolderChanged, "Filing no longer manages this anchor. Review its folder settings first.", RepairChooseFolder, nil)
 	}
 
 	// 0. Validate and reserve the new folder BEFORE anything is torn down. A

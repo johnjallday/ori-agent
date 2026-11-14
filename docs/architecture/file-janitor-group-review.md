@@ -1,5 +1,7 @@
 # File Janitor group-first review contract
 
+The feature is shown to users as **Filing**; internal File Janitor identifiers remain unchanged.
+
 Status: contract selected in the task 1.1 characterization spike; implementation
 and acceptance evidence are tracked separately in the feature findings log.
 Base inspected: `48d8e5392857a0517084bf1ce70cf9313530826c`.

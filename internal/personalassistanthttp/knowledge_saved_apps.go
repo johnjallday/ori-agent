@@ -45,10 +45,10 @@ func (h *Handler) CheckSavedAppSuggestions(w http.ResponseWriter, r *http.Reques
 // undo, scan, or classify a file and accepts no caller-supplied evidence.
 func (h *Handler) CheckJanitorSuggestions(w http.ResponseWriter, r *http.Request) {
 	if h == nil {
-		orihttp.ServiceUnavailable(w, "File Janitor suggestions are unavailable")
+		orihttp.ServiceUnavailable(w, "Filing suggestions are unavailable")
 		return
 	}
-	h.checkKnowledgeSuggestions(w, r, h.janitorSuggestions, "File Janitor")
+	h.checkKnowledgeSuggestions(w, r, h.janitorSuggestions, "Filing")
 }
 
 type admittedKnowledgeCandidate struct {

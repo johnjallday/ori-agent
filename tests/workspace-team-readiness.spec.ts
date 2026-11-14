@@ -71,7 +71,7 @@ test('a saved File Curator is suggested, assigned, and persisted without duplica
   const beforeNames = await savedAgentNames(request);
   await openCreateModal(page);
   await expectNoDownloadsJanitorCard(page);
-  await cardByLabel(page, 'File Janitor').click();
+  await cardByLabel(page, 'Filing').click();
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep2')).toBeVisible();
   await page.locator('#folderNameInput').fill(`File Readiness ${RUN}`);

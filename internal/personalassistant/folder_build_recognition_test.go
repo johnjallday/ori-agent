@@ -115,7 +115,7 @@ func TestFolderRecognition_EverythingElseSaysWhatItIs(t *testing.T) {
 	}
 	inbox := BuildFolderRecognition{
 		Verdict: BuildFolderProject, Shape: "inbox", ProjectCount: 1, CandidateID: "candidate-0",
-		Label: "inbox folder", BlueprintID: "file-janitor", BlueprintLabel: "File Janitor",
+		Label: "inbox folder", BlueprintID: "file-janitor", BlueprintLabel: "Filing",
 	}
 	if got, err := service.Recognize(ctx, target, desktop.ID); err != nil || *got != inbox {
 		t.Fatalf("loose files = %+v %v", got, err)

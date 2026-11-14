@@ -128,7 +128,7 @@ func (s *Service) reportScanFailure(workspaceID string, cause error) {
 		Priority:          "medium",
 		Confidence:        "high",
 		Status:            workspace.OpportunityNew,
-		RecommendedAction: "Open File Janitor settings to reconnect the folder",
+		RecommendedAction: "Open Filing settings to reconnect the folder",
 		CreatedAt:         time.Now(),
 		UpdatedAt:         time.Now(),
 	}

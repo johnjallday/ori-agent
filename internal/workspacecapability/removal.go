@@ -130,7 +130,7 @@ func (s *Service) RemovalPlan(workspaceID, capabilityID string) (RemovalSummary,
 				Removable:       !resource.Shared,
 			}
 			if resource.Shared {
-				summary.Companion.Reason = "This agent existed before File Janitor was installed, so removing the capability leaves it alone."
+				summary.Companion.Reason = "This agent existed before Filing was installed, so removing the capability leaves it alone."
 			}
 			continue
 		}

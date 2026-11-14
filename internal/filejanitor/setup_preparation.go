@@ -310,7 +310,7 @@ func validatePreparationWorkspace(ws *workspace.Workspace, preparation *SetupPre
 	install.OwnedResources = nil
 	digest, err := setupDigest(install)
 	if err != nil || !found || digest != preparation.CapabilityRevision {
-		return setupErr(CodeFolderChanged, "File Janitor was removed or changed. Review its current setup.", RepairRetry, nil)
+		return setupErr(CodeFolderChanged, "Filing was removed or changed. Review its current setup.", RepairRetry, nil)
 	}
 	if !preparationAccessMatches(ws, preparation, root) {
 		return setupErr(CodeFolderChanged, "Workspace folder permissions changed. Stop this preparation and review current access.", RepairRetry, nil)

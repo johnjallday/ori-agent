@@ -49,7 +49,7 @@ export async function startJanitorBuildModel(
         ? 'The metadata does not establish what you want to do.'
         : ordinary
           ? 'Suggested a blank notebook workspace. Review and edit it before creating.'
-          : 'Suggested a File Janitor workspace. Review and edit it before creating.',
+          : 'Suggested a Filing workspace. Review and edit it before creating.',
       ask: {
         question: ambiguous ? 'What would you like to do with this folder?' : '',
         choices: ambiguous

@@ -190,7 +190,7 @@ func (s *Service) checkRootConflict(settings JanitorSettings) ComponentCheck {
 	}
 	check.Status = ComponentFailed
 	check.Code = CodeFolderConflict
-	check.Message = "Another workspace is already tidying this folder, so File Janitor paused here. Choose a different folder, or stop the other workspace from managing it."
+	check.Message = "Another workspace is already tidying this folder, so Filing paused here. Choose a different folder, or stop the other workspace from managing it."
 	check.Repair = RepairChooseFolder
 	return check
 }

@@ -51,7 +51,7 @@
     removeFolder: 'Remove folder',
     folderTitle: 'Add a folder',
     folderDisclosure:
-      'Choosing a folder records file and folder names, kinds, counts and project markers. File contents are not read. Ori first checks for a supported setup plan; otherwise this metadata, and any attached link metadata, is shared with your configured model to suggest a draft. Ordinary creation only links the folder. File Janitor offers a separate permission review to create Filed/ and prepare a metadata-only scan; moves and Trash still need approval.',
+      'Choosing a folder records file and folder names, kinds, counts and project markers. File contents are not read. Ori first checks for a supported setup plan; otherwise this metadata, and any attached link metadata, is shared with your configured model to suggest a draft. Ordinary creation only links the folder. Filing offers a separate permission review to create Filed/ and prepare a metadata-only scan; moves and Trash still need approval.',
     folderLoading: 'Loading folder choices…',
     folderPickerLabel: 'Pick another folder…',
     folderPathLabel: 'or paste a folder path',

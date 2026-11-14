@@ -14,14 +14,14 @@ and the unresolved configured first-goal admission boundary.
 
 ## How recommendations are chosen
 
-The shared resolver uses the existing ticket/task presentation and File Janitor's public,
+The shared resolver uses the existing ticket/task presentation and Filing's public,
 identity-bound action summary. It does not identify capabilities or starter tasks
 by their names, hide tasks, or change their completion state.
 
 Priority, highest first:
 
 1. Tasks needing attention.
-2. File Janitor repair, setup, or consent.
+2. Filing repair, setup, or consent.
 3. Files awaiting review.
 4. Running tasks, then an active file scan.
 5. Other actionable tasks, then unknown task states.
@@ -38,6 +38,22 @@ hide usable actions from another. **Retry workspace status** only rereads state.
 An idle agent is **Ready to help**; queued work is still **Waiting**. Zero
 specialists and empty Memory are not missing-setup conditions.
 
+## Folder setup asks once
+
+For a reviewed attached folder, Next action names the lead and folder:
+**Let Downloads Manager file Downloads** → **Review permission**. The existing
+consent card says **Allow filing in Downloads**. Hiring never grants access;
+only this explicit confirmation creates/reuses Filed/ and prepares one
+metadata-only review. Every move still needs separate approval.
+
+Before that permission, the completed folder banner says **Downloads Manager is
+hired. One step left: allow filing.** The never-configured summary is hidden
+while Next action shows this setup ask, so Overview asks once. It stays available
+when an attention ticket outranks setup, or for revoked access and repair. Once
+allowed, the ordinary completed banner and Filing summary return. With no
+reviewed attached folder, the setup ask is **Choose the folder to file**, and
+its field starts empty.
+
 ## Saved messages and filing updates
 
 A newly ready workspace can save a lead welcome quietly. **New message** does not
@@ -47,7 +63,7 @@ the existing draft/reply/New/creation guards. Only actual visible, unblocked
 message exposure marks it seen—not page entry, hidden hydration or a preview.
 An unread welcome does not displace completed-result or urgent ticket actions.
 
-Filing counts come independently from current saved File Janitor batches and
+Filing counts come independently from current saved Filing batches and
 permission, even if the lead or conversation is unavailable. **Review files**
 opens current Review; reading chat does not clear pending files, and reviewing
 files does not mark a message seen. **Source details** separates the last saved
@@ -64,7 +80,7 @@ focus, view state and current console selections with their existing owners.
 See [Workspace updates architecture](architecture/workspace-updates.md) for
 identity, paging, migration, exposure and lifecycle boundaries.
 
-## File review remains in File Janitor
+## File review remains in Filing
 
 **Review files** opens the existing console. Setup, consent, repair and result
 links also open their existing destinations there. Opening guidance does not

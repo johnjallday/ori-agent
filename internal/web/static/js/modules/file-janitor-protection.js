@@ -250,7 +250,7 @@ export function createProtectionTrips(win) {
     const trip = read();
     if (!trip)
       throw new Error(
-        'The review return has expired or is unavailable. Open File Janitor to review current files.'
+        'The review return has expired or is unavailable. Open Filing to review current files.'
       );
     if (
       trip.workspaceId === win.currentWorkspaceId &&
@@ -278,7 +278,7 @@ export function createProtectionTrips(win) {
     ) {
       consume(trip.nonce);
       throw new Error(
-        'The approved folder or its access changed. Open File Janitor and review current files; old choices cannot be restored.'
+        'The approved folder or its access changed. Open Filing and review current files; old choices cannot be restored.'
       );
     }
     win.location.href = withNonce(
