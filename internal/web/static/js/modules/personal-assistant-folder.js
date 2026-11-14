@@ -32,12 +32,7 @@ import {
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
 import { collectCurrentWorkspaceContext } from './personal-assistant-workspace-context.js';
-import {
-  commanderPresenter,
-  homeCommanderMap,
-  homeMapShowing,
-  revealHiredTile
-} from './commander-map.js';
+import { commanderPresenter, homeCommanderMap, homeMapShowing } from './commander-map.js';
 import { folderLookEnded } from './commander-speech.js';
 import {
   chooseFolder,
@@ -7002,8 +6997,8 @@ async function chooseForAgent(body) {
 }
 
 // After a hire is accepted on Home with the map showing, the chat box narrows so
-// the map and the new tile are visible, and the tile is brought into the part of
-// the map beside it (visual-hire FR15, FR17). The panel answers 'skipped' when
+// the map and the new tile are visible (visual-hire FR15, FR17). The cockpit
+// owns the arrival pan for every entry, independently of drawer narrowing. The panel answers 'skipped' when
 // the box is closed, stepped aside or on the phone sheet: the tile still builds
 // and pans without waiting for a narrowing that will not happen. The workspace page, Needs you and any page without Home's map never
 // get this far (FR21).
@@ -7016,7 +7011,6 @@ function narrowForHiredAgent(workspaceID) {
   });
   if (!showing) return;
   window.PersonalAssistantPanel?.narrowForHire?.(id);
-  void revealHiredTile(id);
 }
 
 async function startAgent(brief, button, hire) {

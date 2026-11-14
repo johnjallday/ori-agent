@@ -24,7 +24,7 @@ import {
   renderFolderAgentReport,
   setupFinished
 } from './folder-agent-card.js';
-import { homeCommanders, homeMapShowing } from './commander-map.js';
+import { homeCommanders, homeMapShowing, revealHiredTile } from './commander-map.js';
 import { commanderBuildingLine } from './commander-speech.js';
 
 // The folder agents whose Commander speaks on Home's map without the drawer:
@@ -3643,6 +3643,7 @@ import {
     if (view === VIEW_TREE && state.view === VIEW_MAP)
       window.OriWorkspaceMap?.suspendDraftPlacement?.();
     state.view = view === VIEW_TREE ? VIEW_TREE : VIEW_MAP;
+    if (state.view === VIEW_TREE) window.OriWorkspaceMap?.finishAssemblies?.();
     els.viewButtons.forEach(btn => {
       const isActive = btn.getAttribute('data-cockpit-view') === state.view;
       btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
@@ -5414,6 +5415,8 @@ import {
       view: state.view,
       map: window.OriWorkspaceMap
     });
+    if (event?.detail?.built && homeMapShowing({ hasMap: Boolean(els.map), view: state.view }))
+      void revealHiredTile(event.detail.workspaceID);
     if (event?.detail?.placement) {
       // The place is about to be drawn: whoever opens it next (the end of a
       // watched run) waits for that, not for a map that has not moved yet.

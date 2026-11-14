@@ -208,6 +208,9 @@ export function pageObstacles(doc = globalThis.document, win = globalThis.window
   if (win?.PersonalAssistantPanel?.isOpen?.())
     rects.push(rectOf(doc?.getElementById?.('personalAssistantPanel')));
   rects.push(rectOf(doc?.getElementById?.('personalAssistantLauncher')));
+  // The Add folder hire keeps its receipt sheet open. Bring its building
+  // beside that sheet, not underneath it, without closing or selecting it.
+  rects.push(rectOf(doc?.querySelector?.('#addFolderModal.show .modal-dialog')));
   return rects.filter(Boolean);
 }
 

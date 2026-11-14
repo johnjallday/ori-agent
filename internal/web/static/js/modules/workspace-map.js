@@ -12509,6 +12509,7 @@
     playHQAssembly: playHQAssembly,
     playAssembly: playAssembly,
     buildOnArrival: buildOnArrival,
+    finishAssemblies: finishBuilds,
     isAssembling: function (id) {
       return activeBuilds.has(id);
     },

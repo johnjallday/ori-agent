@@ -86,6 +86,7 @@ function harness({ reduced = false } = {}) {
     tile,
     mount: () => api.mount(container, { workspaces: [], hideChrome: true, noAutoSelect: true }),
     unmount: () => api.unmount(container),
+    finish: () => api.finishAssemblies(),
     hide() {
       doc.visibilityState = 'hidden';
       docListeners.visibilitychange();
@@ -119,20 +120,20 @@ test('generic house keeps the exact original geometry and paint order inside fou
   for (const part of parts) assert.equal(svg.split(`data-build-part="${part}"`).length, 2);
   const plain = svg.replace(/<g data-build-part="[^"]+">|<\/g>/g, '');
   // The pre-assembly cottage: literal snapshot, including shape/paint order.
-  // Colours are palette-dependent; normalize only their values, not geometry.
+  // Fixed workspace identity also pins the palette assignments, not just geometry.
   assert.equal(
-    plain.replace(/(fill|stroke)="#[^"]+"/g, '$1="COLOR"'),
+    plain,
     '<svg class="ws-map-struct" width="112" height="92" viewBox="0 0 118 96" aria-hidden="true">' +
-      '<polygon points="59,86 110,60 59,34 8,60" fill="COLOR" stroke="COLOR" stroke-opacity=".45"/>' +
-      '<polygon points="34,40 34,54 59,68 59,54" fill="COLOR"/>' +
-      '<polygon points="84,40 84,54 59,68 59,54" fill="COLOR"/>' +
-      '<polygon points="34,40 59,54 59,16" fill="COLOR"/>' +
-      '<polygon points="84,40 59,54 59,16" fill="COLOR"/>' +
-      '<polyline points="34,40 59,54 84,40" fill="none" stroke="COLOR" stroke-opacity=".55" stroke-width="1.5"/>' +
-      '<polygon points="42,48 50,52 50,63 42,59" fill="COLOR"/>' +
-      '<polygon points="66,52 74,48 74,56 66,60" fill="COLOR" fill-opacity=".85"/>' +
-      '<polygon points="70,25 76,28 76,36 70,33" fill="COLOR"/>' +
-      '<polygon points="70,25 76,28 79,26 73,23" fill="COLOR"/></svg>'
+      '<polygon points="59,86 110,60 59,34 8,60" fill="#3f3550" stroke="#8f78ad" stroke-opacity=".45"/>' +
+      '<polygon points="34,40 34,54 59,68 59,54" fill="#b8adc4"/>' +
+      '<polygon points="84,40 84,54 59,68 59,54" fill="#ded6e6"/>' +
+      '<polygon points="34,40 59,54 59,16" fill="#52416b"/>' +
+      '<polygon points="84,40 59,54 59,16" fill="#6b568a"/>' +
+      '<polyline points="34,40 59,54 84,40" fill="none" stroke="#3a2d4d" stroke-opacity=".55" stroke-width="1.5"/>' +
+      '<polygon points="42,48 50,52 50,63 42,59" fill="#3a2d4d"/>' +
+      '<polygon points="66,52 74,48 74,56 66,60" fill="#3a2d4d" fill-opacity=".85"/>' +
+      '<polygon points="70,25 76,28 76,36 70,33" fill="#52416b"/>' +
+      '<polygon points="70,25 76,28 79,26 73,23" fill="#3a2d4d"/></svg>'
   );
 });
 
@@ -207,7 +208,7 @@ test('existing tiles, hidden hires and expired registrations never assemble on a
 });
 
 test('visibility loss and unmount finish active builds and discard pending arrivals', async () => {
-  for (const action of ['hide', 'unmount']) {
+  for (const action of ['hide', 'unmount', 'finish']) {
     const h = harness();
     h.api.buildOnArrival('pending');
     const tile = h.tile('active');

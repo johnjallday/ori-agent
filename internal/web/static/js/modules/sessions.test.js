@@ -10358,11 +10358,12 @@ test('one pane pick at a time; Start announces the new workspace to Home and the
   await pending;
   assert.equal(calls, 1);
   assert.equal(manager.workspaceBuild.folderAgentStarted, true);
+  assert.equal(events[0].detail.built, true);
   assert.deepEqual(
     events.map(event => [event.type, event.detail?.workspaceID || event.detail?.workspaceId]),
     [
-      ['ori:workspaces-changed', 'ws-songs'],
-      ['ori:folder-agent-started', 'ws-songs']
+      ['ori:folder-agent-started', 'ws-songs'],
+      ['ori:workspaces-changed', 'ws-songs']
     ]
   );
 });

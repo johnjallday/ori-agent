@@ -187,6 +187,49 @@ test('project holders open only a saved index, and Cancel restores focus without
   assert.equal(calls.length, 1);
 });
 
+test('workspace project-holder entry announces a build only after an accepted hire', async () => {
+  for (const accepted of [false, true]) {
+    const doc = stubDocument();
+    const events = [];
+    doc.defaultView = {
+      CustomEvent: class {
+        constructor(type, init) {
+          this.type = type;
+          this.detail = init.detail;
+        }
+      },
+      dispatchEvent: event => events.push(event)
+    };
+    const view = folderAgentReportView(
+      reported({
+        project_holders: {
+          report_key: 'walk',
+          rows: [{ index: 0, name: 'Projects', count: 1, kinds: '1 song' }]
+        }
+      })
+    );
+    const card = renderFolderAgentReport(view, doc, {
+      fetchImpl: async url => ({
+        ok: !url.endsWith('/start') || accepted,
+        status: accepted ? 201 : 400,
+        json: async () =>
+          url.endsWith('/project-holder')
+            ? { card: { choice_token: 'child', folder_name: 'Projects', brief: 'Explore' } }
+            : url.endsWith('/start') && !accepted
+              ? { error: 'Not hired' }
+              : { folder_agent: reported({ workspace_id: 'child' }) }
+      })
+    });
+    const holders = card.querySelector('.folder-agent-card__project-holders');
+    await holders.querySelector('button').listeners.click();
+    assert.equal(events.length, 0, 'choice/review is not acceptance');
+    await holders.querySelector('.folder-agent-card__start').listeners.click();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(events.length, accepted ? 1 : 0);
+    if (accepted) assert.deepEqual(events[0].detail, { workspaceID: 'child', built: true });
+  }
+});
+
 test('Documents offers an unticked optional step and reuses stored protection without a scan', async () => {
   const doc = stubDocument();
   const calls = [];

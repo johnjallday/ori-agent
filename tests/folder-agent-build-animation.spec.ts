@@ -10,12 +10,27 @@ import { installLocalCdn } from './helpers/offline-cdn';
 const sandbox = process.env.ORI_FOLDER_AGENT_SANDBOX || '';
 const live = process.env.ORI_BUILD_LIVE === '1';
 test.afterEach(async ({ page }) => page.unrouteAll({ behavior: 'wait' }));
-for (const mode of ['light', 'dark', 'reduced', 'reload-during']) {
+for (const mode of [
+  'light',
+  'dark',
+  'reduced',
+  'reload-during',
+  'tree',
+  'navigate',
+  'closed',
+  'skipped-narrowing',
+  'phone',
+  'create-sheet'
+]) {
   test(`a folder hire builds once on Home — ${mode}`, async ({ page, request }) => {
     test.skip(!sandbox, 'run e2e-fresh --sandbox-env ORI_FOLDER_AGENT_SANDBOX');
+    test.skip(
+      mode === 'create-sheet' && !live,
+      'Create Workspace requires a system model; exercised separately on the with-keys Claude demo'
+    );
     test.setTimeout(live ? 180_000 : 60_000);
     await installLocalCdn(page);
-    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.setViewportSize({ width: mode === 'phone' ? 390 : 1440, height: 1000 });
     await page.emulateMedia({ reducedMotion: mode === 'reduced' ? 'reduce' : 'no-preference' });
     const name = `Build ${mode} ${Date.now()}`;
     const folder = join(sandbox, 'Music', name);
@@ -56,6 +71,7 @@ for (const mode of ['light', 'dark', 'reduced', 'reload-during']) {
     }
     let hold = true;
     let id = '';
+    let releaseStart: (() => void) | null = null;
     await page.route(
       /\/api\/personal-assistant\/folder-agent(?:\/[^/?]+)?(?:\?.*)?$/,
       async route => {
@@ -66,32 +82,72 @@ for (const mode of ['light', 'dark', 'reduced', 'reload-during']) {
         if (body.folder_agent) {
           if (route.request().method() === 'POST' && route.request().url().endsWith('/start'))
             id = body.folder_agent.workspace_id;
+          if (mode === 'closed' && route.request().url().endsWith('/start'))
+            await new Promise<void>(resolve => {
+              releaseStart = resolve;
+            });
           body.folder_agent = keepLooking(body.folder_agent);
         }
         if (body.folder_agents) body.folder_agents = body.folder_agents.map(keepLooking);
         await route.fulfill({ response, json: body });
       }
     );
-    await page.goto('/?panel=today&folder=show');
+    await page.goto(mode === 'create-sheet' ? '/' : '/?panel=today&folder=show');
     await page.evaluate(
       theme => document.documentElement.setAttribute('data-bs-theme', theme),
       mode === 'dark' ? 'dark' : 'light'
     );
     const entry = page.locator('#personalAssistantFolderPathEntry');
-    await expect(entry).toBeVisible();
-    await entry.locator('input').fill(folder);
-    await entry.getByRole('button').click();
-    const host = page.locator('#personalAssistantFolderAgent');
+    if (mode === 'create-sheet') {
+      const close = page.getByRole('button', { name: 'Close personal assistant', exact: true });
+      if (await close.isVisible()) await close.click();
+      await page.locator('#cockpitCreateWorkspaceBtn').click();
+      await page.locator('[data-build-control="add-folder"]').click();
+      await page.locator('#workspaceBuildFolderPath').fill(folder);
+      await page.locator('[data-build-control="folder-path"]').click();
+    } else {
+      await expect(entry).toBeVisible();
+      await entry.locator('input').fill(folder);
+      await entry.getByRole('button').click();
+    }
+    const host = page.locator(
+      mode === 'create-sheet' ? '#workspaceBuildFolderAgent' : '#personalAssistantFolderAgent'
+    );
     const start = host.locator('[data-folder-agent-action="start"]');
     await expect(start).toBeEnabled();
-    const evidence = `tasks/evidence-folder-build-animation/group-2/${live ? 'live-claude/' : ''}${mode}`;
+    const group = ['light', 'dark', 'reduced', 'reload-during'].includes(mode)
+      ? 'group-2'
+      : 'group-3';
+    const evidence = `tasks/evidence-folder-build-animation/${group}/${live ? 'live-claude/' : ''}${mode}`;
     fs.mkdirSync(evidence, { recursive: true });
     await page.screenshot({ path: `${evidence}/before-hire.png` });
+    if (mode === 'tree') await page.locator('[data-cockpit-view="tree"]').click();
+    if (mode === 'skipped-narrowing')
+      await page.evaluate(() => {
+        // Models the panel's existing skipped outcome when stepped aside.
+        (window as any).PersonalAssistantPanel.narrowForHire = () => 'skipped';
+      });
     await page.clock.install({ time: new Date('2030-01-01T00:00:00Z') });
     await page.clock.pauseAt(new Date('2030-01-01T00:00:01Z'));
     await start.click();
     await expect.poll(() => id).not.toBe('');
+    if (mode === 'closed') {
+      await expect.poll(() => Boolean(releaseStart)).toBeTruthy();
+      await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
+      releaseStart!();
+    }
     const tile = page.locator(`#cockpitMap .ws-map-tile[data-ws-id="${id}"]`);
+    if (mode === 'tree') {
+      await page.clock.runFor(2000);
+      await expect(page.locator('.is-assembling')).toHaveCount(0);
+      await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
+      await page.locator('[data-cockpit-view="map"]').click();
+      await expect(tile).toBeVisible();
+      await expect(tile).not.toHaveAttribute('data-build-reveal', 'playing');
+      await page.screenshot({ path: `${evidence}/later-map-finished.png` });
+      await page.clock.resume();
+      return;
+    }
     await expect(tile).toHaveAttribute(
       'data-build-reveal',
       mode === 'reduced' ? 'settled' : 'playing'
@@ -105,17 +161,27 @@ for (const mode of ['light', 'dark', 'reduced', 'reload-during']) {
       await expect(face).toBeHidden();
       expect(await tile.evaluate(el => getComputedStyle(el).animationName)).toBe('none');
       expect(await tile.evaluate(el => getComputedStyle(el).outlineStyle)).toBe('none');
-      await expect(
-        page
-          .locator('.commander-balloon__headline:visible, .commander-balloon-line:visible')
-          .filter({ hasText: `Building ${name}…` })
-      ).toBeVisible();
+      if (mode !== 'phone')
+        await expect(
+          page
+            .locator('.commander-balloon__headline:visible, .commander-balloon-line:visible')
+            .filter({ hasText: `Building ${name}…` })
+        ).toBeVisible();
       for (const offset of [400, 900, 1400]) {
         const style = await page.addStyleTag({
           content: `.is-assembling [data-build-part] { animation-play-state: paused !important; animation-delay: -${offset}ms !important; }`
         });
         await page.screenshot({ path: `${evidence}/assembly-${offset}.png` });
         await style.evaluate(el => el.remove());
+      }
+      if (mode === 'navigate') {
+        await page.locator('[data-cockpit-view="tree"]').click();
+        await expect(page.locator('.is-assembling')).toHaveCount(0);
+        await page.locator('[data-cockpit-view="map"]').click();
+        await expect(tile).toHaveAttribute('data-build-reveal', 'settled');
+        await page.screenshot({ path: `${evidence}/returned-finished.png` });
+        await page.clock.resume();
+        return;
       }
       if (mode === 'reload-during') {
         await page.clock.resume();
@@ -133,12 +199,13 @@ for (const mode of ['light', 'dark', 'reduced', 'reload-during']) {
     }
     await expect(tile).toHaveAttribute('data-build-reveal', 'settled');
     await expect(face).toBeVisible();
-    await expect(
-      page
-        .locator('.commander-balloon__headline:visible, .commander-balloon-line:visible')
-        .filter({ hasText: /Looking (around|in)|Opening |Thinking it through/ })
-        .last()
-    ).toBeVisible();
+    if (mode !== 'phone')
+      await expect(
+        page
+          .locator('.commander-balloon__headline:visible, .commander-balloon-line:visible')
+          .filter({ hasText: /Looking (around|in)|Opening |Thinking it through/ })
+          .last()
+      ).toBeVisible();
     await page.screenshot({ path: `${evidence}/finished.png` });
     hold = false;
     await page.clock.resume();

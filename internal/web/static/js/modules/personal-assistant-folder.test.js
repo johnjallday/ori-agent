@@ -2512,7 +2512,7 @@ test('Hire & start narrows the box only after an accepted hire, and only on Home
   assert.match(helper, /PersonalAssistantPanel\?\.narrowForHire\?\.\(/);
   assert.doesNotMatch(helper, /outcome ===|await/, 'pan never waits on drawer narrowing');
   assert.match(start, /workspaceID: result\.view\?\.workspace_id, built: true/);
-  assert.match(helper, /revealHiredTile\(/);
+  assert.doesNotMatch(helper, /revealHiredTile\(/, 'the cockpit owns the one pan for every entry');
   // Nothing here saves a width: the saved Expand choice is not changed.
   assert.doesNotMatch(helper, /localStorage|setItem|writeDrawerPrefs/);
 });
