@@ -32,12 +32,7 @@ import {
 import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder-chooser.js';
 import { createFolderPathEntry } from './folder-path-entry.js';
 import { collectCurrentWorkspaceContext } from './personal-assistant-workspace-context.js';
-import {
-  commanderPresenter,
-  homeCommanderMap,
-  homeMapShowing,
-  revealHiredTile
-} from './commander-map.js';
+import { commanderPresenter, homeCommanderMap, homeMapShowing } from './commander-map.js';
 import { folderLookEnded } from './commander-speech.js';
 import {
   chooseFolder,
@@ -5390,6 +5385,7 @@ function renderSourceCreationReview() {
   const review = sourceCreationReview,
     offer = state.offer,
     parent = elements()?.offer;
+  const blocked = state.busy || conversationReviewLoading() || prerequisites.active();
   if (!parent) return;
   // A reviewed setup that stopped (a single song's Home ready for Open, or a
   // stop that needs the user) is the card's own to show, with its actions;
@@ -5441,8 +5437,11 @@ function renderSourceCreationReview() {
   review.panel ||= mountPlacementPanel(host, intent => {
     // Keep supported unsent brief text with the source even when Escape closes
     // the shell before the browser delivers change/blur. Never a second draft.
-    if (intent.action === 'dirty' && intent.field === 'mission' && musicSetupOffer(state.offer))
-      intent.value = host.querySelector('[data-placement-field="mission"]')?.value;
+    if (intent.action === 'dirty' && intent.field === 'mission') {
+      const field = host.querySelector('[data-placement-field="mission"]');
+      intent.value = field?.value;
+      field?.setCustomValidity('');
+    }
     void actOnSourceCreationReview(review, intent);
   });
   if (
@@ -5478,7 +5477,7 @@ function renderSourceCreationReview() {
       canShowOnMap: Boolean(review.home && review.result?.id),
       canMoveGroup: Boolean(review.home && review.result?.id),
       positionFailed: review.positionFailed,
-      busy: review.observing,
+      busy: blocked || review.observing,
       message:
         review.message ||
         'Observing the original setup. Reading status never starts or continues work.'
@@ -5564,8 +5563,8 @@ function renderSourceCreationReview() {
     canConfirm: Boolean(
       offer.plan?.digest && !offer.needs_pick && !review.dirty && !review.nameProblem
     ),
-    busy: state.busy,
-    message: review.message || '',
+    busy: blocked,
+    message: review.briefProblem || review.message || '',
     facts: [...projection.facts, { label: 'Later', value: projection.later }],
     confirmLabel: review.actionLabel,
     mapHint: 'Position changes no membership or permissions. Automatic placement needs no map.'
@@ -5646,7 +5645,15 @@ async function retrySourceHomePosition(review) {
 }
 
 async function actOnSourceCreationReview(review, { action, field, value }) {
-  if (!sourceReviewCurrent(review) || state.busy || review.observing || review.editing) return;
+  if (
+    !sourceReviewCurrent(review) ||
+    state.busy ||
+    conversationReviewLoading() ||
+    prerequisites.active() ||
+    review.observing ||
+    review.editing
+  )
+    return;
   if (action === 'read-status') {
     // One explicit re-read; a failure waits for the next explicit request.
     review.observeFailed = false;
@@ -5700,12 +5707,9 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
   if (review.pending || review.result) return;
   if (action === 'dirty') {
     review.dirty = true;
-    if (
-      field === 'mission' &&
-      typeof value === 'string' &&
-      musicSetupOffer(state.offer) &&
-      state.offer.plan?.brief_default
-    ) {
+    if (field === 'mission' && typeof value === 'string' && state.offer.plan?.brief_default) {
+      // This is a local goal, not a plan-changing name edit. Keep even
+      // unblurred text before hydration or a poll can redraw the editor.
       state.brief = { offerId: state.offer.id, value, typed: true };
       review.dirty = false;
     }
@@ -5713,7 +5717,10 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
   }
   if (action === 'edit') {
     review.dirty = false;
-    if (field === 'mission') state.brief = { offerId: state.offer.id, value, typed: true };
+    if (field === 'mission') {
+      state.brief = { offerId: state.offer.id, value, typed: true };
+      review.briefProblem = '';
+    }
     if (field === 'name' && state.offer.software) {
       state.workspaceName = value;
       state.busy = true;
@@ -5741,6 +5748,7 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
     !review.nameProblem &&
     sourceReviewMapAvailable()
   ) {
+    if (!validateSetupBrief()) return;
     review.key = sourceReviewKey();
     review.automatic = false;
     if (musicSetupOffer(state.offer)) {
@@ -5781,6 +5789,7 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
       },
       onConfirm: async (_token, point) => {
         if (sourceReviewCurrent(review) && review.pending) return true;
+        if (state.busy || conversationReviewLoading() || prerequisites.active()) return false;
         if (!sourceReviewCurrent(review) || review.key !== sourceReviewKey()) {
           sourceReviewRestore(review);
           return false;
@@ -5805,6 +5814,7 @@ async function actOnSourceCreationReview(review, { action, field, value }) {
     if (started === false) sourceReviewRestore(review);
     return;
   } else if (action === 'confirm' && review.automatic && !review.dirty && !review.nameProblem) {
+    if (!validateSetupBrief()) return;
     review.key = sourceReviewKey();
     review.pending = true;
     await startOneCardSetup({ reviewedSourceKey: review.key });
@@ -6000,7 +6010,42 @@ export function setupEntryName(offer, action) {
   return String(action?.entry || offer?.setup?.entry_name || offer?.plan?.entry_name || '');
 }
 
+// Validate before changing presentation or marking a source confirmation as
+// pending. Invalid edits are still an editable draft, never unknown delivery.
+function validateSetupBrief() {
+  const problem = globalThis.OriFolderSetupVisual.briefError(briefFor(state.offer));
+  const review = sourceCreationReview;
+  if (review && sourceReviewCurrent(review) && !review.editing) {
+    review.briefProblem = problem;
+    if (problem) {
+      render();
+      const field = document.querySelector(
+        '[data-source-creation-review] [data-placement-field="mission"]'
+      );
+      const message = document.querySelector(
+        '[data-source-creation-review] .assisted-placement__status'
+      );
+      if (field && message) {
+        message.id = 'sourceCreationReviewBriefProblem';
+        field.setAttribute('aria-describedby', message.id);
+        field.after(message);
+      }
+      field?.setCustomValidity(problem);
+      field?.focus();
+    }
+  } else if (problem) {
+    showError(problem);
+    const field = elements()?.brief;
+    field?.setCustomValidity(problem);
+    field?.focus();
+  }
+  return !problem;
+}
+
 async function startOneCardSetup(action) {
+  const offer = state.offer;
+  if (!offer?.id || state.busy || conversationReviewLoading() || prerequisites.active()) return;
+  if (!validateSetupBrief()) return;
   if (
     musicSetupOffer(state.offer) &&
     !action?.reviewedSourceKey &&
@@ -6043,12 +6088,10 @@ async function startOneCardSetup(action) {
     )
       return;
   }
-  const offer = state.offer;
   const owner =
     sourceCreationReview && sourceReviewCurrent(sourceCreationReview) ? sourceCreationReview : null;
   const responseCurrent = reviewResponseGuard(offer);
   const current = () => responseCurrent() && (!owner || sourceReviewCurrent(owner));
-  if (!offer?.id || state.busy || conversationReviewLoading() || prerequisites.active()) return;
   if (offer.needs_pick) {
     showOfferFailure({
       needs_pick: true,
@@ -6061,12 +6104,6 @@ async function startOneCardSetup(action) {
   const digest = String(offer.plan?.digest || offer.setup?.plan_digest || '');
   if (!digest) {
     showError('This setup has no plan to confirm. Choose Adjust… to set it up step by step.');
-    return;
-  }
-  const briefProblem = globalThis.OriFolderSetupVisual.briefError(briefFor(offer));
-  if (briefProblem) {
-    showError(briefProblem);
-    elements()?.brief?.focus();
     return;
   }
   state.busy = true;
@@ -7002,10 +7039,10 @@ async function chooseForAgent(body) {
 }
 
 // After a hire is accepted on Home with the map showing, the chat box narrows so
-// the map and the new tile are visible, and the tile is brought into the part of
-// the map beside it (visual-hire FR15, FR17). The panel answers 'skipped' when
-// the box is closed, stepped aside or on the phone sheet: nothing moved, so no
-// tile work. The workspace page, Needs you and any page without Home's map never
+// the map and the new tile are visible (visual-hire FR15, FR17). The cockpit
+// owns the arrival pan for every entry, independently of drawer narrowing. The panel answers 'skipped' when
+// the box is closed, stepped aside or on the phone sheet: the tile still builds
+// and pans without waiting for a narrowing that will not happen. The workspace page, Needs you and any page without Home's map never
 // get this far (FR21).
 function narrowForHiredAgent(workspaceID) {
   const id = String(workspaceID || '').trim();
@@ -7015,8 +7052,7 @@ function narrowForHiredAgent(workspaceID) {
     view: document.getElementById('homeCockpit')?.dataset?.view || ''
   });
   if (!showing) return;
-  const outcome = window.PersonalAssistantPanel?.narrowForHire?.(id);
-  if (outcome === 'narrowed' || outcome === 'already') void revealHiredTile(id);
+  window.PersonalAssistantPanel?.narrowForHire?.(id);
 }
 
 async function startAgent(brief, button, hire) {
@@ -7042,7 +7078,7 @@ async function startAgent(brief, button, hire) {
     );
     window.dispatchEvent?.(
       new CustomEvent('ori:folder-agent-started', {
-        detail: { workspaceID: result.view?.workspace_id }
+        detail: { workspaceID: result.view?.workspace_id, built: true }
       })
     );
     narrowForHiredAgent(result.view?.workspace_id);

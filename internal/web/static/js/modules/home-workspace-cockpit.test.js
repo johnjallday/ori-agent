@@ -32,6 +32,7 @@ import {
   setupSheetShouldOpen,
   watchedRunsToOpen,
   speakingFolderAgents,
+  registerFolderBuild,
   searchForView,
   readCount,
   formatCount,
@@ -100,6 +101,25 @@ const cockpitCSS = readFileSync(
   new URL('../../css/home-workspace-cockpit.css', import.meta.url),
   'utf8'
 );
+
+test('only an accepted built hire on Home map registers before its first refresh', () => {
+  const ids = [];
+  const map = {
+    buildOnArrival: id => {
+      ids.push(id);
+      return true;
+    }
+  };
+  const detail = { built: true, workspaceID: 'new' };
+  assert.equal(registerFolderBuild(detail, { hasMap: true, view: 'map', map }), true);
+  assert.equal(registerFolderBuild(detail, { hasMap: true, view: 'tree', map }), false);
+  assert.equal(registerFolderBuild(detail, { hasMap: false, view: 'map', map }), false);
+  assert.equal(registerFolderBuild({ workspaceID: 'old' }, { hasMap: true, map }), false);
+  assert.deepEqual(ids, ['new']);
+  const source = readFileSync(new URL('./home-workspace-cockpit.js', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf('const onFolderAgentChange ='));
+  assert.ok(handler.indexOf('registerFolderBuild(') < handler.indexOf('refreshQuietly('));
+});
 
 // ---------------------------------------------------------------------------
 // View state (FR6, FR25, FR26, FR27)
@@ -2475,7 +2495,10 @@ test('a folder workspace that just became a group is framed as the setup sheet f
   // Start and every report action reload the map the canonical way.
   assert.match(source, /addEventListener\('ori:folder-agent-started', onFolderAgentChange\)/);
   assert.match(source, /addEventListener\('ori:folder-agent-changed', onFolderAgentChange\)/);
-  assert.match(source, /refreshQuietly\(\)\)\.finally\(\(\) => void refreshFolderAgentLines\(\)\)/);
+  assert.match(
+    source,
+    /\.then\(\(\) => refreshQuietly\(\)\)\s*\.finally\(\(\) => void refreshFolderAgentLines\(\)\)/
+  );
   const land = source.slice(source.indexOf('async function landPromotedGroup('));
   // Its members are its children now; the same frame and "just placed" mark.
   assert.match(land, /row\.parent_id === groupId/);

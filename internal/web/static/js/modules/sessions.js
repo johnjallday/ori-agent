@@ -17889,12 +17889,15 @@ const sessionManager = {
         isActive: active,
         onStarted: view => {
           build.folderAgentStarted = true;
-          this.notifyWorkspacesChanged({ workspaceId: view?.workspace_id, source: 'folder_agent' });
           const Ctor = typeof window.CustomEvent === 'function' ? window.CustomEvent : null;
           if (Ctor)
             window.dispatchEvent?.(
-              new Ctor('ori:folder-agent-started', { detail: { workspaceID: view?.workspace_id } })
+              new Ctor('ori:folder-agent-started', {
+                detail: { workspaceID: view?.workspace_id, built: true }
+              })
             );
+          // Entrance intent precedes any listing refresh started by this event.
+          this.notifyWorkspacesChanged({ workspaceId: view?.workspace_id, source: 'folder_agent' });
         }
       });
     } finally {

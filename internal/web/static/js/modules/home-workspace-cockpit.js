@@ -24,12 +24,19 @@ import {
   renderFolderAgentReport,
   setupFinished
 } from './folder-agent-card.js';
-import { homeCommanders } from './commander-map.js';
+import { homeCommanders, homeMapShowing, revealHiredTile } from './commander-map.js';
+import { commanderBuildingLine } from './commander-speech.js';
 
 // The folder agents whose Commander speaks on Home's map without the drawer:
 // one looking, setting up, or with a report or a cause waiting. A finished
 // setup's receipt is the drawer's to show; old ones stay quiet.
 const SPEAKING_STATES = new Set(['looking', 'setting_up', 'reported', 'failed']);
+
+export function registerFolderBuild(detail, { hasMap = false, view = '', map } = {}) {
+  return Boolean(
+    detail?.built && homeMapShowing({ hasMap, view }) && map?.buildOnArrival?.(detail.workspaceID)
+  );
+}
 
 export function speakingFolderAgents(views) {
   return (Array.isArray(views) ? views : []).filter(view => SPEAKING_STATES.has(view?.state));
@@ -3636,6 +3643,7 @@ import {
     if (view === VIEW_TREE && state.view === VIEW_MAP)
       window.OriWorkspaceMap?.suspendDraftPlacement?.();
     state.view = view === VIEW_TREE ? VIEW_TREE : VIEW_MAP;
+    if (state.view === VIEW_TREE) window.OriWorkspaceMap?.finishAssemblies?.();
     els.viewButtons.forEach(btn => {
       const isActive = btn.getAttribute('data-cockpit-view') === state.view;
       btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
@@ -5372,11 +5380,16 @@ import {
         ?.workspaceId || '';
     const speaking = speakingFolderAgents(views);
     if (leaving && !speaking.includes(leaving)) speaking.push(leaving);
-    mapCommanders.sync(
-      speaking,
-      owned,
-      new Map(leaving ? [[leaving.workspace_id, folderAgentOpeningLine(leaving)]] : [])
+    const openings = new Map(
+      speaking
+        .filter(view => window.OriWorkspaceMap?.isAssembling?.(view.workspace_id))
+        .map(view => [
+          view.workspace_id,
+          commanderBuildingLine(view.workspace_name || view.folder_name)
+        ])
     );
+    if (leaving) openings.set(leaving.workspace_id, folderAgentOpeningLine(leaving));
+    mapCommanders.sync(speaking, owned, openings);
     const changed = JSON.stringify(next) !== JSON.stringify(state.folderAgentLines);
     const finished = Object.keys(state.folderAgentLines).some(id => !next[id]);
     state.folderAgentLines = next;
@@ -5397,6 +5410,13 @@ import {
   // animated: the Home growing in, the folder sliding inside it.
   const onFolderAgentChange = event => {
     if (!canHydrateWorkspaceData()) return;
+    registerFolderBuild(event?.detail, {
+      hasMap: Boolean(els.map),
+      view: state.view,
+      map: window.OriWorkspaceMap
+    });
+    if (event?.detail?.built && homeMapShowing({ hasMap: Boolean(els.map), view: state.view }))
+      void revealHiredTile(event.detail.workspaceID);
     if (event?.detail?.placement) {
       // The place is about to be drawn: whoever opens it next (the end of a
       // watched run) waits for that, not for a map that has not moved yet.
@@ -5412,10 +5432,16 @@ import {
         .finally(() => void refreshFolderAgentLines());
       return;
     }
-    void Promise.resolve(refreshQuietly()).finally(() => void refreshFolderAgentLines());
+    // A listing already in flight can predate the accepted hire. Register
+    // first, let that stale response land, then fetch the newly created tile.
+    void Promise.resolve(state.inFlight)
+      .catch(() => null)
+      .then(() => refreshQuietly())
+      .finally(() => void refreshFolderAgentLines());
   };
   window.addEventListener('ori:folder-agent-started', onFolderAgentChange);
   window.addEventListener('ori:folder-agent-changed', onFolderAgentChange);
+  window.addEventListener('ori:map-build-changed', () => void refreshFolderAgentLines());
 
   async function refreshLibraryBadges({ force = false } = {}) {
     if (!canHydrateWorkspaceData()) return;

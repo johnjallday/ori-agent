@@ -2923,20 +2923,20 @@
     return (
       '<svg class="ws-map-struct" width="112" height="92" viewBox="0 0 118 96" aria-hidden="true">' +
       // plot
-      '<polygon points="59,86 110,60 59,34 8,60" fill="' +
+      '<g data-build-part="foundation"><polygon points="59,86 110,60 59,34 8,60" fill="' +
       pal.plot +
       '" stroke="' +
       pal.key +
-      '" stroke-opacity=".45"/>' +
+      '" stroke-opacity=".45"/></g>' +
       // left wall (shaded) and right wall (lit)
-      '<polygon points="34,40 34,54 59,68 59,54" fill="' +
+      '<g data-build-part="walls"><polygon points="34,40 34,54 59,68 59,54" fill="' +
       pal.wallShade +
       '"/>' +
       '<polygon points="84,40 84,54 59,68 59,54" fill="' +
       pal.wall +
-      '"/>' +
+      '"/></g>' +
       // hip roof: two visible planes meeting at the front ridge
-      '<polygon points="34,40 59,54 59,16" fill="' +
+      '<g data-build-part="roof"><polygon points="34,40 59,54 59,16" fill="' +
       pal.roofShade +
       '"/>' +
       '<polygon points="84,40 59,54 59,16" fill="' +
@@ -2945,9 +2945,9 @@
       // roof eaves, a thin lip that reads as overhang at small sizes
       '<polyline points="34,40 59,54 84,40" fill="none" stroke="' +
       pal.trim +
-      '" stroke-opacity=".55" stroke-width="1.5"/>' +
+      '" stroke-opacity=".55" stroke-width="1.5"/></g>' +
       // door on the shaded wall
-      '<polygon points="42,48 50,52 50,63 42,59" fill="' +
+      '<g data-build-part="finish"><polygon points="42,48 50,52 50,63 42,59" fill="' +
       pal.trim +
       '"/>' +
       // shuttered window on the lit wall
@@ -2960,7 +2960,7 @@
       '"/>' +
       '<polygon points="70,25 76,28 79,26 73,23" fill="' +
       pal.trim +
-      '"/>' +
+      '"/></g>' +
       '</svg>'
     );
   }
@@ -2973,21 +2973,21 @@
     return (
       '<svg class="ws-map-struct is-hq-struct" width="118" height="104" viewBox="0 0 118 110" aria-hidden="true">' +
       // ground pad
-      '<g data-hq-part="foundation"><polygon points="59,64 109,86 59,108 9,86" fill="#2a2109" stroke="#e8b54b" stroke-opacity=".55"/>' +
+      '<g data-build-part="foundation"><polygon points="59,64 109,86 59,108 9,86" fill="#2a2109" stroke="#e8b54b" stroke-opacity=".55"/>' +
       // base block
       '<polygon points="19,72 19,88 59,108 59,92" fill="#4c3c17"/>' +
       '<polygon points="99,72 99,88 59,108 59,92" fill="#372c11"/>' +
       '<polygon points="59,52 99,72 59,92 19,72" fill="#7a5f22" stroke="#e8b54b" stroke-opacity=".35"/></g>' +
       // tower walls
-      '<g data-hq-part="walls"><polygon points="37,40 37,68 59,79 59,51" fill="#9c7a2c"/>' +
+      '<g data-build-part="walls"><polygon points="37,40 37,68 59,79 59,51" fill="#9c7a2c"/>' +
       '<polygon points="81,40 81,68 59,79 59,51" fill="#785e22"/></g>' +
       // tower windows (lit)
-      '<g data-hq-part="lights"><circle cx="46" cy="53" r="1.5" fill="#ffe08a"/>' +
+      '<g data-build-part="finish"><circle cx="46" cy="53" r="1.5" fill="#ffe08a"/>' +
       '<circle cx="46" cy="62" r="1.5" fill="#ffe08a"/>' +
       '<circle cx="72" cy="53" r="1.5" fill="#ffe08a"/>' +
       '<circle cx="72" cy="62" r="1.5" fill="#ffe08a"/></g>' +
       // gold roof
-      '<g data-hq-part="roof"><polygon points="59,29 81,40 59,51 37,40" fill="#f2c85c" stroke="#ffe08a" stroke-opacity=".5"/>' +
+      '<g data-build-part="roof"><polygon points="59,29 81,40 59,51 37,40" fill="#f2c85c" stroke="#ffe08a" stroke-opacity=".5"/>' +
       // spire + pennant + beacon
       '<line x1="59" y1="29" x2="59" y2="10" stroke="#ffd469" stroke-width="2.4" stroke-linecap="round"/>' +
       '<polygon points="59,12 74,17 59,22" fill="#ffd469"/>' +
@@ -4433,6 +4433,10 @@
   }
 
   var lastMount = null; // { container, state }
+  // Entrance intent is page-local, never saved with a workspace or camera.
+  var arrivingBuilds = new Map();
+  var activeBuilds = new Map();
+  var settledBuilds = new Set();
 
   // Keeping the view centred when the container resizes.
   //
@@ -11122,19 +11126,25 @@
   // Post-success flourish only. Remounted tiles inherit elapsed time, never a
   // second entrance. The coordinator owns eligibility, never the SVG.
   function playHQAssembly(workspaceId) {
+    if (workspaceId !== hqWorkspaceId) return null;
+    return playAssembly(workspaceId);
+  }
+
+  function playAssembly(workspaceId) {
+    if (activeBuilds.has(workspaceId)) return activeBuilds.get(workspaceId).controller;
     var container = lastMount && lastMount.container;
-    if (!container || workspaceId !== hqWorkspaceId) return null;
+    if (!container) return null;
     function findTile() {
       return Array.from(container.querySelectorAll('[data-ws-id]')).find(function (el) {
         return (
           el.getAttribute('data-ws-id') === workspaceId &&
-          el.querySelector('[data-building-variant="hq"], .is-hq-struct')
+          el.querySelector('.ws-map-struct [data-build-part]')
         );
       });
     }
     var tile = findTile();
     if (!tile) return null;
-    var art = tile.querySelector('[data-building-variant="hq"], .is-hq-struct');
+    var art = tile.querySelector('.ws-map-struct');
     var reduced =
       window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     var complete;
@@ -11145,10 +11155,22 @@
     var observer = null;
     var settled = false;
     var started = Date.now();
+    var controller = { skip: skip, done: done };
+    activeBuilds.set(workspaceId, { controller: controller, bind: rebindArt });
+    function rebindArt() {
+      var replacement = findTile();
+      if (!replacement || Date.now() - started >= 1600) {
+        skip();
+        return;
+      }
+      tile = replacement;
+      art = tile.querySelector('.ws-map-struct');
+      bindArt();
+    }
     function bindArt() {
       tile.classList.remove('is-growing-in');
-      tile.dataset.hqReveal = 'playing';
-      art.style.setProperty('--hq-assembly-offset', '-' + (Date.now() - started) + 'ms');
+      tile.dataset.buildReveal = 'playing';
+      art.style.setProperty('--build-assembly-offset', '-' + (Date.now() - started) + 'ms');
       art.classList.add('is-assembling');
     }
     function skip() {
@@ -11157,32 +11179,96 @@
       clearTimeout(timer);
       if (observer) observer.disconnect();
       art.classList.remove('is-assembling');
-      art.style.removeProperty('--hq-assembly-offset');
-      tile.dataset.hqReveal = 'settled';
+      art.style.removeProperty('--build-assembly-offset');
+      tile.dataset.buildReveal = 'settled';
+      tile.classList.add('is-settled');
+      activeBuilds.delete(workspaceId);
+      settledBuilds.add(workspaceId);
       complete();
+      announceMapEvent(container, 'ori:map-build-changed');
     }
     tile.classList.remove('is-growing-in');
-    tile.dataset.hqReveal = reduced ? 'settled' : 'playing';
+    tile.dataset.buildReveal = reduced ? 'settled' : 'playing';
     if (reduced) skip();
     else {
       bindArt();
       timer = setTimeout(skip, 1600);
       if (typeof MutationObserver === 'function') {
         observer = new MutationObserver(function () {
-          if (tile.isConnected) return;
-          var replacement = findTile();
-          if (!replacement || Date.now() - started >= 1600) {
-            skip();
-            return;
-          }
-          tile = replacement;
-          art = tile.querySelector('[data-building-variant="hq"], .is-hq-struct');
-          bindArt();
+          if (!tile.isConnected) rebindArt();
         });
         observer.observe(container, { childList: true, subtree: true });
       }
     }
-    return { skip: skip, done: done };
+    announceMapEvent(container, 'ori:map-build-changed');
+    return controller;
+  }
+
+  // Register before the refresh that first draws this workspace. An existing
+  // tile, a repeated event or an offscreen hire is never another entrance.
+  function buildOnArrival(workspaceId) {
+    var id = String(workspaceId || '').trim();
+    var container = lastMount && lastMount.container;
+    if (
+      !id ||
+      !container ||
+      document.visibilityState === 'hidden' ||
+      arrivingBuilds.has(id) ||
+      activeBuilds.has(id) ||
+      settledBuilds.has(id) ||
+      Array.from(container.querySelectorAll('[data-ws-id]')).some(function (tile) {
+        return tile.getAttribute('data-ws-id') === id;
+      })
+    )
+      return false;
+    arrivingBuilds.set(
+      id,
+      setTimeout(function () {
+        arrivingBuilds.delete(id);
+      }, 5000)
+    );
+    return true;
+  }
+
+  // Synchronous after HTML replacement: no finished-house flash and no replay
+  // when polling, badge responses or placement motion replace the tile.
+  function bindBuilds(container) {
+    settledBuilds.forEach(function (id) {
+      Array.from(container.querySelectorAll('[data-ws-id]')).forEach(function (tile) {
+        if (tile.getAttribute('data-ws-id') === id) {
+          tile.dataset.buildReveal = 'settled';
+          tile.classList.add('is-settled');
+        }
+      });
+    });
+    activeBuilds.forEach(function (build) {
+      build.bind();
+    });
+    arrivingBuilds.forEach(function (timer, id) {
+      var present = Array.from(container.querySelectorAll('[data-ws-id]')).some(function (tile) {
+        return tile.getAttribute('data-ws-id') === id;
+      });
+      if (!present) return;
+      clearTimeout(timer);
+      arrivingBuilds.delete(id);
+      playAssembly(id);
+    });
+  }
+
+  function finishBuilds() {
+    arrivingBuilds.forEach(function (timer) {
+      clearTimeout(timer);
+    });
+    arrivingBuilds.clear();
+    activeBuilds.forEach(function (build) {
+      build.controller.skip();
+    });
+  }
+
+  if (typeof document.addEventListener === 'function') {
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') finishBuilds();
+    });
   }
 
   // HQ presentation frames the reserved site or verified canonical tile, never
@@ -11976,7 +12062,7 @@
     });
     plan.added.forEach(function (key) {
       var el = byKey[key];
-      if (el && el.classList) el.classList.add('is-growing-in');
+      if (el && el.classList && !el.dataset?.buildReveal) el.classList.add('is-growing-in');
     });
     // Commit the starting positions before the transition begins.
     void container.offsetWidth;
@@ -12179,6 +12265,7 @@
       viewport,
       state
     );
+    bindBuilds(container);
     settleRenderedBuildings(container, onScreen);
     bindCreate(container);
     bindTiles(container, workspaces, state);
@@ -12261,6 +12348,7 @@
   /** Tear down the map view (called when switching away). */
   function unmount(container, options) {
     if (!container) return;
+    finishBuilds();
     if (
       options &&
       options.preservePresentation &&
@@ -12419,6 +12507,12 @@
     reveal: reveal,
     frameHQCreation: frameHQCreation,
     playHQAssembly: playHQAssembly,
+    playAssembly: playAssembly,
+    buildOnArrival: buildOnArrival,
+    finishAssemblies: finishBuilds,
+    isAssembling: function (id) {
+      return activeBuilds.has(id);
+    },
     canPresentHQCreation: function () {
       return !scopeGroupId && !placementSession && !moveState;
     },
