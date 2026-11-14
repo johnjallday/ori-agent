@@ -22,10 +22,19 @@ type stubChatRuntimeResolver struct {
 	resolved *workspace.ResolvedAgentRuntime
 	err      error
 	calls    []string
+	// definitionCalls records definition-only reads, which skip skills, MCP
+	// bindings and tools. They are kept apart from calls so a test can tell the
+	// cheap read from a full runtime resolution.
+	definitionCalls []string
 }
 
 func (r *stubChatRuntimeResolver) ResolveAgentForWorkspace(agentName, workspaceID, nodeID string) (*workspace.ResolvedAgentRuntime, error) {
 	r.calls = append(r.calls, agentName+"|"+workspaceID+"|"+nodeID)
+	return r.resolved, r.err
+}
+
+func (r *stubChatRuntimeResolver) ResolveAgentDefinition(agentName, workspaceID string) (*workspace.ResolvedAgentRuntime, error) {
+	r.definitionCalls = append(r.definitionCalls, agentName+"|"+workspaceID)
 	return r.resolved, r.err
 }
 
