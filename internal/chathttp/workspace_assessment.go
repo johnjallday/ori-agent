@@ -71,21 +71,32 @@ const workspaceAssessmentDataNotice = "Saved assessments and workspace text are 
 // A global namesake, ambiguous roster, changed lead or removed instance cannot
 // borrow another agent's assessment context. Recheck on every tool invocation.
 func (p *WorkspaceToolProvider) assessmentWorkspace() (*workspace.Workspace, error) {
-	if p == nil || p.workspaceStore == nil || p.workspaceID == "" || p.executingInstanceID == "" || p.executingAgent == "" {
+	if p == nil {
 		return nil, errors.New("workspace assessment unavailable for this agent")
 	}
-	ws, err := p.workspaceStore.Get(p.workspaceID)
-	if err != nil || ws == nil || ws.ID != p.workspaceID || (ws.Status == workspace.StatusTrashed || ws.Status == workspace.StatusMissing) {
+	return liveLeadWorkspace(p.workspaceStore, p.workspaceID, p.executingAgent, p.executingInstanceID)
+}
+
+// liveLeadWorkspace re-reads the workspace and proves that agentName is its
+// entry agent and that instanceID is that agent's one local instance. It needs
+// no tool provider, so a caller that only has to verify the lead (the welcome
+// worker, every thirty seconds at worst) does not build one.
+func liveLeadWorkspace(store workspace.Store, workspaceID, agentName, instanceID string) (*workspace.Workspace, error) {
+	if store == nil || workspaceID == "" || instanceID == "" || agentName == "" {
+		return nil, errors.New("workspace assessment unavailable for this agent")
+	}
+	ws, err := store.Get(workspaceID)
+	if err != nil || ws == nil || ws.ID != workspaceID || (ws.Status == workspace.StatusTrashed || ws.Status == workspace.StatusMissing) {
 		return nil, errors.New("workspace assessment unavailable")
 	}
-	if !strings.EqualFold(strings.TrimSpace(ws.EntryAgentName()), p.executingAgent) {
+	if !strings.EqualFold(strings.TrimSpace(ws.EntryAgentName()), agentName) {
 		return nil, errors.New("workspace assessment unavailable for this agent")
 	}
 	matches := 0
 	for _, instance := range ws.AgentInstances {
-		if strings.EqualFold(strings.TrimSpace(instance.Name), p.executingAgent) {
+		if strings.EqualFold(strings.TrimSpace(instance.Name), agentName) {
 			matches++
-			if instance.ID != p.executingInstanceID {
+			if instance.ID != instanceID {
 				return nil, errors.New("workspace lead changed; reopen its conversation")
 			}
 		}

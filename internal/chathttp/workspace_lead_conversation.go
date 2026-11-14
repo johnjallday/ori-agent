@@ -105,11 +105,16 @@ func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (ses
 	if name == "" {
 		return unavailable()
 	}
-	ag, err := h.resolveEffectiveAgent(name, normalizedChatRouteContext{WorkspaceID: id})
-	if err != nil || ag.WorkspaceTools == nil {
+	// Retried for every enrolled workspace until its assessment exists, so this
+	// must stay cheap: the lead's identity comes from the roster, and the saved
+	// definition is only checked for existence and pause. resolveEffectiveAgent
+	// would resolve skills, materialize MCP bindings and build the tool set to
+	// learn the same two facts.
+	lead, unique := ws.FindUniqueAgentInstance(name, "")
+	if !unique || lead.ID == "" || h.sessionStore == nil || !h.leadDefinitionAvailable(name, id) {
 		return unavailable()
 	}
-	live, err := ag.WorkspaceTools.assessmentWorkspace()
+	live, err := liveLeadWorkspace(h.workspaceStore, id, name, lead.ID)
 	if err != nil {
 		return unavailable()
 	}
@@ -120,9 +125,9 @@ func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (ses
 	if goal := workspace.GoalOutcomeLine(ws.Mission); goal != "" {
 		intro += " I’ll help you work toward: " + welcomeText(goal, 500)
 	}
-	assessment := h.leadWelcomeContext(ctx, ws, owner, ag.WorkspaceTools.executingInstanceID)
+	assessment := h.leadWelcomeContext(ctx, ws, owner, lead.ID)
 	curator, isCurator := ws.FileCurator()
-	if assessment == "" && isCurator && curator.ID == ag.WorkspaceTools.executingInstanceID {
+	if assessment == "" && isCurator && curator.ID == lead.ID {
 		intro += "\n\nYour saved filing review will appear here when it is available. Nothing moves without your approval in Filing."
 	} else if assessment == "" {
 		intro += "\n\nI don’t have a saved assessment yet. Ask me about your goal, or choose a review in Goal settings when you’re ready."
@@ -132,9 +137,21 @@ func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (ses
 	}
 	return session.LeadConversationInput{
 		WorkspaceID: id, WorkspaceVersion: ws.Version, OwnerUserID: owner,
-		AgentInstanceID: ag.WorkspaceTools.executingInstanceID, AgentName: name,
+		AgentInstanceID: lead.ID, AgentName: name,
 		Introduction: intro, Assessment: assessment,
 	}, workspaceupdates.StateReady, nil
+}
+
+// leadDefinitionAvailable reports whether the lead resolves to a saved, enabled
+// agent definition for this workspace. It reads the definition only: no skills,
+// MCP bindings or tools. A resolver that cannot read definitions is unavailable.
+func (h *Handler) leadDefinitionAvailable(agentName, workspaceID string) bool {
+	reader, ok := h.runtimeResolver.(chatDefinitionReader)
+	if !ok {
+		return false
+	}
+	definition, err := reader.ResolveAgentDefinition(agentName, workspaceID)
+	return err == nil && definition != nil && definition.Agent != nil && !isAgentPaused(definition.Agent)
 }
 
 // Reuse the assessment and task suggestions produced by the authorized review,
