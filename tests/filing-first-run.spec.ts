@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { mkdir, utimes, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdir, readFile, realpath, utimes, writeFile } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
 // Run only against an isolated demo HOME, never the user's folders.
@@ -11,12 +11,16 @@ const folderName = process.env.ORI_FILING_FOLDER || 'Downloads';
 const entryPoint = process.env.ORI_FILING_ENTRY || 'home';
 const theme = process.env.ORI_FILING_THEME || 'light';
 
-test('a fed Downloads folder offers Filing and asks permission for that folder once hired', async ({
+test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`, async ({
   page,
   request
 }) => {
   test.skip(!sandbox, 'requires the isolated server HOME');
   test.setTimeout(120_000);
+  expect(basename(await realpath(sandbox)), 'disposable demo HOME').toMatch(/^ori-(e2e|demo)[.-]/);
+  expect(await readFile(join(sandbox, '.ori-demo-owner'), 'utf8')).toBe(
+    `worktree=${await realpath(process.cwd())}\n`
+  );
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   await installLocalCdn(page);
   await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);

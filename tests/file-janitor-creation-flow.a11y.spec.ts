@@ -82,7 +82,10 @@ for (const variant of variants) {
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(variant.width + 1);
     await page.screenshot({ path: info.outputPath('consent.png') });
-    const confirm = review.getByRole('button', { name: 'Use attached Matrix Inbox', exact: true });
+    const confirm = review.getByRole('button', {
+      name: 'Allow filing in Matrix Inbox',
+      exact: true
+    });
     await confirm.focus();
     await page.keyboard.press('Enter');
     await expect(page.locator('#fileJanitorConsoleBody')).toContainText('invoice.pdf');

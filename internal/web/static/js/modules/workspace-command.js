@@ -2601,7 +2601,9 @@ export class WorkspaceCommandView {
       (onMap ? ' is-map' : '') +
       (onMap && action?.owner === 'workspace' && action.kind === 'create' ? ' is-quiet' : '') +
       '" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending"' +
-      (view.kind === 'setup' && action?.owner === 'console' ? ' data-filing-setup-ask="true"' : '') +
+      (view.kind === 'setup' && action?.owner === 'console'
+        ? ' data-filing-setup-ask="true"'
+        : '') +
       '>' +
       '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
       '<button type="button" class="ws-cmd-agent-action" data-cmd-open-tickets data-cmd-work-key="tickets">All tickets</button></div>' +
