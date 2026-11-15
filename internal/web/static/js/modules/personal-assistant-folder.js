@@ -5512,7 +5512,7 @@ function renderSourceCreationReview() {
     review.actionLabel = 'Set up Home';
     projection.destination = `${offer.plan.destination.status === 'new' ? 'New' : 'Existing'} Home: ${offer.plan.destination.name}. Position changes no membership or access.`;
     const handoffAt = offer.plan.lines.findIndex(line => line.kind === 'handoff');
-    const hireRow = projection.rows[musicSetupOffer(offer) ? 1 : 0];
+    const hireRow = projection.rows.find(row => row.kind === 'project-hire');
     if (handoffAt >= 0 && offer.plan.hire && hireRow) {
       // This is the deferred song's hire, not the Home's Portfolio Manager.
       hireRow.label = `Later project · ${hireRow.label}`;

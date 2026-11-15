@@ -370,6 +370,23 @@ test('Home identity is not the source song name and its later goal is not a Home
   c.renderSourceCreationReview();
   assert.equal(view.rows[0].label, 'Later project · REAPER Assistant');
   assert.match(view.rows[0].detail, /not by this Home setup/);
+  c.state.offer.plan.home_staffing = {
+    roles: [{ role_id: 'manager', label: 'Portfolio Manager' }],
+    choices: [
+      {
+        role_id: 'manager',
+        mode: 'create',
+        name: 'My Manager',
+        provider: 'fixture',
+        model: 'model'
+      }
+    ]
+  };
+  c.renderSourceCreationReview();
+  assert.equal(view.rows[0].label, 'Home · Portfolio Manager');
+  assert.doesNotMatch(view.rows[0].detail, /Assigned only when you explicitly open/);
+  assert.equal(view.rows[1].label, 'Later project · REAPER Assistant');
+  assert.match(view.rows[1].detail, /not by this Home setup/);
 });
 
 test('enter, hover and Back retain review and candidate with no domain effects; final gesture dispatches once', async () => {

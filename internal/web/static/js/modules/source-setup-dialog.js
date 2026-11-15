@@ -11,6 +11,7 @@ export function createSourceSetupDialog({
     Boolean(win?.sessionManager?.workspaceCreatorContext || win?.sessionManager?.workspaceBuild)
 } = {}) {
   let active = null;
+  let returnFocus = null;
   let phase = 'closed';
   let dismissal = null;
   let savedTitle = '';
@@ -27,8 +28,9 @@ export function createSourceSetupDialog({
 
   function finishHidden() {
     const ref = active;
+    const invoker = returnFocus;
     const mode = dismissal || 'close';
-    active = null;
+    active = returnFocus = null;
     phase = 'closed';
     dismissal = null;
     delete modal.dataset.sourceSetupOwner;
@@ -40,8 +42,8 @@ export function createSourceSetupDialog({
     done?.(true);
     if (mode === 'close') {
       ref?.onClose?.();
-      if (current(ref) && ref.invoker?.isConnected && !otherDialog())
-        ref.invoker.focus({ preventScroll: true });
+      if (current(ref) && invoker?.isConnected && !otherDialog())
+        invoker.focus({ preventScroll: true });
     }
   }
 
@@ -130,6 +132,10 @@ export function createSourceSetupDialog({
       )
         return false;
       active = ref;
+      // Inner review navigation can reuse/mutate this identity reference.
+      // Close still belongs to the launcher that opened this modal, never a
+      // Return button inside the now-hidden modal itself.
+      returnFocus = ref.invoker;
       phase = 'opening';
       savedTitle = title?.textContent || '';
       savedCloseLabel = close?.getAttribute('aria-label') || 'Close create workspace';

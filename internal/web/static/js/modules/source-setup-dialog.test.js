@@ -159,6 +159,22 @@ test('source shell fences ordinary lifecycle, duplicate entry, Close and focus r
   assert.equal(f.effects.resets, 2, 'ordinary creation resumes its own lifecycle');
 });
 
+test('inner review navigation cannot replace the opening launcher as the focus return', async () => {
+  const f = fixture();
+  f.adapter.open(f.ref);
+  let innerFocused = false;
+  f.ref.invoker = {
+    isConnected: true,
+    focus: () => {
+      innerFocused = true;
+    }
+  };
+  assert.equal(f.adapter.open(f.ref), true);
+  await f.adapter.close();
+  assert.equal(f.effects.returned, 1);
+  assert.equal(innerFocused, false);
+});
+
 test('competing creator, sibling dialog and obsolete reference refuse without taking ownership', () => {
   const f = fixture();
   f.busy(true);
