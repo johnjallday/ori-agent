@@ -865,7 +865,7 @@ export function agentRoster(workspace) {
   return agents
     .map(agent => {
       if (!agent) return null;
-      if (typeof agent === 'string') return { name: agent, role: '', activity: '' };
+      if (typeof agent === 'string') return { name: agent.trim(), role: '', activity: '' };
       return {
         name: String(agent.name || agent.agent_name || '').trim(),
         role: String(agent.role || '').trim(),
@@ -1177,13 +1177,14 @@ function taskCoverageHTML(count) {
     : '';
 }
 
-function metricHTML(label, value) {
+function metricHTML(label, value, singular = '') {
+  const words = singular ? (value === 1 ? singular : label.toLowerCase()) : label;
   return (
     '<div class="cockpit-rail-metric">' +
     `<span class="cockpit-rail-metric-value"${value === null ? ' data-unavailable="true"' : ''}>` +
     escapeHtml(formatCount(value)) +
     '</span>' +
-    `<span class="cockpit-rail-metric-label">${escapeHtml(label)}</span>` +
+    ` <span class="cockpit-rail-metric-label">${escapeHtml(words)}</span>` +
     '</div>'
   );
 }
@@ -1220,7 +1221,7 @@ function mapAgentPortraitHTML(name, isCommander = false) {
   return `<span class="cockpit-rail-portrait-fallback" title="${escapeHtml(name)}">${escapeHtml(name)}</span>`;
 }
 
-function rosterHTML(state, portrait = mapAgentPortraitHTML) {
+function rosterMessageHTML(state) {
   if (!state || state.state === 'unavailable') {
     return '<p class="cockpit-rail-empty">Agent data unavailable for this workspace.</p>';
   }
@@ -1235,15 +1236,32 @@ function rosterHTML(state, portrait = mapAgentPortraitHTML) {
       '<p class="cockpit-rail-empty">' +
       escapeHtml(
         state.count === 1
-          ? '1 agent attached. Open the workspace to see the roster.'
-          : `${state.count} agents attached. Open the workspace to see the roster.`
+          ? '1 agent attached. Open the workspace to see the team.'
+          : `${state.count} agents attached. Open the workspace to see the team.`
       ) +
       '</p>'
     );
   }
+  return '';
+}
+
+function rosterHTML(state, portrait = mapAgentPortraitHTML, commander = '') {
+  const key = name =>
+    String(name || '')
+      .trim()
+      .toLowerCase();
+  const rows = state?.roster || [];
+  const lead = rows.find(agent => key(agent.name) === key(commander));
+  const team = commander
+    ? [
+        { ...lead, name: commander, commander: true },
+        ...rows.filter(agent => key(agent.name) !== key(commander))
+      ]
+    : rows;
+  if (!team.length) return rosterMessageHTML(state);
   return (
     '<ul class="cockpit-rail-roster cockpit-rail-agent-portraits">' +
-    state.roster
+    team
       .map(agent => {
         const metadata =
           (agent.role || agent.activity) &&
@@ -1257,13 +1275,15 @@ function rosterHTML(state, portrait = mapAgentPortraitHTML) {
             '</span>';
         return (
           '<li class="cockpit-rail-roster-row cockpit-rail-agent-portrait">' +
-          portrait(agent.name) +
+          portrait(agent.name, agent.commander === true) +
+          (agent.commander ? '<span class="cockpit-rail-commander-badge">Commander</span>' : '') +
           (metadata || '') +
           '</li>'
         );
       })
       .join('') +
-    '</ul>'
+    '</ul>' +
+    (['count-only', 'unavailable'].includes(state?.state) ? rosterMessageHTML(state) : '')
   );
 }
 
@@ -1551,21 +1571,13 @@ export function renderWorkspaceRailHTML(view) {
     '</div>' +
     workLineHTML('Tickets', view.status.tickets) +
     '<div class="cockpit-rail-metrics" aria-label="Workspace metrics">' +
-    metricHTML('Agents', view.status.agents) +
-    metricHTML('Attention tickets', view.status.attention) +
+    metricHTML('Agents', view.status.agents, 'agent') +
+    metricHTML('Attention tickets', view.status.attention, 'attention ticket') +
     '</div>' +
     taskCoverageHTML(view.status.partial ? 1 : 0) +
-    (view.commander
-      ? '<section class="cockpit-rail-section" aria-label="Commander">' +
-        '<h3 class="cockpit-rail-section-title">Commander</h3>' +
-        '<div class="cockpit-rail-commander">' +
-        portrait(view.commander, true) +
-        '<span class="cockpit-rail-commander-state">Commander</span>' +
-        '</div></section>'
-      : '') +
-    '<section class="cockpit-rail-section" aria-label="Agent roster">' +
-    '<h3 class="cockpit-rail-section-title">Roster</h3>' +
-    rosterHTML(view.rosterState, portrait) +
+    '<section class="cockpit-rail-section" aria-label="Team">' +
+    '<h3 class="cockpit-rail-section-title">Team</h3>' +
+    rosterHTML(view.rosterState, portrait, view.commander) +
     '</section>' +
     '</div>'
   );

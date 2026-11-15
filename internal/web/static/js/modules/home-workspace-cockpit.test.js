@@ -769,13 +769,13 @@ test('the current Home Map context reuses generated portraits for Commander and 
 
     assert.deepEqual(calls, [
       { name: 'Research Lead', isKeeper: true },
-      { name: 'Research Lead', isKeeper: false },
       { name: 'Source Scout', isKeeper: false }
     ]);
-    assert.match(html, /aria-label="Commander"/);
+    assert.match(html, /aria-label="Team"/);
+    assert.match(html, /cockpit-rail-commander-badge">Commander</);
     assert.match(html, /generated-portrait is-keeper/);
     assert.match(html, /cockpit-rail-roster cockpit-rail-agent-portraits/);
-    assert.equal((html.match(/class="generated-portrait"/g) || []).length, 2);
+    assert.equal((html.match(/class="generated-portrait"/g) || []).length, 1);
     assert.match(html, /cockpit-rail-roster-role">Research</);
     assert.match(html, /cockpit-rail-roster-activity">idle</);
   } finally {
@@ -1249,6 +1249,51 @@ test('the rail never claims "no agents" for a workspace that reports agents', ()
 test('the rail says agent data is unavailable when the payload carries none', () => {
   const html = renderWorkspaceRailHTML(workspaceRailView({ id: 'w', name: 'W' }));
   assert.match(html, /Agent data unavailable/);
+});
+
+test('Team shows the commander once, first, even with case/space duplicates or no array entry', () => {
+  const render = ws =>
+    renderWorkspaceRailHTML({
+      ...workspaceRailView(ws),
+      portraitHTML: (name, lead) => `<face data-lead="${lead}">${name}</face>`
+    });
+  const html = render({ entry_agent_name: 'Lead', agents: ['Scout', ' lead ', 'LEAD', 'Writer'] });
+  assert.equal((html.match(/<face /g) || []).length, 3);
+  assert.match(html, /data-lead="true">Lead<\/face>/);
+  assert.ok(html.indexOf('>Lead</face>') < html.indexOf('>Scout</face>'));
+  assert.ok(html.indexOf('>Scout</face>') < html.indexOf('>Writer</face>'));
+  assert.doesNotMatch(html, /aria-label="Commander"|aria-label="Agent roster"/);
+  const missing = render({ entry_agent_name: 'Lead', agents: ['Scout'] });
+  assert.ok(missing.indexOf('>Lead</face>') < missing.indexOf('>Scout</face>'));
+  for (const extra of [{ agent_count: 0 }, { agent_count: 1 }, {}]) {
+    const known = render({ entry_agent_name: 'Lead', ...extra });
+    assert.match(known, />Lead<\/face>/);
+    assert.doesNotMatch(known, /No agents attached yet/);
+  }
+  assert.match(
+    render({ agent_count: 1 }),
+    /1 agent attached\. Open the workspace to see the team\./
+  );
+});
+
+test('workspace metrics put singular/plural words after their counts', () => {
+  for (const [count, agents, tickets] of [
+    [1, 'agent', 'attention ticket'],
+    [3, 'agents', 'attention tickets'],
+    [0, 'agents', 'attention tickets']
+  ]) {
+    const html = renderWorkspaceRailHTML(
+      workspaceRailView({ agent_count: count, needs_attention_count: count })
+    );
+    assert.match(
+      html,
+      new RegExp(`>${count}</span> <span class="cockpit-rail-metric-label">${agents}</span>`)
+    );
+    assert.match(
+      html,
+      new RegExp(`>${count}</span> <span class="cockpit-rail-metric-label">${tickets}</span>`)
+    );
+  }
 });
 
 test('the rail reports an authoritative zero roster plainly', () => {
@@ -2583,9 +2628,9 @@ test('pure rail accepts chosen portraits for both Commander and roster, or pendi
   };
   view.portraitHTML = (name, commander) =>
     homeAgentPortraitHTML(name, record, false, commander, win);
-  assert.equal((renderWorkspaceRailHTML(view).match(/agent-avatar--character/g) || []).length, 2);
+  assert.equal((renderWorkspaceRailHTML(view).match(/agent-avatar--character/g) || []).length, 1);
   view.portraitHTML = (name, commander) => homeAgentPortraitHTML(name, null, true, commander, win);
-  assert.equal((renderWorkspaceRailHTML(view).match(/home-agent-face-slot/g) || []).length, 2);
+  assert.equal((renderWorkspaceRailHTML(view).match(/home-agent-face-slot/g) || []).length, 1);
   assert.doesNotMatch(renderWorkspaceRailHTML(view), /agent-avatar|ws-map-av-figure/);
 });
 

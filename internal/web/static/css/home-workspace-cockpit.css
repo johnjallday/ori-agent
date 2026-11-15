@@ -1359,15 +1359,18 @@
   text-transform: uppercase;
 }
 
-.cockpit-rail-commander {
+.cockpit-rail-panel .cockpit-rail-metric {
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  min-width: 0;
-  padding: 3px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
 }
 
-.cockpit-rail-commander-state {
+.cockpit-rail-panel .cockpit-rail-metric-label {
+  text-transform: none;
+}
+
+.cockpit-rail-commander-badge {
   padding-bottom: 4px;
   color: var(--hc-amber);
   font-family: "JetBrains Mono", ui-monospace, monospace;
