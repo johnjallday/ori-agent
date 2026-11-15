@@ -148,6 +148,7 @@ export function setupCreationReviewMaterial(session = {}, brief = '') {
   }
   if (hire)
     rows.push({
+      kind: 'project-hire',
       label: hire.role_label || 'Plan-owned team',
       value: `${hire.agent_name || hire.name || 'Agent named by the plan'} · ${hire.mode === 'bind' ? 'Saved assignment' : hire.mode === 'create' ? 'New agent' : 'Set by this plan'}`,
       detail: [

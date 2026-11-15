@@ -139,6 +139,8 @@ type HomeFacts struct {
 // HomeAssistant is the shared assistant a Home's song blueprint declares (one
 // agent, bound into every song the Home opens) as the plan words it.
 type HomeAssistant struct {
+	// RoleID is the provider's immutable role identity, not an editable name.
+	RoleID string `json:"role_id,omitempty"`
 	// Label is the role's own label; Name the name a hire would use, or the
 	// agent the Home already has.
 	Label string `json:"label"`
@@ -174,7 +176,7 @@ func cleanAssistant(in *HomeAssistant) *HomeAssistant {
 	if in == nil {
 		return nil
 	}
-	out := HomeAssistant{Label: homeFactText(in.Label), Name: homeFactText(in.Name), Job: JobLine(in.Job),
+	out := HomeAssistant{RoleID: homeFactText(in.RoleID), Label: homeFactText(in.Label), Name: homeFactText(in.Name), Job: JobLine(in.Job),
 		Taken: homeFactText(in.Taken), State: in.State}
 	switch out.State {
 	case AssistantHire, AssistantHas, AssistantOff, AssistantStale, AssistantHeld:
@@ -189,6 +191,7 @@ func cleanAssistant(in *HomeAssistant) *HomeAssistant {
 
 // HomeHire is one agent the Home step would hire, in plain words.
 type HomeHire struct {
+	RoleID string `json:"role_id,omitempty"`
 	// Name is the name the agent would be hired under.
 	Name string `json:"name"`
 	// Job is one line on what the role does, cut from the provider's own
@@ -211,7 +214,7 @@ const (
 	maxHomeRoles    = 8
 	maxHomeFactText = 100
 	// MaxJobLineRunes bounds a hire's job line, in characters.
-	MaxJobLineRunes = 100
+	MaxJobLineRunes = 160
 )
 
 // JobLine is a role's one-line job from the provider's own description: the
@@ -283,7 +286,7 @@ func cleanHomeFacts(in HomeFacts) *HomeFacts {
 				break
 			}
 			out.MissingRoles = append(out.MissingRoles, name)
-			out.Hires = append(out.Hires, HomeHire{Name: name, Job: JobLine(hire.Job), Taken: homeFactText(hire.Taken)})
+			out.Hires = append(out.Hires, HomeHire{RoleID: homeFactText(hire.RoleID), Name: name, Job: JobLine(hire.Job), Taken: homeFactText(hire.Taken)})
 		}
 	}
 	return &out

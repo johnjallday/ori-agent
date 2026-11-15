@@ -54,6 +54,9 @@ function stubDocument() {
       addEventListener(type, fn) {
         node.listeners[type] = fn;
       },
+      removeEventListener(type, fn) {
+        if (node.listeners[type] === fn) delete node.listeners[type];
+      },
       append(...kids) {
         kids.forEach(kid => {
           kid.parentElement = node;
@@ -1395,7 +1398,7 @@ test('actions post to the workspace path and Set it up carries the digest it sho
   const result = await postFolderAgentAction(view, 'set_up', fetchImpl);
   assert.deepEqual(calls[0], [
     '/api/personal-assistant/folder-agent/ws-1/setup',
-    { plan_digest: 'abc' }
+    { plan_digest: 'abc', hire_faces: {} }
   ]);
   assert.equal(result.view.state, 'setting_up');
 });
@@ -1486,7 +1489,7 @@ test('the report card shows what it is, the steps and its actions; Set it up sen
     .querySelectorAll('button')
     .find(b => b.dataset.folderAgentAction === 'set_up')
     .listeners.click();
-  assert.deepEqual(plain(calls[0]), ['set_up', { selected: [] }]);
+  assert.deepEqual(plain(calls[0]), ['set_up', { selected: [], hire_faces: {} }]);
 });
 
 // After the run, the receipt keeps "First ticket" and Start this (FR20), and
@@ -1688,7 +1691,7 @@ test('every offered step has a box; unticking one refreshes the plan and Set it 
     .querySelectorAll('button')
     .find(b => b.dataset.folderAgentAction === 'set_up')
     .listeners.click();
-  assert.deepEqual(plain(calls[0]), ['set_up', { selected: ['x-tools'] }]);
+  assert.deepEqual(plain(calls[0]), ['set_up', { selected: ['x-tools'], hire_faces: {} }]);
   assert.equal(view.plan.digest, 'without');
 });
 
@@ -1956,14 +1959,15 @@ test('a finished run shows its receipt with links, leaves out empty rows and col
   const card = renderFolderAgentReport(view, stubDocument(), {});
   const run = card.querySelector('.folder-agent-card__run');
   assert.equal(text(run, '.folder-agent-card__run-head'), 'All done · 1 step · 41 s');
-  const rows = run
-    .querySelectorAll('.folder-agent-card__receipt-row')
-    .map(row => [
-      row.dataset.kind,
-      text(row, '.folder-agent-card__receipt-text'),
-      row.querySelector('.folder-agent-card__receipt-link')?.textContent || '',
-      row.querySelector('.folder-agent-card__receipt-link')?.href || ''
-    ]);
+  const rows = run.querySelectorAll('.folder-agent-card__receipt-row').map(row => [
+    row.dataset.kind,
+    row
+      .querySelectorAll('.folder-agent-card__receipt-agent-name')
+      .map(node => node.textContent)
+      .join(' · ') || text(row, '.folder-agent-card__receipt-text'),
+    row.querySelector('.folder-agent-card__receipt-link')?.textContent || '',
+    row.querySelector('.folder-agent-card__receipt-link')?.href || ''
+  ]);
   assert.deepEqual(rows, [
     [
       'installed',
@@ -3045,17 +3049,17 @@ const installCard = (chosen, options = {}) =>
     options
   );
 
-test('the button says how many plugins it installs: Set it up at none', () => {
+test('the button names plugin installation once, without recounting: Set it up at none', () => {
   assert.equal(folderAgentSetUpLabel({ installs: [] }), 'Set it up');
   assert.equal(folderAgentSetUpLabel(null), 'Set it up');
-  assert.equal(folderAgentSetUpLabel({ installs: [{}] }), 'Install 1 & set up');
-  assert.equal(folderAgentSetUpLabel({ installs: [{}, {}] }), 'Install 2 & set up');
+  assert.equal(folderAgentSetUpLabel({ installs: [{}] }), 'Install plugins & set up');
+  assert.equal(folderAgentSetUpLabel({ installs: [{}, {}] }), 'Install plugins & set up');
   const view = folderAgentReportView(
     reported({ model_sentence: '', tools_sentence: '', plan: installPlan(['reaper-tools']) })
   );
   assert.deepEqual(
     view.actions.map(a => a.label),
-    ['Install 1 & set up', 'Keep the folder as it is', 'Look further']
+    ['Install plugins & set up', 'Keep the folder as it is', 'Look further']
   );
   const nothingToInstall = folderAgentReportView(
     reported({
@@ -3101,6 +3105,9 @@ test('the install block lists each plugin with its release, source and why; no b
       'REAPER is on this Mac; its Ori tools are not yet.'
     ]
   );
+  // Value leads attribution: name/version, why, application, muted source.
+  assert.equal(rows[0].children.at(-1).className, 'folder-agent-card__install-source');
+  assert.equal(rows[0].children[1].textContent, 'Lets the agent work with the REAPER songs here.');
   // No state before a run.
   assert.equal(rows[0].dataset.state, undefined);
   assert.equal(rows[0].querySelector('.folder-agent-card__line-state'), null);
@@ -3170,7 +3177,7 @@ test('unticking a step updates the block, the markers and the button from the sa
   };
   const card = installCard(['reaper-tools', 'music-production-home'], { fetchImpl });
   const setUp = card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'set_up');
-  assert.equal(setUp.textContent, 'Install 2 & set up');
+  assert.equal(setUp.textContent, 'Install plugins & set up');
   const home = card
     .querySelectorAll('input')
     .find(b => b.dataset.stepHandle === 'music-production-home');
@@ -3183,10 +3190,10 @@ test('unticking a step updates the block, the markers and the button from the sa
   );
   assert.equal(card.querySelectorAll('.folder-agent-card__install').length, 1);
   assert.equal(card.querySelectorAll('.folder-agent-card__install-marker').length, 1);
-  assert.equal(setUp.textContent, 'Install 1 & set up');
+  assert.equal(setUp.textContent, 'Install plugins & set up');
   home.checked = true;
   await home.listeners.change();
-  assert.equal(setUp.textContent, 'Install 2 & set up');
+  assert.equal(setUp.textContent, 'Install plugins & set up');
   assert.equal(card.querySelectorAll('.folder-agent-card__install').length, 2);
 });
 
@@ -3347,7 +3354,7 @@ test('confirmed, the premise is one plain line in place of the agent sentence an
   assert.ok(card.querySelector('.folder-agent-card__installs'));
   assert.equal(
     card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'set_up').textContent,
-    'Install 1 & set up'
+    'Install plugins & set up'
   );
 });
 
@@ -3653,11 +3660,169 @@ const hiresCard = (hires, hiresNote = '', options = {}) =>
         ...(options.report || {})
       })
     ),
-    stubDocument(),
-    {}
+    options.doc || stubDocument(),
+    options.render || {}
   );
 const hiresBlock = card => card.querySelector('.folder-agent-card__hires');
 const classesOf = node => node.className.split(' ');
+
+for (const action of ['choose', 'skip', 'cancel']) {
+  test(`setup face picker ${action} uses taken faces and restores the same button's focus`, async () => {
+    const win = faceWindow();
+    win.characters.byId = { analyst: { id: 'analyst' }, builder: { id: 'builder' } };
+    const doc = stubDocument();
+    doc.defaultView = win;
+    const opened = [];
+    win.CharacterPicker = {
+      open: async options => {
+        opened.push(options);
+        return { action, catalogId: 'builder' };
+      }
+    };
+    let lists = 0;
+    const card = hiresCard(
+      [hire('Manager', { character: 'analyst' }), hire('Assistant', { character: 'builder' })],
+      '',
+      {
+        doc,
+        render: {
+          fetchImpl: async () => {
+            lists++;
+            return {
+              ok: true,
+              json: async () => [
+                {
+                  name: 'Owned',
+                  appearance: { mode: 'character', character: { catalog_id: 'owned' } }
+                },
+                {
+                  name: 'Inactive',
+                  appearance: { mode: 'generated', character: { catalog_id: 'inactive' } }
+                }
+              ]
+            };
+          }
+        }
+      }
+    );
+    const button = card.querySelector('.folder-agent-card__hire-face');
+    let focused = false;
+    button.focus = () => {
+      focused = true;
+    };
+    assert.equal(button.tagName, 'BUTTON');
+    assert.equal(button.attributes['aria-label'], 'Change face for Manager');
+    await button.listeners.click();
+    assert.equal(focused, true);
+    assert.deepEqual(opened[0].taken.sort(), ['builder', 'owned']);
+    assert.equal(opened[0].selectedId, 'analyst');
+    assert.equal(opened[0].showSkip, true);
+    assert.equal(opened[0].trigger, button);
+    const drawn = win.drawn.filter(item => item.input.name === 'Manager').at(-1).input;
+    assert.equal(drawn.appearance.mode, action === 'skip' ? 'generated' : 'character');
+    if (action !== 'skip')
+      assert.equal(
+        drawn.appearance.character.catalog_id,
+        action === 'choose' ? 'builder' : 'analyst'
+      );
+    await button.listeners.click();
+    assert.equal(lists, 1);
+  });
+}
+
+test('picked setup faces survive unticking, re-ticking and a card refresh, but not a renamed hire', async () => {
+  const doc = stubDocument();
+  const win = faceWindow();
+  doc.defaultView = win;
+  win.CharacterPicker = { open: async () => ({ action: 'choose', catalogId: 'builder' }) };
+  let renamed = false;
+  const raw = chosen => ({
+    ...homePlanOf(chosen ? newHomeLines : [], []),
+    selected: chosen ? [HOME] : [],
+    steps: [{ ...homePlanOf([]).steps[0], chosen }],
+    hires: chosen ? [hire(renamed ? 'New Manager' : 'Manager', { character: 'analyst' })] : []
+  });
+  const view = folderAgentReportView(reported({ plan: raw(true) }));
+  const options = {
+    fetchImpl: async (url, request) => ({
+      ok: true,
+      json: async () =>
+        url.includes('/plan') ? { plan: raw(JSON.parse(request.body).selected.length > 0) } : []
+    })
+  };
+  const card = renderFolderAgentReport(view, doc, options);
+  await card.querySelector('.folder-agent-card__hire-face').listeners.click();
+  const tick = async checked => {
+    const box = card.querySelector('.folder-agent-card__tool-pick');
+    box.checked = checked;
+    await box.listeners.change();
+  };
+  await tick(false);
+  assert.equal(card.querySelector('.folder-agent-card__hire'), null);
+  await tick(true);
+  assert.equal(view.plan.hires[0].character, 'builder');
+  const refreshed = renderFolderAgentReport(view, doc, options);
+  assert.equal(refreshed.querySelector('.folder-agent-card__hire-face').tagName, 'BUTTON');
+  assert.equal(view.plan.hires[0].character, 'builder');
+  renamed = true;
+  await tick(true);
+  assert.equal(view.plan.hires[0].name, 'New Manager');
+  assert.equal(view.plan.hires[0].character, 'analyst');
+  assert.equal(view.hireFaces.has('Manager'), false);
+});
+
+test('planned hires draw suggested or generated faces, redraw with the catalog, and post every shown face', async () => {
+  const doc = stubDocument();
+  const inputs = [];
+  let redraw;
+  let ready = false;
+  doc.defaultView = {
+    RoleCatalog: { isLoaded: () => true, entry: () => ({}) },
+    CharacterCatalog: {
+      load() {},
+      get: id => (ready ? { id } : null),
+      onChange(fn) {
+        redraw = fn;
+        return () => {};
+      }
+    },
+    AgentAvatar: {
+      markup(input) {
+        inputs.push(input);
+        return '<face>';
+      }
+    }
+  };
+  const calls = [];
+  const card = hiresCard([hire('Manager'), hire('Assistant', { character: 'analyst' })], '', {
+    doc,
+    render: { onAction: (id, button, extra) => calls.push([id, extra]) }
+  });
+  assert.equal(card.querySelectorAll('.folder-agent-card__hire-face').length, 2);
+  assert.equal(inputs[0].appearance.mode, 'generated');
+  assert.equal(inputs[1].appearance.mode, 'generated');
+  ready = true;
+  redraw();
+  assert.equal(inputs.at(-1).appearance.character.catalog_id, 'analyst');
+  await card
+    .querySelectorAll('button')
+    .find(button => button.dataset.folderAgentAction === 'set_up')
+    .listeners.click();
+  assert.deepEqual(calls[0][1].hire_faces, { Manager: '', Assistant: 'analyst' });
+  const requests = [];
+  await postFolderAgentAction(
+    {
+      workspaceID: 'ws-1',
+      plan: { digest: 'd', hires: [{ name: 'Assistant', character: 'analyst' }] }
+    },
+    'set_up',
+    async (url, options) => {
+      requests.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({}) };
+    }
+  );
+  assert.deepEqual(requests[0].hire_faces, { Assistant: 'analyst' });
+});
 
 test('the hires block is absent when nobody is hired', () => {
   assert.equal(hiresBlock(hiresCard([])), null);
@@ -3682,14 +3847,15 @@ test('one hire: its name, what it does and its model, one link to Agents, nothin
   assert.equal(rows.length, 1);
   assert.equal(text(rows[0], '.folder-agent-card__hire-name'), 'Portfolio Manager');
   assert.equal(text(rows[0], '.folder-agent-card__hire-job'), 'Coordinates status and priorities.');
-  assert.equal(text(rows[0], '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(text(block, '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(rows[0].querySelector('.folder-agent-card__hire-model'), null);
   assert.equal(rows[0].dataset.step, HOME);
   // The reading order, which a narrow card wraps in: name, job, model.
   assert.deepEqual(
     rows[0].children.map(child =>
       classesOf(child).find(name => name.startsWith('folder-agent-card__hire-'))
     ),
-    ['folder-agent-card__hire-name', 'folder-agent-card__hire-job', 'folder-agent-card__hire-model']
+    ['folder-agent-card__hire-face', 'folder-agent-card__hire-name', 'folder-agent-card__hire-job']
   );
   // One link, to Agents; no rename, no model picker, no opt-out (decision 2A).
   const links = block.querySelectorAll('a');
@@ -3723,9 +3889,18 @@ test('several hires keep their order; a missing job, model or note leaves its pa
     'Your existing Library Manager stays as it is.'
   );
   assert.equal(rows[0].querySelector('.folder-agent-card__hire-note'), null);
-  // No model can run yet: the row says so, and the run will ask for one.
-  assert.equal(text(rows[2], '.folder-agent-card__hire-model'), 'No model yet');
-  assert.equal(text(rows[0], '.folder-agent-card__hire-model'), MODEL);
+  // Different effective models (including unset) must not be called shared.
+  assert.equal(block.querySelectorAll('.folder-agent-card__hire-model').length, 1);
+  assert.equal(text(block, '.folder-agent-card__hire-model'), 'Models chosen per agent');
+  assert.deepEqual(
+    rows.map(row => text(row, '.folder-agent-card__hire-row-model')),
+    [MODEL, MODEL, 'No model yet']
+  );
+  const unset = hiresBlock(
+    hiresCard([hire('Manager', { model: '' }), hire('Assistant', { model: '' })])
+  );
+  assert.equal(text(unset, '.folder-agent-card__hire-model'), 'No model yet');
+  assert.equal(unset.querySelectorAll('.folder-agent-card__hire-model').length, 1);
 });
 
 // assistant-reads-projects FR1, FR2, FR6: the Home's shared assistant is one
@@ -3750,7 +3925,8 @@ test("the Home's shared assistant is one more row of the same list", () => {
     text(assistant, '.folder-agent-card__hire-job'),
     'Handles everything REAPER-related for this project.'
   );
-  assert.equal(text(assistant, '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(text(block, '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(assistant.querySelector('.folder-agent-card__hire-model'), null);
   assert.equal(text(assistant, '.folder-agent-card__hire-note'), 'Joins each song you open.');
   assert.equal(assistant.dataset.step, HOME);
   // The same row layout as the Home's own roles: name, job, model, note.
@@ -3759,9 +3935,9 @@ test("the Home's shared assistant is one more row of the same list", () => {
       classesOf(child).find(name => name.startsWith('folder-agent-card__hire-'))
     ),
     [
+      'folder-agent-card__hire-face',
       'folder-agent-card__hire-name',
       'folder-agent-card__hire-job',
-      'folder-agent-card__hire-model',
       'folder-agent-card__hire-note'
     ]
   );
@@ -3778,7 +3954,191 @@ test('when the host cannot name the hires it says so in one sentence, with no ro
   assert.equal(block.querySelectorAll('a').length, 0);
 });
 
-test('the block sits directly under the install block, before the assurance, and in its place when nothing installs', () => {
+test('hire lines show confirmed faces while working, then the actual agent face; missing choices are generated', async () => {
+  for (const state of ['working', 'done']) {
+    const win = faceWindow();
+    win.characters.byId = { analyst: { id: 'analyst' }, builder: { id: 'builder' } };
+    const doc = stubDocument();
+    doc.defaultView = win;
+    let answer;
+    const response = new Promise(resolve => {
+      answer = resolve;
+    });
+    const line = {
+      step: HOME,
+      kind: 'hire',
+      name: 'Hires Manager',
+      agent_name: 'Manager',
+      state,
+      progress: `${state === 'done' ? 'Hired' : 'Hiring'} Manager`
+    };
+    const view = folderAgentReportView(
+      reported({
+        state: 'setting_up',
+        plan: { ...homePlanOf([line], []), hires: [hire('Manager', { character: 'analyst' })] },
+        setup: { status: 'running', lines: [line] }
+      })
+    );
+    const card = renderFolderAgentReport(view, doc, { fetchImpl: () => response });
+    const face = card.querySelector('.folder-agent-card__hired-face');
+    assert.equal(face.dataset.agentName, 'Manager');
+    if (state === 'working')
+      assert.equal(lastFace(win).input.appearance.character.catalog_id, 'analyst');
+    else
+      assert.equal(
+        win.drawn.length,
+        0,
+        'do not flash a suggested face for a finished/existing agent'
+      );
+    answer({
+      ok: true,
+      json: async () => [
+        {
+          name: 'Manager',
+          role: 'orchestrator',
+          appearance: { mode: 'character', character: { catalog_id: 'builder' } }
+        }
+      ]
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(lastFace(win).input.appearance.character.catalog_id, 'builder');
+  }
+  const win = faceWindow();
+  const doc = stubDocument();
+  doc.defaultView = win;
+  const line = { step: HOME, kind: 'hire', name: 'Hires Legacy Manager', state: 'working' };
+  renderFolderAgentReport(
+    folderAgentReportView(
+      reported({
+        state: 'setting_up',
+        plan: homePlanOf([line], []),
+        setup: { status: 'running', lines: [line] }
+      })
+    ),
+    doc,
+    { fetchImpl: async () => ({ ok: false }) }
+  );
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(lastFace(win).input.name, 'Legacy Manager');
+  assert.equal(lastFace(win).input.appearance.mode, 'generated');
+});
+
+test('Already in your Home and receipt rows use current canonical profiles, with one lookup per card', async () => {
+  const win = faceWindow();
+  const doc = stubDocument();
+  doc.defaultView = win;
+  const appearance = {
+    mode: 'uploaded',
+    uploaded: { image: '/api/agents/Existing/avatar' },
+    generated: { color: '#123456' }
+  };
+  let requests = 0;
+  const line = {
+    step: HOME,
+    kind: 'assistant',
+    name: 'Hires Suggested',
+    agent_name: 'Existing',
+    state: 'done',
+    progress: 'Already in your Home'
+  };
+  const raw = reported({
+    state: 'set_up',
+    plan: { ...homePlanOf([line], []), hires: [] },
+    setup: { status: 'done', lines: [line], receipt: { hired: ['Existing'] } }
+  });
+  const render = () =>
+    renderFolderAgentReport(folderAgentReportView(raw), doc, {
+      fetchImpl: async () => {
+        requests++;
+        return {
+          ok: true,
+          json: async () => [{ name: 'Existing', role: 'orchestrator', appearance }]
+        };
+      }
+    });
+  const card = render();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(requests, 1);
+  assert.equal(card.querySelectorAll('.folder-agent-card__receipt-agent').length, 1);
+  assert.equal(card.querySelectorAll('.folder-agent-card__hired-face').length, 2);
+  assert.deepEqual(lastFace(win).input.appearance, appearance);
+  // Reopening a receipt reads the face as edited on Agents, not a saved choice.
+  appearance.mode = 'generated';
+  render();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(lastFace(win).input.appearance.mode, 'generated');
+  assert.equal(requests, 2);
+});
+
+test('a plan-changed redraw keeps pending picks through subsequent untick and retick', async () => {
+  const rawPlan = chosen => ({
+    ...homePlanOf(chosen ? newHomeLines : [], []),
+    selected: chosen ? [HOME] : [],
+    steps: [{ ...homePlanOf([]).steps[0], chosen }],
+    hires: chosen ? [hire('Manager', { character: 'analyst' })] : []
+  });
+  const view = folderAgentReportView(reported({ plan: rawPlan(true) }));
+  view.hireFaces = new Map([['Manager', { character: 'builder', step: HOME }]]);
+  const refused = await postFolderAgentAction(
+    view,
+    'set_up',
+    async url => ({
+      ok: !url.endsWith('/setup'),
+      json: async () =>
+        url.endsWith('/setup')
+          ? {
+              error: 'Review the current plan.',
+              plan_changed: true,
+              folder_agent: reported({ plan: rawPlan(true) })
+            }
+          : { plan: rawPlan(true) }
+    }),
+    { selected: [HOME], hire_faces: { Manager: 'builder' } }
+  );
+  const next = folderAgentReportView(refused.view);
+  assert.equal(next.hireFaces, view.hireFaces);
+  const card = renderFolderAgentReport(next, stubDocument(), {
+    fetchImpl: async (_url, options) => ({
+      ok: true,
+      json: async () => ({ plan: rawPlan(JSON.parse(options.body).selected.length > 0) })
+    })
+  });
+  for (const checked of [false, true]) {
+    const box = card.querySelector('.folder-agent-card__tool-pick');
+    box.checked = checked;
+    await box.listeners.change();
+  }
+  assert.equal(next.plan.hires[0].character, 'builder');
+});
+
+test('the card promise does not recount visible blocks; the run retains its historical note', () => {
+  const raw = reported({
+    plan: {
+      ...homePlanOf(newHomeLines),
+      assurance: 'Nothing in Ori Music Demo is moved, copied or read.',
+      hires: [hire('Manager')]
+    }
+  });
+  const choosing = renderFolderAgentReport(folderAgentReportView(raw), stubDocument());
+  const note = choosing
+    .querySelectorAll('.folder-agent-card__line')
+    .find(line => line.dataset.kind === 'folder');
+  assert.equal(text(note, '.folder-agent-card__line-name'), raw.plan.assurance);
+  const running = renderFolderAgentReport(
+    folderAgentReportView({
+      ...raw,
+      state: 'setting_up',
+      setup: { status: 'running', lines: newHomeLines }
+    }),
+    stubDocument()
+  );
+  const historical = running
+    .querySelectorAll('.folder-agent-card__line')
+    .find(line => line.dataset.kind === 'folder');
+  assert.equal(text(historical, '.folder-agent-card__line-name'), newHomeLines.at(-1).name);
+});
+
+test('the team leads the plugins, then the assurance; no team when nobody is hired', () => {
   const order = card =>
     card
       .querySelector('.folder-agent-card__run')
@@ -3790,8 +4150,8 @@ test('the block sits directly under the install block, before the assurance, and
   const kinds = order(withInstall);
   assert.deepEqual(kinds.slice(-4), [
     'folder-agent-card__plan',
-    'folder-agent-card__installs',
     'folder-agent-card__hires',
+    'folder-agent-card__installs',
     'folder-agent-card__line'
   ]);
   // The assurance note follows the block.
@@ -3929,8 +4289,8 @@ test('the other way is collapsed under "Other ways to set this up", not in the m
   assert.deepEqual(kinds, [
     'folder-agent-card__plan',
     'folder-agent-card__alternatives',
-    'folder-agent-card__installs',
-    'folder-agent-card__hires'
+    'folder-agent-card__hires',
+    'folder-agent-card__installs'
   ]);
 });
 
@@ -3988,7 +4348,7 @@ test('"Use this instead" swaps the plan in place and swapping back restores the 
   };
   const card = swapCard(HOME, { fetchImpl });
   const setUp = card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'set_up');
-  assert.equal(setUp.textContent, 'Install 1 & set up');
+  assert.equal(setUp.textContent, 'Install plugins & set up');
   assert.ok(hiresBlock(card));
 
   // Take the group instead: the re-plan carries the group in place of the Home.
@@ -4020,7 +4380,7 @@ test('"Use this instead" swaps the plan in place and swapping back restores the 
     .listeners.click();
   assert.deepEqual(requests, [{ selected: [GROUP] }, { selected: [HOME] }]);
   assert.deepEqual(stepRows(card), [[HOME, 'true']]);
-  assert.equal(setUp.textContent, 'Install 1 & set up');
+  assert.equal(setUp.textContent, 'Install plugins & set up');
   assert.equal(card.querySelectorAll('.folder-agent-card__install').length, 1);
   assert.equal(hiresBlock(card).querySelectorAll('.folder-agent-card__hire').length, 1);
   assert.equal(
@@ -4109,7 +4469,10 @@ test('a plan that changed after it was shown is redrawn on the owner’s own cho
   assert.deepEqual(
     calls.map(([url, body]) => [url.replace(/^.*folder-agent\/ws-1/, ''), body]),
     [
-      ['/setup', { plan_digest: `swap-${HOME}`, selected: [HOME] }],
+      [
+        '/setup',
+        { plan_digest: `swap-${HOME}`, hire_faces: { 'Portfolio Manager': '' }, selected: [HOME] }
+      ],
       ['/plan', { selected: [HOME] }]
     ]
   );
@@ -4156,6 +4519,234 @@ test('a plan that changed after it was shown is redrawn on the owner’s own cho
   assert.equal(calls.length, 1);
   assert.equal(result.error, 'Answer the question first.');
   assert.equal(folderAgentReportView(result.view).plan.digest, `swap-${GROUP}`);
+});
+
+test('a changed-plan redraw reviews the same material draft and stable-key face', async () => {
+  const key = `${HOME}/home/manager`;
+  const raw = reported({
+    plan: {
+      ...homePlanOf(newHomeLines),
+      hires: [
+        hire('Aster', {
+          key,
+          role_id: 'manager',
+          character: 'builder',
+          provider: 'claude',
+          model_id: 'alternate'
+        })
+      ]
+    }
+  });
+  const view = folderAgentReportView(raw);
+  const choice = { name: 'Aster', provider: 'claude', model: 'alternate', step: HOME };
+  view.hireDrafts = new Map([[key, choice]]);
+  view.hireFaces = new Map([[key, { character: 'builder', step: HOME }]]);
+  const requests = [];
+  const result = await postFolderAgentAction(
+    view,
+    'set_up',
+    async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return requests.length === 1
+        ? {
+            ok: false,
+            json: async () => ({
+              error: 'Review the current plan.',
+              plan_changed: true,
+              folder_agent: raw
+            })
+          }
+        : {
+            ok: true,
+            json: async () => ({ plan: { ...raw.plan, digest: 'fresh-material-consent' } })
+          };
+    },
+    { selected: [HOME] }
+  );
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1].hire_edits, requests[0].hire_edits);
+  assert.deepEqual(requests[1].hire_edits[key], {
+    name: 'Aster',
+    provider: 'claude',
+    model: 'alternate'
+  });
+  const next = folderAgentReportView(result.view);
+  assert.equal(next.hireDrafts, view.hireDrafts);
+  assert.equal(next.hireFaces, view.hireFaces);
+  assert.equal(next.plan.hires[0].key, key);
+  assert.equal(next.plan.hires[0].name, 'Aster');
+  assert.equal(next.plan.hires[0].character, 'builder');
+});
+
+function editableHireCard({ reject = false } = {}) {
+  const doc = stubDocument();
+  const win = faceWindow();
+  doc.defaultView = win;
+  const requests = [];
+  const mounts = [];
+  const appearances = [];
+  let input;
+  win.AgentCreateForm = {
+    mount(host, options) {
+      mounts.push(options);
+      input = doc.createElement('input');
+      input.value = options.values.name;
+      host.append(input);
+      return {
+        get: field => (field === 'name' ? input : null),
+        focus: () => {
+          doc.activeElement = input;
+        },
+        extract: () => ({
+          valid: true,
+          values: {
+            name: input.value,
+            provider: 'claude',
+            model: 'alternate',
+            role: 'forged',
+            systemPrompt: 'must not send',
+            reasoningEffort: 'max'
+          }
+        })
+      };
+    }
+  };
+  win.AgentAppearanceEditor = {
+    create(options) {
+      appearances.push(options);
+      return {
+        setAgentName() {},
+        destroy() {},
+        appearance: () => ({ mode: 'character', character: { catalog_id: 'builder' } })
+      };
+    }
+  };
+  const key = `${HOME}/home/manager`;
+  const rawPlan = {
+    ...homePlanOf(newHomeLines),
+    hires: [
+      hire('Manager', {
+        key,
+        role_id: 'manager',
+        provider: 'claude',
+        model_id: 'original',
+        character: 'analyst',
+        job: 'Plans the work.'
+      })
+    ],
+    hire_models: [{ provider: 'claude', model: 'alternate', label: 'Alternate' }]
+  };
+  const view = folderAgentReportView(
+    reported({ plan: rawPlan, model_sentence: '', tools_sentence: '' })
+  );
+  const actions = [];
+  const fetchImpl = async (url, init) => {
+    if (!init) return { ok: true, json: async () => [] };
+    requests.push([url, JSON.parse(init.body)]);
+    if (reject) return { ok: false, json: async () => ({ error: 'That name is taken.' }) };
+    const edit = JSON.parse(init.body).hire_edits[key];
+    return {
+      ok: true,
+      json: async () => ({
+        plan: {
+          ...rawPlan,
+          digest: 'reviewed-edit',
+          hires: [
+            {
+              ...rawPlan.hires[0],
+              name: edit.name,
+              model: 'alternate (claude)',
+              model_id: edit.model,
+              provider: edit.provider
+            }
+          ]
+        }
+      })
+    };
+  };
+  const card = renderFolderAgentReport(view, doc, {
+    fetchImpl,
+    onAction: (...args) => actions.push(args)
+  });
+  const trigger = card.querySelector('.folder-agent-card__hire-edit');
+  trigger.focus = () => {
+    doc.activeElement = trigger;
+  };
+  return {
+    doc,
+    card,
+    view,
+    key,
+    trigger,
+    requests,
+    mounts,
+    appearances,
+    actions,
+    name: () => input,
+    setUpButton: () =>
+      card.querySelectorAll('button').find(button => button.dataset.folderAgentAction === 'set_up')
+  };
+}
+
+for (const action of ['cancel', 'escape']) {
+  test(`planned-agent ${action} discards the shared form without a profile or plan write`, async () => {
+    const f = editableHireCard();
+    await f.trigger.listeners.click();
+    assert.equal(f.mounts[0].profile, 'template');
+    assert.deepEqual(f.mounts[0].omitFields, ['systemPrompt', 'reasoningEffort']);
+    assert.equal(f.appearances[0].mode, 'create');
+    assert.equal(f.appearances[0].allowGeneratedColor, false);
+    assert.deepEqual(f.appearances[0].allowedModes, ['generated', 'character']);
+    f.name().value = 'Discard me';
+    const editor = f.card.querySelector('.folder-agent-card__hire-editor');
+    assert.equal(f.setUpButton().disabled, true);
+    if (action === 'escape')
+      editor.listeners.keydown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+    else
+      editor
+        .querySelectorAll('button')
+        .find(button => button.textContent === 'Cancel')
+        .listeners.click();
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.view.hireDrafts.size, 0);
+    assert.equal(f.view.plan.hires[0].name, 'Manager');
+    assert.equal(f.doc.activeElement, f.trigger);
+  });
+}
+
+test('saving a planned agent reviews material fields only and retains its stable face identity', async () => {
+  const f = editableHireCard();
+  await f.trigger.listeners.click();
+  f.name().value = 'Aster';
+  const editor = f.card.querySelector('.folder-agent-card__hire-editor');
+  await editor.listeners.submit({ preventDefault() {} });
+  assert.equal(f.requests.length, 1);
+  assert.ok(f.requests[0][0].endsWith('/plan'));
+  assert.deepEqual(f.requests[0][1].hire_edits, {
+    [f.key]: { name: 'Aster', provider: 'claude', model: 'alternate' }
+  });
+  assert.equal(f.view.plan.digest, 'reviewed-edit');
+  assert.equal(f.view.plan.hires[0].name, 'Aster');
+  assert.equal(f.view.plan.hires[0].character, 'builder');
+  assert.equal(f.view.hireFaces.get(f.key).character, 'builder');
+  const button = f.setUpButton();
+  assert.equal(button.disabled, false);
+  button.listeners.click();
+  assert.deepEqual(f.actions[0][2].hire_edits, f.requests[0][1].hire_edits);
+  assert.deepEqual(f.actions[0][2].hire_faces, { [f.key]: 'builder' });
+});
+
+test('a refused draft save keeps editing and does not change the reviewed team or face', async () => {
+  const f = editableHireCard({ reject: true });
+  await f.trigger.listeners.click();
+  f.name().value = 'Taken';
+  const editor = f.card.querySelector('.folder-agent-card__hire-editor');
+  await editor.listeners.submit({ preventDefault() {} });
+  assert.equal(f.view.hireDrafts.size, 0);
+  assert.equal(f.view.hireFaces.size, 0);
+  assert.equal(f.view.plan.hires[0].name, 'Manager');
+  assert.equal(text(editor, '.folder-agent-card__error'), 'That name is taken.');
+  assert.equal(f.setUpButton().disabled, true);
 });
 
 test('a card that cannot act lists the other way without a button to take it', () => {

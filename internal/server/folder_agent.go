@@ -395,9 +395,20 @@ func (h folderAgentHiring) Character(_ context.Context, _ string, policy folderl
 	if err != nil {
 		return ""
 	}
+	choices := suggestFolderAgentCharacters(catalog, h.characterCounts(), 1, folderagent.PreferredCharacter(policy))
+	if len(choices) == 0 {
+		return ""
+	}
+	return choices[0]
+}
+
+func (h folderAgentHiring) characterCounts() map[string]int {
 	counts := map[string]int{}
 	// Count faces across the visible roster, not just agents offered for reuse.
 	// A personal assistant profile keeps its job, but still wears its face.
+	if h.builder == nil {
+		return counts
+	}
 	if st := h.builder.st; st != nil {
 		for _, name := range st.ListAgents() {
 			if systemassistant.IsCanonicalName(name) {
@@ -409,15 +420,40 @@ func (h folderAgentHiring) Character(_ context.Context, _ string, policy folderl
 			}
 		}
 	}
-	preferred := folderagent.PreferredCharacter(policy)
-	best, least := "", int(^uint(0)>>1)
-	for _, ch := range catalog.Working() {
-		id := string(ch.ID)
-		if count := counts[id]; count < least || (count == least && id == preferred) {
-			best, least = id, count
-		}
+	return counts
+}
+
+// suggestFolderAgentCharacters uses catalog order as its stable tie-break,
+// with the folder hire's optional affinity first among equally worn faces.
+func suggestFolderAgentCharacters(catalog *charactercatalog.Catalog, counts map[string]int, count int, preferred string) []string {
+	if catalog == nil || count <= 0 {
+		return nil
 	}
-	return best
+	var out []string
+	used := map[string]bool{}
+	for len(out) < count {
+		best, least := "", int(^uint(0)>>1)
+		for _, ch := range catalog.Working() {
+			id := string(ch.ID)
+			if !used[id] && (counts[id] < least || (counts[id] == least && id == preferred)) {
+				best, least = id, counts[id]
+			}
+		}
+		if best == "" {
+			break
+		}
+		used[best] = true
+		out = append(out, best)
+	}
+	return out
+}
+
+func (s folderAgentSetups) HomeHireCharacters(count int) []string {
+	catalog, err := charactercatalog.Load()
+	if err != nil {
+		return nil
+	}
+	return suggestFolderAgentCharacters(catalog, folderAgentHiring(s).characterCounts(), count, "")
 }
 
 func (h folderAgentHiring) AgentExists(name string) bool {

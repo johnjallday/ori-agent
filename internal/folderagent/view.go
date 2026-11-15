@@ -192,14 +192,18 @@ type PlanView struct {
 	// tools step ahead of where the agent named it.
 	ReorderNote string `json:"reorder_note,omitempty"`
 	// Installs are the plugins the ticked steps download and install, in run
-	// order: the card's install block and the count on its button.
+	// order: the card's install block and whether its button names installation.
 	Installs []InstallEntry `json:"installs"`
 	// Hires are the agents the ticked steps hire, each by the name it will be
 	// hired under, with what it does and the model it will run on: the card's
 	// hires block. HiresNote stands in its place when the host cannot tell who
 	// the Home will hire (HiresUnnamed); never both.
-	Hires     []HireEntry `json:"hires"`
-	HiresNote string      `json:"hires_note,omitempty"`
+	Hires      []HireEntry `json:"hires"`
+	HiresNote  string      `json:"hires_note,omitempty"`
+	HireModels []HireModel `json:"hire_models,omitempty"`
+	// Assurance is the card's promise without a recount of the visible blocks.
+	// Historical run lines retain their full report/receipt wording.
+	Assurance string `json:"assurance,omitempty"`
 	// Alternatives are the other ways to set this folder up: each step that
 	// cannot run together with a chosen one, kept out of the main list and
 	// offered under "Other ways to set this up".
@@ -226,8 +230,8 @@ func planViewOf(plan Plan) *PlanView {
 	return &PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable,
 		Unavailable: plan.Unavailable, Selected: plan.Selected, Source: plan.Source, Words: plan.Words,
 		WordsRaw: plan.WordsRaw, Steps: steps, Excluded: plan.Excluded, DefaultReason: plan.DefaultReason,
-		ReorderNote: plan.ReorderNote, Installs: installs, Hires: hires, HiresNote: plan.HiresNote,
-		Alternatives: alternatives}
+		ReorderNote: plan.ReorderNote, Installs: installs, Hires: hires, HiresNote: plan.HiresNote, Assurance: plan.Assurance,
+		Alternatives: alternatives, HireModels: plan.HireModels}
 }
 
 func (s *Service) viewOf(ctx context.Context, rec *Record) View {
@@ -502,6 +506,9 @@ type Plan struct {
 	// the host cannot name them yet. See PlanView.
 	Hires     []HireEntry
 	HiresNote string
+	Assurance string
+	// Picker inventory is presentation metadata, not execution authority.
+	HireModels []HireModel
 	// Alternatives are the steps set aside because a chosen step excludes
 	// them; see PlanView. They are not part of the digest: choosing one is a
 	// new selection, and a new selection is a new plan.
@@ -559,6 +566,15 @@ type HireEntry struct {
 	Name  string `json:"name"`
 	Job   string `json:"job,omitempty"`
 	Model string `json:"model"`
+	// Key/RoleID identify the host-owned role independently of an edited name.
+	Key       string `json:"key,omitempty"`
+	RoleID    string `json:"role_id,omitempty"`
+	Assistant bool   `json:"assistant,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+	ModelID   string `json:"model_id,omitempty"`
+	// Character is the suggested or confirmed working character; empty means
+	// generated. Presentation only: never part of the plan digest.
+	Character string `json:"character,omitempty"`
 	// Note says what happens to the owner's own agent when one already holds
 	// the role's name: the run never adopts it, it hires a new one.
 	Note string `json:"note,omitempty"`
@@ -578,6 +594,8 @@ func homeHires(rec Record, home folderlook.Candidate, step string) ([]HireEntry,
 		for i, name := range facts.MissingRoles {
 			entry := HireEntry{Step: step, Name: name, Model: model}
 			if i < len(facts.Hires) {
+				entry.RoleID = facts.Hires[i].RoleID
+				entry.Key = hireKey(step, entry.RoleID, false)
 				entry.Job = facts.Hires[i].Job
 				if taken := facts.Hires[i].Taken; taken != "" {
 					entry.Note = "Your existing " + taken + " stays as it is."
@@ -587,7 +605,8 @@ func homeHires(rec Record, home folderlook.Candidate, step string) ([]HireEntry,
 		}
 		// The shared assistant is one more row of the same list (FR1, FR6).
 		if a := facts.Assistant; assistantHires(facts) == 1 {
-			entry := HireEntry{Step: step, Name: a.Name, Job: a.Job, Model: model, Note: AssistantJoins}
+			entry := HireEntry{Step: step, Name: a.Name, Job: a.Job, Model: model, Note: AssistantJoins,
+				RoleID: a.RoleID, Key: hireKey(step, a.RoleID, true), Assistant: true}
 			if a.Taken != "" {
 				entry.Note += " Your existing " + a.Taken + " stays as it is."
 			}
@@ -890,8 +909,25 @@ func BuildPlan(rec Record, selected []string) Plan {
 			}
 		}
 	}
+	plan.Assurance = folderAssurance(rec, plan.Candidates) + "."
 	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder,
 		Name: assuranceLine(rec, plan.Candidates, len(plan.Installs), len(plan.Hires))})
+	for i := range plan.Hires {
+		if i < len(rec.HomeHireCharacters) {
+			plan.Hires[i].Character = rec.HomeHireCharacters[i]
+		}
+	}
+	plan.HireModels = append([]HireModel(nil), rec.HireModels...)
+	for i := range plan.Hires {
+		for _, model := range rec.HireModels {
+			if model.Default {
+				plan.Hires[i].Provider, plan.Hires[i].ModelID = model.Provider, model.Model
+				break
+			}
+		}
+	}
+	applyHireEdits(&plan, rec.HireEdits)
+	applyHireFaces(&plan, rec.HireFaces)
 	sort.Strings(plan.Selected)
 	plan.Digest = planDigest(plan)
 	return plan
@@ -958,7 +994,9 @@ func toolsBeforeHome(order []string, steps []folderlook.Step, byHandle map[strin
 // song details. A folder placed in a Home whose song-details consent is active is
 // read by that Home's own scans as it is set up, so the line then says what they
 // read instead of promising nothing is read.
-func assuranceLine(rec Record, candidates []folderlook.Candidate, installs, hires int) string {
+// folderAssurance is the promise and any existing read-consent disclosure,
+// without the recount. No closing stop: report lines append their additions.
+func folderAssurance(rec Record, candidates []folderlook.Candidate) string {
 	folder := strings.TrimSpace(rec.FolderName)
 	anonymous := folder == "" || strings.ContainsAny(folder, "/\\\x00\r\n")
 	reads := readsSentence(candidates)
@@ -976,9 +1014,14 @@ func assuranceLine(rec Record, candidates []folderlook.Candidate, installs, hire
 	if reads != "" {
 		line += ". " + reads
 	}
+	return line
+}
+
+func assuranceLine(rec Record, candidates []folderlook.Candidate, installs, hires int) string {
+	line := folderAssurance(rec, candidates)
 	if adds := addsSentence(candidates, installs, hires); adds != "" {
 		line += ". " + adds
-	} else if reads != "" {
+	} else if readsSentence(candidates) != "" {
 		// The reads sentence is the last one: it ends like the adds sentence would.
 		line += "."
 	}
@@ -1155,6 +1198,10 @@ func planDigest(plan Plan) string {
 	for _, e := range plan.Hires {
 		lines = append(lines, personalassistant.FolderPlanLine{Kind: "hire", Name: e.Step + "\x00" + e.Name,
 			Detail: e.Job + "\x00" + e.Model + "\x00" + e.Note})
+		if e.Key != "" || e.Provider != "" || e.ModelID != "" || e.RoleID != "" {
+			lines = append(lines, personalassistant.FolderPlanLine{Kind: "hire_identity", Name: e.Identity(),
+				Detail: fmt.Sprintf("%s\x00%t\x00%s\x00%s", e.RoleID, e.Assistant, e.Provider, e.ModelID)})
+		}
 	}
 	if plan.HiresNote != "" {
 		lines = append(lines, personalassistant.FolderPlanLine{Kind: "hires_note", Name: plan.HiresNote})

@@ -7,8 +7,7 @@ import (
 	"unicode/utf8"
 )
 
-// A provider's own one-sentence description, longer than the 100 characters
-// a job line may take.
+// A provider's own ordinary first sentence, now kept whole by the 160-rune cap.
 const longRoleDescription = "Coordinates portfolio status, priorities, milestones, blockers, deliverables, and explicit handoffs without inheriting project access."
 
 func TestJobLine_FirstSentenceRunesWordCutAndPathShapes(t *testing.T) {
@@ -17,8 +16,7 @@ func TestJobLine_FirstSentenceRunesWordCutAndPathShapes(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"a long sentence is cut at a word, at 100 characters with its ellipsis", longRoleDescription,
-			"Coordinates portfolio status, priorities, milestones, blockers, deliverables, and explicit handoffs…"},
+		{"an ordinary first sentence is kept whole", longRoleDescription, longRoleDescription},
 		{"the first sentence only", "Plans the week. Then reviews it afterwards.", "Plans the week."},
 		{"a question ends a sentence too", "Is it done? Yes it is.", "Is it done?"},
 		{"an exclamation as well", "Ship it! Then rest.", "Ship it!"},
@@ -26,12 +24,12 @@ func TestJobLine_FirstSentenceRunesWordCutAndPathShapes(t *testing.T) {
 		{"a dot inside a word is not a sentence end", "Reads v0.5 notes and files them", "Reads v0.5 notes and files them"},
 		{"whitespace collapses", "  Keeps\tthe\n shelf   tidy ", "Keeps the shelf tidy"},
 		{"nothing in, nothing out", "   ", ""},
-		// The 100th character is the "d" of a word, so the cut steps back to the
-		// space after the sixteenth "words" (index 95), never ending mid-word.
-		{"a word cut mid-word steps back to the last whole word", strings.Repeat("words ", 30),
-			strings.TrimSpace(strings.Repeat("words ", 16)) + "…"},
-		{"trailing punctuation is trimmed before the ellipsis", strings.Repeat("word ", 19) + "x, " + strings.Repeat("y", 40),
-			strings.TrimSpace(strings.Repeat("word ", 19)) + " x…"},
+		// The 160th character falls in a word, so the cut steps back to the
+		// space after the twenty-sixth "words", never ending mid-word.
+		{"a word cut mid-word steps back to the last whole word", strings.Repeat("words ", 40),
+			strings.TrimSpace(strings.Repeat("words ", 26)) + "…"},
+		{"trailing punctuation is trimmed before the ellipsis", strings.Repeat("word ", 31) + "x, " + strings.Repeat("y", 40),
+			strings.TrimSpace(strings.Repeat("word ", 31)) + " x…"},
 		{"a path shape blanks only that job: slash", "Files things in /Users/someone/Music", ""},
 		{"a path shape blanks only that job: and/or", "Plans and/or reviews", ""},
 		{"a path shape blanks only that job: backslash", `Reads C:\Music`, ""},
@@ -50,21 +48,20 @@ func TestJobLine_FirstSentenceRunesWordCutAndPathShapes(t *testing.T) {
 		})
 	}
 
-	// The music role's sentence comes to exactly 100 characters.
-	if n := utf8.RuneCountInString(JobLine(longRoleDescription)); n != 100 {
-		t.Fatalf("the long description comes to %d characters, want exactly 100", n)
+	if MaxJobLineRunes != 160 {
+		t.Fatalf("job cap = %d, want 160", MaxJobLineRunes)
 	}
 
 	// Characters are counted, not bytes: a long run of three-byte characters
-	// with no space is cut to 99 plus the ellipsis, and stays valid text.
-	long := strings.Repeat("歌", 150)
+	// with no space is cut to 159 plus the ellipsis, and stays valid text.
+	long := strings.Repeat("歌", 200)
 	got := JobLine(long)
-	if !utf8.ValidString(got) || utf8.RuneCountInString(got) != 100 || !strings.HasSuffix(got, "…") ||
-		strings.Count(got, "歌") != 99 {
+	if !utf8.ValidString(got) || utf8.RuneCountInString(got) != 160 || !strings.HasSuffix(got, "…") ||
+		strings.Count(got, "歌") != 159 {
 		t.Fatalf("a long run of wide characters = %q (%d characters)", got, utf8.RuneCountInString(got))
 	}
 	// A word with no space to step back to is cut where it falls.
-	if got := JobLine(strings.Repeat("a", 150)); got != strings.Repeat("a", 99)+"…" {
+	if got := JobLine(strings.Repeat("a", 200)); got != strings.Repeat("a", 159)+"…" {
 		t.Fatalf("an unbroken word = %q", got)
 	}
 }

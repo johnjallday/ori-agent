@@ -8,15 +8,50 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/folderlook"
+	"github.com/johnjallday/ori-agent/internal/foldersetup"
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // setup-card-clarity: the card names the agents a Home step will hire before
 // anything exists, from the provider's declaration in the reviewed release,
 // under the names the run will use.
+
+func TestFolderAgentHomeStaffing_ConfirmedFaceIsCreateOnly(t *testing.T) {
+	for _, suggested := range []bool{false, true} {
+		t.Run(map[bool]string{false: "legacy generated", true: "confirmed character"}[suggested], func(t *testing.T) {
+			b, homeID, appearance := folderAgentFacesFixture(t)
+			staffing := portfolioHomeStaffing{builder: b}
+			if suggested {
+				staffing.faces = map[string]*types.AgentAppearance{"Manager": appearance}
+			}
+			role := foldersetup.HomeRole{RoleID: "manager", Name: "Manager"}
+			if err := staffing.Staff(t.Context(), homeID, role); err != nil {
+				t.Fatal(err)
+			}
+			profile, _ := b.st.GetAgent("Manager")
+			if suggested && profile.Appearance.CharacterCatalogID() != appearance.CharacterCatalogID() {
+				t.Fatalf("confirmed face lost: %+v", profile.Appearance)
+			}
+			if !suggested && profile.Appearance.Mode != types.AppearanceModeGenerated {
+				t.Fatalf("legacy default changed: %+v", profile.Appearance)
+			}
+			before := profile.Appearance.Clone()
+			staffing.faces = map[string]*types.AgentAppearance{"Manager": types.NewAgentAppearance()}
+			_ = staffing.Staff(t.Context(), homeID, role)
+			after, _ := b.st.GetAgent("Manager")
+			if !reflect.DeepEqual(before, after.Appearance) || len(b.st.ListAgents()) != 1 {
+				t.Fatal("retry changed an existing agent")
+			}
+			if missing, err := staffing.Missing(t.Context(), homeID); err != nil || len(missing) != 0 {
+				t.Fatalf("filled role offered again: %+v %v", missing, err)
+			}
+		})
+	}
+}
 
 func TestHomeHireSet_NamesLikeTheRun(t *testing.T) {
 	roles := []homeRoleDecl{
@@ -191,8 +226,8 @@ func TestFolderAgentHomeFacts_AnExistingHomeReadsItsOwnDeclaration(t *testing.T)
 		t.Fatalf("facts = %+v ok=%v", facts, ok)
 	}
 	want := []folderlook.HomeHire{
-		{Name: "Portfolio Manager", Job: "Plans the work."},
-		{Name: "Second Role", Job: "Keeps things."},
+		{RoleID: "lead", Name: "Portfolio Manager", Job: "Plans the work."},
+		{RoleID: "second", Name: "Second Role", Job: "Keeps things."},
 	}
 	if !reflect.DeepEqual(facts.Hires, want) || !reflect.DeepEqual(facts.MissingRoles, []string{"Portfolio Manager", "Second Role"}) {
 		t.Fatalf("hires = %+v roles = %v", facts.Hires, facts.MissingRoles)

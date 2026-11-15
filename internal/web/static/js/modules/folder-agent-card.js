@@ -4,6 +4,7 @@
 // sends a path. Words come from the server's view (facts line, stage line,
 // tools); this module only lays them out.
 
+import { renderHireDraftEditor } from './folder-agent-hire-editor.js';
 import { publishFolderAgentChat } from './folder-agent-chat.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 
@@ -251,6 +252,10 @@ export function folderAgentReportView(view) {
         }
       : null
   };
+  // A refused confirmation redraws from a fresh server view, but its pending
+  // picks still belong to this card. Keep the same by-name choice state.
+  if (view.hireFaces instanceof Map) out.hireFaces = view.hireFaces;
+  if (view.hireDrafts instanceof Map) out.hireDrafts = view.hireDrafts;
   if (out.state === 'looking') {
     out.title = `${agent} is looking around ${folder}`;
     out.receipt = String(view.receipt || 'Looking around…');
@@ -280,7 +285,7 @@ export function folderAgentReportView(view) {
     // Set it up waits for a plan that can run; the card says why it cannot.
     if (!out.plan.runnable && out.rootPolicy !== 'documents_inbox')
       out.actions = out.actions.filter(a => a.id !== 'set_up');
-    // The button says what it confirms: how many plugins it installs.
+    // The button names installation without repeating the block's count.
     out.actions = out.actions.map(a =>
       a.id === 'set_up' ? { ...a, label: folderAgentSetUpLabel(out.plan) } : a
     );
@@ -382,14 +387,37 @@ export function folderAgentReceiptRows(view) {
   return rows;
 }
 
+function agentEditorLink(doc, name) {
+  const link = el(doc, 'a', 'folder-agent-card__agent-edit-link', 'Edit agent');
+  link.href = `/agents/${encodeURIComponent(name)}`;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.setAttribute('aria-label', `Edit ${name} (opens in a new tab)`);
+  link.setAttribute(
+    'title',
+    'Profile edits apply wherever this agent is used. Shared edits require confirmation.'
+  );
+  return link;
+}
+
 // renderReceipt draws the receipt rows as a list of label, words and link.
-function renderReceipt(doc, rows) {
+function renderReceipt(doc, rows, view, agentRecords) {
   const list = el(doc, 'dl', 'folder-agent-card__receipt-rows');
   rows.forEach(row => {
     const item = el(doc, 'div', 'folder-agent-card__receipt-row');
     item.dataset.kind = row.label.toLowerCase();
     const words = el(doc, 'dd', 'folder-agent-card__receipt-words');
-    words.append(el(doc, 'span', 'folder-agent-card__receipt-text', row.words));
+    if (row.label === 'Hired' && view?.setup?.receipt?.hired?.length) {
+      view.setup.receipt.hired.forEach(name => {
+        const agent = el(doc, 'span', 'folder-agent-card__receipt-agent');
+        agent.append(
+          renderHiredFace(doc, name, '', agentRecords, true),
+          el(doc, 'span', 'folder-agent-card__receipt-agent-name', name),
+          agentEditorLink(doc, name)
+        );
+        words.append(agent);
+      });
+    } else words.append(el(doc, 'span', 'folder-agent-card__receipt-text', row.words));
     if (row.link) {
       const link = el(doc, 'a', 'folder-agent-card__receipt-link', row.link.text);
       link.href = row.link.href;
@@ -399,6 +427,36 @@ function renderReceipt(doc, rows) {
     list.append(item);
   });
   return list;
+}
+
+// Pending creates can use their confirmed face. Finished/existing agents and
+// receipts use only the current profile, never a historical suggestion.
+function renderHiredFace(doc, name, character, agentRecords, actualOnly = false) {
+  const win = cardWindow(doc);
+  const face = el(doc, 'span', 'folder-agent-card__hired-face');
+  face.dataset.agentName = name;
+  face.setAttribute('aria-hidden', 'true');
+  let records = null;
+  let answered = false;
+  const draw = () => {
+    if (actualOnly && !answered) return;
+    const record = records?.get?.(name);
+    const input = record
+      ? agentFace({ name }, record, win)
+      : hireFace(name, win, actualOnly ? '' : character);
+    const markup = faceMarkup(win, input, '', 28);
+    if (markup) face.innerHTML = markup;
+    else face.textContent = (name[0] || '?').toUpperCase();
+  };
+  draw();
+  watchFaces(face, win, draw, doc);
+  void Promise.resolve(agentRecords?.()).then(found => {
+    if (face.isConnected === false) return;
+    records = found;
+    answered = true;
+    draw();
+  });
+  return face;
 }
 
 // timeOf reads a server timestamp as epoch milliseconds; 0 when absent.
@@ -419,6 +477,7 @@ function lineView(line, defaultState = '') {
     // The host's mark: the outcome-line item this action belongs to, or ''
     // for a detail. The card never works it out from the words.
     outcome: String(line.outcome || ''),
+    agentName: String(line.agent_name || ''),
     state: String(line.state || defaultState),
     progress: String(line.progress || ''),
     startedAt: timeOf(line.started_at),
@@ -1125,11 +1184,13 @@ function actionTime(doc, line, now) {
 // renderAction draws one action: a spinner while it works, its name (or,
 // once done, the runner's receipt words), the live words after the name, and
 // the time last.
-function renderAction(doc, action, now) {
+function renderAction(doc, action, now, faceForAction = null) {
   const state = action.state || 'waiting';
   const act = el(doc, 'span', 'folder-agent-card__action');
   act.dataset.state = state;
   if (action.detail) act.setAttribute('title', action.detail);
+  const face = faceForAction?.(action);
+  if (face) act.append(face);
   if (state === 'working') {
     const spinner = el(doc, 'span', 'folder-agent-card__spinner');
     spinner.setAttribute('aria-hidden', 'true');
@@ -1137,8 +1198,24 @@ function renderAction(doc, action, now) {
   }
   const receipt = state === 'done' && action.progress;
   act.append(
-    el(doc, 'span', 'folder-agent-card__action-name', receipt ? action.progress : action.name)
+    el(
+      doc,
+      'span',
+      'folder-agent-card__action-name',
+      receipt
+        ? action.progress === 'Already in your Home' && action.agentName
+          ? `${action.agentName} · ${action.progress}`
+          : action.progress
+        : action.name
+    )
   );
+  if (
+    state === 'done' &&
+    action.progress &&
+    action.agentName &&
+    ['hire', 'assistant'].includes(action.kind)
+  )
+    act.append(agentEditorLink(doc, action.agentName));
   if (!receipt && action.progress && (state === 'working' || state === 'failed'))
     act.append(el(doc, 'span', 'folder-agent-card__action-progress', action.progress));
   const time = actionTime(doc, action, now);
@@ -1240,11 +1317,44 @@ function renderPlan(
   plan,
   lines,
   phase,
-  { selecting = false, onTick, now = Date.now(), headFirst = false } = {}
+  {
+    selecting = false,
+    onTick,
+    onPickFace,
+    onEditHire,
+    agentRecords,
+    now = Date.now(),
+    headFirst = false
+  } = {}
 ) {
   const section = el(doc, 'section', 'folder-agent-card__run');
   section.dataset.phase = phase;
   const steps = plan?.steps || [];
+  const faceForAction =
+    phase === 'plan'
+      ? null
+      : action => {
+          if (!['hire', 'assistant'].includes(action.kind)) return null;
+          const entry = (plan?.hires || []).find(
+            hire =>
+              action.name === `Hires ${hire.name}` && (!action.step || hire.step === action.step)
+          );
+          // Legacy saved lines predate agent_name. Their host-written hire prefix
+          // is a display-only fallback, never an execution or identity authority.
+          const name =
+            action.agentName ||
+            entry?.name ||
+            (action.name.startsWith('Hires ') ? action.name.slice(6) : '');
+          return name
+            ? renderHiredFace(
+                doc,
+                name,
+                entry?.character || '',
+                agentRecords,
+                action.state === 'done'
+              )
+            : null;
+        };
   if (plan) {
     section.dataset.planSource = plan.source;
     if (plan.source === 'agent' && plan.words) {
@@ -1355,7 +1465,7 @@ function renderPlan(
   // run shows what finished above the line that failed.
   if (phase === 'done' || phase === 'stopped') {
     const receiptRows = folderAgentReceiptRows(view);
-    if (receiptRows.length) section.append(renderReceipt(doc, receiptRows));
+    if (receiptRows.length) section.append(renderReceipt(doc, receiptRows, view, agentRecords));
   }
   const list = el(doc, 'ol', 'folder-agent-card__plan');
   const renderRow = (row, index, isChosen) => {
@@ -1427,14 +1537,18 @@ function renderPlan(
     const shown = row.actions.filter(action => !covered(action));
     // Before Set it up a chosen step reads as its outcomes; from the moment
     // the run starts every action is shown with its live state (FR4).
-    const outcomes = phase === 'plan' && isChosen ? outcomeItems(shown) : [];
+    const teamCoversHires = (plan?.hires || []).some(entry => entry.step === row.handle);
+    const summaryActions = teamCoversHires
+      ? shown.filter(action => !['hire', 'assistant'].includes(action.kind))
+      : shown;
+    const outcomes = phase === 'plan' && isChosen ? outcomeItems(summaryActions) : [];
     if (outcomes.length) {
       body.append(...renderOutcomes(doc, view, row, shown, outcomes, now));
     } else if (shown.length) {
       const actions = el(doc, 'span', 'folder-agent-card__actions-line');
       shown.forEach((action, k) => {
         if (k) actions.append(el(doc, 'span', 'folder-agent-card__action-sep', ' · '));
-        actions.append(renderAction(doc, action, now));
+        actions.append(renderAction(doc, action, now, faceForAction));
       });
       body.append(actions);
     } else if (!row.actions.length) {
@@ -1476,18 +1590,31 @@ function renderPlan(
   // After the plan and before the install block: the other ways in, collapsed.
   if (alternatives.length)
     section.append(renderAlternatives(doc, alternatives, steps, selecting ? onTick : null));
-  if (installs.length) section.append(renderInstalls(doc, installs, lines, phase));
-  // Before Set it up, who the ticked steps hire, directly under what they
-  // install: the button confirms both. Once the run starts its lines say it.
+  // Before confirmation the team leads the plugins. Run/receipt ordering is
+  // unchanged: the run's own lines say who was hired.
   if (phase === 'plan') {
-    const hires = renderHires(doc, plan?.hires || [], plan?.hiresNote || '');
+    const hires = renderHires(
+      doc,
+      plan?.hires || [],
+      plan?.hiresNote || '',
+      onPickFace,
+      onEditHire
+    );
     if (hires) section.append(hires);
   }
+  if (installs.length) section.append(renderInstalls(doc, installs, lines, phase));
   notes.forEach(line => {
     const note = el(doc, 'p', 'folder-agent-card__line folder-agent-card__line--note');
     note.dataset.state = line.state || 'waiting';
     note.dataset.kind = NOTE_LINE_KIND;
-    note.append(el(doc, 'span', 'folder-agent-card__line-name', line.name));
+    note.append(
+      el(
+        doc,
+        'span',
+        'folder-agent-card__line-name',
+        phase === 'plan' && plan?.assurance ? plan.assurance : line.name
+      )
+    );
     section.append(note);
   });
   if (plan?.excluded) section.append(el(doc, 'p', 'folder-agent-card__degraded', plan.excluded));
@@ -1523,8 +1650,8 @@ function installState(entry, lines, phase) {
 
 // renderInstalls draws the install block (PRD FR13, FR14, FR19): one row per
 // plugin the plan downloads and installs, in run order. Name and version;
-// where it comes from with a link to its source and to Plugins; what it gives
-// the owner; where the application and its tools stand. While a run is under
+// what it gives the owner; where the application and its tools stand; then
+// muted attribution with links to the source and Plugins. While a run is under
 // way and after it, each row shows its state from the run's own line.
 function renderInstalls(doc, installs, lines, phase) {
   const n = installs.length;
@@ -1583,10 +1710,11 @@ function renderInstalls(doc, installs, lines, phase) {
     const plugins = el(doc, 'a', 'folder-agent-card__install-link', 'Plugins');
     plugins.href = '/plugins';
     part(plugins);
-    item.append(head, source);
+    item.append(head);
     if (entry.why) item.append(el(doc, 'span', 'folder-agent-card__line-detail', entry.why));
     if (entry.appSentence)
       item.append(el(doc, 'span', 'folder-agent-card__line-detail', entry.appSentence));
+    item.append(source);
     list.append(item);
   });
   block.append(list);
@@ -1594,15 +1722,15 @@ function renderInstalls(doc, installs, lines, phase) {
 }
 
 // renderHires draws the hires block (setup-card-clarity FR6, FR7, FR9) before
-// Set it up: the agents the ticked steps will hire, one row each, read-only.
-// Name, then what it does, then the model it will run on (the order a narrow
-// card wraps them in), and a muted note when one of the owner's own agents
+// Set it up: the agents the ticked steps will hire, each with a changeable
+// face, its name and wrapping job. The shared model appears once in the header.
+// A muted note appears when one of the owner's own agents
 // already holds the name. The one "Agents" link leads to where they can be
 // changed after they are hired. When the host cannot tell who the Home will
 // hire it says so in one sentence instead of rows; it draws nothing when
 // nobody is hired. The children are divs on purpose: the Home drawer restyles
 // the spans directly inside any list item.
-function renderHires(doc, hires, note) {
+function renderHires(doc, hires, note, onPickFace, onEditHire) {
   if (!hires.length && !note) return null;
   const block = el(doc, 'section', 'folder-agent-card__hires');
   if (!hires.length) {
@@ -1611,8 +1739,15 @@ function renderHires(doc, hires, note) {
   }
   const n = hires.length;
   const head = el(doc, 'div', 'folder-agent-card__hires-head');
+  const commonModel = hires.every(entry => entry.model === hires[0].model);
   head.append(
-    el(doc, 'h4', 'folder-agent-card__heading', `Hires ${n} ${plural(n, 'agent', 'agents')}`)
+    el(doc, 'h4', 'folder-agent-card__heading', `Hires ${n} ${plural(n, 'agent', 'agents')}`),
+    el(
+      doc,
+      'span',
+      'folder-agent-card__install-version folder-agent-card__hire-model',
+      commonModel ? hires[0].model || NO_MODEL_YET : 'Models chosen per agent'
+    )
   );
   const agents = el(doc, 'a', 'folder-agent-card__install-link', 'Agents');
   agents.href = '/agents';
@@ -1622,6 +1757,27 @@ function renderHires(doc, hires, note) {
   hires.forEach(entry => {
     const item = el(doc, 'li', 'folder-agent-card__hire');
     item.dataset.step = entry.step;
+    const face = el(doc, onPickFace ? 'button' : 'div', 'folder-agent-card__hire-face');
+    if (onPickFace) {
+      face.type = 'button';
+      face.dataset.hireFace = entry.name;
+      face.setAttribute('aria-label', `Change face for ${entry.name}`);
+    } else face.setAttribute('aria-hidden', 'true');
+    const win = cardWindow(doc);
+    const draw = () => {
+      const markup = faceMarkup(
+        win,
+        hireFace(entry.name, win, entry.character),
+        '',
+        AGENT_FACE_SIZE
+      );
+      if (markup) face.innerHTML = markup;
+      else face.textContent = (entry.name[0] || '?').toUpperCase();
+    };
+    draw();
+    if (onPickFace) face.addEventListener('click', () => onPickFace(entry, face, draw));
+    watchFaces(face, win, draw, doc);
+    item.append(face);
     item.append(
       el(doc, 'div', 'folder-agent-card__line-name folder-agent-card__hire-name', entry.name)
     );
@@ -1629,18 +1785,20 @@ function renderHires(doc, hires, note) {
       item.append(
         el(doc, 'div', 'folder-agent-card__line-detail folder-agent-card__hire-job', entry.job)
       );
-    item.append(
-      el(
-        doc,
-        'div',
-        'folder-agent-card__install-version folder-agent-card__hire-model',
-        entry.model || NO_MODEL_YET
-      )
-    );
+    if (!commonModel)
+      item.append(el(doc, 'div', 'folder-agent-card__hire-row-model', entry.model || NO_MODEL_YET));
     if (entry.note)
       item.append(
         el(doc, 'div', 'folder-agent-card__line-detail folder-agent-card__hire-note', entry.note)
       );
+    if (onEditHire && entry.key && entry.roleID) {
+      const edit = el(doc, 'button', 'folder-agent-card__hire-edit', 'Edit agent');
+      edit.type = 'button';
+      edit.dataset.hireEdit = entry.key;
+      edit.setAttribute('aria-label', `Edit planned agent ${entry.name}`);
+      edit.addEventListener('click', () => onEditHire(entry, edit, item));
+      item.append(edit);
+    }
     list.append(item);
   });
   block.append(list);
@@ -2032,6 +2190,20 @@ function renderProjectHolders(doc, view, fetchImpl) {
   return section;
 }
 
+function hireDraftPayload(drafts, selected) {
+  if (!(drafts instanceof Map)) return {};
+  const active = new Set(selected || []);
+  const edits = Object.fromEntries(
+    [...drafts]
+      .filter(([, choice]) => active.has(choice.step))
+      .map(([key, choice]) => [
+        key,
+        { name: choice.name, provider: choice.provider, model: choice.model }
+      ])
+  );
+  return Object.keys(edits).length ? { hire_edits: edits } : {};
+}
+
 export function renderFolderAgentReport(
   view,
   doc = document,
@@ -2060,6 +2232,159 @@ export function renderFolderAgentReport(
   const selected = new Set(view.plan?.selected || []);
   let planHost = null;
   let setUpButton = null;
+  let planRequest = 0;
+  // Keep only user picks, not server suggestions. A temporary untick keeps a
+  // step's picks; a renamed/removed hire discards them once that step returns.
+  const faces = view.hireFaces instanceof Map ? view.hireFaces : new Map();
+  const drafts = view.hireDrafts instanceof Map ? view.hireDrafts : new Map();
+  view.hireFaces = faces;
+  view.hireDrafts = drafts;
+  const applyFaces = plan => {
+    const offered = new Map((plan?.steps || []).map(step => [step.handle, step]));
+    for (const [name, choice] of faces) {
+      const step = offered.get(choice.step);
+      if (!step || (step.chosen && !plan.hires.some(entry => (entry.key || entry.name) === name)))
+        faces.delete(name);
+    }
+    (plan?.hires || []).forEach(entry => {
+      const key = entry.key || entry.name;
+      if (faces.has(key)) entry.character = faces.get(key).character;
+    });
+  };
+  applyFaces(view.plan);
+  const win = cardWindow(doc);
+  let recordsReady = null;
+  const agentRecords = () => (recordsReady ||= fetchAgentRecords(fetchImpl));
+  let picking = false;
+  const onPickFace =
+    typeof win?.CharacterPicker?.open === 'function' && selecting
+      ? async (entry, trigger, draw) => {
+          if (picking) return;
+          picking = true;
+          const pickerFocus = event => {
+            if (event.target?.closest?.('#charPickerHost')) event.stopImmediatePropagation();
+          };
+          try {
+            const records = await agentRecords();
+            if (card.isConnected === false || trigger.isConnected === false) return;
+            const taken = [...(records?.values() || [])]
+              .filter(record => record.appearance?.mode === 'character')
+              .map(record => record.appearance.character?.catalog_id)
+              .filter(Boolean);
+            (view.plan?.hires || []).forEach(other => {
+              if (other.name !== entry.name && other.character) taken.push(other.character);
+            });
+            doc.addEventListener?.('focusin', pickerFocus, true);
+            const answer = await win.CharacterPicker.open({
+              selectedId: entry.character || '',
+              taken: [...new Set(taken)],
+              role: HIRED_AGENT_ROLE,
+              trigger,
+              showSkip: true
+            });
+            if (card.isConnected === false || trigger.isConnected === false) return;
+            if (answer?.action === 'choose' || answer?.action === 'skip') {
+              entry.character = answer.action === 'choose' ? String(answer.catalogId || '') : '';
+              faces.set(entry.key || entry.name, { character: entry.character, step: entry.step });
+              draw();
+            }
+          } finally {
+            doc.removeEventListener?.('focusin', pickerFocus, true);
+            picking = false;
+            if (trigger.isConnected !== false) trigger.focus?.({ preventScroll: true });
+          }
+        }
+      : null;
+  let editing = false;
+  const onEditHire =
+    selecting && win?.AgentCreateForm?.mount && win?.AgentAppearanceEditor?.create
+      ? async (entry, trigger, item) => {
+          if (editing || picking) return;
+          editing = true;
+          ++planRequest;
+          const suspended = ['button', 'input', 'select'].flatMap(tag =>
+            Array.from(card.querySelectorAll(tag)).map(control => {
+              const disabled = control.disabled;
+              control.disabled = true;
+              return [control, disabled];
+            })
+          );
+          let editor = null;
+          const close = (focus = true) => {
+            editor?.destroy();
+            if (editor) {
+              editor.element.hidden = true;
+              editor.element.remove?.();
+            }
+            suspended.forEach(([control, disabled]) => {
+              control.disabled = disabled;
+            });
+            editing = false;
+            if (focus && trigger.isConnected !== false) trigger.focus?.({ preventScroll: true });
+          };
+          try {
+            const records = await agentRecords();
+            if (card.isConnected === false || trigger.isConnected === false) return close(false);
+            const taken = [...(records?.values() || [])]
+              .filter(record => record.appearance?.mode === 'character')
+              .map(record => record.appearance.character?.catalog_id)
+              .filter(Boolean);
+            (view.plan?.hires || []).forEach(other => {
+              if ((other.key || other.name) !== entry.key && other.character)
+                taken.push(other.character);
+            });
+            editor = renderHireDraftEditor(doc, {
+              entry,
+              models: view.plan.hireModels,
+              taken: [...new Set(taken)],
+              onCancel: close,
+              onSave: async (choice, character) => {
+                const pending = new Map(drafts);
+                pending.set(entry.key, { ...choice, step: entry.step });
+                const { ok, payload } = await post(
+                  `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(view.workspaceID)}/plan`,
+                  { selected: [...selected], ...hireDraftPayload(pending, [...selected]) },
+                  fetchImpl
+                );
+                if (!ok || !payload?.plan)
+                  throw new Error(String(payload?.error || 'The draft could not be reviewed.'));
+                if (card.isConnected === false || editor.element.isConnected === false)
+                  return close(false);
+                const plan = planView(payload.plan);
+                const saved = plan.hires.find(hire => hire.key === entry.key);
+                if (!saved)
+                  throw new Error(
+                    'That role is no longer planned. Cancel and review the current team.'
+                  );
+                drafts.set(entry.key, {
+                  name: saved.name,
+                  provider: saved.provider,
+                  model: saved.modelID,
+                  step: entry.step
+                });
+                faces.set(entry.key, { character, step: entry.step });
+                close(false);
+                acceptPlan(plan);
+                Array.from(planHost?.querySelectorAll('button') || [])
+                  .find(button => button.dataset.hireEdit === entry.key)
+                  ?.focus?.({ preventScroll: true });
+              }
+            });
+            item.append(editor.element);
+            editor.focus();
+          } catch (failure) {
+            close();
+            const message = el(
+              doc,
+              'p',
+              'folder-agent-card__error',
+              failure?.message || 'The agent draft editor could not be opened.'
+            );
+            message.setAttribute('role', 'alert');
+            item.append(message);
+          }
+        }
+      : null;
   const onTick = (handle, checked, excludes) => {
     if (checked) {
       selected.add(handle);
@@ -2069,8 +2394,14 @@ export function renderFolderAgentReport(
     return refreshPlan();
   };
   const refreshPlan = async () => {
-    const plan = await fetchFolderAgentPlan(view.workspaceID, [...selected], fetchImpl);
-    if (!plan) return;
+    const request = ++planRequest;
+    const edits = hireDraftPayload(drafts, [...selected]).hire_edits;
+    const plan = await fetchFolderAgentPlan(view.workspaceID, [...selected], fetchImpl, edits);
+    if (!plan || request !== planRequest) return;
+    acceptPlan(plan);
+  };
+  const acceptPlan = plan => {
+    applyFaces(plan);
     view.plan = plan;
     // The server may have set a step aside (two that cannot run together):
     // the boxes follow its choice.
@@ -2084,7 +2415,12 @@ export function renderFolderAgentReport(
       // that now holds the way the owner just left.
       const swapped = Boolean(doc.activeElement?.dataset?.altStep);
       planHost.replaceChildren(
-        renderPlan(doc, view, plan, plan.lines, 'plan', { selecting, onTick })
+        renderPlan(doc, view, plan, plan.lines, 'plan', {
+          selecting,
+          onTick,
+          onPickFace,
+          onEditHire
+        })
       );
       if (swapped)
         planHost
@@ -2254,6 +2590,7 @@ export function renderFolderAgentReport(
   if (view.setup) {
     const run = renderPlan(doc, view, view.plan, view.setup.lines, runPhase(view.setup), {
       now,
+      agentRecords,
       headFirst: compact
     });
     // In the balloon the run leads (its headline is where the owner looks);
@@ -2273,7 +2610,12 @@ export function renderFolderAgentReport(
   } else if (view.plan && (view.plan.steps.length || view.plan.runnable)) {
     planHost = el(doc, 'div', 'folder-agent-card__plan-host');
     planHost.append(
-      renderPlan(doc, view, view.plan, view.plan.lines, 'plan', { selecting, onTick })
+      renderPlan(doc, view, view.plan, view.plan.lines, 'plan', {
+        selecting,
+        onTick,
+        onPickFace,
+        onEditHire
+      })
     );
     card.append(planHost);
     if (!view.plan.runnable && view.plan.unavailable)
@@ -2408,7 +2750,19 @@ export function renderFolderAgentReport(
       }
       button.addEventListener('click', () => {
         // Set it up carries only the steps the owner left selected.
-        const extra = action.id === 'set_up' ? { selected: [...selected] } : undefined;
+        const extra =
+          action.id === 'set_up'
+            ? {
+                selected: [...selected],
+                hire_faces: Object.fromEntries(
+                  (view.plan?.hires || []).map(entry => [
+                    entry.key || entry.name,
+                    entry.character || ''
+                  ])
+                ),
+                ...hireDraftPayload(drafts, [...selected])
+              }
+            : undefined;
         return onAction?.(action.id, button, extra);
       });
       actions.append(button);
@@ -2492,16 +2846,17 @@ function safeSourceURL(value) {
 }
 
 // folderAgentSetUpLabel is the primary button's words for a plan (PRD FR20):
-// "Install N & set up" while the ticked steps install N plugins, else
+// "Install plugins & set up" while the ticked steps install plugins, else
 // "Set it up". Every surface that offers the action uses it.
 export function folderAgentSetUpLabel(plan) {
   const n = plan?.installs?.length || 0;
-  return n > 0 ? `Install ${n} & set up` : ACTION_LABELS.set_up;
+  return n > 0 ? 'Install plugins & set up' : ACTION_LABELS.set_up;
 }
 
 function planView(plan) {
   return {
     digest: String(plan.digest || ''),
+    assurance: String(plan.assurance || ''),
     runnable: Boolean(plan.runnable),
     unavailable: String(plan.unavailable || ''),
     selected: Array.isArray(plan.selected) ? plan.selected.map(String) : [],
@@ -2514,7 +2869,7 @@ function planView(plan) {
     defaultReason: String(plan.default_reason || ''),
     reorderNote: String(plan.reorder_note || ''),
     // The plugins the ticked steps download and install, in run order: the
-    // install block and the count on the button.
+    // visible install block and whether the button promises installation.
     installs: (Array.isArray(plan.installs) ? plan.installs : [])
       .map(entry => ({
         step: String(entry?.step || ''),
@@ -2536,13 +2891,19 @@ function planView(plan) {
     hires: (Array.isArray(plan.hires) ? plan.hires : [])
       .map(entry => ({
         step: String(entry?.step || ''),
+        key: String(entry?.key || ''),
+        roleID: String(entry?.role_id || ''),
+        provider: String(entry?.provider || ''),
+        modelID: String(entry?.model_id || ''),
         name: String(entry?.name || ''),
         job: String(entry?.job || ''),
+        character: String(entry?.character || ''),
         model: String(entry?.model || ''),
         note: String(entry?.note || '')
       }))
       .filter(entry => entry.name),
     hiresNote: String(plan.hires_note || ''),
+    hireModels: Array.isArray(plan.hire_models) ? plan.hire_models : [],
     // The other ways to set this folder up: steps that cannot run with a chosen
     // one, each with the host's line on what taking it gives up.
     alternatives: (Array.isArray(plan.alternatives) ? plan.alternatives : [])
@@ -2569,12 +2930,20 @@ function planView(plan) {
 }
 
 // fetchFolderAgentPlan asks for the plan of a selection of optional tools.
-export async function fetchFolderAgentPlan(workspaceID, selected, fetchImpl = globalThis.fetch) {
+export async function fetchFolderAgentPlan(
+  workspaceID,
+  selected,
+  fetchImpl = globalThis.fetch,
+  hireEdits
+) {
   if (!workspaceID || typeof fetchImpl !== 'function') return null;
   try {
     const { ok, payload } = await post(
       `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(workspaceID)}/plan`,
-      { selected },
+      {
+        selected,
+        ...(hireEdits && Object.keys(hireEdits).length ? { hire_edits: hireEdits } : {})
+      },
       fetchImpl
     );
     return ok && payload?.plan ? planView(payload.plan) : null;
@@ -2606,7 +2975,15 @@ export async function postFolderAgentAction(
   const url = folderAgentActionPath(view?.workspaceID, action);
   if (!url) return { error: 'That action is not available.' };
   let body = extra;
-  if (action === 'set_up') body = { plan_digest: view.plan?.digest || '', ...extra };
+  if (action === 'set_up')
+    body = {
+      plan_digest: view.plan?.digest || '',
+      hire_faces: Object.fromEntries(
+        (view.plan?.hires || []).map(entry => [entry.key || entry.name, entry.character || ''])
+      ),
+      ...hireDraftPayload(view.hireDrafts, view.plan?.selected),
+      ...extra
+    };
   else if (action === 'use_goal') {
     const goal = String(extra?.goal || '').trim();
     body = goal ? { answer: 'use', goal } : { answer: 'use' };
@@ -2627,7 +3004,10 @@ export async function postFolderAgentAction(
       try {
         const again = await post(
           `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(view.workspaceID)}/plan`,
-          { selected: extra.selected },
+          {
+            selected: extra.selected,
+            ...(body.hire_edits ? { hire_edits: body.hire_edits } : {})
+          },
           fetchImpl
         );
         if (again.ok && again.payload?.plan) refused = { ...refused, plan: again.payload.plan };
@@ -2635,6 +3015,15 @@ export async function postFolderAgentAction(
         // keep the server's view
       }
     }
+    if (refused?.plan?.hires && body?.hire_faces) {
+      refused.plan.hires = refused.plan.hires.map(entry =>
+        Object.hasOwn(body.hire_faces, entry.key || entry.name)
+          ? { ...entry, character: String(body.hire_faces[entry.key || entry.name] || '') }
+          : entry
+      );
+    }
+    if (refused && view.hireFaces instanceof Map) refused.hireFaces = view.hireFaces;
+    if (refused && view.hireDrafts instanceof Map) refused.hireDrafts = view.hireDrafts;
     return { error: String(payload?.error || 'That did not go through.'), view: refused };
   }
   // Home's map follows: a Set it up can turn a tile into a district or move

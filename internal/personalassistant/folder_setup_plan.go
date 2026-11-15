@@ -148,6 +148,9 @@ type FolderPlanLine struct {
 	// decides this, the card never reads it out of Name. It is presentation,
 	// not part of the plan's identity: the digest still covers every action.
 	Outcome string `json:"outcome,omitempty"`
+	// AgentName is display identity for a named hire line. It lets the card
+	// resolve a canonical face without parsing narration; never authority.
+	AgentName string `json:"agent_name,omitempty"`
 	// Progress is the runner's live words for this line ("Downloading <plugin>
 	// <version>" while working, the receipt words once done). Like
 	// State and the timestamps it is not part of the plan's identity.
@@ -193,7 +196,7 @@ func ValidateFolderPlanLine(line FolderPlanLine) error {
 	if line.Kind == "" {
 		return fmt.Errorf("%w: setup line", errFolderDigestInvalid)
 	}
-	for _, text := range []string{line.Name, line.Detail, line.Outcome, line.Progress} {
+	for _, text := range []string{line.Name, line.Detail, line.Outcome, line.Progress, line.AgentName} {
 		if len(text) > folderSetupMaxText || strings.ContainsAny(text, "\x00\r\n") || looksLikeFilesystemPath(text) {
 			return fmt.Errorf("%w: setup line", errFolderDigestInvalid)
 		}

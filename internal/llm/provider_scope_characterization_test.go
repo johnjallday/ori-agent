@@ -41,7 +41,8 @@ func TestInstalledCLIsExposeCharacterizedNarrowFilesystemMechanisms(t *testing.T
 			if err != nil {
 				t.Skipf("%s is not installed", tc.binary)
 			}
-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			// Help describes the binary, not the user's login/configuration.
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
 			output, err := runCLIHelpProbe(ctx, path, t.TempDir(), tc.args...)
 			if err != nil {
@@ -56,25 +57,33 @@ func TestInstalledCLIsExposeCharacterizedNarrowFilesystemMechanisms(t *testing.T
 	}
 }
 
-// Help needs neither login nor user configuration. Keep installed-CLI probes
-// out of the developer's CLI home, and bound both the child and output-pipe wait.
-func runCLIHelpProbe(ctx context.Context, path, home string, args ...string) ([]byte, error) {
+// installedCLIHelpCommand keeps a metadata-only probe away from personal CLI
+// homes and provider credentials. A deadline also bounds a broken installation;
+// WaitDelay bounds output draining if a wrapper leaves a pipe open after exit.
+func installedCLIHelpCommand(ctx context.Context, path, home string, args ...string) *exec.Cmd {
+	// #nosec G204 -- path is exec.LookPath's installed CLI; callers supply fixed help arguments.
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Dir = home
+	cmd.WaitDelay = time.Second
 	cmd.Env = []string{
-		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + home, "USERPROFILE=" + home,
 		"CODEX_HOME=" + home, "CLAUDE_CONFIG_DIR=" + home,
 		"XDG_CONFIG_HOME=" + home, "APPDATA=" + home, "LOCALAPPDATA=" + home,
 		"TMPDIR=" + home, "TEMP=" + home, "TMP=" + home,
 	}
-	for _, key := range []string{"SYSTEMROOT", "PATHEXT"} {
+	// Keep only process-launch essentials, not API keys, login tokens, config
+	// overrides or proxy credentials inherited by the test runner.
+	for _, key := range []string{"PATH", "SystemRoot", "SYSTEMROOT", "COMSPEC", "PATHEXT"} {
 		if value, ok := os.LookupEnv(key); ok {
 			cmd.Env = append(cmd.Env, key+"="+value)
 		}
 	}
-	cmd.WaitDelay = 250 * time.Millisecond
-	output, err := cmd.CombinedOutput()
+	return cmd
+}
+
+// Keep one command policy for both the real help and both subprocess suites.
+func runCLIHelpProbe(ctx context.Context, path, home string, args ...string) ([]byte, error) {
+	output, err := installedCLIHelpCommand(ctx, path, home, args...).CombinedOutput()
 	if ctx.Err() != nil {
 		return output, fmt.Errorf("CLI help deadline: %w", ctx.Err())
 	}

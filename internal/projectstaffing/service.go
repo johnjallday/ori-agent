@@ -198,6 +198,11 @@ func (s *Service) decide(song Song, consent *workspace.ProjectStaffingConsent, r
 // rule for where the decision is made.
 func (s *Service) decideTeam(homeID string, team Team, consent *workspace.ProjectStaffingConsent, roleIDs []string,
 	taken func(string) bool, reserve bool) ([]Fill, error) {
+	return s.decideTeamNamed(homeID, team, consent, roleIDs, taken, reserve, nil)
+}
+
+func (s *Service) decideTeamNamed(homeID string, team Team, consent *workspace.ProjectStaffingConsent, roleIDs []string,
+	taken func(string) bool, reserve bool, names map[string]string) ([]Fill, error) {
 	roles := map[string]workspace.AssistantProgramRoleSpec{}
 	for _, role := range team.Roles {
 		roles[role.ID] = role
@@ -214,6 +219,15 @@ func (s *Service) decideTeam(homeID string, team Team, consent *workspace.Projec
 		})
 		switch decision.Action {
 		case workspace.ProjectStaffingCreate:
+			if name := names[role.ID]; name != "" {
+				// An explicitly confirmed name is exact: never suffix it, adopt
+				// its holder, or replace a different in-flight reservation.
+				entry, _ := consent.Role(role.ID)
+				if taken(name) || (entry.PendingName != "" && entry.PendingName != name) {
+					return nil, ErrReservationHeld
+				}
+				decision.AgentName = name
+			}
 			// An agent already holds the name an earlier create reserved and no
 			// project proves the consent made it: never step around it with a
 			// second create (that is how a second shared agent was born).

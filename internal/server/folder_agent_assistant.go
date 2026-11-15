@@ -25,6 +25,7 @@ type folderAgentAssistantRun struct {
 	team   projectstaffing.Team
 	teamOK bool
 	plan   projectstaffing.SharedPlan
+	edit   *folderAgentAssistantEdit
 }
 
 // creates says the hire would make a new agent, which needs a model.
@@ -70,6 +71,9 @@ func (b *ServerBuilder) hireFolderAgentAssistant(ctx context.Context, rec folder
 		return fail(personalassistant.FolderStopAssistantUnavailable,
 			"Its plugin is not installed, so it could not be hired", errors.New("the Home's song team cannot be read"))
 	}
+	if a.edit != nil && a.plan.Role.ID != a.edit.roleID {
+		return fail(personalassistant.FolderStopPlanChanged, "", errors.New("the shared role changed after confirmation"))
+	}
 	if a.plan.Name != "" {
 		setLine(a.line, personalassistant.FolderLineWorking, "Hiring "+a.plan.Name)
 	}
@@ -78,12 +82,20 @@ func (b *ServerBuilder) hireFolderAgentAssistant(ctx context.Context, rec folder
 		if b.assistantStaffing == nil {
 			return false, errors.New("staffing is unavailable")
 		}
-		return b.assistantStaffing.CreateSharedProjectAgent(ctx, role, name, "", "", marker)
+		provider, model := "", ""
+		if a.edit != nil {
+			provider, model = a.edit.value.Provider, a.edit.value.Model
+		}
+		return b.assistantStaffing.CreateSharedProjectAgent(ctx, role, name, provider, model, rec.HireAppearance(name), marker)
 	}
 	var fills []projectstaffing.Fill
 	err := b.projectStaffing.WithHome(a.homeID, func(tx *projectstaffing.Tx) error {
 		var hireErr error
-		fills, hireErr = tx.HireShared(ctx, a.team, grant, modelReady, create)
+		var names map[string]string
+		if a.edit != nil {
+			names = map[string]string{a.edit.roleID: a.edit.value.Name}
+		}
+		fills, hireErr = tx.HireSharedNamed(ctx, a.team, grant, modelReady, names, create)
 		return hireErr
 	})
 	label := a.plan.Role.Label
@@ -247,6 +259,6 @@ func folderAgentAssistantFacts(ctx context.Context, b *ServerBuilder, userID, pr
 	if !known {
 		return folderlook.HomeAssistant{}, false
 	}
-	return folderlook.HomeAssistant{Label: shared.Role.Label, Name: shared.Name, Job: shared.Role.Description,
+	return folderlook.HomeAssistant{RoleID: shared.Role.ID, Label: shared.Role.Label, Name: shared.Name, Job: shared.Role.Description,
 		Taken: shared.Taken, State: state}, true
 }
