@@ -1,9 +1,12 @@
 package llm
 
 import (
+	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // These tests record the provider characterization performed against Codex CLI
@@ -36,7 +39,15 @@ func TestInstalledCLIsExposeCharacterizedNarrowFilesystemMechanisms(t *testing.T
 			if err != nil {
 				t.Skipf("%s is not installed", tc.binary)
 			}
-			output, err := exec.Command(path, tc.args...).CombinedOutput()
+			// Help describes the binary, not the user's login/configuration. In
+			// particular, Codex startup can block on a busy real CODEX_HOME.
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			cmd := installedCLIHelpCommand(ctx, path, t.TempDir(), tc.args...)
+			output, err := cmd.CombinedOutput()
+			if ctx.Err() != nil {
+				t.Fatalf("%s help exceeded its startup deadline: %v", tc.binary, ctx.Err())
+			}
 			if err != nil {
 				t.Fatalf("%s help: %v: %s", tc.binary, err, output)
 			}
@@ -47,6 +58,31 @@ func TestInstalledCLIsExposeCharacterizedNarrowFilesystemMechanisms(t *testing.T
 			}
 		})
 	}
+}
+
+// installedCLIHelpCommand keeps a metadata-only probe away from personal CLI
+// homes and provider credentials. A deadline also bounds a broken installation;
+// WaitDelay bounds output draining if a wrapper leaves a pipe open after exit.
+func installedCLIHelpCommand(ctx context.Context, path, home string, args ...string) *exec.Cmd {
+	// #nosec G204 -- path is exec.LookPath's installed CLI; callers supply fixed help arguments.
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Dir = home
+	cmd.WaitDelay = time.Second
+	cmd.Env = []string{
+		"HOME=" + home,
+		"USERPROFILE=" + home,
+		"CODEX_HOME=" + home,
+		"CLAUDE_CONFIG_DIR=" + home,
+		"XDG_CONFIG_HOME=" + home,
+	}
+	// Keep only process-launch essentials, not API keys, login tokens, config
+	// overrides or proxy credentials inherited by the test runner.
+	for _, key := range []string{"PATH", "SystemRoot", "COMSPEC", "PATHEXT", "TMPDIR", "TEMP", "TMP"} {
+		if value, ok := os.LookupEnv(key); ok {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
+	}
+	return cmd
 }
 
 // This starts red by design: the pre-feature Claude native posture used

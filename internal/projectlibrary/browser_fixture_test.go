@@ -54,6 +54,13 @@ func browserFixtureSandbox(raw, owner string) (string, error) {
 func createBrowserFixture(t *testing.T, root string) (*Store, Scope, browserFixture) {
 	t.Helper()
 	// root is a new t.TempDir or a newly created directory in the checked sandbox.
+	// Grants pin physical directories and reject symlink traversal. macOS may
+	// supply t.TempDir through /var -> /private/var; authorize the canonical
+	// fixture path, not that ambient temporary-directory alias.
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
 	exports := filepath.Join(root, "exports")
 	folders, err := workspace.NewFileStore(exports)
 	if err != nil {
