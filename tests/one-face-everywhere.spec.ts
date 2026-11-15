@@ -93,6 +93,24 @@ test('working tile wears the same chosen face and polling never repeats the agen
   await expect.poll(() => folderReads).toBeGreaterThan(1);
   expect(agentReads).toBe(1);
   await page.screenshot({ path: `${evidence}/group4-working-tile.png` });
+  await tile.click();
+  const modal = page.locator('#cockpitContextModal');
+  await expect(modal.locator('[data-cockpit-rail-back]')).toBeFocused();
+  await expect(modal.locator('.cockpit-rail-next-detail')).toHaveText(
+    'Albums Manager: Reading the listening notes…'
+  );
+  const open = modal.locator('[data-cockpit-rail-open]');
+  for (const state of ['normal', 'hover', 'focus']) {
+    if (state === 'hover') await open.hover();
+    if (state === 'focus') {
+      await modal.locator('[data-cockpit-rail-back]').focus();
+      await page.keyboard.press('Tab');
+      await expect(open).toBeFocused();
+    }
+    await expect(open).toHaveCSS('text-decoration-line', 'none');
+  }
+  await expect(open).toHaveCSS('outline-style', 'solid');
+  await page.screenshot({ path: `${evidence}/group5-next-move-and-link.png` });
 });
 
 test('Team orders the commander before the rest and removes case-insensitive duplicates', async ({
@@ -112,6 +130,29 @@ test('Team orders the commander before the rest and removes case-insensitive dup
   await expect(team.locator('.cockpit-rail-commander-badge')).toHaveCount(1);
   await page.screenshot({ path: `${evidence}/group3-several-agents.png` });
 });
+
+for (const width of [640, 420]) {
+  test(`document drawer overlap at saved width ${width} (placement cut line)`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.addInitScript(
+      width => localStorage.setItem('ori.assistant.drawer.width', String(width)),
+      width
+    );
+    await page.route('**/api/agents/dashboard/list', route => route.fulfill({ json: [] }));
+    await page.goto('/');
+    await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
+    await page.evaluate(() => (window as any).PersonalAssistantPanel.open());
+    const drawer = page.locator('#personalAssistantPanel');
+    await expect(drawer).toBeVisible();
+    await page.locator('[data-ws-id="generated"]').click();
+    const modal = page.locator('#cockpitContextModal');
+    await expect(modal.locator('[data-cockpit-rail-back]')).toBeFocused();
+    const panelBox = await modal.locator('.modal-dialog').boundingBox();
+    const drawerBox = await drawer.boundingBox();
+    console.log('placement cut line', { width, panelBox, drawerBox });
+    await page.screenshot({ path: `${evidence}/group5-drawer-${width}.png` });
+  });
+}
 
 for (const theme of ['light', 'dark']) {
   test(`panel chosen/generated/pending faces, stable focus (${theme})`, async ({ page }) => {

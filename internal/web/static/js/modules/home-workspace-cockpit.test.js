@@ -617,6 +617,26 @@ test('recommendedNextMove never claims an AI produced the recommendation (FR65)'
 // Rail view model (FR62-FR69)
 // ---------------------------------------------------------------------------
 
+test('next move uses a named live folder line, keeps priority and falls back without one', () => {
+  const live = { name: 'Albums Manager', line: 'Reading the listening notes…' };
+  assert.equal(
+    recommendedNextMove({ active: true }, live).detail,
+    'Albums Manager: Reading the listening notes…'
+  );
+  assert.equal(recommendedNextMove({}, live).kind, 'running');
+  assert.equal(
+    recommendedNextMove({ active: true }, { name: 'Albums Manager', line: '' }).detail,
+    'An agent is currently working in this workspace.'
+  );
+  assert.equal(recommendedNextMove({ needs_attention_count: 1 }, live).kind, 'attention');
+  assert.equal(recommendedNextMove({ setup_required: true }, live).kind, 'setup');
+  const view = workspaceRailView(
+    { active: true },
+    { name: '<Agent>', line: '<script>no</script>' }
+  );
+  assert.match(renderWorkspaceRailHTML(view), /&lt;Agent&gt;: &lt;script&gt;no&lt;\/script&gt;/);
+});
+
 test('entryAgentName + agentRoster read only what the payload carries (FR68/FR69)', () => {
   assert.equal(entryAgentName({ entry_agent_name: '  Scout  ' }), 'Scout');
   assert.equal(entryAgentName({}), '');

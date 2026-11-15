@@ -1277,6 +1277,10 @@
   text-align: center;
 }
 
+.cockpit-context-modal a.cockpit-rail-open:any-link {
+  text-decoration: none;
+}
+
 .cockpit-rail-note {
   flex: 1 1 100%;
   margin: 0;

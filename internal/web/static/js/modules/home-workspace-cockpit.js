@@ -791,9 +791,12 @@ export function renderSignalFiltersHTML(counts, activeSignal, partialSignals = [
  * qualifies, the honest "No immediate action" answer is returned and the caller
  * still renders Open Workspace (FR66).
  */
-export function recommendedNextMove(workspace) {
+export function recommendedNextMove(workspace, liveAgent = null) {
   const ws = workspace || {};
   const signals = workspaceSignals(ws);
+  const liveName = String(liveAgent?.name || '').trim();
+  const liveLine = String(liveAgent?.line || '').trim();
+  const hasLiveLine = Boolean(liveName && liveLine);
 
   if (signals.attention !== null && signals.attention > 0) {
     return {
@@ -815,11 +818,13 @@ export function recommendedNextMove(workspace) {
       detail: 'Setup has not been completed for this workspace.'
     };
   }
-  if (signals.active) {
+  if (signals.active || hasLiveLine) {
     return {
       kind: 'running',
       label: 'Check work in progress',
-      detail: 'An agent is currently working in this workspace.'
+      detail: hasLiveLine
+        ? `${liveName}: ${liveLine}`
+        : 'An agent is currently working in this workspace.'
     };
   }
   const nextRun = String(ws.next_scheduled_run || ws.next_run || '').trim();
@@ -1143,7 +1148,7 @@ export const HQ_SITE_ID = '__personal_hq_site__';
  * unavailable, whether Ask Commander is offered) are assertable without parsing
  * markup.
  */
-export function workspaceRailView(workspace) {
+export function workspaceRailView(workspace, liveAgent = null) {
   const ws = workspace || {};
   const signals = workspaceSignals(ws);
   const commander = entryAgentName(ws);
@@ -1155,7 +1160,7 @@ export function workspaceRailView(workspace) {
     mission: String(ws.description || ws.mission || '').trim(),
     isPersonalHQ: ws.is_personal_hq === true || ws.designation === 'personal_hq',
     status: signals,
-    nextMove: recommendedNextMove(ws),
+    nextMove: recommendedNextMove(ws, liveAgent),
     openHref: ws.folder_slug
       ? workspacePageURL(ws.folder_slug, [], { search: signals.attention > 0 ? 'panel=tasks' : '' })
       : '',
@@ -4248,7 +4253,13 @@ import {
     ensureAgentFaces([entryAgentName(item), ...agentRoster(item).map(agent => agent.name)]);
     const workspaceHTML = isGroupWorkspace(item)
       ? ''
-      : renderWorkspaceRailHTML({ ...workspaceRailView(item), portraitHTML: homePortrait });
+      : renderWorkspaceRailHTML({
+          ...workspaceRailView(item, {
+            name: lastFolderAgentViews.find(view => view.workspace_id === item.id)?.agent_name,
+            line: state.folderAgentLines[item.id]
+          }),
+          portraitHTML: homePortrait
+        });
     showContextPanel(
       isGroupWorkspace(item)
         ? renderGroupRailHTML(
@@ -5449,6 +5460,7 @@ import {
     const facesChanged = JSON.stringify(faces) !== JSON.stringify(state.folderAgentFaces);
     state.folderAgentFaces = faces;
     if (changed || facesChanged) mountMap();
+    if (changed) renderRail({ announceChange: false });
     // A look that just finished may have changed what the workspace shows.
     if (finished) void refreshQuietly();
     if (Object.keys(next).length) folderAgentTimer = setTimeout(refreshFolderAgentLines, 2000);
