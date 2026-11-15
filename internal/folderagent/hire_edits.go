@@ -92,6 +92,9 @@ func hireEditRefusal(code, message string, status int) error {
 // draft sidecar. Once a run has started its create settings are immutable;
 // retries may omit them, but cannot rename/reconfigure a partially made team.
 func (s *Service) checkedHireEdits(ctx context.Context, rec Record, selected []string, requested map[string]HireEdit) (map[string]HireEdit, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if requested == nil {
 		requested = rec.HireEdits
 	}

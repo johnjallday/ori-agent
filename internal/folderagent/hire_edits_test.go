@@ -102,6 +102,21 @@ func TestHireEdits_PreviewIsReadOnlyAndMaterialConsentIsRequired(t *testing.T) {
 	}
 }
 
+func TestHireEdits_CancelledReviewDoesNotChangeTheDraft(t *testing.T) {
+	h, id, selected, original := editableHires(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	before, _ := h.svc.deps.Store.Read(id)
+	_, err := h.svc.PlanWithHires(ctx, "u1", id, selected, map[string]HireEdit{original.Hires[0].Key: {Name: "Cancelled"}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled review continued: %v", err)
+	}
+	after, _ := h.svc.deps.Store.Read(id)
+	if !reflect.DeepEqual(before, after) || len(h.setups.runs) != 0 {
+		t.Fatal("cancelled review changed setup")
+	}
+}
+
 func TestHireEdits_NoModelPreviewCannotAuthorizeSetup(t *testing.T) {
 	h, id, selected, original := editableHires(t)
 	h.svc.deps.Hiring = fakeHiring{}
