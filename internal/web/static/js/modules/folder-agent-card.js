@@ -383,13 +383,22 @@ export function folderAgentReceiptRows(view) {
 }
 
 // renderReceipt draws the receipt rows as a list of label, words and link.
-function renderReceipt(doc, rows) {
+function renderReceipt(doc, rows, view, agentRecords) {
   const list = el(doc, 'dl', 'folder-agent-card__receipt-rows');
   rows.forEach(row => {
     const item = el(doc, 'div', 'folder-agent-card__receipt-row');
     item.dataset.kind = row.label.toLowerCase();
     const words = el(doc, 'dd', 'folder-agent-card__receipt-words');
-    words.append(el(doc, 'span', 'folder-agent-card__receipt-text', row.words));
+    if (row.label === 'Hired' && view?.setup?.receipt?.hired?.length) {
+      view.setup.receipt.hired.forEach(name => {
+        const agent = el(doc, 'span', 'folder-agent-card__receipt-agent');
+        agent.append(
+          renderHiredFace(doc, name, '', agentRecords, true),
+          el(doc, 'span', 'folder-agent-card__receipt-agent-name', name)
+        );
+        words.append(agent);
+      });
+    } else words.append(el(doc, 'span', 'folder-agent-card__receipt-text', row.words));
     if (row.link) {
       const link = el(doc, 'a', 'folder-agent-card__receipt-link', row.link.text);
       link.href = row.link.href;
@@ -399,6 +408,36 @@ function renderReceipt(doc, rows) {
     list.append(item);
   });
   return list;
+}
+
+// Pending creates can use their confirmed face. Finished/existing agents and
+// receipts use only the current profile, never a historical suggestion.
+function renderHiredFace(doc, name, character, agentRecords, actualOnly = false) {
+  const win = cardWindow(doc);
+  const face = el(doc, 'span', 'folder-agent-card__hired-face');
+  face.dataset.agentName = name;
+  face.setAttribute('aria-hidden', 'true');
+  let records = null;
+  let answered = false;
+  const draw = () => {
+    if (actualOnly && !answered) return;
+    const record = records?.get?.(name);
+    const input = record
+      ? agentFace({ name }, record, win)
+      : hireFace(name, win, actualOnly ? '' : character);
+    const markup = faceMarkup(win, input, '', 28);
+    if (markup) face.innerHTML = markup;
+    else face.textContent = (name[0] || '?').toUpperCase();
+  };
+  draw();
+  watchFaces(face, win, draw, doc);
+  void Promise.resolve(agentRecords?.()).then(found => {
+    if (face.isConnected === false) return;
+    records = found;
+    answered = true;
+    draw();
+  });
+  return face;
 }
 
 // timeOf reads a server timestamp as epoch milliseconds; 0 when absent.
@@ -419,6 +458,7 @@ function lineView(line, defaultState = '') {
     // The host's mark: the outcome-line item this action belongs to, or ''
     // for a detail. The card never works it out from the words.
     outcome: String(line.outcome || ''),
+    agentName: String(line.agent_name || ''),
     state: String(line.state || defaultState),
     progress: String(line.progress || ''),
     startedAt: timeOf(line.started_at),
@@ -1125,11 +1165,13 @@ function actionTime(doc, line, now) {
 // renderAction draws one action: a spinner while it works, its name (or,
 // once done, the runner's receipt words), the live words after the name, and
 // the time last.
-function renderAction(doc, action, now) {
+function renderAction(doc, action, now, faceForAction = null) {
   const state = action.state || 'waiting';
   const act = el(doc, 'span', 'folder-agent-card__action');
   act.dataset.state = state;
   if (action.detail) act.setAttribute('title', action.detail);
+  const face = faceForAction?.(action);
+  if (face) act.append(face);
   if (state === 'working') {
     const spinner = el(doc, 'span', 'folder-agent-card__spinner');
     spinner.setAttribute('aria-hidden', 'true');
@@ -1137,7 +1179,16 @@ function renderAction(doc, action, now) {
   }
   const receipt = state === 'done' && action.progress;
   act.append(
-    el(doc, 'span', 'folder-agent-card__action-name', receipt ? action.progress : action.name)
+    el(
+      doc,
+      'span',
+      'folder-agent-card__action-name',
+      receipt
+        ? action.progress === 'Already in your Home' && action.agentName
+          ? `${action.agentName} · ${action.progress}`
+          : action.progress
+        : action.name
+    )
   );
   if (!receipt && action.progress && (state === 'working' || state === 'failed'))
     act.append(el(doc, 'span', 'folder-agent-card__action-progress', action.progress));
@@ -1240,11 +1291,36 @@ function renderPlan(
   plan,
   lines,
   phase,
-  { selecting = false, onTick, onPickFace, now = Date.now(), headFirst = false } = {}
+  { selecting = false, onTick, onPickFace, agentRecords, now = Date.now(), headFirst = false } = {}
 ) {
   const section = el(doc, 'section', 'folder-agent-card__run');
   section.dataset.phase = phase;
   const steps = plan?.steps || [];
+  const faceForAction =
+    phase === 'plan'
+      ? null
+      : action => {
+          if (!['hire', 'assistant'].includes(action.kind)) return null;
+          const entry = (plan?.hires || []).find(
+            hire =>
+              action.name === `Hires ${hire.name}` && (!action.step || hire.step === action.step)
+          );
+          // Legacy saved lines predate agent_name. Their host-written hire prefix
+          // is a display-only fallback, never an execution or identity authority.
+          const name =
+            action.agentName ||
+            entry?.name ||
+            (action.name.startsWith('Hires ') ? action.name.slice(6) : '');
+          return name
+            ? renderHiredFace(
+                doc,
+                name,
+                entry?.character || '',
+                agentRecords,
+                action.state === 'done'
+              )
+            : null;
+        };
   if (plan) {
     section.dataset.planSource = plan.source;
     if (plan.source === 'agent' && plan.words) {
@@ -1355,7 +1431,7 @@ function renderPlan(
   // run shows what finished above the line that failed.
   if (phase === 'done' || phase === 'stopped') {
     const receiptRows = folderAgentReceiptRows(view);
-    if (receiptRows.length) section.append(renderReceipt(doc, receiptRows));
+    if (receiptRows.length) section.append(renderReceipt(doc, receiptRows, view, agentRecords));
   }
   const list = el(doc, 'ol', 'folder-agent-card__plan');
   const renderRow = (row, index, isChosen) => {
@@ -1438,7 +1514,7 @@ function renderPlan(
       const actions = el(doc, 'span', 'folder-agent-card__actions-line');
       shown.forEach((action, k) => {
         if (k) actions.append(el(doc, 'span', 'folder-agent-card__action-sep', ' · '));
-        actions.append(renderAction(doc, action, now));
+        actions.append(renderAction(doc, action, now, faceForAction));
       });
       body.append(actions);
     } else if (!row.actions.length) {
@@ -2110,6 +2186,7 @@ export function renderFolderAgentReport(
   applyFaces(view.plan);
   const win = cardWindow(doc);
   let recordsReady = null;
+  const agentRecords = () => (recordsReady ||= fetchAgentRecords(fetchImpl));
   let picking = false;
   const onPickFace =
     typeof win?.CharacterPicker?.open === 'function' && selecting
@@ -2120,8 +2197,7 @@ export function renderFolderAgentReport(
             if (event.target?.closest?.('#charPickerHost')) event.stopImmediatePropagation();
           };
           try {
-            recordsReady ||= fetchAgentRecords(fetchImpl);
-            const records = await recordsReady;
+            const records = await agentRecords();
             if (card.isConnected === false || trigger.isConnected === false) return;
             const taken = [...(records?.values() || [])]
               .filter(record => record.appearance?.mode === 'character')
@@ -2347,6 +2423,7 @@ export function renderFolderAgentReport(
   if (view.setup) {
     const run = renderPlan(doc, view, view.plan, view.setup.lines, runPhase(view.setup), {
       now,
+      agentRecords,
       headFirst: compact
     });
     // In the balloon the run leads (its headline is where the owner looks);

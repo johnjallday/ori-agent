@@ -1956,14 +1956,15 @@ test('a finished run shows its receipt with links, leaves out empty rows and col
   const card = renderFolderAgentReport(view, stubDocument(), {});
   const run = card.querySelector('.folder-agent-card__run');
   assert.equal(text(run, '.folder-agent-card__run-head'), 'All done · 1 step · 41 s');
-  const rows = run
-    .querySelectorAll('.folder-agent-card__receipt-row')
-    .map(row => [
-      row.dataset.kind,
-      text(row, '.folder-agent-card__receipt-text'),
-      row.querySelector('.folder-agent-card__receipt-link')?.textContent || '',
-      row.querySelector('.folder-agent-card__receipt-link')?.href || ''
-    ]);
+  const rows = run.querySelectorAll('.folder-agent-card__receipt-row').map(row => [
+    row.dataset.kind,
+    row
+      .querySelectorAll('.folder-agent-card__receipt-agent-name')
+      .map(node => node.textContent)
+      .join(' · ') || text(row, '.folder-agent-card__receipt-text'),
+    row.querySelector('.folder-agent-card__receipt-link')?.textContent || '',
+    row.querySelector('.folder-agent-card__receipt-link')?.href || ''
+  ]);
   assert.deepEqual(rows, [
     [
       'installed',
@@ -3944,6 +3945,122 @@ test('when the host cannot name the hires it says so in one sentence, with no ro
   assert.equal(block.querySelectorAll('.folder-agent-card__hire').length, 0);
   assert.equal(block.querySelector('.folder-agent-card__heading'), null);
   assert.equal(block.querySelectorAll('a').length, 0);
+});
+
+test('hire lines show confirmed faces while working, then the actual agent face; missing choices are generated', async () => {
+  for (const state of ['working', 'done']) {
+    const win = faceWindow();
+    win.characters.byId = { analyst: { id: 'analyst' }, builder: { id: 'builder' } };
+    const doc = stubDocument();
+    doc.defaultView = win;
+    let answer;
+    const response = new Promise(resolve => {
+      answer = resolve;
+    });
+    const line = {
+      step: HOME,
+      kind: 'hire',
+      name: 'Hires Manager',
+      agent_name: 'Manager',
+      state,
+      progress: `${state === 'done' ? 'Hired' : 'Hiring'} Manager`
+    };
+    const view = folderAgentReportView(
+      reported({
+        state: 'setting_up',
+        plan: { ...homePlanOf([line], []), hires: [hire('Manager', { character: 'analyst' })] },
+        setup: { status: 'running', lines: [line] }
+      })
+    );
+    const card = renderFolderAgentReport(view, doc, { fetchImpl: () => response });
+    const face = card.querySelector('.folder-agent-card__hired-face');
+    assert.equal(face.dataset.agentName, 'Manager');
+    if (state === 'working')
+      assert.equal(lastFace(win).input.appearance.character.catalog_id, 'analyst');
+    else
+      assert.equal(
+        win.drawn.length,
+        0,
+        'do not flash a suggested face for a finished/existing agent'
+      );
+    answer({
+      ok: true,
+      json: async () => [
+        {
+          name: 'Manager',
+          role: 'orchestrator',
+          appearance: { mode: 'character', character: { catalog_id: 'builder' } }
+        }
+      ]
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(lastFace(win).input.appearance.character.catalog_id, 'builder');
+  }
+  const win = faceWindow();
+  const doc = stubDocument();
+  doc.defaultView = win;
+  const line = { step: HOME, kind: 'hire', name: 'Hires Legacy Manager', state: 'working' };
+  renderFolderAgentReport(
+    folderAgentReportView(
+      reported({
+        state: 'setting_up',
+        plan: homePlanOf([line], []),
+        setup: { status: 'running', lines: [line] }
+      })
+    ),
+    doc,
+    { fetchImpl: async () => ({ ok: false }) }
+  );
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(lastFace(win).input.name, 'Legacy Manager');
+  assert.equal(lastFace(win).input.appearance.mode, 'generated');
+});
+
+test('Already in your Home and receipt rows use current canonical profiles, with one lookup per card', async () => {
+  const win = faceWindow();
+  const doc = stubDocument();
+  doc.defaultView = win;
+  const appearance = {
+    mode: 'uploaded',
+    uploaded: { image: '/api/agents/Existing/avatar' },
+    generated: { color: '#123456' }
+  };
+  let requests = 0;
+  const line = {
+    step: HOME,
+    kind: 'assistant',
+    name: 'Hires Suggested',
+    agent_name: 'Existing',
+    state: 'done',
+    progress: 'Already in your Home'
+  };
+  const raw = reported({
+    state: 'set_up',
+    plan: { ...homePlanOf([line], []), hires: [] },
+    setup: { status: 'done', lines: [line], receipt: { hired: ['Existing'] } }
+  });
+  const render = () =>
+    renderFolderAgentReport(folderAgentReportView(raw), doc, {
+      fetchImpl: async () => {
+        requests++;
+        return {
+          ok: true,
+          json: async () => [{ name: 'Existing', role: 'orchestrator', appearance }]
+        };
+      }
+    });
+  const card = render();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(requests, 1);
+  assert.equal(card.querySelectorAll('.folder-agent-card__receipt-agent').length, 1);
+  assert.equal(card.querySelectorAll('.folder-agent-card__hired-face').length, 2);
+  assert.deepEqual(lastFace(win).input.appearance, appearance);
+  // Reopening a receipt reads the face as edited on Agents, not a saved choice.
+  appearance.mode = 'generated';
+  render();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(lastFace(win).input.appearance.mode, 'generated');
+  assert.equal(requests, 2);
 });
 
 test('the card promise does not recount visible blocks; the run retains its historical note', () => {

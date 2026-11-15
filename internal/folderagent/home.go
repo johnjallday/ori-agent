@@ -155,7 +155,7 @@ func homeLines(rec Record, home folderlook.Candidate) []personalassistant.Folder
 			// One outcome item for every hire, whatever the number of roles.
 			hires = hiresOutcome(len(facts.MissingRoles) + assistantHires(facts))
 			for _, role := range facts.MissingRoles {
-				lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: "Hires " + role, Outcome: hires})
+				lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: "Hires " + role, AgentName: role, Outcome: hires})
 			}
 		} else {
 			lines = append(lines, personalassistant.FolderPlanLine{Kind: FolderPlanHire, Name: HomeRolesLine, Outcome: HomeHiresOutcome,
@@ -211,7 +211,7 @@ func assistantLines(a *folderlook.HomeAssistant, hires string) []personalassista
 	notAdded := "Your " + a.Label + " is not added"
 	switch a.State {
 	case folderlook.AssistantHire:
-		return []personalassistant.FolderPlanLine{{Kind: FolderPlanAssistant, Name: "Hires " + a.Name, Outcome: hires,
+		return []personalassistant.FolderPlanLine{{Kind: FolderPlanAssistant, Name: "Hires " + a.Name, AgentName: a.Name, Outcome: hires,
 			Detail: AssistantJoins}}
 	case folderlook.AssistantOff:
 		return []personalassistant.FolderPlanLine{{Kind: FolderPlanAssistantNote, Name: notAdded,

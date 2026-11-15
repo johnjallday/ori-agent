@@ -191,6 +191,15 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	// The shared assistant the card named: hired after the Home's own roles,
 	// only when the plan has its line (the press approved exactly that).
 	assistant := b.folderAgentHomeAssistant(homeID, line(folderagent.FolderPlanAssistant))
+	// A retry can find a shared assistant already recorded under its actual
+	// name. Its live line resolves that profile's face, not an old suggestion.
+	if assistant.plan.Name != "" {
+		for i := range lines {
+			if lines[i].Kind == folderagent.FolderPlanAssistant {
+				lines[i].AgentName = assistant.plan.Name
+			}
+		}
+	}
 	if (len(missing) > 0 || assistant.creates()) && !staffing.ModelReady(ctx) {
 		setLine(first(append(append(hireLines, assistant.line), rootLine)...), personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopNeedsModel, errors.New("the Home's agents need a model"))

@@ -94,6 +94,9 @@ func TestPlan_HiresBlock(t *testing.T) {
 			var lines []string
 			for _, l := range plan.Lines {
 				if l.Kind == FolderPlanHire && l.Name != HomeRolesLine {
+					if l.AgentName == "" || l.Name != "Hires "+l.AgentName {
+						t.Fatalf("hire line lost structured display identity: %+v", l)
+					}
 					lines = append(lines, l.Name)
 				}
 			}

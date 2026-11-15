@@ -25,14 +25,27 @@ const hires = [
 ];
 const lines = [
   { step, kind: 'provider', name: 'Installs Music Project Management' },
+  { step, kind: 'home_tools', name: 'Installs REAPER tools' },
   {
     step,
     kind: 'home',
     name: 'Creates your Music Production Home',
     outcome: 'Creates Music Production Home'
   },
-  { step, kind: 'hire', name: 'Hires Portfolio Manager', outcome: 'Hires 2 agents' },
-  { step, kind: 'assistant', name: 'Hires REAPER Assistant', outcome: 'Hires 2 agents' },
+  {
+    step,
+    kind: 'hire',
+    agent_name: 'Portfolio Manager',
+    name: 'Hires Portfolio Manager',
+    outcome: 'Hires 2 agents'
+  },
+  {
+    step,
+    kind: 'assistant',
+    agent_name: 'REAPER Assistant',
+    name: 'Hires REAPER Assistant',
+    outcome: 'Hires 2 agents'
+  },
   { step, kind: 'songs', name: 'Lists 6 songs', outcome: 'Lists 6 songs' },
   {
     kind: 'folder',
@@ -116,8 +129,87 @@ async function mount(page: Page, raw = report) {
   }, raw);
   const card = page.locator('.folder-agent-card--report:visible');
   await expect(card).toBeVisible();
-  await expect(card.locator('.folder-agent-card__hire-face [data-aa-character]')).toHaveCount(2);
+  if (raw.state === 'reported')
+    await expect(card.locator('.folder-agent-card__hire-face [data-aa-character]')).toHaveCount(2);
   return card;
+}
+
+for (const phase of ['running', 'done']) {
+  test(`faces through the ${phase === 'running' ? 'hire lines' : 'receipt'}`, async ({
+    page,
+    request
+  }) => {
+    await request.post('/api/onboarding/skip');
+    mkdirSync(`${evidence}/group-4`, { recursive: true, mode: 0o750 });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.route('**/api/agents/dashboard/list', route =>
+      route.fulfill({
+        json: hires.map(hire => ({
+          name: hire.name,
+          role: 'orchestrator',
+          appearance: {
+            mode: 'character',
+            character: {
+              catalog_id:
+                hire.name === 'Portfolio Manager' ? 'decision-strategist' : 'automation-specialist'
+            }
+          }
+        }))
+      })
+    );
+    const running = phase === 'running';
+    const liveLines = lines.map(line => ({
+      ...line,
+      state: running && line.kind === 'hire' ? 'working' : 'done',
+      progress:
+        line.kind === 'hire'
+          ? `${running ? 'Hiring' : 'Hired'} Portfolio Manager`
+          : line.kind === 'assistant'
+            ? 'Already in your Home'
+            : ''
+    }));
+    const card = await mount(page, {
+      ...report,
+      state: running ? 'setting_up' : 'set_up',
+      actions: [],
+      plan: { ...plan, hires: running ? hires : [] },
+      setup: {
+        status: phase,
+        lines: liveLines,
+        receipt: running ? undefined : { hired: hires.map(hire => hire.name) }
+      }
+    } as typeof report);
+    if (running) {
+      const action = card
+        .locator('.folder-agent-card__action')
+        .filter({ hasText: 'Hiring Portfolio Manager' });
+      await expect(action.locator('[data-aa-character]')).toHaveAttribute(
+        'data-aa-character',
+        'decision-strategist'
+      );
+      const existing = card
+        .locator('.folder-agent-card__action')
+        .filter({ hasText: 'Already in your Home' });
+      await expect(existing.locator('[data-aa-character]')).toHaveAttribute(
+        'data-aa-character',
+        'automation-specialist'
+      );
+      await action.scrollIntoViewIfNeeded();
+    } else {
+      const receipt = card.locator('.folder-agent-card__receipt-row[data-kind="hired"]');
+      await expect(receipt.locator('.folder-agent-card__receipt-agent')).toHaveCount(2);
+      await expect(receipt.locator('[data-aa-character]').first()).toHaveAttribute(
+        'data-aa-character',
+        'decision-strategist'
+      );
+      await expect(receipt.locator('[data-aa-character]').last()).toHaveAttribute(
+        'data-aa-character',
+        'automation-specialist'
+      );
+      await receipt.scrollIntoViewIfNeeded();
+    }
+    await page.screenshot({ path: `${evidence}/group-4/${phase}.png` });
+  });
 }
 
 function contrast(foreground: string, background: string) {

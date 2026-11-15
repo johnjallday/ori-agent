@@ -4076,6 +4076,32 @@ button.folder-agent-card__who-face:focus-visible {
   overflow-wrap: anywhere;
 }
 
+.folder-agent-card__receipt-agent {
+  display: flex;
+  flex-basis: 100%;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.folder-agent-card__hired-face {
+  display: inline-flex;
+  vertical-align: middle;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  margin-right: 6px;
+}
+
+.folder-agent-card__hired-face > .agent-avatar {
+  --aa-size: 28px;
+  border-radius: 6px;
+}
+
+.folder-agent-card__receipt-agent .folder-agent-card__hired-face {
+  margin-right: 0;
+}
+
 .folder-agent-card__receipt-link {
   color: var(--hc-signal, var(--cozy-moss));
   font-weight: 600;
