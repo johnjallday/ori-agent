@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -39,15 +41,10 @@ func TestInstalledCLIsExposeCharacterizedNarrowFilesystemMechanisms(t *testing.T
 			if err != nil {
 				t.Skipf("%s is not installed", tc.binary)
 			}
-			// Help describes the binary, not the user's login/configuration. In
-			// particular, Codex startup can block on a busy real CODEX_HOME.
+			// Help describes the binary, not the user's login/configuration.
 			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 			defer cancel()
-			cmd := installedCLIHelpCommand(ctx, path, t.TempDir(), tc.args...)
-			output, err := cmd.CombinedOutput()
-			if ctx.Err() != nil {
-				t.Fatalf("%s help exceeded its startup deadline: %v", tc.binary, ctx.Err())
-			}
+			output, err := runCLIHelpProbe(ctx, path, t.TempDir(), tc.args...)
 			if err != nil {
 				t.Fatalf("%s help: %v: %s", tc.binary, err, output)
 			}
@@ -69,20 +66,82 @@ func installedCLIHelpCommand(ctx context.Context, path, home string, args ...str
 	cmd.Dir = home
 	cmd.WaitDelay = time.Second
 	cmd.Env = []string{
-		"HOME=" + home,
-		"USERPROFILE=" + home,
-		"CODEX_HOME=" + home,
-		"CLAUDE_CONFIG_DIR=" + home,
-		"XDG_CONFIG_HOME=" + home,
+		"HOME=" + home, "USERPROFILE=" + home,
+		"CODEX_HOME=" + home, "CLAUDE_CONFIG_DIR=" + home,
+		"XDG_CONFIG_HOME=" + home, "APPDATA=" + home, "LOCALAPPDATA=" + home,
+		"TMPDIR=" + home, "TEMP=" + home, "TMP=" + home,
 	}
 	// Keep only process-launch essentials, not API keys, login tokens, config
 	// overrides or proxy credentials inherited by the test runner.
-	for _, key := range []string{"PATH", "SystemRoot", "COMSPEC", "PATHEXT", "TMPDIR", "TEMP", "TMP"} {
+	for _, key := range []string{"PATH", "SystemRoot", "SYSTEMROOT", "COMSPEC", "PATHEXT"} {
 		if value, ok := os.LookupEnv(key); ok {
 			cmd.Env = append(cmd.Env, key+"="+value)
 		}
 	}
 	return cmd
+}
+
+// Keep one command policy for both the real help and both subprocess suites.
+func runCLIHelpProbe(ctx context.Context, path, home string, args ...string) ([]byte, error) {
+	output, err := installedCLIHelpCommand(ctx, path, home, args...).CombinedOutput()
+	if ctx.Err() != nil {
+		return output, fmt.Errorf("CLI help deadline: %w", ctx.Err())
+	}
+	return output, err
+}
+
+func TestCLIHelpProbeIsIsolatedAndBounded(t *testing.T) {
+	path, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ORI_CLI_HELP_ENV_SENTINEL", "must-not-reach-child")
+	for _, mode := range []string{"help", "hang"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			output, err := runCLIHelpProbe(ctx, path, t.TempDir(), "-test.run=^TestCLIHelpProbeProcess$", "-test.v", "--", mode)
+			if mode == "hang" {
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("hung probe did not expire: %v", err)
+				}
+				return
+			}
+			if err != nil || !strings.Contains(string(output), "isolated help") {
+				t.Fatalf("isolated probe: %v: %s", err, output)
+			}
+		})
+	}
+}
+
+func TestCLIHelpProbeProcess(t *testing.T) {
+	if len(os.Args) < 3 || os.Args[len(os.Args)-2] != "--" {
+		return
+	}
+	if os.Args[len(os.Args)-1] == "hang" {
+		time.Sleep(time.Minute)
+		return
+	}
+	for _, key := range []string{"ORI_CLI_HELP_ENV_SENTINEL", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+		if os.Getenv(key) != "" {
+			t.Fatalf("probe inherited %s", key)
+		}
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Stat(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR"} {
+		dir, err := os.Stat(os.Getenv(key))
+		if err != nil || !os.SameFile(wd, dir) {
+			t.Fatalf("probe did not isolate %s", key)
+		}
+	}
+	t.Log("isolated help")
 }
 
 // This starts red by design: the pre-feature Claude native posture used

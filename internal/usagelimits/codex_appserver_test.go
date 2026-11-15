@@ -13,6 +13,11 @@ import (
 
 func fakeCodex(t *testing.T, ending string) string {
 	t.Helper()
+	return fakeCodexAfterStartup(t, "", ending)
+}
+
+func fakeCodexAfterStartup(t *testing.T, startup, ending string) string {
+	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX fake CLI")
 	}
@@ -23,6 +28,7 @@ func fakeCodex(t *testing.T, ending string) string {
 	t.Setenv("FAKE_PID_FILE", pid)
 	script := `#!/bin/sh
 [ "$1" = app-server ] || exit 1
+` + startup + `
 printf '%s' "$$" > "$FAKE_PID_FILE"
 read -r init
 case "$init" in *'"name":"ori"'*'"title":"Ori"'*) ;; *) exit 1;; esac
@@ -36,6 +42,20 @@ case "$request" in *'"method":"account/rateLimits/read","params":null'*) ;; *) e
 		t.Fatal(err)
 	}
 	return pid
+}
+
+func waitForCLIStarted(t *testing.T, pidFile string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if data, err := os.ReadFile(pidFile); err == nil && len(data) > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("fake CLI did not start")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func assertCLIStopped(t *testing.T, pidFile string) {
@@ -70,16 +90,7 @@ func TestCodexAppServerCancellationKillsChild(t *testing.T) {
 	defer cancel()
 	result := make(chan error, 1)
 	go func() { _, err := ReadCodexAppServer(ctx); result <- err }()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if data, err := os.ReadFile(pid); err == nil && len(data) > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("fake CLI did not start")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
+	waitForCLIStarted(t, pid)
 	start := time.Now()
 	cancel()
 	if err := <-result; err == nil {
@@ -92,12 +103,31 @@ func TestCodexAppServerCancellationKillsChild(t *testing.T) {
 }
 
 func TestCodexAppServerTimeoutKillsChild(t *testing.T) {
-	pid := fakeCodex(t, "read -r hold\n")
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	// Longer than the read deadline: this deterministically catches starting
+	// that deadline before the child has had a chance to record its PID.
+	pid := fakeCodexAfterStartup(t, "/bin/sleep 1.1\n", "read -r hold\n")
+	ctx, cancelRead := context.WithCancel(t.Context())
+	result, done := make(chan error, 1), make(chan struct{})
+	go func() {
+		defer close(done)
+		_, err := ReadCodexAppServer(ctx)
+		result <- err
+	}()
+	defer func() { cancelRead(); <-done }()
+	waitForCLIStarted(t, pid)
+
+	// Exercise expiry against a running child, not the scheduler's ability to
+	// start a process within one second on a loaded race-test host.
+	deadline, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
+	stop := context.AfterFunc(deadline, cancelRead)
+	defer stop()
 	start := time.Now()
-	if _, err := ReadCodexAppServer(ctx); err == nil {
+	if err := <-result; err == nil {
 		t.Fatal("expected timeout")
+	}
+	if deadline.Err() != context.DeadlineExceeded {
+		t.Fatal("app-server returned before the deadline")
 	}
 	if time.Since(start) > 1500*time.Millisecond {
 		t.Fatal("timeout exceeded bound")

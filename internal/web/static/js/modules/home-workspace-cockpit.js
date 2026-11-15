@@ -13,7 +13,6 @@ import {
 import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
 import {
   ensureRoleCatalog,
-  fetchAgentRecords,
   folderAgentReportView,
   folderAgentTileFaces,
   folderAgentTileLine,
@@ -26,6 +25,7 @@ import {
 } from './folder-agent-card.js';
 import { homeCommanders, homeMapShowing, revealHiredTile } from './commander-map.js';
 import { commanderBuildingLine } from './commander-speech.js';
+import { createHomeAgentDirectory, homeAgentPortraitHTML } from './home-agent-portrait.js';
 
 // The folder agents whose Commander speaks on Home's map without the drawer:
 // one looking, setting up, or with a report or a cause waiting. A finished
@@ -791,9 +791,12 @@ export function renderSignalFiltersHTML(counts, activeSignal, partialSignals = [
  * qualifies, the honest "No immediate action" answer is returned and the caller
  * still renders Open Workspace (FR66).
  */
-export function recommendedNextMove(workspace) {
+export function recommendedNextMove(workspace, liveAgent = null) {
   const ws = workspace || {};
   const signals = workspaceSignals(ws);
+  const liveName = String(liveAgent?.name || '').trim();
+  const liveLine = String(liveAgent?.line || '').trim();
+  const hasLiveLine = Boolean(liveName && liveLine);
 
   if (signals.attention !== null && signals.attention > 0) {
     return {
@@ -815,11 +818,13 @@ export function recommendedNextMove(workspace) {
       detail: 'Setup has not been completed for this workspace.'
     };
   }
-  if (signals.active) {
+  if (signals.active || hasLiveLine) {
     return {
       kind: 'running',
       label: 'Check work in progress',
-      detail: 'An agent is currently working in this workspace.'
+      detail: hasLiveLine
+        ? `${liveName}: ${liveLine}`
+        : 'An agent is currently working in this workspace.'
     };
   }
   const nextRun = String(ws.next_scheduled_run || ws.next_run || '').trim();
@@ -865,7 +870,7 @@ export function agentRoster(workspace) {
   return agents
     .map(agent => {
       if (!agent) return null;
-      if (typeof agent === 'string') return { name: agent, role: '', activity: '' };
+      if (typeof agent === 'string') return { name: agent.trim(), role: '', activity: '' };
       return {
         name: String(agent.name || agent.agent_name || '').trim(),
         role: String(agent.role || '').trim(),
@@ -1143,7 +1148,7 @@ export const HQ_SITE_ID = '__personal_hq_site__';
  * unavailable, whether Ask Commander is offered) are assertable without parsing
  * markup.
  */
-export function workspaceRailView(workspace) {
+export function workspaceRailView(workspace, liveAgent = null) {
   const ws = workspace || {};
   const signals = workspaceSignals(ws);
   const commander = entryAgentName(ws);
@@ -1155,7 +1160,7 @@ export function workspaceRailView(workspace) {
     mission: String(ws.description || ws.mission || '').trim(),
     isPersonalHQ: ws.is_personal_hq === true || ws.designation === 'personal_hq',
     status: signals,
-    nextMove: recommendedNextMove(ws),
+    nextMove: recommendedNextMove(ws, liveAgent),
     openHref: ws.folder_slug
       ? workspacePageURL(ws.folder_slug, [], { search: signals.attention > 0 ? 'panel=tasks' : '' })
       : '',
@@ -1177,13 +1182,14 @@ function taskCoverageHTML(count) {
     : '';
 }
 
-function metricHTML(label, value) {
+function metricHTML(label, value, singular = '') {
+  const words = singular ? (value === 1 ? singular : label.toLowerCase()) : label;
   return (
     '<div class="cockpit-rail-metric">' +
     `<span class="cockpit-rail-metric-value"${value === null ? ' data-unavailable="true"' : ''}>` +
     escapeHtml(formatCount(value)) +
     '</span>' +
-    `<span class="cockpit-rail-metric-label">${escapeHtml(label)}</span>` +
+    ` <span class="cockpit-rail-metric-label">${escapeHtml(words)}</span>` +
     '</div>'
   );
 }
@@ -1220,7 +1226,7 @@ function mapAgentPortraitHTML(name, isCommander = false) {
   return `<span class="cockpit-rail-portrait-fallback" title="${escapeHtml(name)}">${escapeHtml(name)}</span>`;
 }
 
-function rosterHTML(state) {
+function rosterMessageHTML(state) {
   if (!state || state.state === 'unavailable') {
     return '<p class="cockpit-rail-empty">Agent data unavailable for this workspace.</p>';
   }
@@ -1235,15 +1241,32 @@ function rosterHTML(state) {
       '<p class="cockpit-rail-empty">' +
       escapeHtml(
         state.count === 1
-          ? '1 agent attached. Open the workspace to see the roster.'
-          : `${state.count} agents attached. Open the workspace to see the roster.`
+          ? '1 agent attached. Open the workspace to see the team.'
+          : `${state.count} agents attached. Open the workspace to see the team.`
       ) +
       '</p>'
     );
   }
+  return '';
+}
+
+function rosterHTML(state, portrait = mapAgentPortraitHTML, commander = '') {
+  const key = name =>
+    String(name || '')
+      .trim()
+      .toLowerCase();
+  const rows = state?.roster || [];
+  const lead = rows.find(agent => key(agent.name) === key(commander));
+  const team = commander
+    ? [
+        { ...lead, name: commander, commander: true },
+        ...rows.filter(agent => key(agent.name) !== key(commander))
+      ]
+    : rows;
+  if (!team.length) return rosterMessageHTML(state);
   return (
     '<ul class="cockpit-rail-roster cockpit-rail-agent-portraits">' +
-    state.roster
+    team
       .map(agent => {
         const metadata =
           (agent.role || agent.activity) &&
@@ -1257,13 +1280,15 @@ function rosterHTML(state) {
             '</span>';
         return (
           '<li class="cockpit-rail-roster-row cockpit-rail-agent-portrait">' +
-          mapAgentPortraitHTML(agent.name) +
+          portrait(agent.name, agent.commander === true) +
+          (agent.commander ? '<span class="cockpit-rail-commander-badge">Commander</span>' : '') +
           (metadata || '') +
           '</li>'
         );
       })
       .join('') +
-    '</ul>'
+    '</ul>' +
+    (['count-only', 'unavailable'].includes(state?.state) ? rosterMessageHTML(state) : '')
   );
 }
 
@@ -1515,6 +1540,7 @@ export function songRosterURL(homeID) {
 
 export function renderWorkspaceRailHTML(view) {
   if (!view) return '';
+  const portrait = view.portraitHTML || mapAgentPortraitHTML;
   return (
     '<div class="cockpit-rail-panel" data-rail-panel="workspace">' +
     '<header class="cockpit-rail-head">' +
@@ -1550,21 +1576,13 @@ export function renderWorkspaceRailHTML(view) {
     '</div>' +
     workLineHTML('Tickets', view.status.tickets) +
     '<div class="cockpit-rail-metrics" aria-label="Workspace metrics">' +
-    metricHTML('Agents', view.status.agents) +
-    metricHTML('Attention tickets', view.status.attention) +
+    metricHTML('Agents', view.status.agents, 'agent') +
+    metricHTML('Attention tickets', view.status.attention, 'attention ticket') +
     '</div>' +
     taskCoverageHTML(view.status.partial ? 1 : 0) +
-    (view.commander
-      ? '<section class="cockpit-rail-section" aria-label="Commander">' +
-        '<h3 class="cockpit-rail-section-title">Commander</h3>' +
-        '<div class="cockpit-rail-commander">' +
-        mapAgentPortraitHTML(view.commander, true) +
-        '<span class="cockpit-rail-commander-state">Commander</span>' +
-        '</div></section>'
-      : '') +
-    '<section class="cockpit-rail-section" aria-label="Agent roster">' +
-    '<h3 class="cockpit-rail-section-title">Roster</h3>' +
-    rosterHTML(view.rosterState) +
+    '<section class="cockpit-rail-section" aria-label="Team">' +
+    '<h3 class="cockpit-rail-section-title">Team</h3>' +
+    rosterHTML(view.rosterState, portrait, view.commander) +
     '</section>' +
     '</div>'
   );
@@ -2538,6 +2556,12 @@ import {
   function mountMap({ animate = false } = {}) {
     if (!els.map || state.view !== VIEW_MAP) return;
     if (!window.OriWorkspaceMap) return;
+    ensureAgentFaces(
+      state.flattened.flatMap(workspace => [
+        entryAgentName(workspace),
+        ...agentRoster(workspace).map(agent => agent.name)
+      ])
+    );
     window.OriWorkspaceMap.mount(els.map, {
       animate,
       workspaces: state.flattened,
@@ -2553,6 +2577,8 @@ import {
       songFacts: state.songFacts,
       folderAgentLines: state.folderAgentLines,
       folderAgentFaces: state.folderAgentFaces,
+      // Home-only trusted markup. Other map hosts retain their resident default.
+      agentPortraitHTML: homePortrait,
       workspaceUpdateBadges: state.workspaceUpdateBadges,
       // Cockpit contract (see workspace-map.js): select-only pointer semantics,
       // no internal topbar/overview chrome, and no invented default selection.
@@ -4224,9 +4250,16 @@ import {
     }
 
     const song = isHomeSong(item, state.flattened);
+    ensureAgentFaces([entryAgentName(item), ...agentRoster(item).map(agent => agent.name)]);
     const workspaceHTML = isGroupWorkspace(item)
       ? ''
-      : renderWorkspaceRailHTML(workspaceRailView(item));
+      : renderWorkspaceRailHTML({
+          ...workspaceRailView(item, {
+            name: lastFolderAgentViews.find(view => view.workspace_id === item.id)?.agent_name,
+            line: state.folderAgentLines[item.id]
+          }),
+          portraitHTML: homePortrait
+        });
     showContextPanel(
       isGroupWorkspace(item)
         ? renderGroupRailHTML(
@@ -5314,44 +5347,57 @@ import {
   // setup newer than that lands its members (null until the first read, so a
   // page load never replays an old one).
   let folderAgentSetups = null;
-  // The agents behind the tiles being worked on, as the agents list names them
-  // (appearance, role, source): each name is looked up once, the first time it
-  // works, so its tile can wear its face (visual-hire FR17). A name the list does
-  // not have is not asked for again. Until the answer lands (found or failed) a
-  // name is pending and its tile wears no face, so it never flashes a face that is
-  // not its own before the real one.
-  let agentRecords = new Map();
-  const askedForAgents = new Set();
-  const pendingAgents = new Set();
+  // One directory for every named agent on Home, idle or working. A name the
+  // owner's list lacks is remembered, not retried by the folder poll. While a
+  // record is pending no surface flashes a name-derived face before its own.
+  const agentDirectory = createHomeAgentDirectory({
+    fetchImpl: globalThis.fetch,
+    onChange: repaintAgentFaces
+  });
+  let lastFolderAgentViews = [];
+  function homePortrait(name, isCommander = false, options = {}) {
+    return homeAgentPortraitHTML(
+      name,
+      agentDirectory.records.get(name),
+      agentDirectory.pending.has(name),
+      isCommander,
+      window,
+      options
+    );
+  }
+  function repaintAgentFaces() {
+    state.folderAgentFaces = folderAgentTileFaces(
+      lastFolderAgentViews,
+      agentDirectory.records,
+      window,
+      agentDirectory.pending
+    );
+    mountMap();
+    renderRail({ announceChange: false });
+  }
   // The role catalog gives a face its ring and emblem; Home does not load it, so
-  // the first time an agent works it is asked for, and the tiles redraw once it is
-  // here. Pages that never see an agent work never fetch it.
+  // first time an agent is visible it is asked for, and faces redraw once it is
+  // here. Repainting does not repeat the folder-agent network poll.
   let roleCatalogAsked = false;
-  function lookUpWorkingAgents(views) {
-    const working = views.filter(view => view.agent_name && folderAgentTileLine(view));
-    if (working.length && !roleCatalogAsked) {
+  function ensureAgentFaces(names) {
+    if (!names.some(Boolean)) return;
+    agentDirectory.ensure(names);
+    if (!roleCatalogAsked) {
       roleCatalogAsked = true;
-      void ensureRoleCatalog(document, window).then(() => refreshFolderAgentLines());
+      window.CharacterCatalog?.onChange?.(repaintAgentFaces);
+      window.CharacterCatalog?.load?.();
+      void ensureRoleCatalog(document, window).then(repaintAgentFaces);
     }
-    const names = working
-      .map(view => String(view.agent_name))
-      .filter(name => !agentRecords.has(name) && !askedForAgents.has(name));
-    if (!names.length) return;
-    names.forEach(name => {
-      askedForAgents.add(name);
-      pendingAgents.add(name);
-    });
-    void fetchAgentRecords(globalThis.fetch).then(found => {
-      if (found) agentRecords = found;
-      names.forEach(name => pendingAgents.delete(name));
-      void refreshFolderAgentLines();
-    });
+  }
+  function lookUpWorkingAgents(views) {
+    ensureAgentFaces(views.filter(view => folderAgentTileLine(view)).map(view => view.agent_name));
   }
   async function refreshFolderAgentLines() {
     if (folderAgentTimer) clearTimeout(folderAgentTimer);
     folderAgentTimer = 0;
     if (!canHydrateWorkspaceData()) return;
     const views = await listFolderAgents();
+    lastFolderAgentViews = views;
     const next = {};
     views.forEach(view => {
       const line = folderAgentTileLine(view);
@@ -5405,10 +5451,16 @@ import {
     // Each working agent's face on its tile: from what the list has said so far
     // (the name's own face until it answers), redrawn when it changes.
     lookUpWorkingAgents(views);
-    const faces = folderAgentTileFaces(views, agentRecords, window, pendingAgents);
+    const faces = folderAgentTileFaces(
+      views,
+      agentDirectory.records,
+      window,
+      agentDirectory.pending
+    );
     const facesChanged = JSON.stringify(faces) !== JSON.stringify(state.folderAgentFaces);
     state.folderAgentFaces = faces;
     if (changed || facesChanged) mountMap();
+    if (changed) renderRail({ announceChange: false });
     // A look that just finished may have changed what the workspace shows.
     if (finished) void refreshQuietly();
     if (Object.keys(next).length) folderAgentTimer = setTimeout(refreshFolderAgentLines, 2000);

@@ -4413,6 +4413,64 @@
   }
 }
 
+/* Explicit Home-owned portraits retain the resident wrapper, name and mark. */
+.home-agent-portrait > .agent-avatar,
+.home-agent-face-slot {
+  --aa-size: 40px;
+
+  width: 40px;
+  height: 40px;
+  margin-top: 2px;
+}
+
+/* Home opts into a compact team at each building's corner, idle or working.
+   Other hosts supply no portrait renderer and keep their existing tiles. */
+.ws-map-tile-team {
+  position: absolute;
+  top: -16px;
+  right: -8px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 2px;
+  max-width: 128px;
+  pointer-events: none;
+}
+
+.ws-map-tile-team .ws-map-av {
+  flex: 0 0 36px;
+  width: 36px;
+  min-width: 0;
+  height: 48px;
+}
+
+.ws-map-tile-team .agent-avatar,
+.ws-map-tile-team .home-agent-face-slot {
+  --aa-size: 30px;
+
+  width: 30px;
+  height: 30px;
+}
+
+.ws-map-tile-team .ws-map-av-figure {
+  width: 28px;
+  height: 33px;
+}
+
+.ws-map-tile-team .ws-map-av-label {
+  right: 0;
+  bottom: 1px;
+  left: 0;
+  padding: 1px;
+  font-size: 6px;
+}
+
+.ws-map-tile-team .ws-map-av-commander-mark {
+  top: 0;
+  right: 0;
+}
+
 /* The working agent's face on the tile's corner (visual-hire FR17): the shared
    renderer's face, so it is the one on the hire card and the Agents page. It
    floats outside the tile's box and takes no clicks; it exists only while the
@@ -4438,7 +4496,8 @@
   outline: none;
   box-shadow: none;
 }
-.ws-map-tile[data-build-reveal="playing"] .ws-map-tile-face {
+.ws-map-tile[data-build-reveal="playing"] .ws-map-tile-face,
+.ws-map-tile[data-build-reveal="playing"] .ws-map-tile-team {
   opacity: 0;
   visibility: hidden;
 }

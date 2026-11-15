@@ -1036,6 +1036,81 @@ test('workspace detail renders generated agents through the Workspace Map portra
   }
 });
 
+test('group-map opt-in uses the shared avatar for generated and default appearances', () => {
+  const page = new WorkspaceDetailPage('group-1');
+  const seen = [];
+  globalThis.window.OriWorkspaceAgentPortrait = {
+    markup() {
+      throw new Error('group map must not replace the saved identity with a resident');
+    }
+  };
+  globalThis.window.AgentAvatar = {
+    markup(input, options) {
+      seen.push({ input, options });
+      return '<span data-shared="1"></span>';
+    }
+  };
+  try {
+    for (const appearance of [{ mode: 'generated', generated: { color: '#123456' } }, null]) {
+      page.agentIndex = new Map([
+        ['portfolio manager', { name: 'Portfolio Manager', source: 'user', appearance }]
+      ]);
+      const avatar = page.getAgentAvatarPresentation('Portfolio Manager', { useAgentAvatar: true });
+      assert.equal(avatar.kind, 'agent-generated');
+      assert.match(avatar.markup('map-face'), /data-shared="1"/);
+      assert.equal(seen.at(-1).input.appearance, appearance);
+      assert.equal(seen.at(-1).input.name, 'Portfolio Manager');
+      assert.equal(seen.at(-1).options.className, 'map-face');
+    }
+    delete globalThis.window.AgentAvatar;
+    const fallback = page.getAgentAvatarPresentation('Portfolio Manager', { useAgentAvatar: true });
+    assert.equal(fallback.kind, 'initials');
+    assert.equal(fallback.initials, 'PM');
+    assert.equal(fallback.markup('map-face'), '');
+  } finally {
+    delete globalThis.window.OriWorkspaceAgentPortrait;
+    delete globalThis.window.AgentAvatar;
+  }
+});
+
+test('group-map opt-in keeps chosen characters and workspace-scoped uploads authoritative', () => {
+  const page = new WorkspaceDetailPage('group-1');
+  const seen = [];
+  const character = { id: 'project-coordinator' };
+  globalThis.window.AgentAvatar = {
+    markup: (input, options) => {
+      seen.push({ input, options });
+      return '<span></span>';
+    }
+  };
+  globalThis.window.CharacterCatalog = { get: id => (id === character.id ? character : null) };
+  page.agentIndex = new Map([['portfolio manager', { appearance: { mode: 'generated' } }]]);
+  try {
+    const chosen = { mode: 'character', character: { catalog_id: character.id } };
+    page.workspaceAgentProfiles = new Map([
+      ['portfolio manager', { appearance: chosen, characterId: character.id }]
+    ]);
+    page
+      .getAgentAvatarPresentation('Portfolio Manager', { useAgentAvatar: true })
+      .markup('map-face');
+    assert.equal(seen.at(-1).input.appearance, chosen);
+    assert.equal(seen.at(-1).input.character, character);
+    const upload = { mode: 'uploaded', uploaded: { image: 'local.png' } };
+    page.workspaceAgentProfiles.set('portfolio manager', {
+      appearance: upload,
+      appearanceWorkspaceId: 'group-1'
+    });
+    page
+      .getAgentAvatarPresentation('Portfolio Manager', { useAgentAvatar: true })
+      .markup('map-face');
+    assert.equal(seen.at(-1).input.appearance, upload);
+    assert.equal(seen.at(-1).options.workspaceId, 'group-1');
+  } finally {
+    delete globalThis.window.AgentAvatar;
+    delete globalThis.window.CharacterCatalog;
+  }
+});
+
 test('workspace detail preserves explicit character appearances through AgentAvatar', () => {
   const page = new WorkspaceDetailPage('workspace-1');
   const seen = [];
