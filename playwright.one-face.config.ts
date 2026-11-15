@@ -4,7 +4,7 @@ import { defineConfig, devices } from '@playwright/test';
 // Run with scripts/e2e.sh tests/one-face-everywhere.spec.ts -- --config playwright.one-face.config.ts
 export default defineConfig({
   testDir: './tests',
-  testMatch: 'one-face-everywhere.spec.ts',
+  testMatch: ['one-face-everywhere.spec.ts', 'group-map-agent-avatar.spec.ts'],
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,

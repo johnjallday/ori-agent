@@ -4488,7 +4488,9 @@ export class WorkspaceDetailPage {
   //
   // Returns a `markup(className)` function rather than finished HTML: the
   // details card, Command roster/stage, and modal each retain their own geometry.
-  getAgentAvatarPresentation(agentName) {
+  // Group-map units opt into AgentAvatar even for Generated mode, rather than
+  // replacing that agent's saved identity with the local resident default.
+  getAgentAvatarPresentation(agentName, { useAgentAvatar = false } = {}) {
     const normalizedName = String(agentName || '').trim();
     const initials = this.buildAgentInitials(normalizedName);
     const label = `${normalizedName || 'Agent'} avatar`;
@@ -4499,7 +4501,7 @@ export class WorkspaceDetailPage {
     const generated = !appearanceMode || appearanceMode === 'generated';
     const portrait = window.OriWorkspaceAgentPortrait;
 
-    if (generated && portrait && typeof portrait.markup === 'function') {
+    if (!useAgentAvatar && generated && portrait && typeof portrait.markup === 'function') {
       const isKeeper = this.isWorkspaceEntryAgent(normalizedName);
       return {
         markup: className => portrait.markup(normalizedName, { className, isKeeper }),
@@ -4538,7 +4540,7 @@ export class WorkspaceDetailPage {
         }),
       initials,
       label,
-      kind: 'explicit-appearance'
+      kind: useAgentAvatar && generated ? 'agent-generated' : 'explicit-appearance'
     };
   }
 

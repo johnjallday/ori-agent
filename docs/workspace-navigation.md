@@ -46,6 +46,11 @@ Chosen characters and uploaded images retain their saved appearance; generated
 agents keep the map's resident portrait. While agent records load, names remain
 visible in stable empty slots. Unknown agent data is not presented as an empty team.
 
+On a group's own **Map** tab, agent units use the shared avatar for all modes,
+including the initials-based Generated avatar, rather than substituting a resident.
+Chosen characters and workspace-scoped uploads remain authoritative. This does not
+assign a character or change any saved appearance.
+
 ## State and history
 
 - Tickets retains `?ticket=<stable-id>` and `?tickets=<state[,state]>`, not a new
