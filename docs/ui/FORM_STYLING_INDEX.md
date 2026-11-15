@@ -1,13 +1,21 @@
 # Agent Form Styling Documentation Index
 
+> **Visual guidance superseded:** use [Ori visual system](visual-system.md) for
+> current tokens, controls, surfaces, validation presentation and accessibility.
+> The glass/gradient/hover-lift examples indexed below are historical, not styles
+> to copy. Retain useful behavior and field-contract references, checking their
+> paths and APIs against the current implementation.
+
 This directory contains comprehensive documentation on how to style the Create New Agent form to match the main chat page design in the workspace dashboard modal.
 
 ## Documentation Files
 
 ### 1. AGENT_FORM_DESIGN_REFERENCE.md (19 KB)
+
 **Complete design guide with detailed technical specifications**
 
 Contents:
+
 - Overview of form locations
 - Complete HTML structure breakdown
 - Individual field styling with CSS examples
@@ -21,6 +29,7 @@ Contents:
 **Best for:** Understanding the complete design system and how everything fits together
 
 **Quick Links:**
+
 - Form Fields Styling (5 fields detailed)
 - Button Styling (primary & secondary)
 - CSS Variables Used (colors, spacing, radius)
@@ -29,9 +38,11 @@ Contents:
 ---
 
 ### 2. FORM_COMPARISON.md (13 KB)
+
 **Side-by-side comparison of main page vs workspace dashboard**
 
 Contents:
+
 - Main page form (correct implementation)
 - Workspace dashboard form (current implementation)
 - HTML comparison blocks
@@ -46,6 +57,7 @@ Contents:
 **Best for:** Seeing exactly what needs to change and why
 
 **Quick Links:**
+
 - Side-by-Side HTML Comparison
 - CSS Class Comparison (modern-input vs form-control)
 - Option Labels Comparison
@@ -56,9 +68,11 @@ Contents:
 ---
 
 ### 3. AGENT_FORM_QUICK_REFERENCE.md (9.1 KB)
+
 **Quick lookup guide and cheatsheet**
 
 Contents:
+
 - Key files table
 - CSS classes cheatsheet
 - CSS variables list
@@ -76,6 +90,7 @@ Contents:
 **Best for:** Quick reference while coding, copy-paste templates
 
 **Quick Links:**
+
 - CSS Classes Cheat Sheet
 - Form Fields Checklist (with all specs)
 - Copy-Paste Templates (5 ready-to-use blocks)
@@ -88,6 +103,7 @@ Contents:
 ## File Locations in Your Project
 
 **Form Implementation Files:**
+
 ```
 ori-agent/
 ├── internal/web/templates/layout/base.tmpl (lines 57-122)  [REFERENCE - Main Chat Page]
@@ -97,6 +113,7 @@ ori-agent/
 ```
 
 **Documentation Files (in project root):**
+
 ```
 ori-agent/
 ├── FORM_STYLING_INDEX.md (this file)
@@ -110,6 +127,7 @@ ori-agent/
 ## Key Design Elements
 
 ### Form Fields (5 total)
+
 1. **Agent Name** - Text input, required
 2. **Agent Type** - Dropdown with 3 options, descriptive labels
 3. **Model** - Dropdown, dynamically populated from API
@@ -117,6 +135,7 @@ ori-agent/
 5. **System Prompt** - Textarea, 4 rows
 
 ### CSS Classes
+
 - **modern-input** - Glassmorphism input styling
 - **form-range** - Range slider styling
 - **form-control** - Text area styling (with custom styles)
@@ -125,6 +144,7 @@ ori-agent/
 - **modern-btn-secondary** - Secondary button (transparent)
 
 ### CSS Variables (Auto Dark Mode)
+
 - Primary color: #1d4ed8
 - Text color: var(--text-primary)
 - Background: var(--bg-primary), var(--bg-secondary), var(--bg-tertiary)
@@ -136,18 +156,21 @@ ori-agent/
 ## Quick Start Guide
 
 ### For Understanding the Design
+
 1. Read: **AGENT_FORM_DESIGN_REFERENCE.md**
    - Understand the overall system
    - See all CSS details
    - Learn JavaScript functions
 
 ### For Making Updates
+
 1. Open: **FORM_COMPARISON.md**
    - See what changed
    - Copy new code
    - Understand why each change matters
 
 ### For Quick Reference While Coding
+
 1. Use: **AGENT_FORM_QUICK_REFERENCE.md**
    - Copy templates
    - Check specifications
@@ -158,24 +181,31 @@ ori-agent/
 ## Common Tasks
 
 ### "How do I style an input field?"
+
 → See QUICK_REFERENCE.md → Copy-Paste Templates → Basic Field
 
 ### "What's the difference between the main page and dashboard?"
+
 → See FORM_COMPARISON.md → Side-by-Side HTML Comparison
 
 ### "Where's the CSS for modern-input?"
+
 → See DESIGN_REFERENCE.md → Form Fields Styling → Agent Name Field
 
 ### "What are all the Agent Type options?"
+
 → See QUICK_REFERENCE.md → Form Fields Checklist → Agent Type
 
 ### "How do I handle the temperature slider?"
+
 → See QUICK_REFERENCE.md → JavaScript Functions to Use → Event Handlers
 
 ### "What should I test?"
+
 → See QUICK_REFERENCE.md → Testing Checklist
 
 ### "What are common mistakes?"
+
 → See QUICK_REFERENCE.md → Common Mistakes to Avoid
 
 ---
@@ -183,30 +213,34 @@ ori-agent/
 ## Files to Reference While Coding
 
 **For HTML Structure:**
+
 - `/internal/web/templates/layout/base.tmpl` (lines 57-122)
 
 **For CSS Styling:**
+
 - `/internal/web/templates/layout/head.tmpl` (lines 200-226 for modern-input, 128-198 for buttons)
 
 **For JavaScript Logic:**
+
 - `/internal/web/static/js/modules/agents.js` (functions: loadAvailableProviders, populateModelSelect, filterModelsByType)
 
 **For Templates to Update:**
+
 - `/internal/web/templates/pages/workspace-dashboard.tmpl` (lines 234-308)
 
 ---
 
 ## Summary of Changes Needed
 
-| Item | Current | Target | Priority |
-|------|---------|--------|----------|
-| Input Class | form-control | modern-input | High |
-| Temperature Field | Number input | Range slider | High |
-| Temperature Labels | None | Focused/Balanced/Creative | High |
-| System Prompt Rows | 2 | 4 | High |
-| Agent Type Options | Generic | Descriptive (with cost tiers) | Medium |
-| Form Layout | Multi-column | Single column | Medium |
-| System Prompt Styling | Default | Dark background | Medium |
+| Item                  | Current      | Target                        | Priority |
+| --------------------- | ------------ | ----------------------------- | -------- |
+| Input Class           | form-control | modern-input                  | High     |
+| Temperature Field     | Number input | Range slider                  | High     |
+| Temperature Labels    | None         | Focused/Balanced/Creative     | High     |
+| System Prompt Rows    | 2            | 4                             | High     |
+| Agent Type Options    | Generic      | Descriptive (with cost tiers) | Medium   |
+| Form Layout           | Multi-column | Single column                 | Medium   |
+| System Prompt Styling | Default      | Dark background               | Medium   |
 
 ---
 
@@ -223,12 +257,12 @@ ori-agent/
 
 ## Document Statistics
 
-| Document | Size | Content |
-|----------|------|---------|
-| AGENT_FORM_DESIGN_REFERENCE.md | 19 KB | 500+ lines, complete guide |
-| FORM_COMPARISON.md | 13 KB | 400+ lines, detailed comparison |
-| AGENT_FORM_QUICK_REFERENCE.md | 9.1 KB | 300+ lines, quick reference |
-| FORM_STYLING_INDEX.md | This file | Index and navigation |
+| Document                       | Size      | Content                         |
+| ------------------------------ | --------- | ------------------------------- |
+| AGENT_FORM_DESIGN_REFERENCE.md | 19 KB     | 500+ lines, complete guide      |
+| FORM_COMPARISON.md             | 13 KB     | 400+ lines, detailed comparison |
+| AGENT_FORM_QUICK_REFERENCE.md  | 9.1 KB    | 300+ lines, quick reference     |
+| FORM_STYLING_INDEX.md          | This file | Index and navigation            |
 
 **Total Documentation:** 41 KB of comprehensive, detailed guides
 
@@ -247,6 +281,7 @@ ori-agent/
 ## Contact/Questions
 
 All information sourced from:
+
 1. Main chat page form: `/internal/web/templates/layout/base.tmpl`
 2. CSS definitions: `/internal/web/templates/layout/head.tmpl`
 3. JavaScript utilities: `/internal/web/static/js/modules/agents.js`

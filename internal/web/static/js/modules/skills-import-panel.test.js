@@ -35,6 +35,7 @@ test('rows start unticked, and a skill already in the Skills folder is greyed ou
   assert.match(html, /Already in your Skills folder/);
   assert.match(html, /Helps &lt;b&gt;write&lt;\/b&gt;/);
   assert.equal((html.match(/data-import-name=/g) || []).length, 2);
+  assert.match(html, /class="ui-actions"/); // Shared wrapping footer at narrow widths.
   // Nothing selected: Import selected is disabled, Not now is not.
   assert.match(html, /data-import-action="import" disabled>Import selected/);
   assert.match(html, /data-import-action="dismiss" >Not now/);

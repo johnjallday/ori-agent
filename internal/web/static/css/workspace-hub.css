@@ -4465,39 +4465,7 @@ body.chat-panel-open .chat-panel-backdrop {
   display: none !important;
 }
 
-/* Danger button - universal soft-red delete style */
-.modern-btn-danger {
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.45);
-}
-
-.modern-btn-danger:hover {
-  background: rgba(239, 68, 68, 0.22);
-  color: #dc2626;
-  border-color: rgba(239, 68, 68, 0.7);
-}
-
-.modern-btn-danger:active {
-  background: rgba(239, 68, 68, 0.3);
-  border-color: rgba(220, 38, 38, 0.8);
-}
-
-[data-bs-theme="dark"] .modern-btn-danger {
-  background: rgba(239, 68, 68, 0.16);
-  color: #fca5a5;
-  border: 1px solid rgba(239, 68, 68, 0.42);
-}
-
-[data-bs-theme="dark"] .modern-btn-danger:hover {
-  background: rgba(239, 68, 68, 0.26);
-  color: #fecaca;
-  border-color: rgba(239, 68, 68, 0.6);
-}
-
-[data-bs-theme="dark"] .modern-btn-danger:active {
-  background: rgba(239, 68, 68, 0.34);
-}
+/* Shared destructive controls are owned by components.css. */
 
 /* Selection mode button active state */
 .hub-panel.selection-mode #hubSelectTasksBtn,
@@ -4776,14 +4744,8 @@ body.chat-panel-open .chat-panel-backdrop {
   font-size: 1rem;
 }
 
-/* Ensure modals appear above expanded panels */
-.modal {
-  z-index: 10100 !important;
-}
-
-.modal-backdrop {
-  z-index: 10099 !important;
-}
+/* Full-screen Bootstrap modal layers are owned by components.css and the
+   --app-modal-* tokens, above expanded panels AND the shared assistant. */
 
 /* Drag and Drop Styles */
 .launcher-card-item.is-dragging {

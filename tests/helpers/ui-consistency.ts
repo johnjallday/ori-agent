@@ -85,7 +85,7 @@ export async function guardReadTour(page: Page, allowedPosts: string[] = []) {
   return unexpected;
 }
 
-export async function readFixture(page: Page, pattern: string, json: unknown) {
+export async function readFixture(page: Page, pattern: string | RegExp, json: unknown) {
   await page.route(pattern, route => {
     if (route.request().method() !== 'GET') return route.fallback();
     return route.fulfill({ json });
@@ -103,7 +103,10 @@ export async function capture(page: Page, testInfo: TestInfo, name: string, fact
     expect(fonts).toContain('Manrope');
     expect(fonts).toContain('Fraunces');
   }
+  const modalVisible =
+    (await page.locator('.modal.show:visible, dialog[open], [role="dialog"]:visible').count()) > 0;
   const metadata = {
+    captureMode: modalVisible ? 'viewport' : 'full-page',
     revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     dirty: !!execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim(),
     servedBuild: process.env.ORI_UI_BUILD || 'working-tree (rebuild after asset changes)',
@@ -119,6 +122,15 @@ export async function capture(page: Page, testInfo: TestInfo, name: string, fact
     })),
     ...facts
   };
+  if (process.env.ORI_UI_FONTS === 'real') {
+    expect(metadata.computedFonts.body).toContain('Manrope');
+    const displayHeading = page.locator('.ui-page-header h1');
+    if (await displayHeading.count()) {
+      expect(
+        await displayHeading.first().evaluate(node => getComputedStyle(node).fontFamily)
+      ).toContain('Fraunces');
+    }
+  }
   await testInfo.attach(`${name}-metadata`, {
     body: JSON.stringify(metadata, null, 2),
     contentType: 'application/json'
@@ -127,10 +139,20 @@ export async function capture(page: Page, testInfo: TestInfo, name: string, fact
   const phase = process.env.ORI_UI_EVIDENCE;
   if (!['before', 'after'].includes(phase))
     throw new Error('ORI_UI_EVIDENCE must be before or after');
-  const directory = resolve('tasks/evidence-ui-consistency/group-1', phase);
+  const group = testInfo.file.endsWith('ui-consistency-defects.spec.ts') ? 'group-1' : 'group-2';
+  const directory = resolve('tasks/evidence-ui-consistency', group, phase);
   mkdirSync(directory, { recursive: true });
   const stem = `${name}-${metadata.engine}-${metadata.theme}-${metadata.viewport?.width}-${metadata.fontMode}`;
-  await page.screenshot({ path: join(directory, `${stem}.png`), fullPage: true });
+  // Full-page captures at a scrolled position can paint the fixed navbar in
+  // the middle of the image. Normalize only photography, then restore the tour.
+  const scrollTop = await page.evaluate(() => window.scrollY);
+  if (!modalVisible) await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  try {
+    await page.screenshot({ path: join(directory, `${stem}.png`), fullPage: !modalVisible });
+  } finally {
+    if (!modalVisible)
+      await page.evaluate(top => window.scrollTo({ top, behavior: 'instant' }), scrollTop);
+  }
   writeFileSync(join(directory, `${stem}.json`), JSON.stringify(metadata, null, 2));
 }
 
@@ -183,6 +205,15 @@ export async function contrast(locator: Locator, pseudo?: string) {
         .map(i => (fg[i] * fg[3] + bg[i] * bg[3] * (1 - fg[3])) / (alpha || 1))
         .concat(alpha);
     };
+    // Opacity composites an entire group, including opaque child backgrounds.
+    // Do not report uncomposited colors while a tab/dialog is still fading.
+    for (let parent: Element | null = node; parent; parent = parent.parentElement) {
+      if (Number(getComputedStyle(parent).opacity) < 0.999) {
+        throw new Error(
+          `Wait for fading content or measure group-opacity pixels: ${parent.id || parent.className}`
+        );
+      }
+    }
     let background = [0, 0, 0, 0];
     for (
       let parent: Element | null = node;

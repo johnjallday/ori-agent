@@ -231,7 +231,11 @@ for (const [theme, width] of [
     await page.locator('#cockpitViewMap').click();
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-view', 'map');
     await capture(page, info, 'sentinel-home');
-    await page.goto('/agents');
+    const agentsLink = page.locator('.ori-navbar-links a[href="/agents"]');
+    await reachable(agentsLink);
+    await agentsLink.focus();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/\/agents$/);
     await expect(page.locator('#rosterList')).toBeVisible();
     await reachable(page.locator('#rosterSearch'));
     await capture(page, info, 'sentinel-agents');

@@ -8,7 +8,7 @@ body {
   background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 50%, #7dd3fc 100%) !important;
   color: var(--text-primary);
   min-height: 100vh;
-  font-size: 14px;
+  font-size: 1rem;
   line-height: 1.5;
   transition: all 0.3s ease;
   position: relative;
