@@ -453,7 +453,7 @@ func (s folderAgentSetups) HomeHireCharacters(count int) []string {
 	if err != nil {
 		return nil
 	}
-	return suggestFolderAgentCharacters(catalog, (folderAgentHiring{builder: s.builder}).characterCounts(), count, "")
+	return suggestFolderAgentCharacters(catalog, folderAgentHiring(s).characterCounts(), count, "")
 }
 
 func (h folderAgentHiring) AgentExists(name string) bool {
