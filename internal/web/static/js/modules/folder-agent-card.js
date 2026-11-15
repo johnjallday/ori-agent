@@ -1427,7 +1427,11 @@ function renderPlan(
     const shown = row.actions.filter(action => !covered(action));
     // Before Set it up a chosen step reads as its outcomes; from the moment
     // the run starts every action is shown with its live state (FR4).
-    const outcomes = phase === 'plan' && isChosen ? outcomeItems(shown) : [];
+    const teamCoversHires = (plan?.hires || []).some(entry => entry.step === row.handle);
+    const summaryActions = teamCoversHires
+      ? shown.filter(action => !['hire', 'assistant'].includes(action.kind))
+      : shown;
+    const outcomes = phase === 'plan' && isChosen ? outcomeItems(summaryActions) : [];
     if (outcomes.length) {
       body.append(...renderOutcomes(doc, view, row, shown, outcomes, now));
     } else if (shown.length) {
@@ -1476,18 +1480,25 @@ function renderPlan(
   // After the plan and before the install block: the other ways in, collapsed.
   if (alternatives.length)
     section.append(renderAlternatives(doc, alternatives, steps, selecting ? onTick : null));
-  if (installs.length) section.append(renderInstalls(doc, installs, lines, phase));
-  // Before Set it up, who the ticked steps hire, directly under what they
-  // install: the button confirms both. Once the run starts its lines say it.
+  // Before confirmation the team leads the plugins. Run/receipt ordering is
+  // unchanged: the run's own lines say who was hired.
   if (phase === 'plan') {
     const hires = renderHires(doc, plan?.hires || [], plan?.hiresNote || '', onPickFace);
     if (hires) section.append(hires);
   }
+  if (installs.length) section.append(renderInstalls(doc, installs, lines, phase));
   notes.forEach(line => {
     const note = el(doc, 'p', 'folder-agent-card__line folder-agent-card__line--note');
     note.dataset.state = line.state || 'waiting';
     note.dataset.kind = NOTE_LINE_KIND;
-    note.append(el(doc, 'span', 'folder-agent-card__line-name', line.name));
+    note.append(
+      el(
+        doc,
+        'span',
+        'folder-agent-card__line-name',
+        phase === 'plan' && plan?.assurance ? plan.assurance : line.name
+      )
+    );
     section.append(note);
   });
   if (plan?.excluded) section.append(el(doc, 'p', 'folder-agent-card__degraded', plan.excluded));
@@ -1583,10 +1594,11 @@ function renderInstalls(doc, installs, lines, phase) {
     const plugins = el(doc, 'a', 'folder-agent-card__install-link', 'Plugins');
     plugins.href = '/plugins';
     part(plugins);
-    item.append(head, source);
+    item.append(head);
     if (entry.why) item.append(el(doc, 'span', 'folder-agent-card__line-detail', entry.why));
     if (entry.appSentence)
       item.append(el(doc, 'span', 'folder-agent-card__line-detail', entry.appSentence));
+    item.append(source);
     list.append(item);
   });
   block.append(list);
@@ -1594,9 +1606,9 @@ function renderInstalls(doc, installs, lines, phase) {
 }
 
 // renderHires draws the hires block (setup-card-clarity FR6, FR7, FR9) before
-// Set it up: the agents the ticked steps will hire, one row each, read-only.
-// Name, then what it does, then the model it will run on (the order a narrow
-// card wraps them in), and a muted note when one of the owner's own agents
+// Set it up: the agents the ticked steps will hire, each with a changeable
+// face, its name and wrapping job. The shared model appears once in the header.
+// A muted note appears when one of the owner's own agents
 // already holds the name. The one "Agents" link leads to where they can be
 // changed after they are hired. When the host cannot tell who the Home will
 // hire it says so in one sentence instead of rows; it draws nothing when
@@ -1612,7 +1624,13 @@ function renderHires(doc, hires, note, onPickFace) {
   const n = hires.length;
   const head = el(doc, 'div', 'folder-agent-card__hires-head');
   head.append(
-    el(doc, 'h4', 'folder-agent-card__heading', `Hires ${n} ${plural(n, 'agent', 'agents')}`)
+    el(doc, 'h4', 'folder-agent-card__heading', `Hires ${n} ${plural(n, 'agent', 'agents')}`),
+    el(
+      doc,
+      'span',
+      'folder-agent-card__install-version folder-agent-card__hire-model',
+      hires[0].model || NO_MODEL_YET
+    )
   );
   const agents = el(doc, 'a', 'folder-agent-card__install-link', 'Agents');
   agents.href = '/agents';
@@ -1650,14 +1668,6 @@ function renderHires(doc, hires, note, onPickFace) {
       item.append(
         el(doc, 'div', 'folder-agent-card__line-detail folder-agent-card__hire-job', entry.job)
       );
-    item.append(
-      el(
-        doc,
-        'div',
-        'folder-agent-card__install-version folder-agent-card__hire-model',
-        entry.model || NO_MODEL_YET
-      )
-    );
     if (entry.note)
       item.append(
         el(doc, 'div', 'folder-agent-card__line-detail folder-agent-card__hire-note', entry.note)
@@ -2583,16 +2593,17 @@ function safeSourceURL(value) {
 }
 
 // folderAgentSetUpLabel is the primary button's words for a plan (PRD FR20):
-// "Install N & set up" while the ticked steps install N plugins, else
+// "Install plugins & set up" while the ticked steps install plugins, else
 // "Set it up". Every surface that offers the action uses it.
 export function folderAgentSetUpLabel(plan) {
   const n = plan?.installs?.length || 0;
-  return n > 0 ? `Install ${n} & set up` : ACTION_LABELS.set_up;
+  return n > 0 ? 'Install plugins & set up' : ACTION_LABELS.set_up;
 }
 
 function planView(plan) {
   return {
     digest: String(plan.digest || ''),
+    assurance: String(plan.assurance || ''),
     runnable: Boolean(plan.runnable),
     unavailable: String(plan.unavailable || ''),
     selected: Array.isArray(plan.selected) ? plan.selected.map(String) : [],

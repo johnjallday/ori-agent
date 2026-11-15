@@ -211,7 +211,7 @@ const (
 	maxHomeRoles    = 8
 	maxHomeFactText = 100
 	// MaxJobLineRunes bounds a hire's job line, in characters.
-	MaxJobLineRunes = 100
+	MaxJobLineRunes = 160
 )
 
 // JobLine is a role's one-line job from the provider's own description: the

@@ -4495,12 +4495,12 @@ button.folder-agent-card__who-face:focus-visible {
 }
 
 .folder-agent-card__hire {
-  grid-template-columns: 40px minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr);
   grid-template-areas:
-    "face name model"
-    "face job job"
-    "face note note";
-  column-gap: 8px;
+    "face name"
+    "face job"
+    "face note";
+  column-gap: 10px;
   align-items: baseline;
 }
 
@@ -4540,11 +4540,12 @@ button.folder-agent-card__hire-face:focus-visible {
 
 .folder-agent-card__hire-job {
   grid-area: job;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .folder-agent-card__hire-model {
-  grid-area: model;
-  justify-self: end;
+  margin-left: auto;
   text-align: right;
 }
 
@@ -4552,20 +4553,36 @@ button.folder-agent-card__hire-face:focus-visible {
   grid-area: note;
 }
 
-@container (max-width: 400px) {
-  .folder-agent-card__hire {
-    grid-template-columns: 40px minmax(0, 1fr);
-    grid-template-areas:
-      "face name"
-      "face job"
-      "face model"
-      "face note";
-  }
+/* Use the drawer Send button's filled-action token, not Bootstrap blue or
+   --pa-accent-text (a light link colour in dark mode). White on #8a5a15 is
+   above 4.5:1 in either theme. */
+.folder-agent-card .btn-primary {
+  --bs-btn-bg: var(--ori-accent-strong, #8a5a15);
+  --bs-btn-border-color: var(--ori-accent-strong, #8a5a15);
+  background: var(--ori-accent-strong, #8a5a15);
+  border-color: var(--ori-accent-strong, #8a5a15);
+  color: #fff;
+}
 
-  .folder-agent-card__hire-model {
-    justify-self: start;
-    text-align: left;
-  }
+.folder-agent-card .btn-primary:hover,
+.folder-agent-card .btn-primary:active {
+  background: color-mix(in srgb, var(--ori-accent-strong, #8a5a15) 85%, #000);
+  border-color: var(--ori-accent-strong, #8a5a15);
+  color: #fff;
+}
+
+.folder-agent-card .btn-primary:focus-visible {
+  outline: 3px solid var(--ori-accent, #bd7c24);
+  outline-offset: 2px;
+  box-shadow: none;
+}
+
+.folder-agent-card .btn-primary:disabled {
+  background: var(--ori-accent-strong, #8a5a15);
+  border-color: var(--ori-accent-strong, #8a5a15);
+  color: #fff;
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .folder-agent-card__install-head,

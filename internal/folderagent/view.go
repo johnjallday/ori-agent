@@ -200,6 +200,9 @@ type PlanView struct {
 	// the Home will hire (HiresUnnamed); never both.
 	Hires     []HireEntry `json:"hires"`
 	HiresNote string      `json:"hires_note,omitempty"`
+	// Assurance is the card's promise without a recount of the visible blocks.
+	// Historical run lines retain their full report/receipt wording.
+	Assurance string `json:"assurance,omitempty"`
 	// Alternatives are the other ways to set this folder up: each step that
 	// cannot run together with a chosen one, kept out of the main list and
 	// offered under "Other ways to set this up".
@@ -226,7 +229,7 @@ func planViewOf(plan Plan) *PlanView {
 	return &PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable,
 		Unavailable: plan.Unavailable, Selected: plan.Selected, Source: plan.Source, Words: plan.Words,
 		WordsRaw: plan.WordsRaw, Steps: steps, Excluded: plan.Excluded, DefaultReason: plan.DefaultReason,
-		ReorderNote: plan.ReorderNote, Installs: installs, Hires: hires, HiresNote: plan.HiresNote,
+		ReorderNote: plan.ReorderNote, Installs: installs, Hires: hires, HiresNote: plan.HiresNote, Assurance: plan.Assurance,
 		Alternatives: alternatives}
 }
 
@@ -502,6 +505,7 @@ type Plan struct {
 	// the host cannot name them yet. See PlanView.
 	Hires     []HireEntry
 	HiresNote string
+	Assurance string
 	// Alternatives are the steps set aside because a chosen step excludes
 	// them; see PlanView. They are not part of the digest: choosing one is a
 	// new selection, and a new selection is a new plan.
@@ -893,6 +897,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 			}
 		}
 	}
+	plan.Assurance = folderAssurance(rec, plan.Candidates) + "."
 	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder,
 		Name: assuranceLine(rec, plan.Candidates, len(plan.Installs), len(plan.Hires))})
 	for i := range plan.Hires {
@@ -967,7 +972,9 @@ func toolsBeforeHome(order []string, steps []folderlook.Step, byHandle map[strin
 // song details. A folder placed in a Home whose song-details consent is active is
 // read by that Home's own scans as it is set up, so the line then says what they
 // read instead of promising nothing is read.
-func assuranceLine(rec Record, candidates []folderlook.Candidate, installs, hires int) string {
+// folderAssurance is the promise and any existing read-consent disclosure,
+// without the recount. No closing stop: report lines append their additions.
+func folderAssurance(rec Record, candidates []folderlook.Candidate) string {
 	folder := strings.TrimSpace(rec.FolderName)
 	anonymous := folder == "" || strings.ContainsAny(folder, "/\\\x00\r\n")
 	reads := readsSentence(candidates)
@@ -985,9 +992,14 @@ func assuranceLine(rec Record, candidates []folderlook.Candidate, installs, hire
 	if reads != "" {
 		line += ". " + reads
 	}
+	return line
+}
+
+func assuranceLine(rec Record, candidates []folderlook.Candidate, installs, hires int) string {
+	line := folderAssurance(rec, candidates)
 	if adds := addsSentence(candidates, installs, hires); adds != "" {
 		line += ". " + adds
-	} else if reads != "" {
+	} else if readsSentence(candidates) != "" {
 		// The reads sentence is the last one: it ends like the adds sentence would.
 		line += "."
 	}

@@ -3045,17 +3045,17 @@ const installCard = (chosen, options = {}) =>
     options
   );
 
-test('the button says how many plugins it installs: Set it up at none', () => {
+test('the button names plugin installation once, without recounting: Set it up at none', () => {
   assert.equal(folderAgentSetUpLabel({ installs: [] }), 'Set it up');
   assert.equal(folderAgentSetUpLabel(null), 'Set it up');
-  assert.equal(folderAgentSetUpLabel({ installs: [{}] }), 'Install 1 & set up');
-  assert.equal(folderAgentSetUpLabel({ installs: [{}, {}] }), 'Install 2 & set up');
+  assert.equal(folderAgentSetUpLabel({ installs: [{}] }), 'Install plugins & set up');
+  assert.equal(folderAgentSetUpLabel({ installs: [{}, {}] }), 'Install plugins & set up');
   const view = folderAgentReportView(
     reported({ model_sentence: '', tools_sentence: '', plan: installPlan(['reaper-tools']) })
   );
   assert.deepEqual(
     view.actions.map(a => a.label),
-    ['Install 1 & set up', 'Keep the folder as it is', 'Look further']
+    ['Install plugins & set up', 'Keep the folder as it is', 'Look further']
   );
   const nothingToInstall = folderAgentReportView(
     reported({
@@ -3101,6 +3101,9 @@ test('the install block lists each plugin with its release, source and why; no b
       'REAPER is on this Mac; its Ori tools are not yet.'
     ]
   );
+  // Value leads attribution: name/version, why, application, muted source.
+  assert.equal(rows[0].children.at(-1).className, 'folder-agent-card__install-source');
+  assert.equal(rows[0].children[1].textContent, 'Lets the agent work with the REAPER songs here.');
   // No state before a run.
   assert.equal(rows[0].dataset.state, undefined);
   assert.equal(rows[0].querySelector('.folder-agent-card__line-state'), null);
@@ -3170,7 +3173,7 @@ test('unticking a step updates the block, the markers and the button from the sa
   };
   const card = installCard(['reaper-tools', 'music-production-home'], { fetchImpl });
   const setUp = card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'set_up');
-  assert.equal(setUp.textContent, 'Install 2 & set up');
+  assert.equal(setUp.textContent, 'Install plugins & set up');
   const home = card
     .querySelectorAll('input')
     .find(b => b.dataset.stepHandle === 'music-production-home');
@@ -3183,10 +3186,10 @@ test('unticking a step updates the block, the markers and the button from the sa
   );
   assert.equal(card.querySelectorAll('.folder-agent-card__install').length, 1);
   assert.equal(card.querySelectorAll('.folder-agent-card__install-marker').length, 1);
-  assert.equal(setUp.textContent, 'Install 1 & set up');
+  assert.equal(setUp.textContent, 'Install plugins & set up');
   home.checked = true;
   await home.listeners.change();
-  assert.equal(setUp.textContent, 'Install 2 & set up');
+  assert.equal(setUp.textContent, 'Install plugins & set up');
   assert.equal(card.querySelectorAll('.folder-agent-card__install').length, 2);
 });
 
@@ -3347,7 +3350,7 @@ test('confirmed, the premise is one plain line in place of the agent sentence an
   assert.ok(card.querySelector('.folder-agent-card__installs'));
   assert.equal(
     card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'set_up').textContent,
-    'Install 1 & set up'
+    'Install plugins & set up'
   );
 });
 
@@ -3840,19 +3843,15 @@ test('one hire: its name, what it does and its model, one link to Agents, nothin
   assert.equal(rows.length, 1);
   assert.equal(text(rows[0], '.folder-agent-card__hire-name'), 'Portfolio Manager');
   assert.equal(text(rows[0], '.folder-agent-card__hire-job'), 'Coordinates status and priorities.');
-  assert.equal(text(rows[0], '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(text(block, '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(rows[0].querySelector('.folder-agent-card__hire-model'), null);
   assert.equal(rows[0].dataset.step, HOME);
   // The reading order, which a narrow card wraps in: name, job, model.
   assert.deepEqual(
     rows[0].children.map(child =>
       classesOf(child).find(name => name.startsWith('folder-agent-card__hire-'))
     ),
-    [
-      'folder-agent-card__hire-face',
-      'folder-agent-card__hire-name',
-      'folder-agent-card__hire-job',
-      'folder-agent-card__hire-model'
-    ]
+    ['folder-agent-card__hire-face', 'folder-agent-card__hire-name', 'folder-agent-card__hire-job']
   );
   // One link, to Agents; no rename, no model picker, no opt-out (decision 2A).
   const links = block.querySelectorAll('a');
@@ -3886,9 +3885,14 @@ test('several hires keep their order; a missing job, model or note leaves its pa
     'Your existing Library Manager stays as it is.'
   );
   assert.equal(rows[0].querySelector('.folder-agent-card__hire-note'), null);
-  // No model can run yet: the row says so, and the run will ask for one.
-  assert.equal(text(rows[2], '.folder-agent-card__hire-model'), 'No model yet');
-  assert.equal(text(rows[0], '.folder-agent-card__hire-model'), MODEL);
+  // The host gives every hire the same model; it is said once in the head.
+  assert.equal(block.querySelectorAll('.folder-agent-card__hire-model').length, 1);
+  assert.equal(text(block, '.folder-agent-card__hire-model'), MODEL);
+  const unset = hiresBlock(
+    hiresCard([hire('Manager', { model: '' }), hire('Assistant', { model: '' })])
+  );
+  assert.equal(text(unset, '.folder-agent-card__hire-model'), 'No model yet');
+  assert.equal(unset.querySelectorAll('.folder-agent-card__hire-model').length, 1);
 });
 
 // assistant-reads-projects FR1, FR2, FR6: the Home's shared assistant is one
@@ -3913,7 +3917,8 @@ test("the Home's shared assistant is one more row of the same list", () => {
     text(assistant, '.folder-agent-card__hire-job'),
     'Handles everything REAPER-related for this project.'
   );
-  assert.equal(text(assistant, '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(text(block, '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(assistant.querySelector('.folder-agent-card__hire-model'), null);
   assert.equal(text(assistant, '.folder-agent-card__hire-note'), 'Joins each song you open.');
   assert.equal(assistant.dataset.step, HOME);
   // The same row layout as the Home's own roles: name, job, model, note.
@@ -3925,7 +3930,6 @@ test("the Home's shared assistant is one more row of the same list", () => {
       'folder-agent-card__hire-face',
       'folder-agent-card__hire-name',
       'folder-agent-card__hire-job',
-      'folder-agent-card__hire-model',
       'folder-agent-card__hire-note'
     ]
   );
@@ -3942,7 +3946,34 @@ test('when the host cannot name the hires it says so in one sentence, with no ro
   assert.equal(block.querySelectorAll('a').length, 0);
 });
 
-test('the block sits directly under the install block, before the assurance, and in its place when nothing installs', () => {
+test('the card promise does not recount visible blocks; the run retains its historical note', () => {
+  const raw = reported({
+    plan: {
+      ...homePlanOf(newHomeLines),
+      assurance: 'Nothing in Ori Music Demo is moved, copied or read.',
+      hires: [hire('Manager')]
+    }
+  });
+  const choosing = renderFolderAgentReport(folderAgentReportView(raw), stubDocument());
+  const note = choosing
+    .querySelectorAll('.folder-agent-card__line')
+    .find(line => line.dataset.kind === 'folder');
+  assert.equal(text(note, '.folder-agent-card__line-name'), raw.plan.assurance);
+  const running = renderFolderAgentReport(
+    folderAgentReportView({
+      ...raw,
+      state: 'setting_up',
+      setup: { status: 'running', lines: newHomeLines }
+    }),
+    stubDocument()
+  );
+  const historical = running
+    .querySelectorAll('.folder-agent-card__line')
+    .find(line => line.dataset.kind === 'folder');
+  assert.equal(text(historical, '.folder-agent-card__line-name'), newHomeLines.at(-1).name);
+});
+
+test('the team leads the plugins, then the assurance; no team when nobody is hired', () => {
   const order = card =>
     card
       .querySelector('.folder-agent-card__run')
@@ -3954,8 +3985,8 @@ test('the block sits directly under the install block, before the assurance, and
   const kinds = order(withInstall);
   assert.deepEqual(kinds.slice(-4), [
     'folder-agent-card__plan',
-    'folder-agent-card__installs',
     'folder-agent-card__hires',
+    'folder-agent-card__installs',
     'folder-agent-card__line'
   ]);
   // The assurance note follows the block.
@@ -4093,8 +4124,8 @@ test('the other way is collapsed under "Other ways to set this up", not in the m
   assert.deepEqual(kinds, [
     'folder-agent-card__plan',
     'folder-agent-card__alternatives',
-    'folder-agent-card__installs',
-    'folder-agent-card__hires'
+    'folder-agent-card__hires',
+    'folder-agent-card__installs'
   ]);
 });
 
@@ -4152,7 +4183,7 @@ test('"Use this instead" swaps the plan in place and swapping back restores the 
   };
   const card = swapCard(HOME, { fetchImpl });
   const setUp = card.querySelectorAll('button').find(b => b.dataset.folderAgentAction === 'set_up');
-  assert.equal(setUp.textContent, 'Install 1 & set up');
+  assert.equal(setUp.textContent, 'Install plugins & set up');
   assert.ok(hiresBlock(card));
 
   // Take the group instead: the re-plan carries the group in place of the Home.
@@ -4184,7 +4215,7 @@ test('"Use this instead" swaps the plan in place and swapping back restores the 
     .listeners.click();
   assert.deepEqual(requests, [{ selected: [GROUP] }, { selected: [HOME] }]);
   assert.deepEqual(stepRows(card), [[HOME, 'true']]);
-  assert.equal(setUp.textContent, 'Install 1 & set up');
+  assert.equal(setUp.textContent, 'Install plugins & set up');
   assert.equal(card.querySelectorAll('.folder-agent-card__install').length, 1);
   assert.equal(hiresBlock(card).querySelectorAll('.folder-agent-card__hire').length, 1);
   assert.equal(
