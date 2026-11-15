@@ -11,9 +11,11 @@ const SettingsNavigation = (function () {
   let navGroups = [];
   let sections = [];
   let noResultsEl = null;
+  let disclosure = null;
+  let narrowLayout = null;
 
-  // Configuration
-  const SCROLL_OFFSET = 80; // Offset for fixed header
+  // Inset within the desktop scroller, or below the measured mobile navbar.
+  const SCROLL_OFFSET = 16;
   const DEBOUNCE_DELAY = 150;
 
   /**
@@ -31,6 +33,14 @@ const SettingsNavigation = (function () {
       console.warn('Settings navigation: Required elements not found');
       return;
     }
+
+    disclosure = document.getElementById('settingsNavDisclosure');
+    narrowLayout = window.matchMedia('(max-width: 991px)');
+    const syncDisclosure = () => {
+      if (disclosure) disclosure.open = !narrowLayout.matches;
+    };
+    syncDisclosure();
+    narrowLayout.addEventListener('change', syncDisclosure);
 
     // Setup event listeners
     setupSearchListener();
@@ -60,7 +70,6 @@ const SettingsNavigation = (function () {
       if (e.key === 'Escape') {
         this.value = '';
         filterNavigation('');
-        this.blur();
       }
     });
   }
@@ -77,6 +86,8 @@ const SettingsNavigation = (function () {
       return;
     }
 
+    // Typing reveals results without requiring a second disclosure action.
+    if (disclosure && narrowLayout.matches) disclosure.open = true;
     let hasResults = false;
 
     // Check each nav item
@@ -123,7 +134,7 @@ const SettingsNavigation = (function () {
         }
 
         e.preventDefault();
-        scrollToSection(sectionId);
+        scrollToSection(sectionId, { moveFocus: true });
       });
     });
   }
@@ -131,31 +142,45 @@ const SettingsNavigation = (function () {
   /**
    * Scroll to a section with smooth behavior
    */
-  function scrollToSection(sectionId) {
+  function navbarOffset() {
+    return (
+      parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--navbar-offset')) ||
+      0
+    );
+  }
+
+  function scrollToSection(sectionId, { moveFocus = false, updateHistory = true } = {}) {
     const section = document.getElementById(sectionId);
-    if (!section) return;
-
     const settingsContent = document.querySelector('.settings-content');
-    if (!settingsContent) return;
+    if (!section || !settingsContent) return;
 
-    // Calculate the scroll position relative to the scroll container
+    const narrow = narrowLayout.matches;
+    // Close before measuring: the mobile page uses one document scroller.
+    if (narrow && disclosure) disclosure.open = false;
     const sectionRect = section.getBoundingClientRect();
     const contentRect = settingsContent.getBoundingClientRect();
-
-    // Current scroll position plus the offset from the top of the container
-    const scrollTop =
-      settingsContent.scrollTop + (sectionRect.top - contentRect.top) - SCROLL_OFFSET;
-
-    settingsContent.scrollTo({
+    const scrollTop = narrow
+      ? window.scrollY + sectionRect.top - navbarOffset() - SCROLL_OFFSET
+      : settingsContent.scrollTop + sectionRect.top - contentRect.top - SCROLL_OFFSET;
+    (narrow ? window : settingsContent).scrollTo({
       top: Math.max(0, scrollTop),
-      behavior: 'smooth'
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
     });
 
-    // Update URL hash without triggering scroll
-    history.pushState(null, '', `#${sectionId}`);
-
-    // Update active state
+    // Do not append history during Back/Forward or an initial deep link.
+    if (updateHistory && window.location.hash !== `#${sectionId}`) {
+      history.pushState(null, '', `#${sectionId}`);
+    }
     setActiveNavItem(sectionId);
+
+    // A selected link must not retain focus inside the now-closed disclosure.
+    if (narrow && moveFocus) {
+      const heading = section.querySelector('h2');
+      if (heading) {
+        heading.setAttribute('tabindex', '-1');
+        heading.focus({ preventScroll: true });
+      }
+    }
   }
 
   /**
@@ -164,7 +189,10 @@ const SettingsNavigation = (function () {
   function setActiveNavItem(sectionId) {
     navItems.forEach(item => {
       const itemSection = item.getAttribute('data-section');
-      item.classList.toggle('active', itemSection === sectionId);
+      const active = !!itemSection && itemSection === sectionId;
+      item.classList.toggle('active', active);
+      if (active) item.setAttribute('aria-current', 'location');
+      else item.removeAttribute('aria-current');
     });
   }
 
@@ -178,7 +206,7 @@ const SettingsNavigation = (function () {
     // Use a throttled scroll handler for better performance
     let ticking = false;
 
-    settingsContent.addEventListener('scroll', function () {
+    const onScroll = () => {
       if (!ticking) {
         requestAnimationFrame(() => {
           updateActiveOnScroll();
@@ -186,7 +214,9 @@ const SettingsNavigation = (function () {
         });
         ticking = true;
       }
-    });
+    };
+    settingsContent.addEventListener('scroll', onScroll);
+    window.addEventListener('scroll', onScroll);
   }
 
   /**
@@ -196,14 +226,14 @@ const SettingsNavigation = (function () {
     const settingsContent = document.querySelector('.settings-content');
     if (!settingsContent) return;
 
-    const contentRect = settingsContent.getBoundingClientRect();
+    const top = narrowLayout.matches ? navbarOffset() : settingsContent.getBoundingClientRect().top;
     let currentSection = null;
 
     // Find the section that's currently at or above the top of the visible area
     sections.forEach(section => {
       const sectionRect = section.getBoundingClientRect();
       // Check if section top is at or above the threshold (top of content + offset)
-      if (sectionRect.top <= contentRect.top + SCROLL_OFFSET + 50) {
+      if (sectionRect.top <= top + SCROLL_OFFSET + 50) {
         currentSection = section.id;
       }
     });
@@ -221,7 +251,7 @@ const SettingsNavigation = (function () {
     if (hash) {
       // Wait for DOM to be fully rendered
       setTimeout(() => {
-        scrollToSection(hash);
+        scrollToSection(hash, { updateHistory: false });
       }, 100);
     } else {
       // Set first section as active by default
@@ -238,7 +268,7 @@ const SettingsNavigation = (function () {
   function handleHashChange() {
     const hash = window.location.hash.slice(1);
     if (hash) {
-      scrollToSection(hash);
+      scrollToSection(hash, { updateHistory: false });
     }
   }
 

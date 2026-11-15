@@ -7,7 +7,7 @@
   <!-- Navigation -->
   {{template "navbar.tmpl" .}}
 
-  <div class="main-content-wrapper">
+  <div class="main-content-wrapper settings-page-wrapper">
     <!-- Main Content - Settings Layout -->
     <div class="main-content" style="padding: 0;">
       <div class="settings-layout">
@@ -18,9 +18,12 @@
             <svg class="settings-nav-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
             </svg>
-            <input type="text" id="settingsSearch" placeholder="Search settings..." aria-label="Search settings">
+            <input type="search" class="form-control" id="settingsSearch" placeholder="Search settings..." aria-label="Search settings">
           </div>
 
+          <details id="settingsNavDisclosure" class="settings-nav-disclosure" open>
+            <summary class="ui-disclosure-title">Browse settings sections</summary>
+            <div class="settings-nav-items">
           <!-- Account Category -->
           <div class="settings-nav-group" data-category="account">
             <h3 class="settings-nav-group-title">Account</h3>
@@ -330,18 +333,26 @@
                   <path d="M12,4C14.1,4 16.1,4.8 17.6,6.3C20.7,9.4 20.7,14.5 17.6,17.6C15.8,19.5 13.3,20.2 10.9,19.9L11.4,17.9C13.1,18.1 14.9,17.5 16.2,16.2C18.5,13.9 18.5,10.1 16.2,7.7C15.1,6.6 13.5,6 12,6V10.6L7,5.6L12,0.6V4M6.3,17.6C3.7,15 3.3,11 5.1,7.9L6.6,9.4C5.5,11.6 5.9,14.4 7.8,16.2C8.3,16.7 8.9,17.1 9.6,17.4L9,19.4C8,19 7.1,18.4 6.3,17.6Z"/>
                 </svg>
               </span>
-              <span class="settings-nav-item-text" style="color: var(--danger-color);">Reset Application</span>
+              <span class="settings-nav-item-text ui-status-danger">Reset Application</span>
             </a>
           </div>
 
           <!-- No results message -->
-          <div class="settings-nav-no-results" id="settingsNoResults">
+          <div class="settings-nav-no-results" id="settingsNoResults" role="status">
             No settings found matching your search.
           </div>
+            </div>
+          </details>
         </nav>
 
         <!-- Settings Content -->
-        <div class="settings-content">
+        <div class="settings-content" role="region" aria-label="Settings sections" tabindex="0">
+          <header class="ui-page-header">
+            <div>
+              <h1>Settings</h1>
+              <p>Manage Ori’s preferences, providers, and integrations.</p>
+            </div>
+          </header>
 
           <!-- ==================== ACCOUNT SECTION ==================== -->
 
@@ -1891,7 +1902,7 @@
                   <path d="M12,4C14.1,4 16.1,4.8 17.6,6.3C20.7,9.4 20.7,14.5 17.6,17.6C15.8,19.5 13.3,20.2 10.9,19.9L11.4,17.9C13.1,18.1 14.9,17.5 16.2,16.2C18.5,13.9 18.5,10.1 16.2,7.7C15.1,6.6 13.5,6 12,6V10.6L7,5.6L12,0.6V4M6.3,17.6C3.7,15 3.3,11 5.1,7.9L6.6,9.4C5.5,11.6 5.9,14.4 7.8,16.2C8.3,16.7 8.9,17.1 9.6,17.4L9,19.4C8,19 7.1,18.4 6.3,17.6Z"/>
                 </svg>
               </span>
-              <h2 class="settings-section-title" style="color: var(--danger-color);">Reset &amp; Recovery</h2>
+              <h2 class="settings-section-title">Reset &amp; Recovery</h2>
             </div>
 
             <p class="settings-section-description">
@@ -1971,7 +1982,7 @@
             </div>
 
             <!-- Quick Select -->
-            <div class="mb-4 d-flex gap-2">
+            <div class="mb-4 ui-actions">
               <button id="selectAllResetBtn" class="btn btn-sm btn-outline-secondary">Select every category</button>
               <button id="clearAllResetBtn" class="btn btn-sm btn-outline-secondary">Clear selection</button>
             </div>
@@ -1993,7 +2004,7 @@
             </section>
 
             <div class="settings-field mt-4 pt-4" style="border-top: 1px solid var(--danger-color);">
-              <h3 class="h6 mb-2" style="color: var(--danger-color);">Start Fresh</h3>
+              <h3 class="h6 mb-2 ui-status-danger">Start Fresh</h3>
               <p class="settings-section-description">
                 Return this Ori installation to verified first-run state. This clears app identity, setup and
                 progress, settings and saved provider/search keys, agents, app records, local integrations,
@@ -2019,7 +2030,7 @@
     <div class="modal-dialog">
       <div class="modal-content">
         <div class="modal-header" style="border-bottom-color: var(--danger-color);">
-          <h5 class="modal-title" id="resetConfirmModalLabel" style="color: var(--danger-color);">
+          <h5 class="modal-title ui-status-danger" id="resetConfirmModalLabel">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" class="me-2">
               <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
             </svg>

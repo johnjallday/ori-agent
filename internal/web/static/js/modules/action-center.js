@@ -26,12 +26,10 @@
   let workspaceName = workspaceFilter;
 
   // --- Rendering ---
-  const PRIORITY_CHIP_STYLES = {
-    critical: 'background: #c0392b; color: white;',
-    high: 'background: #96400c; color: white;',
-    medium: 'background: #f1c40f; color: #333;',
-    low: 'background: var(--bg-secondary); color: var(--text-primary);',
-    '': 'background: var(--bg-secondary); color: var(--text-primary);'
+  const PRIORITY_CHIP_CLASSES = {
+    critical: 'action-center-priority-danger',
+    high: 'action-center-priority-warning',
+    medium: 'action-center-priority-warning'
   };
 
   function escapeHtml(s) {
@@ -58,9 +56,9 @@
   }
 
   function priorityChip(p) {
-    const style = PRIORITY_CHIP_STYLES[p] || PRIORITY_CHIP_STYLES[''];
-    const label = p ? p.toUpperCase() : 'UNRANKED';
-    return `<span style="padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; ${style}">${escapeHtml(label)}</span>`;
+    const intent = Object.hasOwn(PRIORITY_CHIP_CLASSES, p) ? PRIORITY_CHIP_CLASSES[p] : '';
+    const label = p ? String(p).toUpperCase() : 'UNRANKED';
+    return `<span class="badge ${intent}">${escapeHtml(label)}</span>`;
   }
 
   function statusChip(s) {
@@ -72,7 +70,7 @@
       planned: 'Planned'
     };
     const muted = s === 'resolved' || s === 'dismissed' || s === 'planned';
-    return `<span style="padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.7rem; color: var(${muted ? '--text-secondary' : '--text-primary'}); border: 1px solid var(--border-color, #ddd);">${escapeHtml(labels[s] || s || '')}</span>`;
+    return `<span class="badge ${muted ? 'badge-secondary' : 'action-center-status-active'}">${escapeHtml(Object.hasOwn(labels, s) ? labels[s] : s || '')}</span>`;
   }
 
   function assistantSourceHTML(item) {
@@ -84,12 +82,12 @@
       ? escapeHtml(sourceURL)
       : '';
     const evidence = item.evidence
-      ? `<details style="margin-top: 0.35rem;"><summary>Evidence</summary><div style="white-space: pre-line; margin-top: 0.25rem;">${escapeHtml(item.evidence)}</div></details>`
+      ? `<details class="action-center-details"><summary>Evidence</summary><div class="action-center-details-body">${escapeHtml(item.evidence)}</div></details>`
       : '';
     const sourceLink = safeSourceURL
-      ? `<a href="${safeSourceURL}" style="display: inline-block; margin-top: 0.35rem;">Open source</a>`
+      ? `<a href="${safeSourceURL}" class="action-center-source-link">Open source</a>`
       : '';
-    return `<div style="font-size: 0.75rem; color: var(--text-secondary, #777); margin-top: 0.35rem;"><strong>Assistant suggestion</strong>${label}${confidence}${evidence}${sourceLink}</div>`;
+    return `<div class="action-center-source"><strong>Assistant suggestion</strong>${label}${confidence}${evidence}${sourceLink}</div>`;
   }
 
   // A goal run's summary row ("N suggested tasks in <workspace>") points at the
@@ -144,7 +142,7 @@
   function dailyBriefLinkHTML(item) {
     const sourceURL = String(item.source_url || '').trim();
     if (!DAILY_BRIEF_STATION_LINK.test(sourceURL)) return '';
-    return `<div style="font-size: 0.75rem; margin-top: 0.35rem;"><a href="${escapeHtml(sourceURL)}">Open Daily Brief</a></div>`;
+    return `<div class="action-center-source"><a href="${escapeHtml(sourceURL)}">Open Daily Brief</a></div>`;
   }
 
   function backlogActionHTML(item) {
@@ -180,24 +178,24 @@
         </div>
         <div class="action-center-copy">
           <div class="action-center-title">
-            ${unseen ? '<span role="img" aria-label="Unread" title="Unread" style="width: 8px; height: 8px; background: #6366f1; border-radius: 50%; display: inline-block; flex: 0 0 auto;"></span>' : ''}
+            ${unseen ? '<span role="img" aria-label="Unread" title="Unread" class="action-center-unread-dot"></span>' : ''}
             ${opened ? `<a href="${opened}" data-action="open">${title}</a>` : `<strong>${title}</strong>`}
           </div>
-          <div style="font-size: 0.85rem; color: var(--text-secondary, #555); margin-top: 0.25rem;">${escapeHtml(item.summary || '')}</div>
+          <div class="action-center-summary">${escapeHtml(item.summary || '')}</div>
           ${assistantSourceHTML(item)}
           ${findingDetailsHTML(item)}
           ${goalSuggestionsHTML(item)}
           ${dailyBriefLinkHTML(item)}
-          <div style="font-size: 0.75rem; color: var(--text-secondary, #888); margin-top: 0.4rem;">
-            ${opened ? `<a href="${opened}" style="color: inherit; text-decoration: underline;">${workspaceName}</a>` : `<span>${workspaceName} · Workspace unavailable</span>`}
+          <div class="action-center-metadata">
+            ${opened ? `<a href="${opened}">${workspaceName}</a>` : `<span>${workspaceName} · Workspace unavailable</span>`}
             · ${escapeHtml(fmtTime(item.updated_at))}
           </div>
         </div>
         <div class="action-center-actions">
           ${backlogActionHTML(item)}
-          <button class="btn btn-sm btn-outline-success" data-action="resolve" title="Mark resolved">Resolve</button>
-          <button class="btn btn-sm btn-outline-secondary" data-action="snooze" title="Snooze">Snooze</button>
-          <button class="btn btn-sm btn-outline-danger" data-action="dismiss" title="Dismiss">Dismiss</button>
+          <button class="btn btn-secondary" type="button" data-action="resolve" title="Mark resolved">Resolve</button>
+          <button class="btn btn-secondary" type="button" data-action="snooze" title="Snooze">Snooze</button>
+          <button class="btn btn-outline-danger" type="button" data-action="dismiss" title="Dismiss">Dismiss</button>
         </div>
       </div>
     `;
@@ -336,8 +334,7 @@
     const el = $('#action-center-status');
     if (!el) return;
     el.textContent = msg || '';
-    el.style.color = kind === 'error' ? 'var(--text-primary)' : 'var(--text-secondary, #666)';
-    el.style.fontWeight = kind === 'error' ? '600' : '';
+    el.setAttribute('data-kind', kind || 'info');
   }
 
   // Success message with a clickable link to the created/linked item, so the
@@ -345,8 +342,7 @@
   function setStatusWithLink(msg, href, linkLabel) {
     const el = $('#action-center-status');
     if (!el) return;
-    el.style.color = 'var(--text-secondary, #666)';
-    el.style.fontWeight = '';
+    el.setAttribute('data-kind', 'info');
     el.innerHTML = `${escapeHtml(msg)} <a href="${href}">${escapeHtml(linkLabel)}</a>`;
   }
 
@@ -429,8 +425,21 @@
     // Bootstrap ignores hide() during its opening transition. A fast mutation
     // must wait for the public shown event before trying to close the dialog.
     activeTarget.modalReady = new Promise(resolve => {
-      el.addEventListener('shown.bs.modal', resolve, { once: true });
+      el.addEventListener(
+        'shown.bs.modal',
+        () => {
+          const first = el.querySelector(
+            el.id === 'action-center-dismiss-modal'
+              ? 'input[type="radio"]:checked'
+              : '[data-snooze-preset]'
+          );
+          first?.focus();
+          resolve();
+        },
+        { once: true }
+      );
     });
+    if (el.id === 'action-center-snooze-modal') clearSnoozeValidation();
     bootstrap.Modal.getOrCreateInstance(el).show();
   }
 
@@ -566,6 +575,13 @@
     }
   }
 
+  function clearSnoozeValidation() {
+    const input = $('#action-center-snooze-custom');
+    input?.classList.remove('is-invalid');
+    input?.removeAttribute('aria-invalid');
+    setHidden('#action-center-snooze-error', true);
+  }
+
   function wireModals() {
     for (const selector of ['#action-center-dismiss-modal', '#action-center-snooze-modal']) {
       const modal = $(selector);
@@ -609,14 +625,23 @@
       });
     });
 
+    $('#action-center-snooze-custom')?.addEventListener('input', clearSnoozeValidation);
     const customGo = $('#action-center-snooze-custom-go');
     if (customGo) {
       customGo.addEventListener('click', async () => {
         if (!activeTarget) return;
-        const raw = $('#action-center-snooze-custom').value;
-        if (!raw) return;
+        const input = $('#action-center-snooze-custom');
+        const raw = input.value;
         const date = new Date(raw);
-        if (Number.isNaN(date.getTime())) return;
+        if (!raw || Number.isNaN(date.getTime())) {
+          input.classList.add('is-invalid');
+          input.setAttribute('aria-invalid', 'true');
+          const error = $('#action-center-snooze-error');
+          error.textContent = 'Choose a valid date and time.';
+          error.hidden = false;
+          input.focus();
+          return;
+        }
         await handleMutation(
           activeTarget,
           'snooze',

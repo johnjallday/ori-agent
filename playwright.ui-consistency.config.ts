@@ -5,7 +5,9 @@ import base from './playwright.config';
 export default defineConfig({
   ...base,
   testMatch: 'ui-consistency-*.spec.ts',
-  workers: 2,
+  // Utility journeys restore singleton Profile/Settings values in the owned
+  // installation. Serialize engines as well as cases to avoid racing that state.
+  workers: 1,
   use: { ...base.use, viewport: { width: 1440, height: 900 } },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },

@@ -89,6 +89,181 @@ func TestPilotPagesPreserveControlHooksAndHierarchy(t *testing.T) {
 	}
 }
 
+func TestSettingsAndProfileUseSharedFieldsAndAccessibleNavigation(t *testing.T) {
+	refresh, err := Static.ReadFile("static/css/ui-refresh.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(refresh), "body.settings-page .settings-") || strings.Contains(string(refresh), "body.settings-page .ui-density-option") {
+		t.Error("Settings geometry and density controls belong to settings.css, not a later override layer")
+	}
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	classes := regexp.MustCompile(`class="([^"]*\bsettings-input\b[^"]*)"`)
+	for _, page := range []string{"settings", "profile"} {
+		html, err := r.RenderTemplate(page, GetDefaultData())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range classes.FindAllStringSubmatch(html, -1) {
+			if !strings.Contains(match[1], "form-control") && !strings.Contains(match[1], "form-select") {
+				t.Errorf("%s: field hook %q must retain its shared control class", page, match[1])
+			}
+		}
+		if page == "settings" {
+			for _, hook := range []string{`id="settingsNavDisclosure"`, `class="ui-disclosure-title"`, `id="settingsSearch"`, `href="#voice-language"`, `id="resetConfirmModal"`, `id="confirmResetBtn"`, `aria-label="Settings sections"`} {
+				if !strings.Contains(html, hook) {
+					t.Errorf("Settings lost navigation/confirmation hook %s", hook)
+				}
+			}
+		} else if !strings.Contains(html, "Excluded until you approve it") || !strings.Contains(html, "Stays inside its workspace") {
+			t.Error("Profile must keep approval and workspace scope explanations explicit")
+		}
+	}
+}
+
+func TestVaultDialogsKeepUniqueControllerHooks(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	html, err := r.RenderTemplate("vault", GetDefaultData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"vaultPageEmptySetup", "vaultPageSearchInput", "vaultExplorerAddBtn", "vaultOpenCreateDialogBtn", "vaultCreateOverlay", "vaultUnlockOverlay", "vaultEntryOverlay", "vaultImportOverlay", "vaultConfirmVaultPassword", "vaultImportConfirmVaultPassword", "vaultSaveEntryBtn", "vaultDeleteEntryBtn"} {
+		if strings.Count(html, `id="`+id+`"`) != 1 {
+			t.Errorf("Vault must preserve exactly one #%s", id)
+		}
+	}
+	if !strings.Contains(html, `for="vaultImportConfirmVaultPassword"`) {
+		t.Error("import confirmation must label its own field, not the creation password")
+	}
+	if !strings.Contains(html, `<summary class="ui-disclosure-title">More actions</summary>`) {
+		t.Error("secondary Vault actions require a native keyboard disclosure")
+	}
+}
+
+func TestTemplatesKeepNativeNavigationAndNamedDialogs(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	html, err := r.RenderTemplate("templates", GetDefaultData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hook := range []string{`<h1>Templates</h1>`, `href="/settings#templates"`, `<a id="tplQuestOpen"`, `id="tplGroupPreviewBtn"`, `id="tplBackToLibrary"`, `aria-labelledby="tplNameModalTitle"`, `aria-labelledby="tplDirtyModalTitle"`, `id="tplRootPath"`} {
+		if !strings.Contains(html, hook) {
+			t.Errorf("Templates lost hierarchy/navigation/confirmation hook %s", hook)
+		}
+	}
+}
+
+func TestMCPUsesNamedDialogsAndControlledSourcesDisclosure(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	html, err := r.RenderTemplate("mcp", GetDefaultData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hook := range []string{`<h1>MCP Servers</h1>`, `<button id="mcpSourcesToggle"`, `aria-expanded="false" aria-controls="sourcesPanel"`, `aria-labelledby="addServerTitle"`, `aria-labelledby="removeServerTitle"`, `aria-labelledby="addSourceTitle"`, `aria-labelledby="serverDetailsTitle"`, `for="manualName"`, `for="browseSearch"`, `src="/js/modules/toast.js"`} {
+		if !strings.Contains(html, hook) {
+			t.Errorf("MCP lost shared control/disclosure hook %s", hook)
+		}
+	}
+}
+
+func TestModelsKeepNamedDialogsAndNativeControlHooks(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	html, err := r.RenderTemplate("models", GetDefaultData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hook := range []string{`<h1>Available Models</h1>`, `id="categoryEditorForm" novalidate`, `type="submit" form="categoryEditorForm"`, `class="badge category-badge-preview category-swatch-badge"`, `aria-labelledby="modelsViewLabel"`, `aria-labelledby="categoryModalTitle"`, `aria-labelledby="categoryEditorTitle"`, `aria-labelledby="assignmentModalTitle"`, `aria-labelledby="autoCategorizeTitle"`, `for="categoryName"`, `for="customColor"`, `aria-labelledby="categoryColorLabel"`, `aria-labelledby="categoryIconLabel"`, `id="viewProvider"`, `id="viewCategory"`, `src="/js/modules/toast.js"`} {
+		if !strings.Contains(html, hook) {
+			t.Errorf("Models lost a named dialog/control hook %s", hook)
+		}
+	}
+}
+
+func TestWorkflowsKeepCompactHierarchyAndNativeLibraryHooks(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	html, err := r.RenderTemplate("workflows", GetDefaultData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hook := range []string{`<h1 class="behavior-page__title">Workflows</h1>`, `id="behaviorStudioLibrary" open`, `<summary class="ui-disclosure-title behavior-library-summary">`, `for="behaviorStudioSearch"`, `for="behaviorStudioSourceFilter"`, `for="behaviorStudioCategoryFilter"`, `id="behaviorStudioNewBtn"`, `id="behaviorStudioEditor"`, `id="behaviorStudioPreview"`, `aria-labelledby="behaviorLaunchModalLabel"`, `id="behaviorLaunchSubmit"`, `src="/js/modules/behavior-studio.js"`} {
+		if !strings.Contains(html, hook) {
+			t.Errorf("Workflows lost a shared hierarchy/native control hook %s", hook)
+		}
+	}
+	source, err := Templates.ReadFile("templates/pages/workflows.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obsolete := range []string{`max-width: 13ch`, `behaviorPanelRise`, `backdrop-filter: blur`, `"Avenir Next"`, `--behavior-panel-sheen`} {
+		if strings.Contains(string(source), obsolete) {
+			t.Errorf("Workflows retained superseded local primitive %s", obsolete)
+		}
+	}
+}
+
+func TestReportsKeepNamedControlsAndBoundedDataTables(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	pages := map[string][]string{
+		"usage":  {`<h1>Usage &amp; Costs</h1>`, `id="usageRefreshBtn"`, `id="usageFeedback"`, `id="usageEmpty"`, `ui-metric-grid`, `aria-label="Usage by model"`, `scope="col"`},
+		"review": {`<h1>Conversation Review</h1>`, `id="filterAgent"`, `id="filterType"`, `id="reviewExportMenu"`, `<a class="btn btn-secondary" id="reviewExportJSON"`, `aria-labelledby="triggerModalTitle"`, `for="triggerSensitivity"`, `for="triggerAgent"`, `id="reviewProgressSection"`, `id="reviewResult"`, `aria-label="Detected conversation issues"`},
+	}
+	for page, hooks := range pages {
+		html, err := r.RenderTemplate(page, GetDefaultData())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, hook := range hooks {
+			if !strings.Contains(html, hook) {
+				t.Errorf("%s lost shared report/control hook %s", page, hook)
+			}
+		}
+	}
+}
+
+func TestActionCenterKeepsSharedHierarchyAndTriageHooks(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	html, err := r.RenderTemplate("action-center", GetDefaultData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hook := range []string{`<h1>Action Center</h1>`, `for="action-center-status-filter"`, `for="action-center-sort"`, `id="action-center-results" aria-label="Findings" aria-busy="true"`, `id="action-center-list" hidden`, `aria-labelledby="action-center-dismiss-title"`, `aria-labelledby="action-center-snooze-title"`, `id="action-center-snooze-error"`, `id="action-center-dismiss-confirm"`, `id="action-center-snooze-custom-go"`} {
+		if !strings.Contains(html, hook) {
+			t.Errorf("Action Center lost shared hierarchy/triage hook %s", hook)
+		}
+	}
+	components, err := Static.ReadFile("static/css/components.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(components), ".action-center-library") {
+		t.Error("Action Center library geometry belongs to action-center.css, not a competing shared owner")
+	}
+}
+
 func assertTokenAssetOrder(t *testing.T, name, html string) {
 	t.Helper()
 	owner := strings.Index(html, `href="/css/variables.css"`)

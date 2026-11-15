@@ -1,18 +1,48 @@
-/* Triage keeps Ori's editorial typography and theme; only this page owns these rules. */
+/* Ori-owned triage layout; shared controls, status colors and focus stay canonical. */
+.action-center-page .main-content-wrapper {
+  background: var(--bg-primary);
+}
+
 .action-center-page [hidden] {
-  display: none !important;
+  display: none;
+}
+
+.action-center-toolbar {
+  align-items: end;
+}
+
+.action-center-toolbar > div {
+  flex: 0 1 20rem;
+  min-width: 0;
 }
 
 #action-center-status,
-#action-center-retained {
-  margin-bottom: 0.75rem;
+#action-center-retained,
+#action-center-filter-banner {
+  margin-bottom: var(--space-3);
   font-size: 0.875rem;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 
-#action-center-error h3,
-#action-center-empty h3 {
-  font-size: 1.2rem;
+#action-center-status[data-kind="error"] {
+  color: var(--danger-text);
+  font-weight: 600;
+}
+
+#action-center-filter-banner {
+  padding: var(--space-3);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+#action-center-error h2,
+#action-center-empty h3,
+.action-center-library-title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-body);
+  font-size: 1.125rem;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
@@ -25,15 +55,16 @@
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .action-center-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 0.75rem 1rem;
-  padding: 1rem 0.75rem;
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-4);
   border-bottom: 1px solid var(--border-color);
+  border-inline-start: 3px solid transparent;
   align-items: start;
 }
 
@@ -42,55 +73,57 @@
 }
 
 .action-center-row[data-unread] {
-  background: var(--primary-color-light);
+  background: var(--bg-secondary);
+  border-inline-start-color: var(--focus-color);
 }
 
 .action-center-chips,
 .action-center-actions {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: var(--space-2);
 }
 
 .action-center-chips {
   align-items: flex-start;
+  max-width: 8rem;
 }
 
-.action-center-backlog {
-  padding: 0.25rem 0.5rem;
-  font-size: 0.875rem;
-  text-align: center;
+.action-center-chips .badge {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-.action-center-actions .btn {
+.action-center-status-active {
   color: var(--text-primary);
-  border-color: var(--border-color);
-  background: transparent;
 }
-
-.action-center-actions .btn:hover {
-  background: var(--bg-secondary);
+.action-center-priority-danger {
+  color: var(--danger-text);
 }
-
-.action-center-actions [data-action="dismiss"] {
-  color: #9c2030;
-}
-
-[data-bs-theme="dark"] .action-center-actions [data-action="dismiss"] {
-  color: #ff9aa5;
+.action-center-priority-warning {
+  color: var(--warning-text);
 }
 
 .action-center-title {
   display: flex;
-  gap: 0.5rem;
+  gap: var(--space-2);
   align-items: baseline;
   font-weight: 600;
 }
 
 .action-center-title a {
+  min-width: 0;
   color: var(--text-primary);
   text-decoration: underline;
   text-underline-offset: 0.18em;
+}
+
+.action-center-unread-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  background: var(--info-text);
+  border-radius: 50%;
 }
 
 .action-center-copy,
@@ -99,60 +132,116 @@
   min-width: 0;
 }
 
-/* Evidence and recommended action for findings; suggested-task titles and
-   the Backlog link for a goal run's summary row. */
+.action-center-summary,
+.action-center-source,
+.action-center-metadata {
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.action-center-metadata {
+  font-size: 0.8125rem;
+}
+.action-center-metadata a {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .action-center-details {
-  margin-top: 0.35rem;
-  font-size: 0.8rem;
+  margin-top: var(--space-2);
+  font-size: 0.875rem;
   color: var(--text-secondary);
 }
 
 .action-center-details summary {
   cursor: pointer;
   width: fit-content;
+  max-width: 100%;
+  color: var(--text-primary);
 }
 
 .action-center-details-label {
-  margin-top: 0.35rem;
+  margin-top: var(--space-2);
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .action-center-details-body {
-  margin-top: 0.15rem;
+  margin-top: var(--space-1);
   white-space: pre-line;
 }
 
-.action-center-goal-backlog-link {
+.action-center-goal-backlog-link,
+.action-center-source-link {
   display: inline-block;
-  margin-top: 0.35rem;
-  font-size: 0.8rem;
+  margin-top: var(--space-2);
+  font-size: 0.875rem;
 }
 
 .action-center-unavailable {
   max-width: 10rem;
-  font-size: 0.8rem;
+  font-size: 0.875rem;
   color: var(--text-secondary);
 }
 
-.action-center-page :is(a, button, select, #action-center-status):focus-visible {
-  outline: 2px solid var(--text-primary);
-  outline-offset: 3px;
+/* This page is the sole consumer; do not duplicate its geometry in components.css. */
+.action-center-library {
+  margin-bottom: var(--space-6);
+  color: var(--text-primary);
+}
+
+.action-center-library-intro {
+  margin: 0 0 var(--space-3);
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.action-center-library-cards {
+  display: grid;
+}
+.action-center-library-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-3) var(--space-4);
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.action-center-library-copy {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.action-center-library-counts {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+.action-center-library-open {
+  flex: none;
 }
 
 @media (max-width: 700px) {
   .action-center-row {
     grid-template-columns: minmax(0, 1fr);
   }
-
   .action-center-chips,
   .action-center-actions {
     flex-direction: row;
     flex-wrap: wrap;
+    max-width: 100%;
   }
-
   .action-center-page :is(.modern-btn, .form-select) {
     max-width: 100%;
     white-space: normal;
+  }
+  .action-center-details summary {
+    min-height: var(--touch-target);
+    padding-block: var(--space-3);
   }
 }

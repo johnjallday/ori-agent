@@ -216,7 +216,9 @@
       description: String(parameter?.description || '').trim(),
       required: Boolean(parameter?.required),
       default_value: defaultValue,
-      _defaultText: formatValueForInput(defaultValue, type)
+      _defaultText: Object.prototype.hasOwnProperty.call(parameter || {}, '_defaultText')
+        ? String(parameter._defaultText)
+        : formatValueForInput(defaultValue, type)
     };
   }
 
@@ -257,7 +259,9 @@
       priority: Math.min(5, Math.max(1, Number(step?.priority || 3) || 3)),
       timeout: Number(step?.timeout || 0) || durationFromMinutes(10),
       context: safeObject(step?.context),
-      _contextText: formatJSON(step?.context),
+      _contextText: Object.prototype.hasOwnProperty.call(step || {}, '_contextText')
+        ? String(step._contextText)
+        : formatJSON(step?.context),
       output_schema: normalizeSchema(step?.output_schema)
     };
   }
@@ -541,8 +545,12 @@
         workspaces: [],
         launchState: null,
         launchAgents: [],
-        launchWorkspaceName: ''
+        launchWorkspaceName: '',
+        isSaving: false
       };
+      this.libraryDisclosure = document.getElementById('behaviorStudioLibrary');
+      if (this.libraryDisclosure)
+        this.libraryDisclosure.open = !window.matchMedia('(max-width: 991px)').matches;
     }
 
     getRequestedTemplateId() {
@@ -563,21 +571,78 @@
 
     async init() {
       this.bindEvents();
-      await Promise.all([this.loadTemplates(), this.loadWorkspaces()]);
-      const requestedTemplateId = this.getRequestedTemplateId();
-      if (requestedTemplateId) {
-        const requestedTemplate = this.state.templates.find(
-          template => template.id === requestedTemplateId
-        );
-        if (requestedTemplate) {
-          this.selectTemplate(requestedTemplate.id, { skipDirtyCheck: true });
-          return;
+      await this.initializeLibrary();
+    }
+
+    async initializeLibrary() {
+      try {
+        await Promise.all([this.loadTemplates(), this.loadWorkspaces()]);
+        this.previewEl.hidden = false;
+        const requestedTemplateId = this.getRequestedTemplateId();
+        if (requestedTemplateId) {
+          const requestedTemplate = this.state.templates.find(
+            template => template.id === requestedTemplateId
+          );
+          if (requestedTemplate) {
+            this.selectTemplate(requestedTemplate.id, { skipDirtyCheck: true });
+            return;
+          }
+          notify(`Orchestration skill "${requestedTemplateId}" was not found.`, 'warning');
         }
-        notify(`Orchestration skill "${requestedTemplateId}" was not found.`, 'warning');
+        this.ensureSelection();
+        this.syncTemplateQueryParam(this.state.selectedTemplateId || '');
+        this.render();
+      } catch (error) {
+        this.showLoadError(error);
       }
-      this.ensureSelection();
-      this.syncTemplateQueryParam(this.state.selectedTemplateId || '');
-      this.render();
+    }
+
+    showLoadError(error) {
+      this.listEl.innerHTML =
+        '<div class="behavior-empty-state" role="alert">Library unavailable.</div>';
+      this.editorEl.innerHTML = `<section class="behavior-section"><h2 class="behavior-section__title">Could not load orchestration skills</h2><p class="behavior-empty-state__copy">${escapeHtml(error.message || 'Please try again.')}</p><button type="button" class="btn btn-secondary" data-action="retry-library">Retry</button></section>`;
+      this.previewEl.hidden = true;
+      if (this.countEl) this.countEl.textContent = '—';
+      if (this.customCountEl) this.customCountEl.textContent = '—';
+    }
+
+    rememberFocus(container) {
+      const control = document.activeElement;
+      if (!control || !container?.contains(control)) return null;
+      return {
+        id: control.id,
+        tag: control.tagName,
+        data: { ...control.dataset },
+        start: control.selectionStart,
+        end: control.selectionEnd
+      };
+    }
+
+    restoreFocus(container, saved) {
+      if (!saved) return;
+      const controls = [...container.querySelectorAll('button, input, select, textarea, summary')];
+      const control = controls.find(candidate =>
+        saved.id
+          ? candidate.id === saved.id
+          : candidate.tagName === saved.tag &&
+            Object.keys(saved.data).length > 0 &&
+            Object.entries(saved.data).every(([key, value]) => candidate.dataset[key] === value)
+      );
+      if (control && !control.disabled) {
+        control.focus({ preventScroll: true });
+        if (typeof saved.start === 'number' && typeof control.setSelectionRange === 'function')
+          control.setSelectionRange(saved.start, saved.end);
+      } else {
+        container.querySelector('[data-editor-heading]')?.focus({ preventScroll: true });
+      }
+    }
+
+    focusEditor(field = false) {
+      const target = this.editorEl.querySelector(
+        field ? '[data-field="name"]' : '[data-editor-heading]'
+      );
+      target?.scrollIntoView({ block: 'start', behavior: 'instant' });
+      target?.focus({ preventScroll: true });
     }
 
     bindEvents() {
@@ -606,13 +671,43 @@
       this.importInput?.addEventListener('change', event => this.handleImport(event));
 
       this.listEl?.addEventListener('click', event => this.handleListClick(event));
-      this.editorEl?.addEventListener('click', event => this.handleEditorClick(event));
-      this.editorEl?.addEventListener('input', event => this.handleEditorInput(event));
-      this.editorEl?.addEventListener('change', event => this.handleEditorInput(event));
+      this.editorEl?.addEventListener('click', event => {
+        this.handleEditorClick(event);
+        this.handlePreviewClick(event);
+      });
+      // A text field's later change event fires during pointer-down on Save.
+      // Redrawing that button then would remove the pending click target.
+      this.editorEl?.addEventListener('input', event => {
+        if (event.target.tagName !== 'SELECT') this.handleEditorInput(event);
+      });
+      this.editorEl?.addEventListener('change', event => {
+        if (event.target.tagName === 'SELECT') this.handleEditorInput(event);
+      });
       this.previewEl?.addEventListener('click', event => this.handlePreviewClick(event));
-      this.launchModalBodyEl?.addEventListener('input', event => this.handleLaunchInput(event));
-      this.launchModalBodyEl?.addEventListener('change', event => this.handleLaunchInput(event));
+      this.launchModalBodyEl?.addEventListener('input', event => {
+        if (event.target.tagName !== 'SELECT') this.handleLaunchInput(event);
+      });
+      this.launchModalBodyEl?.addEventListener('change', event => {
+        if (event.target.tagName === 'SELECT') this.handleLaunchInput(event);
+      });
+      this.editorEl?.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        const details = event.target.closest('details[open]');
+        if (!details) return;
+        details.querySelector('summary')?.focus();
+        details.open = false;
+        event.preventDefault();
+      });
       this.launchModalSubmitEl?.addEventListener('click', () => this.instantiateBehavior());
+      this.launchModalEl?.addEventListener('shown.bs.modal', () =>
+        this.launchModalBodyEl?.querySelector('[data-launch-field="workspaceId"]')?.focus()
+      );
+      this.launchModalEl?.addEventListener('hidden.bs.modal', () => {
+        const trigger = this.launchTrigger?.isConnected
+          ? this.launchTrigger
+          : this.editorEl.querySelector('[data-preview-action="launch"]');
+        trigger?.focus({ preventScroll: true });
+      });
     }
 
     async fetchJSON(url, options = {}) {
@@ -721,6 +816,7 @@
 
     startNewBehavior() {
       if (!this.confirmDiscardChanges()) {
+        this.newButton?.focus({ preventScroll: true });
         return;
       }
       const blank = buildBlankTemplate();
@@ -731,9 +827,10 @@
       this.state.launchState = this.buildLaunchState();
       this.syncTemplateQueryParam('');
       this.render();
+      this.focusEditor(true);
     }
 
-    selectTemplate(templateId, { skipDirtyCheck = false } = {}) {
+    selectTemplate(templateId, { skipDirtyCheck = false, moveFocus = false } = {}) {
       if (!skipDirtyCheck && !this.confirmDiscardChanges()) {
         return;
       }
@@ -748,6 +845,10 @@
       this.state.launchState = this.buildLaunchState();
       this.syncTemplateQueryParam(template.id);
       this.render();
+      if (moveFocus && window.matchMedia('(max-width: 991px)').matches) {
+        this.libraryDisclosure.open = false;
+        this.focusEditor();
+      }
     }
 
     duplicateSelectedBehavior() {
@@ -774,9 +875,10 @@
       this.state.launchState = this.buildLaunchState();
       this.syncTemplateQueryParam('');
       this.render();
+      this.focusEditor(true);
     }
 
-    async deleteSelectedBehavior() {
+    async deleteSelectedBehavior(trigger = document.activeElement) {
       const current = this.state.draft;
       if (!current || !current.id || current.source !== 'custom') {
         notify('Only custom orchestration skills can be deleted from this page.', 'warning');
@@ -785,6 +887,7 @@
 
       const confirmed = window.confirm(`Delete "${current.name || current.id}"?`);
       if (!confirmed) {
+        trigger?.focus({ preventScroll: true });
         return;
       }
 
@@ -803,6 +906,9 @@
         this.ensureSelection();
         this.syncTemplateQueryParam(this.state.selectedTemplateId || '');
         this.render();
+        (this.editorEl.querySelector('[data-preview-action="save"]') || this.newButton)?.focus({
+          preventScroll: true
+        });
       } catch (error) {
         console.error('Failed to delete behavior', error);
         notify(error.message || 'Failed to delete orchestration skill.', 'error');
@@ -810,6 +916,10 @@
     }
 
     async saveBehavior() {
+      if (this.state.isSaving) return;
+      this.state.isSaving = true;
+      this.refreshEditorActions();
+      let savedSuccessfully = false;
       try {
         const payload = this.buildTemplatePayload();
         const existing = this.state.templates.find(template => template.id === payload.id);
@@ -829,8 +939,8 @@
         }
 
         const saved = normalizeTemplate(await response.json());
-        notify('Orchestration skill saved.', 'success');
         await this.loadTemplates();
+        notify('Orchestration skill saved.', 'success');
         this.state.selectedTemplateId = saved.id;
         this.state.originalTemplateId = saved.id;
         this.state.draft = saved;
@@ -838,10 +948,44 @@
         this.state.launchState = this.buildLaunchState();
         this.syncTemplateQueryParam(saved.id);
         this.render();
+        savedSuccessfully = true;
       } catch (error) {
         console.error('Failed to save behavior', error);
-        notify(error.message || 'Failed to save orchestration skill.', 'error');
+        this.showEditorError(error);
+      } finally {
+        this.state.isSaving = false;
+        this.refreshEditorActions();
+        if (savedSuccessfully)
+          this.editorEl
+            .querySelector('[data-preview-action="save"]')
+            ?.focus({ preventScroll: true });
       }
+    }
+
+    showEditorError(error) {
+      const message = error.message || 'Failed to save orchestration skill.';
+      const feedback = this.editorEl.querySelector('#behaviorEditorFeedback');
+      if (!feedback) {
+        notify(message, 'error');
+        return;
+      }
+      feedback.textContent = message;
+      feedback.hidden = false;
+      let selector = error.control;
+      if (message === 'Skill name is required.') selector = '[data-field="name"]';
+      const context = message.match(/^Step (\d+) context /);
+      if (context)
+        selector = `[data-step-index="${Number(context[1]) - 1}"][data-step-field="context_text"]`;
+      const control = selector ? this.editorEl.querySelector(selector) : null;
+      if (control) {
+        control.classList.add('is-invalid');
+        control.setAttribute('aria-invalid', 'true');
+        control.setAttribute('aria-describedby', 'behaviorEditorFeedback');
+        control.closest?.('.behavior-field')?.after(feedback);
+      }
+      const destination = control || feedback;
+      destination.scrollIntoView({ block: 'center', behavior: 'instant' });
+      destination.focus({ preventScroll: true });
     }
 
     buildUniqueTemplateId(baseValue) {
@@ -902,11 +1046,16 @@
           required: Boolean(parameter.required)
         };
         if (String(parameter._defaultText || '').trim() !== '') {
-          normalized.default_value = parseValueByType(
-            parameter._defaultText,
-            type,
-            `Default value for ${name}`
-          );
+          try {
+            normalized.default_value = parseValueByType(
+              parameter._defaultText,
+              type,
+              `Default value for ${name}`
+            );
+          } catch (error) {
+            error.control = `[data-param-index="${index}"][data-param-field="default_value"]`;
+            throw error;
+          }
         }
         parameters.push(normalized);
       });
@@ -996,7 +1145,7 @@
       };
     }
 
-    openLaunchModal() {
+    openLaunchModal(trigger = document.activeElement) {
       if (!this.state.draft || !this.state.draft.name) {
         notify('Select or create an orchestration skill first.', 'warning');
         return;
@@ -1009,6 +1158,7 @@
       this.state.launchAgents = [];
       this.state.launchWorkspaceName = '';
       this.renderLaunchModal();
+      this.launchTrigger = trigger;
       this.launchModal?.show();
     }
 
@@ -1023,6 +1173,7 @@
             return;
           }
           if (!this.confirmDiscardChanges()) {
+            actionButton.focus({ preventScroll: true });
             return;
           }
           this.state.draft = normalizeTemplate(template);
@@ -1034,21 +1185,32 @@
             return;
           }
           if (this.state.selectedTemplateId !== template.id) {
+            if (!this.confirmDiscardChanges()) {
+              actionButton.focus({ preventScroll: true });
+              return;
+            }
             this.state.selectedTemplateId = template.id;
             this.state.originalTemplateId = template.id;
             this.state.draft = deepClone(template);
             this.state.isDirty = false;
           }
-          this.deleteSelectedBehavior();
+          this.deleteSelectedBehavior(actionButton);
         }
         return;
       }
 
-      const card = event.target.closest('[data-template-id]');
-      if (!card) {
-        return;
+      const card = event.target.closest('[data-template-select]');
+      if (!card) return;
+      this.selectTemplate(card.dataset.templateId, { moveFocus: true });
+      // Pointer-clicked buttons are not necessarily activeElement in WebKit.
+      if (
+        this.state.selectedTemplateId !== card.dataset.templateId ||
+        !window.matchMedia('(max-width: 991px)').matches
+      ) {
+        [...this.listEl.querySelectorAll('[data-template-select]')]
+          .find(button => button.dataset.templateId === card.dataset.templateId)
+          ?.focus({ preventScroll: true });
       }
-      this.selectTemplate(card.dataset.templateId);
     }
 
     handlePreviewClick(event) {
@@ -1065,13 +1227,13 @@
           this.duplicateSelectedBehavior();
           break;
         case 'delete':
-          this.deleteSelectedBehavior();
+          this.deleteSelectedBehavior(action);
           break;
         case 'export':
           this.exportSelectedBehavior();
           break;
         case 'launch':
-          this.openLaunchModal();
+          this.openLaunchModal(action);
           break;
         default:
           break;
@@ -1119,6 +1281,7 @@
         this.state.launchState = this.buildLaunchState();
         this.syncTemplateQueryParam('');
         this.render();
+        this.focusEditor(true);
         notify('Orchestration skill imported. Save it to persist.', 'success');
       } catch (error) {
         console.error('Failed to import behavior', error);
@@ -1142,6 +1305,9 @@
       const fieldIndex = Number(action.dataset.fieldIndex);
 
       switch (actionName) {
+        case 'retry-library':
+          this.initializeLibrary();
+          break;
         case 'add-param':
           this.state.draft.parameters.push(buildBlankParameter(this.state.draft.parameters.length));
           this.markDirty(true);
@@ -1217,6 +1383,17 @@
       const target = event.target;
       if (!(target instanceof HTMLElement)) {
         return;
+      }
+
+      if (target.matches?.('input, select, textarea')) {
+        const correcting = target.getAttribute('aria-describedby') === 'behaviorEditorFeedback';
+        target.classList.remove('is-invalid');
+        target.removeAttribute('aria-invalid');
+        if (correcting) {
+          target.removeAttribute('aria-describedby');
+          const feedback = this.editorEl.querySelector('#behaviorEditorFeedback');
+          if (feedback) feedback.hidden = true;
+        }
       }
 
       if (target.dataset.field) {
@@ -1407,6 +1584,7 @@
         this.renderEditor();
       }
       this.renderPreview();
+      this.refreshEditorActions();
     }
 
     render() {
@@ -1417,6 +1595,7 @@
     }
 
     renderSidebar() {
+      const focused = this.rememberFocus(this.listEl);
       const categories = Array.from(
         new Set(this.state.templates.map(template => template.category).filter(Boolean))
       ).sort((left, right) => left.localeCompare(right));
@@ -1439,31 +1618,29 @@
           const stepCount = safeArray(template.steps).length;
           return `
           <article class="behavior-card ${isSelected ? 'is-selected' : ''}" data-template-id="${escapeAttr(template.id)}">
-            <div class="behavior-card__head">
-              <div>
-                <div class="behavior-card__title">${escapeHtml(template.name || template.id || 'Untitled')}</div>
-                <div class="behavior-card__meta">
-                  <span class="behavior-badge behavior-badge--${escapeAttr(template.source || 'custom')}">${escapeHtml(template.source || 'custom')}</span>
-                  <span>${stepCount} step${stepCount === 1 ? '' : 's'}</span>
-                  ${template.category ? `<span>${escapeHtml(template.category)}</span>` : ''}
-                </div>
-              </div>
+            <button type="button" class="behavior-card__select" data-template-select data-template-id="${escapeAttr(template.id)}" aria-pressed="${isSelected}">
+              <span class="behavior-card__title">${escapeHtml(template.name || template.id || 'Untitled')}</span>
+              <span class="behavior-card__meta">
+                <span class="badge behavior-badge behavior-badge--${template.source === 'builtin' ? 'builtin' : 'custom'}">${escapeHtml(template.source || 'custom')}</span>
+                <span>${stepCount} step${stepCount === 1 ? '' : 's'}</span>
+                ${template.category ? `<span>${escapeHtml(template.category)}</span>` : ''}
+              </span>
+              <span class="behavior-card__summary">${escapeHtml(truncate(template.description || 'No description yet.', 108) || 'No description yet.')}</span>
+            </button>
               <div class="behavior-card__actions">
-                <button class="behavior-icon-btn" type="button" data-list-action="duplicate" data-template-id="${escapeAttr(template.id)}" title="Duplicate">
+                <button class="btn btn-secondary behavior-icon-btn" type="button" data-list-action="duplicate" data-template-id="${escapeAttr(template.id)}" title="Duplicate" aria-label="Duplicate ${escapeAttr(template.name || template.id)}">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M19,21H9V7H19M19,3H9C7.89,3 7,3.89 7,5V17A2,2 0 0,0 9,19H19A2,2 0 0,0 21,17V5C21,3.89 20.1,3 19,3M5,7H3V19A2,2 0 0,0 5,21H17V19H5V7Z"/></svg>
                 </button>
                 ${
                   template.source === 'custom'
                     ? `
-                  <button class="behavior-icon-btn" type="button" data-list-action="delete" data-template-id="${escapeAttr(template.id)}" title="Delete">
+                  <button class="btn btn-outline-danger behavior-icon-btn" type="button" data-list-action="delete" data-template-id="${escapeAttr(template.id)}" title="Delete" aria-label="Delete ${escapeAttr(template.name || template.id)}">
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3M7,6H17V19H7M9,8V17H11V8M13,8V17H15V8Z"/></svg>
                   </button>
                 `
                     : ''
                 }
               </div>
-            </div>
-            <p class="behavior-card__summary">${escapeHtml(truncate(template.description || 'No description yet.', 108) || 'No description yet.')}</p>
           </article>
         `;
         })
@@ -1478,6 +1655,7 @@
         `;
       }
 
+      this.restoreFocus(this.listEl, focused);
       if (this.countEl) {
         this.countEl.textContent = String(this.state.templates.length);
       }
@@ -1493,7 +1671,10 @@
     }
 
     renderEditor() {
-      const draft = normalizeTemplate(this.state.draft);
+      const focused = this.rememberFocus(this.editorEl);
+      // The draft is normalized on load. Do not trim a live field during redraw:
+      // a trailing space is still part of the user's next word.
+      const draft = this.state.draft;
       const isBuiltin = draft.source === 'builtin';
       const stepCards = safeArray(draft.steps)
         .map((step, index) => this.renderStepCard(step, index))
@@ -1511,28 +1692,30 @@
           <div class="behavior-section__head">
             <div>
               <div class="behavior-section__eyebrow">Orchestration Skill Editor</div>
-              <h2 class="behavior-section__title">Skill metadata and execution rules</h2>
+              <h2 class="behavior-section__title" data-editor-heading tabindex="-1">Skill metadata and execution rules</h2>
             </div>
-            ${isBuiltin ? '<span class="behavior-readonly-pill">Built-in · duplicate to edit</span>' : '<span class="behavior-readonly-pill behavior-readonly-pill--active">Custom</span>'}
+            ${isBuiltin ? '<span class="badge behavior-readonly-pill">Built-in · duplicate to edit</span>' : '<span class="badge behavior-readonly-pill behavior-readonly-pill--active">Custom</span>'}
           </div>
+          <div class="behavior-editor-actions ui-actions" data-editor-actions>${this.editorActionsMarkup()}</div>
+          <div id="behaviorEditorFeedback" class="ui-field-error behavior-editor-feedback" role="alert" tabindex="-1" hidden></div>
           <fieldset class="behavior-editor-fieldset" ${isBuiltin ? 'disabled' : ''}>
             <div class="behavior-form-grid behavior-form-grid--meta">
               <label class="behavior-field">
                 <span class="behavior-field__label">Name</span>
-                <input class="behavior-input" type="text" data-field="name" value="${escapeAttr(draft.name)}" placeholder="Launch Readiness Review">
+                <input class="form-control behavior-input" type="text" required data-field="name" value="${escapeAttr(draft.name)}" placeholder="Launch Readiness Review">
               </label>
               <label class="behavior-field">
                 <span class="behavior-field__label">Skill ID</span>
-                <input class="behavior-input behavior-input--mono" type="text" data-field="id" value="${escapeAttr(draft.id)}" placeholder="launch-readiness-review">
+                <input class="form-control behavior-input behavior-input--mono" type="text" data-field="id" value="${escapeAttr(draft.id)}" placeholder="launch-readiness-review">
               </label>
               <label class="behavior-field">
                 <span class="behavior-field__label">Category</span>
-                <input class="behavior-input" type="text" data-field="category" value="${escapeAttr(draft.category)}" placeholder="release">
+                <input class="form-control behavior-input" type="text" data-field="category" value="${escapeAttr(draft.category)}" placeholder="release">
               </label>
             </div>
             <label class="behavior-field">
               <span class="behavior-field__label">Description</span>
-              <textarea class="behavior-textarea" rows="3" data-field="description" placeholder="Describe what this orchestration skill orchestrates.">${escapeHtml(draft.description)}</textarea>
+              <textarea class="form-control behavior-textarea" rows="3" data-field="description" placeholder="Describe what this orchestration skill orchestrates.">${escapeHtml(draft.description)}</textarea>
             </label>
 
             <div class="behavior-subsection">
@@ -1545,20 +1728,20 @@
               <div class="behavior-form-grid behavior-form-grid--rules">
                 <label class="behavior-field">
                   <span class="behavior-field__label">Orchestration</span>
-                  <select class="behavior-input" data-field="orchestration_mode">
+                  <select class="form-select behavior-input" data-field="orchestration_mode">
                     ${ORCHESTRATION_OPTIONS.map(option => `<option value="${option.value}" ${draft.orchestration_mode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                   </select>
                 </label>
                 <label class="behavior-field">
                   <span class="behavior-field__label">Result Combination</span>
-                  <select class="behavior-input" data-field="result_combination_mode">
+                  <select class="form-select behavior-input" data-field="result_combination_mode">
                     ${COMBINATION_OPTIONS.map(option => `<option value="${option.value}" ${draft.result_combination_mode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
                   </select>
                 </label>
               </div>
               <label class="behavior-field">
                 <span class="behavior-field__label">Combination Instruction</span>
-                <textarea class="behavior-textarea behavior-textarea--compact" rows="2" data-field="combination_instruction" placeholder="Optional note for the final aggregation step.">${escapeHtml(draft.combination_instruction)}</textarea>
+                <textarea class="form-control behavior-textarea behavior-textarea--compact" rows="2" data-field="combination_instruction" placeholder="Optional note for the final aggregation step.">${escapeHtml(draft.combination_instruction)}</textarea>
               </label>
             </div>
 
@@ -1568,7 +1751,7 @@
                   <div class="behavior-subsection__title">Parameters</div>
                   <div class="behavior-subsection__copy">Expose inputs that users fill before they instantiate this orchestration skill.</div>
                 </div>
-                <button class="behavior-btn behavior-btn--secondary" type="button" data-action="add-param">Add parameter</button>
+                <button class="btn btn-secondary behavior-btn behavior-btn--secondary" type="button" data-action="add-param">Add parameter</button>
               </div>
               <div class="behavior-stack">${parameterRows}</div>
             </div>
@@ -1581,13 +1764,37 @@
                   <div class="behavior-subsection__title">Step Graph</div>
                   <div class="behavior-subsection__copy">Each step can depend on any earlier or later step id. The preview panel renders the graph.</div>
                 </div>
-                <button class="behavior-btn behavior-btn--secondary" type="button" data-action="add-step">Add step</button>
+                <button class="btn btn-secondary behavior-btn behavior-btn--secondary" type="button" data-action="add-step">Add step</button>
               </div>
               <div class="behavior-step-list">${stepCards}</div>
             </div>
           </fieldset>
         </section>
       `;
+      this.restoreFocus(this.editorEl, focused);
+    }
+
+    editorActionsMarkup() {
+      const draft = this.state.draft;
+      const isBuiltin = draft.source === 'builtin';
+      const busy = this.state.isSaving;
+      return `<button class="btn btn-primary behavior-btn" type="button" data-preview-action="save" ${isBuiltin || busy ? 'disabled' : ''} aria-busy="${busy}">${busy ? 'Saving…' : 'Save'}</button>
+        <button class="btn btn-secondary behavior-btn" type="button" data-preview-action="launch" ${this.state.isDirty || busy ? 'disabled' : ''}>Add to workspace</button>
+        <details><summary class="btn btn-secondary" data-editor-more>More actions</summary><div class="ui-actions">
+          <button class="btn btn-secondary behavior-btn" type="button" data-preview-action="duplicate">${isBuiltin ? 'Fork' : 'Duplicate'}</button>
+          <button class="btn btn-secondary behavior-btn" type="button" data-preview-action="export">Export</button>
+          <button class="btn btn-outline-danger behavior-btn" type="button" data-preview-action="delete" ${draft.source !== 'custom' || busy ? 'disabled' : ''}>Delete</button>
+        </div></details>`;
+    }
+
+    refreshEditorActions() {
+      const actions = this.editorEl.querySelector('[data-editor-actions]');
+      if (!actions) return;
+      const focused = this.rememberFocus(actions);
+      const open = actions.querySelector('details')?.open;
+      actions.innerHTML = this.editorActionsMarkup();
+      if (open) actions.querySelector('details').open = true;
+      this.restoreFocus(actions, focused);
     }
 
     renderParameterRow(parameter, index) {
@@ -1597,11 +1804,11 @@
           <div class="behavior-parameter-row__grid">
             <label class="behavior-field">
               <span class="behavior-field__label">Name</span>
-              <input class="behavior-input behavior-input--mono" type="text" data-param-index="${index}" data-param-field="name" value="${escapeAttr(parameter.name)}">
+              <input class="form-control behavior-input behavior-input--mono" type="text" data-param-index="${index}" data-param-field="name" value="${escapeAttr(parameter.name)}">
             </label>
             <label class="behavior-field">
               <span class="behavior-field__label">Type</span>
-              <select class="behavior-input" data-param-index="${index}" data-param-field="type">
+              <select class="form-select behavior-input" data-param-index="${index}" data-param-field="type">
                 ${PARAM_TYPE_OPTIONS.map(option => `<option value="${option}" ${parameter.type === option ? 'selected' : ''}>${titleCase(option)}</option>`).join('')}
               </select>
             </label>
@@ -1612,30 +1819,30 @@
           </div>
           <label class="behavior-field">
             <span class="behavior-field__label">Description</span>
-            <input class="behavior-input" type="text" data-param-index="${index}" data-param-field="description" value="${escapeAttr(parameter.description)}" placeholder="What this parameter controls">
+            <input class="form-control behavior-input" type="text" data-param-index="${index}" data-param-field="description" value="${escapeAttr(parameter.description)}" placeholder="What this parameter controls">
           </label>
           <label class="behavior-field">
             <span class="behavior-field__label">Default Value</span>
             ${
               usesTextarea
                 ? `
-              <textarea class="behavior-textarea behavior-textarea--compact behavior-input--mono" rows="3" data-param-index="${index}" data-param-field="default_value" placeholder='${parameter.type === 'array' ? '["value"]' : '{"key":"value"}'}'>${escapeHtml(parameter._defaultText)}</textarea>
+              <textarea class="form-control behavior-textarea behavior-textarea--compact behavior-input--mono" rows="3" data-param-index="${index}" data-param-field="default_value" placeholder='${parameter.type === 'array' ? '["value"]' : '{"key":"value"}'}'>${escapeHtml(parameter._defaultText)}</textarea>
             `
                 : parameter.type === 'boolean'
                   ? `
-              <select class="behavior-input" data-param-index="${index}" data-param-field="default_value">
+              <select class="form-select behavior-input" data-param-index="${index}" data-param-field="default_value">
                 <option value="">No default</option>
                 <option value="true" ${parameter._defaultText === 'true' ? 'selected' : ''}>True</option>
                 <option value="false" ${parameter._defaultText === 'false' ? 'selected' : ''}>False</option>
               </select>
             `
                   : `
-              <input class="behavior-input ${parameter.type === 'number' ? 'behavior-input--mono' : ''}" type="${parameter.type === 'number' ? 'number' : 'text'}" data-param-index="${index}" data-param-field="default_value" value="${escapeAttr(parameter._defaultText)}" placeholder="${parameter.type === 'number' ? '0' : 'Default value'}">
+              <input class="form-control behavior-input ${parameter.type === 'number' ? 'behavior-input--mono' : ''}" type="${parameter.type === 'number' ? 'number' : 'text'}" data-param-index="${index}" data-param-field="default_value" value="${escapeAttr(parameter._defaultText)}" placeholder="${parameter.type === 'number' ? '0' : 'Default value'}">
             `
             }
           </label>
           <div class="behavior-parameter-row__footer">
-            <button class="behavior-link-btn" type="button" data-action="remove-param" data-param-index="${index}">Remove parameter</button>
+            <button class="btn btn-outline-danger behavior-link-btn" type="button" data-action="remove-param" data-param-index="${index}">Remove parameter</button>
           </div>
         </div>
       `;
@@ -1659,13 +1866,13 @@
               <h3 class="behavior-step-card__title">${escapeHtml(step.name || step.description || `Step ${index + 1}`)}</h3>
             </div>
             <div class="behavior-step-card__actions">
-              <button class="behavior-icon-btn" type="button" data-action="move-step-up" data-step-index="${index}" title="Move up">
+              <button class="btn btn-secondary behavior-icon-btn" type="button" data-action="move-step-up" data-step-index="${index}" title="Move up" aria-label="Move step ${index + 1} up" ${index === 0 ? 'disabled' : ''}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7,15L12,10L17,15H7Z"/></svg>
               </button>
-              <button class="behavior-icon-btn" type="button" data-action="move-step-down" data-step-index="${index}" title="Move down">
+              <button class="btn btn-secondary behavior-icon-btn" type="button" data-action="move-step-down" data-step-index="${index}" title="Move down" aria-label="Move step ${index + 1} down" ${index === this.state.draft.steps.length - 1 ? 'disabled' : ''}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7,10L12,15L17,10H7Z"/></svg>
               </button>
-              <button class="behavior-icon-btn" type="button" data-action="remove-step" data-step-index="${index}" title="Remove step">
+              <button class="btn btn-outline-danger behavior-icon-btn" type="button" data-action="remove-step" data-step-index="${index}" title="Remove step" aria-label="Remove step ${index + 1}">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3M7,6H17V19H7M9,8V17H11V8M13,8V17H15V8Z"/></svg>
               </button>
             </div>
@@ -1674,40 +1881,40 @@
           <div class="behavior-form-grid behavior-form-grid--step">
             <label class="behavior-field">
               <span class="behavior-field__label">Step Name</span>
-              <input class="behavior-input" type="text" data-step-index="${index}" data-step-field="name" value="${escapeAttr(step.name)}" placeholder="Collect evidence">
+              <input class="form-control behavior-input" type="text" data-step-index="${index}" data-step-field="name" value="${escapeAttr(step.name)}" placeholder="Collect evidence">
             </label>
             <label class="behavior-field">
               <span class="behavior-field__label">Step ID</span>
-              <input class="behavior-input behavior-input--mono" type="text" data-step-index="${index}" data-step-field="id" value="${escapeAttr(step.id)}" placeholder="collect-evidence">
+              <input class="form-control behavior-input behavior-input--mono" type="text" data-step-index="${index}" data-step-field="id" value="${escapeAttr(step.id)}" placeholder="collect-evidence">
             </label>
             <label class="behavior-field">
               <span class="behavior-field__label">Role</span>
-              <select class="behavior-input" data-step-index="${index}" data-step-field="role">
+              <select class="form-select behavior-input" data-step-index="${index}" data-step-field="role">
                 ${ROLE_OPTIONS.map(option => `<option value="${option.value}" ${step.role === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
               </select>
             </label>
             <label class="behavior-field">
               <span class="behavior-field__label">Pinned Agent <span class="behavior-field__optional">(optional)</span></span>
-              <input class="behavior-input" type="text" data-step-index="${index}" data-step-field="agent_name" value="${escapeAttr(step.agent_name)}" placeholder="Leave blank to assign at launch">
+              <input class="form-control behavior-input" type="text" data-step-index="${index}" data-step-field="agent_name" value="${escapeAttr(step.agent_name)}" placeholder="Leave blank to assign at launch">
             </label>
             <label class="behavior-field">
               <span class="behavior-field__label">Priority</span>
-              <input class="behavior-input behavior-input--mono" type="number" min="1" max="5" data-step-index="${index}" data-step-field="priority" value="${escapeAttr(step.priority)}">
+              <input class="form-control behavior-input behavior-input--mono" type="number" min="1" max="5" data-step-index="${index}" data-step-field="priority" value="${escapeAttr(step.priority)}">
             </label>
             <label class="behavior-field">
               <span class="behavior-field__label">Timeout (minutes)</span>
-              <input class="behavior-input behavior-input--mono" type="number" min="1" step="1" data-step-index="${index}" data-step-field="timeout_minutes" value="${escapeAttr(timeoutMinutes)}">
+              <input class="form-control behavior-input behavior-input--mono" type="number" min="1" step="1" data-step-index="${index}" data-step-field="timeout_minutes" value="${escapeAttr(timeoutMinutes)}">
             </label>
           </div>
 
           <label class="behavior-field">
             <span class="behavior-field__label">Step Description</span>
-            <textarea class="behavior-textarea behavior-textarea--compact" rows="2" data-step-index="${index}" data-step-field="description" placeholder="What this step should accomplish.">${escapeHtml(step.description)}</textarea>
+            <textarea class="form-control behavior-textarea behavior-textarea--compact" rows="2" data-step-index="${index}" data-step-field="description" placeholder="What this step should accomplish.">${escapeHtml(step.description)}</textarea>
           </label>
 
           <label class="behavior-field">
             <span class="behavior-field__label">Details</span>
-            <textarea class="behavior-textarea behavior-textarea--compact" rows="2" data-step-index="${index}" data-step-field="details" placeholder="Optional extra instructions.">${escapeHtml(step.details)}</textarea>
+            <textarea class="form-control behavior-textarea behavior-textarea--compact" rows="2" data-step-index="${index}" data-step-field="details" placeholder="Optional extra instructions.">${escapeHtml(step.details)}</textarea>
           </label>
 
           <div class="behavior-field">
@@ -1732,7 +1939,7 @@
 
           <label class="behavior-field">
             <span class="behavior-field__label">Context JSON</span>
-            <textarea class="behavior-textarea behavior-textarea--code" rows="5" data-step-index="${index}" data-step-field="context_text" placeholder='{"focus":"security"}'>${escapeHtml(step._contextText || '')}</textarea>
+            <textarea class="form-control behavior-textarea behavior-textarea--code" rows="5" data-step-index="${index}" data-step-field="context_text" placeholder='{"focus":"security"}'>${escapeHtml(step._contextText || '')}</textarea>
           </label>
 
           ${schemaEditor}
@@ -1749,7 +1956,7 @@
                 <div class="behavior-subsection__title">${escapeHtml(heading)}</div>
                 <div class="behavior-subsection__copy">Require this step to return valid JSON matching a schema.</div>
               </div>
-              <button class="behavior-btn behavior-btn--secondary" type="button" data-action="${scope === 'template' ? 'enable-template-schema' : 'enable-step-schema'}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''}>Enable schema</button>
+              <button class="btn btn-secondary behavior-btn behavior-btn--secondary" type="button" data-action="${scope === 'template' ? 'enable-template-schema' : 'enable-step-schema'}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''}>Enable schema</button>
             </div>
           </div>
         `;
@@ -1763,14 +1970,14 @@
               <div class="behavior-subsection__copy">These fields are enforced at runtime.</div>
             </div>
             <div class="behavior-subsection__actions">
-              <button class="behavior-btn behavior-btn--secondary" type="button" data-action="${scope === 'template' ? 'add-template-schema-field' : 'add-step-schema-field'}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''}>Add field</button>
-              <button class="behavior-link-btn" type="button" data-action="${scope === 'template' ? 'disable-template-schema' : 'disable-step-schema'}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''}>Disable schema</button>
+              <button class="btn btn-secondary behavior-btn behavior-btn--secondary" type="button" data-action="${scope === 'template' ? 'add-template-schema-field' : 'add-step-schema-field'}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''}>Add field</button>
+              <button class="btn btn-secondary behavior-link-btn" type="button" data-action="${scope === 'template' ? 'disable-template-schema' : 'disable-step-schema'}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''}>Disable schema</button>
             </div>
           </div>
           <div class="behavior-form-grid behavior-form-grid--schema">
             <label class="behavior-field">
               <span class="behavior-field__label">Schema Name</span>
-              <input class="behavior-input" type="text" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-schema-field="name" value="${escapeAttr(schema.name)}" placeholder="release_decision">
+              <input class="form-control behavior-input" type="text" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-schema-field="name" value="${escapeAttr(schema.name)}" placeholder="release_decision">
             </label>
             <label class="behavior-field behavior-field--toggle">
               <span class="behavior-field__label">Strict</span>
@@ -1779,7 +1986,7 @@
           </div>
           <label class="behavior-field">
             <span class="behavior-field__label">Schema Description</span>
-            <textarea class="behavior-textarea behavior-textarea--compact" rows="2" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-schema-field="description" placeholder="What the JSON object represents.">${escapeHtml(schema.description)}</textarea>
+            <textarea class="form-control behavior-textarea behavior-textarea--compact" rows="2" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-schema-field="description" placeholder="What the JSON object represents.">${escapeHtml(schema.description)}</textarea>
           </label>
           <div class="behavior-schema-field-list">
             ${safeArray(schema.fields)
@@ -1789,11 +1996,11 @@
                 <div class="behavior-form-grid behavior-form-grid--schema-row">
                   <label class="behavior-field">
                     <span class="behavior-field__label">Field</span>
-                    <input class="behavior-input behavior-input--mono" type="text" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-field-index="${fieldIndex}" data-schema-item-field="name" value="${escapeAttr(field.name)}" placeholder="summary">
+                    <input class="form-control behavior-input behavior-input--mono" type="text" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-field-index="${fieldIndex}" data-schema-item-field="name" value="${escapeAttr(field.name)}" placeholder="summary">
                   </label>
                   <label class="behavior-field">
                     <span class="behavior-field__label">Type</span>
-                    <select class="behavior-input" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-field-index="${fieldIndex}" data-schema-item-field="type">
+                    <select class="form-select behavior-input" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-field-index="${fieldIndex}" data-schema-item-field="type">
                       ${OUTPUT_FIELD_TYPES.map(option => `<option value="${option}" ${field.type === option ? 'selected' : ''}>${titleCase(option)}</option>`).join('')}
                     </select>
                   </label>
@@ -1804,10 +2011,10 @@
                 </div>
                 <label class="behavior-field">
                   <span class="behavior-field__label">Description</span>
-                  <input class="behavior-input" type="text" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-field-index="${fieldIndex}" data-schema-item-field="description" value="${escapeAttr(field.description)}" placeholder="Explain this field">
+                  <input class="form-control behavior-input" type="text" data-schema-scope="${scope}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-field-index="${fieldIndex}" data-schema-item-field="description" value="${escapeAttr(field.description)}" placeholder="Explain this field">
                 </label>
                 <div class="behavior-parameter-row__footer">
-                  <button class="behavior-link-btn" type="button" data-action="${scope === 'template' ? 'remove-template-schema-field' : 'remove-step-schema-field'}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-field-index="${fieldIndex}">Remove field</button>
+                  <button class="btn btn-outline-danger behavior-link-btn" type="button" data-action="${scope === 'template' ? 'remove-template-schema-field' : 'remove-step-schema-field'}" ${scope === 'step' ? `data-step-index="${stepIndex}"` : ''} data-field-index="${fieldIndex}">Remove field</button>
                 </div>
               </div>
             `
@@ -1819,6 +2026,7 @@
     }
 
     renderPreview() {
+      const rawOpen = this.previewEl.querySelector('.behavior-json-inspector')?.open;
       const draft = normalizeTemplate(this.state.draft);
       const graphLayout = buildGraphLayout(draft.steps);
       const graphMarkup = graphLayout
@@ -1840,20 +2048,12 @@
           <div class="behavior-preview-card__hero">
             <div>
               <div class="behavior-preview-card__eyebrow">Skill Summary</div>
-              <h2 class="behavior-preview-card__title">${escapeHtml(draft.name || 'New orchestration skill')}</h2>
+              <h2 class="behavior-preview-card__title" id="behaviorStudioSelectedLabel">${escapeHtml(draft.name || 'New orchestration skill')}</h2>
               <p class="behavior-preview-card__copy">${escapeHtml(draft.description || 'Describe the reusable orchestration this skill should execute.')}</p>
             </div>
-            <div class="behavior-preview-card__status ${this.state.isDirty ? 'is-dirty' : ''}">
+            <div class="badge behavior-preview-card__status ${this.state.isDirty ? 'is-dirty' : ''}">
               ${this.state.isDirty ? 'Unsaved draft' : isBuiltin ? 'Built-in' : 'Saved'}
             </div>
-          </div>
-
-          <div class="behavior-preview-card__actions">
-            <button class="behavior-btn behavior-btn--primary" type="button" data-preview-action="launch" ${this.state.isDirty ? 'disabled' : ''}>Add to workspace</button>
-            <button class="behavior-btn behavior-btn--secondary" type="button" data-preview-action="save" ${isBuiltin ? 'disabled' : ''}>Save</button>
-            <button class="behavior-btn behavior-btn--secondary" type="button" data-preview-action="duplicate">${isBuiltin ? 'Fork' : 'Duplicate'}</button>
-            <button class="behavior-btn behavior-btn--secondary" type="button" data-preview-action="export">Export</button>
-            <button class="behavior-btn behavior-btn--danger" type="button" data-preview-action="delete" ${draft.source !== 'custom' ? 'disabled' : ''}>Delete</button>
           </div>
 
           <div class="behavior-preview-stats">
@@ -1880,7 +2080,7 @@
               <h3>Step Graph</h3>
               <span>${stepCount} node${stepCount === 1 ? '' : 's'}</span>
             </div>
-            <div class="behavior-graph-frame">${graphMarkup}</div>
+            <div class="behavior-graph-frame" role="region" aria-label="Step dependency graph" tabindex="0">${graphMarkup}</div>
           </div>
 
           <div class="behavior-preview-panel">
@@ -1914,6 +2114,7 @@
           </details>
         </section>
       `;
+      if (rawOpen) this.previewEl.querySelector('.behavior-json-inspector').open = true;
     }
 
     renderGraphSVG(steps, graphLayout) {
@@ -1943,11 +2144,12 @@
             return '';
           }
           const accent = getRoleAccent(step.role);
-          const label = truncate(step.name || step.description || step.id, 28);
+          const label = truncate(step.name || step.description || step.id, 16);
           const sublabel = truncate(step.agent_name || step.role || 'general', 20);
           return `
           <g transform="translate(${position.x - 72}, ${position.y - 34})">
-            <rect width="144" height="68" rx="18" fill="rgba(255,255,255,0.94)" stroke="${accent}" stroke-width="2.2"></rect>
+            <title>${escapeHtml(step.name || step.description || step.id)}</title>
+            <rect width="144" height="68" rx="18" fill="var(--surface-solid)" stroke="${accent}" stroke-width="2.2"></rect>
             <rect width="144" height="10" rx="10" fill="${accent}" opacity="0.88"></rect>
             <text x="16" y="34" class="behavior-graph-label">${escapeHtml(label)}</text>
             <text x="16" y="52" class="behavior-graph-sublabel">${escapeHtml(sublabel)}</text>
@@ -1957,7 +2159,7 @@
         .join('');
 
       return `
-        <svg class="behavior-graph-svg" viewBox="0 0 ${graphLayout.width} ${graphLayout.height}" preserveAspectRatio="xMidYMid meet">
+        <svg class="behavior-graph-svg" role="img" aria-label="Step dependency graph preview" viewBox="0 0 ${graphLayout.width} ${graphLayout.height}" preserveAspectRatio="xMidYMid meet">
           <defs>
             <filter id="behaviorNodeShadow" x="-20%" y="-20%" width="140%" height="140%">
               <feDropShadow dx="0" dy="14" stdDeviation="12" flood-color="rgba(15, 23, 42, 0.18)"></feDropShadow>
@@ -1979,6 +2181,7 @@
     }
 
     renderLaunchModal() {
+      const focused = this.rememberFocus(this.launchModalBodyEl);
       if (!this.launchModalBodyEl) {
         return;
       }
@@ -2007,7 +2210,7 @@
           step => `
         <label class="behavior-field">
           <span class="behavior-field__label">${escapeHtml(step.name || step.id)}</span>
-          <select class="behavior-input" data-launch-field="assignment" data-step-id="${escapeAttr(step.id)}">
+          <select class="form-select behavior-input" data-launch-field="assignment" data-step-id="${escapeAttr(step.id)}">
             <option value="">Use skill default${step.agent_name ? ` (${escapeHtml(step.agent_name)})` : ''}</option>
             ${this.state.launchAgents
               .map(
@@ -2033,14 +2236,14 @@
             </div>
             <label class="behavior-field">
               <span class="behavior-field__label">Target Workspace</span>
-              <select class="behavior-input" data-launch-field="workspaceId">
+              <select class="form-select behavior-input" data-launch-field="workspaceId">
                 <option value="">Select a workspace</option>
                 ${workspaceOptions}
               </select>
             </label>
             <label class="behavior-field">
               <span class="behavior-field__label">Fallback Agent</span>
-              <select class="behavior-input" data-launch-field="fallbackAgent" ${this.state.launchAgents.length === 0 ? 'disabled' : ''}>
+              <select class="form-select behavior-input" data-launch-field="fallbackAgent" ${this.state.launchAgents.length === 0 ? 'disabled' : ''}>
                 <option value="">Leave unassigned unless a step pins an agent</option>
                 ${this.state.launchAgents.map(agentName => `<option value="${escapeAttr(agentName)}" ${launchState.fallbackAgent === agentName ? 'selected' : ''}>${escapeHtml(agentName)}</option>`).join('')}
               </select>
@@ -2063,21 +2266,21 @@
             </div>
             <label class="behavior-field">
               <span class="behavior-field__label">Orchestration Override</span>
-              <select class="behavior-input" data-launch-field="orchestrationMode">
+              <select class="form-select behavior-input" data-launch-field="orchestrationMode">
                 <option value="">Use skill default (${escapeHtml(draft.orchestration_mode)})</option>
                 ${ORCHESTRATION_OPTIONS.map(option => `<option value="${option.value}" ${launchState.orchestrationMode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
               </select>
             </label>
             <label class="behavior-field">
               <span class="behavior-field__label">Combination Override</span>
-              <select class="behavior-input" data-launch-field="resultCombinationMode">
+              <select class="form-select behavior-input" data-launch-field="resultCombinationMode">
                 <option value="">Use skill default (${escapeHtml(draft.result_combination_mode)})</option>
                 ${COMBINATION_OPTIONS.map(option => `<option value="${option.value}" ${launchState.resultCombinationMode === option.value ? 'selected' : ''}>${option.label}</option>`).join('')}
               </select>
             </label>
             <label class="behavior-field">
               <span class="behavior-field__label">Combination Instruction</span>
-              <textarea class="behavior-textarea behavior-textarea--compact" rows="2" data-launch-field="combinationInstruction" placeholder="Optional override for the final aggregation note.">${escapeHtml(launchState.combinationInstruction || '')}</textarea>
+              <textarea class="form-control behavior-textarea behavior-textarea--compact" rows="2" data-launch-field="combinationInstruction" placeholder="Optional override for the final aggregation note.">${escapeHtml(launchState.combinationInstruction || '')}</textarea>
             </label>
           </div>
         </div>
@@ -2104,6 +2307,7 @@
           </div>
         </div>
       `;
+      this.restoreFocus(this.launchModalBodyEl, focused);
     }
 
     renderLaunchParameterField(parameter, launchState) {
@@ -2113,7 +2317,7 @@
           return `
             <label class="behavior-field">
               <span class="behavior-field__label">${escapeHtml(parameter.name)}</span>
-              <select class="behavior-input" data-launch-field="parameter" data-parameter-name="${escapeAttr(parameter.name)}">
+              <select class="form-select behavior-input" data-launch-field="parameter" data-parameter-name="${escapeAttr(parameter.name)}">
                 <option value="" ${value === '' ? 'selected' : ''}>No value</option>
                 <option value="true" ${value === 'true' ? 'selected' : ''}>True</option>
                 <option value="false" ${value === 'false' ? 'selected' : ''}>False</option>
@@ -2126,7 +2330,7 @@
           return `
             <label class="behavior-field">
               <span class="behavior-field__label">${escapeHtml(parameter.name)}</span>
-              <textarea class="behavior-textarea behavior-textarea--code" rows="4" data-launch-field="parameter" data-parameter-name="${escapeAttr(parameter.name)}" placeholder="${parameter.type === 'array' ? '["value"]' : '{"key":"value"}'}">${escapeHtml(value)}</textarea>
+              <textarea class="form-control behavior-textarea behavior-textarea--code" rows="4" data-launch-field="parameter" data-parameter-name="${escapeAttr(parameter.name)}" placeholder="${parameter.type === 'array' ? '["value"]' : '{"key":"value"}'}">${escapeHtml(value)}</textarea>
               ${parameter.description ? `<span class="behavior-field__hint">${escapeHtml(parameter.description)}</span>` : ''}
             </label>
           `;
@@ -2134,7 +2338,7 @@
           return `
             <label class="behavior-field">
               <span class="behavior-field__label">${escapeHtml(parameter.name)}</span>
-              <input class="behavior-input behavior-input--mono" type="number" data-launch-field="parameter" data-parameter-name="${escapeAttr(parameter.name)}" value="${escapeAttr(value)}">
+              <input class="form-control behavior-input behavior-input--mono" type="number" data-launch-field="parameter" data-parameter-name="${escapeAttr(parameter.name)}" value="${escapeAttr(value)}">
               ${parameter.description ? `<span class="behavior-field__hint">${escapeHtml(parameter.description)}</span>` : ''}
             </label>
           `;
@@ -2142,7 +2346,7 @@
           return `
             <label class="behavior-field">
               <span class="behavior-field__label">${escapeHtml(parameter.name)}</span>
-              <input class="behavior-input" type="text" data-launch-field="parameter" data-parameter-name="${escapeAttr(parameter.name)}" value="${escapeAttr(value)}">
+              <input class="form-control behavior-input" type="text" data-launch-field="parameter" data-parameter-name="${escapeAttr(parameter.name)}" value="${escapeAttr(value)}">
               ${parameter.description ? `<span class="behavior-field__hint">${escapeHtml(parameter.description)}</span>` : ''}
             </label>
           `;

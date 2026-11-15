@@ -97,14 +97,17 @@ for (const width of [320, 390, 720]) {
     await expect(page.locator('#issuesTable .spinner-border')).toHaveCount(0);
     await expect(page.locator('#runsTable .spinner-border')).toHaveCount(0);
     await capture(page, info, 'review');
+    const exportToggle = page.locator('#reviewExportMenu > summary');
+    await reachable(exportToggle, 44);
+    await exportToggle.click();
     const geometry: Record<string, unknown> = {};
     for (const selector of [
       '#triggerBtn',
       '#filterAgent',
       '#filterType',
       'button[onclick="refreshData()"]',
-      'button[onclick="exportIssues(\'json\')"]',
-      'button[onclick="exportIssues(\'jsonl\')"]'
+      '#reviewExportJSON',
+      '#reviewExportJSONL'
     ]) {
       geometry[selector] = await reachable(page.locator(selector), 44);
     }

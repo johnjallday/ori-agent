@@ -185,10 +185,33 @@
   const importBtn = document.getElementById('vaultImportBtn');
   const importCancelBtn = document.getElementById('vaultImportCancelBtn');
 
-  function mountPageDialogOverlays() {
-    const overlays = [unlockOverlay, createOverlay, exportOverlay, importOverlay, editorOverlay];
+  const pageDialogOverlays = [
+    unlockOverlay,
+    createOverlay,
+    exportOverlay,
+    importOverlay,
+    editorOverlay
+  ];
+  const inertRoots = new Map();
 
-    overlays.forEach(overlay => {
+  function activePageDialog() {
+    return (
+      pageDialogOverlays
+        .find(overlay => overlay && !overlay.hidden)
+        ?.querySelector('[role="dialog"]') || null
+    );
+  }
+
+  function dialogControls(dialog) {
+    return Array.from(
+      dialog.querySelectorAll(
+        'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter(control => control.getClientRects().length && !control.closest('[hidden]'));
+  }
+
+  function mountPageDialogOverlays() {
+    pageDialogOverlays.forEach(overlay => {
       if (overlay && overlay.parentElement !== document.body) {
         document.body.appendChild(overlay);
       }
@@ -229,6 +252,12 @@
   let activeDropFolderButton = null;
 
   function notify(message, type = 'info', options = {}) {
+    // Vault has an in-flow status host. Rapid create/lock/unlock/save journeys
+    // must not pile fixed success toasts over the explorer's next action.
+    if (alertsEl || activePageDialog()) {
+      showInlineAlert(message, type);
+      return;
+    }
     if (typeof window.notifyToast === 'function') {
       window.notifyToast(message, type, options);
       return;
@@ -297,16 +326,23 @@
   }
 
   function syncDialogBodyState() {
-    document.body.classList.toggle(
-      'vault-page-dialog-open',
-      Boolean(
-        unlockDialogOpen ||
-        createDialogOpen ||
-        exportDialogOpen ||
-        importDialogOpen ||
-        editorDialogOpen
-      )
-    );
+    const dialog = activePageDialog();
+    document.body.classList.toggle('vault-page-dialog-open', Boolean(dialog));
+    if (dialog) {
+      dialog.setAttribute('tabindex', '-1');
+      document.querySelectorAll('.navbar, .main-content-wrapper').forEach(root => {
+        if (!inertRoots.has(root)) inertRoots.set(root, root.inert);
+        root.inert = true;
+      });
+    } else {
+      inertRoots.forEach((inert, root) => {
+        root.inert = inert;
+      });
+      inertRoots.clear();
+    }
+    pageDialogOverlays.forEach(overlay => {
+      if (overlay?.hidden) overlay.querySelector('.vault-page-dialog-feedback')?.remove();
+    });
   }
 
   function vaultRecordCount(vaultItem) {
@@ -1205,15 +1241,29 @@
   }
 
   function showInlineAlert(message, type = 'info') {
+    window.clearTimeout(showInlineAlert.timeoutId);
     if (!message) {
-      if (alertsEl) {
-        alertsEl.innerHTML = '';
-      }
-      window.clearTimeout(showInlineAlert.timeoutId);
+      if (alertsEl) alertsEl.innerHTML = '';
+      pageDialogOverlays.forEach(overlay =>
+        overlay?.querySelector('.vault-page-dialog-feedback')?.remove()
+      );
       return;
     }
 
-    if (!alertsEl) {
+    // Validation and save feedback must remain inside the active custom dialog,
+    // not behind its backdrop or above its decisions in a fixed toast stack.
+    const dialog = activePageDialog();
+    let host = alertsEl;
+    if (dialog) {
+      host = dialog.querySelector('.vault-page-dialog-feedback');
+      if (!host) {
+        host = document.createElement('div');
+        host.className = 'vault-page-alerts vault-page-dialog-feedback';
+        host.setAttribute('aria-live', 'polite');
+        dialog.prepend(host);
+      }
+    }
+    if (!host) {
       notify(message, type);
       return;
     }
@@ -1225,16 +1275,19 @@
       info: 'alert-info'
     };
 
-    alertsEl.innerHTML = `
-      <div class="alert ${classes[type] || classes.info}" role="alert">
+    host.innerHTML = `
+      <div class="alert ${classes[type] || classes.info}" role="${type === 'error' || type === 'warning' ? 'alert' : 'status'}">
         ${escapeHTML(message)}
       </div>
     `;
 
-    window.clearTimeout(showInlineAlert.timeoutId);
-    showInlineAlert.timeoutId = window.setTimeout(() => {
-      alertsEl.innerHTML = '';
-    }, 5000);
+    if (dialog) {
+      host.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+    } else {
+      showInlineAlert.timeoutId = window.setTimeout(() => {
+        host.innerHTML = '';
+      }, 5000);
+    }
   }
 
   function syncImportControls() {
@@ -1924,6 +1977,14 @@
 
   function setInteractiveState(locked) {
     const disableVaultEditing = !vaultStatus || !vaultStatus.available || Boolean(locked);
+    const empty = vaults.length === 0;
+    section.dataset.vaultState = empty ? 'empty' : locked ? 'locked' : 'ready';
+    const emptySetup = document.getElementById('vaultPageEmptySetup');
+    if (emptySetup) emptySetup.hidden = !empty;
+    if (openCreateDialogBtn) {
+      openCreateDialogBtn.classList.toggle('modern-btn-primary', empty);
+      openCreateDialogBtn.classList.toggle('modern-btn-secondary', !empty);
+    }
 
     if (saveEntryBtn) {
       saveEntryBtn.disabled = disableVaultEditing;
@@ -1949,6 +2010,7 @@
     }
     if (explorerAddBtn) {
       explorerAddBtn.disabled = disableVaultEditing;
+      explorerAddBtn.hidden = empty;
     }
     if (explorerNewFolderBtn) {
       explorerNewFolderBtn.disabled = disableVaultEditing;
@@ -4988,7 +5050,29 @@
     }
   });
 
+  document.addEventListener('focusin', event => {
+    const dialog = activePageDialog();
+    if (dialog && !dialog.contains(event.target)) {
+      (dialogControls(dialog)[0] || dialog).focus({ preventScroll: true });
+    }
+  });
+
   document.addEventListener('keydown', event => {
+    const dialog = activePageDialog();
+    if (event.key === 'Tab' && dialog) {
+      const controls = dialogControls(dialog);
+      const first = controls[0] || dialog;
+      const last = controls[controls.length - 1] || dialog;
+      if (
+        !controls.length ||
+        (event.shiftKey ? document.activeElement === first : document.activeElement === last) ||
+        !controls.includes(document.activeElement)
+      ) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
+      return;
+    }
     if (event.key !== 'Escape') {
       return;
     }

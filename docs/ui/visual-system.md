@@ -63,6 +63,13 @@ height overriding the control minimum.
 
 ## Controls and states
 
+Reports opt into `.ui-metric-grid`/`.ui-metric` for quiet numeric summaries,
+`.ui-number` for tabular numerals, and `.ui-data-table` for genuinely wide tables.
+The table wrapper needs a descriptive accessible name, `role="region"` and
+`tabindex="0"`; the table still needs column/row headers and a caption. Keep
+horizontal scrolling inside that bounded region, never on the page toolbar.
+These classes do not style other tables or turn static summaries into actions.
+
 Bootstrap `.btn` and `.modern-btn` are compatibility names for the same family,
 using Bootstrap's `--bs-btn-*` state variables. Bootstrap retains responsibility
 for toggles, dropdowns and tab behavior.
@@ -167,6 +174,23 @@ showcase: actual loaded states, element bounds, hit testing, focus and persisten
 Measure normal text at ≥4.5:1, qualifying large text at ≥3:1, essential boundaries
 and focus at ≥3:1 against actual backgrounds. Disabled states are exempt from
 those enabled-control ratios, not from recognizable semantics.
+
+Run the opt-in suites through `scripts/test-ui-consistency.sh` against an owned
+isolated demo. It starts no server and runs one spec per fresh browser process,
+sequentially, without adding retries. This bounds the context count: the local
+macOS WebKit run reproducibly stalled before navigation in its 64th context.
+Use `--utilities` for the utility checkpoint and forward normal e2e options;
+arguments after `--` go to Playwright. Utility mutations additionally require
+`ORI_DISABLE_NATIVE_SECRET_STORE=1` on the demo server; HOME isolation alone does
+not disable native credential storage.
+
+```sh
+./scripts/test-ui-consistency.sh --utilities --port 8943 \
+  --env ORI_UI_SANDBOX="$SANDBOX" --env ORI_UI_EVIDENCE=after
+./scripts/test-ui-consistency.sh --utilities --port 8943 \
+  --env ORI_UI_SANDBOX="$SANDBOX" --env ORI_UI_EVIDENCE=after --env ORI_UI_FONTS=real
+./scripts/test-ui-consistency.test.sh # fake-only runner contracts
+```
 
 Offline/fallback screenshots and intended-font verification are separate evidence.
 Prove loaded Manrope/Fraunces **and computed families**; `document.fonts.ready`

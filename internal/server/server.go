@@ -482,6 +482,7 @@ func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveActionCenter(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("action-center")
 	data.Title = "Action Center - Ori Agent"
+	data.BrandText = "Ori Agent"
 	s.renderAndWritePage(w, "action-center", data)
 }
 

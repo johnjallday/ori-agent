@@ -92,7 +92,13 @@ export async function readFixture(page: Page, pattern: string | RegExp, json: un
   });
 }
 
-export async function capture(page: Page, testInfo: TestInfo, name: string, facts: object = {}) {
+export async function capture(
+  page: Page,
+  testInfo: TestInfo,
+  name: string,
+  facts: object = {},
+  options: { fullPage?: boolean } = {}
+) {
   await page.evaluate(() => document.fonts.ready);
   const fonts = await page.evaluate(() =>
     Array.from(document.fonts)
@@ -105,8 +111,9 @@ export async function capture(page: Page, testInfo: TestInfo, name: string, fact
   }
   const modalVisible =
     (await page.locator('.modal.show:visible, dialog[open], [role="dialog"]:visible').count()) > 0;
+  const fullPage = options.fullPage ?? !modalVisible;
   const metadata = {
-    captureMode: modalVisible ? 'viewport' : 'full-page',
+    captureMode: fullPage ? 'full-page' : 'viewport',
     revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     dirty: !!execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim(),
     servedBuild: process.env.ORI_UI_BUILD || 'working-tree (rebuild after asset changes)',
@@ -139,18 +146,24 @@ export async function capture(page: Page, testInfo: TestInfo, name: string, fact
   const phase = process.env.ORI_UI_EVIDENCE;
   if (!['before', 'after'].includes(phase))
     throw new Error('ORI_UI_EVIDENCE must be before or after');
-  const group = testInfo.file.endsWith('ui-consistency-defects.spec.ts') ? 'group-1' : 'group-2';
+  const group =
+    testInfo.file.includes('ui-consistency-utilities') ||
+    testInfo.file.endsWith('default-model-utility.spec.ts')
+      ? 'group-3'
+      : testInfo.file.endsWith('ui-consistency-defects.spec.ts')
+        ? 'group-1'
+        : 'group-2';
   const directory = resolve('tasks/evidence-ui-consistency', group, phase);
   mkdirSync(directory, { recursive: true });
   const stem = `${name}-${metadata.engine}-${metadata.theme}-${metadata.viewport?.width}-${metadata.fontMode}`;
   // Full-page captures at a scrolled position can paint the fixed navbar in
   // the middle of the image. Normalize only photography, then restore the tour.
   const scrollTop = await page.evaluate(() => window.scrollY);
-  if (!modalVisible) await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  if (fullPage) await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
   try {
-    await page.screenshot({ path: join(directory, `${stem}.png`), fullPage: !modalVisible });
+    await page.screenshot({ path: join(directory, `${stem}.png`), fullPage });
   } finally {
-    if (!modalVisible)
+    if (fullPage)
       await page.evaluate(top => window.scrollTo({ top, behavior: 'instant' }), scrollTop);
   }
   writeFileSync(join(directory, `${stem}.json`), JSON.stringify(metadata, null, 2));

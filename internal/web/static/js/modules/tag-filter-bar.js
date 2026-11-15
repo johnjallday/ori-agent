@@ -83,6 +83,15 @@ export function createTagFilterBar(options = {}) {
     }
   }
 
+  function updateSelection() {
+    for (const chip of chips.children) {
+      const selected = active.has(chip.textContent);
+      chip.classList.toggle('is-active', selected);
+      chip.setAttribute('aria-pressed', String(selected));
+    }
+    clearBtn.hidden = active.size === 0;
+  }
+
   function render() {
     chips.innerHTML = '';
     if (available.length === 0) {
@@ -105,7 +114,8 @@ export function createTagFilterBar(options = {}) {
         } else {
           active.add(tag);
         }
-        render();
+        // Keep the focused native button alive when toggling a filter.
+        updateSelection();
         emitChange();
       });
       chips.appendChild(chip);
@@ -116,7 +126,9 @@ export function createTagFilterBar(options = {}) {
   clearBtn.addEventListener('click', () => {
     if (active.size === 0) return;
     active.clear();
-    render();
+    const restoreFocus = document.activeElement === clearBtn;
+    updateSelection();
+    if (restoreFocus) chips.firstElementChild?.focus({ preventScroll: true });
     emitChange();
   });
 

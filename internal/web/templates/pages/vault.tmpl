@@ -9,17 +9,15 @@
   <div class="main-content-wrapper">
     <div class="main-content">
       <div class="container-fluid vault-page-container">
-        <section class="vault-page-hero modern-card">
+        <header class="vault-page-hero ui-page-header">
           <div class="vault-page-hero-copy">
-            <h1 class="vault-page-hero-title">
-              <span class="vault-page-hero-kicker">Encrypted</span>
-              Private Vault
-            </h1>
+            <h1 class="vault-page-hero-title">Vaults</h1>
             <p class="vault-page-hero-subtitle">
-              Manage named vaults, passwords, and encrypted transfers. Use the explorer for entries and the settings for administration.
+              Manage private items, vault passwords, and encrypted transfers.
             </p>
           </div>
-        </section>
+          <span class="badge text-bg-secondary">Encrypted</span>
+        </header>
 
         {{template "vault-settings-section.tmpl" .}}
       </div>
