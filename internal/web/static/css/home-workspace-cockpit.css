@@ -1413,6 +1413,22 @@
   background: transparent;
 }
 
+/* The name and the slot do not move as records/catalogs arrive. */
+.cockpit-rail-panel .ws-map-av {
+  flex-basis: 92px;
+  width: 92px;
+  height: 72px;
+}
+
+.cockpit-rail-panel .agent-avatar,
+.cockpit-rail-panel .home-agent-face-slot {
+  --aa-size: 44px;
+
+  width: 44px;
+  height: 44px;
+  margin-top: 3px;
+}
+
 .cockpit-rail-agent-meta {
   display: grid;
   gap: 2px;

@@ -8,6 +8,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
+import { createHomeAgentDirectory, homeAgentPortraitHTML } from './home-agent-portrait.js';
 import {
   VIEW_MAP,
   VIEW_TREE,
@@ -2519,29 +2521,143 @@ test('a folder workspace that just became a group is framed as the setup sheet f
   assert.match(land, /await landSetUpProjects\(groupId, ids\)/);
 });
 
+function portraitWindow() {
+  const win = {};
+  for (const file of ['agent-avatar', 'workspace-agent-portrait']) {
+    runInNewContext(readFileSync(new URL(`./${file}.js`, import.meta.url), 'utf8'), {
+      window: win
+    });
+  }
+  win.RoleCatalog = {
+    isLoaded: () => true,
+    entry: () => ({ accent_color: '#abcdef', emblem: 'star' })
+  };
+  win.CharacterCatalog = { get: id => ({ id, assets: { portrait: '/characters/face.svg' } }) };
+  return win;
+}
+
+test('Home portraits honor explicit modes, never dormant faces, and escape names', () => {
+  const win = portraitWindow();
+  const name = '<Albums & "Manager">';
+  const character = {
+    name,
+    role: 'orchestrator',
+    appearance: { mode: 'character', character: { catalog_id: 'coordinator' } }
+  };
+  const draw = (record, pending = false) => homeAgentPortraitHTML(name, record, pending, true, win);
+  const html = draw(character);
+  assert.match(html, /agent-avatar--character/);
+  assert.match(html, /\/characters\/face.svg/);
+  assert.match(html, /ws-map-av-commander-mark/);
+  assert.match(html, /&lt;Albums &amp; &quot;Manager&quot;&gt;/);
+  assert.doesNotMatch(html, /<Albums/);
+  assert.match(
+    draw({ name, appearance: { mode: 'uploaded', uploaded: { image: '/uploads/face.png' } } }),
+    /agent-avatar--image/
+  );
+  for (const record of [
+    null,
+    undefined,
+    { name },
+    { ...character, appearance: { ...character.appearance, mode: 'generated' } }
+  ]) {
+    assert.match(draw(record), /ws-map-av-figure/);
+    assert.doesNotMatch(draw(record), /agent-avatar/);
+  }
+  assert.match(draw(character, true), /home-agent-face-slot/);
+  assert.doesNotMatch(draw(character, true), /agent-avatar|ws-map-av-figure/);
+  assert.match(draw(null, true), /&lt;Albums/);
+});
+
+test('pure rail accepts chosen portraits for both Commander and roster, or pending name slots', () => {
+  const win = portraitWindow();
+  const view = workspaceRailView({
+    name: 'Albums',
+    entry_agent_name: 'Manager',
+    agents: ['Manager'],
+    agent_count: 1
+  });
+  const record = {
+    name: 'Manager',
+    appearance: { mode: 'character', character: { catalog_id: 'coordinator' } }
+  };
+  view.portraitHTML = (name, commander) =>
+    homeAgentPortraitHTML(name, record, false, commander, win);
+  assert.equal((renderWorkspaceRailHTML(view).match(/agent-avatar--character/g) || []).length, 2);
+  view.portraitHTML = (name, commander) => homeAgentPortraitHTML(name, null, true, commander, win);
+  assert.equal((renderWorkspaceRailHTML(view).match(/home-agent-face-slot/g) || []).length, 2);
+  assert.doesNotMatch(renderWorkspaceRailHTML(view), /agent-avatar|ws-map-av-figure/);
+});
+
+test('one batched directory response repaints once, queues new names and remembers failures', async () => {
+  let answer;
+  let requests = 0;
+  let redraws = 0;
+  const directory = createHomeAgentDirectory({
+    fetchImpl: () => {
+      requests++;
+      return new Promise(resolve => {
+        answer = resolve;
+      });
+    },
+    onChange: () => redraws++
+  });
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  directory.ensure(['A']);
+  directory.ensure(['B']);
+  assert.equal(directory.pending.size, 2);
+  await settle();
+  assert.equal(requests, 1);
+  directory.ensure(['C']);
+  answer({ ok: true, json: async () => [{ name: 'A' }, { name: 'C' }] });
+  await settle();
+  assert.equal(redraws, 1);
+  assert.equal(directory.pending.size, 0);
+  directory.ensure(['A', 'B', 'C']);
+  await settle();
+  assert.equal(requests, 1);
+  directory.ensure(['D']);
+  await settle();
+  answer({ ok: false });
+  await settle();
+  assert.equal(redraws, 2);
+  assert.equal(directory.pending.size, 0);
+  directory.ensure(['D']);
+  await settle();
+  assert.equal(requests, 2);
+  // A queued name absent from an in-flight full list gets one follow-up.
+  directory.ensure(['E']);
+  await settle();
+  directory.ensure(['F']);
+  answer({ ok: true, json: async () => [] });
+  await settle();
+  assert.equal(requests, 4);
+  answer({ ok: true, json: async () => [{ name: 'F' }] });
+  await settle();
+  assert.equal(directory.pending.size, 0);
+});
+
 test('Home gives the map the face of each working agent, read from the agents list once per name (visual-hire FR17)', () => {
   const source = readFileSync(new URL('./home-workspace-cockpit.js', import.meta.url), 'utf8');
   // The map is mounted with the faces beside the lines they go with.
   assert.match(source, /folderAgentFaces: state\.folderAgentFaces/);
   // They are computed from the same views as the lines, and a change redraws the map.
-  assert.match(source, /folderAgentTileFaces\(views, agentRecords, window, pendingAgents\)/);
+  assert.match(
+    source,
+    /folderAgentTileFaces\(\s*views,\s*agentDirectory\.records,\s*window,\s*agentDirectory\.pending\s*\)/
+  );
   assert.match(source, /if \(changed \|\| facesChanged\) mountMap\(\)/);
   // The list is asked for the first time a name works, never again for that name,
   // so the two-second follow loop cannot ask every turn.
-  assert.match(source, /const askedForAgents = new Set\(\)/);
-  assert.match(source, /!agentRecords\.has\(name\) && !askedForAgents\.has\(name\)/);
-  assert.match(source, /askedForAgents\.add\(name\);\s*pendingAgents\.add\(name\);/);
+  assert.match(source, /createHomeAgentDirectory\(\{/);
+  assert.match(source, /agentDirectory\.ensure\(names\)/);
   // The role catalog is not on Home: it is asked for once, the first time an agent
   // works, and the tiles redraw when it is here.
   assert.match(source, /let roleCatalogAsked = false/);
-  assert.match(
-    source,
-    /ensureRoleCatalog\(document, window\)\.then\(\(\) => refreshFolderAgentLines\(\)\)/
-  );
+  assert.match(source, /ensureRoleCatalog\(document, window\)\.then\(repaintAgentFaces\)/);
   // Until it answers a name is pending (no face rather than a wrong one); an answer
   // or a failure ends that and the tiles are drawn again.
-  assert.match(
-    source,
-    /names\.forEach\(name => pendingAgents\.delete\(name\)\);\s*void refreshFolderAgentLines\(\)/
-  );
+  assert.match(source, /onChange: repaintAgentFaces/);
+  assert.match(source, /CharacterCatalog\?\.onChange\?\.\(repaintAgentFaces\)/);
+  assert.match(source, /CharacterCatalog\?\.load\?\.\(\)/);
 });

@@ -13,7 +13,6 @@ import {
 import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
 import {
   ensureRoleCatalog,
-  fetchAgentRecords,
   folderAgentReportView,
   folderAgentTileFaces,
   folderAgentTileLine,
@@ -26,6 +25,7 @@ import {
 } from './folder-agent-card.js';
 import { homeCommanders, homeMapShowing, revealHiredTile } from './commander-map.js';
 import { commanderBuildingLine } from './commander-speech.js';
+import { createHomeAgentDirectory, homeAgentPortraitHTML } from './home-agent-portrait.js';
 
 // The folder agents whose Commander speaks on Home's map without the drawer:
 // one looking, setting up, or with a report or a cause waiting. A finished
@@ -1220,7 +1220,7 @@ function mapAgentPortraitHTML(name, isCommander = false) {
   return `<span class="cockpit-rail-portrait-fallback" title="${escapeHtml(name)}">${escapeHtml(name)}</span>`;
 }
 
-function rosterHTML(state) {
+function rosterHTML(state, portrait = mapAgentPortraitHTML) {
   if (!state || state.state === 'unavailable') {
     return '<p class="cockpit-rail-empty">Agent data unavailable for this workspace.</p>';
   }
@@ -1257,7 +1257,7 @@ function rosterHTML(state) {
             '</span>';
         return (
           '<li class="cockpit-rail-roster-row cockpit-rail-agent-portrait">' +
-          mapAgentPortraitHTML(agent.name) +
+          portrait(agent.name) +
           (metadata || '') +
           '</li>'
         );
@@ -1515,6 +1515,7 @@ export function songRosterURL(homeID) {
 
 export function renderWorkspaceRailHTML(view) {
   if (!view) return '';
+  const portrait = view.portraitHTML || mapAgentPortraitHTML;
   return (
     '<div class="cockpit-rail-panel" data-rail-panel="workspace">' +
     '<header class="cockpit-rail-head">' +
@@ -1558,13 +1559,13 @@ export function renderWorkspaceRailHTML(view) {
       ? '<section class="cockpit-rail-section" aria-label="Commander">' +
         '<h3 class="cockpit-rail-section-title">Commander</h3>' +
         '<div class="cockpit-rail-commander">' +
-        mapAgentPortraitHTML(view.commander, true) +
+        portrait(view.commander, true) +
         '<span class="cockpit-rail-commander-state">Commander</span>' +
         '</div></section>'
       : '') +
     '<section class="cockpit-rail-section" aria-label="Agent roster">' +
     '<h3 class="cockpit-rail-section-title">Roster</h3>' +
-    rosterHTML(view.rosterState) +
+    rosterHTML(view.rosterState, portrait) +
     '</section>' +
     '</div>'
   );
@@ -4224,9 +4225,10 @@ import {
     }
 
     const song = isHomeSong(item, state.flattened);
+    ensureAgentFaces([entryAgentName(item), ...agentRoster(item).map(agent => agent.name)]);
     const workspaceHTML = isGroupWorkspace(item)
       ? ''
-      : renderWorkspaceRailHTML(workspaceRailView(item));
+      : renderWorkspaceRailHTML({ ...workspaceRailView(item), portraitHTML: homePortrait });
     showContextPanel(
       isGroupWorkspace(item)
         ? renderGroupRailHTML(
@@ -5320,38 +5322,54 @@ import {
   // not have is not asked for again. Until the answer lands (found or failed) a
   // name is pending and its tile wears no face, so it never flashes a face that is
   // not its own before the real one.
-  let agentRecords = new Map();
-  const askedForAgents = new Set();
-  const pendingAgents = new Set();
+  const agentDirectory = createHomeAgentDirectory({
+    fetchImpl: globalThis.fetch,
+    onChange: repaintAgentFaces
+  });
+  let lastFolderAgentViews = [];
+  function homePortrait(name, isCommander = false, options = {}) {
+    return homeAgentPortraitHTML(
+      name,
+      agentDirectory.records.get(name),
+      agentDirectory.pending.has(name),
+      isCommander,
+      window,
+      options
+    );
+  }
+  function repaintAgentFaces() {
+    state.folderAgentFaces = folderAgentTileFaces(
+      lastFolderAgentViews,
+      agentDirectory.records,
+      window,
+      agentDirectory.pending
+    );
+    mountMap();
+    renderRail({ announceChange: false });
+  }
   // The role catalog gives a face its ring and emblem; Home does not load it, so
   // the first time an agent works it is asked for, and the tiles redraw once it is
   // here. Pages that never see an agent work never fetch it.
   let roleCatalogAsked = false;
-  function lookUpWorkingAgents(views) {
-    const working = views.filter(view => view.agent_name && folderAgentTileLine(view));
-    if (working.length && !roleCatalogAsked) {
+  function ensureAgentFaces(names) {
+    if (!names.some(Boolean)) return;
+    agentDirectory.ensure(names);
+    if (!roleCatalogAsked) {
       roleCatalogAsked = true;
-      void ensureRoleCatalog(document, window).then(() => refreshFolderAgentLines());
+      window.CharacterCatalog?.onChange?.(repaintAgentFaces);
+      window.CharacterCatalog?.load?.();
+      void ensureRoleCatalog(document, window).then(repaintAgentFaces);
     }
-    const names = working
-      .map(view => String(view.agent_name))
-      .filter(name => !agentRecords.has(name) && !askedForAgents.has(name));
-    if (!names.length) return;
-    names.forEach(name => {
-      askedForAgents.add(name);
-      pendingAgents.add(name);
-    });
-    void fetchAgentRecords(globalThis.fetch).then(found => {
-      if (found) agentRecords = found;
-      names.forEach(name => pendingAgents.delete(name));
-      void refreshFolderAgentLines();
-    });
+  }
+  function lookUpWorkingAgents(views) {
+    ensureAgentFaces(views.filter(view => folderAgentTileLine(view)).map(view => view.agent_name));
   }
   async function refreshFolderAgentLines() {
     if (folderAgentTimer) clearTimeout(folderAgentTimer);
     folderAgentTimer = 0;
     if (!canHydrateWorkspaceData()) return;
     const views = await listFolderAgents();
+    lastFolderAgentViews = views;
     const next = {};
     views.forEach(view => {
       const line = folderAgentTileLine(view);
@@ -5405,7 +5423,12 @@ import {
     // Each working agent's face on its tile: from what the list has said so far
     // (the name's own face until it answers), redrawn when it changes.
     lookUpWorkingAgents(views);
-    const faces = folderAgentTileFaces(views, agentRecords, window, pendingAgents);
+    const faces = folderAgentTileFaces(
+      views,
+      agentDirectory.records,
+      window,
+      agentDirectory.pending
+    );
     const facesChanged = JSON.stringify(faces) !== JSON.stringify(state.folderAgentFaces);
     state.folderAgentFaces = faces;
     if (changed || facesChanged) mountMap();
