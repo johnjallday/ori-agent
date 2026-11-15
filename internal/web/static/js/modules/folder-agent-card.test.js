@@ -3659,6 +3659,111 @@ const hiresCard = (hires, hiresNote = '', options = {}) =>
 const hiresBlock = card => card.querySelector('.folder-agent-card__hires');
 const classesOf = node => node.className.split(' ');
 
+for (const action of ['choose', 'skip', 'cancel']) {
+  test(`setup face picker ${action} uses taken faces and restores the same button's focus`, async () => {
+    const win = faceWindow();
+    win.characters.byId = { analyst: { id: 'analyst' }, builder: { id: 'builder' } };
+    const doc = stubDocument();
+    doc.defaultView = win;
+    const opened = [];
+    win.CharacterPicker = {
+      open: async options => {
+        opened.push(options);
+        return { action, catalogId: 'builder' };
+      }
+    };
+    let lists = 0;
+    const card = hiresCard(
+      [hire('Manager', { character: 'analyst' }), hire('Assistant', { character: 'builder' })],
+      '',
+      {
+        doc,
+        render: {
+          fetchImpl: async () => {
+            lists++;
+            return {
+              ok: true,
+              json: async () => [
+                {
+                  name: 'Owned',
+                  appearance: { mode: 'character', character: { catalog_id: 'owned' } }
+                },
+                {
+                  name: 'Inactive',
+                  appearance: { mode: 'generated', character: { catalog_id: 'inactive' } }
+                }
+              ]
+            };
+          }
+        }
+      }
+    );
+    const button = card.querySelector('.folder-agent-card__hire-face');
+    let focused = false;
+    button.focus = () => {
+      focused = true;
+    };
+    assert.equal(button.tagName, 'BUTTON');
+    assert.equal(button.attributes['aria-label'], 'Change face for Manager');
+    await button.listeners.click();
+    assert.equal(focused, true);
+    assert.deepEqual(opened[0].taken.sort(), ['builder', 'owned']);
+    assert.equal(opened[0].selectedId, 'analyst');
+    assert.equal(opened[0].showSkip, true);
+    assert.equal(opened[0].trigger, button);
+    const drawn = win.drawn.filter(item => item.input.name === 'Manager').at(-1).input;
+    assert.equal(drawn.appearance.mode, action === 'skip' ? 'generated' : 'character');
+    if (action !== 'skip')
+      assert.equal(
+        drawn.appearance.character.catalog_id,
+        action === 'choose' ? 'builder' : 'analyst'
+      );
+    await button.listeners.click();
+    assert.equal(lists, 1);
+  });
+}
+
+test('picked setup faces survive unticking, re-ticking and a card refresh, but not a renamed hire', async () => {
+  const doc = stubDocument();
+  const win = faceWindow();
+  doc.defaultView = win;
+  win.CharacterPicker = { open: async () => ({ action: 'choose', catalogId: 'builder' }) };
+  let renamed = false;
+  const raw = chosen => ({
+    ...homePlanOf(chosen ? newHomeLines : [], []),
+    selected: chosen ? [HOME] : [],
+    steps: [{ ...homePlanOf([]).steps[0], chosen }],
+    hires: chosen ? [hire(renamed ? 'New Manager' : 'Manager', { character: 'analyst' })] : []
+  });
+  const view = folderAgentReportView(reported({ plan: raw(true) }));
+  const options = {
+    fetchImpl: async (url, request) => ({
+      ok: true,
+      json: async () =>
+        url.includes('/plan') ? { plan: raw(JSON.parse(request.body).selected.length > 0) } : []
+    })
+  };
+  const card = renderFolderAgentReport(view, doc, options);
+  await card.querySelector('.folder-agent-card__hire-face').listeners.click();
+  const tick = async checked => {
+    const box = card.querySelector('.folder-agent-card__tool-pick');
+    box.checked = checked;
+    await box.listeners.change();
+  };
+  await tick(false);
+  assert.equal(card.querySelector('.folder-agent-card__hire'), null);
+  await tick(true);
+  assert.equal(view.plan.hires[0].character, 'builder');
+  const refreshed = renderFolderAgentReport(view, doc, options);
+  assert.equal(refreshed.querySelector('.folder-agent-card__hire-face').tagName, 'BUTTON');
+  assert.equal(view.plan.hires[0].character, 'builder');
+  renamed = true;
+  await tick(true);
+  assert.equal(view.plan.hires[0].name, 'New Manager');
+  assert.equal(view.plan.hires[0].character, 'analyst');
+  assert.equal(view.hireFaces.has('Manager'), false);
+});
+
 test('planned hires draw suggested or generated faces, redraw with the catalog, and post every shown face', async () => {
   const doc = stubDocument();
   const inputs = [];

@@ -1240,7 +1240,7 @@ function renderPlan(
   plan,
   lines,
   phase,
-  { selecting = false, onTick, now = Date.now(), headFirst = false } = {}
+  { selecting = false, onTick, onPickFace, now = Date.now(), headFirst = false } = {}
 ) {
   const section = el(doc, 'section', 'folder-agent-card__run');
   section.dataset.phase = phase;
@@ -1480,7 +1480,7 @@ function renderPlan(
   // Before Set it up, who the ticked steps hire, directly under what they
   // install: the button confirms both. Once the run starts its lines say it.
   if (phase === 'plan') {
-    const hires = renderHires(doc, plan?.hires || [], plan?.hiresNote || '');
+    const hires = renderHires(doc, plan?.hires || [], plan?.hiresNote || '', onPickFace);
     if (hires) section.append(hires);
   }
   notes.forEach(line => {
@@ -1602,7 +1602,7 @@ function renderInstalls(doc, installs, lines, phase) {
 // hire it says so in one sentence instead of rows; it draws nothing when
 // nobody is hired. The children are divs on purpose: the Home drawer restyles
 // the spans directly inside any list item.
-function renderHires(doc, hires, note) {
+function renderHires(doc, hires, note, onPickFace) {
   if (!hires.length && !note) return null;
   const block = el(doc, 'section', 'folder-agent-card__hires');
   if (!hires.length) {
@@ -1622,18 +1622,25 @@ function renderHires(doc, hires, note) {
   hires.forEach(entry => {
     const item = el(doc, 'li', 'folder-agent-card__hire');
     item.dataset.step = entry.step;
-    const face = el(doc, 'div', 'folder-agent-card__hire-face');
-    face.setAttribute('aria-hidden', 'true');
+    const face = el(doc, onPickFace ? 'button' : 'div', 'folder-agent-card__hire-face');
+    if (onPickFace) {
+      face.type = 'button';
+      face.dataset.hireFace = entry.name;
+      face.setAttribute('aria-label', `Change face for ${entry.name}`);
+    } else face.setAttribute('aria-hidden', 'true');
     const win = cardWindow(doc);
     const draw = () => {
-      face.innerHTML = faceMarkup(
+      const markup = faceMarkup(
         win,
         hireFace(entry.name, win, entry.character),
         '',
         AGENT_FACE_SIZE
       );
+      if (markup) face.innerHTML = markup;
+      else face.textContent = (entry.name[0] || '?').toUpperCase();
     };
     draw();
+    if (onPickFace) face.addEventListener('click', () => onPickFace(entry, face, draw));
     watchFaces(face, win, draw, doc);
     item.append(face);
     item.append(
@@ -2074,6 +2081,66 @@ export function renderFolderAgentReport(
   const selected = new Set(view.plan?.selected || []);
   let planHost = null;
   let setUpButton = null;
+  let planRequest = 0;
+  // Keep only user picks, not server suggestions. A temporary untick keeps a
+  // step's picks; a renamed/removed hire discards them once that step returns.
+  const faces = view.hireFaces instanceof Map ? view.hireFaces : new Map();
+  view.hireFaces = faces;
+  const applyFaces = plan => {
+    const offered = new Map((plan?.steps || []).map(step => [step.handle, step]));
+    for (const [name, choice] of faces) {
+      const step = offered.get(choice.step);
+      if (!step || (step.chosen && !plan.hires.some(entry => entry.name === name)))
+        faces.delete(name);
+    }
+    (plan?.hires || []).forEach(entry => {
+      if (faces.has(entry.name)) entry.character = faces.get(entry.name).character;
+    });
+  };
+  applyFaces(view.plan);
+  const win = cardWindow(doc);
+  let recordsReady = null;
+  let picking = false;
+  const onPickFace =
+    typeof win?.CharacterPicker?.open === 'function' && selecting
+      ? async (entry, trigger, draw) => {
+          if (picking) return;
+          picking = true;
+          const pickerFocus = event => {
+            if (event.target?.closest?.('#charPickerHost')) event.stopImmediatePropagation();
+          };
+          try {
+            recordsReady ||= fetchAgentRecords(fetchImpl);
+            const records = await recordsReady;
+            if (card.isConnected === false || trigger.isConnected === false) return;
+            const taken = [...(records?.values() || [])]
+              .filter(record => record.appearance?.mode === 'character')
+              .map(record => record.appearance.character?.catalog_id)
+              .filter(Boolean);
+            (view.plan?.hires || []).forEach(other => {
+              if (other.name !== entry.name && other.character) taken.push(other.character);
+            });
+            doc.addEventListener?.('focusin', pickerFocus, true);
+            const answer = await win.CharacterPicker.open({
+              selectedId: entry.character || '',
+              taken: [...new Set(taken)],
+              role: HIRED_AGENT_ROLE,
+              trigger,
+              showSkip: true
+            });
+            if (card.isConnected === false || trigger.isConnected === false) return;
+            if (answer?.action === 'choose' || answer?.action === 'skip') {
+              entry.character = answer.action === 'choose' ? String(answer.catalogId || '') : '';
+              faces.set(entry.name, { character: entry.character, step: entry.step });
+              draw();
+            }
+          } finally {
+            doc.removeEventListener?.('focusin', pickerFocus, true);
+            picking = false;
+            if (trigger.isConnected !== false) trigger.focus?.({ preventScroll: true });
+          }
+        }
+      : null;
   const onTick = (handle, checked, excludes) => {
     if (checked) {
       selected.add(handle);
@@ -2083,8 +2150,10 @@ export function renderFolderAgentReport(
     return refreshPlan();
   };
   const refreshPlan = async () => {
+    const request = ++planRequest;
     const plan = await fetchFolderAgentPlan(view.workspaceID, [...selected], fetchImpl);
-    if (!plan) return;
+    if (!plan || request !== planRequest) return;
+    applyFaces(plan);
     view.plan = plan;
     // The server may have set a step aside (two that cannot run together):
     // the boxes follow its choice.
@@ -2098,7 +2167,7 @@ export function renderFolderAgentReport(
       // that now holds the way the owner just left.
       const swapped = Boolean(doc.activeElement?.dataset?.altStep);
       planHost.replaceChildren(
-        renderPlan(doc, view, plan, plan.lines, 'plan', { selecting, onTick })
+        renderPlan(doc, view, plan, plan.lines, 'plan', { selecting, onTick, onPickFace })
       );
       if (swapped)
         planHost
@@ -2287,7 +2356,7 @@ export function renderFolderAgentReport(
   } else if (view.plan && (view.plan.steps.length || view.plan.runnable)) {
     planHost = el(doc, 'div', 'folder-agent-card__plan-host');
     planHost.append(
-      renderPlan(doc, view, view.plan, view.plan.lines, 'plan', { selecting, onTick })
+      renderPlan(doc, view, view.plan, view.plan.lines, 'plan', { selecting, onTick, onPickFace })
     );
     card.append(planHost);
     if (!view.plan.runnable && view.plan.unavailable)
@@ -2664,6 +2733,13 @@ export async function postFolderAgentAction(
       } catch (_) {
         // keep the server's view
       }
+    }
+    if (refused?.plan?.hires && extra?.hire_faces) {
+      refused.plan.hires = refused.plan.hires.map(entry =>
+        Object.hasOwn(extra.hire_faces, entry.name)
+          ? { ...entry, character: String(extra.hire_faces[entry.name] || '') }
+          : entry
+      );
     }
     return { error: String(payload?.error || 'That did not go through.'), view: refused };
   }

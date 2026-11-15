@@ -56,6 +56,12 @@ test('the suggested faces on the real plan are the agents hired by Set it up', a
     expect(confirmed.ok(), await confirmed.text()).toBe(true);
     view = await read();
   }
+  if (process.env.ORI_VISUAL_SETUP_PICK === '1') {
+    const configured = await request.post('/api/settings/system-model', {
+      data: { provider: 'claude', model: 'claude-sonnet-4-6' }
+    });
+    expect(configured.ok()).toBe(true);
+  }
   // Use the real workspace's conversation card, not a renderer mounted in a
   // fixture container. The model may leave Home unticked; choose it explicitly.
   await page.goto(view.route);
@@ -72,6 +78,48 @@ test('the suggested faces on the real plan are the agents hired by Set it up', a
   await expect(card.locator('.folder-agent-card__hire')).toHaveCount(2);
   const portraits = card.locator('.folder-agent-card__hire-face [data-aa-character]');
   await expect(portraits).toHaveCount(2);
+  if (process.env.ORI_VISUAL_SETUP_PICK === '1') {
+    const face = card.getByRole('button', {
+      name: 'Change face for Portfolio Manager',
+      exact: true
+    });
+    await face.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    await expect(face).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(
+      page.getByRole('dialog', { name: 'Choose a character', exact: true })
+    ).toBeVisible();
+    await page.locator('#charPickerCancel').click();
+    await expect(face).toBeFocused();
+    await page.keyboard.press('Space');
+    await expect(
+      page.getByRole('dialog', { name: 'Choose a character', exact: true })
+    ).toBeVisible();
+    const taken = await portraits.evaluateAll(nodes =>
+      nodes.map(node => node.getAttribute('data-aa-character'))
+    );
+    await page
+      .locator(`.char-card${taken.map(id => `:not([data-char-id="${id}"])`).join('')}`)
+      .first()
+      .click();
+    const picked = await page
+      .locator('.char-card[aria-checked="true"]')
+      .getAttribute('data-char-id');
+    await page.locator('#charPickerConfirm').click();
+    await expect(face).toBeFocused();
+    await expect(face.locator('[data-aa-character]')).toHaveAttribute('data-aa-character', picked!);
+    const homePick = card.locator('input[data-step-handle="music-production-home"]');
+    await homePick.uncheck();
+    await expect(card.locator('.folder-agent-card__hire')).toHaveCount(0);
+    await homePick.check();
+    await expect(
+      card
+        .getByRole('button', { name: 'Change face for Portfolio Manager', exact: true })
+        .locator('[data-aa-character]')
+    ).toHaveAttribute('data-aa-character', picked!);
+  }
   const shown = await card
     .locator('.folder-agent-card__hire')
     .evaluateAll(rows =>
@@ -103,6 +151,8 @@ test('the suggested faces on the real plan are the agents hired by Set it up', a
     });
   }
   await page.goto('/agents');
+  const closeDrawer = page.getByRole('button', { name: 'Close personal assistant', exact: true });
+  if (await closeDrawer.isVisible()) await closeDrawer.click();
   for (const id of Object.values(shown))
     await expect(page.locator(`[data-aa-character="${id}"]`).first()).toBeVisible();
   await page.screenshot({ path: join(evidence, 'hired-agents.png') });

@@ -4511,6 +4511,24 @@ button.folder-agent-card__who-face:focus-visible {
   height: 40px;
 }
 
+button.folder-agent-card__hire-face {
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+button.folder-agent-card__hire-face:hover {
+  outline: 1px solid var(--hc-ink-dim, var(--cozy-ink-dim));
+  outline-offset: 2px;
+}
+
+button.folder-agent-card__hire-face:focus-visible {
+  outline: 2px solid var(--hc-ink, var(--cozy-ink));
+  outline-offset: 3px;
+}
+
 .folder-agent-card__hire-face > .agent-avatar {
   --aa-size: 40px;
   border-radius: 8px;
