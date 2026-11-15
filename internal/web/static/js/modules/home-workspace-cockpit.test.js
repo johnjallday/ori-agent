@@ -2632,6 +2632,13 @@ test('Home portraits honor explicit modes, never dormant faces, and escape names
   assert.match(draw(character, true), /home-agent-face-slot/);
   assert.doesNotMatch(draw(character, true), /agent-avatar|ws-map-av-figure/);
   assert.match(draw(null, true), /&lt;Albums/);
+  // A failed optional ring catalog must not discard a saved character/upload.
+  delete win.RoleCatalog;
+  assert.match(draw(character), /agent-avatar--character/);
+  assert.match(
+    draw({ name, appearance: { mode: 'uploaded', uploaded: { image: 'photo.png' } } }),
+    /agent-avatar--image/
+  );
 });
 
 test('pure rail accepts chosen portraits for both Commander and roster, or pending name slots', () => {

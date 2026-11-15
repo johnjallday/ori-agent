@@ -47,9 +47,19 @@ export function homeAgentPortraitHTML(
     .split(/\s+/)
     .filter(c => /^[a-zA-Z0-9_-]+$/.test(c))
     .join(' ');
+  // agentFace supplies role/source presentation, but intentionally withholds
+  // appearance while its role catalog is unavailable. Home must still honor
+  // the saved choice if that optional catalog fails; only the ring is unknown.
+  const input = pending
+    ? null
+    : {
+        ...agentFace({ name }, record, win),
+        appearance: record.appearance,
+        character: win?.CharacterCatalog?.get?.(record.appearance.character?.catalog_id) || null
+      };
   const face = pending
     ? '<span class="home-agent-face-slot" aria-hidden="true"></span>'
-    : win.AgentAvatar.markup(agentFace({ name }, record, win), { size: options.size || 40 });
+    : win.AgentAvatar.markup(input, { size: options.size || 40 });
   return (
     `<${tag} class="ws-map-av home-agent-portrait${isCommander ? ' is-keeper' : ''}${pending ? ' is-pending' : ''}${href ? ' is-link' : ''} ${className}"${href ? ` href="${escapeHtml(href)}"` : ''} title="${safeName}">` +
     face +
