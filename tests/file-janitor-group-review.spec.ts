@@ -101,7 +101,7 @@ async function openReview(page: Page, slug: string, extra = '') {
   // dialog ownership: close Review, decline the nudge, reopen the saved route.
   const nudge = page.locator('#workspace-detail-task-confirm-modal');
   if (await nudge.isVisible()) {
-    await console.getByRole('button', { name: 'Close File Janitor', exact: true }).click();
+    await console.getByRole('button', { name: 'Close Filing', exact: true }).click();
     await nudge.getByRole('button', { name: 'Not now', exact: true }).click();
     await expect(nudge).toBeHidden();
     await page.goto(url);

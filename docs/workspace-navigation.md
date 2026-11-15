@@ -56,7 +56,7 @@ A rendered zero must come from a successful canonical read. An idle agent's
   Navigation does not move buildings or persist a new layout. Actual moves,
   placement, membership changes and creation still require their existing actions.
 - Opening a menu does not create a workspace, install tools, approve operations or
-  grant capabilities. Filing review remains in File Janitor.
+  grant capabilities. File review remains in Filing.
 
 ### Configured first-goal boundary
 

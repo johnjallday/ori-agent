@@ -106,7 +106,7 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 			}
 		case KindFileCurator:
 			step.Kind = StepFileCurator
-			step.Title = fmt.Sprintf("Add File Janitor to %s", folderName)
+			step.Title = fmt.Sprintf("Organize loose files in %s (you approve every move)", folderName)
 		case KindSkill, KindMCP, KindPlugin:
 			step.Kind = StepAddOn
 			step.Default = c.Ranked

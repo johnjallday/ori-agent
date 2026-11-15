@@ -1,5 +1,7 @@
 # Reviewed File Janitor creation and preparation
 
+The feature is shown to users as **Filing**; internal File Janitor identifiers remain unchanged.
+
 Status: Implemented (merged in #678); acceptance evidence remains in the
 feature's findings log.
 

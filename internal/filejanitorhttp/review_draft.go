@@ -88,6 +88,6 @@ func (h *Handler) respondDraftError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondBadRequest(w, "That edit is not a choice Ori offers for this review.")
 	default:
 		_ = orihttp.RespondAPIError(w, http.StatusConflict,
-			orihttp.NewAPIError("review_unavailable", "This saved review is unavailable. Check File Janitor setup and reload the current review."))
+			orihttp.NewAPIError("review_unavailable", "This saved review is unavailable. Check Filing setup and reload the current review."))
 	}
 }

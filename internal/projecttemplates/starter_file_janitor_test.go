@@ -1,8 +1,8 @@
 package projecttemplates_test
 
 import (
+	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -30,8 +30,11 @@ func TestFileJanitorStarterTemplate_Identity(t *testing.T) {
 	if tpl.ID != "file-janitor" {
 		t.Fatalf("template ID must be file-janitor, got %q", tpl.ID)
 	}
-	if tpl.Name != "File Janitor" {
-		t.Fatalf("display name = %q, want %q", tpl.Name, "File Janitor")
+	if tpl.Name != "Filing" {
+		t.Fatalf("display name = %q, want %q", tpl.Name, "Filing")
+	}
+	if tpl.Tagline != "Organize loose files in one folder, with your approval for every move." {
+		t.Fatalf("tagline = %q", tpl.Tagline)
 	}
 	if !tpl.Builtin {
 		t.Fatal("file-janitor must be a built-in template")
@@ -39,11 +42,37 @@ func TestFileJanitorStarterTemplate_Identity(t *testing.T) {
 	if tpl.Retired {
 		t.Fatal("file-janitor must not be retired")
 	}
-	if tpl.BuiltinVersion < 5 {
-		t.Fatalf("builtin_version = %d; reviewed preparation/manual-only copy requires version 5", tpl.BuiltinVersion)
+	if tpl.BuiltinVersion != 6 {
+		t.Fatalf("builtin_version = %d; Filing display refresh requires version 6", tpl.BuiltinVersion)
 	}
 	if len(tpl.Warnings) != 0 {
 		t.Fatalf("file-janitor should load without warnings, got %v", tpl.Warnings)
+	}
+}
+
+func TestFileJanitorStarterTemplate_RefreshesVersion5ManifestOnly(t *testing.T) {
+	libDir := t.TempDir()
+	folder := filepath.Join(libDir, "file-janitor")
+	if err := os.Mkdir(folder, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"name":"File Janitor","builtin":true,"builtin_version":5,"agents":[{"name":"File Curator","role":"specialist"}]}`
+	if err := os.WriteFile(filepath.Join(folder, projecttemplates.ManifestFileName), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	notes := filepath.Join(folder, "user-notes.md")
+	if err := os.WriteFile(notes, []byte("keep my notes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := projecttemplates.EnsureLibrary(libDir); err != nil {
+		t.Fatal(err)
+	}
+	tpl, err := projecttemplates.FindLibraryTemplate(libDir, "file-janitor")
+	if err != nil || tpl.Name != "Filing" || tpl.BuiltinVersion != 6 || tpl.Agents[0].Name != "File Curator" {
+		t.Fatalf("refreshed library = %+v, %v", tpl, err)
+	}
+	if data, err := os.ReadFile(notes); err != nil || string(data) != "keep my notes" {
+		t.Fatalf("user notes changed: %q %v", data, err)
 	}
 }
 
@@ -63,7 +92,7 @@ func TestFileJanitorStarterTemplate_SuggestsDownloadsByDefault(t *testing.T) {
 	if req.SuggestedPath != "~/Downloads" {
 		t.Fatalf("suggested path = %q, want the unresolved ~/Downloads", req.SuggestedPath)
 	}
-	if strings.TrimSpace(req.Label) == "" {
+	if req.Label != "Folder to file" {
 		t.Fatal("directory requirement needs a display label for the setup card")
 	}
 }

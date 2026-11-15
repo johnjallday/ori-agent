@@ -326,7 +326,7 @@ test.describe('File Janitor console accessibility', () => {
     const workspaceId = await workspaceWithFolder(request, `FJ A11y Name ${RUN}`, root);
     await openConsole(page, workspaceId);
 
-    const dialog = page.getByRole('dialog', { name: 'File Janitor' });
+    const dialog = page.getByRole('dialog', { name: 'Filing' });
     await expect(dialog).toBeVisible();
     await expect(dialog).toHaveAttribute('aria-modal', 'true');
 
@@ -334,7 +334,7 @@ test.describe('File Janitor console accessibility', () => {
     // could drift from what a sighted user reads.
     const labelledBy = await dialog.getAttribute('aria-labelledby');
     expect(labelledBy).toBeTruthy();
-    await expect(page.locator(`#${labelledBy}`)).toHaveText('File Janitor');
+    await expect(page.locator(`#${labelledBy}`)).toHaveText('Filing');
   });
 
   test('the depot card and station expose name, folder, state, and one keyboard entry', async ({
@@ -356,7 +356,7 @@ test.describe('File Janitor console accessibility', () => {
     const workspaceSlug = workspaceSlugs.get(workspaceId) || workspaceId;
     await page.goto(`/workspaces/${encodeURIComponent(workspaceSlug)}`);
 
-    const card = page.getByRole('group', { name: 'File Janitor' });
+    const card = page.getByRole('group', { name: 'Filing' });
     await expect(card).toBeVisible({ timeout: 15000 });
     await expect(card.locator('dt')).toHaveText([
       'Current status',
@@ -370,15 +370,13 @@ test.describe('File Janitor console accessibility', () => {
 
     await page.getByRole('button', { name: 'Map', exact: true }).click();
     const station = page.getByRole('button', {
-      name: new RegExp(
-        `File Janitor station, managed folder ${basename(root)}, 1 file ready for review`
-      )
+      name: new RegExp(`Filing station, managed folder ${basename(root)}, 1 file ready for review`)
     });
     await expect(station).toBeVisible();
     await station.focus();
     await expect(station).toBeFocused();
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('dialog', { name: 'File Janitor' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'Filing' })).toBeVisible();
 
     await page.locator('[data-fj-console-close]').click();
     await expect(station).toBeFocused();

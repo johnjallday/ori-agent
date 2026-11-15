@@ -122,7 +122,7 @@ func (s *Service) PrepareMetadataReview(request PreparationRequest, automation P
 			status.Settings.DailyScanLocalTime != request.DailyScanLocalTime || status.Settings.Timezone != request.Timezone ||
 			status.Settings.AutomationApprovedAt.IsZero() {
 			rollback()
-			return result, setupErr(CodeFolderChanged, "File Janitor settings changed while preparing review.", RepairRetry, nil)
+			return result, setupErr(CodeFolderChanged, "Filing settings changed while preparing review.", RepairRetry, nil)
 		}
 		if err := RequireHealthyAutomation(status); err != nil {
 			rollback()

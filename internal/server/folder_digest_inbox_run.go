@@ -266,7 +266,7 @@ func inboxRefusal(err error) string {
 	if errors.As(err, &setupErr) && strings.TrimSpace(setupErr.Message) != "" {
 		return strings.TrimSpace(setupErr.Message)
 	}
-	return "File Janitor cannot use this folder. Nothing was created."
+	return "Filing cannot use this folder. Nothing was created."
 }
 
 // inboxBatchOutcome maps a File Janitor scan outcome to a first batch's.

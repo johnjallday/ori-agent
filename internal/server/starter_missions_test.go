@@ -99,6 +99,19 @@ func TestFindJanitorWorkspace_MatchesOnlyFileJanitorProvenance(t *testing.T) {
 	}
 }
 
+func TestFindJanitorWorkspace_RenamedBlueprintKeepsOldWorkspaceName(t *testing.T) {
+	s := newStarterStore(t)
+	ws := s.add("old-filing", "File Janitor — Downloads", "file-janitor", "", nil)
+	before := ws.Name
+	if slug, _, ok := findJanitorWorkspace(s.store); !ok || slug != ws.FolderSlug {
+		t.Fatalf("old blueprint workspace not found: %q %t", slug, ok)
+	}
+	saved, err := s.store.Get(ws.ID)
+	if err != nil || saved.Name != before {
+		t.Fatalf("workspace name changed: %+v %v", saved, err)
+	}
+}
+
 func TestFindJanitorWorkspace_PrefersAReadyWorkspace(t *testing.T) {
 	s := newStarterStore(t)
 	now := time.Now()

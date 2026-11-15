@@ -165,7 +165,7 @@ test('an inbox hire reports its first batch with Review batch as a link and Not 
   assert.deepEqual(
     empty.actions.map(action => [action.label, action.href || '']),
     [
-      ['Open File Janitor', '/workspaces/downloads?panel=file-janitor'],
+      ['Open Filing', '/workspaces/downloads?panel=file-janitor'],
       ['Not now', '']
     ]
   );

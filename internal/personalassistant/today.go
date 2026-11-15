@@ -881,9 +881,9 @@ func (s *TodayService) folderReceiptTodayItem(offer FolderOffer, now time.Time) 
 		if folder == "" {
 			return TodayItem{}, false
 		}
-		title = "Set up File Janitor for " + folder
+		title = "Set up Filing for " + folder
 		if offer.Outcome.Existing {
-			title = "Opened File Janitor for " + folder
+			title = "Opened Filing for " + folder
 		}
 		detail = "Folder ready for review"
 		route += "?panel=file-janitor"
@@ -913,7 +913,7 @@ func (s *TodayService) loadJanitorResults(ctx context.Context, userID string, no
 	results, err := s.janitorResults.JanitorResults(ctx, strings.TrimSpace(userID))
 	if err != nil {
 		logger.Warn("personal assistant today: File Janitor results unavailable", logger.Fields{"error": err.Error()})
-		out.UnavailableSources = appendSource(out.UnavailableSources, "File Janitor")
+		out.UnavailableSources = appendSource(out.UnavailableSources, "Filing")
 		return nil
 	}
 	sort.SliceStable(results, func(i, j int) bool { return results[i].NewestAt.After(results[j].NewestAt) })

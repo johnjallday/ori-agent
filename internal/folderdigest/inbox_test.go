@@ -77,11 +77,11 @@ func TestInboxCapability_IsKeyedByVerdictNotMarker(t *testing.T) {
 		t.Fatalf("inbox row = %+v ok=%t", row, ok)
 	}
 	b := row.Builtin
-	if b.DisplayName != "inbox folder" || b.Workspace != "File Janitor workspace" ||
+	if b.DisplayName != "inbox folder" || b.Workspace != "Filing workspace" ||
 		b.Question != "Want File Curator to keep this folder tidy?" || b.AcceptLabel != "Review setup" || b.DeclineLabel != "No thanks" {
 		t.Fatalf("inbox copy = %+v", b)
 	}
-	if row.Blueprint.BlueprintID != "file-janitor" || row.Blueprint.Label != "File Janitor" || row.Offer != nil {
+	if row.Blueprint.BlueprintID != "file-janitor" || row.Blueprint.Label != "Filing" || row.Offer != nil {
 		t.Fatalf("inbox blueprint = %+v offer=%v", row.Blueprint, row.Offer)
 	}
 	if len(row.Markers) != 0 || len(row.Tools) != 0 {

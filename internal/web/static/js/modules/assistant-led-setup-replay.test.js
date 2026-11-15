@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { blueprintCards, replaySources } from './assistant-led-setup-replay.js';
 
-test('blueprint cards put Blank first, keep only built-ins, and never drop File Janitor', () => {
+test('blueprint cards put Blank first, keep only built-ins, and never drop Filing', () => {
   const cards = blueprintCards([
     {
       id: 'calendar-ops',
@@ -27,10 +27,11 @@ test('blueprint cards put Blank first, keep only built-ins, and never drop File 
   assert.equal(cards[2].description, 'Review and file. Safely.');
 });
 
-test('a missing or broken template list still yields a clickable File Janitor', () => {
+test('a missing or broken template list still yields a clickable Filing', () => {
   for (const input of [undefined, null, [], 'nope', [{ id: 'x' }]]) {
     const ids = blueprintCards(input).map(card => card.id);
     assert.deepEqual(ids, ['blank', 'file-janitor'], String(input));
+    assert.equal(blueprintCards(input)[1].label, 'Filing');
   }
 });
 

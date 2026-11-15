@@ -211,7 +211,7 @@ async function clearBlockingModals(page: Page) {
   let returnTo = '';
   if ((await gate.isVisible()) && (await console_(page).isVisible())) {
     returnTo = page.url();
-    await console_(page).getByRole('button', { name: 'Close File Janitor', exact: true }).click();
+    await console_(page).getByRole('button', { name: 'Close Filing', exact: true }).click();
     await expect(console_(page)).toBeHidden();
   }
   const notNow = gate.getByRole('button', { name: 'Not now' });
@@ -270,7 +270,9 @@ async function openWorkspace(page: Page, workspaceId: string, query = '') {
 }
 
 async function openConsoleFromCard(page: Page) {
-  await page.locator('#fileJanitorCardOpen').click();
+  const summaryAction = page.locator('#fileJanitorCardOpen');
+  if (await summaryAction.isVisible()) await summaryAction.click();
+  else await page.locator('#workspaceNextAction').click();
   await expect(console_(page)).toBeVisible({ timeout: 15000 });
   await allFiles(page);
 }
@@ -590,7 +592,7 @@ test.describe('File Janitor capability', () => {
     await installCapability(request, workspaceId);
     await openWorkspace(page, workspaceId, '?mode=details&source=next-action');
     const area = page.getByRole('region', { name: 'Next action', exact: true });
-    await expect(area).toContainText('Choose the folder to tidy');
+    await expect(area).toContainText('Choose the folder to file');
     await capture('next-action-setup.png');
     const root = fixtureFolder('next-action', {
       'first.pdf': 'synthetic',
@@ -601,7 +603,7 @@ test.describe('File Janitor capability', () => {
       data: { paused: true }
     });
     await page.evaluate(() => (window as any).FileJanitorConsole.refresh());
-    await expect(area).toContainText('File Janitor is paused');
+    await expect(area).toContainText('Filing is paused');
     await page.locator('#workspaceNextAction').click();
     await page.locator('#fileJanitorScan').click();
     await allFiles(page, true);
@@ -739,9 +741,8 @@ test.describe('File Janitor capability', () => {
     // The compact card appears on nothing but the persisted install record —
     // this workspace has no blueprint, no folder, and no janitor state.
     const card = page.locator('#fileJanitorMount');
-    await expect(card).toBeVisible({ timeout: 15000 });
-    await expect(card).toContainText('File Janitor');
-    await expect(card).toContainText('No folder chosen yet');
+    await expect(page.locator('#workspaceNextAction')).toHaveText('Set up filing');
+    await expect(card).toBeHidden();
 
     // And Details carries a summary only: no review table, no settings form.
     await expect(card.locator('table')).toHaveCount(0);
@@ -749,7 +750,7 @@ test.describe('File Janitor capability', () => {
     await expect(page.locator('#fileJanitorBatch')).toHaveCount(0);
 
     // The single action leads into the real setup surface.
-    await expect(page.locator('#fileJanitorCardOpen')).toHaveText('Set up File Janitor');
+    await expect(page.locator('#workspaceNextAction')).toHaveText('Set up filing');
     await openConsoleFromCard(page);
     await expect(consoleBody(page).locator('#fileJanitorPath')).toBeVisible();
   });
@@ -793,7 +794,7 @@ test.describe('File Janitor capability', () => {
     await expect(station).toBeVisible({ timeout: 15000 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await expect(station.locator('[data-building-variant="depot"]')).toBeVisible();
-    await expect(station.locator('.ws-cmd-map-hq-station-label')).toHaveText('File Janitor');
+    await expect(station.locator('.ws-cmd-map-hq-station-label')).toHaveText('Filing');
     await expect(station.locator('.ws-cmd-map-hq-station-location')).toHaveAttribute(
       'title',
       basename(root)
@@ -854,7 +855,7 @@ test.describe('File Janitor capability', () => {
     await expect(page.locator('#fileJanitorMount')).toBeHidden();
 
     await page.locator('[data-cmd-view-mode="details"]').click();
-    const summary = page.getByRole('group', { name: 'File Janitor' });
+    const summary = page.getByRole('group', { name: 'Filing' });
     await expect(summary).toBeVisible();
     const summaryBox = await summary.boundingBox();
     expect(summaryBox).toBeTruthy();
@@ -1203,7 +1204,7 @@ test.describe('File Janitor capability', () => {
     const card = page.locator('#fileJanitorMount');
     await expect(card).toBeVisible({ timeout: 15000 });
     await expect(card).toContainText('Folder access was revoked');
-    await expect(page.locator('#fileJanitorCardOpen')).toHaveText('Set up File Janitor');
+    await expect(page.locator('#fileJanitorCardOpen')).toHaveText('Set up Filing');
   });
 
   // The generic blueprint's Setup Wizard must offer a way to choose a folder.
@@ -1237,7 +1238,7 @@ test.describe('File Janitor capability', () => {
       await page.locator('#setupWizardBannerAction').click();
     }
     await expect(dialog).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('#setupWizardStepTitle')).toHaveText('Choose the folder to tidy', {
+    await expect(page.locator('#setupWizardStepTitle')).toHaveText('Choose the folder to file', {
       timeout: 15000
     });
 

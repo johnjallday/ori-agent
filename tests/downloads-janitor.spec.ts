@@ -202,7 +202,9 @@ async function openConsole(page: Page) {
     await expect(wizard).toBeHidden({ timeout: 15000 });
   }
 
-  await page.locator('#fileJanitorCardOpen').click();
+  const summaryAction = page.locator('#fileJanitorCardOpen');
+  if (await summaryAction.isVisible()) await summaryAction.click();
+  else await page.locator('#workspaceNextAction').click();
   await expect(page.locator('#fileJanitorConsole')).toBeVisible({ timeout: 15000 });
   const toggle = page.locator('#fileJanitorView-all');
   if (await toggle.isVisible()) await toggle.click();
@@ -262,8 +264,9 @@ test.describe('Downloads Janitor', () => {
     await page.goto(workspaceURL(id));
 
     const mount = page.locator('#fileJanitorMount');
-    await expect(mount).toBeVisible({ timeout: 15000 });
-    await expect(mount).not.toHaveAttribute('hidden', /.*/);
+    await expect(page.locator('#workspaceNextAction')).toBeVisible({ timeout: 15000 });
+    await expect(mount).toBeHidden();
+    await expect(page.locator('#workspaceNextAction')).toBeVisible();
     await expect(page.locator('#fileJanitorMount')).toContainText('Setup required');
     // The blueprint's wizard owns setup, so this surface offers a way into it
     // rather than a second folder chooser (FR-82).
@@ -272,7 +275,7 @@ test.describe('Downloads Janitor', () => {
     // single action opens the console, replacing the old inline panel's
     // "Continue setup" button (#fileJanitorOpenSetup). The intent asserted
     // here is unchanged — one way in, and no editable path field anywhere.
-    await expect(page.locator('#fileJanitorCardOpen')).toBeVisible();
+    await expect(page.locator('#workspaceNextAction')).toBeVisible();
     await expect(page.locator('#fileJanitorPath')).toHaveCount(0);
 
     // The wizard opens itself, and states what access it is asking for before
@@ -318,13 +321,13 @@ test.describe('Downloads Janitor', () => {
 
     // A reload does not ambush the user again, and Details still offers a way in.
     await page.goto(workspaceURL(id));
-    await expect(page.locator('#fileJanitorCardOpen')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#workspaceNextAction')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('#setupWizardDialog')).toBeHidden();
 
     // Card opens the console; the console's own entry opens the same wizard, at
     // the step it left off on. (The entry moved into the console with the rest
     // of the surface; Details is a summary now.)
-    await page.locator('#fileJanitorCardOpen').click();
+    await page.locator('#workspaceNextAction').click();
     await expect(page.locator('#fileJanitorConsole')).toBeVisible({ timeout: 15000 });
     await page.locator('#fileJanitorOpenSetup').click();
     await expect(page.locator('#setupWizardDialog')).toBeVisible();
@@ -646,7 +649,7 @@ test.describe('Downloads Janitor', () => {
     // Details, so enter Map explicitly instead of depending on a saved view.
     await page
       .locator('#fileJanitorConsole')
-      .getByRole('button', { name: 'Close File Janitor', exact: true })
+      .getByRole('button', { name: 'Close Filing', exact: true })
       .click();
     await page.getByRole('button', { name: 'Map', exact: true }).click();
     await expect(page.locator('[data-cmd-hq-station="file-janitor"]').first()).toContainText(

@@ -1741,7 +1741,7 @@ submitted to the server.
 
 It reuses creation's path/ownership validation, rejects stale state, and returns
 the updated workspace detail. Default access retains its ID, tools and disabled
-or removed state; unrelated user grants are unchanged. File Janitor-owned
+or removed state; unrelated user grants are unchanged. Filing-owned
 anchors use the capability's lifecycle to invalidate old pending approvals and
 monitoring consent. Capability availability or lifecycle conflicts return 409
 with an error sentence. Generic directory PUT cannot change an anchor path.
@@ -1751,7 +1751,7 @@ for the single-binding rule, sidecar-only deletion/backup and no-migration polic
 
 ## Workspace Updates
 
-Quiet saved lead messages and File Janitor review counts are independent of ticket
+Quiet saved lead messages and Filing review counts are independent of ticket
 attention and library proposals. All three routes are trusted-current-owner scoped
 and return `Cache-Control: no-store`; callers cannot supply another owner.
 
@@ -1784,7 +1784,7 @@ safe lead/session identity, `unread_count`, and delivered `messages` with exact
 message ID/revision and delivery/seen times. These are host welcomes, not all chat
 replies. `review.state` also supports `unconfigured`; ready data includes
 `pending_count`, `needs_review_count`, safe capability/install/root/batch identity
-and observation/batch times. It uses current saved File Janitor authority, not
+and observation/batch times. It uses current saved Filing authority, not
 conversation text. No filename, absolute path, file content, grant or approval
 token is included. One unavailable source does not hide another usable source.
 Unknown is not zero; retained last-known observations cannot authorize navigation.
@@ -1875,7 +1875,7 @@ An unreviewed `DELETE` returns `409` with code `group_requirement_review_require
 
 ## Workspace Build Sessions API
 
-"Build with your assistant" (`tasks/prd-build-with-your-assistant.md`, architecture in `docs/architecture/workspace-build-sessions.md`): the Personal Assistant fills the Create Workspace wizard through a conversation in a pane beside it. A build session is a server-held draft that **is** the create request. The model proposes; the host validates every field; the wizard renders it through its own setters; the user confirms with ordinary Create (`POST /api/workspaces` with `build_session_id`). An attached File Janitor draft may instead use the separately reviewed creation endpoints below; ordinary draft/turn/folder endpoints create nothing.
+"Build with your assistant" (`tasks/prd-build-with-your-assistant.md`, architecture in `docs/architecture/workspace-build-sessions.md`): the Personal Assistant fills the Create Workspace wizard through a conversation in a pane beside it. A build session is a server-held draft that **is** the create request. The model proposes; the host validates every field; the wizard renders it through its own setters; the user confirms with ordinary Create (`POST /api/workspaces` with `build_session_id`). An attached Filing draft may instead use the separately reviewed creation endpoints below; ordinary draft/turn/folder endpoints create nothing.
 
 Bodies are capped at 256 KiB and must be one JSON object with only the fields named below (`400` otherwise). Errors carry a stable `code`:
 
@@ -2061,7 +2061,7 @@ Ends an open build without creating anything (Start over, or Discard from Today)
 
 ### Create from a Build
 
-`POST /api/workspaces` accepts `build_session_id`. After the workspace is created the session is marked `created` and a short summary is stored in the workspace's `template_provenance.build_summary`: `assistant_name`, `session_id`, `created_at`, `turn_count`, `user_request` (the first thing the user asked for), and `decisions` (one `{section, text}` per section — blueprint, details, team, placement). The team line describes the team in the create request, not the model's claim, and the assistant's reason for a section the user later changed on the form is left out. The build is named in the create request only once its draft is on the form: while "Resume building …?" is unanswered, a workspace made by hand is not tied to the paused build. `GET /api/orchestration/workspace?id=…` and the sessionhttp workspace detail return it as `build_summary`, and the workspace page shows it under "How this was set up". An unknown or ordinary closed `build_session_id` does not block ordinary create. A retained accepted File Janitor preparation claim does: use its exact confirmation/recovery endpoint; ordinary create cannot bypass it.
+`POST /api/workspaces` accepts `build_session_id`. After the workspace is created the session is marked `created` and a short summary is stored in the workspace's `template_provenance.build_summary`: `assistant_name`, `session_id`, `created_at`, `turn_count`, `user_request` (the first thing the user asked for), and `decisions` (one `{section, text}` per section — blueprint, details, team, placement). The team line describes the team in the create request, not the model's claim, and the assistant's reason for a section the user later changed on the form is left out. The build is named in the create request only once its draft is on the form: while "Resume building …?" is unanswered, a workspace made by hand is not tied to the paused build. `GET /api/orchestration/workspace?id=…` and the sessionhttp workspace detail return it as `build_summary`, and the workspace page shows it under "How this was set up". An unknown or ordinary closed `build_session_id` does not block ordinary create. A retained accepted Filing preparation claim does: use its exact confirmation/recovery endpoint; ordinary create cannot bypass it.
 
 When the named build has an attached folder, Create links that folder to the new workspace in place — as a linked directory reference, and as its primary directory unless the create already set one outside the workspace folder — and the summary gains a `folder` decision. The folder is resolved through the build's canonical open review before anything is created, including private path-and-identity restoration after a restart. An unavailable or replaced source is `409` with `conflict.type: "build_folder"` and an `error` to show, and nothing is created. Unreviewed selections still have their separate 30-minute lifetime. Nothing is copied, moved, or read in the linked folder.
 
@@ -2121,7 +2121,7 @@ Runs the build's ready `plan` as Home's own setup journey on the build's held fo
 
 For a recognized folder whose `plan` waits on its Home's plugin. The request names only the build: the plugin is the one the folder's recognition names, and the release is the one Home's folder card would install, through the same reviewed-release service. A preview (`confirm` false, no `reviewed_version`) installs nothing and returns `{ "session": …, "home_provider": { "name", "plugin_id", "version", "source", "disclosure", "ready", "installed", "update", "installed_version", "development_copy" } }`, where `disclosure` is the plugin manager's trust report. A confirmation (`"confirm": true, "reviewed_version": "0.3.0"`) installs and enables exactly that release, adds the host line "Installed <name> <version>. Hire and build can run the plan now." to the transcript, and returns the same shape with a fresh `plan`. Refusals carry `code` and an `error` to show: `400` for `reviewed_version` without `confirm`; `409` `no_provider` (the plan is not waiting on a plugin), `provider_changed` (the reviewed release is no longer the one the host would install; nothing was installed), `home_upgrade_required` (a Home is pinned to the installed release); `503` `provider_unavailable`; `version`, `closed`, `not_found` as elsewhere.
 
-### Reviewed File Janitor Creation
+### Reviewed Filing Creation
 
 For built-in `file-janitor` (and legacy `downloads-janitor`) with a live attached
 folder, review the **canonical edited BuildDraft**, not a replacement client draft:
@@ -2167,7 +2167,7 @@ Later unrelated choices are preserved. A separate new build is allowed; old
 review/prepare calls return `409 preparation_deferred`. No native-selection success
 is implied by these API contracts.
 
-## File Janitor Folder Review API
+## Filing Folder Review API
 
 Prefix: `/api/workspaces/{id}/file-janitor`; retained `downloads-janitor` is an alias.
 All routes are owner scoped and `no-store`. POST bodies are closed single JSON
@@ -2435,7 +2435,7 @@ A `needs_pick: true` offer or `409` response also carries `needs_pick_reason`: `
 
 A recognized software project adds two refusals to a `yes` with `project`: `400` while the offer's `software.needs_candidate` is true (choose a candidate first, below), and `409` with `"project_exists": true` and the offer when a workspace of the user's already has this exact folder as its primary linked folder (the offer's `software.existing` lists it; no second workspace is made). `409` with `"needs_pick": true` also covers a folder that was deleted and made again at the same path since it was shown.
 
-`decision` is `yes`, `no`, or `later`. `choice` (`project` or `tidy`) is required with `yes` when the verdict leaves both open. `no` never asks about that folder again; `later` asks again in a week. A `yes` with `tidy` runs the File Janitor setup for the folder on the server and the returned offer is `resolved` with `outcome.route` (the first review batch, or the workspace that already manages the folder). A `yes` with `project` and `create: true` — the card's confirmed plan ("Set up Thesis as a Writing project workspace?") — has the server set the workspace up itself (the folder's name, the shape's installed blueprint or blank, the folder linked as the primary directory, the first task seeded) and the returned offer is `resolved` with `outcome.workspace_id`, `outcome.route` and `outcome.blueprint`; a retried click reuses the workspace already made for the offer. It is offered only while the offer's `create_available` is true. A `yes` with `project` and no `create` (the card's Adjust…) leaves the offer `awaiting_outcome` until the resolve below. `request_id` makes a retry return the same result. `404` for an unknown offer; `409` when it was already answered; `503` when the workspace could not be created (the offer stays pending).
+`decision` is `yes`, `no`, or `later`. `choice` (`project` or `tidy`) is required with `yes` when the verdict leaves both open. `no` never asks about that folder again; `later` asks again in a week. A `yes` with `tidy` runs the Filing setup for the folder on the server and the returned offer is `resolved` with `outcome.route` (the first review batch, or the workspace that already manages the folder). A `yes` with `project` and `create: true` — the card's confirmed plan ("Set up Thesis as a Writing project workspace?") — has the server set the workspace up itself (the folder's name, the shape's installed blueprint or blank, the folder linked as the primary directory, the first task seeded) and the returned offer is `resolved` with `outcome.workspace_id`, `outcome.route` and `outcome.blueprint`; a retried click reuses the workspace already made for the offer. It is offered only while the offer's `create_available` is true. A `yes` with `project` and no `create` (the card's Adjust…) leaves the offer `awaiting_outcome` until the resolve below. `request_id` makes a retry return the same result. `404` for an unknown offer; `409` when it was already answered; `503` when the workspace could not be created (the offer stays pending).
 
 ### Remove a Stopped Setup
 
@@ -2935,7 +2935,7 @@ Without a hired assistant and a Personal HQ, every global-memory control answers
 
 Agents in every workspace's chat and task runs have the workspace tool `memory_propose_global`, allowed under every autonomy policy, including Watch, because it writes no canonical memory. The model supplies only `text` (one line, at most 500 characters, the same rules as `memory_write`) and `category` (`how_you_work`, `people`, `projects`, `routines`, `sources`). The server fills the workspace, agent and task from the verified execution context; any other argument is ignored.
 
-A proposal becomes a review candidate (source kind `workspace_agent`) with evidence `{source_kind: "workspace_agent", source_id: <workspace ID>, summary: "<workspace> · <agent> · task <id>" | "… · chat"}`. It never writes `MEMORY.md`. Proposals are keyed by normalized text, so the same fact from two workspaces is one item. Workspace proposals have their own quota: 10 pending and 10 per rolling 24 hours, separate from the folder-scan, saved-app and File Janitor sources.
+A proposal becomes a review candidate (source kind `workspace_agent`) with evidence `{source_kind: "workspace_agent", source_id: <workspace ID>, summary: "<workspace> · <agent> · task <id>" | "… · chat"}`. It never writes `MEMORY.md`. Proposals are keyed by normalized text, so the same fact from two workspaces is one item. Workspace proposals have their own quota: 10 pending and 10 per rolling 24 hours, separate from the folder-scan, saved-app and Filing sources.
 
 The tool replies `{"status", "message"}`:
 
@@ -3878,7 +3878,7 @@ Scheduler nodes emit Server-Sent Events (SSE) for real-time updates:
 
 The maps show work while it happens and deliver each finished result as a
 **parcel** that waits until it is opened. Work is a task run, a Daily Brief
-generation, or an unattended File Janitor scan.
+generation, or an unattended Filing scan.
 
 The feed carries names, ids, phases, outcomes and counts only. It never carries
 tool arguments, tool results, task descriptions, brief content, file names or
@@ -3957,10 +3957,10 @@ behind may miss events; reconnecting sends a fresh snapshot.
 | `phase` | `started`, `step`, `blocked`, `resumed`, `finished` |
 | `step.type` | `thinking`, `tool_call`, `tool_result` (with `ok`), `delegation` — task steps only |
 | `outcome` | `succeeded`, `partial`, `failed`, `timeout`; empty when a run stopped without finishing (cancelled, deleted, or silent for 10 minutes) |
-| `count` | File Janitor finishes only: new files waiting for review |
+| `count` | Filing finishes only: new files waiting for review |
 | `parcel_id` | Set when the finish produced a parcel |
 
-Daily Brief and File Janitor activities send only `started` and `finished`.
+Daily Brief and Filing activities send only `started` and `finished`.
 
 **`parcel` event** — a parcel row (as in the snapshot). With `"opened": true` the
 parcel is no longer waiting: it was opened, swept after 14 days, or deleted with
@@ -3972,7 +3972,7 @@ its task or workspace.
   City Economy is on (that is its Harvest) and a ticket accepted by hand.
 - A Daily Brief generated **by the schedule**. A brief the user opened or
   refreshed gets none.
-- A File Janitor scan that found **at least one** new file to review.
+- A Filing scan that found **at least one** new file to review.
 
 ### Open a Parcel
 
@@ -4030,7 +4030,7 @@ Called by any other place a result is seen, so its parcel stops waiting.
 ```
 
 `kind` is `task`, `daily_brief` or `file_janitor`. `ref_id` is required for a
-task. The Daily Brief and the File Janitor console show everything that is
+task. The Daily Brief and the Filing console show everything that is
 waiting, so they leave `ref_id` out and open every parcel of their kind in the
 workspace.
 

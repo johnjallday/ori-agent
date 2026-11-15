@@ -222,7 +222,7 @@ func TestCuratorProtectionEndpointAndCapturedRequestUseIdenticalProjection(t *te
 			}
 			prompt := provider.requests[len(provider.requests)-1].SystemPrompt
 			if state == "revoked" {
-				if fact.State != "unavailable" || strings.Contains(prompt, "## File Janitor managed-folder protection") {
+				if fact.State != "unavailable" || strings.Contains(prompt, "## Filing managed-folder protection") {
 					t.Fatal(fact, prompt)
 				}
 			} else if !strings.Contains(prompt, fact.Prompt()) || fact.Prompt() == "" {

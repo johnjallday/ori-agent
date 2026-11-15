@@ -366,7 +366,7 @@ const SOFTWARE_STOP_COPY = {
 // pick; anything else carries on from what is saved.
 const INBOX_STOP_COPY = {
   plan_changed:
-    'What is saved no longer matches what you reviewed, or File Janitor will not take this folder, so I stopped before going further. Anything that finished is kept and no file was moved. Pick the folder again to review it afresh.',
+    'What is saved no longer matches what you reviewed, or Filing will not take this folder, so I stopped before going further. Anything that finished is kept and no file was moved. Pick the folder again to review it afresh.',
   needs_pick: (subject, setup) => folderPickCopy(subject, setup?.needs_pick_reason),
   interrupted:
     'Setup was interrupted before it finished. What it finished is kept; Try again carries on from there.',
@@ -758,7 +758,7 @@ function inboxRefusalView(offer, base, subject) {
     return {
       ...base,
       headline: segments(['Hire File Curator for ', { text: subject }, ' (unavailable)']),
-      question: message || 'File Janitor cannot use this folder. Nothing is created.',
+      question: message || 'Filing cannot use this folder. Nothing is created.',
       reason: '',
       actions: [],
       plan: null,
@@ -2177,9 +2177,9 @@ function tidyConfirmView(offer, base, folder) {
   return {
     ...base,
     confirming: true,
-    headline: segments(['Set up File Janitor for ', { text: folder }, '?']),
+    headline: segments(['Set up filing for ', { text: folder }, '?']),
     question:
-      'Ori will create a File Janitor workspace with a File Curator, watch the folder while paused, scan it once and propose moves — nothing moves until you approve a batch.',
+      'Ori will create a Filing workspace with a File Curator, watch the folder while paused, scan it once and propose moves — nothing moves until you approve a batch.',
     actions: [
       {
         id: 'setup',
@@ -2243,7 +2243,7 @@ function verdictView(offer, base, { verdict, folder, subject, remember, confirm 
       return {
         ...base,
         headline: segments(['I am not sure what ', { text: subject }, ' is.']),
-        question: 'Is this a project you work in, or a folder to tidy?',
+        question: 'Is this a project you work in, or a folder to file?',
         actions: [
           { id: 'project', label: "It's a project", style: 'primary', confirm: 'project' },
           { id: 'tidy', label: 'Tidy it', style: 'outline', confirm: 'tidy' },
@@ -2482,7 +2482,7 @@ export function firstBatchView(offer) {
   return {
     outcome,
     route,
-    label: outcome === 'batch' ? 'Review batch' : 'Open File Janitor',
+    label: outcome === 'batch' ? 'Review batch' : 'Open Filing',
     eligible: count(batch.eligible),
     needsReview: count(batch.needs_review)
   };
@@ -2943,7 +2943,7 @@ export function folderOutcomeNote(offer) {
       if (offer?.outcome?.kind === 'tidy') {
         return (
           String(offer?.outcome?.note || '').trim() ||
-          `File Janitor is set up for ${subject}; its first proposals are ready to review.`
+          `Filing is set up for ${subject}; its first proposals are ready to review.`
         );
       }
       if (offer?.outcome?.blueprint && String(offer?.blueprint_label || '').trim()) {
@@ -6729,9 +6729,9 @@ function startManualTidy() {
   showError('');
   manager.showAddWorkspaceModal({
     entryPoint: 'folder_digest',
-    name: `File Janitor — ${String(offer?.folder || '').trim() || 'folder'}`,
+    name: `Filing — ${String(offer?.folder || '').trim() || 'folder'}`,
     blueprint: 'file-janitor',
-    blueprintNote: 'Choose the folder to tidy in the setup wizard after creating.'
+    blueprintNote: 'Choose the folder to file in the setup wizard after creating.'
   });
 }
 
@@ -7542,7 +7542,7 @@ async function chooseCandidate(action) {
 
 export function folderDecisionProgress(offer, action) {
   const subject = String(offer?.subject?.name || offer?.folder || '').trim() || 'the folder';
-  if (action.walkthrough) return `Setting up File Janitor for ${subject}…`;
+  if (action.walkthrough) return `Setting up Filing for ${subject}…`;
   if (action.create && offer?.operation === 'link_supporting_folder')
     return `Linking ${subject} as a supporting folder in ${offer.destination?.name || 'the reviewed project'}…`;
   if (action.create) return `Setting up the workspace for ${subject}…`;

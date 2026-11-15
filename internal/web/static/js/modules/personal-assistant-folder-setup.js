@@ -662,7 +662,7 @@ async function review(candidateId, close = false, offerId, placement) {
           state: 'existing',
           label:
             result.folder_existing_project.tidied === true
-              ? 'File Janitor workspace'
+              ? 'Filing workspace'
               : 'Existing workspace',
           scope:
             result.folder_existing_project.tidied === true ? 'Already tidies it' : 'Already set up',

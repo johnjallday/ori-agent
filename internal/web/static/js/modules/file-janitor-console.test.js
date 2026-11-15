@@ -257,6 +257,50 @@ function attachedReview(overrides = {}) {
   };
 }
 
+test('setup-review completion notifies subscribers with only the selected display name', async () => {
+  setup();
+  panel.render(setupRequiredStatus);
+  const seen = [];
+  panel.subscribe(snapshot => seen.push(snapshot.actionState));
+  let review = attachedReview();
+  globalThis.fetch = async url => ({
+    ok: true,
+    json: async () =>
+      String(url).endsWith('/setup-review')
+        ? { review }
+        : String(url).endsWith('/file-janitor')
+          ? { status: setupRequiredStatus }
+          : { batches: [], actions: [], candidates: [] }
+  });
+  await panel.refresh();
+  assert.ok(seen.some(snapshot => snapshot.linkedFolderName === 'Synthetic Inbox'));
+  assert.equal(panel.getActionState().linkedFolderName, 'Synthetic Inbox');
+  assert.doesNotMatch(JSON.stringify(seen), /\/tmp\/Synthetic Inbox/);
+  for (const state of [
+    'choose_folder',
+    'prepared',
+    'preparation_incomplete',
+    'preparation_changed',
+    'folder_unavailable',
+    'folder_conflict'
+  ]) {
+    review = attachedReview({ state });
+    await panel.refresh();
+    assert.equal(panel.getActionState().linkedFolderName, '', state);
+    assert.equal(seen.at(-1).linkedFolderName, '', state);
+  }
+  for (const overrides of [
+    { reference_id: '' },
+    { reference_id: 'missing' },
+    { candidates: [] },
+    { candidates: [...attachedReview().candidates, ...attachedReview().candidates] }
+  ]) {
+    review = attachedReview(overrides);
+    await panel.refresh();
+    assert.equal(panel.getActionState().linkedFolderName, '');
+  }
+});
+
 test('attached folder review is default-off and discloses its actual filesystem change', () => {
   const doc = setup();
   panel._setSetupReview(attachedReview());
@@ -267,7 +311,11 @@ test('attached folder review is default-off and discloses its actual filesystem 
     throw new Error('a pure render must not call an endpoint');
   };
   assert.equal(panel._renderSetupReview(host), true);
-  assert.match(host.textContent, /Use attached Synthetic Inbox/);
+  assert.match(host.textContent, /Allow filing in Synthetic Inbox/);
+  assert.equal(
+    host.all(node => node.tagName === 'H3')[0].textContent,
+    'Allow filing in Synthetic Inbox'
+  );
   assert.match(host.textContent, /Create or reuse Filed/);
   assert.match(host.textContent, /No file contents are opened/);
   assert.match(host.textContent, /separate approval/);
@@ -289,7 +337,7 @@ test('a malformed success response cannot invent a prepared result', async () =>
   });
   panel._renderSetupReview(host);
   host
-    .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Use attached'))[0]
+    .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Allow filing in'))[0]
     .click();
   await settle();
   assert.match(host.textContent, /initial result could not be confirmed/);
@@ -344,7 +392,7 @@ test('a newly linked empty folder retains its verified initial result through st
   const host = doc.createElement('div');
   panel._renderSetupReview(host);
   host
-    .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Use attached'))[0]
+    .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Allow filing in'))[0]
     .click();
   await settle();
   await settle();
@@ -380,7 +428,7 @@ test('ambiguous attached folders require a choice before confirmation', () => {
   panel._renderSetupReview(host);
   assert.equal(host.all(node => node.tagName === 'SELECT')[0].value, '');
   assert.equal(
-    host.all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Use attached'))[0]
+    host.all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Allow filing in'))[0]
       .disabled,
     true
   );
@@ -546,11 +594,11 @@ test('a preset suggestion still pre-fills and is immediately approvable', () => 
   assert.equal(confirm.disabled, false);
 });
 
-test('the setup card is titled File Janitor, not Downloads Janitor', () => {
+test('the setup card is titled Filing, not Downloads Janitor', () => {
   const doc = setup();
   openConsole(setupRequiredStatus);
   const title = doc.getElementById('fileJanitorTitle');
-  assert.equal(title.textContent, 'File Janitor');
+  assert.equal(title.textContent, 'Filing');
 });
 
 test('the folder input is labelled and described for screen readers', () => {
@@ -2131,8 +2179,8 @@ test('the card always states what Ori reads, without opening settings', () => {
   );
   const body = cardText(doc);
   assert.match(body, /Local only · file details/);
-  assert.match(body, /Names, types, sizes, and dates/);
-  assert.match(body, /no file contents are read/);
+  assert.match(body, /Names, types, sizes and dates only/);
+  assert.match(body, /No file contents are read/);
 });
 
 test('a cloud provider is named, and the pending confirmation is the action', () => {
@@ -2969,7 +3017,7 @@ test('the console is a labelled modal dialog', () => {
   // The accessible name is the visible title, not a separate string that could
   // drift away from what is on screen.
   const labelledBy = dialog.getAttribute('aria-labelledby');
-  assert.equal(doc.getElementById(labelledBy).textContent, 'File Janitor');
+  assert.equal(doc.getElementById(labelledBy).textContent, 'Filing');
 });
 
 test('a late status repaint after closing preserves focus on the live compact opener', () => {
@@ -3212,7 +3260,7 @@ test('the station keeps product identity, managed folder, depot art, and state d
   );
 
   const station = adapter.station();
-  assert.equal(station.label, 'File Janitor');
+  assert.equal(station.label, 'Filing');
   assert.equal(station.location, 'A very long approved inbox folder');
   assert.equal(station.visualVariant, 'depot');
   assert.equal(station.state().value, '2 files ready for review');
@@ -3257,8 +3305,8 @@ test('Workspace Details carries no review table and no settings form', () => {
   const card = doc.getElementById('fileJanitorMount');
 
   // The compact card answers "is anything waiting?" and offers a way in.
-  assert.match(card.textContent, /File depot/);
-  assert.match(card.textContent, /File Janitor/);
+  assert.doesNotMatch(card.textContent, /File depot/);
+  assert.match(card.textContent, /Filing/);
   assert.match(card.textContent, /Current status Review ready/);
   assert.match(card.textContent, /Managed folder Inbox/);
   assert.match(card.textContent, /Review queue 2 files waiting for review/);
@@ -3385,6 +3433,34 @@ test('the compact card sends consent-required work to Settings', () => {
   assert.equal(action.textContent, 'Review consent');
   action.click();
   assert.equal(panel.activeTab(), 'settings');
+});
+
+test('the never-configured summary hides only when Next action actually shows the setup ask', () => {
+  const doc = setup();
+  doc.body.dataset = { workspaceViewMode: 'details' };
+  const next = doc.register('workspaceNextActionRegion');
+  next.setAttribute('data-filing-setup-ask', 'true');
+  panel.render(setupRequiredStatus);
+  const card = doc.getElementById('fileJanitorMount');
+  assert.equal(card.hidden, true);
+  // A ticket outranks setup; the fallback card is now the only setup ask.
+  next.setAttribute('data-filing-setup-ask', 'false');
+  panel._syncSummaryVisibility();
+  assert.equal(card.hidden, false);
+  panel._setSetupReview(attachedReview());
+  panel.render(setupRequiredStatus);
+  assert.match(card.textContent, /Synthetic Inbox · not allowed yet/);
+  assert.match(
+    card.textContent,
+    /Filing is not allowed in Synthetic Inbox yet. Nothing is scanned or moved./
+  );
+  next.setAttribute('data-filing-setup-ask', 'true');
+  panel.render(statusFixture());
+  assert.equal(card.hidden, false, 'after setup the summary stays');
+  panel.render({ ...setupRequiredStatus, settings: { access_revoked_at: '2026-11-14T12:00:00Z' } });
+  assert.equal(card.hidden, false, 'revoked access keeps its fallback');
+  panel.render({ ...setupRequiredStatus, readiness: { state: 'needs_attention' } });
+  assert.equal(card.hidden, false, 'repair keeps its fallback');
 });
 
 test('the configured summary is visible only in Details across status refreshes', () => {
@@ -4063,11 +4139,11 @@ test('a refused Curator request is reported, not swallowed', async () => {
 
 const REMOVAL_SUMMARY = {
   capability_id: 'file-janitor',
-  display_name: 'File Janitor',
+  display_name: 'Filing',
   installed: true,
   managed_folder: 'Inbox',
   stops_automation: ['Watching this folder for new files.', 'The daily catch-up scan.'],
-  retained_audit: ['The history of everything File Janitor filed, trashed, or restored.'],
+  retained_audit: ['The history of everything Filing filed, trashed, or restored.'],
   moves_files: false
 };
 
@@ -4083,7 +4159,7 @@ test('Settings offers removal and says plainly that files are not touched', () =
   const doc = setup();
   const restore = openSettings();
 
-  assert.ok(doc.getElementById('fileJanitorRemove'), 'expected a Remove File Janitor control');
+  assert.ok(doc.getElementById('fileJanitorRemove'), 'expected a Remove Filing control');
   assert.match(text(doc), /Your files are not moved or deleted/);
   restore();
 });
@@ -4114,7 +4190,7 @@ test('the confirmation is built from the server dry run', async () => {
   assert.match(body, /Watching this folder for new files/);
   assert.match(body, /gives up its access/);
   assert.match(body, /No files are moved, renamed, deleted, or restored/);
-  assert.match(body, /history of everything File Janitor filed/);
+  assert.match(body, /history of everything Filing filed/);
   restore();
 });
 
@@ -4194,8 +4270,7 @@ test('an adopted Curator is described as left alone, with no checkbox', async ()
         companion: {
           agent_instance_id: 'agent-1',
           removable: false,
-          reason:
-            'This agent existed before File Janitor was installed, so removing it leaves it alone.'
+          reason: 'This agent existed before Filing was installed, so removing it leaves it alone.'
         }
       }
     })
@@ -4205,7 +4280,7 @@ test('an adopted Curator is described as left alone, with no checkbox', async ()
   await settle();
 
   assert.equal(doc.getElementById('fileJanitorRemoveCompanion'), null);
-  assert.match(text(doc), /existed before File Janitor was installed/);
+  assert.match(text(doc), /existed before Filing was installed/);
   restore();
 });
 

@@ -85,7 +85,7 @@ func (a *SetupAdapter) Evaluate(_ context.Context, req setupwizard.StepRequest) 
 	if a == nil || a.service == nil {
 		return setupwizard.StepReadiness{
 			Blocked:       true,
-			Summary:       "File Janitor is unavailable in this build.",
+			Summary:       "Filing is unavailable in this build.",
 			ErrorCategory: setupwizard.ErrorCategoryUnavailable,
 		}, nil
 	}
@@ -93,7 +93,7 @@ func (a *SetupAdapter) Evaluate(_ context.Context, req setupwizard.StepRequest) 
 	if err != nil {
 		return setupwizard.StepReadiness{
 			Blocked:       true,
-			Summary:       "Ori could not read this workspace's File Janitor settings.",
+			Summary:       "Ori could not read this workspace's Filing settings.",
 			ErrorCategory: setupwizard.ErrorCategoryDomainError,
 		}, nil
 	}
@@ -273,7 +273,7 @@ func overallReadiness(status Status) setupwizard.StepReadiness {
 		}
 		return setupwizard.StepReadiness{
 			Ready:   true,
-			Summary: "Everything File Janitor needs is working.",
+			Summary: "Everything Filing needs is working.",
 		}
 	case ReadinessNeedsAttention:
 		if failing := status.Readiness.Failing(); len(failing) > 0 {
@@ -285,7 +285,7 @@ func overallReadiness(status Status) setupwizard.StepReadiness {
 		}
 		return setupwizard.StepReadiness{
 			Blocked:       true,
-			Summary:       "Something File Janitor needs stopped working.",
+			Summary:       "Something Filing needs stopped working.",
 			ErrorCategory: setupwizard.ErrorCategoryDomainError,
 		}
 	default:

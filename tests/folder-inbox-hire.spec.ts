@@ -116,7 +116,7 @@ test('no model is configured, and Downloads is answered by a hire card on Home',
   await attachFromHome(page, 'Downloads');
   const card = panel(page);
   await expectCurator(page, 'Downloads');
-  await expect(card.getByText('Nothing to download: File Janitor is built into Ori')).toBeVisible();
+  await expect(card.getByText('Nothing to download: Filing is built into Ori')).toBeVisible();
   const ready = card.locator('details.folder-requirements__ready');
   if (!(await ready.evaluate(node => (node as HTMLDetailsElement).open)))
     await ready.locator('summary').first().click();

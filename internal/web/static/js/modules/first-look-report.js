@@ -191,7 +191,7 @@ function firstBatchReportView(item, now) {
         href: route
       });
     else if (offered.includes('open_janitor'))
-      actions.push({ id: 'open_janitor', label: 'Open File Janitor', primary: true, href: route });
+      actions.push({ id: 'open_janitor', label: 'Open Filing', primary: true, href: route });
   }
   if (!failed && offered.includes('review_learned'))
     actions.push({ id: 'review_learned', label: 'Review what Ori learned', primary: false });

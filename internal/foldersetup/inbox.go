@@ -28,7 +28,7 @@ const (
 	// without approval.
 	InboxFolderDetail    = "Ori lists the files directly inside it and reads their names, types, sizes and dates. It creates a Filed folder inside it. Nothing moves until you approve it in the review."
 	InboxFirstLookLine   = "A first look: a metadata-only scan that proposes the first filing batch"
-	InboxFirstLookDetail = "No model is called, and no file is opened, moved or deleted. You review the batch in File Janitor."
+	InboxFirstLookDetail = "No model is called, and no file is opened, moved or deleted. You review the batch in Filing."
 )
 
 // BuildInboxPlan lists every consequence of Hire and build for an inbox folder

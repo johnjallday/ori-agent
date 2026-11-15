@@ -320,7 +320,7 @@ must not omit the object to bypass readiness.
 ## Acceptance summary
 
 - A saved `File Curator` is a suggestion until its role-specific action is
-  clicked. The File Janitor's first and only ordinary role is required and
+  clicked. The Filing blueprint's first and only ordinary role is required and
   primary; assignment reuses the saved definition unchanged.
 - Suggestions use deterministic name/role-label matching, explain only that
   match, exclude unattachable/occupied definitions, and never call a model.

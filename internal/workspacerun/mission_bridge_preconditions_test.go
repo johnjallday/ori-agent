@@ -113,7 +113,7 @@ func TestMissionBridge_FileJanitorRunCarriesTheBackupPrecondition(t *testing.T) 
 	prompt := runner.lastTask.Description
 	for _, want := range []string{
 		"## Preconditions\n",
-		"- As of 2026-10-29T09:00:00Z (stored metadata only, not a new check): The approved File Janitor folder is not covered",
+		"- As of 2026-10-29T09:00:00Z (stored metadata only, not a new check): The approved Filing folder is not covered",
 		`Suggested task: "` + backupTitle + `". First step: Press Back up and approve one metadata read.`,
 	} {
 		if !strings.Contains(prompt, want) {

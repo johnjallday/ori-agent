@@ -156,9 +156,9 @@ export function commanderSpeech(view) {
       }
       return {
         phase: 'done',
-        line: `${view.workspace} is set up · See what I made`,
+        line: `${view.title || `${view.workspace} is set up`} · See what I made`,
         headline: '',
-        announce: `${view.workspace} is set up`,
+        announce: view.title || `${view.workspace} is set up`,
         review: true
       };
     }
@@ -234,7 +234,7 @@ export function commanderOneLine(view) {
     case 'done':
       return {
         phase: speech.phase,
-        text: `${view.workspace} is set up`,
+        text: view.title || `${view.workspace} is set up`,
         action: 'See what I made'
       };
     default:

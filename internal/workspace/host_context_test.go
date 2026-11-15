@@ -116,7 +116,7 @@ func TestCuratorFactsRevalidateCachedAssociationAfterRead(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := AppendHostContext("", resolved.HostContext)
-			if strings.Contains(got, "## File Janitor managed-folder protection") {
+			if strings.Contains(got, "## Filing managed-folder protection") {
 				t.Fatal("late fact leaked", got)
 			}
 			if (got != "") != (change == "revoked") {
@@ -164,7 +164,7 @@ func TestCuratorCapturedTaskRequestsKeepHostAdviceAndRuntimeSkillOverrides(t *te
 				if !provider.called || strings.Count(prompt, filecuratorguidance.Heading) != 1 || !strings.Contains(prompt, "My user-authored instructions") || !strings.Contains(prompt, "Runtime override advice") {
 					t.Fatalf("captured prompt missing layered context: %q", prompt)
 				}
-				if strings.Count(prompt, "## File Janitor managed-folder protection") != 1 || facts.calls != 1 {
+				if strings.Count(prompt, "## Filing managed-folder protection") != 1 || facts.calls != 1 {
 					t.Fatal("actual task request did not receive shared managed facts exactly once", prompt)
 				}
 				if len(provider.gotReq.MCPServers) != 0 {

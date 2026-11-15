@@ -68,7 +68,7 @@ func (r *CapabilityRuntime) CapabilityStatus(workspaceID string) (workspacecapab
 	if r == nil || r.service == nil {
 		return workspacecapability.Status{
 			State:  workspacecapability.StatusUnavailable,
-			Detail: "File Janitor is not available.",
+			Detail: "Filing is not available.",
 		}, nil
 	}
 
@@ -238,7 +238,7 @@ func (r *CapabilityRuntime) DescribeCapabilityRemoval(workspaceID string) (works
 	facts := workspacecapability.RemovalFacts{
 		ManagedFolder: folderDisplayName(settings.RootPath),
 		RetainedAudit: []string{
-			"The history of everything File Janitor filed, trashed, or restored.",
+			"The history of everything Filing filed, trashed, or restored.",
 			"Your settings and past decisions, kept inactive for the record.",
 		},
 	}

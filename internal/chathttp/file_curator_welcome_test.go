@@ -48,7 +48,7 @@ func TestFileCuratorWelcome_OffersConciseStateBackedNavigation(t *testing.T) {
 			if strings.Contains(text, "\n1. ") || strings.Contains(text, "reply with a number") || len([]rune(text)) > 650 {
 				t.Fatalf("welcome is not concise navigation guidance: %s", text)
 			}
-			for _, want := range []string{"ask about filing rules", "does not scan", "read file contents", "explicit approval in File Janitor"} {
+			for _, want := range []string{"ask about filing rules", "does not scan", "read file contents", "explicit approval in Filing"} {
 				if !strings.Contains(text, want) {
 					t.Errorf("missing %q: %s", want, text)
 				}
@@ -176,7 +176,7 @@ func TestWorkspaceAssessmentPrompt_KeepsCuratorChoicesSeparateFromGoalReviews(t 
 		t.Fatal(err)
 	}
 	guidance := workspaceAssessmentPrompt(ag)
-	for _, want := range []string{"filing reviews are separate from goal assessments", "numbered choice selects a discussion topic", "not scan or file-action approval", "rather than inventing filenames"} {
+	for _, want := range []string{"Filing reviews are separate from goal assessments", "numbered choice selects a discussion topic", "not scan or file-action approval", "rather than inventing filenames"} {
 		if !strings.Contains(guidance, want) {
 			t.Fatalf("missing %q: %s", want, guidance)
 		}

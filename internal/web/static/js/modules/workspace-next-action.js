@@ -34,7 +34,7 @@ export function updateSourceRows(saved) {
     completionAt(value) === null ? 'Unavailable' : new Date(value).toLocaleString();
   const review = saved.review;
   if (review?.batch_id) {
-    rows.push(['Filing source', 'Saved File Janitor review']);
+    rows.push(['Filing source', 'Saved Filing review']);
     rows.push(['Batch', review.batch_id]);
     rows.push(['Batch completed', when(review.batch_completed_at)]);
     rows.push(['Review observed', when(review.observed_at)]);
@@ -150,13 +150,13 @@ export function resolveWorkspaceNextAction(input) {
   if (runningLine) ongoing.push(runningLine);
   if (janitor?.scanning) ongoing.push('Scanning for files. Nothing moves without approval.');
   if (known && janitor.scanState === 'failed')
-    ongoing.push('The last scan failed. Open File Janitor to retry explicitly.');
+    ongoing.push('The last scan failed. Open Filing to retry explicitly.');
   if (known && janitor.history?.state === 'ready') {
     const counts = janitor.latestReceipt?.counts;
     const problems = (counts?.failed || 0) + (counts?.stale || 0);
     if (problems)
       ongoing.push(
-        `Last filing: ${counts.applied || 0} applied, ${problems} not applied. See History in File Janitor.`
+        `Last filing: ${counts.applied || 0} applied, ${problems} not applied. See History in Filing.`
       );
   }
   const isLoading = [
@@ -220,7 +220,7 @@ export function resolveWorkspaceNextAction(input) {
     if (janitor.readiness === 'needs_attention')
       return consoleDescriptor(
         'repair',
-        'File Janitor needs attention',
+        'Filing needs attention',
         'Repair folder access or setup before continuing.',
         'Repair setup',
         'attention'
@@ -228,15 +228,19 @@ export function resolveWorkspaceNextAction(input) {
     if (!janitor.configured || janitor.readiness === 'setup_required')
       return consoleDescriptor(
         'setup',
-        'Choose the folder to tidy',
-        'Finish setup in File Janitor. Opening setup starts nothing.',
-        'Set up File Janitor'
+        janitor.linkedFolderName
+          ? `Let ${String(input.leadAgentName || '').trim() || 'Ori'} file ${janitor.linkedFolderName}`
+          : 'Choose the folder to file',
+        janitor.linkedFolderName
+          ? 'Review what Ori may read and change. Nothing moves until you approve it.'
+          : 'Nothing is scanned or moved until you choose one.',
+        janitor.linkedFolderName ? 'Review permission' : 'Set up filing'
       );
     if (janitor.consentRequired)
       return consoleDescriptor(
         'consent',
         'Review content consent',
-        'File Janitor needs your decision before using document extracts.',
+        'Filing needs your decision before using document extracts.',
         'Review consent',
         'attention'
       );
@@ -266,7 +270,7 @@ export function resolveWorkspaceNextAction(input) {
       'review',
       'Scanning for files',
       'The scan proposes a review batch. It does not move or remove files.',
-      'Open File Janitor'
+      'Open Filing'
     );
   if (actionable) return taskDescriptor(actionable);
   if (unknown.length) return taskDescriptor(unknown[0]);
@@ -328,7 +332,7 @@ export function resolveWorkspaceNextAction(input) {
       janitor.emptyState === 'scan_empty' || janitor.emptyState === 'no_proposals'
         ? 'The last scan found no eligible files. Scan again only when you choose.'
         : janitor.mode === 'manual'
-          ? 'Manual scans only. Start a scan explicitly in File Janitor.'
+          ? 'Manual scans only. Start a scan explicitly in Filing.'
           : janitor.mode === 'paused'
             ? 'Automatic scanning is paused. You can still scan on demand.'
             : 'Watching for arrivals. Nothing moves without your approval.';
@@ -337,10 +341,10 @@ export function resolveWorkspaceNextAction(input) {
       janitor.mode === 'manual'
         ? 'Ready when you are'
         : janitor.mode === 'paused'
-          ? 'File Janitor is paused'
+          ? 'Filing is paused'
           : 'Watching for files',
       copy,
-      'Open File Janitor'
+      'Open Filing'
     );
   }
   return finish({

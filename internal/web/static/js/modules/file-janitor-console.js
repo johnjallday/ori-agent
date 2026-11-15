@@ -615,7 +615,18 @@
     if (disposed) return;
     const host = mount();
     if (!host) return;
-    host.hidden = !status?.applies || workspaceViewMode() !== 'details';
+    const settings = status?.settings || {};
+    const neverSetUp =
+      !isConfigured(status) &&
+      (!settings.setup_completed_at || settings.setup_completed_at.startsWith('0001-')) &&
+      (!settings.access_revoked_at || settings.access_revoked_at.startsWith('0001-')) &&
+      status?.readiness?.state !== 'needs_attention';
+    const nextActionAsks =
+      document
+        .getElementById('workspaceNextActionRegion')
+        ?.getAttribute('data-filing-setup-ask') === 'true';
+    host.hidden =
+      !status?.applies || workspaceViewMode() !== 'details' || (neverSetUp && nextActionAsks);
   }
 
   function el(tag, className, text) {
@@ -761,7 +772,10 @@
   function renderSetupCard(host, status) {
     const suggestion = status.suggestion || {};
     const settings = status.settings || {};
-    const label = suggestion.label || 'Folder to tidy';
+    const label =
+      suggestion.label && suggestion.label !== 'Folder to tidy'
+        ? suggestion.label
+        : 'Folder to file';
     // Only a preset may pre-fill a path. A generic in-place install starts
     // empty rather than proposing ~/Downloads: pre-filling a real folder the
     // user never chose, next to a button that grants access to it, turns an
@@ -774,11 +788,11 @@
 
     const head = el('div', 'fj-head');
     const heading = el('div', 'fj-heading');
-    const title = el('h2', 'fj-title', 'File Janitor');
+    const title = el('h2', 'fj-title', 'Filing');
     title.id = 'fileJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
-      el('p', 'fj-sub', 'Choose the folder to tidy. Nothing is scanned or moved until you do.')
+      el('p', 'fj-sub', 'Choose the folder to file. Nothing is scanned or moved until you do.')
     );
     heading.appendChild(
       el(
@@ -2951,19 +2965,19 @@
   // FR-119).
   function removalSection() {
     const section = el('div', 'fj-setting fj-setting-removal');
-    section.appendChild(el('h4', 'fj-setting-heading', 'Remove File Janitor'));
+    section.appendChild(el('h4', 'fj-setting-heading', 'Remove Filing'));
 
     if (!removalConfirming) {
       section.appendChild(
         el(
           'p',
           'fj-setting-help',
-          'Stops managing this folder and removes File Janitor from this workspace. ' +
+          'Stops managing this folder and removes Filing from this workspace. ' +
             'Your files are not moved or deleted.'
         )
       );
       const start = button(
-        'Remove File Janitor',
+        'Remove Filing',
         'fj-btn fj-btn-secondary fj-btn-destructive',
         () => void beginRemoval()
       );
@@ -2975,7 +2989,7 @@
     const summary = removalSummary || {};
     const confirmation = el('div', 'fj-removal-confirm');
     confirmation.setAttribute('role', 'group');
-    confirmation.setAttribute('aria-label', 'Confirm removing File Janitor');
+    confirmation.setAttribute('aria-label', 'Confirm removing Filing');
 
     // Name the folder. A confirmation the user cannot evaluate is not one.
     confirmation.appendChild(
@@ -2984,7 +2998,7 @@
         'fj-removal-lead',
         summary.managed_folder
           ? 'Ori will stop managing ' + safeName(summary.managed_folder) + '.'
-          : 'Ori will remove File Janitor from this workspace.'
+          : 'Ori will remove Filing from this workspace.'
       )
     );
 
@@ -3038,12 +3052,12 @@
 
     const buttons = el('div', 'fj-settings-actions');
     const confirm = button(
-      'Remove File Janitor',
+      'Remove Filing',
       'fj-btn fj-btn-destructive',
       () => void completeRemoval()
     );
     confirm.id = 'fileJanitorRemoveConfirm';
-    const cancel = button('Keep File Janitor', 'fj-btn fj-btn-secondary', () => {
+    const cancel = button('Keep Filing', 'fj-btn fj-btn-secondary', () => {
       removalConfirming = false;
       removalSummary = null;
       removalCompanionChecked = false;
@@ -3093,7 +3107,7 @@
     const id = wsId();
     if (!id || busy) return;
     busy = true;
-    setSettingsMessage('Removing File Janitor…');
+    setSettingsMessage('Removing Filing…');
     try {
       const response = await fetch(
         '/api/workspaces/' + encodeURIComponent(id) + '/capabilities/file-janitor',
@@ -3105,7 +3119,7 @@
       );
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(body.message || 'Ori could not remove File Janitor.');
+        throw new Error(body.message || 'Ori could not remove Filing.');
       }
       removalConfirming = false;
       removalSummary = null;
@@ -3121,7 +3135,7 @@
       const catalog = typeof window === 'undefined' ? null : window.WorkspaceCapabilities;
       if (catalog && typeof catalog.reload === 'function') await catalog.reload();
     } catch (error) {
-      setSettingsMessage(error.message || 'Ori could not remove File Janitor.');
+      setSettingsMessage(error.message || 'Ori could not remove Filing.');
       renderSettings();
     } finally {
       busy = false;
@@ -3157,7 +3171,7 @@
       el(
         'p',
         'fj-setting-help',
-        'No Curator in this workspace. File Janitor works fully without one — a Curator only ' +
+        'No Curator in this workspace. Filing works fully without one — a Curator only ' +
           'helps you understand what is proposed, and can never act on your files.'
       )
     );
@@ -3332,7 +3346,7 @@
       const response = await fetch('/api/folder-picker/select-path', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Choose a different folder to tidy' })
+        body: JSON.stringify({ title: 'Choose a different folder to file' })
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.success)
@@ -4022,7 +4036,7 @@
     if (mode === 'metadata_only') {
       return {
         value: 'Local only · file details',
-        note: 'Names, types, sizes, and dates; no file contents are read.'
+        note: 'No file contents are read. Names, types, sizes and dates only.'
       };
     }
     if (mode === 'local_model') {
@@ -4050,7 +4064,7 @@
   function compactPrimaryAction(status) {
     const configured = isConfigured(status);
     const activity = activityState(status);
-    if (!configured) return { label: 'Set up File Janitor', tab: '' };
+    if (!configured) return { label: 'Set up Filing', tab: '' };
     if (activity.id === 'needs_attention') return { label: 'Repair setup', tab: 'review' };
     if (activity.id === 'consent_required') return { label: 'Review consent', tab: 'settings' };
     const waiting = pendingCount();
@@ -4069,7 +4083,12 @@
     const activity = activityState(status);
     const privacy = compactPrivacy(status);
     const managedFolderPath = configured ? safeName(settings.root_path) : 'Not connected';
-    const managedFolder = configured ? compactFolderName(settings.root_path) : managedFolderPath;
+    const linkedFolder = reviewedFolderName();
+    const managedFolder = configured
+      ? compactFolderName(settings.root_path)
+      : linkedFolder
+        ? linkedFolder + ' · not allowed yet'
+        : managedFolderPath;
 
     const card = el('section', 'fj-card is-' + activity.id.replace(/_/g, '-'));
     card.setAttribute('role', 'group');
@@ -4078,8 +4097,7 @@
     const head = el('div', 'fj-card-head');
     head.appendChild(compactDepotMark());
     const heading = el('div', 'fj-card-heading');
-    heading.appendChild(el('span', 'fj-card-kicker', 'File depot'));
-    const title = el('h2', 'fj-card-title', 'File Janitor');
+    const title = el('h2', 'fj-card-title', 'Filing');
     title.id = 'fileJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
@@ -4090,7 +4108,9 @@
           ? 'Sort proposed destinations, then decide what moves.'
           : settings.access_revoked_at && !settings.access_revoked_at.startsWith('0001-')
             ? 'Folder access was revoked. Choose a folder again to grant fresh permission; nothing is scanned or moved.'
-            : 'No folder chosen yet. Nothing is scanned or moved until you choose one.'
+            : linkedFolder
+              ? `Filing is not allowed in ${linkedFolder} yet. Nothing is scanned or moved.`
+              : 'No folder chosen yet. Nothing is scanned or moved until you choose one.'
       )
     );
     head.appendChild(heading);
@@ -4160,7 +4180,7 @@
     renderSetupCard(host, {
       settings,
       suggestion: {
-        label: 'Folder to tidy',
+        label: 'Folder to file',
         suggested_path: settings.root_path || '',
         filing_root_name: settings.filing_root_name,
         daily_scan_local_time: settings.daily_scan_local_time
@@ -4803,7 +4823,7 @@
     const header = el('header', 'fj-console-head');
 
     const heading = el('div', 'fj-console-heading');
-    const title = el('h2', 'fj-console-title', 'File Janitor');
+    const title = el('h2', 'fj-console-title', 'Filing');
     title.id = CONSOLE_TITLE_ID;
     heading.appendChild(title);
     // The managed folder is shown by its display name, cleaned the same way a
@@ -4835,7 +4855,7 @@
     }
     const closeButton = button('Close', 'fj-btn fj-btn-secondary', () => close());
     closeButton.setAttribute('data-fj-console-close', '');
-    closeButton.setAttribute('aria-label', 'Close File Janitor');
+    closeButton.setAttribute('aria-label', 'Close Filing');
     consoleCloseButton = closeButton;
     actions.appendChild(closeButton);
     header.appendChild(actions);
@@ -4854,7 +4874,7 @@
   function renderConsoleTabs() {
     const list = el('div', 'fj-console-tabs');
     list.setAttribute('role', 'tablist');
-    list.setAttribute('aria-label', 'File Janitor sections');
+    list.setAttribute('aria-label', 'Filing sections');
     const labels = { review: 'Review', history: 'History', settings: 'Settings' };
     CONSOLE_TABS.forEach(tab => {
       const active = tab === consoleTab;
@@ -5035,16 +5055,16 @@
       const failed = sources.some(source => source.state === 'unavailable');
       const loading = sources.some(source => source.state === 'loading');
       const text = failed
-        ? 'File Janitor information is unavailable. Last known details may be out of date.'
+        ? 'Filing information is unavailable. Last known details may be out of date.'
         : loading
-          ? 'Checking File Janitor. Last known details may be out of date.'
+          ? 'Checking Filing. Last known details may be out of date.'
           : '';
       if (notice.getAttribute('data-read-status') !== text) {
         notice.setAttribute('data-read-status', text);
         notice.textContent = text;
         if (failed)
           notice.appendChild(
-            button('Retry File Janitor', 'fj-btn fj-btn-secondary', () => void refresh())
+            button('Retry Filing', 'fj-btn fj-btn-secondary', () => void refresh())
           );
       }
       notice.hidden = !text;
@@ -5119,9 +5139,13 @@
           if (['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state))
             window.SetupWizard?.registerStepRenderer?.('automation_review', automationStepRenderer);
         }
+        notifySubscribers();
       }
     } catch (error) {
-      if (sequence === setupReviewRequest) setupReview = null;
+      if (!disposed && sequence === setupReviewRequest && id === wsId()) {
+        setupReview = null;
+        notifySubscribers();
+      }
       if (choice) throw error;
     }
     return setupReview;
@@ -5195,8 +5219,11 @@
       ].includes(review.state)
     )
       return false;
+    const selectedFolder = (review.candidates || []).find(
+      item => item.reference_id === review.reference_id
+    );
     const card = el('section', 'fj-setup-review');
-    card.setAttribute('aria-label', 'Review File Janitor permissions');
+    card.setAttribute('aria-label', 'Review Filing permissions');
     card.appendChild(
       el(
         'h3',
@@ -5205,11 +5232,10 @@
           ? 'Preparation changed'
           : review.operation_id
             ? 'Finish preparing your review'
-            : 'Use your attached folder'
+            : selectedFolder
+              ? 'Allow filing in ' + safeName(selectedFolder.name)
+              : 'Choose which folder to file'
       )
-    );
-    const selectedFolder = (review.candidates || []).find(
-      item => item.reference_id === review.reference_id
     );
     const candidate = selectedFolder || (review.candidates || [])[0];
     const message = el('p', 'fj-sub');
@@ -5239,7 +5265,7 @@
       const label = el('label', 'fj-label', 'Attached folder');
       const select = el('select', 'fj-input');
       select.setAttribute('aria-label', 'Attached folder');
-      const placeholder = el('option', '', 'Choose which folder to tidy');
+      const placeholder = el('option', '', 'Choose which folder to file');
       placeholder.value = '';
       select.appendChild(placeholder);
       review.candidates.forEach(item => {
@@ -5313,7 +5339,7 @@
     const confirm = button(
       review.operation_id
         ? 'Retry preparation'
-        : 'Use attached ' + safeName(candidate?.name, 'folder'),
+        : 'Allow filing in ' + safeName(candidate?.name, 'folder'),
       'fj-btn fj-btn-primary',
       async () => {
         if (busy || !['review', 'preparation_incomplete'].includes(review.state)) return;
@@ -5444,7 +5470,7 @@
     const card = el('section', 'fj-card');
     const head = el('div', 'fj-head');
     const heading = el('div', 'fj-heading');
-    const title = el('h2', 'fj-title', 'File Janitor');
+    const title = el('h2', 'fj-title', 'Filing');
     title.id = 'fileJanitorTitle';
     heading.appendChild(title);
     heading.appendChild(
@@ -5523,7 +5549,7 @@
       const response = await fetch('/api/folder-picker/select-path', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Choose the folder to tidy' })
+        body: JSON.stringify({ title: 'Choose the folder to file' })
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.success)
@@ -5543,7 +5569,7 @@
     if (!id || busy) return;
     const trimmed = String(path || '').trim();
     if (!trimmed) {
-      showError('Choose a folder to tidy.');
+      showError('Choose a folder to file.');
       return;
     }
     busy = true;
@@ -5963,6 +5989,7 @@
   if (typeof document !== 'undefined') {
     window.addEventListener?.('pageshow', () => void resumeProtectionTrip());
     document.addEventListener(WORKSPACE_VIEW_MODE_EVENT, () => syncSummaryVisibility());
+    document.addEventListener('ori:workspace-next-action-rendered', () => syncSummaryVisibility());
     document.addEventListener('ori:filing-protection-ready', () => {
       void loadProtection().then(() => resumeProtectionTrip());
     });
@@ -6038,6 +6065,16 @@
   /** Public, immutable summary. No candidate content, folder paths, or approvals.
    * @returns {ConsoleActionState}
    */
+  function reviewedFolderName() {
+    if (setupReview?.state !== 'review' || !setupReview.reference_id) return '';
+    const selected = (setupReview.candidates || []).filter(
+      item => item.reference_id === setupReview.reference_id
+    );
+    return selected.length === 1 && String(selected[0].name || '').trim()
+      ? safeName(selected[0].name)
+      : '';
+  }
+
   function getActionState() {
     const applies = typeof lastStatus?.applies === 'boolean' ? lastStatus.applies : null;
     const absent = statusLoadState === 'ready' && applies === false;
@@ -6085,6 +6122,7 @@
       history: source(historyState, historyState !== 'ready' && receiptLoaded),
       historyList: source(historyListLoadState, historyListLoadState !== 'ready' && historyLoaded),
       rootId: String(settings.root_id || ''),
+      linkedFolderName: reviewedFolderName(),
       batchId: String(lastBatch?.id || ''),
       pendingCount: batchLoaded ? pendingCount() : null,
       needsReviewCount: batchLoaded ? Number(lastBatch?.summary?.needs_review) || 0 : null,
@@ -6116,7 +6154,7 @@
       return {
         applies: true,
         value: 'Needs attention',
-        description: firstProblem(readiness) || 'File Janitor needs attention',
+        description: firstProblem(readiness) || 'Filing needs attention',
         tone: 'degraded'
       };
     }
@@ -6124,7 +6162,7 @@
       return {
         applies: true,
         value: 'Setup needed',
-        description: 'waiting for you to choose a folder to tidy',
+        description: 'waiting for you to choose a folder to file',
         tone: 'attention'
       };
     }
@@ -6227,7 +6265,7 @@
       const picker = await fetch('/api/folder-picker/select-path', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: 'Choose the folder to tidy' })
+        body: JSON.stringify({ title: 'Choose the folder to file' })
       });
       const chosen = await picker.json().catch(() => ({}));
       if (!picker.ok || !chosen.success) {
@@ -6589,7 +6627,7 @@
             : status.folder_display_name || '';
         return {
           key: 'file-janitor',
-          label: 'File Janitor',
+          label: 'Filing',
           location: folder || 'No folder approved',
           icon: 'bi-folder-symlink',
           visualVariant: 'depot',

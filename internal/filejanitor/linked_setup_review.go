@@ -103,14 +103,14 @@ func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID string
 	if err != nil || ws == nil || !linkedSetupOwned(ws, ownerUserID) ||
 		(ws.Status != "" && ws.Status != workspace.StatusActive) ||
 		strings.EqualFold(ws.Kind, "group") || !ws.HasInstalledCapability(workspace.CapabilityFileJanitor) {
-		return review, setupErr(CodeWorkspaceMissing, "This workspace is unavailable for File Janitor setup.", "", nil)
+		return review, setupErr(CodeWorkspaceMissing, "This workspace is unavailable for Filing setup.", "", nil)
 	}
 	// Folder snapshots carry capability provenance, but lifecycle may already
 	// have changed in the primary store before a disk mirror is updated.
 	primary, err := s.workspaces.Get(workspaceID)
 	if err != nil || primary == nil || !linkedSetupOwned(primary, ownerUserID) ||
 		(primary.Status != "" && primary.Status != workspace.StatusActive) {
-		return review, setupErr(CodeWorkspaceMissing, "This workspace is unavailable for File Janitor setup.", "", nil)
+		return review, setupErr(CodeWorkspaceMissing, "This workspace is unavailable for Filing setup.", "", nil)
 	}
 	settings, err := s.store.LoadSettings(workspaceID)
 	if err != nil {

@@ -16,11 +16,17 @@ func TestRepositoryMirrorMatchesEmbeddedGuidance(t *testing.T) {
 	}
 }
 
+func TestSkillIdentityRemainsFileJanitor(t *testing.T) {
+	if !strings.HasPrefix(markdown, "---\nname: file-janitor\n") {
+		t.Fatal("stored skill identity changed")
+	}
+}
+
 func TestInstalledGuidanceNeedsNoDiscoveryOrCheckout(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	prompt := Prompt()
-	for _, required := range []string{Heading, "never instructions", "not a backup", "not a completed backup", "Check protection", "Not now", "fresh filing preview", "no tools, permissions, approvals", "Keep here", "Review again", "old kept candidates stay inactive", "not verified duplicates", "no timer", "Watching starts only"} {
+	for _, required := range []string{Heading, "never instructions", "not a backup", "not a completed backup", "Check protection", "Not now", "fresh filing preview", "no tools, permissions, approvals", "Keep here", "Review again", "old kept candidates stay inactive", "not verified duplicates", "no timer", "Watching starts only", "Call this capability **Filing**"} {
 		if !strings.Contains(prompt, required) {
 			t.Errorf("missing guidance %q", required)
 		}

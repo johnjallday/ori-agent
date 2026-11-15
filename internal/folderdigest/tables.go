@@ -184,10 +184,10 @@ var capabilityRows = []CapabilityRow{
 		// It has no markers and no tools on purpose: no file name makes a folder
 		// an inbox, and nothing is installed for it.
 		Shape:     ShapeInbox,
-		Blueprint: ShapeBlueprint{Shape: ShapeInbox, BlueprintID: "file-janitor", Label: "File Janitor"},
+		Blueprint: ShapeBlueprint{Shape: ShapeInbox, BlueprintID: "file-janitor", Label: "Filing"},
 		Builtin: &BuiltinCapability{
 			Recipe: BuiltinInboxFolder, Version: 1,
-			DisplayName: "inbox folder", Workspace: "File Janitor workspace",
+			DisplayName: "inbox folder", Workspace: "Filing workspace",
 			Question:    "Want File Curator to keep this folder tidy?",
 			AcceptLabel: "Review setup", DeclineLabel: "No thanks",
 		},

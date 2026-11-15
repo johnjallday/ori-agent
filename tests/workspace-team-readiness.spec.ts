@@ -64,14 +64,14 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/workspaces');
 });
 
-test('a saved File Curator is suggested, assigned, and persisted without duplication', async ({
+test('a saved File Curator is explicitly assigned and persisted without duplication', async ({
   page,
   request
 }) => {
   const beforeNames = await savedAgentNames(request);
   await openCreateModal(page);
   await expectNoDownloadsJanitorCard(page);
-  await cardByLabel(page, 'File Janitor').click();
+  await cardByLabel(page, 'Filing').click();
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep2')).toBeVisible();
   await page.locator('#folderNameInput').fill(`File Readiness ${RUN}`);
@@ -80,14 +80,12 @@ test('a saved File Curator is suggested, assigned, and persisted without duplica
 
   const role = page.locator('#workspaceRoleRoster .ws-role-row').first();
   await expect(role.locator('.ws-role-tag')).toHaveText('Missing');
+  await role.getByRole('button', { name: 'Assign an agent to File Curator', exact: true }).click();
   const suggestion = page.getByRole('button', {
-    name: 'Use File Curator for File Curator',
+    name: 'Assign File Curator to File Curator',
     exact: true
   });
   await expect(suggestion).toBeVisible();
-  await expect(page.locator('#workspaceSavedAgentSuggestions')).toContainText(
-    "Matches this role's name"
-  );
   await page.locator('#addFolderModal .modal-dialog').screenshot({
     path: `${SHOTS}/file-curator-suggested.png`
   });

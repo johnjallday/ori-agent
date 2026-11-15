@@ -16912,7 +16912,7 @@ export class WorkspaceDetailPage {
       heading: 'Relink anchored folder',
       workspaceId,
       title: 'Relink anchored folder',
-      copy: 'Choose the folder at its new location. Ori’s notes and settings stay in their separate folder. Access is not widened. If File Janitor manages this folder, old pending approvals are cleared and monitoring needs a fresh decision.',
+      copy: 'Choose the folder at its new location. Ori’s notes and settings stay in their separate folder. Access is not widened. If Filing manages this folder, old pending approvals are cleared and monitoring needs a fresh decision.',
       onSelect: select,
       onChoose: async () => {
         const response = await fetch('/api/folder-picker/select-path', {

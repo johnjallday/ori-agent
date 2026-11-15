@@ -6,8 +6,11 @@ import { installLocalCdn } from './helpers/offline-cdn';
 // Real sandbox APIs, no model: ./scripts/e2e-fresh.sh --sandbox-env ORI_FOLDER_CURATOR_SANDBOX tests/folder-agent-curator.spec.ts
 const sandbox = process.env.ORI_FOLDER_CURATOR_SANDBOX || '';
 const endpoint = '/api/personal-assistant/folder-agent';
-const live = process.env.ORI_CURATOR_LIVE === '1';
-const evidence = resolve('tasks/evidence-one-agent-per-folder', live ? 'live-claude' : '.');
+const filingLive = process.env.ORI_FILING_LIVE === '1';
+const live = filingLive || process.env.ORI_CURATOR_LIVE === '1';
+const evidence = filingLive
+  ? resolve('tasks/evidence-filing-first-run/live-claude')
+  : resolve('tasks/evidence-one-agent-per-folder', live ? 'live-claude' : '.');
 
 test('fed folders keep their hired agent as Curator, with Settings and a saved welcome', async ({
   page,
@@ -46,7 +49,11 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
   });
   expect(hq.status(), await hq.text()).toBe(201);
 
-  for (const folder of live ? ['Downloads', 'Desktop'] : ['Downloads', 'Loose Files']) {
+  for (const folder of filingLive
+    ? ['Downloads']
+    : live
+      ? ['Downloads', 'Desktop']
+      : ['Downloads', 'Loose Files']) {
     const root = join(sandbox, folder);
     await mkdir(root, { recursive: true, mode: 0o750 });
     const old = new Date(Date.now() - 3_600_000);
@@ -98,10 +105,12 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
 
     await page.reload();
     if (await closeAssistant.isVisible()) await closeAssistant.click();
-    await page.locator('#fileJanitorCardOpen').click();
-    const permissions = page.getByRole('region', { name: 'Review File Janitor permissions' });
+    await page.locator('#workspaceNextAction').click();
+    const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
     await expect(permissions).toContainText('Every move into Filed/');
-    await permissions.getByRole('button', { name: `Use attached ${folder}`, exact: true }).click();
+    await permissions
+      .getByRole('button', { name: `Allow filing in ${folder}`, exact: true })
+      .click();
     await expect(permissions).toBeHidden();
     // Permission acceptance can hide this card before preparation's async
     // handoff opens Review. Wait for that real completion, not an intermediate
@@ -118,7 +127,7 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
       path: join(evidence, `${folder}-curator-settings.png`),
       fullPage: true
     });
-    await page.getByRole('button', { name: 'Close File Janitor', exact: true }).click();
+    await page.getByRole('button', { name: 'Close Filing', exact: true }).click();
 
     // Preparation's saved-batch welcome is delivered asynchronously. Do not
     // mistake the earlier folder-look report for that later filing message.
@@ -169,7 +178,11 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
       const before = (await (await request.get(`/api/sessions/${session}`)).json()).messages.length;
       await page
         .locator('#personalAssistantInput')
-        .fill('Explain why a file can need review. Can you approve or move it for me?');
+        .fill(
+          filingLive
+            ? 'What can you do with this folder?'
+            : 'Explain why a file can need review. Can you approve or move it for me?'
+        );
       await page.locator('#personalAssistantSend').click();
       await expect
         .poll(
@@ -184,7 +197,11 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
         .toBe(true);
       const saved = await (await request.get(`/api/sessions/${session}`)).json();
       const answer = saved.messages.at(-1).content;
-      expect(answer).toMatch(/approv|review|Janitor/i);
+      expect(answer).toMatch(/approv|review|filing/i);
+      if (filingLive) {
+        expect(answer).toMatch(/\bfiling\b/i);
+        expect(answer).not.toMatch(/File Janitor/i);
+      }
       expect(actions).toEqual([]);
       page.off('request', track);
       await writeFile(join(evidence, `${folder}-answer.txt`), answer, { mode: 0o600 });
@@ -200,5 +217,7 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
   }
   const agents = JSON.stringify(await (await request.get('/api/agents')).json());
   expect(agents).not.toContain('File Curator');
-  expect((await (await request.get(endpoint)).json()).folder_agents).toHaveLength(2);
+  expect((await (await request.get(endpoint)).json()).folder_agents).toHaveLength(
+    filingLive ? 1 : 2
+  );
 });

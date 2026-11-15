@@ -60,7 +60,7 @@ func (h *Handler) preparedBuildWorkspace(owner string, build personalassistant.W
 	install.OwnedResources = nil
 	capabilityRevision, digestErr := digestJSON(install)
 	if !found || digestErr != nil || capabilityRevision != marker.CapabilityRevision {
-		return refuse("setup_changed", "File Janitor was removed or changed. Open the workspace's current settings; the old review cannot restore access.", "folder")
+		return refuse("setup_changed", "Filing was removed or changed. Open the workspace's current settings; the old review cannot restore access.", "folder")
 	}
 	ref, err := ws.GetDirectoryReference(marker.FolderReferenceID)
 	if err != nil || ref == nil {

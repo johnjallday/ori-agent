@@ -141,6 +141,17 @@ test('the run line says the step and the live words, never the time (FR6)', () =
   assert.doesNotMatch(s.line, /\d:\d\d/);
 });
 
+test('the completed banner and speech keep the filing permission qualifier', () => {
+  const done = view({
+    state: 'set_up',
+    setup: { status: 'done', lines: runLines },
+    filing_permission_required: true
+  });
+  assert.match(commanderSpeech(done).line, /One step left: allow filing/);
+  assert.match(commanderSpeech(done).announce, /One step left: allow filing/);
+  assert.match(commanderOneLine(done).text, /One step left: allow filing/);
+});
+
 test('the receipt and stopped lines', () => {
   const done = view({ state: 'set_up', setup: { status: 'done', lines: runLines } });
   assert.equal(commanderSpeech(done).line, 'Albums is set up · See what I made');

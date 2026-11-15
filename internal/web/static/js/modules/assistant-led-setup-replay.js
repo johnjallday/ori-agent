@@ -74,7 +74,7 @@ export function blueprintCards(templates) {
   if (!cards.some(card => card.id === 'file-janitor')) {
     cards.push({
       id: 'file-janitor',
-      label: 'File Janitor',
+      label: 'Filing',
       tagline: 'Review and file one intake folder safely.',
       icon: '📁',
       builtin: true

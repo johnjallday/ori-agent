@@ -332,7 +332,7 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
       const button = doc.createElement('button');
       button.type = 'button';
       button.className = 'assistant-led-setup__choice';
-      button.textContent = `${String(target?.name || 'File Janitor workspace')}${target?.supported ? '' : ' · Manual review required'}`;
+      button.textContent = `${String(target?.name || 'Filing workspace')}${target?.supported ? '' : ' · Manual review required'}`;
       button.dataset.workspaceId = String(target?.workspace_id || '');
       button.addEventListener(
         'click',
@@ -375,12 +375,12 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
     els.milestones.replaceChildren();
     if (proposal) {
       if (proposal.mode === 'create') {
-        els.target.textContent = 'Workspace: create one File Janitor workspace after this review.';
+        els.target.textContent = 'Workspace: create one Filing workspace after this review.';
       } else if (proposal.mode === 'adopt') {
         const target = proposal.targets?.[0];
-        els.target.textContent = `Workspace: continue ${String(target?.name || 'the selected File Janitor workspace')} without changing it by previewing.`;
+        els.target.textContent = `Workspace: continue ${String(target?.name || 'the selected Filing workspace')} without changing it by previewing.`;
       } else {
-        els.target.textContent = 'Workspace: choose one of your File Janitor workspaces.';
+        els.target.textContent = 'Workspace: choose one of your Filing workspaces.';
       }
       (proposal.team || []).forEach(role => {
         const item = doc.createElement('li');
@@ -490,7 +490,7 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
         root.hidden = false;
         root.dataset.viewState = 'unavailable';
         els.state.textContent = 'unavailable';
-        els.status.textContent = 'File Janitor setup could not be refreshed. Nothing was changed.';
+        els.status.textContent = 'Filing setup could not be refreshed. Nothing was changed.';
         setError(error.message || 'Assistant setup is unavailable.');
       }
       return null;
@@ -525,7 +525,7 @@ function createController({ document: doc, fetch: fetchImpl, window: win }) {
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({
           workspace_id: workspaceID,
-          title: 'Choose the folder File Janitor may tidy'
+          title: 'Choose the folder Filing may use'
         })
       });
       const picked = await responsePayload(pickerResponse);

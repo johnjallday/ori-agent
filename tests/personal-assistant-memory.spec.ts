@@ -83,10 +83,8 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     // knowledge links live in the Memory station (hq-details-landing FR18, FR19).
     await expect(page.locator('#personalHQKnowledgeEntry')).toHaveCount(0);
     await page.locator('[data-cmd-view-mode="details"]').click();
-    // The HQ's memory is its Memory station; an empty HQ already has Stations open.
-    const stations = page.locator('[data-cmd-manage-section="stations"]');
-    if ((await stations.getAttribute('aria-expanded')) !== 'true') await stations.click();
-    await page.locator('.ws-cmd-rail [data-cmd-hq-station="memory"]').click();
+    // HQ Overview exposes its existing station grid, not the retired rail accordion.
+    await page.locator('[data-cmd-hq-card="memory"]').click();
     await expect(page.locator('#workspace-detail-config-memory-pane')).toBeVisible();
     await expect(page.locator('#workspace-detail-memory-add-type')).toBeVisible();
     const knowledge = page.locator('#workspace-detail-memory-global');
@@ -576,7 +574,7 @@ test.describe.serial('Personal HQ reviewed-memory entry', () => {
     const checked = await request.post('/api/personal-assistant/knowledge/check-janitor');
     expect(checked.ok(), await checked.text()).toBeTruthy();
     await page.goto('/profile');
-    await expect(page.locator('#reviewedKnowledgeQueue')).toContainText('File Janitor');
+    await expect(page.locator('#reviewedKnowledgeQueue')).toContainText('Filing');
     await expect(page.locator('#reviewedDossierSources')).toContainText(
       'Eligible approved filing decisions exist'
     );

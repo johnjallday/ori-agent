@@ -17,7 +17,7 @@ import (
 
 const (
 	dailyBriefParcelTitle  = "Daily Brief"
-	fileJanitorParcelTitle = "File Janitor"
+	fileJanitorParcelTitle = "Filing"
 	// A failed brief's reason stays on the server; the card says only this.
 	dailyBriefFailedText = "Your Daily Brief could not be prepared."
 	// briefDateLayout is the brief's local date, as the brief service keeps it.

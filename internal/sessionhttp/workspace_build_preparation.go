@@ -107,12 +107,12 @@ func (h *Handler) postWorkspaceBuildPreparation(w http.ResponseWriter, r *http.R
 	}
 	deps := h.workspaceBuild
 	if deps == nil || deps.FileJanitor == nil || h.workspaceTaskStore == nil {
-		respondBuildPreparationError(w, "preparation_unavailable", "Reviewed File Janitor creation is unavailable. Keep the draft and use ordinary setup.", http.StatusServiceUnavailable, nil)
+		respondBuildPreparationError(w, "preparation_unavailable", "Reviewed Filing creation is unavailable. Keep the draft and use ordinary setup.", http.StatusServiceUnavailable, nil)
 		return
 	}
 	janitor, automation := deps.FileJanitor()
 	if janitor == nil {
-		respondBuildPreparationError(w, "preparation_unavailable", "File Janitor is unavailable.", http.StatusServiceUnavailable, nil)
+		respondBuildPreparationError(w, "preparation_unavailable", "Filing is unavailable.", http.StatusServiceUnavailable, nil)
 		return
 	}
 	owner, err := h.buildPreparationOwner(r.Context())
@@ -168,14 +168,14 @@ func (h *Handler) postWorkspaceBuildPreparation(w http.ResponseWriter, r *http.R
 		return
 	}
 	if build.Folder == nil || !isReviewedJanitorBlueprint(build.Draft.TemplateID) || build.Draft.Blank {
-		respondBuildPreparationError(w, "folder_review_unavailable", "Attach a folder to a built-in File Janitor draft, or continue with ordinary creation.", http.StatusConflict, nil)
+		respondBuildPreparationError(w, "folder_review_unavailable", "Attach a folder to a built-in Filing draft, or continue with ordinary creation.", http.StatusConflict, nil)
 		return
 	}
 	// Only a supported built-in with no Home-creation contract can enter this
 	// preview hook: earlier normal creator gates may otherwise claim a Home.
 	tpl, err := h.resolveProjectTemplate(build.Draft.TemplateID, "")
 	if err != nil || !tpl.Builtin || tpl.GroupRequirement != nil {
-		respondBuildPreparationError(w, "blueprint_changed", "This blueprint no longer supports reviewed File Janitor creation.", http.StatusConflict, nil)
+		respondBuildPreparationError(w, "blueprint_changed", "This blueprint no longer supports reviewed Filing creation.", http.StatusConflict, nil)
 		return
 	}
 	payload, err := buildPreparationCreatePayload(*build)

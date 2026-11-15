@@ -84,7 +84,7 @@ function actionButton(label, onClick, className = 'modern-btn modern-btn-seconda
 function sourceLabel(item) {
   if (item.source?.kind === 'interview') return 'Your interview with Ori';
   if (item.source_kind === 'saved_app') return 'Saved app evidence';
-  if (item.source_kind === 'file_janitor') return 'Approved File Janitor actions';
+  if (item.source_kind === 'file_janitor') return 'Approved Filing actions';
   if (item.source_kind === 'folder_scan') return 'A folder you showed Ori';
   if (item.source_kind === 'second_brain') return 'Your connected notes';
   if (item.source_kind === 'explicit') return 'You told Ori';
@@ -121,7 +121,7 @@ const APPROVED_SOURCE_CHIPS = {
   folder_scan: 'From a folder scan',
   second_brain: 'From your notes',
   saved_app: 'From saved apps',
-  file_janitor: 'From File Janitor'
+  file_janitor: 'From Filing'
 };
 
 // approvedSourceChip names the origin of an approved global fact (FR 14):
@@ -918,7 +918,7 @@ export function mountPersonalHQKnowledge(root = document) {
     checkSource(checkButton, 'check-saved-apps', 'Saved app evidence')
   );
   janitorButton.addEventListener('click', () =>
-    checkSource(janitorButton, 'check-janitor', 'Approved File Janitor decisions')
+    checkSource(janitorButton, 'check-janitor', 'Approved Filing decisions')
   );
   reload();
   return { reload };

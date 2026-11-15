@@ -55,9 +55,11 @@ type View struct {
 	Actions        []string               `json:"actions,omitempty"`
 	Plan           *PlanView              `json:"plan,omitempty"`
 	Setup          *Setup                 `json:"setup,omitempty"`
-	Failure        string                 `json:"failure,omitempty"`
-	Nested         *WorkspaceRef          `json:"nested,omitempty"`
-	UpdatedAt      time.Time              `json:"updated_at"`
+	// FilingPermissionRequired is live display state, never persisted or hashed.
+	FilingPermissionRequired bool          `json:"filing_permission_required,omitempty"`
+	Failure                  string        `json:"failure,omitempty"`
+	Nested                   *WorkspaceRef `json:"nested,omitempty"`
+	UpdatedAt                time.Time     `json:"updated_at"`
 
 	// Premise is "This looks like a <kind> folder" and its answer
 	// (confirm-and-visible-installs FR1–FR6); nil when the folder is not asked.
@@ -296,6 +298,15 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 		// A receipt lists what the run did, not what it would hire, and a
 		// finished setup has no other way left to choose.
 		plan.Hires, plan.HiresNote, plan.Alternatives = nil, "", nil
+	}
+	if completed(rec) && s.deps.FilingPermission != nil {
+		for _, line := range rec.Setup.Lines {
+			if line.Kind == FolderPlanCapability && line.Step == "file-curator" {
+				allowed, err := s.deps.FilingPermission(rec.WorkspaceID)
+				v.FilingPermissionRequired = err == nil && !allowed
+				break
+			}
+		}
 	}
 	v.Plan = planViewOf(plan)
 	v.Landing = landingOf(rec, plan)
@@ -822,7 +833,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 		case folderlook.KindFileCurator:
 			// File Janitor goes into this workspace in place (the folder is
 			// already its anchor); the hired agent explains proposed filing.
-			janitor, curator := "Adds File Janitor to "+rec.WorkspaceName, rec.AgentName+" explains proposed filing"
+			janitor, curator := "Adds filing to "+rec.WorkspaceName, rec.AgentName+" explains proposed filing"
 			plan.Lines = append(plan.Lines,
 				personalassistant.FolderPlanLine{
 					Kind: FolderPlanCapability, Name: janitor, Outcome: janitor,
@@ -867,7 +878,7 @@ func BuildPlan(rec Record, selected []string) Plan {
 	if rec.RootPolicy != folderlook.RootOrdinary {
 		plan.DefaultReason = "Ori refreshed the setup choices for this folder. Review and confirm the current plan."
 		if rec.RootPolicy == folderlook.RootDocuments {
-			plan.DefaultReason = "Documents stays a folder with its agent. File Janitor is optional."
+			plan.DefaultReason = "Documents stays a folder with its agent. Filing is optional."
 		}
 		if rec.RootPolicy == folderlook.RootUnresolved {
 			plan.Unavailable = folderlook.PolicyLine(rec.RootPolicy)

@@ -633,7 +633,7 @@ test.describe('attached creation with a scripted local model', () => {
       await page
         .locator('#templatePicker .workspace-template-card')
         .filter({
-          has: page.locator('.workspace-template-card-label', { hasText: /^File Janitor$/ })
+          has: page.locator('.workspace-template-card-label', { hasText: /^Filing$/ })
         })
         .click();
       await page.locator('#workspaceBuildWithBtn').click();
@@ -812,7 +812,9 @@ for (const monitoring of [false, true]) {
       await expect(review).toContainText('Daily scan at');
     }
     await page.screenshot({ path: testInfo.outputPath('permission-review.png') });
-    await review.getByRole('button', { name: 'Use attached Synthetic Inbox', exact: true }).click();
+    await review
+      .getByRole('button', { name: 'Allow filing in Synthetic Inbox', exact: true })
+      .click();
     await expect(page.locator('#setupWizardDialog')).not.toHaveAttribute('open', '');
     await expect(page.locator('#fileJanitorConsole')).toBeVisible();
     await expect(page.locator('#fileJanitorConsoleBody')).toContainText('invoice.pdf');
@@ -869,7 +871,7 @@ for (const monitoring of [false, true]) {
       await page.reload();
       await expect(page.locator('#fileJanitorMount')).toContainText('revoked');
       await expect(
-        page.getByRole('button', { name: 'Use attached Synthetic Inbox', exact: true })
+        page.getByRole('button', { name: 'Allow filing in Synthetic Inbox', exact: true })
       ).toHaveCount(0);
       expect(readFileSync(join(root, 'invoice.pdf'), 'utf8')).toBe('synthetic source bytes');
       await page.screenshot({ path: testInfo.outputPath('revoked-permission-repair.png') });
@@ -888,7 +890,9 @@ for (const settling of [false, true]) {
     const workspace = await createLinked(request, settling ? 'settling' : 'empty', [root]);
     await page.goto(`/workspaces/${workspace.slug}?panel=file-janitor`);
     const review = page.locator('#setupWizardDialog[open] .fj-setup-review');
-    await review.getByRole('button', { name: 'Use attached Synthetic Inbox', exact: true }).click();
+    await review
+      .getByRole('button', { name: 'Allow filing in Synthetic Inbox', exact: true })
+      .click();
     await expect(page.locator('#setupWizardDialog')).not.toHaveAttribute('open', '');
     await expect(page.locator('#fileJanitorConsoleBody')).toContainText('Initial scan finished');
     await expect(page.locator('#fileJanitorConsoleBody')).toContainText('No eligible files');
@@ -959,14 +963,16 @@ test('same-named attachments require an explicit reference choice', async ({
   const review = page.locator('#setupWizardDialog[open] .fj-setup-review');
   await expect(review).toBeVisible();
   await expect(
-    review.getByRole('button', { name: 'Use attached Synthetic Inbox', exact: true })
+    review.getByRole('button', { name: 'Allow filing in Synthetic Inbox', exact: true })
   ).toBeDisabled();
   await page.screenshot({ path: testInfo.outputPath('choose-attached-folder.png') });
   await review.getByRole('combobox', { name: 'Attached folder' }).selectOption(workspace.refs[1]);
   await expect(
-    review.getByRole('button', { name: 'Use attached Synthetic Inbox', exact: true })
+    review.getByRole('button', { name: 'Allow filing in Synthetic Inbox', exact: true })
   ).toBeEnabled();
-  await review.getByRole('button', { name: 'Use attached Synthetic Inbox', exact: true }).click();
+  await review
+    .getByRole('button', { name: 'Allow filing in Synthetic Inbox', exact: true })
+    .click();
   await expect(page.locator('#fileJanitorConsoleBody')).toContainText('invoice.pdf');
   expect(existsSync(join(roots[0], 'Filed'))).toBeFalsy();
   const status = (await (await request.get(`/api/workspaces/${workspace.id}/file-janitor`)).json())

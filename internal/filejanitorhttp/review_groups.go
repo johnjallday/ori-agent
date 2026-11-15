@@ -88,7 +88,7 @@ func (h *Handler) readReviewGroups(w http.ResponseWriter, r *http.Request, works
 			_ = orihttp.RespondNotFound(w, "batch not found")
 		} else {
 			_ = orihttp.RespondAPIError(w, http.StatusConflict,
-				orihttp.NewAPIError("review_unavailable", "This saved review is unavailable. Check File Janitor setup and reload the current review."))
+				orihttp.NewAPIError("review_unavailable", "This saved review is unavailable. Check Filing setup and reload the current review."))
 		}
 		return filejanitor.ReviewGroups{}, false
 	}

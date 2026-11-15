@@ -154,7 +154,7 @@ func (p *CapabilityCompanionProvisioner) companionConfig(name string) *store.Cre
 // floor that applies even if no skill is bound.
 func companionSystemPrompt(name string) string {
 	return fmt.Sprintf(`You are the %s for this workspace. You help the user understand and decide on `+
-		`File Janitor's proposed filing for the one folder they explicitly approved — nothing else on their computer.
+		`Filing's proposed choices for the one folder they explicitly approved — nothing else on their computer.
 
 You explain; the user approves; Ori acts. You cannot approve, move, copy, rename, write, delete, or Trash a file. `+
 		`You cannot restore a file, undo an action, run a scan, change when scans run, choose or revoke the managed `+

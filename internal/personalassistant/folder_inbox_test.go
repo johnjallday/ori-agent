@@ -54,7 +54,7 @@ func TestFolderInbox_TheAttachAnswersWithTheHireOfFileCurator(t *testing.T) {
 		t.Fatalf("hire candidate = %+v", got)
 	}
 	options := service.ReviewOptions(ctx, source, observed.ID)
-	if len(options) != 1 || options[0].WorkspaceType != "File Janitor workspace" || options[0].Presentation == nil || options[0].Presentation.State == "unavailable" {
+	if len(options) != 1 || options[0].WorkspaceType != "Filing workspace" || options[0].Presentation == nil || options[0].Presentation.State == "unavailable" {
 		t.Fatalf("options = %+v", options)
 	}
 	planned := setup.planned[len(setup.planned)-1].Offer

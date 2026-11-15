@@ -128,7 +128,7 @@ func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (ses
 	assessment := h.leadWelcomeContext(ctx, ws, owner, lead.ID)
 	curator, isCurator := ws.FileCurator()
 	if assessment == "" && isCurator && curator.ID == lead.ID {
-		intro += "\n\nYour saved filing review will appear here when it is available. Nothing moves without your approval in File Janitor."
+		intro += "\n\nYour saved filing review will appear here when it is available. Nothing moves without your approval in Filing."
 	} else if assessment == "" {
 		intro += "\n\nI don’t have a saved assessment yet. Ask me about your goal, or choose a review in Goal settings when you’re ready."
 		if strings.TrimSpace(ws.Mission) == "" {

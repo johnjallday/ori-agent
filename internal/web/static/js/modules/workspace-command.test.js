@@ -7485,7 +7485,7 @@ function installJanitorStationAdapter(target) {
         const folder = status.folder_display_name || '';
         return {
           key: 'file-janitor',
-          label: 'File Janitor',
+          label: 'Filing',
           location: folder || 'No folder approved',
           icon: 'bi-folder-symlink',
           visualVariant: 'depot',
@@ -7538,7 +7538,7 @@ function janitorCommandView(catalogItem) {
 
 function installedFileJanitor(status) {
   return {
-    definition: { id: 'file-janitor', display: { name: 'File Janitor' } },
+    definition: { id: 'file-janitor', display: { name: 'Filing' } },
     installed: true,
     available: true,
     status
@@ -7553,7 +7553,7 @@ test('an installed File Janitor awaiting setup says so on the map', () => {
     );
     const html = commandView.renderOperationsMap();
     assert.match(html, /data-cmd-hq-station="file-janitor"/);
-    assert.match(html, /File Janitor/);
+    assert.match(html, /Filing/);
     // The state is carried as text, not only as a colour tone (FR-96).
     assert.match(html, /Choose a folder to manage\./);
     // It is not the HQ, and must not be styled as one.
@@ -7580,7 +7580,7 @@ test('a configured File Janitor station shows its folder and derived status', ()
     assert.match(html, /--station-x:87\.00%/);
     assert.match(html, /data-building-variant="depot"/);
     assert.match(html, /data-context="station"/);
-    assert.match(html, /ws-cmd-map-hq-station-label">File Janitor/);
+    assert.match(html, /ws-cmd-map-hq-station-label">Filing/);
     assert.match(html, /ws-cmd-map-hq-station-location[^>]*>Downloads/);
     assert.match(html, /managed folder Downloads, 12 ready for review/);
     assert.match(html, /12 ready for review/);
@@ -7595,7 +7595,7 @@ test('a workspace without the capability installed gets no station', () => {
     // Not installed: the catalog lists the capability, but there is no install
     // record. A station here would be inferred rather than derived (FR-94).
     const commandView = janitorCommandView({
-      definition: { id: 'file-janitor', display: { name: 'File Janitor' } },
+      definition: { id: 'file-janitor', display: { name: 'Filing' } },
       installed: false,
       available: true
     });
@@ -7614,7 +7614,7 @@ test('an install this build cannot resolve renders no station', () => {
     // Installed but unavailable: visible in the catalog as metadata, but there
     // is nothing to activate, so it must not offer a Map entry point (FR-14).
     const commandView = janitorCommandView({
-      definition: { id: 'file-janitor', display: { name: 'File Janitor' } },
+      definition: { id: 'file-janitor', display: { name: 'Filing' } },
       installed: true,
       available: false,
       unavailable: 'not available in this version'

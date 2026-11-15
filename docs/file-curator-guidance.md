@@ -1,13 +1,13 @@
 # File Curator guidance
 
-File Janitor works without an agent or a provider key. Its optional File Curator
+Filing works without an agent or a provider key. Its optional File Curator
 explains filing choices, important-original backup considerations, and the limits
 of Undo and stored protection evidence. It cannot approve filing, operate backups,
 fetch credentials or grant access.
 
 ## Availability and identity
 
-Open **File Janitor → Settings → Curator** to see built-in guidance availability.
+Open **Filing → Settings → Curator** to see built-in guidance availability.
 Ori associates guidance with the installed capability's actual companion agent
 instance—not its display name, entry-agent position or a skill named
 `file-janitor`. Renaming a Curator, reusing an agent definition, or assigning
@@ -23,19 +23,19 @@ resolution.
 
 ## Fed folders keep their own agent
 
-On the **Hire an agent for a folder** path, adding File Janitor does not hire
-or attach a second agent. The agent chosen on the hire card holds the Curator
-role in that workspace. **File Janitor → Settings → Curator** names it, and
+On the **Hire an agent for a folder** path, adding Filing does not hire
+or attach a second agent. The agent chosen on the hire card handles filing
+in that workspace. **Filing → Settings → Curator** names it, and
 its chat receives the saved filing welcome once the folder's explicitly approved
 preparation has finished. Opening chat does not scan or approve anything.
 
 The role is attached to the workspace instance, not the shared definition. The
-same saved agent in another workspace is unaffected. Removing File Janitor drops
+same saved agent in another workspace is unaffected. Removing Filing drops
 the role but never detaches the folder's agent. Repeating setup creates nothing
 extra. A missing/ambiguous attachment, changed lead or conflicting association
-stops the role step with a settings recovery message; File Janitor remains
+stops the role step with a settings recovery message; Filing remains
 installed and usable without an agent. Existing completed two-agent workspaces,
-the File Janitor blueprint and manual **Add a Curator** are unchanged.
+the Filing blueprint and manual **Add a Curator** are unchanged.
 
 ## Bundled content, not imported-skill trust
 
@@ -51,7 +51,7 @@ definition, tool allowlist or opt-in setting is modified to attach guidance.
 
 ## Stored facts and review return
 
-The approved File Janitor folder's projection is shared by the review UI and the
+The approved Filing folder's projection is shared by the review UI and the
 associated Curator in chat/tasks, including non-entry and CLI paths. Reads use
 Ori-owned settings/workspace metadata and the existing saved backup scope. Paths
 stay server-side. Root identity, grants, scope and association are revalidated

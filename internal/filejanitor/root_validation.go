@@ -89,7 +89,7 @@ func ValidateRoot(raw string, guards RootGuards) (string, error) {
 func canonicalizeRoot(raw string) (string, error) {
 	path := strings.TrimSpace(raw)
 	if path == "" {
-		return "", setupErr(CodeInvalidPath, "Choose a folder to tidy.", RepairChooseFolder, nil)
+		return "", setupErr(CodeInvalidPath, "Choose a folder to file.", RepairChooseFolder, nil)
 	}
 	if strings.ContainsRune(path, 0) {
 		return "", setupErr(CodeInvalidPath, "That folder path is not valid.", RepairChooseFolder, nil)

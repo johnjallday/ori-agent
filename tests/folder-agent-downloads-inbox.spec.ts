@@ -93,7 +93,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
     .filter({ hasText: 'Downloads stays an inbox' });
   await expect(report).toBeVisible({ timeout: 30_000 });
   await expect(report.locator('[data-step]')).toHaveCount(1);
-  await expect(report).toContainText('Add File Janitor to Downloads');
+  await expect(report).toContainText('Organize loose files in Downloads (you approve every move)');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('7 software projects');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('5 REAPER songs');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('3 manuscripts');
@@ -311,17 +311,17 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   expect(structure(await (await request.get('/api/workspaces')).json())).toEqual(structureBefore);
   await page.goto(`${view.route}?view=details`);
   if (await closeAssistant.isVisible()) await closeAssistant.click();
-  await page.locator('#fileJanitorCardOpen').click();
-  const permissions = page.getByRole('region', { name: 'Review File Janitor permissions' });
-  await expect(permissions).toContainText('Use your attached folder');
+  await page.locator('#workspaceNextAction').click();
+  const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
+  await expect(permissions).toContainText('Allow filing in Downloads');
   await expect(permissions).toContainText('No file contents are opened');
   await expect(permissions).toContainText(
     'Every move into Filed/ or action to Trash needs your separate approval'
   );
   await expect(permissions.getByRole('checkbox')).not.toBeChecked();
   await page.screenshot({ path: join(evidence, 'janitor-needs-grant.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Close File Janitor', exact: true }).click();
-  await page.locator('#fileJanitorCardOpen').click();
+  await page.getByRole('button', { name: 'Close Filing', exact: true }).click();
+  await page.locator('#workspaceNextAction').click();
   await expect(permissions.getByRole('checkbox')).not.toBeChecked();
   expect(
     (await (await request.get(`/api/workspaces/${id}/file-janitor/protection`)).json()).state
@@ -331,7 +331,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   ).toEqual([]);
   // This separate explicit confirmation discloses Filed/ creation and one
   // metadata-only scan. It still grants no moves, Trash or monitoring.
-  await permissions.getByRole('button', { name: 'Use attached Downloads', exact: true }).click();
+  await permissions.getByRole('button', { name: 'Allow filing in Downloads', exact: true }).click();
   await expect(permissions).toBeHidden();
   const configured = (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json())
     .status;
