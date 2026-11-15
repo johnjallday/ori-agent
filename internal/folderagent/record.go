@@ -23,6 +23,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/types"
 )
 
 // RecordVersion is the schema version of a stored record.
@@ -275,6 +276,16 @@ type Record struct {
 	// It is read each time a plan is built (effectiveRecord) and never stored:
 	// a model set in Settings after the look shows on the next card.
 	HomeHireModel string `json:"-"`
+	// HomeHireCharacters is a read-only projection of the current roster's
+	// suggestions. Confirmed HireFaces override it, including generated faces.
+	HomeHireCharacters []string `json:"-"`
+	// HireFaces are canonical create-only appearances confirmed by hire name.
+	// They survive a stopped run; a new look clears them.
+	HireFaces map[string]*types.AgentAppearance `json:"hire_faces,omitempty"`
+	// HireEdits are confirmed create-only settings, keyed by host hire identity.
+	HireEdits map[string]HireEdit `json:"hire_edits,omitempty"`
+	// HireModels is the live, read-only model picker catalog; never persisted.
+	HireModels []HireModel `json:"-"`
 	// Failure is the plain sentence a failed look shows.
 	Failure string `json:"failure,omitempty"`
 

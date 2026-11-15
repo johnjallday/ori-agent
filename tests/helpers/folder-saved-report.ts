@@ -2,6 +2,7 @@ import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { resumeRetainedMusicReview, retainedMusicOptions } from './retained-music-review';
 
 // Read-only tail of the live REAPER journey. Reusable after slow inference or a
 // browser interruption; it cannot provision, retry, or manufacture a report.
@@ -11,7 +12,8 @@ export async function verifySavedFirstLook(
   sandbox: string,
   offerID: string,
   expectedWorkspaceRoute?: string,
-  sourceFixture = { subject: 'Third', folder: join('Downloads', 'Third'), file: 'Third.rpp' }
+  sourceFixture = { subject: 'Third', folder: join('Downloads', 'Third'), file: 'Third.rpp' },
+  conversationID?: string
 ) {
   expect(offerID).toBeTruthy();
   const get = async (url: string) => {
@@ -69,7 +71,11 @@ export async function verifySavedFirstLook(
     await page.locator('#personalAssistantClose').click();
     await expect(panel).toBeHidden();
   }
-  await page.getByRole('button', { name: 'Tickets', exact: true }).click();
+  const tickets = page
+    .getByRole('navigation', { name: 'Workspace views', exact: true })
+    .getByRole('button', { name: /^Tickets(?:\s+\d+)?$/ });
+  await tickets.click({ timeout: 15_000 });
+  await expect(tickets).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator(`[data-ticket-id="${look.task_id}"]`).first()).toBeVisible();
   // Recipe-backed optional work remains discoverable after completion.
   if (look.recipe) await expect(page.locator('#workspaceFirstTaskBanner')).toBeVisible();
@@ -86,12 +92,19 @@ export async function verifySavedFirstLook(
       ).href
     })
   );
-  await page.goto('/');
-  if (!(await panel.isVisible())) await page.locator('#personalAssistantLauncher').click();
-  await expect(panel).toBeVisible();
-  const strip = page.locator('#personalAssistantTodayStripToggle');
-  if ((await strip.getAttribute('aria-expanded')) === 'false') await strip.click();
-  const report = page.locator('#personalAssistantFolderOffer').getByRole('link', {
+  let reportCard;
+  if (conversationID) {
+    await resumeRetainedMusicReview(page, conversationID);
+    reportCard = await retainedMusicOptions(page);
+  } else {
+    await page.goto('/');
+    if (!(await panel.isVisible())) await page.locator('#personalAssistantLauncher').click();
+    await expect(panel).toBeVisible();
+    const strip = page.locator('#personalAssistantTodayStripToggle');
+    if ((await strip.getAttribute('aria-expanded')) === 'false') await strip.click();
+    reportCard = page.locator('#personalAssistantFolderOffer');
+  }
+  const report = reportCard.getByRole('link', {
     name:
       look.recipe === 'folder_summary'
         ? 'Open summary'

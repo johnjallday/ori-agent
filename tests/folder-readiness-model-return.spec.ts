@@ -2,11 +2,23 @@ import { test, expect, type APIRequestContext, type Locator } from '@playwright/
 import { createServer, type Server } from 'node:http';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { openFolderAttach, chooseAttach } from './helpers/assistant-menus';
+import { openFolderAttach } from './helpers/assistant-menus';
 import { stageReviewedFolderPackages } from './helpers/reviewed-folder-packages';
+import { installLocalCdn } from './helpers/offline-cdn';
+import {
+  chooseRetainedHomeTeam,
+  openRetainedMusicDialog,
+  openRetainedSongFromHome,
+  retainedMusicOptions,
+  resumeRetainedMusicReview,
+  returnToRetainedMusicReview,
+  seedRetainedMusicReview
+} from './helpers/retained-music-review';
 
-// Real host + reviewed packages, explicitly controlled loopback provider. This
-// is configuration/consent evidence, NOT a live model or report-quality test.
+// Real host/packages/settings, with only model replies scripted. The project
+// model Settings control remains owned by the software source review. Music's
+// retained source now reviews an explicit Home team, with a separate manager
+// Open; its shared assistant's model must remain independent of later Defaults.
 const sandbox = process.env.ORI_READINESS_MODEL_SANDBOX || '';
 const port = Number(process.env.ORI_READINESS_MODEL_PORT || 0);
 const evidence = process.env.ORI_READINESS_EVIDENCE || '';
@@ -15,15 +27,14 @@ test.describe.configure({ mode: 'serial' });
 test.setTimeout(120_000);
 let provider: Server;
 let executions = 0;
+test.beforeEach(async ({ page }) => installLocalCdn(page));
 
 async function revealModel(card: Locator) {
   const ready = card.locator('details.folder-requirements__ready');
   await expect(ready).toBeVisible();
   if (!(await ready.evaluate(node => (node as HTMLDetailsElement).open)))
     await ready.locator('summary').first().click();
-  await card
-    .getByRole('region', { name: 'Project agent model' })
-    .scrollIntoViewIfNeeded({ timeout: 10_000 });
+  await card.getByRole('region', { name: 'Project agent model' }).scrollIntoViewIfNeeded();
 }
 
 async function json(request: APIRequestContext, path: string) {
@@ -32,20 +43,21 @@ async function json(request: APIRequestContext, path: string) {
   return response.json();
 }
 
+async function post(request: APIRequestContext, path: string, data: object) {
+  const response = await request.post(path, { data });
+  expect(response.ok(), await response.text()).toBeTruthy();
+  return response.json();
+}
+
 test.beforeAll(async ({ request }) => {
   expect((await json(request, '/api/settings/system-model')).configured).toBe(false);
   if (process.env.ORI_READINESS_MODEL_INSTALL === '1') await stageReviewedFolderPackages(request);
   expect((await json(request, '/api/plugins')).plugins.length).toBeGreaterThanOrEqual(2);
-  const post = async (path: string, data: object) => {
-    const response = await request.post(path, { data });
-    expect(response.ok(), await response.text()).toBeTruthy();
-    return response.json();
-  };
-  await post('/api/onboarding/skip', {});
-  await post('/api/settings/workspace-root', { workspace_root: '' });
+  await post(request, '/api/onboarding/skip', {});
+  await post(request, '/api/settings/workspace-root', { workspace_root: '' });
   let assistant = (await json(request, '/api/personal-assistant')).personal_assistant;
   if (assistant.state === 'needs_hire') {
-    await post('/api/personal-assistant/hire', {
+    await post(request, '/api/personal-assistant/hire', {
       request_id: 'model-readiness-hire',
       if_version: assistant.state_version || 0,
       display_name: 'Atlas',
@@ -55,33 +67,41 @@ test.beforeAll(async ({ request }) => {
     assistant = (await json(request, '/api/personal-assistant')).personal_assistant;
   }
   if (assistant.state === 'needs_hq')
-    await post('/api/personal-assistant/hq', {
+    await post(request, '/api/personal-assistant/hq', {
       request_id: 'model-readiness-hq',
       if_version: assistant.state_version,
       name: 'My HQ',
       timezone: 'UTC'
     });
-  for (const folder of ['Desktop', 'Documents']) {
+  for (const folder of ['Desktop', 'Documents', 'Downloads'])
     mkdirSync(join(sandbox, folder), { recursive: true, mode: 0o750 });
+  writeFileSync(
+    join(sandbox, 'Desktop', 'go.mod'),
+    'module example.invalid/readiness\n\ngo 1.26\n',
+    { mode: 0o600, flag: 'wx' }
+  );
+  writeFileSync(join(sandbox, 'Desktop', 'main.go'), 'package main\n\nfunc main() {}\n', {
+    mode: 0o600,
+    flag: 'wx'
+  });
+  for (const folder of ['Documents', 'Downloads'])
     writeFileSync(join(sandbox, folder, 'Session.rpp'), '<REAPER_PROJECT 0.1 "7.0"\n>\n', {
       mode: 0o600,
       flag: 'wx'
     });
-  }
-  provider = createServer((req, res) => {
+  provider = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     if (req.method === 'GET') {
       res.end(
         JSON.stringify({
-          object: 'list',
-          data: ['readiness-control-a', 'readiness-control-b'].map(id => ({
-            id,
-            object: 'model',
-            owned_by: 'controlled-fixture'
-          }))
+          data: ['readiness-control-a', 'readiness-control-b'].map(id => ({ id, object: 'model' }))
         })
       );
       return;
+    }
+    // Drain requests before replying, including any separate Home background work.
+    for await (const _chunk of req) {
+      /* scripted body is not retained */
     }
     executions++;
     res.end(
@@ -113,22 +133,12 @@ test.afterAll(async () => {
   if (provider) await new Promise<void>(resolve => provider.close(() => resolve()));
 });
 
-test('real model Settings return preserves the review and requires refreshed explicit consent', async ({
+test('real project-model Settings return preserves the review and requires refreshed explicit consent', async ({
   page,
   request
 }) => {
-  const bytes = readFileSync(join(sandbox, 'Desktop', 'Session.rpp'));
-  const workspaces = await json(request, '/api/workspaces');
-  const effects: string[] = [];
-  page.on('request', req => {
-    if (
-      req.method() !== 'GET' &&
-      /\/offers\/[^/]+\/(setup|decide)$|\/plugins\/.*(install|enable|update)|\/tasks.*execute/.test(
-        new URL(req.url()).pathname
-      )
-    )
-      effects.push(req.url());
-  });
+  const file = join(sandbox, 'Desktop', 'main.go');
+  const bytes = readFileSync(file);
   await page.goto('/?panel=today');
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
   await page.evaluate(() =>
@@ -145,7 +155,8 @@ test('real model Settings return preserves the review and requires refreshed exp
     .getByRole('button', { name: 'Desktop', exact: true })
     .click();
   const card = page.locator('#personalAssistantFolderOffer');
-  await expect(card).toBeVisible({ timeout: 60_000 });
+  await expect(card).toBeVisible();
+  await card.getByRole('button', { name: 'Review setup', exact: true }).click();
   await expect(card.getByRole('region', { name: 'Project agent model' })).toContainText(
     'Configuration needed'
   );
@@ -156,8 +167,18 @@ test('real model Settings return preserves the review and requires refreshed exp
     request,
     `/api/home-assistant/conversations/${original.conversation_id}`
   );
+  const workspaces = await json(request, '/api/workspaces');
+  const effects: string[] = [];
+  page.on('request', req => {
+    if (
+      req.method() !== 'GET' &&
+      /\/offers\/[^/]+\/(setup|decide)$|\/plugins\/.*(install|enable|update)|\/tasks.*execute/.test(
+        new URL(req.url()).pathname
+      )
+    )
+      effects.push(req.url());
+  });
 
-  // A blocked popup is visible and does not discard process-local context.
   await page.evaluate(() => {
     (window as any).__readinessOpen = window.open;
     window.open = () => null;
@@ -203,9 +224,6 @@ test('real model Settings return preserves the review and requires refreshed exp
   const after = await json(request, `/api/home-assistant/conversations/${current.conversation_id}`);
   expect(after.messages.length).toBe(history.messages.length);
   expect(after.folder_context.revision).toBe(history.folder_context.revision);
-  // The refreshed conversation/history read can finish after the recheck.
-  // Read the current disclosure and verify its focus/visibility, not the
-  // scroll position of the earlier node before that hydration completed.
   await revealModel(card);
   const refreshedModel = card.getByRole('region', { name: 'Project agent model' });
   await refreshedModel.focus();
@@ -216,14 +234,14 @@ test('real model Settings return preserves the review and requires refreshed exp
   if (evidence)
     await page.screenshot({ path: join(evidence, 'group3-controlled-model-return.png') });
 
-  // Deliberately submit the earlier consent after a material settings change.
-  // The real endpoint, not a response fixture, must refuse it before effects.
   await settings.locator('#systemModelModel').selectOption('readiness-control-b');
   await settings.locator('#saveSystemModelBtn').click();
   await expect(settings.locator('#systemModelStatusDetails')).toContainText('readiness-control-b');
   const stale = await request.post(
     `/api/personal-assistant/folder-digest/offers/${current.id}/setup`,
-    { data: { request_id: 'readiness-stale-consent', plan_digest: current.plan.digest, brief } }
+    {
+      data: { request_id: 'readiness-stale-consent', plan_digest: current.plan.digest, brief }
+    }
   );
   expect(stale.status()).toBe(409);
   expect((await stale.json()).plan_changed).toBe(true);
@@ -237,34 +255,58 @@ test('real model Settings return preserves the review and requires refreshed exp
   await expect(card.getByLabel('What should it do with it?')).toHaveValue(brief);
   await expect(page.locator('#personalAssistantInput')).toHaveValue(draft);
   expect(effects).toEqual([]);
-  expect(readFileSync(join(sandbox, 'Desktop', 'Session.rpp'))).toEqual(bytes);
+  expect(readFileSync(file)).toEqual(bytes);
 
-  // Only this final, refreshed UI confirmation may create resources/start work.
-  const accepted = page.waitForResponse(response => /\/offers\/[^/]+\/setup$/.test(response.url()));
+  // This first button only opens the source-owned final review. The actual
+  // confirmation is a separate explicit gesture; no domain receipt is mocked.
   await card.locator('[data-folder-action="setup"]').click();
+  const review = page.locator('[data-source-creation-review]:visible');
+  await expect(review).toBeVisible();
+  expect(effects).toEqual([]);
+  await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  const accepted = page.waitForResponse(response => /\/offers\/[^/]+\/setup$/.test(response.url()));
+  await review.locator('[data-placement-action="confirm"]').click();
   expect((await accepted).ok()).toBeTruthy();
+  await expect(review.getByRole('heading', { name: 'Workspace created', exact: true })).toBeVisible(
+    { timeout: 60_000 }
+  );
+  await review.getByRole('button', { name: 'Close', exact: true }).click();
   await expect
-    .poll(
-      async () =>
-        (await page.evaluate(() => (window as any).PersonalAssistantFolder.current()))?.status,
-      { timeout: 60_000 }
-    )
+    .poll(() => page.evaluate(() => (window as any).PersonalAssistantFolder.current()?.status))
     .toBe('resolved');
   await expect(card.getByRole('button', { name: 'Check again', exact: true })).toHaveCount(0);
   expect(effects.filter(url => /\/setup$/.test(url))).toHaveLength(1);
-  expect(readFileSync(join(sandbox, 'Desktop', 'Session.rpp'))).toEqual(bytes);
+  expect(readFileSync(file)).toEqual(bytes);
   if (evidence) await page.screenshot({ path: join(evidence, 'group3-controlled-confirmed.png') });
   await settings.close();
 });
 
-test('a real shared agent retains its own configured model after the default changes', async ({
+test('a real shared music agent retains its configured model after the Default changes', async ({
   page,
   request
 }) => {
-  const changed = await request.post('/api/settings/system-model', {
-    data: { provider: 'lmstudio', model: 'readiness-control-a' }
+  expect((await json(request, '/api/settings/system-model')).model).toBe('readiness-control-b');
+  const retained = await seedRetainedMusicReview(request, join(sandbox, 'Documents'));
+  await resumeRetainedMusicReview(page, retained.conversation.id);
+  await openRetainedMusicDialog(page);
+  await chooseRetainedHomeTeam(page, { provider: 'lmstudio', model: 'readiness-control-b' });
+  const review = await returnToRetainedMusicReview(page);
+  await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+  await review.getByRole('button', { name: 'Set up Home', exact: true }).click();
+  await expect(review.getByRole('heading', { name: 'Home ready', exact: true })).toBeVisible({
+    timeout: 60_000
   });
-  expect(changed.ok()).toBeTruthy();
+  const home = (await json(request, '/api/workspaces')).folders.find(
+    (item: any) => item.kind === 'group'
+  );
+  expect(home).toBeTruthy();
+  await page.getByRole('button', { name: 'Close setup review', exact: true }).click();
+  await openRetainedSongFromHome(page, home, 'Documents');
+  const profile = await json(request, '/api/agents/REAPER%20Assistant/detail');
+  await post(request, '/api/settings/system-model', {
+    provider: 'lmstudio',
+    model: 'readiness-control-a'
+  });
   const workspaces = await json(request, '/api/workspaces');
   const effects: string[] = [];
   page.on('request', req => {
@@ -274,47 +316,20 @@ test('a real shared agent retains its own configured model after the default cha
     )
       effects.push(req.url());
   });
-  await page.goto('/settings');
-  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.open));
-  await page.evaluate(() =>
-    (window as any).PersonalAssistantPanel.open(
-      document.getElementById('personalAssistantLauncher')
-    )
-  );
-  const draft = '  Bound 🎼 agent draft  ';
-  await page.locator('#personalAssistantInput').fill(draft);
-  await openFolderAttach(page);
-  await page
-    .locator('#personalAssistantFolderChoices')
-    .getByRole('button', { name: 'Documents', exact: true })
-    .click();
-  const card = page.locator('#personalAssistantFolderOffer');
-  await expect
-    .poll(
-      async () =>
-        page.evaluate(() => (window as any).PersonalAssistantFolder.current()?.plan?.hire?.mode),
-      { timeout: 60_000 }
-    )
-    .toBe('bind');
+  const later = await seedRetainedMusicReview(request, join(sandbox, 'Downloads'));
+  await resumeRetainedMusicReview(page, later.conversation.id);
+  const card = await retainedMusicOptions(page);
   const current = await page.evaluate(() => (window as any).PersonalAssistantFolder.current());
-  expect(current.plan.visual.model).toMatchObject({
-    state: 'configured',
-    settings: 'agent',
-    name: 'readiness-control-b'
+  expect(current.plan.hire).toMatchObject({
+    mode: 'bind',
+    agent_name: 'REAPER Assistant',
+    model: 'readiness-control-b'
   });
-  expect(current.plan.visual.model.agent_name).toBe(current.plan.hire.agent_name);
-  await revealModel(card);
-  const model = card.getByRole('region', { name: 'Project agent model' });
-  await expect(model).toContainText('readiness-control-b');
-  await expect(card.locator('[data-folder-action="setup"]')).toHaveText('Assign & set up');
-  const ready = card.locator('details.folder-requirements__ready');
-  if (!(await ready.evaluate(node => (node as HTMLDetailsElement).open)))
-    await ready.locator('summary').first().click();
-  await model.scrollIntoViewIfNeeded();
-  if (evidence)
-    await page.screenshot({ path: join(evidence, 'group3-real-bound-agent-model.png') });
-  await expect(page.locator('#personalAssistantInput')).toHaveValue(draft);
+  expect(await json(request, '/api/agents/REAPER%20Assistant/detail')).toEqual(profile);
+  await expect(card.getByRole('button', { name: /Go to Music Production Home/ })).toBeVisible();
   expect(effects).toEqual([]);
   expect(await json(request, '/api/workspaces')).toEqual(workspaces);
+  if (evidence)
+    await page.screenshot({ path: join(evidence, 'group3-real-bound-agent-model.png') });
   await card.getByRole('button', { name: 'Keep chatting', exact: true }).click();
 });

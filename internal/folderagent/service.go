@@ -139,6 +139,12 @@ type HomeHireModeler interface {
 	HomeHireModel() string
 }
 
+// HomeHireCharacterSuggester offers distinct, least-worn working characters
+// in stable order. Missing catalog data must not prevent a plan from building.
+type HomeHireCharacterSuggester interface {
+	HomeHireCharacters(count int) []string
+}
+
 // RunResult is how a Set it up run ended and what it made (its receipt,
 // partial when it stopped).
 type RunResult struct {
@@ -947,6 +953,7 @@ func (s *Service) LookFurther(ctx context.Context, userID, workspaceID string, f
 			return ErrWrongState
 		}
 		r.State, r.Failure, r.Hint = StateLooking, "", hint
+		r.HireFaces, r.HireEdits = nil, nil
 		r.Progress.Turn, r.Progress.Folder = false, ""
 		return nil
 	})
@@ -965,6 +972,11 @@ type SetUpRequest struct {
 	// always run. Set it up writes no workspace goal: the suggested goal is
 	// offered once the run is done (AnswerGoal).
 	Selected []string
+	// HireEdits are pending create-only name/model choices by host hire identity.
+	HireEdits map[string]HireEdit
+	// HireFaces are the faces shown on the card, keyed by hire identity or name.
+	// An empty character id explicitly chooses the generated face.
+	HireFaces map[string]string
 }
 
 // SetUp confirms the plan and runs it in the background (PRD FR32).
@@ -977,7 +989,13 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 		return View{}, ErrWrongState
 	}
 	selected, planDigest := req.Selected, req.PlanDigest
-	plan := BuildPlan(*current, selected)
+	edits, err := s.checkedHireEdits(ctx, *current, selected, req.HireEdits)
+	if err != nil {
+		return View{}, err
+	}
+	preview := *current
+	preview.HireEdits = edits
+	plan := BuildPlan(preview, selected)
 	if plan.Digest != planDigest {
 		return View{}, personalassistant.ErrFolderPlanChanged
 	}
@@ -996,6 +1014,11 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 	if s.deps.Setups == nil {
 		return View{}, ErrUnavailable
 	}
+	faces, err := confirmedHireFaces(*current, plan.Hires, req.HireFaces)
+	if err != nil {
+		return View{}, err
+	}
+	applyHireFaces(&plan, faces)
 	rec, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
 		if !setUpAllowed(r) {
 			return ErrWrongState
@@ -1010,6 +1033,7 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 			r.Candidates, r.Sections, r.Stage = current.Candidates, current.Sections, current.Stage
 		}
 		r.State = StateSettingUp
+		r.HireFaces, r.HireEdits = faces, cloneHireEdits(edits)
 		// Once the run is done the Commander offers to learn the songs; a
 		// folder set up before this build never is.
 		r.OffersSongs = true

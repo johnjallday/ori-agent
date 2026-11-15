@@ -73,9 +73,10 @@
 
   // A caller may omit a field its contract never accepts — a program Home
   // role's instructions are applied server-side, so that caller mounts the
-  // form without a prompt box. Only the prompt is omissible: name, model, and
-  // provider are what every create needs.
-  const OMISSIBLE_FIELDS = ['systemPrompt'];
+  // form without a prompt box. A name/model-only setup draft also omits
+  // reasoning, which its confirmation contract does not accept. Name, model
+  // and provider are what every create needs.
+  const OMISSIBLE_FIELDS = ['systemPrompt', 'reasoningEffort'];
 
   function normalizeOmitted(fields) {
     return (Array.isArray(fields) ? fields : []).filter(name => OMISSIBLE_FIELDS.includes(name));

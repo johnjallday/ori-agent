@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/foldersetup"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -17,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -392,6 +394,9 @@ func (p *portfolioHomes) Commit(ctx context.Context, review foldersetup.HomeRevi
 type portfolioHomeStaffing struct {
 	builder *ServerBuilder
 	model   *personalassistant.FolderSetupModelIntent
+	faces   map[string]*types.AgentAppearance
+	// Confirmed create-only choices by immutable Home role id.
+	edits map[string]folderagent.HireEdit
 }
 
 // homeRoleDecl is a role as the hire set reads it: from a Home's stored
@@ -500,7 +505,11 @@ func (s portfolioHomeStaffing) Missing(_ context.Context, homeID string) ([]fold
 	}
 	var roles []foldersetup.HomeRole
 	for _, hire := range hires {
-		roles = append(roles, foldersetup.HomeRole{RoleID: hire.RoleID, Name: hire.Name})
+		name := hire.Name
+		if edit, ok := s.edits[hire.RoleID]; ok {
+			name = edit.Name
+		}
+		roles = append(roles, foldersetup.HomeRole{RoleID: hire.RoleID, Name: name})
 	}
 	return roles, nil
 }
@@ -512,12 +521,23 @@ func (s portfolioHomeStaffing) ModelReady(context.Context) bool {
 	return s.builder.systemModelAvailable()
 }
 
+func (s portfolioHomeStaffing) modelReadyFor(roleID string) bool {
+	if edit, ok := s.edits[roleID]; ok {
+		return edit.Provider != "" && edit.Model != "" && s.builder.validateModel(edit.Provider, edit.Model) == nil
+	}
+	return s.ModelReady(context.Background())
+}
+
 func (s portfolioHomeStaffing) Staff(ctx context.Context, homeID string, role foldersetup.HomeRole) error {
 	fill := setupjourney.RoleFill{
 		RoleID: role.RoleID, Mode: setupjourney.StaffingModeCreate, Name: role.Name,
+		Appearance: s.faces[role.Name].Clone(),
 	}
 	if s.model != nil {
 		fill.Provider, fill.Model = s.model.Provider, s.model.Model
+	}
+	if edit, ok := s.edits[role.RoleID]; ok {
+		fill.Name, fill.Provider, fill.Model = edit.Name, edit.Provider, edit.Model
 	}
 	return s.builder.assistantStaffing.StaffRoleOnWorkspace(ctx, homeID, []setupjourney.RoleFill{fill})
 }

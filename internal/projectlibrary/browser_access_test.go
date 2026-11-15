@@ -82,6 +82,27 @@ func TestBrowserAccess_IndependentReferenceNotDiscoveryOrManagedFiles(t *testing
 	}
 }
 
+func TestBrowserFixture_CanonicalizesTemporaryDirectoryAlias(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "physical")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(parent, "alias")
+	if err := os.Symlink(root, alias); err != nil {
+		t.Skipf("directory symlinks are unavailable: %v", err)
+	}
+	library, scope, fixture := createBrowserFixture(t, alias)
+	canonical, err := filepath.EvalSymlinks(fixture.SourceRoot)
+	if err != nil || canonical != fixture.SourceRoot {
+		t.Fatalf("fixture did not pin a physical path: %q %v", fixture.SourceRoot, err)
+	}
+	list, err := library.BrowserList(t.Context(), scope, "browser-000", "")
+	if err != nil || len(list.Entries) == 0 {
+		t.Fatalf("canonical fixture grant is unreadable: %+v %v", list, err)
+	}
+}
+
 func TestBrowserAccess_ReferenceLocatorAndRootChangesRefuse(t *testing.T) {
 	for _, mode := range []string{"reference-removed", "purpose", "owner", "reference-owner", "locator", "replacement", "symlink-root", "symlink-parent"} {
 		t.Run(mode, func(t *testing.T) {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -273,6 +275,21 @@ func (s *Service) PlanShared(homeID string, team Team) (SharedPlan, error) {
 // reservation's marker stops the hire (ErrReservationHeld): it is never
 // adopted and never stepped around with a second create.
 func (tx *Tx) HireShared(ctx context.Context, team Team, grant Grant, modelReady bool, create SharedCreate) ([]Fill, error) {
+	return tx.HireSharedNamed(ctx, team, grant, modelReady, nil, create)
+}
+
+// HireSharedNamed is the same guarded create with exact, already-confirmed
+// names by declared role id. It changes no role, digest, consent scope or bind.
+func (tx *Tx) HireSharedNamed(ctx context.Context, team Team, grant Grant, modelReady bool, names map[string]string, create SharedCreate) ([]Fill, error) {
+	for id, name := range names {
+		declared := false
+		for _, role := range team.Roles {
+			declared = declared || role.ID == id
+		}
+		if !declared || strings.TrimSpace(name) == "" || name != strings.TrimSpace(name) || name == "." || name == ".." || utf8.RuneCountInString(name) > 80 || strings.ContainsAny(name, `/\:`) || strings.ContainsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }) {
+			return nil, ErrNotShared
+		}
+	}
 	s := tx.s
 	if s == nil || s.workspaces == nil || create == nil || len(team.Roles) == 0 ||
 		strings.TrimSpace(team.PluginID) == "" || strings.TrimSpace(team.BlueprintID) == "" {
@@ -347,7 +364,7 @@ func (tx *Tx) HireShared(ctx context.Context, team Team, grant Grant, modelReady
 	taken := s.nameTaken(Song{Home: home})
 	fills := make([]Fill, 0, len(team.Roles))
 	for _, role := range team.Roles {
-		decided, err := s.decideTeam(tx.home, team, consent, []string{role.ID}, taken, true)
+		decided, err := s.decideTeamNamed(tx.home, team, consent, []string{role.ID}, taken, true, names)
 		if err != nil {
 			return fills, err
 		}

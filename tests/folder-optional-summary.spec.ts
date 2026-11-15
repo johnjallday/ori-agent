@@ -2,8 +2,16 @@ import { test, expect } from '@playwright/test';
 import { createServer } from 'node:http';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { openFolderAttach, chooseAttach } from './helpers/assistant-menus';
-import { finishPluginSetupWizard } from './helpers/plugin-setup-wizard';
+import { stageReviewedFolderPackages } from './helpers/reviewed-folder-packages';
+import { installLocalCdn } from './helpers/offline-cdn';
+import {
+  chooseRetainedHomeTeam,
+  openRetainedSongFromHome,
+  resumeRetainedMusicReview,
+  retainedMusicOptions,
+  returnToRetainedMusicReview,
+  seedRetainedMusicReview
+} from './helpers/retained-music-review';
 
 // Real host/observation/review/packages/persistence; only the provider is scripted.
 // Run scripts/e2e-folder-summary.sh. No native/live REAPER or paid model claim.
@@ -134,32 +142,53 @@ test('setup ends ready; a separately disclosed summary reads once, refuses tools
       await json('/api/personal-assistant/pause', { if_version: pa.state_version });
     const before = summaryCalls().length;
     await page.setViewportSize({ width: 1440, height: 1200 });
-    await page.goto('/?panel=today');
-    await openFolderAttach(page);
-    await page
-      .locator('#personalAssistantFolderChoices')
-      .getByRole('button', { name: 'Desktop', exact: true })
-      .click();
-    const card = page.locator('#personalAssistantFolderOffer');
-    await expect(card.locator('#personalAssistantFolderFindings')).toContainText(
-      '1 file observed',
-      { timeout: 60_000 }
+    await installLocalCdn(page);
+    // Package preparation uses the real installer, including an actual update
+    // from the historical package in --upgrade mode. It is not source-review
+    // consent or an edited manifest/floor.
+    if (upgrade) {
+      const music =
+        'https://github.com/johnjallday/music-project-management#sha=c420507da24c1fc007d794f3e8974231dd2c5d4a';
+      await json('/api/plugins/install', { source: music });
+      await json('/api/plugins/install', { source: music, confirm: true });
+      await json('/api/plugins/music-project-management/enable', {});
+      // Updating an installed package uses its own reviewed replacement lane,
+      // not a second same-name install over a live component registration.
+      expect((await json('/api/plugins/reaper-plugin/update', {})).updated).toBe(false);
+      const updated = await json('/api/plugins/reaper-plugin/update', { confirm: true });
+      expect(updated.updated).toBe(true);
+      expect(updated.plugin.version).toBe('0.12.0');
+      await json('/api/plugins/reaper-plugin/enable', {});
+    } else await stageReviewedFolderPackages(request);
+    const reviewed = await seedRetainedMusicReview(request, folder);
+    const conversation = reviewed.conversation.id;
+    await resumeRetainedMusicReview(page, conversation);
+    await chooseRetainedHomeTeam(page, { provider: 'lmstudio', model: 'summary-fixture' });
+    const review = await returnToRetainedMusicReview(page);
+    await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+    await review.getByRole('button', { name: 'Set up Home', exact: true }).click();
+    await expect(review.getByRole('heading', { name: 'Home ready', exact: true })).toBeVisible({
+      timeout: 120_000
+    });
+    const home = (await json('/api/workspaces')).folders.find(
+      (workspace: any) => workspace.kind === 'group'
     );
-    const requirements = card.locator('#personalAssistantFolderRequirements');
-    await requirements
-      .getByRole('button', { name: 'Install Music Project Management', exact: true })
-      .click();
-    await finishPluginSetupWizard(page);
-    await expect(requirements).toContainText('Nothing to download', { timeout: 60_000 });
-    console.log('Unrelated scripted background calls:', calls.length - summaryCalls().length);
+    expect(home).toBeTruthy();
+    expect(
+      (await json('/api/workspaces')).folders.filter(
+        (workspace: any) => workspace.parent_id === home.id
+      )
+    ).toHaveLength(0);
     expect(summaryCalls().length).toBe(before);
+    await page.getByRole('button', { name: 'Close setup review', exact: true }).click();
+    await openRetainedSongFromHome(page, home, 'Desktop');
+    await resumeRetainedMusicReview(page, conversation);
+    const card = await retainedMusicOptions(page);
+    console.log('Unrelated scripted background calls:', calls.length - summaryCalls().length);
     const offer = await page.evaluate(() => (window as any).PersonalAssistantFolder.current());
-    expect(offer.plan.optional_task).toBe(true);
-    const conversation = offer.conversation_id;
-    await card.getByRole('button', { name: 'Hire & set up', exact: true }).click();
     try {
       await expect(card.locator('#personalAssistantFolderOfferHeadline')).toContainText(
-        'Workspace ready',
+        'is ready',
         { timeout: 60_000 }
       );
     } catch (error) {
@@ -179,14 +208,11 @@ test('setup ends ready; a separately disclosed summary reads once, refuses tools
       throw error;
     }
     const optional = card.locator('#personalAssistantFolderOptionalTask');
-    await expect(optional).toBeVisible();
-    await expect(optional).toContainText('tracks, overview and one next step');
-    await expect(optional).toContainText('summary-fixture');
-    await expect(optional).toContainText('model tokens');
-    await expect(optional).toContainText('source-file changes or external actions');
+    await expect(optional).toBeHidden();
+    await expect(card.getByRole('button', { name: 'Start summary', exact: true })).toHaveCount(0);
     expect(summaryCalls().length).toBe(before); // A seed is not a summary provider call.
     expect(await readFile(file, 'utf8')).toBe(source);
-    await optional.scrollIntoViewIfNeeded();
+    await card.locator('#personalAssistantFolderOfferHeadline').scrollIntoViewIfNeeded();
     await capture('summary-workspace-ready.png');
     const ready = await page.evaluate(() => (window as any).PersonalAssistantFolder.current());
     const workspaceId = ready.outcome.workspace_id;
@@ -194,12 +220,23 @@ test('setup ends ready; a separately disclosed summary reads once, refuses tools
     const task = (await json(taskPath)).first_task;
     expect(ready.outcome.first_task_id).toBe(task.task_id);
     expect(ready.outcome.first_look).toBeUndefined();
-    await card.getByRole('link', { name: 'Open workspace', exact: true }).click();
+    const open = card.getByRole('link', { name: 'Open workspace', exact: true });
+    const route = await open.getAttribute('href');
+    await Promise.all([page.waitForURL(url => url.pathname === route), open.click()]);
+    await page.waitForFunction(
+      () => (window as any).workspaceDetail?.initialListsLoaded,
+      undefined,
+      { timeout: 15_000 }
+    );
     const banner = page.locator('#workspaceFirstTaskBanner');
-    await expect(page.locator('#personalAssistantPanel')).toBeVisible();
-    await page.locator('#personalAssistantClose').click();
+    if (await page.locator('#personalAssistantPanel').isVisible())
+      await page.locator('#personalAssistantClose').click();
     await expect(page.locator('#personalAssistantPanel')).toBeHidden();
     await expect(banner).toContainText('Optional project ticket');
+    await expect(banner).toContainText('tracks, overview and one next step');
+    await expect(banner).toContainText('summary-fixture');
+    await expect(banner).toContainText('model tokens');
+    await expect(banner).toContainText('source-file changes or external actions');
     await expect(banner).toContainText(task.executor.model);
     expect(summaryCalls().length).toBe(before); // Opening never starts it.
     attack = true;
@@ -244,24 +281,16 @@ test('setup ends ready; a separately disclosed summary reads once, refuses tools
       )
     ).toHaveLength(1);
     expect(tasks.some((item: any) => item.context?.first_look_task_id)).toBe(false); // Suggested work is not automatically started.
-    await page.goto('/?panel=today');
-    await page.waitForFunction(() =>
-      Boolean((window as any).PersonalAssistantConversation?.resume)
-    );
-    await page.evaluate(
-      async id => (window as any).PersonalAssistantConversation.resume(id),
-      conversation
-    );
-    await expect(card.locator('#personalAssistantFolderOptionalTask')).toContainText(
-      'Review the vocal arrangement'
-    );
+    await resumeRetainedMusicReview(page, conversation);
+    await retainedMusicOptions(page);
+    await expect(card.locator('#personalAssistantFolderOptionalTask')).toBeVisible();
+    await expect(card.getByRole('button', { name: 'Start summary', exact: true })).toHaveCount(0);
+    await expect(card).toContainText('Review the vocal arrangement');
     expect(summaryCalls().length).toBe(before + 2);
     expect(await readFile(file, 'utf8')).toBe(source);
     const today = (await json('/api/personal-assistant/today')).today;
     expect(JSON.stringify(today.needs_you)).toContain('start_this');
-    const savedReport = card
-      .locator('#personalAssistantFolderOptionalTask')
-      .getByRole('link', { name: 'Open summary', exact: true });
+    const savedReport = card.getByRole('link', { name: 'Open summary', exact: true });
     await savedReport.scrollIntoViewIfNeeded({ timeout: 10_000 });
     await expect(savedReport).toBeVisible();
     await capture('summary-reopened-home-report.png');

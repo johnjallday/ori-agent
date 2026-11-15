@@ -94,6 +94,9 @@ func TestPlan_HiresBlock(t *testing.T) {
 			var lines []string
 			for _, l := range plan.Lines {
 				if l.Kind == FolderPlanHire && l.Name != HomeRolesLine {
+					if l.AgentName == "" || l.Name != "Hires "+l.AgentName {
+						t.Fatalf("hire line lost structured display identity: %+v", l)
+					}
 					lines = append(lines, l.Name)
 				}
 			}
@@ -164,6 +167,27 @@ func TestPlan_HiresAreInTheDigest(t *testing.T) {
 	altered.HiresNote = "something else"
 	if planDigest(altered) == known.Digest {
 		t.Fatal("the unnamed-hires sentence is not in the digest")
+	}
+}
+
+func TestPlanView_AssuranceDoesNotRecountTheBlocks(t *testing.T) {
+	rec := hiresRecord(newHomeFacts(folderlook.HomeHire{Name: "Manager"}), testModel)
+	plan := homePlan(t, rec)
+	if got := planViewOf(plan).Assurance; got != "Nothing in Albums is moved, copied or read." {
+		t.Fatalf("card promise: %q", got)
+	}
+	if !strings.Contains(plan.Lines[len(plan.Lines)-1].Name, "Ori adds") {
+		t.Fatal("historical report/receipt line lost its recount")
+	}
+	for i := range rec.Candidates {
+		if rec.Candidates[i].Home != nil {
+			rec.Candidates[i].Home.HomeExists = true
+			rec.Candidates[i].Home.SongDetails = folderlook.SongDetailsNames
+		}
+	}
+	shown := planViewOf(homePlan(t, rec)).Assurance
+	if strings.Contains(shown, "copied or read") || !strings.Contains(shown, "already reads song details") || strings.Contains(shown, "Ori adds") {
+		t.Fatalf("existing read consent was misrepresented: %q", shown)
 	}
 }
 

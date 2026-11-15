@@ -166,7 +166,7 @@ async function hireAndSetUp(page: Page, entry: 'sheet' | 'home', path: string, b
   const report = page.locator('.folder-agent-card--report:visible');
   await expect(report).toContainText('REAPER');
   const setup = report.locator('[data-folder-agent-action="set_up"]');
-  await expect(setup).toHaveText(/^(Install \d+ & set up|Set it up)$/);
+  await expect(setup).toHaveText(/^(Install plugins & set up|Set it up)$/);
   await setup.click();
   await expect
     .poll(async () => (await read()).setup?.status || '', { timeout: 180_000 })

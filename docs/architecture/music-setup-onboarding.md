@@ -388,16 +388,28 @@ folder agent's plan card and its Home step. The reading itself is in
   afterwards added nobody.
 - **The plan card:** when the plan creates or joins a Home whose song team
   requires a shared assistant the Home does not have, the hires list gains one
-  row: the role's label, the role's own description as its job, the model, and
-  the note "Joins each song you open." The "Hires N agents" count includes it.
+  row: a suggested, changeable character, the role's label and wrapping job,
+  and the note "Joins each song you open." A common model appears once in
+  the team's heading line; different per-agent models appear on their rows.
+  The "Hires N agents" count includes it.
   It is one more row in the existing list, never a new block. A Home that
   already has its assistant gets no row. A Home whose "Add my … to songs I
   open" switch is off is not switched on: the card says so in one line and
   names the switch.
+- **Edit agent:** the shared create form stages name/model/face changes only,
+  with no role, instructions, skills or access controls. The host's immutable
+  step/role key survives renaming. A read-only plan preview validates names and
+  models and issues the material digest; Set up persists the confirmed settings
+  and creates profiles through the existing staffing adapters. Face choices stay
+  presentation-only. Stopped-run retries retain their confirmed material draft;
+  they cannot silently reconfigure a partially created team. Existing/hired
+  profiles open the normal guarded agent editor, with shared-edit/version checks.
 - **What the Home step installs:** the Home's provider, and now also the app
   plugin that provides the song team when it is not installed and the plan's
-  tools step is not ticked. The card's install list and its closing "Ori adds
-  …" line count it, so the press approves it. Which plugin comes from the
+  tools step is not ticked. The card's install list counts it, so the press
+  approves it. The team leads that list; the card's closing assurance does
+  not recount the visible blocks. Historical report/run lines retain their
+  "Ori adds …" wording. Which plugin comes from the
   folder's own recognised format through the reviewed list; host code names no
   product.
 - **Set up:** pressing it is the approval for every hire the card lists. After

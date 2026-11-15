@@ -53,7 +53,7 @@ func TestPlan_HiresTheSharedAssistantAsOneMoreRow(t *testing.T) {
 	want := []HireEntry{
 		{Step: "music-production-home", Name: "Portfolio Manager", Job: "Plans the work.", Model: testModel},
 		{Step: "music-production-home", Name: "REAPER Assistant", Job: "Handles everything REAPER-related for this project.",
-			Model: testModel, Note: AssistantJoins},
+			Model: testModel, Note: AssistantJoins, Assistant: true},
 	}
 	if !reflect.DeepEqual(plan.Hires, want) || plan.HiresNote != "" {
 		t.Fatalf("hires = %+v note %q", plan.Hires, plan.HiresNote)

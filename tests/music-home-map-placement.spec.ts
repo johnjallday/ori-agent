@@ -6,6 +6,11 @@ import {
   openMusicHomeReview
 } from './helpers/music-home-placement';
 import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
+import {
+  openRetainedMusicDialog,
+  resumeRetainedMusicReview,
+  seedRetainedMusicReview
+} from './helpers/retained-music-review';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -171,12 +176,7 @@ test('single-song reviewed empty Home is positioned before any project Open', as
       )
         secondWrites++;
     });
-    await secondTab.goto('/?panel=today&folder=show');
-    if (source.conversation_id)
-      await secondTab.evaluate(
-        (id: string) => (window as any).PersonalAssistantConversation.resume(id),
-        source.conversation_id
-      );
+    await resumeRetainedMusicReview(secondTab, source.conversation_id);
     const launch = secondTab.locator('[data-source-setup-summary]').getByRole('button', {
       name: 'Review setup',
       exact: true
@@ -813,15 +813,9 @@ test('existing Home Show and Move preserve later project anchors and canonical m
     y: (el as HTMLElement).style.top
   }));
   const beforeSecond = await resourceCounts(request, home.id);
-  await page.goto('/?panel=today&folder=show');
-  await page.locator('.folder-path-entry__input:visible').first().fill(secondSong);
-  await page.getByRole('button', { name: 'Use this path', exact: true }).first().click();
-  await page
-    .locator('[data-source-setup-summary]')
-    .getByRole('button', { name: 'Review setup', exact: true })
-    .click();
-  const existingReview = page.locator('#addFolderModal[data-source-setup-owner]');
-  await expect(existingReview).toBeVisible();
+  const retained = await seedRetainedMusicReview(request, secondSong);
+  await resumeRetainedMusicReview(page, retained.conversation.id);
+  const existingReview = await openRetainedMusicDialog(page);
   await expect(page.locator('#folderModalTitle')).toBeFocused();
   await expect(
     existingReview.getByRole('button', { name: 'Set up Home', exact: true })
@@ -1004,18 +998,7 @@ test(`collection ${collectionOnMap ? 'map' : 'automatic'} setup finishes a Home 
   await page.setViewportSize({ width: collectionOnMap ? 1440 : 720, height: 1000 });
   const before = await snapshot(request);
   expect(before.workspaces.filter((w: any) => w.kind === 'group')).toHaveLength(0);
-  await page.goto('/?panel=today&folder=show');
-  await page.locator('.folder-path-entry__input:visible').first().fill(collection);
-  await page.getByRole('button', { name: 'Use this path', exact: true }).first().click();
-  await page
-    .getByRole('button', { name: 'Review library setup', exact: true })
-    .click({ timeout: 15_000 });
-  await page
-    .locator('[data-source-setup-summary]')
-    .getByRole('button', { name: 'Review setup', exact: true })
-    .click({ timeout: 15_000 });
-  const review = page.locator('#addFolderModal [data-source-creation-review]:visible');
-  await expect(review).toBeVisible();
+  const review = await openMusicHomeReview(page, collection, false, true);
   await expect(review.getByRole('textbox', { name: 'Group name', exact: true })).toHaveValue(
     'Music Production Home'
   );
