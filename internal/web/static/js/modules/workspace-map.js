@@ -3083,7 +3083,48 @@
     );
   }
 
-  function tileHTML(tile, selectedId, index) {
+  // Only a host option can supply trusted, already-escaped face markup. Never
+  // read this seam from a workspace payload (including its agents array).
+  function hostAgentPortraitHTML(name, isCommander, options, href) {
+    if (options && typeof options.agentPortraitHTML === 'function') {
+      var html = options.agentPortraitHTML(name, isCommander, { href: href || '' });
+      if (typeof html === 'string') return html;
+    }
+    return avatarHTML(name, isCommander ? 'is-keeper' : '', href);
+  }
+
+  function tileTeamHTML(ws, options) {
+    if (!options || typeof options.agentPortraitHTML !== 'function') return '';
+    var lead = String(ws.entry_agent_name || '').trim();
+    var seen = Object.create(null);
+    var names = (lead ? [lead] : [])
+      .concat(
+        (Array.isArray(ws.agents) ? ws.agents : []).map(function (agent) {
+          return typeof agent === 'string' ? agent : agent && (agent.name || agent.agent_name);
+        })
+      )
+      .map(function (name) {
+        return String(name || '').trim();
+      })
+      .filter(function (name) {
+        var key = name.toLowerCase();
+        if (!key || seen[key]) return false;
+        seen[key] = true;
+        return true;
+      });
+    if (!names.length) return '';
+    return (
+      '<span class="ws-map-tile-team" aria-hidden="true">' +
+      names
+        .map(function (name) {
+          return hostAgentPortraitHTML(name, name === lead, options);
+        })
+        .join('') +
+      '</span>'
+    );
+  }
+
+  function tileHTML(tile, selectedId, index, options) {
     var ws = tile.ws || {};
     var pal = paletteFor(ws.id);
     var active = !!ws.active || !!folderAgentLines[ws.id];
@@ -3158,9 +3199,12 @@
       '</span>' +
       // The agent at work wears its face on the tile's corner while its line is
       // set; decorative, the status line says the same in words (FR17).
-      (folderAgentLines[ws.id] && folderAgentFaces[ws.id]
-        ? '<span class="ws-map-tile-face" aria-hidden="true">' + folderAgentFaces[ws.id] + '</span>'
-        : '') +
+      (tileTeamHTML(ws, options) ||
+        (folderAgentLines[ws.id] && folderAgentFaces[ws.id]
+          ? '<span class="ws-map-tile-face" aria-hidden="true">' +
+            folderAgentFaces[ws.id] +
+            '</span>'
+          : '')) +
       (hasKeeper ? '<span class="ws-map-tile-crest" title="Commander (locked)">★</span>' : '') +
       (isHQ ? '<span class="ws-map-tile-hq-badge" title="Personal HQ">HQ</span>' : '') +
       // Same badge slot as HQ, so the economy's badges inherit the tile's own
@@ -3553,7 +3597,9 @@
     });
     layout.nodes.forEach(function (node, index) {
       var placed = toLayer(node);
-      parts.push(tileHTML({ ws: node.ws, left: placed.left, top: placed.top }, selectedId, index));
+      parts.push(
+        tileHTML({ ws: node.ws, left: placed.left, top: placed.top }, selectedId, index, options)
+      );
     });
     if (layout.hqSite) {
       parts.push(hqSiteHTML(toLayer(layout.hqSite), selectedId, layout.nodes.length, site));
@@ -4176,7 +4222,7 @@
     // these — link to that agent's record (FR-38/FR-39).
     var keeper = entry
       ? '<div class="ws-map-ov-keeper">' +
-        avatarHTML(entry, 'is-keeper', agentRecordHref(entry)) +
+        hostAgentPortraitHTML(entry, true, options, agentRecordHref(entry)) +
         '<div class="ws-map-ov-keeper-meta">' +
         '<div class="ws-map-ov-keeper-badge">★ Locked · can&#39;t remove</div></div></div>'
       : '<span class="ws-map-ov-none">No Commander</span>';
@@ -4184,7 +4230,8 @@
     var roster = agents.length
       ? agents
           .map(function (a) {
-            return avatarHTML(a, '', agentRecordHref(a));
+            var name = typeof a === 'string' ? a : String(a.name || a.agent_name || '');
+            return hostAgentPortraitHTML(name, false, options, agentRecordHref(name));
           })
           .join('')
       : '<span class="ws-map-ov-none">No agents yet</span>';
@@ -4337,7 +4384,8 @@
       workspaces.length === 0;
     var canvas =
       (Array.isArray(workspaces) && workspaces.length > 0) || site.show || authoritativeEmpty
-        ? canvasHTML(workspaces, selectedId, { viewport: viewport }).html
+        ? canvasHTML(workspaces, selectedId, Object.assign({}, options, { viewport: viewport }))
+            .html
         : emptyCanvasHTML();
     // Cockpit mode: the workspace-area header and on-demand context modal
     // already own the title, the stat readout, New Workspace, and the selected

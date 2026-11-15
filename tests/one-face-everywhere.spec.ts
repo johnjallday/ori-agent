@@ -54,6 +54,47 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
+test('working tile wears the same chosen face and polling never repeats the agents read', async ({
+  page
+}) => {
+  let agentReads = 0;
+  let folderReads = 0;
+  await page.route('**/api/agents/dashboard/list', route => {
+    agentReads++;
+    return route.fulfill({
+      json: [
+        {
+          name: 'Albums Manager',
+          appearance: { mode: 'character', character: { catalog_id: 'project-coordinator' } }
+        }
+      ]
+    });
+  });
+  await page.route('**/api/personal-assistant/folder-agent', route => {
+    folderReads++;
+    return route.fulfill({
+      json: {
+        folder_agents: [
+          {
+            workspace_id: 'chosen',
+            agent_name: 'Albums Manager',
+            folder_name: 'Albums',
+            state: 'looking',
+            progress_line: 'Reading the listening notes…'
+          }
+        ]
+      }
+    });
+  });
+  await page.goto('/');
+  const tile = page.locator('[data-ws-id="chosen"]');
+  await expect(tile.locator('.agent-avatar--character')).toBeVisible();
+  await expect(tile.locator('.ws-map-tile-flag')).toContainText('Reading the listening notes…');
+  await expect.poll(() => folderReads).toBeGreaterThan(1);
+  expect(agentReads).toBe(1);
+  await page.screenshot({ path: `${evidence}/group4-working-tile.png` });
+});
+
 test('Team orders the commander before the rest and removes case-insensitive duplicates', async ({
   page
 }) => {
@@ -103,6 +144,9 @@ for (const theme of ['light', 'dark']) {
     const modal = page.locator('#cockpitContextModal');
     await expect(modal).toBeVisible();
     await expect(modal.locator('.home-agent-face-slot')).toHaveCount(1);
+    const tile = page.locator('[data-ws-id="chosen"]');
+    await expect(tile.locator('.home-agent-face-slot')).toHaveCount(1);
+    await expect(tile.locator('.agent-avatar, .ws-map-av-figure')).toHaveCount(0);
     await expect(modal.locator('.agent-avatar, .ws-map-av-figure')).toHaveCount(0);
     const open = modal.locator('[data-cockpit-rail-open]');
     await expect(modal.locator('[data-cockpit-rail-back]')).toBeFocused();
@@ -113,12 +157,17 @@ for (const theme of ['light', 'dark']) {
       .catch(() => '');
     release();
     await expect(modal.locator('.agent-avatar--character')).toHaveCount(1);
+    await expect(tile.locator('.agent-avatar--character')).toHaveCount(1);
+    expect(await tile.locator('.agent-avatar img').getAttribute('src')).toBe(
+      await modal.locator('.agent-avatar img').getAttribute('src')
+    );
     await expect(open).toBeFocused();
     if (live) await expect(page.locator('#cockpitRailLive')).toHaveText(live);
     mkdirSync(evidence, { recursive: true });
     await page.screenshot({ path: `${evidence}/group3-team-character-${theme}.png` });
     await modal.getByRole('button', { name: 'Close context', exact: true }).click();
     await expect(modal).toBeHidden();
+    await page.screenshot({ path: `${evidence}/group4-idle-map-${theme}.png` });
     await page.locator('[data-ws-id="generated"]').click();
     await expect(modal).toBeVisible();
     await expect(modal.locator('[data-cockpit-rail-back]')).toBeFocused();

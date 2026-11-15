@@ -2551,6 +2551,12 @@ import {
   function mountMap({ animate = false } = {}) {
     if (!els.map || state.view !== VIEW_MAP) return;
     if (!window.OriWorkspaceMap) return;
+    ensureAgentFaces(
+      state.flattened.flatMap(workspace => [
+        entryAgentName(workspace),
+        ...agentRoster(workspace).map(agent => agent.name)
+      ])
+    );
     window.OriWorkspaceMap.mount(els.map, {
       animate,
       workspaces: state.flattened,
@@ -2566,6 +2572,8 @@ import {
       songFacts: state.songFacts,
       folderAgentLines: state.folderAgentLines,
       folderAgentFaces: state.folderAgentFaces,
+      // Home-only trusted markup. Other map hosts retain their resident default.
+      agentPortraitHTML: homePortrait,
       workspaceUpdateBadges: state.workspaceUpdateBadges,
       // Cockpit contract (see workspace-map.js): select-only pointer semantics,
       // no internal topbar/overview chrome, and no invented default selection.
@@ -5328,12 +5336,9 @@ import {
   // setup newer than that lands its members (null until the first read, so a
   // page load never replays an old one).
   let folderAgentSetups = null;
-  // The agents behind the tiles being worked on, as the agents list names them
-  // (appearance, role, source): each name is looked up once, the first time it
-  // works, so its tile can wear its face (visual-hire FR17). A name the list does
-  // not have is not asked for again. Until the answer lands (found or failed) a
-  // name is pending and its tile wears no face, so it never flashes a face that is
-  // not its own before the real one.
+  // One directory for every named agent on Home, idle or working. A name the
+  // owner's list lacks is remembered, not retried by the folder poll. While a
+  // record is pending no surface flashes a name-derived face before its own.
   const agentDirectory = createHomeAgentDirectory({
     fetchImpl: globalThis.fetch,
     onChange: repaintAgentFaces
@@ -5360,8 +5365,8 @@ import {
     renderRail({ announceChange: false });
   }
   // The role catalog gives a face its ring and emblem; Home does not load it, so
-  // the first time an agent works it is asked for, and the tiles redraw once it is
-  // here. Pages that never see an agent work never fetch it.
+  // first time an agent is visible it is asked for, and faces redraw once it is
+  // here. Repainting does not repeat the folder-agent network poll.
   let roleCatalogAsked = false;
   function ensureAgentFaces(names) {
     if (!names.some(Boolean)) return;
