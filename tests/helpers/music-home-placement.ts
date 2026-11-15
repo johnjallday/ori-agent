@@ -2,6 +2,13 @@ import { expect as baseExpect, type APIRequestContext, type Page } from '@playwr
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
+import {
+  chooseRetainedHomeTeam,
+  openRetainedMusicDialog,
+  resumeRetainedMusicReview,
+  returnToRetainedMusicReview,
+  seedRetainedMusicReview
+} from './retained-music-review';
 const expect = baseExpect.configure({ timeout: 60_000 });
 
 // Fingerprint synthetic source bytes as well as file/directory membership.
@@ -49,23 +56,14 @@ export async function musicHomeResourceCounts(request: APIRequestContext, homeID
   };
 }
 
-export async function openMusicHomeReview(page: Page, song: string, tree = false) {
-  await page.goto(`/?panel=today&folder=show${tree ? '&view=tree' : ''}`);
-  await page.locator('.folder-path-entry__input:visible').first().fill(song);
-  await page.getByRole('button', { name: 'Use this path', exact: true }).first().click();
-  const existing = page.getByRole('button', {
-    name: `Open ${path.basename(song)} review`,
-    exact: true
-  });
-  const first = page
-    .locator('[data-source-setup-summary]')
-    .getByRole('button', { name: 'Review setup', exact: true });
-  await expect(first.or(existing)).toBeVisible();
-  if (await existing.isVisible()) await existing.click();
-  await first.click();
-  const dialog = page.locator('#addFolderModal[data-source-setup-owner]');
-  await expect(dialog).toBeVisible();
-  const review = dialog.locator('[data-source-creation-review]:visible');
-  await expect(review).toBeVisible();
-  return review;
+export async function openMusicHomeReview(page: Page, song: string, tree = false, library = false) {
+  // Placement acceptance exercises an existing retained owner. Add folder is
+  // now the independently tested hire-first entry, not this source review.
+  const reviewed = await seedRetainedMusicReview(page.request, song, library);
+  await resumeRetainedMusicReview(page, reviewed.conversation.id, tree);
+  await openRetainedMusicDialog(page);
+  const settings = await (await page.request.get('/api/settings/system-model')).json();
+  expect(settings.configured, 'the placement sandbox must select its fixture model').toBe(true);
+  await chooseRetainedHomeTeam(page, { provider: settings.provider, model: settings.model });
+  return returnToRetainedMusicReview(page);
 }

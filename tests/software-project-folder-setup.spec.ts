@@ -416,7 +416,7 @@ async function pickChip(page: Page, chip: 'Documents' | 'Desktop' | 'Downloads')
     .getByRole('button', { name: chip, exact: true })
     .click();
   const response = await attached;
-  expect(response.ok()).toBeTruthy();
+  expect(response.ok(), await response.text()).toBeTruthy();
   const selection = await response.json();
   await expect(page.locator('#personalAssistantReviewFolderSetup')).toBeEnabled({
     timeout: 30_000
@@ -582,8 +582,12 @@ function watchWrites(page: Page) {
   const writes: string[] = [];
   page.on('request', request => {
     const path = new URL(request.url()).pathname;
-    if (request.method() !== 'GET' && path !== '/api/home-assistant/context')
-      writes.push(`${request.method()} ${path}`);
+    // The notes offer acknowledges that it was displayed; it grants no folder
+    // access and starts no work. Keep every setup/task/permission write visible.
+    const presentationOnly =
+      path === '/api/home-assistant/context' ||
+      (request.method() === 'POST' && path === '/api/personal-assistant/second-brain/prompted');
+    if (request.method() !== 'GET' && !presentationOnly) writes.push(`${request.method()} ${path}`);
   });
   return writes;
 }
@@ -789,24 +793,41 @@ test.describe('a fresh server', () => {
     // old folder is moved away and deleted only once the new one exists: a
     // filesystem may give a new directory the inode number of one just
     // deleted, and the replacement would then pass for the original.
+    const oldOfferID = await page.evaluate(
+      () => (window as any).PersonalAssistantFolder.current().id
+    );
     const aside = join(sandbox, 'e2e-software', 'replaced-scratchpad');
     rmSync(aside, { recursive: true, force: true });
     renameSync(folders.scratchpad, aside);
     seedScratchpad('another-scratchpad');
     rmSync(aside, { recursive: true });
     await comeBack(page);
-    await expect(question(page)).toContainText('not the one you showed me');
+    await expect(question(page)).toContainText(
+      'scratchpad is not the folder you showed me: it was replaced. Pick it again to carry on.'
+    );
     expect(await list(page, '#personalAssistantFolderPlan')).toHaveLength(0);
     expect((await buttons(page))[0]).toBe('Pick it again');
 
     await press(page, 'Pick it again');
-    // Pick it again opens the assistant's attachment picker (the retired
-    // scan chooser is gone); the folder is attached anew and reviewed from the
-    // composer, then the card offers Review setup as before.
-    await expect(page.locator('#personalAssistantFolderChoices')).toBeVisible();
-    await pickChip(page, 'Downloads');
-    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
-    await chooseProject(page, 'scratchpad');
+    // Re-pick verifies the exact replacement, not its Downloads parent.
+    // A new identity needs a new review; it cannot reuse the old consent.
+    const chooser = page.locator('#personalAssistantContextChooser');
+    await expect(chooser).toBeVisible();
+    const repicked = page.waitForResponse(
+      response =>
+        response.request().method() === 'POST' &&
+        /\/api\/home-assistant\/folder-context\/select$/.test(response.url())
+    );
+    await chooser.locator('.folder-path-entry__input').fill(folders.scratchpad);
+    await chooser.getByRole('button', { name: 'Use this path', exact: true }).click();
+    const selected = await repicked;
+    expect(selected.ok(), await selected.text()).toBeTruthy();
+    const selection = await selected.json();
+    expect(selection.observation.folder).toBe('scratchpad');
+    expect(selection.hire_candidate).toBeTruthy();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).PersonalAssistantFolder.current()?.id))
+      .not.toBe(oldOfferID);
     await expect(card(page)).toBeVisible({ timeout: 30_000 });
     await expect(headline(page)).toContainText('scratchpad looks like');
     await review(page);
@@ -860,29 +881,23 @@ test.describe('after the server was restarted', () => {
 
     await comeBack(page);
     expect((await currentOffer(request))?.id).toBe(before.offer);
-    // The saved conversation's card says the held folder did not survive the
-    // restart (the conversation-bound review holds the folder in memory); the
-    // paused setup itself is saved, and shows again once the folder is picked.
-    await expect(question(page)).toContainText('the server was restarted');
-    const repick = card(page).getByRole('button', { name: 'Pick it again', exact: true });
-    await repick.focus();
-    await expect(repick).toBeFocused();
-    await expect(repick).toBeInViewport({ ratio: 1 });
+    // Canonical held-selection metadata now survives restart. An unchanged
+    // folder retains its review, unlike the replacement covered above. Merely
+    // restoring the conversation cannot accept setup or execute its assessment.
+    await expect(question(page)).toHaveText('Review the setup before anything is created.');
+    await expect(
+      card(page).getByRole('button', { name: 'Pick it again', exact: true })
+    ).toHaveCount(0);
+    expect((await currentOffer(request)).needs_pick).not.toBe(true);
+    expect(provider.calls).toHaveLength(0);
+    expect(hashes()).toEqual(before.hashes);
     if (process.env.ORI_VISUAL_EVIDENCE) {
       await page.screenshot({
-        path: `${process.env.ORI_VISUAL_EVIDENCE}/04-scripted-software-repick.png`
+        path: `${process.env.ORI_VISUAL_EVIDENCE}/04-scripted-software-restored-review.png`
       });
     }
-    // Picking the same folder again and reviewing the same project recovers
-    // the confirmed, paused setup; it never starts a second one.
-    await press(page, 'Pick it again');
-    await pickChip(page, 'Documents');
-    await chooseAttach(page, '#personalAssistantReviewFolderSetup');
-    await chooseProject(page, 'widget');
-    await expect(card(page)).toBeVisible({ timeout: 30_000 });
-    await review(page);
-    // No setup was accepted before restart. Fresh held evidence may issue a
-    // refreshed review identity; it must not create a workspace or task.
+    // No setup was accepted before restart; the durable review creates no
+    // workspace or task until the refreshed explicit confirmation below.
     const refreshed = await currentOffer(request);
     expect(refreshed.subject.name).toBe('widget');
     expect(refreshed.setup).toBeFalsy();
@@ -1109,7 +1124,7 @@ test.describe('after the server was restarted', () => {
     await expect(banner).toHaveAttribute('data-phase', 'done');
     await closeAssistantDrawer(page);
     await expect(banner.locator('.first-task-banner__text')).toContainText(
-      'It suggests one next task: Add a health check endpoint to the service.'
+      'It suggests one next ticket: Add a health check endpoint to the service.'
     );
     expect(await banner.locator('button, a').allInnerTexts()).toEqual([
       'Open the assessment',
