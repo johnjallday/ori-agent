@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -35,7 +36,9 @@ func TestInstalledCLIHelpProcess(t *testing.T) {
 			// The deadline must stop this process, not wait for its own exit.
 			time.Sleep(time.Minute)
 		case "failure":
-			fmt.Fprintln(os.Stderr, "fixture help failed")
+			if _, err := fmt.Fprintln(os.Stderr, "fixture help failed"); err != nil {
+				os.Exit(2)
+			}
 			os.Exit(3)
 		default:
 			os.Exit(2)
@@ -72,9 +75,13 @@ func TestInstalledCLIHelpUsesDisposableConfigurationWithoutCredentials(t *testin
 	if cmd.WaitDelay != time.Second {
 		t.Fatalf("unbounded pipe draining: WaitDelay = %v", cmd.WaitDelay)
 	}
-	output, err := cmd.CombinedOutput()
+	// The cover-instrumented test executable may warn on stderr when its
+	// subprocess has no GOCOVERDIR. Only stdout is the fixture's JSON protocol.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("fixture help: %v: %s", err, output)
+		t.Fatalf("fixture help: %v: %s", err, stderr.String())
 	}
 	var got struct {
 		Directory   string
