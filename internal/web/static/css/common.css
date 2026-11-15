@@ -946,18 +946,38 @@ h3,
   font-size: clamp(1.1rem, 2.5vw, 1.5rem);
 }
 
-/* Minimum touch target size (44x44px) */
-@media (max-width: 768px) {
+/* Size hit areas, not checkbox/radio artwork (nor range/color controls). */
+@media (max-width: 768px), (pointer: coarse) {
   button,
   .btn,
   .modern-btn,
   a.btn,
-  [role="button"],
-  input[type="checkbox"],
-  input[type="radio"],
-  .form-check-input {
+  [role="button"] {
     min-height: 44px;
     min-width: 44px;
+  }
+
+  /* Bootstrap's adjacent label and native wrapping labels both activate the
+     input. Do not style hidden .btn-check radios or enlarge the glyph. */
+  .form-check-label,
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]) {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .form-check:has(> .form-check-label) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .form-check:has(> .form-check-label) > .form-check-input {
+    flex-shrink: 0;
+    margin-top: 0;
   }
 
   /* Smaller buttons get padding to meet touch target */
@@ -965,7 +985,9 @@ h3,
   .modern-btn-sm {
     padding: 0.625rem 0.875rem;
   }
+}
 
+@media (max-width: 768px) {
   /* Chat input reduced height on mobile */
   #input,
   .chat-input {

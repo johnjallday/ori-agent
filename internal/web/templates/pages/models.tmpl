@@ -12,12 +12,12 @@
     <div class="main-content">
       <div class="container-fluid py-4">
   <!-- Header -->
-  <div class="d-flex justify-content-between align-items-center mb-4">
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
     <div>
       <h1 class="h3 mb-1">Available Models</h1>
       <p class="text-muted mb-0">Browse all AI models available across different providers</p>
     </div>
-    <div class="d-flex gap-2">
+    <div class="d-flex flex-wrap gap-2">
       <button id="autoCategorizeAllBtn" class="btn btn-outline-primary d-none" title="Auto-categorize all models with AI">
         <i class="bi bi-magic me-2"></i>Auto-Categorize
       </button>
@@ -273,6 +273,8 @@
 }
 
 .provider-header, .category-header {
+  flex-wrap: wrap;
+  gap: 0.75rem;
   background: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
@@ -362,6 +364,8 @@
 }
 
 .model-info {
+  min-width: 0;
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 1rem;
@@ -373,7 +377,9 @@
   font-weight: 500;
   color: var(--text-color);
   font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
-  min-width: 200px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .model-meta {
@@ -384,6 +390,8 @@
 }
 
 .model-tag {
+  max-width: 100%;
+  overflow-wrap: anywhere;
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   font-size: 0.75rem;
@@ -466,6 +474,9 @@
 }
 
 .provider-info, .category-info {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 0.5rem;

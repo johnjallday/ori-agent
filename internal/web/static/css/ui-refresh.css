@@ -73,8 +73,8 @@
   --bg-organic: #0d140d; /* charred — reserve for sparse "organic-cool" use */
 
   --text-primary: #c9ccd1;
-  --text-secondary: #8a8a8a;
-  --text-muted: #5c5c5e;
+  --text-secondary: #b3b6bd;
+  --text-muted: #a6a8af;
 
   --border-color: #383b43;
   --border-light: #5c5c5e;
@@ -3206,11 +3206,17 @@ body.settings-page .settings-content {
 }
 
 body.settings-page .settings-nav-search input {
-  border-color: rgba(92, 92, 94, 0.3);
-  background: rgba(245, 246, 247, 0.86);
+  border-color: var(--border-color);
+  background: var(--bg-primary);
+  color: var(--text-primary);
   border-radius: 999px;
   font-size: 0.82rem;
   letter-spacing: 0.02em;
+}
+
+body.settings-page .settings-nav-search input::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
 }
 
 body.settings-page .settings-nav-group-title {

@@ -95,8 +95,8 @@
   --bg-organic: #0d140d; /* charred — reserve for ~5–10% "organic-cool" surfaces */
 
   --text-primary: #c9ccd1;
-  --text-secondary: #8a8a8a;
-  --text-muted: #5c5c5e;
+  --text-secondary: #b3b6bd;
+  --text-muted: #a6a8af;
 
   --border-color: #383b43; /* slightly lighter so it reads against bg-tertiary */
   --border-light: #5c5c5e;
