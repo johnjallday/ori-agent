@@ -954,9 +954,13 @@ function syncPanelViewport() {
   }
 }
 
-function assistantAvatarMarkup(name, appearance) {
-  if (window.AgentAvatar?.markup) {
-    return window.AgentAvatar.markup({ name, appearance: appearance || {} }, { size: 40 });
+export function assistantAvatarMarkup(name, appearance, win = window) {
+  if (win.AgentAvatar?.markup) {
+    const characterId = appearance?.character?.catalog_id;
+    return win.AgentAvatar.markup(
+      { name, appearance: appearance || {}, character: win.CharacterCatalog?.get?.(characterId) },
+      { size: 40 }
+    );
   }
   return '<span class="agent-avatar agent-avatar--generated">P</span>';
 }
@@ -2421,6 +2425,10 @@ function init() {
   const panel = document.getElementById('personalAssistantPanel');
   const launcher = document.getElementById('personalAssistantLauncher');
   if (!panel || !launcher) return;
+  // Appearance already reaches the recipient; the shared renderer also needs
+  // the catalog entry. Repaint chrome only, without touching conversation/focus.
+  window.CharacterCatalog?.onChange?.(() => renderIdentity());
+  window.CharacterCatalog?.load?.();
   state.els = {
     root: document.getElementById('oriGuideRoot'),
     panel,

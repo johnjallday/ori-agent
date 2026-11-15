@@ -1,9 +1,14 @@
 package llm
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // These tests record the provider characterization performed against Codex CLI
@@ -36,7 +41,9 @@ func TestInstalledCLIsExposeCharacterizedNarrowFilesystemMechanisms(t *testing.T
 			if err != nil {
 				t.Skipf("%s is not installed", tc.binary)
 			}
-			output, err := exec.Command(path, tc.args...).CombinedOutput()
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			defer cancel()
+			output, err := runCLIHelpProbe(ctx, path, t.TempDir(), tc.args...)
 			if err != nil {
 				t.Fatalf("%s help: %v: %s", tc.binary, err, output)
 			}
@@ -47,6 +54,85 @@ func TestInstalledCLIsExposeCharacterizedNarrowFilesystemMechanisms(t *testing.T
 			}
 		})
 	}
+}
+
+// Help needs neither login nor user configuration. Keep installed-CLI probes
+// out of the developer's CLI home, and bound both the child and output-pipe wait.
+func runCLIHelpProbe(ctx context.Context, path, home string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Dir = home
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + home, "USERPROFILE=" + home,
+		"CODEX_HOME=" + home, "CLAUDE_CONFIG_DIR=" + home,
+		"XDG_CONFIG_HOME=" + home, "APPDATA=" + home, "LOCALAPPDATA=" + home,
+		"TMPDIR=" + home, "TEMP=" + home, "TMP=" + home,
+	}
+	for _, key := range []string{"SYSTEMROOT", "PATHEXT"} {
+		if value, ok := os.LookupEnv(key); ok {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
+	}
+	cmd.WaitDelay = 250 * time.Millisecond
+	output, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return output, fmt.Errorf("CLI help deadline: %w", ctx.Err())
+	}
+	return output, err
+}
+
+func TestCLIHelpProbeIsIsolatedAndBounded(t *testing.T) {
+	path, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ORI_CLI_HELP_ENV_SENTINEL", "must-not-reach-child")
+	for _, mode := range []string{"help", "hang"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+			defer cancel()
+			output, err := runCLIHelpProbe(ctx, path, t.TempDir(), "-test.run=^TestCLIHelpProbeProcess$", "-test.v", "--", mode)
+			if mode == "hang" {
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("hung probe did not expire: %v", err)
+				}
+				return
+			}
+			if err != nil || !strings.Contains(string(output), "isolated help") {
+				t.Fatalf("isolated probe: %v: %s", err, output)
+			}
+		})
+	}
+}
+
+func TestCLIHelpProbeProcess(t *testing.T) {
+	if len(os.Args) < 3 || os.Args[len(os.Args)-2] != "--" {
+		return
+	}
+	if os.Args[len(os.Args)-1] == "hang" {
+		time.Sleep(time.Minute)
+		return
+	}
+	for _, key := range []string{"ORI_CLI_HELP_ENV_SENTINEL", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"} {
+		if os.Getenv(key) != "" {
+			t.Fatalf("probe inherited %s", key)
+		}
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wd, err := os.Stat(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR"} {
+		dir, err := os.Stat(os.Getenv(key))
+		if err != nil || !os.SameFile(wd, dir) {
+			t.Fatalf("probe did not isolate %s", key)
+		}
+	}
+	t.Log("isolated help")
 }
 
 // This starts red by design: the pre-feature Claude native posture used

@@ -539,7 +539,7 @@ const AGENT_FACE_SIZE = 40;
 // source and role, the role's ring and emblem, and the character once the
 // catalog has it. Without the role catalog the ring is unknown, so the face
 // stays the fallback rather than a wrong one.
-function agentFace(agent, record, win) {
+export function agentFace(agent, record, win) {
   const roles = win?.RoleCatalog;
   if (!record || !roles?.isLoaded?.()) return { name: agent.name, source: 'user', appearance: {} };
   const role = String(record.role || '');

@@ -38,6 +38,19 @@ an explicit unknown/unavailable state and an existing retry/repair destination.
 A rendered zero must come from a successful canonical read. An idle agent's
 **Ready to help** is not proof that a workspace has no queued work.
 
+## Home workspace panel
+
+Select a workspace on Home's map to open its context panel. **Team** shows the
+commander once, first with a text **Commander** badge, then the other agents.
+Chosen characters and uploaded images retain their saved appearance; generated
+agents keep the map's resident portrait. While agent records load, names remain
+visible in stable empty slots. Unknown agent data is not presented as an empty team.
+
+On a group's own **Map** tab, agent units use the shared avatar for all modes,
+including the initials-based Generated avatar, rather than substituting a resident.
+Chosen characters and workspace-scoped uploads remain authoritative. This does not
+assign a character or change any saved appearance.
+
 ## State and history
 
 - Tickets retains `?ticket=<stable-id>` and `?tickets=<state[,state]>`, not a new

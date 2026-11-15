@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   personalHandoffStatus,
+  assistantAvatarMarkup,
   EXPLORE_FOLDER_URL,
   LEGACY_ASSISTANT_HANDOFF_KEY,
   readLegacyAssistantHandoff,
@@ -49,6 +50,24 @@ import {
   suggestedReplyDraft
 } from './personal-assistant-panel.js';
 import { resolveRecipient } from './personal-assistant-recipient.js';
+
+test('drawer gives the saved character to the shared avatar renderer', () => {
+  const appearance = { mode: 'character', character: { catalog_id: 'project-coordinator' } };
+  const character = { id: 'project-coordinator', assets: { portrait: '/characters/portrait.svg' } };
+  let input;
+  const win = {
+    CharacterCatalog: { get: id => (id === character.id ? character : null) },
+    AgentAvatar: { markup: value => ((input = value), '<portrait>') }
+  };
+  assert.equal(assistantAvatarMarkup('Albums Manager', appearance, win), '<portrait>');
+  assert.equal(input.appearance, appearance);
+  assert.equal(input.character, character);
+  assistantAvatarMarkup('Generated', { mode: 'generated' }, win);
+  assert.equal(input.character, null);
+  const source = readFileSync(new URL('./personal-assistant-panel.js', import.meta.url), 'utf8');
+  assert.match(source, /CharacterCatalog\?\.onChange\?\.\(\(\) => renderIdentity\(\)\)/);
+  assert.match(source, /CharacterCatalog\?\.load\?\.\(\)/);
+});
 
 const workspacePage = {
   surface: 'workspace_detail',

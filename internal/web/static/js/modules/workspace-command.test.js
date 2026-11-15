@@ -8011,6 +8011,32 @@ test('a group’s agents stand on the map; only a state needing action docks a c
   assert.match(empty, /ws-cmd-map-command-post"><div class="ws-cmd-map-empty is-agent-empty">/);
 });
 
+test('group map units request canonical avatars without changing other Command portrait defaults', () => {
+  const view = detachmentCommandView('group', undefined, {
+    agents: ['Boss', 'Scout'],
+    entry: 'Boss'
+  });
+  const seen = [];
+  view.page.getAgentAvatarPresentation = (name, options) => {
+    seen.push({ name, options });
+    return { markup: className => `<span class="agent-avatar ${className}"></span>` };
+  };
+  const units = view.detachmentUnits();
+  assert.deepEqual(seen, [
+    { name: 'Boss', options: { useAgentAvatar: true } },
+    { name: 'Scout', options: { useAgentAvatar: true } }
+  ]);
+  assert.match(units[0].portraitHTML, /agent-avatar ws-cmd-character is-roster/);
+  assert.equal(units[0].commander, true);
+  assert.equal(units[0].status, 'Working');
+  assert.equal(units[1].commander, false);
+  assert.equal(units[1].working, false);
+  for (const variant of ['roster', 'stage']) {
+    view.agentCharacterHTML({ name: 'Boss', tone: 'idle' }, variant);
+    assert.equal(seen.at(-1).options, undefined);
+  }
+});
+
 test('an agent name too long for an anchor id falls back to a stable hashed key', () => {
   const longName = 'Agent ' + 'with a very long name '.repeat(20);
   const view = detachmentCommandView('group', undefined, { agents: [longName], entry: longName });

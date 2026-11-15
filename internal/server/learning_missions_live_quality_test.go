@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/learningmissions"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
@@ -428,11 +427,7 @@ func qualityPreferences(c qualityCase) learningmissions.PreferencesRequest {
 }
 func qualityServiceFixture(t *testing.T, c qualityCase) (*learningmissions.Service, *learningmissions.SQLiteStore) {
 	t.Helper()
-	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "quality.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := newFixtureDatabase(t)
 	for _, id := range []string{"quality-workspace", "missing-workspace"} {
 		if _, err := db.ExecContext(t.Context(), `INSERT INTO workspaces(id,name,created_at,updated_at) VALUES(?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`, id, c.Workspace); err != nil {
 			t.Fatal(err)
