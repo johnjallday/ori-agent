@@ -176,6 +176,21 @@ function mount(win, options = {}) {
 
 /* ---- the three-way choice (FR-27, FR-96) ---------------------------------- */
 
+test('a generated-or-character host can omit colours it cannot persist', () => {
+  const win = load();
+  const { host } = mount(win, {
+    mode: 'create',
+    allowedModes: ['generated', 'character'],
+    allowGeneratedColor: false
+  });
+  assert.ok(host.radio('generated'));
+  assert.ok(host.radio('character'));
+  assert.equal(host.radio('uploaded'), undefined);
+  assert.equal(host.get('appearance-color'), undefined);
+  assert.doesNotMatch(host.innerHTML, /type="color"/);
+  assert.match(mount(win).host.innerHTML, /type="color"/);
+});
+
 test('the editor renders one labelled radio group with all three sources', () => {
   const win = load();
   const { host } = mount(win);

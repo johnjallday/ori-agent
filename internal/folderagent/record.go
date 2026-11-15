@@ -282,6 +282,10 @@ type Record struct {
 	// HireFaces are canonical create-only appearances confirmed by hire name.
 	// They survive a stopped run; a new look clears them.
 	HireFaces map[string]*types.AgentAppearance `json:"hire_faces,omitempty"`
+	// HireEdits are confirmed create-only settings, keyed by host hire identity.
+	HireEdits map[string]HireEdit `json:"hire_edits,omitempty"`
+	// HireModels is the live, read-only model picker catalog; never persisted.
+	HireModels []HireModel `json:"-"`
 	// Failure is the plain sentence a failed look shows.
 	Failure string `json:"failure,omitempty"`
 

@@ -192,6 +192,7 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-assistant-setup-completion.js',
       'internal/web/static/js/modules/first-look-report.js',
       'internal/web/static/js/modules/folder-agent-card.js',
+      'internal/web/static/js/modules/folder-agent-hire-editor.js',
       'internal/web/static/js/modules/folder-agent-chat.js',
       'internal/web/static/js/modules/commander-balloon.js',
       'internal/web/static/js/modules/commander-speech.js',

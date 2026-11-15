@@ -54,6 +54,9 @@ function stubDocument() {
       addEventListener(type, fn) {
         node.listeners[type] = fn;
       },
+      removeEventListener(type, fn) {
+        if (node.listeners[type] === fn) delete node.listeners[type];
+      },
       append(...kids) {
         kids.forEach(kid => {
           kid.parentElement = node;
@@ -3886,9 +3889,13 @@ test('several hires keep their order; a missing job, model or note leaves its pa
     'Your existing Library Manager stays as it is.'
   );
   assert.equal(rows[0].querySelector('.folder-agent-card__hire-note'), null);
-  // The host gives every hire the same model; it is said once in the head.
+  // Different effective models (including unset) must not be called shared.
   assert.equal(block.querySelectorAll('.folder-agent-card__hire-model').length, 1);
-  assert.equal(text(block, '.folder-agent-card__hire-model'), MODEL);
+  assert.equal(text(block, '.folder-agent-card__hire-model'), 'Models chosen per agent');
+  assert.deepEqual(
+    rows.map(row => text(row, '.folder-agent-card__hire-row-model')),
+    [MODEL, MODEL, 'No model yet']
+  );
   const unset = hiresBlock(
     hiresCard([hire('Manager', { model: '' }), hire('Assistant', { model: '' })])
   );
@@ -4512,6 +4519,234 @@ test('a plan that changed after it was shown is redrawn on the owner’s own cho
   assert.equal(calls.length, 1);
   assert.equal(result.error, 'Answer the question first.');
   assert.equal(folderAgentReportView(result.view).plan.digest, `swap-${GROUP}`);
+});
+
+test('a changed-plan redraw reviews the same material draft and stable-key face', async () => {
+  const key = `${HOME}/home/manager`;
+  const raw = reported({
+    plan: {
+      ...homePlanOf(newHomeLines),
+      hires: [
+        hire('Aster', {
+          key,
+          role_id: 'manager',
+          character: 'builder',
+          provider: 'claude',
+          model_id: 'alternate'
+        })
+      ]
+    }
+  });
+  const view = folderAgentReportView(raw);
+  const choice = { name: 'Aster', provider: 'claude', model: 'alternate', step: HOME };
+  view.hireDrafts = new Map([[key, choice]]);
+  view.hireFaces = new Map([[key, { character: 'builder', step: HOME }]]);
+  const requests = [];
+  const result = await postFolderAgentAction(
+    view,
+    'set_up',
+    async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return requests.length === 1
+        ? {
+            ok: false,
+            json: async () => ({
+              error: 'Review the current plan.',
+              plan_changed: true,
+              folder_agent: raw
+            })
+          }
+        : {
+            ok: true,
+            json: async () => ({ plan: { ...raw.plan, digest: 'fresh-material-consent' } })
+          };
+    },
+    { selected: [HOME] }
+  );
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[1].hire_edits, requests[0].hire_edits);
+  assert.deepEqual(requests[1].hire_edits[key], {
+    name: 'Aster',
+    provider: 'claude',
+    model: 'alternate'
+  });
+  const next = folderAgentReportView(result.view);
+  assert.equal(next.hireDrafts, view.hireDrafts);
+  assert.equal(next.hireFaces, view.hireFaces);
+  assert.equal(next.plan.hires[0].key, key);
+  assert.equal(next.plan.hires[0].name, 'Aster');
+  assert.equal(next.plan.hires[0].character, 'builder');
+});
+
+function editableHireCard({ reject = false } = {}) {
+  const doc = stubDocument();
+  const win = faceWindow();
+  doc.defaultView = win;
+  const requests = [];
+  const mounts = [];
+  const appearances = [];
+  let input;
+  win.AgentCreateForm = {
+    mount(host, options) {
+      mounts.push(options);
+      input = doc.createElement('input');
+      input.value = options.values.name;
+      host.append(input);
+      return {
+        get: field => (field === 'name' ? input : null),
+        focus: () => {
+          doc.activeElement = input;
+        },
+        extract: () => ({
+          valid: true,
+          values: {
+            name: input.value,
+            provider: 'claude',
+            model: 'alternate',
+            role: 'forged',
+            systemPrompt: 'must not send',
+            reasoningEffort: 'max'
+          }
+        })
+      };
+    }
+  };
+  win.AgentAppearanceEditor = {
+    create(options) {
+      appearances.push(options);
+      return {
+        setAgentName() {},
+        destroy() {},
+        appearance: () => ({ mode: 'character', character: { catalog_id: 'builder' } })
+      };
+    }
+  };
+  const key = `${HOME}/home/manager`;
+  const rawPlan = {
+    ...homePlanOf(newHomeLines),
+    hires: [
+      hire('Manager', {
+        key,
+        role_id: 'manager',
+        provider: 'claude',
+        model_id: 'original',
+        character: 'analyst',
+        job: 'Plans the work.'
+      })
+    ],
+    hire_models: [{ provider: 'claude', model: 'alternate', label: 'Alternate' }]
+  };
+  const view = folderAgentReportView(
+    reported({ plan: rawPlan, model_sentence: '', tools_sentence: '' })
+  );
+  const actions = [];
+  const fetchImpl = async (url, init) => {
+    if (!init) return { ok: true, json: async () => [] };
+    requests.push([url, JSON.parse(init.body)]);
+    if (reject) return { ok: false, json: async () => ({ error: 'That name is taken.' }) };
+    const edit = JSON.parse(init.body).hire_edits[key];
+    return {
+      ok: true,
+      json: async () => ({
+        plan: {
+          ...rawPlan,
+          digest: 'reviewed-edit',
+          hires: [
+            {
+              ...rawPlan.hires[0],
+              name: edit.name,
+              model: 'alternate (claude)',
+              model_id: edit.model,
+              provider: edit.provider
+            }
+          ]
+        }
+      })
+    };
+  };
+  const card = renderFolderAgentReport(view, doc, {
+    fetchImpl,
+    onAction: (...args) => actions.push(args)
+  });
+  const trigger = card.querySelector('.folder-agent-card__hire-edit');
+  trigger.focus = () => {
+    doc.activeElement = trigger;
+  };
+  return {
+    doc,
+    card,
+    view,
+    key,
+    trigger,
+    requests,
+    mounts,
+    appearances,
+    actions,
+    name: () => input,
+    setUpButton: () =>
+      card.querySelectorAll('button').find(button => button.dataset.folderAgentAction === 'set_up')
+  };
+}
+
+for (const action of ['cancel', 'escape']) {
+  test(`planned-agent ${action} discards the shared form without a profile or plan write`, async () => {
+    const f = editableHireCard();
+    await f.trigger.listeners.click();
+    assert.equal(f.mounts[0].profile, 'template');
+    assert.deepEqual(f.mounts[0].omitFields, ['systemPrompt', 'reasoningEffort']);
+    assert.equal(f.appearances[0].mode, 'create');
+    assert.equal(f.appearances[0].allowGeneratedColor, false);
+    assert.deepEqual(f.appearances[0].allowedModes, ['generated', 'character']);
+    f.name().value = 'Discard me';
+    const editor = f.card.querySelector('.folder-agent-card__hire-editor');
+    assert.equal(f.setUpButton().disabled, true);
+    if (action === 'escape')
+      editor.listeners.keydown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+    else
+      editor
+        .querySelectorAll('button')
+        .find(button => button.textContent === 'Cancel')
+        .listeners.click();
+    assert.equal(f.requests.length, 0);
+    assert.equal(f.view.hireDrafts.size, 0);
+    assert.equal(f.view.plan.hires[0].name, 'Manager');
+    assert.equal(f.doc.activeElement, f.trigger);
+  });
+}
+
+test('saving a planned agent reviews material fields only and retains its stable face identity', async () => {
+  const f = editableHireCard();
+  await f.trigger.listeners.click();
+  f.name().value = 'Aster';
+  const editor = f.card.querySelector('.folder-agent-card__hire-editor');
+  await editor.listeners.submit({ preventDefault() {} });
+  assert.equal(f.requests.length, 1);
+  assert.ok(f.requests[0][0].endsWith('/plan'));
+  assert.deepEqual(f.requests[0][1].hire_edits, {
+    [f.key]: { name: 'Aster', provider: 'claude', model: 'alternate' }
+  });
+  assert.equal(f.view.plan.digest, 'reviewed-edit');
+  assert.equal(f.view.plan.hires[0].name, 'Aster');
+  assert.equal(f.view.plan.hires[0].character, 'builder');
+  assert.equal(f.view.hireFaces.get(f.key).character, 'builder');
+  const button = f.setUpButton();
+  assert.equal(button.disabled, false);
+  button.listeners.click();
+  assert.deepEqual(f.actions[0][2].hire_edits, f.requests[0][1].hire_edits);
+  assert.deepEqual(f.actions[0][2].hire_faces, { [f.key]: 'builder' });
+});
+
+test('a refused draft save keeps editing and does not change the reviewed team or face', async () => {
+  const f = editableHireCard({ reject: true });
+  await f.trigger.listeners.click();
+  f.name().value = 'Taken';
+  const editor = f.card.querySelector('.folder-agent-card__hire-editor');
+  await editor.listeners.submit({ preventDefault() {} });
+  assert.equal(f.view.hireDrafts.size, 0);
+  assert.equal(f.view.hireFaces.size, 0);
+  assert.equal(f.view.plan.hires[0].name, 'Manager');
+  assert.equal(text(editor, '.folder-agent-card__error'), 'That name is taken.');
+  assert.equal(f.setUpButton().disabled, true);
 });
 
 test('a card that cannot act lists the other way without a button to take it', () => {

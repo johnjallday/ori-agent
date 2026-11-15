@@ -166,6 +166,36 @@ func TestSetUp_HireFacesWireShape(t *testing.T) {
 	}
 }
 
+func TestHireEdits_WireAcceptsOnlyCreateSettings(t *testing.T) {
+	for _, action := range []string{"plan", "setup"} {
+		for _, extra := range []string{"", `,"role":"orchestrator"`, `,"system_prompt":"changed"`, `,"skills":["extra"]`, `,"path":"/tmp"`, `,"existing":"Saved"`} {
+			body := `{"selected":["home"],"hire_edits":{"home/home/manager":{"name":"Aster","provider":"claude","model":"chosen"` + extra + `}}}`
+			if action == "setup" {
+				body = strings.TrimSuffix(body, "}") + `,"plan_digest":"d"}`
+			}
+			req := httptest.NewRequest(http.MethodPost, "/folder-agent/ws/"+action, strings.NewReader(body))
+			req.SetPathValue("workspaceID", "ws")
+			rec := httptest.NewRecorder()
+			if action == "plan" {
+				handler().Plan(rec, req)
+			} else {
+				handler().SetUp(rec, req)
+			}
+			want := http.StatusBadRequest
+			if extra == "" {
+				want = http.StatusServiceUnavailable
+			}
+			if rec.Code != want {
+				t.Fatalf("%s %s: %d %s", action, body, rec.Code, rec.Body.String())
+			}
+		}
+	}
+	input := setUpRequest{HireEdits: map[string]folderagent.HireEdit{"home/home/manager": {Name: "Aster", Provider: "claude", Model: "chosen"}}}
+	if setUpOf(input).HireEdits["home/home/manager"].Name != "Aster" {
+		t.Fatal("lost material choices in HTTP mapping")
+	}
+}
+
 func TestWriteError_PlainSentences(t *testing.T) {
 	cases := []struct {
 		err    error

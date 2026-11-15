@@ -243,9 +243,10 @@ func (h *Handler) LookFurther(w http.ResponseWriter, r *http.Request) {
 }
 
 type setUpRequest struct {
-	PlanDigest string            `json:"plan_digest"`
-	Selected   []string          `json:"selected"`
-	HireFaces  map[string]string `json:"hire_faces"`
+	PlanDigest string                          `json:"plan_digest"`
+	Selected   []string                        `json:"selected"`
+	HireFaces  map[string]string               `json:"hire_faces"`
+	HireEdits  map[string]folderagent.HireEdit `json:"hire_edits"`
 	// UseGoal and Goal are what an older card sent with Set it up. They are
 	// accepted and ignored: Set it up writes no goal; the goal is offered
 	// once the run is done (Goal).
@@ -286,7 +287,7 @@ func (h *Handler) SetUp(w http.ResponseWriter, r *http.Request) {
 }
 
 func setUpOf(req setUpRequest) folderagent.SetUpRequest {
-	return folderagent.SetUpRequest{PlanDigest: req.PlanDigest, Selected: req.Selected, HireFaces: req.HireFaces}
+	return folderagent.SetUpRequest{PlanDigest: req.PlanDigest, Selected: req.Selected, HireFaces: req.HireFaces, HireEdits: req.HireEdits}
 }
 
 type premiseRequest struct {
@@ -390,7 +391,8 @@ func (h *Handler) Songs(w http.ResponseWriter, r *http.Request) {
 }
 
 type planRequest struct {
-	Selected []string `json:"selected"`
+	Selected  []string                        `json:"selected"`
+	HireEdits map[string]folderagent.HireEdit `json:"hire_edits"`
 }
 
 // Plan returns the plan card for the optional candidates the owner left
@@ -407,7 +409,7 @@ func (h *Handler) Plan(w http.ResponseWriter, r *http.Request) {
 	if req.Selected == nil {
 		req.Selected = []string{}
 	}
-	plan, err := h.service.Plan(userID, r.PathValue("workspaceID"), req.Selected)
+	plan, err := h.service.PlanWithHires(r.Context(), userID, r.PathValue("workspaceID"), req.Selected, req.HireEdits)
 	if err != nil {
 		writeError(w, err)
 		return

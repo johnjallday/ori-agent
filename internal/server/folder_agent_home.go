@@ -182,7 +182,8 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 
 	// The roles the Home still lacks, each on its own line ("Hires <role>"),
 	// or on the one "Fills the Home's roles" line, named as each is hired.
-	staffing := portfolioHomeStaffing{builder: b, faces: rec.HireFaces}
+	roleEdits, assistantEdit := folderAgentHireEdits(rec, home)
+	staffing := portfolioHomeStaffing{builder: b, faces: rec.HireFaces, edits: roleEdits}
 	missing, err := staffing.Missing(ctx, homeID)
 	if err != nil {
 		setLine(first(append(hireLines, rootLine)...), personalassistant.FolderLineFailed, "")
@@ -191,6 +192,10 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	// The shared assistant the card named: hired after the Home's own roles,
 	// only when the plan has its line (the press approved exactly that).
 	assistant := b.folderAgentHomeAssistant(homeID, line(folderagent.FolderPlanAssistant))
+	assistant.edit = assistantEdit
+	if assistantEdit != nil && assistant.creates() {
+		assistant.plan.Name = assistantEdit.value.Name
+	}
 	// A retry can find a shared assistant already recorded under its actual
 	// name. Its live line resolves that profile's face, not an old suggestion.
 	if assistant.plan.Name != "" {
@@ -200,7 +205,16 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 			}
 		}
 	}
-	if (len(missing) > 0 || assistant.creates()) && !staffing.ModelReady(ctx) {
+	modelsReady := true
+	for _, role := range missing {
+		modelsReady = modelsReady && staffing.modelReadyFor(role.RoleID)
+	}
+	assistantModelReady := staffing.ModelReady(ctx)
+	if assistantEdit != nil {
+		edit := assistantEdit.value
+		assistantModelReady = edit.Provider != "" && edit.Model != "" && b.validateModel(edit.Provider, edit.Model) == nil
+	}
+	if !modelsReady || (assistant.creates() && !assistantModelReady) {
 		setLine(first(append(append(hireLines, assistant.line), rootLine)...), personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopNeedsModel, errors.New("the Home's agents need a model"))
 	}
@@ -218,7 +232,7 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	// still added and listed; the run then ends stopped so Set up again retries.
 	var assistantStop *homeStageStop
 	if assistant.line != "" {
-		name, stopped := b.hireFolderAgentAssistant(ctx, rec, assistant, staffing.ModelReady(ctx), setLine)
+		name, stopped := b.hireFolderAgentAssistant(ctx, rec, assistant, assistantModelReady, setLine)
 		if name != "" {
 			receipt.hired = append(receipt.hired, name)
 		}
@@ -417,7 +431,7 @@ func homeFactHires(hires []homeHire) ([]string, []folderlook.HomeHire) {
 	names := make([]string, 0, len(hires))
 	out := make([]folderlook.HomeHire, 0, len(hires))
 	for _, hire := range hires {
-		entry := folderlook.HomeHire{Name: hire.Name, Job: hire.Description}
+		entry := folderlook.HomeHire{RoleID: hire.RoleID, Name: hire.Name, Job: hire.Description}
 		if hire.Base != "" && !strings.EqualFold(hire.Base, hire.Name) {
 			entry.Taken = hire.Base
 		}

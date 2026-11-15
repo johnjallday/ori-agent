@@ -4521,11 +4521,13 @@ button.folder-agent-card__who-face:focus-visible {
 }
 
 .folder-agent-card__hire {
-  grid-template-columns: 40px minmax(0, 1fr);
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   grid-template-areas:
-    "face name"
-    "face job"
-    "face note";
+    "face name edit"
+    "face job job"
+    "face model model"
+    "face note note"
+    "editor editor editor";
   column-gap: 10px;
   align-items: baseline;
 }
@@ -4577,6 +4579,60 @@ button.folder-agent-card__hire-face:focus-visible {
 
 .folder-agent-card__hire-note {
   grid-area: note;
+}
+
+.folder-agent-card__hire-row-model {
+  grid-area: model;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__hire-edit {
+  grid-area: edit;
+  align-self: start;
+  padding: 2px 0 2px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.folder-agent-card__hire-edit:focus-visible,
+.folder-agent-card__agent-edit-link:focus-visible {
+  outline: 2px solid var(--hc-ink, var(--cozy-ink));
+  outline-offset: 3px;
+}
+
+.folder-agent-card__hire-editor {
+  grid-area: editor;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hc-line, var(--cozy-line));
+}
+
+.folder-agent-card__hire-editor[hidden] {
+  display: none;
+}
+
+.folder-agent-card__hire-editor h5,
+.folder-agent-card__draft-note {
+  margin: 0;
+}
+
+.folder-agent-card__draft-note,
+.folder-agent-card__agent-edit-link {
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__agent-edit-link {
+  margin-inline-start: 6px;
 }
 
 /* Use the drawer Send button's filled-action token, not Bootstrap blue or

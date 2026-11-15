@@ -226,8 +226,8 @@ func TestFolderAgentHomeFacts_AnExistingHomeReadsItsOwnDeclaration(t *testing.T)
 		t.Fatalf("facts = %+v ok=%v", facts, ok)
 	}
 	want := []folderlook.HomeHire{
-		{Name: "Portfolio Manager", Job: "Plans the work."},
-		{Name: "Second Role", Job: "Keeps things."},
+		{RoleID: "lead", Name: "Portfolio Manager", Job: "Plans the work."},
+		{RoleID: "second", Name: "Second Role", Job: "Keeps things."},
 	}
 	if !reflect.DeepEqual(facts.Hires, want) || !reflect.DeepEqual(facts.MissingRoles, []string{"Portfolio Manager", "Second Role"}) {
 		t.Fatalf("hires = %+v roles = %v", facts.Hires, facts.MissingRoles)

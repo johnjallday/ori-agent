@@ -235,6 +235,9 @@
     }
 
     function generatedControls() {
+      // Some create contracts accept only generated-or-character, not a
+      // custom colour. Never offer a choice that host cannot round-trip.
+      if (opts.allowGeneratedColor === false) return '';
       var color = (state.staged.generated && state.staged.generated.color) || '';
       var swatch = color || opts.defaultColor || '#4f46e5';
       return (

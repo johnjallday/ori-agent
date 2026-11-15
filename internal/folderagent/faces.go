@@ -17,7 +17,10 @@ func confirmedHireFaces(rec Record, hires []HireEntry, chosen map[string]string)
 	}
 	faces := make(map[string]*types.AgentAppearance, len(hires))
 	for _, hire := range hires {
-		id, supplied := chosen[hire.Name]
+		id, supplied := chosen[hire.Identity()]
+		if !supplied {
+			id, supplied = chosen[hire.Name] // compatibility with name-keyed clients
+		}
 		if !supplied {
 			// An older client omits faces. Keep a retry's saved choice, but do
 			// not silently opt a first confirmation into a suggested character.
@@ -56,8 +59,10 @@ func applyHireFaces(plan *Plan, faces map[string]*types.AgentAppearance) {
 }
 
 // Execution equivalence retains every structural and authority check, ignoring
-// only faces. Roster usage can change while a multi-step run hires its agents.
+// faces and picker inventory. Roster usage and available options can change
+// while a multi-step run hires its agents; confirmed settings cannot.
 func withoutHireFaces(plan Plan) Plan {
+	plan.HireModels = nil
 	plan.Hires = append([]HireEntry(nil), plan.Hires...)
 	for i := range plan.Hires {
 		plan.Hires[i].Character = ""

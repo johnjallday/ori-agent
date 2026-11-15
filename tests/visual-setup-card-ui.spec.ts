@@ -9,6 +9,10 @@ const step = 'music-production-home';
 const hires = [
   {
     step,
+    key: `${step}/home/portfolio-manager`,
+    role_id: 'portfolio-manager',
+    provider: 'claude',
+    model_id: 'claude-sonnet-4-6',
     name: 'Portfolio Manager',
     character: 'automation-specialist',
     model: 'claude-sonnet-4-6 (claude)',
@@ -16,6 +20,10 @@ const hires = [
   },
   {
     step,
+    key: `${step}/assistant/reaper-assistant`,
+    role_id: 'reaper-assistant',
+    provider: 'claude',
+    model_id: 'claude-sonnet-4-6',
     name: 'REAPER Assistant',
     character: 'decision-strategist',
     model: 'claude-sonnet-4-6 (claude)',
@@ -67,6 +75,10 @@ const plan = {
     }
   ],
   hires,
+  hire_models: [
+    { provider: 'claude', model: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', default: true },
+    { provider: 'claude', model: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' }
+  ],
   lines,
   assurance: 'Nothing in Albums is moved, copied or read.',
   alternatives: [
@@ -194,6 +206,12 @@ for (const phase of ['running', 'done']) {
         'data-aa-character',
         'automation-specialist'
       );
+      const edit = existing.getByRole('link', {
+        name: 'Edit REAPER Assistant (opens in a new tab)'
+      });
+      await expect(edit).toHaveAttribute('href', '/agents/REAPER%20Assistant');
+      await expect(edit).toHaveAttribute('target', '_blank');
+      await expect(edit).toHaveAttribute('title', /Shared edits require confirmation/);
       await action.scrollIntoViewIfNeeded();
     } else {
       const receipt = card.locator('.folder-agent-card__receipt-row[data-kind="hired"]');
@@ -206,9 +224,116 @@ for (const phase of ['running', 'done']) {
         'data-aa-character',
         'automation-specialist'
       );
+      await expect(receipt.locator('.folder-agent-card__agent-edit-link')).toHaveCount(2);
+      await expect(
+        receipt.getByRole('link', { name: 'Edit Portfolio Manager (opens in a new tab)' })
+      ).toHaveAttribute('href', '/agents/Portfolio%20Manager');
       await receipt.scrollIntoViewIfNeeded();
     }
     await page.screenshot({ path: `${evidence}/group-4/${phase}.png` });
+  });
+}
+
+for (const theme of ['light', 'dark']) {
+  test(`planned-agent editor stays a draft in the real ${theme} drawer`, async ({
+    page,
+    request
+  }) => {
+    await request.post('/api/onboarding/skip');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.addInitScript(theme => {
+      localStorage.setItem('ori-theme', theme);
+      localStorage.setItem('ori.assistant.drawer.width', '560');
+    }, theme);
+    const previews: any[] = [];
+    const profileWrites: string[] = [];
+    await page.route('**/folder-agent/visual-fixture/plan', async route => {
+      const body = route.request().postDataJSON();
+      previews.push(body);
+      const edit = body.hire_edits[hires[0].key];
+      await route.fulfill({
+        json: {
+          plan: {
+            ...plan,
+            digest: 'reviewed-name-model-draft',
+            hires: plan.hires.map((hire, i) =>
+              i
+                ? hire
+                : {
+                    ...hire,
+                    name: edit.name,
+                    model: `${edit.model} (${edit.provider})`,
+                    provider: edit.provider,
+                    model_id: edit.model
+                  }
+            ),
+            lines: plan.lines.map(line =>
+              line.agent_name === hires[0].name
+                ? { ...line, name: `Hires ${edit.name}`, agent_name: edit.name }
+                : line
+            )
+          }
+        }
+      });
+    });
+    const card = await mount(page);
+    page.on('request', req => {
+      if (/\/api\/agents(?:\/|\?|$)/.test(req.url()) && !['GET', 'HEAD'].includes(req.method()))
+        profileWrites.push(`${req.method()} ${new URL(req.url()).pathname}`);
+    });
+    const edit = card.getByRole('button', {
+      name: 'Edit planned agent Portfolio Manager',
+      exact: true
+    });
+    const setup = card.getByRole('button', { name: 'Install plugins & set up', exact: true });
+    await edit.click();
+    let editor = card.getByRole('form', { name: 'Edit planned agent Portfolio Manager' });
+    await expect(editor).toBeVisible();
+    await expect(setup).toBeDisabled();
+    await expect(editor.locator('[data-agent-create-field="name"]')).toBeFocused();
+    await expect(
+      editor.locator(
+        '[data-agent-create-field="role"], [data-agent-create-field="systemPrompt"], [data-agent-create-field="reasoningEffort"], input[type="file"], input[type="color"]'
+      )
+    ).toHaveCount(0);
+    await editor.locator('[data-agent-create-field="name"]').fill('Discard me');
+    await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(edit).toBeFocused();
+    await expect(card.locator('.folder-agent-card__hire-name').first()).toHaveText(
+      'Portfolio Manager'
+    );
+    expect(previews).toHaveLength(0);
+    await edit.click();
+    editor = card.getByRole('form', { name: 'Edit planned agent Portfolio Manager' });
+    await editor.locator('[data-agent-create-field="name"]').fill('Aster');
+    await editor
+      .locator('[data-agent-create-field="model"]')
+      .selectOption('claude-haiku-4-5-20251001');
+    await editor.getByRole('radio', { name: /^Generated/ }).check();
+    await editor.getByRole('button', { name: 'Save draft', exact: true }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(card.locator('.folder-agent-card__hire-name').first()).toHaveText('Aster');
+    await expect(
+      card.getByRole('button', { name: 'Edit planned agent Aster', exact: true })
+    ).toBeFocused();
+    await expect(card.locator('.folder-agent-card__hire-model')).toHaveText(
+      'Models chosen per agent'
+    );
+    await expect(card.locator('.folder-agent-card__hire-row-model').first()).toHaveText(
+      'claude-haiku-4-5-20251001 (claude)'
+    );
+    await expect(
+      card.locator('.folder-agent-card__hire-face').first().locator('[data-aa-character]')
+    ).toHaveCount(0);
+    await expect(setup).toBeEnabled();
+    expect(previews).toHaveLength(1);
+    expect(previews[0].hire_edits).toEqual({
+      [hires[0].key]: { name: 'Aster', provider: 'claude', model: 'claude-haiku-4-5-20251001' }
+    });
+    expect(profileWrites).toEqual([]);
+    expect(await card.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    mkdirSync(`${evidence}/group-7`, { recursive: true, mode: 0o750 });
+    await card.screenshot({ path: `${evidence}/group-7/${theme}-edited-draft.png` });
   });
 }
 

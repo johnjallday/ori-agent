@@ -4,6 +4,7 @@
 // sends a path. Words come from the server's view (facts line, stage line,
 // tools); this module only lays them out.
 
+import { renderHireDraftEditor } from './folder-agent-hire-editor.js';
 import { publishFolderAgentChat } from './folder-agent-chat.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 
@@ -254,6 +255,7 @@ export function folderAgentReportView(view) {
   // A refused confirmation redraws from a fresh server view, but its pending
   // picks still belong to this card. Keep the same by-name choice state.
   if (view.hireFaces instanceof Map) out.hireFaces = view.hireFaces;
+  if (view.hireDrafts instanceof Map) out.hireDrafts = view.hireDrafts;
   if (out.state === 'looking') {
     out.title = `${agent} is looking around ${folder}`;
     out.receipt = String(view.receipt || 'Looking around…');
@@ -385,6 +387,19 @@ export function folderAgentReceiptRows(view) {
   return rows;
 }
 
+function agentEditorLink(doc, name) {
+  const link = el(doc, 'a', 'folder-agent-card__agent-edit-link', 'Edit agent');
+  link.href = `/agents/${encodeURIComponent(name)}`;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.setAttribute('aria-label', `Edit ${name} (opens in a new tab)`);
+  link.setAttribute(
+    'title',
+    'Profile edits apply wherever this agent is used. Shared edits require confirmation.'
+  );
+  return link;
+}
+
 // renderReceipt draws the receipt rows as a list of label, words and link.
 function renderReceipt(doc, rows, view, agentRecords) {
   const list = el(doc, 'dl', 'folder-agent-card__receipt-rows');
@@ -397,7 +412,8 @@ function renderReceipt(doc, rows, view, agentRecords) {
         const agent = el(doc, 'span', 'folder-agent-card__receipt-agent');
         agent.append(
           renderHiredFace(doc, name, '', agentRecords, true),
-          el(doc, 'span', 'folder-agent-card__receipt-agent-name', name)
+          el(doc, 'span', 'folder-agent-card__receipt-agent-name', name),
+          agentEditorLink(doc, name)
         );
         words.append(agent);
       });
@@ -1193,6 +1209,13 @@ function renderAction(doc, action, now, faceForAction = null) {
         : action.name
     )
   );
+  if (
+    state === 'done' &&
+    action.progress &&
+    action.agentName &&
+    ['hire', 'assistant'].includes(action.kind)
+  )
+    act.append(agentEditorLink(doc, action.agentName));
   if (!receipt && action.progress && (state === 'working' || state === 'failed'))
     act.append(el(doc, 'span', 'folder-agent-card__action-progress', action.progress));
   const time = actionTime(doc, action, now);
@@ -1294,7 +1317,15 @@ function renderPlan(
   plan,
   lines,
   phase,
-  { selecting = false, onTick, onPickFace, agentRecords, now = Date.now(), headFirst = false } = {}
+  {
+    selecting = false,
+    onTick,
+    onPickFace,
+    onEditHire,
+    agentRecords,
+    now = Date.now(),
+    headFirst = false
+  } = {}
 ) {
   const section = el(doc, 'section', 'folder-agent-card__run');
   section.dataset.phase = phase;
@@ -1562,7 +1593,13 @@ function renderPlan(
   // Before confirmation the team leads the plugins. Run/receipt ordering is
   // unchanged: the run's own lines say who was hired.
   if (phase === 'plan') {
-    const hires = renderHires(doc, plan?.hires || [], plan?.hiresNote || '', onPickFace);
+    const hires = renderHires(
+      doc,
+      plan?.hires || [],
+      plan?.hiresNote || '',
+      onPickFace,
+      onEditHire
+    );
     if (hires) section.append(hires);
   }
   if (installs.length) section.append(renderInstalls(doc, installs, lines, phase));
@@ -1693,7 +1730,7 @@ function renderInstalls(doc, installs, lines, phase) {
 // hire it says so in one sentence instead of rows; it draws nothing when
 // nobody is hired. The children are divs on purpose: the Home drawer restyles
 // the spans directly inside any list item.
-function renderHires(doc, hires, note, onPickFace) {
+function renderHires(doc, hires, note, onPickFace, onEditHire) {
   if (!hires.length && !note) return null;
   const block = el(doc, 'section', 'folder-agent-card__hires');
   if (!hires.length) {
@@ -1702,13 +1739,14 @@ function renderHires(doc, hires, note, onPickFace) {
   }
   const n = hires.length;
   const head = el(doc, 'div', 'folder-agent-card__hires-head');
+  const commonModel = hires.every(entry => entry.model === hires[0].model);
   head.append(
     el(doc, 'h4', 'folder-agent-card__heading', `Hires ${n} ${plural(n, 'agent', 'agents')}`),
     el(
       doc,
       'span',
       'folder-agent-card__install-version folder-agent-card__hire-model',
-      hires[0].model || NO_MODEL_YET
+      commonModel ? hires[0].model || NO_MODEL_YET : 'Models chosen per agent'
     )
   );
   const agents = el(doc, 'a', 'folder-agent-card__install-link', 'Agents');
@@ -1747,10 +1785,20 @@ function renderHires(doc, hires, note, onPickFace) {
       item.append(
         el(doc, 'div', 'folder-agent-card__line-detail folder-agent-card__hire-job', entry.job)
       );
+    if (!commonModel)
+      item.append(el(doc, 'div', 'folder-agent-card__hire-row-model', entry.model || NO_MODEL_YET));
     if (entry.note)
       item.append(
         el(doc, 'div', 'folder-agent-card__line-detail folder-agent-card__hire-note', entry.note)
       );
+    if (onEditHire && entry.key && entry.roleID) {
+      const edit = el(doc, 'button', 'folder-agent-card__hire-edit', 'Edit agent');
+      edit.type = 'button';
+      edit.dataset.hireEdit = entry.key;
+      edit.setAttribute('aria-label', `Edit planned agent ${entry.name}`);
+      edit.addEventListener('click', () => onEditHire(entry, edit, item));
+      item.append(edit);
+    }
     list.append(item);
   });
   block.append(list);
@@ -2142,6 +2190,20 @@ function renderProjectHolders(doc, view, fetchImpl) {
   return section;
 }
 
+function hireDraftPayload(drafts, selected) {
+  if (!(drafts instanceof Map)) return {};
+  const active = new Set(selected || []);
+  const edits = Object.fromEntries(
+    [...drafts]
+      .filter(([, choice]) => active.has(choice.step))
+      .map(([key, choice]) => [
+        key,
+        { name: choice.name, provider: choice.provider, model: choice.model }
+      ])
+  );
+  return Object.keys(edits).length ? { hire_edits: edits } : {};
+}
+
 export function renderFolderAgentReport(
   view,
   doc = document,
@@ -2174,16 +2236,19 @@ export function renderFolderAgentReport(
   // Keep only user picks, not server suggestions. A temporary untick keeps a
   // step's picks; a renamed/removed hire discards them once that step returns.
   const faces = view.hireFaces instanceof Map ? view.hireFaces : new Map();
+  const drafts = view.hireDrafts instanceof Map ? view.hireDrafts : new Map();
   view.hireFaces = faces;
+  view.hireDrafts = drafts;
   const applyFaces = plan => {
     const offered = new Map((plan?.steps || []).map(step => [step.handle, step]));
     for (const [name, choice] of faces) {
       const step = offered.get(choice.step);
-      if (!step || (step.chosen && !plan.hires.some(entry => entry.name === name)))
+      if (!step || (step.chosen && !plan.hires.some(entry => (entry.key || entry.name) === name)))
         faces.delete(name);
     }
     (plan?.hires || []).forEach(entry => {
-      if (faces.has(entry.name)) entry.character = faces.get(entry.name).character;
+      const key = entry.key || entry.name;
+      if (faces.has(key)) entry.character = faces.get(key).character;
     });
   };
   applyFaces(view.plan);
@@ -2220,13 +2285,103 @@ export function renderFolderAgentReport(
             if (card.isConnected === false || trigger.isConnected === false) return;
             if (answer?.action === 'choose' || answer?.action === 'skip') {
               entry.character = answer.action === 'choose' ? String(answer.catalogId || '') : '';
-              faces.set(entry.name, { character: entry.character, step: entry.step });
+              faces.set(entry.key || entry.name, { character: entry.character, step: entry.step });
               draw();
             }
           } finally {
             doc.removeEventListener?.('focusin', pickerFocus, true);
             picking = false;
             if (trigger.isConnected !== false) trigger.focus?.({ preventScroll: true });
+          }
+        }
+      : null;
+  let editing = false;
+  const onEditHire =
+    selecting && win?.AgentCreateForm?.mount && win?.AgentAppearanceEditor?.create
+      ? async (entry, trigger, item) => {
+          if (editing || picking) return;
+          editing = true;
+          ++planRequest;
+          const suspended = ['button', 'input', 'select'].flatMap(tag =>
+            Array.from(card.querySelectorAll(tag)).map(control => {
+              const disabled = control.disabled;
+              control.disabled = true;
+              return [control, disabled];
+            })
+          );
+          let editor = null;
+          const close = (focus = true) => {
+            editor?.destroy();
+            if (editor) {
+              editor.element.hidden = true;
+              editor.element.remove?.();
+            }
+            suspended.forEach(([control, disabled]) => {
+              control.disabled = disabled;
+            });
+            editing = false;
+            if (focus && trigger.isConnected !== false) trigger.focus?.({ preventScroll: true });
+          };
+          try {
+            const records = await agentRecords();
+            if (card.isConnected === false || trigger.isConnected === false) return close(false);
+            const taken = [...(records?.values() || [])]
+              .filter(record => record.appearance?.mode === 'character')
+              .map(record => record.appearance.character?.catalog_id)
+              .filter(Boolean);
+            (view.plan?.hires || []).forEach(other => {
+              if ((other.key || other.name) !== entry.key && other.character)
+                taken.push(other.character);
+            });
+            editor = renderHireDraftEditor(doc, {
+              entry,
+              models: view.plan.hireModels,
+              taken: [...new Set(taken)],
+              onCancel: close,
+              onSave: async (choice, character) => {
+                const pending = new Map(drafts);
+                pending.set(entry.key, { ...choice, step: entry.step });
+                const { ok, payload } = await post(
+                  `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(view.workspaceID)}/plan`,
+                  { selected: [...selected], ...hireDraftPayload(pending, [...selected]) },
+                  fetchImpl
+                );
+                if (!ok || !payload?.plan)
+                  throw new Error(String(payload?.error || 'The draft could not be reviewed.'));
+                if (card.isConnected === false || editor.element.isConnected === false)
+                  return close(false);
+                const plan = planView(payload.plan);
+                const saved = plan.hires.find(hire => hire.key === entry.key);
+                if (!saved)
+                  throw new Error(
+                    'That role is no longer planned. Cancel and review the current team.'
+                  );
+                drafts.set(entry.key, {
+                  name: saved.name,
+                  provider: saved.provider,
+                  model: saved.modelID,
+                  step: entry.step
+                });
+                faces.set(entry.key, { character, step: entry.step });
+                close(false);
+                acceptPlan(plan);
+                Array.from(planHost?.querySelectorAll('button') || [])
+                  .find(button => button.dataset.hireEdit === entry.key)
+                  ?.focus?.({ preventScroll: true });
+              }
+            });
+            item.append(editor.element);
+            editor.focus();
+          } catch (failure) {
+            close();
+            const message = el(
+              doc,
+              'p',
+              'folder-agent-card__error',
+              failure?.message || 'The agent draft editor could not be opened.'
+            );
+            message.setAttribute('role', 'alert');
+            item.append(message);
           }
         }
       : null;
@@ -2240,8 +2395,12 @@ export function renderFolderAgentReport(
   };
   const refreshPlan = async () => {
     const request = ++planRequest;
-    const plan = await fetchFolderAgentPlan(view.workspaceID, [...selected], fetchImpl);
+    const edits = hireDraftPayload(drafts, [...selected]).hire_edits;
+    const plan = await fetchFolderAgentPlan(view.workspaceID, [...selected], fetchImpl, edits);
     if (!plan || request !== planRequest) return;
+    acceptPlan(plan);
+  };
+  const acceptPlan = plan => {
     applyFaces(plan);
     view.plan = plan;
     // The server may have set a step aside (two that cannot run together):
@@ -2256,7 +2415,12 @@ export function renderFolderAgentReport(
       // that now holds the way the owner just left.
       const swapped = Boolean(doc.activeElement?.dataset?.altStep);
       planHost.replaceChildren(
-        renderPlan(doc, view, plan, plan.lines, 'plan', { selecting, onTick, onPickFace })
+        renderPlan(doc, view, plan, plan.lines, 'plan', {
+          selecting,
+          onTick,
+          onPickFace,
+          onEditHire
+        })
       );
       if (swapped)
         planHost
@@ -2446,7 +2610,12 @@ export function renderFolderAgentReport(
   } else if (view.plan && (view.plan.steps.length || view.plan.runnable)) {
     planHost = el(doc, 'div', 'folder-agent-card__plan-host');
     planHost.append(
-      renderPlan(doc, view, view.plan, view.plan.lines, 'plan', { selecting, onTick, onPickFace })
+      renderPlan(doc, view, view.plan, view.plan.lines, 'plan', {
+        selecting,
+        onTick,
+        onPickFace,
+        onEditHire
+      })
     );
     card.append(planHost);
     if (!view.plan.runnable && view.plan.unavailable)
@@ -2586,8 +2755,12 @@ export function renderFolderAgentReport(
             ? {
                 selected: [...selected],
                 hire_faces: Object.fromEntries(
-                  (view.plan?.hires || []).map(entry => [entry.name, entry.character || ''])
-                )
+                  (view.plan?.hires || []).map(entry => [
+                    entry.key || entry.name,
+                    entry.character || ''
+                  ])
+                ),
+                ...hireDraftPayload(drafts, [...selected])
               }
             : undefined;
         return onAction?.(action.id, button, extra);
@@ -2718,6 +2891,10 @@ function planView(plan) {
     hires: (Array.isArray(plan.hires) ? plan.hires : [])
       .map(entry => ({
         step: String(entry?.step || ''),
+        key: String(entry?.key || ''),
+        roleID: String(entry?.role_id || ''),
+        provider: String(entry?.provider || ''),
+        modelID: String(entry?.model_id || ''),
         name: String(entry?.name || ''),
         job: String(entry?.job || ''),
         character: String(entry?.character || ''),
@@ -2726,6 +2903,7 @@ function planView(plan) {
       }))
       .filter(entry => entry.name),
     hiresNote: String(plan.hires_note || ''),
+    hireModels: Array.isArray(plan.hire_models) ? plan.hire_models : [],
     // The other ways to set this folder up: steps that cannot run with a chosen
     // one, each with the host's line on what taking it gives up.
     alternatives: (Array.isArray(plan.alternatives) ? plan.alternatives : [])
@@ -2752,12 +2930,20 @@ function planView(plan) {
 }
 
 // fetchFolderAgentPlan asks for the plan of a selection of optional tools.
-export async function fetchFolderAgentPlan(workspaceID, selected, fetchImpl = globalThis.fetch) {
+export async function fetchFolderAgentPlan(
+  workspaceID,
+  selected,
+  fetchImpl = globalThis.fetch,
+  hireEdits
+) {
   if (!workspaceID || typeof fetchImpl !== 'function') return null;
   try {
     const { ok, payload } = await post(
       `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(workspaceID)}/plan`,
-      { selected },
+      {
+        selected,
+        ...(hireEdits && Object.keys(hireEdits).length ? { hire_edits: hireEdits } : {})
+      },
       fetchImpl
     );
     return ok && payload?.plan ? planView(payload.plan) : null;
@@ -2793,8 +2979,9 @@ export async function postFolderAgentAction(
     body = {
       plan_digest: view.plan?.digest || '',
       hire_faces: Object.fromEntries(
-        (view.plan?.hires || []).map(entry => [entry.name, entry.character || ''])
+        (view.plan?.hires || []).map(entry => [entry.key || entry.name, entry.character || ''])
       ),
+      ...hireDraftPayload(view.hireDrafts, view.plan?.selected),
       ...extra
     };
   else if (action === 'use_goal') {
@@ -2817,7 +3004,10 @@ export async function postFolderAgentAction(
       try {
         const again = await post(
           `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(view.workspaceID)}/plan`,
-          { selected: extra.selected },
+          {
+            selected: extra.selected,
+            ...(body.hire_edits ? { hire_edits: body.hire_edits } : {})
+          },
           fetchImpl
         );
         if (again.ok && again.payload?.plan) refused = { ...refused, plan: again.payload.plan };
@@ -2825,14 +3015,15 @@ export async function postFolderAgentAction(
         // keep the server's view
       }
     }
-    if (refused?.plan?.hires && extra?.hire_faces) {
+    if (refused?.plan?.hires && body?.hire_faces) {
       refused.plan.hires = refused.plan.hires.map(entry =>
-        Object.hasOwn(extra.hire_faces, entry.name)
-          ? { ...entry, character: String(extra.hire_faces[entry.name] || '') }
+        Object.hasOwn(body.hire_faces, entry.key || entry.name)
+          ? { ...entry, character: String(body.hire_faces[entry.key || entry.name] || '') }
           : entry
       );
     }
     if (refused && view.hireFaces instanceof Map) refused.hireFaces = view.hireFaces;
+    if (refused && view.hireDrafts instanceof Map) refused.hireDrafts = view.hireDrafts;
     return { error: String(payload?.error || 'That did not go through.'), view: refused };
   }
   // Home's map follows: a Set it up can turn a tile into a district or move

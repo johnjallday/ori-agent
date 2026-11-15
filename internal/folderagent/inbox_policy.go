@@ -1,6 +1,7 @@
 package folderagent
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -95,6 +96,9 @@ func (s *Service) effectiveRecord(rec *Record) *Record {
 	// carries and the check just before the run all see the same model.
 	if modeler, ok := s.deps.Setups.(HomeHireModeler); ok {
 		copy.HomeHireModel = modeler.HomeHireModel()
+	}
+	if s.deps.Hiring != nil {
+		copy.HireModels = append([]HireModel(nil), s.deps.Hiring.Models(context.Background())...)
 	}
 	if suggester, ok := s.deps.Setups.(HomeHireCharacterSuggester); ok {
 		count := 0

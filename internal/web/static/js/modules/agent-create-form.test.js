@@ -237,6 +237,26 @@ test('standalone extraction validates the prompt cap and reports field errors', 
   assert.equal(host.errors.get('systemPrompt').textContent, result.errors.systemPrompt);
 });
 
+test('a name/model-only draft omits instructions and reasoning without exposing a role', () => {
+  assert.deepEqual(
+    Form.mountedFields('template', ['systemPrompt', 'reasoningEffort', 'name', 'model']),
+    ['name', 'model', 'provider']
+  );
+  const host = fakeHost({
+    name: 'Manager',
+    model: 'm',
+    provider: 'p',
+    systemPrompt: 'must not send',
+    reasoningEffort: 'high'
+  });
+  const result = Form.extract({
+    host,
+    profile: 'template',
+    omitFields: ['systemPrompt', 'reasoningEffort']
+  });
+  assert.deepEqual(result.values, { name: 'Manager', model: 'm', provider: 'p' });
+});
+
 test('a mount can omit the prompt: its section becomes a note and extraction never returns it', () => {
   assert.deepEqual(Form.mountedFields('template', ['systemPrompt', 'name']), [
     'name',
