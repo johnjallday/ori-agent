@@ -1277,6 +1277,10 @@
   text-align: center;
 }
 
+.cockpit-context-modal a.cockpit-rail-open:any-link {
+  text-decoration: none;
+}
+
 .cockpit-rail-note {
   flex: 1 1 100%;
   margin: 0;
@@ -1359,15 +1363,18 @@
   text-transform: uppercase;
 }
 
-.cockpit-rail-commander {
+.cockpit-rail-panel .cockpit-rail-metric {
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  min-width: 0;
-  padding: 3px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
 }
 
-.cockpit-rail-commander-state {
+.cockpit-rail-panel .cockpit-rail-metric-label {
+  text-transform: none;
+}
+
+.cockpit-rail-commander-badge {
   padding-bottom: 4px;
   color: var(--hc-amber);
   font-family: "JetBrains Mono", ui-monospace, monospace;
@@ -1411,6 +1418,22 @@
   padding: 3px;
   border: 0;
   background: transparent;
+}
+
+/* The name and the slot do not move as records/catalogs arrive. */
+.cockpit-rail-panel .ws-map-av {
+  flex-basis: 92px;
+  width: 92px;
+  height: 72px;
+}
+
+.cockpit-rail-panel .agent-avatar,
+.cockpit-rail-panel .home-agent-face-slot {
+  --aa-size: 44px;
+
+  width: 44px;
+  height: 44px;
+  margin-top: 3px;
 }
 
 .cockpit-rail-agent-meta {

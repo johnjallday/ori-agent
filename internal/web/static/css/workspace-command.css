@@ -801,8 +801,8 @@
   background: color-mix(in srgb, var(--ws-panel) 92%, transparent);
 }
 
-/* An agent standing on the group map wears its roster portrait, sized to the
-   unit's plate. */
+/* An agent standing on the group map wears its shared avatar, sized to the
+   unit's plate. The roster frame class retains the existing map geometry. */
 .ws-map-unit .ws-cmd-character.is-roster,
 .ws-map-unit .ws-cmd-character.is-roster.ws-map-av {
   --aa-size: 58px;

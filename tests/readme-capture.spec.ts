@@ -753,6 +753,13 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { sessions: [] });
       return;
     }
+    // Home now loads the shared role catalog for its agent faces. The scene's
+    // custom role labels have no catalog entry; answer deterministically rather
+    // than letting this read escape the fictional fixture boundary.
+    if (url.pathname === '/api/agents/catalog') {
+      await json(route, { entries: [] });
+      return;
+    }
     if (url.pathname === '/api/agents/dashboard/list') {
       await json(route, {
         agents: README_SCENES.workspace_command.agents.map(agent => ({

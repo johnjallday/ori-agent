@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -16,11 +15,9 @@ import (
 
 func learningSourceFixture(t *testing.T) (learningMissionSource, learningmissions.Instance, *database.DB) {
 	t.Helper()
-	db, err := database.Open(t.Context(), &database.Config{Path: filepath.Join(t.TempDir(), "learning.db")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	// These adapter fixtures exercise canonical records, not database startup.
+	// Reuse schema bytes only; every call still owns a separate database.
+	db := newFixtureDatabase(t)
 	workspaces, err := workspace.NewFileStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +83,27 @@ func learningSourceFixture(t *testing.T) (learningMissionSource, learningmission
 		t.Fatal(err)
 	}
 	return source, i, db
+}
+
+func TestLearningSourceFixturesKeepCanonicalStateIndependent(t *testing.T) {
+	first, original, firstDB := learningSourceFixture(t)
+	second, next, secondDB := learningSourceFixture(t)
+	if firstDB.Path() == secondDB.Path() {
+		t.Fatal("fixtures shared a database path")
+	}
+	if _, err := firstDB.ExecContext(t.Context(), `DELETE FROM workspaces WHERE id=?`, original.Definition.WorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Result(t.Context(), "local", original); !errors.Is(err, learningmissions.ErrUnavailable) {
+		t.Fatal("deleted registration retained authority", err)
+	}
+	if proof, err := second.Result(t.Context(), "local", next); err != nil || proof.Text != "The exact original result" {
+		t.Fatal("one fixture changed another's canonical result", err)
+	}
+	var registrations int
+	if err := secondDB.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM workspaces`).Scan(&registrations); err != nil || registrations != 1 {
+		t.Fatalf("fixture inherited workspace registrations: count=%d err=%v", registrations, err)
+	}
 }
 
 func TestLearningMissionsCanonicalResultIgnoresLatestTicketText(t *testing.T) {

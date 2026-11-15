@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { TicketCounts } from './ticket-count-line.js';
+import { homeAgentPortraitHTML } from './home-agent-portrait.js';
 import {
   workspaceUpdateSignals,
   renderWorkspaceUpdateMapMarkers,
@@ -2249,6 +2250,57 @@ test('tileHTML keeps custom and unknown blueprints on the generic building', () 
   assert.match(custom, /<svg class="ws-map-struct"/);
   assert.doesNotMatch(unknown, /data-building-variant=/);
   assert.match(unknown, /<svg class="ws-map-struct"/);
+});
+
+test('Home host seam draws saved faces on idle tiles and Overview without leaking into other hosts', () => {
+  const map = loadOriWorkspaceMap();
+  const win = {
+    RoleCatalog: { isLoaded: () => true, entry: () => null },
+    CharacterCatalog: { get: id => ({ id, assets: { portrait: '/characters/chosen.svg' } }) }
+  };
+  vm.runInNewContext(portraitSource, { window: win });
+  vm.runInNewContext(readFileSync(new URL('./agent-avatar.js', import.meta.url), 'utf8'), {
+    window: win
+  });
+  const name = 'Lead <&"';
+  const record = { name, appearance: { mode: 'character', character: { catalog_id: 'chosen' } } };
+  const options = {
+    agentPortraitHTML: (agent, commander, opts) =>
+      homeAgentPortraitHTML(agent, agent === name ? record : null, false, commander, win, opts)
+  };
+  const ws = { id: 'faces', name: 'Faces', entry_agent_name: name, agents: [name, 'Generated'] };
+  const tile = map.tileHTML({ ws, col: 0, row: 0 }, '', 0, options);
+  assert.match(tile, /ws-map-tile-team/);
+  assert.match(tile, /agent-avatar--character/);
+  assert.match(tile, /ws-map-av-figure/);
+  assert.match(tile, /ws-map-av-commander-mark/);
+  assert.match(tile, /Lead &lt;&amp;&quot;/);
+  assert.doesNotMatch(tile, /href="\/agents/);
+  const overview = map.overviewBodyHTML(ws, options);
+  assert.match(overview, /agent-avatar--character/);
+  assert.ok(overview.includes('href="/agents?agent=' + encodeURIComponent(name) + '"'));
+  assert.match(overview, /is-keeper/);
+  // No module-global registry: subsequent default calls still use residents.
+  assert.doesNotMatch(map.tileHTML({ ws, col: 0, row: 0 }), /ws-map-tile-team|agent-avatar/);
+  assert.doesNotMatch(map.overviewBodyHTML(ws), /agent-avatar/);
+  assert.match(map.overviewBodyHTML(ws), /ws-map-av-figure/);
+  // API-origin markup/functions are never accepted, even on nested agent data.
+  const poisoned = {
+    ...ws,
+    portraitHTML: '<evil>',
+    agentPortraitHTML: () => '<evil>',
+    agents: [{ name: 'Unknown', portraitHTML: '<evil>' }]
+  };
+  assert.doesNotMatch(map.tileHTML({ ws: poisoned, col: 0, row: 0 }), /<evil>/);
+  assert.doesNotMatch(map.overviewBodyHTML(poisoned), /<evil>/);
+  assert.match(map.overviewBodyHTML(poisoned, options), />Unknown<\/span>/);
+  const pending = {
+    agentPortraitHTML: (agent, commander, opts) =>
+      homeAgentPortraitHTML(agent, record, true, commander, win, opts)
+  };
+  const loading = map.tileHTML({ ws, col: 0, row: 0 }, '', 0, pending);
+  assert.match(loading, /home-agent-face-slot/);
+  assert.doesNotMatch(loading, /agent-avatar|ws-map-av-figure/);
 });
 
 test('tileHTML LED and entry-agent crest reflect active state and entry_agent_name', () => {

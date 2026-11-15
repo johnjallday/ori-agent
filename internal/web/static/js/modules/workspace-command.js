@@ -5225,7 +5225,8 @@ export class WorkspaceCommandView {
   // WorkspaceDetailPage resolves generated/default agents to the name-derived
   // Workspace Map stick figure, while preserving explicit uploaded/character
   // appearances through AgentAvatar. Command view supplies only its geometry
-  // and operational status frame (FR-96).
+  // and operational status frame (FR-96). Group-map units use AgentAvatar for
+  // Generated mode too, so they do not substitute a resident for that identity.
   agentCharacterHTML(agent, variant = 'roster') {
     if (!agent) return '';
     const page = this.page || {};
@@ -5233,7 +5234,10 @@ export class WorkspaceCommandView {
     const className = 'ws-cmd-character' + variantClass + ' ' + escapeHtml(agent.tone || 'idle');
 
     const avatar = page.getAgentAvatarPresentation
-      ? page.getAgentAvatarPresentation(agent.name)
+      ? page.getAgentAvatarPresentation(
+          agent.name,
+          variant === 'map' ? { useAgentAvatar: true } : undefined
+        )
       : null;
     const html = avatar && avatar.markup ? avatar.markup(className) : '';
     if (html) return html;
@@ -14323,7 +14327,7 @@ export class WorkspaceCommandView {
         working: agent.tone === 'working',
         commander: !!agent.entry,
         selected: agent.key === this.selectedAgentKey,
-        portraitHTML: this.agentCharacterHTML(agent, 'roster')
+        portraitHTML: this.agentCharacterHTML(agent, 'map')
       };
     });
   }
