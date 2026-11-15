@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
@@ -75,5 +76,35 @@ func TestFolderAgentHiring_CharacterSuggestion(t *testing.T) {
 				t.Fatalf("equally worn: %q, want %q", got, preferred)
 			}
 		})
+	}
+}
+
+func TestFolderAgentHomeHireCharacters_DistinctStableAndLeastWorn(t *testing.T) {
+	catalog := charactercatalog.MustLoad()
+	working := catalog.Working()
+	preferred := string(working[0].ID)
+	appearance := types.NewAgentAppearance()
+	appearance.SetCharacter(preferred, working[0].EntryVersion)
+	h := folderAgentSetups{builder: &ServerBuilder{st: &journeyAgentStore{agents: map[string]*agent.Agent{
+		"Wearing first": {Appearance: appearance},
+	}}}}
+	got := h.HomeHireCharacters(2)
+	want := []string{string(working[1].ID), string(working[2].ID)}
+	if !reflect.DeepEqual(got, want) || !reflect.DeepEqual(got, h.HomeHireCharacters(2)) {
+		t.Fatalf("suggestions: %v, want stable %v", got, want)
+	}
+	all := h.HomeHireCharacters(len(working) + 2)
+	seen := map[string]bool{}
+	for _, id := range all {
+		if seen[id] || !catalog.IsAssignable(charactercatalog.CharacterID(id)) {
+			t.Fatalf("duplicate or unavailable character: %v", all)
+		}
+		seen[id] = true
+	}
+	if len(all) != len(working) {
+		t.Fatalf("exhausted catalog: %v", all)
+	}
+	if got := suggestFolderAgentCharacters(nil, nil, 2, ""); len(got) != 0 {
+		t.Fatalf("missing catalog: %v", got)
 	}
 }

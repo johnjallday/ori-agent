@@ -1622,6 +1622,20 @@ function renderHires(doc, hires, note) {
   hires.forEach(entry => {
     const item = el(doc, 'li', 'folder-agent-card__hire');
     item.dataset.step = entry.step;
+    const face = el(doc, 'div', 'folder-agent-card__hire-face');
+    face.setAttribute('aria-hidden', 'true');
+    const win = cardWindow(doc);
+    const draw = () => {
+      face.innerHTML = faceMarkup(
+        win,
+        hireFace(entry.name, win, entry.character),
+        '',
+        AGENT_FACE_SIZE
+      );
+    };
+    draw();
+    watchFaces(face, win, draw, doc);
+    item.append(face);
     item.append(
       el(doc, 'div', 'folder-agent-card__line-name folder-agent-card__hire-name', entry.name)
     );
@@ -2408,7 +2422,15 @@ export function renderFolderAgentReport(
       }
       button.addEventListener('click', () => {
         // Set it up carries only the steps the owner left selected.
-        const extra = action.id === 'set_up' ? { selected: [...selected] } : undefined;
+        const extra =
+          action.id === 'set_up'
+            ? {
+                selected: [...selected],
+                hire_faces: Object.fromEntries(
+                  (view.plan?.hires || []).map(entry => [entry.name, entry.character || ''])
+                )
+              }
+            : undefined;
         return onAction?.(action.id, button, extra);
       });
       actions.append(button);
@@ -2538,6 +2560,7 @@ function planView(plan) {
         step: String(entry?.step || ''),
         name: String(entry?.name || ''),
         job: String(entry?.job || ''),
+        character: String(entry?.character || ''),
         model: String(entry?.model || ''),
         note: String(entry?.note || '')
       }))
@@ -2606,7 +2629,14 @@ export async function postFolderAgentAction(
   const url = folderAgentActionPath(view?.workspaceID, action);
   if (!url) return { error: 'That action is not available.' };
   let body = extra;
-  if (action === 'set_up') body = { plan_digest: view.plan?.digest || '', ...extra };
+  if (action === 'set_up')
+    body = {
+      plan_digest: view.plan?.digest || '',
+      hire_faces: Object.fromEntries(
+        (view.plan?.hires || []).map(entry => [entry.name, entry.character || ''])
+      ),
+      ...extra
+    };
   else if (action === 'use_goal') {
     const goal = String(extra?.goal || '').trim();
     body = goal ? { answer: 'use', goal } : { answer: 'use' };

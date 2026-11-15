@@ -78,7 +78,7 @@ func (b *ServerBuilder) hireFolderAgentAssistant(ctx context.Context, rec folder
 		if b.assistantStaffing == nil {
 			return false, errors.New("staffing is unavailable")
 		}
-		return b.assistantStaffing.CreateSharedProjectAgent(ctx, role, name, "", "", marker)
+		return b.assistantStaffing.CreateSharedProjectAgent(ctx, role, name, "", "", rec.HireAppearance(name), marker)
 	}
 	var fills []projectstaffing.Fill
 	err := b.projectStaffing.WithHome(a.homeID, func(tx *projectstaffing.Tx) error {

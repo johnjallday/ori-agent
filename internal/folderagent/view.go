@@ -559,6 +559,9 @@ type HireEntry struct {
 	Name  string `json:"name"`
 	Job   string `json:"job,omitempty"`
 	Model string `json:"model"`
+	// Character is the suggested or confirmed working character; empty means
+	// generated. Presentation only: never part of the plan digest.
+	Character string `json:"character,omitempty"`
 	// Note says what happens to the owner's own agent when one already holds
 	// the role's name: the run never adopts it, it hires a new one.
 	Note string `json:"note,omitempty"`
@@ -892,6 +895,12 @@ func BuildPlan(rec Record, selected []string) Plan {
 	}
 	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder,
 		Name: assuranceLine(rec, plan.Candidates, len(plan.Installs), len(plan.Hires))})
+	for i := range plan.Hires {
+		if i < len(rec.HomeHireCharacters) {
+			plan.Hires[i].Character = rec.HomeHireCharacters[i]
+		}
+	}
+	applyHireFaces(&plan, rec.HireFaces)
 	sort.Strings(plan.Selected)
 	plan.Digest = planDigest(plan)
 	return plan

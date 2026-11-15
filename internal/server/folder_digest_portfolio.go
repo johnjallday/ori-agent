@@ -17,6 +17,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/setupjourney"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -392,6 +393,7 @@ func (p *portfolioHomes) Commit(ctx context.Context, review foldersetup.HomeRevi
 type portfolioHomeStaffing struct {
 	builder *ServerBuilder
 	model   *personalassistant.FolderSetupModelIntent
+	faces   map[string]*types.AgentAppearance
 }
 
 // homeRoleDecl is a role as the hire set reads it: from a Home's stored
@@ -515,6 +517,7 @@ func (s portfolioHomeStaffing) ModelReady(context.Context) bool {
 func (s portfolioHomeStaffing) Staff(ctx context.Context, homeID string, role foldersetup.HomeRole) error {
 	fill := setupjourney.RoleFill{
 		RoleID: role.RoleID, Mode: setupjourney.StaffingModeCreate, Name: role.Name,
+		Appearance: s.faces[role.Name].Clone(),
 	}
 	if s.model != nil {
 		fill.Provider, fill.Model = s.model.Provider, s.model.Model

@@ -96,6 +96,16 @@ func (s *Service) effectiveRecord(rec *Record) *Record {
 	if modeler, ok := s.deps.Setups.(HomeHireModeler); ok {
 		copy.HomeHireModel = modeler.HomeHireModel()
 	}
+	if suggester, ok := s.deps.Setups.(HomeHireCharacterSuggester); ok {
+		count := 0
+		for _, c := range copy.Candidates {
+			if c.Kind == folderlook.KindHomeProvider {
+				hires, _ := homeHires(copy, c, "")
+				count += len(hires)
+			}
+		}
+		copy.HomeHireCharacters = suggester.HomeHireCharacters(count)
+	}
 	identity := s.rootIdentity(rec.WorkspaceID)
 	copy.RootPolicy, copy.PolicyBinding = identity.Policy, identity.Binding
 	if identity.Policy != folderlook.RootOrdinary {
@@ -153,7 +163,7 @@ func (s *Service) CheckPlan(workspaceID string, plan Plan) error {
 	copy := *rec
 	copy.State = StateReported
 	current := BuildPlan(*s.effectiveRecord(&copy), plan.Selected)
-	if !current.Runnable || !reflect.DeepEqual(current, plan) {
+	if !current.Runnable || !reflect.DeepEqual(withoutHireFaces(current), withoutHireFaces(plan)) {
 		return personalassistant.ErrFolderPlanChanged
 	}
 	return nil

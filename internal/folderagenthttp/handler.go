@@ -243,8 +243,9 @@ func (h *Handler) LookFurther(w http.ResponseWriter, r *http.Request) {
 }
 
 type setUpRequest struct {
-	PlanDigest string   `json:"plan_digest"`
-	Selected   []string `json:"selected"`
+	PlanDigest string            `json:"plan_digest"`
+	Selected   []string          `json:"selected"`
+	HireFaces  map[string]string `json:"hire_faces"`
 	// UseGoal and Goal are what an older card sent with Set it up. They are
 	// accepted and ignored: Set it up writes no goal; the goal is offered
 	// once the run is done (Goal).
@@ -285,7 +286,7 @@ func (h *Handler) SetUp(w http.ResponseWriter, r *http.Request) {
 }
 
 func setUpOf(req setUpRequest) folderagent.SetUpRequest {
-	return folderagent.SetUpRequest{PlanDigest: req.PlanDigest, Selected: req.Selected}
+	return folderagent.SetUpRequest{PlanDigest: req.PlanDigest, Selected: req.Selected, HireFaces: req.HireFaces}
 }
 
 type premiseRequest struct {

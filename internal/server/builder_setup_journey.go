@@ -215,7 +215,7 @@ func (b *ServerBuilder) initializeSetupJourney() {
 			b.sessionHandler.SetSharedProjectStaffing(b.projectStaffing, b.systemModelAvailable)
 			b.sessionHandler.SetSharedAgentCreator(func(ctx context.Context, role workspace.AssistantProgramRoleSpec, name string,
 				marker *agentpkg.AssistantSetupProvenance) (bool, error) {
-				return staffingAdapter.CreateSharedProjectAgent(ctx, role, name, "", "", marker)
+				return staffingAdapter.CreateSharedProjectAgent(ctx, role, name, "", "", nil, marker)
 			})
 			if b.setupWizardService != nil {
 				wizard := b.setupWizardService

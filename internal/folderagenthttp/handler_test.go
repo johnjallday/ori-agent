@@ -155,6 +155,17 @@ func TestSetUp_AcceptsAndIgnoresAnOlderCardsGoal(t *testing.T) {
 	}
 }
 
+func TestSetUp_HireFacesWireShape(t *testing.T) {
+	var req setUpRequest
+	if err := json.Unmarshal([]byte(`{"plan_digest":"d","selected":["home"],"hire_faces":{"Manager":"analyst","Assistant":""}}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	got := setUpOf(req)
+	if got.HireFaces["Manager"] != "analyst" || len(got.HireFaces) != 2 || got.Selected[0] != "home" {
+		t.Fatalf("lost confirmed faces: %+v", got)
+	}
+}
+
 func TestWriteError_PlainSentences(t *testing.T) {
 	cases := []struct {
 		err    error

@@ -11,11 +11,42 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
+	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // assistant-reads-projects: the folder card names the Home's shared assistant
 // from the app plugin's song blueprint, and the run hires it.
+
+func TestFolderAgentAssistant_ConfirmedFaceAndExistingFace(t *testing.T) {
+	b, homeID, appearance := folderAgentFacesFixture(t)
+	b.projectStaffing = projectstaffing.New(b.workspaceStore, b.st)
+	team := projectstaffing.Team{PluginID: "fixture", BlueprintID: "song", Digest: strings.Repeat("c", 64),
+		Roles: []workspace.AssistantProgramRoleSpec{{ID: "assistant", Label: "App Assistant", Required: true,
+			Scope: workspace.AssistantRoleScopeProject, Role: "orchestrator", SystemPrompt: "Helps with projects"}}}
+	plan, err := b.projectStaffing.PlanShared(homeID, team)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := folderagent.Record{WorkspaceID: "folder", HireFaces: map[string]*types.AgentAppearance{plan.Name: appearance}}
+	run := folderAgentAssistantRun{line: "Hires " + plan.Name, homeID: homeID, team: team, teamOK: true, plan: plan}
+	var progress string
+	setLine := func(_, _, words string) { progress = words }
+	name, stopped := b.hireFolderAgentAssistant(t.Context(), rec, run, true, setLine)
+	if stopped != nil || name != plan.Name {
+		t.Fatalf("hire: %q %+v", name, stopped)
+	}
+	profile, _ := b.st.GetAgent(name)
+	if profile.Appearance.CharacterCatalogID() != appearance.CharacterCatalogID() {
+		t.Fatalf("assistant lost confirmed face: %+v", profile.Appearance)
+	}
+	rec.HireFaces[name] = types.NewAgentAppearance()
+	name, stopped = b.hireFolderAgentAssistant(t.Context(), rec, run, true, setLine)
+	profile, _ = b.st.GetAgent(plan.Name)
+	if stopped != nil || name != "" || progress != "Already in your Home" || profile.Appearance.CharacterCatalogID() != appearance.CharacterCatalogID() {
+		t.Fatalf("existing assistant changed: %q %+v %q %+v", name, stopped, progress, profile.Appearance)
+	}
+}
 
 func songBlueprint(id string, resource bool) plugin.ResolvedBlueprint {
 	project := &projecttemplates.AssistantProjectDeclaration{SchemaVersion: 1, Version: 1, ID: id + "-team",

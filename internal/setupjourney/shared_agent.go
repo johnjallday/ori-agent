@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
+	"github.com/johnjallday/ori-agent/internal/agentappearance"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -22,7 +23,7 @@ import (
 // the profile (its marker lets the Home's sweep record it); a failure before it
 // leaves nothing.
 func (a *AssistantStaffingAdapter) CreateSharedProjectAgent(ctx context.Context, role workspace.AssistantProgramRoleSpec, name, provider, model string,
-	marker *agent.AssistantSetupProvenance) (bool, error) {
+	appearance *types.AgentAppearance, marker *agent.AssistantSetupProvenance) (bool, error) {
 	name = strings.TrimSpace(name)
 	if a == nil || a.profiles == nil || marker == nil || name == "" || strings.TrimSpace(marker.ID) == "" {
 		return false, ErrInvalid
@@ -36,10 +37,14 @@ func (a *AssistantStaffingAdapter) CreateSharedProjectAgent(ctx context.Context,
 	if profileNameExists(a.profiles, name) {
 		return false, ErrConflict
 	}
+	appearance, err := agentappearance.ValidateStaged(appearance)
+	if err != nil {
+		return false, ErrInvalid
+	}
 	stamped := *marker
 	created, err := a.createStaffingProfile(ctx, name, &store.CreateAgentConfig{
 		Role: types.AgentRole(role.Role), Model: model, LLMProvider: provider, SystemPrompt: role.SystemPrompt,
-		Description: role.Description, AssistantSetup: &stamped,
+		Description: role.Description, Appearance: appearance.Clone(), AssistantSetup: &stamped,
 	})
 	if err != nil {
 		// A strict create reports the name it wrote; a legacy one wrote nothing

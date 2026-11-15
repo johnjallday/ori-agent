@@ -182,7 +182,7 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 
 	// The roles the Home still lacks, each on its own line ("Hires <role>"),
 	// or on the one "Fills the Home's roles" line, named as each is hired.
-	staffing := portfolioHomeStaffing{builder: b}
+	staffing := portfolioHomeStaffing{builder: b, faces: rec.HireFaces}
 	missing, err := staffing.Missing(ctx, homeID)
 	if err != nil {
 		setLine(first(append(hireLines, rootLine)...), personalassistant.FolderLineFailed, "")

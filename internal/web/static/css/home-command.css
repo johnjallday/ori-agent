@@ -4495,13 +4495,25 @@ button.folder-agent-card__who-face:focus-visible {
 }
 
 .folder-agent-card__hire {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   grid-template-areas:
-    "name model"
-    "job job"
-    "note note";
+    "face name model"
+    "face job job"
+    "face note note";
   column-gap: 8px;
   align-items: baseline;
+}
+
+.folder-agent-card__hire-face {
+  grid-area: face;
+  align-self: start;
+  width: 40px;
+  height: 40px;
+}
+
+.folder-agent-card__hire-face > .agent-avatar {
+  --aa-size: 40px;
+  border-radius: 8px;
 }
 
 .folder-agent-card__hire-name {
@@ -4524,12 +4536,12 @@ button.folder-agent-card__who-face:focus-visible {
 
 @container (max-width: 400px) {
   .folder-agent-card__hire {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 40px minmax(0, 1fr);
     grid-template-areas:
-      "name"
-      "job"
-      "model"
-      "note";
+      "face name"
+      "face job"
+      "face model"
+      "face note";
   }
 
   .folder-agent-card__hire-model {

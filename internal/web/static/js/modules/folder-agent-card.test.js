@@ -1395,7 +1395,7 @@ test('actions post to the workspace path and Set it up carries the digest it sho
   const result = await postFolderAgentAction(view, 'set_up', fetchImpl);
   assert.deepEqual(calls[0], [
     '/api/personal-assistant/folder-agent/ws-1/setup',
-    { plan_digest: 'abc' }
+    { plan_digest: 'abc', hire_faces: {} }
   ]);
   assert.equal(result.view.state, 'setting_up');
 });
@@ -1486,7 +1486,7 @@ test('the report card shows what it is, the steps and its actions; Set it up sen
     .querySelectorAll('button')
     .find(b => b.dataset.folderAgentAction === 'set_up')
     .listeners.click();
-  assert.deepEqual(plain(calls[0]), ['set_up', { selected: [] }]);
+  assert.deepEqual(plain(calls[0]), ['set_up', { selected: [], hire_faces: {} }]);
 });
 
 // After the run, the receipt keeps "First ticket" and Start this (FR20), and
@@ -1688,7 +1688,7 @@ test('every offered step has a box; unticking one refreshes the plan and Set it 
     .querySelectorAll('button')
     .find(b => b.dataset.folderAgentAction === 'set_up')
     .listeners.click();
-  assert.deepEqual(plain(calls[0]), ['set_up', { selected: ['x-tools'] }]);
+  assert.deepEqual(plain(calls[0]), ['set_up', { selected: ['x-tools'], hire_faces: {} }]);
   assert.equal(view.plan.digest, 'without');
 });
 
@@ -3653,11 +3653,64 @@ const hiresCard = (hires, hiresNote = '', options = {}) =>
         ...(options.report || {})
       })
     ),
-    stubDocument(),
-    {}
+    options.doc || stubDocument(),
+    options.render || {}
   );
 const hiresBlock = card => card.querySelector('.folder-agent-card__hires');
 const classesOf = node => node.className.split(' ');
+
+test('planned hires draw suggested or generated faces, redraw with the catalog, and post every shown face', async () => {
+  const doc = stubDocument();
+  const inputs = [];
+  let redraw;
+  let ready = false;
+  doc.defaultView = {
+    RoleCatalog: { isLoaded: () => true, entry: () => ({}) },
+    CharacterCatalog: {
+      load() {},
+      get: id => (ready ? { id } : null),
+      onChange(fn) {
+        redraw = fn;
+        return () => {};
+      }
+    },
+    AgentAvatar: {
+      markup(input) {
+        inputs.push(input);
+        return '<face>';
+      }
+    }
+  };
+  const calls = [];
+  const card = hiresCard([hire('Manager'), hire('Assistant', { character: 'analyst' })], '', {
+    doc,
+    render: { onAction: (id, button, extra) => calls.push([id, extra]) }
+  });
+  assert.equal(card.querySelectorAll('.folder-agent-card__hire-face').length, 2);
+  assert.equal(inputs[0].appearance.mode, 'generated');
+  assert.equal(inputs[1].appearance.mode, 'generated');
+  ready = true;
+  redraw();
+  assert.equal(inputs.at(-1).appearance.character.catalog_id, 'analyst');
+  await card
+    .querySelectorAll('button')
+    .find(button => button.dataset.folderAgentAction === 'set_up')
+    .listeners.click();
+  assert.deepEqual(calls[0][1].hire_faces, { Manager: '', Assistant: 'analyst' });
+  const requests = [];
+  await postFolderAgentAction(
+    {
+      workspaceID: 'ws-1',
+      plan: { digest: 'd', hires: [{ name: 'Assistant', character: 'analyst' }] }
+    },
+    'set_up',
+    async (url, options) => {
+      requests.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({}) };
+    }
+  );
+  assert.deepEqual(requests[0].hire_faces, { Assistant: 'analyst' });
+});
 
 test('the hires block is absent when nobody is hired', () => {
   assert.equal(hiresBlock(hiresCard([])), null);
@@ -3689,7 +3742,12 @@ test('one hire: its name, what it does and its model, one link to Agents, nothin
     rows[0].children.map(child =>
       classesOf(child).find(name => name.startsWith('folder-agent-card__hire-'))
     ),
-    ['folder-agent-card__hire-name', 'folder-agent-card__hire-job', 'folder-agent-card__hire-model']
+    [
+      'folder-agent-card__hire-face',
+      'folder-agent-card__hire-name',
+      'folder-agent-card__hire-job',
+      'folder-agent-card__hire-model'
+    ]
   );
   // One link, to Agents; no rename, no model picker, no opt-out (decision 2A).
   const links = block.querySelectorAll('a');
@@ -3759,6 +3817,7 @@ test("the Home's shared assistant is one more row of the same list", () => {
       classesOf(child).find(name => name.startsWith('folder-agent-card__hire-'))
     ),
     [
+      'folder-agent-card__hire-face',
       'folder-agent-card__hire-name',
       'folder-agent-card__hire-job',
       'folder-agent-card__hire-model',
@@ -4109,7 +4168,10 @@ test('a plan that changed after it was shown is redrawn on the owner’s own cho
   assert.deepEqual(
     calls.map(([url, body]) => [url.replace(/^.*folder-agent\/ws-1/, ''), body]),
     [
-      ['/setup', { plan_digest: `swap-${HOME}`, selected: [HOME] }],
+      [
+        '/setup',
+        { plan_digest: `swap-${HOME}`, hire_faces: { 'Portfolio Manager': '' }, selected: [HOME] }
+      ],
       ['/plan', { selected: [HOME] }]
     ]
   );
