@@ -4063,6 +4063,47 @@ test('Already in your Home and receipt rows use current canonical profiles, with
   assert.equal(requests, 2);
 });
 
+test('a plan-changed redraw keeps pending picks through subsequent untick and retick', async () => {
+  const rawPlan = chosen => ({
+    ...homePlanOf(chosen ? newHomeLines : [], []),
+    selected: chosen ? [HOME] : [],
+    steps: [{ ...homePlanOf([]).steps[0], chosen }],
+    hires: chosen ? [hire('Manager', { character: 'analyst' })] : []
+  });
+  const view = folderAgentReportView(reported({ plan: rawPlan(true) }));
+  view.hireFaces = new Map([['Manager', { character: 'builder', step: HOME }]]);
+  const refused = await postFolderAgentAction(
+    view,
+    'set_up',
+    async url => ({
+      ok: !url.endsWith('/setup'),
+      json: async () =>
+        url.endsWith('/setup')
+          ? {
+              error: 'Review the current plan.',
+              plan_changed: true,
+              folder_agent: reported({ plan: rawPlan(true) })
+            }
+          : { plan: rawPlan(true) }
+    }),
+    { selected: [HOME], hire_faces: { Manager: 'builder' } }
+  );
+  const next = folderAgentReportView(refused.view);
+  assert.equal(next.hireFaces, view.hireFaces);
+  const card = renderFolderAgentReport(next, stubDocument(), {
+    fetchImpl: async (_url, options) => ({
+      ok: true,
+      json: async () => ({ plan: rawPlan(JSON.parse(options.body).selected.length > 0) })
+    })
+  });
+  for (const checked of [false, true]) {
+    const box = card.querySelector('.folder-agent-card__tool-pick');
+    box.checked = checked;
+    await box.listeners.change();
+  }
+  assert.equal(next.plan.hires[0].character, 'builder');
+});
+
 test('the card promise does not recount visible blocks; the run retains its historical note', () => {
   const raw = reported({
     plan: {

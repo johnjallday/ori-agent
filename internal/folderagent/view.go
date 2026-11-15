@@ -192,7 +192,7 @@ type PlanView struct {
 	// tools step ahead of where the agent named it.
 	ReorderNote string `json:"reorder_note,omitempty"`
 	// Installs are the plugins the ticked steps download and install, in run
-	// order: the card's install block and the count on its button.
+	// order: the card's install block and whether its button names installation.
 	Installs []InstallEntry `json:"installs"`
 	// Hires are the agents the ticked steps hire, each by the name it will be
 	// hired under, with what it does and the model it will run on: the card's

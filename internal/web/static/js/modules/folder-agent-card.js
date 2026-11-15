@@ -251,6 +251,9 @@ export function folderAgentReportView(view) {
         }
       : null
   };
+  // A refused confirmation redraws from a fresh server view, but its pending
+  // picks still belong to this card. Keep the same by-name choice state.
+  if (view.hireFaces instanceof Map) out.hireFaces = view.hireFaces;
   if (out.state === 'looking') {
     out.title = `${agent} is looking around ${folder}`;
     out.receipt = String(view.receipt || 'Looking around…');
@@ -280,7 +283,7 @@ export function folderAgentReportView(view) {
     // Set it up waits for a plan that can run; the card says why it cannot.
     if (!out.plan.runnable && out.rootPolicy !== 'documents_inbox')
       out.actions = out.actions.filter(a => a.id !== 'set_up');
-    // The button says what it confirms: how many plugins it installs.
+    // The button names installation without repeating the block's count.
     out.actions = out.actions.map(a =>
       a.id === 'set_up' ? { ...a, label: folderAgentSetUpLabel(out.plan) } : a
     );
@@ -1610,8 +1613,8 @@ function installState(entry, lines, phase) {
 
 // renderInstalls draws the install block (PRD FR13, FR14, FR19): one row per
 // plugin the plan downloads and installs, in run order. Name and version;
-// where it comes from with a link to its source and to Plugins; what it gives
-// the owner; where the application and its tools stand. While a run is under
+// what it gives the owner; where the application and its tools stand; then
+// muted attribution with links to the source and Plugins. While a run is under
 // way and after it, each row shows its state from the run's own line.
 function renderInstalls(doc, installs, lines, phase) {
   const n = installs.length;
@@ -2693,7 +2696,7 @@ function planView(plan) {
     defaultReason: String(plan.default_reason || ''),
     reorderNote: String(plan.reorder_note || ''),
     // The plugins the ticked steps download and install, in run order: the
-    // install block and the count on the button.
+    // visible install block and whether the button promises installation.
     installs: (Array.isArray(plan.installs) ? plan.installs : [])
       .map(entry => ({
         step: String(entry?.step || ''),
@@ -2829,6 +2832,7 @@ export async function postFolderAgentAction(
           : entry
       );
     }
+    if (refused && view.hireFaces instanceof Map) refused.hireFaces = view.hireFaces;
     return { error: String(payload?.error || 'That did not go through.'), view: refused };
   }
   // Home's map follows: a Set it up can turn a tile into a district or move
