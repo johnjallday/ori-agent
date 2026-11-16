@@ -249,10 +249,51 @@ const SettingsNavigation = (function () {
   function handleInitialHash() {
     const hash = window.location.hash.slice(1);
     if (hash) {
-      // Wait for DOM to be fully rendered
-      setTimeout(() => {
-        scrollToSection(hash, { updateHistory: false });
-      }, 100);
+      // Font swapping can change the height of every preceding section. A
+      // fixed delay races that layout, especially on narrow WebKit documents.
+      // Hold the initial anchor through late settings hydration as well as
+      // font/navbar layout, but stop as soon as the user takes over.
+      const expectedHash = window.location.hash;
+      const intentEvents = ['wheel', 'touchstart', 'pointerdown', 'keydown', 'focusin'];
+      let cancelled = false;
+      let alignmentScheduled = false;
+      let layoutObserver = null;
+      const cleanup = () => {
+        intentEvents.forEach(type => window.removeEventListener(type, cancel));
+        layoutObserver?.disconnect();
+      };
+      const cancel = () => {
+        cancelled = true;
+        cleanup();
+      };
+      intentEvents.forEach(type => window.addEventListener(type, cancel, { passive: true }));
+      const align = () => {
+        if (cancelled || alignmentScheduled) return;
+        alignmentScheduled = true;
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            alignmentScheduled = false;
+            if (cancelled) return;
+            if (window.location.hash !== expectedHash) {
+              cancel();
+              return;
+            }
+            scrollToSection(hash, { updateHistory: false });
+          });
+        });
+      };
+      const ready = () => {
+        if (cancelled) return;
+        if (typeof ResizeObserver !== 'undefined') {
+          layoutObserver = new ResizeObserver(align);
+          sections.forEach(section => layoutObserver.observe(section));
+          const navbar = document.querySelector('.navbar');
+          if (navbar) layoutObserver.observe(navbar);
+        }
+        align();
+      };
+      if (document.fonts?.ready) document.fonts.ready.then(ready, cancel);
+      else ready();
     } else {
       // Set first section as active by default
       if (navItems.length > 0) {

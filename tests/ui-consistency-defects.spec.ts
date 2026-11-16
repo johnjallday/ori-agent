@@ -1,15 +1,32 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 import {
   assertSandbox,
   capture,
   contrast,
   createWorkspace,
+  removeOwnedWorkspace,
   guardReadTour,
   preparePage,
   reachable,
   readFixture
 } from './helpers/ui-consistency';
 import { longModelName, modelProviders, themes } from './fixtures/ui-consistency-scenes';
+
+const ownedWorkspaces = new Map<string, Awaited<ReturnType<typeof createWorkspace>>>();
+async function createDefectWorkspace(request: APIRequestContext, testId: string) {
+  const workspace = await createWorkspace(request);
+  ownedWorkspaces.set(testId, workspace);
+  return workspace;
+}
+
+test.afterEach(async ({ page, request }, info) => {
+  info.setTimeout(30_000);
+  const workspace = ownedWorkspaces.get(info.testId);
+  if (!workspace) return;
+  if (!page.isClosed()) await page.close();
+  await removeOwnedWorkspace(request, workspace);
+  ownedWorkspaces.delete(info.testId);
+});
 
 test.beforeAll(async ({ request }) => {
   await assertSandbox(request);
@@ -25,7 +42,7 @@ test.beforeEach(async ({ request }) => {
 
 for (const theme of themes) {
   test(`Diagnostics readable health and result pairs: ${theme}`, async ({ page }, info) => {
-    const ws = await createWorkspace(page.request);
+    const ws = await createDefectWorkspace(page.request, info.testId);
     await preparePage(page, theme);
     // ui_smoke.go runs only internal GET checks; explicit POST, no execution.
     const writes = await guardReadTour(page, ['/api/diagnostics/ui-smoke-test']);
@@ -116,7 +133,7 @@ for (const width of [320, 390, 720]) {
   });
 
   test(`Canvas toolbar stays outside its pan region at ${width}px`, async ({ page }, info) => {
-    const ws = await createWorkspace(page.request);
+    const ws = await createDefectWorkspace(page.request, info.testId);
     await preparePage(page, 'light', width);
     const writes = await guardReadTour(page);
     await page.goto(`/workspaces/${ws.folder_slug}/canvas`);
@@ -216,7 +233,7 @@ for (const [theme, width] of [
   ['dark', 1440]
 ] as const) {
   test(`shared-style sentinel ${theme} ${width}px`, async ({ page }, info) => {
-    const ws = await createWorkspace(page.request);
+    const ws = await createDefectWorkspace(page.request, info.testId);
     await preparePage(page, theme, width);
     const stored = await page.request.get(`/api/orchestration/workspace?id=${ws.id}`);
     expect(stored.ok()).toBeTruthy();

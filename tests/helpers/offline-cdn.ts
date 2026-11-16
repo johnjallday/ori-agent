@@ -20,6 +20,7 @@ const pkg = require('../../package.json');
 
 const BOOTSTRAP = pkg.dependencies?.bootstrap ?? pkg.devDependencies?.bootstrap;
 const ICONS = pkg.dependencies?.['bootstrap-icons'] ?? pkg.devDependencies?.['bootstrap-icons'];
+const AXE = pkg.devDependencies?.['axe-core'];
 
 function resolveDir(id: string): string {
   return require.resolve(`${id}/package.json`).replace(/\/package\.json$/, '');
@@ -34,6 +35,17 @@ function resolveDir(id: string): string {
 export async function installLocalCdn(page: Page): Promise<void> {
   const bootstrapDir = resolveDir('bootstrap');
   const iconsDir = resolveDir('bootstrap-icons');
+  const axeDir = resolveDir('axe-core');
+
+  // Accessibility assertions must not depend on a live CDN either. Only the
+  // exact pinned version is intercepted; other requested versions stay honest.
+  await page.route(`**/axe-core@${AXE}/axe.min.js`, route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/javascript',
+      body: readFileSync(`${axeDir}/axe.min.js`, 'utf8')
+    })
+  );
 
   await page.route(`**/bootstrap@${BOOTSTRAP}/dist/css/bootstrap.min.css`, route =>
     route.fulfill({

@@ -766,13 +766,16 @@ export function renderSignalFiltersHTML(counts, activeSignal, partialSignals = [
     const isActive = signal === activeSignal;
     const count = counts ? counts[signal] : null;
     const label = SIGNAL_LABELS[signal];
+    const compactLabel = signal === SIGNAL_ATTENTION ? 'Attention' : label;
+    const partial = partialSignals.includes(signal);
+    const accessibleLabel = `${label}: ${formatCount(count)}${count !== null && partial ? '+' : ''}${partial ? '. Known workspaces only; some ticket data is unavailable.' : ''}`;
     // A KNOWN zero renders quieter; an unavailable count (null) never does,
     // because "nothing matches" and "we cannot tell" are different answers.
     return (
-      `<button type="button" class="cockpit-signal-chip" data-cockpit-signal="${escapeHtml(signal)}" ` +
+      `<button type="button" class="modern-btn modern-btn-secondary ui-filter cockpit-signal-chip" data-cockpit-signal="${escapeHtml(signal)}" ` +
       (count === 0 ? 'data-zero="true" ' : '') +
-      `aria-pressed="${isActive ? 'true' : 'false'}">` +
-      `<span class="cockpit-signal-label">${escapeHtml(label)}</span>` +
+      `aria-pressed="${isActive ? 'true' : 'false'}" aria-label="${escapeHtml(accessibleLabel)}">` +
+      `<span class="cockpit-signal-label">${escapeHtml(compactLabel)}</span>` +
       `<span class="cockpit-signal-count"${count === null ? ' data-unavailable="true"' : ''}>` +
       `${escapeHtml(formatCount(count))}${count !== null && partialSignals.includes(signal) ? '+' : ''}</span>` +
       (partialSignals.includes(signal)
@@ -2500,6 +2503,11 @@ import {
 
   function renderFilters() {
     if (!els.filters) return;
+    const focusedSignal = els.filters.contains(document.activeElement)
+      ? document.activeElement
+          ?.closest('[data-cockpit-signal]')
+          ?.getAttribute('data-cockpit-signal')
+      : '';
     const counts = signalCounts(state.flattened, state.scheduleIndex);
     const partial = SIGNALS.filter(signal =>
       state.flattened.some(
@@ -2517,6 +2525,11 @@ import {
         applySignal(next === state.signal ? '' : next);
       });
     });
+    if (focusedSignal) {
+      els.filters
+        .querySelector(`[data-cockpit-signal="${parseSignal(focusedSignal)}"]`)
+        ?.focus({ preventScroll: true });
+    }
   }
 
   function applySignal(signal) {

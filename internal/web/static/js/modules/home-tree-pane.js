@@ -601,10 +601,10 @@ export function renderTabStripHTML(tabs, activeKey, flattened = []) {
       const key = escapeHtml(tab.key);
       return (
         `<div class="cockpit-pane-tab${active ? ' is-active' : ''}" role="presentation">` +
-        `<button type="button" class="cockpit-pane-tab-label" role="tab" data-pane-tab="${key}" ` +
+        `<button type="button" class="nav-link cockpit-pane-tab-label${active ? ' active' : ''}" role="tab" data-pane-tab="${key}" ` +
         `aria-selected="${active ? 'true' : 'false'}" aria-controls="cockpitPanePanel" ` +
         `tabindex="${active ? '0' : '-1'}" title="${title}">${title}</button>` +
-        `<button type="button" class="cockpit-pane-tab-close" data-pane-close="${key}" ` +
+        `<button type="button" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-pane-tab-close" data-pane-close="${key}" ` +
         `aria-label="Close ${title}" tabindex="${active ? '0' : '-1'}">${iconHTML('close', { size: 12 })}</button>` +
         '</div>'
       );
@@ -878,10 +878,10 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
       // Shown only in the one-column layout, where the pane takes the tree's
       // place and this is the way back (FR4).
       '<div class="cockpit-pane-back-bar">' +
-      '<button type="button" class="cockpit-pane-back" data-pane-back>' +
+      '<button type="button" class="modern-btn modern-btn-quiet cockpit-pane-back" data-pane-back>' +
       `${iconHTML('back', { size: 14 })}<span>${BACK_TO_TREE_LABEL}</span></button>` +
       '</div>' +
-      '<div class="cockpit-pane-tabs" role="tablist" aria-label="Open items"></div>' +
+      '<div class="nav nav-tabs cockpit-pane-tabs" role="tablist" aria-label="Open items"></div>' +
       '<div class="cockpit-pane-panel" id="cockpitPanePanel" role="tabpanel" tabindex="-1"></div>';
     strip = host.querySelector(':scope > .cockpit-pane-tabs');
     panel = host.querySelector(':scope > .cockpit-pane-panel');

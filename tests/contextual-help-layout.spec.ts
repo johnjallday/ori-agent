@@ -1,6 +1,18 @@
 import { test, expect, type Page } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
 import { mockHiredAssistant } from './helpers/hired-assistant';
+import { assertSandbox } from './helpers/ui-consistency';
+
+test.beforeEach(async ({ request, page }) => {
+  await assertSandbox(request);
+  // The production guide currently uses deterministic reviewed copy (no
+  // SetPhraser wiring). A Help-layout test must still never hand off real work.
+  await page.route('**/api/home-assistant/**', route =>
+    ['GET', 'HEAD'].includes(route.request().method())
+      ? route.fallback()
+      : route.abort('blockedbyclient')
+  );
+});
 
 // Isolated demo only. Help responses are real except the explicitly labelled
 // long-copy and delayed-response fixtures. The relationship is fictional;
@@ -83,6 +95,7 @@ for (const theme of ['light', 'dark']) {
         }
         await page.setViewportSize({ width: 1440, height: 900 });
         await page.goto(path);
+        if (screen === 'agents') await expect(page.locator('#rosterLoading')).toBeHidden();
         await openHelp(page);
         await expect(page.locator('#oriGuideLauncher')).toHaveAttribute('aria-expanded', 'true');
         await expect(page.locator('#oriGuidePanel')).not.toHaveAttribute('aria-modal', 'true');
@@ -101,7 +114,10 @@ for (const theme of ['light', 'dark']) {
             // The existing selected-agent inspector becomes a modal sheet on
             // resize. Escape must dismiss it without also closing Help.
             const inspector = page.locator('#inspector');
-            if ((await inspector.getAttribute('aria-modal')) === 'true') {
+            if (((await inspector.getAttribute('class')) || '').split(/\s+/).includes('is-open')) {
+              // Resize presentation is scheduled asynchronously. Its stable
+              // open state precedes aria-modal in WebKit; wait for the sheet.
+              await expect(inspector).toHaveAttribute('aria-modal', 'true');
               await page.keyboard.press('Escape');
               await expect(inspector).not.toHaveAttribute('aria-modal', 'true');
               await expect(page.locator('#oriGuidePanel')).toBeVisible();

@@ -1234,6 +1234,19 @@ test('renderSignalFiltersHTML marks the active chip and flags unavailable counts
   assert.match(html, /—/);
 });
 
+test('compact shared signal controls retain full accessible scope and partial-data authority', () => {
+  const html = renderSignalFiltersHTML({ attention: 2, running: 0, today: null }, '', [
+    SIGNAL_ATTENTION
+  ]);
+  assert.match(html, /class="modern-btn modern-btn-secondary ui-filter cockpit-signal-chip"/);
+  assert.match(html, /class="cockpit-signal-label">Attention<\/span>/);
+  assert.match(
+    html,
+    /aria-label="Workspaces needing attention: 2\+\. Known workspaces only; some ticket data is unavailable\."/
+  );
+  assert.match(html, /data-unavailable="true"/);
+});
+
 test('renderSignalFiltersHTML quiets a known zero but never an unavailable count', () => {
   const html = renderSignalFiltersHTML({ attention: 2, running: 0, today: null }, '');
   const chip = signal =>

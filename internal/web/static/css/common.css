@@ -57,7 +57,7 @@
 
 /* Shared static/interactive surface rules live in components.css. */
 
-/* Glassmorphism effect for navbar */
+/* Retained legacy glass surfaces; the shared navbar is opaque. */
 .glassmorphism {
   background: rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(20px);
@@ -68,24 +68,6 @@
 [data-bs-theme="dark"] .glassmorphism {
   background: rgba(10, 10, 10, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-/* Navigation link styles */
-.nav-link-item {
-  position: relative;
-  font-weight: 500;
-  font-size: 0.95rem;
-}
-
-.nav-link-item:hover {
-  background: var(--bg-secondary) !important;
-  color: var(--text-primary) !important;
-}
-
-.nav-link-item:active,
-.nav-link-item.active {
-  background: var(--bg-tertiary) !important;
-  color: var(--text-primary) !important;
 }
 
 /* Plugin Pages Dropdown Styles */
@@ -565,8 +547,11 @@ h3,
 @media (max-width: 768px), (pointer: coarse) {
   button,
   .btn,
+  .btn-close,
   .modern-btn,
   a.btn,
+  .nav-link-item,
+  .ori-navbar-brand,
   .nav-tabs .nav-link,
   .nav-pills .nav-link,
   [role="button"] {
@@ -584,7 +569,8 @@ h3,
      input. Do not style hidden .btn-check radios or enlarge the glyph. */
   .form-check-label,
   label:has(> input[type="checkbox"]),
-  label:has(> input[type="radio"]) {
+  label:has(> input[type="radio"]),
+  label:has(> input[type="color"]) {
     min-height: 44px;
     min-width: 44px;
     display: inline-flex;
@@ -603,11 +589,8 @@ h3,
     margin-top: 0;
   }
 
-  /* Smaller buttons get padding to meet touch target */
-  .btn-sm,
-  .modern-btn-sm {
-    padding: 0.625rem 0.875rem;
-  }
+  /* The touch floor above provides the target. Compact button padding remains
+     owned by components.css instead of silently changing on narrow screens. */
 }
 
 @media (max-width: 768px) {
@@ -795,16 +778,15 @@ h3,
    Navigation Indicators
    ============================================ */
 
-/* Active page indicator in navbar */
-.nav-link-item.active,
-.nav-link.active {
+/* Retained standalone legacy links; Bootstrap tabs/pills have one owner in
+   components.css, including their selected foreground and underline. */
+.nav-link.active:not(:where(.nav-tabs .nav-link, .nav-pills .nav-link)) {
   position: relative;
   background: var(--bg-tertiary) !important;
   color: var(--text-primary) !important;
 }
 
-.nav-link-item.active::after,
-.nav-link.active::after {
+.nav-link.active:not(:where(.nav-tabs .nav-link, .nav-pills .nav-link))::after {
   content: "";
   position: absolute;
   bottom: 0;
@@ -1384,7 +1366,9 @@ h3,
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    /* A nonzero duration also animates elements whose default transition
+       property is "all", briefly separating theme foreground/backdrop pairs. */
+    transition-duration: 0s !important;
     scroll-behavior: auto !important;
   }
 

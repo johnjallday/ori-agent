@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import {
   assertSandbox,
   createWorkspace,
+  removeOwnedWorkspace,
   preparePage,
   guardReadTour,
   capture as captureSurface,
@@ -207,14 +208,7 @@ for (const theme of themes) {
     const workspace = await createWorkspace(request);
     cleanups.set(info.testId, async client => {
       if (!page.isClosed()) await page.close();
-      const read = await client.get(`/api/workspaces/${workspace.id}`);
-      expect(read.ok()).toBeTruthy();
-      expect((await read.json()).name).toBe(workspace.name);
-      expect(
-        (
-          await client.delete(`/api/orchestration/workspace?id=${encodeURIComponent(workspace.id)}`)
-        ).ok()
-      ).toBeTruthy();
+      await removeOwnedWorkspace(client, workspace);
     });
     const firstID = randomUUID(),
       secondID = randomUUID(),

@@ -43,7 +43,7 @@ function fakeElement(attrs = {}) {
 }
 
 // A Settings page with one in-page section item and one hub item per page.
-function loadSettings({ narrow = false, hash = '', reduced = true } = {}) {
+function loadSettings({ narrow = false, hash = '', reduced = true, fontsReady } = {}) {
   const sectionItem = fakeElement({ 'data-section': 'api-keys', text: 'API Keys' });
   const skillsItem = fakeElement({ text: 'Skills', dataset: { externalLink: 'true' } });
   const pluginsItem = fakeElement({ text: 'Plugins', dataset: { externalLink: 'true' } });
@@ -70,10 +70,12 @@ function loadSettings({ narrow = false, hash = '', reduced = true } = {}) {
   const windowScrolls = [];
   const pushes = [];
   const windowListeners = {};
+  const layoutObservers = [];
 
   const document = {
     readyState: 'complete',
     documentElement: {},
+    fonts: fontsReady ? { ready: fontsReady } : undefined,
     getElementById: id =>
       ({
         settingsSearch: search,
@@ -98,6 +100,9 @@ function loadSettings({ narrow = false, hash = '', reduced = true } = {}) {
       scrollY: 120,
       scrollTo: options => windowScrolls.push(options),
       addEventListener: (type, fn) => (windowListeners[type] = fn),
+      removeEventListener: (type, fn) => {
+        if (windowListeners[type] === fn) delete windowListeners[type];
+      },
       matchMedia: query => (query.includes('max-width') ? media : { matches: reduced })
     },
     getComputedStyle: () => ({ getPropertyValue: () => '76px' }),
@@ -111,6 +116,17 @@ function loadSettings({ narrow = false, hash = '', reduced = true } = {}) {
     setTimeout: fn => timers.push(fn),
     clearTimeout() {},
     requestAnimationFrame: fn => fn(),
+    ResizeObserver: class {
+      constructor(callback) {
+        this.callback = callback;
+        this.disconnected = false;
+        layoutObservers.push(this);
+      }
+      observe() {}
+      disconnect() {
+        this.disconnected = true;
+      }
+    },
     Array
   };
   sandbox.globalThis = sandbox;
@@ -135,12 +151,18 @@ function loadSettings({ narrow = false, hash = '', reduced = true } = {}) {
     disclosure,
     media,
     heading,
+    apiKeysSection,
     contentScrolls,
     windowScrolls,
     pushes,
     search,
     window: sandbox.window,
     hashchange: () => windowListeners.hashchange(),
+    fireWindow: type => windowListeners[type]?.({}),
+    resize: () =>
+      layoutObservers
+        .filter(observer => !observer.disconnected)
+        .forEach(observer => observer.callback()),
     flush: () => timers.splice(0).forEach(fn => fn())
   };
 }
@@ -212,6 +234,80 @@ test('deep links and history navigation scroll without appending entries or stea
   assert.equal(nav.windowScrolls[0].behavior, 'smooth');
   assert.deepEqual(nav.pushes, []);
   assert.equal(nav.heading.attrs.focused, undefined);
+});
+
+test('initial deep links measure after font settlement instead of a fixed timer', () => {
+  let settled;
+  const nav = loadSettings({
+    narrow: true,
+    hash: '#api-keys',
+    fontsReady: { then: callback => (settled = callback) }
+  });
+  nav.flush();
+  assert.equal(nav.windowScrolls.length, 0, 'a 100ms timer is not font readiness');
+  nav.apiKeysSection.getBoundingClientRect = () => ({ top: 900 });
+  settled();
+  assert.equal(nav.windowScrolls[0].top, 928);
+  assert.equal(nav.sectionItem.attrs['aria-current'], 'location');
+  assert.deepEqual(nav.pushes, []);
+  assert.equal(nav.heading.attrs.focused, undefined);
+});
+
+test('late initial font alignment never overrides a user interaction', () => {
+  for (const event of ['wheel', 'touchstart', 'pointerdown', 'keydown', 'focusin']) {
+    let settled;
+    const nav = loadSettings({
+      narrow: true,
+      hash: '#api-keys',
+      fontsReady: { then: callback => (settled = callback) }
+    });
+    nav.fireWindow(event);
+    settled();
+    assert.equal(nav.windowScrolls.length, 0, event);
+  }
+});
+
+test('the initial fragment follows late section hydration until the user interacts', () => {
+  let settled;
+  const nav = loadSettings({
+    narrow: true,
+    hash: '#api-keys',
+    fontsReady: { then: callback => (settled = callback) }
+  });
+  settled();
+  nav.apiKeysSection.getBoundingClientRect = () => ({ top: 900 });
+  nav.resize();
+  assert.equal(nav.windowScrolls.at(-1).top, 928);
+  assert.deepEqual(nav.pushes, []);
+  assert.equal(nav.heading.attrs.focused, undefined);
+});
+
+test('the settled initial fragment stops following layout after user intent', () => {
+  let settled;
+  const nav = loadSettings({
+    narrow: true,
+    hash: '#api-keys',
+    fontsReady: { then: callback => (settled = callback) }
+  });
+  settled();
+  const count = nav.windowScrolls.length;
+  nav.fireWindow('wheel');
+  nav.apiKeysSection.getBoundingClientRect = () => ({ top: 900 });
+  nav.resize();
+  assert.equal(nav.windowScrolls.length, count);
+});
+
+test('late initial font alignment cannot restore a superseded fragment', () => {
+  let settled;
+  const nav = loadSettings({
+    narrow: true,
+    hash: '#api-keys',
+    fontsReady: { then: callback => (settled = callback) }
+  });
+  nav.window.location.hash = '#another-section';
+  settled();
+  assert.equal(nav.windowScrolls.length, 0);
+  assert.deepEqual(nav.pushes, []);
 });
 
 test('Escape clears a search without blurring its keyboard focus', () => {

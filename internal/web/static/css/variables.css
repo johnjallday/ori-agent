@@ -150,6 +150,13 @@
   --muted-text: var(--text-muted);
 }
 
+/* Bootstrap's default pink inline-code foreground misses AA on shared light
+   surfaces. Code is content, not a status; use the theme's normal foreground. */
+:root,
+[data-bs-theme] {
+  --bs-code-color: var(--text-primary);
+}
+
 @media (min-width: 1400px) {
   :root {
     --ui-density: 1.08;

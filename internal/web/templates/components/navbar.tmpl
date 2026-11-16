@@ -1,5 +1,5 @@
 <!-- Top Navbar - Flexible component for all pages -->
-<nav class="navbar {{if .NavbarClass}}{{.NavbarClass}}{{else}}modern-card glassmorphism{{end}} {{if .NavbarFixed}}navbar-expand-lg position-fixed w-100 top-0{{end}}" style="position: {{if .NavbarFixed}}fixed{{else}}sticky{{end}}; top: 0; z-index: 10002; {{if .NavbarFixed}}backdrop-filter: blur(10px);{{else}}border-radius: 0; border: none; border-bottom: 1px solid var(--border-color); backdrop-filter: blur(20px);{{end}}">
+<nav class="navbar ori-navbar {{if .NavbarClass}}{{.NavbarClass}}{{end}} {{if .NavbarFixed}}navbar-expand-lg position-fixed w-100 top-0{{end}}" aria-label="Primary navigation">
   <div class="container-fluid {{if .NavbarPadding}}{{.NavbarPadding}}{{else}}{{if .NavbarFixed}}px-4{{end}}{{end}}">
     <div class="ori-navbar-shell">
       <div class="ori-navbar-left">
@@ -13,11 +13,11 @@
         {{end}}
 
         <!-- Brand -->
-        <a class="navbar-brand ori-navbar-brand fw-bold {{if .BrandNoDecoration}}text-decoration-none{{else}}d-flex{{end}} align-items-center" href="{{if .BrandURL}}{{.BrandURL}}{{else}}/{{end}}" style="color: {{if .BrandColor}}{{.BrandColor}}{{else}}var(--primary-color){{end}};{{if not .NavbarFixed}} font-size: 1.25rem; cursor: pointer;{{end}}">
+        <a class="navbar-brand ori-navbar-brand fw-bold d-flex align-items-center{{if .BrandNoDecoration}} text-decoration-none{{end}}" href="{{if .BrandURL}}{{.BrandURL}}{{else}}/{{end}}" style="color: {{if .BrandColor}}{{.BrandColor}}{{else}}var(--accent-text){{end}};">
           {{if .BrandIcon}}
           {{.BrandIcon}}
           {{else if .UseLegacyIcon}}
-          <span data-icon="cpu" data-icon-size="36" data-icon-class="me-2" style="color: var(--primary-color);"></span>
+          <span data-icon="cpu" data-icon-size="36" data-icon-class="me-2" style="color: currentColor;"></span>
           {{else}}
           <svg width="36" height="36" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" class="me-2">
             <path d="M 724 410 L 714 405 L 686 404 L 663 397 L 651 386 L 632 352 L 618 339 L 600 329 L 582 324 L 561 324 L 542 329 L 518 344
@@ -28,7 +28,7 @@
               fill="currentColor"/>
           </svg>
           {{end}}
-          {{if .BrandText}}{{.BrandText}}{{else}}{{.Title}}{{end}}
+          <span class="ori-navbar-brand-text">{{if .BrandText}}{{.BrandText}}{{else}}{{.Title}}{{end}}</span>
         </a>
       </div>
 
@@ -64,7 +64,7 @@
             <path d="M11.1 13.6H12.9V15.9H11.1V13.6Z" fill="currentColor"/>
           </svg>
           <span>Vaults</span>
-          <span id="vaultNavCount" class="ori-navbar-vault-count is-hidden" aria-label="Vault entry count">0</span>
+          <span id="vaultNavCount" class="badge ori-navbar-vault-count is-hidden" aria-label="Vault entry count">0</span>
         </a>
       </div>
       {{end}}

@@ -1,19 +1,17 @@
 {{define "agents-detail"}}
 <!DOCTYPE html>
-<html data-bs-theme="light">
+<html lang="en" data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="ui-page">
   <style>
     #agentWorkspacesSection.agent-workspaces {
       scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px);
-      background: var(--bg-secondary);
     }
     .agent-workspaces .modern-btn { background-image: none; }
     .agent-workspaces a { color: var(--text-primary); text-decoration: underline; }
     .agent-workspaces[hidden] { display: none !important; }
     /* Per-section edit state ("Unsaved changes", "Saving…", "Changed elsewhere"). */
-    .agent-edit-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid var(--border-color); color: var(--text-primary); background: var(--bg-secondary); }
     .agent-edit-badge[hidden] { display: none !important; }
     .agent-edit-badge[data-state="conflict"], .agent-edit-badge[data-state="unconfirmed"], .agent-edit-badge[data-state="error"] { border-color: var(--agent-edit-danger); color: var(--agent-edit-danger); }
     /* Inline "keep editing / discard" confirmation for a dirty editor. */
@@ -28,9 +26,7 @@
     .agent-conflict-review dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
     .agent-conflict-review .actions { display: flex; flex-wrap: wrap; gap: 8px; }
     /* Status colours with real contrast: --success-color is too light for text. */
-    :root { --agent-edit-success: #047857; --agent-edit-danger: #b91c1c; }
-    .dark-mode, [data-bs-theme="dark"] { --agent-edit-success: #34d399; --agent-edit-danger: #fca5a5; }
-    @media (prefers-color-scheme: dark) { :root:not(.light-mode):not([data-bs-theme="light"]) { --agent-edit-success: #34d399; --agent-edit-danger: #fca5a5; } }
+    :root { --agent-edit-success: var(--success-text); --agent-edit-danger: var(--danger-text); }
     .agent-workspaces h2 { font-size: 20px; color: var(--text-primary); }
     .agent-workspaces p { color: var(--text-secondary); }
     .agent-workspaces fieldset { min-width: 0; }
@@ -38,26 +34,23 @@
     .agent-workspaces ul { list-style: none; padding: 0; margin: 12px 0; }
     .agent-workspaces li { padding: 12px 0; border-top: 1px solid var(--border-color); overflow-wrap: anywhere; }
     .agent-workspaces label { display: flex; gap: 10px; align-items: center; color: var(--text-primary); }
-    .agent-workspaces input[type="checkbox"] { flex-shrink: 0; width: 20px; height: 20px; accent-color: var(--primary-color); }
+    .agent-workspaces input[type="checkbox"] { flex-shrink: 0; width: 18px; height: 18px; accent-color: var(--primary-color); }
     .agent-workspaces li p { margin: 6px 0; font-size: 13px; }
     .agent-workspaces li a { display: inline-block; margin-top: 6px; text-decoration: underline; }
-    .agent-workspaces :is(a, button, input, h2, [data-workspace-status]):focus-visible { outline: 2px solid var(--primary-color); outline-offset: 3px; }
+    .agent-workspaces :is(a, button, input, h2, [data-workspace-status]):focus-visible { outline: 2px solid var(--focus-color); outline-offset: 2px; }
     .agent-workspaces-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
     /* Where settings come from: read-only inspection of one chosen context. */
-    /* Muted text in this section meets WCAG AA (4.5:1) in both themes; the
-       shared --text-secondary token is about 4.2:1 on the dark card. */
-    :root { --settings-ownership-muted: var(--text-secondary); --settings-ownership-focus: var(--primary-color); }
-    .dark-mode, [data-bs-theme="dark"] { --settings-ownership-muted: #a8a8ad; --settings-ownership-focus: #6ee7b7; }
-    @media (prefers-color-scheme: dark) { :root:not(.light-mode):not([data-bs-theme="light"]) { --settings-ownership-muted: #a8a8ad; --settings-ownership-focus: #6ee7b7; } }
-    .settings-ownership { scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px); background: var(--bg-secondary); color: var(--text-primary); }
+    /* Compatibility names resolve to the shared semantic foreground/focus pairs. */
+    :root { --settings-ownership-muted: var(--text-muted); --settings-ownership-focus: var(--focus-color); }
+    .settings-ownership { scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px); color: var(--text-primary); }
     .settings-ownership[hidden] { display: none !important; }
     /* In-page "Where to change it" targets land below the fixed navbar. */
-    #agentConfigurationSection, #agentHeader, #promptSection { scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px); }
+    #agentConfigurationSection, #agentHeader, #promptSection, #appearanceSection, #capabilitiesSection { scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px); }
     .settings-ownership h2 { font-size: 20px; margin: 0; color: var(--text-primary); }
     .settings-ownership p { color: var(--settings-ownership-muted); overflow-wrap: anywhere; }
     .settings-ownership .settings-ownership-picker { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 12px 0; }
     .settings-ownership label { font-weight: 600; color: var(--text-primary); }
-    .settings-ownership select { min-width: min(100%, 18rem); max-width: 100%; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); }
+    .settings-ownership select { min-width: min(100%, 18rem); max-width: 100%; }
     .settings-ownership :is(select, button, h2):focus-visible { outline: 2px solid var(--settings-ownership-focus); outline-offset: 3px; }
     .settings-ownership .settings-ownership-heading { font-size: 16px; font-weight: 600; margin: 8px 0; color: var(--text-primary); overflow-wrap: anywhere; }
     .settings-ownership .settings-ownership-source { color: var(--text-primary); margin: 4px 0; }
@@ -100,51 +93,6 @@
       .settings-ownership-row dd { border-top: 0; padding-top: 0; }
     }
 
-    /* Toggle Switch Styles */
-    .toggle-switch {
-      position: relative;
-      display: inline-block;
-      width: 44px;
-      height: 24px;
-    }
-    .toggle-switch input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-    .toggle-slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background-color: var(--border-color, #ccc);
-      transition: 0.3s;
-      border-radius: 24px;
-    }
-    .toggle-slider:before {
-      position: absolute;
-      content: "";
-      height: 18px;
-      width: 18px;
-      left: 3px;
-      bottom: 3px;
-      background-color: white;
-      transition: 0.3s;
-      border-radius: 50%;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-    }
-    .toggle-switch input:checked + .toggle-slider {
-      background-color: var(--primary-color, #7c3aed);
-    }
-    .toggle-switch input:checked + .toggle-slider:before {
-      transform: translateX(20px);
-    }
-    .toggle-switch input:focus + .toggle-slider {
-      box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
-    }
-
     /* The profile modal holds only fields its Save and Cancel own. Appearance
        saves immediately, so it lives in its own section on the page. */
     .agent-profile-modal-grid {
@@ -160,113 +108,23 @@
 
     /* The shared Appearance editor: three source cards, each with its own
        actions. min-width: 0 lets it wrap rather than overflow at phone width. */
-    .agent-appearance-panel {
-      max-width: 560px;
-      min-width: 0;
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 16px;
-      background: var(--bg-secondary);
+    .agent-appearance-panel { min-width: 0; }
+    .agent-appearance-panel .appearance-editor__sources {
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+      align-items: start;
     }
+    .agent-detail-identity { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); min-width: 0; }
+    .agent-detail-title { flex: 1 1 14rem; min-width: 0; }
+    #agentAvatar { width: 88px; height: 88px; flex: 0 0 88px; }
+    .agent-detail-copy { flex-basis: 100%; overflow-wrap: anywhere; }
+    .agent-detail-copy p { max-width: 75ch; }
+    .agent-detail-copy .agent-description-large { margin: 0; }
+    #agentName { overflow-wrap: anywhere; }
 
-    /* At phone width the editor's source cards need the whole card width; the
-       extra frame and section padding would push them past their box. */
-    @media (max-width: 575px) {
-      #appearanceSection { padding: 1rem !important; }
-      .agent-appearance-panel { padding: 0; border: 0; background: transparent; }
-    }
-
-    .agent-profile-avatar-preview {
-      width: 96px;
-      height: 96px;
-      border-radius: 16px;
-      border: 2px dashed var(--border-color);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-      background: var(--bg-primary);
-      margin-bottom: 12px;
-    }
-
-    .agent-profile-avatar-preview img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: none;
-    }
-
-    .agent-profile-drop-zone {
-      border: 2px dashed var(--border-color);
-      border-radius: 10px;
-      padding: 14px;
-      text-align: center;
-      cursor: pointer;
-      background: var(--bg-primary);
-      transition: border-color 0.2s ease, background-color 0.2s ease;
-    }
-
-    .agent-profile-drop-zone:hover,
-    .agent-profile-drop-zone.is-dragover {
-      border-color: var(--primary-color);
-      background: var(--bg-tertiary);
-    }
-
-    .agent-profile-tags-container {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      min-height: 44px;
-      padding: 8px;
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      background: var(--bg-secondary);
-    }
-
-    .agent-profile-tag-input {
-      min-width: 140px;
-      flex: 1;
-      border: 0;
-      outline: 0;
-      background: transparent;
-      color: var(--text-primary);
-      font-size: 14px;
-    }
-
-    .agent-profile-tag-chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: var(--primary-color-light);
-      color: var(--primary-color);
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    .agent-profile-tag-remove {
-      border: 0;
-      background: transparent;
-      color: inherit;
-      padding: 0;
-      line-height: 1;
-      cursor: pointer;
-    }
-
-    @media (max-width: 767px) {
-      .agent-profile-modal-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .setup-health-banner {
-      border-left: 4px solid var(--warning-color);
-      background: linear-gradient(145deg, color-mix(in srgb, var(--bg-secondary) 84%, transparent), var(--bg-primary));
-    }
+    .setup-health-banner { border-left: 4px solid var(--warning-text); }
 
     .setup-health-banner.is-ready {
-      border-left-color: var(--success-color);
+      border-left-color: var(--success-text);
     }
 
     .setup-health-title {
@@ -289,6 +147,7 @@
 
     .setup-health-item {
       display: flex;
+      flex-wrap: wrap;
       justify-content: space-between;
       align-items: center;
       gap: 10px;
@@ -313,16 +172,15 @@
 
     .capability-summary-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
       gap: 10px;
       margin-bottom: 12px;
     }
 
     .capability-summary-item {
-      border: 1px solid var(--border-color);
-      border-radius: 10px;
-      background: var(--bg-secondary);
-      padding: 10px 12px;
+      min-width: 0;
+      padding: var(--space-3) 0;
+      border-top: 1px solid var(--border-color);
     }
 
     .capability-summary-label {
@@ -341,34 +199,9 @@
       margin-bottom: 6px;
     }
 
-    .capability-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 11px;
-      font-weight: 600;
-      border-radius: 999px;
-      padding: 3px 8px;
-      border: 1px solid transparent;
-    }
-
-    .capability-pill.ready {
-      background: rgba(34, 197, 94, 0.12);
-      border-color: rgba(34, 197, 94, 0.25);
-      color: var(--success-color);
-    }
-
-    .capability-pill.warning {
-      background: rgba(245, 158, 11, 0.13);
-      border-color: rgba(245, 158, 11, 0.3);
-      color: var(--warning-color);
-    }
-
-    .capability-pill.error {
-      background: rgba(239, 68, 68, 0.12);
-      border-color: rgba(239, 68, 68, 0.25);
-      color: var(--danger-color);
-    }
+    .capability-pill.ready { color: var(--success-text); }
+    .capability-pill.warning { color: var(--warning-text); }
+    .capability-pill.error { color: var(--danger-text); }
 
     .capability-dependency-list {
       display: grid;
@@ -376,11 +209,10 @@
     }
 
     .capability-dependency-item {
-      border: 1px solid var(--border-color);
-      border-radius: 10px;
-      background: var(--bg-secondary);
-      padding: 10px 12px;
+      border-top: 1px solid var(--border-color);
+      padding: var(--space-3) 0;
       display: flex;
+      flex-wrap: wrap;
       justify-content: space-between;
       gap: 12px;
       align-items: center;
@@ -578,25 +410,15 @@
         </div>
 
         <!-- Content (hidden until loaded) -->
-        <div id="content" style="display: none;">
+        <div id="content" class="ui-section ui-section--quiet" style="display: none;">
           <!-- Agent Header -->
-          <div id="agentHeader" class="agent-header modern-card p-4 mb-4" style="display: none;">
-            <!-- Wraps at narrow widths so the actions never push the page sideways. -->
-            <div class="d-flex align-items-center gap-3 flex-wrap w-100">
-              <div id="agentAvatar" class="agent-avatar-large" style="width: 80px; height: 80px; border-radius: 16px; background: linear-gradient(135deg, var(--primary-color), var(--primary-light)); display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 700; color: white;">
-                --
-              </div>
-              <div class="flex-grow-1" style="min-width: min(100%, 14rem);">
-                <h1 id="agentName" style="font-size: 28px; margin: 0 0 8px 0; color: var(--text-primary); overflow-wrap: anywhere;">Loading...</h1>
-                <div class="d-flex align-items-start gap-2">
-                  <p id="agentDescription" class="agent-description-large flex-grow-1" style="color: var(--text-secondary); margin: 0;">Loading description...</p>
-                </div>
-                <!-- Where this agent comes from: "Customised in: …" for one of your
-                     agents, "From workspace: …" for a workspace's own agent. -->
-                <p id="agentOriginNote" class="agent-description-large text-secondary mt-2 mb-0" hidden></p>
-                <p id="profilePageStatus" role="status" aria-live="polite" class="small mt-2 mb-0" style="color: var(--agent-edit-success);"></p>
-              </div>
-              <div class="d-flex gap-2 flex-wrap align-items-center">
+          <a href="/agents" class="modern-btn modern-btn-secondary mb-3">← Back to Agents</a>
+          <header id="agentHeader" class="agent-header ui-page-header ui-section p-3 mb-4" style="display: none;">
+            <div class="agent-detail-identity">
+              <div id="agentAvatar" class="agent-avatar-large">--</div>
+              <div class="agent-detail-title"><h1 id="agentName">Loading...</h1></div>
+            </div>
+            <div class="ui-actions">
                 <button id="addToMyAgentsButton" class="modern-btn modern-btn-primary" type="button" hidden>
                   Add to my agents
                 </button>
@@ -604,22 +426,27 @@
                         title="Open this agent's folder in your Workspace Directory">
                   Show in Finder
                 </button>
-                <span id="profileEditBadge" class="agent-edit-badge" data-edit-badge="profile" hidden></span>
+                <span id="profileEditBadge" class="agent-edit-badge modern-badge" data-edit-badge="profile" hidden></span>
                 <button id="editProfileButton" class="modern-btn modern-btn-primary" type="button">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" aria-hidden="true">
                     <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
                   </svg>
                   Edit Profile
                 </button>
-                <button id="deleteButton" class="modern-btn modern-btn-secondary" style="background: rgba(239, 68, 68, 0.1); color: var(--danger-color); border-color: rgba(239, 68, 68, 0.2);">
+                <button id="deleteButton" class="modern-btn modern-btn-danger" type="button">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
                   </svg>
                   Delete
                 </button>
-              </div>
             </div>
-          </div>
+            <div class="agent-detail-copy">
+              <p id="agentDescription" class="agent-description-large">Loading description...</p>
+              <!-- Provenance remains complete and does not change the editor's owner. -->
+              <p id="agentOriginNote" class="agent-description-large text-secondary mt-2 mb-0" hidden></p>
+              <p id="profilePageStatus" role="status" aria-live="polite" class="small mt-2 mb-0" style="color: var(--agent-edit-success);"></p>
+            </div>
+          </header>
 
           {{if .Extra.IsHiredAssistant}}
           <div class="modern-card p-3 mb-4" id="hiredAssistantKnowledgeEntry">
@@ -637,10 +464,10 @@
                own section rather than part of the profile modal, whose Save
                and Cancel own only the fields inside it. The shared editor is
                the same control the Agents roster uses (FR-26/FR-85). -->
-          <section id="appearanceSection" class="section-card modern-card p-4 mb-4" aria-labelledby="appearanceTitle" aria-describedby="appearanceSaveNote">
+          <section id="appearanceSection" class="section-card ui-section p-3 mb-4" aria-labelledby="appearanceTitle" aria-describedby="appearanceSaveNote">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
               <h3 id="appearanceTitle" class="section-title" style="font-size: 18px; font-weight: 600; margin: 0; color: var(--text-primary);">Appearance</h3>
-              <span class="agent-edit-badge">Changes save immediately</span>
+              <span class="agent-edit-badge modern-badge">Changes save immediately</span>
             </div>
             <p id="appearanceSaveNote" class="small" style="color: var(--text-secondary); margin: 0 0 12px;">Each choice here is saved as soon as you make it. Saving or cancelling the profile does not change it.</p>
             <div class="agent-appearance-panel">
@@ -670,12 +497,12 @@
           <section id="settingsOwnershipSection" class="settings-ownership section-card modern-card p-4 mb-4" aria-labelledby="settingsOwnershipTitle" hidden>
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
               <h2 id="settingsOwnershipTitle" tabindex="-1">Where settings come from</h2>
-              <span class="agent-edit-badge">Read only</span>
+              <span class="agent-edit-badge modern-badge">Read only</span>
             </div>
             <p class="small mt-2 mb-0">See which saved settings apply in one place and where they are stored. Nothing here changes the agent.</p>
             <div class="settings-ownership-picker">
               <label for="settingsOwnershipContext">Viewing</label>
-              <select id="settingsOwnershipContext" data-ownership-context disabled></select>
+              <select id="settingsOwnershipContext" class="form-select" data-ownership-context disabled></select>
             </div>
             <p data-ownership-unsaved class="small settings-ownership-unsaved" role="status" aria-live="polite" hidden></p>
             <p data-ownership-status role="status" aria-live="polite" class="small mb-0"></p>
@@ -719,7 +546,7 @@
                 </svg>
                 Capabilities
               </h3>
-              <span id="capabilitiesReadinessBadge" class="capability-pill warning">Checking...</span>
+              <span id="capabilitiesReadinessBadge" class="capability-pill modern-badge warning">Checking...</span>
             </div>
             <p id="capabilitiesSummaryText" class="setup-health-subtitle" style="margin-bottom: 12px;">Loading capabilities...</p>
             <div id="capabilitiesSummaryGrid" class="capability-summary-grid"></div>
@@ -740,7 +567,7 @@
                     Configuration
                   </h3>
                   <div class="d-flex align-items-center gap-2">
-                    <span id="configEditBadge" class="agent-edit-badge" data-edit-badge="configuration" hidden></span>
+                    <span id="configEditBadge" class="agent-edit-badge modern-badge" data-edit-badge="configuration" hidden></span>
                     <button id="editConfigBtn" class="modern-btn modern-btn-secondary" onclick="toggleConfigEditMode()">Edit</button>
                     <div id="configEditActions" class="d-flex gap-2" style="display: none;">
                       <button id="saveConfigBtn" class="modern-btn modern-btn-primary" onclick="saveConfigChanges()">Save</button>
@@ -781,8 +608,8 @@
                 <div id="configEditForm" style="display: none;">
                   <div class="row g-3">
                     <div class="col-sm-6">
-                      <label for="editProviderFilter" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Provider Filter</label>
-                      <select id="editProviderFilter" class="form-select" onchange="filterEditModelOptions()" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                      <label for="editProviderFilter" class="form-label">Provider Filter</label>
+                      <select id="editProviderFilter" class="form-select" onchange="filterEditModelOptions()">
                         <option value="">All Providers</option>
                         <option value="openai">OpenAI</option>
                         <option value="codex">OpenAI Codex (CLI)</option>
@@ -795,8 +622,8 @@
                       </select>
                     </div>
                     <div class="col-sm-6">
-                      <label id="editModelLabel" for="editModel" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Model</label>
-                      <select id="editModel" class="form-select" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                      <label id="editModelLabel" for="editModel" class="form-label">Model</label>
+                      <select id="editModel" class="form-select">
                         <option value="">Loading models...</option>
                       </select>
                     </div>
@@ -805,8 +632,8 @@
                       <p class="mb-0" style="font-size: 13px; color: var(--text-secondary);">This is the agent's saved configuration. Saving this form also updates <a href="/settings#system-model">Settings → Default model</a> for Assistant conversations and Ori's AI features.</p>
                     </div>
                     <div class="col-sm-6" id="editReasoningField" style="display: none;">
-                      <label for="editReasoningEffort" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Reasoning Level</label>
-                      <select id="editReasoningEffort" class="form-select" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                      <label for="editReasoningEffort" class="form-label">Reasoning Level</label>
+                      <select id="editReasoningEffort" class="form-select">
                         <option value="medium" selected>Medium (Recommended)</option>
                         <option value="high">High</option>
                         <option value="low">Low</option>
@@ -814,12 +641,12 @@
                       </select>
                     </div>
                     <div class="col-sm-6">
-                      <label for="editTemperature" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Temperature</label>
-                      <input id="editTemperature" type="number" step="0.1" min="0" max="2" class="form-control" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                      <label for="editTemperature" class="form-label">Temperature</label>
+                      <input id="editTemperature" type="number" step="0.1" min="0" max="2" class="form-control">
                     </div>
                     <div class="col-sm-6">
-                      <label for="editMaxTokens" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Max Tokens</label>
-                      <input id="editMaxTokens" type="number" min="0" class="form-control" placeholder="optional" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                      <label for="editMaxTokens" class="form-label">Max Tokens</label>
+                      <input id="editMaxTokens" type="number" min="0" class="form-control" placeholder="optional">
                     </div>
                     <div class="col-sm-6">
                       <label for="editRole" class="info-item-label" style="font-size: 13px; color: var(--text-secondary);">Role</label>
@@ -858,7 +685,7 @@
                     System Prompt
                   </h3>
                   <div class="d-flex align-items-center gap-2">
-                    <span id="promptEditBadge" class="agent-edit-badge" data-edit-badge="prompt" hidden></span>
+                    <span id="promptEditBadge" class="agent-edit-badge modern-badge" data-edit-badge="prompt" hidden></span>
                     <button id="editPromptBtn" class="modern-btn modern-btn-secondary" onclick="togglePromptEditMode()">Edit</button>
                     <div id="promptEditActions" class="d-flex gap-2" style="display: none;">
                       <button id="savePromptBtn" class="modern-btn modern-btn-primary" onclick="savePromptChanges()">Save</button>
@@ -870,7 +697,7 @@
 
                 <div id="promptEditForm" style="display: none;">
                   <label for="editSystemPrompt" class="visually-hidden">System prompt</label>
-                  <textarea id="editSystemPrompt" class="form-control" rows="10" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); font-family: 'SF Mono', monospace; font-size: 13px; line-height: 1.6;"></textarea>
+                  <textarea id="editSystemPrompt" class="form-control" rows="10" style="font-family: var(--font-mono);"></textarea>
                 </div>
                 <!-- Outside the form so a save's outcome stays visible after the editor closes. -->
                 <div id="promptEditStatus" tabindex="-1" role="status" aria-live="polite" class="small mt-2" style="color: var(--text-secondary);"></div>
@@ -914,7 +741,7 @@
                 <p style="margin: 0 0 16px; color: var(--text-secondary); font-size: 13px; line-height: 1.5;">
                   MCP bindings are configured per workspace now. This page shows the connectors required by this agent's enabled skills and whether those connectors exist globally.
                 </p>
-                <div id="mcpList" class="mcp-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
+                <div id="mcpList" class="mcp-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 17.5rem), 1fr)); gap: 12px;">
                   <div class="text-center py-3" style="color: var(--text-secondary);">Loading MCP dependencies...</div>
                 </div>
               </div>
@@ -968,7 +795,7 @@
                     <input class="form-check-input" type="checkbox" id="expertModeToggle" role="switch" aria-label="Expert mode">
                   </div>
                 </div>
-                <div id="skillsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
+                <div id="skillsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr)); gap: 12px;">
                   <div class="text-center py-3" style="color: var(--text-secondary);">Loading skills...</div>
                 </div>
               </div>
@@ -1021,11 +848,11 @@
               <div class="row g-3">
                 <div class="col-12">
                   <label for="profileAgentNameInput" class="form-label" style="color: var(--text-primary);">Name</label>
-                  <input type="text" id="profileAgentNameInput" name="agent_name" class="form-control" autocomplete="off" spellcheck="false" placeholder="Agent name…" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                  <input type="text" id="profileAgentNameInput" name="agent_name" class="form-control" autocomplete="off" spellcheck="false" placeholder="Agent name…">
                 </div>
                 <div class="col-12">
                   <label for="profileDescriptionInput" class="form-label" style="color: var(--text-primary);">Description</label>
-                  <textarea id="profileDescriptionInput" name="description" class="form-control" rows="4" placeholder="Describe the agent's purpose…" style="background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); resize: vertical;"></textarea>
+                  <textarea id="profileDescriptionInput" name="description" class="form-control" rows="4" placeholder="Describe the agent's purpose…"></textarea>
                 </div>
                 <div class="col-sm-6">
                   <label class="form-label" for="profileFavoriteToggle" style="color: var(--text-primary);">Favorite</label>
@@ -1036,8 +863,8 @@
                 </div>
                 <div class="col-12">
                   <label for="profileTagsInput" class="form-label" style="color: var(--text-primary);">Tags</label>
-                  <div id="profileTagsContainer" class="agent-profile-tags-container">
-                    <input type="text" id="profileTagsInput" name="tags" class="agent-profile-tag-input" autocomplete="off" spellcheck="false" placeholder="Add tags…">
+                  <div id="profileTagsContainer" class="agent-profile-tags-container tag-input-chips">
+                    <input type="text" id="profileTagsInput" name="tags" class="agent-profile-tag-input tag-input-field" autocomplete="off" spellcheck="false" placeholder="Add tags…">
                   </div>
                   <div class="form-helper" style="color: var(--text-secondary); font-size: 12px; margin-top: 6px;">Press Enter to add a tag.</div>
                 </div>

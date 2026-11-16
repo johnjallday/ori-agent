@@ -800,7 +800,7 @@ function markerHTML(row) {
   if (row.kind === 'failed') {
     // A failed linked folder retries that folder, not its whole section.
     return (
-      `<button type="button" class="cockpit-tree-retry" data-tree-retry="${escapeHtml(row.workspaceId)}" ` +
+      `<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm cockpit-tree-retry" data-tree-retry="${escapeHtml(row.workspaceId)}" ` +
       `data-tree-retry-section="${escapeHtml(row.section)}" ` +
       (row.dirId ? `data-tree-retry-folder="${escapeHtml(row.dirId)}" ` : '') +
       'tabindex="-1">Retry</button>'
@@ -866,7 +866,7 @@ function rowHTML(row, ctx) {
   // The "⋯" button. It is out of the tab order — the keyboard opens the same
   // menu with Shift+F10 or the Menu key on the row itself (FR54).
   const more = rowHasMenu(row)
-    ? `<button type="button" class="cockpit-tree-more" data-tree-menu-for="${id}" tabindex="-1" ` +
+    ? `<button type="button" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-tree-more" data-tree-menu-for="${id}" tabindex="-1" ` +
       `aria-haspopup="menu" aria-label="Actions for ${name}">${iconHTML('more', { size: 16 })}</button>`
     : '';
 
@@ -892,7 +892,7 @@ function rowHTML(row, ctx) {
       : '') +
     `style="--tree-depth:${row.depth}">` +
     (row.expandable
-      ? `<button type="button" class="cockpit-tree-caret" data-tree-toggle="${id}" tabindex="-1" ` +
+      ? `<button type="button" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-tree-caret" data-tree-toggle="${id}" tabindex="-1" ` +
         `aria-label="${row.expanded ? 'Collapse' : 'Expand'} ${name}">` +
         iconHTML(row.expanded ? 'caretDown' : 'caretRight', { size: 14 }) +
         '</button>'
@@ -1305,7 +1305,7 @@ export function treeCanUndo(state) {
 // so seven of them fit the tree column and each is still named (FR53, FR64).
 function toolbarButtonHTML(label, icon, attributes) {
   return (
-    `<button type="button" class="cockpit-tree-tool" aria-label="${escapeHtml(label)}" ` +
+    `<button type="button" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-tree-tool" aria-label="${escapeHtml(label)}" ` +
     `title="${escapeHtml(label)}" ${attributes}>${iconHTML(icon, { size: 16 })}</button>`
   );
 }
@@ -1321,7 +1321,7 @@ const NEW_NOTE_HINT = 'Pick a workspace first';
  */
 function newNoteButtonHTML(enabled) {
   return (
-    '<button type="button" class="cockpit-tree-tool" data-tree-new-note aria-label="New note" ' +
+    '<button type="button" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-tree-tool" data-tree-new-note aria-label="New note" ' +
     `title="${enabled ? 'New note' : NEW_NOTE_HINT}" aria-disabled="${enabled ? 'false' : 'true'}">` +
     `${iconHTML('newNote', { size: 16 })}</button>`
   );
@@ -1372,7 +1372,7 @@ function renderToolbarHTML(state) {
       'data-bs-toggle="modal" data-bs-target="#addFolderModal" data-workspace-import-mode="true" data-workspace-entry-point="home_cockpit_tree_import"'
     ) +
     toolbarButtonHTML('Rescan', 'rescan', 'data-tree-rescan') +
-    `<a class="cockpit-tree-tool" href="/settings" aria-label="Manage directory" title="Manage directory">${iconHTML('settings', { size: 16 })}</a>` +
+    `<a class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-tree-tool" href="/settings" aria-label="Manage directory" title="Manage directory">${iconHTML('settings', { size: 16 })}</a>` +
     toolbarButtonHTML('Undo', 'undo', `data-tree-undo ${treeCanUndo(state) ? '' : 'disabled'}`) +
     '</div>' +
     '</div>'
@@ -1389,10 +1389,10 @@ export function renderFilterBoxHTML() {
   return (
     '<div class="cockpit-tree-filter" data-tree-filter-box role="search">' +
     iconHTML('filter', { size: 14, className: 'cockpit-tree-filter-icon' }) +
-    '<input type="text" class="cockpit-tree-filter-input" data-tree-filter ' +
+    '<input type="text" class="form-control cockpit-tree-filter-input" data-tree-filter ' +
     'placeholder="Filter" aria-label="Filter the tree by name" ' +
     'autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">' +
-    '<button type="button" class="cockpit-tree-filter-clear" data-tree-filter-clear ' +
+    '<button type="button" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-tree-filter-clear" data-tree-filter-clear ' +
     `aria-label="Clear the filter" title="Clear the filter" hidden>${iconHTML('close', { size: 12 })}</button>` +
     '</div>'
   );
@@ -1425,12 +1425,12 @@ export function renderTagFilterBarHTML(state) {
       .sort()
       .map(
         tag =>
-          `<button type="button" class="cockpit-tree-tagbar-chip" data-tree-tag-filter="${escapeHtml(tag)}" ` +
+          `<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm ui-filter cockpit-tree-tagbar-chip" data-tree-tag-filter="${escapeHtml(tag)}" ` +
           `aria-pressed="${active.has(tag) ? 'true' : 'false'}">${escapeHtml(tag)}</button>`
       )
       .join('') +
     (active.size > 0
-      ? '<button type="button" class="cockpit-tree-tagbar-clear" data-tree-tag-clear>Clear tag filters</button>'
+      ? '<button type="button" class="modern-btn modern-btn-quiet modern-btn-sm cockpit-tree-tagbar-clear" data-tree-tag-clear>Clear tag filters</button>'
       : '') +
     '</div>'
   );

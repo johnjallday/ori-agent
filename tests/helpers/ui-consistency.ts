@@ -5,7 +5,7 @@ import {
   type Page,
   type TestInfo
 } from '@playwright/test';
-import { readFileSync, realpathSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { join, relative, resolve, isAbsolute } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { installLocalCdn } from './offline-cdn';
@@ -50,6 +50,49 @@ export async function createWorkspace(request: APIRequestContext) {
   expect(workspace.id).toBeTruthy();
   expect(workspace.folder_slug).toBeTruthy();
   return workspace as { id: string; folder_slug: string; name: string };
+}
+
+/** Retire only this test's exact disposable workspace, including its local
+ * greeting session. The orchestration DELETE only unlinks those sessions. */
+export async function removeOwnedWorkspace(
+  request: APIRequestContext,
+  expected: { id: string; name: string; folder_slug: string }
+) {
+  const sandbox = await assertSandbox(request);
+  expect(expected.name).toMatch(
+    /^UI consistency [0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+  );
+  const response = await request.get(`/api/workspaces/${encodeURIComponent(expected.id)}`);
+  expect(response.ok()).toBeTruthy();
+  const workspace = await response.json();
+  expect(workspace.id).toBe(expected.id);
+  expect(workspace.name).toBe(expected.name);
+  expect(workspace.folder_slug).toBe(expected.folder_slug);
+  expect(workspace.kind).toBe('workspace');
+  const sidecar = realpathSync(workspace.sidecar_path);
+  const settings = await (await request.get('/api/settings/workspace-root')).json();
+  const root = realpathSync(settings.effective_workspace_root);
+  expect(relative(root, sidecar)).toBe(expected.folder_slug);
+  expect(relative(sandbox, sidecar).startsWith('..')).toBe(false);
+  for (const key of ['tasks', 'scheduled_tasks', 'messages', 'attachments', 'folders']) {
+    expect(workspace[key] || [], `owned blank workspace unexpectedly gained ${key}`).toEqual([]);
+  }
+  for (const key of ['workflows', 'assistant_program']) {
+    expect(workspace[key] === null || typeof workspace[key] === 'object').toBe(true);
+    expect(Object.keys(workspace[key] || {}), `owned workspace unexpectedly gained ${key}`).toEqual(
+      []
+    );
+  }
+  // Explicit permanent removal stays inside the verified sidecar. Do not move
+  // these fixtures into the user's native Trash, or delete their home_directory.
+  const deleted = await request.delete(
+    `/api/workspaces/${encodeURIComponent(expected.id)}?confirm=true&delete_sessions=true`
+  );
+  expect(deleted.status()).toBe(204);
+  expect((await request.get(`/api/workspaces/${encodeURIComponent(expected.id)}`)).status()).toBe(
+    404
+  );
+  expect(existsSync(sidecar), 'the owned sidecar must not survive metadata deletion').toBe(false);
 }
 
 export async function preparePage(page: Page, theme: 'light' | 'dark', width = 1440) {
@@ -147,12 +190,16 @@ export async function capture(
   if (!['before', 'after'].includes(phase))
     throw new Error('ORI_UI_EVIDENCE must be before or after');
   const group =
-    testInfo.file.includes('ui-consistency-utilities') ||
-    testInfo.file.endsWith('default-model-utility.spec.ts')
-      ? 'group-3'
-      : testInfo.file.endsWith('ui-consistency-defects.spec.ts')
-        ? 'group-1'
-        : 'group-2';
+    testInfo.file.includes('ui-consistency-navigation') ||
+    testInfo.file.includes('ui-consistency-home') ||
+    testInfo.file.includes('ui-consistency-agent')
+      ? 'group-4'
+      : testInfo.file.includes('ui-consistency-utilities') ||
+          testInfo.file.endsWith('default-model-utility.spec.ts')
+        ? 'group-3'
+        : testInfo.file.endsWith('ui-consistency-defects.spec.ts')
+          ? 'group-1'
+          : 'group-2';
   const directory = resolve('tasks/evidence-ui-consistency', group, phase);
   mkdirSync(directory, { recursive: true });
   const stem = `${name}-${metadata.engine}-${metadata.theme}-${metadata.viewport?.width}-${metadata.fontMode}`;

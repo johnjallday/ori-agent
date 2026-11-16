@@ -251,7 +251,7 @@
         '</label>' +
         // Reset is not a removal of anything the user can lose: it hands the
         // colour back to the deterministic algorithm (FR-31).
-        '<button type="button" class="appearance-btn" id="' +
+        '<button type="button" class="appearance-btn modern-btn modern-btn-secondary" id="' +
         esc(id('color-reset')) +
         '"' +
         (color ? '' : ' disabled') +
@@ -269,7 +269,7 @@
         (entry
           ? '<p class="appearance-source__selection">Character art: ' + esc(entry.name) + '</p>'
           : '') +
-        '<button type="button" class="appearance-btn" id="' +
+        '<button type="button" class="appearance-btn modern-btn modern-btn-secondary" id="' +
         esc(id('character-choose')) +
         '">' +
         (chosen ? 'Change character' : 'Choose character') +
@@ -277,7 +277,7 @@
         // Explicitly destructive wording, reserved for the one action that
         // actually discards data (FR-30/design 6.3).
         (chosen
-          ? '<button type="button" class="appearance-btn" id="' +
+          ? '<button type="button" class="appearance-btn modern-btn modern-btn-danger" id="' +
             esc(id('character-remove')) +
             '">Remove character selection</button>'
           : '')
@@ -291,7 +291,7 @@
         '<span class="visually-hidden">' +
         (uploaded ? 'Replace uploaded image' : 'Upload an image') +
         '</span>' +
-        '<input type="file" id="' +
+        '<input type="file" class="form-control" id="' +
         esc(id('file')) +
         '" accept="' +
         ACCEPT +
@@ -301,7 +301,7 @@
         (uploaded ? ' Uploading a new image replaces the current one.' : '') +
         '</p>' +
         (uploaded
-          ? '<button type="button" class="appearance-btn" id="' +
+          ? '<button type="button" class="appearance-btn modern-btn modern-btn-danger" id="' +
             esc(id('upload-remove')) +
             '">Remove uploaded image</button>'
           : '')
@@ -319,6 +319,11 @@
     }
 
     function render() {
+      var active = document.activeElement;
+      var focusedId =
+        active && active.id && host.querySelector('#' + cssId(active.id)) === active
+          ? active.id
+          : '';
       var characterAvailable = hasCharacter(state.staged);
       var uploadAvailable = hasUpload(state.staged) || !!state.pendingFile;
 
@@ -382,6 +387,23 @@
       if (statusEl) statusEl.className = 'appearance-editor__status is-' + state.messageKind;
 
       wire();
+      // Staging/confirmation redraws must not discard the actual invoker.
+      // Do not move focus when it belongs to a different field or overlay.
+      if (focusedId) {
+        var control = host.querySelector('#' + cssId(focusedId));
+        if (control && !control.disabled) control.focus({ preventScroll: true });
+        else {
+          var fallback =
+            focusedId === id('character-remove')
+              ? byId('character-choose')
+              : focusedId === id('upload-remove')
+                ? byId('file')
+                : focusedId === id('color-reset')
+                  ? byId('color')
+                  : null;
+          if (fallback && !fallback.disabled) fallback.focus({ preventScroll: true });
+        }
+      }
     }
 
     // Ids here are module-generated tokens, but querySelector still needs them

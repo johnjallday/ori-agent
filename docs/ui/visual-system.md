@@ -15,6 +15,19 @@ acceptance are still in progress. A passing pilot is not whole-app certification
 | `css/layout.css`                   | Body and page geometry                                                                 |
 | Feature stylesheets                | Artwork, map geometry and page-specific layout; migrate deliberately with coverage     |
 
+The shared `.ori-navbar` uses `layout.css` for its opaque frame/reflow and
+`components.css` for links, badges and current states. `common.css` owns touch
+floors and focus. Preserve the logo SVG, Fraunces brand text, native routes and
+conditional Vaults controller; the default brand uses `--accent-text`, while
+explicit caller brand colors remain supported. `navbar-offset.js` measures the
+live height with its retained 76px minimum. Do not add per-page navbar offsets.
+Settings holds an initial fragment through font and section hydration, stopping
+on user intent; do not replace readiness/geometry tracking with a fixed timer.
+Navbar automation also checks the 720×450 CSS viewport equivalent of 1440×900
+at 200% zoom. Native browser zoom controls still need the manual app-wide pass.
+Reduced motion uses zero transition duration: a positive global duration can
+create transitions even on otherwise static elements during a theme switch.
+
 The shared plugin trust disclosure remains owned by `js/modules/plugin-lifecycle.js`
 and `css/workspace-construct.css`. It consumes these controls and semantic tokens;
 permission warnings, commands and digests stay complete and readable. Styling must
@@ -59,7 +72,12 @@ Use paired `--success-text`, `--warning-text`, `--info-text` and `--accent-text`
 for readable semantic foregrounds; legacy status swatches are not text pairs.
 Select indicators use a theme-paired `--select-indicator` SVG. Native select
 semantics remain intact; custom painting avoids WebKit's intrinsic menulist
-height overriding the control minimum.
+height overriding the control minimum. Bootstrap inline code uses the normal
+theme foreground through `--bs-code-color`; its default pink misses AA on shared
+light surfaces. Single-line native selectors contain their closed-field option
+overflow: WebKit can otherwise enlarge the document even when the field's own
+box fits. This is field containment, never page overflow masking; multiple and
+listbox selectors retain internal scrolling and native selection semantics.
 
 ## Controls and states
 
@@ -111,6 +129,23 @@ keyboard action; prefer native `disabled`, or enforce the state in the controlle
 button foreground. Controllers own accessible pending labels, busy/disabled
 state and success/error feedback; CSS never fakes success.
 
+The shared Appearance editor and character picker consume the same button,
+field and filter primitives in every host. Feature CSS owns portrait/preview
+geometry, not another control family. Character selection uses a native modal
+`<dialog>` so an underlying Bootstrap modal cannot cover it or reclaim focus.
+Preserve the parent draft and the choose/cancel/skip result contract; restore the
+actual invoker, including its replacement after a staged redraw. Keep the gallery
+and keyboard-focusable preview bounded; card rows must fit their complete art
+and description rather than shrinking to a touch-floor height. The wide agent
+detail host may arrange source cards in responsive columns without imposing that
+geometry on narrow modal hosts. File inputs consume the canonical field metrics,
+including the narrow target floor.
+
+Hire/Create uses one form surface with quiet sections rather than cards inside
+cards. Untouched fields remain neutral and controller validation remains live.
+Metadata loading/errors are not empty or successful creation. A fixture-backed
+model picker or staged portrait choice does not prove a saved model or a hire.
+
 ## Page structure and surfaces
 
 ```html
@@ -154,6 +189,24 @@ without covering footer actions. `toast.js` owns notification lifetime;
 programmatic openers must restore focus. Native/custom dialogs keep their own hosts and
 lifecycle. Page-local geometry and inline compatibility exceptions require
 explicit coverage before removal.
+
+### Gallery and fixed-furniture clearance
+
+The Agents gallery keeps cozy paper, portrait rings and catalog tints as artwork.
+Its routine controls, inspector tabs, fields and slot badge use shared aliases;
+role text and selection frames use semantic foregrounds, never arbitrary catalog
+colours. Native custom overlays retain their controllers: the narrow inspector
+inerts exterior siblings, preserves earlier inert state, traps focus only while
+modal, and restores its opener. Native Filters and bulk dialogs keep their own
+lifecycle and cancellation authority.
+
+`agents-roster.js` measures the desktop inspector's actual top and the visible
+assistant launcher's footprint, including portrait/font changes. The pane and
+bulk bar reserve that space without hiding the assistant or guessing its width.
+Check whole-control intersection as well as center-point hit testing: a partially
+covered action can otherwise pass. Shared coachmarks reveal with native nearest
+scrolling, focus without a preliminary scroll, and suppress smooth reveal for
+reduced motion; first-use guidance is not a layout-test bypass.
 
 ## Compatibility and verification
 

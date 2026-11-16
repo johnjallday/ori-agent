@@ -2627,14 +2627,29 @@ test.describe('Agents first screen, faces, and blank slates', () => {
   const card = (page, name: string) => page.locator(`.roster-card[data-name="${name}"]`);
   const opacity = locator => locator.evaluate(el => getComputedStyle(el).opacity);
 
-  test('the toolbar holds one row at desktop width', async ({ page }) => {
+  test('desktop toolbar preserves useful search width and wraps without clipping', async ({
+    page
+  }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await openAgents(page);
-    const tops = await page
-      .locator('.collection-toolbar > *')
-      .evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().top)));
-    // Filters used to wrap onto a row of its own with the Inspector open.
-    expect(new Set(tops).size).toBe(1);
+    // Shared 40px controls and visible sort/group labels may use another row;
+    // keeping every group on one row must not squeeze the search back to 140px.
+    const geometry = await page.locator('.collection-toolbar').evaluate(toolbar => {
+      const bounds = toolbar.getBoundingClientRect();
+      return {
+        width: toolbar.querySelector('#rosterSearch').getBoundingClientRect().width,
+        groups: Array.from(toolbar.children).map(child => {
+          const rect = child.getBoundingClientRect();
+          return { left: rect.left - bounds.left, right: bounds.right - rect.right };
+        })
+      };
+    });
+    expect(geometry.width).toBeGreaterThanOrEqual(256);
+    expect(geometry.groups).toHaveLength(4);
+    for (const bounds of geometry.groups) {
+      expect(bounds.left).toBeGreaterThanOrEqual(-1);
+      expect(bounds.right).toBeGreaterThanOrEqual(-1);
+    }
   });
 
   test('a card checkbox appears when it is wanted and stays for selection mode', async ({

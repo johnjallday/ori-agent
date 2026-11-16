@@ -1,4 +1,13 @@
 import { test, expect, Page } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
+import {
+  createOwnedAgent,
+  guardOwnedAgentEdits,
+  ownedAgentDetail,
+  recordOwnedAgent,
+  removeOwnedAgent,
+  type OwnedAgent
+} from './helpers/ui-consistency-owned-agent';
 
 /**
  * The Appearance section on the full agent detail page. It used to live in the
@@ -17,7 +26,15 @@ import { test, expect, Page } from '@playwright/test';
  * So the assertions here are about hit-testing and geometry, not visibility.
  */
 
-const AGENT = `DetailAppearance${Date.now()}`;
+let AGENT = '';
+let owned: OwnedAgent;
+let unexpected: string[];
+
+test.beforeEach(async ({ page }) => {
+  await installLocalCdn(page);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  unexpected = await guardOwnedAgentEdits(page, owned, { appearanceOnly: true });
+});
 
 async function openAppearanceSection(page: Page) {
   await page.route('**/api/onboarding/status', route =>
@@ -36,14 +53,33 @@ async function openAppearanceSection(page: Page) {
 }
 
 test.beforeAll(async ({ request }) => {
-  const res = await request.post('/api/agents', {
-    data: { name: AGENT, model: 'gpt-4o-mini' }
-  });
-  expect(res.ok(), await res.text()).toBeTruthy();
+  owned = await createOwnedAgent(request);
+  AGENT = owned.name;
 });
 
-test.afterAll(async ({ request }) => {
-  await request.delete(`/api/agents?name=${encodeURIComponent(AGENT)}`).catch(() => undefined);
+test.afterEach(async ({ request }, info) => {
+  info.setTimeout(30_000);
+  if (info.status !== info.expectedStatus) return; // Preserve unrecognized drift on failure.
+  expect(unexpected).toEqual([]);
+  const agent = await ownedAgentDetail(request, owned);
+  for (const key of [
+    'name',
+    'role',
+    'model',
+    'provider',
+    'temperature',
+    'max_output_tokens',
+    'system_prompt',
+    'metadata'
+  ]) {
+    expect(agent[key], `appearance must not change ${key}`).toEqual(owned.expected[key]);
+  }
+  await recordOwnedAgent(request, owned);
+});
+
+test.afterAll(async ({ request }, info) => {
+  info.setTimeout(30_000);
+  if (owned) await removeOwnedAgent(request, owned);
 });
 
 test('every Appearance control on the detail page is actually clickable', async ({ page }) => {
@@ -56,6 +92,7 @@ test('every Appearance control on the detail page is actually clickable', async 
   await page.locator('.char-card', { hasText: 'Research Archivist' }).click();
   await page.locator('#charPickerConfirm').click();
   await expect(page.locator('#agentAppearance-mode-character')).toBeChecked({ timeout: 10000 });
+  await expect(page.locator('#agentAppearance-status')).toContainText('Saved.');
 
   // Hit-testing: the element at each control's centre must be the control
   // itself (or inside it). This is what "visible but covered" fails.
@@ -87,6 +124,7 @@ test('every Appearance control on the detail page is actually clickable', async 
   // click an element another element intercepts.
   await page.locator('#agentAppearance-character-remove').click({ timeout: 5000 });
   await expect(page.locator('#agentAppearance-mode-generated')).toBeChecked();
+  await expect(page.locator('#agentAppearance-status')).toContainText('Saved.');
 });
 
 test('the Appearance panel stays inside its section', async ({ page }) => {
@@ -129,7 +167,7 @@ test('the profile modal no longer holds appearance controls', async ({ page }) =
   await expect(page.locator('#profileEditModal')).toContainText('saves on its own');
 });
 
-test('the editor styles its own buttons rather than borrowing the roster stylesheet', async ({
+test('the editor uses shared controls without borrowing the roster stylesheet', async ({
   page
 }) => {
   await openAppearanceSection(page);

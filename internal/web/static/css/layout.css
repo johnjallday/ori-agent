@@ -70,6 +70,174 @@ body.home-command-page::before {
   min-height: 100vh;
 }
 
+/* Shared navbar geometry. Controls live in components.css; the live offset
+   remains owned by navbar-offset.js, including its existing 76px floor. */
+.navbar.ori-navbar {
+  position: sticky;
+  top: 0;
+  z-index: 10002;
+  padding: var(--space-2) 0;
+  border: 0;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: 0;
+  background: var(--surface-solid);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.ori-navbar-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  width: 100%;
+  min-width: 0;
+}
+
+.ori-navbar-shell > * {
+  min-width: 0;
+}
+
+.ori-navbar-left {
+  grid-column: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  justify-self: start;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.ori-navbar-brand {
+  margin: 0;
+  min-width: 0;
+  max-width: 100%;
+  min-block-size: var(--control-height);
+  white-space: normal;
+}
+
+.ori-navbar-brand-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ori-navbar-brand svg {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+}
+
+.ori-navbar-links {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ori-navbar-divider {
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+}
+
+.ori-navbar-plugin-pages {
+  position: relative;
+  z-index: 10001;
+}
+
+.ori-navbar-utilities {
+  grid-column: 3;
+  justify-self: end;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ori-navbar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ori-navbar-actions :is(.modern-btn, .modern-badge, #locationIndicator) {
+  flex: 0 1 auto;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ori-navbar-actions svg,
+.ori-navbar-vault-icon {
+  flex: 0 0 auto;
+}
+
+.ori-navbar-actions :is(#navSettingsLink, #keyboardNavigationToggle, #darkModeToggle) {
+  flex-shrink: 0;
+  inline-size: var(--control-height);
+  padding: 0;
+}
+
+@media (max-width: 1200px) {
+  .ori-navbar-shell {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ori-navbar-links {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: flex-start;
+    justify-self: start;
+  }
+
+  .ori-navbar-utilities {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .ori-navbar-divider {
+    display: none;
+  }
+}
+
+@media (max-width: 991px) {
+  .ori-navbar-left {
+    grid-column: 1 / -1;
+  }
+
+  .ori-navbar-links {
+    grid-column: 1;
+  }
+
+  .ori-navbar-utilities {
+    grid-row: 2;
+  }
+}
+
+@media (max-width: 768px) {
+  .ori-navbar-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ori-navbar-left,
+  .ori-navbar-links,
+  .ori-navbar-utilities {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: stretch;
+  }
+
+  .ori-navbar-actions {
+    justify-content: flex-start;
+  }
+}
+
 /* Override Bootstrap accordion chevron with Emerald palette color */
 .accordion-button::after {
   background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%231F6B4E'%3e%3cpath fill-rule='evenodd' d='M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708z'/%3e%3c/svg%3e");

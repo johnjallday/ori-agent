@@ -88,6 +88,9 @@
   };
 
   var els = {};
+  var inspectorInertRoots = [];
+  var collectionDialogOpeners = new WeakMap();
+  var inspectorViewportFrame = null;
 
   // The personal-assistant relationship, read once on load (Mission 01, PRD
   // FR19) and again after a hire or repair attempt. `state` stays null until
@@ -290,12 +293,12 @@
     if (createModal) {
       createModal.addEventListener('hidden.bs.modal', function () {
         leaveHireMode();
-        // Bootstrap leaves focus on <body> when the modal closes. Hand it back
-        // to the button that opens the modal, unless the roster has focused
-        // something since (the created agent's card, say).
-        if (!document.activeElement || document.activeElement === document.body) {
-          els.newAgentBtn.focus();
-        }
+        // A hidden modal may retain activeElement until the next layout. That
+        // is not an intentional focus move; restore its actual outside invoker.
+        var active = document.activeElement;
+        if (!active || active === document.body || createModal.contains(active)) {
+          restoreCollectionDialog(createModal, els.newAgentBtn);
+        } else collectionDialogOpeners.delete(createModal);
       });
     }
     els.stageDelete.addEventListener('click', onDeleteClick);
@@ -365,17 +368,21 @@
     // Escape closes the modal sheet before anything else can act on it, but
     // only while the sheet is actually presented, so it never steals Escape
     // from a dialog or from the desktop layout (PRD FR87).
-    document.addEventListener('keydown', function (e) {
-      if (e.key !== 'Escape') return;
-      if (!isSheetMode() || !state.inspectorOpen) return;
-      if (document.querySelector('dialog[open]')) return;
-      e.preventDefault();
-      e.stopPropagation();
-      closeInspector({ restoreFocus: true });
-    });
+    document.addEventListener('keydown', onInspectorKeydown);
+    document.addEventListener('focusin', onInspectorFocus);
     // Crossing the breakpoint changes which presentation is correct; the open
     // agent and every other piece of state stay exactly as they were.
     window.addEventListener('resize', reflectInspectorPresentation);
+    window.addEventListener('scroll', scheduleInspectorViewport, { passive: true });
+    if (typeof ResizeObserver === 'function') {
+      var inspectorLayoutObserver = new ResizeObserver(scheduleInspectorViewport);
+      inspectorLayoutObserver.observe(els.shell.parentElement);
+      var navbar = document.querySelector('.ori-navbar');
+      if (navbar) inspectorLayoutObserver.observe(navbar);
+      var launcher = document.getElementById('personalAssistantLauncher');
+      if (launcher) inspectorLayoutObserver.observe(launcher);
+    }
+    if (document.fonts) document.fonts.ready.then(scheduleInspectorViewport);
     // The Filters panel is anchored to a button whose position moves with the
     // toolbar, so an open panel has to be re-pinned on resize — including the
     // crossing between popover and bottom sheet.
@@ -400,14 +407,14 @@
       closeBulkDelete();
     });
 
-    els.bulkAddTags.addEventListener('click', function () {
-      openBulkTags('add');
+    els.bulkAddTags.addEventListener('click', function (event) {
+      openBulkTags('add', event.currentTarget);
     });
-    els.bulkRemoveTags.addEventListener('click', function () {
-      openBulkTags('remove');
+    els.bulkRemoveTags.addEventListener('click', function (event) {
+      openBulkTags('remove', event.currentTarget);
     });
-    els.bulkSetRole.addEventListener('click', function () {
-      openBulkTags('role');
+    els.bulkSetRole.addEventListener('click', function (event) {
+      openBulkTags('role', event.currentTarget);
     });
     els.bulkTagsCancel.addEventListener('click', closeBulkTags);
     els.bulkTagsConfirm.addEventListener('click', runBulkTags);
@@ -555,7 +562,8 @@
       }
       previous.delete(provider.provider);
       pill.dataset.displayName = provider.display_name;
-      pill.className = 'roster-limit roster-limit--' + ui.level(provider.level);
+      pill.className =
+        'modern-btn modern-btn-secondary roster-limit roster-limit--' + ui.level(provider.level);
       pill.innerHTML = ui.pillLabel(provider);
       pill.title = ui.pillDescription(provider);
       pill.setAttribute('aria-label', pill.title);
@@ -1093,7 +1101,11 @@
     );
     panel.style.left = Math.round(left) + 'px';
     panel.style.right = 'auto';
-    panel.style.top = Math.round(anchor.bottom + 8) + 'px';
+    var top = Math.min(
+      anchor.bottom + 8,
+      Math.max(margin, window.innerHeight - panel.offsetHeight - margin)
+    );
+    panel.style.top = Math.round(Math.max(margin, top)) + 'px';
   }
 
   function closeFilters() {
@@ -1711,8 +1723,12 @@
   // else is ready.
   function renderStatusTiles() {
     if (!els.stats) return;
+    var focused = document.activeElement;
+    var focusedHealth =
+      els.stats.contains(focused) && focused.dataset ? focused.dataset.health : null;
     var total = state.agents.length;
     if (total === 0) {
+      if (focusedHealth) els.search.focus({ preventScroll: true });
       els.stats.hidden = true;
       els.stats.innerHTML = '';
       return;
@@ -1745,6 +1761,10 @@
     if (state.filters.health.has('ready')) pills += statTile('ready', 'ready', ready);
     els.stats.hidden = pills === '';
     els.stats.innerHTML = pills;
+    if (focusedHealth) {
+      var restored = els.stats.querySelector('[data-health="' + focusedHealth + '"]');
+      (restored || els.search).focus({ preventScroll: true });
+    }
   }
 
   // Each pill is a toggle filter button (PRD FR72) over its health bucket.
@@ -1756,7 +1776,7 @@
     var selected = kind !== 'total' && state.filters.health.has(kind);
     var sel = selected ? ' is-selected' : '';
     return (
-      '<button type="button" class="roster-stat roster-stat--' +
+      '<button type="button" class="modern-btn modern-btn-secondary ui-filter roster-stat roster-stat--' +
       kind +
       zero +
       sel +
@@ -2131,6 +2151,109 @@
     return true;
   }
 
+  function inspectorHasTopDialog() {
+    return !!document.querySelector('dialog[open], .modal.show');
+  }
+
+  function onInspectorKeydown(e) {
+    if (!isSheetMode() || !state.inspectorOpen || inspectorHasTopDialog()) return;
+    if (e.key === 'Tab') {
+      var controls = inspectorControls();
+      var first = controls[0];
+      var last = controls[controls.length - 1];
+      var outside = !els.inspector.contains(document.activeElement);
+      if (
+        controls.length &&
+        (outside ||
+          (e.shiftKey ? document.activeElement === first : document.activeElement === last))
+      ) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    } else if (e.key === 'Escape' && !e.defaultPrevented) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeInspector({ restoreFocus: true });
+    }
+  }
+
+  function onInspectorFocus(e) {
+    if (!isSheetMode() || !state.inspectorOpen || inspectorHasTopDialog()) return;
+    if (!els.inspector.contains(e.target)) {
+      var first = inspectorControls()[0];
+      if (first) first.focus();
+    }
+  }
+
+  function inspectorControls() {
+    if (!els.inspector) return [];
+    return Array.from(
+      els.inspector.querySelectorAll(
+        'a[href], button, input, select, textarea, summary, [tabindex]'
+      )
+    ).filter(function (node) {
+      return !node.disabled && node.tabIndex >= 0 && node.getClientRects().length > 0;
+    });
+  }
+
+  // Keep the desktop aside, but make its modal-sheet contract real on phones:
+  // inert only siblings outside its ancestor path, and restore prior state.
+  function syncInspectorInert(active) {
+    if (!active) {
+      inspectorInertRoots.forEach(function (record) {
+        record.node.inert = record.previous;
+      });
+      inspectorInertRoots = [];
+      return;
+    }
+    if (inspectorInertRoots.length || !els.inspector) return;
+    var branch = els.inspector;
+    while (branch && branch !== document.body) {
+      var parent = branch.parentElement;
+      if (!parent) break;
+      Array.from(parent.children).forEach(function (node) {
+        if (node === branch || node === els.inspectorBackdrop) return;
+        inspectorInertRoots.push({ node: node, previous: node.inert });
+        node.inert = true;
+      });
+      branch = parent;
+    }
+  }
+
+  function scheduleInspectorViewport() {
+    if (inspectorViewportFrame !== null) return;
+    inspectorViewportFrame = window.requestAnimationFrame(function () {
+      inspectorViewportFrame = null;
+      updateInspectorViewport();
+    });
+  }
+
+  function updateInspectorViewport() {
+    if (!els.shell || !els.inspector) return;
+    var tokens = getComputedStyle(document.documentElement);
+    var gap = parseFloat(tokens.getPropertyValue('--space-4')) || 16;
+    var nav = parseFloat(tokens.getPropertyValue('--navbar-offset')) || 76;
+    var clearance = parseFloat(tokens.getPropertyValue('--ori-launcher-clearance-y')) || 88;
+    var launcher = document.getElementById('personalAssistantLauncher');
+    if (launcher && launcher.getClientRects().length) {
+      clearance = Math.max(
+        clearance,
+        Math.ceil(window.innerHeight - launcher.getBoundingClientRect().top)
+      );
+    }
+    var layout = els.shell.parentElement;
+    if (layout.style.getPropertyValue('--collection-launcher-clearance') !== clearance + 'px') {
+      layout.style.setProperty('--collection-launcher-clearance', clearance + 'px');
+    }
+    if (isSheetMode() || !state.inspectorOpen) return;
+    var top = Math.max(els.inspector.getBoundingClientRect().top, nav + gap);
+    var available = Math.max(0, Math.floor(window.innerHeight - top - clearance - gap - 2));
+    var value = available + 'px';
+    if (els.inspector.style.getPropertyValue('--inspector-available-height') !== value) {
+      els.inspector.style.setProperty('--inspector-available-height', value);
+    }
+  }
+
   function reflectInspectorPresentation() {
     var sheet = isSheetMode();
     var open = state.inspectorOpen;
@@ -2153,6 +2276,10 @@
     }
     if (els.inspectorBackdrop) els.inspectorBackdrop.hidden = !(sheet && open);
     document.body.classList.toggle('inspector-sheet-open', sheet && open);
+    syncInspectorInert(sheet && open);
+    // Resizing an open desktop aside into a modal must also move focus inside.
+    if (sheet && open) onInspectorFocus({ target: document.activeElement });
+    scheduleInspectorViewport();
   }
 
   /* ---- stage --------------------------------------------------------------- */
@@ -2407,7 +2534,7 @@
       esc(titleCase(stage)) +
       '</span>' +
       '<span class="stage__progression-xp" id="stageProgressionXp"></span>' +
-      '<span class="stage__progression-slots" id="stageProgressionSlots">…</span>';
+      '<span class="modern-badge stage__progression-slots" id="stageProgressionSlots">…</span>';
 
     fetch('/api/agents/' + encodeURIComponent(name) + '/evolution')
       .then(function (r) {
@@ -2798,7 +2925,14 @@
   // assistant preset. A press that lands before the one relationship read
   // answers waits for it briefly, so it still opens the right form; a read that
   // fails or never answers opens the ordinary one.
-  function openCreate() {
+  function rememberCreateInvoker(opener) {
+    var modal = createModalElement();
+    if (!modal || modal.classList.contains('show') || collectionDialogOpeners.has(modal)) return;
+    rememberCollectionDialog(modal, opener);
+  }
+
+  function openCreate(event) {
+    rememberCreateInvoker(event && event.currentTarget);
     if (assistant.known || !assistant.pending) {
       renderCreate(assistantCreateMode());
       return;
@@ -2834,6 +2968,7 @@
   // assistant's chip, say); the ordinary form ignores it.
   function openCreateModal(options) {
     options = options || {};
+    rememberCreateInvoker();
     leaveHireMode();
     // As a sheet the Inspector covers the whole page, above the modal's layer.
     if (isSheetMode() && state.inspectorOpen) closeInspector();
@@ -2951,6 +3086,7 @@
   // offer). The preset is announced once it is on screen, so Ori's walkthrough
   // anchors on controls that are really there.
   function openHireModal(view) {
+    rememberCreateInvoker();
     var modal = createModalElement();
     var host = document.getElementById('agentCreateFormHost');
     if (!modal || !host || typeof bootstrap === 'undefined') {
@@ -3161,7 +3297,7 @@
       esc(api.HIRE_BOUNDARY_COPY) +
       '</p>' +
       '<div class="create-preset__error" id="createError" role="alert" tabindex="-1" hidden></div>' +
-      '<p class="create-preset__switch"><button type="button" class="roster-linkbtn" id="cr-standard-form">' +
+      '<p class="create-preset__switch"><button type="button" class="modern-btn modern-btn-quiet roster-linkbtn" id="cr-standard-form">' +
       'Create a different kind of agent instead</button></p>' +
       '</div>';
 
@@ -3365,7 +3501,7 @@
           '</p>'
         : '<p class="form-helper create-preset__boundary">' + esc(copy.guidance) + '</p>') +
       '<div class="create-preset__error" id="createError" role="alert" tabindex="-1" hidden></div>' +
-      '<p class="create-preset__switch"><button type="button" class="roster-linkbtn" id="cr-resolver-recheck">' +
+      '<p class="create-preset__switch"><button type="button" class="modern-btn modern-btn-quiet roster-linkbtn" id="cr-resolver-recheck">' +
       'Check again</button></p>' +
       '</div>';
     document.getElementById('cr-resolver-recheck').addEventListener('click', function () {
@@ -3726,7 +3862,7 @@
         // different statement from "this agent has none" (PRD FR20/FR100).
         host.innerHTML =
           '<p class="stage-hint">Capabilities unavailable — the agent detail could not be loaded.</p>' +
-          '<button type="button" class="roster-linkbtn" id="toolboxRetry">Try again</button>';
+          '<button type="button" class="modern-btn modern-btn-secondary roster-linkbtn" id="toolboxRetry">Try again</button>';
         var retry = document.getElementById('toolboxRetry');
         if (retry)
           retry.addEventListener('click', function () {
@@ -3791,6 +3927,7 @@
       var panel = document.getElementById('panel-' + t);
       var active = t === tabName;
       tab.classList.toggle('is-active', active);
+      tab.classList.toggle('active', active);
       tab.setAttribute('aria-selected', active ? 'true' : 'false');
       tab.tabIndex = active ? 0 : -1;
       panel.hidden = !active;
@@ -4539,8 +4676,28 @@
     return { eligible: true, reason: '' };
   }
 
-  function openBulkDelete() {
+  function rememberCollectionDialog(dialog, opener) {
+    collectionDialogOpeners.set(dialog, opener || document.activeElement);
+  }
+
+  function restoreCollectionDialog(dialog, fallback, preferStable) {
+    var opener = collectionDialogOpeners.get(dialog);
+    collectionDialogOpeners.delete(dialog);
+    var target =
+      !preferStable &&
+      opener &&
+      opener !== document.body &&
+      document.contains(opener) &&
+      !opener.disabled &&
+      opener.getClientRects().length
+        ? opener
+        : fallback;
+    if (target) target.focus({ preventScroll: true });
+  }
+
+  function openBulkDelete(event) {
     if (state.checked.size === 0) return;
+    rememberCollectionDialog(els.bulkDeleteDialog, event && event.currentTarget);
     // Deleting the focused agent will replace the stage; guard unsaved edits
     // before we commit to the flow (PRD FR15).
     var names = Array.from(state.checked);
@@ -4617,12 +4774,12 @@
     );
   }
 
-  function closeBulkDelete() {
+  function closeBulkDelete(preferStable) {
     if (els.bulkDeleteDialog.open && typeof els.bulkDeleteDialog.close === 'function')
       els.bulkDeleteDialog.close();
     else els.bulkDeleteDialog.removeAttribute('open');
-    // Return focus to a stable control rather than a possibly-removed card.
-    if (els.selectAll) els.selectAll.focus();
+    // Cancellation returns to the invoker; successful deletion may remove it.
+    restoreCollectionDialog(els.bulkDeleteDialog, els.selectAll, preferStable);
   }
 
   function runBulkDelete() {
@@ -4709,7 +4866,7 @@
       }
     });
 
-    closeBulkDelete();
+    closeBulkDelete(true);
     renderBulkResult(summary, results);
 
     // Reload from the server (authoritative): deleted agents vanish, skipped
@@ -4770,9 +4927,10 @@
 
   // Reused for tags AND bulk role assignment (PRD FR9, Group 5.4): the dialog
   // is a generic "bulk edit" shell keyed by dlg.dataset.mode.
-  function openBulkTags(mode) {
+  function openBulkTags(mode, opener) {
     if (state.checked.size === 0) return;
     var dlg = els.bulkTagsDialog;
+    rememberCollectionDialog(dlg, opener);
     dlg.dataset.mode = mode;
     var titles = { add: 'Add tags', remove: 'Remove tags', role: 'Set role' };
     els.bulkTagsTitle.textContent = titles[mode] || '';
@@ -4791,7 +4949,7 @@
       els.bulkTagsBody.innerHTML =
         '<p class="bulk-dialog__lead">Assign one role to every selected agent. Metadata only — model, prompt, and skills are unchanged.</p>' +
         '<label class="bulk-dialog__field"><span class="visually-hidden">Role</span>' +
-        '<select id="bulkRoleSelect" class="bulk-dialog__text">' +
+        '<select id="bulkRoleSelect" class="form-select bulk-dialog__text">' +
         options +
         '</select></label>';
       if (typeof dlg.showModal === 'function') dlg.showModal();
@@ -4811,7 +4969,7 @@
         });
       } else if (host) {
         host.innerHTML =
-          '<input id="bulkTagsText" type="text" class="bulk-dialog__text" placeholder="tag1, tag2">';
+          '<input id="bulkTagsText" type="text" class="form-control bulk-dialog__text" placeholder="tag1, tag2">';
       }
     } else {
       // Remove: offer the union of tags across the checked set as a checklist so
@@ -4848,7 +5006,7 @@
     if (dlg.open && typeof dlg.close === 'function') dlg.close();
     else dlg.removeAttribute('open');
     bulkTagsInput = null;
-    if (els.selectAll) els.selectAll.focus();
+    restoreCollectionDialog(dlg, els.selectAll);
   }
 
   // Union of tags across the given agents (case-insensitive, original casing).

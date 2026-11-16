@@ -264,6 +264,168 @@ func TestActionCenterKeepsSharedHierarchyAndTriageHooks(t *testing.T) {
 	}
 }
 
+func TestNavbarUsesSharedOwnersAndKeepsNativeHooks(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	for _, fixed := range []bool{false, true} {
+		data := GetDefaultData()
+		data.CurrentPage = "settings"
+		data.BrandText = "Ori Agent"
+		data.NavbarFixed = fixed
+		html, err := r.RenderTemplate("settings", data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nav := navbarMarkup(t, html)
+		for _, hook := range []string{`navbar ori-navbar`, `aria-label="Primary navigation"`, `class="ori-navbar-brand-text">Ori Agent</span>`, `var(--accent-text)`, `href="/agents" id="navAgentsLink"`, `id="vaultLauncherButton"`, `id="vaultNavCount"`, `data-bs-target="#vaultModal"`, `id="navSettingsLink"`, `aria-current="page"`, `id="oriGuideLauncher"`, `id="keyboardNavigationToggle"`, `id="darkModeToggle"`} {
+			if !strings.Contains(nav, hook) {
+				t.Errorf("fixed=%v: navbar lost named native hook %s", fixed, hook)
+			}
+		}
+		if strings.Contains(nav, "backdrop-filter") || strings.Contains(nav, "modern-card glassmorphism") {
+			t.Errorf("fixed=%v: navbar still competes with legacy glass/card surfaces", fixed)
+		}
+		if strings.Contains(nav, "position-fixed") != fixed {
+			t.Errorf("fixed=%v: lost the caller's positioning contract", fixed)
+		}
+	}
+	data := GetDefaultData()
+	data.BrandColor = "#123456"
+	data.BrandText = "A caller's custom brand"
+	data.BrandURL = "/agents"
+	data.UseLegacyIcon = true
+	html, err := r.RenderTemplate("skills", data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nav := navbarMarkup(t, html)
+	for _, hook := range []string{`style="color: #123456;"`, `data-icon="cpu"`, `style="color: currentColor;"`, `href="/agents"`} {
+		if !strings.Contains(nav, hook) {
+			t.Errorf("navbar lost the caller's brand hook %s", hook)
+		}
+	}
+	for _, path := range []string{"static/styles.css", "static/css/common.css", "static/css/ui-refresh.css"} {
+		data, err := Static.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, obsolete := range []string{".nav-link-item {", ".ori-navbar-shell {", ".ori-navbar-vault-count {"} {
+			if strings.Contains(string(data), obsolete) {
+				t.Errorf("%s competes with the navbar's shared component/layout owners: %s", path, obsolete)
+			}
+		}
+	}
+}
+
+func TestAgentsCollectionKeepsSharedControlsAndNativeGalleryHooks(t *testing.T) {
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	html, err := r.RenderTemplate("agents-roster", GetDefaultData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hook := range []string{`class="ui-page-header collection-head"`, `class="collection-summary"`, `id="rosterSearch" class="form-control"`, `class="form-select" id="rosterSort"`, `id="filtersPanel" aria-labelledby="filtersPanelTitle"`, `class="modern-btn modern-btn-primary stage__fullpage"`, `class="nav nav-tabs stage__tabs"`, `id="inspector" aria-label="Selected agent"`, `id="bulkDeleteDialog" aria-labelledby="bulkDeleteTitle"`, `id="rosterCoachmark"`, `id="rosterFaces"`, `src="/js/agents-roster.js"`} {
+		if !strings.Contains(html, hook) {
+			t.Errorf("Agents lost a shared control or native gallery hook: %s", hook)
+		}
+	}
+	data, err := Static.ReadFile("static/css/agents-roster.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, competing := range []string{"--bg-primary:", "--text-primary:", ".btn-primary {", ".btn-danger {", ".btn-ghost {"} {
+		if strings.Contains(string(data), competing) {
+			t.Errorf("Agents must not redefine shared palette/control primitives: %s", competing)
+		}
+	}
+}
+
+func TestCompactButtonPaddingHasOneOwner(t *testing.T) {
+	common, err := Static.ReadFile("static/css/common.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(common), ".modern-btn-sm {") {
+		t.Fatal("touch target floors must not redefine compact button padding")
+	}
+	components, err := Static.ReadFile("static/css/components.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(components), "--bs-btn-padding-x: 0.75rem;") {
+		t.Fatal("components.css must retain the compact padding contract")
+	}
+	if !strings.Contains(string(components), ".btn-close {\n  box-sizing: border-box;\n  min-width: var(--control-height);\n  min-height: var(--control-height);") {
+		t.Fatal("Bootstrap close artwork must keep shared border-box hit-area geometry")
+	}
+}
+
+func TestReducedMotionDoesNotCreateStaticThemeTransitions(t *testing.T) {
+	data, err := Static.ReadFile("static/css/common.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "transition-duration: 0s !important;") || strings.Contains(string(data), "transition-duration: 0.01ms !important;") {
+		t.Error("reduced motion must not introduce a nonzero transition duration on otherwise static elements")
+	}
+}
+
+func TestAgentCreateUsesSharedSurfacesAndControls(t *testing.T) {
+	page, err := Templates.ReadFile("templates/pages/agents-create.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, competing := range []string{".form-input:focus-visible", ".btn-check:checked + .btn", "linear-gradient(", "!important", "form-card modern-card", `class="form-textarea"`} {
+		if strings.Contains(string(page), competing) {
+			t.Errorf("Create must not restore competing control/surface styling: %s", competing)
+		}
+	}
+	for _, required := range []string{`id="createAgentForm" class="ui-section" novalidate`, `class="form-card ui-section ui-section--quiet"`, `class="tags-input-container tag-input-chips"`} {
+		if !strings.Contains(string(page), required) {
+			t.Errorf("Create must retain shared form ownership: %s", required)
+		}
+	}
+	appearance, err := Static.ReadFile("static/css/agent-appearance.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, competing := range []string{".appearance-btn:hover", ".appearance-btn:disabled", "padding: 6px 12px"} {
+		if strings.Contains(string(appearance), competing) {
+			t.Errorf("Appearance must inherit shared button metrics/states: %s", competing)
+		}
+	}
+}
+
+func TestAgentDetailUsesSharedVisualOwners(t *testing.T) {
+	for _, name := range []string{"agents-claude-detail", "agents-codex-detail"} {
+		data, err := Templates.ReadFile("templates/pages/" + name + ".tmpl")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{`class="ui-page-header"`, `class="cli-detail-container"`, `class="modern-badge">CLI · Read-only`, `role="status" aria-live="polite"`} {
+			if !strings.Contains(string(data), required) {
+				t.Errorf("%s must retain shared/read-only semantics: %s", name, required)
+			}
+		}
+		if strings.Contains(string(data), "<style>") || strings.Contains(string(data), "overflow-x: hidden") {
+			t.Errorf("%s must not restore its private palette or hide page overflow", name)
+		}
+	}
+	data, err := Templates.ReadFile("templates/pages/agents-detail.tmpl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{`--agent-edit-success: var(--success-text)`, `--agent-edit-danger: var(--danger-text)`, `id="deleteButton" class="modern-btn modern-btn-danger"`, `grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr))`} {
+		if !strings.Contains(string(data), required) {
+			t.Errorf("agent detail must retain shared controls and bounded appearance geometry: %s", required)
+		}
+	}
+}
+
 func assertTokenAssetOrder(t *testing.T, name, html string) {
 	t.Helper()
 	owner := strings.Index(html, `href="/css/variables.css"`)
