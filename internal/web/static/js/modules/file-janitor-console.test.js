@@ -9,6 +9,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createProtectionTrips, protectionSentence, TRIP_KEY } from './file-janitor-protection.js';
 import * as pictureModule from './file-janitor-picture.js';
+import * as receiptModule from './file-janitor-receipt.js';
 
 class FakeElement {
   constructor(tag) {
@@ -191,6 +192,7 @@ const panel = await (async () => {
   // The page loads the picture module as a script of its own; the console reads
   // window.FileJanitorPicture when it draws.
   globalThis.FileJanitorPicture = pictureModule;
+  globalThis.FileJanitorReceipt = receiptModule;
   return globalThis.window.DownloadsJanitorPanel;
 })();
 
@@ -3705,8 +3707,11 @@ test('latest receipt reads unfiltered later pages and compares completion time, 
   };
   await panel._reloadHistory();
   assert.equal(panel.getActionState().latestReceipt.id, 'a');
-  assert.equal(requests.length, 2);
-  assert.match(requests[1], /offset=2/);
+  // History also asks for its one "Last filing" line, a separate read.
+  const historyReads = requests.filter(url => /\/history/.test(url));
+  assert.equal(historyReads.length, 2);
+  assert.match(historyReads[1], /offset=2/);
+  assert.equal(requests.filter(url => /\/filings\?limit=1$/.test(url)).length, 1);
 });
 
 test('batch loading qualifies stale counts synchronously and ignores an older response', async () => {
@@ -4055,7 +4060,16 @@ async function groupedReviewFixture(count = 206) {
     fileGate: null,
     // After a press: the batch has nothing left, or cannot be read again.
     emptied: false,
-    failBatchRead: false
+    failBatchRead: false,
+    // What a scan answers, when a test needs a scan to find something new.
+    scanReply: null,
+    // The filings the server journaled, newest last, and how Undo all answers.
+    filings: [],
+    looseNow: 7,
+    receiptGone: false,
+    undoGate: null,
+    undoReply: null,
+    forgetFails: false
   };
   // What filing would do right now for the saved choices on screen.
   const planView = ids => {
@@ -4094,13 +4108,17 @@ async function groupedReviewFixture(count = 206) {
   // A press that went through: every planned file filed, reported like the journal.
   state.fileReply = () => {
     const draft = draftView();
-    const outcomes = draft.choices.map(choice => ({
-      candidate_id: choice.candidate_id,
-      name: candidates.find(item => item.id === choice.candidate_id).name,
-      operation: choice.operation,
-      result: 'applied',
-      destination: choice.operation === 'move' ? 'Filed/Images' : ''
-    }));
+    // The destination is the file's own relative reference, as the server reports it.
+    const outcomes = draft.choices.map(choice => {
+      const name = candidates.find(item => item.id === choice.candidate_id).name;
+      return {
+        candidate_id: choice.candidate_id,
+        name,
+        operation: choice.operation,
+        result: 'applied',
+        destination: choice.operation === 'move' ? 'Filed/Images/' + name : ''
+      };
+    });
     for (const choice of draft.choices) {
       const candidate = candidates.find(item => item.id === choice.candidate_id);
       candidate.state = 'applied';
@@ -4110,6 +4128,12 @@ async function groupedReviewFixture(count = 206) {
     state.review.groups = [];
     state.generation++;
     state.emptied = candidates.every(candidate => candidate.state !== 'pending');
+    state.filings.push({
+      id: 'filing-' + state.fileRequests.length,
+      names: outcomes.filter(outcome => outcome.operation === 'move').map(outcome => outcome.name),
+      trashed: outcomes.filter(outcome => outcome.operation === 'trash').length,
+      undone: false
+    });
     return {
       ok: true,
       json: async () => ({
@@ -4280,6 +4304,74 @@ async function groupedReviewFixture(count = 206) {
     const target = String(url);
     calls.push({ target, options });
     const reply = body => ({ ok: true, json: async () => body });
+    if (state.scanReply && /\/scan$/.test(target)) return reply(state.scanReply);
+    // The receipt, the list for History's line, Undo all and "forget", as the
+    // server answers them.
+    const filingsRoute = target.match(
+      /\/filings(?:\/([^/?]+))?(\/undo|\/forget-restored)?(\?.*)?$/
+    );
+    if (filingsRoute) {
+      const [, id, action] = filingsRoute;
+      const filing = state.filings.find(item => item.id === id);
+      const summary = item => ({
+        filing_id: item.id,
+        state: 'done',
+        admitted_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        filed: item.names.length,
+        trashed: item.trashed,
+        not_moved: 0,
+        undo_available: !item.undone,
+        undone: item.undone
+      });
+      if (!id) return reply({ success: true, filings: state.filings.slice(-1).map(summary) });
+      if (action === '/forget-restored') {
+        if (state.forgetFails)
+          return {
+            ok: false,
+            status: 500,
+            json: async () => ({ error: { message: 'Ori could not forget those files.' } })
+          };
+        return reply({ success: true, forgotten: filing ? filing.names.length : 0 });
+      }
+      if (action === '/undo') {
+        if (state.undoGate) await state.undoGate;
+        if (state.undoReply) return state.undoReply(filing);
+        if (!filing || filing.undone)
+          return {
+            ok: false,
+            status: 409,
+            json: async () => ({
+              error: { code: 'undo_unavailable', message: 'This filing cannot be undone.' }
+            })
+          };
+        filing.undone = true;
+        return reply({
+          success: true,
+          undo: {
+            filing_id: filing.id,
+            back: filing.names.length,
+            not_back: 0,
+            outcomes: filing.names.map(name => ({ name, result: 'undone' }))
+          }
+        });
+      }
+      if (!filing || state.receiptGone) return { ok: false, status: 404, json: async () => ({}) };
+      return reply({
+        success: true,
+        receipt: {
+          ...summary(filing),
+          by_destination: [
+            { category: 'images', destination: 'Filed/Images', count: filing.names.length }
+          ],
+          not_moved: [],
+          not_moved_total: 0,
+          not_attempted: 0,
+          loose_now: state.looseNow,
+          history_trimmed: false
+        }
+      });
+    }
     if (target.includes('/picture/files?')) {
       const query = new URLSearchParams(target.split('?')[1]);
       const view = pictureView();
@@ -6272,6 +6364,270 @@ test('an answer that arrives after the folder was replaced is ignored', async ()
   assert.doesNotMatch(text(doc), /3 files filed/);
 });
 
+async function pressedFixture(count = 3) {
+  const fixture = await groupedReviewFixture(count);
+  pressButton(fixture.doc).click();
+  await settle();
+  await settle();
+  return fixture;
+}
+
+const okReply = body => ({ ok: true, json: async () => body });
+
+test('the receipt is the journal: count filed, where, how many stay loose, one row per destination (R43)', async () => {
+  const { doc, calls } = await pressedFixture(3);
+  assert.equal(doc.getElementById('fileJanitorResultsSummary').textContent, '3 files filed.');
+  const body = text(doc);
+  assert.match(body, /They are in Inbox\/Filed\. 7 files stay loose in Inbox\./);
+  assert.match(body, /3 → Filed\/Images/);
+  assert.ok(doc.getElementById('fileJanitorUndoAll'));
+  assert.ok(doc.getElementById('fileJanitorReceiptDone'));
+  assert.ok(
+    calls.some(call => /\/filings\/filing-1$/.test(call.target)),
+    'the numbers are read back from what happened, not recounted from the plan'
+  );
+});
+
+test('when the receipt cannot be read, the answer to the press is drawn, without a loose count', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  state.receiptGone = true;
+  pressButton(doc).click();
+  await settle();
+  await settle();
+  assert.equal(doc.getElementById('fileJanitorResultsSummary').textContent, '3 files filed.');
+  assert.doesNotMatch(text(doc), /stay loose/);
+  assert.ok(doc.getElementById('fileJanitorUndoAll'));
+});
+
+test('Done closes the receipt and puts focus back on the picture', async () => {
+  const { doc } = await pressedFixture(3);
+  doc.getElementById('fileJanitorReceiptDone').click();
+  assert.equal(doc.getElementById('fileJanitorResultsSummary'), null);
+  assert.equal(doc.getElementById('fileJanitorUndoAll'), null);
+  // Every file was filed, so there is no picture left to draw: focus is on a control
+  // of the review (Scan now), not dropped to the page.
+  assert.notEqual(doc.activeElement, doc.body);
+  assert.equal(doc.activeElement, doc.getElementById('fileJanitorScan'));
+});
+
+test('focus follows the account: the receipt, then the Undone view, never the page top (R65)', async () => {
+  const { doc } = await pressedFixture(3);
+  assert.equal(doc.activeElement, doc.getElementById('fileJanitorReceipt'));
+  doc.getElementById('fileJanitorUndoAll').click();
+  await settle();
+  await settle();
+  assert.equal(
+    doc.activeElement,
+    doc.getElementById('fileJanitorUndone'),
+    'after Undo all focus is on the answer, not dropped to the page'
+  );
+});
+
+test('a refused or lost Undo all leaves focus on the receipt, not the page top', async () => {
+  const { doc, state } = await pressedFixture(3);
+  state.undoReply = () => {
+    throw new Error('Connection lost.');
+  };
+  doc.getElementById('fileJanitorUndoAll').click();
+  await settle();
+  await settle();
+  assert.equal(doc.activeElement, doc.getElementById('fileJanitorReceipt'));
+});
+
+test('Undo all asks once with no body, shows how many are back, and Ori scans only on the button (R47, R49, R52)', async () => {
+  const { doc, calls } = await pressedFixture(3);
+  doc.getElementById('fileJanitorUndoAll').click();
+  await settle();
+  await settle();
+  const undoCalls = calls.filter(call => /\/filings\/filing-1\/undo$/.test(call.target));
+  assert.equal(undoCalls.length, 1);
+  assert.equal(undoCalls[0].options.method, 'POST');
+  assert.equal(undoCalls[0].options.body, undefined, 'nothing the page sends can widen it');
+  assert.equal(
+    doc.getElementById('fileJanitorUndoneTitle').textContent,
+    '3 files are back where they were.'
+  );
+  assert.equal(doc.getElementById('fileJanitorUndoAll'), null, 'it is not offered twice');
+  assert.equal(
+    calls.filter(call => /\/scan$/.test(call.target)).length,
+    0,
+    'putting files back never scans'
+  );
+  const before = calls.length;
+  doc.getElementById('fileJanitorScanAgain').click();
+  await settle();
+  await settle();
+  const after = calls.slice(before).map(call => call.target);
+  const forgetAt = after.findIndex(target => /\/filings\/filing-1\/forget-restored$/.test(target));
+  const scanAt = after.findIndex(target => /\/scan$/.test(target));
+  assert.ok(forgetAt >= 0, 'Ori first forgets that it put these files back');
+  assert.ok(scanAt > forgetAt, 'and only then runs the ordinary scan');
+  assert.equal(doc.getElementById('fileJanitorUndone'), null, 'the Undone view is closed');
+});
+
+test('Scan again after Undo all takes the new scan, not the finished review it was pinned to', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  // The server keeps the finished review as the open one; it is not "no review".
+  const filed = state.fileReply;
+  state.fileReply = request => {
+    const answer = filed(request);
+    state.emptied = false;
+    return answer;
+  };
+  pressButton(doc).click();
+  await settle();
+  await settle();
+  state.scanReply = { success: true, created: true, batch: { id: 'batch-after-undo' } };
+  doc.getElementById('fileJanitorUndoAll').click();
+  await settle();
+  await settle();
+  doc.getElementById('fileJanitorScanAgain').click();
+  await settle();
+  await settle();
+  // An open review is normally kept when a newer scan appears. Here the person
+  // asked for the new scan, so it must not answer "a newer review is available".
+  assert.doesNotMatch(text(doc), /A newer saved review is available/);
+});
+
+test('an ordinary Scan now still keeps the open review and says a newer one exists', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  state.scanReply = { success: true, created: true, batch: { id: 'batch-newer' } };
+  doc.getElementById('fileJanitorScan').click();
+  await settle();
+  await settle();
+  assert.match(text(doc), /A newer saved review is available/);
+});
+
+test('a failed forget does not scan, and the button stays', async () => {
+  const { doc, calls, state } = await pressedFixture(3);
+  doc.getElementById('fileJanitorUndoAll').click();
+  await settle();
+  await settle();
+  state.forgetFails = true;
+  doc.getElementById('fileJanitorScanAgain').click();
+  await settle();
+  await settle();
+  assert.equal(calls.filter(call => /\/scan$/.test(call.target)).length, 0);
+  assert.ok(doc.getElementById('fileJanitorScanAgain'));
+  assert.match(text(doc), /Ori could not forget those files\./);
+});
+
+test('one original name taken: that file is listed with why and where it is, and the rest are back (R49)', async () => {
+  const { doc, state } = await pressedFixture(3);
+  state.undoReply = filing =>
+    okReply({
+      success: true,
+      undo: {
+        filing_id: filing.id,
+        back: 2,
+        not_back: 1,
+        outcomes: [
+          {
+            name: 'image-0.png',
+            result: 'failed',
+            message:
+              'Something else is already using the original name, so Ori did not overwrite it.',
+            location: 'filed',
+            destination: 'Filed/Images/image-0.png'
+          },
+          { name: 'image-1.png', result: 'undone' },
+          { name: 'image-2.png', result: 'undone' }
+        ]
+      }
+    });
+  doc.getElementById('fileJanitorUndoAll').click();
+  await settle();
+  await settle();
+  assert.equal(
+    doc.getElementById('fileJanitorUndoneTitle').textContent,
+    '2 files are back where they were.'
+  );
+  const body = text(doc);
+  assert.match(body, /1 file could not be put back/);
+  assert.match(body, /image-0\.png\s+— Something else is already using the original name/);
+  assert.match(body, /It is still in Filed\/Images\/image-0\.png\./);
+  assert.ok(doc.getElementById('fileJanitorScanAgain'), 'the files that came back can be reviewed');
+});
+
+test('Undo all is refused as unavailable: nothing is claimed, and the receipt stops offering it', async () => {
+  const { doc, state } = await pressedFixture(3);
+  state.filings[0].undone = true; // another window already did it
+  state.undoReply = () => ({
+    ok: false,
+    status: 409,
+    json: async () => ({ error: { code: 'undo_unavailable', message: 'x' } })
+  });
+  doc.getElementById('fileJanitorUndoAll').click();
+  await settle();
+  await settle();
+  assert.match(text(doc), /Undo all is not available for this filing any more/);
+  assert.equal(doc.getElementById('fileJanitorUndoAll'), null);
+  assert.equal(doc.getElementById('fileJanitorResultsSummary').textContent, '3 files filed.');
+});
+
+test('a lost Undo all request says so and leaves the button for a retry', async () => {
+  const { doc, state } = await pressedFixture(3);
+  state.undoReply = () => {
+    throw new Error('Connection lost.');
+  };
+  doc.getElementById('fileJanitorUndoAll').click();
+  await settle();
+  await settle();
+  assert.match(text(doc), /Connection lost\./);
+  const again = doc.getElementById('fileJanitorUndoAll');
+  assert.ok(again);
+  assert.equal(again.disabled, false);
+  assert.equal(doc.getElementById('fileJanitorUndone'), null, 'nothing was claimed as put back');
+});
+
+test('while Undo all runs the buttons wait and say so, and a second press does nothing', async () => {
+  const { doc, calls, state } = await pressedFixture(3);
+  let release;
+  state.undoGate = new Promise(resolve => {
+    release = resolve;
+  });
+  const undo = doc.getElementById('fileJanitorUndoAll');
+  undo.click();
+  await settle();
+  const running = doc.getElementById('fileJanitorUndoAll');
+  assert.equal(running.disabled, true);
+  assert.equal(running.textContent, 'Putting files back…');
+  assert.equal(doc.getElementById('fileJanitorReceiptDone').disabled, true);
+  running.click();
+  await settle();
+  release();
+  await settle();
+  await settle();
+  assert.equal(calls.filter(call => /\/undo$/.test(call.target)).length, 1);
+  assert.ok(doc.getElementById('fileJanitorUndoneTitle'));
+});
+
+test('History says what the last filing was, and Undo all there works after the receipt is closed (R46)', async () => {
+  const { doc, calls } = await pressedFixture(3);
+  doc.getElementById('fileJanitorReceiptDone').click();
+  panel._selectTab('history');
+  await panel._reloadHistory();
+  await settle();
+  const line = doc.getElementById('fileJanitorLastFiling');
+  assert.match(line.textContent, /^Last filing · 3 files · /);
+  assert.ok(doc.getElementById('fileJanitorLastFilingUndo'));
+  doc.getElementById('fileJanitorLastFilingUndo').click();
+  await settle();
+  await settle();
+  assert.equal(calls.filter(call => /\/filings\/filing-1\/undo$/.test(call.target)).length, 1);
+  // The answer is shown on the Review tab, where the one button for what comes
+  // next lives.
+  assert.equal(
+    doc.getElementById('fileJanitorUndoneTitle').textContent,
+    '3 files are back where they were.'
+  );
+  panel._selectTab('history');
+  await panel._reloadHistory();
+  await settle();
+  assert.match(doc.getElementById('fileJanitorLastFiling').textContent, /put back$/);
+  assert.equal(doc.getElementById('fileJanitorLastFilingUndo'), null);
+});
+
 test('results survive the batch they emptied, and the empty batch says why', async () => {
   const { doc } = await groupedReviewFixture(3);
   pressButton(doc).click();
@@ -6279,7 +6635,7 @@ test('results survive the batch they emptied, and the empty batch says why', asy
   await settle();
   const body = text(doc);
   assert.match(body, /3 files filed/, 'the outcome must remain visible after the batch empties');
-  assert.match(body, /→ Filed\/Images/);
+  assert.match(body, /3 → Filed\/Images/, 'one row for the destination, not one line per file');
   assert.match(body, /Batch complete/);
 });
 
@@ -6367,20 +6723,27 @@ test('mixed outcomes name moves, Trash, failures, stale files, and replay truthf
   pressButton(doc).click();
   await settle();
   await settle();
+  // The receipt could not be read here (this stub has no filings route for it), so
+  // the answer to the press is drawn: the count of what actually happened, the
+  // Trash and an unclassified change apart from "filed", and every file that did not
+  // move listed with its reason.
   const body = text(doc);
-  assert.match(body, /1 file filed/);
-  assert.match(body, /1 moved to Trash/);
-  assert.match(body, /1 changes completed/);
-  assert.match(body, /older-response\.dat\s+— Completed/);
-  assert.doesNotMatch(body, /→ Filed\/Documents\/older-response\.dat/);
-  assert.match(body, /1 could not be moved/);
-  assert.match(body, /1 changed since you approved/);
+  assert.equal(
+    doc.getElementById('fileJanitorResultsSummary').textContent,
+    '1 file filed · 1 moved to Trash · 1 change completed.'
+  );
+  assert.match(body, /1 → Filed\/Documents/);
+  assert.match(body, /1 → Trash/);
+  assert.match(body, /2 files were not moved/);
+  assert.match(body, /blocked\.pdf\s+— Permission denied\./);
+  assert.match(body, /changed\.pdf\s+— Changed after review\./);
   assert.match(body, /Already completed earlier; nothing ran again/);
-  assert.match(body, /old\.zip\s+— Moved to Trash/);
-  assert.match(body, /View History/);
+  assert.doesNotMatch(body, /older-response\.dat/);
+  assert.ok(doc.getElementById('fileJanitorUndoAll'), 'a filed file can be put back');
+  assert.ok(doc.getElementById('fileJanitorReceiptDone'));
 });
 
-test('a stale result explains itself and offers a rescan', async () => {
+test('a file that changed since the press is listed as not moved, with the reason', async () => {
   const { doc, state } = await groupedReviewFixture(3);
   state.fileReply = () => ({
     ok: true,
@@ -6402,7 +6765,11 @@ test('a stale result explains itself and offers a rescan', async () => {
   await settle();
   await settle();
   const body = text(doc);
-  assert.match(body, /changed since you approved/);
+  assert.match(body, /Nothing was filed/);
+  assert.match(body, /1 file was not moved/);
+  assert.match(body, /invoice-2026-07\.pdf\s+— This file changed after you approved it/);
   assert.match(body, /Ori left it alone/);
-  assert.match(body, /Scan again/);
+  // Nothing moved, so there is nothing to put back.
+  assert.equal(doc.getElementById('fileJanitorUndoAll'), null);
+  assert.ok(doc.getElementById('fileJanitorReceiptDone'));
 });

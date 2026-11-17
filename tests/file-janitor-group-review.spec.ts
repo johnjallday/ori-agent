@@ -665,9 +665,10 @@ test('real filesystem partial failure requires a new unselected retry review, an
     await expect(console.locator('#fileJanitorResultsSummary')).toContainText('1 file filed', {
       timeout: 60_000
     });
-    await expect(console.locator('#fileJanitorResultsSummary')).toContainText(
-      '1 could not be moved'
-    );
+    // The file that did not move is named on the receipt, with its reason, and the
+    // title counts only what was filed.
+    await expect(console.locator('.fj-receipt-notmoved-title')).toHaveText('1 file was not moved');
+    await expect(console.locator('.fj-receipt-notmoved')).toContainText('second.png');
     expect(existsSync(join(ws.root, 'first.dmg'))).toBe(false);
     expect(existsSync(join(ws.root, 'second.png'))).toBe(true);
     await expect(fileButton(console)).toHaveText(filesLabel(0));
@@ -2088,4 +2089,318 @@ test('a pair card and a bundle card fit at 390px with long file names', async ({
   mkdirSync(evidence, { recursive: true });
   await console.locator('.fj-pair').evaluate(node => node.scrollIntoView({ block: 'center' }));
   await page.screenshot({ path: `${evidence}/04-e2e-pairs-390.png`, fullPage: true });
+});
+
+// ------------------------------------------------ the receipt, and Undo all
+//
+// After a press the receipt says what the journal says happened: the count filed,
+// where the files are, how many stay loose, one row per destination folder and
+// every file that did not move. Undo all puts every file back in one request, and
+// Ori scans again only when the person presses the one button for it.
+
+// Every file below a folder, as paths relative to it. Empty folders count for nothing.
+function filesUnder(dir: string, prefix = ''): string[] {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true }).flatMap(entry =>
+    entry.isDirectory()
+      ? filesUnder(join(dir, entry.name), `${prefix}${entry.name}/`)
+      : [`${prefix}${entry.name}`]
+  );
+}
+
+// The files still loose in the folder itself: not the Filed root, not what is in it.
+const looseFiles = (root: string) =>
+  readdirSync(root, { withFileTypes: true })
+    .filter(entry => entry.isFile())
+    .map(entry => entry.name)
+    .sort();
+
+// A different content per file, so "back where it was" means the same bytes too.
+const ownBytes = (names: string[]) =>
+  Object.fromEntries(names.map(name => [name, `original bytes of ${name}`]));
+
+const receiptRows = (console: Root) => console.locator('#fileJanitorResultsHost .fj-receipt-row');
+const undoAllButton = (console: Root) => console.locator('#fileJanitorUndoAll');
+const undoneTitle = (console: Root) => console.locator('#fileJanitorUndoneTitle');
+
+// The POSTs to this workspace's Filing routes, in the order the browser sent them.
+function posts(page: Page) {
+  const seen: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && /\/file-janitor\//.test(req.url()))
+      seen.push(new URL(req.url()).pathname.replace(/^.*\/file-janitor\//, ''));
+  });
+  return seen;
+}
+
+const filedNames = ['a.png', 'b.png', 'c.png', 'setup.dmg'];
+
+test('after a press the receipt says what the journal says: the count, where, how many stay loose, one row per destination', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const stay = ['passport-a.pdf', 'passport-b.pdf'];
+  const names = [...filedNames, ...stay];
+  const ws = await manualReview(request, names, 'Receipt totals', false, ownBytes(names));
+  const console = await openReview(page, ws.slug);
+  const folderName = basename(ws.root);
+  // The picture's count is the one the button states before the press.
+  await expect(fileButton(console)).toHaveText(filesLabel(4));
+  await fileButton(console).click();
+  const receipt = console.locator('#fileJanitorResultsHost .fj-receipt');
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('4 files filed.', {
+    timeout: 60_000
+  });
+  // The same number is what is now under Filed on disk, and what the journal holds.
+  const onDisk = filesUnder(join(ws.root, 'Filed'));
+  expect(onDisk).toHaveLength(4);
+  const history = await (await request.get(`${ws.base}/history?limit=100`)).json();
+  expect(history.total).toBe(4);
+
+  // Where they are, and how many stay loose: the files still in the folder.
+  const loose = looseFiles(ws.root);
+  expect(loose).toEqual([...stay].sort());
+  await expect(receipt.locator('.fj-receipt-where')).toHaveText(
+    `They are in ${folderName}/Filed. ${loose.length} files stay loose in ${folderName}.`
+  );
+
+  // One row per destination folder that exists on disk, each with its own count.
+  const folders = destinations(ws.root).sort();
+  expect(folders).toEqual(['Images', 'Installers']);
+  await expect(receiptRows(console)).toHaveCount(folders.length);
+  for (const dir of folders) {
+    const count = filesUnder(join(ws.root, 'Filed', dir)).length;
+    await expect(receiptRows(console).filter({ hasText: `Filed/${dir}` })).toHaveText(
+      `${count} → Filed/${dir}`
+    );
+  }
+
+  // The server's own receipt agrees with what the page shows.
+  const listed = (await (await request.get(`${ws.base}/filings?limit=1`)).json()).filings;
+  expect(listed).toHaveLength(1);
+  expect(listed[0]).toMatchObject({ filed: 4, trashed: 0, undo_available: true, undone: false });
+  const served = (await (await request.get(`${ws.base}/filings/${listed[0].filing_id}`)).json())
+    .receipt;
+  expect(served).toMatchObject({ filed: 4, trashed: 0, not_moved_total: 0, loose_now: 2 });
+  expect(served.by_destination).toHaveLength(2);
+
+  // No file-by-file list and no second screen: Undo all and Done, nothing else.
+  await expect(receipt.locator('.fj-results-item')).toHaveCount(0);
+  await expect(receipt.locator('.fj-receipt-notmoved')).toHaveCount(0);
+  await expect(receipt.getByRole('button')).toHaveText(['Undo all', 'Done']);
+  await expect(receipt.getByRole('button', { name: 'View History' })).toHaveCount(0);
+  await expect(receipt).toBeFocused();
+  mkdirSync(evidence, { recursive: true });
+  await receipt.evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: `${evidence}/05-e2e-receipt.png`, fullPage: true });
+});
+
+test('Undo all puts every file back under its own name with its own bytes, and Ori scans again only on the button', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const contents = ownBytes(filedNames);
+  const ws = await manualReview(request, filedNames, 'Undo all', false, contents);
+  const firstBatch = (await pictureOf(request, ws.base)).batch_id;
+  const console = await openReview(page, ws.slug);
+  const sent = posts(page);
+  await fileButton(console).click();
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('4 files filed.', {
+    timeout: 60_000
+  });
+  for (const name of filedNames) expect(existsSync(join(ws.root, name)), name).toBe(false);
+  const batchesBefore = (await (await request.get(`${ws.base}/batches`)).json()).batches.length;
+
+  await undoAllButton(console).click();
+  await expect(undoneTitle(console)).toHaveText('4 files are back where they were.', {
+    timeout: 60_000
+  });
+  // Every file is back in the folder, with the bytes it had; none is left under Filed.
+  for (const name of filedNames) {
+    expect(existsSync(join(ws.root, name)), name).toBe(true);
+    expect(readFileSync(join(ws.root, name), 'utf8'), name).toBe(contents[name]);
+  }
+  expect(filesUnder(join(ws.root, 'Filed'))).toEqual([]);
+  // One request for all of it, and the receipt no longer offers it.
+  expect(sent.filter(path => /^filings\/[^/]+\/undo$/.test(path))).toHaveLength(1);
+  await expect(undoAllButton(console)).toHaveCount(0);
+  await expect(console.locator('.fj-receipt-notmoved')).toHaveCount(0);
+  const listed = (await (await request.get(`${ws.base}/filings?limit=1`)).json()).filings;
+  expect(listed[0]).toMatchObject({ undone: true, undo_available: false });
+  await page.screenshot({ path: `${evidence}/05-e2e-undone.png`, fullPage: true });
+
+  // Putting files back never scans: no scan request, no new review, until the press.
+  await page.waitForTimeout(1500);
+  expect(sent.filter(path => path === 'scan')).toEqual([]);
+  expect((await (await request.get(`${ws.base}/batches`)).json()).batches).toHaveLength(
+    batchesBefore
+  );
+  // Nothing is waiting to be reviewed: every file of the old review was filed.
+  expect(drawn(await pictureOf(request, ws.base))).toBe(0);
+
+  // The one button forgets that Ori put these back, then runs the ordinary scan.
+  await console.locator('#fileJanitorScanAgain').click();
+  await expect(fileButton(console)).toHaveText(filesLabel(4), { timeout: 60_000 });
+  const order = sent.filter(path => path === 'scan' || /\/forget-restored$/.test(path));
+  expect(order).toHaveLength(2);
+  expect(order[0]).toMatch(/^filings\/[^/]+\/forget-restored$/);
+  expect(order[1]).toBe('scan');
+  await expect(console.locator('#fileJanitorUndone')).toHaveCount(0);
+  // The restored files are in a new review, ticked and ready to file again.
+  const again = await pictureOf(request, ws.base);
+  expect(again.batch_id).not.toBe(firstBatch);
+  expect(drawn(again)).toBe(4);
+  for (const name of filedNames) expect(existsSync(join(ws.root, name)), name).toBe(true);
+});
+
+test('with one original name taken, Undo all lists that file with the reason and where it is, and puts the rest back', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const contents = ownBytes(filedNames);
+  const ws = await manualReview(request, filedNames, 'Undo all, name taken', false, contents);
+  const console = await openReview(page, ws.slug);
+  await fileButton(console).click();
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('4 files filed.', {
+    timeout: 60_000
+  });
+  // Something new takes the original name after the file was filed.
+  const newcomer = 'A different file that now has this name';
+  writeFileSync(join(ws.root, 'b.png'), newcomer, { mode: 0o600 });
+
+  await undoAllButton(console).click();
+  await expect(undoneTitle(console)).toHaveText('3 files are back where they were.', {
+    timeout: 60_000
+  });
+  const notBack = console.locator('#fileJanitorUndone .fj-receipt-notmoved');
+  await expect(notBack.locator('.fj-receipt-notmoved-title')).toHaveText(
+    '1 file could not be put back'
+  );
+  await expect(notBack.locator('.fj-results-item')).toHaveCount(1);
+  await expect(notBack.locator('.fj-results-item')).toContainText('b.png');
+  await expect(notBack.locator('.fj-results-item')).toContainText(
+    /already using the original name/
+  );
+  await expect(notBack.locator('.fj-results-item')).toContainText(
+    'It is still in Filed/Images/b.png.'
+  );
+  // The rest are back, with their own bytes; the newcomer is untouched; the filed
+  // copy stays where it is rather than overwriting anything.
+  for (const name of ['a.png', 'c.png', 'setup.dmg']) {
+    expect(readFileSync(join(ws.root, name), 'utf8'), name).toBe(contents[name]);
+  }
+  expect(readFileSync(join(ws.root, 'b.png'), 'utf8')).toBe(newcomer);
+  expect(readFileSync(join(ws.root, 'Filed', 'Images', 'b.png'), 'utf8')).toBe(contents['b.png']);
+  expect(filesUnder(join(ws.root, 'Filed'))).toEqual(['Images/b.png']);
+  // The files that did come back can be reviewed again.
+  await expect(console.locator('#fileJanitorScanAgain')).toBeVisible();
+  await notBack.evaluate(node => node.scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: `${evidence}/05-e2e-undo-partial.png`, fullPage: true });
+});
+
+test('Undo all from History works after the receipt was closed, and the line then says the files were put back', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const contents = ownBytes(filedNames);
+  const ws = await manualReview(request, filedNames, 'Undo all from History', false, contents);
+  const console = await openReview(page, ws.slug);
+  await fileButton(console).click();
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('4 files filed.', {
+    timeout: 60_000
+  });
+  await console.locator('#fileJanitorReceiptDone').click();
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveCount(0);
+
+  // History: one line for the last filing above the per-file list.
+  await console.getByRole('tab', { name: 'History', exact: true }).click();
+  const line = console.locator('#fileJanitorLastFiling');
+  await expect(line).toContainText('Last filing · 4 files');
+  await expect(console.locator('.fj-history-item')).toHaveCount(4);
+  const lineBox = await line.boundingBox();
+  const listBox = await console.locator('.fj-history-list').boundingBox();
+  expect(lineBox!.y).toBeLessThan(listBox!.y);
+  await page.screenshot({ path: `${evidence}/05-e2e-history-line.png`, fullPage: true });
+
+  const sent = posts(page);
+  await console.locator('#fileJanitorLastFilingUndo').click();
+  // The answer is shown on the Review tab, with the files back on disk.
+  await expect(undoneTitle(console)).toHaveText('4 files are back where they were.', {
+    timeout: 60_000
+  });
+  await expect(console.getByRole('tab', { name: 'Review', exact: true })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  );
+  for (const name of filedNames) {
+    expect(readFileSync(join(ws.root, name), 'utf8'), name).toBe(contents[name]);
+  }
+  expect(filesUnder(join(ws.root, 'Filed'))).toEqual([]);
+  expect(sent.filter(path => /^filings\/[^/]+\/undo$/.test(path))).toHaveLength(1);
+  expect(sent.filter(path => path === 'scan')).toEqual([]);
+
+  await console.getByRole('tab', { name: 'History', exact: true }).click();
+  await expect(console.locator('#fileJanitorLastFiling')).toContainText('put back');
+  await expect(console.locator('#fileJanitorLastFilingUndo')).toHaveCount(0);
+});
+
+test('a file sent to the Trash is counted apart on the receipt, and Undo all brings it back from the Trash', async ({
+  page,
+  request
+}) => {
+  const trashDir = sandboxTrash();
+  test.skip(
+    !trashDir,
+    'NOT RUN: the runner did not pass the server sandbox (use e2e-fresh.sh --sandbox-env ORI_E2E_SANDBOX), so the isolated Trash cannot be located and the real one is never touched'
+  );
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  const ws = await manualReview(
+    request,
+    pairFiles.slice(0, 2),
+    'Receipt Trash and Undo all',
+    false,
+    pairContents
+  );
+  const console = await openReview(page, ws.slug);
+  await pairCard(console, 'Budget.pdf')
+    .getByRole('button', { name: 'Trash the copy Budget (2).pdf', exact: true })
+    .click();
+  await expect(fileButton(console)).toHaveText(filesLabel(0, 1));
+  await console.locator('#fileJanitorTrashAck').check();
+  await expect(fileButton(console)).toBeEnabled();
+  await fileButton(console).click();
+  // Counted apart from "filed", with its own row, and no destination folder made.
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('1 moved to Trash.', {
+    timeout: 60_000
+  });
+  await expect(receiptRows(console)).toHaveCount(1);
+  await expect(receiptRows(console)).toHaveText('1 → Trash');
+  await expect(console.locator('#fileJanitorResultsHost .fj-receipt-where')).not.toContainText(
+    'They are in'
+  );
+  expect(destinations(ws.root)).toEqual([]);
+  expect(existsSync(join(ws.root, 'Budget (2).pdf'))).toBe(false);
+  // Other cases in this run send a file of the same name to the same sandbox Trash
+  // and leave it there, so this case counts only what it added.
+  const trashed = () =>
+    (existsSync(trashDir!) ? readdirSync(trashDir!) : []).filter(name =>
+      name.startsWith('Budget (2)')
+    );
+  const inTrashNow = trashed().length;
+  expect(inTrashNow).toBeGreaterThanOrEqual(1);
+
+  await undoAllButton(console).click();
+  await expect(undoneTitle(console)).toHaveText('1 file is back where it was.', {
+    timeout: 60_000
+  });
+  expect(readFileSync(join(ws.root, 'Budget (2).pdf'), 'utf8')).toBe(
+    pairContents['Budget (2).pdf']
+  );
+  expect(readFileSync(join(ws.root, 'Budget.pdf'), 'utf8')).toBe(pairContents['Budget.pdf']);
+  // Exactly the one file this case sent to the Trash left it.
+  expect(trashed()).toHaveLength(inTrashNow - 1);
 });

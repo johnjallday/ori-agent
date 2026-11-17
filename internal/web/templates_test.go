@@ -1191,6 +1191,7 @@ func TestWorkspaceDetailFileJanitorContract(t *testing.T) {
 	for _, want := range []string{
 		`/js/modules/file-janitor-console.js`,
 		`/js/modules/file-janitor-picture.js`,
+		`/js/modules/file-janitor-receipt.js`,
 		`/js/modules/workspace-overlay-coordinator.js`,
 	} {
 		if !strings.Contains(html, want) {

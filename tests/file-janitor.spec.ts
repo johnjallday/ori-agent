@@ -991,14 +991,20 @@ test.describe('File Janitor capability', () => {
     expect(existsSync(join(root, 'holiday.png'))).toBe(true);
 
     const results = consoleBody(page).locator('.fj-results');
+    // The receipt says how many were filed and where, one row per destination; the
+    // file-by-file record is in History, with one line above it for the last filing.
     await expect(results).toContainText('1 file filed');
-    await expect(results).toContainText('invoice.pdf');
-    await results.getByRole('button', { name: 'View History' }).click();
+    await expect(results).toContainText('1 → Filed/Documents');
+    await expect(results.getByRole('button', { name: 'Undo all' })).toBeVisible();
+    await console_(page).locator('[data-fj-tab="history"]').click();
     await expect(console_(page).locator('[data-fj-tab="history"]')).toHaveAttribute(
       'aria-selected',
       'true'
     );
     await expect(consoleBody(page)).toContainText('invoice.pdf');
+    await expect(consoleBody(page).locator('#fileJanitorLastFiling')).toContainText(
+      'Last filing · 1 file'
+    );
   });
 
   test('a failed batch refresh keeps the last known review visible but inert', async ({

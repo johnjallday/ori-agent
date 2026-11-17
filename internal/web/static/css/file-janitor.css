@@ -1270,6 +1270,67 @@
   padding-left: 1rem;
 }
 
+/* The receipt after a press and the Undone view after Undo all. Plain words, one
+   row per destination, then the files that did not move (R43, R49). */
+.fj-receipt-where,
+.fj-receipt-note {
+  margin: 0 0 0.55rem;
+  font-size: 0.85rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
+/* What happened is the point of these panels, so every line in them is full-contrast
+   text (the secondary grey measured 4.3:1 on the dark theme). */
+.fj-receipt .fj-results-item,
+.fj-undone .fj-results-item,
+.fj-receipt .fj-results-replayed,
+.fj-undone .fj-results-replayed,
+.fj-receipt .fj-sub,
+.fj-undone .fj-sub {
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-receipt-rows {
+  list-style: none;
+  margin: 0 0 0.6rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.fj-receipt-row {
+  font-size: 0.85rem;
+  color: var(--text-primary, #e8e8e8);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.fj-receipt-notmoved {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--fj-line-strong, var(--border-subtle, rgba(255, 255, 255, 0.12)));
+}
+
+.fj-receipt-notmoved-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+/* History's one line for the last filing: the words, then Undo all as a link, wrapping
+   cleanly when the panel is narrow. */
+.fj-last-filing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 0.15rem;
+  margin: 0 0 0.6rem;
+  font-size: 0.85rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
 /* Destructive styling: a removal never looks like a move. The class is applied
    alongside text that states the consequence, so the distinction never rests on
    colour alone. */

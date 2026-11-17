@@ -2,7 +2,6 @@ package filejanitor
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -27,17 +26,6 @@ import (
 // ---- stubs: delete the block when the named task adds the real API ----
 
 var errNotBuiltYet = errors.New("not built yet")
-
-// Task 5.2 replaces these with Undo all in filing_undo.go.
-type FilingUndoResult struct {
-	FilingID string
-	Replayed bool
-	Back     int
-}
-
-func (s *Service) UndoFiling(context.Context, string, string, string) (FilingUndoResult, error) {
-	return FilingUndoResult{}, errNotBuiltYet
-}
 
 // ---- end of stubs ----
 

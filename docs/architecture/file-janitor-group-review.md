@@ -546,9 +546,13 @@ write, the connector contract (`mcp_mover.go`, the `Mover` interface).
   line. `GET .../filings/{filingID}?offset=` returns the receipt: `filing_id`,
   `state` (`running|done|interrupted`), `admitted_at`, `completed_at`, `filed`,
   `trashed`, `by_destination[{category, destination, count}]`, `not_moved_total`,
-  `not_moved[<=50 {candidate_id, name, operation, reason}]`, `not_attempted`,
-  `loose_now`, `undo_available`, `undo`, `history_trimmed`. Every number comes
-  from the journal, so it survives a restart.
+  `not_moved[<=50 {candidate_id, name, operation, result: failed|stale, reason}]`
+  (paged with `offset`), `not_attempted`, `loose_now` (files of the scan still
+  waiting), `undo_available`, `undo` (`{state, back, not_back, claimed_at,
+  completed_at}` once Undo all was pressed) and `history_trimmed`. Every number
+  comes from the journal, so it survives a restart. `undo_available` is true while
+  the run has finished, Undo all was not pressed, the folder is the one that was
+  filed and at least one filed file can still be reversed.
 - `POST .../filings/{filingID}/undo` (empty body), `UndoFiling(ctx, owner, ws,
   filingID)`: `lockRoot` first, then one claim write: unknown filing or owner is
   `ErrUndoUnavailable`; `settings.RootID != filing.RootID` is refused (relinked);
@@ -582,6 +586,29 @@ idempotent, is refused after a relink, and returns `{forgotten:n}`. It does not
 reuse `reconsider_files`, which clears the candidate's own fingerprint key (not
 necessarily what `suppressRestored` wrote) and needs the batch revisions. A failed
 scan leaves the files forgotten, which is harmless; a retry sends both again.
+
+### The receipt and Undone views in the browser (tasks 5.3 to 5.5)
+
+`file-janitor-receipt.js` (an ES module, `window.FileJanitorReceipt`) only draws;
+the console owns every request. After a press the console reads
+`GET .../filings/{id}` and draws the receipt: "N files filed." (Trash apart as "M
+moved to Trash", a change of unknown kind as "N changes completed", never "filed"),
+"They are in <folder>/Filed. K files stay loose in <folder>.", one row per
+destination folder, the "N files were not moved" section (each file with its
+reason, 50 at a time), **Undo all** (only while the server says it is on offer) and
+**Done**. If the receipt cannot be read, the answer to the press is drawn instead,
+without the loose count. The per-file list is gone from this panel: History has it.
+
+**Undo all** is `POST .../filings/{id}/undo` with no body, from the receipt or from
+History's "Last filing" line. The answer is the Undone view on the Review tab: "N
+files are back where they were.", the files that could not be put back each with
+the reason and where the file is now (still filed, still in the Trash, a file with
+the original name in the folder, or not found), and one button, **Scan again to
+review them**, which sends `forget-restored` and, only after it succeeds, the
+ordinary scan. `undo_unavailable` (409) is shown as one sentence and the receipt
+is read again so the button goes; a lost request leaves the button for a retry
+and claims nothing. The History line is `GET .../filings?limit=1`: "Last filing ·
+N files · time" with an **Undo all** link while on offer and "put back" after.
 
 ### Storage (both sides stay at scan state schema 3)
 

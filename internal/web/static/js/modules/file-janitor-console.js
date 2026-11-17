@@ -144,6 +144,11 @@
   // What the last press reported, shown until the person leaves the Review tab,
   // closes the console, changes folder or presses again.
   let lastResults = null;
+  // Undo all or "Scan again" is running: the buttons wait, and say so.
+  let receiptBusy = false;
+  // The most recent filing, for History's one line (R46), and which read it came from.
+  let lastFiling = null;
+  let lastFilingRequest = 0;
   // The file selected for the bar above the File button (R23); one at a time.
   let selectedFile = null;
   // Rows the person asked Ori to stop asking about, kept only for this page so the
@@ -206,6 +211,8 @@
     generation++;
     keptRows.clear();
     lastResults = null;
+    lastFiling = null;
+    receiptBusy = false;
     discardProtectionApproval();
     protectionRequest++;
     protectionFact = null;
@@ -2974,7 +2981,7 @@
       // outcome beneath it. History gains the entries this press just wrote.
       await loadBatch();
       if (!scopeCurrent(scope)) return;
-      renderResults(result);
+      await showReceipt(scope, result);
       await loadHistory();
     } catch (error) {
       if (!scopeCurrent(scope)) return;
@@ -3704,6 +3711,15 @@
     title.id = 'fileJanitorHistoryTitle';
     panel.appendChild(title);
 
+    // One line for the most recent filing, with Undo all while it is on offer (R46).
+    // The per-file list below is unchanged.
+    const lastLine = window.FileJanitorReceipt?.renderLastFiling?.(document, lastFiling, {
+      when: formatWhen(lastFiling?.completed_at || lastFiling?.admitted_at),
+      busy: receiptBusy,
+      onUndoAll: summary => void undoAll(summary.filing_id)
+    });
+    if (lastLine) panel.appendChild(lastLine);
+
     const bar = el('div', 'fj-filters');
     bar.setAttribute('role', 'group');
     bar.setAttribute('aria-label', 'Filter history');
@@ -3842,6 +3858,7 @@
     // Separate ownership: changing a list filter must not cancel or qualify
     // the unfiltered canonical read. Share its first page when possible.
     const receiptRead = refreshReceipt ? loadLatestReceipt(scope, query ? null : listRead) : null;
+    if (refreshReceipt) void loadLastFiling(scope);
     notifySubscribers();
     try {
       const body = await listRead;
@@ -3904,114 +3921,219 @@
 
   const RESULT_MARKS = { applied: '✓', failed: '!', stale: '•' };
 
-  function outcomeOperation(outcome) {
-    // Only the operation field is authoritative. A destination-looking string,
-    // filename, or clicked control is not evidence that an apply actually ran
-    // as a move.
-    return outcome.operation === 'move' || outcome.operation === 'trash' ? outcome.operation : '';
-  }
-
-  function outcomeLabel(outcome) {
-    const operation = outcomeOperation(outcome);
-    if (outcome.result === 'stale') return 'Changed — not moved';
-    if (outcome.result === 'failed') return 'Not moved';
-    if (outcome.result === 'applied' && operation === 'move') return 'Filed';
-    if (outcome.result === 'applied' && operation === 'trash') return 'Moved to Trash';
-    if (outcome.result === 'applied') return 'Completed';
-    return safeName(outcome.result, 'Not completed');
-  }
-
   // renderResults reports what happened per file. Operation evidence comes
   // from each authoritative outcome: an applied Trash is never called "filed",
   // and an older response without operation data gets neutral wording.
-  function renderResults(result, { focus = true } = {}) {
+  function renderResults(view, { focus = true } = {}) {
     // Kept so a redraw of the console (a status refresh that lands after the press)
     // shows the same account again instead of wiping it.
-    lastResults = result;
+    lastResults = view;
     const host = document.getElementById('fileJanitorResultsHost');
     if (!host) return;
     clear(host);
+    const drawing = window.FileJanitorReceipt;
+    if (!drawing || !view) return;
 
-    const panel = el('section', 'fj-results');
-    // Focus moves here below, so the user is taken to the outcome rather than
-    // told about it from elsewhere. A live region as well would announce the
-    // same text twice, so this is a labelled group instead of role="status".
-    panel.setAttribute('role', 'group');
-    panel.setAttribute('tabindex', '-1');
-    panel.setAttribute('aria-labelledby', 'fileJanitorResultsSummary');
-
-    const outcomes = Array.isArray(result.outcomes) ? result.outcomes : [];
-    let filed = 0;
-    let trashed = 0;
-    let completed = 0;
-    let failed = 0;
-    let stale = 0;
-    outcomes.forEach(outcome => {
-      const operation = outcomeOperation(outcome);
-      if (outcome.result === 'applied' && operation === 'move') filed += 1;
-      else if (outcome.result === 'applied' && operation === 'trash') trashed += 1;
-      else if (outcome.result === 'applied') completed += 1;
-      else if (outcome.result === 'failed') failed += 1;
-      else if (outcome.result === 'stale') stale += 1;
-    });
-    // Older aggregate-only replies cannot prove which operation succeeded, so
-    // they are deliberately reported as completed changes rather than files.
-    if (outcomes.length === 0) {
-      completed = Number(result.applied) || 0;
-      failed = Number(result.failed) || 0;
-      stale = Number(result.stale) || 0;
-    }
-
-    const parts = [];
-    if (filed) parts.push(filed + (filed === 1 ? ' file filed' : ' files filed'));
-    if (trashed) parts.push(formatCount(trashed) + ' moved to Trash');
-    if (completed) parts.push(formatCount(completed) + ' changes completed');
-    if (failed) parts.push(formatCount(failed) + ' could not be moved');
-    if (stale) parts.push(formatCount(stale) + ' changed since you approved');
-    if (parts.length === 0) parts.push('Nothing was moved');
-    const resultsSummary = el('p', 'fj-results-summary', parts.join(' · ') + '.');
-    resultsSummary.id = 'fileJanitorResultsSummary';
-    panel.appendChild(resultsSummary);
-    if (result.replayed) {
-      panel.appendChild(
-        el('p', 'fj-results-replayed', 'Already completed earlier; nothing ran again.')
-      );
-    }
-
-    const list = el('ul', 'fj-results-list');
-    outcomes.forEach(outcome => {
-      const entry = el('li', 'fj-results-item fj-results-' + (outcome.result || 'failed'));
-      const mark = el('span', 'fj-results-mark', RESULT_MARKS[outcome.result] || '!');
-      mark.setAttribute('aria-hidden', 'true');
-      entry.appendChild(mark);
-      entry.appendChild(el('span', 'fj-results-name', displayName(outcome)));
-      entry.appendChild(el('span', 'fj-results-state', ' — ' + outcomeLabel(outcome)));
-      if (
-        outcome.destination &&
-        outcome.result === 'applied' &&
-        outcomeOperation(outcome) === 'move'
-      ) {
-        entry.appendChild(el('span', 'fj-results-destination', ' → ' + outcome.destination));
-      }
-      if (outcome.message) {
-        entry.appendChild(el('span', 'fj-results-message', ' ' + outcome.message));
-      }
-      list.appendChild(entry);
-    });
-    panel.appendChild(list);
-
-    const actions = el('div', 'fj-results-actions');
-    actions.appendChild(
-      button('View History', 'fj-btn fj-btn-secondary', () => selectTab('history'))
-    );
-    if (stale) {
-      actions.appendChild(button('Scan again', 'fj-btn fj-btn-secondary', () => void scanNow()));
-    }
-    panel.appendChild(actions);
+    const ctx = {
+      folderName: compactFolderName(lastStatus?.settings?.root_path),
+      filingRoot: lastStatus?.settings?.filing_root_name || 'Filed',
+      busy: receiptBusy,
+      onUndoAll: summary => void undoAll(summary.filingId || summary.filing_id),
+      onScanAgain: () => void scanAgainAfterUndo(view.filingId),
+      onDone: () => closeResults()
+    };
+    // Focus moves to the panel below, so the user is taken to the outcome rather
+    // than told about it from elsewhere. The panel is a labelled group, not a live
+    // region: a live region as well would announce the same text twice.
+    const panel =
+      view.kind === 'undone'
+        ? drawing.renderUndone(document, view.result, ctx)
+        : drawing.renderReceipt(document, view.model, ctx);
     host.appendChild(panel);
     // Move focus to the outcome so a keyboard user lands on what happened instead
     // of at the top of the document (not when the same account is only redrawn).
     if (focus) panel.focus?.();
+  }
+
+  // The receipt of the press that just finished: the server's account of what
+  // happened, read back from its journal. When it cannot be read the answer to the
+  // press itself is drawn instead, with less to say (no count of files left loose).
+  async function showReceipt(scope, result) {
+    const drawing = window.FileJanitorReceipt;
+    if (!drawing) return;
+    const filingId = result.filing_id || '';
+    const fromJournal = await readReceiptModel(scope, filingId, Boolean(result.replayed));
+    if (!scopeCurrent(scope)) return;
+    renderResults({
+      kind: 'receipt',
+      filingId,
+      model: fromJournal || drawing.receiptModelFromResult(result)
+    });
+  }
+
+  // The receipt as the server's journal tells it, or null when it cannot be read.
+  async function readReceiptModel(scope, filingId, replayed) {
+    const drawing = window.FileJanitorReceipt;
+    if (!drawing || !filingId) return null;
+    try {
+      const response = await fetch(apiBase(scope.id) + '/filings/' + encodeURIComponent(filingId));
+      if (!response.ok) return null;
+      const body = await response.json();
+      return body?.receipt
+        ? { ...drawing.receiptModelFromReceipt(body.receipt), replayed: Boolean(replayed) }
+        : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Done closes the account and puts focus back on the picture.
+  function closeResults() {
+    lastResults = null;
+    const host = document.getElementById('fileJanitorResultsHost');
+    if (host) clear(host);
+    // The button that was pressed is gone. Focus goes to the picture; when the
+    // review has nothing left to draw, to the Scan now button, then to the tab, so a
+    // keyboard user is never dropped at the top of the page.
+    for (const id of ['fileJanitorPicture', 'fileJanitorScan', 'fileJanitorTab-review']) {
+      const target = document.getElementById(id);
+      if (target?.focus) {
+        target.focus();
+        break;
+      }
+    }
+  }
+
+  // Undo all (R47 to R50): one request that puts back every file one press of File
+  // moved. It is asked from the receipt or from History, so the answer is shown on
+  // the Review tab either way. A second press, from another window, reports the
+  // first run's answer and moves nothing.
+  async function undoAll(filingId) {
+    const scope = requestScope();
+    if (!scope.id || !filingId || receiptBusy || busy || disposed) return;
+    receiptBusy = true;
+    busy = true;
+    let drawn = false;
+    showError('');
+    if (lastResults) renderResults(lastResults);
+    else renderHistory();
+    try {
+      const response = await fetch(
+        apiBase(scope.id) + '/filings/' + encodeURIComponent(filingId) + '/undo',
+        { method: 'POST' }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!scopeCurrent(scope)) return;
+      if (!response.ok) {
+        const apiError = body.error || body;
+        if (apiError?.code === 'undo_unavailable') {
+          // Nothing was put back and Undo all is not on offer any more: say so and
+          // draw the receipt again so the button goes.
+          showError(
+            'Undo all is not available for this filing any more. The files stay where they are.'
+          );
+          await refreshFilingViews(scope, filingId);
+          return;
+        }
+        throw new Error((apiError && apiError.message) || 'Ori could not put the files back.');
+      }
+      receiptBusy = false;
+      busy = false;
+      // The files are back: leave History for the Review tab, where the answer and
+      // the one button for what comes next live.
+      if (consoleTab !== 'review') selectTab('review');
+      await loadBatch();
+      if (!scopeCurrent(scope)) return;
+      // Drawn once, with focus on it: drawing it again would drop focus to the page.
+      renderResults({ kind: 'undone', filingId, result: body.undo || {} });
+      drawn = true;
+      await loadHistory();
+    } catch (error) {
+      if (!scopeCurrent(scope)) return;
+      // The request was lost or failed before an answer: nothing is claimed here.
+      // The button stays, and pressing it again reports the first run if one began.
+      showError(error.message || 'Ori could not put the files back.');
+    } finally {
+      if (scopeCurrent(scope)) {
+        receiptBusy = false;
+        busy = false;
+        // Where Undo all did not finish, the panel comes back from the busy state
+        // with focus on it, so a keyboard user is not sent to the top of the page.
+        if (!drawn) {
+          if (lastResults) renderResults(lastResults);
+          else if (consoleTab === 'history') renderHistory();
+        }
+        updateSelectionSummary();
+      }
+    }
+  }
+
+  // Draws the receipt again from the journal (after a refusal), and History's line.
+  async function refreshFilingViews(scope, filingId) {
+    receiptBusy = false;
+    busy = false;
+    if (lastResults?.kind === 'receipt') {
+      const model = await readReceiptModel(scope, filingId, lastResults.model?.replayed);
+      if (!scopeCurrent(scope)) return;
+      if (model) renderResults({ ...lastResults, model }, { focus: false });
+    }
+    await loadHistory({ refreshReceipt: false });
+  }
+
+  // "Scan again to review them" (R52) is one press with two steps. Ori first
+  // forgets that it put these files back, then runs the ordinary scan; it never
+  // scans on its own. The scan only starts after the forgetting succeeded.
+  async function scanAgainAfterUndo(filingId) {
+    const scope = requestScope();
+    if (!scope.id || !filingId || receiptBusy || busy || disposed) return;
+    receiptBusy = true;
+    showError('');
+    if (lastResults) renderResults(lastResults);
+    let forgotten = false;
+    try {
+      const response = await fetch(
+        apiBase(scope.id) + '/filings/' + encodeURIComponent(filingId) + '/forget-restored',
+        { method: 'POST' }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!scopeCurrent(scope)) return;
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || 'Ori could not start the scan.');
+      }
+      forgotten = true;
+    } catch (error) {
+      if (scopeCurrent(scope)) showError(error.message || 'Ori could not start the scan.');
+    } finally {
+      if (scopeCurrent(scope)) {
+        receiptBusy = false;
+        if (lastResults) renderResults(lastResults);
+      }
+    }
+    if (!forgotten || !scopeCurrent(scope)) return;
+    // The ordinary scan, from this one press. What it finds is drawn as the review.
+    closeResults();
+    await scanNow({ adoptNew: true });
+    // The review was redrawn under the person: focus goes back to its picture.
+    if (scopeCurrent(scope)) document.getElementById('fileJanitorPicture')?.focus?.();
+  }
+
+  // History's one line for the most recent filing (R46), read beside the list.
+  async function loadLastFiling(scope) {
+    const sequence = ++lastFilingRequest;
+    try {
+      const response = await fetch(apiBase(scope.id) + '/filings?limit=1');
+      if (!response.ok) throw new Error('filings failed');
+      const body = await response.json();
+      if (!scopeCurrent(scope) || sequence !== lastFilingRequest) return;
+      lastFiling = Array.isArray(body.filings) && body.filings.length ? body.filings[0] : null;
+    } catch (_) {
+      if (!scopeCurrent(scope) || sequence !== lastFilingRequest) return;
+      // The line is a convenience: when it cannot be read it is left out, and the
+      // per-file list below says everything it did.
+      lastFiling = null;
+    }
+    renderHistory();
   }
 
   // pauseControl is the real Pause/Resume, shared by every surface that offers
@@ -5684,12 +5806,19 @@
 
   // scanNow runs a real scan. It reports honestly when a scan finds nothing:
   // silence would be indistinguishable from a broken button.
-  async function scanNow() {
+  async function scanNow({ adoptNew = false } = {}) {
     const scope = requestScope();
     const id = scope.id;
     if (!id || busy || disposed) return;
+    // An open review is kept when a scan finds something newer, so the picture the
+    // person is looking at never swaps by itself. After Undo all the person pressed
+    // "Scan again to review them" to leave that finished review behind: the newest
+    // scan is the one they asked for.
     const pinnedReview =
-      draftEnabled && lastBatch?.id && (consoleOpen || selected.size + trashMarked.size > 0)
+      !adoptNew &&
+      draftEnabled &&
+      lastBatch?.id &&
+      (consoleOpen || selected.size + trashMarked.size > 0)
         ? lastBatch.id
         : '';
     busy = true;
