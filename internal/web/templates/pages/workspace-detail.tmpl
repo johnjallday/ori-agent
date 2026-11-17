@@ -9471,6 +9471,13 @@
        never at load time. -->
   <script type="module" src="/js/modules/workspace-overlay-coordinator.js"></script>
   <script defer src="/js/modules/file-janitor-console.js"></script>
+  <!-- The review drawn as a picture of the folder after filing. A module, like
+       the protection helper: the console reads window.FileJanitorPicture when it
+       draws, not at load time. -->
+  <script type="module" src="/js/modules/file-janitor-picture.js"></script>
+  <!-- What one press of File did and what Undo all did about it: drawn from the
+       server's receipt, read by the console when it needs it. -->
+  <script type="module" src="/js/modules/file-janitor-receipt.js"></script>
   <script type="module" src="/js/modules/protect-folders-chooser.js"></script>
   <script defer src="/js/modules/backup-recovery-console.js"></script>
   <script defer src="/js/modules/github-proposals.js"></script>

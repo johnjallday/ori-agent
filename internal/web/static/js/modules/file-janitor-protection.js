@@ -73,6 +73,22 @@ export function protectionSentence(fact) {
   }
 }
 
+// The one sentence on the Review tab's backup strip (R53). Only the three states
+// where Ori has information and the folder is not reported as covered have one: a
+// covered folder, and a state Ori cannot read, show no strip at all.
+export function protectionStripSentence(fact) {
+  switch (fact?.state) {
+    case 'not_covered':
+      return 'Filing is not a backup, and this folder is not in the backups Ori can see.';
+    case 'unknown':
+      return 'Filing is not a backup, and Ori does not know of one for this folder.';
+    case 'configured':
+      return 'Filing is not a backup. A backup is set up, but Ori has not seen it finish.';
+    default:
+      return '';
+  }
+}
+
 export function createProtectionTrips(win) {
   let memory = null;
   let creatorActive = false;
@@ -379,5 +395,6 @@ export function createProtectionTrips(win) {
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.FileJanitorProtection = createProtectionTrips(window);
   window.FileJanitorProtection.sentence = protectionSentence;
+  window.FileJanitorProtection.stripSentence = protectionStripSentence;
   document.dispatchEvent(new CustomEvent('ori:filing-protection-ready'));
 }

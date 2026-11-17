@@ -26,6 +26,12 @@ var (
 	ErrUnsupportedScanSchema = errors.New("unsupported File Janitor scan schema")
 )
 
+// errMemberChanged is ErrCandidateNotActionable for the one reason the person can
+// act on by scanning again: the file is not the file that was scanned. A group tick
+// leaves such a file unticked instead of refusing the folder; only when nothing in
+// the group could be ticked is it returned, so the person is told why.
+var errMemberChanged = fmt.Errorf("%w: it changed since the scan", ErrCandidateNotActionable)
+
 // ReviewChoice records an actual explicit selection, never an approval. The
 // destination remains exclusively in the canonical candidate decision.
 type ReviewChoice struct {
@@ -135,6 +141,16 @@ type ReviewDraftView struct {
 	Choices       []ReviewChoiceView     `json:"choices"`
 	RemovedStale  int                    `json:"removed_stale"`
 	Groups        []ReviewDraftGroupView `json:"groups"`
+	// removed names each ticked file the revalidation dropped because the file
+	// itself changed or went missing since the scan. It is never serialized: the
+	// plan check uses it to say which files "changed since you looked".
+	removed []removedChoice
+}
+
+// removedChoice is one ticked file that is no longer the file that was ticked.
+type removedChoice struct {
+	candidateID string
+	reason      string // "changed" or "missing"
 }
 
 // projectReviewDraft never persists reconciliation. Every caller receives a
@@ -149,7 +165,91 @@ type reviewDraftBinding struct {
 	Digest            string
 }
 
-func projectReviewDraft(state ScanState, batchID string, binding reviewDraftBinding, groupRevision string) ReviewDraftView {
+// moveAnswered reports whether a move may go ahead for this candidate. A file
+// whose type Ori could not settle (NeedsReview) moves only once the person has
+// answered with a destination: for that file alone, or for a whole row of
+// question files in the picture ("Move to Documents"), which records the same
+// destination on each file it covers and names the row as its source. A
+// destination that arrived with a folder's group-level suggestion does not count:
+// a file that newly needs review must not move on an older folder-level choice.
+// It is the single rule behind the draft projection, the edit that selects a
+// file, and the execution fence, so the three cannot drift apart.
+func moveAnswered(candidate JanitorCandidate) bool {
+	if !candidate.NeedsReview {
+		return true
+	}
+	return candidate.DecisionCategory != "" && (candidate.DecisionGroupID == "" || questionGroupIDs[candidate.DecisionGroupID])
+}
+
+// questionGroupIDs are the IDs of the fixed question rows, which are the only group
+// answers that count for a file that needs review.
+var questionGroupIDs = func() map[string]bool {
+	ids := make(map[string]bool, len(questionGroups))
+	for _, definition := range questionGroups {
+		ids[reviewGroupID(definition.key)] = true
+	}
+	return ids
+}()
+
+// reviewDefaultsApply reports whether a batch opens with its confident folders
+// ticked: it was made by a build that sets the marker, and nothing has touched it
+// since: no saved draft record (valid, invalid or stale), and every candidate is
+// still pending with no decision. Any typed edit stores a draft record, which
+// ends the defaults for good, even when it stores no choices at all; a legacy
+// decision or an apply moves a candidate off pending/undecided and does the same.
+func reviewDefaultsApply(state ScanState, batchID string) bool {
+	batch, found := state.Batch(batchID)
+	if !found || batch.ReviewDefaults != ReviewDefaultsFilingGroups {
+		return false
+	}
+	for _, draft := range state.ReviewDrafts {
+		if draft.BatchID == batchID {
+			return false
+		}
+	}
+	for _, filing := range state.Filings {
+		if filing.BatchID == batchID {
+			return false
+		}
+	}
+	candidates := state.CandidatesFor(batchID)
+	if len(candidates) == 0 {
+		return false
+	}
+	for _, candidate := range candidates {
+		if candidate.State != CandidatePending || candidate.Decision != DecisionNone || !candidate.DecidedAt.IsZero() {
+			return false
+		}
+	}
+	return true
+}
+
+// defaultReviewChoices is exactly what select_filing_groups would add to an
+// empty draft: one move choice per pending member of every confident group, with
+// that group as provenance. It never includes a question group, and it is derived
+// from the batch's own member lists, which are fixed when the scan creates the
+// batch, so a file that arrives later can never join.
+func defaultReviewChoices(groups ReviewGroups) []ReviewChoiceView {
+	choices := []ReviewChoiceView{}
+	for _, group := range groups.Groups {
+		if group.Kind != "filing" {
+			continue
+		}
+		members, _ := groups.Members(group.ID)
+		for _, member := range members {
+			candidate := member.Candidate
+			definition, err := LookupCategory(string(candidate.EffectiveCategory()))
+			if err != nil || !proposalPending(candidate) || candidate.Decision == DecisionTrash || !moveAnswered(candidate) {
+				continue
+			}
+			choices = append(choices, ReviewChoiceView{CandidateID: candidate.ID, Operation: OperationMove, Category: definition.ID, SourceGroupID: group.ID})
+		}
+	}
+	return choices
+}
+
+func projectReviewDraft(state ScanState, batchID string, binding reviewDraftBinding, groups ReviewGroups) ReviewDraftView {
+	groupRevision := groups.Revision
 	view := ReviewDraftView{BatchID: batchID, GroupRevision: groupRevision, State: "empty", Choices: []ReviewChoiceView{}}
 	var stored *ReviewDraft
 	duplicate := false
@@ -184,7 +284,7 @@ func projectReviewDraft(state ScanState, batchID string, binding reviewDraftBind
 				definition, categoryErr := LookupCategory(string(candidate.EffectiveCategory()))
 				if !found || candidate.BatchID != batchID || candidate.WorkspaceID != state.WorkspaceID ||
 					!proposalPending(candidate) || candidate.Fingerprint.Key() != choice.FingerprintKey ||
-					(choice.Operation == OperationMove && (categoryErr != nil || (candidate.NeedsReview && (candidate.DecisionCategory == "" || candidate.DecisionGroupID != "")))) {
+					(choice.Operation == OperationMove && (categoryErr != nil || !moveAnswered(candidate))) {
 					if !found || (candidate.State != CandidateApplied && candidate.State != CandidateApplying) {
 						view.RemovedStale++
 					}
@@ -197,6 +297,10 @@ func projectReviewDraft(state ScanState, batchID string, binding reviewDraftBind
 				view.Choices = append(view.Choices, item)
 			}
 		}
+	} else if reviewDefaultsApply(state, batchID) {
+		// Nothing has touched this scan: show the confident folders ticked. This
+		// is derived on every read and written only by the person's first edit.
+		view.State, view.Choices = "default", defaultReviewChoices(groups)
 	}
 	sort.Slice(view.Choices, func(i, j int) bool { return view.Choices[i].CandidateID < view.Choices[j].CandidateID })
 	// All fields here have a bounded JSON representation. Include raw invalid
@@ -246,7 +350,7 @@ func reconcileLegacyDraftDecision(state *ScanState, previous, candidate JanitorC
 			// Current disk state is revalidated by draft reads and preview; this
 			// legacy metadata-only edit never probes a revoked/unavailable root.
 			valid := proposalPending(previous) && choice.FingerprintKey == previous.Fingerprint.Key() &&
-				(choice.Operation != OperationMove || !previous.NeedsReview || (previous.DecisionCategory != "" && previous.DecisionGroupID == ""))
+				(choice.Operation != OperationMove || moveAnswered(previous))
 			if !valid {
 				draft.RemovedStale++
 				continue

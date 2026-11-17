@@ -27,6 +27,11 @@ func (h *Handler) GetReviewGroups(w http.ResponseWriter, r *http.Request) {
 type reviewGroupMemberDTO struct {
 	candidateDTO
 	Cautions []string `json:"cautions,omitempty"`
+	// FamilyID, Ending and BundleID are opaque and name nothing (see
+	// filejanitor.ReviewGroupMember): the picture draws pairs and bundles from them.
+	FamilyID string `json:"family_id,omitempty"`
+	Ending   string `json:"ending,omitempty"`
+	BundleID string `json:"bundle_id,omitempty"`
 }
 
 // GetReviewGroupMembers retains candidate paging bounds even when a group is
@@ -67,6 +72,7 @@ func (h *Handler) GetReviewGroupMembers(w http.ResponseWriter, r *http.Request) 
 		page = append(page, reviewGroupMemberDTO{
 			candidateDTO: toCandidateDTO(member.Candidate, filejanitor.DefaultFilingRootName),
 			Cautions:     member.Cautions,
+			FamilyID:     member.Family, Ending: member.Ending, BundleID: member.Bundle,
 		})
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{

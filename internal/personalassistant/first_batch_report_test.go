@@ -244,8 +244,14 @@ func TestFirstBatchReport_ProtectionSentencesMatchTheReviewConsole(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Only protectionSentence: the review tab's backup strip has its own, shorter
+	// sentences (protectionStripSentence) and is not the evidence line.
+	function := regexp.MustCompile(`(?s)export function protectionSentence\(.*?\n}\n`).FindString(string(source))
+	if function == "" {
+		t.Fatal("protectionSentence not found in the protection module")
+	}
 	js := map[string]string{}
-	for _, match := range regexp.MustCompile(`case '([a-z_]+)':\s*return '([^']+)';`).FindAllStringSubmatch(string(source), -1) {
+	for _, match := range regexp.MustCompile(`case '([a-z_]+)':\s*return '([^']+)';`).FindAllStringSubmatch(function, -1) {
 		js[match[1]] = match[2]
 	}
 	if len(firstBatchProtectionSentences) != 3 {

@@ -136,95 +136,12 @@ func (s *Service) PreviewMoves(req PreviewRequest) (Preview, error) {
 				return fmt.Errorf("%w: approve one batch at a time", ErrInvalidAction)
 			}
 
-			if operation == OperationTrash {
-				// A Trash item has no category and no destination inside the
-				// folder: it leaves the folder entirely, recoverably.
-				current, err := currentFingerprint(root, candidate.Name)
-				if err != nil {
-					return fmt.Errorf("%w: %s is no longer available", ErrCandidateNotActionable, candidate.Display())
-				}
-				if !candidate.Fingerprint.Matches(current) {
-					return fmt.Errorf("%w: %s changed since it was proposed — rescan to review it again", ErrCandidateNotActionable, candidate.Display())
-				}
-				items = append(items, PreviewItem{
-					CandidateID: candidate.ID,
-					Name:        candidate.Display(),
-					Operation:   OperationTrash,
-					Size:        candidate.Size,
-				})
-				plan = append(plan, PlanItem{
-					CandidateID:    candidate.ID,
-					Operation:      OperationTrash,
-					FingerprintKey: candidate.Fingerprint.Key(),
-				})
-				continue
-			}
-
-			category := candidate.EffectiveCategory()
-			requestedCategory := strings.TrimSpace(requested.Category)
-			if requestedCategory != "" {
-				definition, err := LookupCategory(requestedCategory)
-				if err != nil {
-					return err
-				}
-				category = definition.ID
-			}
-			// A flagged file needs the user's own answer, not a fallback.
-			//
-			// An empty category otherwise means "keep what Ori proposed", which
-			// is right for a confident classification and wrong for this one:
-			// NeedsReview says the proposal is not trustworthy, so filing on it
-			// is filing on the guess the flag exists to reject. Refusing here
-			// rather than only in the browser matters because the client is not
-			// what makes this safe (FR-63, FR-64).
-			if candidate.NeedsReview && requestedCategory == "" && candidate.DecisionCategory == "" {
-				return fmt.Errorf("%w: %s needs a category you choose before it can be filed",
-					ErrCandidateNotActionable, candidate.Display())
-			}
-			if !ValidCategory(category) {
-				return fmt.Errorf("%w: %q", ErrUnknownCategory, category)
-			}
-
-			// The source must still be the file that was proposed. Checking now
-			// keeps a plainly stale plan from ever being approved; it is checked
-			// again immediately before the mutation, which is what actually
-			// protects the file.
-			current, err := currentFingerprint(root, candidate.Name)
-			if err != nil {
-				return fmt.Errorf("%w: %s is no longer available", ErrCandidateNotActionable, candidate.Display())
-			}
-			if !candidate.Fingerprint.Matches(current) {
-				return fmt.Errorf("%w: %s changed since it was proposed — rescan to review it again", ErrCandidateNotActionable, candidate.Display())
-			}
-
-			destinationDir, err := DestinationDir(settings, category)
+			line, planned, err := planLine(settings, root, candidate, operation, requested.Category, reserved)
 			if err != nil {
 				return err
 			}
-			finalName, err := resolveAvailableNameReserving(destinationDir, candidate.Name, reserved)
-			if err != nil {
-				return err
-			}
-			relative, err := DestinationRelativeFor(settings.FilingRootName, category, finalName)
-			if err != nil {
-				return err
-			}
-
-			items = append(items, PreviewItem{
-				CandidateID: candidate.ID,
-				Name:        candidate.Display(),
-				Operation:   OperationMove,
-				Category:    category,
-				Destination: relative,
-				Renamed:     finalName != candidate.Name,
-				Size:        candidate.Size,
-			})
-			plan = append(plan, PlanItem{
-				CandidateID:    candidate.ID,
-				Operation:      OperationMove,
-				Category:       category,
-				FingerprintKey: candidate.Fingerprint.Key(),
-			})
+			items = append(items, line)
+			plan = append(plan, planned)
 		}
 
 		reviewRevision, reviewScope, err := s.reviewApprovalBinding(*state, workspaceID, userID, batchID, req.ReviewRevision, plan)
@@ -273,6 +190,122 @@ func (s *Service) PreviewMoves(req PreviewRequest) (Preview, error) {
 		return Preview{}, err
 	}
 	return preview, nil
+}
+
+// planSourceError says that a file's own state no longer matches the saved scan:
+// it is gone ("missing") or is not the file that was proposed ("changed"). It is
+// an ErrCandidateNotActionable with the same words as before, but typed so the
+// plan check can name such a file instead of failing the whole plan.
+type planSourceError struct {
+	reason  string // "missing" or "changed"
+	message string
+}
+
+func (e planSourceError) Error() string { return e.message }
+func (e planSourceError) Unwrap() error { return ErrCandidateNotActionable }
+
+func sourceMissing(candidate JanitorCandidate) error {
+	return planSourceError{reason: "missing", message: fmt.Sprintf("%v: %s is no longer available", ErrCandidateNotActionable, candidate.Display())}
+}
+
+func sourceChanged(candidate JanitorCandidate) error {
+	return planSourceError{reason: "changed", message: fmt.Sprintf("%v: %s changed since it was proposed — rescan to review it again", ErrCandidateNotActionable, candidate.Display())}
+}
+
+// planLine works out one operation of a plan: where the file will go, under what
+// name, and the line of the exact plan an approval is bound to. It is the single
+// place that resolves a destination name (never overwriting, and treating names
+// already reserved by this plan as taken), shared by the preview that issues an
+// approval and the plan check that issues none. It only looks at the file's
+// metadata: it opens nothing, creates nothing, and writes nothing.
+func planLine(settings JanitorSettings, root string, candidate JanitorCandidate, operation Operation, requestedCategory string, reserved map[string]struct{}) (PreviewItem, PlanItem, error) {
+	if operation == OperationTrash {
+		// A Trash item has no category and no destination inside the folder: it
+		// leaves the folder entirely, recoverably.
+		current, err := currentFingerprint(root, candidate.Name)
+		if err != nil {
+			return PreviewItem{}, PlanItem{}, sourceMissing(candidate)
+		}
+		if !candidate.Fingerprint.Matches(current) {
+			return PreviewItem{}, PlanItem{}, sourceChanged(candidate)
+		}
+		item := PreviewItem{
+			CandidateID: candidate.ID,
+			Name:        candidate.Display(),
+			Operation:   OperationTrash,
+			Size:        candidate.Size,
+		}
+		planned := PlanItem{
+			CandidateID:    candidate.ID,
+			Operation:      OperationTrash,
+			FingerprintKey: candidate.Fingerprint.Key(),
+		}
+		return item, planned, nil
+	}
+
+	category := candidate.EffectiveCategory()
+	requestedCategory = strings.TrimSpace(requestedCategory)
+	if requestedCategory != "" {
+		definition, err := LookupCategory(requestedCategory)
+		if err != nil {
+			return PreviewItem{}, PlanItem{}, err
+		}
+		category = definition.ID
+	}
+	// A flagged file needs the user's own answer, not a fallback.
+	//
+	// An empty category otherwise means "keep what Ori proposed", which is right
+	// for a confident classification and wrong for this one: NeedsReview says the
+	// proposal is not trustworthy, so filing on it is filing on the guess the flag
+	// exists to reject. Refusing here rather than only in the browser matters
+	// because the client is not what makes this safe (FR-63, FR-64).
+	if candidate.NeedsReview && requestedCategory == "" && candidate.DecisionCategory == "" {
+		return PreviewItem{}, PlanItem{}, fmt.Errorf("%w: %s needs a category you choose before it can be filed",
+			ErrCandidateNotActionable, candidate.Display())
+	}
+	if !ValidCategory(category) {
+		return PreviewItem{}, PlanItem{}, fmt.Errorf("%w: %q", ErrUnknownCategory, category)
+	}
+
+	// The source must still be the file that was proposed. Checking now keeps a
+	// plainly stale plan from ever being approved; it is checked again immediately
+	// before the mutation, which is what actually protects the file.
+	current, err := currentFingerprint(root, candidate.Name)
+	if err != nil {
+		return PreviewItem{}, PlanItem{}, sourceMissing(candidate)
+	}
+	if !candidate.Fingerprint.Matches(current) {
+		return PreviewItem{}, PlanItem{}, sourceChanged(candidate)
+	}
+
+	destinationDir, err := DestinationDir(settings, category)
+	if err != nil {
+		return PreviewItem{}, PlanItem{}, err
+	}
+	finalName, err := resolveAvailableNameReserving(destinationDir, candidate.Name, reserved)
+	if err != nil {
+		return PreviewItem{}, PlanItem{}, err
+	}
+	relative, err := DestinationRelativeFor(settings.FilingRootName, category, finalName)
+	if err != nil {
+		return PreviewItem{}, PlanItem{}, err
+	}
+	item := PreviewItem{
+		CandidateID: candidate.ID,
+		Name:        candidate.Display(),
+		Operation:   OperationMove,
+		Category:    category,
+		Destination: relative,
+		Renamed:     finalName != candidate.Name,
+		Size:        candidate.Size,
+	}
+	planned := PlanItem{
+		CandidateID:    candidate.ID,
+		Operation:      OperationMove,
+		Category:       category,
+		FingerprintKey: candidate.Fingerprint.Key(),
+	}
+	return item, planned, nil
 }
 
 // resolveAvailableNameReserving resolves a free destination name, treating names

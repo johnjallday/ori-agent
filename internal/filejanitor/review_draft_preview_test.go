@@ -172,8 +172,23 @@ func TestReviewDraftReturn_RevalidatesSelectedNamesWithoutWritingOrScanning(t *t
 	if err != nil || !created {
 		t.Fatal("explicit fresh scan not usable", err)
 	}
+	// A fresh scan opens with its own confident folders ticked (R10) and nothing
+	// else: no choice is inherited from the older scan or its candidates.
 	fresh, err := s.ReadReviewDraft(t.Context(), "local", "ws-1", newBatch.ID)
-	if err != nil || len(fresh.Choices) != 0 {
-		t.Fatal("fresh scan auto-selected replacement", err)
+	if err != nil || fresh.State != "default" {
+		t.Fatalf("a fresh scan must open in the default state: %+v %v", fresh, err)
+	}
+	_, freshCandidates, err := s.BatchDetail("ws-1", newBatch.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inFresh := make(map[string]bool, len(freshCandidates))
+	for _, candidate := range freshCandidates {
+		inFresh[candidate.ID] = true
+	}
+	for _, choice := range fresh.Choices {
+		if !inFresh[choice.CandidateID] {
+			t.Fatalf("a fresh scan inherited a choice from an older candidate: %+v", choice)
+		}
 	}
 }

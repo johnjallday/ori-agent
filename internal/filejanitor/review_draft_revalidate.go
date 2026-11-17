@@ -12,7 +12,7 @@ import (
 // The same revalidation runs inside edit/approval transactions. It cannot grant
 // mutation authority; the executor still revalidates immediately before moving.
 func (s *Service) revalidatedReviewDraft(state ScanState, batchID string, binding reviewDraftBinding, groups ReviewGroups, root ManagedRoot) ReviewDraftView {
-	view := projectReviewDraft(state, batchID, binding, groups.Revision)
+	view := projectReviewDraft(state, batchID, binding, groups)
 	finish := func(view ReviewDraftView) ReviewDraftView {
 		view.Groups = reviewDraftGroupViews(groups, view.Choices)
 		return view
@@ -45,14 +45,19 @@ func (s *Service) revalidatedReviewDraft(state ScanState, batchID string, bindin
 		candidate := byID[choice.CandidateID]
 		var current Fingerprint
 		valid := rootAvailable
+		reason := "missing"
 		if valid {
 			current, err = currentFingerprint(root.Path, candidate.Name)
 			valid = err == nil && candidate.Fingerprint.Matches(current)
+			if err == nil {
+				reason = "changed"
+			}
 		}
 		if valid {
 			kept = append(kept, choice)
 		} else {
 			view.RemovedStale++
+			view.removed = append(view.removed, removedChoice{candidateID: choice.CandidateID, reason: reason})
 			invalid = append(invalid, []string{choice.CandidateID, current.Key()})
 		}
 	}

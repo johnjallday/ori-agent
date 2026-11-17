@@ -191,7 +191,7 @@ test('saved filing updates navigate independently and retain remaining review af
   const filingOperations: string[] = [];
   page.on('request', req => {
     const operation = new URL(req.url()).pathname.match(
-      /\/file-janitor\/(scan|prepare-review|decisions|preview|apply|undo)$/
+      /\/file-janitor\/(?:batches\/[^/]+\/)?(scan|prepare-review|decisions|preview|apply|undo|file)$/
     );
     if (req.method() === 'POST' && operation) {
       automaticActions++;
@@ -288,16 +288,20 @@ test('saved filing updates navigate independently and retain remaining review af
   await page.screenshot({ path: testInfo.outputPath('filing-source-details.png'), fullPage: true });
   expect(automaticActions).toBe(0);
 
-  // Only this explicit selection/preview/confirmation authorizes filing.
+  // Only this explicit press authorizes filing.
   await card.getByRole('button', { name: 'Review files', exact: true }).click();
+  // The review opens on the picture; the per-file checkboxes are in All files.
+  await page.locator('#fileJanitorView-all').click();
   const row = page
     .locator('#fileJanitorConsoleBody .fj-row-item')
     .filter({ hasText: 'report.pdf' });
   await row.locator('.fj-select').check();
-  await page.locator('#fileJanitorApprove').click();
-  await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
+  // One press files what is ticked: nothing moves before it, and there is no
+  // separate confirm screen.
   expect(existsSync(join(root, 'report.pdf'))).toBe(true);
-  await page.locator('#fileJanitorConfirmApply').click();
+  await expect(page.locator('#fileJanitorApprove')).toHaveText('File 1 file');
+  await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
+  await page.locator('#fileJanitorApprove').click();
   await expect
     .poll(() => existsSync(join(root, 'Filed', 'Documents', 'report.pdf')), { timeout: 30000 })
     .toBe(true);
@@ -317,15 +321,17 @@ test('saved filing updates navigate independently and retain remaining review af
   );
   expect(modelCalls().length).toBe(calls + 1);
   const operations = Object.fromEntries(
-    ['scan', 'prepare-review', 'decisions', 'preview', 'apply', 'undo'].map(kind => [
+    ['scan', 'prepare-review', 'decisions', 'preview', 'apply', 'undo', 'file'].map(kind => [
       kind,
       filingOperations.filter(value => value === kind).length
     ])
   );
   expect(operations.scan).toBe(0);
   expect(operations['prepare-review']).toBe(0);
-  expect(operations.preview).toBe(1);
-  expect(operations.apply).toBe(1);
+  // One press is the only thing that filed: no preview and no separate apply.
+  expect(operations.preview).toBe(0);
+  expect(operations.apply).toBe(0);
+  expect(operations.file).toBe(1);
   expect(operations.undo).toBe(0);
   writeFileSync(
     testInfo.outputPath('filing-operation-counts.json'),

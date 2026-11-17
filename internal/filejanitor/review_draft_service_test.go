@@ -120,6 +120,10 @@ func TestReviewDraftEdits_GroupUndoPreservesPriorPerFileChoiceAndDestination(t *
 
 func TestReviewDraftEdits_PerFileChangePromotesExceptionAndCategoryAloneNeverSelects(t *testing.T) {
 	s, batch, candidates := draftServiceFixture(t, "one.png", "two.png")
+	// A scan saved by the card-grid review opens with nothing ticked; that is the
+	// state in which "a category edit alone never selects" is meaningful. For a
+	// scan that opens ticked see TestTickedOnOpen_FirstEditKeepsTheOtherTicks.
+	stripReviewDefaults(t, s)
 	id := candidates[0].ID
 	onlyCategory := editDraft(t, s, batch.ID, "set_category", func(r *ReviewDraftEdit) { r.CandidateIDs, r.Category = []string{id}, "documents" })
 	if len(onlyCategory.Choices) != 0 {

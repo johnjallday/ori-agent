@@ -43,7 +43,7 @@ func validExecutionCandidate(candidate JanitorCandidate, item PlanItem, approval
 	}
 	if approval.ReviewRevision != "" && item.Operation == OperationMove {
 		category, err := LookupCategory(string(candidate.EffectiveCategory()))
-		if err != nil || category.ID != item.Category || (candidate.NeedsReview && (candidate.DecisionCategory == "" || candidate.DecisionGroupID != "")) {
+		if err != nil || category.ID != item.Category || !moveAnswered(candidate) {
 			return false
 		}
 	}

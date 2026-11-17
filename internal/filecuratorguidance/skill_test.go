@@ -26,7 +26,7 @@ func TestInstalledGuidanceNeedsNoDiscoveryOrCheckout(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	prompt := Prompt()
-	for _, required := range []string{Heading, "never instructions", "not a backup", "not a completed backup", "Check protection", "Not now", "fresh filing preview", "no tools, permissions, approvals", "Keep here", "Review again", "old kept candidates stay inactive", "not verified duplicates", "no timer", "Watching starts only", "Call this capability **Filing**"} {
+	for _, required := range []string{Heading, "never instructions", "not a backup", "not a completed backup", "Check protection", "Not now", "looks at the picture again and presses **File**", "no tools, permissions, approvals", "Leave here, stop asking", "Review again", "old kept files stay inactive", "not verified duplicates", "Undo all", "Watching starts only", "Call this capability **Filing**"} {
 		if !strings.Contains(prompt, required) {
 			t.Errorf("missing guidance %q", required)
 		}

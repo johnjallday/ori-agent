@@ -297,6 +297,7 @@ func (s *Service) scanNow(workspaceID string, source ScanSource, operation *Scan
 			ID: "batch-" + uuid.New().String(), WorkspaceID: workspaceID, Source: source,
 			StartedAt: result.ScannedAt, CompletedAt: result.ScannedAt, Ineligible: result.Ineligible,
 			RootID: settings.RootID, CapabilityInstalledAt: installedAt,
+			ReviewDefaults: ReviewDefaultsFilingGroups,
 		}
 		candidates := make([]JanitorCandidate, 0, len(result.Eligible))
 		for _, candidate := range result.Eligible {

@@ -72,7 +72,7 @@ func (h *Handler) respondDraftError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, filejanitor.ErrReviewBounds):
 		_ = orihttp.RespondAPIError(w, http.StatusRequestEntityTooLarge,
-			orihttp.NewAPIError("review_bounds", "These saved choices exceed the review limit. Choose a smaller exact selection; nothing was partially saved."))
+			orihttp.NewAPIError("review_bounds", "These saved choices are more than one review can hold. Choose fewer files; nothing was partially saved."))
 	case errors.Is(err, filejanitor.ErrReviewConflict):
 		_ = orihttp.RespondAPIError(w, http.StatusConflict,
 			orihttp.NewAPIError("review_conflict", "This review or its saved choices changed. Reload before making that choice again; nothing was overwritten."))
@@ -80,10 +80,10 @@ func (h *Handler) respondDraftError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondAPIError(w, http.StatusConflict,
 			orihttp.NewAPIError("review_draft_invalid", "Saved choices are unavailable for this review. Reload and review the current state; unknown data was left intact and no old approval was restored."))
 	case errors.Is(err, filejanitor.ErrCandidateNotFound), errors.Is(err, filejanitor.ErrBatchNotFound):
-		_ = orihttp.RespondNotFound(w, "review member or batch not found")
+		_ = orihttp.RespondNotFound(w, "that file or scan was not found")
 	case errors.Is(err, filejanitor.ErrCandidateNotActionable):
 		_ = orihttp.RespondAPIError(w, http.StatusConflict,
-			orihttp.NewAPIError("review_member_changed", "A file changed or still needs a category decision. Reload this batch, choose a category where needed, or use Scan now for a fresh review."))
+			orihttp.NewAPIError("review_member_changed", "Ori could not tick that: a file changed since the scan, or it still needs a folder. Scan again, or pick a folder for it first."))
 	case errors.Is(err, filejanitor.ErrUnknownCategory), errors.Is(err, filejanitor.ErrInvalidAction):
 		_ = orihttp.RespondBadRequest(w, "That edit is not a choice Ori offers for this review.")
 	default:

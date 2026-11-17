@@ -2,10 +2,12 @@ package filejanitor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ReviewDraftEdit is a closed, bounded operation. Group and intent revisions
@@ -190,12 +192,17 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 			return nil
 		}
 		validatedFileRoot := ""
-		selectMove := func(id, source string) error {
+		// selectMove ticks one file. answer is the destination the person is giving it
+		// with this same edit (a row's menu), checked as if it were already recorded.
+		selectMove := func(id, source string, answer Category) error {
 			index, found := byID[id]
 			if !found || !proposalPending(state.Candidates[index]) {
 				return ErrCandidateNotActionable
 			}
 			candidate := state.Candidates[index]
+			if answer != "" {
+				candidate.DecisionCategory = answer
+			}
 			if validatedFileRoot == "" {
 				settings, err := s.store.LoadSettings(workspaceID)
 				if err != nil {
@@ -209,34 +216,69 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 			}
 			current, err := currentFingerprint(validatedFileRoot, candidate.Name)
 			if err != nil || !candidate.Fingerprint.Matches(current) {
-				return ErrCandidateNotActionable
+				return errMemberChanged
 			}
-			if !ValidCategory(candidate.EffectiveCategory()) || (candidate.NeedsReview && (candidate.DecisionCategory == "" || candidate.DecisionGroupID != "")) {
+			if !ValidCategory(candidate.EffectiveCategory()) || !moveAnswered(candidate) {
 				return ErrCandidateNotActionable
 			}
 			choices[id] = ReviewChoice{CandidateID: id, FingerprintKey: candidate.Fingerprint.Key(), Operation: OperationMove, SourceGroupID: source}
 			return nil
 		}
-		selectGroup := func(group ReviewGroup) error {
-			if group.Kind != "filing" {
-				return ErrCandidateNotActionable
+		// selectGroup ticks the members of a group that are still the file that was
+		// scanned. A member that changed or went missing since the scan is left
+		// unticked, not a reason to refuse the whole folder: the person would
+		// otherwise be unable to tick a folder because of one file. It returns how
+		// many it ticked and how many it had to leave, so a caller can say so when
+		// nothing at all could be ticked.
+		selectGroup := func(group ReviewGroup) (ticked, left int, err error) {
+			question := group.Kind != "filing"
+			if question && category == "" {
+				// A question group has no folder of its own: placing it needs the
+				// person's destination (R19). Ori never ticks one.
+				return 0, 0, ErrInvalidAction
 			}
 			members, _ := groups.Members(group.ID)
 			for _, member := range members {
 				id := member.Candidate.ID
-				if _, exists := choices[id]; exists || member.Candidate.Decision == DecisionTrash {
+				prior, exists := choices[id]
+				// Choosing another folder for a row rewrites the choices that came from
+				// that row, and only those.
+				rewrite := question && exists && prior.Operation == OperationMove && prior.SourceGroupID == group.ID
+				if (exists && !rewrite) || member.Candidate.Decision == DecisionTrash {
 					continue // never overwrite an explicit prior choice or Trash mark
 				}
-				if err := selectMove(id, group.ID); err != nil {
-					return err
+				if question {
+					// The row's destination is the person's answer for each file in
+					// it. It overwrites an older answer for a file that has no choice
+					// right now: the person just chose this folder for the row.
+					if err := selectMove(id, group.ID, category); err != nil {
+						if errors.Is(err, errMemberChanged) {
+							left++
+							continue
+						}
+						return ticked, left, err
+					}
+					candidate := &state.Candidates[byID[id]]
+					candidate.Decision, candidate.DecisionCategory, candidate.DecidedAt = DecisionMove, category, s.clock()
+					candidate.DecisionGroupID = group.ID
+					ticked++
+					continue
+				}
+				if err := selectMove(id, group.ID, ""); err != nil {
+					if errors.Is(err, errMemberChanged) {
+						left++
+						continue
+					}
+					return ticked, left, err
 				}
 				if category != "" {
 					if err := setCategory(id, true); err != nil {
-						return err
+						return ticked, left, err
 					}
 				}
+				ticked++
 			}
-			return nil
+			return ticked, left, nil
 		}
 		var targetGroup ReviewGroup
 		if request.GroupID != "" {
@@ -269,13 +311,18 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 		}
 		switch request.Action {
 		case "select_group":
-			if err := selectGroup(targetGroup); err != nil {
+			ticked, left, err := selectGroup(targetGroup)
+			if err != nil {
 				return err
+			}
+			if ticked == 0 && left > 0 {
+				// Every file that could have been ticked changed since the scan.
+				return errMemberChanged
 			}
 		case "select_filing_groups":
 			for _, group := range groups.Groups {
 				if group.Kind == "filing" {
-					if err := selectGroup(group); err != nil {
+					if _, _, err := selectGroup(group); err != nil {
 						return err
 					}
 				}
@@ -287,7 +334,7 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 						return err
 					}
 				}
-				if err := selectMove(id, ""); err != nil {
+				if err := selectMove(id, "", ""); err != nil {
 					return err
 				}
 			}
@@ -313,6 +360,26 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 			for id, choice := range choices {
 				if choice.SourceGroupID == request.GroupID {
 					delete(choices, id)
+				}
+			}
+			// "Leave here" on a question row takes back everything the row's menu
+			// says about its files: the picture counts a file the person placed one
+			// at a time as placed in its row, so the row's own "Leave here" must be
+			// able to undo it (a Trash mark is not a placement and stays). It then
+			// remembers nothing: the destination recorded on those files goes too,
+			// so an old answer cannot later satisfy an "answered" check for a file
+			// that needs review.
+			if targetGroup.Kind == "question" {
+				members, _ := groups.Members(targetGroup.ID)
+				for _, member := range members {
+					candidate := &state.Candidates[byID[member.Candidate.ID]]
+					if choice, chosen := choices[candidate.ID]; chosen && choice.Operation == OperationMove {
+						delete(choices, candidate.ID)
+					}
+					if _, kept := choices[candidate.ID]; !kept && candidate.Decision == DecisionMove {
+						candidate.Decision, candidate.DecisionCategory = DecisionNone, ""
+						candidate.DecisionGroupID, candidate.DecidedAt = "", time.Time{}
+					}
 				}
 			}
 		case "deselect_group":
@@ -346,6 +413,13 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 				members, _ := groups.Members(targetGroup.ID)
 				ids = make([]string, 0, len(members))
 				for _, member := range members {
+					// A question row's "stop asking" covers the files still drawn in
+					// the row. A file with a Trash mark or a choice of its own is
+					// drawn elsewhere, and each file stays in one place.
+					if prior, chosen := choices[member.Candidate.ID]; targetGroup.Kind == "question" && chosen &&
+						(prior.Operation != OperationMove || prior.SourceGroupID != targetGroup.ID) {
+						continue
+					}
 					ids = append(ids, member.Candidate.ID)
 				}
 			}

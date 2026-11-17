@@ -221,20 +221,17 @@ function rowFor(page: Page, name: string) {
 }
 
 /**
- * Presses the confirmation's apply button.
+ * Presses the one main button and waits for the results.
  *
- * Waits for the panel's own content first. The confirm button is created and
- * appended in the same tick as the panel, so a click issued the instant the
- * selector resolves can race the render — a real user cannot click that fast,
- * but a test can, and the result is a silent no-op indistinguishable from a
- * broken button. Asserting on the panel's text pins it down before clicking.
+ * There is no separate confirm screen: the button states what it will do and
+ * files exactly the plan on screen. It is disabled while a choice is being saved
+ * or the plan is being checked, so wait until it is enabled before pressing; a
+ * click on a disabled button is a silent no-op.
  */
-async function confirmApply(page: Page) {
-  const panel = page.locator('.fj-confirm');
-  await expect(panel).toBeVisible({ timeout: 15000 });
-  await expect(panel).toContainText('Confirm these moves');
-  await expect(page.locator('#fileJanitorConfirmApply')).toBeEnabled();
-  await page.locator('#fileJanitorConfirmApply').click();
+async function pressFile(page: Page) {
+  const button = page.locator('#fileJanitorApprove');
+  await expect(button).toBeEnabled({ timeout: 15000 });
+  await button.click();
   await expect(page.locator('.fj-results')).toBeVisible({ timeout: 30000 });
 }
 
@@ -412,15 +409,26 @@ test.describe('Downloads Janitor', () => {
     await expect(page.locator('.fj-row-item')).toHaveCount(4);
     await expect(rowFor(page, 'big-movie.mp4')).toHaveCount(0);
 
-    // Nothing is selected. Opening the review surface can never move anything.
-    const boxes = page.locator('.fj-select');
-    for (let i = 0; i < (await boxes.count()); i += 1) {
-      await expect(boxes.nth(i)).not.toBeChecked();
+    // Only what Ori is confident about opens ticked; a question file (music, a file
+    // it cannot classify) never does. Opening the review surface can never move
+    // anything: ticking is a suggestion until the person confirms.
+    for (const name of ['invoice-2026-07.pdf', 'screenshot.png']) {
+      await expect(rowFor(page, name).locator('.fj-select')).toBeChecked();
     }
-    // The approve control is disabled and says why.
-    const approve = page.locator('#fileJanitorApprove');
-    await expect(approve).toBeDisabled();
-    await expect(page.locator('#fileJanitorSelection')).toContainText('No files selected');
+    for (const name of ['podcast.mp3', 'payload.bin']) {
+      await expect(rowFor(page, name).locator('.fj-select')).not.toBeChecked();
+    }
+    await expect(page.locator('#fileJanitorApprove')).toHaveText('File 2 files');
+    await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
+    for (const name of [
+      'invoice-2026-07.pdf',
+      'screenshot.png',
+      'podcast.mp3',
+      'payload.bin',
+      'big-movie.mp4.crdownload'
+    ]) {
+      expect(existsSync(join(root, name)), `${name} must not have moved`).toBeTruthy();
+    }
 
     // An unclassifiable file is flagged rather than guessed at.
     await expect(rowFor(page, 'payload.bin')).toContainText('Needs review');
@@ -442,7 +450,7 @@ test.describe('Downloads Janitor', () => {
     await rowFor(page, 'advert.png')
       .getByRole('button', { name: 'Keep here', exact: true })
       .click();
-    await expect(rowFor(page, 'advert.png')).toContainText('Kept in this saved batch');
+    await expect(rowFor(page, 'advert.png')).toContainText('Kept in this scan');
   });
 
   // ------------------------------------------------------------------- apply
@@ -458,20 +466,16 @@ test.describe('Downloads Janitor', () => {
     await completeSetup(page, id, root);
     await scan(page);
 
-    await rowFor(page, 'report.pdf').locator('.fj-select').check();
-    await rowFor(page, 'photo.png').locator('.fj-select').check();
+    // All three confident files open ticked; approve two by leaving the third out.
+    await expect(rowFor(page, 'report.pdf').locator('.fj-select')).toBeChecked();
+    await expect(rowFor(page, 'photo.png').locator('.fj-select')).toBeChecked();
+    await rowFor(page, 'untouched.csv').locator('.fj-select').uncheck();
 
-    const approve = page.locator('#fileJanitorApprove');
-    await expect(approve).toContainText('2 moves');
-    await approve.click();
+    // The one main button states what pressing it will do; nothing has moved.
+    await expect(page.locator('#fileJanitorApprove')).toHaveText('File 2 files');
+    expect(existsSync(join(root, 'report.pdf')), 'nothing moves before the press').toBeTruthy();
 
-    // The confirmation names every destination before anything happens.
-    const confirm = page.locator('.fj-confirm');
-    await expect(confirm).toContainText('Filed/Documents');
-    await expect(confirm).toContainText('Filed/Images');
-    expect(existsSync(join(root, 'report.pdf')), 'nothing moves at approval').toBeTruthy();
-
-    await confirmApply(page);
+    await pressFile(page);
 
     expect(existsSync(join(root, 'Filed', 'Documents', 'report.pdf'))).toBeTruthy();
     expect(existsSync(join(root, 'Filed', 'Images', 'photo.png'))).toBeTruthy();
@@ -488,13 +492,16 @@ test.describe('Downloads Janitor', () => {
     await completeSetup(page, id, root);
     await scan(page);
     await rowFor(page, 'invoice.pdf').locator('.fj-select').check();
-    await page.locator('#fileJanitorApprove').click();
 
-    // The rename is disclosed at approval time, with the reason.
-    await expect(page.locator('.fj-confirm')).toContainText('invoice (2).pdf');
-    await expect(page.locator('.fj-confirm')).toContainText('already there');
+    // The rename is shown in the picture before anything moves: the file is drawn
+    // under its new name and tagged "renamed".
+    await page.locator('#fileJanitorView-groups').click();
+    const picture = page.locator('#fileJanitorPicture');
+    await expect(picture).toContainText('invoice (2).pdf', { timeout: 15000 });
+    await expect(picture.locator('.fj-tag').filter({ hasText: 'renamed' })).toBeVisible();
+    expect(existsSync(join(root, 'invoice.pdf')), 'nothing moves before the press').toBeTruthy();
 
-    await confirmApply(page);
+    await pressFile(page);
 
     expect(existsSync(join(root, 'Filed', 'Documents', 'invoice (2).pdf'))).toBeTruthy();
     // The original is untouched — that is the whole point.
@@ -512,21 +519,19 @@ test.describe('Downloads Janitor', () => {
     await scan(page);
 
     await rowFor(page, 'junk.bin').getByRole('button', { name: /Trash/ }).click();
-    await page.locator('#fileJanitorApprove').click();
 
-    const confirmButton = page.locator('#fileJanitorConfirmApply');
-    await expect(confirmButton).toBeDisabled();
-    await expect(page.locator('.fj-confirm')).toContainText('Nothing is deleted permanently');
-
+    // The button names the Trash move and stays disabled until the person ticks
+    // the box that states the count. The box is never ticked for them.
+    const approve = page.locator('#fileJanitorApprove');
+    await expect(approve).toHaveText('Move 1 file to Trash');
+    await expect(approve).toBeDisabled();
     const ack = page.locator('#fileJanitorTrashAck');
-    await expect(page.locator('.fj-trash-ack')).toContainText('Yes, move 1 file to the Trash');
-    // Focus is on the acknowledgement, not lost to the body behind a disabled
-    // button — the destructive path is where losing your place matters most.
-    await expect(ack).toBeFocused();
+    await expect(page.locator('.fj-trash-ack')).toContainText('Yes, move 1 file to Trash');
+    await expect(ack).not.toBeChecked();
 
     await ack.check();
-    await expect(confirmButton).toBeEnabled();
-    await confirmButton.click();
+    await expect(approve).toBeEnabled();
+    await approve.click();
 
     await expect(page.locator('.fj-results')).toBeVisible({ timeout: 15000 });
     expect(existsSync(join(root, 'junk.bin'))).toBeFalsy();
@@ -541,8 +546,7 @@ test.describe('Downloads Janitor', () => {
     await completeSetup(page, id, root);
     await scan(page);
     await rowFor(page, 'contract.pdf').locator('.fj-select').check();
-    await page.locator('#fileJanitorApprove').click();
-    await confirmApply(page);
+    await pressFile(page);
     expect(existsSync(join(root, 'Filed', 'Documents', 'contract.pdf'))).toBeTruthy();
 
     // History is a console tab now, not a section stacked under the review
@@ -592,8 +596,7 @@ test.describe('Downloads Janitor', () => {
     await completeSetup(page, id, root);
     await scan(page);
     await rowFor(page, 'keep.pdf').locator('.fj-select').check();
-    await page.locator('#fileJanitorApprove').click();
-    await confirmApply(page);
+    await pressFile(page);
 
     const revoked = await request.post(`/api/workspaces/${id}/downloads-janitor/revoke`);
     expect(revoked.ok()).toBeTruthy();

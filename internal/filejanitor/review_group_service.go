@@ -33,20 +33,7 @@ func (s *Service) ReadReviewGroups(ctx context.Context, owner, workspaceID, batc
 	var batch JanitorBatch
 	var candidates []JanitorCandidate
 	if batchID == "latest" {
-		// Index once: finding a retained pending batch must not repeatedly build
-		// a map of every retained candidate for every resolved batch.
-		pending := make(map[string]bool, len(state.Batches))
-		for _, candidate := range state.Candidates {
-			if candidate.Actionable() || candidate.State == CandidateApplying {
-				pending[candidate.BatchID] = true
-			}
-		}
-		for i := len(state.Batches) - 1; i >= 0; i-- {
-			if pending[state.Batches[i].ID] {
-				batch = state.Batches[i]
-				break
-			}
-		}
+		batch, _ = latestPendingBatch(state)
 	} else {
 		var found bool
 		batch, found = state.Batch(batchID)

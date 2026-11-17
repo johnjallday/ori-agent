@@ -78,20 +78,28 @@ func TestReviewKeep_UnchangedScanAndTargetedReconsiderationRequireExplicitRescan
 	if len(proposed) != 1 || proposed[0].Name != candidates[0].Name || proposed[0].ID == candidates[0].ID {
 		t.Fatalf("wrong fresh proposal: %+v", proposed)
 	}
+	// Reconsidering selects nothing by itself. The fresh scan opens ticked with
+	// its own confident folder (R10), and the only choice is the fresh candidate,
+	// never the old one that was reconsidered.
 	view, err := s.ReadReviewDraft(t.Context(), "local", "ws-1", fresh.ID)
-	if err != nil || len(view.Choices) != 0 {
-		t.Fatal("reconsideration selected a replacement", err)
+	if err != nil || view.State != "default" || len(view.Choices) != 1 || view.Choices[0].CandidateID != proposed[0].ID {
+		t.Fatalf("reconsideration selected something other than the fresh proposal: %+v %v", view, err)
 	}
 }
 
 func TestReviewKeep_ChangedMemberAndStaleRetryRejectAtomically(t *testing.T) {
 	s, batch, candidates := draftServiceFixture(t, "one.png", "two.png")
-	before, _ := s.ReadReviewDraft(t.Context(), "local", "ws-1", batch.ID)
-	request := ReviewDraftEdit{ExpectedRevision: before.Revision, ExpectedGroupRevision: before.GroupRevision, Action: "keep_group", GroupID: reviewGroupID("filing-images")}
 	settings, _ := s.store.LoadSettings("ws-1")
 	if err := os.WriteFile(filepath.Join(settings.RootPath, candidates[1].Name), []byte("replacement"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	// A default view revalidates its ticked names like a saved one, so the changed
+	// file shows up in the revision the edit must quote.
+	before, _ := s.ReadReviewDraft(t.Context(), "local", "ws-1", batch.ID)
+	if before.RemovedStale != 1 || len(before.Choices) != 1 {
+		t.Fatalf("a changed file must drop out of the ticked view: %+v", before)
+	}
+	request := ReviewDraftEdit{ExpectedRevision: before.Revision, ExpectedGroupRevision: before.GroupRevision, Action: "keep_group", GroupID: reviewGroupID("filing-images")}
 	if _, err := s.EditReviewDraft("local", "ws-1", batch.ID, request); !errors.Is(err, ErrCandidateNotActionable) {
 		t.Fatal("changed member accepted", err)
 	}
@@ -128,9 +136,11 @@ func TestReviewKeep_ChangedKeptFileMayBeProposedAgainWithoutSelectingIt(t *testi
 	if len(proposed) != 1 || proposed[0].ID == candidates[0].ID {
 		t.Fatal("changed file did not get a fresh candidate")
 	}
+	// The changed file is a new candidate in a new scan, so it opens ticked like
+	// any confident file (R10); it must not inherit the old candidate's kept state.
 	view, err := s.ReadReviewDraft(t.Context(), "local", "ws-1", fresh.ID)
-	if err != nil || len(view.Choices) != 0 {
-		t.Fatal("changed replacement inherited choices", err)
+	if err != nil || view.State != "default" || len(view.Choices) != 1 || view.Choices[0].CandidateID != proposed[0].ID {
+		t.Fatalf("the replacement must be ticked as its own new candidate: %+v %v", view, err)
 	}
 }
 

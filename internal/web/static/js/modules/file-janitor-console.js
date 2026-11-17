@@ -56,16 +56,16 @@
   let draftRequest = 0;
   let draftWriteChain = Promise.resolve();
   let failedDraftEdit = null;
-  let groupReview = null;
-  let groupsLoadState = 'idle';
-  let groupsRequest = 0;
-  let activeGroupID = '';
-  let groupMembers = [];
-  const deferredQuestions = new Set();
-  let groupMemberTotal = 0;
-  let groupOffset = 0;
-  let groupMemberLoadState = 'idle';
-  let groupMemberRequest = 0;
+  // The picture of the folder after filing: one bounded read of the saved scan,
+  // plus the one open "and N more" list. Both are projections; the saved choices
+  // stay in reviewDraft and are only ever changed through submitReviewEdit.
+  let picture = null;
+  let pictureLoadState = 'idle';
+  let pictureRequest = 0;
+  let pictureMore = null;
+  let pictureMoreRequest = 0;
+  // The list that was open when a save changed the revisions it was read from.
+  let pictureReopen = null;
   let savedBatches = [];
   let savedBatchOffset = 0;
   let savedBatchTotal = 0;
@@ -93,6 +93,9 @@
   // DOM row per candidate is what makes a large review unusable — so the page
   // is bounded and only the page is requested (FR-109, FR-150).
   const PAGE_SIZE = 50;
+  // The most choices a default view is trusted to carry (a sanity bound; a stored
+  // draft is capped at 1,000 by the server).
+  const MAX_DEFAULT_CHOICES = 100000;
   let pageOffset = 0;
   // Counts for the WHOLE batch, from the server. The filter labels and the
   // "showing X of Y" line come from these rather than from the rows on screen,
@@ -108,10 +111,51 @@
   // proposals, and a batch whose candidates all reached outcomes.
   let emptyReviewState = 'unscanned';
   let reviewStatusMessage = '';
-  // The approval issued by a preview, held only until the user confirms or
-  // cancels. It is never persisted: an abandoned approval simply expires.
-  let pendingPreview = null;
+  // What filing would do right now (the server's plan check) and the person's
+  // press on it. The plan is a read that issues no authority; one File press quotes
+  // it, and the server works it out again before anything moves. Nothing here is
+  // persisted: the Trash tick, the plan and any retry key live in this page only.
+  let plan = null;
+  let planLoadState = 'idle';
+  let planRequest = 0;
+  let planTimer = 0;
+  // The Trash count the person ticked "Yes, move N files to Trash" for; 0 = not
+  // ticked. It is never restored after a reload and is cleared whenever the count
+  // it was ticked for changes.
+  let trashAcknowledgedFor = 0;
+  // The retry key of a press whose answer was lost, so pressing again reports the
+  // first result instead of filing twice.
+  let pendingPress = null;
+  // Fences a press answer that arrives after the review it belonged to is gone.
   let approvalGeneration = 0;
+  // The planned final name of each file the plan was asked about, by candidate id,
+  // and which files those were (so a redraw that shows others asks again).
+  let planItems = Object.create(null);
+  let planAskedKey = '';
+  // R36: after a press found the plan had changed (and moved nothing), the files
+  // whose plan differs from what the person looked at. Cleared by the next save,
+  // press or reload. lookedNames is what was on screen when that press happened.
+  let changedMarks = new Set();
+  let lookedNames = null;
+  // What the last refused press said, shown beside the button until the person acts.
+  let pressNotice = '';
+  // A File request is in flight: the console does not close under it.
+  let pressing = false;
+  // What the last press reported, shown until the person leaves the Review tab,
+  // closes the console, changes folder or presses again.
+  let lastResults = null;
+  // Undo all or "Scan again" is running: the buttons wait, and say so.
+  let receiptBusy = false;
+  // A scan this console made while a review was open; the open review is kept (R62).
+  let newerScanID = '';
+  // The most recent filing, for History's one line (R46), and which read it came from.
+  let lastFiling = null;
+  let lastFilingRequest = 0;
+  // The file selected for the bar above the File button (R23); one at a time.
+  let selectedFile = null;
+  // Rows the person asked Ori to stop asking about, kept only for this page so the
+  // row can say so and offer "Review again" (R22). Keyed by scan.
+  const keptRows = new Map();
   let protectionFact = null;
   let protectionRequest = 0;
   let departingForProtection = false;
@@ -167,6 +211,11 @@
 
   function invalidateFolderState() {
     generation++;
+    keptRows.clear();
+    lastResults = null;
+    lastFiling = null;
+    receiptBusy = false;
+    newerScanID = '';
     discardProtectionApproval();
     protectionRequest++;
     protectionFact = null;
@@ -180,7 +229,7 @@
     setupReviewRequest++;
     lastBatch = null;
     lastCandidates = [];
-    resetGroupReview();
+    resetPicture();
     resetReviewDraft();
     draftEnabled = true;
     reviewView = 'groups';
@@ -194,7 +243,6 @@
     selected = new Set();
     trashMarked = new Set();
     expandedCandidates = new Set();
-    pendingPreview = null;
     linkedBatchID = '';
     pageOffset = 0;
     filter = '';
@@ -246,17 +294,16 @@
     return '/api/workspaces/' + encodeURIComponent(id) + '/' + API_PREFIX;
   }
 
-  // Protection departure is narrower than ordinary console close/reopen.
-  // Destroy both DOM and captured authority, and fence a late preview response.
+  // Anything captured for one press is dropped whenever the review it was captured
+  // for may have changed (a saved edit, a departure to protection, closing the
+  // console): the Trash tick is cleared, a late press answer is fenced out, and the
+  // retry key is forgotten. The next press starts from the plan on screen.
   function discardProtectionApproval() {
     approvalGeneration++;
-    pendingPreview = null;
-    const apply = document.getElementById('fileJanitorConfirmApply');
-    if (apply) apply.disabled = true;
+    trashAcknowledgedFor = 0;
+    pendingPress = null;
     const acknowledgement = document.getElementById('fileJanitorTrashAck');
     if (acknowledgement) acknowledgement.checked = false;
-    clear(document.getElementById('fileJanitorConfirmHost'));
-    focusReturn = null;
   }
 
   async function loadProtection() {
@@ -279,58 +326,94 @@
     if (scopeCurrent(scope)) renderBatch();
   }
 
-  function protectionPrompt() {
+  // The backup strip (R53 to R55): one sentence and two buttons, directly above the
+  // File button. It is drawn only when Ori has protection information for this
+  // folder that does not report it covered, and the person has not said "Not now"
+  // for it. Otherwise the Review tab says nothing about backups; Check protection
+  // stays on the Settings tab.
+  function protectionStrip() {
     const trips = window.FileJanitorProtection;
-    if (!trips || !protectionFact) return null;
     const fact = protectionFact;
-    const dismissed = trips.isDismissed(fact.binding_id);
-    const section = el('section', 'fj-protection' + (dismissed ? ' is-passive' : ''));
+    if (!trips || !fact?.destination || !fact?.binding_id) return null;
+    const sentence = trips.stripSentence?.(fact) || '';
+    if (!sentence || trips.isDismissed(fact.binding_id)) return null;
+    const section = el('section', 'fj-protection');
     section.setAttribute('aria-label', 'Optional folder protection');
-    if (!dismissed) {
-      section.appendChild(el('h3', 'fj-protection-title', 'Filing is not a backup'));
-      section.appendChild(el('p', 'fj-protection-copy', trips.sentence(fact)));
-      const dates = [];
-      if (fact.observed_at)
-        dates.push('Evidence observed ' + new Date(fact.observed_at).toLocaleString());
-      if (fact.last_completed_at)
-        dates.push('Last completed backup ' + new Date(fact.last_completed_at).toLocaleString());
-      if (dates.length) section.appendChild(el('p', 'fj-protection-time', dates.join(' · ')));
+    section.appendChild(el('p', 'fj-protection-copy', sentence));
+    const actions = el('div', 'fj-actions fj-protection-actions');
+    const check = button(
+      'Check protection',
+      'fj-btn fj-btn-secondary',
+      () => void checkProtection()
+    );
+    check.id = 'fileJanitorCheckProtection';
+    check.disabled =
+      Boolean(protectionReturnRetry) || departingForProtection || busy || !batchActionsAvailable();
+    actions.appendChild(check);
+    actions.appendChild(
+      button('Not now', 'fj-btn fj-btn-secondary', () => {
+        const durable = trips.dismiss(fact.binding_id);
+        // Nothing about backups stays on the Review tab. The one thing worth saying is
+        // that the choice could not be kept past this page.
+        reviewStatusMessage = durable
+          ? ''
+          : 'Dismissed for this page only: browser storage is unavailable. Filing is still available.';
+        renderBatch();
+        focusReviewStart();
+      })
+    );
+    section.appendChild(actions);
+    return section;
+  }
+
+  // Check protection on the Settings tab, always there once Ori knows where to send
+  // the person (R54), with the longer account of what Ori has seen.
+  function protectionSettings() {
+    const trips = window.FileJanitorProtection;
+    const fact = protectionFact;
+    if (!trips || !fact?.destination || !fact?.binding_id) return null;
+    const section = el('div', 'fj-setting fj-setting-protection');
+    section.appendChild(el('h4', 'fj-setting-heading', 'Protection'));
+    section.appendChild(el('p', 'fj-setting-help', trips.sentence(fact)));
+    const check = button(
+      'Check protection',
+      'fj-btn fj-btn-secondary',
+      () => void checkProtection()
+    );
+    check.id = 'fileJanitorCheckProtectionSettings';
+    // It sends the person away and brings them back to a review, so it needs one.
+    check.disabled =
+      !lastBatch ||
+      Boolean(protectionReturnRetry) ||
+      departingForProtection ||
+      busy ||
+      !batchActionsAvailable();
+    section.appendChild(check);
+    if (!lastBatch)
       section.appendChild(
         el(
           'p',
-          'fj-protection-copy',
-          'Optional: check protection for important originals. You can keep filing now. Undo is not a recovery copy.'
+          'fj-setting-help',
+          'Scan the folder first. Check protection returns you to that review.'
         )
       );
-    }
-    if (fact.destination && fact.binding_id) {
-      const actions = el('div', 'fj-actions');
-      const check = button(
-        'Check protection',
-        'fj-btn fj-btn-secondary',
-        () => void checkProtection()
-      );
-      check.id = 'fileJanitorCheckProtection';
-      check.disabled =
-        Boolean(protectionReturnRetry) ||
-        departingForProtection ||
-        busy ||
-        !batchActionsAvailable();
-      actions.appendChild(check);
-      if (!dismissed)
-        actions.appendChild(
-          button('Not now', 'fj-btn fj-btn-secondary', () => {
-            const durable = trips.dismiss(fact.binding_id);
-            reviewStatusMessage = durable
-              ? 'Protection prompt dismissed for this folder. Check protection is still available.'
-              : 'Dismissed for this page only: browser storage is unavailable. Filing is still available.';
-            renderBatch();
-            document.getElementById('fileJanitorCheckProtection')?.focus?.();
-          })
-        );
-      section.appendChild(actions);
-    }
     return section;
+  }
+
+  // Focus for the start of the Review tab after the strip goes or a trip returns: the
+  // picture, else the tab, never the top of the page.
+  function focusReviewStart() {
+    for (const id of [
+      'fileJanitorPicture',
+      'fileJanitorCheckProtection',
+      'fileJanitorTab-review'
+    ]) {
+      const target = document.getElementById(id);
+      if (target?.focus) {
+        target.focus();
+        return;
+      }
+    }
   }
 
   async function checkProtection() {
@@ -340,7 +423,7 @@
     const scope = requestScope();
     const batchID = lastBatch.id;
     departingForProtection = true;
-    updateConfirmationAvailability();
+    updateSelectionSummary();
     try {
       while (pendingDecisionWrites.size) await Promise.all([...pendingDecisionWrites]);
       if (draftEnabled && !draftChoicesResolved())
@@ -379,7 +462,7 @@
       showError(error.message || 'Could not open protection. Your review choices are still here.');
     } finally {
       departingForProtection = false;
-      updateConfirmationAvailability();
+      updateSelectionSummary();
       renderBatch();
     }
   }
@@ -441,7 +524,7 @@
         );
         if (!batchResponse.ok)
           throw new Error(
-            'Could not reload the saved batch. Retry returning; no choices were replayed.'
+            'Could not reload the saved review. Retry returning; no choices were replayed.'
           );
         const saved = await batchResponse.json();
         if (!scopeCurrent(scope)) return;
@@ -475,7 +558,7 @@
           throw new Error('Could not consume this return safely. Retry returning.');
         protectionFact = finalFact;
         reviewStatusMessage =
-          'Current saved choices were reconciled for this exact batch, including changes made elsewhere. No old selections or approval were replayed. Request a fresh preview and confirmation; Trash needs a new acknowledgement.';
+          'Your saved choices were brought up to date for this scan, including changes made elsewhere. No old selections or approval were replayed. Look at the picture again, then press File; Trash needs a new tick.';
         open({ source: 'protection-return', tab: 'review' });
         return;
       }
@@ -487,9 +570,7 @@
       const latest = await latestResponse.json();
       if (latest.batch?.id !== trip.batchId) {
         stale = true;
-        throw new Error(
-          'This review batch has changed or finished. Old choices cannot be restored.'
-        );
+        throw new Error('This review has changed or finished. Old choices cannot be restored.');
       }
       const candidates = new Map();
       let offset = 0;
@@ -535,13 +616,11 @@
       }
       const finalBatchResponse = await fetch(apiBase(scope.id) + '/batches/latest?limit=1');
       if (!finalBatchResponse.ok)
-        throw new Error('Could not revalidate this batch. Return again to retry.');
+        throw new Error('Could not check this review again. Return again to retry.');
       const finalBatch = await finalBatchResponse.json();
       if (!scopeCurrent(scope) || finalBatch.batch?.id !== trip.batchId) {
         stale = true;
-        throw new Error(
-          'This review batch changed while returning. Old choices cannot be restored.'
-        );
+        throw new Error('This review changed while returning. Old choices cannot be restored.');
       }
       if (!trips.consume(trip.nonce))
         throw new Error(
@@ -564,11 +643,13 @@
       await loadBatch();
       reviewStatusMessage =
         (removed
-          ? removed + ' choices are no longer eligible and were removed. '
+          ? removed === 1
+            ? '1 file you chose has changed or been filed, so it was taken out. '
+            : removed + ' files you chose have changed or been filed, so they were taken out. '
           : 'Your valid review choices were kept. ') +
-        'Review selected changes again for a fresh preview and confirmation.';
+        'Look at the picture again, then press File.';
       open({ source: 'protection-return', tab: 'review' });
-      document.getElementById('fileJanitorCheckProtection')?.focus?.();
+      focusReviewStart();
     } catch (error) {
       if (!scopeCurrent(scope)) return;
       if (stale) {
@@ -588,7 +669,7 @@
       restoringProtection = false;
       departingForProtection = false;
       renderBatch();
-      document.getElementById('fileJanitorCheckProtection')?.focus?.();
+      focusReviewStart();
     }
   }
 
@@ -760,7 +841,7 @@
         '/' +
         (filingRootName || 'Filed') +
         '/<category> — always inside the same folder.',
-      'Files you explicitly mark for Trash go to your system Trash, where you can restore them. Ori never deletes anything permanently.',
+      'Files you mark for Trash go to your system Trash, where you can restore them. Ori never deletes anything permanently.',
       'Nothing moves without your approval. Ori proposes; you decide.',
       'A catch-up scan runs daily at ' + (dailyTime || '09:00') + ' your local time.',
       'Reading what is inside your files is off, and is a separate choice you can make later.'
@@ -934,7 +1015,7 @@
   function batchProgress(batch) {
     const summary = batch?.summary || {};
     const progress = el('section', 'fj-batch-progress');
-    progress.setAttribute('aria-label', 'Whole batch progress');
+    progress.setAttribute('aria-label', 'Whole scan progress');
     const stateLabels = {
       pending: 'Review in progress',
       partially_applied: 'Partially completed',
@@ -942,16 +1023,13 @@
         summary.failed || summary.stale ? 'Review complete with problems' : 'Review complete'
     };
     progress.appendChild(
-      el('p', 'fj-batch-progress-title', stateLabels[batch?.state] || 'Batch status')
+      el('p', 'fj-batch-progress-title', stateLabels[batch?.state] || 'Scan status')
     );
     progress.appendChild(
       el(
         'p',
         'fj-batch-progress-main',
-        formatCount(summary.proposed) +
-          ' remaining of ' +
-          formatCount(summary.total) +
-          ' candidates'
+        formatCount(summary.proposed) + ' remaining of ' + formatCount(summary.total) + ' files'
       )
     );
 
@@ -981,10 +1059,24 @@
       (draftLoadState === 'saved' &&
         !failedDraftEdit &&
         reviewDraft?.batch_id === lastBatch?.id &&
-        ['saved', 'empty'].includes(reviewDraft.state) &&
+        ['saved', 'empty', 'default'].includes(reviewDraft.state) &&
         pendingDecisionWrites.size === 0 &&
-        (reviewView !== 'groups' ||
-          (groupsLoadState === 'loaded' && groupReview?.revision === reviewDraft.group_revision)))
+        (reviewView !== 'groups' || pictureMatchesDraft()))
+    );
+  }
+
+  // The picture and the saved choices are two reads. Edits quote the saved
+  // choices' revisions, so the picture is only actionable while both name the same
+  // saved review; a change made in another window between the reads shows up here
+  // as a mismatch and the screen reloads instead of acting on a stale picture.
+  function pictureMatchesDraft() {
+    return Boolean(
+      picture &&
+      pictureLoadState === 'loaded' &&
+      picture.batch_id === lastBatch?.id &&
+      reviewDraft &&
+      picture.draft_revision === reviewDraft.revision &&
+      picture.revision === reviewDraft.group_revision
     );
   }
 
@@ -992,16 +1084,140 @@
     return batchActionsAvailable() && !busy && draftChoicesResolved();
   }
 
-  function updateConfirmationAvailability() {
-    const control = document.getElementById('fileJanitorConfirmApply');
-    if (!control || !pendingPreview) return;
-    const needsTrashAck = pendingPreview.preview.trash_count > 0;
-    control.disabled =
-      busy ||
-      departingForProtection ||
-      batchLoadState !== 'loaded' ||
-      pendingPreview.preview.batch_id !== lastBatch?.id ||
-      (needsTrashAck && !document.getElementById('fileJanitorTrashAck')?.checked);
+  // ------------------------------------------------------------ the plan check
+  //
+  // The plan is what filing would do right now: the final name of each file (so a
+  // clash can be tagged "renamed"), the totals the button states, and a digest a
+  // press quotes. It is a read: it issues no approval, creates no folder and
+  // writes nothing. It follows the saved choices (so it is asked for after every
+  // saved change, debounced) and only counts while it names the choices on screen.
+
+  function planMatchesDraft() {
+    return Boolean(
+      plan &&
+      planLoadState === 'loaded' &&
+      plan.batch_id === lastBatch?.id &&
+      reviewDraft &&
+      plan.revision === reviewDraft.revision &&
+      plan.group_revision === reviewDraft.group_revision
+    );
+  }
+
+  function resetPlan() {
+    planRequest++;
+    clearTimeout(planTimer);
+    planTimer = 0;
+    plan = null;
+    planLoadState = 'idle';
+    planItems = Object.create(null);
+    planAskedKey = '';
+    changedMarks = new Set();
+    lookedNames = null;
+    pressNotice = '';
+    trashAcknowledgedFor = 0;
+    pendingPress = null;
+  }
+
+  // The files the picture is showing by name, so the plan can say which of them
+  // will be renamed. At most 200, whichever five a card lists.
+  function planFileIDs() {
+    const ids = [];
+    if (reviewView === 'groups' && picture?.batch_id === lastBatch?.id) {
+      for (const folder of picture.folders) for (const file of folder.files) ids.push(file.id);
+      if (pictureMore?.section === 'filed' && pictureMore.state === 'loaded')
+        for (const file of pictureMore.files) ids.push(file.id);
+    }
+    return [...new Set(ids)].slice(0, 200);
+  }
+
+  function validPlan(value, batchID) {
+    const count = number => Number.isSafeInteger(number) && number >= 0;
+    return Boolean(
+      value &&
+      value.batch_id === batchID &&
+      typeof value.revision === 'string' &&
+      value.revision.length === 64 &&
+      typeof value.group_revision === 'string' &&
+      value.group_revision.length === 64 &&
+      typeof value.plan_digest === 'string' &&
+      count(value.move_count) &&
+      count(value.trash_count) &&
+      count(value.total) &&
+      typeof value.over_limit === 'boolean' &&
+      value.changed &&
+      count(value.changed.total) &&
+      Array.isArray(value.changed.items) &&
+      value.changed.items.length <= 50 &&
+      (value.items === undefined || (Array.isArray(value.items) && value.items.length <= 200))
+    );
+  }
+
+  function schedulePlan(delay = 120) {
+    clearTimeout(planTimer);
+    planTimer = setTimeout(() => void loadReviewPlan(), delay);
+  }
+
+  async function loadReviewPlan() {
+    const scope = requestScope();
+    const batchID = lastBatch?.id;
+    // Nothing draws a plan while the console is closed, and opening it asks again.
+    if (!consoleOpen || !scope.id || !batchID || !reviewDraft || draftLoadState !== 'saved') return;
+    const sequence = ++planRequest;
+    const revision = reviewDraft.revision;
+    const groupRevision = reviewDraft.group_revision;
+    const current = () =>
+      scopeCurrent(scope) &&
+      sequence === planRequest &&
+      lastBatch?.id === batchID &&
+      reviewDraft?.revision === revision;
+    planLoadState = 'loading';
+    const ids = planFileIDs();
+    planAskedKey = ids.join(',');
+    try {
+      const response = await fetch(
+        apiBase(scope.id) +
+          '/batches/' +
+          encodeURIComponent(batchID) +
+          '/plan?revision=' +
+          encodeURIComponent(revision) +
+          '&group_revision=' +
+          encodeURIComponent(groupRevision) +
+          (ids.length ? '&ids=' + ids.map(encodeURIComponent).join(',') : '')
+      );
+      const body = await response.json().catch(() => ({}));
+      // An answer that arrives after a newer question, or after the saved choices
+      // moved on, is dropped: only the latest plan for the choices on screen counts.
+      if (!current()) return;
+      if (response.status === 409) {
+        // The choices moved on between asking and answering; a reload is under way.
+        planLoadState = 'idle';
+        return;
+      }
+      if (!response.ok || !validPlan(body.plan, batchID)) throw new Error('plan unavailable');
+      plan = body.plan;
+      planLoadState = 'loaded';
+      planItems = Object.create(null);
+      for (const item of plan.items || []) planItems[item.candidate_id] = item;
+      if (lookedNames) {
+        // R36: a file whose final name is not the one the person looked at.
+        for (const item of plan.items || [])
+          if (
+            lookedNames.has(item.candidate_id) &&
+            lookedNames.get(item.candidate_id) !== item.final_name
+          )
+            changedMarks.add(item.candidate_id);
+        lookedNames = null;
+      }
+      // The Trash tick belongs to one count; a different count clears it.
+      if (trashAcknowledgedFor && trashAcknowledgedFor !== plan.trash_count)
+        trashAcknowledgedFor = 0;
+    } catch (_) {
+      if (!current()) return;
+      plan = null;
+      planLoadState = 'error';
+      trashAcknowledgedFor = 0;
+    }
+    if (current()) renderBatch();
   }
 
   function categoryPicker(candidate) {
@@ -1200,7 +1416,7 @@
       versions: 'Possible copy/version',
       audio: 'Audio or related material',
       unresolved: 'Category needs review',
-      unmatched: 'Unmatched proposal'
+      unmatched: 'No folder matched'
     };
     const cautions = (candidate.cautions || []).map(code => cautionLabels[code]).filter(Boolean);
     if (cautions.length)
@@ -1218,7 +1434,7 @@
         'span',
         'fj-state',
         (draftEnabled && candidate.state === 'skipped'
-          ? 'Kept in this saved batch'
+          ? 'Kept in this scan'
           : STATE_ROW_LABELS[candidate.state]) ||
           candidate.state ||
           'Unknown'
@@ -1307,7 +1523,7 @@
             'span',
             'fj-muted',
             draftEnabled
-              ? 'No active skip. Choose Scan now for fresh proposals; this old candidate stays inactive.'
+              ? 'No active skip. Choose Scan now to look again; this old file stays inactive.'
               : 'Dismissed'
           )
         );
@@ -1456,6 +1672,7 @@
     draftLoadState = 'idle';
     failedDraftEdit = null;
     draftWriteChain = Promise.resolve();
+    resetPlan();
   }
 
   function applyReviewDraft(view) {
@@ -1466,10 +1683,13 @@
       typeof view.group_revision !== 'string' ||
       view.group_revision.length !== 64 ||
       !Array.isArray(view.choices) ||
-      view.choices.length > 1000 ||
+      // A stored draft holds at most 1,000 choices. A scan nobody has touched can
+      // tick more confident files than that: its default view is drawn and the
+      // button says what to do (R39); the first edit has to leave 1,000 or fewer.
+      view.choices.length > (view.state === 'default' ? MAX_DEFAULT_CHOICES : 1000) ||
       !Array.isArray(view.groups) ||
       view.groups.length > 13 ||
-      !['empty', 'saved', 'invalid', 'stale'].includes(view.state)
+      !['empty', 'default', 'saved', 'invalid', 'stale'].includes(view.state)
     )
       throw new Error('Saved review choices are unavailable.');
     if (['invalid', 'stale'].includes(view.state) && view.choices.length)
@@ -1505,6 +1725,9 @@
       view.choices.filter(choice => choice.operation === 'trash').map(choice => choice.candidate_id)
     );
     draftLoadState = 'saved';
+    // What filing would do follows the saved choices: ask again (debounced, and an
+    // older answer is dropped), so the button states what is on screen.
+    if (!planMatchesDraft()) schedulePlan();
   }
 
   async function loadReviewDraft() {
@@ -1576,8 +1799,17 @@
     const sequence = ++draftRequest;
     const focusID = String(document.activeElement?.id || '');
     discardProtectionApproval();
+    // The person is changing the plan: what a refused press said no longer applies.
+    changedMarks = new Set();
+    pressNotice = '';
+    markRemovedSeen();
+    // Whatever one file was being decided is decided now (or refused): close the bar.
+    selectedFile = null;
     draftLoadState = 'saving';
     failedDraftEdit = null;
+    // What the picture showed before this change, to say what it did afterwards (R66).
+    const shownBefore =
+      picture?.batch_id === batchID ? window.FileJanitorPicture?.folderCounts?.(picture) : null;
     const write = draftWriteChain.then(async () => {
       if (!scopeCurrent(scope) || lastBatch?.id !== batchID) return false;
       try {
@@ -1593,26 +1825,67 @@
         if (!scopeCurrent(scope) || lastBatch?.id !== batchID || sequence !== draftRequest)
           return false;
         if (!response.ok) {
-          const error = new Error(
-            body.error?.message || body.message || 'The edit is not confirmed saved.'
-          );
-          error.conflict = response.status === 409;
+          const apiError = body.error || body;
+          const error = new Error(apiError.message || 'The edit is not confirmed saved.');
+          // A file that changed since the scan cannot be ticked: the saved choices
+          // are fine and the person can act (scan again), so it is not a conflict.
+          error.memberChanged = apiError.code === 'review_member_changed';
+          error.conflict = response.status === 409 && !error.memberChanged;
+          // The edit would leave more than one press can file (R39). It was not
+          // saved and nothing is wrong with the saved choices: say what to do.
+          error.bounds = response.status === 413;
           throw error;
         }
         applyReviewDraft(body.draft);
-        if (request.action === 'reconsider_files')
+        // In the picture the answer is said beside the File button, in view and
+        // announced, not at the top of the page; the row itself already says "Ori
+        // will not ask about these again".
+        if (request.action === 'reconsider_files') {
+          const said = 'Ori will offer these again the next time it scans.';
+          if (reviewView === 'groups') pressNotice = said;
+          else reviewStatusMessage = said;
+        }
+        if (
+          (request.action === 'keep_group' || request.action === 'keep_files') &&
+          reviewView !== 'groups'
+        )
           reviewStatusMessage =
-            'Only the requested skip choices were forgotten. Nothing scanned or selected. Choose Scan now explicitly for fresh proposals; old kept candidates remain inactive.';
-        if (request.action === 'keep_group' || request.action === 'keep_files')
-          reviewStatusMessage =
-            'Kept here without moving or opening contents. Changed files may be proposed again; existing skip retention applies.';
+            'Left here. Ori will not ask about these again unless a file changes.';
         showError('');
         await loadBatch();
+        if (shownBefore && picture?.batch_id === batchID)
+          announce(
+            window.FileJanitorPicture?.changeAnnouncement?.(
+              shownBefore,
+              window.FileJanitorPicture.folderCounts(picture)
+            ) || ''
+          );
         return true;
       } catch (error) {
         if (!scopeCurrent(scope) || lastBatch?.id !== batchID || sequence !== draftRequest)
           return false;
-        draftLoadState = error.conflict ? 'conflict' : 'error';
+        if (error.bounds || error.memberChanged) {
+          // Not a failed save: nothing changed and nothing is wrong with the saved
+          // choices. The line beside the button says what to do instead.
+          draftLoadState = 'saved';
+          failedDraftEdit = null;
+          pressNotice = error.bounds
+            ? window.FileJanitorPicture?.OVER_LIMIT_NOTE || error.message
+            : error.message;
+          renderBatch();
+          return false;
+        }
+        if (error.conflict) {
+          // Another window changed this review (R63). Nothing was overwritten: read it
+          // again, say so, and leave the person's last click unsaved rather than
+          // replaying it against a picture it was not made for.
+          draftLoadState = 'idle';
+          failedDraftEdit = null;
+          saySomethingChanged('Updated from another window. Your last change was not saved.');
+          await loadBatch();
+          return false;
+        }
+        draftLoadState = 'error';
         failedDraftEdit = { request, batchID, binding: displayed, message: error.message };
         renderBatch();
         return false;
@@ -1624,23 +1897,36 @@
       pendingDecisionWrites.delete(write);
       if (scopeCurrent(scope)) {
         renderBatch();
+        // Back to what the person was on. When that control is gone (the one-file
+        // bar closes once its file is decided), to the file where it now sits, so
+        // they land where the result is; failing that, a control that always exists.
         const target =
           document.getElementById(focusID) ||
           (request.group_id &&
-            document.getElementById('fileJanitorGroup-select-' + request.group_id));
+            document.getElementById('fileJanitorGroup-select-' + request.group_id)) ||
+          (request.candidate_ids?.length &&
+            document.getElementById('fileJanitorFile-' + request.candidate_ids[0]));
         if (target && !target.disabled) target.focus?.();
         else {
           const fallback =
             document.getElementById('fileJanitorDraftStatus')?.querySelector('button') ||
             document.getElementById('fileJanitorKept') ||
             document.getElementById('fileJanitorView-groups');
-          fallback?.focus?.();
+          if (fallback) fallback.focus?.();
+          else focusInPicture();
         }
       }
     };
     void write.then(finished, finished);
     renderBatch();
     return write;
+  }
+
+  // One line beside the File button in the picture, and in the status line of the
+  // All files list, saying the review was read again because it changed (R63).
+  function saySomethingChanged(message) {
+    if (reviewView === 'groups') pressNotice = message;
+    else reviewStatusMessage = message;
   }
 
   function reloadSavedChoices() {
@@ -1651,40 +1937,52 @@
     void loadBatch();
   }
 
+  // How many ticked files the server took out of the saved choices because they
+  // changed, that the person has not yet seen the footer say (it is said once).
+  const removedSeen = new Map();
+  function unseenRemoved() {
+    const total = Number(reviewDraft?.removed_stale) || 0;
+    return Math.max(0, total - (removedSeen.get(reviewDraft?.batch_id) || 0));
+  }
+  function markRemovedSeen() {
+    if (reviewDraft?.batch_id)
+      removedSeen.set(reviewDraft.batch_id, Number(reviewDraft.removed_stale) || 0);
+  }
+
   function draftSaveStatus() {
     const node = el('div', 'fj-draft-status');
     node.id = 'fileJanitorDraftStatus';
-    const problem = ['error', 'conflict'].includes(draftLoadState);
+    const problem = draftLoadState === 'error';
     node.setAttribute('role', problem ? 'alert' : 'status');
     node.setAttribute('aria-live', 'polite');
-    let message =
-      draftLoadState === 'saving'
-        ? 'Saving exact choices…'
-        : draftLoadState === 'saved'
-          ? 'Exact choices saved. Approval is still required.'
-          : 'Loading saved choices…';
+    // A saved choice needs no label at all (R58): the main button already says
+    // "Saving…" while one is in flight. This says something only when saving failed,
+    // the saved choices are out of date, or files were taken out.
+    let message = '';
     if (problem)
       message = failedDraftEdit
-        ? (draftLoadState === 'conflict'
-            ? 'Review changed. Reload saved choices before continuing. '
-            : 'This edit is not confirmed saved. ') + failedDraftEdit.message
-        : 'Saved choices are unavailable. Preview is disabled until they can be reloaded.';
+        ? 'This edit is not confirmed saved. ' + failedDraftEdit.message
+        : 'Saved choices are unavailable. Filing is disabled until they can be reloaded.';
     if (draftLoadState === 'saved' && ['invalid', 'stale'].includes(reviewDraft?.state)) {
-      message =
-        'Old saved choices are invalid for this review. Clear them explicitly before choosing again.';
+      message = 'Old saved choices are invalid for this review. Clear them before choosing again.';
       node.appendChild(button('Clear invalid choices', 'fj-btn', reviewEditCallback('clear_all')));
-    } else if (draftLoadState === 'saved' && reviewDraft?.removed_stale) {
+    } else if (draftLoadState === 'saved' && unseenRemoved() > 0) {
+      // Said once, until the person acts. The count is kept with the saved choices,
+      // so without this it would sit in the footer for as long as the review lives.
+      const gone = unseenRemoved();
       message =
-        formatCount(reviewDraft.removed_stale) +
-        ' saved choices are no longer eligible and were removed. Remaining exact choices are saved.';
+        gone === 1
+          ? '1 file you ticked changed since you looked, so it was taken out.'
+          : formatCount(gone) +
+            ' files you ticked changed since you looked, so they were taken out.';
     }
-    node.appendChild(el('p', 'fj-sub', message));
+    if (message) node.appendChild(el('p', 'fj-sub', message));
     if (problem) {
-      if (failedDraftEdit && draftLoadState !== 'conflict') {
+      if (failedDraftEdit) {
         const failed = failedDraftEdit;
         node.appendChild(
           button(
-            'Retry exact edit',
+            'Retry that change',
             'fj-btn',
             () => void submitReviewEdit(failed.request.action, {}, failed.request, failed.binding)
           )
@@ -1695,248 +1993,201 @@
     return node;
   }
 
-  function groupSelectionControls(group) {
-    const editBinding = reviewEditBinding();
-    const wrap = el('div', 'fj-group-choices');
-    const state = reviewDraft?.groups?.find(item => item.id === group.id);
-    if (!draftEnabled || !state) return wrap;
-    const label = el('label', 'fj-group-select');
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.id = 'fileJanitorGroup-select-' + group.id;
-    checkbox.checked = state.eligible > 0 && state.selected === state.eligible;
-    checkbox.indeterminate = state.selected > 0 && state.selected < state.eligible;
-    checkbox.setAttribute('aria-label', 'Select filing proposals in ' + group.label);
-    checkbox.setAttribute(
-      'aria-checked',
-      checkbox.indeterminate ? 'mixed' : checkbox.checked ? 'true' : 'false'
-    );
-    checkbox.disabled = !reviewEditsAvailable() || !state.eligible;
-    checkbox.addEventListener('change', () => {
-      void submitReviewEdit(
-        checkbox.checked ? 'select_group' : 'deselect_group',
-        { group_id: group.id },
-        null,
-        editBinding
-      );
-    });
-    label.appendChild(checkbox);
-    label.appendChild(el('span', '', 'Select group'));
-    wrap.appendChild(label);
-    wrap.appendChild(
-      el(
-        'p',
-        'fj-sub',
-        state.selected +
-          ' of ' +
-          state.eligible +
-          ' filing proposals selected' +
-          (state.trash ? ' · ' + state.trash + ' explicitly marked for Trash separately' : '')
-      )
-    );
-    if (state.mixed_destinations)
-      wrap.appendChild(el('p', 'fj-sub', 'Mixed saved destinations; per-file exceptions stay.'));
-    if (!state.group_marked) return wrap;
-    const destination = document.createElement('select');
-    destination.id = 'fileJanitorGroup-category-' + group.id;
-    destination.className = 'fj-category';
-    destination.setAttribute(
-      'aria-label',
-      'Destination for selected group files in ' + group.label
-    );
-    destination.disabled = !reviewEditsAvailable() || !state.group_marked;
-    if (state.mixed_destinations) {
-      const mixed = document.createElement('option');
-      mixed.value = '';
-      mixed.textContent = 'Mixed saved destinations';
-      mixed.selected = true;
-      mixed.disabled = true;
-      destination.appendChild(mixed);
-    }
-    for (const category of categories) {
-      const option = document.createElement('option');
-      option.value = category.id;
-      option.textContent = category.label || category.id;
-      option.selected =
-        !state.mixed_destinations && category.id === (state.category || group.category);
-      destination.appendChild(option);
-    }
-    destination.addEventListener(
-      'change',
-      () =>
-        void submitReviewEdit(
-          'set_category',
-          { group_id: group.id, category: destination.value },
-          null,
-          editBinding
-        )
-    );
-    wrap.appendChild(destination);
-    wrap.appendChild(
-      el('p', 'fj-sub', 'Changes selected group-added files only; per-file exceptions stay.')
-    );
-    const undo = button(
-      'Undo group mark',
-      'fj-btn',
-      reviewEditCallback('clear_group', { group_id: group.id })
-    );
-    undo.id = 'fileJanitorGroup-undo-' + group.id;
-    undo.disabled = !reviewEditsAvailable() || !state.group_marked;
-    undo.setAttribute(
-      'aria-label',
-      'Undo group mark for ' + group.label + ', keeping per-file choices'
-    );
-    wrap.appendChild(undo);
-    return wrap;
+  function resetPicture() {
+    selectedFile = null;
+    pictureRequest++;
+    pictureMoreRequest++;
+    picture = null;
+    pictureLoadState = 'idle';
+    pictureMore = null;
+    pictureReopen = null;
   }
 
-  function reviewPlanSidebar() {
-    const plan = el('aside', 'fj-review-plan');
-    plan.setAttribute('aria-label', 'Saved review plan');
-    plan.appendChild(el('h3', 'fj-group-title', 'Your selected changes'));
-    plan.appendChild(
-      el('p', 'fj-group-count', selected.size + (selected.size === 1 ? ' move' : ' moves'))
+  // A picture the server sent is checked for shape and bounds before it is drawn,
+  // so a malformed or unbounded reply is "unavailable", never a half-drawn folder.
+  function validPicture(value, batchID) {
+    const count = number => Number.isSafeInteger(number) && number >= 0;
+    const section = item =>
+      Boolean(item) && count(item.count) && Array.isArray(item.files) && item.files.length <= 12;
+    return Boolean(
+      value &&
+      value.batch_id === batchID &&
+      typeof value.revision === 'string' &&
+      value.revision.length === 64 &&
+      typeof value.draft_revision === 'string' &&
+      value.draft_revision.length === 64 &&
+      ['empty', 'default', 'saved', 'invalid', 'stale'].includes(value.draft_state) &&
+      ['none', 'some', 'unknown'].includes(value.content_read) &&
+      count(value.waiting) &&
+      count(value.counts?.candidates) &&
+      Array.isArray(value.folders) &&
+      value.folders.length <= 16 &&
+      value.folders.every(
+        folder =>
+          typeof folder.category === 'string' &&
+          count(folder.count) &&
+          count(folder.unfiled_count) &&
+          Array.isArray(folder.files) &&
+          folder.files.length <= 5 &&
+          Array.isArray(folder.unfiled_files) &&
+          folder.unfiled_files.length <= 5
+      ) &&
+      Array.isArray(value.loose) &&
+      value.loose.length <= 8 &&
+      value.loose.every(
+        row =>
+          typeof row.group_id === 'string' &&
+          count(row.count) &&
+          count(row.loose_count) &&
+          Array.isArray(row.singles) &&
+          row.singles.length <= 12
+      ) &&
+      section(value.left_out) &&
+      section(value.trash) &&
+      section(value.could_not_file)
     );
-    plan.appendChild(el('p', 'fj-sub', trashMarked.size + ' explicitly marked for Trash'));
-    const destinations = new Map();
-    for (const choice of reviewDraft?.choices || []) {
-      if (choice.operation === 'move')
-        destinations.set(choice.category, (destinations.get(choice.category) || 0) + 1);
-    }
-    const list = el('ul', 'fj-group-samples');
-    for (const [category, count] of destinations) {
-      const definition = categories.find(item => item.id === category);
-      const label = definition?.folder_name
-        ? 'Filed/' + definition.folder_name
-        : definition?.label || category;
-      list.appendChild(el('li', '', count + ' → ' + label));
-    }
-    plan.appendChild(list);
-    plan.appendChild(
-      el('p', 'fj-sub', 'Saved choices are not approval. A fresh exact preview is still required.')
-    );
-    const clear = button('Clear selected changes', 'fj-btn', reviewEditCallback('clear_all'));
-    clear.disabled = !reviewEditsAvailable() || selected.size + trashMarked.size === 0;
-    plan.appendChild(clear);
-    return plan;
   }
 
-  function resetGroupReview() {
-    deferredQuestions.clear();
-    groupsRequest++;
-    groupMemberRequest++;
-    groupReview = null;
-    groupsLoadState = 'idle';
-    activeGroupID = '';
-    groupMembers = [];
-    groupMemberTotal = 0;
-    groupOffset = 0;
-    groupMemberLoadState = 'idle';
-  }
-
-  async function loadReviewGroups() {
+  async function loadReviewPicture() {
     const scope = requestScope();
     const batchID = lastBatch?.id;
     if (!scope.id || !batchID) return;
-    const sequence = ++groupsRequest;
+    const sequence = ++pictureRequest;
     const current = () =>
-      scopeCurrent(scope) && sequence === groupsRequest && lastBatch?.id === batchID;
-    groupsLoadState = 'loading';
+      scopeCurrent(scope) && sequence === pictureRequest && lastBatch?.id === batchID;
+    pictureLoadState = 'loading';
     try {
       const response = await fetch(
-        apiBase(scope.id) + '/batches/' + encodeURIComponent(batchID) + '/groups'
+        apiBase(scope.id) + '/batches/' + encodeURIComponent(batchID) + '/picture'
       );
       const body = await response.json();
       if (!current()) return;
-      const review = body.review;
+      if (!response.ok || !validPicture(body.picture, batchID))
+        throw new Error('The picture is unavailable');
+      picture = body.picture;
+      pictureLoadState = 'loaded';
+      // An open list is pinned to the scan and choices it was read from. When a
+      // save changes them, loadBatch reads the same page again against the new
+      // revisions (see pictureReopen) instead of showing different files.
       if (
-        !response.ok ||
-        review?.batch_id !== batchID ||
-        typeof review.revision !== 'string' ||
-        !Array.isArray(review.groups) ||
-        review.groups.length > 13 ||
-        !Number.isSafeInteger(review.counts?.candidates)
-      )
-        throw new Error('Saved groups unavailable');
-      groupReview = review;
-      groupsLoadState = 'loaded';
-      if (activeGroupID && review.groups.some(group => group.id === activeGroupID)) {
-        await loadGroupMembers(activeGroupID, groupOffset, false);
-      } else {
-        activeGroupID = '';
-        groupMembers = [];
+        pictureMore &&
+        (pictureMore.revision !== picture.revision ||
+          pictureMore.draftRevision !== picture.draft_revision)
+      ) {
+        pictureReopen = {
+          section: pictureMore.section,
+          key: pictureMore.key,
+          offset: pictureMore.offset
+        };
+        pictureMore = null;
+        pictureMoreRequest++;
       }
+      // The plan names the files this picture shows, so a new picture asks again.
+      schedulePlan();
     } catch (_) {
       if (!current()) return;
-      groupsLoadState = 'error';
-      groupMemberRequest++;
-      groupMembers = [];
-      groupMemberLoadState = 'error';
+      picture = null;
+      pictureLoadState = 'error';
+      pictureMore = null;
+      pictureMoreRequest++;
     }
     if (current()) renderBatch();
   }
 
-  async function loadGroupMembers(groupID, offset = 0, focus = true) {
-    const focusID = document.activeElement?.id;
+  // One page of the list behind an "and N more" control. The page is pinned to
+  // the revisions on screen: if the scan or the saved choices moved on, the server
+  // refuses it and the list says so instead of showing different files.
+  async function loadPictureFiles(section, key, offset = 0, focus = true) {
     const scope = requestScope();
     const batchID = lastBatch?.id;
-    const revision = groupReview?.revision;
-    if (!scope.id || !batchID || !revision || groupsLoadState !== 'loaded') return;
-    const sequence = ++groupMemberRequest;
+    if (!scope.id || !batchID || !pictureMatchesDraft()) return;
+    const revision = picture.revision;
+    const draftRevision = picture.draft_revision;
+    const sequence = ++pictureMoreRequest;
     const current = () =>
       scopeCurrent(scope) &&
-      sequence === groupMemberRequest &&
+      sequence === pictureMoreRequest &&
       lastBatch?.id === batchID &&
-      groupReview?.revision === revision;
-    activeGroupID = groupID;
-    groupOffset = offset;
-    groupMemberLoadState = 'loading';
-    groupMembers = [];
+      picture?.revision === revision &&
+      picture?.draft_revision === draftRevision;
+    pictureMore = {
+      section,
+      key,
+      offset,
+      limit: PAGE_SIZE,
+      state: 'loading',
+      total: 0,
+      files: [],
+      revision,
+      draftRevision
+    };
     renderBatch();
     try {
       const response = await fetch(
         apiBase(scope.id) +
           '/batches/' +
           encodeURIComponent(batchID) +
-          '/groups/' +
-          encodeURIComponent(groupID) +
-          '/members?limit=' +
+          '/picture/files?section=' +
+          encodeURIComponent(section) +
+          '&key=' +
+          encodeURIComponent(key) +
+          '&limit=' +
           PAGE_SIZE +
           '&offset=' +
           offset +
           '&revision=' +
-          encodeURIComponent(revision)
+          encodeURIComponent(revision) +
+          '&draft_revision=' +
+          encodeURIComponent(draftRevision)
       );
       const body = await response.json();
       if (!current()) return;
+      const page = body.page;
       if (
         !response.ok ||
-        body.batch_id !== batchID ||
-        body.group_id !== groupID ||
-        body.revision !== revision ||
-        !Array.isArray(body.candidates) ||
-        body.candidates.length > PAGE_SIZE ||
-        !Number.isSafeInteger(body.total) ||
-        body.total < 0
+        page?.batch_id !== batchID ||
+        page.section !== section ||
+        page.revision !== revision ||
+        page.draft_revision !== draftRevision ||
+        !Array.isArray(page.files) ||
+        page.files.length > PAGE_SIZE ||
+        !Number.isSafeInteger(page.total) ||
+        page.total < 0 ||
+        !Number.isSafeInteger(page.offset) ||
+        page.offset < 0
       )
-        throw new Error('Group members unavailable');
-      groupMembers = body.candidates;
-      groupMemberTotal = body.total;
-      groupMemberLoadState = 'loaded';
+        throw new Error('These files are unavailable');
+      pictureMore = {
+        ...pictureMore,
+        state: 'loaded',
+        total: page.total,
+        files: page.files,
+        offset: page.offset
+      };
+      schedulePlan();
     } catch (_) {
       if (!current()) return;
-      groupMemberLoadState = 'error';
+      pictureMore = { ...pictureMore, state: 'error' };
     }
     if (current()) {
       renderBatch();
       if (focus) {
-        const panel = document.getElementById('fileJanitorGroup-details');
+        const panel = document.getElementById('fileJanitorMorePanel');
         panel?.focus?.({ preventScroll: true });
         panel?.scrollIntoView?.({ block: 'start' });
-      } else {
-        document.getElementById(focusID)?.focus?.({ preventScroll: true });
       }
     }
+  }
+
+  function closePictureMore() {
+    const previous = pictureMore;
+    pictureMore = null;
+    pictureMoreRequest++;
+    renderBatch();
+    if (previous)
+      document
+        .getElementById('fileJanitorMore-' + previous.section + '-' + previous.key)
+        ?.focus?.();
   }
 
   async function loadSavedBatches() {
@@ -1962,7 +2213,7 @@
 
   function savedBatchPicker() {
     const wrap = el('div', 'fj-saved-batches');
-    const label = el('label', 'fj-label', 'Saved review batch');
+    const label = el('label', 'fj-label', 'Saved scan');
     label.setAttribute('for', 'fileJanitorBatchChoice');
     wrap.appendChild(label);
     const select = document.createElement('select');
@@ -1970,7 +2221,7 @@
     select.className = 'fj-input';
     select.disabled =
       !batchActionsAvailable() ||
-      Boolean(pendingPreview) ||
+      busy ||
       pendingDecisionWrites.size > 0 ||
       Boolean(failedDraftEdit);
     if (!lastBatch) {
@@ -2003,7 +2254,7 @@
       consoleItem = '';
       pageOffset = 0;
       filter = '';
-      resetGroupReview();
+      resetPicture();
       void loadBatch();
     });
     wrap.appendChild(select);
@@ -2042,12 +2293,13 @@
     bar.setAttribute('role', 'group');
     bar.setAttribute('aria-label', 'Review view');
     for (const [view, label] of [
-      ['groups', 'Groups'],
+      ['groups', 'Picture'],
       ['all', 'All files']
     ]) {
       const control = button(label, 'fj-filter', () => {
         reviewView = view;
-        renderBatch();
+        // The header offers All files only from the picture, so repaint it too.
+        renderConsole();
         document.getElementById('fileJanitorView-' + view)?.focus?.();
       });
       control.id = 'fileJanitorView-' + view;
@@ -2057,261 +2309,461 @@
     return bar;
   }
 
-  function renderReviewGroups() {
-    const section = el('section', 'fj-groups');
-    section.setAttribute('aria-label', 'Grouped proposals for this saved batch');
-    if (groupsLoadState !== 'loaded' || groupReview?.batch_id !== lastBatch?.id) {
-      const failed = groupsLoadState === 'error';
+  // ------------------------------------------------ answers on the loose rows
+  //
+  // A row menu and the one-file bar are the person's answers to what Ori could not
+  // decide. Each is one of the existing saved-choice edits, quoting the revisions
+  // the picture was drawn from, so a stale control changes nothing. They only record
+  // what the person chose: files move when File is pressed.
+
+  // When the control the person was on has gone, focus goes to the next thing they
+  // can act on in the picture: a row menu, or the picture itself. A disabled File
+  // button cannot take focus, so it is not the fallback.
+  const ROW_KEYS = ['sensitive', 'versions', 'audio', 'unresolved', 'unmatched'];
+  function focusInPicture() {
+    const target =
+      ROW_KEYS.map(key => document.getElementById('fileJanitorRowMenu-' + key)).find(Boolean) ||
+      document.getElementById('fileJanitorPicture');
+    target?.focus?.();
+  }
+
+  function selectFile(file) {
+    const previous = selectedFile;
+    selectedFile = file ? { ...file } : null;
+    renderBatch();
+    if (selectedFile) document.getElementById('fileJanitorFileMenu')?.focus?.();
+    // Closing the bar returns to the file it was about, not to the page top.
+    else if (previous) {
+      const back = document.getElementById('fileJanitorFile-' + previous.id);
+      if (back) back.focus?.();
+      else focusInPicture();
+    }
+  }
+
+  // R19, R20, R21, R22: the one menu on a question row.
+  async function answerRow(row, choice, binding) {
+    if (choice.kind === 'move') {
+      await submitReviewEdit(
+        'select_group',
+        { group_id: row.group_id, category: choice.category },
+        null,
+        binding
+      );
+    } else if (choice.kind === 'leave') {
+      // Nothing recorded for the row any more; nothing to ask the server when
+      // nothing was placed.
+      if (row.placed_count > 0)
+        await submitReviewEdit('clear_group', { group_id: row.group_id }, null, binding);
+      else renderBatch();
+    } else if (choice.kind === 'stop') {
+      await stopAskingAboutRow(row, binding);
+    }
+  }
+
+  // The files "Leave here, stop asking" will cover, which Review again must be able
+  // to name afterwards: the row's members, except those drawn elsewhere (a Trash
+  // mark or a choice of the person's own for that one file).
+  async function rowMemberIDs(row) {
+    const scope = requestScope();
+    const batchID = lastBatch?.id;
+    const elsewhere = new Set(
+      (reviewDraft?.choices || [])
+        .filter(
+          choice =>
+            choice.operation === 'trash' ||
+            (choice.operation === 'move' && choice.source_group_id !== row.group_id)
+        )
+        .map(choice => choice.candidate_id)
+    );
+    const ids = [];
+    for (let offset = 0; offset < row.count; offset += 200) {
+      const response = await fetch(
+        apiBase(scope.id) +
+          '/batches/' +
+          encodeURIComponent(batchID) +
+          '/groups/' +
+          encodeURIComponent(row.group_id) +
+          '/members?limit=200&offset=' +
+          offset +
+          '&revision=' +
+          encodeURIComponent(reviewDraft.group_revision)
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !Array.isArray(body.candidates)) throw new Error('members unavailable');
+      for (const member of body.candidates) if (!elsewhere.has(member.id)) ids.push(member.id);
+      if (body.candidates.length === 0) break;
+    }
+    return ids;
+  }
+
+  async function stopAskingAboutRow(row, binding) {
+    if (!reviewEditsAvailable()) return;
+    const batchID = lastBatch?.id;
+    let ids;
+    busy = true;
+    try {
+      ids = await rowMemberIDs(row);
+    } catch (_) {
+      showError('Ori could not read these files, so nothing was changed. Try again.');
+      return;
+    } finally {
+      busy = false;
+      updateSelectionSummary();
+    }
+    if (lastBatch?.id !== batchID) return;
+    const saved = await submitReviewEdit('keep_group', { group_id: row.group_id }, null, binding);
+    if (saved && ids.length) {
+      keptRows.set(batchID, [
+        ...(keptRows.get(batchID) || []).filter(item => item.key !== row.key),
+        { key: row.key, count: ids.length, ids }
+      ]);
+      reviewStatusMessage = '';
+      renderBatch();
+      // The row's menu is gone; land on the note that replaced it.
+      document.getElementById('fileJanitorReviewAgain-' + row.key)?.focus?.();
+    }
+  }
+
+  // R22: Ori forgets the choice, and the files come back in the next scan.
+  async function reviewKeptAgain(kept, binding) {
+    const batchID = lastBatch?.id;
+    const saved = await submitReviewEdit(
+      'reconsider_files',
+      { candidate_ids: kept.ids },
+      null,
+      binding
+    );
+    if (saved && batchID) {
+      keptRows.set(
+        batchID,
+        (keptRows.get(batchID) || []).filter(item => item.key !== kept.key)
+      );
+      pressNotice = 'Ori will offer these again the next time it scans.';
+      renderBatch();
+      // The note that held this button is gone.
+      focusInPicture();
+    }
+  }
+
+  // Every file of a bundle with where it is now. A card shows at most twelve; when it
+  // holds more, the rest are read (pinned to the revisions on screen) so one choice
+  // really covers the whole bundle.
+  async function bundleMembers(bundle) {
+    if (!bundle.more) return bundle.files;
+    const scope = requestScope();
+    const files = [];
+    for (let offset = 0; offset < bundle.count; offset += 200) {
+      const response = await fetch(
+        apiBase(scope.id) +
+          '/batches/' +
+          encodeURIComponent(lastBatch.id) +
+          '/picture/files?section=bundle&key=' +
+          encodeURIComponent(bundle.bundle_id) +
+          '&limit=200&offset=' +
+          offset +
+          '&revision=' +
+          encodeURIComponent(picture.revision) +
+          '&draft_revision=' +
+          encodeURIComponent(picture.draft_revision)
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !Array.isArray(body.page?.files)) throw new Error('bundle unavailable');
+      files.push(...body.page.files);
+      if (body.page.files.length === 0) break;
+    }
+    return files;
+  }
+
+  // R32: one choice for a bundle applies to every file in it, and they all go to the
+  // same folder. A file already in Trash is a file the person decided about on its
+  // own: a bundle choice never overwrites that.
+  async function answerBundle(bundle, choice, binding) {
+    if (!reviewEditsAvailable()) return;
+    let members;
+    busy = true;
+    try {
+      members = await bundleMembers(bundle);
+    } catch (_) {
+      showError('Ori could not read these files, so nothing was changed. Try again.');
+      return;
+    } finally {
+      busy = false;
+      updateSelectionSummary();
+    }
+    const notTrashed = members.filter(file => file.placement !== 'trash').map(file => file.id);
+    if (choice.kind === 'move')
+      await submitReviewEdit(
+        'select_files',
+        { candidate_ids: notTrashed, category: choice.category },
+        null,
+        binding
+      );
+    else if (choice.kind === 'stop')
+      await submitReviewEdit('keep_files', { candidate_ids: notTrashed }, null, binding);
+    else if (choice.kind === 'leave') {
+      const placed = members.filter(file => file.placement === 'filed').map(file => file.id);
+      if (placed.length)
+        await submitReviewEdit('exclude_files', { candidate_ids: placed }, null, binding);
+      else renderBatch();
+    }
+  }
+
+  // R23: what the person chose for the one selected file.
+  async function answerFile(file, choice, binding) {
+    selectedFile = null;
+    const ids = { candidate_ids: [file.id] };
+    if (choice.kind === 'move')
+      await submitReviewEdit('select_files', { ...ids, category: choice.category }, null, binding);
+    else if (choice.kind === 'trash') await submitReviewEdit('mark_trash', ids, null, binding);
+    else if (choice.kind === 'stop') await submitReviewEdit('keep_files', ids, null, binding);
+    else if (choice.kind === 'leave')
+      await submitReviewEdit(
+        file.placement === 'trash' ? 'unmark_trash' : 'exclude_files',
+        ids,
+        null,
+        binding
+      );
+  }
+
+  // True only for a picture that was read and has no file in any part of it: no
+  // folder card, no loose row, nothing left out, for Trash or that could not be
+  // filed, no file whose saved state is not understood, and no row kept this session.
+  function pictureIsEmpty() {
+    const read = picture;
+    if (!read || read.batch_id !== lastBatch?.id || pictureLoadState !== 'loaded') return false;
+    return (
+      read.waiting === 0 &&
+      (read.counts?.unknown || 0) === 0 &&
+      (read.folders || []).length === 0 &&
+      (read.loose || []).length === 0 &&
+      (read.left_out?.count || 0) === 0 &&
+      (read.trash?.count || 0) === 0 &&
+      (read.could_not_file?.count || 0) === 0 &&
+      (keptRows.get(lastBatch.id) || []).length === 0
+    );
+  }
+
+  // "Nothing to file. {folder} is tidy." with the one thing to do next: scan again.
+  function tidyState() {
+    const wrap = el('div', 'fj-empty fj-picture-tidy');
+    // Focusable by script, like the picture it stands in for.
+    wrap.id = 'fileJanitorPicture';
+    wrap.setAttribute('tabindex', '-1');
+    const folder = compactFolderName(lastStatus?.settings?.root_path);
+    // Files the person told Ori to leave are not waiting, but the folder is not tidy
+    // either: say what is true.
+    const left = Number(lastBatch?.summary?.skipped) || 0;
+    // Files still waiting in another scan mean the folder is not tidy either, and "this
+    // scan" is the honest scope of "nothing to file".
+    const elsewhere = waitingInOtherScan();
+    wrap.appendChild(
+      el(
+        'p',
+        'fj-empty-title',
+        elsewhere
+          ? 'Nothing to file in this scan.'
+          : left > 0
+            ? 'Nothing to file. ' +
+              (left === 1 ? '1 file stays' : formatCount(left) + ' files stay') +
+              ' where you left ' +
+              (left === 1 ? 'it' : 'them') +
+              '.'
+            : 'Nothing to file. ' + folder + ' is tidy.'
+      )
+    );
+    wrap.appendChild(button('Scan now', 'fj-btn fj-btn-secondary', () => void scanNow()));
+    return wrap;
+  }
+
+  // R62: a scan newer than the one on screen. Said in one line with one button; the
+  // picture the person is looking at is never swapped by itself. It is known from the
+  // scan this console just ran, or from the newest of the saved scans.
+  function newerScanAvailable() {
+    if (!lastBatch) return '';
+    if (newerScanID && newerScanID !== lastBatch.id) return newerScanID;
+    const newest = savedBatchOffset === 0 ? savedBatches[0] : null;
+    if (!newest || newest.id === lastBatch.id) return '';
+    const newestAt = Date.parse(newest.started_at || newest.completed_at);
+    const openAt = Date.parse(lastBatch.started_at || lastBatch.completed_at);
+    return newestAt > openAt ? newest.id : '';
+  }
+
+  function newerScanLine() {
+    const id = newerScanAvailable();
+    if (!id) return null;
+    const line = el('div', 'fj-newer-scan');
+    line.id = 'fileJanitorNewerScan';
+    line.setAttribute('role', 'status');
+    line.appendChild(el('span', 'fj-newer-scan-text', 'A newer scan is ready.'));
+    const show = button('Show the newer scan', 'fj-link', () => showScan(id));
+    show.id = 'fileJanitorShowNewerScan';
+    line.appendChild(show);
+    return line;
+  }
+
+  // Files still waiting in a different saved scan of this folder. A scan does not
+  // propose a file that an earlier scan still holds, so without this the files of the
+  // scan that is not open are in no picture at all. Only scans that have something to
+  // file count; a finished one does not.
+  function waitingInOtherScan() {
+    if (!lastBatch || savedBatchOffset !== 0) return null;
+    const openAt = Date.parse(lastBatch.started_at || lastBatch.completed_at);
+    let found = null;
+    let foundAt = -Infinity;
+    let count = 0;
+    for (const batch of savedBatches) {
+      if (batch.id === lastBatch.id || batch.state === 'resolved') continue;
+      // Files that need review are a part of the proposed ones, not more of them.
+      const waiting = Number(batch.summary?.proposed) || 0;
+      if (waiting <= 0) continue;
+      count += waiting;
+      const at = Date.parse(batch.started_at || batch.completed_at) || 0;
+      if (at > foundAt) {
+        found = batch;
+        foundAt = at;
+      }
+    }
+    return found ? { id: found.id, count, earlier: foundAt < openAt } : null;
+  }
+
+  // "N files are still waiting in an earlier scan." with the one button that opens it.
+  // A newer scan has its own line, so this is only for earlier ones.
+  function otherScanLine() {
+    const other = waitingInOtherScan();
+    if (!other || !other.earlier) return null;
+    const line = el('div', 'fj-newer-scan');
+    line.id = 'fileJanitorOtherScan';
+    line.setAttribute('role', 'status');
+    line.appendChild(
+      el(
+        'span',
+        'fj-newer-scan-text',
+        (other.count === 1 ? '1 file is' : formatCount(other.count) + ' files are') +
+          ' still waiting in an earlier scan.'
+      )
+    );
+    const show = button('Show the earlier scan', 'fj-link', () => showScan(other.id));
+    show.id = 'fileJanitorShowOtherScan';
+    line.appendChild(show);
+    return line;
+  }
+
+  // Opens another saved scan. The picture is drawn again for it, so focus goes back to
+  // the picture once it has loaded instead of to the page.
+  function showScan(id) {
+    discardProtectionApproval();
+    newerScanID = '';
+    linkedBatchID = id;
+    consoleItem = '';
+    pageOffset = 0;
+    filter = '';
+    lastResults = null;
+    announce('');
+    resetPicture();
+    void loadBatch().then(() => focusReviewStart());
+  }
+
+  // The Review tab: the folder as it will look after filing. This only draws what
+  // the picture read says. A tick or untick is one saved edit through the same
+  // lifecycle as every other choice, and the picture is redrawn from the server's
+  // next read, never from this module's own arithmetic.
+  function renderPictureView() {
+    const section = el('section', 'fj-picture-host');
+    const drawing = window.FileJanitorPicture;
+    const hasPicture = picture?.batch_id === lastBatch?.id;
+    if (pictureLoadState === 'error' || (!hasPicture && pictureLoadState === 'loaded')) {
       const notice = el(
         'p',
         'fj-empty-copy',
-        failed
-          ? 'Grouped proposals are unavailable. No files are selected by opening this view. Retry, or use All files.'
-          : 'Loading saved grouped proposals…'
+        'The picture of your folder is unavailable. Nothing was changed, and this does not mean the folder is tidy. Retry, or use All files.'
       );
-      notice.setAttribute('role', failed ? 'alert' : 'status');
+      notice.setAttribute('role', 'alert');
       section.appendChild(notice);
-      if (failed)
-        section.appendChild(button('Retry groups', 'fj-btn', () => void loadReviewGroups()));
+      section.appendChild(button('Retry', 'fj-btn', () => void loadReviewPicture()));
       return section;
     }
-    const counts = groupReview.counts;
-    section.appendChild(
-      el(
-        'p',
-        'fj-group-accounting',
-        formatCount(counts.candidates) +
-          ' candidates in this saved batch · ' +
-          formatCount(counts.filing) +
-          ' suggested for filing · ' +
-          formatCount(counts.questions) +
-          ' need a decision.'
-      )
-    );
-    const other = [
-      ['kept', 'kept here'],
-      ['applied', 'applied'],
-      ['stale', 'stale'],
-      ['failed', 'failed'],
-      ['applying', 'in progress'],
-      ['unknown', 'unavailable state'],
-      ['ineligible', 'ineligible scan observations (not candidates)']
-    ]
-      .filter(([key]) => counts[key])
-      .map(([key, label]) => formatCount(counts[key]) + ' ' + label);
-    if (other.length)
-      section.appendChild(
-        el('p', 'fj-muted', other.join(' · ') + '. See All files or History for recorded outcomes.')
-      );
-    if (counts.kept > 0) {
-      const kept = button('See kept files', 'fj-btn fj-btn-secondary', () => {
-        reviewView = 'all';
-        filter = 'skipped';
-        pageOffset = 0;
-        void loadBatch();
-      });
-      kept.id = 'fileJanitorKept';
-      kept.disabled = !batchActionsAvailable() || busy;
-      section.appendChild(kept);
+    if (!hasPicture || !drawing) {
+      const notice = el('p', 'fj-empty-copy', 'Loading your folder…');
+      notice.setAttribute('role', 'status');
+      section.appendChild(notice);
+      return section;
     }
-    section.appendChild(
-      el(
-        'p',
-        'fj-sub',
-        'These are saved proposals, not a folder inventory. Grouping uses names and saved metadata; file details show the actual classification provenance.'
-      )
-    );
-    if (draftEnabled) {
-      section.appendChild(
-        el(
-          'p',
-          'fj-sub',
-          'Keep here leaves files untouched, remembers these exact file states, and cancels their saved changes. Changed files may return; existing skip retention applies. Not now leaves questions pending, with no timer.'
-        )
-      );
-      const selectAll = button(
-        'Select all filing groups',
-        'fj-btn fj-btn-secondary',
-        reviewEditCallback('select_filing_groups')
-      );
-      selectAll.disabled = !reviewEditsAvailable() || counts.filing === 0;
-      section.appendChild(selectAll);
-      section.appendChild(
-        el(
-          'p',
-          'fj-sub',
-          'Only the exact filing proposals in this batch. Questions, unresolved files and Trash marks are excluded.'
-        )
-      );
+    // R59: nothing waiting anywhere. This is only said of a picture that loaded and
+    // has no file in any part of it; an unreadable one never gets here.
+    if (pictureIsEmpty()) {
+      section.appendChild(tidyState());
+      return section;
     }
-    const layout = el('div', 'fj-group-plan-layout');
-    const grid = el('div', 'fj-group-grid');
-    for (const group of groupReview.groups) {
-      const card = el(
-        'article',
-        'fj-group-card' + (group.kind === 'question' ? ' fj-group-question' : '')
-      );
-      card.setAttribute('data-fj-group', group.id);
-      card.appendChild(
-        el('p', 'fj-group-kind', group.kind === 'question' ? 'Your decision' : 'Suggested filing')
-      );
-      card.appendChild(el('h3', 'fj-group-title', group.label));
-      card.appendChild(
-        el(
-          'p',
-          'fj-group-count',
-          formatCount(group.count) + (group.count === 1 ? ' file' : ' files')
-        )
-      );
-      if (group.kind === 'question' && deferredQuestions.has(group.id)) {
-        const state = reviewDraft?.groups.find(item => item.id === group.id);
-        card.appendChild(
-          el(
-            'p',
-            'fj-group-reason',
-            'Still pending. Not now changed no choices and sets no timer.' +
-              (state?.selected || state?.trash ? ' Saved choices remain in the review plan.' : '')
-          )
-        );
-        const reopen = button('Reopen question', 'fj-btn fj-btn-secondary', () => {
-          deferredQuestions.delete(group.id);
-          renderBatch();
-          document.getElementById('fileJanitorGroup-' + group.id)?.focus?.();
-        });
-        reopen.id = 'fileJanitorGroup-reopen-' + group.id;
-        reopen.setAttribute('aria-label', 'Reopen question: ' + group.label);
-        card.appendChild(reopen);
-        grid.appendChild(card);
-        continue;
-      }
-      if (group.question) card.appendChild(el('p', 'fj-question-prompt', group.question));
-      if (group.kind === 'filing') card.appendChild(groupSelectionControls(group));
-      if (group.destination)
-        card.appendChild(el('p', 'fj-destination', 'Proposed: ' + group.destination));
-      card.appendChild(el('p', 'fj-group-reason', group.reason));
-      const samples = el('ul', 'fj-group-samples');
-      for (const name of (group.samples || []).slice(0, 3))
-        samples.appendChild(el('li', '', safeName(name)));
-      card.appendChild(samples);
-      const details = button(
-        'See files',
-        'fj-btn fj-btn-secondary',
-        () => void loadGroupMembers(group.id)
-      );
-      details.id = 'fileJanitorGroup-' + group.id;
-      details.disabled = batchLoadState !== 'loaded';
-      details.setAttribute(
-        'aria-label',
-        'See ' + formatCount(group.count) + ' files in ' + group.label
-      );
-      details.setAttribute('aria-expanded', activeGroupID === group.id ? 'true' : 'false');
-      details.setAttribute('aria-controls', 'fileJanitorGroup-details');
-      card.appendChild(details);
-      if (draftEnabled) {
-        const keep = button(
-          'Keep here',
-          'fj-btn fj-btn-secondary',
-          reviewEditCallback('keep_group', { group_id: group.id })
-        );
-        keep.disabled = !reviewEditsAvailable();
-        keep.setAttribute('aria-label', 'Keep ' + group.label + ' here');
-        card.appendChild(keep);
-      }
-      if (group.kind === 'question') {
-        const binding = reviewEditBinding();
-        const defer = button('Not now', 'fj-btn fj-btn-quiet', () => {
-          if (!scopeCurrent(binding.scope) || binding.batchID !== lastBatch?.id) return;
-          deferredQuestions.add(group.id);
-          if (activeGroupID === group.id) {
-            activeGroupID = '';
-            groupMemberRequest++;
+    const binding = reviewEditBinding();
+    section.appendChild(
+      drawing.renderPicture(document, picture, {
+        folderName: compactFolderName(lastStatus?.settings?.root_path),
+        editsAvailable: reviewEditsAvailable(),
+        more: pictureMore,
+        // The plan check names the final file names (R7) and, after a refused
+        // press, the files that changed since the person looked (R36).
+        plan: planMatchesDraft() ? { items: planItems } : undefined,
+        changedIds: changedMarks,
+        // Answers on the loose rows and for one file (R19 to R25). Every one is an
+        // existing saved-choice edit; nothing here moves a file.
+        destinations: categories,
+        filedRoot: lastStatus?.settings?.filing_root_name || 'Filed',
+        selectedFile,
+        keptRows: keptRows.get(lastBatch.id) || [],
+        onSelectFile: file => selectFile(file),
+        onRowChoice: (row, choice) => void answerRow(row, choice, binding),
+        onFileChoice: (file, choice) => void answerFile(file, choice, binding),
+        onReviewAgain: kept => void reviewKeptAgain(kept, binding),
+        onRetry: file =>
+          void submitReviewEdit('retry_files', { candidate_ids: [file.id] }, null, binding),
+        // Possible copies and music bundles (R26 to R33): a copy marked for Trash
+        // (one file, never a row or a pair), put back, and one choice for a bundle.
+        onTrashCopy: file =>
+          void submitReviewEdit('mark_trash', { candidate_ids: [file.id] }, null, binding),
+        onPutBack: file =>
+          void submitReviewEdit('unmark_trash', { candidate_ids: [file.id] }, null, binding),
+        onBundleChoice: (bundle, choice) => void answerBundle(bundle, choice, binding),
+        onTickFolder: (folder, ticked) =>
+          void submitReviewEdit(
+            ticked ? 'select_group' : 'deselect_group',
+            { group_id: folder.group_id },
+            null,
+            binding
+          ),
+        onOpenMore: (pickedSection, key) => {
+          if (pictureMore?.section === pickedSection && pictureMore?.key === key)
+            closePictureMore();
+          else void loadPictureFiles(pickedSection, key, 0);
+        },
+        onMorePage: offset => {
+          if (!pictureMore) return;
+          if (pictureMore.state === 'error') {
+            // The page could not be read against what is on screen; start over
+            // from the saved review rather than retrying a stale request.
+            pictureMore = null;
+            pictureMoreRequest++;
+            void loadBatch();
+            return;
           }
-          renderBatch();
-          document.getElementById('fileJanitorGroup-reopen-' + group.id)?.focus?.();
-        });
-        defer.setAttribute('aria-label', 'Not now: ' + group.label);
-        card.appendChild(defer);
-      }
-      grid.appendChild(card);
-    }
-    layout.appendChild(grid);
-    if (draftEnabled) layout.appendChild(reviewPlanSidebar());
-    section.appendChild(layout);
-    if (!groupReview.groups.length)
-      section.appendChild(
-        el(
-          'p',
-          'fj-empty-copy',
-          'No pending proposal groups in this saved batch. Recorded outcomes remain in All files and History.'
-        )
-      );
-    if (activeGroupID) {
-      const group = groupReview.groups.find(group => group.id === activeGroupID);
-      const panel = el('section', 'fj-group-details');
-      panel.id = 'fileJanitorGroup-details';
-      panel.setAttribute('tabindex', '-1');
-      panel.setAttribute('aria-label', 'Files in ' + (group?.label || 'this group'));
-      panel.appendChild(el('h3', 'fj-group-title', group?.label || 'Group files'));
-      panel.appendChild(
-        button('Close file list', 'fj-btn', () => {
-          const previous = activeGroupID;
-          activeGroupID = '';
-          groupMemberRequest++;
-          renderBatch();
-          document.getElementById('fileJanitorGroup-' + previous)?.focus?.();
-        })
-      );
-      if (groupMemberLoadState === 'loaded') {
-        panel.appendChild(
-          el(
-            'p',
-            'fj-sub',
-            'Showing ' +
-              (groupMembers.length ? groupOffset + 1 : 0) +
-              '–' +
-              (groupOffset + groupMembers.length) +
-              ' of ' +
-              formatCount(groupMemberTotal) +
-              ' files in this group.'
-          )
-        );
-        const scroller = el('div', 'fj-table-scroll');
-        scroller.appendChild(reviewTable(groupMembers));
-        panel.appendChild(scroller);
-        const nav = el('nav', 'fj-actions');
-        nav.setAttribute('aria-label', 'Group member pages');
-        for (const [label, offset, disabled] of [
-          ['Previous group files', Math.max(0, groupOffset - PAGE_SIZE), groupOffset === 0],
-          [
-            'Next group files',
-            groupOffset + PAGE_SIZE,
-            groupOffset + groupMembers.length >= groupMemberTotal
-          ]
-        ]) {
-          const control = button(
-            label,
-            'fj-btn',
-            () => void loadGroupMembers(activeGroupID, offset)
-          );
-          control.disabled =
-            disabled || batchLoadState !== 'loaded' || groupsLoadState !== 'loaded';
-          nav.appendChild(control);
+          void loadPictureFiles(pictureMore.section, pictureMore.key, offset, false);
+        },
+        onCloseMore: closePictureMore,
+        onShowEarlier: () => {
+          reviewView = 'all';
+          filter = picture.counts.kept ? 'skipped' : '';
+          pageOffset = 0;
+          void loadBatch();
         }
-        panel.appendChild(nav);
-      } else {
-        panel.appendChild(
-          el(
-            'p',
-            'fj-empty-copy',
-            groupMemberLoadState === 'error'
-              ? 'Group files are unavailable or changed. Reload these proposals before continuing.'
-              : 'Loading group files…'
-          )
-        );
-        if (groupMemberLoadState === 'error')
-          panel.appendChild(button('Reload proposals', 'fj-btn', () => void loadReviewGroups()));
-      }
-      section.appendChild(panel);
+      })
+    );
+    if (picture.counts.unknown > 0) {
+      const unknown = el(
+        'p',
+        'fj-batch-load-notice',
+        'Some files have a saved state this version does not understand. They were not counted as filed. Open All files before continuing.'
+      );
+      unknown.setAttribute('role', 'alert');
+      section.appendChild(unknown);
     }
     return section;
   }
@@ -2356,37 +2808,53 @@
     if (protectionControl)
       protectionControl.disabled =
         Boolean(protectionReturnRetry) || departingForProtection || busy || !reviewEditsAvailable();
+    const settingsProtection = document.getElementById('fileJanitorCheckProtectionSettings');
+    if (settingsProtection)
+      settingsProtection.disabled =
+        !lastBatch ||
+        Boolean(protectionReturnRetry) ||
+        departingForProtection ||
+        busy ||
+        !reviewEditsAvailable();
+    const model = fileButtonState();
     const node = document.getElementById('fileJanitorSelection');
-    if (node) {
-      const count = selected.size;
-      const trashes = trashMarked.size;
-      const parts = [];
-      if (count) parts.push(count + (count === 1 ? ' file selected' : ' files selected'));
-      if (trashes)
-        parts.push(
-          trashes + (trashes === 1 ? ' file marked for Trash' : ' files marked for Trash')
-        );
-      node.textContent = parts.length === 0 ? 'No files selected.' : parts.join(' · ') + '.';
-    }
+    if (node) node.textContent = pressNotice || model.note;
     const approve = document.getElementById('fileJanitorApprove');
     if (approve) {
-      const moves = selected.size;
-      const trashes = trashMarked.size;
-      // The control states exactly what it will attempt — moves and removals
-      // counted separately — and stays disabled until there is something valid
-      // to attempt (FR-69).
-      const parts = [];
-      if (moves) parts.push(moves + (moves === 1 ? ' move' : ' moves'));
-      if (trashes) parts.push(trashes + ' to Trash');
-      approve.textContent =
-        parts.length === 0 ? 'Review selected changes' : 'Review ' + parts.join(' and ');
-      approve.disabled = moves + trashes === 0 || !reviewEditsAvailable();
-      approve.setAttribute('aria-disabled', approve.disabled ? 'true' : 'false');
-      // Point the disabled control at the line that says why ("No files
-      // selected."), so the reason is available to a screen reader reading the
-      // button rather than only to someone who happens to look above it.
+      // R35: the one main button states exactly what pressing it will do, and is
+      // disabled until pressing it is safe to offer.
+      approve.textContent = model.label;
+      approve.disabled = model.disabled;
+      approve.setAttribute('aria-disabled', model.disabled ? 'true' : 'false');
+      // Point the disabled control at the line that says why, so the reason is
+      // available to a screen reader reading the button.
       approve.setAttribute('aria-describedby', 'fileJanitorSelection');
     }
+  }
+
+  // The button's state from what is on screen. The label table and every rule about
+  // when it may be pressed live in the picture module; this only gathers the facts.
+  function fileButtonState() {
+    const drawing = window.FileJanitorPicture;
+    const saveState =
+      draftLoadState === 'saving' || pendingDecisionWrites.size > 0
+        ? 'saving'
+        : failedDraftEdit
+          ? 'failed'
+          : draftLoadState === 'error'
+            ? 'unavailable'
+            : '';
+    if (!drawing) return { label: 'Nothing to file', note: '', disabled: true, moves: 0, trash: 0 };
+    return drawing.fileButtonModel({
+      // While the next plan is being worked out the last one still words the
+      // button (disabled, "Checking…"), so it does not flicker to "Nothing to file".
+      plan: plan && plan.batch_id === lastBatch?.id ? plan : null,
+      planCurrent: planMatchesDraft(),
+      saveState,
+      trashAcknowledged: Boolean(plan) && trashAcknowledgedFor === plan.trash_count,
+      editsAvailable:
+        batchActionsAvailable() && !busy && !departingForProtection && draftChoicesResolved()
+    });
   }
 
   function batchLoadNotice(hasLastKnownBatch) {
@@ -2406,11 +2874,11 @@
         'fj-batch-load-copy',
         failed
           ? hasLastKnownBatch
-            ? 'Showing the last known batch. Review actions are disabled until the latest data loads.'
+            ? 'Showing the last known scan. Review actions are disabled until the latest data loads.'
             : 'Ori could not load the review data. This does not mean the folder is empty.'
           : hasLastKnownBatch
             ? 'Last known counts remain visible but cannot be acted on while they refresh.'
-            : 'Checking for the latest scan and proposals.'
+            : 'Checking for the latest scan.'
       )
     );
     if (failed) {
@@ -2426,6 +2894,10 @@
     if (!container) return;
     const focusedReviewControlID = String(document.activeElement?.id || '');
     clear(container);
+    // In the picture, #fileJanitorView-all is the header's button; in All files it
+    // is the view switch (the two are never on screen together).
+    const headerAllFiles = document.getElementById('fileJanitorView-all');
+    if (headerAllFiles && reviewView === 'groups') headerAllFiles.hidden = !lastBatch;
     if (protectionReturnRetry) {
       const retry = button(
         'Retry returning to review',
@@ -2450,22 +2922,27 @@
       notice.setAttribute('aria-live', 'polite');
       container.appendChild(notice);
     }
+    const newerScan = newerScanLine();
+    if (newerScan) container.appendChild(newerScan);
+    const otherScan = otherScanLine();
+    if (otherScan) container.appendChild(otherScan);
 
     if (!lastBatch) {
       if (batchLoadState === 'loading' || batchLoadState === 'error') return;
       const empty = el('div', 'fj-empty');
+      const folder = compactFolderName(lastStatus?.settings?.root_path);
       const states = {
         no_proposals: {
           title: 'Initial scan complete — no eligible files',
           copy: 'Files may still be settling. Scan again when you choose; nothing moves without your approval.'
         },
         scan_empty: {
-          title: 'Scan complete — no new proposals',
+          title: 'Nothing to file. ' + folder + ' is tidy.',
           copy: 'Ori found no new eligible files. No changes were made.'
         },
         completed: {
-          title: 'Batch complete',
-          copy: 'Every candidate has a recorded outcome. View History for the item-by-item record.'
+          title: 'Nothing to file. ' + folder + ' is tidy.',
+          copy: 'Every file in the last scan has a recorded result. View History for the file-by-file record.'
         },
         unscanned: {
           title: 'Not scanned in this session',
@@ -2475,6 +2952,10 @@
       const state = states[emptyReviewState] || states.unscanned;
       empty.appendChild(el('p', 'fj-empty-title', state.title));
       empty.appendChild(el('p', 'fj-empty-copy', state.copy));
+      // A finished or empty scan offers the next step in the state itself (R59).
+      if (emptyReviewState === 'scan_empty' || emptyReviewState === 'completed') {
+        empty.appendChild(button('Scan now', 'fj-btn fj-btn-secondary', () => void scanNow()));
+      }
       if (emptyReviewState === 'completed') {
         empty.appendChild(
           button('View History', 'fj-btn fj-btn-secondary', () => selectTab('history'))
@@ -2486,13 +2967,25 @@
       return;
     }
 
-    const protection = protectionPrompt();
-    if (protection && reviewView !== 'groups') container.appendChild(protection);
-    if (groupReview?.batch_id === lastBatch.id && groupReview.counts.unknown > 0) {
+    const protection = protectionStrip();
+    if (reviewView === 'groups') {
+      // Before the first folder card there is only the lead line and the frame
+      // title (R56): no progress, summary, saved-review picker or view switch.
+      // All files stays reachable from the header, and holds the picker.
+      container.appendChild(renderPictureView());
+      if (protection) container.appendChild(protection);
+      appendReviewFooter(container, focusedReviewControlID);
+      // The plan names the files this picture draws. Coming back from All files, or
+      // a different list opening, means it was asked about other files: ask again.
+      if (planLoadState === 'loaded' && planAskedKey !== planFileIDs().join(',')) schedulePlan();
+      return;
+    }
+    if (protection) container.appendChild(protection);
+    if (picture?.batch_id === lastBatch.id && picture.counts?.unknown > 0) {
       const unknown = el(
         'p',
         'fj-batch-load-notice',
-        'Some candidates have an unsupported saved state. They were not counted as completed; inspect All files before continuing.'
+        'Some files have a saved state this version does not understand. They were not counted as completed; inspect All files before continuing.'
       );
       unknown.setAttribute('role', 'alert');
       container.appendChild(unknown);
@@ -2503,12 +2996,6 @@
     container.appendChild(summary);
     container.appendChild(savedBatchPicker());
     container.appendChild(reviewViewSwitch());
-    if (reviewView === 'groups') {
-      container.appendChild(renderReviewGroups());
-      if (protection) container.appendChild(protection);
-      appendReviewFooter(container, focusedReviewControlID);
-      return;
-    }
     container.appendChild(filterBar());
 
     const rows = visibleCandidates();
@@ -2522,7 +3009,7 @@
             formatCount(problems) +
             (problems === 1 ? ' problem still needs attention.' : ' problems still need attention.')
           : summaryData.total
-            ? 'Review complete. Every candidate has a recorded outcome.'
+            ? 'Review complete. Every file has a recorded result.'
             : 'Scan complete. No files needed filing.';
       }
       container.appendChild(el('p', 'fj-empty-copy', emptyCopy));
@@ -2539,6 +3026,18 @@
 
   function appendReviewFooter(container, focusedReviewControlID) {
     const footer = el('div', 'fj-footer');
+    // R23: the one-file bar sits right above the File button, so it stays in view
+    // however far down the picture the selected file is.
+    if (reviewView === 'groups' && picture?.batch_id === lastBatch?.id) {
+      const bar = window.FileJanitorPicture?.renderFileBar?.(document, picture, {
+        editsAvailable: reviewEditsAvailable(),
+        destinations: categories,
+        selectedFile,
+        onSelectFile: file => selectFile(file),
+        onFileChoice: (file, choice) => void answerFile(file, choice, reviewEditBinding())
+      });
+      if (bar) footer.appendChild(bar);
+    }
     const selection = el('p', 'fj-selection');
     selection.id = 'fileJanitorSelection';
     selection.setAttribute('role', 'status');
@@ -2546,18 +3045,58 @@
     footer.appendChild(selection);
     if (draftEnabled) footer.appendChild(draftSaveStatus());
 
+    // R37: files marked for Trash need their own tick, naming the count, before the
+    // button works. It is never ticked by Ori and is cleared when the count changes.
+    const model = fileButtonState();
+    if (model.needsTrashTick && planMatchesDraft()) {
+      const ack = el('label', 'fj-trash-ack');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.id = 'fileJanitorTrashAck';
+      box.checked = trashAcknowledgedFor === plan.trash_count;
+      const askedFor = plan.trash_count;
+      box.addEventListener('change', () => {
+        trashAcknowledgedFor = box.checked ? askedFor : 0;
+        updateSelectionSummary();
+      });
+      ack.appendChild(box);
+      const ackText = el(
+        'span',
+        'fj-trash-ack-text',
+        window.FileJanitorPicture.trashTickLabel(askedFor)
+      );
+      ackText.id = 'fileJanitorTrashAckText';
+      ack.appendChild(ackText);
+      footer.appendChild(ack);
+    }
+    // More than one press can file (R39). Unticking a folder is the way out; when
+    // no single folder brings it under the limit, starting from nothing is.
+    if (draftEnabled && planMatchesDraft() && plan.over_limit)
+      footer.appendChild(
+        button('Untick everything', 'fj-btn fj-btn-secondary', reviewEditCallback('clear_all'))
+      );
+    if (planLoadState === 'error')
+      footer.appendChild(
+        button('Check again', 'fj-btn fj-btn-secondary', () => {
+          planLoadState = 'idle';
+          void loadReviewPlan();
+        })
+      );
     const approve = button(
-      'Review selected changes',
-      'fj-btn fj-btn-primary',
-      () => void startApproval()
+      model.label,
+      'fj-btn fj-btn-primary' + (model.trash > 0 ? ' fj-btn-destructive' : ''),
+      () => void pressFile()
     );
     approve.id = 'fileJanitorApprove';
     footer.appendChild(approve);
     container.appendChild(footer);
 
     updateSelectionSummary();
+    // The plan check redraws after the person acted, so focus has to come back to
+    // whatever they were on: a folder tick, an "and N more" control, the Trash tick
+    // or the main button as much as a table control.
     if (
-      /^fileJanitor(?:Select|Category|FileDetailsToggle|Trash|Skip|Group)-/.test(
+      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|TrashCopy|PutBack|File|ReviewAgain|Retry)-|Approve$|TrashAck$|ShowEarlier$|FileMenu$|FileBarCancel$|Picture$)/.test(
         focusedReviewControlID
       )
     ) {
@@ -2565,225 +3104,130 @@
     }
   }
 
-  // ------------------------------------------------------- confirm and apply
+  // ------------------------------------------------------------------ the press
 
-  // renderConfirmation shows the final, server-derived plan: the exact
-  // destination each file will get, including any rename forced by a name
-  // already in use. This is the last thing the user sees before anything moves.
-  // approval is { preview, decisions } — the same object held in
-  // pendingPreview. It is passed through rather than re-read from module state
-  // when the button is pressed, so nothing that happens between rendering the
-  // confirmation and the user clicking it can quietly empty the button.
-  function renderConfirmation(approval) {
-    const previewResult = (approval && approval.preview) || {};
-    const host = document.getElementById('fileJanitorConfirmHost');
-    if (!host) return;
-    clear(host);
-
-    const panel = el('section', 'fj-confirm');
-    panel.setAttribute('role', 'group');
-    panel.setAttribute('aria-labelledby', 'fileJanitorConfirmTitle');
-
-    const title = el('h3', 'fj-confirm-title', 'Confirm these moves');
-    title.id = 'fileJanitorConfirmTitle';
-    panel.appendChild(title);
-
-    const moveCount = previewResult.move_count || 0;
-    const trashCount = previewResult.trash_count || 0;
-    const sentences = [];
-    if (moveCount) {
-      sentences.push(
-        moveCount === 1 ? 'Ori will move 1 file.' : 'Ori will move ' + moveCount + ' files.'
-      );
-    }
-    if (trashCount) {
-      sentences.push(
-        (trashCount === 1
-          ? 'Ori will move 1 file to your system Trash'
-          : 'Ori will move ' + trashCount + ' files to your system Trash') +
-          ', where you can restore them. Nothing is deleted permanently.'
-      );
-    } else {
-      sentences.push('Nothing is deleted.');
-    }
-    const lead = el('p', 'fj-confirm-lead', sentences.join(' '));
-    lead.setAttribute('role', 'status');
-    panel.appendChild(lead);
-
-    const items = previewResult.items || [];
-    const destinations = new Map();
-    for (const item of items) {
-      const target =
-        item.operation === 'trash'
-          ? 'Trash (separate acknowledgement)'
-          : String(item.destination || '')
-              .split('/')
-              .slice(0, -1)
-              .join('/') || 'Destination unavailable';
-      destinations.set(target, (destinations.get(target) || 0) + 1);
-    }
-    const totals = el('ul', 'fj-confirm-totals');
-    for (const [target, count] of destinations)
-      totals.appendChild(el('li', '', count + ' → ' + target));
-    panel.appendChild(totals);
-    panel.appendChild(
-      el(
-        'p',
-        'fj-sub',
-        'Only these exact selected operations are authorized. Other saved batch candidates are unchanged. Collision names may be re-resolved to avoid overwriting.'
-      )
-    );
-    const list = el('ul', 'fj-confirm-list');
-    let offset = 0;
-    const pageStatus = el('p', 'fj-sub');
-    pageStatus.setAttribute('role', 'status');
-    const pages = el('nav', 'fj-actions');
-    pages.setAttribute('aria-label', 'Exact preview file pages');
-    const previous = button('Previous preview files', 'fj-btn', () => {
-      offset = Math.max(0, offset - PAGE_SIZE);
-      paintItems();
-    });
-    const next = button('Next preview files', 'fj-btn', () => {
-      offset += PAGE_SIZE;
-      paintItems();
-    });
-    function paintItems() {
-      clear(list);
-      items.slice(offset, offset + PAGE_SIZE).forEach(item => {
-        const isTrash = item.operation === 'trash';
-        const entry = el('li', 'fj-confirm-item' + (isTrash ? ' fj-confirm-trash' : ''));
-        entry.appendChild(el('span', 'fj-confirm-name', displayName(item)));
-        entry.appendChild(el('span', 'fj-confirm-arrow', ' → '));
-        entry.appendChild(
-          el('span', 'fj-confirm-destination', isTrash ? 'Trash (restorable)' : item.destination)
-        );
-        if (item.renamed) {
-          // Ori never overwrites, so a taken name means a new one. Saying so here
-          // is the difference between a surprise and an informed choice.
-          const note = el(
-            'span',
-            'fj-confirm-renamed',
-            ' (renamed — a file with that name is already there)'
-          );
-          entry.appendChild(note);
-        }
-        list.appendChild(entry);
-      });
-      pageStatus.textContent =
-        'Showing ' +
-        (items.length ? offset + 1 : 0) +
-        '–' +
-        Math.min(offset + PAGE_SIZE, items.length) +
-        ' of ' +
-        items.length +
-        ' exact selected operations.';
-      previous.disabled = offset === 0;
-      next.disabled = offset + PAGE_SIZE >= items.length;
-    }
-    paintItems();
-    panel.appendChild(pageStatus);
-    panel.appendChild(list);
-    if (items.length > PAGE_SIZE) {
-      pages.appendChild(previous);
-      pages.appendChild(next);
-      panel.appendChild(pages);
-    }
-
-    const actions = el('div', 'fj-actions');
-    const confirm = button(
-      confirmLabel(previewResult),
-      'fj-btn fj-btn-primary' + (trashCount > 0 ? ' fj-btn-destructive' : ''),
-      () => void applyApproval(approval)
-    );
-    confirm.id = 'fileJanitorConfirmApply';
-    // A batch containing any removal needs a second, explicit acknowledgement
-    // stating the exact number of files going to Trash. Moves alone do not:
-    // reserving the extra step for the destructive case is what keeps it
-    // meaningful rather than something to click through (FR-70).
-    let initialFocus = confirm;
-    if (trashCount > 0) {
-      confirm.disabled = true;
-      // A disabled control cannot be focused, so focusing it would drop focus
-      // to the document body — on the destructive path, where losing your place
-      // matters most. Focus goes to the acknowledgement instead, which is the
-      // thing the user has to act on next anyway.
-      const ack = el('label', 'fj-trash-ack');
-      const box = document.createElement('input');
-      box.type = 'checkbox';
-      box.id = 'fileJanitorTrashAck';
-      // Say why the button is unavailable rather than leaving it inert and
-      // unexplained.
-      confirm.setAttribute('aria-describedby', 'fileJanitorTrashAckText');
-      box.addEventListener('change', () => {
-        updateConfirmationAvailability();
-        // Ticking the box is the moment the action becomes available, so hand
-        // the user straight to it instead of making them tab back.
-        if (box.checked) confirm.focus?.();
-      });
-      initialFocus = box;
-      ack.appendChild(box);
-      const ackText = el(
-        'span',
-        'fj-trash-ack-text',
-        trashCount === 1
-          ? 'Yes, move 1 file to the Trash.'
-          : 'Yes, move ' + trashCount + ' files to the Trash.'
-      );
-      ackText.id = 'fileJanitorTrashAckText';
-      ack.appendChild(ackText);
-      panel.appendChild(ack);
-    }
-    actions.appendChild(confirm);
-    actions.appendChild(
-      button('Cancel', 'fj-btn fj-btn-secondary', () => {
-        // Cancelling abandons the approval; the decisions themselves are still
-        // recorded, so nothing the user chose is lost.
-        approvalGeneration++;
-        pendingPreview = null;
-        clear(host);
-        // Destroying the panel would otherwise drop focus to the body, leaving
-        // a keyboard user at the top of the document with no idea where they
-        // were. Put them back on the control that opened it.
-        restoreFocus();
-      })
-    );
-    panel.appendChild(actions);
-    host.appendChild(panel);
-    updateConfirmationAvailability();
-    initialFocus.focus?.();
-  }
-
-  // focusReturn holds the element that opened the confirmation panel so focus
-  // can go back there when the panel closes for any reason.
-  let focusReturn = null;
-
-  function rememberFocus() {
-    const active = document.activeElement;
-    focusReturn = active && active !== document.body ? active : null;
-  }
-
-  function restoreFocus() {
-    const target = focusReturn;
-    focusReturn = null;
-    if (!target) return;
-    // The opener may have been re-rendered away; fall back to the approve
-    // button, which is the equivalent place in the rebuilt surface.
-    if (target.isConnected) {
-      target.focus?.();
+  // One press files exactly the plan on screen, or nothing (R36). The request quotes
+  // the saved choices, the plan's digest and the Trash tick; the server works the
+  // plan out again, and if it differs in any way nothing moves and the fresh plan
+  // comes back. A retry key makes pressing twice, or retrying after a lost
+  // connection, report the first result instead of filing again (R41).
+  async function pressFile() {
+    const id = wsId();
+    const model = fileButtonState();
+    if (
+      !id ||
+      !lastBatch ||
+      !planMatchesDraft() ||
+      model.disabled ||
+      busy ||
+      disposed ||
+      departingForProtection ||
+      batchLoadState !== 'loaded'
+    )
       return;
+    const scope = requestScope();
+    const batchId = lastBatch.id;
+    const epoch = approvalGeneration;
+    const pressed = plan;
+    // The key belongs to this exact plan. A press whose answer was lost reuses it;
+    // any other plan gets a new one.
+    if (!pendingPress || pendingPress.digest !== pressed.plan_digest)
+      pendingPress = { digest: pressed.plan_digest, key: newClientKey() };
+    const press = pendingPress;
+    busy = true;
+    pressing = true;
+    showError('');
+    pressNotice = '';
+    lastResults = null;
+    markRemovedSeen();
+    updateSelectionSummary();
+    const control = document.getElementById('fileJanitorApprove');
+    if (control) control.textContent = 'Filing…';
+    try {
+      const response = await fetch(
+        apiBase(id) + '/batches/' + encodeURIComponent(batchId) + '/file',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            expected_revision: pressed.revision,
+            expected_group_revision: pressed.group_revision,
+            plan_digest: pressed.plan_digest,
+            trash_acknowledged: pressed.trash_count > 0 ? trashAcknowledgedFor : 0,
+            client_key: press.key
+          })
+        }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!scopeCurrent(scope) || lastBatch?.id !== batchId || epoch !== approvalGeneration) return;
+      if (!response.ok) {
+        const apiError = body.error || body;
+        const code = apiError?.code || '';
+        if (code === 'plan_changed' || code === 'trash_not_acknowledged') {
+          // Nothing moved. Redraw from what is true now and say which files changed.
+          pendingPress = null;
+          trashAcknowledgedFor = 0;
+          const fresh = apiError.details?.plan;
+          changedMarks = new Set();
+          lookedNames = new Map(
+            Object.entries(planItems).map(([key, item]) => [key, item.final_name])
+          );
+          for (const gone of fresh?.changed?.items || []) changedMarks.add(gone.candidate_id);
+          pressNotice =
+            code === 'plan_changed'
+              ? 'The folder changed since you looked. Nothing was filed. Look at the picture, then press File again.'
+              : 'Files are going to the Trash and that was not confirmed. Nothing was filed.';
+          resetPlanKeepingMarks();
+          await loadBatch();
+          return;
+        }
+        // A refusal that is not about the plan (the review moved, too large, or
+        // unavailable) states itself and the review is read again; nothing was
+        // filed. A review that moved is a different plan, so its key is dropped.
+        if (code === 'review_conflict') pendingPress = null;
+        throw new Error((apiError && apiError.message) || 'Ori could not file these files.');
+      }
+      const result = body.filing || {};
+      pendingPress = null;
+      trashAcknowledgedFor = 0;
+      // Reload first so the picture reflects the new states, then report the
+      // outcome beneath it. History gains the entries this press just wrote.
+      await loadBatch();
+      if (!scopeCurrent(scope)) return;
+      await showReceipt(scope, result);
+      await loadHistory();
+    } catch (error) {
+      if (!scopeCurrent(scope)) return;
+      // The answer was lost or refused. The key is kept: pressing again reports the
+      // first result if the press did go through, and files once if it did not.
+      showError(error.message || 'Ori could not file these files.');
+      await loadBatch();
+    } finally {
+      pressing = false;
+      if (scopeCurrent(scope)) {
+        busy = false;
+        updateSelectionSummary();
+      }
     }
-    document.getElementById('fileJanitorApprove')?.focus?.();
   }
 
-  // confirmLabel names both halves of a mixed batch so the button never
-  // understates what it is about to do.
-  function confirmLabel(previewResult) {
-    const moves = previewResult.move_count || 0;
-    const trashes = previewResult.trash_count || 0;
-    const parts = [];
-    if (moves) parts.push(moves === 1 ? 'Move 1 file' : 'Move ' + moves + ' files');
-    if (trashes) parts.push(trashes === 1 ? 'Trash 1 file' : 'Trash ' + trashes + ' files');
-    return parts.length === 0 ? 'Apply' : parts.join(' and ');
+  // A fresh key for one press: random, URL-safe, 16 to 128 characters.
+  function newClientKey() {
+    const bytes = new Uint8Array(18);
+    (window.crypto || globalThis.crypto).getRandomValues(bytes);
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  // After a refused press the plan is asked for again, but what the person was told
+  // about the refusal (the marks, the notice) must survive that.
+  function resetPlanKeepingMarks() {
+    const marks = changedMarks;
+    const looked = lookedNames;
+    const notice = pressNotice;
+    resetPlan();
+    changedMarks = marks;
+    lookedNames = looked;
+    pressNotice = notice;
   }
 
   // ------------------------------------------------------------- privacy & settings
@@ -2915,6 +3359,9 @@
     const repair = repairAction(lastStatus);
     if (repair) health.appendChild(repair);
     panel.appendChild(health);
+
+    const protectionSection = protectionSettings();
+    if (protectionSection) panel.appendChild(protectionSection);
 
     panel.appendChild(curatorSection());
 
@@ -3480,6 +3927,15 @@
     title.id = 'fileJanitorHistoryTitle';
     panel.appendChild(title);
 
+    // One line for the most recent filing, with Undo all while it is on offer (R46).
+    // The per-file list below is unchanged.
+    const lastLine = window.FileJanitorReceipt?.renderLastFiling?.(document, lastFiling, {
+      when: formatWhen(lastFiling?.completed_at || lastFiling?.admitted_at),
+      busy: receiptBusy,
+      onUndoAll: summary => void undoAll(summary.filing_id)
+    });
+    if (lastLine) panel.appendChild(lastLine);
+
     const bar = el('div', 'fj-filters');
     bar.setAttribute('role', 'group');
     bar.setAttribute('aria-label', 'Filter history');
@@ -3618,6 +4074,7 @@
     // Separate ownership: changing a list filter must not cancel or qualify
     // the unfiltered canonical read. Share its first page when possible.
     const receiptRead = refreshReceipt ? loadLatestReceipt(scope, query ? null : listRead) : null;
+    if (refreshReceipt) void loadLastFiling(scope);
     notifySubscribers();
     try {
       const body = await listRead;
@@ -3680,273 +4137,219 @@
 
   const RESULT_MARKS = { applied: '✓', failed: '!', stale: '•' };
 
-  function outcomeOperation(outcome) {
-    // Only the operation field is authoritative. A destination-looking string,
-    // filename, or clicked control is not evidence that an apply actually ran
-    // as a move.
-    return outcome.operation === 'move' || outcome.operation === 'trash' ? outcome.operation : '';
-  }
-
-  function outcomeLabel(outcome) {
-    const operation = outcomeOperation(outcome);
-    if (outcome.result === 'stale') return 'Changed — not moved';
-    if (outcome.result === 'failed') return 'Not moved';
-    if (outcome.result === 'applied' && operation === 'move') return 'Filed';
-    if (outcome.result === 'applied' && operation === 'trash') return 'Moved to Trash';
-    if (outcome.result === 'applied') return 'Completed';
-    return safeName(outcome.result, 'Not completed');
-  }
-
   // renderResults reports what happened per file. Operation evidence comes
   // from each authoritative outcome: an applied Trash is never called "filed",
   // and an older response without operation data gets neutral wording.
-  function renderResults(result) {
-    const host = document.getElementById('fileJanitorConfirmHost');
+  function renderResults(view, { focus = true } = {}) {
+    // Kept so a redraw of the console (a status refresh that lands after the press)
+    // shows the same account again instead of wiping it.
+    lastResults = view;
+    const host = document.getElementById('fileJanitorResultsHost');
     if (!host) return;
     clear(host);
+    const drawing = window.FileJanitorReceipt;
+    if (!drawing || !view) return;
 
-    const panel = el('section', 'fj-results');
-    // Focus moves here below, so the user is taken to the outcome rather than
-    // told about it from elsewhere. A live region as well would announce the
-    // same text twice, so this is a labelled group instead of role="status".
-    panel.setAttribute('role', 'group');
-    panel.setAttribute('tabindex', '-1');
-    panel.setAttribute('aria-labelledby', 'fileJanitorResultsSummary');
-
-    const outcomes = Array.isArray(result.outcomes) ? result.outcomes : [];
-    let filed = 0;
-    let trashed = 0;
-    let completed = 0;
-    let failed = 0;
-    let stale = 0;
-    outcomes.forEach(outcome => {
-      const operation = outcomeOperation(outcome);
-      if (outcome.result === 'applied' && operation === 'move') filed += 1;
-      else if (outcome.result === 'applied' && operation === 'trash') trashed += 1;
-      else if (outcome.result === 'applied') completed += 1;
-      else if (outcome.result === 'failed') failed += 1;
-      else if (outcome.result === 'stale') stale += 1;
-    });
-    // Older aggregate-only replies cannot prove which operation succeeded, so
-    // they are deliberately reported as completed changes rather than files.
-    if (outcomes.length === 0) {
-      completed = Number(result.applied) || 0;
-      failed = Number(result.failed) || 0;
-      stale = Number(result.stale) || 0;
-    }
-
-    const parts = [];
-    if (filed) parts.push(filed + (filed === 1 ? ' file filed' : ' files filed'));
-    if (trashed) parts.push(formatCount(trashed) + ' moved to Trash');
-    if (completed) parts.push(formatCount(completed) + ' changes completed');
-    if (failed) parts.push(formatCount(failed) + ' could not be moved');
-    if (stale) parts.push(formatCount(stale) + ' changed since you approved');
-    if (parts.length === 0) parts.push('Nothing was moved');
-    const resultsSummary = el('p', 'fj-results-summary', parts.join(' · ') + '.');
-    resultsSummary.id = 'fileJanitorResultsSummary';
-    panel.appendChild(resultsSummary);
-    if (result.replayed) {
-      panel.appendChild(
-        el('p', 'fj-results-replayed', 'Already completed earlier; nothing ran again.')
-      );
-    }
-
-    const list = el('ul', 'fj-results-list');
-    outcomes.forEach(outcome => {
-      const entry = el('li', 'fj-results-item fj-results-' + (outcome.result || 'failed'));
-      const mark = el('span', 'fj-results-mark', RESULT_MARKS[outcome.result] || '!');
-      mark.setAttribute('aria-hidden', 'true');
-      entry.appendChild(mark);
-      entry.appendChild(el('span', 'fj-results-name', displayName(outcome)));
-      entry.appendChild(el('span', 'fj-results-state', ' — ' + outcomeLabel(outcome)));
-      if (
-        outcome.destination &&
-        outcome.result === 'applied' &&
-        outcomeOperation(outcome) === 'move'
-      ) {
-        entry.appendChild(el('span', 'fj-results-destination', ' → ' + outcome.destination));
-      }
-      if (outcome.message) {
-        entry.appendChild(el('span', 'fj-results-message', ' ' + outcome.message));
-      }
-      list.appendChild(entry);
-    });
-    panel.appendChild(list);
-
-    const actions = el('div', 'fj-results-actions');
-    actions.appendChild(
-      button('View History', 'fj-btn fj-btn-secondary', () => selectTab('history'))
-    );
-    if (stale) {
-      actions.appendChild(button('Scan again', 'fj-btn fj-btn-secondary', () => void scanNow()));
-    }
-    panel.appendChild(actions);
+    const ctx = {
+      folderName: compactFolderName(lastStatus?.settings?.root_path),
+      filingRoot: lastStatus?.settings?.filing_root_name || 'Filed',
+      busy: receiptBusy,
+      onUndoAll: summary => void undoAll(summary.filingId || summary.filing_id),
+      onScanAgain: () => void scanAgainAfterUndo(view.filingId),
+      onDone: () => closeResults()
+    };
+    // Focus moves to the panel below, so the user is taken to the outcome rather
+    // than told about it from elsewhere. The panel is a labelled group, not a live
+    // region: a live region as well would announce the same text twice.
+    const panel =
+      view.kind === 'undone'
+        ? drawing.renderUndone(document, view.result, ctx)
+        : drawing.renderReceipt(document, view.model, ctx);
     host.appendChild(panel);
-    // The button that was pressed no longer exists. Move focus to the outcome
-    // so a keyboard user lands on what happened instead of at the top of the
-    // document, and drop the saved opener — this panel is where they are now.
-    focusReturn = null;
-    panel.focus?.();
+    // Move focus to the outcome so a keyboard user lands on what happened instead
+    // of at the top of the document (not when the same account is only redrawn).
+    if (focus) panel.focus?.();
   }
 
-  // startApproval asks the server for the final plan and shows it for
-  // confirmation. Nothing moves at this step.
-  async function startApproval() {
-    const id = wsId();
-    if (
-      !id ||
-      !lastBatch ||
-      !reviewEditsAvailable() ||
-      busy ||
-      departingForProtection ||
-      selected.size + trashMarked.size === 0
-    )
-      return;
-    const scope = requestScope();
-    const batchId = lastBatch.id;
-    const approvalEpoch = approvalGeneration;
-    busy = true;
-    showError('');
-    rememberFocus();
-    const control = document.getElementById('fileJanitorApprove');
-    if (control) control.disabled = true;
+  // The receipt of the press that just finished: the server's account of what
+  // happened, read back from its journal. When it cannot be read the answer to the
+  // press itself is drawn instead, with less to say (no count of files left loose).
+  async function showReceipt(scope, result) {
+    const drawing = window.FileJanitorReceipt;
+    if (!drawing) return;
+    const filingId = result.filing_id || '';
+    const fromJournal = await readReceiptModel(scope, filingId, Boolean(result.replayed));
+    if (!scopeCurrent(scope)) return;
+    renderResults({
+      kind: 'receipt',
+      filingId,
+      model: fromJournal || drawing.receiptModelFromResult(result)
+    });
+  }
+
+  // The receipt as the server's journal tells it, or null when it cannot be read.
+  async function readReceiptModel(scope, filingId, replayed) {
+    const drawing = window.FileJanitorReceipt;
+    if (!drawing || !filingId) return null;
     try {
-      const decisions = draftEnabled
-        ? reviewDraft.choices.map(choice => ({
-            candidate_id: choice.candidate_id,
-            operation: choice.operation,
-            category: choice.category || ''
-          }))
-        : Array.from(selected).map(candidateId => {
-            const candidate =
-              lastCandidates.find(item => item.id === candidateId) ||
-              protectionCandidates.get(candidateId) ||
-              {};
-            // For a flagged row the user's own choice is the ONLY acceptable
-            // category. Falling back to candidate.category here would file it
-            // using the guess that was flagged as not trustworthy — the exact
-            // outcome the flag exists to prevent. Sending an empty category makes
-            // the server refuse it rather than this silently deciding.
-            const category = unresolvedNeedsReview(candidate)
-              ? ''
-              : candidate.decision_category || candidate.category || '';
-            return { candidate_id: candidateId, operation: 'move', category };
-          });
-      if (!draftEnabled)
-        trashMarked.forEach(candidateId => {
-          decisions.push({ candidate_id: candidateId, operation: 'trash', category: '' });
-        });
-      const response = await fetch(apiBase(id) + '/preview', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          decisions,
-          ...(draftEnabled ? { review_revision: reviewDraft.revision } : {})
-        })
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const apiError = body.error || body;
-        const error = new Error(
-          (apiError && apiError.message) || 'Ori could not prepare these moves.'
-        );
-        error.conflict = draftEnabled && response.status === 409;
-        throw error;
-      }
-      if (!scopeCurrent(scope) || lastBatch?.id !== batchId || approvalEpoch !== approvalGeneration)
-        return;
-      pendingPreview = { preview: body.preview, decisions, approvalGeneration: approvalEpoch };
-      // Release the busy flag BEFORE the confirmation goes on screen. Rendering
-      // it first left a window in which the confirm button was visible and
-      // enabled while applyApproval still saw busy === true and returned
-      // silently: a user who clicked promptly got nothing at all, with no error
-      // and no request. The approval request is finished by this point, so
-      // there is nothing left to be busy with.
-      busy = false;
-      renderConfirmation(pendingPreview);
-    } catch (error) {
-      if (scopeCurrent(scope) && lastBatch?.id === batchId) {
-        showError(error.message || 'Ori could not prepare these moves.');
-        if (error.conflict) {
-          draftLoadState = 'conflict';
-          discardProtectionApproval();
-          renderBatch();
-        }
-      }
-    } finally {
-      if (scopeCurrent(scope)) {
-        busy = false;
-        updateSelectionSummary();
+      const response = await fetch(apiBase(scope.id) + '/filings/' + encodeURIComponent(filingId));
+      if (!response.ok) return null;
+      const body = await response.json();
+      return body?.receipt
+        ? { ...drawing.receiptModelFromReceipt(body.receipt), replayed: Boolean(replayed) }
+        : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Done closes the account and puts focus back on the picture.
+  function closeResults() {
+    lastResults = null;
+    const host = document.getElementById('fileJanitorResultsHost');
+    if (host) clear(host);
+    // The button that was pressed is gone. Focus goes to the picture; when the
+    // review has nothing left to draw, to the Scan now button, then to the tab, so a
+    // keyboard user is never dropped at the top of the page.
+    for (const id of ['fileJanitorPicture', 'fileJanitorScan', 'fileJanitorTab-review']) {
+      const target = document.getElementById(id);
+      if (target?.focus) {
+        target.focus();
+        break;
       }
     }
   }
 
-  // applyApproval spends the approval and reports the per-item outcome.
-  async function applyApproval(approval) {
-    const id = wsId();
-    // Prefer the approval this button was built with. Falling back to module
-    // state keeps older call sites working, but the button the user pressed is
-    // the authority on what they approved.
-    const active = approval && approval.preview ? approval : pendingPreview;
-    if (
-      !id ||
-      busy ||
-      !active ||
-      disposed ||
-      active !== pendingPreview ||
-      active.approvalGeneration !== approvalGeneration ||
-      departingForProtection ||
-      (active.preview.trash_count > 0 &&
-        !document.getElementById('fileJanitorTrashAck')?.checked) ||
-      batchLoadState !== 'loaded' ||
-      active.preview.batch_id !== lastBatch?.id
-    )
-      return;
+  // Undo all (R47 to R50): one request that puts back every file one press of File
+  // moved. It is asked from the receipt or from History, so the answer is shown on
+  // the Review tab either way. A second press, from another window, reports the
+  // first run's answer and moves nothing.
+  async function undoAll(filingId) {
     const scope = requestScope();
+    if (!scope.id || !filingId || receiptBusy || busy || disposed) return;
+    receiptBusy = true;
     busy = true;
+    let drawn = false;
     showError('');
-    const control = document.getElementById('fileJanitorConfirmApply');
-    if (control) {
-      control.disabled = true;
-      control.textContent = 'Moving…';
-    }
+    if (lastResults) renderResults(lastResults);
+    else renderHistory();
     try {
-      const response = await fetch(apiBase(id) + '/apply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          batch_id: active.preview.batch_id,
-          approval_token: active.preview.token,
-          decisions: active.decisions
-        })
-      });
+      const response = await fetch(
+        apiBase(scope.id) + '/filings/' + encodeURIComponent(filingId) + '/undo',
+        { method: 'POST' }
+      );
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        const apiError = body.error || body;
-        throw new Error((apiError && apiError.message) || 'Ori could not apply these moves.');
-      }
       if (!scopeCurrent(scope)) return;
-      const result = body.result || {};
-      pendingPreview = null;
-      // Reload first so the table reflects the new states, then report the
-      // outcome beneath it. History gains the entries this apply just wrote.
+      if (!response.ok) {
+        const apiError = body.error || body;
+        if (apiError?.code === 'undo_unavailable') {
+          // Nothing was put back and Undo all is not on offer any more: say so and
+          // draw the receipt again so the button goes.
+          showError(
+            'Undo all is not available for this filing any more. The files stay where they are.'
+          );
+          await refreshFilingViews(scope, filingId);
+          return;
+        }
+        throw new Error((apiError && apiError.message) || 'Ori could not put the files back.');
+      }
+      receiptBusy = false;
+      busy = false;
+      // The files are back: leave History for the Review tab, where the answer and
+      // the one button for what comes next live.
+      if (consoleTab !== 'review') selectTab('review');
       await loadBatch();
       if (!scopeCurrent(scope)) return;
-      renderResults(result);
+      // Drawn once, with focus on it: drawing it again would drop focus to the page.
+      renderResults({ kind: 'undone', filingId, result: body.undo || {} });
+      drawn = true;
       await loadHistory();
     } catch (error) {
       if (!scopeCurrent(scope)) return;
-      approvalGeneration++;
-      pendingPreview = null;
-      clear(document.getElementById('fileJanitorConfirmHost'));
-      showError(error.message || 'Ori could not apply these moves.');
-      await loadBatch();
+      // The request was lost or failed before an answer: nothing is claimed here.
+      // The button stays, and pressing it again reports the first run if one began.
+      showError(error.message || 'Ori could not put the files back.');
     } finally {
       if (scopeCurrent(scope)) {
+        receiptBusy = false;
         busy = false;
+        // Where Undo all did not finish, the panel comes back from the busy state
+        // with focus on it, so a keyboard user is not sent to the top of the page.
+        if (!drawn) {
+          if (lastResults) renderResults(lastResults);
+          else if (consoleTab === 'history') renderHistory();
+        }
         updateSelectionSummary();
       }
     }
+  }
+
+  // Draws the receipt again from the journal (after a refusal), and History's line.
+  async function refreshFilingViews(scope, filingId) {
+    receiptBusy = false;
+    busy = false;
+    if (lastResults?.kind === 'receipt') {
+      const model = await readReceiptModel(scope, filingId, lastResults.model?.replayed);
+      if (!scopeCurrent(scope)) return;
+      if (model) renderResults({ ...lastResults, model }, { focus: false });
+    }
+    await loadHistory({ refreshReceipt: false });
+  }
+
+  // "Scan again to review them" (R52) is one press with two steps. Ori first
+  // forgets that it put these files back, then runs the ordinary scan; it never
+  // scans on its own. The scan only starts after the forgetting succeeded.
+  async function scanAgainAfterUndo(filingId) {
+    const scope = requestScope();
+    if (!scope.id || !filingId || receiptBusy || busy || disposed) return;
+    receiptBusy = true;
+    showError('');
+    if (lastResults) renderResults(lastResults);
+    let forgotten = false;
+    try {
+      const response = await fetch(
+        apiBase(scope.id) + '/filings/' + encodeURIComponent(filingId) + '/forget-restored',
+        { method: 'POST' }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!scopeCurrent(scope)) return;
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || 'Ori could not start the scan.');
+      }
+      forgotten = true;
+    } catch (error) {
+      if (scopeCurrent(scope)) showError(error.message || 'Ori could not start the scan.');
+    } finally {
+      if (scopeCurrent(scope)) {
+        receiptBusy = false;
+        if (lastResults) renderResults(lastResults);
+      }
+    }
+    if (!forgotten || !scopeCurrent(scope)) return;
+    // The ordinary scan, from this one press. What it finds is drawn as the review.
+    closeResults();
+    await scanNow({ adoptNew: true });
+    // The review was redrawn under the person: focus goes back to its picture.
+    if (scopeCurrent(scope)) document.getElementById('fileJanitorPicture')?.focus?.();
+  }
+
+  // History's one line for the most recent filing (R46), read beside the list.
+  async function loadLastFiling(scope) {
+    const sequence = ++lastFilingRequest;
+    try {
+      const response = await fetch(apiBase(scope.id) + '/filings?limit=1');
+      if (!response.ok) throw new Error('filings failed');
+      const body = await response.json();
+      if (!scopeCurrent(scope) || sequence !== lastFilingRequest) return;
+      lastFiling = Array.isArray(body.filings) && body.filings.length ? body.filings[0] : null;
+    } catch (_) {
+      if (!scopeCurrent(scope) || sequence !== lastFilingRequest) return;
+      // The line is a convenience: when it cannot be read it is left out, and the
+      // per-file list below says everything it did.
+      lastFiling = null;
+    }
+    renderHistory();
   }
 
   // pauseControl is the real Pause/Resume, shared by every surface that offers
@@ -4309,7 +4712,7 @@
   // renderConsoleBody paints the console's active tab. It reuses the renderers
   // the inline panel already had: they address their hosts by id, so moving
   // those hosts into the console moves the surfaces with them.
-  function renderConsoleBody(host, status, confirmation = null) {
+  function renderConsoleBody(host, status) {
     if (
       ['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state) ||
       !isConfigured(status)
@@ -4350,15 +4753,21 @@
     }
 
     // Review: readiness rows, then the batch, then — deliberately outside the
-    // batch — the confirmation step and the report of what just happened.
+    // batch — the report of what just happened.
     // Applying every file empties the batch; the account of the user's own
     // files must not be swept away with the table it came from.
+    // In the picture, nothing but the lead line and the frame comes before the
+    // first folder (R56), so the folder-access disclosure sits below it. A failed
+    // check is a real problem with a way out, so it stays on top and open.
+    let healthBelow = null;
     if (reviewView === 'groups') {
       const disclosure = el('details', 'fj-review-health');
-      disclosure.open = (status.readiness?.checks || []).some(check => check.status === 'failed');
+      const failed = (status.readiness?.checks || []).some(check => check.status === 'failed');
+      disclosure.open = failed;
       disclosure.appendChild(el('summary', 'fj-label', 'Folder access and scan status'));
       disclosure.appendChild(readinessRows(status));
-      host.appendChild(disclosure);
+      if (failed) host.appendChild(disclosure);
+      else healthBelow = disclosure;
     } else {
       host.appendChild(readinessRows(status));
     }
@@ -4367,12 +4776,27 @@
     const batchHost = el('div', 'fj-batch');
     batchHost.id = 'fileJanitorBatch';
     host.appendChild(batchHost);
-    const confirmHost = confirmation || el('div', 'fj-confirm-host');
-    confirmHost.id = 'fileJanitorConfirmHost';
-    host.appendChild(confirmHost);
+    const resultsHost = el('div', 'fj-confirm-host');
+    resultsHost.id = 'fileJanitorResultsHost';
+    host.appendChild(resultsHost);
+    if (healthBelow) host.appendChild(healthBelow);
     host.appendChild(errorRegion());
+    // What a change did, said to a screen reader and not drawn (R66). It lives here,
+    // outside the part that is redrawn after every change, so the words it is given
+    // are announced instead of being replaced with it.
+    const announcer = el('p', 'fj-sr-only');
+    announcer.id = 'fileJanitorAnnounce';
+    announcer.setAttribute('role', 'status');
+    announcer.setAttribute('aria-live', 'polite');
+    announcer.setAttribute('aria-atomic', 'true');
+    host.appendChild(announcer);
     renderBatch();
-    if (pendingPreview && !confirmation) renderConfirmation(pendingPreview);
+    if (lastResults) renderResults(lastResults, { focus: false });
+  }
+
+  function announce(message) {
+    const node = document.getElementById('fileJanitorAnnounce');
+    if (node) node.textContent = message || '';
   }
 
   // repairAction offers "Choose the folder again" when readiness says the
@@ -4538,7 +4962,7 @@
         kind: 'modal',
         container: host,
         trigger: consoleTrigger,
-        canEscape: () => !pendingPreview && !revokeConfirmed,
+        canEscape: () => !pressing && !revokeConfirmed,
         onClose: info => {
           // The coordinator closes this for its own reasons too (Escape, a
           // modal that must replace it). Mirror that into local state so the
@@ -4561,14 +4985,12 @@
   }
 
   // Update links select the current review, never an old preparation's pinned
-  // batch or approval. A live selection/confirmation in another batch stays
-  // with its existing owner until the user finishes it.
+  // batch. A live selection in another batch stays with its existing owner until
+  // the user finishes it.
   function openLatestReview(options = {}) {
     if (
       busy ||
-      (consoleOpen &&
-        (pendingPreview || selected.size > 0) &&
-        (lastBatch?.id || '') !== (options.batchId || ''))
+      (consoleOpen && selected.size > 0 && (lastBatch?.id || '') !== (options.batchId || ''))
     )
       return false;
     linkedBatchID = '';
@@ -4604,6 +5026,7 @@
   function close(options = {}) {
     if (!consoleOpen) return false;
     discardProtectionApproval();
+    lastResults = null;
     consoleOpen = false;
     settingsOpen = false;
     consoleCloseButton = null;
@@ -4727,7 +5150,6 @@
     const host = consoleHost();
     if (!host) return;
     const status = lastStatus;
-    const confirmation = pendingPreview && document.getElementById('fileJanitorConfirmHost');
     const focused = activeElement();
     let ancestor = focused;
     while (ancestor && ancestor !== host) ancestor = ancestor.parentElement || ancestor.parent;
@@ -4770,7 +5192,7 @@
     // anywhere. It corrected itself on the next repaint, which is why it looked
     // intermittent.
     host.appendChild(dialog);
-    renderConsoleBody(body, status, confirmation);
+    renderConsoleBody(body, status);
 
     paintError();
     const liveFocus = focusId && document.getElementById(focusId);
@@ -4850,6 +5272,21 @@
       const scan = button('Scan now', 'fj-btn fj-btn-secondary', () => void scanNow());
       scan.id = 'fileJanitorScan';
       scan.disabled = scanning;
+      if (consoleTab === 'review' && reviewView === 'groups') {
+        const allFiles = button('All files', 'fj-btn fj-btn-secondary', () => {
+          reviewView = 'all';
+          renderConsole();
+          document.getElementById('fileJanitorView-all')?.focus?.();
+        });
+        // The same id the view switch gives All files, so every caller that reaches
+        // All files by that control keeps working from the picture.
+        allFiles.id = 'fileJanitorView-all';
+        // With no saved review there is nothing to list, so the control is not
+        // shown (not merely disabled). The header is built when the console
+        // opens, before the review loads; renderBatch keeps this in step.
+        allFiles.hidden = !lastBatch;
+        actions.appendChild(allFiles);
+      }
       actions.appendChild(scan);
       actions.appendChild(pauseControl(settings));
     }
@@ -4920,9 +5357,10 @@
     if (!next) return;
     consoleTab = next;
     rememberedTab.set(wsId(), next);
-    // Moving tabs abandons any half-finished approval: an approval issued
-    // against the Review tab must not survive out of the user's sight.
-    pendingPreview = null;
+    // Moving tabs drops the Trash tick: it is never restored after coming back
+    // from another page (R37).
+    discardProtectionApproval();
+    lastResults = null;
     consoleItem = '';
     renderConsole();
     document.getElementById('fileJanitorTab-' + next)?.focus?.();
@@ -4988,7 +5426,7 @@
     const batch = /^[A-Za-z0-9_-]{1,128}$/.test(requestedBatch) ? requestedBatch : '';
     if (draftEnabled && batch !== linkedBatchID) {
       linkedBatchID = batch;
-      resetGroupReview();
+      resetPicture();
       resetReviewDraft();
       selected.clear();
       trashMarked.clear();
@@ -5033,7 +5471,7 @@
   function notifySubscribers() {
     if (disposed) return;
     const actionState = getActionState();
-    updateConfirmationAvailability();
+    updateSelectionSummary();
     const statusLine = document.getElementById('fileJanitorConsoleStatus');
     const count = document.getElementById('fileJanitorReviewCount');
     const pending = pendingCount();
@@ -5598,12 +6036,19 @@
 
   // scanNow runs a real scan. It reports honestly when a scan finds nothing:
   // silence would be indistinguishable from a broken button.
-  async function scanNow() {
+  async function scanNow({ adoptNew = false } = {}) {
     const scope = requestScope();
     const id = scope.id;
     if (!id || busy || disposed) return;
+    // An open review is kept when a scan finds something newer, so the picture the
+    // person is looking at never swaps by itself. After Undo all the person pressed
+    // "Scan again to review them" to leave that finished review behind: the newest
+    // scan is the one they asked for.
     const pinnedReview =
-      draftEnabled && lastBatch?.id && (consoleOpen || selected.size + trashMarked.size > 0)
+      !adoptNew &&
+      draftEnabled &&
+      lastBatch?.id &&
+      (consoleOpen || selected.size + trashMarked.size > 0)
         ? lastBatch.id
         : '';
     busy = true;
@@ -5634,8 +6079,7 @@
       await loadBatch();
       if (!scopeCurrent(scope)) return;
       if (result.created && pinnedReview && result.batch?.id !== pinnedReview) {
-        reviewStatusMessage =
-          'A newer saved review is available in Saved review batch. Your current review and choices stayed here.';
+        newerScanID = result.batch?.id || '';
         renderBatch();
       }
       if (!result.created) {
@@ -5643,7 +6087,7 @@
           emptyReviewState = 'scan_empty';
         } else {
           reviewStatusMessage =
-            'Scan complete — no new proposals. The current review batch is unchanged.';
+            'Scan complete — nothing new to file. The current review is unchanged.';
         }
         renderBatch();
       }
@@ -5793,8 +6237,6 @@
     // Qualify stale data before even the category read can suspend this request.
     await loadCategories();
     if (!current()) return;
-    const pendingControl = document.getElementById('fileJanitorConfirmApply');
-    if (pendingPreview && pendingControl) pendingControl.disabled = true;
 
     try {
       const query =
@@ -5845,16 +6287,17 @@
       if (!current()) return;
       batchLoadState = 'error';
       notifySubscribers();
-      const hadPendingPreview = Boolean(pendingPreview);
-      pendingPreview = null;
-      if (hadPendingPreview) clear(document.getElementById('fileJanitorConfirmHost'));
+      // What was on screen can no longer be trusted: the tick and any retry key go.
+      discardProtectionApproval();
       renderBatch();
       return;
     }
 
     // A different batch invalidates every decision made against the old one.
     if ((lastBatch && lastBatch.id) !== previousBatchID) {
-      resetGroupReview();
+      // What was said about the old review is not about this one.
+      announce('');
+      resetPicture();
       resetReviewDraft();
       selected = new Set();
       trashMarked = new Set();
@@ -5862,34 +6305,47 @@
     }
     dropIneligibleSelections();
 
-    // A confirmation survives only when it still names this exact batch. While
-    // the refresh was in flight its final action was disabled.
-    const hadPendingPreview = Boolean(pendingPreview);
-    const approvalStillApplies =
-      pendingPreview &&
-      lastBatch &&
-      pendingPreview.preview &&
-      pendingPreview.preview.batch_id === lastBatch.id;
-    if (!approvalStillApplies) {
-      pendingPreview = null;
-      if (hadPendingPreview) clear(document.getElementById('fileJanitorConfirmHost'));
-    } else {
-      const control = document.getElementById('fileJanitorConfirmApply');
-      const acknowledgement = document.getElementById('fileJanitorTrashAck');
-      if (control) {
-        control.textContent = confirmLabel(pendingPreview.preview);
-        control.disabled = Boolean(acknowledgement && !acknowledgement.checked);
-      }
-    }
+    // A plan, a Trash tick or a retry key belongs to one review: when the review in
+    // view is a different one, none of them carries over.
+    if (!lastBatch || (plan && plan.batch_id !== lastBatch.id)) resetPlan();
 
     if (lastBatch) {
       // Resolve latest only once. A later scan is discoverable in the saved
       // batch picker, never an implicit replacement of the review in progress.
       if (!linkedBatchID) linkedBatchID = lastBatch.id;
-      await Promise.all([loadReviewGroups(), loadSavedBatches(), loadReviewDraft()]);
+      await Promise.all([loadReviewPicture(), loadSavedBatches(), loadReviewDraft()]);
       if (!current()) return;
+      // The picture and the saved choices are two reads. If a change made in
+      // another window landed between them they disagree; read both again once
+      // rather than drawing a picture the next edit would be refused against.
+      if (pictureLoadState === 'loaded' && reviewDraft && !pictureMatchesDraft()) {
+        await Promise.all([loadReviewDraft(), loadReviewPicture()]);
+        if (!current()) return;
+        // The two reads straddled a change from somewhere else (R63).
+        saySomethingChanged('Updated from another window.');
+      }
+      // A list the person had open stays open across a save: read the same page
+      // again against the new revisions. One that has emptied (its own folder was
+      // just unticked) closes rather than saying "0 of 0".
+      if (pictureReopen) {
+        const reopen = pictureReopen;
+        pictureReopen = null;
+        if (pictureMatchesDraft()) {
+          await loadPictureFiles(reopen.section, reopen.key, reopen.offset, false);
+          if (!current()) return;
+          if (pictureMore?.state === 'loaded' && pictureMore.files.length === 0) {
+            if (pictureMore.total > 0 && reopen.offset > 0)
+              await loadPictureFiles(reopen.section, reopen.key, 0, false);
+            else {
+              pictureMore = null;
+              pictureMoreRequest++;
+            }
+            if (!current()) return;
+          }
+        }
+      }
     } else {
-      resetGroupReview();
+      resetPicture();
       await loadSavedBatches();
       if (!current()) return;
     }
@@ -5934,7 +6390,7 @@
       const preparationID = new URLSearchParams(window.location?.search || '').get('preparation');
       if (setupReview?.state === 'result_unavailable') {
         reviewStatusMessage =
-          'The accepted initial result cannot be confirmed from retained receipts. Nothing was rescanned. Choose Scan now explicitly if you want another scan.';
+          'The accepted initial result cannot be confirmed from retained receipts. Nothing was rescanned. Choose Scan now if you want another scan.';
       }
       if (
         preparationID &&
@@ -6009,10 +6465,9 @@
     window.addEventListener('popstate', () => applyUrlState({ source: 'popstate' }));
     window.addEventListener('keydown', event => {
       if (!consoleOpen || event.key !== 'Escape') return;
-      // A destructive confirmation owns Escape while it is on screen: the
-      // answer to "are you sure" must be given, not dismissed by closing the
-      // surface that asked (FR-120).
-      if (pendingPreview || revokeConfirmed) return;
+      // A destructive confirmation owns Escape while it is on screen (FR-120), and
+      // a File request that is in flight is not closed under.
+      if (pressing || revokeConfirmed) return;
       event.preventDefault();
       close();
     });
@@ -6472,7 +6927,6 @@
       selected = new Set();
       trashMarked = new Set();
       if (changed) expandedCandidates = new Set();
-      pendingPreview = null;
       filter = '';
     },
     _selected: () => Array.from(selected),
@@ -6480,7 +6934,13 @@
       reviewView = view === 'all' ? 'all' : 'groups';
       renderBatch();
     },
-    _loadReviewGroups: loadReviewGroups,
+    _loadReviewPicture: loadReviewPicture,
+    // Asks for the plan now instead of after the debounce, so a test does not wait.
+    _planNow: async () => {
+      clearTimeout(planTimer);
+      planTimer = 0;
+      await loadReviewPlan();
+    },
     _setFilter: next => selectFilter(next),
     _reloadBatch: () => loadBatch(),
     _reloadHistory: () => loadHistory(),
@@ -6538,7 +6998,11 @@
       reviewStatusMessage = '';
       selected = new Set();
       trashMarked = new Set();
-      pendingPreview = null;
+      resetPlan();
+      pressing = false;
+      lastResults = null;
+      selectedFile = null;
+      keptRows.clear();
       approvalGeneration++;
       protectionFact = null;
       protectionCandidates.clear();
@@ -6557,7 +7021,7 @@
       lastStatus = null;
       lastBatch = null;
       lastCandidates = [];
-      resetGroupReview();
+      resetPicture();
       resetReviewDraft();
       draftEnabled = true;
       reviewView = 'groups';

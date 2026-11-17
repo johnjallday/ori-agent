@@ -19,7 +19,12 @@ const ReviewGroupSampleLimit = 3
 // ReviewGroup is a bounded saved proposal, never a filesystem inventory or an
 // authorization. Candidate IDs are exposed only by the paged member endpoint.
 type ReviewGroup struct {
-	ID          string   `json:"id"`
+	ID string `json:"id"`
+	// Key is the fixed vocabulary word behind ID ("sensitive", "versions",
+	// "audio", "unresolved", "unmatched", "filing-images", ...). It names a rule,
+	// never a file, so the picture can pick a short label without a lookup table
+	// of opaque IDs. It is not part of the revision.
+	Key         string   `json:"key"`
 	Kind        string   `json:"kind"`
 	Label       string   `json:"label"`
 	Reason      string   `json:"reason"`
@@ -59,6 +64,16 @@ type ReviewGroups struct {
 type ReviewGroupMember struct {
 	Candidate JanitorCandidate
 	Cautions  []string
+	// Family, Ending and Bundle describe how a file sits with its siblings, for the
+	// picture only. Family is an opaque ID shared by the files of one name apart from
+	// a copy or version ending (members of the possible-copies group); Ending is
+	// the kind of that ending; Bundle is an opaque ID shared by audio files with the
+	// same name stem. They are filled in after the grouping loop, are not part of the
+	// group revision, and never carry a name: the scope digest is server-only, so no
+	// ID reverses to a file.
+	Family string
+	Ending string
+	Bundle string
 }
 
 // Members returns a copy of this saved projection's members in batch order.
@@ -138,7 +153,7 @@ func GroupReview(batch JanitorBatch, candidates []JanitorCandidate, scope string
 	}
 	cards := make(map[string]*ReviewGroup, len(definitions))
 	for _, definition := range definitions {
-		card := &ReviewGroup{ID: reviewGroupID(definition.key), Kind: "question", Label: definition.label, Reason: definition.reason, Category: definition.category, Samples: []string{}}
+		card := &ReviewGroup{ID: reviewGroupID(definition.key), Key: definition.key, Kind: "question", Label: definition.label, Reason: definition.reason, Category: definition.category, Samples: []string{}}
 		if definition.category != "" {
 			card.Kind = "filing"
 			category, _ := LookupCategory(string(definition.category))
@@ -194,7 +209,83 @@ func GroupReview(batch JanitorBatch, candidates []JanitorCandidate, scope string
 		}
 	}
 	out.Revision = hex.EncodeToString(hash.Sum(nil))
+	annotateMembers(out.members, out.Groups, scope, batch.ID)
 	return out, nil
+}
+
+// Ending kinds a member can have (R28 turns on them). "none" is the file with no
+// copy or version ending, the one a copy is a copy of.
+const (
+	EndingNone    = "none"
+	EndingNumber  = "number"  // "name (2)"
+	EndingCopy    = "copy"    // "name copy", "name copy 2"
+	EndingV       = "v"       // "name v2"
+	EndingVersion = "version" // "name version 2"
+)
+
+// opaqueIdentifier hashes structured parts, never a delimiter-joined name, under a
+// scope digest only the server holds, so the result carries no file name.
+func opaqueIdentifier(prefix, domain, scope, batchID, value string) string {
+	sum := sha256.Sum256([]byte(domain + "\x00" + scope + "\x00" + batchID + "\x00" + value))
+	return prefix + hex.EncodeToString(sum[:12])
+}
+
+// annotateMembers is the second pass that gives members of the possible-copies and
+// audio groups their family and bundle. It runs after the revision is final and
+// touches nothing the revision, the membership or any saved choice depends on.
+func annotateMembers(members map[string][]ReviewGroupMember, groups []ReviewGroup, scope, batchID string) {
+	for _, group := range groups {
+		list := members[group.ID]
+		switch group.Key {
+		case "versions":
+			for i := range list {
+				if family, _ := versionFamily(list[i].Candidate.Name); family != "" {
+					list[i].Family = opaqueIdentifier("fam-", "fj-family-v1", scope, batchID, family)
+					list[i].Ending = versionEnding(list[i].Candidate.Name)
+				}
+			}
+		case "audio":
+			shared := make(map[string]int, len(list))
+			for _, member := range list {
+				if stem := bundleStem(member.Candidate.Name); stem != "" {
+					shared[stem]++
+				}
+			}
+			for i := range list {
+				if stem := bundleStem(list[i].Candidate.Name); stem != "" && shared[stem] >= 2 {
+					list[i].Bundle = opaqueIdentifier("bun-", "fj-bundle-v1", scope, batchID, stem)
+				}
+			}
+		}
+	}
+}
+
+func bundleStem(name string) string {
+	if len(name) > 1024 {
+		return ""
+	}
+	return reviewNameStem(name)
+}
+
+// versionEnding names the kind of copy or version ending a file name has.
+func versionEnding(name string) string {
+	if len(name) > 1024 {
+		return EndingNone
+	}
+	stem := strings.TrimSuffix(strings.ToLower(name), strings.ToLower(filepath.Ext(name)))
+	ending := strings.TrimLeft(versionSuffix.FindString(stem), " _.-")
+	switch {
+	case ending == "":
+		return EndingNone
+	case strings.HasPrefix(ending, "("):
+		return EndingNumber
+	case strings.HasPrefix(ending, "version"):
+		return EndingVersion
+	case strings.HasPrefix(ending, "copy"):
+		return EndingCopy
+	default:
+		return EndingV
+	}
 }
 
 func proposalPending(candidate JanitorCandidate) bool {

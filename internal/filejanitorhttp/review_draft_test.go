@@ -62,6 +62,61 @@ func TestReviewDraftHTTP_Exact206SelectionAndAliasParity(t *testing.T) {
 	}
 }
 
+// Group 3: a question row is placed with one request that carries the folder. The
+// same edit refuses without one, the picture then shows the row's files as placed,
+// and the legacy alias is held to the same revision rule.
+func TestReviewDraftHTTP_QuestionRowIsPlacedWithOneDestination(t *testing.T) {
+	h, _ := pictureHandler(t, mixedPictureFiles(3))
+	_, picture, _ := readPicture(t, h, "file-janitor")
+	batchID := picture["batch_id"].(string)
+	var row map[string]any
+	for _, item := range picture["loose"].([]any) {
+		if item.(map[string]any)["key"] == "sensitive" {
+			row = item.(map[string]any)
+		}
+	}
+	if row == nil || row["count"] != float64(2) || row["placed_count"] != float64(0) {
+		t.Fatalf("expected a Sensitive-looking row of 2 unplaced files, got %v", row)
+	}
+	groupID := row["group_id"].(string)
+	target := pathFor("file-janitor", "ws-1", "/batches/"+batchID+"/draft")
+
+	missing := draftRequest(t, h, batchID, "select_group", groupID)
+	data, _ := json.Marshal(missing)
+	if rec, body := serve(t, h, http.MethodPost, target, string(data)); rec.Code != http.StatusBadRequest {
+		t.Fatalf("a question row has no folder of its own: %d %v", rec.Code, body)
+	}
+
+	placed := draftRequest(t, h, batchID, "select_group", groupID)
+	placed.Category = "documents"
+	data, _ = json.Marshal(placed)
+	rec, body := serve(t, h, http.MethodPost, target, string(data))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("place the row: %d %s", rec.Code, rec.Body.String())
+	}
+	var rowChoices int
+	for _, choice := range body["draft"].(map[string]any)["choices"].([]any) {
+		if choice.(map[string]any)["group_id"] == groupID {
+			rowChoices++
+		}
+	}
+	if rowChoices != 2 {
+		t.Fatalf("both files of the row should be chosen, got %d", rowChoices)
+	}
+	_, after, _ := readPicture(t, h, "file-janitor")
+	for _, item := range after["loose"].([]any) {
+		got := item.(map[string]any)
+		if got["key"] == "sensitive" && (got["placed_count"] != float64(2) || got["placed_category"] != "documents") {
+			t.Fatalf("the row should read as placed in Documents: %v", got)
+		}
+	}
+	// The legacy prefix cannot replay the same stale request.
+	legacy := pathFor("downloads-janitor", "ws-1", "/batches/"+batchID+"/draft")
+	if rec, _ := serve(t, h, http.MethodPost, legacy, string(data)); rec.Code != http.StatusConflict {
+		t.Fatalf("the legacy alias bypassed the revision rule: %d", rec.Code)
+	}
+}
+
 func TestReviewDraftHTTP_ClosedBoundedEditsAreAtomic(t *testing.T) {
 	h, _ := groupHandler(t, 2)
 	review, card := readGroupCard(t, h)
@@ -127,9 +182,12 @@ func TestReviewDraftHTTP_OversizedGroupRefusesWithoutPartialSelection(t *testing
 	if rec.Code != http.StatusRequestEntityTooLarge || body["code"] != "review_bounds" {
 		t.Fatalf("oversized group: %d %s", rec.Code, rec.Body.String())
 	}
+	// The refused edit stored nothing: the scan is still the untouched default
+	// view (all 1,001 files shown ticked, never stored), not a partial selection.
 	_, fresh := serve(t, h, http.MethodGet, target, "")
-	if len(fresh["draft"].(map[string]any)["choices"].([]any)) != 0 {
-		t.Fatal("oversized group partially selected")
+	draft := fresh["draft"].(map[string]any)
+	if draft["state"] != "default" || len(draft["choices"].([]any)) != 1001 {
+		t.Fatalf("a refused oversized edit left a stored or partial selection: %v %d", draft["state"], len(draft["choices"].([]any)))
 	}
 }
 
@@ -139,8 +197,11 @@ func TestReviewDraftHTTP_ReadDoesNotPersistDraft(t *testing.T) {
 	statePath := filepath.Join(h.lookup.(*fakeStore).root, "ws-1", "downloads-janitor", "scan-state.json")
 	before, _ := os.ReadFile(statePath)
 	rec, body := serve(t, h, http.MethodGet, pathFor("file-janitor", "ws-1", "/batches/"+review["batch_id"].(string)+"/draft"), "")
-	if rec.Code != http.StatusOK || len(body["draft"].(map[string]any)["choices"].([]any)) != 0 {
-		t.Fatal("new draft read invented selection")
+	// A new scan opens with its confident folder ticked (the two images), derived
+	// on the read and never stored by it.
+	draft, _ := body["draft"].(map[string]any)
+	if rec.Code != http.StatusOK || draft["state"] != "default" || len(draft["choices"].([]any)) != 2 {
+		t.Fatalf("a new scan must open ticked: %d %s", rec.Code, rec.Body.String())
 	}
 	after, _ := os.ReadFile(statePath)
 	if string(before) != string(after) {
