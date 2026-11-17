@@ -28,38 +28,6 @@ import (
 
 var errNotBuiltYet = errors.New("not built yet")
 
-// Task 2.1 replaces these with the real plan check in review_plan.go.
-type ReviewPlanQuery struct{ Revision, GroupRevision, Destination string }
-type ReviewPlanChanged struct{ CandidateID, Name, Reason string }
-type ReviewPlan struct {
-	PlanDigest       string
-	MoveCount, Total int
-	OverLimit        bool
-	Changed          []ReviewPlanChanged
-}
-
-func (s *Service) PlanReview(context.Context, string, string, string, ReviewPlanQuery) (ReviewPlan, error) {
-	return ReviewPlan{}, errNotBuiltYet
-}
-
-// Task 2.2 replaces these with the real File request in review_plan.go.
-var ErrReviewPlanChanged = errors.New("the plan changed since it was shown")
-
-type FileRequest struct {
-	ExpectedRevision, ExpectedGroupRevision, PlanDigest, ClientKey string
-	TrashAcknowledged                                              int
-}
-type FilingResult struct {
-	FilingID string
-	Replayed bool
-	Filed    int
-	Plan     ReviewPlan
-}
-
-func (s *Service) FileReviewPlan(context.Context, string, string, string, FileRequest) (FilingResult, error) {
-	return FilingResult{}, errNotBuiltYet
-}
-
 // Task 5.2 replaces these with Undo all in filing_undo.go.
 type FilingUndoResult struct {
 	FilingID string

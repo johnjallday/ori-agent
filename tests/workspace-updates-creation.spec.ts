@@ -72,7 +72,7 @@ test('Updates creation: attached folder, reviewed setup, quiet Home discovery, e
     const path = new URL(req.url()).pathname;
     if (
       req.method() !== 'GET' &&
-      /\/file-janitor\/(?:setup|scan|prepare-review|decisions|preview|apply|undo)$|^\/api\/chat$|\/tasks\/execute$/.test(
+      /\/file-janitor\/(?:setup|scan|prepare-review|decisions|preview|apply|undo|batches\/[^/]+\/file)$|^\/api\/chat$|\/tasks\/execute$/.test(
         path
       )
     )
@@ -103,19 +103,21 @@ test('Updates creation: attached folder, reviewed setup, quiet Home discovery, e
   await expect(page.locator('#fileJanitorConsoleBody')).toContainText('invoice.pdf');
   expect(operations).toEqual([]);
   const history = await (await request.get(`/api/sessions/${saved.session_id}`)).json();
+  // The review opens on the picture; the per-file checkboxes are in All files.
+  await page.locator('#fileJanitorView-all').click();
   await page
     .locator('#fileJanitorConsoleBody .fj-row-item')
     .filter({ hasText: 'invoice.pdf' })
     .locator('.fj-select')
     .check();
-  await page.locator('#fileJanitorApprove').click();
-  await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
+  // One press files what is ticked: there is no separate confirm screen.
+  await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
   const applied = page.waitForResponse(
     response =>
       response.request().method() === 'POST' &&
-      new URL(response.url()).pathname === `/api/workspaces/${id}/file-janitor/apply`
+      /\/file-janitor\/batches\/[^/]+\/file$/.test(new URL(response.url()).pathname)
   );
-  await page.locator('#fileJanitorConfirmApply').click();
+  await page.locator('#fileJanitorApprove').click();
   const appliedResponse = await applied;
   expect(appliedResponse.ok(), await appliedResponse.text()).toBe(true);
   await expect
@@ -125,8 +127,7 @@ test('Updates creation: attached folder, reviewed setup, quiet Home discovery, e
     })
     .toBe(0);
   expect(operations).toEqual([
-    `/api/workspaces/${id}/file-janitor/preview`,
-    `/api/workspaces/${id}/file-janitor/apply`
+    expect.stringMatching(new RegExp(`^/api/workspaces/${id}/file-janitor/batches/[^/]+/file$`))
   ]);
   expect(readFileSync(join(root, 'Filed', 'Documents', 'invoice.pdf'), 'utf8')).toBe(
     'synthetic source bytes'

@@ -36,6 +36,9 @@ const (
 	// MaxRetainedActions caps the journal. History is what the user undoes
 	// from, so the bound is generous and the newest entries win.
 	MaxRetainedActions = 1000
+	// MaxRetainedFilings bounds the one-press filing records kept for receipts
+	// and Undo all.
+	MaxRetainedFilings = 20
 	// MaxRetainedScanOperations bounds setup-specific scan acknowledgments.
 	MaxRetainedScanOperations = 50
 	// ObservationTTL bounds how long an unmatched settling observation is kept.
@@ -125,6 +128,13 @@ type ScanState struct {
 	ReviewDrafts []ReviewDraft `json:"review_drafts,omitempty"`
 	// Actions is the durable journal of every attempted mutation.
 	Actions []FileAction `json:"actions,omitempty"`
+	// Filings records each one-press filing: what was admitted, by whom, and the
+	// retry key that makes a repeated press report the first result. It holds no
+	// authority and no path; the per-file facts stay in Actions, where the filing
+	// ID is the actions' IdempotencyKey. An older build that rewrites this file
+	// drops the field, which only loses the receipt and Undo all, never widens
+	// what may move.
+	Filings []FilingRecord `json:"filings,omitempty"`
 	// ScanOperations are bounded operation-specific acknowledgments written in
 	// the same atomic record as their batch/candidates/settling observations.
 	ScanOperations []ScanOperationReceipt `json:"scan_operations,omitempty"`
@@ -449,6 +459,16 @@ func validateScanState(state ScanState) error {
 			}
 		}
 	}
+	seenFilings := make(map[string]struct{}, len(state.Filings))
+	for _, filing := range state.Filings {
+		if err := filing.validate(); err != nil {
+			return err
+		}
+		if _, duplicate := seenFilings[filing.ID]; duplicate {
+			return fmt.Errorf("%w: duplicate filing %s", ErrInvalidCandidate, filing.ID)
+		}
+		seenFilings[filing.ID] = struct{}{}
+	}
 	totalChoices := 0
 	for _, draft := range state.ReviewDrafts {
 		if len(draft.invalid) > 0 {
@@ -556,6 +576,13 @@ func pruneScanState(state ScanState, now time.Time) ScanState {
 	// and the newest are kept.
 	if len(state.Actions) > MaxRetainedActions {
 		state.Actions = state.Actions[len(state.Actions)-MaxRetainedActions:]
+	}
+	// Filing records keep the newest few, oldest dropped first.
+	if len(state.Filings) > MaxRetainedFilings {
+		sort.SliceStable(state.Filings, func(i, j int) bool {
+			return state.Filings[i].AdmittedAt.Before(state.Filings[j].AdmittedAt)
+		})
+		state.Filings = state.Filings[len(state.Filings)-MaxRetainedFilings:]
 	}
 
 	// Skips are user decisions, so they are only ever dropped by the cap —

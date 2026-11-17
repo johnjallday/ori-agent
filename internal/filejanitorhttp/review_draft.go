@@ -83,7 +83,7 @@ func (h *Handler) respondDraftError(w http.ResponseWriter, err error) {
 		_ = orihttp.RespondNotFound(w, "review member or batch not found")
 	case errors.Is(err, filejanitor.ErrCandidateNotActionable):
 		_ = orihttp.RespondAPIError(w, http.StatusConflict,
-			orihttp.NewAPIError("review_member_changed", "A file changed or still needs a category decision. Reload this batch, choose a category where needed, or use Scan now for a fresh review."))
+			orihttp.NewAPIError("review_member_changed", "Ori could not tick that: a file changed since the scan, or it still needs a folder. Scan again, or pick a folder for it first."))
 	case errors.Is(err, filejanitor.ErrUnknownCategory), errors.Is(err, filejanitor.ErrInvalidAction):
 		_ = orihttp.RespondBadRequest(w, "That edit is not a choice Ori offers for this review.")
 	default:

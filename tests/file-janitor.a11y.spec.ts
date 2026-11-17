@@ -1,5 +1,5 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
-import { mkdtempSync, writeFileSync, utimesSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, utimesSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -16,7 +16,7 @@ import { basename, join } from 'node:path';
  *   - It announces itself as a dialog, named by the title on screen.
  *   - Focus goes into it, stays in it, and comes back out to the control that
  *     opened it.
- *   - Escape closes it — except while a destructive confirmation is waiting.
+ *   - Escape closes it — except while a File request is in flight.
  *   - Its tabs, filters, and row controls are real controls with real state.
  *   - Status changes are announced rather than only redrawn.
  *
@@ -123,6 +123,9 @@ test.describe('File Janitor console accessibility', () => {
       await expect(note).toBeVisible();
       await expect(note).toContainText('Filing is not a backup');
       await expect(page.locator('#fileJanitorCheckProtection')).toBeEnabled();
+      // The plan check answers a moment after the review opens and redraws it; the
+      // File button is enabled only once it has, so wait for that before measuring.
+      await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
       // Scope the audit to the new surface; unrelated page chrome has its own suite.
       await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
       const evidence = 'tasks/evidence-file-curator-backup-guidance/group-4';
@@ -426,26 +429,60 @@ test.describe('File Janitor console accessibility', () => {
     await expect(page.locator('#fileJanitorCardOpen')).toBeFocused();
   });
 
-  // A destructive confirmation owns Escape while it is on screen: the answer to
-  // "are you sure" must be given, not dismissed by closing the surface asking.
-  test('Escape does not dismiss a pending approval', async ({ page, request }) => {
-    const root = inbox('confirm', ['invoice.pdf']);
-    const workspaceId = await workspaceWithFolder(request, `FJ A11y Confirm ${RUN}`, root);
+  // There is no confirm screen to protect any more: with files ticked and the
+  // File button enabled, Escape just closes the console, and files nothing.
+  test('Escape closes a review with files ticked and files nothing', async ({ page, request }) => {
+    const root = inbox('escape-ticked', ['invoice.pdf']);
+    const workspaceId = await workspaceWithFolder(request, `FJ A11y Escape Ticked ${RUN}`, root);
     await openConsole(page, workspaceId);
 
+    const filed: string[] = [];
+    page.on('request', req => {
+      if (req.method() === 'POST' && /\/batches\/[^/]+\/file$/.test(req.url()))
+        filed.push(req.url());
+    });
     await page.locator('#fileJanitorScan').click();
     await page.locator('#fileJanitorView-all').click();
     const row = page.locator('.fj-row-item').filter({ hasText: 'invoice.pdf' });
     await expect(row).toBeVisible({ timeout: 15000 });
     await row.locator('.fj-select').check();
-    await page.locator('#fileJanitorApprove').click();
-    await expect(page.locator('#fileJanitorConsoleBody')).toContainText('Confirm', {
-      timeout: 15000
+    await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#fileJanitorConsole')).toBeHidden({ timeout: 15000 });
+    expect(filed).toEqual([]);
+    expect(existsSync(join(root, 'invoice.pdf'))).toBe(true);
+  });
+
+  // A File request that is in flight owns Escape: closing the console under it
+  // would leave the person without the receipt of what was just filed.
+  test('Escape does not close the console while a File request is in flight', async ({
+    page,
+    request
+  }) => {
+    const root = inbox('escape-press', ['invoice.pdf']);
+    const workspaceId = await workspaceWithFolder(request, `FJ A11y Escape Press ${RUN}`, root);
+    await openConsole(page, workspaceId);
+
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => (release = resolve));
+    await page.route('**/batches/*/file', async route => {
+      await gate;
+      await route.continue();
     });
+    await page.locator('#fileJanitorScan').click();
+    await page.locator('#fileJanitorView-all').click();
+    const row = page.locator('.fj-row-item').filter({ hasText: 'invoice.pdf' });
+    await expect(row).toBeVisible({ timeout: 15000 });
+    await row.locator('.fj-select').check();
+    await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
+    await page.locator('#fileJanitorApprove').click();
 
     await page.keyboard.press('Escape');
     await expect(page.locator('#fileJanitorConsole')).toBeVisible();
-    await expect(page.locator('#fileJanitorConsoleBody')).toContainText('Confirm');
+    release();
+    await expect(page.locator('.fj-results')).toBeVisible({ timeout: 30000 });
+    expect(existsSync(join(root, 'Filed', 'Documents', 'invoice.pdf'))).toBe(true);
   });
 
   test('tabs and filters are real controls that report their state', async ({ page, request }) => {
@@ -543,9 +580,9 @@ test.describe('File Janitor console accessibility', () => {
 
     // The confident folder opens ticked, so all 60 are selected; leaving one out
     // changes the count and the footer button stays in view.
-    await expect(page.locator('#fileJanitorApprove')).toHaveText('Review 60 moves');
+    await expect(page.locator('#fileJanitorApprove')).toHaveText('File 60 files');
     await firstRow.locator('.fj-select').uncheck();
-    await expect(page.locator('#fileJanitorApprove')).toHaveText('Review 59 moves');
+    await expect(page.locator('#fileJanitorApprove')).toHaveText('File 59 files');
     await expect(page.locator('.fj-footer')).toBeInViewport();
     await expect(page.locator('[data-fj-console-close]')).toBeInViewport();
   });

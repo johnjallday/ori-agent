@@ -25,7 +25,7 @@ function operations(page: Page) {
     const path = new URL(req.url()).pathname;
     if (
       req.method() !== 'GET' &&
-      /\/file-janitor\/(?:setup|scan|prepare-review|decisions|preview|apply|undo)$|^\/api\/chat$|\/tasks\/execute$/.test(
+      /\/file-janitor\/(?:setup|scan|prepare-review|decisions|preview|apply|undo|batches\/[^/]+\/file)$|^\/api\/chat$|\/tasks\/execute$/.test(
         path
       )
     )
@@ -146,22 +146,25 @@ test('Updates lifecycle: real tabs reconcile exact exposure and partial filing w
       .locator('#workspaceNextActionRegion')
       .getByRole('button', { name: 'Review files', exact: true })
       .click();
+    // The review opens on the picture; the per-file checkboxes are in All files.
+    await page.locator('#fileJanitorView-all').click();
     await page
       .locator('#fileJanitorConsoleBody .fj-row-item')
       .filter({ hasText: 'report.pdf' })
       .locator('.fj-select')
       .check();
+    // One press files what is ticked: there is no separate confirm screen.
+    await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
     await page.locator('#fileJanitorApprove').click();
-    await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
-    await page.locator('#fileJanitorConfirmApply').click();
     await expect.poll(() => existsSync(join(root, 'Filed', 'Documents', 'report.pdf'))).toBe(true);
     await expect.poll(async () => (await updates(request, ws.id)).review.pending_count).toBe(1);
     await observer.bringToFront();
     await expect(row).toContainText('1 file to review');
     await expect(row).not.toContainText('New message');
     expect(writerWrites).toEqual([
-      `POST /api/workspaces/${ws.id}/file-janitor/preview`,
-      `POST /api/workspaces/${ws.id}/file-janitor/apply`
+      expect.stringMatching(
+        new RegExp(`^POST /api/workspaces/${ws.id}/file-janitor/batches/[^/]+/file$`)
+      )
     ]);
     expect(observerWrites).toEqual([]);
     expect((await ok(await request.get(`/api/sessions/${savedSessionId}`))).messages).toEqual(

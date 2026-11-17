@@ -299,30 +299,33 @@ test('protection round trip keeps choices through chooser, creation, existing co
   const category = page.getByLabel('Category for invoice.pdf', { exact: true });
   await category.selectOption('images');
   await expect(category).toHaveValue('images');
-  await page.locator('#fileJanitorApprove').click();
+  // One main button states the plan; files going to Trash need their own tick.
   await expect(page.locator('#fileJanitorTrashAck')).toBeVisible();
+  await expect(page.locator('#fileJanitorApprove')).toBeDisabled();
   await page.locator('#fileJanitorTrashAck').check();
-  const oldApply = await page.locator('#fileJanitorConfirmApply').elementHandle();
+  await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
+  const oldApprove = await page.locator('#fileJanitorApprove').elementHandle();
   const mutations: string[] = [];
   page.on('request', req => {
     if (
       req.method() !== 'GET' &&
       (req.url().includes('backup-recovery') ||
-        req.url().endsWith('/apply') ||
+        req.url().endsWith('/file') ||
         new URL(req.url()).pathname === '/api/workspaces')
     )
       mutations.push(req.method() + ' ' + new URL(req.url()).pathname);
   });
   await page.locator('#fileJanitorCheckProtection').click();
   await expect(page.locator('#protectFoldersChooser')).toBeVisible();
-  await oldApply!.evaluate((node: HTMLButtonElement) => node.click());
+  // A button captured before leaving has no authority left: pressing it files nothing.
+  await oldApprove!.evaluate((node: HTMLButtonElement) => node.click());
   expect(mutations).toEqual([]);
   await page.locator('#protectFoldersCancel').click();
   await expect(moves).toBeChecked();
   await expect(
     page.getByRole('button', { name: 'Unmark discard.csv for Trash', exact: true })
   ).toBeVisible();
-  await expect(page.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+  await expect(page.locator('#fileJanitorResultsHost .fj-results')).toHaveCount(0);
   await expect(page.locator('#fileJanitorCheckProtection')).toBeFocused();
   await page.locator('#fileJanitorCheckProtection').click();
   await page.getByRole('button', { name: 'Use restic', exact: true }).click();
@@ -413,13 +416,15 @@ test('protection round trip keeps choices through chooser, creation, existing co
   await expect(
     page.getByRole('button', { name: 'Unmark discard.csv for Trash', exact: true })
   ).toBeVisible();
-  await expect(page.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+  await expect(page.locator('#fileJanitorResultsHost .fj-results')).toHaveCount(0);
   expect(
     await page.evaluate(() => sessionStorage.getItem('ori.fileJanitor.protectionTrip.v1'))
   ).toBeNull();
-  await page.locator('#fileJanitorApprove').click();
+  // The Trash tick is never restored after coming back from another page: the
+  // button stays disabled until it is ticked again.
+  await expect(page.locator('#fileJanitorTrashAck')).toBeVisible();
   await expect(page.locator('#fileJanitorTrashAck')).not.toBeChecked();
-  await expect(page.locator('#fileJanitorConfirmApply')).toBeDisabled();
+  await expect(page.locator('#fileJanitorApprove')).toBeDisabled();
   const evidence = 'tasks/evidence-file-curator-backup-guidance/group-3';
   mkdirSync(evidence, { recursive: true });
   await page
@@ -431,7 +436,7 @@ test('protection round trip keeps choices through chooser, creation, existing co
   await page.goBack();
   await allFiles(page, true);
   await expect(moves).toBeChecked({ timeout: 20000 });
-  await expect(page.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+  await expect(page.locator('#fileJanitorResultsHost .fj-results')).toHaveCount(0);
   expect(mutations.filter(line => !line.endsWith(' /api/workspaces'))).toEqual([]);
   expect(mutations.filter(line => line.endsWith(' /api/workspaces'))).toHaveLength(1);
   writeFileSync(join(evidence, 'navigation-mutations.json'), JSON.stringify(mutations, null, 2));
@@ -640,7 +645,10 @@ test.describe('File Janitor capability', () => {
     await page.evaluate(() => (window as any).workspaceDetail.loadTasks());
     const operating: string[] = [];
     page.on('request', req => {
-      if (req.method() === 'POST' && /file-janitor\/(scan|preview|apply|decisions)/.test(req.url()))
+      if (
+        req.method() === 'POST' &&
+        /file-janitor\/(scan|preview|apply|decisions|batches\/[^/]+\/file$)/.test(req.url())
+      )
         operating.push(req.url());
     });
     await page.locator('#workspaceNextAction').click();
@@ -666,27 +674,25 @@ test.describe('File Janitor capability', () => {
       .filter({ hasText: 'second.csv' })
       .locator('.fj-category')
       .selectOption('images');
-    await page.locator('#fileJanitorApprove').click();
-    await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
+    // One main button states the plan; nothing moves until it is pressed.
+    await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
     await page.evaluate(() => (window as any).FileJanitorConsole.refresh());
-    await page.keyboard.press('Escape');
-    await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
+    await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
     await page.goBack();
     await expect(page.locator('#fileJanitorConsole')).toBeHidden();
     await expect(page.locator('#workspaceNextAction')).toBeFocused();
     await page.locator('#workspaceNextAction').click();
-    await expect(page.locator('#fileJanitorConfirmApply')).toHaveCount(0);
-    await page.locator('#fileJanitorApprove').click();
-    await expect(page.locator('#fileJanitorConfirmApply')).toBeVisible();
-    expect(operating.filter(url => /\/(apply|scan|decisions)$/.test(url))).toEqual([]);
+    await expect(page.locator('#fileJanitorResultsHost .fj-results')).toHaveCount(0);
+    await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
+    expect(operating.filter(url => /\/(file|apply|scan|decisions)$/.test(url))).toEqual([]);
     // Use a real synthetic destination permission failure for a partial receipt.
-    // Changed inputs before confirmation now invalidate the whole exact token;
-    // that separate safety case is covered by the group-review suite.
+    // A press whose plan changed files nothing at all; that separate safety case
+    // is covered by the group-review suite.
     const denied = join(root, 'Filed', 'Images');
     mkdirSync(denied, { recursive: true });
     chmodSync(denied, 0o500);
     try {
-      await page.locator('#fileJanitorConfirmApply').click();
+      await page.locator('#fileJanitorApprove').click();
       await expect(consoleBody(page).locator('.fj-results')).toContainText('1 file filed');
     } finally {
       chmodSync(denied, 0o750);
@@ -968,17 +974,11 @@ test.describe('File Janitor capability', () => {
       .locator('.fj-select')
       .uncheck();
     await expect(page.locator('.fj-footer')).toBeInViewport();
-    await expect(page.locator('#fileJanitorApprove')).toHaveText('Review 1 move');
-    await page.locator('#fileJanitorApprove').click();
-
-    // Nothing has moved yet: this is the confirmation, in the console.
-    await expect(consoleBody(page)).toContainText('Confirm', { timeout: 15000 });
+    // The one main button states what pressing it will do. Nothing has moved yet.
+    await expect(page.locator('#fileJanitorApprove')).toHaveText('File 1 file');
+    await expect(page.locator('#fileJanitorApprove')).toBeEnabled({ timeout: 15000 });
     expect(existsSync(join(root, 'invoice.pdf'))).toBe(true);
-
-    await consoleBody(page)
-      .getByRole('button', { name: /Move|Apply|Confirm these/ })
-      .first()
-      .click();
+    await page.locator('#fileJanitorApprove').click();
 
     // 30s, matching the History test: on a cold server this may be the first
     // apply the process has ever done, and it flaked at 15s. Waiting longer
@@ -1062,12 +1062,8 @@ test.describe('File Janitor capability', () => {
     const row = consoleBody(page).locator('.fj-row-item').filter({ hasText: 'report.pdf' });
     await expect(row).toBeVisible({ timeout: 15000 });
     await row.locator('.fj-select').check();
+    await expect(page.locator('#fileJanitorApprove')).toBeEnabled({ timeout: 15000 });
     await page.locator('#fileJanitorApprove').click();
-    await expect(consoleBody(page)).toContainText('Confirm', { timeout: 15000 });
-    await consoleBody(page)
-      .getByRole('button', { name: /Move|Apply|Confirm these/ })
-      .first()
-      .click();
     // A generous window: on a cold server this is the first apply the process
     // has ever done, and it flaked once at 15s against a brand-new sandbox.
     // Waiting longer costs nothing when it passes.

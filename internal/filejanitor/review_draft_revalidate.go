@@ -45,14 +45,19 @@ func (s *Service) revalidatedReviewDraft(state ScanState, batchID string, bindin
 		candidate := byID[choice.CandidateID]
 		var current Fingerprint
 		valid := rootAvailable
+		reason := "missing"
 		if valid {
 			current, err = currentFingerprint(root.Path, candidate.Name)
 			valid = err == nil && candidate.Fingerprint.Matches(current)
+			if err == nil {
+				reason = "changed"
+			}
 		}
 		if valid {
 			kept = append(kept, choice)
 		} else {
 			view.RemovedStale++
+			view.removed = append(view.removed, removedChoice{candidateID: choice.CandidateID, reason: reason})
 			invalid = append(invalid, []string{choice.CandidateID, current.Key()})
 		}
 	}

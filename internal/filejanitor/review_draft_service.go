@@ -2,6 +2,7 @@ package filejanitor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -209,7 +210,7 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 			}
 			current, err := currentFingerprint(validatedFileRoot, candidate.Name)
 			if err != nil || !candidate.Fingerprint.Matches(current) {
-				return ErrCandidateNotActionable
+				return errMemberChanged
 			}
 			if !ValidCategory(candidate.EffectiveCategory()) || !moveAnswered(candidate) {
 				return ErrCandidateNotActionable
@@ -217,9 +218,15 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 			choices[id] = ReviewChoice{CandidateID: id, FingerprintKey: candidate.Fingerprint.Key(), Operation: OperationMove, SourceGroupID: source}
 			return nil
 		}
-		selectGroup := func(group ReviewGroup) error {
+		// selectGroup ticks the members of a group that are still the file that was
+		// scanned. A member that changed or went missing since the scan is left
+		// unticked, not a reason to refuse the whole folder: the person would
+		// otherwise be unable to tick a folder because of one file. It returns how
+		// many it ticked and how many it had to leave, so a caller can say so when
+		// nothing at all could be ticked.
+		selectGroup := func(group ReviewGroup) (ticked, left int, err error) {
 			if group.Kind != "filing" {
-				return ErrCandidateNotActionable
+				return 0, 0, ErrCandidateNotActionable
 			}
 			members, _ := groups.Members(group.ID)
 			for _, member := range members {
@@ -228,15 +235,20 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 					continue // never overwrite an explicit prior choice or Trash mark
 				}
 				if err := selectMove(id, group.ID); err != nil {
-					return err
+					if errors.Is(err, errMemberChanged) {
+						left++
+						continue
+					}
+					return ticked, left, err
 				}
 				if category != "" {
 					if err := setCategory(id, true); err != nil {
-						return err
+						return ticked, left, err
 					}
 				}
+				ticked++
 			}
-			return nil
+			return ticked, left, nil
 		}
 		var targetGroup ReviewGroup
 		if request.GroupID != "" {
@@ -269,13 +281,18 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 		}
 		switch request.Action {
 		case "select_group":
-			if err := selectGroup(targetGroup); err != nil {
+			ticked, left, err := selectGroup(targetGroup)
+			if err != nil {
 				return err
+			}
+			if ticked == 0 && left > 0 {
+				// Every file that could have been ticked changed since the scan.
+				return errMemberChanged
 			}
 		case "select_filing_groups":
 			for _, group := range groups.Groups {
 				if group.Kind == "filing" {
-					if err := selectGroup(group); err != nil {
+					if _, _, err := selectGroup(group); err != nil {
 						return err
 					}
 				}

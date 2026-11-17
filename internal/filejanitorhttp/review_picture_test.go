@@ -2,6 +2,7 @@ package filejanitorhttp
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/userprofile"
@@ -71,13 +72,19 @@ func TestReviewPictureFilesHTTP_RefusesWhatItCannotPageHonestly(t *testing.T) {
 	h, _ := groupHandler(t, 3)
 	_, picture, _ := readPicture(t, h, "file-janitor")
 	revision := picture["revision"].(string)
+	// A revision that is certainly different, whatever its last digit is.
+	otherDigit := "0"
+	if strings.HasSuffix(revision, "0") {
+		otherDigit = "1"
+	}
+	different := revision[:63] + otherDigit
 
 	for _, tc := range []struct {
 		name, query string
 		code        int
 		errorCode   string
 	}{
-		{"scan changed since the page was drawn", "section=filed&key=images&revision=" + revision[:63] + "0", http.StatusConflict, "review_changed"},
+		{"scan changed since the page was drawn", "section=filed&key=images&revision=" + different, http.StatusConflict, "review_changed"},
 		{"choices changed since the page was drawn", "section=filed&key=images&draft_revision=stale", http.StatusConflict, "review_changed"},
 		{"unknown section", "section=everything", http.StatusBadRequest, "invalid_request"},
 		{"unknown folder", "section=filed&key=nowhere", http.StatusBadRequest, "invalid_request"},

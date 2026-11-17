@@ -510,11 +510,16 @@ test.describe('the first Downloads batch teaches Ori', () => {
       .first()
       .getByRole('link', { name: 'Review batch' })
       .click();
+    // The review opens on the picture; the per-file checkboxes are in All files.
+    await page.locator('#fileJanitorView-all').click();
     for (const file of files) {
       await page.getByRole('checkbox', { name: `Select ${file}`, exact: true }).check();
     }
-    await page.locator('#fileJanitorApprove').click();
-    await page.locator('#fileJanitorConfirmApply').click();
+    // One press files what is ticked: there is no separate confirm screen.
+    const file = page.locator('#fileJanitorApprove');
+    await expect(file).toBeEnabled();
+    await file.click();
+    await expect(page.locator('#fileJanitorResultsSummary')).toContainText('filed');
 
     // The names that recur are offered as learnings; nothing is a fact yet.
     const learning = async () =>

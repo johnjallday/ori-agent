@@ -94,7 +94,11 @@ type ReviewPicture struct {
 	// ContentRead says whether any file in the scan was sorted by reading inside
 	// it: "none", "some", or "unknown" when a saved file has no provenance. The
 	// lead line's third sentence must be true for the scan.
-	ContentRead  string            `json:"content_read"`
+	ContentRead string `json:"content_read"`
+	// Changed is how many waiting files are drawn under "could not be filed"
+	// because they changed or went missing since the scan. The sections add up to
+	// Waiting once these are counted.
+	Changed      int               `json:"changed"`
 	Folders      []PictureFolder   `json:"folders"`
 	Loose        []PictureLooseRow `json:"loose"`
 	LeftOut      PictureSection    `json:"left_out"`
@@ -138,7 +142,17 @@ type pictureLayout struct {
 	trash    []PictureFile
 	couldNot []PictureFile
 	selected map[string]int // group ID to members with a move choice
+	// changed counts the waiting files drawn under "could not be filed" because
+	// the file itself changed or went missing since the scan; they are still
+	// waiting, so they are part of the scan's waiting total.
+	changed int
 }
+
+// Why a ticked file that is no longer the file that was ticked is not filed.
+const (
+	pictureReasonChanged = "This file changed since you looked, so Ori left it alone."
+	pictureReasonMissing = "This file is no longer in the folder."
+)
 
 func pictureFileFor(candidate JanitorCandidate, placement string) PictureFile {
 	file := PictureFile{ID: candidate.ID, Name: candidate.Display(), Size: candidate.Size, Placement: placement}
@@ -170,7 +184,23 @@ func layoutReviewPicture(groups ReviewGroups, view ReviewDraftView, candidates [
 			}
 		}
 	}
+	removed := make(map[string]string, len(view.removed))
+	for _, gone := range view.removed {
+		removed[gone.candidateID] = gone.reason
+	}
 	for _, candidate := range candidates {
+		if reason, gone := removed[candidate.ID]; gone && proposalPending(candidate) {
+			// Ticked, but the file is no longer the file that was ticked: it is
+			// not filed, and it is not "left out by you" either.
+			file := pictureFileFor(candidate, PictureCouldNotFile)
+			file.State, file.Reason = reason, pictureReasonChanged
+			if reason == "missing" {
+				file.Reason = pictureReasonMissing
+			}
+			layout.couldNot = append(layout.couldNot, file)
+			layout.changed++
+			continue
+		}
 		if !proposalPending(candidate) {
 			if candidate.State == CandidateFailed || candidate.State == CandidateStale {
 				file := pictureFileFor(candidate, PictureCouldNotFile)
@@ -256,7 +286,7 @@ func buildReviewPicture(groups ReviewGroups, view ReviewDraftView, candidates []
 	picture := ReviewPicture{
 		BatchID: groups.BatchID, Revision: groups.Revision, DraftRevision: view.Revision, DraftState: view.State,
 		RuleVersion: groups.RuleVersion, Counts: groups.Counts, Waiting: groups.Counts.Filing + groups.Counts.Questions,
-		RemovedStale: view.RemovedStale, ContentRead: reviewContentRead(candidates),
+		RemovedStale: view.RemovedStale, ContentRead: reviewContentRead(candidates), Changed: layout.changed,
 		Folders: []PictureFolder{}, Loose: []PictureLooseRow{},
 		LeftOut: pictureSection(layout.leftOut), Trash: pictureSection(layout.trash), CouldNotFile: pictureSection(layout.couldNot),
 	}

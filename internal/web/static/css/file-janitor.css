@@ -164,6 +164,13 @@
   white-space: nowrap;
 }
 
+/* A file whose plan is not what the person looked at. The words carry the meaning;
+   the heavier border only makes it easy to find among the other tags. */
+.fj-tag-changed {
+  border-width: 2px;
+  font-weight: 600;
+}
+
 /* Link-style text is the accent mixed toward the theme's own foreground so it
    keeps 4.5:1 on both the light and dark surfaces (the raw accent is 3.4:1 on
    light). */
@@ -986,28 +993,6 @@
   border-color: var(--border-color, #2f2f2f);
 }
 
-.fj-confirm {
-  margin-top: 0.9rem;
-  padding: 0.75rem 0.9rem;
-  border-radius: 10px;
-  border: 1px solid var(--accent-color, #3b7dd8);
-  background: var(--surface-2, rgba(255, 255, 255, 0.04));
-}
-
-.fj-confirm-title {
-  margin: 0;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--text-primary, #e8e8e8);
-}
-
-.fj-confirm-lead {
-  margin: 0.2rem 0 0.5rem;
-  font-size: 0.82rem;
-  color: var(--text-secondary, #9aa0a6);
-}
-
-.fj-confirm-list,
 .fj-results-list {
   list-style: none;
   margin: 0;
@@ -1019,26 +1004,14 @@
   overflow-y: auto;
 }
 
-.fj-confirm-item,
 .fj-results-item {
   font-size: 0.8rem;
   color: var(--text-secondary, #9aa0a6);
   overflow-wrap: anywhere;
 }
 
-.fj-confirm-name,
 .fj-results-name {
   color: var(--text-primary, #e8e8e8);
-}
-
-.fj-confirm-destination {
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
-}
-
-/* A forced rename is called out in words: the user is told the file will not
-   land under the name they expected, and why. */
-.fj-confirm-renamed {
-  color: var(--warning-color, #b26a00);
 }
 
 .fj-results {
@@ -1108,15 +1081,11 @@
   color: #fff;
 }
 
-.fj-confirm-trash .fj-confirm-destination {
-  color: var(--danger-color, #c5442e);
-}
-
 .fj-trash-ack {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.4rem;
-  margin: 0.6rem 0 0;
+  margin: 0;
   font-size: 0.82rem;
   color: var(--text-primary, #e8e8e8);
   cursor: pointer;
@@ -1382,6 +1351,19 @@
 
 .fj-console .fj-btn-primary.fj-btn-destructive {
   background: color-mix(in srgb, var(--danger-color, #c5442e) 85%, #000);
+}
+
+/* Waiting for the Trash tick (or a save, or the plan check): the main button keeps
+   its words readable. Red text-on-red at reduced opacity was not; it is drawn as the
+   ordinary disabled button with a red outline, and the words still say "Trash". */
+.fj-console .fj-footer .fj-btn-primary:disabled {
+  opacity: 1;
+}
+
+.fj-console .fj-footer .fj-btn-primary.fj-btn-destructive:disabled {
+  background: var(--bg-tertiary, #2a2a2a);
+  color: var(--text-primary, #e8e8e8);
+  border: 2px solid var(--danger-color, #c5442e);
 }
 
 /* The header carries the title, the folder, the status, and the actions that

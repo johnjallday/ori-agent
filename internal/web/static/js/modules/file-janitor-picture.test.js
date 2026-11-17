@@ -10,7 +10,9 @@ import {
   BANNED_WORDS,
   LOOSE_LABELS,
   LOOSE_WHY,
+  OVER_LIMIT_NOTE,
   earlierLine,
+  fileButtonModel,
   folderAriaLabel,
   folderLabel,
   frameTitle,
@@ -18,7 +20,8 @@ import {
   looseTotal,
   moreLabel,
   pictureAccounting,
-  renderPicture
+  renderPicture,
+  trashTickLabel
 } from './file-janitor-picture.js';
 
 class El {
@@ -516,6 +519,112 @@ test('the accounting adds up to what is waiting, and the quiet line counts earli
   );
   find(root, node => node.id === 'fileJanitorShowEarlier')[0].fire('click');
   assert.deepEqual(shown, [true]);
+});
+
+const planOf = (move_count, trash_count = 0, extra = {}) => ({
+  move_count,
+  trash_count,
+  over_limit: false,
+  ...extra
+});
+
+test('the one main button states what pressing it will do (R35)', () => {
+  const model = plan => fileButtonModel({ plan, planCurrent: true, trashAcknowledged: true });
+  assert.equal(model(planOf(52)).label, 'File 52 files');
+  assert.equal(model(planOf(1)).label, 'File 1 file');
+  assert.equal(model(planOf(52, 1)).label, 'File 52 files · 1 to Trash');
+  assert.equal(model(planOf(52, 3)).label, 'File 52 files · 3 to Trash');
+  assert.equal(model(planOf(0, 3)).label, 'Move 3 files to Trash');
+  assert.equal(model(planOf(0, 1)).label, 'Move 1 file to Trash');
+  assert.equal(model(planOf(0, 0)).label, 'Nothing to file');
+  assert.equal(model(planOf(0, 0)).disabled, true, 'nothing to file is disabled');
+  assert.equal(model(planOf(52)).disabled, false);
+});
+
+test('Trash needs its own tick before the button works, and the tick names the count (R37)', () => {
+  const base = { planCurrent: true, plan: planOf(10, 2) };
+  const without = fileButtonModel({ ...base, trashAcknowledged: false });
+  assert.equal(without.disabled, true);
+  assert.equal(without.needsTrashTick, true);
+  assert.equal(fileButtonModel({ ...base, trashAcknowledged: true }).disabled, false);
+  assert.equal(trashTickLabel(2), 'Yes, move 2 files to Trash');
+  assert.equal(trashTickLabel(1), 'Yes, move 1 file to Trash');
+  // No Trash, no tick to ask for.
+  assert.equal(fileButtonModel({ plan: planOf(10), planCurrent: true }).needsTrashTick, false);
+});
+
+test('over 1,000 files the button is disabled and says what to do (R39)', () => {
+  const model = fileButtonModel({
+    plan: planOf(1200, 0, { over_limit: true }),
+    planCurrent: true,
+    trashAcknowledged: true
+  });
+  assert.equal(model.label, 'Ori files up to 1,000 files at a time. Untick a folder to continue.');
+  assert.equal(model.label, OVER_LIMIT_NOTE);
+  assert.equal(model.disabled, true);
+});
+
+test('while a choice is saving, unsaved, or the plan is being checked, the button waits and says why (R40)', () => {
+  const plan = planOf(5);
+  const saving = fileButtonModel({ plan, planCurrent: true, saveState: 'saving' });
+  assert.deepEqual([saving.disabled, saving.note], [true, 'Saving…']);
+  // The note names the way on that is actually offered: a failed save can be retried,
+  // a change made elsewhere has to be reloaded (retrying would overwrite it).
+  for (const [state, note] of [
+    ['failed', 'Not saved. Retry'],
+    ['conflict', 'Not saved. Reload'],
+    ['unavailable', 'Choices unavailable. Reload']
+  ]) {
+    const model = fileButtonModel({ plan, planCurrent: true, saveState: state });
+    assert.deepEqual([model.disabled, model.note], [true, note]);
+  }
+  const checking = fileButtonModel({ plan, planCurrent: false });
+  assert.deepEqual([checking.disabled, checking.note], [true, 'Checking…']);
+  assert.equal(fileButtonModel({ planCurrent: true }).disabled, true, 'no plan yet');
+  assert.equal(fileButtonModel({ plan, planCurrent: true, editsAvailable: false }).disabled, true);
+  const ready = fileButtonModel({ plan, planCurrent: true });
+  assert.deepEqual([ready.disabled, ready.note], [false, '']);
+});
+
+test('no button label or note uses a retired word', () => {
+  const texts = [];
+  for (const [moves, trash] of [
+    [52, 0],
+    [52, 3],
+    [0, 3],
+    [0, 0]
+  ])
+    texts.push(fileButtonModel({ plan: planOf(moves, trash), planCurrent: true }).label);
+  for (const saveState of ['saving', 'failed', 'conflict', 'unavailable'])
+    texts.push(fileButtonModel({ plan: planOf(5), planCurrent: true, saveState }).note);
+  texts.push(OVER_LIMIT_NOTE, trashTickLabel(3), 'Checking…');
+  for (const text of texts)
+    for (const word of BANNED_WORDS)
+      assert.doesNotMatch(text.toLowerCase(), new RegExp('\\b' + word + '\\b'), text);
+});
+
+test('a file that will get a new name is shown under it, tagged "renamed" (R7)', () => {
+  const picture = pictureFixture();
+  picture.folders[0].files = [file('Invoice 100.pdf', { id: 'x1' }), ...names('doc-', 4)];
+  const plan = {
+    items: {
+      x1: { renamed: true, final_name: 'Invoice 100 (2).pdf' },
+      'id-doc-0': { renamed: false, final_name: 'doc-0' }
+    }
+  };
+  const root = renderPicture(doc, picture, ctx({ plan }));
+  const documents = find(root, node => node.getAttribute('data-fj-folder') === 'documents')[0];
+  const items = find(documents, node => node.tagName === 'LI');
+  assert.match(textOf(items[0]), /^Invoice 100 \(2\)\.pdf renamed$/);
+  assert.equal(textOf(items[1]), 'doc-0', 'a file with no clash keeps its own name');
+  // Until the plan check returns, every file shows its own name.
+  const bare = renderPicture(doc, picture, ctx());
+  const names0 = find(
+    find(bare, node => node.getAttribute('data-fj-folder') === 'documents')[0],
+    node => node.tagName === 'LI'
+  ).map(textOf);
+  assert.equal(names0[0], 'Invoice 100.pdf');
+  assert.ok(!names0.join(' ').includes('renamed'));
 });
 
 test('small helpers read plainly', () => {

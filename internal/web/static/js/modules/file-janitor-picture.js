@@ -87,6 +87,70 @@ export function moreLabel(shown, total) {
   return 'and ' + (total - shown) + ' more';
 }
 
+// R35, R37, R39, R40: the one main button. It states what pressing it will do, and
+// is disabled until pressing it is safe to offer. Pure: the console passes what it
+// knows and draws what this returns; nothing here decides what may move.
+//
+//   plan                 the server's plan check for what the person is looking at
+//   planCurrent          that plan names the saved choices on screen
+//   saveState            '' | 'saving' | 'failed' (retry) | 'conflict' (changed
+//                        elsewhere: reload) | 'unavailable' (could not be read)
+//   trashAcknowledged    the person ticked "Yes, move M files to Trash" for this M
+//   editsAvailable       nothing else is in flight
+export const CHANGED_TAG = 'changed since you looked';
+export const OVER_LIMIT_NOTE =
+  'Ori files up to 1,000 files at a time. Untick a folder to continue.';
+
+export function trashTickLabel(count) {
+  return 'Yes, move ' + filesWord(count) + ' to Trash';
+}
+
+export function fileButtonModel({
+  plan,
+  planCurrent,
+  saveState = '',
+  trashAcknowledged = false,
+  editsAvailable = true
+} = {}) {
+  const moves = plan?.move_count || 0;
+  const trash = plan?.trash_count || 0;
+  // Before the first plan there is nothing to state yet: the button says File and
+  // waits ("Checking…"), rather than claiming there is nothing to file.
+  let label = plan ? 'Nothing to file' : 'File';
+  if (moves > 0 && trash > 0) label = 'File ' + filesWord(moves) + ' · ' + trash + ' to Trash';
+  else if (moves > 0) label = 'File ' + filesWord(moves);
+  else if (trash > 0) label = 'Move ' + filesWord(trash) + ' to Trash';
+  let note = '';
+  let disabled = false;
+  if (plan?.over_limit) {
+    label = OVER_LIMIT_NOTE;
+    disabled = true;
+  } else if (saveState === 'saving') {
+    note = 'Saving…';
+    disabled = true;
+  } else if (saveState === 'failed') {
+    note = 'Not saved. Retry';
+    disabled = true;
+  } else if (saveState === 'conflict') {
+    // Changed somewhere else: retrying would overwrite it, so the way on is to reload.
+    note = 'Not saved. Reload';
+    disabled = true;
+  } else if (saveState === 'unavailable') {
+    note = 'Choices unavailable. Reload';
+    disabled = true;
+  } else if (!plan || !planCurrent) {
+    note = 'Checking…';
+    disabled = true;
+  } else if (moves + trash === 0) {
+    disabled = true;
+  } else if (trash > 0 && !trashAcknowledged) {
+    disabled = true;
+  } else if (!editsAvailable) {
+    disabled = true;
+  }
+  return { label, note, disabled, moves, trash, needsTrashTick: trash > 0 && !plan?.over_limit };
+}
+
 // Still loose: exactly the files its rows list: the question rows and the files
 // taken out of a ticked folder. The files of a folder that is not ticked also stay
 // loose (R13), but they are drawn in that folder's own dashed card with their own
@@ -209,11 +273,22 @@ export function renderPicture(doc, picture, ctx) {
   return root;
 }
 
-function nameList(h, files, className) {
+// A file the plan says will get a new name (a file of that name is already in the
+// destination) is shown under the new name, tagged "renamed" (R7). The plan check
+// is a read of disk, so the names arrive after the picture; until then, and for a
+// file the plan does not cover, the name is the file's own.
+function nameList(h, files, className, ctx) {
   const list = h('ul', className);
   for (const file of files) {
-    const item = h('li', 'fj-file', file.name);
+    const planned = ctx?.plan?.items?.[file.id];
+    const renamed = Boolean(planned?.renamed && planned.final_name);
+    const item = h('li', 'fj-file', renamed ? planned.final_name : file.name);
+    if (renamed) item.appendChild(h('span', 'fj-tag', 'renamed'));
     if (file.your_choice) item.appendChild(h('span', 'fj-tag', 'your choice'));
+    // R36: a press that found the plan had changed moved nothing; the files whose
+    // plan differs from what the person looked at say so, until the next change.
+    if (ctx?.changedIds?.has(file.id))
+      item.appendChild(h('span', 'fj-tag fj-tag-changed', CHANGED_TAG));
     list.appendChild(item);
   }
   return list;
@@ -260,7 +335,7 @@ function folderCard(h, folder, ctx) {
   card.appendChild(head);
   if (unticked) card.appendChild(h('p', 'fj-not-filed', 'Not filed'));
   if (folder.count > 0) {
-    card.appendChild(nameList(h, folder.files, 'fj-folder-files'));
+    card.appendChild(nameList(h, folder.files, 'fj-folder-files', ctx));
     if (folder.count > folder.files.length)
       card.appendChild(
         moreButton(h, ctx, FILED, folder.category, folder.files.length, folder.count)
@@ -369,7 +444,9 @@ function morePanel(h, picture, ctx) {
         'Showing ' + first + '–' + (more.offset + more.files.length) + ' of ' + more.total + '.'
       )
     );
-    panel.appendChild(nameList(h, more.files, 'fj-loose-files'));
+    panel.appendChild(
+      nameList(h, more.files, 'fj-loose-files', more.section === FILED ? ctx : undefined)
+    );
     const nav = h('nav', 'fj-actions');
     nav.setAttribute('aria-label', 'File list pages');
     for (const [label, offset, disabled] of [
@@ -407,7 +484,10 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     looseTotal,
     pictureAccounting,
     earlierLine,
-    folderLabel
+    folderLabel,
+    fileButtonModel,
+    trashTickLabel,
+    OVER_LIMIT_NOTE
   };
   document.dispatchEvent(new CustomEvent('ori:filing-picture-ready'));
 }

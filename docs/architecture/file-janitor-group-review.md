@@ -428,7 +428,11 @@ write, the connector contract (`mcp_mover.go`, the `Mover` interface).
   question-group or hand-changed file), else a filing member goes to its folder's
   dashed `unfiled` list when none of its group is selected and to `left_out`
   otherwise, else a question member to its row. Failed and stale files go to
-  `could_not_file`. The section counts add up to `waiting` (R8).
+  `could_not_file`, and so does a waiting file whose saved choice was removed
+  because the file changed or went missing since the scan (`state` `changed` or
+  `missing`, never `can_retry`): it is not "left out by you", the person did not
+  leave it out. `changed` in the picture counts those files. The section counts add
+  up to `waiting` (R8).
 - `GET .../picture/files?section=filed|unfiled|loose|left_out|trash|could_not_file|family|bundle&key=&revision=&draft_revision=&limit=50&offset=0`
   pages the same placement (50 default, 200 maximum); a mismatch is 409
   `review_changed`.
@@ -440,8 +444,11 @@ write, the connector contract (`mcp_mover.go`, the `Mover` interface).
 
 ### Plan check (task 2.1)
 
-- `GET .../batches/{batchID}/plan?revision=&group_revision=&destination=<category|trash>&limit=50&offset=0`,
-  `no-store`; a revision mismatch is 409 `review_conflict`.
+- `GET .../batches/{batchID}/plan?revision=&group_revision=&destination=<category|trash>&limit=50&offset=0`
+  or `...&ids=a,b,c` (at most 200 distinct candidate IDs, not together with
+  `destination`; `items` is then exactly those files' lines, which is how the
+  picture learns the final name of each file it shows), `no-store`; a revision
+  mismatch is 409 `review_conflict`, a bad `ids` list 400.
   `Service.PlanReview(ctx, owner, ws, batchID, ReviewPlanQuery)` in
   `review_plan.go` reads `loadScanState(ws, true)` and never calls
   `UpdateScanState`, `MkdirAll` or the root lock. It `Lstat`s each file once and

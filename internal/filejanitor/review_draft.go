@@ -26,6 +26,12 @@ var (
 	ErrUnsupportedScanSchema = errors.New("unsupported File Janitor scan schema")
 )
 
+// errMemberChanged is ErrCandidateNotActionable for the one reason the person can
+// act on by scanning again: the file is not the file that was scanned. A group tick
+// leaves such a file unticked instead of refusing the folder; only when nothing in
+// the group could be ticked is it returned, so the person is told why.
+var errMemberChanged = fmt.Errorf("%w: it changed since the scan", ErrCandidateNotActionable)
+
 // ReviewChoice records an actual explicit selection, never an approval. The
 // destination remains exclusively in the canonical candidate decision.
 type ReviewChoice struct {
@@ -135,6 +141,16 @@ type ReviewDraftView struct {
 	Choices       []ReviewChoiceView     `json:"choices"`
 	RemovedStale  int                    `json:"removed_stale"`
 	Groups        []ReviewDraftGroupView `json:"groups"`
+	// removed names each ticked file the revalidation dropped because the file
+	// itself changed or went missing since the scan. It is never serialized: the
+	// plan check uses it to say which files "changed since you looked".
+	removed []removedChoice
+}
+
+// removedChoice is one ticked file that is no longer the file that was ticked.
+type removedChoice struct {
+	candidateID string
+	reason      string // "changed" or "missing"
 }
 
 // projectReviewDraft never persists reconciliation. Every caller receives a
@@ -172,6 +188,11 @@ func reviewDefaultsApply(state ScanState, batchID string) bool {
 	}
 	for _, draft := range state.ReviewDrafts {
 		if draft.BatchID == batchID {
+			return false
+		}
+	}
+	for _, filing := range state.Filings {
+		if filing.BatchID == batchID {
 			return false
 		}
 	}
