@@ -122,7 +122,7 @@ func TestPremiseNames(t *testing.T) {
 		{"a longer name is cut with an ellipsis", songs(strings.Repeat("b", 41), "B"), []string{strings.Repeat("b", 39) + "…", "B"}, 0},
 		{"a long name of wide characters is cut by characters, not bytes", songs(strings.Repeat("曲", 50)), []string{strings.Repeat("曲", 39) + "…"}, 0},
 		{"html stays plain text, not escaped or removed", songs(`<b>Hi</b> & "you"`, "B"), []string{`<b>Hi</b> & "you"`, "B"}, 0},
-		{"control and bidi characters are dropped", songs("Na\nme\t1", "Evil‮File", "C"), []string{"Name1", "EvilFile", "C"}, 0},
+		{"control and bidi characters are dropped", songs("Na\nme\t1", "Evil"+string(rune(0x202e))+"File", "C"), []string{"Name1", "EvilFile", "C"}, 0},
 		{"a name with nothing left is skipped, not counted", songs("\n\t", "B", "C", "D", "E"), []string{"B", "C", "D"}, 1},
 	}
 	for _, tc := range cases {
@@ -285,7 +285,7 @@ func TestPremiseOutcome_FollowsTheChosenSteps(t *testing.T) {
 	})
 	t.Run("the folder's name is drawn as plain text, controls dropped", func(t *testing.T) {
 		rec := homeStageRecord(&folderlook.HomeFacts{HomeExists: true, RolesKnown: true})
-		rec.FolderName = "My\nAlbums‮ <b>"
+		rec.FolderName = "My\nAlbums" + string(rune(0x202e)) + " <b>"
 		got := premiseOutcome(&rec, homePlan(t, rec))
 		if got != "I'll plan adding MyAlbums <b> to your Music Production Home: a card for each song." {
 			t.Fatalf("outcome = %q", got)
