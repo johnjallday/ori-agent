@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WorkspaceCommandView } from './workspace-command.js';
 import { workspaceUpdates } from './workspace-updates.js';
+import { folderAgentReportView } from './folder-agent-card.js';
 
 globalThis.document = { getElementById: () => null };
 globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
@@ -506,6 +507,196 @@ for (const kind of ['station', 'detachment']) {
 test('HQ and group journeys do not acquire ordinary workspace guidance', () => {
   assert.equal(view([], { workspace: { designation: 'personal_hq' } }).renderWorkFirst(), '');
   assert.equal(view([], { workspace: { kind: 'group' } }).renderWorkFirst(), '');
+});
+
+// The folder's Commander waiting on the person (folder-question-said-once
+// FR13 to FR16): the page hands its view to the command, the strip and the
+// Commander card say the same thing, and the strip's button goes to the card.
+const folderRaw = (overrides = {}) => ({
+  workspace_id: 'w',
+  workspace_name: 'Albums',
+  folder_name: 'Albums',
+  agent_name: 'Albums Manager',
+  state: 'reported',
+  actions: ['set_up', 'keep', 'look_further'],
+  premise: {
+    state: 'asked',
+    sentence: 'This looks like a music folder.',
+    confirm: 'Yes, show me the plan',
+    other: "It's something else"
+  },
+  chat: { session_id: 'thread-1', message_id: 'question-1', unread: true },
+  ...overrides
+});
+const folderEntry = (overrides = {}, review = () => true) => {
+  const raw = folderRaw(overrides);
+  return { view: folderAgentReportView(raw), raw, review };
+};
+
+function commandWithFolderAgent(tasks = []) {
+  const command = view(tasks);
+  command.active = true;
+  command.viewMode = 'map';
+  command.renders = 0;
+  command.render = () => {
+    command.renders += 1;
+  };
+  return command;
+}
+
+test('the strip names the waiting question and redraws only when what it waits on changes', () => {
+  const command = commandWithFolderAgent();
+  command.setFolderAgent('w', folderEntry());
+  assert.equal(command.renders, 1);
+  const html = command.renderWorkFirst();
+  assert.match(html, /<h3>Albums Manager has a question about Albums<\/h3>/);
+  assert.match(html, />Answer<\/button>/);
+  assert.doesNotMatch(html, /New message from/);
+  // No empty description line under the title.
+  assert.doesNotMatch(html, /<\/h3><p>/);
+  assert.equal(command.nextAction().kind, 'folder_agent');
+
+  // The page hands over a view on every draw (the look's progress included):
+  // the same words do not redraw the command.
+  command.setFolderAgent('w', folderEntry({ progress: { entries: 40 } }));
+  command.setFolderAgent('w', folderEntry({ updated_at: '2026-11-17T10:00:00Z' }));
+  assert.equal(command.renders, 1);
+
+  // The words change (the question is answered, the plan is ready): it redraws.
+  command.setFolderAgent(
+    'w',
+    folderEntry({ premise: { state: 'confirmed', sentence: 'A music folder.' } })
+  );
+  assert.equal(command.renders, 2);
+  assert.match(command.renderWorkFirst(), /Albums Manager has a plan for Albums/);
+  assert.match(command.renderWorkFirst(), />Review<\/button>/);
+
+  // The agent goes on working: the strip lets go of it.
+  command.setFolderAgent(
+    'w',
+    folderEntry({ state: 'setting_up', setup: { status: 'running', lines: [] } })
+  );
+  assert.equal(command.renders, 3);
+  assert.notEqual(command.nextAction().kind, 'folder_agent');
+
+  // Another workspace's view, or none, is ignored.
+  command.setFolderAgent('other', folderEntry());
+  assert.equal(command.renders, 3);
+  command.setFolderAgent('w', folderEntry());
+  command.setFolderAgent('w', null);
+  assert.notEqual(command.nextAction().kind, 'folder_agent');
+});
+
+test("the strip's button opens the Commander's chat at the message, else does what Review does (FR15)", () => {
+  const opened = [];
+  globalThis.window = {
+    location: { search: '' },
+    PersonalAssistantPanel: {
+      openFolderReport: (id, ref, trigger) => {
+        opened.push([id, ref.sessionID, ref.messageID, trigger]);
+        return Promise.resolve(true);
+      }
+    }
+  };
+  try {
+    // The question has a message in the chat: it opens there.
+    const command = commandWithFolderAgent();
+    let reviewed = 0;
+    command.setFolderAgent(
+      'w',
+      folderEntry({}, () => (reviewed += 1) > 0)
+    );
+    bindPrimary(command).click();
+    assert.equal(opened.length, 1);
+    assert.deepEqual(opened[0].slice(0, 3), ['w', 'thread-1', 'question-1']);
+    assert.equal(reviewed, 0, 'Review is only the fallback');
+
+    // No message in the chat (nothing was posted): Review's own behaviour.
+    const bare = commandWithFolderAgent();
+    let review = 0;
+    bare.setFolderAgent(
+      'w',
+      folderEntry({ chat: undefined }, () => (review += 1) > 0)
+    );
+    bindPrimary(bare).click();
+    assert.equal(review, 1);
+    assert.equal(opened.length, 1, 'nothing opened in the chat');
+    // The button opens nothing about a ticket and starts no work.
+    assert.equal(bare.openFolderAgent(), true);
+  } finally {
+    delete globalThis.window;
+  }
+});
+
+test('the Commander card says what it waits on, unless a ticket itself needs the person (FR16)', () => {
+  const working = { id: 'look', status: 'in_progress', description: 'Look around Albums' };
+  const done = { id: 'look', status: 'completed', description: 'Look around Albums', result: 'x' };
+  const command = commandWithFolderAgent([working]);
+  // No view yet: the status comes from tickets, as before.
+  assert.equal(
+    command.mapAgentStatus({ tasks: [working], name: 'Albums Manager' }).label,
+    'Working'
+  );
+
+  command.setFolderAgent('w', folderEntry());
+  const status = command.mapAgentStatus({ tasks: [working], name: 'Albums Manager' });
+  assert.deepEqual(status, {
+    key: 'needs-you',
+    label: 'Has a question for you',
+    detail: 'Albums Manager has a question about Albums'
+  });
+  // The same words after the ticket finished (no stale "Ready to help").
+  assert.equal(
+    command.mapAgentStatus({ tasks: [done], name: 'Albums Manager' }).label,
+    'Has a question for you'
+  );
+  // It reads as one that asks the person, not as work.
+  assert.equal(command.statusTone(status.key, status.label), 'needs-input');
+  // Names match case-insensitively; another agent's card is its tickets' status.
+  assert.equal(
+    command.mapAgentStatus({ tasks: [], name: ' albums manager ' }).label,
+    'Has a question for you'
+  );
+  assert.equal(command.mapAgentStatus({ tasks: [working], name: 'Someone Else' }).label, 'Working');
+
+  // A ticket that itself needs the person keeps its own status.
+  const blocked = { id: 'b', status: 'blocked' };
+  const needsInput = { id: 'n', status: 'in_progress', context: { execution_step_waiting: true } };
+  assert.equal(
+    command.mapAgentStatus({ tasks: [blocked], name: 'Albums Manager' }).label,
+    'Blocked'
+  );
+  assert.equal(
+    command.mapAgentStatus({ tasks: [needsInput], name: 'Albums Manager' }).label,
+    'Needs input'
+  );
+
+  // Each other waiting moment has its own status, from the same words.
+  for (const [overrides, label] of [
+    [{ premise: { state: 'confirmed', sentence: 'x' } }, 'Has a plan for you'],
+    [
+      { premise: { state: 'something_else', sentence: 'x', withdrawn: true } },
+      'Nothing planned yet'
+    ],
+    [{ state: 'failed', premise: undefined }, 'Could not look']
+  ]) {
+    command.setFolderAgent('w', folderEntry(overrides));
+    assert.equal(command.mapAgentStatus({ tasks: [], name: 'Albums Manager' }).label, label);
+  }
+
+  // Not waiting (it is setting up): the tickets say it, as before.
+  command.setFolderAgent(
+    'w',
+    folderEntry({
+      state: 'setting_up',
+      premise: undefined,
+      setup: { status: 'running', lines: [] }
+    })
+  );
+  assert.equal(
+    command.mapAgentStatus({ tasks: [working], name: 'Albums Manager' }).label,
+    'Working'
+  );
 });
 
 test('on the Map the look the Commander narrates is not the next action; Overview lists it (map-above-the-fold)', () => {

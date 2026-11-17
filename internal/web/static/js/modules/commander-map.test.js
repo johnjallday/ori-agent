@@ -130,7 +130,7 @@ test('on the Map tab the header card is one line and the balloon carries the rep
   assert.equal(presenter.present(args(map, host)), true);
   assert.equal(host.shown.children[0].textContent, 'Albums Manager has a plan for Albums');
   assert.equal(host.shown.children[1].textContent, 'Review');
-  assert.equal(map.balloon.content.line, 'I have a plan for Albums · Review');
+  assert.equal(map.balloon.content.line, 'Albums Manager has a plan for Albums · Review');
   assert.deepEqual(map.balloon.content.speaker, { name: 'Albums Manager', role: 'Commander' });
   assert.equal(map.balloon.content.body().kind, 'compact');
   // A report already waiting when the page opened: no expanding by itself.
@@ -138,6 +138,51 @@ test('on the Map tab the header card is one line and the balloon carries the rep
   // Review expands the balloon and brings the map into view.
   host.shown.children[1].listeners.click();
   assert.deepEqual(map.calls.slice(-2), [['reveal'], ['expand', true]]);
+});
+
+// The page's Next action strip speaks for the same folder agent: the presenter
+// hands it each view the page already fetched (no second request), and gives it
+// the line's own Review for a report that has no message in the chat.
+test('the presenter hands each view to the page and reviews as the line does (folder-question-said-once FR15)', () => {
+  const map = fakeMap();
+  const host = fakeHost();
+  const seen = [];
+  let reviewed = 0;
+  const presenter = commanderPresenter(map, {
+    onView: entry => seen.push(entry),
+    onReview: () => (reviewed += 1)
+  });
+  // Nothing to review before a view.
+  assert.equal(presenter.review(), false);
+
+  const first = args(map, host);
+  presenter.present(first);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].view, first.view);
+  assert.equal(seen[0].raw, first.raw);
+  // Each later view goes the same way, and a presenter told "nothing" says so.
+  presenter.present(args(map, host, { previous: first.view }));
+  assert.equal(seen.length, 2);
+  presenter.present(null);
+  assert.equal(seen.at(-1), null);
+
+  // Review, on the map: the line's Review button does exactly this.
+  presenter.present(first);
+  const before = map.calls.length;
+  assert.equal(presenter.review(), true);
+  assert.deepEqual(map.calls.slice(before), [['reveal'], ['expand', true]]);
+  assert.equal(reviewed, 1);
+  host.shown.children[1].listeners.click();
+  assert.deepEqual(map.calls.slice(-2), [['reveal'], ['expand', true]]);
+  assert.equal(reviewed, 2);
+
+  // Off the map there is no balloon to open: the full card the host shows is
+  // brought into view instead, and the balloon is left alone.
+  map.state.visible = false;
+  const offMap = map.calls.length;
+  assert.equal(presenter.review(), true);
+  assert.equal(map.calls.slice(offMap).filter(c => c[0] === 'expand').length, 0);
+  assert.equal(reviewed, 2);
 });
 
 // The chat box's answer to "do you hold the plan?" is asked on every draw.
@@ -179,7 +224,7 @@ test('while the chat box holds the plan its host shows the full card and the bal
     true
   );
   assert.equal(map.balloon.content.body, null);
-  assert.equal(map.balloon.content.line, 'I have a plan for Albums · Review');
+  assert.equal(map.balloon.content.line, 'Albums Manager has a plan for Albums · Review');
   // The arrival is announced once, by the balloon's own line.
   assert.ok(map.balloon.content.announce);
   assert.match(map.balloon.content.signature, /\|true$/);
@@ -277,7 +322,7 @@ test('the balloon asks to learn the songs, then follows the reading', () => {
   };
 
   const asking = present({ songs_offer: songsOffer });
-  assert.equal(asking.map.balloon.content.line, 'Want me to learn the 7 songs? · Review');
+  assert.equal(asking.map.balloon.content.line, 'Albums Manager asks to learn the songs · Answer');
   assert.equal(asking.host.shown.children[0].textContent, 'Albums Manager asks to learn the songs');
   assert.equal(asking.map.balloon.content.body().kind, 'compact');
 
@@ -338,7 +383,7 @@ test('a host that keeps no line says nothing on the map and comes back with the 
   // On the map the Commander's line is the status: the host is empty and hidden.
   assert.equal(host.shown, undefined);
   assert.equal(host.hidden, true);
-  assert.equal(map.balloon.content.line, 'I have a plan for Albums · Review');
+  assert.equal(map.balloon.content.line, 'Albums Manager has a plan for Albums · Review');
   // The page unhides the host before each draw; a redraw hides it again.
   host.hidden = false;
   map.fire();
@@ -623,7 +668,7 @@ test("Home's other Commanders speak from their tiles; the drawer's own is left t
   commanders.sync(views, 'ws-b');
   assert.deepEqual(commanders.ids(), ['ws-a']);
   const a = commanderBalloon('home:ws-a');
-  assert.equal(a.content.line, 'I have a plan for Albums · Review');
+  assert.equal(a.content.line, 'Albums Manager has a plan for Albums · Review');
   assert.equal(a.expanded, false, 'never opens by itself for an agent not followed');
   // An action from its balloon posts through the host and redraws.
   a.content.body(doc).children[0].dispatch('click');
@@ -658,7 +703,10 @@ test('a balloon whose run Home follows out says where it is going', () => {
   assert.equal(drawn.at(-1), true, 'the card draws its own Opening line');
   // Without an opening, the same balloon keeps its own speech.
   commanders.sync([raw({ workspace_id: 'ws-a' })], '');
-  assert.equal(commanderBalloon('home:ws-a').content.line, 'I have a plan for Albums · Review');
+  assert.equal(
+    commanderBalloon('home:ws-a').content.line,
+    'Albums Manager has a plan for Albums · Review'
+  );
 });
 
 test('a balloon handed to the drawer is released, not cleared', () => {
@@ -674,7 +722,10 @@ test('a balloon handed to the drawer is released, not cleared', () => {
   commanders.sync([raw({ workspace_id: 'ws-a' })], '');
   commanders.sync([raw({ workspace_id: 'ws-a' })], 'ws-a');
   assert.deepEqual(commanders.ids(), []);
-  assert.equal(commanderBalloon('home:ws-a').content.line, 'I have a plan for Albums · Review');
+  assert.equal(
+    commanderBalloon('home:ws-a').content.line,
+    'Albums Manager has a plan for Albums · Review'
+  );
 });
 
 test('the Commander anchor: command node, group Commander unit, else the lot', () => {

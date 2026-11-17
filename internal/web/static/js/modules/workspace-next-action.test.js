@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  folderAgentWaiting,
   resolveWorkspaceNextAction as resolve,
   updateSourceRows
 } from './workspace-next-action.js';
+import { folderAgentReportView } from './folder-agent-card.js';
+import { commanderOneLine } from './commander-speech.js';
 
 const savedUpdates = (review = {}, welcome = {}) => ({
   state: 'ready',
@@ -425,4 +428,167 @@ test('navigation keys change on workspace generation, root, batch and receipt id
     before,
     'same batch count refresh does not change ownership'
   );
+});
+
+// The folder's Commander waiting on the person (folder-question-said-once FR13
+// to FR14): the strip names it in the shared row's words, below a ticket that
+// needs the person and above everything else.
+const folderView = (overrides = {}) =>
+  folderAgentReportView({
+    workspace_id: 'w',
+    workspace_name: 'Albums',
+    folder_name: 'Albums',
+    agent_name: 'Albums Manager',
+    state: 'reported',
+    actions: ['set_up', 'keep', 'look_further'],
+    ...overrides
+  });
+const asking = () =>
+  folderView({
+    premise: {
+      state: 'asked',
+      sentence: 'This looks like a music folder.',
+      confirm: 'Yes, show me the plan',
+      other: "It's something else"
+    }
+  });
+const withFolder = (folderAgent, extra = {}) =>
+  resolve({ workspaceId: 'w', tasks: { state: 'ready', items: [] }, folderAgent, ...extra });
+
+test('the strip names the question, the plan and the other waiting moments in the shared words', () => {
+  const setUp = {
+    status: 'done',
+    lines: [{ kind: 'home', step: 'home', name: 'x', state: 'done' }]
+  };
+  const rows = {
+    question: [asking(), 'Answer'],
+    plan: [folderView(), 'Review'],
+    'something else': [
+      folderView({ premise: { state: 'something_else', sentence: 'None.', withdrawn: true } }),
+      'Review'
+    ],
+    'could not look': [
+      folderView({ model_sentence: 'Albums Manager could not look itself: no key.' }),
+      'Review'
+    ],
+    'could not finish looking': [folderView({ state: 'failed' }), 'Review'],
+    'a step did not finish': [
+      folderView({ state: 'set_up', setup: { ...setUp, status: 'stopped' } }),
+      'Review'
+    ],
+    'learn the songs': [
+      folderView({
+        state: 'set_up',
+        setup: setUp,
+        songs_offer: {
+          count: 7,
+          noun: 'songs',
+          ask: 'Want me to learn the 7 songs?',
+          reads: 'x',
+          not_read: ''
+        }
+      }),
+      'Answer'
+    ],
+    'a suggested goal': [
+      folderView({
+        state: 'set_up',
+        setup: setUp,
+        goal_offer: { goal: 'Finish it', max_runes: 300 }
+      }),
+      'Review'
+    ]
+  };
+  for (const [name, [view, button]] of Object.entries(rows)) {
+    const strip = withFolder(view);
+    const words = commanderOneLine(view);
+    assert.equal(strip.kind, 'folder_agent', name);
+    // Taken from the one function the one-line card and the card's status use.
+    assert.equal(strip.title, words.text, name);
+    assert.equal(strip.action.label, words.action, name);
+    assert.equal(strip.action.label, button, name);
+    assert.equal(strip.action.owner, 'folder_agent', name);
+    assert.equal(strip.action.id, 'w', name);
+    assert.equal(strip.action.key, `folder-agent:${words.phase}:w`, name);
+    assert.equal(strip.description, '', name);
+  }
+  assert.equal(withFolder(asking()).title, 'Albums Manager has a question about Albums');
+});
+
+test('the waiting Commander ranks directly below a ticket that needs the person, above all else', () => {
+  const waiting = asking();
+  // A ticket that needs the person comes first.
+  assert.equal(
+    withFolder(waiting, { tasks: { state: 'ready', items: [task('failed', 'broken')] } }).kind,
+    'task'
+  );
+  assert.equal(
+    withFolder(waiting, { tasks: { state: 'ready', items: [task('blocked', 'b')] } }).action.owner,
+    'task'
+  );
+  // Running work, a finished result, filing work and an unread message all come after it.
+  const running = withFolder(waiting, {
+    tasks: { state: 'ready', items: [task('in_progress', 'work', { description: 'Research' })] }
+  });
+  assert.equal(running.kind, 'folder_agent');
+  assert.deepEqual(running.ongoing, ['Running: Research'], 'running work stays visible underneath');
+  assert.equal(
+    withFolder(waiting, {
+      tasks: { state: 'ready', items: [completed('done', '2026-10-01T00:00:00Z')] }
+    }).kind,
+    'folder_agent'
+  );
+  assert.equal(
+    withFolder(waiting, { console: consoleState({ pendingCount: 4 }) }).kind,
+    'folder_agent'
+  );
+  const unread = withFolder(waiting, { updates: savedUpdates({ pending_count: 0 }) });
+  assert.equal(unread.kind, 'folder_agent');
+  assert.equal(unread.message.unread, true, 'the unread message stays one tap away');
+  // Without the folder agent that unread message is the action, as before.
+  assert.equal(withFolder(null, { updates: savedUpdates({ pending_count: 0 }) }).kind, 'welcome');
+});
+
+test('without a waiting Commander the strip is exactly what it was', () => {
+  const inputs = [
+    { workspaceId: 'w', tasks: { state: 'ready', items: [] } },
+    { workspaceId: 'w', tasks: { state: 'ready', items: [task('in_progress', 'work')] } },
+    { workspaceId: 'w', tasks: { state: 'ready', items: [task('failed', 'broken')] } },
+    {
+      workspaceId: 'w',
+      tasks: { state: 'ready', items: [] },
+      updates: savedUpdates({ pending_count: 0 })
+    },
+    {
+      workspaceId: 'w',
+      tasks: { state: 'ready', items: [] },
+      console: consoleState({ pendingCount: 2 })
+    }
+  ];
+  for (const input of inputs) {
+    const today = resolve(input);
+    assert.deepEqual(resolve({ ...input, folderAgent: null }), today);
+    assert.deepEqual(resolve({ ...input, folderAgent: undefined }), today);
+    // Not waiting: the agent is looking, setting up or learning, or it is another workspace's.
+    assert.deepEqual(resolve({ ...input, folderAgent: folderView({ state: 'looking' }) }), today);
+    assert.deepEqual(
+      resolve({
+        ...input,
+        folderAgent: folderView({ state: 'setting_up', setup: { status: 'running', lines: [] } })
+      }),
+      today
+    );
+    assert.deepEqual(
+      resolve({ ...input, folderAgent: folderView({ workspace_id: 'another' }) }),
+      today
+    );
+    assert.deepEqual(resolve({ ...input, folderAgent: folderView({ state: 'kept' }) }), today);
+  }
+});
+
+test('folderAgentWaiting says when, and for which workspace, the Commander waits', () => {
+  assert.equal(folderAgentWaiting(asking(), 'w').phase, 'premise');
+  assert.equal(folderAgentWaiting(asking(), 'other'), null);
+  assert.equal(folderAgentWaiting(null, 'w'), null);
+  assert.equal(folderAgentWaiting(folderView({ state: 'looking' }), 'w'), null);
 });

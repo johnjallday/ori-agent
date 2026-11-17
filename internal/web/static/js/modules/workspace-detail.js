@@ -613,8 +613,12 @@ export class WorkspaceDetailPage {
     // leaves it out (commanderNarratedTicket).
     this.commanderPresenter?.dispose();
     this.commanderNarratedTicket = '';
+    this.folderAgentPhase = undefined;
     this.commanderPresenter = commanderPresenter(workspaceCommanderMap(this.workspaceId), {
       ticketItems: activity => this.commanderTicketItems(activity),
+      // The same view the Commander speaks from reaches the Next action strip and
+      // the Commander card, and tells the page when its tickets are out of date.
+      onView: entry => this.noteFolderAgentView(entry),
       hostLine: false,
       onNarrated: ticketID => {
         this.commanderNarratedTicket = ticketID;
@@ -646,6 +650,24 @@ export class WorkspaceDetailPage {
    * agent-give-task.js) and open the task form with that agent chosen.
    * The parameter is removed so a reload does not open it again.
    */
+  // noteFolderAgentView hears each view of the folder agent the page already
+  // fetched (the Commander's presenter passes it on). It hands the view to the
+  // Next action strip and the Commander card (workspaceCommand), and reloads the
+  // page's tickets when the agent's phase changes: its own tickets are written
+  // straight to the workspace, with no event the page listens to, so a page
+  // opened during the look kept an "In progress" ticket (and a "Working" card)
+  // after the look ended. The first view only records the phase.
+  noteFolderAgentView(entry) {
+    const phase = entry?.view ? String(entry.view.state || '') : '';
+    const before = this.folderAgentPhase;
+    this.folderAgentPhase = phase;
+    if (before && phase && before !== phase) void this.loadTasks();
+    window.workspaceCommand?.setFolderAgent?.(
+      this.workspaceId,
+      entry ? { ...entry, review: () => this.commanderPresenter?.review?.() } : null
+    );
+  }
+
   // commanderTicketItems turns the Commander's ticket activity into its
   // balloon's items: a waiting ticket answered through the ticket page's own
   // assist endpoint, a run's lines, and a finished result to open or dismiss.

@@ -32,11 +32,82 @@ export function lookLine(view) {
   return 'Looking around…';
 }
 
+// WAITING_PHASES are the seven moments the Commander waits on the person
+// (folder-question-said-once FR13): the question, the plan, "something else",
+// a look that could not run or finish, a step that did not finish, the offer to
+// learn the songs, and a suggested goal. In each, the Next action strip, the
+// Commander card on the map and the balloon's folded line say the same words,
+// and they all come from waitingWords below, so they cannot drift apart.
+export const WAITING_PHASES = [
+  'premise',
+  'report',
+  'withdrawn',
+  'cause',
+  'stopped',
+  'songs',
+  'goal'
+];
+
+// waitingWords is the one table of those words: the title (the strip's title,
+// the one-line card's text and the folded line's words), the button's label
+// ("Answer" when the person is asked something, "Review" otherwise) and the
+// Commander card's status. null for any phase that is not a waiting moment.
+function waitingWords(phase, view) {
+  const folder = view.folder || view.workspace;
+  const agent = view.agent || 'The agent';
+  switch (phase) {
+    case 'premise':
+      return {
+        text: `${agent} has a question about ${folder}`,
+        action: 'Answer',
+        status: 'Has a question for you'
+      };
+    case 'report':
+      return {
+        text: `${agent} has a plan for ${folder}`,
+        action: 'Review',
+        status: 'Has a plan for you'
+      };
+    case 'withdrawn':
+      return {
+        text: `Nothing is planned for ${folder}`,
+        action: 'Review',
+        status: 'Nothing planned yet'
+      };
+    case 'cause':
+      return {
+        text: `${agent} could not look itself`,
+        action: 'Review',
+        status: 'Could not look'
+      };
+    case 'stopped':
+      return {
+        text: `${view.workspace}: a step did not finish`,
+        action: 'Review',
+        status: 'A step did not finish'
+      };
+    case 'songs':
+      return {
+        text: `${agent} asks to learn the ${view.songsOffer?.noun || 'songs'}`,
+        action: 'Answer',
+        status: 'Has a question for you'
+      };
+    case 'goal':
+      return {
+        text: `${agent} suggests a goal for ${view.workspace}`,
+        action: 'Review',
+        status: 'Suggests a goal'
+      };
+    default:
+      return null;
+  }
+}
+
 // commanderSpeech is the Commander's voice for one folder agent view:
 // {phase, line, headline, announce, review}. line is the collapsed speech
 // line, headline the balloon header's line, announce what the live region may
 // say. null when the Commander has nothing to say (kept, or no view).
-export function commanderSpeech(view) {
+function speechOf(view) {
   if (!view || !view.workspaceID) return null;
   const folder = view.folder || view.workspace;
   switch (view.state) {
@@ -167,76 +238,56 @@ export function commanderSpeech(view) {
   }
 }
 
+// commanderSpeech: while the Commander waits on the person (WAITING_PHASES) its
+// folded line is the row's words, "<title> · <button>", the same title the strip
+// and the one-line card use. Every other phase (looking, setting up, learning,
+// finished) speaks as it always did (FR17). The live region's announcement is
+// unchanged (FR29).
+export function commanderSpeech(view) {
+  const speech = speechOf(view);
+  const row = speech ? waitingWords(speech.phase, view) : null;
+  return row ? { ...speech, line: `${row.text} · ${row.action}` } : speech;
+}
+
 // Decorative entrance copy belongs to the tile, never the drawer's status.
 export function commanderBuildingLine(workspace) {
   return `Building ${workspace || 'workspace'}…`;
 }
 
 // commanderOneLine is the shrunk card (FR13, FR15): the Commander's line in
-// the third person with one action. null when there is nothing to say.
+// the third person with one action. null when there is nothing to say. It is
+// also the one source of the words for every waiting moment (FR13): `text` is
+// the title the Next action strip shows, `action` the button's label, `status`
+// the Commander card's status, and `waiting` says whether the phase is one of
+// the seven moments the Commander waits on the person (WAITING_PHASES). A
+// phase that is not one (looking, setting up, learning, finished) is
+// waiting: false with no status, and the strip and the card behave as they did.
 export function commanderOneLine(view) {
   const speech = commanderSpeech(view);
   if (!speech) return null;
+  const waiting = waitingWords(speech.phase, view);
+  if (waiting) return { phase: speech.phase, ...waiting, waiting: true };
   const folder = view.folder || view.workspace;
   const agent = view.agent || 'The agent';
+  const plain = (text, action = 'Review') => ({
+    phase: speech.phase,
+    text,
+    action,
+    waiting: false,
+    status: ''
+  });
   switch (speech.phase) {
     case 'looking':
-      return {
-        phase: speech.phase,
-        text: `${agent} is looking around ${folder}`,
-        action: 'Review'
-      };
-    case 'report':
-      return { phase: speech.phase, text: `${agent} has a plan for ${folder}`, action: 'Review' };
-    case 'premise':
-      return {
-        phase: speech.phase,
-        text: `${agent} has a question about ${folder}`,
-        action: 'Review'
-      };
-    case 'withdrawn':
-      return {
-        phase: speech.phase,
-        text: `Nothing is planned for ${folder}`,
-        action: 'Review'
-      };
-    case 'cause':
-      return { phase: speech.phase, text: `${agent} could not look itself`, action: 'Review' };
+      return plain(`${agent} is looking around ${folder}`);
     case 'running': {
       const step = folderAgentRunStep(view);
       const where = step && step.count ? ` · step ${step.step} of ${step.count}` : '';
-      return {
-        phase: speech.phase,
-        text: `Setting up ${view.workspace}${where}`,
-        action: 'Review'
-      };
+      return plain(`Setting up ${view.workspace}${where}`);
     }
-    case 'stopped':
-      return {
-        phase: speech.phase,
-        text: `${view.workspace}: a step did not finish`,
-        action: 'Review'
-      };
-    case 'songs':
-      return {
-        phase: speech.phase,
-        text: `${agent} asks to learn the ${view.songsOffer.noun}`,
-        action: 'Review'
-      };
     case 'learning':
-      return { phase: speech.phase, text: view.learning.line, action: 'Review' };
-    case 'goal':
-      return {
-        phase: speech.phase,
-        text: `${agent} suggests a goal for ${view.workspace}`,
-        action: 'Review'
-      };
+      return plain(view.learning.line);
     case 'done':
-      return {
-        phase: speech.phase,
-        text: view.title || `${view.workspace} is set up`,
-        action: 'See what I made'
-      };
+      return plain(view.title || `${view.workspace} is set up`, 'See what I made');
     default:
       return null;
   }

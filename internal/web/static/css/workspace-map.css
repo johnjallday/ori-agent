@@ -4594,15 +4594,17 @@
   font-size: 12px;
   font-weight: 600;
   line-height: 20px;
-  white-space: nowrap;
+  /* The line says what the Commander waits on and the button's word (for example
+     "Albums Manager has a question about Albums · Answer"): it wraps to a second
+     row rather than cutting that word off with an ellipsis. */
+  white-space: normal;
   cursor: pointer;
   animation: commander-balloon-in 180ms ease-out both;
 }
 
 .commander-balloon-line-text {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .commander-balloon-line::after {

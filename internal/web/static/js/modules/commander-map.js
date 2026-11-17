@@ -596,7 +596,8 @@ export function commanderPresenter(
     hostLine = true,
     onNarrated = null,
     chatHolds = null,
-    chatLine = null
+    chatLine = null,
+    onView = null
   } = {}
 ) {
   let last = null;
@@ -823,6 +824,9 @@ export function commanderPresenter(
       if (phase !== lastPhase) shift = 0;
       lastPhase = phase;
       last = args;
+      // The page's Next action strip speaks for the same folder agent: it is
+      // handed the view the page already fetched, here, not a second request.
+      onView?.(args ? { view: args.view, raw: args.raw } : null);
       const drawn = draw({ report: true });
       // While the report has something to say, its own look ticket is told by
       // the report: a host that lists tickets leaves that one to the Commander.
@@ -835,6 +839,22 @@ export function commanderPresenter(
     },
     // retick redraws the tickets after an answer, an error or a dismissal.
     retick,
+    // review is what the one-line card's Review button does, for a caller that
+    // has no such button (the Next action strip when the report has no message
+    // in the chat): on the map it brings the map into view and opens the
+    // Commander's balloon; elsewhere the full card the host shows comes into
+    // view. false when there is no report to review.
+    review() {
+      if (!last) return false;
+      if (map.visible?.() && !map.narrow?.()) {
+        map.reveal?.();
+        map.balloon.expand();
+        onReview?.();
+        return true;
+      }
+      revealHost();
+      return true;
+    },
     // release stops following the map but leaves the balloon to its next
     // presenter (the same workspace, spoken for by another host).
     release() {
