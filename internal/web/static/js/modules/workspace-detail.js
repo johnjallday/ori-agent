@@ -619,6 +619,9 @@ export class WorkspaceDetailPage {
       // The same view the Commander speaks from reaches the Next action strip and
       // the Commander card, and tells the page when its tickets are out of date.
       onView: entry => this.noteFolderAgentView(entry),
+      // The balloon's header and folded line show the face the Commander card
+      // draws (the same presentation), not initials.
+      face: name => this.commanderFaceMarkup(name),
       hostLine: false,
       onNarrated: ticketID => {
         this.commanderNarratedTicket = ticketID;
@@ -650,6 +653,15 @@ export class WorkspaceDetailPage {
    * agent-give-task.js) and open the task form with that agent chosen.
    * The parameter is removed so a reload does not open it again.
    */
+  // commanderFaceMarkup is the Commander's face for its balloon: the very
+  // presentation the Commander card on the map draws (a chosen character or
+  // upload through AgentAvatar, else the name-derived figure), so the card, the
+  // balloon's header and its folded line show one face. '' when none can be drawn.
+  commanderFaceMarkup(name) {
+    const presentation = this.getAgentAvatarPresentation(name);
+    return presentation?.markup ? presentation.markup('commander-balloon-avatar') || '' : '';
+  }
+
   // noteFolderAgentView hears each view of the folder agent the page already
   // fetched (the Commander's presenter passes it on). It hands the view to the
   // Next action strip and the Commander card (workspaceCommand), and reloads the
@@ -4583,6 +4595,8 @@ export class WorkspaceDetailPage {
       if (this._destroyed) return;
       this.renderAgentGroups();
       window.workspaceCommand?.refresh();
+      // The Commander's balloon shows the same face its card does.
+      this.commanderPresenter?.retick?.();
     });
     // The module does not fetch on its own — each page asks for it, so a page
     // that shows no agents pays nothing. Without this the catalog stays empty
@@ -13282,6 +13296,8 @@ export class WorkspaceDetailPage {
     if (!this.isResourceRequestCurrent(request)) return;
     this.renderAgentGroups();
     window.workspaceCommand?.refresh();
+    // The Commander's balloon shows the face its card does, once the profile is here.
+    this.commanderPresenter?.retick?.();
   }
 
   hasWorkspaceAgentSnapshot(agentName) {
@@ -13382,6 +13398,8 @@ export class WorkspaceDetailPage {
     // it now so an explicit uploaded/character appearance replaces the local
     // generated default as soon as its authoritative profile is known.
     window.workspaceCommand?.refresh();
+    // The Commander's balloon shows the face its card does, once the profile is here.
+    this.commanderPresenter?.retick?.();
 
     return this.agentCatalog;
   }

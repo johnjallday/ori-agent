@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   personalHandoffStatus,
   assistantAvatarMarkup,
+  commanderAvatarMarkup,
   EXPLORE_FOLDER_URL,
   LEGACY_ASSISTANT_HANDOFF_KEY,
   readLegacyAssistantHandoff,
@@ -67,6 +68,99 @@ test('drawer gives the saved character to the shared avatar renderer', () => {
   const source = readFileSync(new URL('./personal-assistant-panel.js', import.meta.url), 'utf8');
   assert.match(source, /CharacterCatalog\?\.onChange\?\.\(\(\) => renderIdentity\(\)\)/);
   assert.match(source, /CharacterCatalog\?\.load\?\.\(\)/);
+});
+
+// FR25, FR26 (finding 1.5): the line above a Commander's message draws the same
+// face the drawer's header draws. The header resolves a chosen character from the
+// catalog; the message line used to hand the renderer only {name, appearance}, so
+// a character-faced agent's messages showed initials beside a header that showed
+// its face (the renderer falls back to generated initials without the character).
+test("a message's author line draws the header's face, at its own size", () => {
+  const appearance = { mode: 'character', character: { catalog_id: 'project-coordinator' } };
+  const character = { id: 'project-coordinator', assets: { portrait: '/characters/portrait.svg' } };
+  let call;
+  const win = {
+    CharacterCatalog: { get: id => (id === character.id ? character : null) },
+    AgentAvatar: {
+      markup: (input, options) => ((call = { input, options }), '<portrait>')
+    }
+  };
+  assert.equal(assistantAvatarMarkup('Albums Manager', appearance, win, 20), '<portrait>');
+  assert.equal(
+    call.input.character,
+    character,
+    'the catalog character is resolved as the header does'
+  );
+  assert.equal(call.input.appearance, appearance);
+  assert.equal(call.options.size, 20);
+  // The header keeps its own size.
+  assistantAvatarMarkup('Albums Manager', appearance, win);
+  assert.equal(call.options.size, 40);
+  // An agent with no saved face resolves no character: the generated fallback.
+  assistantAvatarMarkup('Generated', { mode: 'generated' }, win, 20);
+  assert.equal(call.input.character ?? null, null);
+
+  // The classic dashboard script draws the author line through the panel's method.
+  const panel = readFileSync(new URL('./personal-assistant-panel.js', import.meta.url), 'utf8');
+  assert.match(panel, /avatarMarkup: \(name, appearance, size\) =>/);
+  assert.match(panel, /commanderAvatarMarkup\(name, appearance, window, size\)/);
+  // The drawer's header and launcher draw a workspace Commander's face the same way.
+  assert.match(panel, /: commanderAvatarMarkup\(who\.name, who\.appearance\);/);
+  const dashboard = readFileSync(new URL('./dashboard.js', import.meta.url), 'utf8');
+  const stamp = dashboard.slice(
+    dashboard.indexOf('function stampHomeAssistantMessageAuthor('),
+    dashboard.indexOf('function ensureEntryAgentPanelSession(')
+  );
+  assert.match(stamp, /panel\.avatarMarkup\(name, appearance, 20\)/);
+});
+
+// FR24 to FR27: the Commander has one face. A chosen character or upload goes
+// through the shared renderer (the catalog character resolved); an agent with no
+// saved face gets the card's own fallback, the name-derived figure, not the
+// renderer's generated initials; and with no figure helper loaded it still draws.
+test('the Commander face is the card’s own: chosen through the renderer, else its figure', () => {
+  const rendered = [];
+  const figures = [];
+  const win = {
+    CharacterCatalog: { get: id => ({ id, assets: { portrait: '/p.svg' } }) },
+    AgentAvatar: {
+      markup: (input, options) => (rendered.push([input, options]), '<renderer>')
+    },
+    OriWorkspaceAgentPortrait: {
+      markup: (name, options) => (figures.push([name, options]), `<figure ${name}>`)
+    }
+  };
+  // A chosen character or upload: the renderer, with the catalog character resolved.
+  const character = { mode: 'character', character: { catalog_id: 'project-coordinator' } };
+  assert.equal(commanderAvatarMarkup('Albums Manager', character, win, 20), '<renderer>');
+  assert.equal(rendered[0][0].character.id, 'project-coordinator');
+  assert.equal(rendered[0][1].size, 20);
+  assert.equal(commanderAvatarMarkup('Albums Manager', { mode: 'uploaded' }, win), '<renderer>');
+  assert.equal(figures.length, 0, 'a saved face is never replaced by the figure');
+
+  // No saved face (generated, empty or unknown): the card's figure for the Commander.
+  for (const appearance of [{ mode: 'generated' }, {}, null, undefined, { mode: ' Generated ' }]) {
+    assert.equal(
+      commanderAvatarMarkup('Albums Manager', appearance, win),
+      '<figure Albums Manager>'
+    );
+  }
+  assert.deepEqual(figures[0], [
+    'Albums Manager',
+    { className: 'ori-commander-figure', isKeeper: true }
+  ]);
+  assert.equal(
+    rendered.length,
+    2,
+    'the renderer was not used for a face the card draws as a figure'
+  );
+
+  // No figure helper on the page: the renderer's generated face, as before.
+  const bare = { ...win, OriWorkspaceAgentPortrait: undefined };
+  assert.equal(commanderAvatarMarkup('Albums Manager', { mode: 'generated' }, bare), '<renderer>');
+  // A helper that returns nothing falls back too.
+  const empty = { ...win, OriWorkspaceAgentPortrait: { markup: () => '' } };
+  assert.equal(commanderAvatarMarkup('Albums Manager', {}, empty), '<renderer>');
 });
 
 // The drawer's wiring for the folder question (folder-question-said-once FR11).

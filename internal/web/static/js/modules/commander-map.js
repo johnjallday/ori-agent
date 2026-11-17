@@ -480,7 +480,8 @@ export function homeCommanders({
   win = globalThis.window,
   reportView,
   renderCard,
-  act
+  act,
+  face = null
 } = {}) {
   const live = new Map();
   // opening is the line a balloon says while Home leaves for where its run
@@ -489,7 +490,7 @@ export function homeCommanders({
     let entry = live.get(id);
     if (!entry) {
       entry = {
-        presenter: commanderPresenter(homeCommanderMap(id, { doc, win }), { watched: false })
+        presenter: commanderPresenter(homeCommanderMap(id, { doc, win }), { watched: false, face })
       };
       live.set(id, entry);
     }
@@ -538,7 +539,12 @@ export function homeCommanders({
         live.delete(id);
       });
     },
-    ids: () => [...live.keys()]
+    ids: () => [...live.keys()],
+    // repaint draws every balloon again, for a face that arrived after it did
+    // (the agent's record or the character catalog loaded).
+    repaint() {
+      live.forEach(entry => entry.presenter.retick());
+    }
   };
 }
 
@@ -597,9 +603,22 @@ export function commanderPresenter(
     onNarrated = null,
     chatHolds = null,
     chatLine = null,
-    onView = null
+    onView = null,
+    face = null
   } = {}
 ) {
+  // faceOf is the Commander's face as its host draws it everywhere else (the
+  // Commander card on the workspace page, the tile on Home): the balloon's header
+  // and folded line show that, not initials (folder-question-said-once FR24).
+  // '' when the host has none yet; the balloon then falls back to initials.
+  const faceOf = name => {
+    try {
+      const markup = typeof face === 'function' ? face(name) : '';
+      return typeof markup === 'string' ? markup : '';
+    } catch (_) {
+      return '';
+    }
+  };
   let last = null;
   let narrated = '';
   let tickets = [];
@@ -653,7 +672,7 @@ export function commanderPresenter(
       const held = chatHeld();
       const entrance = map.openingLine?.(view) || '';
       return {
-        speaker: { name: view.agent, role: 'Commander' },
+        speaker: { name: view.agent, role: 'Commander', face: faceOf(view.agent) },
         // A balloon leaving with its run says where it goes (a line); the
         // workspace page's own follower passes true and keeps its speech.
         line: entrance || (typeof opening === 'string' && opening ? opening : item.speech.line),
@@ -669,7 +688,11 @@ export function commanderPresenter(
       };
     }
     return {
-      speaker: { name: item.agent || last?.view.agent || 'Commander', role: 'Commander' },
+      speaker: {
+        name: item.agent || last?.view.agent || 'Commander',
+        role: 'Commander',
+        face: faceOf(item.agent || last?.view.agent)
+      },
       line: item.line,
       headline: item.headline,
       announce: item.announce,

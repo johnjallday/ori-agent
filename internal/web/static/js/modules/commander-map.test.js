@@ -131,7 +131,11 @@ test('on the Map tab the header card is one line and the balloon carries the rep
   assert.equal(host.shown.children[0].textContent, 'Albums Manager has a plan for Albums');
   assert.equal(host.shown.children[1].textContent, 'Review');
   assert.equal(map.balloon.content.line, 'Albums Manager has a plan for Albums · Review');
-  assert.deepEqual(map.balloon.content.speaker, { name: 'Albums Manager', role: 'Commander' });
+  assert.deepEqual(map.balloon.content.speaker, {
+    name: 'Albums Manager',
+    role: 'Commander',
+    face: ''
+  });
   assert.equal(map.balloon.content.body().kind, 'compact');
   // A report already waiting when the page opened: no expanding by itself.
   assert.equal(map.balloon.expanded, false);
@@ -679,6 +683,73 @@ test("Home's other Commanders speak from their tiles; the drawer's own is left t
   commanders.sync([], '');
   assert.deepEqual(commanders.ids(), []);
   assert.equal(a.content, null);
+});
+
+// FR24, FR27: the balloon speaks with the Commander's own face on both maps,
+// the one its card or tile draws, and draws again when the face arrives late.
+test("the balloon speaks with the Commander's face and says so again when the face arrives", () => {
+  const map = fakeMap();
+  const host = fakeHost();
+  const faces = new Map();
+  const presenter = commanderPresenter(map, { face: name => faces.get(name) });
+  // No face yet (the record has not loaded): the speaker carries none, and the
+  // balloon falls back to initials.
+  presenter.present(args(map, host));
+  assert.equal(map.balloon.content.speaker.face, '');
+  // The face arrives: a redraw gives it to the balloon.
+  faces.set('Albums Manager', '<span class="agent-avatar agent-avatar--character"></span>');
+  presenter.retick();
+  assert.equal(
+    map.balloon.content.speaker.face,
+    '<span class="agent-avatar agent-avatar--character"></span>'
+  );
+
+  // A provider that fails, or answers with something else, never breaks the balloon.
+  for (const bad of [
+    () => {
+      throw new Error('renderer not loaded');
+    },
+    () => null,
+    () => ({ not: 'markup' }),
+    () => 42
+  ]) {
+    const broken = commanderPresenter(fakeMap(), { face: bad });
+    const brokenMap = fakeMap();
+    const again = commanderPresenter(brokenMap, { face: bad });
+    again.present(args(brokenMap, fakeHost()));
+    assert.equal(brokenMap.balloon.content.speaker.face, '');
+    broken.dispose();
+  }
+  // No provider at all (a host that has no face) is the same.
+  const bareMap = fakeMap();
+  commanderPresenter(bareMap).present(args(bareMap, fakeHost()));
+  assert.equal(bareMap.balloon.content.speaker.face, '');
+});
+
+test("Home's balloons speak with the tile's face and repaint when it arrives (FR27)", () => {
+  resetCommanderBalloons();
+  const doc = fakeDocument();
+  const faces = new Map();
+  const asked = [];
+  const commanders = homeCommanders({
+    doc,
+    win: {},
+    reportView: folderAgentReportView,
+    renderCard: () => doc.createElement('article'),
+    act: async () => null,
+    face: name => {
+      asked.push(name);
+      return faces.get(name);
+    }
+  });
+  commanders.sync(speakingFolderAgents([raw({ workspace_id: 'ws-a' })]), '');
+  const balloon = commanderBalloon('home:ws-a');
+  assert.equal(balloon.content.speaker.face, '');
+  assert.ok(asked.includes('Albums Manager'));
+  faces.set('Albums Manager', '<b class="tile-face"></b>');
+  commanders.repaint();
+  assert.equal(balloon.content.speaker.face, '<b class="tile-face"></b>');
+  commanders.sync([], '');
 });
 
 test('a balloon whose run Home follows out says where it is going', () => {

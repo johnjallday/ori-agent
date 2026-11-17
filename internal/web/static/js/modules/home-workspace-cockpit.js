@@ -5330,6 +5330,8 @@ import {
   const mapCommanders = homeCommanders({
     reportView: folderAgentReportView,
     renderCard: (view, options) => renderFolderAgentReport(view, document, options),
+    // A balloon speaks from its tile with the tile's own face, not initials.
+    face: name => homePortrait(name, true, { className: 'commander-balloon-avatar' }),
     act: async (view, action, extra) => {
       const result = await postFolderAgentAction(view, action, globalThis.fetch, extra);
       if (action === 'set_up' && result?.view) {
@@ -5374,6 +5376,8 @@ import {
     );
     mountMap();
     renderRail({ announceChange: false });
+    // The balloons speak with the same faces: draw them again with the new ones.
+    mapCommanders.repaint();
   }
   // The role catalog gives a face its ring and emblem; Home does not load it, so
   // first time an agent is visible it is asked for, and faces redraw once it is

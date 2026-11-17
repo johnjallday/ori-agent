@@ -2765,6 +2765,45 @@ test('the page reloads its tickets when the folder agent changes phase and hands
   }
 });
 
+// FR24: the Commander's balloon shows the face its card draws. The card calls
+// getAgentAvatarPresentation(name) (the default variant), so the balloon must ask
+// for exactly that and nothing else, and draw nothing of its own when there is none.
+test("the Commander's balloon takes its face from the card's own avatar presentation", () => {
+  const asked = [];
+  const page = {
+    getAgentAvatarPresentation: (...args) => {
+      asked.push(args);
+      return { markup: className => `<span class="${className}">face</span>` };
+    }
+  };
+  const face = WorkspaceDetailPage.prototype.commanderFaceMarkup.call(page, 'Albums Manager');
+  assert.equal(face, '<span class="commander-balloon-avatar">face</span>');
+  assert.deepEqual(asked, [['Albums Manager']], 'the default variant, as the card asks');
+
+  // No renderer yet, or no presentation: an empty face (the balloon then uses initials).
+  assert.equal(
+    WorkspaceDetailPage.prototype.commanderFaceMarkup.call(
+      { getAgentAvatarPresentation: () => ({ markup: () => '' }) },
+      'A'
+    ),
+    ''
+  );
+  assert.equal(
+    WorkspaceDetailPage.prototype.commanderFaceMarkup.call(
+      { getAgentAvatarPresentation: () => null },
+      'A'
+    ),
+    ''
+  );
+  assert.equal(
+    WorkspaceDetailPage.prototype.commanderFaceMarkup.call(
+      { getAgentAvatarPresentation: () => ({}) },
+      'A'
+    ),
+    ''
+  );
+});
+
 test('template setup still starts and monitors, but only a pending HQ first visit suppresses the toast', async () => {
   const originals = { fetch: global.fetch, body: document.body, toast: window.Toast };
   try {

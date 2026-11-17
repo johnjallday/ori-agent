@@ -229,6 +229,28 @@ export function shouldAnnounce(text, last, now, gap = BALLOON_ANNOUNCE_GAP_MS) {
   return { now: false, wait: gap - since };
 }
 
+// showFace puts the Commander's face in a balloon face slot: the host's own
+// avatar markup (the same the Commander card draws, so the card, the balloon's
+// header and its folded line show one face), or the initials when the host has
+// no face to give. Markup is only written when it changed, so a redraw does not
+// make the face flicker.
+function showFace(node, face, initials) {
+  if (!node) return;
+  if (face) {
+    if (node.faceMarkup !== face) {
+      node.innerHTML = face;
+      node.faceMarkup = face;
+    }
+    node.classList?.add('has-avatar');
+    return;
+  }
+  if (node.faceMarkup !== undefined || node.textContent !== initials) {
+    node.textContent = initials;
+    node.faceMarkup = undefined;
+  }
+  node.classList?.remove('has-avatar');
+}
+
 function initialsOf(name) {
   const words = String(name || '')
     .trim()
@@ -503,7 +525,7 @@ class CommanderBalloon {
   }
 
   // update sets what the Commander says. content: {speaker: {name, role,
-  // initials}, line, announce, headline, signature, body(doc) → Element,
+  // initials, face}, line, announce, headline, signature, body(doc) → Element,
   // more: {label}, onMore}. A null content removes the balloon (FR30).
   update(content) {
     if (!content) {
@@ -517,8 +539,10 @@ class CommanderBalloon {
     this.content = content;
     const speaker = content.speaker || {};
     const initials = speaker.initials || initialsOf(speaker.name);
-    nodes.lineFace.textContent = initials;
-    nodes.face.textContent = initials;
+    // The Commander's own face, the markup its card draws (speaker.face), in the
+    // header and in the folded line; initials only when the host has none.
+    const face = typeof speaker.face === 'string' ? speaker.face : '';
+    for (const node of [nodes.lineFace, nodes.face]) showFace(node, face, initials);
     nodes.lineText.textContent = content.line || '';
     nodes.line.setAttribute('aria-label', `${speaker.name || 'Commander'}: ${content.line || ''}`);
     nodes.line.setAttribute('aria-expanded', this.expanded ? 'true' : 'false');

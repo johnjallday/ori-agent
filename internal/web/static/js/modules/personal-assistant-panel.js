@@ -955,15 +955,35 @@ function syncPanelViewport() {
   }
 }
 
-export function assistantAvatarMarkup(name, appearance, win = window) {
+export function assistantAvatarMarkup(name, appearance, win = window, size = 40) {
   if (win.AgentAvatar?.markup) {
     const characterId = appearance?.character?.catalog_id;
     return win.AgentAvatar.markup(
       { name, appearance: appearance || {}, character: win.CharacterCatalog?.get?.(characterId) },
-      { size: 40 }
+      { size }
     );
   }
   return '<span class="agent-avatar agent-avatar--generated">P</span>';
+}
+
+/**
+ * The face of a workspace's Commander as its card on the map draws it: a chosen
+ * character or upload through the shared renderer (the catalog character
+ * resolved, as the card does), and for an agent with no saved face the card's
+ * own fallback, the name-derived figure, not the renderer's generated initials.
+ * The drawer's header and launcher and the line above each of its messages use
+ * this, so the card, the balloon and the chat show one face (FR24 to FR27).
+ */
+export function commanderAvatarMarkup(name, appearance, win = window, size = 40) {
+  const mode = String(appearance?.mode || '')
+    .trim()
+    .toLowerCase();
+  const portrait = win.OriWorkspaceAgentPortrait;
+  if ((!mode || mode === 'generated') && typeof portrait?.markup === 'function') {
+    const figure = portrait.markup(name, { className: 'ori-commander-figure', isKeeper: true });
+    if (figure) return figure;
+  }
+  return assistantAvatarMarkup(name, appearance, win, size);
 }
 
 function recipients() {
@@ -1601,7 +1621,7 @@ function renderIdentity() {
     );
   const avatar = who.personal
     ? assistantAvatarMarkup(view.name, personalAssistant?.appearance)
-    : assistantAvatarMarkup(who.name, who.appearance);
+    : commanderAvatarMarkup(who.name, who.appearance);
   els.launcherAvatar.innerHTML = avatar;
   els.panelAvatar.innerHTML = avatar;
   els.panelAvatar.hidden = !who.openable;
@@ -2834,6 +2854,13 @@ const api = {
   syncBriefMode: () => renderIdentity(),
   // Notes asks for the hired assistant through the guarded switch.
   choosePersonal,
+  // The face the drawer's header draws for a workspace's Commander (see
+  // commanderAvatarMarkup), at any size: the line above a message in the thread
+  // draws the same one. '' when no renderer is loaded.
+  avatarMarkup: (name, appearance, size) =>
+    window.AgentAvatar?.markup || window.OriWorkspaceAgentPortrait?.markup
+      ? commanderAvatarMarkup(name, appearance, window, size)
+      : '',
   _state: state
 };
 if (typeof window !== 'undefined') window.PersonalAssistantPanel = api;
