@@ -101,6 +101,16 @@ func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (ses
 	if setup := ws.SetupWizardState(); setup != workspace.SetupWizardStateNotApplicable && setup != workspace.SetupWizardStateReady {
 		return input, workspaceupdates.StateWaitingSetup, nil
 	}
+	// A workspace made by feeding a folder is first asked about by its own
+	// Commander, so the welcome (which would ask a second question) waits until
+	// the folder is set up or kept. It answers before the version fence below:
+	// the folder agent writes the workspace all through its look, and waiting is
+	// not a conflict. The worker keeps the enrolment and looks again, backing off
+	// to a few minutes; setting up or keeping wakes it at once.
+	folder := h.folderWelcomeFor(id)
+	if folder == FolderWelcomeHold {
+		return input, workspaceupdates.StateWaitingSetup, nil
+	}
 	name := strings.TrimSpace(ws.EntryAgentName())
 	if name == "" {
 		return unavailable()
@@ -131,7 +141,9 @@ func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (ses
 		intro += "\n\nYour saved filing review will appear here when it is available. Nothing moves without your approval in Filing."
 	} else if assessment == "" {
 		intro += "\n\nI don’t have a saved assessment yet. Ask me about your goal, or choose a review in Goal settings when you’re ready."
-		if strings.TrimSpace(ws.Mission) == "" {
+		// After Set up the Commander offers a goal itself, so the welcome does not
+		// ask for one a second time.
+		if strings.TrimSpace(ws.Mission) == "" && folder != FolderWelcomeAfterSetUp {
 			intro += "\n\nWhat outcome would you like us to work toward?"
 		}
 	}

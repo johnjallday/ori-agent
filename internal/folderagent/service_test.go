@@ -33,18 +33,28 @@ type fakeWorkspaces struct {
 	taken    map[string]bool
 	refuse   error
 	goals    map[string]string
+	// afterCreate runs inside CreateAnchored once the workspace exists (and,
+	// in the real host, its welcome is enrolled and its worker woken), outside
+	// the fake's lock and before the folder record has been written. It is how
+	// a test stands in the window a welcome worker or a browser can reach.
+	afterCreate func(workspaceID string)
 }
 
 func (w *fakeWorkspaces) CreateAnchored(_ context.Context, req CreateRequest) (Created, error) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	if w.refuse != nil {
+		w.mu.Unlock()
 		return Created{}, w.refuse
 	}
 	w.created = append(w.created, req)
 	id := fmt.Sprintf("ws-%d", len(w.created))
 	w.anchors[id] = req.AnchorPath
 	w.taken[req.Name] = true
+	hook := w.afterCreate
+	w.mu.Unlock()
+	if hook != nil {
+		hook(id)
+	}
 	return Created{ID: id, Name: req.Name, Slug: strings.ToLower(req.Name), AgentName: req.AgentName}, nil
 }
 func (w *fakeWorkspaces) NameTaken(_ context.Context, name string) bool {
@@ -120,12 +130,19 @@ type fakeTickets struct {
 	finished map[string]string
 	backlog  []string
 	started  []string
+	// onOpen runs when the first ticket is opened: after the workspace exists,
+	// before the folder record does (outside the fake's lock).
+	onOpen func(workspaceID string)
 }
 
 func (t *fakeTickets) Open(ws, title, agent string) (string, error) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
 	t.opened = append(t.opened, title+" · "+agent)
+	hook := t.onOpen
+	t.mu.Unlock()
+	if hook != nil {
+		hook(ws)
+	}
 	return "ticket-" + ws, nil
 }
 func (t *fakeTickets) Finish(ws, id, result string, failed bool) error {
