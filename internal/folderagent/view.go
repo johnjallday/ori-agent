@@ -321,6 +321,18 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 		v.GoalOffer = &GoalOfferView{Goal: goal, MaxRunes: personalassistant.BriefMaxRunes, Basis: basis}
 	}
 	v.Premise = premiseView(rec, plan)
+	if v.Chat != nil {
+		// While the question is asked the drawer shows the lead-in and the card,
+		// not the stored text that says the question again. Once the owner has
+		// answered it, that stored text (its question, its two answers, "answer it
+		// in the card below") describes a card that no longer has buttons, so the
+		// drawer shows what the look found instead. A later look's report is
+		// posted after the answer and is drawn as stored.
+		v.Chat.Lead = ReportLead(v)
+		if v.Chat.Lead == "" && answeredQuestionMessage(rec, v.Chat) {
+			v.Chat.Lead = ReportOpening(v)
+		}
+	}
 	withdrawn := premiseWithdrawn(rec)
 	if withdrawn {
 		// "Something else": nothing is recommended until a look with the

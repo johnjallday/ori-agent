@@ -375,7 +375,7 @@ test('a report posted to the conversation is one line off the map, and nothing w
   assert.equal(host.shown.children[0].textContent, 'Albums Manager has a plan for Albums');
   assert.equal(host.shown.children[1].textContent, 'Open in chat');
   host.shown.children[1].listeners.click();
-  assert.deepEqual(opened[0][0], { sessionID: 's-1', messageID: 'm-1', unread: true });
+  assert.deepEqual(opened[0][0], { sessionID: 's-1', messageID: 'm-1', unread: true, lead: '' });
   // The open chat shows it: the page says nothing, the balloon carries no body.
   held = true;
   map.fire();

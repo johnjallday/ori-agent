@@ -69,6 +69,89 @@ test('drawer gives the saved character to the shared avatar renderer', () => {
   assert.match(source, /CharacterCatalog\?\.load\?\.\(\)/);
 });
 
+// The drawer's wiring for the folder question (folder-question-said-once FR11).
+// The panel's private functions need its globals, so the rule itself is tested
+// in folder-agent-chat.test.js (folderReportReload, syncFolderReport); these pin
+// that every way into the chat reaches it.
+test('every control that opens the chat for the report loads the thread through one rule', () => {
+  const source = readFileSync(new URL('./personal-assistant-panel.js', import.meta.url), 'utf8');
+  const fn = name => {
+    const start = source.search(new RegExp(`(?:async )?function ${name}\\(`));
+    assert.ok(start >= 0, `${name} exists`);
+    return source.slice(start, source.indexOf('\n}\n', start) + 3);
+  };
+  // The launcher (while a report or welcome waits) and the drawer's own "New
+  // message" bar open what waits, the report first.
+  assert.match(
+    source,
+    /else if \(waitingFolderReport\(\) \|\| currentWelcome\(\)\?\.unread_count > 0\) openUnread\(launcher\)/
+  );
+  assert.match(
+    source,
+    /openWelcome\?\.addEventListener\('click', event => openUnread\(event\.currentTarget\)\)/
+  );
+  assert.match(fn('openUnread'), /openFolderReport\(report\.workspaceId, report, trigger\)/);
+  // openFolderReport (also the page's "Open in chat") no longer trusts "the
+  // thread already holds a lead message": it asks the rule, with the report it
+  // was given, and keeps today's exact load only when it changes thread.
+  const open = fn('openFolderReport');
+  assert.doesNotMatch(
+    open,
+    /querySelector\(`#homeAssistantConversation \[data-lead-message-id\]`\)/
+  );
+  assert.match(
+    open,
+    /changing\s*\?\s*await hydrateEntryConversation\(\{ force: true, exact: true \}\)\s*:\s*await syncFolderReportThread\(workspaceId, target\)/
+  );
+  // A draft only blocks changing thread, never a reload of the same one.
+  assert.match(open, /changing && \(state\.draft \|\| state\.els\?\.input\?\.value\)/);
+  // A report landing while the drawer is open goes through the same rule.
+  assert.match(
+    fn('onFolderAgentChat'),
+    /if \(!row && state\.open\) void syncFolderReportThread\(workspaceId\)/
+  );
+  // The rule never loads over a reply in flight or a pending confirmation or plan.
+  const sync = fn('syncFolderReportThread');
+  assert.match(sync, /busy: window\.OriAskRouting\?\.getState\?\.\(\)\.busy === true/);
+  assert.match(sync, /locked: Boolean\(switchLock\(\)\) \|\| creationTransition\.blocksReveal\(\)/);
+  assert.match(sync, /hydrate: options => hydrateEntryConversation\(options\)/);
+  // A load that had to wait runs when the reply ends.
+  assert.match(
+    source,
+    /addEventListener\('personal-assistant:busy', event => \{\s*if \(event\?\.detail\?\.busy !== false \|\| !reportReload\.deferred \|\| !state\.open\) return;/
+  );
+  assert.match(source, /setTimeout\(\(\) => void syncFolderReportThread\(workspaceId\), 0\)/);
+  // The turn's own event is real: the busy listener has something to hear.
+  const dashboard = readFileSync(new URL('./dashboard.js', import.meta.url), 'utf8');
+  assert.match(
+    dashboard,
+    /new CustomEvent\('personal-assistant:busy', \{ detail: \{ busy: homeAssistantState\.busy \} \}\)/
+  );
+});
+
+test('the New message bar clears only once the report row has been in view', () => {
+  const source = readFileSync(new URL('./personal-assistant-panel.js', import.meta.url), 'utf8');
+  const start = source.indexOf('function exposeFolderReport(');
+  assert.ok(start >= 0);
+  const expose = source.slice(start, source.indexOf('\n}\n', start) + 3);
+  // Seen is marked only for the report's own row, and only while it is inside
+  // the open, focused, settled drawer's scroll area.
+  assert.match(
+    expose,
+    /const row = Array\.from\(transcript\.querySelectorAll\('\[data-lead-message-id\]'\)\)\.find\(/
+  );
+  assert.match(expose, /if \(!row\) return;/);
+  assert.match(expose, /bounds\.bottom <= viewport\.top \|\| bounds\.top >= viewport\.bottom/);
+  assert.match(
+    expose,
+    /markFolderAgentChatSeen\(report\.workspaceId, report\.messageID\);\s*renderWelcomeIndicator\(\);/
+  );
+  assert.match(expose, /void postFolderAgentChatSeen\(report\.workspaceId, report\.messageID\)/);
+  // So a thread that lacked the row could never clear it: the reload is what
+  // lets it, and it schedules this exposure when it has loaded the message.
+  assert.match(source, /if \(result\.reloaded\) scheduleWelcomeExposure\(\);/);
+});
+
 const workspacePage = {
   surface: 'workspace_detail',
   workspaceId: 'ws-1',
