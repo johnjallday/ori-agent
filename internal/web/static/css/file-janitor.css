@@ -18,57 +18,6 @@
   min-height: 44px;
 }
 
-.fj-groups {
-  margin-block: 1rem;
-}
-
-.fj-group-accounting {
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--text-primary, #e8e8e8);
-}
-
-.fj-group-plan-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(12rem, 16rem);
-  align-items: start;
-  gap: 1rem;
-}
-
-.fj-review-plan {
-  position: sticky;
-  top: 0;
-  margin-block: 1rem;
-  padding: 1rem;
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
-  border-radius: 10px;
-  background: var(--surface-1, rgba(255, 255, 255, 0.03));
-  overflow-wrap: anywhere;
-}
-
-.fj-group-select {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  min-height: 44px;
-  color: var(--text-primary, #e8e8e8);
-  font-weight: 600;
-}
-
-.fj-group-select input {
-  width: 1.2rem;
-  height: 1.2rem;
-}
-
-.fj-group-choices .fj-category {
-  min-height: 44px;
-  max-width: 100%;
-}
-
-.fj-group-choices .fj-sub {
-  margin-block: 0.4rem;
-}
-
 .fj-draft-status {
   flex: 1 1 15rem;
   max-width: 36rem;
@@ -78,89 +27,214 @@
   margin: 0;
 }
 
-@media (max-width: 900px) {
-  .fj-group-plan-layout {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .fj-review-plan {
-    position: static;
-    margin-top: 0;
-  }
-}
-
-.fj-group-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
-  gap: 0.85rem;
+/* The review drawn as a picture of the folder after filing. A frame holds the
+   Filed box (one card per destination folder), what stays loose, and Trash only
+   when something is marked. State is never colour alone: an unticked folder is
+   dashed AND says "Not filed". */
+.fj-picture-host {
   margin-block: 1rem;
+  /* Lines and the dashed "Not filed" border come from the app's real tokens, so
+     they show on both the light and dark surfaces. */
+  --fj-line: var(--border-color, #383b43);
+  --fj-line-strong: var(--text-muted, #5c5c5e);
 }
 
-.fj-group-card {
-  min-width: 0;
+.fj-lead {
+  margin: 0 0 1rem;
+  color: var(--text-primary, #e8e8e8);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.fj-frame {
   padding: 1rem;
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
-  border-radius: 10px;
-  background: var(--surface-1, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--fj-line);
+  border-radius: 12px;
   overflow-wrap: anywhere;
 }
 
-.fj-group-question {
-  border-inline-start: 3px solid var(--warning-color, #b26a00);
+.fj-frame-title {
+  margin: 0 0 0.85rem;
+  color: var(--text-primary, #e8e8e8);
+  font-size: 1.05rem;
+  font-weight: 600;
 }
 
-.fj-group-kind {
+.fj-box {
+  margin-block: 0.85rem 0;
+  padding: 0.85rem;
+  border: 1px solid var(--fj-line);
+  border-radius: 10px;
+}
+
+.fj-box-title {
+  margin: 0 0 0.6rem;
+  color: var(--text-primary, #e8e8e8);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.fj-box-empty {
+  margin: 0;
   color: var(--text-secondary, #9aa0a6);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 0 0 0.45rem;
 }
 
-.fj-group-title {
+.fj-folder-cards {
+  display: grid;
+  /* One card per row on a phone, several across on a wide console. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: 0.75rem;
+}
+
+.fj-folder-card {
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--fj-line);
+  border-radius: 10px;
+  background: var(--bg-tertiary, transparent);
+}
+
+/* Not filed: dashed AND stronger, and the card says "Not filed" in words. */
+.fj-folder-card.is-unticked {
+  border: 2px dashed var(--fj-line-strong);
+  background: transparent;
+}
+
+.fj-folder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.fj-folder-tick {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 44px;
+  min-width: 0;
   color: var(--text-primary, #e8e8e8);
-  font-size: 1rem;
   font-weight: 600;
-  margin: 0 0 0.35rem;
 }
 
-.fj-group-count {
+.fj-folder-tick input {
+  flex: none;
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
+.fj-folder-name {
   color: var(--text-primary, #e8e8e8);
-  font-size: 1.3rem;
+  font-weight: 600;
+}
+
+.fj-folder-count {
+  color: var(--text-primary, #e8e8e8);
+  font-size: 1.15rem;
   font-variant-numeric: tabular-nums;
+}
+
+.fj-not-filed {
   margin: 0.25rem 0;
-}
-
-.fj-question-prompt {
-  font-weight: 600;
-  line-height: 1.5;
-}
-
-.fj-group-reason,
-.fj-group-samples {
   color: var(--text-secondary, #9aa0a6);
   font-size: 0.82rem;
+  font-style: italic;
+}
+
+.fj-folder-files,
+.fj-loose-files {
+  margin: 0.35rem 0;
+  padding-inline-start: 1.15rem;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.85rem;
   line-height: 1.5;
 }
 
-.fj-group-samples {
-  padding-inline-start: 1.15rem;
+.fj-file-reason {
+  display: block;
+  font-size: 0.8rem;
 }
 
-.fj-group-card .fj-btn,
-.fj-group-details .fj-btn {
+.fj-tag {
+  margin-inline-start: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--fj-line-strong);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+/* Link-style text is the accent mixed toward the theme's own foreground so it
+   keeps 4.5:1 on both the light and dark surfaces (the raw accent is 3.4:1 on
+   light). */
+.fj-more,
+.fj-link {
+  min-height: 44px;
+  padding: 0 0.25rem;
+  border: 0;
+  background: none;
+  color: color-mix(in srgb, var(--accent-color, #3b7dd8) 60%, var(--text-primary, #e8e8e8));
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.fj-more:focus-visible,
+.fj-link:focus-visible,
+.fj-why-toggle:focus-visible,
+.fj-folder-tick input:focus-visible,
+.fj-more-panel:focus-visible {
+  outline: 2px solid var(--focus-ring, #5b9dd9);
+  outline-offset: 2px;
+}
+
+.fj-loose-row {
+  margin-block: 0.6rem;
+  padding-block-start: 0.6rem;
+  border-top: 1px solid var(--fj-line);
+}
+
+.fj-loose-row:first-of-type {
+  border-top: 0;
+  padding-block-start: 0;
+}
+
+.fj-loose-label {
+  margin: 0 0 0.25rem;
+  color: var(--text-primary, #e8e8e8);
+  font-size: 0.92rem;
+  font-weight: 600;
+}
+
+.fj-why-toggle {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--accent-color, #3b7dd8) 60%, var(--text-primary, #e8e8e8));
+}
+
+.fj-why-text {
+  margin: 0.25rem 0 0.5rem;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.fj-more-panel {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--fj-line);
+}
+
+.fj-more-panel .fj-btn {
   min-height: 44px;
 }
 
-.fj-group-details {
-  margin-top: 1rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.14));
-}
-
-.fj-group-details:focus-visible {
-  outline: 2px solid var(--focus-ring, #5b9dd9);
-  outline-offset: 3px;
+.fj-earlier {
+  margin: 0.75rem 0 0;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.85rem;
 }
 
 /* Quiet, optional advice: a margin note rather than a filing gate. */
@@ -1286,7 +1360,17 @@
 
 /* Bring supporting copy toward the theme's own foreground on elevated cards. */
 .fj-console
-  :is(.fj-sub, .fj-muted, .fj-group-kind, .fj-group-reason, .fj-group-samples, .fj-destination) {
+  :is(
+    .fj-sub,
+    .fj-muted,
+    .fj-destination,
+    .fj-why-text,
+    .fj-not-filed,
+    .fj-folder-files,
+    .fj-loose-files,
+    .fj-earlier,
+    .fj-box-empty
+  ) {
   color: color-mix(in srgb, var(--text-secondary, #9aa0a6) 80%, var(--text-primary, #e8e8e8));
 }
 

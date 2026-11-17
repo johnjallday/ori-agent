@@ -358,7 +358,17 @@ type JanitorBatch struct {
 	// NotificationID links the single Action Center entry created for this
 	// batch, so repeat scans update one item instead of flooding (FR-103).
 	NotificationID string `json:"notification_id,omitempty"`
+	// ReviewDefaults marks a scan made by a build whose review opens with every
+	// confident folder ticked (ReviewDefaultsFilingGroups). It is inert
+	// provenance, never a grant: the ticks are derived on each read and stored
+	// only by the person's first edit. A scan without it, such as one saved by
+	// the card-grid review, opens with nothing ticked.
+	ReviewDefaults string `json:"review_defaults,omitempty"`
 }
+
+// ReviewDefaultsFilingGroups is the one marker value: confident (filing) groups
+// open ticked, question groups never do.
+const ReviewDefaultsFilingGroups = "filing_groups_v1"
 
 // SummarizeBatch recomputes a batch's summary and state from its candidates.
 // The batch record never carries counts that disagree with the candidates it

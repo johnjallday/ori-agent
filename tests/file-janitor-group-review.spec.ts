@@ -10,12 +10,18 @@ import {
   symlinkSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 // Real APIs and saved state, credential-free. No picker/provider/group endpoint
 // is mocked. Only unrelated first-run onboarding is suppressed. Every managed
 // folder is a new synthetic OS-temp directory, never the user's Downloads.
-const evidence = 'tasks/evidence-file-janitor-group-review';
+//
+// The Review tab is a picture of the folder as it will look after filing: the
+// confident folders are ticked when it opens, the question groups never are, and
+// opening or ticking moves nothing. These journeys drive that picture against the
+// real server; the confirm step that still follows the picture is replaced by the
+// one-press button in a later group, and these cases move with it.
+const evidence = 'tasks/evidence-filing-picture-review';
 const old = new Date(Date.now() - 60 * 60 * 1000);
 
 test.describe.configure({ mode: 'serial' });
@@ -110,7 +116,29 @@ async function openReview(page: Page, slug: string, extra = '') {
   return console;
 }
 
-test('agentless real grouped entry pages a 206-member group without selecting or moving files', async ({
+// The tick box of one destination folder in the picture.
+const folder = (console: ReturnType<Page['locator']>, category: string) =>
+  console.locator(`#fileJanitorFolder-${category}`);
+
+// What the server says is waiting and where each file is drawn.
+async function pictureOf(request: APIRequestContext, base: string, batch = 'latest') {
+  const response = await request.get(`${base}/batches/${batch}/picture`);
+  expect(response.ok(), await response.text()).toBeTruthy();
+  return (await response.json()).picture;
+}
+
+const drawn = (picture: {
+  folders: { count: number; unfiled_count: number }[];
+  loose: { loose_count: number }[];
+  left_out: { count: number };
+  trash: { count: number };
+}) =>
+  picture.folders.reduce((sum, item) => sum + item.count + item.unfiled_count, 0) +
+  picture.loose.reduce((sum, row) => sum + row.loose_count, 0) +
+  picture.left_out.count +
+  picture.trash.count;
+
+test('agentless real entry draws a 206-file folder ticked, unticks one folder, keeps it across reload, and moves nothing', async ({
   page,
   request
 }) => {
@@ -122,51 +150,81 @@ test('agentless real grouped entry pages a 206-member group without selecting or
     if (req.method() !== 'GET' && req.url().includes('/file-janitor')) mutations.push(req.url());
   });
   const console = await openReview(page, ws.slug);
-  await expect(console.locator('#fileJanitorView-groups')).toHaveAttribute('aria-pressed', 'true');
-  await expect(console.locator('.fj-group-accounting')).toContainText('206 candidates');
-  await expect(console.locator('.fj-group-card')).toHaveCount(1);
-  await expect(console.locator('.fj-group-samples li')).toHaveCount(3);
-  await expect(console.locator('.fj-group-card .fj-group-count')).toHaveText('206 files');
+
+  // The lead line, then the frame: nothing else comes before the first folder.
+  // The folder is named by its own folder name, never a path.
+  const folderName = basename(ws.root);
+  await expect(console.locator('#fileJanitorLead')).toHaveText(
+    `This is how ${folderName} will look. Nothing moves until you press File. Ori reads names, types, sizes and dates, never what is inside.`
+  );
+  await expect(console.locator('#fileJanitorFrameTitle')).toHaveText(`${folderName}, after filing`);
+  await expect(folder(console, 'images')).toBeChecked();
+  await expect(folder(console, 'images')).toHaveAccessibleName('Images, 206 files, will be filed');
+  await expect(console.locator('.fj-folder-card .fj-folder-files li')).toHaveCount(5);
+  await expect(console.locator('#fileJanitorMore-filed-images')).toHaveText('and 201 more');
   await expect(console.locator('.fj-row-item')).toHaveCount(0);
-  await expect(console.locator('#fileJanitorApprove')).toBeDisabled();
-  mkdirSync(evidence, { recursive: true });
-  await page.screenshot({ path: `${evidence}/01-groups.png`, fullPage: true });
-  await console.getByRole('button', { name: 'See 206 files in Images', exact: true }).click();
-  const details = console.locator('#fileJanitorGroup-details');
-  await expect(details).toContainText('Showing 1–50 of 206');
-  await expect(details.locator('.fj-row-item')).toHaveCount(50);
-  await expect(details.locator('input.fj-select:checked')).toHaveCount(0);
-  await details.getByRole('button', { name: 'Next group files', exact: true }).click();
-  await expect(details).toContainText('Showing 51–100 of 206');
-  await details.locator('.fj-group-title').scrollIntoViewIfNeeded();
-  await expect(details.locator('.fj-group-title')).toBeInViewport();
-  await page.screenshot({ path: `${evidence}/01-group-details.png`, fullPage: true });
-  for (const expected of ['101–150', '151–200', '201–206']) {
-    await details.getByRole('button', { name: 'Next group files', exact: true }).click();
-    await expect(details).toContainText(`Showing ${expected} of 206`);
+  // Ticked on open: the footer is ready to file the folder as it is drawn.
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('206 files selected.');
+  await expect(console.locator('#fileJanitorApprove')).toBeEnabled();
+  // The old plan sidebar, select-all, counting line and Not now are gone.
+  for (const gone of ['Your selected changes', 'Select all filing groups', 'candidates in this']) {
+    await expect(console).not.toContainText(gone);
   }
-  await expect(details.locator('.fj-row-item')).toHaveCount(6);
-  await expect(
-    details.getByRole('button', { name: 'Next group files', exact: true })
-  ).toBeDisabled();
-  await console.getByRole('button', { name: 'All files', exact: true }).click();
-  await expect(console.locator('.fj-row-item')).toHaveCount(50);
-  await console.getByRole('button', { name: 'Groups', exact: true }).click();
-  await expect(details).toContainText('Showing 201–206 of 206');
-  await details.getByRole('button', { name: 'Close file list', exact: true }).click();
-  await expect(
-    console.getByRole('button', { name: 'See 206 files in Images', exact: true })
-  ).toBeFocused();
+  mkdirSync(evidence, { recursive: true });
+  await page.screenshot({ path: `${evidence}/01-picture-on-open.png`, fullPage: true });
+
+  // "and N more" opens the whole folder, 50 at a time, and gives focus back.
+  await console.locator('#fileJanitorMore-filed-images').click();
+  const more = console.locator('#fileJanitorMorePanel');
+  await expect(more).toContainText('Showing 1–50 of 206');
+  await expect(more.locator('li')).toHaveCount(50);
+  for (const range of ['51–100', '101–150', '151–200', '201–206']) {
+    await more.getByRole('button', { name: 'Next files', exact: true }).click();
+    await expect(more).toContainText(`Showing ${range} of 206`);
+  }
+  await expect(more.locator('li')).toHaveCount(6);
+  await expect(more.getByRole('button', { name: 'Next files', exact: true })).toBeDisabled();
+  await page.screenshot({ path: `${evidence}/01-untick-and-more.png`, fullPage: true });
+  await more.getByRole('button', { name: 'Close list', exact: true }).click();
+  await expect(console.locator('#fileJanitorMore-filed-images')).toBeFocused();
+
+  // Opening, reading and paging wrote nothing, and made no folder.
   expect(mutations).toEqual([]);
+  expect(existsSync(join(ws.root, 'Filed', 'Images'))).toBe(false);
   for (const name of names) expect(existsSync(join(ws.root, name)), name).toBe(true);
-  const history = await (await request.get(`${ws.base}/history`)).json();
-  expect(history.total).toBe(0);
+
+  // Unticking is one saved edit; the card stays, dashed, and says Not filed.
+  await folder(console, 'images').uncheck();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+  await expect(console.locator('.fj-folder-card.is-unticked')).toContainText('Not filed');
+  await expect(folder(console, 'images')).toHaveAccessibleName('Images, 206 files, not filed');
+  await expect(console.locator('#fileJanitorApprove')).toBeDisabled();
+  expect(mutations.filter(url => url.endsWith('/draft'))).toHaveLength(1);
+  const saved = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review;
+  const draft = (await (await request.get(`${ws.base}/batches/${saved.batch_id}/draft`)).json())
+    .draft;
+  expect(draft.state).toBe('saved');
+  expect(draft.choices).toEqual([]);
+
+  // The saved state survives a reload, and the folder is not ticked again.
+  await page.reload();
+  await expect(folder(console, 'images')).not.toBeChecked();
+  await expect(console.locator('.fj-folder-card.is-unticked')).toContainText('Not filed');
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+  await page.screenshot({ path: `${evidence}/01-unticked-after-reload.png`, fullPage: true });
+  await folder(console, 'images').check();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('206 files selected.');
+
+  for (const name of names) expect(existsSync(join(ws.root, name)), name).toBe(true);
+  expect(existsSync(join(ws.root, 'Filed', 'Images'))).toBe(false);
+  expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
 });
 
-test('206 mixed candidates have exclusive whole-batch accounting and reachable deep links', async ({
+test('206 mixed files are each drawn once, question groups are never ticked, and deep links still reach All files', async ({
   page,
   request
 }) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
   const names = [
     ...Array.from({ length: 18 }, (_, i) => `installer-${i}.dmg`),
     ...Array.from({ length: 31 }, (_, i) => `photo-${i}.png`),
@@ -178,24 +236,60 @@ test('206 mixed candidates have exclusive whole-batch accounting and reachable d
   ];
   expect(names).toHaveLength(206);
   const ws = await manualReview(request, names);
-  const groups = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review;
-  expect(groups.counts).toMatchObject({ candidates: 206, filing: 149, questions: 57 });
+  const picture = await pictureOf(request, ws.base);
+  expect(picture.counts).toMatchObject({ candidates: 206, filing: 149, questions: 57 });
+  expect(picture.waiting).toBe(206);
+  // Every waiting file is drawn exactly once: the sections add up to the scan.
+  expect(drawn(picture)).toBe(206);
+  expect(picture.draft_state).toBe('default');
+  expect(picture.folders.map((item: { category: string }) => item.category)).toEqual([
+    'documents',
+    'images',
+    'installers'
+  ]);
+  expect(picture.loose.map((row: { key: string }) => row.key).sort()).toEqual([
+    'audio',
+    'sensitive',
+    'unresolved',
+    'versions'
+  ]);
+  const draft = (await (await request.get(`${ws.base}/batches/${picture.batch_id}/draft`)).json())
+    .draft;
+  expect(draft.choices).toHaveLength(149);
   expect(
-    groups.groups.reduce((sum: number, group: { count: number }) => sum + group.count, 0)
-  ).toBe(206);
+    draft.choices.every((choice: { source_group_id: string }) => choice.source_group_id !== '')
+  ).toBe(true);
+
   const console = await openReview(page, ws.slug);
-  await expect(console.locator('.fj-group-card')).toHaveCount(groups.groups.length);
-  await expect(console.locator('.fj-group-accounting')).toContainText('206 candidates');
+  await expect(console.locator('.fj-folder-card')).toHaveCount(3);
+  await expect(console.locator('.fj-folder-card .fj-folder-name')).toHaveText([
+    'Documents',
+    'Images',
+    'Installers'
+  ]);
+  await expect(console.locator('.fj-loose-label')).toHaveText([
+    'Sensitive-looking names · 7',
+    'Possible copies · 10',
+    'Music and audio · 20',
+    'Unknown type · 20'
+  ]);
+  // No tick box and no menu for a question group; the question files stay loose.
+  await expect(console.locator('.fj-loose-row input, .fj-loose-row select')).toHaveCount(0);
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('149 files selected.');
+  await expect(console.getByRole('heading', { name: /^Still loose in .* · 57$/ })).toBeVisible();
+  mkdirSync(evidence, { recursive: true });
+  await page.screenshot({ path: `${evidence}/01-mixed-picture.png`, fullPage: true });
+
   const detail = await (
-    await request.get(`${ws.base}/batches/${groups.batch_id}?limit=1&offset=205`)
+    await request.get(`${ws.base}/batches/${picture.batch_id}?limit=1&offset=205`)
   ).json();
-  await openReview(page, ws.slug, `&batch_id=${groups.batch_id}&item=${detail.candidates[0].id}`);
+  await openReview(page, ws.slug, `&batch_id=${picture.batch_id}&item=${detail.candidates[0].id}`);
   await expect(console.locator('#fileJanitorView-all')).toHaveAttribute('aria-pressed', 'true');
   await expect(console.locator('#fileJanitorLinkedRow')).toBeVisible();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+  for (const name of names) expect(existsSync(join(ws.root, name))).toBe(true);
 });
 
-test('two group choices stage 49 exact moves and stay pinned when a newer review arrives', async ({
+test('two folders open ticked and stay pinned when a newer review arrives', async ({
   page,
   request
 }) => {
@@ -206,23 +300,12 @@ test('two group choices stage 49 exact moves and stay pinned when a newer review
   ];
   const ws = await manualReview(request, names, 'Group review 49 choices');
   const console = await openReview(page, ws.slug);
-  const group = (label: string) =>
-    console.getByRole('checkbox', { name: `Select filing proposals in ${label}`, exact: true });
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
-  await group('Installers').click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('18 files selected.');
-  await expect(group('Installers')).toBeChecked();
-  await group('Images').click();
+  await expect(folder(console, 'installers')).toBeChecked();
+  await expect(folder(console, 'images')).toBeChecked();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
   await expect(console.locator('#fileJanitorApprove')).toHaveText('Review 49 moves');
   await expect(console.locator('#fileJanitorApprove')).toBeEnabled();
-  mkdirSync(evidence, { recursive: true });
-  await console
-    .locator('.fj-group-plan-layout')
-    .evaluate(node => node.scrollIntoView({ block: 'start' }));
-  await page.screenshot({ path: `${evidence}/02-group-selection.png`, fullPage: true });
-  const batchID = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review
-    .batch_id;
+  const batchID = (await pictureOf(request, ws.base)).batch_id;
   const draft = (await (await request.get(`${ws.base}/batches/${batchID}/draft`)).json()).draft;
   expect(draft.choices).toHaveLength(49);
   expect(draft.choices.every((choice: { operation: string }) => choice.operation === 'move')).toBe(
@@ -232,102 +315,67 @@ test('two group choices stage 49 exact moves and stay pinned when a newer review
   utimesSync(join(ws.root, 'later-arrival.png'), old, old);
   await console.getByRole('button', { name: 'Scan now', exact: true }).click();
   await expect(console).toContainText('A newer saved review is available');
+  // The open picture is never swapped by itself, and the later arrival is not in it.
   await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
-  await expect(console.locator('#fileJanitorBatchChoice')).toHaveValue(batchID);
   await expect(page).toHaveURL(new RegExp(`batch_id=${batchID}`));
   await page.reload();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
-  const newest = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review
-    .batch_id;
+  const newest = (await pictureOf(request, ws.base)).batch_id;
   expect(newest).not.toBe(batchID);
+  await console.getByRole('button', { name: 'All files', exact: true }).click();
+  await expect(console.locator('#fileJanitorBatchChoice')).toHaveValue(batchID);
   await console.locator('#fileJanitorBatchChoice').selectOption(newest);
-  await expect(console.locator('.fj-group-accounting')).toContainText('1 candidates');
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+  await console.locator('#fileJanitorView-groups').click();
+  // The newer scan is its own picture, ticked on open with its one new file.
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  await expect(console.locator('.fj-folder-card .fj-folder-count')).toHaveText('1');
+  await console.getByRole('button', { name: 'All files', exact: true }).click();
   await console.locator('#fileJanitorBatchChoice').selectOption(batchID);
+  await console.locator('#fileJanitorView-groups').click();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
   for (const name of [...names, 'later-arrival.png'])
     expect(existsSync(join(ws.root, name))).toBe(true);
   expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
 });
 
-test('large saved group choices preserve off-page exclusions, destination exceptions and group Undo', async ({
+test('a file left out of a ticked folder is kept across reload and shown as left out', async ({
   page,
   request
 }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
   const names = Array.from({ length: 206 }, (_, i) => `image-${String(i).padStart(4, '0')}.png`);
   const ws = await manualReview(request, names, 'Group review durable choices');
-  const console = await openReview(page, ws.slug);
-  const selectGroup = console.getByRole('checkbox', {
-    name: 'Select filing proposals in Images',
-    exact: true
-  });
-  await console.getByRole('button', { name: 'See 206 files in Images', exact: true }).click();
-  const details = console.locator('#fileJanitorGroup-details');
-  const prior = details.getByRole('checkbox', { name: 'Select image-0000.png', exact: true });
-  await details
-    .getByRole('combobox', { name: 'Category for image-0000.png', exact: true })
-    .selectOption('documents');
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
-  await expect(prior).toBeEnabled();
-  await prior.click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
-  await selectGroup.click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('206 files selected.');
-  await details.getByRole('button', { name: 'Next group files', exact: true }).click();
-  await expect(details).toContainText('Showing 51–100 of 206');
-  await details.getByRole('checkbox', { name: 'Select image-0051.png', exact: true }).click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('205 files selected.');
-  await expect(selectGroup).toHaveJSProperty('indeterminate', true);
-  await details.locator('.fj-group-title').scrollIntoViewIfNeeded();
-  await page.screenshot({ path: `${evidence}/02-member-exception.png`, fullPage: true });
-  await console
-    .getByRole('combobox', { name: 'Destination for selected group files in Images', exact: true })
-    .selectOption('archives');
-  await expect(console.locator('.fj-review-plan')).toContainText('204 → Filed/Archives');
-  const batchID = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review
-    .batch_id;
-  let draft = (await (await request.get(`${ws.base}/batches/${batchID}/draft`)).json()).draft;
-  expect(
-    draft.choices.filter((choice: { category: string }) => choice.category === 'documents')
-  ).toHaveLength(1);
-  expect(
-    draft.choices.filter((choice: { category: string }) => choice.category === 'archives')
-  ).toHaveLength(204);
-  await console
-    .getByRole('button', {
-      name: 'Undo group mark for Images, keeping per-file choices',
-      exact: true
-    })
-    .click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
-  await selectGroup.click(); // a new, explicit snapshot selection
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('206 files selected.');
-  await details.getByRole('checkbox', { name: 'Select image-0051.png', exact: true }).click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('205 files selected.');
-  for (const range of ['101–150', '151–200']) {
-    await details.getByRole('button', { name: 'Next group files', exact: true }).click();
-    await expect(details).toContainText(`Showing ${range} of 206`);
-  }
-  await details.getByRole('checkbox', { name: 'Select image-0151.png', exact: true }).click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('204 files selected.');
-  draft = (await (await request.get(`${ws.base}/batches/${batchID}/draft`)).json()).draft;
-  expect(draft.choices).toHaveLength(204);
+  const batchID = (await pictureOf(request, ws.base)).batch_id;
   const members = await (await request.get(`${ws.base}/batches/${batchID}?limit=200`)).json();
-  const excludedIDs = members.candidates
-    .filter((candidate: { name: string }) =>
-      ['image-0051.png', 'image-0151.png'].includes(candidate.name)
-    )
-    .map((candidate: { id: string }) => candidate.id);
-  expect(excludedIDs).toHaveLength(2);
+  const target = members.candidates.find(
+    (candidate: { name: string }) => candidate.name === 'image-0051.png'
+  );
+  // Deep-link to a file that is not on the first page of All files and leave it out.
+  const console = await openReview(page, ws.slug, `&batch_id=${batchID}&item=${target.id}`);
+  await expect(console.locator('#fileJanitorLinkedRow')).toBeVisible();
+  await console.getByRole('checkbox', { name: 'Select image-0051.png', exact: true }).uncheck();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('205 files selected.');
+  await console.locator('#fileJanitorView-groups').click();
+  await expect(folder(console, 'images')).toHaveJSProperty('indeterminate', true);
+  await expect(folder(console, 'images')).toBeChecked();
+  await expect(console.locator('.fj-loose-label')).toHaveText(['Left out by you · 1']);
+  await expect(console.locator('.fj-loose-files li')).toHaveText(['image-0051.png']);
+  mkdirSync(evidence, { recursive: true });
+  await page.screenshot({ path: `${evidence}/02-left-out.png`, fullPage: true });
+  const picture = await pictureOf(request, ws.base, batchID);
+  expect(picture.left_out.count).toBe(1);
+  expect(picture.folders[0]).toMatchObject({ group_state: 'partial', count: 205 });
+  expect(drawn(picture)).toBe(206);
+  const draft = (await (await request.get(`${ws.base}/batches/${batchID}/draft`)).json()).draft;
+  expect(draft.choices).toHaveLength(205);
   expect(
-    draft.choices.every(
-      (choice: { candidate_id: string }) => !excludedIDs.includes(choice.candidate_id)
-    )
+    draft.choices.every((choice: { candidate_id: string }) => choice.candidate_id !== target.id)
   ).toBe(true);
-  await page.reload();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('204 files selected.');
-  await expect(selectGroup).toHaveJSProperty('indeterminate', true);
+  // Reopen Review plainly (the deep link above opens All files by design).
+  await openReview(page, ws.slug);
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('205 files selected.');
+  await expect(folder(console, 'images')).toHaveJSProperty('indeterminate', true);
+  await expect(console.locator('.fj-loose-label')).toHaveText(['Left out by you · 1']);
   expect(
     (await (await request.get(`${ws.base}/batches/${batchID}/draft`)).json()).draft.choices
   ).toEqual(draft.choices);
@@ -335,7 +383,7 @@ test('large saved group choices preserve off-page exclusions, destination except
   expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
 });
 
-test('injected save failure is unsaved and two real tabs resolve a canonical conflict by reloading', async ({
+test('injected save failure is unsaved and two real windows resolve a stale preview and a conflict by reloading', async ({
   page,
   request,
   context
@@ -344,14 +392,13 @@ test('injected save failure is unsaved and two real tabs resolve a canonical con
   const console = await openReview(page, ws.slug);
   const other = await context.newPage();
   const second = await openReview(other, ws.slug);
-  const group = console.getByRole('checkbox', {
-    name: 'Select filing proposals in Images',
-    exact: true
-  });
-  await expect(group).toBeEnabled();
-  await expect(
-    second.getByRole('checkbox', { name: 'Select filing proposals in Images', exact: true })
-  ).toBeEnabled();
+  await expect(folder(console, 'images')).toBeEnabled();
+  await expect(folder(second, 'images')).toBeEnabled();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
+  await expect(second.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
+
+  // The first window's untick is lost on the wire: it says so, blocks the button,
+  // and the same request can be retried.
   let fail = true;
   await page.route('**/file-janitor/batches/*/draft', route => {
     if (route.request().method() === 'POST' && fail) {
@@ -360,33 +407,40 @@ test('injected save failure is unsaved and two real tabs resolve a canonical con
     }
     return route.continue();
   });
-  await group.click();
+  // A click, not uncheck(): the unconfirmed edit leaves the box as it was.
+  await folder(console, 'images').click();
   await expect(console.locator('#fileJanitorDraftStatus')).toContainText('not confirmed saved');
+  await expect(folder(console, 'images')).toBeDisabled();
   await expect(console.locator('#fileJanitorApprove')).toBeDisabled();
   await console.getByRole('button', { name: 'Retry exact edit', exact: true }).click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
-  await second
-    .getByRole('checkbox', { name: 'Select filing proposals in Images', exact: true })
-    .click();
-  await expect(second.locator('#fileJanitorDraftStatus')).toContainText('Review changed');
-  await expect(second.locator('#fileJanitorApprove')).toBeDisabled();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+
+  // The second window still shows both ticked. Its button is stale, so the preview
+  // is refused instead of filing what is no longer chosen.
+  await second.locator('#fileJanitorApprove').click();
+  await expect(second.locator('#fileJanitorDraftStatus')).toContainText('unavailable');
+  await expect(second.locator('#fileJanitorConfirmApply')).toHaveCount(0);
   await other.screenshot({ path: `${evidence}/02-save-conflict.png`, fullPage: true });
   await second.getByRole('button', { name: 'Reload saved choices', exact: true }).click();
+  await expect(second.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+  await expect(folder(second, 'images')).not.toBeChecked();
+
+  // The second window ticks again; the first window's picture is now behind, and
+  // its own edit is refused as a conflict rather than overwriting.
+  await folder(second, 'images').check();
   await expect(second.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
-  await second.getByRole('button', { name: 'See 2 files in Images', exact: true }).click();
-  await second.getByRole('checkbox', { name: 'Select one.png', exact: true }).click();
-  await expect(second.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
-  await console.locator('#fileJanitorApprove').click();
-  await expect(console.locator('#fileJanitorDraftStatus')).toContainText('unavailable');
-  await expect(console.locator('#fileJanitorConfirmApply')).toHaveCount(0);
+  await folder(console, 'images').click();
+  await expect(console.locator('#fileJanitorDraftStatus')).toContainText('Review changed');
+  await expect(console.locator('#fileJanitorApprove')).toBeDisabled();
   await console.getByRole('button', { name: 'Reload saved choices', exact: true }).click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
+  await expect(folder(console, 'images')).toBeChecked();
   expect(existsSync(join(ws.root, 'one.png'))).toBe(true);
   expect(existsSync(join(ws.root, 'two.png'))).toBe(true);
   await other.close();
 });
 
-test('real focused questions keep exact music states and reconsider only one item before explicit scan', async ({
+test('question groups stay loose and unticked, are described truthfully, and name files as text', async ({
   page,
   request
 }) => {
@@ -406,104 +460,57 @@ test('real focused questions keep exact music states and reconsider only one ite
   const ws = await manualReview(request, names, 'Focused questions');
   const review = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review;
   expect(review.counts).toMatchObject({ candidates: 9, filing: 1, questions: 8 });
-  const batchID = review.batch_id;
   const console = await openReview(page, ws.slug);
-  const card = (label: string) =>
-    console
-      .locator('.fj-group-card')
-      .filter({ has: page.getByRole('heading', { name: label, exact: true }) });
   const posts: string[] = [];
   page.on('request', req => {
     if (req.method() === 'POST' && req.url().includes('/file-janitor')) posts.push(req.url());
   });
-  await console.getByRole('button', { name: 'Select all filing groups', exact: true }).click();
+  // Only the one confident file is ticked; every question file stays loose.
   await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
-  const versions = card('Possible copies or versions');
-  await versions
-    .getByRole('button', { name: 'Not now: Possible copies or versions', exact: true })
-    .click();
-  await expect(versions).toContainText('Still pending');
-  await expect(console.locator('.fj-group-accounting')).toContainText('8 need a decision');
-  expect(posts).toHaveLength(1);
-  await versions
-    .getByRole('button', { name: 'Reopen question: Possible copies or versions', exact: true })
-    .click();
-  await expect(versions).toContainText('not been compared');
-  await card('Sensitive-looking names')
-    .getByRole('button', { name: /See .* files in Sensitive-looking names/ })
-    .click();
-  await expect(console.locator('#fileJanitorGroup-details')).toContainText(hostile);
-  expect(await console.locator('#fileJanitorGroup-details img').count()).toBe(0);
-  await console
-    .locator('#fileJanitorGroup-details')
-    .getByRole('button', { name: `Show file details for ${hostile}`, exact: true })
-    .click();
-  await expect(console.locator('#fileJanitorGroup-details')).toContainText(
-    'Saved metadata classification'
+  await expect(console.locator('.fj-loose-label')).toHaveText([
+    'Sensitive-looking names · 1',
+    'Possible copies · 2',
+    'Music and audio · 4',
+    'Unknown type · 1'
+  ]);
+  await expect(console.locator('.fj-loose-row input')).toHaveCount(0);
+  await expect(console.locator('.fj-loose')).toContainText(hostile);
+  expect(await console.locator('.fj-loose img').count()).toBe(0);
+  // "Why?" says what Ori actually checked, and no more.
+  const sensitive = console.locator('.fj-loose-row').filter({ hasText: 'Sensitive-looking names' });
+  await sensitive.locator('summary').click();
+  await expect(sensitive.locator('.fj-why-text')).toHaveText(
+    'A name has a word like passport or tax in it. Ori has not looked inside the files.'
+  );
+  const copies = console.locator('.fj-loose-row').filter({ hasText: 'Possible copies' });
+  await copies.locator('summary').click();
+  await expect(copies.locator('.fj-why-text')).toContainText(
+    'Ori has not compared what is inside.'
   );
   mkdirSync(evidence, { recursive: true });
-  await console.locator('.fj-group-grid').evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await console.locator('.fj-loose').evaluate(node => node.scrollIntoView({ block: 'start' }));
   await page.screenshot({ path: `${evidence}/03-focused-questions.png`, fullPage: true });
-  const music = card('Audio and related material');
-  await expect(music).toContainText('4 files');
-  await expect(music).toContainText('not verified projects or duplicates');
-  await music.getByRole('button', { name: /See .* files in Audio and related material/ }).click();
-  await console.getByRole('checkbox', { name: 'Select song.wav', exact: true }).click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
+
+  // A per-file Trash mark (made in All files) appears in the Trash box and leaves
+  // its row; nothing goes to the Trash until a later, separately confirmed step.
+  await console.getByRole('button', { name: 'All files', exact: true }).click();
   await console.getByRole('button', { name: 'Mark song.rpp for Trash', exact: true }).click();
   await expect(console.locator('#fileJanitorSelection')).toContainText('1 file marked for Trash');
-  await music
-    .getByRole('button', { name: 'Keep Audio and related material here', exact: true })
-    .click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
-  await expect(console.locator('.fj-groups')).toContainText('4 kept here');
-  await expect(music).toHaveCount(0);
-  const skips = (await (await request.get(`${ws.base}/skipped`)).json()).skipped;
-  expect(skips.map((item: { name: string }) => item.name).sort()).toEqual([
-    'song.pdf',
-    'song.rpp',
-    'song.wav',
-    'song.zip'
-  ]);
-  await console.getByRole('button', { name: 'See kept files', exact: true }).click();
-  await expect(console.locator('.fj-row-item')).toHaveCount(4);
-  await console.getByRole('button', { name: 'Review song.wav again', exact: true }).click();
-  await expect(console.locator('.fj-batch-scan-status')).toContainText(
-    'Nothing scanned or selected'
-  );
-  await expect(
-    console.getByRole('button', { name: 'Review song.wav again', exact: true })
-  ).toHaveCount(0);
-  await expect(
-    console.getByRole('button', { name: 'Review song.zip again', exact: true })
-  ).toBeVisible();
-  expect((await (await request.get(`${ws.base}/skipped`)).json()).skipped).toHaveLength(3);
-  const oldBatch = await (await request.get(`${ws.base}/batches/${batchID}?filter=skipped`)).json();
-  expect(oldBatch.candidates).toHaveLength(4);
-  expect(oldBatch.candidates.every((item: { state: string }) => item.state === 'skipped')).toBe(
-    true
-  );
+  await console.locator('#fileJanitorView-groups').click();
+  await expect(console.locator('.fj-trash')).toContainText('Trash · 1');
+  await expect(console.locator('.fj-trash')).toContainText('song.rpp');
+  await expect(console.locator('.fj-loose-label').nth(2)).toHaveText('Music and audio · 4');
+  const picture = await pictureOf(request, ws.base);
+  expect(drawn(picture)).toBe(9);
+  expect(picture.trash.count).toBe(1);
+  expect(picture.loose.find((row: { key: string }) => row.key === 'audio')).toMatchObject({
+    count: 4,
+    trash_count: 1,
+    loose_count: 3
+  });
   expect(posts.every(url => url.endsWith('/draft'))).toBe(true);
-  await console
-    .locator('.fj-batch-scan-status')
-    .evaluate(node => node.scrollIntoView({ block: 'start' }));
-  await page.screenshot({ path: `${evidence}/03-kept-and-reconsider.png`, fullPage: true });
-  await console.getByRole('button', { name: 'Scan now', exact: true }).click();
-  await expect
-    .poll(
-      async () =>
-        (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review.batch_id
-    )
-    .not.toBe(batchID);
-  const fresh = (await (await request.get(`${ws.base}/batches/latest`)).json()).batch;
-  const freshBody = await (await request.get(`${ws.base}/batches/${fresh.id}`)).json();
-  expect(freshBody.candidates.map((item: { name: string }) => item.name)).toEqual(['song.wav']);
-  expect(
-    (await (await request.get(`${ws.base}/batches/${fresh.id}/draft`)).json()).draft.choices
-  ).toEqual([]);
   for (const name of names) expect(existsSync(join(ws.root, name))).toBe(true);
-  const history = await (await request.get(`${ws.base}/history`)).json();
-  expect(history.total).toBe(0);
+  expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
 });
 
 test('real exact grouped confirmation moves 49 chosen files through MCP, preserves an exclusion, and supports replay and Undo', async ({
@@ -514,7 +521,7 @@ test('real exact grouped confirmation moves 49 chosen files through MCP, preserv
   const names = [
     ...Array.from({ length: 18 }, (_, i) => `installer-${i}.dmg`),
     ...Array.from({ length: 31 }, (_, i) => `image-${i}.png`),
-    'leave.png'
+    'a-leave.png'
   ];
   const ws = await manualReview(request, names, 'Exact grouped execution');
   mkdirSync(join(ws.root, 'Filed', 'Images'), { recursive: true });
@@ -522,16 +529,11 @@ test('real exact grouped confirmation moves 49 chosen files through MCP, preserv
     mode: 0o600
   });
   const console = await openReview(page, ws.slug);
-  await console
-    .getByRole('checkbox', { name: 'Select filing proposals in Installers', exact: true })
-    .click();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('18 files selected.');
-  await console
-    .getByRole('checkbox', { name: 'Select filing proposals in Images', exact: true })
-    .click();
+  // Both folders open ticked: 18 installers and 32 images.
   await expect(console.locator('#fileJanitorSelection')).toHaveText('50 files selected.');
-  await console.getByRole('button', { name: 'See 32 files in Images', exact: true }).click();
-  await console.getByRole('checkbox', { name: 'Select leave.png', exact: true }).uncheck();
+  // Leave one image out of its ticked folder, from All files.
+  await console.getByRole('button', { name: 'All files', exact: true }).click();
+  await console.getByRole('checkbox', { name: 'Select a-leave.png', exact: true }).uncheck();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('49 files selected.');
   await console.locator('#fileJanitorApprove').click();
   await expect(console.locator('.fj-confirm-lead')).toContainText('move 49 files');
@@ -550,8 +552,8 @@ test('real exact grouped confirmation moves 49 chosen files through MCP, preserv
   await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('49 files filed.', {
     timeout: 60_000
   });
-  expect(existsSync(join(ws.root, 'leave.png'))).toBe(true);
-  for (const name of names.filter(name => name !== 'leave.png'))
+  expect(existsSync(join(ws.root, 'a-leave.png'))).toBe(true);
+  for (const name of names.filter(name => name !== 'a-leave.png'))
     expect(existsSync(join(ws.root, name))).toBe(false);
   expect(existsSync(join(ws.root, 'Filed', 'Images', 'image-0 (2).png'))).toBe(true);
   const history = await (await request.get(`${ws.base}/history?limit=100`)).json();
@@ -579,7 +581,6 @@ test('real filesystem partial failure requires a new unselected retry review, an
   test.skip(process.platform === 'win32', 'POSIX directory-mode failure fixture');
   const ws = await manualReview(request, ['first.dmg', 'second.png'], 'Partial grouped execution');
   const console = await openReview(page, ws.slug);
-  await console.getByRole('button', { name: 'Select all filing groups', exact: true }).click();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
   await console.locator('#fileJanitorApprove').click();
   const destination = join(ws.root, 'Filed', 'Images');
@@ -599,7 +600,9 @@ test('real filesystem partial failure requires a new unselected retry review, an
   } finally {
     chmodSync(destination, 0o750);
   }
-  await console.locator('#fileJanitorView-all').click();
+  // The file that could not be filed is drawn as such, and is not ticked again.
+  await expect(console.locator('.fj-could-not')).toContainText('second.png');
+  await console.getByRole('button', { name: 'All files', exact: true }).click();
   await console.getByRole('button', { name: 'Review retry for second.png', exact: true }).click();
   await expect(
     console.getByRole('checkbox', { name: 'Select second.png', exact: true })
@@ -630,10 +633,8 @@ test('real protection departure returns to the pinned older batch and current ca
   request
 }) => {
   const ws = await manualReview(request, ['one.png', 'two.png'], 'Pinned protection return');
-  const review = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review;
-  const batchID = review.batch_id;
+  const batchID = (await pictureOf(request, ws.base)).batch_id;
   const console = await openReview(page, ws.slug);
-  await console.getByRole('button', { name: 'Select all filing groups', exact: true }).click();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
   await console.locator('#fileJanitorApprove').click();
   const protection = await (await request.get(`${ws.base}/protection`)).json();
@@ -659,17 +660,19 @@ test('real protection departure returns to the pinned older batch and current ca
   utimesSync(join(ws.root, 'later.png'), old, old);
   const scan = await request.post(`${ws.base}/scan`);
   expect(scan.ok(), await scan.text()).toBe(true);
-  const latest = (await (await request.get(`${ws.base}/batches/latest/groups`)).json()).review
-    .batch_id;
+  const latest = (await pictureOf(request, ws.base)).batch_id;
   expect(latest).not.toBe(batchID);
   await returning.click();
   await expect(console).toBeVisible();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
-  await expect(console.locator('#fileJanitorBatchChoice')).toHaveValue(batchID);
   await expect(console.locator('#fileJanitorConfirmApply')).toHaveCount(0);
   await expect(console.locator('.fj-batch-scan-status')).toContainText(
     'No old selections or approval were replayed'
   );
+  // The pinned older review, not the newest one, is what was restored.
+  await console.getByRole('button', { name: 'All files', exact: true }).click();
+  await expect(console.locator('#fileJanitorBatchChoice')).toHaveValue(batchID);
+  await console.locator('#fileJanitorView-groups').click();
   await console.locator('#fileJanitorApprove').click();
   await expect(console.locator('.fj-confirm-lead')).toContainText('move 1 file');
   for (const name of ['one.png', 'two.png', 'later.png'])
@@ -690,16 +693,18 @@ test('explicit setup of an adopted alias keeps saved group scope without probing
   const review = (await response.json()).review;
   expect(review.counts).toMatchObject({ candidates: 1, filing: 1 });
   const console = await openReview(page, ws.slug);
-  await console
-    .getByRole('checkbox', { name: 'Select filing proposals in Images', exact: true })
-    .click();
+  await expect(folder(console, 'images')).toBeChecked();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  // The picture names no path, and the alias spelling is not widened.
+  await expect(console).not.toContainText(ws.referencePath);
+  await folder(console, 'images').uncheck();
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
   await page.reload();
-  await expect(console.locator('#fileJanitorSelection')).toHaveText('1 file selected.');
+  await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
   expect(existsSync(join(ws.root, 'alias.png'))).toBe(true);
 });
 
-test('1000 saved candidates keep bounded cards, paged DOM and one exact selection request', async ({
+test('1000 saved files keep a bounded picture, paged lists and a preview of the whole 1000', async ({
   page,
   request
 }) => {
@@ -709,43 +714,42 @@ test('1000 saved candidates keep bounded cards, paged DOM and one exact selectio
     Array.from({ length: 1000 }, (_, i) => `scale-${String(i).padStart(4, '0')}.png`),
     'Bounded 1000 review'
   );
-  const raw = await (await request.get(`${ws.base}/batches/latest/groups`)).text();
-  expect(Buffer.byteLength(raw)).toBeLessThan(4000);
-  const review = JSON.parse(raw).review;
-  expect(review.counts).toMatchObject({ candidates: 1000, filing: 1000, questions: 0 });
-  expect(review.groups).toHaveLength(1);
-  expect(review.groups[0].samples).toHaveLength(3);
+  const raw = await (await request.get(`${ws.base}/batches/latest/picture`)).text();
+  // The first screenful is one bounded read however many files wait.
+  expect(Buffer.byteLength(raw)).toBeLessThan(30_000);
+  const picture = JSON.parse(raw).picture;
+  expect(picture.counts).toMatchObject({ candidates: 1000, filing: 1000, questions: 0 });
+  expect(picture.folders).toHaveLength(1);
+  expect(picture.folders[0].files).toHaveLength(5);
+  expect(drawn(picture)).toBe(1000);
   const console = await openReview(page, ws.slug);
   const posts: string[] = [];
   page.on('request', req => {
     if (req.method() === 'POST' && req.url().includes('/file-janitor')) posts.push(req.url());
   });
-  const started = Date.now();
-  await console
-    .getByRole('checkbox', { name: 'Select filing proposals in Images', exact: true })
-    .click();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('1000 files selected.', {
     timeout: 20_000
   });
-  const elapsed = Date.now() - started;
-  expect(posts.filter(url => url.endsWith('/draft'))).toHaveLength(1);
-  expect(posts).toHaveLength(1);
+  expect(posts).toHaveLength(0);
   expect(await console.locator('.fj-row-item').count()).toBe(0);
-  await console.getByRole('button', { name: 'See 1,000 files in Images', exact: true }).click();
-  await expect(console.locator('.fj-row-item')).toHaveCount(50);
-  const draftText = await (await request.get(`${ws.base}/batches/${review.batch_id}/draft`)).text();
+  await console.locator('#fileJanitorMore-filed-images').click();
+  await expect(console.locator('#fileJanitorMorePanel li')).toHaveCount(50);
+  await expect(console.locator('#fileJanitorMorePanel')).toContainText('Showing 1–50 of 1000');
+  const draftText = await (
+    await request.get(`${ws.base}/batches/${picture.batch_id}/draft`)
+  ).text();
   expect(Buffer.byteLength(draftText)).toBeLessThan(256 * 1024);
   expect(JSON.parse(draftText).draft.choices).toHaveLength(1000);
   await console.locator('#fileJanitorApprove').click();
   await expect(console.locator('.fj-confirm-item')).toHaveCount(50);
   await expect(console.locator('.fj-confirm')).toContainText('of 1000 exact selected operations');
   globalThis.console.info(
-    `Grouped review scale: 1000 candidates, card JSON ${Buffer.byteLength(raw)} bytes, draft JSON ${Buffer.byteLength(draftText)} bytes, select-and-save ${elapsed}ms, 1 POST, 50 member/preview rows (local Chromium sandbox).`
+    `Picture scale: 1000 files, first screenful ${Buffer.byteLength(raw)} bytes, draft ${Buffer.byteLength(draftText)} bytes, 0 writes to open, 50 list rows, 50 preview rows (local Chromium sandbox).`
   );
 });
 
 for (const theme of ['light', 'dark']) {
-  test(`grouped review keyboard, partial selection, 390px, zoom and reduced motion (${theme})`, async ({
+  test(`picture keyboard, partial selection, 390px, zoom and reduced motion (${theme})`, async ({
     page,
     request
   }) => {
@@ -767,25 +771,26 @@ for (const theme of ['light', 'dark']) {
       }
       throw new Error('Keyboard target unreachable');
     };
-    const select = console.getByRole('checkbox', {
-      name: 'Select filing proposals in Images',
-      exact: true
-    });
-    await tabTo(select);
+    const tick = folder(console, 'images');
+    await expect(tick).toBeChecked();
+    await expect(console.locator('#fileJanitorSelection')).toHaveText('3 files selected.');
+    // The folder card, one per row at 390px, is reachable and operable by keyboard.
+    await tabTo(tick);
+    await page.keyboard.press('Space');
+    await expect(console.locator('#fileJanitorSelection')).toHaveText('No files selected.');
+    await expect(console.locator('.fj-folder-card.is-unticked')).toContainText('Not filed');
+    await tabTo(tick);
     await page.keyboard.press('Space');
     await expect(console.locator('#fileJanitorSelection')).toHaveText('3 files selected.');
-    const details = console.getByRole('button', { name: 'See 3 files in Images', exact: true });
-    await tabTo(details);
+    // Leave one file out (All files), then come back: the folder is partly ticked.
+    await tabTo(console.getByRole('button', { name: 'All files', exact: true }));
     await page.keyboard.press('Enter');
-    await expect(console.locator('.fj-row-item')).toHaveCount(3);
     const file = console.getByRole('checkbox', { name: 'Select first.png', exact: true });
     await tabTo(file);
     await page.keyboard.press('Space');
     await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
-    const close = console.getByRole('button', { name: 'Close file list', exact: true });
-    await tabTo(close, true);
-    await page.keyboard.press('Enter');
-    await expect(select).toHaveJSProperty('indeterminate', true);
+    await console.locator('#fileJanitorView-groups').click();
+    await expect(tick).toHaveJSProperty('indeterminate', true);
     await tabTo(console.locator('#fileJanitorApprove'));
     await page.keyboard.press('Enter');
     await expect(console.locator('#fileJanitorConfirmApply')).toBeFocused();
@@ -795,9 +800,8 @@ for (const theme of ['light', 'dark']) {
     await expect(console.locator('#fileJanitorSelection')).toHaveText('2 files selected.');
     await expect(console.locator('#fileJanitorApprove')).toBeFocused();
     expect(await console.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
-    await console
-      .locator('.fj-group-grid')
-      .evaluate(node => node.scrollIntoView({ block: 'start' }));
+    await console.locator('.fj-frame').evaluate(node => node.scrollIntoView({ block: 'start' }));
+    mkdirSync(evidence, { recursive: true });
     await page.screenshot({ path: `${evidence}/05-${theme}-390.png`, fullPage: true });
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.evaluate(() => {
@@ -829,10 +833,14 @@ for (const theme of ['light', 'dark']) {
 test('installed setup-required entry is not an empty saved review', async ({ page, request }) => {
   const ws = await workspace(request);
   const console = await openReview(page, ws.slug);
-  await expect(console.locator('.fj-group-card')).toHaveCount(0);
-  await expect(console).not.toContainText('No pending proposal groups');
+  await expect(console.locator('.fj-folder-card')).toHaveCount(0);
+  await expect(console.locator('#fileJanitorPicture')).toHaveCount(0);
+  await expect(console).not.toContainText('Nothing is set to be filed');
   await expect(console).toContainText(/folder/i);
   const response = await request.get(`/api/workspaces/${ws.id}/file-janitor/batches/latest/groups`);
   expect(response.status()).toBe(409);
   expect((await response.json()).code).toBe('review_unavailable');
+  const picture = await request.get(`/api/workspaces/${ws.id}/file-janitor/batches/latest/picture`);
+  expect(picture.status()).toBe(409);
+  expect((await picture.json()).code).toBe('review_unavailable');
 });

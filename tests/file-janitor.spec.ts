@@ -959,7 +959,14 @@ test.describe('File Janitor capability', () => {
     expect(footerBox).toBeTruthy();
     expect(detailsBox!.y + detailsBox!.height).toBeLessThanOrEqual(footerBox!.y);
 
-    await row.locator('.fj-select').check();
+    // Both confident files open ticked. Approve only the invoice: leave the
+    // holiday photo out of its ticked folder.
+    await expect(row.locator('.fj-select')).toBeChecked();
+    await consoleBody(page)
+      .locator('.fj-row-item')
+      .filter({ hasText: 'holiday.png' })
+      .locator('.fj-select')
+      .uncheck();
     await expect(page.locator('.fj-footer')).toBeInViewport();
     await expect(page.locator('#fileJanitorApprove')).toHaveText('Review 1 move');
     await page.locator('#fileJanitorApprove').click();

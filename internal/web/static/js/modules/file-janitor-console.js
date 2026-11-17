@@ -56,16 +56,16 @@
   let draftRequest = 0;
   let draftWriteChain = Promise.resolve();
   let failedDraftEdit = null;
-  let groupReview = null;
-  let groupsLoadState = 'idle';
-  let groupsRequest = 0;
-  let activeGroupID = '';
-  let groupMembers = [];
-  const deferredQuestions = new Set();
-  let groupMemberTotal = 0;
-  let groupOffset = 0;
-  let groupMemberLoadState = 'idle';
-  let groupMemberRequest = 0;
+  // The picture of the folder after filing: one bounded read of the saved scan,
+  // plus the one open "and N more" list. Both are projections; the saved choices
+  // stay in reviewDraft and are only ever changed through submitReviewEdit.
+  let picture = null;
+  let pictureLoadState = 'idle';
+  let pictureRequest = 0;
+  let pictureMore = null;
+  let pictureMoreRequest = 0;
+  // The list that was open when a save changed the revisions it was read from.
+  let pictureReopen = null;
   let savedBatches = [];
   let savedBatchOffset = 0;
   let savedBatchTotal = 0;
@@ -180,7 +180,7 @@
     setupReviewRequest++;
     lastBatch = null;
     lastCandidates = [];
-    resetGroupReview();
+    resetPicture();
     resetReviewDraft();
     draftEnabled = true;
     reviewView = 'groups';
@@ -981,10 +981,24 @@
       (draftLoadState === 'saved' &&
         !failedDraftEdit &&
         reviewDraft?.batch_id === lastBatch?.id &&
-        ['saved', 'empty'].includes(reviewDraft.state) &&
+        ['saved', 'empty', 'default'].includes(reviewDraft.state) &&
         pendingDecisionWrites.size === 0 &&
-        (reviewView !== 'groups' ||
-          (groupsLoadState === 'loaded' && groupReview?.revision === reviewDraft.group_revision)))
+        (reviewView !== 'groups' || pictureMatchesDraft()))
+    );
+  }
+
+  // The picture and the saved choices are two reads. Edits quote the saved
+  // choices' revisions, so the picture is only actionable while both name the same
+  // saved review; a change made in another window between the reads shows up here
+  // as a mismatch and the screen reloads instead of acting on a stale picture.
+  function pictureMatchesDraft() {
+    return Boolean(
+      picture &&
+      pictureLoadState === 'loaded' &&
+      picture.batch_id === lastBatch?.id &&
+      reviewDraft &&
+      picture.draft_revision === reviewDraft.revision &&
+      picture.revision === reviewDraft.group_revision
     );
   }
 
@@ -1469,7 +1483,7 @@
       view.choices.length > 1000 ||
       !Array.isArray(view.groups) ||
       view.groups.length > 13 ||
-      !['empty', 'saved', 'invalid', 'stale'].includes(view.state)
+      !['empty', 'default', 'saved', 'invalid', 'stale'].includes(view.state)
     )
       throw new Error('Saved review choices are unavailable.');
     if (['invalid', 'stale'].includes(view.state) && view.choices.length)
@@ -1695,248 +1709,197 @@
     return node;
   }
 
-  function groupSelectionControls(group) {
-    const editBinding = reviewEditBinding();
-    const wrap = el('div', 'fj-group-choices');
-    const state = reviewDraft?.groups?.find(item => item.id === group.id);
-    if (!draftEnabled || !state) return wrap;
-    const label = el('label', 'fj-group-select');
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.id = 'fileJanitorGroup-select-' + group.id;
-    checkbox.checked = state.eligible > 0 && state.selected === state.eligible;
-    checkbox.indeterminate = state.selected > 0 && state.selected < state.eligible;
-    checkbox.setAttribute('aria-label', 'Select filing proposals in ' + group.label);
-    checkbox.setAttribute(
-      'aria-checked',
-      checkbox.indeterminate ? 'mixed' : checkbox.checked ? 'true' : 'false'
-    );
-    checkbox.disabled = !reviewEditsAvailable() || !state.eligible;
-    checkbox.addEventListener('change', () => {
-      void submitReviewEdit(
-        checkbox.checked ? 'select_group' : 'deselect_group',
-        { group_id: group.id },
-        null,
-        editBinding
-      );
-    });
-    label.appendChild(checkbox);
-    label.appendChild(el('span', '', 'Select group'));
-    wrap.appendChild(label);
-    wrap.appendChild(
-      el(
-        'p',
-        'fj-sub',
-        state.selected +
-          ' of ' +
-          state.eligible +
-          ' filing proposals selected' +
-          (state.trash ? ' · ' + state.trash + ' explicitly marked for Trash separately' : '')
-      )
-    );
-    if (state.mixed_destinations)
-      wrap.appendChild(el('p', 'fj-sub', 'Mixed saved destinations; per-file exceptions stay.'));
-    if (!state.group_marked) return wrap;
-    const destination = document.createElement('select');
-    destination.id = 'fileJanitorGroup-category-' + group.id;
-    destination.className = 'fj-category';
-    destination.setAttribute(
-      'aria-label',
-      'Destination for selected group files in ' + group.label
-    );
-    destination.disabled = !reviewEditsAvailable() || !state.group_marked;
-    if (state.mixed_destinations) {
-      const mixed = document.createElement('option');
-      mixed.value = '';
-      mixed.textContent = 'Mixed saved destinations';
-      mixed.selected = true;
-      mixed.disabled = true;
-      destination.appendChild(mixed);
-    }
-    for (const category of categories) {
-      const option = document.createElement('option');
-      option.value = category.id;
-      option.textContent = category.label || category.id;
-      option.selected =
-        !state.mixed_destinations && category.id === (state.category || group.category);
-      destination.appendChild(option);
-    }
-    destination.addEventListener(
-      'change',
-      () =>
-        void submitReviewEdit(
-          'set_category',
-          { group_id: group.id, category: destination.value },
-          null,
-          editBinding
-        )
-    );
-    wrap.appendChild(destination);
-    wrap.appendChild(
-      el('p', 'fj-sub', 'Changes selected group-added files only; per-file exceptions stay.')
-    );
-    const undo = button(
-      'Undo group mark',
-      'fj-btn',
-      reviewEditCallback('clear_group', { group_id: group.id })
-    );
-    undo.id = 'fileJanitorGroup-undo-' + group.id;
-    undo.disabled = !reviewEditsAvailable() || !state.group_marked;
-    undo.setAttribute(
-      'aria-label',
-      'Undo group mark for ' + group.label + ', keeping per-file choices'
-    );
-    wrap.appendChild(undo);
-    return wrap;
+  function resetPicture() {
+    pictureRequest++;
+    pictureMoreRequest++;
+    picture = null;
+    pictureLoadState = 'idle';
+    pictureMore = null;
+    pictureReopen = null;
   }
 
-  function reviewPlanSidebar() {
-    const plan = el('aside', 'fj-review-plan');
-    plan.setAttribute('aria-label', 'Saved review plan');
-    plan.appendChild(el('h3', 'fj-group-title', 'Your selected changes'));
-    plan.appendChild(
-      el('p', 'fj-group-count', selected.size + (selected.size === 1 ? ' move' : ' moves'))
+  // A picture the server sent is checked for shape and bounds before it is drawn,
+  // so a malformed or unbounded reply is "unavailable", never a half-drawn folder.
+  function validPicture(value, batchID) {
+    const count = number => Number.isSafeInteger(number) && number >= 0;
+    const section = item =>
+      Boolean(item) && count(item.count) && Array.isArray(item.files) && item.files.length <= 12;
+    return Boolean(
+      value &&
+      value.batch_id === batchID &&
+      typeof value.revision === 'string' &&
+      value.revision.length === 64 &&
+      typeof value.draft_revision === 'string' &&
+      value.draft_revision.length === 64 &&
+      ['empty', 'default', 'saved', 'invalid', 'stale'].includes(value.draft_state) &&
+      ['none', 'some', 'unknown'].includes(value.content_read) &&
+      count(value.waiting) &&
+      count(value.counts?.candidates) &&
+      Array.isArray(value.folders) &&
+      value.folders.length <= 16 &&
+      value.folders.every(
+        folder =>
+          typeof folder.category === 'string' &&
+          count(folder.count) &&
+          count(folder.unfiled_count) &&
+          Array.isArray(folder.files) &&
+          folder.files.length <= 5 &&
+          Array.isArray(folder.unfiled_files) &&
+          folder.unfiled_files.length <= 5
+      ) &&
+      Array.isArray(value.loose) &&
+      value.loose.length <= 8 &&
+      value.loose.every(
+        row =>
+          typeof row.group_id === 'string' &&
+          count(row.count) &&
+          count(row.loose_count) &&
+          Array.isArray(row.singles) &&
+          row.singles.length <= 12
+      ) &&
+      section(value.left_out) &&
+      section(value.trash) &&
+      section(value.could_not_file)
     );
-    plan.appendChild(el('p', 'fj-sub', trashMarked.size + ' explicitly marked for Trash'));
-    const destinations = new Map();
-    for (const choice of reviewDraft?.choices || []) {
-      if (choice.operation === 'move')
-        destinations.set(choice.category, (destinations.get(choice.category) || 0) + 1);
-    }
-    const list = el('ul', 'fj-group-samples');
-    for (const [category, count] of destinations) {
-      const definition = categories.find(item => item.id === category);
-      const label = definition?.folder_name
-        ? 'Filed/' + definition.folder_name
-        : definition?.label || category;
-      list.appendChild(el('li', '', count + ' → ' + label));
-    }
-    plan.appendChild(list);
-    plan.appendChild(
-      el('p', 'fj-sub', 'Saved choices are not approval. A fresh exact preview is still required.')
-    );
-    const clear = button('Clear selected changes', 'fj-btn', reviewEditCallback('clear_all'));
-    clear.disabled = !reviewEditsAvailable() || selected.size + trashMarked.size === 0;
-    plan.appendChild(clear);
-    return plan;
   }
 
-  function resetGroupReview() {
-    deferredQuestions.clear();
-    groupsRequest++;
-    groupMemberRequest++;
-    groupReview = null;
-    groupsLoadState = 'idle';
-    activeGroupID = '';
-    groupMembers = [];
-    groupMemberTotal = 0;
-    groupOffset = 0;
-    groupMemberLoadState = 'idle';
-  }
-
-  async function loadReviewGroups() {
+  async function loadReviewPicture() {
     const scope = requestScope();
     const batchID = lastBatch?.id;
     if (!scope.id || !batchID) return;
-    const sequence = ++groupsRequest;
+    const sequence = ++pictureRequest;
     const current = () =>
-      scopeCurrent(scope) && sequence === groupsRequest && lastBatch?.id === batchID;
-    groupsLoadState = 'loading';
+      scopeCurrent(scope) && sequence === pictureRequest && lastBatch?.id === batchID;
+    pictureLoadState = 'loading';
     try {
       const response = await fetch(
-        apiBase(scope.id) + '/batches/' + encodeURIComponent(batchID) + '/groups'
+        apiBase(scope.id) + '/batches/' + encodeURIComponent(batchID) + '/picture'
       );
       const body = await response.json();
       if (!current()) return;
-      const review = body.review;
+      if (!response.ok || !validPicture(body.picture, batchID))
+        throw new Error('The picture is unavailable');
+      picture = body.picture;
+      pictureLoadState = 'loaded';
+      // An open list is pinned to the scan and choices it was read from. When a
+      // save changes them, loadBatch reads the same page again against the new
+      // revisions (see pictureReopen) instead of showing different files.
       if (
-        !response.ok ||
-        review?.batch_id !== batchID ||
-        typeof review.revision !== 'string' ||
-        !Array.isArray(review.groups) ||
-        review.groups.length > 13 ||
-        !Number.isSafeInteger(review.counts?.candidates)
-      )
-        throw new Error('Saved groups unavailable');
-      groupReview = review;
-      groupsLoadState = 'loaded';
-      if (activeGroupID && review.groups.some(group => group.id === activeGroupID)) {
-        await loadGroupMembers(activeGroupID, groupOffset, false);
-      } else {
-        activeGroupID = '';
-        groupMembers = [];
+        pictureMore &&
+        (pictureMore.revision !== picture.revision ||
+          pictureMore.draftRevision !== picture.draft_revision)
+      ) {
+        pictureReopen = {
+          section: pictureMore.section,
+          key: pictureMore.key,
+          offset: pictureMore.offset
+        };
+        pictureMore = null;
+        pictureMoreRequest++;
       }
     } catch (_) {
       if (!current()) return;
-      groupsLoadState = 'error';
-      groupMemberRequest++;
-      groupMembers = [];
-      groupMemberLoadState = 'error';
+      picture = null;
+      pictureLoadState = 'error';
+      pictureMore = null;
+      pictureMoreRequest++;
     }
     if (current()) renderBatch();
   }
 
-  async function loadGroupMembers(groupID, offset = 0, focus = true) {
-    const focusID = document.activeElement?.id;
+  // One page of the list behind an "and N more" control. The page is pinned to
+  // the revisions on screen: if the scan or the saved choices moved on, the server
+  // refuses it and the list says so instead of showing different files.
+  async function loadPictureFiles(section, key, offset = 0, focus = true) {
     const scope = requestScope();
     const batchID = lastBatch?.id;
-    const revision = groupReview?.revision;
-    if (!scope.id || !batchID || !revision || groupsLoadState !== 'loaded') return;
-    const sequence = ++groupMemberRequest;
+    if (!scope.id || !batchID || !pictureMatchesDraft()) return;
+    const revision = picture.revision;
+    const draftRevision = picture.draft_revision;
+    const sequence = ++pictureMoreRequest;
     const current = () =>
       scopeCurrent(scope) &&
-      sequence === groupMemberRequest &&
+      sequence === pictureMoreRequest &&
       lastBatch?.id === batchID &&
-      groupReview?.revision === revision;
-    activeGroupID = groupID;
-    groupOffset = offset;
-    groupMemberLoadState = 'loading';
-    groupMembers = [];
+      picture?.revision === revision &&
+      picture?.draft_revision === draftRevision;
+    pictureMore = {
+      section,
+      key,
+      offset,
+      limit: PAGE_SIZE,
+      state: 'loading',
+      total: 0,
+      files: [],
+      revision,
+      draftRevision
+    };
     renderBatch();
     try {
       const response = await fetch(
         apiBase(scope.id) +
           '/batches/' +
           encodeURIComponent(batchID) +
-          '/groups/' +
-          encodeURIComponent(groupID) +
-          '/members?limit=' +
+          '/picture/files?section=' +
+          encodeURIComponent(section) +
+          '&key=' +
+          encodeURIComponent(key) +
+          '&limit=' +
           PAGE_SIZE +
           '&offset=' +
           offset +
           '&revision=' +
-          encodeURIComponent(revision)
+          encodeURIComponent(revision) +
+          '&draft_revision=' +
+          encodeURIComponent(draftRevision)
       );
       const body = await response.json();
       if (!current()) return;
+      const page = body.page;
       if (
         !response.ok ||
-        body.batch_id !== batchID ||
-        body.group_id !== groupID ||
-        body.revision !== revision ||
-        !Array.isArray(body.candidates) ||
-        body.candidates.length > PAGE_SIZE ||
-        !Number.isSafeInteger(body.total) ||
-        body.total < 0
+        page?.batch_id !== batchID ||
+        page.section !== section ||
+        page.revision !== revision ||
+        page.draft_revision !== draftRevision ||
+        !Array.isArray(page.files) ||
+        page.files.length > PAGE_SIZE ||
+        !Number.isSafeInteger(page.total) ||
+        page.total < 0 ||
+        !Number.isSafeInteger(page.offset) ||
+        page.offset < 0
       )
-        throw new Error('Group members unavailable');
-      groupMembers = body.candidates;
-      groupMemberTotal = body.total;
-      groupMemberLoadState = 'loaded';
+        throw new Error('These files are unavailable');
+      pictureMore = {
+        ...pictureMore,
+        state: 'loaded',
+        total: page.total,
+        files: page.files,
+        offset: page.offset
+      };
     } catch (_) {
       if (!current()) return;
-      groupMemberLoadState = 'error';
+      pictureMore = { ...pictureMore, state: 'error' };
     }
     if (current()) {
       renderBatch();
       if (focus) {
-        const panel = document.getElementById('fileJanitorGroup-details');
+        const panel = document.getElementById('fileJanitorMorePanel');
         panel?.focus?.({ preventScroll: true });
         panel?.scrollIntoView?.({ block: 'start' });
-      } else {
-        document.getElementById(focusID)?.focus?.({ preventScroll: true });
       }
     }
+  }
+
+  function closePictureMore() {
+    const previous = pictureMore;
+    pictureMore = null;
+    pictureMoreRequest++;
+    renderBatch();
+    if (previous)
+      document
+        .getElementById('fileJanitorMore-' + previous.section + '-' + previous.key)
+        ?.focus?.();
   }
 
   async function loadSavedBatches() {
@@ -2003,7 +1966,7 @@
       consoleItem = '';
       pageOffset = 0;
       filter = '';
-      resetGroupReview();
+      resetPicture();
       void loadBatch();
     });
     wrap.appendChild(select);
@@ -2042,12 +2005,13 @@
     bar.setAttribute('role', 'group');
     bar.setAttribute('aria-label', 'Review view');
     for (const [view, label] of [
-      ['groups', 'Groups'],
+      ['groups', 'Picture'],
       ['all', 'All files']
     ]) {
       const control = button(label, 'fj-filter', () => {
         reviewView = view;
-        renderBatch();
+        // The header offers All files only from the picture, so repaint it too.
+        renderConsole();
         document.getElementById('fileJanitorView-' + view)?.focus?.();
       });
       control.id = 'fileJanitorView-' + view;
@@ -2057,261 +2021,78 @@
     return bar;
   }
 
-  function renderReviewGroups() {
-    const section = el('section', 'fj-groups');
-    section.setAttribute('aria-label', 'Grouped proposals for this saved batch');
-    if (groupsLoadState !== 'loaded' || groupReview?.batch_id !== lastBatch?.id) {
-      const failed = groupsLoadState === 'error';
+  // The Review tab: the folder as it will look after filing. This only draws what
+  // the picture read says. A tick or untick is one saved edit through the same
+  // lifecycle as every other choice, and the picture is redrawn from the server's
+  // next read, never from this module's own arithmetic.
+  function renderPictureView() {
+    const section = el('section', 'fj-picture-host');
+    const drawing = window.FileJanitorPicture;
+    const hasPicture = picture?.batch_id === lastBatch?.id;
+    if (pictureLoadState === 'error' || (!hasPicture && pictureLoadState === 'loaded')) {
       const notice = el(
         'p',
         'fj-empty-copy',
-        failed
-          ? 'Grouped proposals are unavailable. No files are selected by opening this view. Retry, or use All files.'
-          : 'Loading saved grouped proposals…'
+        'The picture of your folder is unavailable. Nothing was changed, and this does not mean the folder is tidy. Retry, or use All files.'
       );
-      notice.setAttribute('role', failed ? 'alert' : 'status');
+      notice.setAttribute('role', 'alert');
       section.appendChild(notice);
-      if (failed)
-        section.appendChild(button('Retry groups', 'fj-btn', () => void loadReviewGroups()));
+      section.appendChild(button('Retry', 'fj-btn', () => void loadReviewPicture()));
       return section;
     }
-    const counts = groupReview.counts;
-    section.appendChild(
-      el(
-        'p',
-        'fj-group-accounting',
-        formatCount(counts.candidates) +
-          ' candidates in this saved batch · ' +
-          formatCount(counts.filing) +
-          ' suggested for filing · ' +
-          formatCount(counts.questions) +
-          ' need a decision.'
-      )
-    );
-    const other = [
-      ['kept', 'kept here'],
-      ['applied', 'applied'],
-      ['stale', 'stale'],
-      ['failed', 'failed'],
-      ['applying', 'in progress'],
-      ['unknown', 'unavailable state'],
-      ['ineligible', 'ineligible scan observations (not candidates)']
-    ]
-      .filter(([key]) => counts[key])
-      .map(([key, label]) => formatCount(counts[key]) + ' ' + label);
-    if (other.length)
-      section.appendChild(
-        el('p', 'fj-muted', other.join(' · ') + '. See All files or History for recorded outcomes.')
-      );
-    if (counts.kept > 0) {
-      const kept = button('See kept files', 'fj-btn fj-btn-secondary', () => {
-        reviewView = 'all';
-        filter = 'skipped';
-        pageOffset = 0;
-        void loadBatch();
-      });
-      kept.id = 'fileJanitorKept';
-      kept.disabled = !batchActionsAvailable() || busy;
-      section.appendChild(kept);
+    if (!hasPicture || !drawing) {
+      const notice = el('p', 'fj-empty-copy', 'Loading your folder…');
+      notice.setAttribute('role', 'status');
+      section.appendChild(notice);
+      return section;
     }
+    const binding = reviewEditBinding();
     section.appendChild(
-      el(
-        'p',
-        'fj-sub',
-        'These are saved proposals, not a folder inventory. Grouping uses names and saved metadata; file details show the actual classification provenance.'
-      )
-    );
-    if (draftEnabled) {
-      section.appendChild(
-        el(
-          'p',
-          'fj-sub',
-          'Keep here leaves files untouched, remembers these exact file states, and cancels their saved changes. Changed files may return; existing skip retention applies. Not now leaves questions pending, with no timer.'
-        )
-      );
-      const selectAll = button(
-        'Select all filing groups',
-        'fj-btn fj-btn-secondary',
-        reviewEditCallback('select_filing_groups')
-      );
-      selectAll.disabled = !reviewEditsAvailable() || counts.filing === 0;
-      section.appendChild(selectAll);
-      section.appendChild(
-        el(
-          'p',
-          'fj-sub',
-          'Only the exact filing proposals in this batch. Questions, unresolved files and Trash marks are excluded.'
-        )
-      );
-    }
-    const layout = el('div', 'fj-group-plan-layout');
-    const grid = el('div', 'fj-group-grid');
-    for (const group of groupReview.groups) {
-      const card = el(
-        'article',
-        'fj-group-card' + (group.kind === 'question' ? ' fj-group-question' : '')
-      );
-      card.setAttribute('data-fj-group', group.id);
-      card.appendChild(
-        el('p', 'fj-group-kind', group.kind === 'question' ? 'Your decision' : 'Suggested filing')
-      );
-      card.appendChild(el('h3', 'fj-group-title', group.label));
-      card.appendChild(
-        el(
-          'p',
-          'fj-group-count',
-          formatCount(group.count) + (group.count === 1 ? ' file' : ' files')
-        )
-      );
-      if (group.kind === 'question' && deferredQuestions.has(group.id)) {
-        const state = reviewDraft?.groups.find(item => item.id === group.id);
-        card.appendChild(
-          el(
-            'p',
-            'fj-group-reason',
-            'Still pending. Not now changed no choices and sets no timer.' +
-              (state?.selected || state?.trash ? ' Saved choices remain in the review plan.' : '')
-          )
-        );
-        const reopen = button('Reopen question', 'fj-btn fj-btn-secondary', () => {
-          deferredQuestions.delete(group.id);
-          renderBatch();
-          document.getElementById('fileJanitorGroup-' + group.id)?.focus?.();
-        });
-        reopen.id = 'fileJanitorGroup-reopen-' + group.id;
-        reopen.setAttribute('aria-label', 'Reopen question: ' + group.label);
-        card.appendChild(reopen);
-        grid.appendChild(card);
-        continue;
-      }
-      if (group.question) card.appendChild(el('p', 'fj-question-prompt', group.question));
-      if (group.kind === 'filing') card.appendChild(groupSelectionControls(group));
-      if (group.destination)
-        card.appendChild(el('p', 'fj-destination', 'Proposed: ' + group.destination));
-      card.appendChild(el('p', 'fj-group-reason', group.reason));
-      const samples = el('ul', 'fj-group-samples');
-      for (const name of (group.samples || []).slice(0, 3))
-        samples.appendChild(el('li', '', safeName(name)));
-      card.appendChild(samples);
-      const details = button(
-        'See files',
-        'fj-btn fj-btn-secondary',
-        () => void loadGroupMembers(group.id)
-      );
-      details.id = 'fileJanitorGroup-' + group.id;
-      details.disabled = batchLoadState !== 'loaded';
-      details.setAttribute(
-        'aria-label',
-        'See ' + formatCount(group.count) + ' files in ' + group.label
-      );
-      details.setAttribute('aria-expanded', activeGroupID === group.id ? 'true' : 'false');
-      details.setAttribute('aria-controls', 'fileJanitorGroup-details');
-      card.appendChild(details);
-      if (draftEnabled) {
-        const keep = button(
-          'Keep here',
-          'fj-btn fj-btn-secondary',
-          reviewEditCallback('keep_group', { group_id: group.id })
-        );
-        keep.disabled = !reviewEditsAvailable();
-        keep.setAttribute('aria-label', 'Keep ' + group.label + ' here');
-        card.appendChild(keep);
-      }
-      if (group.kind === 'question') {
-        const binding = reviewEditBinding();
-        const defer = button('Not now', 'fj-btn fj-btn-quiet', () => {
-          if (!scopeCurrent(binding.scope) || binding.batchID !== lastBatch?.id) return;
-          deferredQuestions.add(group.id);
-          if (activeGroupID === group.id) {
-            activeGroupID = '';
-            groupMemberRequest++;
+      drawing.renderPicture(document, picture, {
+        folderName: compactFolderName(lastStatus?.settings?.root_path),
+        editsAvailable: reviewEditsAvailable(),
+        more: pictureMore,
+        onTickFolder: (folder, ticked) =>
+          void submitReviewEdit(
+            ticked ? 'select_group' : 'deselect_group',
+            { group_id: folder.group_id },
+            null,
+            binding
+          ),
+        onOpenMore: (pickedSection, key) => {
+          if (pictureMore?.section === pickedSection && pictureMore?.key === key)
+            closePictureMore();
+          else void loadPictureFiles(pickedSection, key, 0);
+        },
+        onMorePage: offset => {
+          if (!pictureMore) return;
+          if (pictureMore.state === 'error') {
+            // The page could not be read against what is on screen; start over
+            // from the saved review rather than retrying a stale request.
+            pictureMore = null;
+            pictureMoreRequest++;
+            void loadBatch();
+            return;
           }
-          renderBatch();
-          document.getElementById('fileJanitorGroup-reopen-' + group.id)?.focus?.();
-        });
-        defer.setAttribute('aria-label', 'Not now: ' + group.label);
-        card.appendChild(defer);
-      }
-      grid.appendChild(card);
-    }
-    layout.appendChild(grid);
-    if (draftEnabled) layout.appendChild(reviewPlanSidebar());
-    section.appendChild(layout);
-    if (!groupReview.groups.length)
-      section.appendChild(
-        el(
-          'p',
-          'fj-empty-copy',
-          'No pending proposal groups in this saved batch. Recorded outcomes remain in All files and History.'
-        )
-      );
-    if (activeGroupID) {
-      const group = groupReview.groups.find(group => group.id === activeGroupID);
-      const panel = el('section', 'fj-group-details');
-      panel.id = 'fileJanitorGroup-details';
-      panel.setAttribute('tabindex', '-1');
-      panel.setAttribute('aria-label', 'Files in ' + (group?.label || 'this group'));
-      panel.appendChild(el('h3', 'fj-group-title', group?.label || 'Group files'));
-      panel.appendChild(
-        button('Close file list', 'fj-btn', () => {
-          const previous = activeGroupID;
-          activeGroupID = '';
-          groupMemberRequest++;
-          renderBatch();
-          document.getElementById('fileJanitorGroup-' + previous)?.focus?.();
-        })
-      );
-      if (groupMemberLoadState === 'loaded') {
-        panel.appendChild(
-          el(
-            'p',
-            'fj-sub',
-            'Showing ' +
-              (groupMembers.length ? groupOffset + 1 : 0) +
-              '–' +
-              (groupOffset + groupMembers.length) +
-              ' of ' +
-              formatCount(groupMemberTotal) +
-              ' files in this group.'
-          )
-        );
-        const scroller = el('div', 'fj-table-scroll');
-        scroller.appendChild(reviewTable(groupMembers));
-        panel.appendChild(scroller);
-        const nav = el('nav', 'fj-actions');
-        nav.setAttribute('aria-label', 'Group member pages');
-        for (const [label, offset, disabled] of [
-          ['Previous group files', Math.max(0, groupOffset - PAGE_SIZE), groupOffset === 0],
-          [
-            'Next group files',
-            groupOffset + PAGE_SIZE,
-            groupOffset + groupMembers.length >= groupMemberTotal
-          ]
-        ]) {
-          const control = button(
-            label,
-            'fj-btn',
-            () => void loadGroupMembers(activeGroupID, offset)
-          );
-          control.disabled =
-            disabled || batchLoadState !== 'loaded' || groupsLoadState !== 'loaded';
-          nav.appendChild(control);
+          void loadPictureFiles(pictureMore.section, pictureMore.key, offset, false);
+        },
+        onCloseMore: closePictureMore,
+        onShowEarlier: () => {
+          reviewView = 'all';
+          filter = picture.counts.kept ? 'skipped' : '';
+          pageOffset = 0;
+          void loadBatch();
         }
-        panel.appendChild(nav);
-      } else {
-        panel.appendChild(
-          el(
-            'p',
-            'fj-empty-copy',
-            groupMemberLoadState === 'error'
-              ? 'Group files are unavailable or changed. Reload these proposals before continuing.'
-              : 'Loading group files…'
-          )
-        );
-        if (groupMemberLoadState === 'error')
-          panel.appendChild(button('Reload proposals', 'fj-btn', () => void loadReviewGroups()));
-      }
-      section.appendChild(panel);
+      })
+    );
+    if (picture.counts.unknown > 0) {
+      const unknown = el(
+        'p',
+        'fj-batch-load-notice',
+        'Some files have a saved state this version does not understand. They were not counted as filed. Open All files before continuing.'
+      );
+      unknown.setAttribute('role', 'alert');
+      section.appendChild(unknown);
     }
     return section;
   }
@@ -2426,6 +2207,10 @@
     if (!container) return;
     const focusedReviewControlID = String(document.activeElement?.id || '');
     clear(container);
+    // In the picture, #fileJanitorView-all is the header's button; in All files it
+    // is the view switch (the two are never on screen together).
+    const headerAllFiles = document.getElementById('fileJanitorView-all');
+    if (headerAllFiles && reviewView === 'groups') headerAllFiles.hidden = !lastBatch;
     if (protectionReturnRetry) {
       const retry = button(
         'Retry returning to review',
@@ -2487,12 +2272,21 @@
     }
 
     const protection = protectionPrompt();
-    if (protection && reviewView !== 'groups') container.appendChild(protection);
-    if (groupReview?.batch_id === lastBatch.id && groupReview.counts.unknown > 0) {
+    if (reviewView === 'groups') {
+      // Before the first folder card there is only the lead line and the frame
+      // title (R56): no progress, summary, saved-review picker or view switch.
+      // All files stays reachable from the header, and holds the picker.
+      container.appendChild(renderPictureView());
+      if (protection) container.appendChild(protection);
+      appendReviewFooter(container, focusedReviewControlID);
+      return;
+    }
+    if (protection) container.appendChild(protection);
+    if (picture?.batch_id === lastBatch.id && picture.counts?.unknown > 0) {
       const unknown = el(
         'p',
         'fj-batch-load-notice',
-        'Some candidates have an unsupported saved state. They were not counted as completed; inspect All files before continuing.'
+        'Some files have a saved state this version does not understand. They were not counted as completed; inspect All files before continuing.'
       );
       unknown.setAttribute('role', 'alert');
       container.appendChild(unknown);
@@ -2503,12 +2297,6 @@
     container.appendChild(summary);
     container.appendChild(savedBatchPicker());
     container.appendChild(reviewViewSwitch());
-    if (reviewView === 'groups') {
-      container.appendChild(renderReviewGroups());
-      if (protection) container.appendChild(protection);
-      appendReviewFooter(container, focusedReviewControlID);
-      return;
-    }
     container.appendChild(filterBar());
 
     const rows = visibleCandidates();
@@ -4353,12 +4141,18 @@
     // batch — the confirmation step and the report of what just happened.
     // Applying every file empties the batch; the account of the user's own
     // files must not be swept away with the table it came from.
+    // In the picture, nothing but the lead line and the frame comes before the
+    // first folder (R56), so the folder-access disclosure sits below it. A failed
+    // check is a real problem with a way out, so it stays on top and open.
+    let healthBelow = null;
     if (reviewView === 'groups') {
       const disclosure = el('details', 'fj-review-health');
-      disclosure.open = (status.readiness?.checks || []).some(check => check.status === 'failed');
+      const failed = (status.readiness?.checks || []).some(check => check.status === 'failed');
+      disclosure.open = failed;
       disclosure.appendChild(el('summary', 'fj-label', 'Folder access and scan status'));
       disclosure.appendChild(readinessRows(status));
-      host.appendChild(disclosure);
+      if (failed) host.appendChild(disclosure);
+      else healthBelow = disclosure;
     } else {
       host.appendChild(readinessRows(status));
     }
@@ -4370,6 +4164,7 @@
     const confirmHost = confirmation || el('div', 'fj-confirm-host');
     confirmHost.id = 'fileJanitorConfirmHost';
     host.appendChild(confirmHost);
+    if (healthBelow) host.appendChild(healthBelow);
     host.appendChild(errorRegion());
     renderBatch();
     if (pendingPreview && !confirmation) renderConfirmation(pendingPreview);
@@ -4850,6 +4645,21 @@
       const scan = button('Scan now', 'fj-btn fj-btn-secondary', () => void scanNow());
       scan.id = 'fileJanitorScan';
       scan.disabled = scanning;
+      if (consoleTab === 'review' && reviewView === 'groups') {
+        const allFiles = button('All files', 'fj-btn fj-btn-secondary', () => {
+          reviewView = 'all';
+          renderConsole();
+          document.getElementById('fileJanitorView-all')?.focus?.();
+        });
+        // The same id the view switch gives All files, so every caller that reaches
+        // All files by that control keeps working from the picture.
+        allFiles.id = 'fileJanitorView-all';
+        // With no saved review there is nothing to list, so the control is not
+        // shown (not merely disabled). The header is built when the console
+        // opens, before the review loads; renderBatch keeps this in step.
+        allFiles.hidden = !lastBatch;
+        actions.appendChild(allFiles);
+      }
       actions.appendChild(scan);
       actions.appendChild(pauseControl(settings));
     }
@@ -4988,7 +4798,7 @@
     const batch = /^[A-Za-z0-9_-]{1,128}$/.test(requestedBatch) ? requestedBatch : '';
     if (draftEnabled && batch !== linkedBatchID) {
       linkedBatchID = batch;
-      resetGroupReview();
+      resetPicture();
       resetReviewDraft();
       selected.clear();
       trashMarked.clear();
@@ -5854,7 +5664,7 @@
 
     // A different batch invalidates every decision made against the old one.
     if ((lastBatch && lastBatch.id) !== previousBatchID) {
-      resetGroupReview();
+      resetPicture();
       resetReviewDraft();
       selected = new Set();
       trashMarked = new Set();
@@ -5886,10 +5696,37 @@
       // Resolve latest only once. A later scan is discoverable in the saved
       // batch picker, never an implicit replacement of the review in progress.
       if (!linkedBatchID) linkedBatchID = lastBatch.id;
-      await Promise.all([loadReviewGroups(), loadSavedBatches(), loadReviewDraft()]);
+      await Promise.all([loadReviewPicture(), loadSavedBatches(), loadReviewDraft()]);
       if (!current()) return;
+      // The picture and the saved choices are two reads. If a change made in
+      // another window landed between them they disagree; read both again once
+      // rather than drawing a picture the next edit would be refused against.
+      if (pictureLoadState === 'loaded' && reviewDraft && !pictureMatchesDraft()) {
+        await Promise.all([loadReviewDraft(), loadReviewPicture()]);
+        if (!current()) return;
+      }
+      // A list the person had open stays open across a save: read the same page
+      // again against the new revisions. One that has emptied (its own folder was
+      // just unticked) closes rather than saying "0 of 0".
+      if (pictureReopen) {
+        const reopen = pictureReopen;
+        pictureReopen = null;
+        if (pictureMatchesDraft()) {
+          await loadPictureFiles(reopen.section, reopen.key, reopen.offset, false);
+          if (!current()) return;
+          if (pictureMore?.state === 'loaded' && pictureMore.files.length === 0) {
+            if (pictureMore.total > 0 && reopen.offset > 0)
+              await loadPictureFiles(reopen.section, reopen.key, 0, false);
+            else {
+              pictureMore = null;
+              pictureMoreRequest++;
+            }
+            if (!current()) return;
+          }
+        }
+      }
     } else {
-      resetGroupReview();
+      resetPicture();
       await loadSavedBatches();
       if (!current()) return;
     }
@@ -6480,7 +6317,7 @@
       reviewView = view === 'all' ? 'all' : 'groups';
       renderBatch();
     },
-    _loadReviewGroups: loadReviewGroups,
+    _loadReviewPicture: loadReviewPicture,
     _setFilter: next => selectFilter(next),
     _reloadBatch: () => loadBatch(),
     _reloadHistory: () => loadHistory(),
@@ -6557,7 +6394,7 @@
       lastStatus = null;
       lastBatch = null;
       lastCandidates = [];
-      resetGroupReview();
+      resetPicture();
       resetReviewDraft();
       draftEnabled = true;
       reviewView = 'groups';

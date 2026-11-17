@@ -6,6 +6,11 @@ Status: contract selected in the task 1.1 characterization spike; implementation
 and acceptance evidence are tracked separately in the feature findings log.
 Base inspected: `48d8e5392857a0517084bf1ce70cf9313530826c`.
 
+The **Picture review** section near the end of this document changes four
+clauses below (no group selected on entry, question groups refusing
+`select_group`, preview then confirm, and "Not now"); where they disagree, that
+section wins once the `filing-picture-review` feature has landed.
+
 ## Authority and compatibility
 
 Groups describe **one saved scan batch**, not a live folder inventory. Reading
@@ -306,6 +311,268 @@ These observations describe base `48d8e5392`, not the new grouped path:
   Raw scan schema was normalized unconditionally; the draft migration now
   preserves unsupported-schema evidence and refuses unsupported writes.
 - No new plugin/provider/devtools release or connector protocol is required.
+
+## Picture review
+
+Contract for the `filing-picture-review` feature (PRD `R` numbers refer to its
+requirements), selected in its task 1.1 on base `3add0ffb6`. It is a contract,
+not a statement of what already runs: each part says which task builds it. When
+the feature ships, task 6.6 folds the four changed clauses below into the text
+above and this section keeps the new routes, fields and storage.
+
+### Four clauses change
+
+| Clause above | After this feature |
+| --- | --- |
+| "No group is selected on entry." | A scan created by the picture-review build opens with every **filing** group ticked, derived on each read and stored only when the person first edits. Question groups are never ticked. A press binds the tick to exact files at the revision the picture showed. |
+| `select_group` refuses question groups. | `select_group` on a question group is allowed with a required `category`; it places exactly that group's members at the revision shown. Question groups stay out of the on-open ticks and out of `select_filing_groups`. |
+| Preview issues an approval; a second request confirms it. | `GET .../plan` draws the picture with no authority. One `POST .../file` states the plan it saw; the server recomputes it under the root lock and only then issues **and spends** the approval inside that request. The older preview/apply routes keep working unchanged. |
+| "Not now" is a collapsed card. | "Leave here" is the same state: pending, nothing remembered. |
+
+Unchanged: one scan at a time, exact fingerprints, never overwrite, no path or
+token in any response, per-file Trash only, the 1,000-file cap, reads that do not
+write, the connector contract (`mcp_mover.go`, the `Mover` interface).
+
+### Ticked on open (task 1.2)
+
+- `JanitorBatch.review_defaults` (string, `omitempty`) is set to
+  `"filing_groups_v1"` only by `scanNow` when it creates a batch
+  (`scan_service.go`; the only production site that appends batches).
+- `reviewDefaultsApply(state, batch)` is true only when **all** hold: the batch
+  has the marker; no `ReviewDraft` record exists for the batch (valid, invalid or
+  stale); no `FilingRecord` exists for the batch; every candidate of the batch is
+  `Pending` with `DecisionNone` and a zero `DecidedAt`.
+- `projectReviewDraft` takes the groups. When the rule is true it returns
+  `State:"default"` and one move choice per member of every `Kind=="filing"`
+  group, `SourceGroupID` = that group's ID: exactly what `select_filing_groups`
+  would add to an empty draft. `revalidatedReviewDraft` then checks metadata for
+  those names as it does for saved ones. No enumeration, content read or write.
+- Nothing is stored until the person edits. Any typed edit creates a draft
+  record starting from the view's choices, so unticking one folder keeps the rest
+  and clearing everything stores an empty record that never re-ticks. A legacy
+  `/decisions` change sets `DecidedAt`; any apply or a filing record also ends the
+  defaults for good.
+- A file that arrives later is in no batch member list (fixed when the scan
+  creates the batch), so it can never join a tick. It appears only in a new scan.
+- **Older scans** (no marker, including ones saved by the card-grid version, and
+  scan files of schema 0, 1 or 2) open with nothing ticked and their saved choices
+  unchanged. This follows "older files load with no ticks invented"; it is a
+  one-line change in `reviewDefaultsApply` if the owner prefers to tick them.
+- A default view can exceed 1,000 files (a scan has no size cap). The caps do not
+  change: the plan check reports `over_limit`, the press is refused, and an edit
+  from such a view that would leave more than 1,000 choices is refused with
+  `review_bounds` like any other, so the person must untick enough in one step.
+  The picture says "Ori files up to 1,000 files at a time. Untick a folder to
+  continue." for both the disabled button and that refusal (R39).
+- Lock order is unchanged: reads take no lock; edits take `lockRoot` then
+  `UpdateScanState`.
+
+### Question group to one folder (task 3.1)
+
+- `select_group` on `Kind=="question"` requires a non-empty `category`
+  (`ErrInvalidAction` otherwise). For each member at the revision shown it skips a
+  file with a Trash choice, a move choice from another group, or
+  `Decision==DecisionTrash`; otherwise it sets `Decision=Move`,
+  `DecisionCategory=category`, `DecisionGroupID=group.ID`, then selects the move
+  with `SourceGroupID=group.ID`. Choosing another folder for the row rewrites only
+  the choices that came from that group.
+- One predicate `moveAnswered(candidate, groupID)` replaces the four places that
+  reject a `NeedsReview` move whose `DecisionGroupID != ""`:
+  `selectMove` (`review_draft_service.go`), `projectReviewDraft`
+  (`review_draft.go`), `validExecutionCandidate` (`review_execution.go`) and the
+  plan check. It accepts a file that does not need review, or one with a
+  `DecisionCategory` whose `DecisionGroupID` is empty or the ID of a **question**
+  group. All must change together: changing only the draft side would let a placed
+  file pass the picture and then fail the per-item fence as a conflict.
+  `reconcileLegacyDraftDecision` keeps dropping such a choice on a legacy category
+  edit, the safe direction.
+- Row "Leave here" is `clear_group`; for question groups it also clears
+  `Decision`, `DecisionCategory`, `DecisionGroupID` and `DecidedAt` where
+  `DecisionGroupID==group.ID` and no choice is left, so nothing is remembered.
+  Row "Leave here, stop asking" is `keep_group`; for question groups it skips
+  only members without a Trash choice or a per-file move choice (those are drawn
+  elsewhere, so each file stays in one place). Filing-group keep is as today.
+
+### Pairs, bundles and the first screenful (tasks 1.3, 4.1)
+
+- `ReviewGroupMember` gains `Family`, `Ending`, `Bundle`; `ReviewGroup` gains
+  `Key`. They are filled in a second pass after the main grouping loop and are
+  **not** added to the revision's encode calls, so membership and `revision` do
+  not change and `ReviewGroupRuleVersion` stays **3**. A golden revision captured
+  on the base commit proves it before any edit to `review_groups.go`.
+- `family_id`: `fam-` plus 24 hex of `sha256("fj-family-v1\0"+scope+"\0"+batchID+"\0"+versionFamily(name))`
+  for members of the possible-copies group. `ending`: `number`, `copy`, `v`,
+  `version` or `none`. `bundle_id`: `bun-` plus the same kind of hash, for audio
+  members whose `reviewNameStem` is shared by at least two audio-group members.
+  The scope digest is server-only, so no ID reverses to a name.
+- `GET .../batches/{batchID}/picture` is the one bounded read. It resolves
+  `latest` like the group read, always returns the concrete `batch_id`, reads
+  groups, revalidated draft and placement from one snapshot, and sets `no-store`.
+  Fields: `batch_id`, `revision`, `draft_revision`, `draft_state`, `rule_version`,
+  `counts`, `waiting`, `removed_stale`, `content_read` (`none|some|unknown`),
+  `folders[]` in category-registry order `{category, destination, group_id,
+  group_state: ticked|partial|unticked|none, count, files <=5, unfiled_count,
+  unfiled_files <=5}`, `loose[]` per question group `{group_id, key, count,
+  placed_count, placed_category, trash_count, loose_count, singles <=12, more}`
+  (`count` is the whole group and equals `loose_count + placed_count +
+  trash_count`; `placed_category` is set only when every placed file shares one
+  folder; task 4.1 adds `pairs <=3 x files <=6` and `bundles <=3 x files <=12`),
+  `left_out`, `trash`, `could_not_file` (`{count, files <=12}`). A file entry is
+  `{id, name, size, modified_at, category, your_choice, placement, family_id,
+  ending, bundle_id}` (the last three from task 4.1) plus `state`, `reason` and
+  `can_retry` for a file that could not be filed: no path, fingerprint, token or
+  choice list. `ReviewGroup` gains `key`, the fixed rule word behind its opaque
+  ID; the picture's labels and "Why?" sentences are browser copy keyed by it.
+- One pure `placeReviewFiles` puts each waiting member in exactly one place:
+  Trash choice, else move choice (its category's folder; `your_choice` for a
+  question-group or hand-changed file), else a filing member goes to its folder's
+  dashed `unfiled` list when none of its group is selected and to `left_out`
+  otherwise, else a question member to its row. Failed and stale files go to
+  `could_not_file`. The section counts add up to `waiting` (R8).
+- `GET .../picture/files?section=filed|unfiled|loose|left_out|trash|could_not_file|family|bundle&key=&revision=&draft_revision=&limit=50&offset=0`
+  pages the same placement (50 default, 200 maximum); a mismatch is 409
+  `review_changed`.
+- `content_read` is computed over every candidate: `some` if any `Classifier` is
+  `content`, `none` if all are `metadata`, `model` or `fallback`, else `unknown`.
+  The lead line's third sentence follows it; for `unknown` it is left out rather
+  than guessed. Nothing in production sets `content` today, so that wording is
+  tested but cannot appear yet.
+
+### Plan check (task 2.1)
+
+- `GET .../batches/{batchID}/plan?revision=&group_revision=&destination=<category|trash>&limit=50&offset=0`,
+  `no-store`; a revision mismatch is 409 `review_conflict`.
+  `Service.PlanReview(ctx, owner, ws, batchID, ReviewPlanQuery)` in
+  `review_plan.go` reads `loadScanState(ws, true)` and never calls
+  `UpdateScanState`, `MkdirAll` or the root lock. It `Lstat`s each file once and
+  opens none, so a file readable by nobody is still planned.
+- Response: `batch_id`, `revision`, `group_revision`, `plan_digest`, `move_count`,
+  `trash_count`, `total`, `over_limit`, `destinations[{category, destination,
+  count, renamed_count, first <=5}]`, `trash{count, first <=5}`, `changed{total,
+  items <=50 {candidate_id, name, reason: changed|missing}}`, and with
+  `destination` a page `items` of `{candidate_id, name, operation, category,
+  final_name, renamed, size}` plus `items_total`, `limit`, `offset`.
+- Walk the effective choices in batch candidate order with one `reserved` name
+  map; apply runs in the same order, so final names agree when nothing changed.
+  Above 1,000 operations the check returns 200 with `over_limit:true`, counts
+  only, no stat, `plan_digest:""`; only the press returns 413 (R39 needs counts).
+- `preview.go`'s per-item logic becomes `planLine(settings, root, candidate, op,
+  category, reserved)`; `PreviewMoves` is that in a loop plus issuing approval,
+  behaviour unchanged. Name-clash resolution stays only in
+  `resolveAvailableNameReserving`. `PayloadHash` is unchanged.
+- `plan_digest` = hex sha256 of `"file-janitor-plan-v1"`, workspace ID, batch ID,
+  the scope digest, draft revision, group revision, and the sorted lines
+  `cid|op|category|fingerprintKey|finalName` and `cid|changed|reason`. It covers
+  everything `PayloadHash` covers.
+- The server names only files whose own state changed. A change from a choice or
+  a new clash is found by the browser comparing the old and fresh plans by
+  `candidate_id`.
+
+### One File request (task 2.2)
+
+- `POST .../batches/{batchID}/file`: closed JSON, at most 4 KiB, unknown fields
+  refused, one object: `{expected_revision, expected_group_revision, plan_digest,
+  trash_acknowledged (int), client_key}`; `client_key` is 16 to 128 of
+  `[A-Za-z0-9_-]`. `Service.FileReviewPlan(ctx, owner, ws, batchID, FileRequest)`.
+- Order: bounds and fields, no locks; `StoredManagedRoot`, and
+  `ResolveRoot(settings)` equal to the root path; **`lockRoot` for the whole
+  request**; then one `UpdateScanState` that is the admission:
+  1. a `FilingRecord` with this `client_key` exists: replay, write nothing (another
+     owner: 409);
+  2. mark older records with no `CompletedAt` that are not running as
+     `Interrupted`;
+  3. recompute the effective view and the plan; if either revision, the digest, or
+     `trash_acknowledged != trash_count` differs, or `over_limit`, return
+     `ErrReviewPlanChanged` / `ErrReviewBounds` with the fresh plan. The mutate
+     returns an error, so nothing is written;
+  4. on a match, `invalidateBatchApprovals`, append an **already consumed**
+     `ApprovalRecord` (`IdempotencyKey` = the filing ID `"filing-"+uuid`, review
+     revision and scope, `PayloadHash`, `ConsumedAt`, a random discarded
+     `TokenHash`) and a `FilingRecord`. That write is the admission.
+- Then, still under the root lock and registered in a `runningFilings` set, run
+  the existing `applyOne` / `trashOne` per item in plan order and stamp
+  `CompletedAt`. The response is built from the journal, so a first answer and a
+  replay are identical. Responses: 200 `{filing, replayed, outcomes}`; 409
+  `plan_changed` or `trash_not_acknowledged` with `plan`; 413 `review_bounds`.
+- Never take `lockRoot` inside a mutate. An edit that commits before admission
+  wins; one attempted after it blocks on `lockRoot`, then loses its compare-and-swap
+  with `ErrReviewConflict`. A retry with the same key waits on the root lock, then
+  replays. After a crash there is no resume: a retry returns the journal outcomes
+  with `interrupted:true`, files never attempted counted `not_attempted`.
+- **Limit of "nothing moves" (R36):** it holds up to admission. After it, the
+  per-item fences in `review_execution.go` stay as they are: a file changed since
+  is reported stale and a new name clash gets another free name, so a receipt can
+  differ from the picture. The receipt says what happened.
+
+### Filing identity, receipt, Undo all (tasks 5.1, 5.2)
+
+- The filing ID is the existing `IdempotencyKey` (wire name `filing_id`); no new
+  `FileAction` field. Per file the journal holds the action with `Undo`,
+  `UndoneAt`, `UndoError`.
+- `GET .../filings?limit=1` (newest first, at most 20) feeds History's last-filing
+  line. `GET .../filings/{filingID}?offset=` returns the receipt: `filing_id`,
+  `state` (`running|done|interrupted`), `admitted_at`, `completed_at`, `filed`,
+  `trashed`, `by_destination[{category, destination, count}]`, `not_moved_total`,
+  `not_moved[<=50 {candidate_id, name, operation, reason}]`, `not_attempted`,
+  `loose_now`, `undo_available`, `undo`, `history_trimmed`. Every number comes
+  from the journal, so it survives a restart.
+- `POST .../filings/{filingID}/undo` (empty body), `UndoFiling(ctx, owner, ws,
+  filingID)`: `lockRoot` first, then one claim write: unknown filing or owner is
+  `ErrUndoUnavailable`; `settings.RootID != filing.RootID` is refused (relinked);
+  `UndoClaimedAt` already set is a replay; nothing `Undoable()` is refused;
+  otherwise set `UndoClaimedAt/By` and mark each `Undoable()` action of the key
+  `UndoInProgress`. Then in reverse journal order call `undoMove` /
+  `restoreFromTrash` **directly** (never `Service.Undo`: it claims again and the
+  root lock is a plain mutex), re-checking `RootID` per item.
+- Result: `{filing_id, replayed, back, not_back, outcomes[{candidate_id, action_id,
+  name, operation, result: undone|already_undone|failed|interrupted, message,
+  location: folder|filed|trash|unknown, destination}]}`. A file already undone
+  one at a time is `already_undone`. A second press or window waits on the root
+  lock, then replays; a per-file undo during the run is refused by the existing
+  in-progress check.
+- Limits to state honestly: a crash leaves actions in applying or undo-in-progress
+  (the startup reconciliation named in `apply.go` and `action.go` comments does
+  not exist; receipt and Undo all report these `interrupted`); a second request
+  waits for the first run, up to 1,000 file operations; `MaxRetainedActions`
+  (1,000) equals the per-press cap, so the next filing prunes older actions
+  (`history_trimmed`) and the newest filing is always complete.
+
+### After Undo all (task 5.4)
+
+"Scan again to review them" is **one press with two server steps**; Ori never
+scans without it. The browser sends `POST .../filings/{filingID}/forget-restored`
+and only after it succeeds the existing `POST .../scan`. Under the root lock, in
+one scan-state write, forget clears the skip key of each restored file's current
+fingerprint and its `BeforeFingerprint` key for every action undone by that run
+(`UndoDone` with `UndoneAt >= UndoClaimedAt`). It changes no file or candidate, is
+idempotent, is refused after a relink, and returns `{forgotten:n}`. It does not
+reuse `reconsider_files`, which clears the candidate's own fingerprint key (not
+necessarily what `suppressRestored` wrote) and needs the batch revisions. A failed
+scan leaves the files forgotten, which is harmless; a retry sends both again.
+
+### Storage (both sides stay at scan state schema 3)
+
+- Additive: `JanitorBatch.review_defaults`; `ScanState.filings []FilingRecord`
+  (`omitempty`, newest 20, validated: unique IDs, `client_key` pattern, planned
+  at most 1,000) with `id, owner, batch_id, root_id, client_key, plan_digest,
+  planned_moves, planned_trash, admitted_at, completed_at, interrupted,
+  unrecorded[{candidate_id, reason}], undo_claimed_at, undo_claimed_by,
+  undo_completed_at`. `ApprovalRecord` and `FileAction` gain nothing.
+- Moving to 4 would make every older binary refuse the whole file and break
+  Filing after a downgrade. Staying at 3, an older binary that rewrites the file
+  drops both additions: the batch then shows nothing ticked and Undo all and the
+  receipt disappear. Neither widens what may move. Newer unknown schemas are still
+  refused, never written over. If a later field's loss on downgrade would be
+  unsafe, that is the reason to move to 4.
+
+### Routes added (both prefixes, in `registerUnder`)
+
+`GET .../batches/{id}/picture` and `/picture/files` (1.3), `GET
+.../batches/{id}/plan` (2.1), `POST .../batches/{id}/file` (2.2), `GET
+.../filings` and `.../filings/{id}` (5.1), `POST .../filings/{id}/undo` (5.2),
+`POST .../filings/{id}/forget-restored` (5.4). Each is added to the route lists in
+`authorization_audit_test.go` and `route_parity_test.go`, stays inside reset
+admission, and returns no path, fingerprint or token.
 
 ## Non-goals
 

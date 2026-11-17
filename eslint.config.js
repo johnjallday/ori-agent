@@ -284,6 +284,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-protection.js',
       'internal/web/static/js/modules/protect-folders-chooser.js',
       'internal/web/static/js/modules/file-janitor-protection.js',
+      'internal/web/static/js/modules/file-janitor-picture.js',
       'internal/web/static/js/modules/smartOnboarding.js',
       'internal/web/static/js/modules/workspace-detail.js',
       'internal/web/static/js/modules/workspace-detail-data-loader.js',

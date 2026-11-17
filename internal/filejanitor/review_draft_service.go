@@ -211,7 +211,7 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 			if err != nil || !candidate.Fingerprint.Matches(current) {
 				return ErrCandidateNotActionable
 			}
-			if !ValidCategory(candidate.EffectiveCategory()) || (candidate.NeedsReview && (candidate.DecisionCategory == "" || candidate.DecisionGroupID != "")) {
+			if !ValidCategory(candidate.EffectiveCategory()) || !moveAnswered(candidate) {
 				return ErrCandidateNotActionable
 			}
 			choices[id] = ReviewChoice{CandidateID: id, FingerprintKey: candidate.Fingerprint.Key(), Operation: OperationMove, SourceGroupID: source}

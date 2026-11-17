@@ -19,7 +19,12 @@ const ReviewGroupSampleLimit = 3
 // ReviewGroup is a bounded saved proposal, never a filesystem inventory or an
 // authorization. Candidate IDs are exposed only by the paged member endpoint.
 type ReviewGroup struct {
-	ID          string   `json:"id"`
+	ID string `json:"id"`
+	// Key is the fixed vocabulary word behind ID ("sensitive", "versions",
+	// "audio", "unresolved", "unmatched", "filing-images", ...). It names a rule,
+	// never a file, so the picture can pick a short label without a lookup table
+	// of opaque IDs. It is not part of the revision.
+	Key         string   `json:"key"`
 	Kind        string   `json:"kind"`
 	Label       string   `json:"label"`
 	Reason      string   `json:"reason"`
@@ -138,7 +143,7 @@ func GroupReview(batch JanitorBatch, candidates []JanitorCandidate, scope string
 	}
 	cards := make(map[string]*ReviewGroup, len(definitions))
 	for _, definition := range definitions {
-		card := &ReviewGroup{ID: reviewGroupID(definition.key), Kind: "question", Label: definition.label, Reason: definition.reason, Category: definition.category, Samples: []string{}}
+		card := &ReviewGroup{ID: reviewGroupID(definition.key), Key: definition.key, Kind: "question", Label: definition.label, Reason: definition.reason, Category: definition.category, Samples: []string{}}
 		if definition.category != "" {
 			card.Kind = "filing"
 			category, _ := LookupCategory(string(definition.category))

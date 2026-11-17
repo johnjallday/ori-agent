@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createProtectionTrips, protectionSentence, TRIP_KEY } from './file-janitor-protection.js';
+import * as pictureModule from './file-janitor-picture.js';
 
 class FakeElement {
   constructor(tag) {
@@ -187,6 +188,9 @@ function openConsole(status, tab) {
 const panel = await (async () => {
   setup();
   await import('./file-janitor-console.js');
+  // The page loads the picture module as a script of its own; the console reads
+  // window.FileJanitorPicture when it draws.
+  globalThis.FileJanitorPicture = pictureModule;
   return globalThis.window.DownloadsJanitorPanel;
 })();
 
@@ -4848,12 +4852,19 @@ async function groupedReviewFixture(count = 206) {
     ]
   };
   const state = {
+    // review is the server's grouping of the scan; the picture is drawn from it.
     review,
-    failGroups: false,
+    failPicture: false,
+    staleDraftOnce: false,
     batch,
     batches: [batch],
     generation: 0,
-    choices: [],
+    // A scan nobody has touched opens with its confident folder ticked.
+    choices: candidates.map(candidate => ({
+      candidate_id: candidate.id,
+      operation: 'move',
+      source_group_id: 'group-images'
+    })),
     failNextEdit: false,
     editGate: null
   };
@@ -4874,7 +4885,7 @@ async function groupedReviewFixture(count = 206) {
       batch_id: state.batch.id,
       revision: state.generation.toString(16).padStart(64, '0'),
       group_revision: state.review.revision,
-      state: state.generation ? 'saved' : 'empty',
+      state: state.generation ? 'saved' : 'default',
       removed_stale: 0,
       choices,
       groups: state.review.groups.map(group => ({
@@ -4888,10 +4899,130 @@ async function groupedReviewFixture(count = 206) {
       }))
     };
   };
+  // The server's placement of each waiting file, for the fixture's one group.
+  const pictureLists = () => {
+    const group = state.review.groups[0];
+    const pending = group ? candidates.filter(candidate => candidate.state === 'pending') : [];
+    const chosen = new Map(state.choices.map(choice => [choice.candidate_id, choice]));
+    const moved = pending.filter(candidate => chosen.get(candidate.id)?.operation === 'move');
+    const filing = group?.kind !== 'question';
+    const rest = pending.filter(candidate => !chosen.has(candidate.id));
+    return {
+      group,
+      pending,
+      moved,
+      filing,
+      filed: filing ? moved : [],
+      unfiled: filing && !moved.length ? rest : [],
+      left_out: filing && moved.length ? rest : [],
+      trash: pending.filter(candidate => chosen.get(candidate.id)?.operation === 'trash'),
+      loose: filing ? [] : rest
+    };
+  };
+  const pictureView = () => {
+    const draft = draftView();
+    const lists = pictureLists();
+    const entries = (items, placement, limit) =>
+      items.slice(0, limit).map(candidate => ({
+        id: candidate.id,
+        name: candidate.name,
+        size: 10,
+        placement
+      }));
+    const folders = [];
+    if (lists.filing && (lists.filed.length || lists.unfiled.length))
+      folders.push({
+        category: 'images',
+        destination: 'Filed/Images',
+        group_id: lists.group.id,
+        group_state: !lists.moved.length
+          ? 'unticked'
+          : lists.moved.length < lists.pending.length
+            ? 'partial'
+            : 'ticked',
+        count: lists.filed.length,
+        files: entries(lists.filed, 'filed', 5),
+        unfiled_count: lists.unfiled.length,
+        unfiled_files: entries(lists.unfiled, 'unfiled', 5)
+      });
+    const loose =
+      !lists.filing && lists.group
+        ? [
+            {
+              group_id: lists.group.id,
+              key: 'sensitive',
+              count: lists.pending.length,
+              placed_count: 0,
+              trash_count: lists.trash.length,
+              loose_count: lists.loose.length,
+              singles: entries(lists.loose, 'loose', 12),
+              more: Math.max(0, lists.loose.length - 12)
+            }
+          ]
+        : [];
+    const view = {
+      batch_id: state.batch.id,
+      revision: state.review.revision,
+      draft_revision: draft.revision,
+      draft_state: draft.state,
+      rule_version: 3,
+      counts: state.review.counts,
+      waiting: state.review.counts.filing + state.review.counts.questions,
+      removed_stale: 0,
+      content_read: 'none',
+      folders,
+      loose,
+      left_out: { count: lists.left_out.length, files: entries(lists.left_out, 'left_out', 12) },
+      trash: { count: lists.trash.length, files: entries(lists.trash, 'trash', 12) },
+      could_not_file: { count: 0, files: [] }
+    };
+    if (state.staleDraftOnce) {
+      // A change in another window landed between the picture read and the
+      // saved-choices read: the two name different revisions.
+      state.staleDraftOnce = false;
+      view.draft_revision = 'f'.repeat(64);
+    }
+    return view;
+  };
   globalThis.fetch = async (url, options) => {
     const target = String(url);
     calls.push({ target, options });
     const reply = body => ({ ok: true, json: async () => body });
+    if (target.includes('/picture/files?')) {
+      const query = new URLSearchParams(target.split('?')[1]);
+      const view = pictureView();
+      if (
+        query.get('revision') !== view.revision ||
+        query.get('draft_revision') !== view.draft_revision
+      )
+        return { ok: false, status: 409, json: async () => ({ code: 'review_changed' }) };
+      const section = query.get('section');
+      const list = pictureLists()[section] || [];
+      const offset = Number(query.get('offset'));
+      const limit = Number(query.get('limit'));
+      return reply({
+        page: {
+          batch_id: state.batch.id,
+          revision: view.revision,
+          draft_revision: view.draft_revision,
+          section,
+          key: query.get('key'),
+          total: list.length,
+          limit,
+          offset,
+          files: list.slice(offset, offset + limit).map(candidate => ({
+            id: candidate.id,
+            name: candidate.name,
+            size: 10,
+            placement: section
+          }))
+        }
+      });
+    }
+    if (target.endsWith('/picture'))
+      return state.failPicture
+        ? { ok: false, json: async () => ({}) }
+        : reply({ picture: pictureView() });
     if (target.endsWith('/draft')) {
       if (options?.method !== 'POST') return reply({ draft: draftView() });
       if (state.editGate) await state.editGate;
@@ -5009,20 +5140,6 @@ async function groupedReviewFixture(count = 206) {
           }))
         }
       });
-    if (target.endsWith('/groups'))
-      return state.failGroups
-        ? { ok: false, json: async () => ({}) }
-        : reply({ review: state.review });
-    if (target.includes('/members?')) {
-      const offset = Number(new URLSearchParams(target.split('?')[1]).get('offset'));
-      return reply({
-        batch_id: batch.id,
-        group_id: 'group-images',
-        revision: review.revision,
-        candidates: candidates.slice(offset, offset + 50),
-        total: count
-      });
-    }
     if (target.includes('/batches?'))
       return reply({ batches: state.batches, total: state.batches.length });
     if (isBatchDetailRequest(target)) {
@@ -5052,8 +5169,8 @@ async function groupedReviewFixture(count = 206) {
 
 test('exact preview pages 206 saved operations without expanding the DOM or losing intent on cancel', async () => {
   const { doc } = await groupedReviewFixture();
-  changeCheckbox(filingGroupCheckbox(doc), true);
-  await settle();
+  // The folder opens ticked: nothing is selected by hand before previewing.
+  assert.equal(panel._selected().length, 206);
   doc.getElementById('fileJanitorApprove').click();
   await settle();
   const host = doc.getElementById('fileJanitorConfirmHost');
@@ -5076,8 +5193,7 @@ test('exact preview pages 206 saved operations without expanding the DOM or losi
 
 test('canonical protection return restores a pinned older batch from winning server intent, never browser selections', async t => {
   const { doc, state, calls } = await groupedReviewFixture(3);
-  changeCheckbox(filingGroupCheckbox(doc), true);
-  await settle();
+  assert.equal(panel._selected().length, 3, 'the folder opens ticked');
   state.choices = [{ candidate_id: 'group-member-2', operation: 'move', source_group_id: '' }];
   state.generation++;
   state.batches.unshift({ ...state.batch, id: 'newer-batch' });
@@ -5135,136 +5251,228 @@ test('canonical protection return restores a pinned older batch from winning ser
 
 test('unsupported saved lifecycle states are visible, not completed or fake all-clear', async () => {
   const { doc, state } = await groupedReviewFixture(3);
+  // Nothing is pending, so nothing is ticked and nothing is drawn as a folder.
+  state.choices = [];
   state.review.groups = [];
   state.review.counts = { candidates: 3, filing: 0, questions: 0, unknown: 3 };
   state.batch.state = 'resolved';
   state.batch.summary.proposed = 0;
   await panel._reloadBatch();
-  assert.match(surface(doc).textContent, /unsupported saved state/);
-  assert.match(surface(doc).textContent, /3 unavailable state/);
+  assert.match(surface(doc).textContent, /saved state this version does not understand/);
   assert.doesNotMatch(surface(doc).textContent, /Review complete|All clear/);
   assert.deepEqual(panel._selected(), []);
 });
 
-test('Not now only de-emphasizes a pending question and reopens without a write', async () => {
-  const { doc, calls, state } = await groupedReviewFixture(3);
-  state.review.groups[0].kind = 'question';
-  state.review.groups[0].label = 'Possible copies or versions';
-  state.review.groups[0].question = 'Which possible versions do you want to file?';
-  state.review.counts.filing = 0;
-  state.review.counts.questions = 3;
-  await panel._reloadBatch();
-  const before = calls.filter(call => call.options?.method === 'POST').length;
-  surface(doc)
-    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Not now')[0]
-    .click();
-  assert.match(surface(doc).textContent, /Still pending/);
-  assert.match(surface(doc).textContent, /3 need a decision/);
-  assert.equal(doc.getElementById('fileJanitorGroup-group-images'), null);
-  surface(doc)
-    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Reopen question')[0]
-    .click();
-  assert.ok(doc.getElementById('fileJanitorGroup-group-images'));
-  assert.match(surface(doc).textContent, /Which possible versions/);
-  assert.equal(calls.filter(call => call.options?.method === 'POST').length, before);
-  assert.deepEqual(panel._selected(), []);
-});
+// ----------------------------------------------- the picture of the folder
+//
+// The Review tab draws the folder as it will look after filing. These tests
+// drive the console against a stub that answers like the server's picture read;
+// the pure drawing rules have their own tests in file-janitor-picture.test.js.
 
-test('Keep here clears exact intent and targeted Review again only offers a fresh explicit scan', async () => {
-  const { doc, calls, state, candidates } = await groupedReviewFixture(3);
-  changeCheckbox(filingGroupCheckbox(doc), true);
-  await settle();
-  surface(doc)
-    .all(
-      node => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === 'Keep Images here'
-    )[0]
-    .click();
-  await settle();
-  assert.deepEqual(panel._selected(), []);
-  assert.match(surface(doc).textContent, /3 kept here/);
-  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
-  doc.getElementById('fileJanitorKept').click();
-  await settle();
-  const again = surface(doc).all(
-    node =>
-      node.tagName === 'BUTTON' &&
-      String(node.getAttribute('aria-label')).startsWith('Review image-0.png again')
-  )[0];
-  assert.ok(again);
-  again.click();
-  await settle();
-  assert.equal(candidates[0].skip_remembered, false);
-  assert.equal(candidates[1].skip_remembered, true);
-  assert.equal(candidates[0].state, 'skipped');
-  assert.match(surface(doc).textContent, /Choose Scan now explicitly/);
-  assert.deepEqual(state.choices, []);
-  const posts = calls.filter(call => call.options?.method === 'POST');
-  assert.deepEqual(
-    posts.map(call => JSON.parse(call.options.body).action),
-    ['select_group', 'keep_group', 'reconsider_files']
-  );
-  assert.ok(
-    posts.every(call => call.target.endsWith('/draft')),
-    'no scan, preview or file operation is implicit'
-  );
-});
+function folderCheckbox(doc, category = 'images') {
+  return doc.getElementById('fileJanitorFolder-' + category);
+}
 
-test('grouped entry is the default, shows complete bounded counts, and selects nothing', async () => {
+function changeCheckbox(node, checked) {
+  node.checked = checked;
+  node.dispatch('change');
+}
+
+function pictureHost(doc) {
+  return doc.getElementById('fileJanitorBatch');
+}
+
+function buttonNamed(root, label) {
+  return root.all(node => node.tagName === 'BUTTON' && node.textContent === label)[0];
+}
+
+test('the picture is the default view: lead line, frame title, a ticked folder, five names', async () => {
   const { doc, calls } = await groupedReviewFixture();
-  assert.equal(doc.getElementById('fileJanitorView-groups').getAttribute('aria-pressed'), 'true');
-  assert.match(surface(doc).textContent, /206 candidates in this saved batch/);
-  assert.match(surface(doc).textContent, /206 files/);
-  assert.match(surface(doc).textContent, /<img onerror=alert\(1\)>/);
-  assert.equal(rowsIn(surface(doc)).length, 0, 'entry must not render all members');
-  assert.deepEqual(panel._selected(), []);
-  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
+  const batch = pictureHost(doc);
+  // Before the first folder card there is only the picture host, its lead line and
+  // the frame title: no summary, progress, picker, view switch or counting line.
+  assert.deepEqual(
+    batch.children.filter(node => node.className !== 'fj-footer').map(node => node.className),
+    ['fj-picture-host']
+  );
+  const picture = batch.children[0].children[0];
+  assert.equal(picture.id, 'fileJanitorPicture');
+  assert.deepEqual(
+    picture.children.map(node => node.className),
+    ['fj-lead', 'fj-frame']
+  );
+  assert.equal(
+    picture.children[0].textContent,
+    'This is how Inbox will look. Nothing moves until you press File. Ori reads names, types, sizes and dates, never what is inside.'
+  );
+  assert.equal(picture.children[1].children[0].textContent, 'Inbox, after filing');
+  const images = folderCheckbox(doc);
+  assert.equal(images.checked, true);
+  assert.equal(images.getAttribute('aria-label'), 'Images, 206 files, will be filed');
+  assert.deepEqual(
+    surface(doc)
+      .all(node => node.className === 'fj-folder-files')[0]
+      .children.map(node => node.textContent),
+    ['image-0.png', 'image-1.png', 'image-2.png', 'image-3.png', 'image-4.png']
+  );
+  assert.equal(buttonNamed(surface(doc), 'and 201 more').id, 'fileJanitorMore-filed-images');
+  assert.equal(rowsIn(surface(doc)).length, 0, 'the picture must not render every member');
+  // The folder opens ticked; the footer still files it through today's preview.
+  assert.equal(panel._selected().length, 206);
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, false);
+  // The old card grid, plan sidebar and counting text are gone from this view.
+  for (const gone of [
+    /Your selected changes/,
+    /Select all filing groups/,
+    /candidates in this saved batch/,
+    /Not now/
+  ])
+    assert.doesNotMatch(surface(doc).textContent, gone);
+  // Opening writes nothing and starts nothing.
   assert.ok(calls.every(call => !call.options?.method || call.options.method === 'GET'));
   assert.ok(calls.every(call => !/curator|agent|scan|preview|apply/.test(call.target)));
 });
 
-test('group details page independently, reuse existing controls and return focus', async () => {
-  const { doc, calls } = await groupedReviewFixture();
-  doc.getElementById('fileJanitorGroup-group-images').click();
-  await settle();
-  assert.equal(rowsIn(surface(doc)).length, 50);
-  assert.match(surface(doc).textContent, /Showing 1–50 of 206/);
-  assert.ok(surface(doc).all(node => node.className === 'fj-category').length);
-  surface(doc)
-    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Next group files')[0]
-    .click();
-  await settle();
-  assert.match(surface(doc).textContent, /Showing 51–100 of 206/);
-  assert.ok(calls.some(call => call.target.includes('offset=50&revision=')));
-  doc.getElementById('fileJanitorView-all').click();
-  assert.equal(rowsIn(surface(doc)).length, 50);
+test('All files stays reachable from the header, keeps the saved-review picker, and returns', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  state.batches = [batchFixture({ id: 'batch-new' }), state.batch];
+  await panel._reloadBatch();
+  assert.equal(doc.getElementById('fileJanitorBatchChoice'), null, 'the picture has no picker');
+  // In the picture the header offers All files; the Picture/All files switch is
+  // not above the picture.
+  assert.equal(doc.getElementById('fileJanitorView-groups'), null, 'no switch above the picture');
+  const header = doc.getElementById('fileJanitorView-all');
+  assert.match(header.className, /fj-btn/);
+  header.click();
+  assert.equal(rowsIn(surface(doc)).length, 3);
+  // In All files the same id is the switch, pressed, and the picker is here.
+  assert.match(doc.getElementById('fileJanitorView-all').className, /fj-filter/);
+  assert.equal(doc.getElementById('fileJanitorView-all').getAttribute('aria-pressed'), 'true');
+  const picker = doc.getElementById('fileJanitorBatchChoice');
+  assert.ok(picker.children.some(option => option.value === 'batch-new'));
+  assert.ok(picker.children.some(option => option.value === 'batch-1' && option.selected));
   doc.getElementById('fileJanitorView-groups').click();
-  assert.match(surface(doc).textContent, /Showing 51–100 of 206/);
-  surface(doc)
-    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Close file list')[0]
-    .click();
-  assert.equal(doc.activeElement.id, 'fileJanitorGroup-group-images');
-  assert.equal(rowsIn(surface(doc)).length, 0);
+  assert.ok(folderCheckbox(doc));
+  assert.match(doc.getElementById('fileJanitorView-all').className, /fj-btn/);
 });
 
-test('group unavailable is distinct from no pending groups and can retry without writes', async () => {
-  const { doc, calls, state } = await groupedReviewFixture();
-  state.failGroups = true;
-  await panel._loadReviewGroups();
-  assert.match(surface(doc).textContent, /Grouped proposals are unavailable/);
-  assert.doesNotMatch(surface(doc).textContent, /No pending proposal groups/);
-  state.failGroups = false;
-  state.review = {
-    ...state.review,
-    groups: [],
-    counts: { candidates: 206, filing: 0, questions: 0, kept: 206 }
-  };
-  surface(doc)
-    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Retry groups')[0]
-    .click();
+test('with no saved review the header offers no All files control, and shows it once one loads', () => {
+  const doc = setup();
+  panel._setBatch(null, [], CATEGORIES);
+  panel._reviewView('groups'); // the picture, as in production
+  openConsole(statusFixture(), 'review');
+  // Hidden, not merely disabled: there is nothing to list, and a control that
+  // looks present but cannot be used would stall anything that probes for it.
+  assert.equal(doc.getElementById('fileJanitorView-all').hidden, true);
+  panel._setBatch(batchFixture(), candidatesFixture().slice(0, 1), CATEGORIES);
+  panel._reviewView('groups');
+  assert.equal(doc.getElementById('fileJanitorView-all').hidden, false);
+});
+
+test('and N more opens the whole list 50 at a time, pinned to the picture, and returns focus', async () => {
+  const { doc, calls } = await groupedReviewFixture();
+  doc.getElementById('fileJanitorMore-filed-images').click();
   await settle();
-  assert.match(surface(doc).textContent, /No pending proposal groups/);
-  assert.match(surface(doc).textContent, /206 kept here/);
+  const panelNode = doc.getElementById('fileJanitorMorePanel');
+  assert.match(panelNode.textContent, /Showing 1–50 of 206/);
+  assert.equal(panelNode.all(node => node.tagName === 'LI').length, 50);
+  assert.equal(doc.activeElement.id, 'fileJanitorMorePanel');
+  buttonNamed(surface(doc), 'Next files').click();
+  await settle();
+  assert.match(surface(doc).textContent, /Showing 51–100 of 206/);
+  const paged = calls.filter(call => call.target.includes('/picture/files?'));
+  assert.ok(paged[1].target.includes('offset=50'));
+  assert.ok(paged.every(call => /revision=[a]{64}&draft_revision=[0-9a-f]{64}/.test(call.target)));
+  // The list survives a trip to All files and back; closing returns to its trigger.
+  doc.getElementById('fileJanitorView-all').click();
+  doc.getElementById('fileJanitorView-groups').click();
+  assert.match(surface(doc).textContent, /Showing 51–100 of 206/);
+  buttonNamed(surface(doc), 'Close list').click();
+  assert.equal(doc.activeElement.id, 'fileJanitorMore-filed-images');
+  assert.equal(doc.getElementById('fileJanitorMorePanel'), null);
   assert.ok(calls.every(call => !call.options?.method || call.options.method === 'GET'));
+});
+
+test('an open list stays open across a save and reads the same page against the new choices', async () => {
+  const { doc } = await groupedReviewFixture();
+  doc.getElementById('fileJanitorMore-filed-images').click();
+  await settle();
+  assert.match(surface(doc).textContent, /Showing 1–50 of 206/);
+  // Leave one file out from All files; the picture's choices change.
+  doc.getElementById('fileJanitorView-all').click();
+  const row = rowsIn(surface(doc)).find(
+    row => row.getAttribute('data-candidate-id') === 'group-member-1'
+  );
+  changeCheckbox(row.all(node => node.className === 'fj-select')[0], false);
+  await settle();
+  doc.getElementById('fileJanitorView-groups').click();
+  await settle();
+  assert.ok(doc.getElementById('fileJanitorMorePanel'), 'the list was not closed by the save');
+  assert.match(surface(doc).textContent, /Showing 1–50 of 205/);
+});
+
+test('a list closes when a save empties it, instead of saying 0 of 0', async () => {
+  const { doc } = await groupedReviewFixture();
+  doc.getElementById('fileJanitorMore-filed-images').click();
+  await settle();
+  assert.ok(doc.getElementById('fileJanitorMorePanel'));
+  changeCheckbox(folderCheckbox(doc), false); // the open list's own folder
+  await settle();
+  assert.equal(doc.getElementById('fileJanitorMorePanel'), null);
+  assert.doesNotMatch(surface(doc).textContent, /0 of 0/);
+  const card = surface(doc).all(node => node.getAttribute('data-fj-folder') === 'images')[0];
+  assert.match(card.className, /is-unticked/);
+});
+
+test('a list the server refuses says so and starts over from the saved review', async () => {
+  const { doc, state } = await groupedReviewFixture();
+  doc.getElementById('fileJanitorMore-filed-images').click();
+  await settle();
+  // Another window changed the saved choices after the list was drawn.
+  state.generation++;
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, options) =>
+    String(url).includes('/picture/files?')
+      ? { ok: false, status: 409, json: async () => ({ code: 'review_changed' }) }
+      : original(url, options);
+  buttonNamed(surface(doc), 'Next files').click();
+  await settle();
+  assert.match(surface(doc).textContent, /could not be loaded/);
+  assert.equal(
+    doc.getElementById('fileJanitorMorePanel').all(node => node.tagName === 'LI').length,
+    0
+  );
+  globalThis.fetch = original;
+  buttonNamed(surface(doc), 'Retry').click();
+  await settle();
+  assert.equal(doc.getElementById('fileJanitorMorePanel'), null, 'a stale list is dropped');
+  assert.ok(folderCheckbox(doc));
+});
+
+test('an unavailable picture is not drawn as a tidy folder and can retry without writes', async () => {
+  const { doc, calls, state } = await groupedReviewFixture();
+  state.failPicture = true;
+  await panel._loadReviewPicture();
+  const text = surface(doc).textContent;
+  assert.match(text, /picture of your folder is unavailable/);
+  assert.match(text, /does not mean the folder is tidy/);
+  assert.equal(folderCheckbox(doc), null);
+  assert.equal(doc.getElementById('fileJanitorPicture'), null);
+  state.failPicture = false;
+  buttonNamed(surface(doc), 'Retry').click();
+  await settle();
+  assert.ok(folderCheckbox(doc));
+  assert.ok(calls.every(call => !call.options?.method || call.options.method === 'GET'));
+});
+
+test('the picture and the saved choices are read again once if they disagree', async () => {
+  const { doc, calls, state } = await groupedReviewFixture(3);
+  state.staleDraftOnce = true;
+  calls.length = 0;
+  await panel._reloadBatch();
+  assert.equal(calls.filter(call => call.target.endsWith('/picture')).length, 2);
+  assert.ok(folderCheckbox(doc));
+  assert.equal(folderCheckbox(doc).disabled, false, 'the matching pair is actionable');
 });
 
 test('a resolved concrete batch stays pinned and newer saved batches remain discoverable', async () => {
@@ -5274,107 +5482,82 @@ test('a resolved concrete batch stays pinned and newer saved batches remain disc
   await panel._reloadBatch();
   assert.ok(calls.some(call => /\/batches\/batch-1\?/.test(call.target)));
   assert.ok(!calls.some(call => call.target.includes('/batches/latest')));
+  doc.getElementById('fileJanitorView-all').click();
   const picker = doc.getElementById('fileJanitorBatchChoice');
   assert.ok(picker.children.some(option => option.value === 'batch-new'));
   assert.ok(picker.children.some(option => option.value === 'batch-1' && option.selected));
-  assert.deepEqual(panel._selected(), []);
+  assert.equal(panel._selected().length, 206);
 });
 
-function filingGroupCheckbox(doc) {
-  return surface(doc).all(
-    node =>
-      node.tagName === 'INPUT' &&
-      node.getAttribute('aria-label') === 'Select filing proposals in Images'
-  )[0];
-}
-
-function changeCheckbox(node, checked) {
-  node.checked = checked;
-  node.dispatch('change');
-}
-
-test('group selection saves one exact request before enabling preview and preserves an off-page exception', async () => {
+test('unticking a folder saves one request before the button can file again, and re-ticking restores it', async () => {
   const { doc, calls, state } = await groupedReviewFixture();
   let release;
   state.editGate = new Promise(resolve => {
     release = resolve;
   });
-  changeCheckbox(filingGroupCheckbox(doc), true);
+  changeCheckbox(folderCheckbox(doc), false);
   await settle();
-  assert.deepEqual(panel._selected(), [], 'a pending save cannot masquerade as selected');
+  assert.equal(panel._selected().length, 206, 'a pending save changes nothing on screen');
   assert.match(surface(doc).textContent, /Saving exact choices/);
   assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
   release();
   await settle();
+  // Nothing is ticked now: the card stays, drawn dashed, with its files listed as
+  // not filed, and there is nothing to file.
+  assert.deepEqual(panel._selected(), []);
+  const card = surface(doc).all(node => node.getAttribute('data-fj-folder') === 'images')[0];
+  assert.match(card.className, /is-unticked/);
+  assert.match(card.textContent, /Not filed/);
+  assert.equal(folderCheckbox(doc).checked, false);
+  assert.equal(folderCheckbox(doc).getAttribute('aria-label'), 'Images, 206 files, not filed');
+  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
+  changeCheckbox(folderCheckbox(doc), true);
+  await settle();
   assert.equal(panel._selected().length, 206);
+  assert.equal(folderCheckbox(doc).checked, true);
   assert.equal(doc.getElementById('fileJanitorApprove').disabled, false);
   const edits = calls.filter(call => call.options?.method === 'POST');
-  assert.equal(edits.length, 1, 'group selection must not post once per member');
+  assert.deepEqual(
+    edits.map(call => JSON.parse(call.options.body).action),
+    ['deselect_group', 'select_group'],
+    'one request per tick, never one per file'
+  );
   const request = JSON.parse(edits[0].options.body);
-  assert.equal(request.action, 'select_group');
   assert.equal(request.group_id, 'group-images');
   assert.equal(request.candidate_ids, undefined, 'the server resolves the displayed snapshot');
-  doc.getElementById('fileJanitorGroup-group-images').click();
-  await settle();
-  surface(doc)
-    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Next group files')[0]
-    .click();
-  await settle();
+  assert.equal(request.expected_revision.length, 64);
+  assert.ok(edits.every(call => call.target.endsWith('/draft')));
+});
+
+test('a file left out of a ticked folder is listed as left out and the folder shows partly ticked', async () => {
+  const { doc } = await groupedReviewFixture(3);
+  doc.getElementById('fileJanitorView-all').click();
   const row = rowsIn(surface(doc)).find(
-    row => row.getAttribute('data-candidate-id') === 'group-member-51'
+    row => row.getAttribute('data-candidate-id') === 'group-member-1'
   );
   changeCheckbox(row.all(node => node.className === 'fj-select')[0], false);
   await settle();
-  assert.equal(panel._selected().length, 205);
-  assert.ok(!panel._selected().includes('group-member-51'));
-  assert.equal(filingGroupCheckbox(doc).indeterminate, true);
-  doc.getElementById('fileJanitorView-all').click();
+  assert.equal(panel._selected().length, 2);
   doc.getElementById('fileJanitorView-groups').click();
-  await panel._reloadBatch();
-  assert.equal(panel._selected().length, 205);
-  assert.ok(!panel._selected().includes('group-member-51'));
+  assert.equal(folderCheckbox(doc).indeterminate, true);
+  assert.equal(folderCheckbox(doc).checked, true);
+  assert.match(surface(doc).textContent, /Left out by you · 1/);
+  assert.match(surface(doc).textContent, /image-1\.png/);
 });
 
-test('category-only edits select nothing and group Undo preserves a prior per-file choice', async () => {
-  const { doc } = await groupedReviewFixture(3);
-  doc.getElementById('fileJanitorGroup-group-images').click();
-  await settle();
-  let row = rowsIn(surface(doc))[0];
-  const id = row.getAttribute('data-candidate-id');
-  const picker = row.all(node => node.className === 'fj-category')[0];
-  picker.value = 'archives';
-  picker.dispatch('change');
-  await settle();
-  assert.deepEqual(panel._selected(), [], 'changing destination is not selecting');
-  row = rowsIn(surface(doc))[0];
-  changeCheckbox(row.all(node => node.className === 'fj-select')[0], true);
-  await settle();
-  changeCheckbox(filingGroupCheckbox(doc), true);
-  await settle();
-  assert.equal(panel._selected().length, 3);
-  surface(doc)
-    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Undo group mark')[0]
-    .click();
-  await settle();
-  assert.deepEqual(panel._selected(), [id]);
-  assert.equal(filingGroupCheckbox(doc).indeterminate, true);
-  assert.match(surface(doc).textContent, /Mixed saved destinations/);
-});
-
-test('a failed group save is explicitly unsaved, blocks preview and retries the exact request', async () => {
+test('a failed folder save is explicitly unsaved, blocks the button and retries the same request', async () => {
   const { doc, state } = await groupedReviewFixture(3);
   state.failNextEdit = true;
-  changeCheckbox(filingGroupCheckbox(doc), true);
+  changeCheckbox(folderCheckbox(doc), false);
   await settle();
-  assert.deepEqual(panel._selected(), []);
+  assert.equal(panel._selected().length, 3, 'nothing is shown as saved that is not');
   assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
   assert.match(surface(doc).textContent, /not confirmed saved/);
-  surface(doc)
-    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Retry exact edit')[0]
-    .click();
+  assert.equal(folderCheckbox(doc).disabled, true, 'no further edit while one is unconfirmed');
+  buttonNamed(surface(doc), 'Retry exact edit').click();
   await settle();
-  assert.equal(panel._selected().length, 3);
-  assert.equal(doc.getElementById('fileJanitorApprove').disabled, false);
+  assert.deepEqual(panel._selected(), []);
+  assert.equal(folderCheckbox(doc).checked, false);
 });
 
 test('a malformed successful save response cannot invent durably saved choices', async () => {
@@ -5387,44 +5570,43 @@ test('a malformed successful save response cannot invent durably saved choices',
           json: async () => ({ draft: { ...draftView(), revision: 'invalid' } })
         })
       : original(url, options);
-  changeCheckbox(filingGroupCheckbox(doc), true);
+  changeCheckbox(folderCheckbox(doc), false);
   await settle();
-  assert.deepEqual(panel._selected(), []);
+  assert.equal(panel._selected().length, 3);
   assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
   assert.match(surface(doc).textContent, /not confirmed saved/);
 });
 
-test('a concurrent-tab conflict requires reload and never overwrites the winning exact choices', async () => {
+test('a change in another window needs a reload and never overwrites the winning choices', async () => {
   const { doc, state } = await groupedReviewFixture(3);
+  // Another window left out two files after this picture was drawn.
   state.generation++;
   state.choices = [{ candidate_id: 'group-member-1', operation: 'move', source_group_id: '' }];
-  changeCheckbox(filingGroupCheckbox(doc), true);
+  changeCheckbox(folderCheckbox(doc), false);
   await settle();
   assert.match(surface(doc).textContent, /Review changed/);
   assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
-  assert.deepEqual(panel._selected(), []);
-  surface(doc)
-    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Reload saved choices')[0]
-    .click();
+  buttonNamed(surface(doc), 'Reload saved choices').click();
   await settle();
   assert.deepEqual(panel._selected(), ['group-member-1']);
-  assert.equal(filingGroupCheckbox(doc).indeterminate, true);
+  assert.equal(folderCheckbox(doc).indeterminate, true);
+  assert.match(surface(doc).textContent, /Left out by you · 2/);
 });
 
-test('a detached group control cannot select the same group name in another batch', async () => {
+test('a detached folder control cannot change the same folder in another saved review', async () => {
   const { doc, calls, state } = await groupedReviewFixture(3);
-  const old = filingGroupCheckbox(doc);
+  const old = folderCheckbox(doc);
   state.batch = batchFixture({ id: 'batch-new', summary: { total: 3, proposed: 3 } });
   state.batches = [state.batch];
   state.review = { ...state.review, batch_id: 'batch-new', revision: 'b'.repeat(64) };
   panel._setLinkedBatchForTest('batch-new');
   await panel._reloadBatch();
   calls.length = 0;
-  changeCheckbox(old, true);
+  changeCheckbox(old, false);
   await settle();
-  assert.deepEqual(panel._selected(), []);
+  assert.equal(panel._selected().length, 3, 'the new review keeps its own ticks');
   assert.ok(calls.every(call => call.options?.method !== 'POST'));
-  assert.equal(filingGroupCheckbox(doc).checked, false);
+  assert.equal(folderCheckbox(doc).checked, true);
 });
 
 test('late saved-intent reads cannot overwrite a newer canonical return', async () => {
@@ -5456,8 +5638,6 @@ test('late saved-intent reads cannot overwrite a newer canonical return', async 
 
 test('close and reopen retain saved choices but never restore confirmation authority', async () => {
   const { doc, calls } = await groupedReviewFixture(2);
-  changeCheckbox(filingGroupCheckbox(doc), true);
-  await settle();
   doc.getElementById('fileJanitorApprove').click();
   await settle();
   const captured = doc.getElementById('fileJanitorConfirmApply');

@@ -127,9 +127,12 @@ func TestReviewDraftHTTP_OversizedGroupRefusesWithoutPartialSelection(t *testing
 	if rec.Code != http.StatusRequestEntityTooLarge || body["code"] != "review_bounds" {
 		t.Fatalf("oversized group: %d %s", rec.Code, rec.Body.String())
 	}
+	// The refused edit stored nothing: the scan is still the untouched default
+	// view (all 1,001 files shown ticked, never stored), not a partial selection.
 	_, fresh := serve(t, h, http.MethodGet, target, "")
-	if len(fresh["draft"].(map[string]any)["choices"].([]any)) != 0 {
-		t.Fatal("oversized group partially selected")
+	draft := fresh["draft"].(map[string]any)
+	if draft["state"] != "default" || len(draft["choices"].([]any)) != 1001 {
+		t.Fatalf("a refused oversized edit left a stored or partial selection: %v %d", draft["state"], len(draft["choices"].([]any)))
 	}
 }
 
@@ -139,8 +142,11 @@ func TestReviewDraftHTTP_ReadDoesNotPersistDraft(t *testing.T) {
 	statePath := filepath.Join(h.lookup.(*fakeStore).root, "ws-1", "downloads-janitor", "scan-state.json")
 	before, _ := os.ReadFile(statePath)
 	rec, body := serve(t, h, http.MethodGet, pathFor("file-janitor", "ws-1", "/batches/"+review["batch_id"].(string)+"/draft"), "")
-	if rec.Code != http.StatusOK || len(body["draft"].(map[string]any)["choices"].([]any)) != 0 {
-		t.Fatal("new draft read invented selection")
+	// A new scan opens with its confident folder ticked (the two images), derived
+	// on the read and never stored by it.
+	draft, _ := body["draft"].(map[string]any)
+	if rec.Code != http.StatusOK || draft["state"] != "default" || len(draft["choices"].([]any)) != 2 {
+		t.Fatalf("a new scan must open ticked: %d %s", rec.Code, rec.Body.String())
 	}
 	after, _ := os.ReadFile(statePath)
 	if string(before) != string(after) {

@@ -541,8 +541,11 @@ test.describe('File Janitor console accessibility', () => {
     expect(containment.progress).toBeLessThanOrEqual(containment.body);
     expect(containment.bodyScrollsSideways).toBe(false);
 
-    await firstRow.locator('.fj-select').check();
-    await expect(page.locator('#fileJanitorApprove')).toHaveText('Review 1 move');
+    // The confident folder opens ticked, so all 60 are selected; leaving one out
+    // changes the count and the footer button stays in view.
+    await expect(page.locator('#fileJanitorApprove')).toHaveText('Review 60 moves');
+    await firstRow.locator('.fj-select').uncheck();
+    await expect(page.locator('#fileJanitorApprove')).toHaveText('Review 59 moves');
     await expect(page.locator('.fj-footer')).toBeInViewport();
     await expect(page.locator('[data-fj-console-close]')).toBeInViewport();
   });

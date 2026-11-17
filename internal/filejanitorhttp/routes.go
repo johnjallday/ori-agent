@@ -68,6 +68,8 @@ func (h *Handler) registerUnder(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+base+"/batches/{batchID}/draft", h.EditReviewDraft)
 	mux.HandleFunc("GET "+base+"/batches/{batchID}/groups", h.GetReviewGroups)
 	mux.HandleFunc("GET "+base+"/batches/{batchID}/groups/{groupID}/members", h.GetReviewGroupMembers)
+	mux.HandleFunc("GET "+base+"/batches/{batchID}/picture", h.GetReviewPicture)
+	mux.HandleFunc("GET "+base+"/batches/{batchID}/picture/files", h.GetReviewPictureFiles)
 	mux.HandleFunc("POST "+base+"/test-scan", h.TestScan)
 	mux.HandleFunc("POST "+base+"/scan", h.ScanNow)
 	mux.HandleFunc("POST "+base+"/decisions", h.UpdateDecisions)

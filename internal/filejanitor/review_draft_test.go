@@ -54,11 +54,11 @@ func TestReviewDraft_RestartRestoresOnlyExplicitChoices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view := projectReviewDraft(loaded, "batch-1", binding, "members")
+	view := projectReviewDraft(loaded, "batch-1", binding, ReviewGroups{Revision: "members"})
 	if view.State != "saved" || len(view.Choices) != 1 || view.Choices[0].CandidateID != state.Candidates[0].ID || view.Choices[0].Category != CategoryDocuments {
 		t.Fatalf("lost exact intent or inferred category selection: %+v", view)
 	}
-	before := projectReviewDraft(state, "batch-1", binding, "members")
+	before := projectReviewDraft(state, "batch-1", binding, ReviewGroups{Revision: "members"})
 	if before.Revision != view.Revision {
 		t.Fatal("restart changed intent revision")
 	}
@@ -88,7 +88,7 @@ func TestReviewDraft_LegacyScanSchemasNeverInferSelection(t *testing.T) {
 			if err != nil || loaded.SchemaVersion != ScanStateSchemaVersion || len(loaded.ReviewDrafts) != 0 {
 				t.Fatalf("legacy selection invented: %+v %v", loaded, err)
 			}
-			view := projectReviewDraft(loaded, "batch-1", binding, "members")
+			view := projectReviewDraft(loaded, "batch-1", binding, ReviewGroups{Revision: "members"})
 			if view.State != "empty" || len(view.Choices) != 0 || loaded.Candidates[0].DecisionCategory != CategoryImages || loaded.Candidates[0].DecisionGroupID != "" {
 				t.Fatal("legacy destination/selection compatibility lost")
 			}
@@ -159,7 +159,7 @@ func TestReviewDraft_MalformedAndFutureDraftsAreInertAndPreserved(t *testing.T) 
 			if err != nil || len(loaded.Candidates) != 2 {
 				t.Fatalf("bad draft stranded canonical batch: %v", err)
 			}
-			view := projectReviewDraft(loaded, "batch-1", binding, "members")
+			view := projectReviewDraft(loaded, "batch-1", binding, ReviewGroups{Revision: "members"})
 			if view.State != "invalid" || len(view.Choices) != 0 {
 				t.Fatalf("bad draft supplied selection: %+v", view)
 			}
@@ -235,7 +235,7 @@ func TestReviewDraft_ReconcilesScopeStateAndOrphansWithoutWriting(t *testing.T) 
 				state.ReviewDrafts = append(state.ReviewDrafts, state.ReviewDrafts[0])
 			}
 			before, _ := json.Marshal(state)
-			view := projectReviewDraft(state, "batch-1", binding, "members")
+			view := projectReviewDraft(state, "batch-1", binding, ReviewGroups{Revision: "members"})
 			if len(view.Choices) != 0 || view.RemovedStale == 0 {
 				t.Fatalf("stale choices survived: %+v", view)
 			}
@@ -249,20 +249,20 @@ func TestReviewDraft_ReconcilesScopeStateAndOrphansWithoutWriting(t *testing.T) 
 
 func TestReviewDraft_RevisionBindsIntentAndCanonicalDestinationNotTokenChurn(t *testing.T) {
 	state, binding := draftFixture()
-	before := projectReviewDraft(state, "batch-1", binding, "members")
+	before := projectReviewDraft(state, "batch-1", binding, ReviewGroups{Revision: "members"})
 	state.UpdatedAt = time.Now()
 	state.Approvals = []ApprovalRecord{{ID: "unrelated-token"}}
-	after := projectReviewDraft(state, "batch-1", binding, "members")
+	after := projectReviewDraft(state, "batch-1", binding, ReviewGroups{Revision: "members"})
 	if before.Revision != after.Revision {
 		t.Fatal("timestamp/token churn invalidated intent")
 	}
 	state.Candidates[1].DecisionCategory = CategoryImages // even an unselected category edit must CAS
-	if projectReviewDraft(state, "batch-1", binding, "members").Revision == before.Revision {
+	if projectReviewDraft(state, "batch-1", binding, ReviewGroups{Revision: "members"}).Revision == before.Revision {
 		t.Fatal("category edit can be overwritten by a stale tab")
 	}
 	state.Candidates[1].DecisionCategory = ""
 	state.ReviewDrafts[0].Choices = nil
-	if projectReviewDraft(state, "batch-1", binding, "members").Revision == before.Revision {
+	if projectReviewDraft(state, "batch-1", binding, ReviewGroups{Revision: "members"}).Revision == before.Revision {
 		t.Fatal("cleared intent did not change revision")
 	}
 }

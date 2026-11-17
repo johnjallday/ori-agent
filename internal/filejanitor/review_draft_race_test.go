@@ -9,43 +9,62 @@ import (
 	"time"
 )
 
+// Two windows edit from the same view. Exactly one wins; the other gets a
+// conflict; the saved choices are one window's edit, never a merge of both. It is
+// checked for a scan with nothing ticked (a card-grid scan: each window selects a
+// different file) and for one that opens ticked (each window leaves a different
+// file out).
 func TestReviewDraftRace_ExactlyOneConcurrentTabWinsCAS(t *testing.T) {
-	s, batch, candidates := draftServiceFixture(t, "one.png", "two.png")
-	before, err := s.ReadReviewDraft(t.Context(), "local", "ws-1", batch.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	var workers sync.WaitGroup
-	for _, candidate := range candidates {
-		workers.Add(1)
-		go func(id string) {
-			defer workers.Done()
-			<-start
-			_, err := s.EditReviewDraft("local", "ws-1", batch.ID, ReviewDraftEdit{ExpectedRevision: before.Revision, ExpectedGroupRevision: before.GroupRevision, Action: "select_files", CandidateIDs: []string{id}})
-			results <- err
-		}(candidate.ID)
-	}
-	close(start)
-	workers.Wait()
-	close(results)
-	won, conflicts := 0, 0
-	for err := range results {
-		if err == nil {
-			won++
-		} else if errors.Is(err, ErrReviewConflict) {
-			conflicts++
-		} else {
-			t.Fatalf("unexpected concurrent edit error: %v", err)
-		}
-	}
-	if won != 1 || conflicts != 1 {
-		t.Fatalf("lost-write CAS: won=%d conflicts=%d", won, conflicts)
-	}
-	view, err := s.ReadReviewDraft(t.Context(), "local", "ws-1", batch.ID)
-	if err != nil || len(view.Choices) != 1 {
-		t.Fatalf("concurrent edits merged or lost exact intent: %+v %v", view, err)
+	for _, tc := range []struct {
+		name         string
+		cardGridScan bool
+		action       string
+	}{
+		{"scan with nothing ticked", true, "select_files"},
+		{"scan that opens ticked", false, "exclude_files"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, batch, candidates := draftServiceFixture(t, "one.png", "two.png")
+			if tc.cardGridScan {
+				stripReviewDefaults(t, s)
+			}
+			before, err := s.ReadReviewDraft(t.Context(), "local", "ws-1", batch.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			start := make(chan struct{})
+			results := make(chan error, 2)
+			var workers sync.WaitGroup
+			for _, candidate := range candidates {
+				workers.Add(1)
+				go func(id string) {
+					defer workers.Done()
+					<-start
+					_, err := s.EditReviewDraft("local", "ws-1", batch.ID, ReviewDraftEdit{ExpectedRevision: before.Revision, ExpectedGroupRevision: before.GroupRevision, Action: tc.action, CandidateIDs: []string{id}})
+					results <- err
+				}(candidate.ID)
+			}
+			close(start)
+			workers.Wait()
+			close(results)
+			won, conflicts := 0, 0
+			for err := range results {
+				if err == nil {
+					won++
+				} else if errors.Is(err, ErrReviewConflict) {
+					conflicts++
+				} else {
+					t.Fatalf("unexpected concurrent edit error: %v", err)
+				}
+			}
+			if won != 1 || conflicts != 1 {
+				t.Fatalf("lost-write CAS: won=%d conflicts=%d", won, conflicts)
+			}
+			view, err := s.ReadReviewDraft(t.Context(), "local", "ws-1", batch.ID)
+			if err != nil || len(view.Choices) != 1 {
+				t.Fatalf("concurrent edits merged or lost exact intent: %+v %v", view, err)
+			}
+		})
 	}
 }
 

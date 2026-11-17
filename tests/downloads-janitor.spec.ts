@@ -412,15 +412,26 @@ test.describe('Downloads Janitor', () => {
     await expect(page.locator('.fj-row-item')).toHaveCount(4);
     await expect(rowFor(page, 'big-movie.mp4')).toHaveCount(0);
 
-    // Nothing is selected. Opening the review surface can never move anything.
-    const boxes = page.locator('.fj-select');
-    for (let i = 0; i < (await boxes.count()); i += 1) {
-      await expect(boxes.nth(i)).not.toBeChecked();
+    // Only what Ori is confident about opens ticked; a question file (music, a file
+    // it cannot classify) never does. Opening the review surface can never move
+    // anything: ticking is a suggestion until the person confirms.
+    for (const name of ['invoice-2026-07.pdf', 'screenshot.png']) {
+      await expect(rowFor(page, name).locator('.fj-select')).toBeChecked();
     }
-    // The approve control is disabled and says why.
-    const approve = page.locator('#fileJanitorApprove');
-    await expect(approve).toBeDisabled();
-    await expect(page.locator('#fileJanitorSelection')).toContainText('No files selected');
+    for (const name of ['podcast.mp3', 'payload.bin']) {
+      await expect(rowFor(page, name).locator('.fj-select')).not.toBeChecked();
+    }
+    await expect(page.locator('#fileJanitorSelection')).toContainText('2 files selected');
+    await expect(page.locator('#fileJanitorApprove')).toBeEnabled();
+    for (const name of [
+      'invoice-2026-07.pdf',
+      'screenshot.png',
+      'podcast.mp3',
+      'payload.bin',
+      'big-movie.mp4.crdownload'
+    ]) {
+      expect(existsSync(join(root, name)), `${name} must not have moved`).toBeTruthy();
+    }
 
     // An unclassifiable file is flagged rather than guessed at.
     await expect(rowFor(page, 'payload.bin')).toContainText('Needs review');
@@ -458,8 +469,10 @@ test.describe('Downloads Janitor', () => {
     await completeSetup(page, id, root);
     await scan(page);
 
-    await rowFor(page, 'report.pdf').locator('.fj-select').check();
-    await rowFor(page, 'photo.png').locator('.fj-select').check();
+    // All three confident files open ticked; approve two by leaving the third out.
+    await expect(rowFor(page, 'report.pdf').locator('.fj-select')).toBeChecked();
+    await expect(rowFor(page, 'photo.png').locator('.fj-select')).toBeChecked();
+    await rowFor(page, 'untouched.csv').locator('.fj-select').uncheck();
 
     const approve = page.locator('#fileJanitorApprove');
     await expect(approve).toContainText('2 moves');
