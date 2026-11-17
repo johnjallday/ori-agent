@@ -929,7 +929,7 @@ test.describe('File Janitor capability', () => {
     await allFiles(page, true);
     await expect(consoleBody(page).locator('.fj-row-item').first()).toBeVisible({ timeout: 15000 });
     const progress = consoleBody(page).locator('.fj-batch-progress');
-    await expect(progress).toContainText('2 remaining of 2 candidates');
+    await expect(progress).toContainText('2 remaining of 2 files');
     await expect(progress).toContainText('need review within remaining');
 
     await expect(consoleBody(page).locator('.fj-table th')).toHaveText([
@@ -1039,7 +1039,7 @@ test.describe('File Janitor capability', () => {
 
     const unavailable = consoleBody(page).locator('.fj-batch-load-error');
     await expect(unavailable).toContainText('Review unavailable');
-    await expect(unavailable).toContainText('Showing the last known batch');
+    await expect(unavailable).toContainText('Showing the last known scan');
     await expect(row).toBeVisible();
     await expect(row.locator('.fj-select')).toBeDisabled();
     await expect(page.locator('#fileJanitorApprove')).toBeDisabled();

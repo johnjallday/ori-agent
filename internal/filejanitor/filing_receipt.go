@@ -62,7 +62,8 @@ type FilingReceipt struct {
 	NotMoved      []ReceiptNotMoved    `json:"not_moved"`
 	// NotAttempted counts planned files the run never reached (an interrupted run).
 	NotAttempted int `json:"not_attempted"`
-	// LooseNow is how many files of this scan are still waiting in the folder.
+	// LooseNow is how many files are still waiting in the folder, in this scan or in
+	// another scan of it.
 	LooseNow int `json:"loose_now"`
 	// UndoAvailable is true while at least one file of this filing can still be put
 	// back and the folder is the one that was filed.
@@ -203,16 +204,41 @@ func buildReceipt(state ScanState, record FilingRecord, currentRootID string, of
 	} else if accounted < planned {
 		receipt.HistoryTrimmed = true
 	}
-	for _, candidate := range state.Candidates {
-		if candidate.BatchID == record.BatchID && proposalPending(candidate) {
-			receipt.LooseNow++
-		}
-	}
+	receipt.LooseNow = waitingInFolder(state, record)
 	receipt.UndoAvailable = undoAvailableFor(record, actions, currentRootID)
 	if !record.UndoClaimedAt.IsZero() {
 		receipt.Undo = undoSummary(state, record)
 	}
 	return receipt
+}
+
+// waitingInFolder is how many files Ori still has waiting for this folder: the ones in
+// the scan that was filed and the ones in any other scan of the same folder. A newer
+// scan does not propose a file an earlier pending scan already holds, so counting the
+// filed scan alone would say "no files stay loose" while files sit in an earlier one.
+// A file is counted once, by its saved state.
+func waitingInFolder(state ScanState, record FilingRecord) int {
+	rootOf := make(map[string]string, len(state.Batches))
+	for _, batch := range state.Batches {
+		rootOf[batch.ID] = batch.RootID
+	}
+	seen := map[string]bool{}
+	waiting := 0
+	for _, candidate := range state.Candidates {
+		if !proposalPending(candidate) {
+			continue
+		}
+		if candidate.BatchID != record.BatchID && (record.RootID == "" || rootOf[candidate.BatchID] != record.RootID) {
+			continue
+		}
+		key := candidate.Fingerprint.Key()
+		if key != "" && seen[key] {
+			continue
+		}
+		seen[key] = true
+		waiting++
+	}
+	return waiting
 }
 
 func undoSummary(state ScanState, record FilingRecord) *FilingUndoSummary {

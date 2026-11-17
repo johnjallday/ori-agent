@@ -151,9 +151,17 @@ test.describe('File Janitor console accessibility', () => {
           animations: 'disabled'
         });
       }
-      // Deterministic presentation fixtures only: no provider check or backup
-      // is claimed by these two uncertainty states.
-      for (const state of ['unknown', 'unavailable']) {
+      // Deterministic presentation fixtures only: no provider check or backup is
+      // claimed by these states. Each uncovered state has one sentence (R53); a
+      // covered folder, or one Ori cannot read, has no strip at all (R54).
+      const sentences: Record<string, string | null> = {
+        not_covered: 'this folder is not in the backups Ori can see',
+        unknown: 'Ori does not know of one for this folder',
+        configured: 'A backup is set up, but Ori has not seen it finish',
+        covered: null,
+        unavailable: null
+      };
+      for (const [state, sentence] of Object.entries(sentences)) {
         await page.route(`**/api/workspaces/${id}/file-janitor/protection`, async route => {
           const fact = await (await route.fetch()).json();
           fact.state = state;
@@ -165,28 +173,39 @@ test.describe('File Janitor console accessibility', () => {
           await route.fulfill({ json: fact });
         });
         await page.evaluate(() => (window as any).FileJanitorConsole._loadProtection());
-        await expect(note).toContainText(
-          state === 'unknown' ? 'Protection is unknown' : 'Protection is unavailable'
-        );
-        await note.screenshot({
-          path: join(evidence, `protection-${state}-${theme}.png`),
-          animations: 'disabled'
-        });
+        if (sentence) {
+          await expect(note).toContainText('Filing is not a backup');
+          await expect(note).toContainText(sentence);
+          // One sentence and two buttons, nothing else.
+          await expect(note.getByRole('button')).toHaveText(['Check protection', 'Not now']);
+          await note.screenshot({
+            path: join(evidence, `protection-${state}-${theme}.png`),
+            animations: 'disabled'
+          });
+        } else {
+          await expect(note).toHaveCount(0);
+        }
         await page.unroute(`**/api/workspaces/${id}/file-janitor/protection`);
       }
       await page.evaluate(() => (window as any).FileJanitorConsole._loadProtection());
       const notNow = note.getByRole('button', { name: 'Not now' });
       await notNow.focus();
       await page.keyboard.press('Enter');
-      await expect(page.locator('#fileJanitorCheckProtection')).toBeFocused();
-      await expect(note).not.toContainText('Filing is not a backup');
-      await expect(page.locator('.fj-batch-scan-status')).toContainText(
-        'dismissed for this folder'
-      );
+      // Focus stays in the review, not the top of the page, and nothing about backups
+      // is left on the Review tab (R54).
+      await expect(page.locator('#fileJanitorTab-review')).toBeFocused();
+      await expect(note).toHaveCount(0);
+      await expect(page.locator('#fileJanitorCheckProtection')).toHaveCount(0);
+      await expect(page.locator('#fileJanitorConsole')).not.toContainText('Filing is not a backup');
       await page.reload();
       await page.locator('#fileJanitorView-all').click();
-      await expect(page.locator('#fileJanitorCheckProtection')).toBeVisible();
-      await expect(note).not.toContainText('Filing is not a backup');
+      await expect(page.locator('#fileJanitorCheckProtection')).toHaveCount(0);
+      await expect(note).toHaveCount(0);
+      // Check protection stays on the Settings tab.
+      await page.locator('[data-fj-tab="settings"]').click();
+      await expect(page.locator('#fileJanitorCheckProtectionSettings')).toBeVisible();
+      await page.locator('[data-fj-tab="review"]').click();
+      await page.locator('#fileJanitorView-all').click();
       const select = page.getByRole('checkbox', {
         name: 'Select important-original.pdf',
         exact: true
@@ -560,7 +579,7 @@ test.describe('File Janitor console accessibility', () => {
     await page.locator('#fileJanitorView-all').click();
     const firstRow = page.locator('.fj-row-item').first();
     await expect(firstRow).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('.fj-batch-progress')).toContainText('60 remaining of 60 candidates');
+    await expect(page.locator('.fj-batch-progress')).toContainText('60 remaining of 60 files');
 
     const containment = await page.evaluate(() => {
       const dialog = document.querySelector('#fileJanitorConsoleDialog');
@@ -660,5 +679,204 @@ test.describe('File Janitor console accessibility', () => {
     // The header — and its Close — stay reachable however far the body scrolls.
     await page.locator('#fileJanitorConsoleBody').evaluate(el => el.scrollTo(0, el.scrollHeight));
     await expect(page.locator('[data-fj-console-close]')).toBeInViewport();
+  });
+});
+
+// The picture of the folder after filing (R65 to R69): keyboard order, what a screen
+// reader hears, the narrow and zoomed layouts, both themes and long names.
+test.describe('Filing picture accessibility', () => {
+  const LONG_NAME =
+    'A very long scanned contract for the whole of the northern region with every annex attached 2026.pdf';
+  const names = [LONG_NAME, 'photo-0.png', 'photo-1.png', 'photo-2.png'];
+
+  async function openPicture(page: Page, request: APIRequestContext, label: string) {
+    const root = inbox(label, names);
+    const workspaceId = await workspaceWithFolder(request, `FJ Picture ${label} ${RUN}`, root);
+    await openConsole(page, workspaceId);
+    await page.locator('#fileJanitorScan').click();
+    await expect(page.locator('#fileJanitorPicture')).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('#fileJanitorApprove')).toBeEnabled({ timeout: 20000 });
+    return workspaceId;
+  }
+
+  async function axeViolations(page: Page, selector: string) {
+    return page.evaluate(
+      async scope =>
+        (
+          await (window as any).axe.run(scope, {
+            runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] }
+          })
+        ).violations.map((v: { id: string; nodes: unknown[] }) => `${v.id} x${v.nodes.length}`),
+      selector
+    );
+  }
+
+  for (const theme of ['light', 'dark']) {
+    test(`the picture, the receipt and the Undone view pass axe, with reduced motion (${theme})`, async ({
+      page,
+      request
+    }) => {
+      test.setTimeout(90000);
+      await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+      await openPicture(page, request, `axe-${theme}`);
+      await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
+      expect(await axeViolations(page, '.fj-picture-host')).toEqual([]);
+      // Reduced motion (openConsole asks for it): nothing in the picture animates.
+      const moving = await page.evaluate(() =>
+        [...document.querySelectorAll('.fj-picture-host, .fj-picture-host *')]
+          .filter(node => {
+            // The app's own reduced-motion rule makes every duration 0.01 ms, which
+            // is no motion a person can see: only a visible duration counts.
+            const milliseconds = (value: string) =>
+              value.trim().endsWith('ms') ? parseFloat(value) : parseFloat(value) * 1000;
+            const style = getComputedStyle(node);
+            return (
+              (style.animationName !== 'none' &&
+                style.animationDuration.split(',').some(value => milliseconds(value) > 1)) ||
+              style.transitionDuration.split(',').some(value => milliseconds(value) > 1)
+            );
+          })
+          .map(node => `${node.tagName.toLowerCase()}.${(node as HTMLElement).className}`)
+      );
+      expect([...new Set(moving)], 'something in the picture still moves').toEqual([]);
+
+      await page.locator('#fileJanitorApprove').click();
+      await expect(page.locator('#fileJanitorReceipt')).toBeVisible({ timeout: 30000 });
+      expect(await axeViolations(page, '#fileJanitorReceipt')).toEqual([]);
+      await page.locator('#fileJanitorUndoAll').click();
+      await expect(page.locator('#fileJanitorUndone')).toBeVisible({ timeout: 30000 });
+      expect(await axeViolations(page, '#fileJanitorUndone')).toEqual([]);
+    });
+  }
+
+  test('Tab moves through the picture in reading order and reaches the File button', async ({
+    page,
+    request
+  }) => {
+    await openPicture(page, request, 'order');
+    await page.locator('#fileJanitorFolder-documents').focus();
+    const order: number[] = [];
+    let reached = false;
+    for (let step = 0; step < 60 && !reached; step++) {
+      const at = await page.evaluate(() => {
+        const node = document.activeElement as HTMLElement;
+        return {
+          index: [...document.querySelectorAll('*')].indexOf(node),
+          id: node?.id || '',
+          dialog: Boolean(node?.closest('#fileJanitorConsoleDialog'))
+        };
+      });
+      expect(at.dialog, 'focus left the console').toBe(true);
+      order.push(at.index);
+      if (at.id === 'fileJanitorApprove') reached = true;
+      else await page.keyboard.press('Tab');
+    }
+    expect(reached, 'the File button was not reached by Tab').toBe(true);
+    // Each stop is after the one before it in the page: reading order.
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  test('a change is said to a screen reader', async ({ page, request }) => {
+    await openPicture(page, request, 'announce');
+    const live = page.locator('#fileJanitorAnnounce');
+    await expect(live).toHaveAttribute('aria-live', 'polite');
+    await page.locator('#fileJanitorFolder-images').click();
+    await expect(live).toHaveText('3 files no longer set to be filed in Images.');
+    await page.locator('#fileJanitorFolder-images').click();
+    await expect(live).toHaveText('3 files moved to Images.');
+  });
+
+  test('at 390 px the folder cards stack, nothing scrolls sideways and the button is reachable', async ({
+    page,
+    request
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPicture(page, request, 'narrow');
+    const layout = await page.evaluate(() => {
+      const cards = [...document.querySelectorAll('.fj-folder-card')].map(card => {
+        const box = card.getBoundingClientRect();
+        return {
+          left: Math.round(box.left),
+          top: Math.round(box.top),
+          right: Math.round(box.right)
+        };
+      });
+      const host = document.querySelector('.fj-picture-host') as HTMLElement;
+      const limit = host.getBoundingClientRect().right + 1;
+      const past = [...host.querySelectorAll('*')]
+        .filter(node => node.getBoundingClientRect().right > limit)
+        .slice(0, 6)
+        .map(node => `${node.tagName.toLowerCase()}.${(node as HTMLElement).className}`);
+      return {
+        cards,
+        viewport: innerWidth,
+        hostScrolls: host.scrollWidth > host.clientWidth + 1,
+        past
+      };
+    });
+    expect(layout.past, 'these reach past the picture').toEqual([]);
+    expect(layout.cards.length).toBeGreaterThanOrEqual(2);
+    // One per row: the same left edge, each below the one before, none past the screen.
+    expect(new Set(layout.cards.map(card => card.left)).size).toBe(1);
+    expect(layout.cards.map(card => card.top)).toEqual(
+      [...layout.cards.map(card => card.top)].sort((a, b) => a - b)
+    );
+    expect(new Set(layout.cards.map(card => card.top)).size).toBe(layout.cards.length);
+    expect(Math.max(...layout.cards.map(card => card.right))).toBeLessThanOrEqual(layout.viewport);
+    expect(layout.hostScrolls).toBe(false);
+    await page.locator('#fileJanitorApprove').scrollIntoViewIfNeeded();
+    await expect(page.locator('#fileJanitorApprove')).toBeInViewport();
+  });
+
+  test('at a 200%-zoom-equivalent viewport the picture still works and the button is in view', async ({
+    page,
+    request
+  }) => {
+    await page.setViewportSize({ width: 720, height: 450 });
+    await openPicture(page, request, 'zoom');
+    await page.locator('#fileJanitorApprove').scrollIntoViewIfNeeded();
+    await expect(page.locator('#fileJanitorApprove')).toBeInViewport();
+    await expect(page.locator('[data-fj-console-close]')).toBeInViewport();
+    const sideways = await page
+      .locator('#fileJanitorConsoleBody')
+      .evaluate(body => body.scrollWidth > body.clientWidth + 1);
+    expect(sideways).toBe(false);
+  });
+
+  test('a long file name is shortened in the middle, keeps its extension and opens out on focus and hover (R69)', async ({
+    page,
+    request
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPicture(page, request, 'long');
+    const name = page.locator('.fj-mid').first();
+    await expect(name).toHaveAttribute('title', LONG_NAME);
+    // The whole name is in the page: it is what a screen reader reads.
+    await expect(name).toHaveText(LONG_NAME);
+    const end = name.locator('.fj-mid-end');
+    await expect(end).toBeInViewport();
+    expect(await end.textContent()).toMatch(/\.pdf$/);
+    const shown = await name.evaluate(node => {
+      const start = node.querySelector('.fj-mid-start') as HTMLElement;
+      return {
+        clipped: start.scrollWidth > start.clientWidth,
+        fits: node.scrollWidth <= innerWidth
+      };
+    });
+    expect(shown.clipped, 'the start of a long name is cut with an ellipsis').toBe(true);
+    expect(shown.fits).toBe(true);
+    // Hover and focus show it in full.
+    const control = page.locator('.fj-file-name', { has: name });
+    await control.hover();
+    expect(
+      await name.locator('.fj-mid-start').evaluate(node => getComputedStyle(node).whiteSpace)
+    ).toBe('normal');
+    await page.mouse.move(0, 0);
+    await control.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    expect(
+      await name.locator('.fj-mid-start').evaluate(node => getComputedStyle(node).whiteSpace)
+    ).toBe('normal');
   });
 });

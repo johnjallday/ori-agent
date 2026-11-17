@@ -282,7 +282,11 @@
    as a button: no box, the same colour as the name list, underlined on hover and on
    focus, with a visible focus ring and a pressed state that is not colour alone. */
 .fj-file-name {
-  display: inline;
+  /* A button is shrink-to-fit, so a long name would make it as wide as the whole
+     name. Capped at its line, the name inside can be shortened in the middle. */
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
   min-height: 1.75rem;
   padding: 0 0.15rem;
   border: 0;
@@ -316,6 +320,64 @@
   font-weight: 700;
   text-decoration: underline;
   text-decoration-thickness: 2px;
+}
+
+/* A long file name is shortened in the middle (R69): the start gives way with an
+   ellipsis and the end, with the extension, always shows. The whole name is still in
+   the page (a screen reader reads it, it can be copied), and it opens out in full on
+   hover and on focus. A line that fits shows no ellipsis at all. */
+.fj-mid {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  vertical-align: bottom;
+}
+
+.fj-mid-start {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fj-mid-end {
+  flex: none;
+  white-space: nowrap;
+}
+
+.fj-mid:hover,
+.fj-file-name:hover .fj-mid,
+.fj-file-name:focus-visible .fj-mid,
+.fj-mid:focus-within {
+  display: inline;
+}
+
+.fj-mid:hover .fj-mid-start,
+.fj-file-name:hover .fj-mid-start,
+.fj-file-name:focus-visible .fj-mid-start,
+.fj-mid:focus-within .fj-mid-start {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.fj-mid:hover .fj-mid-end,
+.fj-file-name:hover .fj-mid-end,
+.fj-file-name:focus-visible .fj-mid-end {
+  white-space: normal;
+}
+
+/* Said to a screen reader, never drawn. */
+.fj-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* The menu on a loose row and the menu in the one-file bar. */
@@ -405,6 +467,9 @@
 .fj-file-bar {
   display: flex;
   flex-wrap: wrap;
+  /* A flex item will not shrink below its content, and a shortened name's content
+     is the whole name on one line: let the bar, and the name in it, shrink. */
+  min-width: 0;
   align-items: center;
   gap: 0.5rem 0.75rem;
   margin-top: 0.75rem;
@@ -425,6 +490,7 @@
 
 .fj-file-bar-name {
   margin: 0;
+  min-width: 0;
   max-width: 100%;
   color: var(--text-primary, #e8e8e8);
   font-size: 0.9rem;
@@ -448,7 +514,8 @@
   font-size: 0.85rem;
 }
 
-/* Quiet, optional advice: a margin note rather than a filing gate. */
+/* The backup strip: one sentence and two buttons, a margin note rather than a filing
+   gate. The buttons wrap under the sentence on a narrow screen. */
 .fj-protection {
   border-inline-start: 2px solid var(--border-subtle, #697078);
   padding: 0.65rem 1rem;
@@ -458,23 +525,17 @@
   overflow-wrap: anywhere;
 }
 
-.fj-protection-title {
-  font-size: 0.9rem;
-  font-weight: 600;
-  margin: 0 0 0.3rem;
-}
-
-.fj-protection-copy,
-.fj-protection-time {
-  font-size: 0.8rem;
+.fj-protection-copy {
+  font-size: 0.85rem;
   line-height: 1.5;
-  margin: 0.25rem 0;
+  margin: 0 0 0.4rem;
   color: var(--text-primary, #e8e8e8);
 }
 
-.fj-protection.is-passive {
-  padding-block: 0.25rem;
-  background: transparent;
+.fj-protection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 
 .fj-card {

@@ -429,7 +429,7 @@ func TestReviewPicture_PlacementRules(t *testing.T) {
 // R4, R64, R69: the first screenful is bounded however big the folder is, and a
 // hostile name is shown as plain bounded text.
 func TestReviewPicture_FirstScreenfulIsBoundedAndNamesAreSafe(t *testing.T) {
-	names := []string{"<img onerror=alert(1)>.png", "invoice‮gpj.exe", "a\nlog.pdf", strings.Repeat("界", 200) + ".pdf"}
+	names := []string{"<img onerror=alert(1)>.png", "invoice\u202egpj.exe", "a\nlog.pdf", strings.Repeat("界", 200) + ".pdf"}
 	for i := range 206 {
 		names = append(names, fmt.Sprintf("image-%04d.png", i))
 	}
@@ -468,7 +468,7 @@ func TestReviewPicture_FirstScreenfulIsBoundedAndNamesAreSafe(t *testing.T) {
 		drawn = append(drawn, row.Singles...)
 	}
 	for _, file := range drawn {
-		if strings.ContainsAny(file.Name, "\n‮") || utf8.RuneCountInString(file.Name) > maxDisplayNameRunes+1 {
+		if strings.ContainsAny(file.Name, "\n\u202e") || utf8.RuneCountInString(file.Name) > maxDisplayNameRunes+1 {
 			t.Fatalf("unsafe or unbounded name: %q", file.Name)
 		}
 	}

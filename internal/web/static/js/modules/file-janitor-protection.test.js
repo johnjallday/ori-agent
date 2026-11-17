@@ -4,6 +4,7 @@ import {
   createProtectionTrips,
   validateTrip,
   protectionSentence,
+  protectionStripSentence,
   TRIP_KEY,
   TRIP_TTL
 } from './file-janitor-protection.js';
@@ -274,4 +275,34 @@ test('configuration, uncertainty and unavailable roots never claim completed bac
   assert.match(protectionSentence({ state: 'configured' }), /not observed a completed backup/);
   assert.match(protectionSentence({ state: 'unknown' }), /does not mean there is no backup/);
   assert.match(protectionSentence({ state: 'unavailable' }), /Reconnect/);
+});
+
+// R53: the Review tab's strip has exactly one sentence per state Ori has information
+// for that does not report the folder covered, and none for any other state.
+test('the backup strip has the PRD sentence for each uncovered state and none otherwise', () => {
+  assert.equal(
+    protectionStripSentence({ state: 'not_covered' }),
+    'Filing is not a backup, and this folder is not in the backups Ori can see.'
+  );
+  assert.equal(
+    protectionStripSentence({ state: 'unknown' }),
+    'Filing is not a backup, and Ori does not know of one for this folder.'
+  );
+  assert.equal(
+    protectionStripSentence({ state: 'configured' }),
+    'Filing is not a backup. A backup is set up, but Ori has not seen it finish.'
+  );
+  // A covered folder, an unreadable state and no information at all show no strip.
+  for (const fact of [
+    { state: 'covered' },
+    { state: 'unavailable' },
+    { state: '' },
+    {},
+    null,
+    undefined
+  ])
+    assert.equal(protectionStripSentence(fact), '', JSON.stringify(fact));
+  // The sentences never claim a completed backup that Ori has not seen.
+  for (const state of ['not_covered', 'unknown', 'configured'])
+    assert.doesNotMatch(protectionStripSentence({ state }), /protected|backed up|safe/i);
 });

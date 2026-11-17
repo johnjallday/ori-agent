@@ -229,16 +229,18 @@ func planLine(settings JanitorSettings, root string, candidate JanitorCandidate,
 		if !candidate.Fingerprint.Matches(current) {
 			return PreviewItem{}, PlanItem{}, sourceChanged(candidate)
 		}
-		return PreviewItem{
+		item := PreviewItem{
 			CandidateID: candidate.ID,
 			Name:        candidate.Display(),
 			Operation:   OperationTrash,
 			Size:        candidate.Size,
-		}, PlanItem{
+		}
+		planned := PlanItem{
 			CandidateID:    candidate.ID,
 			Operation:      OperationTrash,
 			FingerprintKey: candidate.Fingerprint.Key(),
-		}, nil
+		}
+		return item, planned, nil
 	}
 
 	category := candidate.EffectiveCategory()
@@ -288,7 +290,7 @@ func planLine(settings JanitorSettings, root string, candidate JanitorCandidate,
 	if err != nil {
 		return PreviewItem{}, PlanItem{}, err
 	}
-	return PreviewItem{
+	item := PreviewItem{
 		CandidateID: candidate.ID,
 		Name:        candidate.Display(),
 		Operation:   OperationMove,
@@ -296,12 +298,14 @@ func planLine(settings JanitorSettings, root string, candidate JanitorCandidate,
 		Destination: relative,
 		Renamed:     finalName != candidate.Name,
 		Size:        candidate.Size,
-	}, PlanItem{
+	}
+	planned := PlanItem{
 		CandidateID:    candidate.ID,
 		Operation:      OperationMove,
 		Category:       category,
 		FingerprintKey: candidate.Fingerprint.Key(),
-	}, nil
+	}
+	return item, planned, nil
 }
 
 // resolveAvailableNameReserving resolves a free destination name, treating names

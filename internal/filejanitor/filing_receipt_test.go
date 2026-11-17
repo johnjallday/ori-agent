@@ -163,6 +163,47 @@ func TestReadFiling_PrunedHistoryIsSaidSo(t *testing.T) {
 	}
 }
 
+// A newer scan does not propose a file an earlier pending scan already holds, so the
+// receipt of a filing from one scan must not say "no files stay loose" while files wait
+// in another scan of the same folder. Another folder's files, and the same file state
+// held twice, are not counted.
+func TestReadFiling_LooseNowCountsFilesWaitingInAnotherScanOfTheFolder(t *testing.T) {
+	s, batch, filed, _, _ := filedFixture(t, "a.png", "b.png")
+	before, err := s.ReadFiling(t.Context(), "local", "ws-1", filed.FilingID, 0)
+	if err != nil || before.LooseNow != 0 {
+		t.Fatalf("nothing is waiting yet: %+v %v", before, err)
+	}
+	pending := func(id, batchID, name string) JanitorCandidate {
+		return JanitorCandidate{
+			ID: id, WorkspaceID: "ws-1", BatchID: batchID, Name: name, State: CandidatePending,
+			Fingerprint: Fingerprint{Name: name, Size: 7, ModTime: time.Unix(500, 0)},
+		}
+	}
+	if _, err := s.store.UpdateScanState("ws-1", func(state *ScanState) error {
+		state.Batches = append(state.Batches,
+			JanitorBatch{ID: "batch-earlier", WorkspaceID: "ws-1", RootID: batch.RootID, CandidateIDs: []string{"e1", "e2", "e3"}},
+			JanitorBatch{ID: "batch-other-folder", WorkspaceID: "ws-1", RootID: "some-other-root", CandidateIDs: []string{"o1"}},
+		)
+		state.Candidates = append(state.Candidates,
+			pending("e1", "batch-earlier", "installer.dmg"),
+			pending("e2", "batch-earlier", "notes.zip"),
+			// The same file state held by a second scan is one file.
+			pending("e3", "batch-earlier", "notes.zip"),
+			pending("o1", "batch-other-folder", "elsewhere.pdf"),
+		)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.ReadFiling(t.Context(), "local", "ws-1", filed.FilingID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.LooseNow != 2 {
+		t.Fatalf("two files wait in an earlier scan of this folder (the other folder's does not count): loose now %d", after.LooseNow)
+	}
+}
+
 func TestReadFiling_RefusesWhatIsNotYours(t *testing.T) {
 	s, _, filed, _, _ := filedFixture(t, "a.png")
 	for name, call := range map[string]func() error{

@@ -12,46 +12,8 @@ import (
 
 // Write-side rules of the "Picture review" contract in
 // docs/architecture/file-janitor-group-review.md: the plan check, the one File
-// request, and Undo all. The APIs they call do not exist yet, so the stubs below
-// stand in for them and make every test here SKIP with the task that owns it.
-//
-//	FILING_PENDING_STRICT=1 go test ./internal/filejanitor -run 'TestReviewPlan|TestFilingUndo'
-//
-// turns each skip into a failure, which is how the rules were shown red when
-// they were written. Each task that adds the real API (2.1, 2.2, 5.2) must
-// delete its stub block here: the duplicate declaration will not compile until
-// it does, so a stub cannot outlive the feature. By delivery no stub, no
-// pendingUntil call and no skip may remain (task 6.9 checks).
-
-// ---- stubs: delete the block when the named task adds the real API ----
-
-var errNotBuiltYet = errors.New("not built yet")
-
-// ---- end of stubs ----
-
-// pendingTask skips (or, with FILING_PENDING_STRICT=1, fails) a test whose rule
-// belongs to a later task and cannot pass yet. The task that builds the rule
-// deletes the call; task 6.9 checks that none is left.
-func pendingTask(t *testing.T, task string) {
-	t.Helper()
-	if os.Getenv("FILING_PENDING_STRICT") == "1" {
-		return // run for real: the test is expected to fail until the task lands
-	}
-	t.Skipf("pending task %s: the rule is specified and the test is written; the code is not", task)
-}
-
-// pendingUntil skips (or, with FILING_PENDING_STRICT=1, fails) while the API a
-// test needs is still a stub.
-func pendingUntil(t *testing.T, task string, err error) {
-	t.Helper()
-	if !errors.Is(err, errNotBuiltYet) {
-		return
-	}
-	if os.Getenv("FILING_PENDING_STRICT") == "1" {
-		t.Fatalf("task %s has not built this yet", task)
-	}
-	t.Skipf("pending task %s: the rule is specified, the API is not built yet", task)
-}
+// request, and Undo all. They were written first and shown failing; the APIs they
+// call now exist and every test here runs.
 
 // pressFixture ticks every image of a small scan and returns the saved view, so
 // these tests do not depend on how task 1.2 ticks a scan on open.
@@ -70,15 +32,14 @@ func pressFixture(t *testing.T, names ...string) (*Service, JanitorBatch, Review
 func planOf(t *testing.T, s *Service, batchID string, view ReviewDraftView) ReviewPlan {
 	t.Helper()
 	plan, err := s.PlanReview(t.Context(), "local", "ws-1", batchID, ReviewPlanQuery{Revision: view.Revision, GroupRevision: view.GroupRevision})
-	pendingUntil(t, "2.1", err)
 	if err != nil {
 		t.Fatalf("plan check: %v", err)
 	}
 	return plan
 }
 
-func pressRequest(view ReviewDraftView, plan ReviewPlan, key string) FileRequest {
-	return FileRequest{ExpectedRevision: view.Revision, ExpectedGroupRevision: view.GroupRevision, PlanDigest: plan.PlanDigest, ClientKey: key}
+func pressRequest(view ReviewDraftView, plan ReviewPlan) FileRequest {
+	return FileRequest{ExpectedRevision: view.Revision, ExpectedGroupRevision: view.GroupRevision, PlanDigest: plan.PlanDigest, ClientKey: pressKey}
 }
 
 const pressKey = "press-key-0123456789"
@@ -164,8 +125,7 @@ func TestReviewPlan_StalePlanPressMovesNothing(t *testing.T) {
 			tc.change(t, s, settings.RootPath)
 			before := scanStateBytes(t, s)
 
-			_, err := s.FileReviewPlan(t.Context(), "local", "ws-1", batch.ID, pressRequest(view, plan, pressKey))
-			pendingUntil(t, "2.2", err)
+			_, err := s.FileReviewPlan(t.Context(), "local", "ws-1", batch.ID, pressRequest(view, plan))
 			if !errors.Is(err, ErrReviewPlanChanged) {
 				t.Fatalf("a stale plan must be refused as changed, got %v", err)
 			}
@@ -188,8 +148,7 @@ func TestReviewPlan_EditBeforeAdmissionWins(t *testing.T) {
 		r.CandidateIDs = []string{candidateNamed(t, candidates, "one.png").ID}
 	})
 
-	_, err := s.FileReviewPlan(t.Context(), "local", "ws-1", batch.ID, pressRequest(view, plan, pressKey))
-	pendingUntil(t, "2.2", err)
+	_, err := s.FileReviewPlan(t.Context(), "local", "ws-1", batch.ID, pressRequest(view, plan))
 	if !errors.Is(err, ErrReviewPlanChanged) && !errors.Is(err, ErrReviewConflict) {
 		t.Fatalf("a press built on a replaced choice set must be refused, got %v", err)
 	}
@@ -207,7 +166,7 @@ func TestReviewPlan_EditBeforeAdmissionWins(t *testing.T) {
 func TestReviewPlan_SameClientKeyFilesOnce(t *testing.T) {
 	s, batch, view, mover := pressFixture(t, "one.png", "two.png")
 	plan := planOf(t, s, batch.ID, view)
-	request := pressRequest(view, plan, pressKey)
+	request := pressRequest(view, plan)
 
 	start := make(chan struct{})
 	results := make([]FilingResult, 2)
@@ -224,7 +183,6 @@ func TestReviewPlan_SameClientKeyFilesOnce(t *testing.T) {
 	close(start)
 	wg.Wait()
 	for _, err := range errs {
-		pendingUntil(t, "2.2", err)
 		if err != nil {
 			t.Fatalf("a repeated press must report the first result, got %v", err)
 		}
@@ -249,8 +207,7 @@ func TestReviewPlan_SameClientKeyFilesOnce(t *testing.T) {
 func TestFilingUndo_SecondRunCannotStart(t *testing.T) {
 	s, batch, view, mover := pressFixture(t, "one.png", "two.png")
 	plan := planOf(t, s, batch.ID, view)
-	filed, err := s.FileReviewPlan(t.Context(), "local", "ws-1", batch.ID, pressRequest(view, plan, pressKey))
-	pendingUntil(t, "2.2", err)
+	filed, err := s.FileReviewPlan(t.Context(), "local", "ws-1", batch.ID, pressRequest(view, plan))
 	if err != nil || filed.Filed != 2 {
 		t.Fatalf("setup: filing failed: %+v %v", filed, err)
 	}
@@ -272,17 +229,13 @@ func TestFilingUndo_SecondRunCannotStart(t *testing.T) {
 		first <- result
 		firstErr <- err
 	}()
-	pendingUndo := func() {
-		select {
-		case <-started:
-		case err := <-firstErr:
-			pendingUntil(t, "5.2", err)
-			t.Fatalf("Undo all ended before it moved anything: %v", err)
-		case <-time.After(5 * time.Second):
-			t.Fatal("Undo all did not start")
-		}
+	select {
+	case <-started:
+	case err := <-firstErr:
+		t.Fatalf("Undo all ended before it moved anything: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Undo all did not start")
 	}
-	pendingUndo()
 
 	second := make(chan FilingUndoResult, 1)
 	go func() {

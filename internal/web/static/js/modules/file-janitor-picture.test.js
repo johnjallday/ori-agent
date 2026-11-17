@@ -7,6 +7,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
+  changeAnnouncement,
+  folderCounts,
+  setName,
   BANNED_WORDS,
   LOOSE_LABELS,
   LOOSE_WHY,
@@ -486,10 +489,100 @@ test('a hostile name is text, never markup, and never reaches innerHTML', () => 
   const picture = pictureFixture();
   picture.folders[0].files = [file('<img src=x onerror=alert(1)>.png'), ...names('doc-', 4)];
   const root = renderPicture(doc, picture, ctx({ folderName: '<b>Downloads</b>' }));
-  assert.match(textOf(root), /<img src=x onerror=alert\(1\)>\.png/);
+  // The name is long enough to be shortened in the middle: both halves are text, and
+  // the whole name, markup characters and all, is the wrapper's title.
+  const hostile = '<img src=x onerror=alert(1)>.png';
+  const wrapper = find(root, node => node.title === hostile)[0];
+  assert.ok(wrapper, 'the whole name is available');
+  assert.equal(
+    wrapper.children.map(child => child._text).join(''),
+    hostile,
+    'the two halves are the name, as text'
+  );
   assert.match(textOf(root), /<b>Downloads<\/b>, after filing/);
   const source = readFileSync(new URL('./file-janitor-picture.js', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|outerHTML|document\.write/);
+});
+
+// R66: what a screen reader hears after a change, said from what the picture now
+// shows against what it showed.
+test('a change is announced from the picture, not from the request (R66)', () => {
+  const folders = (...entries) =>
+    folderCounts({
+      folders: entries.map(([destination, count]) => ({ destination, count }))
+    });
+  const before = folders(['Filed/Documents', 26], ['Filed/Images', 10]);
+  assert.equal(
+    changeAnnouncement(before, folders(['Filed/Documents', 28], ['Filed/Images', 10])),
+    '2 files moved to Documents.'
+  );
+  assert.equal(
+    changeAnnouncement(before, folders(['Filed/Documents', 27], ['Filed/Images', 10])),
+    '1 file moved to Documents.'
+  );
+  // A file sent from one folder to another is a gain for the one that gained it.
+  assert.equal(
+    changeAnnouncement(before, folders(['Filed/Documents', 25], ['Filed/Images', 11])),
+    '1 file moved to Images.'
+  );
+  // Nothing gained and some lost: the folders that lost are named instead.
+  assert.equal(
+    changeAnnouncement(before, folders(['Filed/Documents', 26], ['Filed/Images', 0])),
+    '10 files no longer set to be filed in Images.'
+  );
+  // A folder that is gone altogether counts as lost; a new one as gained.
+  assert.equal(
+    changeAnnouncement(before, folders(['Filed/Documents', 26])),
+    '10 files no longer set to be filed in Images.'
+  );
+  assert.equal(
+    changeAnnouncement(
+      before,
+      folders(['Filed/Documents', 26], ['Filed/Images', 10], ['Filed/Other', 3])
+    ),
+    '3 files moved to Other.'
+  );
+  // No change, or nothing to compare, says nothing.
+  assert.equal(changeAnnouncement(before, before), '');
+  assert.equal(changeAnnouncement(null, before), '');
+  assert.equal(changeAnnouncement(before, null), '');
+});
+
+// The element builder the module is given: tag, class, text.
+const el = (tag, className, text) => {
+  const node = doc.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+};
+
+test('a long file name is shortened in the middle and keeps its whole name and its extension (R69)', () => {
+  const short = setName(el, el('li'), 'invoice.pdf');
+  assert.equal(short.textContent, 'invoice.pdf');
+  assert.equal(short.children.length, 0, 'a name that fits is plain text');
+  const long = 'Quarterly report for the whole northern region final version 2026.pdf';
+  const node = setName(el, el('li'), long);
+  const wrap = node.children[0];
+  assert.equal(wrap.className, 'fj-mid');
+  assert.equal(wrap.title, long, 'the whole name on hover');
+  const [start, end] = wrap.children.map(child => child._text);
+  assert.equal(start + end, long, 'both halves together are the whole name');
+  assert.ok(end.endsWith('.pdf'), 'the extension always shows');
+  assert.ok(start.length > end.length);
+  // A button says its whole name, so its accessible name is exactly the file's name.
+  const button = setName(el, el('button'), long);
+  assert.equal(button.getAttribute('aria-label'), long);
+  assert.equal(setName(el, el('button'), 'short.pdf').getAttribute('aria-label'), undefined);
+  assert.equal(setName(el, el('li'), long).getAttribute('aria-label'), undefined);
+  // No extension, and a name made of astral characters, are cut on characters.
+  const plain = setName(el, el('li'), 'x'.repeat(60)).children[0];
+  assert.equal(plain.children.map(child => child._text).join(''), 'x'.repeat(60));
+  const astral = '😀'.repeat(40);
+  const emoji = setName(el, el('li'), astral).children[0];
+  assert.equal(emoji.children.map(child => child._text).join(''), astral);
+  // The cut never splits a character: no half of a surrogate pair is left alone.
+  const loneSurrogate = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+  assert.ok(emoji.children.every(child => !loneSurrogate.test(child._text)));
 });
 
 test('the accounting adds up to what is waiting, and the quiet line counts earlier files', () => {

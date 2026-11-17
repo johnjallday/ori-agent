@@ -349,7 +349,10 @@ test('two folders open ticked and stay pinned when a newer review arrives', asyn
   writeFileSync(join(ws.root, 'later-arrival.png'), 'Synthetic later arrival', { mode: 0o600 });
   utimesSync(join(ws.root, 'later-arrival.png'), old, old);
   await console.getByRole('button', { name: 'Scan now', exact: true }).click();
-  await expect(console).toContainText('A newer saved review is available');
+  // One line says so, with one button (R62).
+  await expect(console.locator('#fileJanitorNewerScan')).toContainText('A newer scan is ready.');
+  const showNewer = console.getByRole('button', { name: 'Show the newer scan', exact: true });
+  await expect(showNewer).toBeVisible();
   // The open picture is never swapped by itself, and the later arrival is not in it.
   await expect(fileButton(console)).toHaveText(filesLabel(49));
   await expect(page).toHaveURL(new RegExp(`batch_id=${batchID}`));
@@ -357,14 +360,14 @@ test('two folders open ticked and stay pinned when a newer review arrives', asyn
   await expect(fileButton(console)).toHaveText(filesLabel(49));
   const newest = (await pictureOf(request, ws.base)).batch_id;
   expect(newest).not.toBe(batchID);
-  await console.getByRole('button', { name: 'All files', exact: true }).click();
-  await expect(console.locator('#fileJanitorBatchChoice')).toHaveValue(batchID);
-  await console.locator('#fileJanitorBatchChoice').selectOption(newest);
-  await console.locator('#fileJanitorView-groups').click();
+  await expect(showNewer).toBeVisible();
+  await showNewer.click();
   // The newer scan is its own picture, ticked on open with its one new file.
   await expect(fileButton(console)).toHaveText(filesLabel(1));
   await expect(console.locator('.fj-folder-card .fj-folder-count')).toHaveText('1');
+  await expect(showNewer).toHaveCount(0);
   await console.getByRole('button', { name: 'All files', exact: true }).click();
+  await expect(console.locator('#fileJanitorBatchChoice')).toHaveValue(newest);
   await console.locator('#fileJanitorBatchChoice').selectOption(batchID);
   await console.locator('#fileJanitorView-groups').click();
   await expect(fileButton(console)).toHaveText(filesLabel(49));
@@ -449,7 +452,7 @@ test('injected save failure is unsaved and two real windows resolve a stale pres
   await expect(folder(console, 'images')).toBeDisabled();
   await expect(fileButton(console)).toBeDisabled();
   await expect(console.locator('#fileJanitorSelection')).toHaveText('Not saved. Retry');
-  await console.getByRole('button', { name: 'Retry exact edit', exact: true }).click();
+  await console.getByRole('button', { name: 'Retry that change', exact: true }).click();
   await expect(fileButton(console)).toHaveText(filesLabel(0));
 
   // The second window still shows both ticked. Its button is stale, so the press
@@ -472,9 +475,14 @@ test('injected save failure is unsaved and two real windows resolve a stale pres
   await folder(second, 'images').check();
   await expect(fileButton(second)).toHaveText(filesLabel(2));
   await folder(console, 'images').click();
-  await expect(console.locator('#fileJanitorDraftStatus')).toContainText('Review changed');
-  await expect(fileButton(console)).toBeDisabled();
-  await console.getByRole('button', { name: 'Reload saved choices', exact: true }).click();
+  // The window reads the saved choices again by itself and says so (R63); there is
+  // nothing to reload by hand, and the refused click was not applied.
+  await expect(console.locator('#fileJanitorSelection')).toContainText(
+    'Updated from another window. Your last change was not saved.'
+  );
+  await expect(
+    console.getByRole('button', { name: 'Reload saved choices', exact: true })
+  ).toHaveCount(0);
   await expect(fileButton(console)).toHaveText(filesLabel(2));
   await expect(folder(console, 'images')).toBeChecked();
   expect(existsSync(join(ws.root, 'one.png'))).toBe(true);
@@ -1025,6 +1033,27 @@ test('one press files exactly the ticked files and nothing else', async ({ page,
   expect(after.waiting).toBe(4);
   expect(drawn(after)).toBe(4);
   await expect(fileButton(console)).toHaveText(filesLabel(0));
+});
+
+test('a 206-file folder card is filed completely in one press, and the receipt counts all 206 (A3)', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const names = Array.from({ length: 206 }, (_, i) => `image-${String(i).padStart(4, '0')}.png`);
+  const ws = await manualReview(request, names, 'Press 206');
+  const console = await openReview(page, ws.slug);
+  await expect(fileButton(console)).toHaveText(filesLabel(206));
+  await fileButton(console).click();
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('206 files filed.', {
+    timeout: 120_000
+  });
+  await expect(receiptRows(console)).toHaveText('206 → Filed/Images');
+  expect(readdirSync(join(ws.root, 'Filed', 'Images'))).toHaveLength(206);
+  for (const name of names) expect(existsSync(join(ws.root, name)), name).toBe(false);
+  // The journal agrees with the receipt, file for file.
+  const history = await (await request.get(`${ws.base}/history?limit=1`)).json();
+  expect(history.total).toBe(206);
 });
 
 test('a ticked file that changed after you looked files nothing, is marked, and a second press files the rest', async ({
@@ -2211,6 +2240,14 @@ test('Undo all puts every file back under its own name with its own bytes, and O
     timeout: 60_000
   });
   for (const name of filedNames) expect(existsSync(join(ws.root, name)), name).toBe(false);
+  // Everything was filed, so nothing is waiting: the picture says the folder is tidy
+  // and offers a scan (R59), not an empty frame.
+  await expect(console.locator('#fileJanitorPicture')).toContainText(
+    /Nothing to file\. .+ is tidy\./
+  );
+  await expect(
+    console.locator('#fileJanitorPicture').getByRole('button', { name: 'Scan now', exact: true })
+  ).toBeVisible();
   const batchesBefore = (await (await request.get(`${ws.base}/batches`)).json()).batches.length;
 
   await undoAllButton(console).click();
@@ -2299,6 +2336,57 @@ test('with one original name taken, Undo all lists that file with the reason and
   await expect(console.locator('#fileJanitorScanAgain')).toBeVisible();
   await notBack.evaluate(node => node.scrollIntoView({ block: 'center' }));
   await page.screenshot({ path: `${evidence}/05-e2e-undo-partial.png`, fullPage: true });
+});
+
+// A new scan does not propose a file an earlier scan still holds. The files of the
+// scan that is not open must not vanish: the page names them, the receipt still counts
+// them as loose, and one button opens that scan.
+test('files still waiting in an earlier scan are named, counted as loose on the receipt, and one button opens that scan', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const ws = await manualReview(
+    request,
+    ['a.png', 'b.png', 'c.png', 'mystery.zzzz'],
+    'Earlier scan still holds a file'
+  );
+  const console = await openReview(page, ws.slug);
+  await expect(fileButton(console)).toHaveText(filesLabel(3));
+  await fileButton(console).click();
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('3 files filed.', {
+    timeout: 60_000
+  });
+  await expect(console.locator('#fileJanitorResultsHost .fj-receipt-where')).toContainText(
+    '1 file stays loose'
+  );
+  await undoAllButton(console).click();
+  await expect(undoneTitle(console)).toHaveText('3 files are back where they were.', {
+    timeout: 60_000
+  });
+  await console.locator('#fileJanitorScanAgain').click();
+  // The new scan proposes the three restored files. The fourth file is still held by the
+  // earlier scan, and the page says where it is instead of letting it vanish.
+  await expect(fileButton(console)).toHaveText(filesLabel(3));
+  await expect(console.locator('#fileJanitorOtherScan')).toContainText(
+    '1 file is still waiting in an earlier scan.'
+  );
+  await fileButton(console).click();
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('3 files filed.', {
+    timeout: 60_000
+  });
+  // The file in the earlier scan is still loose, and the receipt does not say otherwise.
+  await expect(console.locator('#fileJanitorResultsHost .fj-receipt-where')).toContainText(
+    '1 file stays loose'
+  );
+  // Nothing is left to file in this scan, and the page does not call the folder tidy.
+  await expect(console.locator('#fileJanitorPicture')).toContainText(
+    'Nothing to file in this scan.'
+  );
+  await expect(console.locator('#fileJanitorPicture')).not.toContainText('tidy');
+  await console.getByRole('button', { name: 'Show the earlier scan', exact: true }).click();
+  await expect(console).toContainText('mystery.zzzz');
+  expect(existsSync(join(ws.root, 'mystery.zzzz'))).toBe(true);
 });
 
 test('Undo all from History works after the receipt was closed, and the line then says the files were put back', async ({

@@ -17,19 +17,8 @@ import (
 )
 
 // These tests state the HTTP rules of the "Picture review" contract in
-// docs/architecture/file-janitor-group-review.md. They fail until tasks 1.2 and
-// 1.3 (and 4.1 for the pair and bundle identifiers) land, then guard them.
-
-// pendingTask skips (or, with FILING_PENDING_STRICT=1, runs for real) a test whose
-// rule belongs to a later task and cannot pass yet. The task that builds the rule
-// deletes the call; task 6.9 checks that none is left.
-func pendingTask(t *testing.T, task string) {
-	t.Helper()
-	if os.Getenv("FILING_PENDING_STRICT") == "1" {
-		return
-	}
-	t.Skipf("pending task %s: the rule is specified and the test is written; the code is not", task)
-}
+// docs/architecture/file-janitor-group-review.md. They were written before the
+// code and shown failing; they now guard it.
 
 type pictureFile struct {
 	name string

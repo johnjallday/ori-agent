@@ -7,7 +7,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { createProtectionTrips, protectionSentence, TRIP_KEY } from './file-janitor-protection.js';
+import {
+  createProtectionTrips,
+  protectionSentence,
+  protectionStripSentence,
+  TRIP_KEY
+} from './file-janitor-protection.js';
 import * as pictureModule from './file-janitor-picture.js';
 import * as receiptModule from './file-janitor-receipt.js';
 
@@ -900,8 +905,8 @@ test('whole-batch progress separates remaining, subset, outcomes, and ineligible
   renderReview(doc, batch, candidatesFixture());
 
   const progress = surface(doc).all(node => node.className === 'fj-batch-progress')[0];
-  assert.ok(progress, 'the review needs a whole-batch progress readout');
-  assert.match(progress.textContent, /3 remaining of 15 candidates/);
+  assert.ok(progress, 'the review needs a whole-scan progress readout');
+  assert.match(progress.textContent, /3 remaining of 15 files/);
   assert.match(progress.textContent, /2 need review within remaining/);
   assert.match(progress.textContent, /6 completed/);
   assert.match(progress.textContent, /4 skipped/);
@@ -1143,8 +1148,14 @@ test('Scan now reports honestly when a scan finds nothing new', async () => {
 
   const error = doc.getElementById('fileJanitorError');
   assert.equal(error.hidden, true, 'an empty successful scan is not an error');
-  assert.match(text(doc), /Scan complete — no new proposals/);
+  // R59: nothing waiting is said once, with the button for the next scan.
+  assert.match(text(doc), /Nothing to file\. Inbox is tidy\./);
   assert.match(text(doc), /No changes were made/);
+  assert.ok(
+    surface(doc).all(node => node.tagName === 'BUTTON' && node.textContent === 'Scan now').length >=
+      2,
+    'Scan now in the header and in the state itself'
+  );
   // The button is usable again.
   assert.equal(doc.getElementById('fileJanitorScan').disabled, false);
 });
@@ -1175,8 +1186,8 @@ test('a scan with no new proposals keeps an existing review batch and reports th
   await settle();
   await settle();
 
-  assert.match(text(doc), /Scan complete — no new proposals/);
-  assert.match(text(doc), /current review batch is unchanged/);
+  assert.match(text(doc), /Scan complete — nothing new to file/);
+  assert.match(text(doc), /current review is unchanged/);
   assert.match(text(doc), /invoice-2026-07\.pdf/);
   assert.equal(doc.getElementById('fileJanitorError').hidden, true);
 });
@@ -1194,8 +1205,8 @@ test('a resolved pending batch becomes a completed-batch empty state', async () 
 
   await panel._reloadBatch();
 
-  assert.match(text(doc), /Batch complete/);
-  assert.match(text(doc), /Every candidate has a recorded outcome/);
+  assert.match(text(doc), /Nothing to file\. Inbox is tidy\./);
+  assert.match(text(doc), /Every file in the last scan has a recorded result/);
   assert.match(text(doc), /View History/);
 });
 
@@ -2920,7 +2931,7 @@ test('a failed batch read is unavailable, not an empty folder, and keeps stale d
 
   const host = surface(doc);
   assert.match(host.textContent, /Review unavailable/);
-  assert.match(host.textContent, /Showing the last known batch/);
+  assert.match(host.textContent, /Showing the last known scan/);
   assert.match(host.textContent, /invoice-2026-07\.pdf/);
   assert.doesNotMatch(host.textContent, /Nothing to review/);
   assert.equal(host.all(node => node.className === 'fj-select')[0].disabled, true);
@@ -4925,6 +4936,180 @@ test('an unavailable picture is not drawn as a tidy folder and can retry without
   assert.ok(calls.every(call => !call.options?.method || call.options.method === 'GET'));
 });
 
+// A3: a folder of any size is drawn as one card with five names and a count of the
+// rest, never with every member, and one press files all of it up to the limit.
+for (const count of [1, 5, 6, 50, 51, 200, 206, 1000]) {
+  test(`a ${count}-file folder is one card, five names at most, and filed as ${count} (matrix)`, async () => {
+    const { doc } = await groupedReviewFixture(count);
+    const card = doc.getElementById('fileJanitorFolder-images');
+    assert.ok(card, 'the folder card is drawn and ticked');
+    assert.equal(card.checked, true);
+    const named = surface(doc).all(
+      node => node.className === 'fj-file-name' && node.id?.startsWith('fileJanitorFile-')
+    );
+    assert.equal(named.length, Math.min(count, 5), 'five names at most');
+    if (count > 5) {
+      assert.equal(
+        buttonNamed(surface(doc), 'and ' + (count - 5) + ' more').id,
+        'fileJanitorMore-filed-images'
+      );
+    } else {
+      assert.equal(
+        surface(doc).all(node => /^and \d+ more$/.test(node.textContent || '')).length,
+        0,
+        'nothing is left to open'
+      );
+    }
+    assert.equal(rowsIn(surface(doc)).length, 0, 'the picture never draws every member');
+    assert.equal(panel._selected().length, count);
+    assert.equal(
+      doc.getElementById('fileJanitorApprove').textContent,
+      count === 1 ? 'File 1 file' : 'File ' + count + ' files'
+    );
+    assert.equal(doc.getElementById('fileJanitorApprove').disabled, false);
+  });
+}
+
+test('a folder with nothing in it is tidy and offers a scan, not an empty frame (matrix, 0 files)', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  const filed = state.fileReply;
+  state.fileReply = request => {
+    const answer = filed(request);
+    state.emptied = false;
+    return answer;
+  };
+  pressButton(doc).click();
+  await settle();
+  await settle();
+  await planSettled();
+  assert.match(doc.getElementById('fileJanitorPicture').textContent, /Nothing to file\./);
+  assert.equal(pressButton(doc).textContent, 'Nothing to file');
+});
+
+test('a change is said to a screen reader from what the picture now shows (R66)', async () => {
+  const { doc } = await groupedReviewFixture(3);
+  const live = doc.getElementById('fileJanitorAnnounce');
+  assert.equal(live.getAttribute('role'), 'status');
+  assert.equal(live.getAttribute('aria-live'), 'polite');
+  assert.equal(live.textContent, '', 'nothing is said before anything changes');
+  changeCheckbox(folderCheckbox(doc), false);
+  await settle();
+  await settle();
+  assert.equal(
+    doc.getElementById('fileJanitorAnnounce').textContent,
+    '3 files no longer set to be filed in Images.'
+  );
+  changeCheckbox(folderCheckbox(doc), true);
+  await settle();
+  await settle();
+  assert.equal(doc.getElementById('fileJanitorAnnounce').textContent, '3 files moved to Images.');
+  // The live region is not part of what is redrawn after a change.
+  assert.equal(doc.getElementById('fileJanitorAnnounce'), live);
+});
+
+test('nothing waiting says the folder is tidy with a Scan now button, only for a picture that was read (R59)', async () => {
+  const { doc, calls, state } = await groupedReviewFixture(3);
+  // The server keeps the finished review as the open one after everything is filed.
+  const filed = state.fileReply;
+  state.fileReply = request => {
+    const answer = filed(request);
+    state.emptied = false;
+    return answer;
+  };
+  pressButton(doc).click();
+  await settle();
+  await settle();
+  await planSettled();
+  const picturePanel = doc.getElementById('fileJanitorPicture');
+  assert.ok(picturePanel, 'the tidy state stands where the picture was');
+  assert.match(picturePanel.textContent, /Nothing to file\. Inbox is tidy\./);
+  assert.equal(pressButton(doc).textContent, 'Nothing to file');
+  assert.equal(pressButton(doc).disabled, true);
+  assert.equal(folderCheckbox(doc), null, 'no folder card is drawn');
+  // Its one button asks for a scan, and nothing else.
+  const before = calls.length;
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Scan now')
+    .at(-1)
+    .click();
+  await settle();
+  assert.deepEqual(
+    calls
+      .slice(before)
+      .filter(call => call.options?.method === 'POST')
+      .map(call => call.target.replace(/^.*\/file-janitor/, '')),
+    ['/scan']
+  );
+  // A picture that could not be read never says it (R61).
+  state.failPicture = true;
+  await panel._loadReviewPicture();
+  assert.doesNotMatch(text(doc), /Inbox is tidy/);
+  assert.match(text(doc), /does not mean the folder is tidy/);
+});
+
+test('files the person told Ori to leave are not called tidy', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  state.batch.summary = { ...state.batch.summary, skipped: 2 };
+  state.review.counts = { candidates: 3, filing: 0, questions: 0 };
+  state.review.groups = [];
+  state.choices = [];
+  await panel._reloadBatch();
+  await settle();
+  const panelText = doc.getElementById('fileJanitorPicture').textContent;
+  assert.match(panelText, /Nothing to file\. 2 files stay where you left them\./);
+  assert.doesNotMatch(panelText, /tidy/);
+});
+
+// R58: the picture never uses these words, anywhere on the Review tab: not the
+// picture, the footer, the receipt or the Undone view. A scan is a "scan".
+const RETIRED_WORDS =
+  /\b(?:batch(?:es)?|candidates?|proposals?|exact(?:ly)?|explicitly|drafts?)\b/i;
+
+function retiredWordsIn(doc) {
+  const found = text(doc).match(new RegExp(RETIRED_WORDS.source, 'gi'));
+  return found ? [...new Set(found.map(word => word.toLowerCase()))] : [];
+}
+
+test('the Review tab never uses a retired word: picture, footer, receipt and Undone view (R58)', async () => {
+  const { doc, state } = await groupedReviewFixture(206);
+  assert.deepEqual(retiredWordsIn(doc), [], 'the picture with its footer');
+  // The Trash tick and the changed-since-you-looked notice live in the footer too.
+  state.choices[0] = { candidate_id: 'group-member-0', operation: 'trash' };
+  state.generation++;
+  await panel._reloadBatch();
+  await panel._planNow();
+  assert.deepEqual(retiredWordsIn(doc), [], 'with a file marked for Trash');
+  changeCheckbox(doc.getElementById('fileJanitorTrashAck'), true);
+  pressButton(doc).click();
+  await settle();
+  await settle();
+  assert.ok(doc.getElementById('fileJanitorResultsSummary'), 'the receipt is showing');
+  assert.deepEqual(retiredWordsIn(doc), [], 'the receipt');
+  doc.getElementById('fileJanitorUndoAll').click();
+  await settle();
+  await settle();
+  assert.ok(doc.getElementById('fileJanitorUndoneTitle'), 'the Undone view is showing');
+  assert.deepEqual(retiredWordsIn(doc), [], 'the Undone view');
+});
+
+test('the All files list and the empty and error states use no retired word either (R58)', async () => {
+  const { doc, state } = await groupedReviewFixture(5);
+  doc.getElementById('fileJanitorView-all').click();
+  await settle();
+  await settle();
+  assert.match(text(doc), /image-0\.png/, 'the list is showing');
+  assert.deepEqual(retiredWordsIn(doc), [], 'the All files list');
+  // A review that cannot be read, a saved edit that failed, and a finished review.
+  state.failBatchRead = true;
+  await panel._reloadBatch();
+  assert.match(text(doc), /Review unavailable/);
+  assert.deepEqual(retiredWordsIn(doc), [], 'a review that could not be read');
+  state.failBatchRead = false;
+  state.emptied = true;
+  await panel._reloadBatch();
+  assert.deepEqual(retiredWordsIn(doc), [], 'a finished review');
+});
+
 test('the picture and the saved choices are read again once if they disagree', async () => {
   const { doc, calls, state } = await groupedReviewFixture(3);
   state.staleDraftOnce = true;
@@ -4933,6 +5118,143 @@ test('the picture and the saved choices are read again once if they disagree', a
   assert.equal(calls.filter(call => call.target.endsWith('/picture')).length, 2);
   assert.ok(folderCheckbox(doc));
   assert.equal(folderCheckbox(doc).disabled, false, 'the matching pair is actionable');
+  // The two reads straddled a change from somewhere else, and the page says so (R63).
+  assert.match(text(doc), /Updated from another window\./);
+});
+
+test('a newer scan is one line with one button, and the open picture is never swapped by itself (R62)', async () => {
+  const { doc, calls, state } = await groupedReviewFixture(3);
+  assert.equal(doc.getElementById('fileJanitorNewerScan'), null, 'no newer scan yet');
+  const newer = batchFixture({
+    id: 'batch-newer',
+    started_at: '2099-01-01T00:00:00Z',
+    summary: { total: 3, proposed: 3 }
+  });
+  state.batches = [newer, state.batch];
+  calls.length = 0;
+  await panel._reloadBatch();
+  // Still the scan that was open; the line says a newer one exists.
+  assert.ok(!calls.some(call => call.target.includes('/batches/latest')));
+  const line = doc.getElementById('fileJanitorNewerScan');
+  assert.ok(line, 'the newer scan is named');
+  assert.match(line.textContent, /A newer scan is ready\./);
+  assert.equal(doc.getElementById('fileJanitorShowNewerScan').textContent, 'Show the newer scan');
+  assert.equal(panel._selected().length, 3, 'the open picture and its ticks are unchanged');
+  // Only the button changes what is open.
+  state.batch = newer;
+  calls.length = 0;
+  doc.getElementById('fileJanitorShowNewerScan').click();
+  await settle();
+  await settle();
+  assert.ok(calls.some(call => /\/batches\/batch-newer\?/.test(call.target)));
+  assert.equal(doc.getElementById('fileJanitorNewerScan'), null, 'the line goes once it is shown');
+  // The button that was pressed is gone: focus goes to the picture, not the page.
+  assert.notEqual(doc.activeElement, doc.body);
+});
+
+// A scan does not propose a file that an earlier scan still holds, so the files of the
+// scan that is not open are in no picture. The page says where they are.
+test('files still waiting in an earlier scan are named, with one button that opens it', async () => {
+  const { doc, calls, state } = await groupedReviewFixture(3);
+  assert.equal(doc.getElementById('fileJanitorOtherScan'), null, 'nothing is waiting elsewhere');
+  state.batches = [
+    state.batch,
+    batchFixture({
+      id: 'batch-earlier',
+      started_at: '2001-01-01T00:00:00Z',
+      // Two of the four need review; they are part of the four, not extra.
+      summary: { total: 4, proposed: 4, needs_review: 2 }
+    })
+  ];
+  await panel._reloadBatch();
+  const line = doc.getElementById('fileJanitorOtherScan');
+  assert.ok(line, 'the earlier scan is named');
+  assert.match(line.textContent, /4 files are still waiting in an earlier scan\./);
+  assert.equal(panel._selected().length, 3, 'the open picture is untouched');
+  calls.length = 0;
+  doc.getElementById('fileJanitorShowOtherScan').click();
+  await settle();
+  await settle();
+  assert.ok(calls.some(call => /\/batches\/batch-earlier\?/.test(call.target)));
+  assert.notEqual(doc.activeElement, doc.body, 'focus is not dropped to the page');
+});
+
+test('a finished earlier scan, or one with nothing waiting, adds no line', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  state.batches = [
+    state.batch,
+    batchFixture({
+      id: 'b-done',
+      started_at: '2001-01-01T00:00:00Z',
+      state: 'resolved',
+      summary: { proposed: 5 }
+    }),
+    batchFixture({
+      id: 'b-empty',
+      started_at: '2002-01-01T00:00:00Z',
+      summary: { proposed: 0, needs_review: 0 }
+    })
+  ];
+  await panel._reloadBatch();
+  assert.equal(doc.getElementById('fileJanitorOtherScan'), null);
+});
+
+test('nothing to file in this scan is not called tidy while files wait in another scan', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  const filed = state.fileReply;
+  state.fileReply = request => {
+    const answer = filed(request);
+    state.emptied = false;
+    return answer;
+  };
+  state.batches = [
+    state.batch,
+    batchFixture({
+      id: 'batch-earlier',
+      started_at: '2001-01-01T00:00:00Z',
+      summary: { proposed: 7 }
+    })
+  ];
+  pressButton(doc).click();
+  await settle();
+  await settle();
+  await planSettled();
+  const picturePanel = doc.getElementById('fileJanitorPicture');
+  assert.match(picturePanel.textContent, /Nothing to file in this scan\./);
+  assert.doesNotMatch(picturePanel.textContent, /tidy/);
+  assert.match(text(doc), /7 files are still waiting in an earlier scan\./);
+});
+
+test('what was said about one review is not left behind when another opens', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  changeCheckbox(folderCheckbox(doc), false);
+  await settle();
+  await settle();
+  assert.notEqual(doc.getElementById('fileJanitorAnnounce').textContent, '');
+  state.batches = [
+    batchFixture({ id: 'batch-newer', started_at: '2099-01-01T00:00:00Z' }),
+    state.batch
+  ];
+  await panel._reloadBatch();
+  state.batch = batchFixture({
+    id: 'batch-newer',
+    started_at: '2099-01-01T00:00:00Z',
+    summary: { total: 3, proposed: 3 }
+  });
+  doc.getElementById('fileJanitorShowNewerScan').click();
+  await settle();
+  await settle();
+  assert.equal(doc.getElementById('fileJanitorAnnounce').textContent, '');
+});
+
+test('an older saved scan is not called newer', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  state.batches = [
+    state.batch,
+    batchFixture({ id: 'batch-old', started_at: '2001-01-01T00:00:00Z' })
+  ];
+  await panel._reloadBatch();
+  assert.equal(doc.getElementById('fileJanitorNewerScan'), null);
 });
 
 test('a resolved concrete batch stays pinned and newer saved batches remain discoverable', async () => {
@@ -4958,7 +5280,8 @@ test('unticking a folder saves one request before the button can file again, and
   changeCheckbox(folderCheckbox(doc), false);
   await settle();
   assert.equal(panel._selected().length, 206, 'a pending save changes nothing on screen');
-  assert.match(surface(doc).textContent, /Saving exact choices/);
+  // A saved choice needs no label (R58): only the button says it is waiting.
+  assert.doesNotMatch(surface(doc).textContent, /Saving exact|Your choices are saved/);
   assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
   assert.equal(
     doc.getElementById('fileJanitorSelection').textContent,
@@ -5023,7 +5346,7 @@ test('a failed folder save is explicitly unsaved, blocks the button and retries 
   assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
   assert.match(surface(doc).textContent, /not confirmed saved/);
   assert.equal(folderCheckbox(doc).disabled, true, 'no further edit while one is unconfirmed');
-  buttonNamed(surface(doc), 'Retry exact edit').click();
+  buttonNamed(surface(doc), 'Retry that change').click();
   await settle();
   assert.deepEqual(panel._selected(), []);
   assert.equal(folderCheckbox(doc).checked, false);
@@ -5046,20 +5369,29 @@ test('a malformed successful save response cannot invent durably saved choices',
   assert.match(surface(doc).textContent, /not confirmed saved/);
 });
 
-test('a change in another window needs a reload and never overwrites the winning choices', async () => {
-  const { doc, state } = await groupedReviewFixture(3);
+test('a change in another window is read again, said once, and never overwrites the winning choices (R63)', async () => {
+  const { doc, calls, state } = await groupedReviewFixture(3);
   // Another window left out two files after this picture was drawn.
   state.generation++;
   state.choices = [{ candidate_id: 'group-member-1', operation: 'move', source_group_id: '' }];
   changeCheckbox(folderCheckbox(doc), false);
   await settle();
-  assert.match(surface(doc).textContent, /Review changed/);
-  assert.equal(doc.getElementById('fileJanitorApprove').disabled, true);
-  buttonNamed(surface(doc), 'Reload saved choices').click();
   await settle();
-  assert.deepEqual(panel._selected(), ['group-member-1']);
+  // Nothing to press: the picture was read again by itself and says so.
+  assert.match(text(doc), /Updated from another window\. Your last change was not saved\./);
+  assert.equal(
+    surface(doc).all(node => node.textContent === 'Reload saved choices').length,
+    0,
+    'no button to press'
+  );
+  assert.deepEqual(panel._selected(), ['group-member-1'], "the other window's choices won");
   assert.equal(folderCheckbox(doc).indeterminate, true);
   assert.match(surface(doc).textContent, /Left out by you · 2/);
+  // The click that was refused was not tried a second time against the new picture.
+  assert.equal(
+    calls.filter(call => /\/draft$/.test(call.target) && call.options?.method === 'POST').length,
+    1
+  );
 });
 
 test('a detached folder control cannot change the same folder in another saved review', async () => {
@@ -5163,6 +5495,7 @@ async function protectionReview(t, count = 3) {
   };
   window.FileJanitorProtection = createProtectionTrips(window);
   window.FileJanitorProtection.sentence = protectionSentence;
+  window.FileJanitorProtection.stripSentence = protectionStripSentence;
   window.OriProtectFolders = {
     open: async () => {
       state.opened++;
@@ -5204,21 +5537,105 @@ async function protectionReview(t, count = 3) {
   return { doc, state, stored };
 }
 
-test('protection is optional, Not now keeps a passive link and filing selections', async t => {
+test('protection is optional: one sentence and two buttons, and Not now removes it from Review but keeps the choices', async t => {
   const { doc } = await protectionReview(t);
   panel._select('c1');
-  assert.match(text(doc), /Filing is not a backup/);
-  assert.match(text(doc), /Protection is unknown/);
+  const strip = () =>
+    surface(doc).all(node => node.getAttribute?.('aria-label') === 'Optional folder protection')[0];
+  assert.equal(
+    strip().all(node => node.className === 'fj-protection-copy')[0].textContent,
+    'Filing is not a backup, and Ori does not know of one for this folder.'
+  );
+  assert.deepEqual(
+    strip()
+      .all(node => node.tagName === 'BUTTON')
+      .map(node => node.textContent),
+    ['Check protection', 'Not now'],
+    'exactly the two buttons'
+  );
   surface(doc)
     .all(node => node.tagName === 'BUTTON' && node.textContent === 'Not now')[0]
     .click();
   assert.deepEqual(panel._selected(), ['c1']);
+  // R54: once dismissed nothing about backups is on the Review tab.
   assert.doesNotMatch(text(doc), /Filing is not a backup/);
-  assert.ok(doc.getElementById('fileJanitorCheckProtection'));
+  assert.equal(strip(), undefined);
+  assert.equal(doc.getElementById('fileJanitorCheckProtection'), null);
+  assert.doesNotMatch(
+    text(doc),
+    /Protection prompt dismissed|Dismissed for this page only/,
+    'no label for a choice that was kept'
+  );
   panel.close();
   panel.open({ source: 'protection-return' });
   assert.doesNotMatch(text(doc), /Filing is not a backup/);
   assert.deepEqual(panel._selected(), ['c1'], 'the choices outlive the reminder');
+  // Check protection stays on the Settings tab.
+  panel._selectTab('settings');
+  const settingsCheck = doc.getElementById('fileJanitorCheckProtectionSettings');
+  assert.ok(settingsCheck, 'Check protection is reachable from Settings');
+  assert.equal(settingsCheck.disabled, false);
+});
+
+test('the backup strip appears for each uncovered state with its sentence, and never for a covered or unreadable one (R53, R54)', async t => {
+  const { doc, state } = await protectionReview(t);
+  const sentences = {
+    not_covered: 'Filing is not a backup, and this folder is not in the backups Ori can see.',
+    unknown: 'Filing is not a backup, and Ori does not know of one for this folder.',
+    configured: 'Filing is not a backup. A backup is set up, but Ori has not seen it finish.'
+  };
+  for (const [name, sentence] of Object.entries(sentences)) {
+    state.fact.state = name;
+    await panel._loadProtection();
+    assert.match(text(doc), new RegExp(sentence.replace(/[.]/g, '\\.')), name);
+  }
+  for (const name of ['covered', 'unavailable']) {
+    state.fact.state = name;
+    await panel._loadProtection();
+    assert.doesNotMatch(text(doc), /Filing is not a backup/, name);
+    assert.equal(doc.getElementById('fileJanitorCheckProtection'), null, name);
+  }
+  // No information at all: no strip either.
+  state.fact.state = 'unknown';
+  delete state.fact.destination;
+  await panel._loadProtection();
+  assert.doesNotMatch(text(doc), /Filing is not a backup/);
+});
+
+test('when the choice cannot be kept past this page, Not now says so', async t => {
+  const { doc } = await protectionReview(t);
+  window.localStorage = {
+    getItem: () => null,
+    setItem() {
+      throw new Error('denied');
+    }
+  };
+  surface(doc)
+    .all(node => node.tagName === 'BUTTON' && node.textContent === 'Not now')[0]
+    .click();
+  assert.match(text(doc), /Dismissed for this page only: browser storage is unavailable/);
+  assert.doesNotMatch(text(doc), /Filing is not a backup/, 'it is still gone for this page');
+});
+
+test('the backup strip sits above the File button, below the picture', async t => {
+  const { doc } = await protectionReview(t);
+  const order = surface(doc).all(
+    node =>
+      node.getAttribute?.('aria-label') === 'Optional folder protection' ||
+      node.id === 'fileJanitorApprove'
+  );
+  assert.equal(order[0].getAttribute('aria-label'), 'Optional folder protection');
+  assert.equal(order[1].id, 'fileJanitorApprove');
+});
+
+test('Settings offers Check protection even when the strip was dismissed, and says why it waits without a review', async t => {
+  const { doc } = await protectionReview(t);
+  panel._selectTab('settings');
+  assert.match(text(doc), /Protection/);
+  assert.match(text(doc), /Protection is unknown/, 'Settings keeps the longer account');
+  const check = doc.getElementById('fileJanitorCheckProtectionSettings');
+  assert.ok(check);
+  assert.equal(check.disabled, false);
 });
 
 test('protection departure keeps the saved choices, and the return carries no permission', async t => {
@@ -5815,13 +6232,16 @@ test('files taken out because they changed are said once, in plain words, until 
   assert.match(status(), /2 files you ticked changed since you looked, so they were taken out\./);
 });
 
-test('a change made elsewhere says to reload, not to retry', async () => {
+test('a change made elsewhere is said beside the button, not offered as a retry', async () => {
   const { doc, state } = await groupedReviewFixture(3);
   state.generation++; // another window saved something after this picture was drawn
   changeCheckbox(folderCheckbox(doc), false);
   await settle();
-  assert.equal(doc.getElementById('fileJanitorSelection').textContent, 'Not saved. Reload');
-  assert.ok(buttonNamed(surface(doc), 'Reload saved choices'));
+  await settle();
+  assert.equal(
+    doc.getElementById('fileJanitorSelection').textContent,
+    'Updated from another window. Your last change was not saved.'
+  );
 });
 
 // ---------------------------------------------- answers on the loose rows
@@ -6486,7 +6906,7 @@ test('Scan again after Undo all takes the new scan, not the finished review it w
   await settle();
   // An open review is normally kept when a newer scan appears. Here the person
   // asked for the new scan, so it must not answer "a newer review is available".
-  assert.doesNotMatch(text(doc), /A newer saved review is available/);
+  assert.doesNotMatch(text(doc), /A newer scan is ready/);
 });
 
 test('an ordinary Scan now still keeps the open review and says a newer one exists', async () => {
@@ -6495,7 +6915,7 @@ test('an ordinary Scan now still keeps the open review and says a newer one exis
   doc.getElementById('fileJanitorScan').click();
   await settle();
   await settle();
-  assert.match(text(doc), /A newer saved review is available/);
+  assert.match(text(doc), /A newer scan is ready/);
 });
 
 test('a failed forget does not scan, and the button stays', async () => {
@@ -6636,7 +7056,7 @@ test('results survive the batch they emptied, and the empty batch says why', asy
   const body = text(doc);
   assert.match(body, /3 files filed/, 'the outcome must remain visible after the batch empties');
   assert.match(body, /3 → Filed\/Images/, 'one row for the destination, not one line per file');
-  assert.match(body, /Batch complete/);
+  assert.match(body, /Nothing to file\. Inbox is tidy\./);
 });
 
 test('the account of a press survives a redraw of the console, and goes with the tab or a new press', async () => {

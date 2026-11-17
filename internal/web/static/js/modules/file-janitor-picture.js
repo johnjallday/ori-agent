@@ -53,6 +53,67 @@ export function frameTitle(folderName) {
   return folderName + ', after filing';
 }
 
+// How many files each folder card will file, by destination. The console reads this
+// before and after one saved change so it can say what the change did (R66).
+export function folderCounts(picture) {
+  const counts = new Map();
+  for (const folder of picture?.folders || [])
+    counts.set(folder.destination || folder.category || '', {
+      label: folderLabel(folder),
+      count: folder.count || 0
+    });
+  return counts;
+}
+
+// R66: what a screen reader hears after a change, such as "2 files moved to
+// Documents". Said from what the picture now shows against what it showed, never
+// from the request, so it cannot claim a move that did not happen. Folders that
+// gained files are named; when none gained and some lost, those are named instead.
+export function changeAnnouncement(before, after) {
+  if (!before || !after) return '';
+  const gained = [];
+  const lost = [];
+  for (const [key, next] of after) {
+    const was = before.get(key)?.count || 0;
+    if (next.count > was) gained.push(filesWord(next.count - was) + ' moved to ' + next.label);
+    else if (next.count < was)
+      lost.push(filesWord(was - next.count) + ' no longer set to be filed in ' + next.label);
+  }
+  for (const [key, was] of before)
+    if (!after.has(key) && was.count > 0)
+      lost.push(filesWord(was.count) + ' no longer set to be filed in ' + was.label);
+  return (gained.length ? gained : lost).join('. ') + (gained.length || lost.length ? '.' : '');
+}
+
+// R69: a long file name is shortened in the middle, so the start and the extension
+// both show, and the whole name is in the page: it is the text a screen reader reads,
+// it can be copied, and it shows in full on hover and on focus (see the stylesheet).
+// A name that fits is plain text.
+const SHORT_NAME_MAX = 28;
+export function setName(h, node, name) {
+  const text = String(name ?? '');
+  const letters = Array.from(text);
+  if (letters.length <= SHORT_NAME_MAX) {
+    node.textContent = text;
+    return node;
+  }
+  const dot = text.lastIndexOf('.');
+  const extension = dot > 0 && text.length - dot <= 8 ? text.length - dot : 0;
+  const endLength = Math.min(Math.max(extension + 5, 9), 14);
+  // The two halves are separate boxes, which a browser reads with a space between
+  // them. A button says its whole name outright, so a screen reader hears the file's
+  // own name and nothing is lost to the cut.
+  if (String(node.tagName).toUpperCase() === 'BUTTON') node.setAttribute('aria-label', text);
+  const wrap = h('span', 'fj-mid');
+  wrap.title = text;
+  wrap.appendChild(
+    h('span', 'fj-mid-start', letters.slice(0, letters.length - endLength).join(''))
+  );
+  wrap.appendChild(h('span', 'fj-mid-end', letters.slice(letters.length - endLength).join('')));
+  node.appendChild(wrap);
+  return node;
+}
+
 // R2: sentences one and two are fixed. The third must be true for this scan, so
 // it follows what the server says about reading inside files, and is left out
 // rather than guessed when the server cannot say.
@@ -319,7 +380,7 @@ function fileBar(h, ctx) {
     bar.appendChild(h('p', 'fj-sub', FILE_BAR_HINT));
     return bar;
   }
-  const name = h('p', 'fj-file-bar-name', file.name);
+  const name = setName(h, h('p', 'fj-file-bar-name'), file.name);
   name.id = 'fileJanitorFileBarName';
   bar.appendChild(name);
   const select = h('select', 'fj-row-menu');
@@ -368,9 +429,10 @@ function nameList(h, files, className, ctx, { planned: usePlan = false } = {}) {
     const renamed = Boolean(planned?.renamed && planned.final_name);
     const shown = renamed ? planned.final_name : file.name;
     const selectable = Boolean(ctx?.onSelectFile);
-    const item = h('li', 'fj-file', selectable ? undefined : shown);
+    const item = h('li', 'fj-file');
+    if (!selectable) setName(h, item, shown);
     if (selectable) {
-      const control = h('button', 'fj-file-name', shown);
+      const control = setName(h, h('button', 'fj-file-name'), shown);
       control.type = 'button';
       control.id = 'fileJanitorFile-' + file.id;
       control.setAttribute('aria-pressed', ctx.selectedFile?.id === file.id ? 'true' : 'false');
@@ -650,7 +712,7 @@ function rowMenu(h, row, ctx) {
 // "Put the copy back".
 function pairLine(h, file, files, ctx) {
   const line = h('li', 'fj-pair-line');
-  const name = h('button', 'fj-file-name', file.name);
+  const name = setName(h, h('button', 'fj-file-name'), file.name);
   name.type = 'button';
   name.id = 'fileJanitorFile-' + file.id;
   name.setAttribute('aria-pressed', ctx.selectedFile?.id === file.id ? 'true' : 'false');
@@ -807,7 +869,7 @@ function couldNotFile(h, picture, ctx) {
   box.appendChild(h('h4', 'fj-box-title', 'Could not be filed · ' + picture.could_not_file.count));
   const list = h('ul', 'fj-loose-files');
   for (const file of picture.could_not_file.files) {
-    const item = h('li', 'fj-file', file.name);
+    const item = setName(h, h('li', 'fj-file'), file.name);
     if (file.reason) item.appendChild(h('span', 'fj-file-reason', file.reason));
     // R25: a file an earlier attempt left behind can be tried again. It comes back
     // unticked, so trying again never files anything by itself.
@@ -899,6 +961,8 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     pictureAccounting,
     earlierLine,
     folderLabel,
+    folderCounts,
+    changeAnnouncement,
     renderFileBar,
     rowMenuValue,
     rowMenuOptions,

@@ -450,7 +450,7 @@ test.describe('Downloads Janitor', () => {
     await rowFor(page, 'advert.png')
       .getByRole('button', { name: 'Keep here', exact: true })
       .click();
-    await expect(rowFor(page, 'advert.png')).toContainText('Kept in this saved batch');
+    await expect(rowFor(page, 'advert.png')).toContainText('Kept in this scan');
   });
 
   // ------------------------------------------------------------------- apply

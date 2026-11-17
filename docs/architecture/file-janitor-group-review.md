@@ -2,14 +2,18 @@
 
 The feature is shown to users as **Filing**; internal File Janitor identifiers remain unchanged.
 
-Status: contract selected in the task 1.1 characterization spike; implementation
-and acceptance evidence are tracked separately in the feature findings log.
-Base inspected: `48d8e5392857a0517084bf1ce70cf9313530826c`.
+Status: contract selected in the task 1.1 characterization spike and extended by
+the `filing-picture-review` feature (the Review tab is a picture of the folder
+after filing, filed by one press, with a receipt and Undo all). Implementation and
+acceptance evidence are tracked separately in the feature findings log. Base
+inspected: `48d8e5392857a0517084bf1ce70cf9313530826c`.
 
-The **Picture review** section near the end of this document changes four
-clauses below (no group selected on entry, question groups refusing
-`select_group`, preview then confirm, and "Not now"); where they disagree, that
-section wins once the `filing-picture-review` feature has landed.
+Four clauses of the original contract changed with that feature and are rewritten
+in place below: confident folders are ticked on open, a question group can be placed
+with one choice, the plan check and one File request replace preview then confirm,
+and "Not now" became "Leave here". The **Picture review** section near the end
+keeps the new routes, fields and storage, and a table of what each clause said
+before.
 
 ## Authority and compatibility
 
@@ -126,17 +130,23 @@ unknown actions, duplicate IDs, foreign members, invalid categories, and stale
 scope/revisions reject the **entire** transaction. No implicit partial selection.
 Actions: select group, select filing groups, select file, exclude file, set
 category, deselect group, clear group-added choices (Undo), clear all choices,
-mark/unmark per-file Trash, Keep here, and targeted reconsider. Deselect group
-removes all exact move choices in that group but leaves separate Trash marks;
-Undo removes only choices with that group's selection provenance. There is no
-group Trash action.
+mark/unmark per-file Trash, Leave here, stop asking (`keep_group`, `keep_files`),
+and targeted reconsider. Deselect group removes all exact move choices in that
+group but leaves separate Trash marks; Undo removes only choices with that group's
+selection provenance. There is no group Trash action.
 
 Resolve group members under the canonical `UpdateScanState` lock. Group select
 and select-all use the exact revision displayed, not currently fetched member
-pages, not a future rule. Routine select-all excludes every question group,
-unresolved Needs review member, non-actionable/failed member, and existing
-explicit Trash mark. No group is selected on entry. A category edit without a
-selection edits the canonical candidate but leaves it unselected.
+pages, not a future rule. Selecting a **question** group is allowed and requires
+a `category`: it places exactly the members of that group at the revision shown,
+once, in one folder. Routine select-all (`select_filing_groups`) excludes every
+question group, unresolved Needs review member, non-actionable/failed member, and
+existing explicit Trash mark. A scan that has no saved choices opens with every
+filing group ticked (derived on each read, stored only when the person first
+edits; see **Ticked on open**), and Ori never ticks a question group. The tick
+binds to exact files only when File is pressed, at the membership the picture
+showed. A category edit without a selection edits the canonical candidate but
+leaves it unselected.
 
 Use **1,000 choices per batch**, **1,000 candidate IDs per edit**, **10,000 total
 retained draft choices per workspace**, and **256 KiB edit bodies**. Refuse
@@ -148,8 +158,10 @@ of all pages is needed to select a 206-member group. Draft reads also return a
 fixed-vocabulary per-group selection/destination projection, including exact
 selected/Trash/group-added counts and mixed canonical destinations. These are
 read projections, not stored group booleans or another destination map.
-Preview caps its exact plan
-at 1,000 operations; above the cap requires an explicit smaller selection.
+The plan check and the File
+request cap a plan at 1,000 operations; above the cap the picture says so ("Ori files up to
+1,000 files at a time. Untick a folder to continue."), the main button is off, and
+the person unticks a folder to bring it back.
 
 ## Durable intent and schema
 
@@ -209,12 +221,13 @@ folder review/regrant. Mismatched proof, changed reference, revoked access or
 reinstall cannot widen it. Older readers may ignore/drop the optional metadata;
 that loses alias readability on re-upgrade rather than broadening permission.
 
-## Keep here, Not now, and Review again
+## Leave here, stop asking, and Review again
 
 Typed edits `keep_group` and `keep_files` resolve exact displayed IDs under the
 same draft/group CAS and root → scan-state lock. Each current regular-file
-fingerprint is checked; a changed member rejects the entire edit. Keep here
-records existing exact fingerprint skips, marks those candidates
+fingerprint is checked; a changed member rejects the entire edit. **Leave here,
+stop asking** (the menu entry for these edits; the code and journal still call it
+keep) records existing exact fingerprint skips, marks those candidates
 skipped, clears only their staged choices, and invalidates matching unspent
 preview authority in one transaction. It changes no managed file. Existing skip
 retention remains 2,000 newest skips, no age expiry: disclose that changed files
@@ -227,12 +240,25 @@ silently scan, select a replacement, restore old approval, or resurrect the old
 candidate. All-files reads derive `skip_remembered` for kept candidates from the
 canonical skip records, rather than a second remembered-state field. Kept access
 and the saved-batch picker remain available after all candidates are resolved.
-Existing whole-skip-reset endpoint stays compatible. Not now is only
-an accessible collapsed/de-emphasized question in this console: it stays pending
-and reopenable, grants nothing, and sets no timer. Use the same semantics for
-music and versions; do not label it “for now”.
+Existing whole-skip-reset endpoint stays compatible. **Leave here** is the plain
+state a question is in until the person answers it: the files stay pending and
+reachable, nothing is remembered, nothing is granted and no timer runs. There is no
+separate "Not now" on a question or a card. Use the same semantics for music and
+versions; do not label it “for now”.
 
-## Exact preview and confirmation fence
+## The approval fence: plan check, then one File request
+
+The review no longer has a preview step or a confirm screen. `GET .../plan` draws
+the picture's numbers and final file names with **no authority**; one
+`POST .../file` states the plan it saw (the saved-choice revisions, the plan digest
+and the acknowledged Trash count), the server works the plan out again under the
+root lock, and only if it is identical does it issue **and spend** the approval
+inside that request, then apply through the per-file path below. If anything
+differs it moves nothing and returns the fresh plan with the changed files named.
+Everything that follows in this section (token hashing, expiry, consumption,
+idempotency, journal, scope binding, per-item admission) applies unchanged inside
+that request. The older `POST .../preview` and `.../apply` routes stay for
+compatibility and per-file retry, under the same fence.
 
 The existing `PayloadHash` covers candidate IDs, operation, effective category,
 and saved fingerprint, but not selection/deselection intent or current scope.
@@ -281,10 +307,11 @@ change the batch. A handoff already admitted cannot be retroactively undone by
 later revocation; every following item has its own admission. No new executor,
 connector protocol, background continuation or filesystem enumeration is added.
 
-The final preview shows whole-operation/destination totals and a bounded
-50-operation detail page (no mandatory row tour), preserving separate fresh
-Trash acknowledgement. Cancellation and failed confirmation discard captured
-local authority while leaving canonical choices to be reconciled. Canonical
+The plan check returns whole-operation/destination totals and final file names for
+the files the picture draws (no mandatory row tour), and the Trash count is
+acknowledged separately in the request: the tick is never set for the person and
+never restored. A refused or failed press discards captured local authority while
+leaving canonical choices to be reconciled. Canonical
 protection returns pin the concrete batch, reload its winning server draft,
 recheck the saved protection binding and consume the navigation correlation.
 They neither require that batch to remain latest nor replay browser choice IDs;
@@ -315,12 +342,11 @@ These observations describe base `48d8e5392`, not the new grouped path:
 ## Picture review
 
 Contract for the `filing-picture-review` feature (PRD `R` numbers refer to its
-requirements), selected in its task 1.1 on base `3add0ffb6`. It is a contract,
-not a statement of what already runs: each part says which task builds it. When
-the feature ships, task 6.6 folds the four changed clauses below into the text
-above and this section keeps the new routes, fields and storage.
+requirements), selected in its task 1.1 on base `3add0ffb6`. The four clauses
+below have been rewritten in place in the text above; this section keeps what each
+one said before, and the routes, fields and storage the feature added.
 
-### Four clauses change
+### The four clauses that changed
 
 | Clause above | After this feature |
 | --- | --- |
@@ -547,8 +573,9 @@ write, the connector contract (`mcp_mover.go`, the `Mover` interface).
   `state` (`running|done|interrupted`), `admitted_at`, `completed_at`, `filed`,
   `trashed`, `by_destination[{category, destination, count}]`, `not_moved_total`,
   `not_moved[<=50 {candidate_id, name, operation, result: failed|stale, reason}]`
-  (paged with `offset`), `not_attempted`, `loose_now` (files of the scan still
-  waiting), `undo_available`, `undo` (`{state, back, not_back, claimed_at,
+  (paged with `offset`), `not_attempted`, `loose_now` (files still waiting for the
+  folder, in the filed scan or in another scan of it, each file state counted
+  once: a newer scan does not propose a file an earlier pending scan holds), `undo_available`, `undo` (`{state, back, not_back, claimed_at,
   completed_at}` once Undo all was pressed) and `history_trimmed`. Every number
   comes from the journal, so it survives a restart. `undo_available` is true while
   the run has finished, Undo all was not pressed, the folder is the one that was
@@ -609,6 +636,43 @@ ordinary scan. `undo_unavailable` (409) is shown as one sentence and the receipt
 is read again so the button goes; a lost request leaves the button for a retry
 and claims nothing. The History line is `GET .../filings?limit=1`: "Last filing ·
 N files · time" with an **Undo all** link while on offer and "put back" after.
+
+### The backup strip, other states, access (tasks 6.1 to 6.4)
+
+- **Backup strip (R53 to R55).** One sentence and two buttons (**Check protection**,
+  **Not now**) directly above the File button, from `protectionStripSentence`: only
+  for `not_covered`, `unknown` and `configured`, only when the protection fact has a
+  destination and binding, and not once dismissed for that binding. A covered
+  folder, an unreadable state and a dismissed strip show nothing about backups on
+  Review; **Check protection** stays in a Protection section on the Settings tab
+  (disabled with a sentence while there is no scan to return to). A protection trip
+  restores the picture with the saved choices and never the Trash tick.
+- **States (R59 to R64).** Nothing waiting: "Nothing to file. {folder} is tidy." and
+  Scan now, only for a picture that was read and has no file anywhere in it (files the
+  person told Ori to leave are named instead of called tidy). A picture that cannot
+  be read says so with Retry and never draws as tidy. When another saved scan of the
+  folder still has files waiting, "tidy" is not said ("Nothing to file in this scan.")
+  and an earlier scan is named in one line ("N files are still waiting in an earlier
+  scan." with **Show the earlier scan**), because a scan does not propose a file an
+  earlier pending scan holds. A newer scan is one line with
+  **Show the newer scan** and never replaces the open picture. A change from another
+  window is read again and said ("Updated from another window."; a refused save adds
+  "Your last change was not saved."); the manual reload state no longer exists.
+- **Words (R56 to R58).** The Review tab, the All files list, the empty, loading and
+  error states, the receipt, the Undone view and the server messages a person can
+  reach use none of: batch, candidate, proposal, exact, explicitly, draft. A saved
+  choice has no label; the main button says "Saving…" and the footer speaks only
+  when saving failed, a save is out of date or files were taken out. Two console
+  tests render each state and fail on any of those words. The Curator guidance
+  (`internal/filecuratorguidance`, mirrored byte for byte in `.agents/skills`) was
+  rewritten to describe the picture, **Leave here**, **Leave here, stop asking**,
+  **Undo all** and the strip.
+- **Access (R65 to R69).** A persistent visually hidden `role=status` region says what a
+  change did, from the picture before and after ("2 files moved to Documents."). A long
+  file name is shortened in the middle with the whole name in the page (read by a screen
+  reader, copyable, in `title`, opened out on hover and focus). Browser cases cover axe
+  on the picture, receipt and Undone view in both themes, reduced motion, Tab order, the
+  announcement, 390 px and a 200%-zoom-equivalent viewport.
 
 ### Storage (both sides stay at scan state schema 3)
 

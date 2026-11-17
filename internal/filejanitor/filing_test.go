@@ -261,6 +261,40 @@ func TestFileReviewPlan_RevokedAccessBeforeThePressMovesNothing(t *testing.T) {
 	}
 }
 
+// A7: a folder that was relinked (a different folder, or the same one granted
+// again) between the picture and the press is not the folder the person looked at:
+// nothing moves, in either folder, and the plan they read cannot be spent on it.
+func TestFileReviewPlan_ARelinkedFolderBeforeThePressMovesNothing(t *testing.T) {
+	s, batch, _, root := planFixture(t, "a.png", "b.png")
+	mover := &realMover{}
+	s.SetMover(mover)
+	plan := readPlan(t, s, batch.ID, ReviewPlanQuery{})
+	folderBefore := exists(t, root, "Filed")
+	if _, err := s.store.UpdateSettings("ws-1", func(settings *JanitorSettings) error {
+		settings.RootID = "replacement-root"
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	beforeRelinkedState := scanStateBytes(t, s)
+	_, err := s.FileReviewPlan(t.Context(), "local", "ws-1", batch.ID, FileRequest{
+		ExpectedRevision: plan.Revision, ExpectedGroupRevision: plan.GroupRevision,
+		PlanDigest: plan.PlanDigest, ClientKey: keyOne,
+	})
+	if err == nil {
+		t.Fatal("a press after the folder was relinked was accepted")
+	}
+	if mover.calls != 0 || !exists(t, root, "a.png") || !exists(t, root, "b.png") {
+		t.Fatal("a file moved after the folder was relinked")
+	}
+	if exists(t, root, "Filed") != folderBefore {
+		t.Fatalf("a refused press changed whether %q exists (was %v)", "Filed", folderBefore)
+	}
+	if !bytes.Equal(beforeRelinkedState, scanStateBytes(t, s)) {
+		t.Fatal("a refused press left an approval or a filing record behind")
+	}
+}
+
 func TestFileReviewPlan_AnotherPersonsKeyIsAConflictNotAReplay(t *testing.T) {
 	s, batch, _, _ := planFixture(t, "a.png")
 	s.SetMover(&realMover{})

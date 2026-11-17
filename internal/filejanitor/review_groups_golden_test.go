@@ -29,7 +29,7 @@ func goldenGroups(t *testing.T) ReviewGroups {
 		"Song.wav", "Song.als", "Song 2.wav", "solo.mp3",
 		"passport-a.pdf", "tax-return.pdf", "mystery.qqq",
 		"photo.png", "photo (2).png", "a.dmg", "notes.txt",
-		"‮txt.exe", "café menu.pdf", strings.Repeat("long-name-", 40)+".pdf",
+		"\u202etxt.exe", "café menu.pdf", strings.Repeat("long-name-", 40)+".pdf",
 	)
 	return mustGroup(t, batch, candidates)
 }

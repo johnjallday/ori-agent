@@ -21,7 +21,7 @@ func TestVersionEnding_NamesTheKindOfEnding(t *testing.T) {
 		"Budget_version_3.pdf":            EndingVersion,
 		"Budget version.pdf":              EndingNone, // no number, so not a version ending
 		"Résumé (2).pdf":                  EndingNumber,
-		"‮report (2).pdf":                 EndingNumber,
+		"\u202ereport (2).pdf":            EndingNumber,
 		"notes.txt":                       EndingNone,
 		strings.Repeat("a", 1100) + "(2)": EndingNone, // over the name bound: never classified
 	} {
@@ -103,7 +103,7 @@ func TestAnnotateMembers_Bundles(t *testing.T) {
 // The identifiers say nothing about a file: they are a keyed hash, they never repeat
 // a name, they are stable for one scan and they do not carry across scans or scopes.
 func TestAnnotateMembers_IdentifiersAreOpaqueAndStable(t *testing.T) {
-	names := []string{"Budget.pdf", "Budget (2).pdf", "Song.wav", "Song.als", "‮report.pdf", "‮report (2).pdf", "café menu.pdf", "café menu (2).pdf"}
+	names := []string{"Budget.pdf", "Budget (2).pdf", "Song.wav", "Song.als", "\u202ereport.pdf", "\u202ereport (2).pdf", "café menu.pdf", "café menu (2).pdf"}
 	batch, candidates := groupFixture(names...)
 	first := mustGroup(t, batch, candidates)
 	again := mustGroup(t, batch, candidates)
