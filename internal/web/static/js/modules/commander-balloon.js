@@ -383,6 +383,11 @@ class CommanderBalloon {
     show.addEventListener('click', () => this.onShow?.());
     dock.append(arrow, show);
     const body = make('div', 'commander-balloon__body');
+    // Focusable by script only: focusFirst lands here when the first control is
+    // below the fold, and the group is named by the balloon's own title.
+    body.setAttribute('tabindex', '-1');
+    body.setAttribute('role', 'group');
+    body.setAttribute('aria-labelledby', `${this.id}-title`);
     body.addEventListener('scroll', () => {
       this.scrollTop = body.scrollTop;
     });
@@ -623,14 +628,31 @@ class CommanderBalloon {
     return true;
   }
 
+  // focusFirst puts focus where the balloon's content starts, without scrolling
+  // it. A card taller than the balloon (the folder question now carries a names
+  // line, an outcome and a safety line above its buttons) used to be scrolled so
+  // its first control showed, which put the question sentence out of view the
+  // moment the balloon opened. A control that is not in view inside the body
+  // leaves focus on the body itself: the question reads from its top, and Tab
+  // takes the person to the control, which the browser then scrolls into view.
   focusFirst() {
     const nodes = this.nodes;
     if (!nodes) return;
     const first =
       (!nodes.dock.hidden && nodes.show) || firstFocusable(nodes.body) || nodes.close || null;
-    first?.focus?.({ preventScroll: true });
-    // Inside the balloon's own scroll, the focused control comes into view.
-    first?.scrollIntoView?.({ block: 'nearest' });
+    const target = first && this.outOfView(first) ? nodes.body : first;
+    target?.focus?.({ preventScroll: true });
+  }
+
+  // outOfView: whether node, inside the body, is not wholly in the body's visible
+  // area. False when that cannot be told (the body has no height yet).
+  outOfView(node) {
+    const body = this.nodes?.body;
+    if (!node || node === body || !body?.contains?.(node)) return false;
+    const host = body.getBoundingClientRect?.();
+    const rect = node.getBoundingClientRect?.();
+    if (!host || !rect || !(host.height > 0)) return false;
+    return rect.top < host.top - 0.5 || rect.bottom > host.bottom + 0.5;
   }
 
   // collapse closes the balloon; returnFocus sends focus back to the unit.

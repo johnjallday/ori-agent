@@ -509,6 +509,64 @@ test('the small face slots keep the figure free of the card’s plate and star',
   );
 });
 
+// FR31, demo finding 7.1b: opening the balloon scrolled its first control into
+// view, so a card taller than the balloon (the folder question: sentence, names,
+// outcome, safety line, then the buttons) opened with the question sentence
+// scrolled out of sight above the buttons. Opening never scrolls the body now.
+test('opening a balloon whose first control is below the fold keeps the question in view', () => {
+  resetCommanderBalloons();
+  const doc = fakeDocument();
+  const { root, unit } = mapRoot(doc);
+  const balloon = commanderBalloon('ws:tall', { doc, now: () => 0, setTimer: () => 1 });
+  balloon.attach(root, { anchor: () => unit, narrow: () => false });
+  balloon.update(reportContent(doc));
+  const body = balloon.nodes.body;
+  const goal = body.querySelector('.goal');
+  let scrolled = 0;
+  goal.scrollIntoView = () => (scrolled += 1);
+  body.scrollIntoView = () => (scrolled += 1);
+
+  assert.equal(body.getAttribute('tabindex'), '-1', 'the body can take script focus');
+  assert.equal(body.getAttribute('role'), 'group');
+  assert.match(body.getAttribute('aria-labelledby'), /-title$/);
+
+  // The body shows 100 px (top 100); the control sits at 250: not in view.
+  body.rect = { left: 0, top: 100, width: 360, height: 100 };
+  goal.rect = { left: 0, top: 250, width: 200, height: 44 };
+  body.scrollTop = 0;
+  assert.equal(balloon.expand(), true);
+  assert.equal(doc.activeElement, body, 'focus waits on the body, not on a control no one can see');
+  assert.equal(body.scrollTop, 0, 'the question is still at the top');
+  assert.equal(scrolled, 0, 'nothing was scrolled into view');
+  assert.equal(balloon.outOfView(goal), true);
+
+  // Closing and opening again, and the "and N more" step, behave the same.
+  balloon.collapse({ returnFocus: false });
+  assert.equal(balloon.expand(), true);
+  assert.equal(doc.activeElement, body);
+  assert.equal(body.scrollTop, 0);
+
+  // A control that is in view takes focus, as before, still without scrolling.
+  goal.rect = { left: 0, top: 120, width: 200, height: 44 };
+  balloon.collapse({ returnFocus: false });
+  assert.equal(balloon.expand(), true);
+  assert.equal(doc.activeElement, goal);
+  assert.equal(balloon.outOfView(goal), false);
+  assert.equal(scrolled, 0);
+
+  // A control cut by the body's lower edge counts as out of view; one wholly
+  // inside, or a body with no height yet, does not.
+  goal.rect = { left: 0, top: 180, width: 200, height: 44 };
+  assert.equal(balloon.outOfView(goal), true);
+  goal.rect = { left: 0, top: 156, width: 200, height: 44 };
+  assert.equal(balloon.outOfView(goal), false);
+  body.rect = { left: 0, top: 100, width: 360, height: 0 };
+  goal.rect = { left: 0, top: 900, width: 200, height: 44 };
+  assert.equal(balloon.outOfView(goal), false, 'no layout yet: cannot tell, so focus the control');
+  assert.equal(balloon.outOfView(null), false);
+  assert.equal(balloon.outOfView(body), false);
+});
+
 test('three mounts within 100 ms keep one expanded balloon with its content and focus', () => {
   resetCommanderBalloons();
   const doc = fakeDocument();

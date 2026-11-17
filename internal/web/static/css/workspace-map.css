@@ -4833,6 +4833,12 @@
   overscroll-behavior: contain;
 }
 
+/* Script focus lands here when the first control is below the fold. */
+.commander-balloon__body:focus-visible {
+  outline: 2px solid var(--cozy-accent, currentColor);
+  outline-offset: -2px;
+}
+
 /* The card inside drops its own frame: the balloon is the frame. */
 .commander-balloon__body .folder-agent-card {
   border: 0;
