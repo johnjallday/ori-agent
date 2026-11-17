@@ -8,7 +8,9 @@ import {
   realpathSync,
   chmodSync,
   symlinkSync,
-  readdirSync
+  readdirSync,
+  readFileSync,
+  statSync
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -27,13 +29,21 @@ const old = new Date(Date.now() - 60 * 60 * 1000);
 
 test.describe.configure({ mode: 'serial' });
 
-function syntheticRoot(names: string[]) {
+// A file's content, and optionally the time it was last changed. Most fixtures do not
+// care and share one short text; the pair and bundle cases choose sizes and days.
+type Fixture = string | { text: string; mtime?: Date };
+
+function syntheticRoot(names: string[], contents: Record<string, Fixture> = {}) {
   const temp = realpathSync(tmpdir());
   const root = realpathSync(mkdtempSync(join(temp, 'ori-group-review-')));
   if (!root.startsWith(temp) || root === temp) throw new Error('Non-temporary fixture');
   for (const name of names) {
-    writeFileSync(join(root, name), 'Synthetic group review fixture', { mode: 0o600 });
-    utimesSync(join(root, name), old, old);
+    const chosen = contents[name];
+    const text =
+      typeof chosen === 'string' ? chosen : (chosen?.text ?? 'Synthetic group review fixture');
+    const mtime = typeof chosen === 'object' && chosen.mtime ? chosen.mtime : old;
+    writeFileSync(join(root, name), text, { mode: 0o600 });
+    utimesSync(join(root, name), mtime, mtime);
   }
   return root;
 }
@@ -59,10 +69,11 @@ async function manualReview(
   request: APIRequestContext,
   names: string[],
   label?: string,
-  useAlias = false
+  useAlias = false,
+  contents: Record<string, Fixture> = {}
 ) {
   const ws = await workspace(request, label);
-  const root = syntheticRoot(names);
+  const root = syntheticRoot(names, contents);
   const referencePath = useAlias
     ? join(
         realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'ori-group-alias-'))),
@@ -534,12 +545,16 @@ test('question groups stay loose and unticked, are described truthfully, and nam
   // The heading counts what is listed under it (the three still loose); the row's
   // note says where the fourth went.
   await expect(console.locator('.fj-loose-label').nth(2)).toHaveText('Music and audio · 3');
-  await expect(
-    console
-      .locator('.fj-loose-row')
-      .filter({ has: page.locator('#fileJanitorRowMenu-audio') })
-      .locator('.fj-row-note')
-  ).toHaveText('1 in Trash');
+  const audioRow = console
+    .locator('.fj-loose-row')
+    .filter({ has: page.locator('#fileJanitorRowMenu-audio') });
+  await expect(audioRow.locator('.fj-row-note:not(.fj-bundle-note)')).toHaveText('1 in Trash');
+  // The four song.* files are one bundle card, which says it is split: the one in
+  // Trash is no longer with the others.
+  await expect(audioRow.locator('.fj-bundle-title')).toHaveText(
+    'song · 4 files · moves or stays together'
+  );
+  await expect(audioRow.locator('.fj-bundle-note')).toHaveText('Split: 3 stay here, 1 in Trash');
   const picture = await pictureOf(request, ws.base);
   expect(drawn(picture)).toBe(9);
   expect(picture.trash.count).toBe(1);
@@ -1584,4 +1599,493 @@ test('a row menu and the one-file bar fit at 390px with a long file name', async
   mkdirSync(evidence, { recursive: true });
   await bar.evaluate(node => node.scrollIntoView({ block: 'center' }));
   await page.screenshot({ path: `${evidence}/03-e2e-bar-390.png`, fullPage: true });
+});
+
+// ------------------------------------------- possible copies and music bundles
+//
+// Possible copies are drawn as pair cards (the file with no ending first, one hint
+// line from size and date) and music that shares a name apart from the extension as
+// bundle cards. "Trash the copy" is a per-file action offered under one rule; a
+// bundle has one menu whose choice covers every file in it. Every choice is a saved
+// edit: nothing moves, and nothing goes to the Trash, until File is pressed.
+
+const bytes = (count: number) => 'x'.repeat(count);
+
+type Root = ReturnType<Page['locator']>;
+
+const pairCard = (console: Root, name: string) =>
+  console.locator('.fj-pair').filter({ hasText: name });
+
+// A bundle's card, found by the name in its heading ("Song 130 · 3 files · ...").
+const bundleCard = (console: Root, name: string) =>
+  console.locator('.fj-bundle').filter({ hasText: `${name} · ` });
+
+// The Trash of the isolated server, found only through the sandbox path the e2e
+// runner hands the spec (`--sandbox-env ORI_E2E_SANDBOX`): the server runs with HOME
+// inside that sandbox, so its Trash is <sandbox>/.Trash. The real Trash is never read.
+function sandboxTrash(): string | null {
+  const sandbox = process.env.ORI_E2E_SANDBOX;
+  if (!sandbox) return null;
+  const real = realpathSync(sandbox);
+  const temp = realpathSync(tmpdir());
+  if (!real.startsWith(temp) || real === temp) throw new Error('The e2e sandbox is not temporary');
+  return join(real, '.Trash');
+}
+
+const focusedElement = (page: Page) =>
+  page.evaluate(() => {
+    const node = document.activeElement;
+    return node ? `${node.tagName.toLowerCase()}${node.id ? '#' + node.id : ''}` : 'none';
+  });
+
+const pairFiles = [
+  'Budget.pdf',
+  'Budget (2).pdf',
+  'Plan.pdf',
+  'Plan copy.pdf',
+  'Memo.pdf',
+  'Memo-v2.pdf'
+];
+const pairContents: Record<string, string> = {
+  'Budget.pdf': bytes(20),
+  'Budget (2).pdf': bytes(20),
+  'Plan.pdf': bytes(20),
+  'Plan copy.pdf': bytes(35), // a different size: never offered "Trash the copy"
+  'Memo.pdf': bytes(20),
+  'Memo-v2.pdf': bytes(20) // the same size, but a version ending: never offered it
+};
+
+test('three kinds of pair: only a copy of the same size with a copy ending has "Trash the copy"', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  const ws = await manualReview(request, pairFiles, 'Three pairs', false, pairContents);
+  const console = await openReview(page, ws.slug);
+  // Possible copies are all questions: nothing is ticked, nothing to file.
+  await expect(fileButton(console)).toHaveText(filesLabel(0));
+  await expect(console.locator('.fj-loose-label')).toHaveText(['Possible copies · 6']);
+  await expect(console.locator('.fj-pair')).toHaveCount(3);
+
+  // The file with no ending comes first in every card, then the one with an ending.
+  await expect(pairCard(console, 'Budget.pdf').locator('.fj-pair-line .fj-file-name')).toHaveText([
+    'Budget.pdf',
+    'Budget (2).pdf'
+  ]);
+  await expect(pairCard(console, 'Plan.pdf').locator('.fj-pair-line .fj-file-name')).toHaveText([
+    'Plan.pdf',
+    'Plan copy.pdf'
+  ]);
+  await expect(pairCard(console, 'Memo.pdf').locator('.fj-pair-line .fj-file-name')).toHaveText([
+    'Memo.pdf',
+    'Memo-v2.pdf'
+  ]);
+  // Each line shows the size and the day it last changed.
+  const facts = /^\d+ B · [A-Z][a-z]{2} \d{1,2}, \d{4}$/;
+  for (const fact of await console.locator('.fj-pair-facts').all())
+    await expect(fact).toHaveText(facts);
+  await expect(pairCard(console, 'Plan.pdf').locator('.fj-pair-facts').nth(1)).toHaveText(
+    /^35 B · /
+  );
+  // One hint line per card, from size and date alone.
+  await expect(pairCard(console, 'Budget.pdf').locator('.fj-pair-hint')).toHaveText(
+    'Same size, same day'
+  );
+  await expect(pairCard(console, 'Plan.pdf').locator('.fj-pair-hint')).toHaveText('Different size');
+  await expect(pairCard(console, 'Memo.pdf').locator('.fj-pair-hint')).toHaveText(
+    'Same size, same day'
+  );
+  // Ori does not compare what is inside files, so it never says "duplicate".
+  await expect(console).not.toContainText(/duplicate|identical/i);
+
+  // The one button: the bracketed copy of the same size as its original.
+  const trashButtons = console.locator('[id^="fileJanitorTrashCopy-"]');
+  await expect(trashButtons).toHaveCount(1);
+  await expect(trashButtons).toHaveAttribute('aria-label', 'Trash the copy Budget (2).pdf');
+  await expect(
+    pairCard(console, 'Budget.pdf').locator('[id^="fileJanitorTrashCopy-"]')
+  ).toHaveCount(1);
+  await expect(pairCard(console, 'Plan.pdf').getByRole('button', { name: /trash/i })).toHaveCount(
+    0
+  );
+  await expect(pairCard(console, 'Memo.pdf').getByRole('button', { name: /trash/i })).toHaveCount(
+    0
+  );
+  // No Trash for a whole row or a whole pair: no menu offers it.
+  for (const menu of await console.locator('select.fj-row-menu').all())
+    await expect(menu.locator('option').filter({ hasText: /trash/i })).toHaveCount(0);
+
+  mkdirSync(evidence, { recursive: true });
+  await console.locator('.fj-loose').evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: `${evidence}/04-e2e-pairs.png`, fullPage: true });
+  // Looking at pairs moves nothing.
+  for (const name of pairFiles) expect(existsSync(join(ws.root, name)), name).toBe(true);
+  expect(destinations(ws.root)).toEqual([]);
+});
+
+test('Trash the copy marks that one file, Put the copy back undoes it, and nothing is trashed until File', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  const ws = await manualReview(
+    request,
+    pairFiles.slice(0, 2),
+    'Trash the copy',
+    false,
+    pairContents
+  );
+  const console = await openReview(page, ws.slug);
+  const edits = draftPosts(page);
+  const filePosts: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && isFileRequest(req.url())) filePosts.push(req.url());
+  });
+  const card = pairCard(console, 'Budget.pdf');
+  const trash = card.getByRole('button', { name: 'Trash the copy Budget (2).pdf', exact: true });
+  await expect(fileButton(console)).toHaveText(filesLabel(0));
+
+  await trash.click();
+  // The line says so, the Trash box holds the one file, and the button waits for the tick.
+  await expect(card.locator('.fj-pair-line').nth(1)).toContainText('in Trash');
+  await expect(
+    card.getByRole('button', { name: 'Put Budget (2).pdf back', exact: true })
+  ).toBeVisible();
+  await expect(console.locator('.fj-trash')).toContainText('Trash · 1');
+  await expect(console.locator('.fj-trash')).toContainText('Budget (2).pdf');
+  await expect(fileButton(console)).toHaveText(filesLabel(0, 1));
+  await expect(fileButton(console)).toBeDisabled();
+  await expect(console.locator('.fj-trash-ack')).toContainText('Yes, move 1 file to Trash');
+  await expect(console.locator('#fileJanitorTrashAck')).not.toBeChecked();
+  // Only the copy is marked: the original has no button and is still loose.
+  await expect(card.locator('.fj-pair-line').nth(0)).not.toContainText('in Trash');
+  mkdirSync(evidence, { recursive: true });
+  await page.screenshot({ path: `${evidence}/04-e2e-trash-copy.png`, fullPage: true });
+
+  // Put it back: the Trash box goes, the button is back, nothing else changed.
+  await card.getByRole('button', { name: 'Put Budget (2).pdf back', exact: true }).click();
+  await expect(console.locator('.fj-trash')).toHaveCount(0);
+  await expect(console.locator('#fileJanitorTrashAck')).toHaveCount(0);
+  await expect(trash).toBeVisible();
+  await expect(fileButton(console)).toHaveText(filesLabel(0));
+  // And mark it again.
+  await trash.click();
+  await expect(console.locator('.fj-trash')).toContainText('Trash · 1');
+  expect(edits).toEqual(['mark_trash', 'unmark_trash', 'mark_trash']);
+
+  // A mark is a saved choice, not an action: both files are still in the folder.
+  for (const name of ['Budget.pdf', 'Budget (2).pdf'])
+    expect(existsSync(join(ws.root, name))).toBe(true);
+  expect(filePosts).toEqual([]);
+  expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
+});
+
+test('pressing File with the Trash tick sends the marked copy to the Trash and leaves the original alone', async ({
+  page,
+  request
+}) => {
+  const trashDir = sandboxTrash();
+  test.skip(
+    !trashDir,
+    'NOT RUN: the runner did not pass the server sandbox (use e2e-fresh.sh --sandbox-env ORI_E2E_SANDBOX), so the isolated Trash cannot be located and the real one is never touched'
+  );
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  const ws = await manualReview(
+    request,
+    pairFiles.slice(0, 2),
+    'Trash the copy press',
+    false,
+    pairContents
+  );
+  const console = await openReview(page, ws.slug);
+  const filePosts: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && isFileRequest(req.url())) filePosts.push(req.url());
+  });
+  await pairCard(console, 'Budget.pdf')
+    .getByRole('button', { name: 'Trash the copy Budget (2).pdf', exact: true })
+    .click();
+  await expect(fileButton(console)).toHaveText(filesLabel(0, 1));
+  await expect(fileButton(console)).toBeDisabled();
+  await console.locator('#fileJanitorTrashAck').check();
+  await expect(fileButton(console)).toBeEnabled();
+  await fileButton(console).click();
+  await expect(console.locator('#fileJanitorResultsSummary')).toContainText('1 moved to Trash', {
+    timeout: 60_000
+  });
+  expect(filePosts).toHaveLength(1);
+  // The copy left the folder and is in the isolated Trash; the original did not move.
+  expect(existsSync(join(ws.root, 'Budget (2).pdf'))).toBe(false);
+  expect(existsSync(join(ws.root, 'Budget.pdf'))).toBe(true);
+  expect(readFileSync(join(ws.root, 'Budget.pdf'), 'utf8')).toBe(pairContents['Budget.pdf']);
+  const trashed = existsSync(trashDir!) ? readdirSync(trashDir!) : [];
+  const copies = trashed.filter(name => name.startsWith('Budget (2)'));
+  expect(copies, `the Trash held ${JSON.stringify(trashed)}`).toHaveLength(1);
+  expect(readFileSync(join(trashDir!, copies[0]), 'utf8')).toBe(pairContents['Budget (2).pdf']);
+  expect(trashed.filter(name => name.startsWith('Budget.pdf'))).toEqual([]);
+  // Trash only: no destination folder was made.
+  expect(destinations(ws.root)).toEqual([]);
+});
+
+const songFiles = [
+  'Song 130.wav',
+  'Song 130.als',
+  'Song 130.mp3',
+  'Take 2.wav',
+  'Take 2.als',
+  'solo.mp3',
+  'one.png'
+];
+
+test('one menu choice sends a bundle to Filed/Audio, and one press files all of its files side by side', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  const ws = await manualReview(request, songFiles, 'Song bundle');
+  const console = await openReview(page, ws.slug);
+  const drafts: { action: string; candidate_ids?: string[]; category?: string }[] = [];
+  const filePosts: string[] = [];
+  page.on('request', req => {
+    if (req.method() !== 'POST') return;
+    if (/\/batches\/[^/]+\/draft$/.test(new URL(req.url()).pathname))
+      drafts.push(req.postDataJSON());
+    if (isFileRequest(req.url())) filePosts.push(req.url());
+  });
+  // Only the confident png is ticked; the music is questions.
+  await expect(fileButton(console)).toHaveText(filesLabel(1));
+  await expect(console.locator('.fj-bundle')).toHaveCount(2);
+  const song = bundleCard(console, 'Song 130');
+  const take = bundleCard(console, 'Take 2');
+  await expect(song.locator('.fj-bundle-title')).toHaveText(
+    'Song 130 · 3 files · moves or stays together'
+  );
+  await expect(take.locator('.fj-bundle-title')).toHaveText(
+    'Take 2 · 2 files · moves or stays together'
+  );
+  for (const name of ['Song 130.wav', 'Song 130.als', 'Song 130.mp3'])
+    await expect(song.getByRole('button', { name, exact: true })).toBeVisible();
+  // The song with no partner is a single, listed beside the bundles in the same row.
+  const audio = console
+    .locator('.fj-loose-row')
+    .filter({ has: page.locator('#fileJanitorRowMenu-audio') });
+  await expect(audio.getByRole('button', { name: 'solo.mp3', exact: true })).toBeVisible();
+  await expect(console.locator('.fj-bundle').getByRole('button', { name: 'solo.mp3' })).toHaveCount(
+    0
+  );
+  await expect(song.locator('select option')).toHaveText([
+    'Leave here',
+    'Leave here, stop asking',
+    'Move to Documents',
+    'Move to Images',
+    'Move to Audio',
+    'Move to Video',
+    'Move to Archives',
+    'Move to Installers',
+    'Move to Data',
+    'Move to Other'
+  ]);
+  await expect(song.locator('select')).toHaveValue('leave');
+
+  // One choice, one request, covering all three files and nothing else.
+  await song.locator('select').selectOption({ label: 'Move to Audio' });
+  await expect(fileButton(console)).toHaveText(filesLabel(4));
+  await expect(song.locator('.fj-bundle-note')).toHaveText('All in Filed/Audio');
+  await expect(song.locator('select')).toHaveValue('move:audio');
+  await expect(take.locator('.fj-bundle-note')).toHaveCount(0);
+  expect(drafts.map(edit => edit.action)).toEqual(['select_files']);
+  expect(drafts[0].category).toBe('audio');
+  expect(drafts[0].candidate_ids).toHaveLength(3);
+  // The files are in the Audio card, tagged as the person's choice; nothing moved yet.
+  const audioCard = console.locator('[data-fj-folder="audio"]');
+  for (const name of ['Song 130.wav', 'Song 130.als', 'Song 130.mp3'])
+    await expect(audioCard).toContainText(name);
+  await expect(audioCard.locator('.fj-tag').filter({ hasText: 'your choice' })).toHaveCount(3);
+  for (const name of songFiles) expect(existsSync(join(ws.root, name)), name).toBe(true);
+  expect(destinations(ws.root)).toEqual([]);
+  expect(filePosts).toEqual([]);
+  mkdirSync(evidence, { recursive: true });
+  await console.locator('.fj-loose').evaluate(node => node.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: `${evidence}/04-e2e-bundles.png`, fullPage: true });
+
+  // One press files the bundle and the png.
+  await fileButton(console).click();
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('4 files filed.', {
+    timeout: 60_000
+  });
+  expect(filePosts).toHaveLength(1);
+  const audioDir = join(ws.root, 'Filed', 'Audio');
+  expect(readdirSync(audioDir).sort()).toEqual(['Song 130.als', 'Song 130.mp3', 'Song 130.wav']);
+  // Side by side: files, not subfolders.
+  for (const name of readdirSync(audioDir))
+    expect(statSync(join(audioDir, name)).isFile(), name).toBe(true);
+  for (const name of ['Song 130.wav', 'Song 130.als', 'Song 130.mp3'])
+    expect(existsSync(join(ws.root, name)), name).toBe(false);
+  // The other bundle, the lone track and nothing else moved.
+  for (const name of ['Take 2.wav', 'Take 2.als', 'solo.mp3'])
+    expect(existsSync(join(ws.root, name)), name).toBe(true);
+  expect(existsSync(join(ws.root, 'Filed', 'Images', 'one.png'))).toBe(true);
+  expect(destinations(ws.root).sort()).toEqual(['Audio', 'Images']);
+});
+
+test('a bundle split by single-file choices says how it is split, and its own "Leave here" takes the placed file back', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  const ws = await manualReview(request, songFiles, 'Split bundle');
+  const console = await openReview(page, ws.slug);
+  const drafts: { action: string; candidate_ids?: string[]; category?: string }[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && /\/batches\/[^/]+\/draft$/.test(new URL(req.url()).pathname))
+      drafts.push(req.postDataJSON());
+  });
+  const song = bundleCard(console, 'Song 130');
+  const menu = song.locator('select');
+  await expect(fileButton(console)).toHaveText(filesLabel(1));
+  await expect(song.locator('.fj-bundle-note')).toHaveCount(0);
+
+  // One file of the bundle goes to Documents from the one-file bar.
+  await fileNamed(song, 'Song 130.als').click();
+  await expect(console.locator('#fileJanitorFileBarName')).toHaveText('Song 130.als');
+  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Move to Documents' });
+  await expect(song.locator('.fj-bundle-note')).toHaveText(
+    'Split: 2 stay here, 1 in Filed/Documents'
+  );
+  // No one folder describes the bundle now: a disabled "Mixed choices" line is selected.
+  await expect(menu).toHaveValue('mixed');
+  await expect(menu.locator('option:checked')).toHaveText('Mixed choices');
+  await expect(fileButton(console)).toHaveText(filesLabel(2));
+  mkdirSync(evidence, { recursive: true });
+  await song.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${evidence}/04-e2e-bundle-split.png`, fullPage: true });
+
+  // Bundle-level "Leave here" takes the placed file back; the bundle is whole again.
+  await menu.selectOption({ label: 'Leave here' });
+  await expect(song.locator('.fj-bundle-note')).toHaveCount(0);
+  await expect(menu).toHaveValue('leave');
+  await expect(fileButton(console)).toHaveText(filesLabel(1));
+  expect(drafts.map(edit => edit.action)).toEqual(['select_files', 'exclude_files']);
+  expect(drafts[1].candidate_ids).toHaveLength(1);
+
+  // A file already in Trash is never overwritten by a bundle choice: it is left out
+  // of the request, stays in the Trash box, and the card counts it.
+  await fileNamed(song, 'Song 130.wav').click();
+  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Move to Trash' });
+  await expect(console.locator('.fj-trash')).toContainText('Song 130.wav');
+  await menu.selectOption({ label: 'Move to Audio' });
+  await expect(song.locator('.fj-bundle-note')).toHaveText('Split: 2 in Filed/Audio, 1 in Trash');
+  expect(drafts.map(edit => edit.action)).toEqual([
+    'select_files',
+    'exclude_files',
+    'mark_trash',
+    'select_files'
+  ]);
+  expect(drafts[3].candidate_ids).toHaveLength(2);
+  await expect(console.locator('.fj-trash')).toContainText('Trash · 1');
+  // Everything above was a choice: nothing moved.
+  for (const name of songFiles) expect(existsSync(join(ws.root, name)), name).toBe(true);
+  expect(destinations(ws.root)).toEqual([]);
+});
+
+test('a bundle menu and "Trash the copy" work by keyboard, and focus stays in the picture afterwards', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1200 });
+  const ws = await manualReview(
+    request,
+    ['Budget.pdf', 'Budget (2).pdf', 'Song 130.wav', 'Song 130.als', 'one.png'],
+    'Keyboard cards',
+    false,
+    { 'Budget.pdf': bytes(20), 'Budget (2).pdf': bytes(20) }
+  );
+  const console = await openReview(page, ws.slug);
+  await expect(fileButton(console)).toHaveText(filesLabel(1));
+  const tabTo = async (target: Root) => {
+    for (let i = 0; i < 150; i++) {
+      if (await target.evaluate(node => node === document.activeElement).catch(() => false)) return;
+      await page.keyboard.press('Tab');
+    }
+    throw new Error('Keyboard target unreachable');
+  };
+  const insideConsole = () =>
+    page.evaluate(() => {
+      const active = document.activeElement;
+      return Boolean(active && active !== document.body && active.closest('#fileJanitorConsole'));
+    });
+
+  // Tab to the bundle menu and choose a folder.
+  const menu = bundleCard(console, 'Song 130').locator('select');
+  await tabTo(menu);
+  await expect(menu).toBeFocused();
+  await menu.selectOption({ label: 'Move to Audio' });
+  await expect(fileButton(console)).toHaveText(filesLabel(3));
+  await expect(bundleCard(console, 'Song 130').locator('.fj-bundle-note')).toHaveText(
+    'All in Filed/Audio'
+  );
+  const afterMenu = await focusedElement(page);
+  expect(
+    await insideConsole(),
+    `focus fell out of the picture after the bundle menu (on ${afterMenu})`
+  ).toBe(true);
+  await expect(menu).toBeFocused();
+
+  // Tab to "Trash the copy" and press Enter. The button becomes "Put the copy back",
+  // so focus has to land on something sensible in the picture, not on the page.
+  const trash = console.locator('[id^="fileJanitorTrashCopy-"]');
+  await tabTo(trash);
+  await expect(trash).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(console.locator('.fj-trash')).toContainText('Budget (2).pdf');
+  await expect(fileButton(console)).toHaveText(filesLabel(3, 1));
+  const afterTrash = await focusedElement(page);
+  expect(
+    await insideConsole(),
+    `focus fell out of the picture after Trash the copy (on ${afterTrash})`
+  ).toBe(true);
+});
+
+test('a pair card and a bundle card fit at 390px with long file names', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const stem = 'quarterly-budget-report-final-for-the-overflow-check-with-a-long-name-2026';
+  const song = 'a-very-long-song-title-for-the-overflow-check-take-one-hundred-and-thirty';
+  const ws = await manualReview(
+    request,
+    [`${stem}.pdf`, `${stem} (2).pdf`, `${song}.wav`, `${song}.als`, 'one.png'],
+    'Narrow cards',
+    false,
+    { [`${stem}.pdf`]: bytes(20), [`${stem} (2).pdf`]: bytes(20) }
+  );
+  const console = await openReview(page, ws.slug);
+  await expect(fileButton(console)).toHaveText(filesLabel(1));
+  const fits = async () => {
+    expect(await console.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
+    ).toBe(true);
+  };
+  await fits();
+  for (const card of [console.locator('.fj-pair'), console.locator('.fj-bundle')]) {
+    await card.scrollIntoViewIfNeeded();
+    const box = await card.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(391);
+  }
+  const menu = console.locator('.fj-bundle select');
+  const menuBox = await menu.boundingBox();
+  expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(391);
+  expect(menuBox!.height).toBeGreaterThanOrEqual(44);
+  // Trash the copy, and place the bundle: still no overflow, and the lines wrap.
+  await console.locator('[id^="fileJanitorTrashCopy-"]').click();
+  await expect(console.locator('.fj-trash')).toContainText('Trash · 1');
+  await menu.selectOption({ label: 'Move to Audio' });
+  await expect(console.locator('.fj-bundle-note')).toHaveText('All in Filed/Audio');
+  await fits();
+  mkdirSync(evidence, { recursive: true });
+  await console.locator('.fj-pair').evaluate(node => node.scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: `${evidence}/04-e2e-pairs-390.png`, fullPage: true });
 });

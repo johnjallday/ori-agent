@@ -2,6 +2,7 @@ package filejanitorhttp
 
 import (
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -103,6 +104,65 @@ func TestReviewPictureFilesHTTP_RefusesWhatItCannotPageHonestly(t *testing.T) {
 
 // A scan with nothing waiting is a known empty picture; a workspace whose folder
 // is not set up is unavailable. An error is never drawn as a tidy, empty folder.
+// R26, R31: the picture's possible-copies row carries pair cards and its music row
+// carries bundle cards, each with an opaque identifier; a card pages by that
+// identifier, on both prefixes, pinned to the revisions on screen.
+func TestReviewPictureHTTP_PairsAndBundlesPageByIdentifier(t *testing.T) {
+	h, _ := pictureHandler(t, mixedPictureFiles(0))
+	var canonical map[string]any
+	for _, prefix := range routePrefixPair {
+		_, picture, raw := readPicture(t, h, prefix.prefix)
+		if canonical != nil && !reflect.DeepEqual(canonical, picture) {
+			t.Fatal("canonical and legacy pictures diverged")
+		}
+		canonical = picture
+		rows := map[string]map[string]any{}
+		for _, item := range picture["loose"].([]any) {
+			row := item.(map[string]any)
+			rows[row["key"].(string)] = row
+		}
+		pairs := rows["versions"]["pairs"].([]any)
+		bundles := rows["audio"]["bundles"].([]any)
+		if len(pairs) != 1 || len(bundles) != 1 {
+			t.Fatalf("%s: one pair and one bundle expected: %v %v", prefix.name, pairs, bundles)
+		}
+		pair, bundle := pairs[0].(map[string]any), bundles[0].(map[string]any)
+		if pair["count"] != float64(3) || bundle["count"] != float64(2) || bundle["name"] != "Song" {
+			t.Fatalf("%s: pair %v bundle %v", prefix.name, pair, bundle)
+		}
+		first := pair["files"].([]any)[0].(map[string]any)
+		if first["name"] != "Budget.pdf" || first["ending"] != "none" || !strings.HasPrefix(first["family_id"].(string), "fam-") {
+			t.Fatalf("%s: the original comes first with its ending and family: %v", prefix.name, first)
+		}
+		for _, id := range []string{pair["family_id"].(string), bundle["bundle_id"].(string)} {
+			if strings.Contains(strings.ToLower(id), "budget") || strings.Contains(strings.ToLower(id), "song") {
+				t.Fatalf("%s: identifier %q names a file", prefix.name, id)
+			}
+		}
+		_ = raw
+
+		pin := "&revision=" + picture["revision"].(string) + "&draft_revision=" + picture["draft_revision"].(string)
+		for section, key := range map[string]string{"family": pair["family_id"].(string), "bundle": bundle["bundle_id"].(string)} {
+			rec, body := serve(t, h, http.MethodGet, pictureFilesTarget(prefix.prefix, "section="+section+"&key="+key+"&limit=50"+pin), "")
+			if rec.Code != http.StatusOK {
+				t.Fatalf("%s %s: %d %s", prefix.name, section, rec.Code, rec.Body.String())
+			}
+			page := body["page"].(map[string]any)
+			want := float64(3)
+			if section == "bundle" {
+				want = 2
+			}
+			if page["total"] != want || len(page["files"].([]any)) != int(want) {
+				t.Fatalf("%s %s: the whole card, %v", prefix.name, section, page)
+			}
+		}
+		rec, _ := serve(t, h, http.MethodGet, pictureFilesTarget(prefix.prefix, "section=family&key=../etc&limit=50"+pin), "")
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: a malformed key must be refused, got %d", prefix.name, rec.Code)
+		}
+	}
+}
+
 func TestReviewPictureHTTP_KnownEmptyIsNotUnavailable(t *testing.T) {
 	empty, _ := groupHandler(t, 0)
 	_, picture, _ := readPicture(t, empty, "file-janitor")

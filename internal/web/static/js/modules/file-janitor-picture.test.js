@@ -11,7 +11,14 @@ import {
   LOOSE_LABELS,
   LOOSE_WHY,
   OVER_LIMIT_NOTE,
+  PAIR_BANNED_WORDS,
+  bundleMenuValue,
+  bundleNote,
   earlierLine,
+  formatDay,
+  formatSize,
+  pairHint,
+  trashCopyAllowed,
   fileButtonModel,
   fileMenuOptions,
   renderFileBar,
@@ -909,6 +916,365 @@ test('"Try again" is offered only for a file an earlier attempt can retry (R25)'
   assert.equal(retries[0].getAttribute('aria-label'), 'Try failed.pdf again');
   retries[0].fire('click');
   assert.deepEqual(retried, ['failed.pdf']);
+});
+
+// ------------------------------------------------------ pairs and bundles
+
+const noon = day => '2026-11-' + String(day).padStart(2, '0') + 'T12:00:00Z';
+const copyFile = (name, ending, extra = {}) => ({
+  id: 'id-' + name,
+  name,
+  size: 2048,
+  modified_at: noon(10),
+  placement: 'loose',
+  ending,
+  family_id: 'fam-' + '0'.repeat(24),
+  ...extra
+});
+const pairPicture = (files, extra = {}) =>
+  pictureFixture({
+    loose: [
+      {
+        group_id: 'g-ver',
+        key: 'versions',
+        count: files.length,
+        placed_count: 0,
+        trash_count: 0,
+        loose_count: files.length,
+        singles: [],
+        pairs: [
+          { family_id: 'fam-' + '0'.repeat(24), count: files.length, files, more: 0, ...extra }
+        ],
+        bundles: [],
+        more: 0
+      }
+    ]
+  });
+
+test('"Trash the copy" follows the rule table exactly (R28)', () => {
+  const original = copyFile('Budget.pdf', 'none');
+  const card = (...extra) => [original, ...extra];
+  const copy = copyFile('Budget (2).pdf', 'number');
+  assert.equal(trashCopyAllowed(copy, card(copy)), true, 'a bracketed number, same size');
+  const wordCopy = copyFile('Budget copy 2.pdf', 'copy');
+  assert.equal(trashCopyAllowed(wordCopy, card(wordCopy)), true, '"copy" and "copy 2"');
+  // The higher version may be the one to keep: never offered.
+  for (const ending of ['v', 'version'])
+    assert.equal(
+      trashCopyAllowed(copyFile('Budget v2.pdf', ending), card(copyFile('Budget v2.pdf', ending))),
+      false,
+      ending
+    );
+  const bigger = copyFile('Budget (2).pdf', 'number', { size: 4096 });
+  assert.equal(trashCopyAllowed(bigger, card(bigger)), false, 'different size');
+  assert.equal(trashCopyAllowed(copy, [copy]), false, 'no file without an ending in the card');
+  assert.equal(
+    trashCopyAllowed(copy, [original, copyFile('Budget.PDF', 'none', { id: 'x' }), copy]),
+    false,
+    'two files without an ending'
+  );
+  assert.equal(trashCopyAllowed(original, card(copy)), false, 'the original is never a copy');
+  assert.equal(
+    trashCopyAllowed({ ...copy, placement: 'trash' }, card(copy)),
+    false,
+    'already in Trash'
+  );
+  assert.equal(
+    trashCopyAllowed({ ...copy, placement: 'filed' }, card(copy)),
+    false,
+    'already placed'
+  );
+  assert.equal(trashCopyAllowed(null, card(copy)), false);
+});
+
+test('the hint line comes from size and date only (R27)', () => {
+  const a = copyFile('a.pdf', 'none');
+  assert.equal(pairHint([a, copyFile('b.pdf', 'number')]), 'Same size, same day');
+  assert.equal(
+    pairHint([a, copyFile('b.pdf', 'number', { modified_at: noon(11) })]),
+    'Same size, different day'
+  );
+  assert.equal(pairHint([a, copyFile('b.pdf', 'number', { size: 1 })]), 'Different size');
+  // Three files: any different size means different size; all alike means same.
+  assert.equal(
+    pairHint([a, copyFile('b', 'number'), copyFile('c', 'copy', { size: 9 })]),
+    'Different size'
+  );
+  assert.equal(
+    pairHint([a, copyFile('b', 'number'), copyFile('c', 'copy')]),
+    'Same size, same day'
+  );
+  // A date nobody knows is never claimed to be the same day.
+  assert.equal(
+    pairHint([a, copyFile('b.pdf', 'number', { modified_at: '' })]),
+    'Same size, different day'
+  );
+  assert.equal(pairHint([a]), '');
+  for (const hint of ['Same size, same day', 'Same size, different day', 'Different size'])
+    for (const word of PAIR_BANNED_WORDS) assert.doesNotMatch(hint.toLowerCase(), new RegExp(word));
+});
+
+test('sizes and days read plainly', () => {
+  assert.equal(formatSize(0), '0 B');
+  assert.equal(formatSize(1023), '1023 B');
+  assert.equal(formatSize(1024), '1 KB');
+  assert.equal(formatSize(1536), '1.5 KB');
+  assert.equal(formatSize(20 * 1024), '20 KB');
+  assert.equal(formatSize(5 * 1024 * 1024), '5 MB');
+  assert.equal(formatSize(-1), '');
+  assert.equal(formatSize('x'), '');
+  assert.equal(formatDay(noon(10)), 'Nov 10, 2026');
+  assert.equal(formatDay(''), '');
+  assert.equal(formatDay('not a date'), '');
+});
+
+test('a pair card lists the original first with name, size and date, and one hint line (R26, R27)', () => {
+  const files = [
+    copyFile('Budget.pdf', 'none'),
+    copyFile('Budget (2).pdf', 'number'),
+    copyFile('Budget-v2.pdf', 'v', { size: 4096, modified_at: noon(12) })
+  ];
+  const root = renderPicture(doc, pairPicture(files), answerCtx());
+  const card = find(root, node => node.className === 'fj-pair')[0];
+  assert.equal(card.getAttribute('aria-label'), 'Possible copies of Budget.pdf');
+  const lines = find(card, node => node.className === 'fj-pair-line');
+  assert.deepEqual(
+    lines.map(line => textOf(find(line, node => node.className === 'fj-file-name')[0])),
+    ['Budget.pdf', 'Budget (2).pdf', 'Budget-v2.pdf']
+  );
+  assert.equal(
+    textOf(find(lines[0], node => node.className === 'fj-pair-facts')[0]),
+    '2 KB · Nov 10, 2026'
+  );
+  assert.equal(
+    textOf(find(lines[2], node => node.className === 'fj-pair-facts')[0]),
+    '4 KB · Nov 12, 2026'
+  );
+  assert.equal(textOf(find(card, node => node.className === 'fj-pair-hint')[0]), 'Different size');
+  // Only the bracketed copy of the same size as the original has the button: not the
+  // original, and not the higher version (it ends in v2 and has another size).
+  const buttons = find(card, node => node.textContent === 'Trash the copy');
+  assert.deepEqual(
+    buttons.map(button => button.getAttribute('aria-label')),
+    ['Trash the copy Budget (2).pdf']
+  );
+});
+
+test('"Trash the copy" appears on the one line that passes the rule, marks that file, and can be undone (R28, R29)', () => {
+  const marked = [];
+  const original = copyFile('Budget.pdf', 'none');
+  const copy = copyFile('Budget (2).pdf', 'number');
+  const root = renderPicture(
+    doc,
+    pairPicture([original, copy]),
+    answerCtx({ onTrashCopy: file => marked.push(file.name) })
+  );
+  const trash = find(root, node => node.textContent === 'Trash the copy');
+  assert.equal(trash.length, 1);
+  assert.equal(trash[0].getAttribute('aria-label'), 'Trash the copy Budget (2).pdf');
+  trash[0].fire('click');
+  assert.deepEqual(marked, ['Budget (2).pdf']);
+  // After it is marked the line says so and offers the way back; nothing else changes.
+  const back = [];
+  const after = renderPicture(
+    doc,
+    pairPicture([original, { ...copy, placement: 'trash' }]),
+    answerCtx({ onPutBack: file => back.push(file.name) })
+  );
+  const line = find(after, node => node.className === 'fj-pair-line')[1];
+  assert.match(textOf(line), /in Trash/);
+  assert.equal(find(after, node => node.textContent === 'Trash the copy').length, 0);
+  find(line, node => node.textContent === 'Put the copy back')[0].fire('click');
+  assert.deepEqual(back, ['Budget (2).pdf']);
+});
+
+test('there is no Trash action on a row, a pair or a bundle as a whole (R30)', () => {
+  const picture = pairPicture([
+    copyFile('Budget.pdf', 'none'),
+    copyFile('Budget (2).pdf', 'number')
+  ]);
+  picture.loose.push({
+    group_id: 'g-audio',
+    key: 'audio',
+    count: 2,
+    placed_count: 0,
+    trash_count: 0,
+    loose_count: 2,
+    singles: [],
+    pairs: [],
+    bundles: [bundleFixture()],
+    more: 0
+  });
+  const root = renderPicture(doc, picture, answerCtx());
+  for (const select of find(root, node => node.tagName === 'SELECT'))
+    assert.ok(!select.children.some(option => /trash/i.test(textOf(option))), select.id);
+  const trashLabels = find(
+    root,
+    node => /trash/i.test(textOf(node)) && node.tagName === 'BUTTON'
+  ).map(textOf);
+  assert.deepEqual(trashLabels, ['Trash the copy'], 'only the one per-file button');
+});
+
+test('a pair card with more files than it shows opens its own list', () => {
+  const opened = [];
+  const files = [copyFile('Budget.pdf', 'none'), copyFile('Budget (2).pdf', 'number')];
+  const root = renderPicture(
+    doc,
+    pairPicture(files, { count: 9, more: 7 }),
+    answerCtx({ onOpenMore: (section, key) => opened.push([section, key]) })
+  );
+  const more = find(
+    root,
+    node => node.className === 'fj-more' && /and 7 more/.test(textOf(node))
+  )[0];
+  more.fire('click');
+  assert.deepEqual(opened, [['family', 'fam-' + '0'.repeat(24)]]);
+});
+
+function bundleFixture(over = {}) {
+  return {
+    bundle_id: 'bun-' + '1'.repeat(24),
+    name: 'Song 130',
+    count: 5,
+    more: 0,
+    loose_count: 5,
+    placed_count: 0,
+    trash_count: 0,
+    files: ['Song 130.wav', 'Song 130.als', 'Song 130.mp3', 'Song 130.aiff', 'Song 130.flac'].map(
+      (name, i) => ({
+        id: 'id-b' + i,
+        name,
+        size: 100,
+        placement: 'loose',
+        bundle_id: 'bun-' + '1'.repeat(24)
+      })
+    ),
+    ...over
+  };
+}
+
+const audioPicture = bundle =>
+  pictureFixture({
+    loose: [
+      {
+        group_id: 'g-audio',
+        key: 'audio',
+        count: bundle.count + 1,
+        placed_count: bundle.placed_count,
+        trash_count: bundle.trash_count,
+        loose_count: bundle.loose_count + 1,
+        singles: [file('solo.mp3', { placement: 'loose' })],
+        pairs: [],
+        bundles: [bundle],
+        more: 0
+      }
+    ]
+  });
+
+test('a bundle card says what it is and moves or stays together (R31)', () => {
+  const root = renderPicture(doc, audioPicture(bundleFixture()), answerCtx());
+  const card = find(root, node => node.className === 'fj-bundle')[0];
+  assert.equal(
+    textOf(find(card, node => node.className === 'fj-bundle-title')[0]),
+    'Song 130 · 5 files · moves or stays together'
+  );
+  assert.equal(find(card, node => node.className === 'fj-file').length, 5, 'the names are inside');
+  // Each can still be selected by itself (R33).
+  const selectable = renderPicture(
+    doc,
+    audioPicture(bundleFixture()),
+    answerCtx({ onSelectFile: () => {} })
+  );
+  assert.equal(
+    find(
+      find(selectable, node => node.className === 'fj-bundle')[0],
+      node => node.className === 'fj-file-name'
+    ).length,
+    5
+  );
+  // The single song with no partner is listed beside the bundle, in the same row.
+  const row = find(root, node => node.getAttribute('data-fj-group') === 'g-audio')[0];
+  const singles = find(row, node => node.className === 'fj-loose-files').filter(
+    list => !card.all(n => n === list).length
+  );
+  assert.ok(singles.some(list => /solo\.mp3/.test(textOf(list))));
+});
+
+test('a bundle menu has the same choices as a row menu and one choice covers the whole bundle (R32)', () => {
+  const chosen = [];
+  const bundle = bundleFixture();
+  const root = renderPicture(
+    doc,
+    audioPicture(bundle),
+    answerCtx({ onBundleChoice: (item, choice) => chosen.push([item.name, choice]) })
+  );
+  const menu = find(root, node => node.id === 'fileJanitorBundleMenu-' + bundle.bundle_id)[0];
+  assert.deepEqual(options(menu), [
+    'leave',
+    'stop',
+    'move:documents',
+    'move:images',
+    'move:archives'
+  ]);
+  assert.equal(menu.children.find(option => option.selected).value, 'leave');
+  assert.match(menu.getAttribute('aria-label'), /^Song 130: what to do with these 5 files$/);
+  menu.value = 'move:archives';
+  menu.fire('change');
+  assert.deepEqual(chosen, [['Song 130', { kind: 'move', category: 'archives' }]]);
+});
+
+test('a bundle that is not all in one place says how it is split, in plain words (R33)', () => {
+  const dest = answerCtx();
+  const note = over => bundleNote(bundleFixture(over), dest);
+  assert.equal(note({}), '', 'all loose: nothing to say');
+  assert.equal(
+    note({ loose_count: 0, placed_count: 5, placed_category: 'archives' }),
+    'All in Filed/Archives'
+  );
+  assert.equal(
+    note({ loose_count: 4, placed_count: 1, placed_category: 'archives' }),
+    'Split: 4 stay here, 1 in Filed/Archives'
+  );
+  assert.equal(
+    note({ loose_count: 1, placed_count: 4, placed_category: 'archives' }),
+    'Split: 1 stays here, 4 in Filed/Archives'
+  );
+  assert.equal(
+    note({ loose_count: 2, placed_count: 2, placed_category: '', trash_count: 1 }),
+    'Split: 2 stay here, 2 placed in other folders, 1 in Trash'
+  );
+  assert.equal(bundleMenuValue(bundleFixture({ loose_count: 4, placed_count: 1 })), 'mixed');
+  assert.equal(
+    bundleMenuValue(bundleFixture({ loose_count: 0, placed_count: 5, placed_category: 'images' })),
+    'move:images'
+  );
+  const drawn = renderPicture(
+    doc,
+    audioPicture(bundleFixture({ loose_count: 4, placed_count: 1, placed_category: 'archives' })),
+    dest
+  );
+  assert.equal(
+    textOf(find(drawn, node => node.className === 'fj-row-note fj-bundle-note')[0]),
+    'Split: 4 stay here, 1 in Filed/Archives'
+  );
+});
+
+test('no word on a pair or a bundle claims what Ori has not checked, or is a retired word', () => {
+  const picture = audioPicture(
+    bundleFixture({ loose_count: 4, placed_count: 1, placed_category: 'archives' })
+  );
+  picture.loose.push(
+    pairPicture([
+      copyFile('Budget.pdf', 'none'),
+      copyFile('Budget (2).pdf', 'number', { placement: 'trash' })
+    ]).loose[0]
+  );
+  const text = find(renderPicture(doc, picture, answerCtx()), () => true)
+    .map(node => node._text)
+    .join(' ')
+    .toLowerCase();
+  for (const word of [...BANNED_WORDS, ...PAIR_BANNED_WORDS])
+    assert.doesNotMatch(text, new RegExp('\\b' + word + '\\b'), word);
 });
 
 test('the border tokens exist wherever the picture and the footer use them', () => {

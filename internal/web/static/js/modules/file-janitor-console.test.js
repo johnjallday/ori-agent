@@ -4041,6 +4041,8 @@ async function groupedReviewFixture(count = 206) {
     refuseMemberChanged: false,
     removedStale: 0,
     couldNot: [],
+    decorateRow: null,
+    sectionFiles: null,
     editGate: null,
     // The plan check and the File request, answered like the server's.
     planCalls: 0,
@@ -4231,10 +4233,15 @@ async function groupedReviewFixture(count = 206) {
               trash_count: lists.trash.length,
               loose_count: lists.loose.length,
               singles: entries(lists.loose, 'loose', 12),
+              pairs: [],
+              bundles: [],
               more: Math.max(0, lists.loose.length - 12)
             }
           ]
         : [];
+    // A test that wants pair or bundle cards draws them over the one row.
+    if (state.decorateRow)
+      for (let i = 0; i < loose.length; i++) loose[i] = state.decorateRow(loose[i], lists);
     const view = {
       batch_id: state.batch.id,
       revision: state.review.revision,
@@ -4285,6 +4292,23 @@ async function groupedReviewFixture(count = 206) {
       const list = pictureLists()[section] || [];
       const offset = Number(query.get('offset'));
       const limit = Number(query.get('limit'));
+      if (state.sectionFiles?.[section]) {
+        // A card's whole list, each member with where it is now.
+        const all = state.sectionFiles[section]();
+        return reply({
+          page: {
+            batch_id: state.batch.id,
+            revision: view.revision,
+            draft_revision: view.draft_revision,
+            section,
+            key: query.get('key'),
+            total: all.length,
+            limit,
+            offset,
+            files: all.slice(offset, offset + limit)
+          }
+        });
+      }
       return reply({
         page: {
           batch_id: state.batch.id,
@@ -5889,6 +5913,217 @@ test('after "stop asking" focus is on the note that replaced the menu, and Revie
   // Nothing is waiting, so the File button is disabled and cannot take focus: it
   // lands on the picture itself, and stays there through the next redraw.
   assert.equal(doc.activeElement, doc.getElementById('fileJanitorPicture'));
+});
+
+// ------------------------------------------ possible copies and music bundles
+
+// Where each file of a card is now, from the fixture's saved choices.
+function cardFile(state, candidates, index, extra = {}) {
+  const candidate = candidates[index];
+  const choice = state.choices.find(item => item.candidate_id === candidate.id);
+  return {
+    id: candidate.id,
+    name: candidate.name,
+    size: 2048,
+    modified_at: '2026-11-10T12:00:00Z',
+    placement: choice?.operation === 'trash' ? 'trash' : choice ? 'filed' : 'loose',
+    category: candidate.decision_category || undefined,
+    ...extra
+  };
+}
+
+async function copiesFixture() {
+  const fixture = await questionRowFixture(3);
+  const { state, candidates } = fixture;
+  Object.assign(state.review.groups[0], { key: 'versions', label: 'Possible copies' });
+  const family = 'fam-' + 'a'.repeat(24);
+  state.decorateRow = row => ({
+    ...row,
+    key: 'versions',
+    singles: [],
+    pairs: [
+      {
+        family_id: family,
+        count: 2,
+        more: 0,
+        files: [
+          cardFile(state, candidates, 0, { ending: 'none', family_id: family }),
+          cardFile(state, candidates, 1, { ending: 'number', family_id: family })
+        ]
+      }
+    ]
+  });
+  await panel._reloadBatch();
+  await panel._planNow();
+  return fixture;
+}
+
+test('Trash the copy marks that one file, the line says so, Put the copy back undoes it, nothing is filed (R28, R29)', async () => {
+  const { doc, calls } = await copiesFixture();
+  const card = surface(doc).all(node => String(node.className) === 'fj-pair')[0];
+  assert.equal(
+    card.all(node => node.className === 'fj-pair-hint')[0].textContent,
+    'Same size, same day'
+  );
+  // The original has no button; the bracketed copy of the same size has one.
+  assert.equal(doc.getElementById('fileJanitorTrashCopy-group-member-0'), null);
+  doc.getElementById('fileJanitorTrashCopy-group-member-1').click();
+  await planSettled();
+  const [mark] = draftEdits(calls);
+  assert.deepEqual([mark.action, mark.candidate_ids], ['mark_trash', ['group-member-1']]);
+  assert.equal(mark.group_id, undefined, 'one file, never a row or a pair');
+  const line = surface(doc).all(node => node.className === 'fj-pair-line')[1];
+  assert.match(line.textContent, /in Trash/);
+  assert.match(surface(doc).textContent, /Trash · 1/);
+  assert.equal(pressButton(doc).textContent, 'Move 1 file to Trash');
+  assert.ok(
+    !calls.some(call => /\/file$/.test(call.target)),
+    'nothing goes to the Trash until File'
+  );
+  doc.getElementById('fileJanitorPutBack-group-member-1').click();
+  await planSettled();
+  assert.equal(draftEdits(calls)[1].action, 'unmark_trash');
+  assert.doesNotMatch(surface(doc).textContent, /Trash · 1/);
+  assert.ok(doc.getElementById('fileJanitorTrashCopy-group-member-1'), 'the button is back');
+  assert.equal(pressButton(doc).textContent, 'Nothing to file');
+});
+
+test('a copy of a different size gets no Trash button', async () => {
+  const { doc, state, candidates } = await copiesFixture();
+  const family = 'fam-' + 'a'.repeat(24);
+  state.decorateRow = row => ({
+    ...row,
+    singles: [],
+    pairs: [
+      {
+        family_id: family,
+        count: 2,
+        more: 0,
+        files: [
+          cardFile(state, candidates, 0, { ending: 'none', family_id: family }),
+          cardFile(state, candidates, 1, { ending: 'number', family_id: family, size: 4096 })
+        ]
+      }
+    ]
+  });
+  await panel._reloadBatch();
+  assert.equal(doc.getElementById('fileJanitorTrashCopy-group-member-1'), null);
+  assert.match(surface(doc).textContent, /Different size/);
+});
+
+async function bundleFixtureOnPage(more = false) {
+  const fixture = await questionRowFixture(3);
+  const { state, candidates } = fixture;
+  Object.assign(state.review.groups[0], { key: 'audio', label: 'Music and audio' });
+  const bundleId = 'bun-' + 'b'.repeat(24);
+  const members = () =>
+    [0, 1, 2].map(index => cardFile(state, candidates, index, { bundle_id: bundleId }));
+  state.decorateRow = row => {
+    const all = members();
+    const shown = more ? all.slice(0, 1) : all;
+    const count = placement => all.filter(file => file.placement === placement).length;
+    const placedIn = [
+      ...new Set(all.filter(file => file.placement === 'filed').map(file => file.category))
+    ];
+    return {
+      ...row,
+      key: 'audio',
+      singles: [],
+      bundles: [
+        {
+          bundle_id: bundleId,
+          name: 'Song 130',
+          count: all.length,
+          more: all.length - shown.length,
+          files: shown,
+          loose_count: count('loose'),
+          placed_count: count('filed'),
+          placed_category: placedIn.length === 1 ? placedIn[0] : '',
+          trash_count: count('trash')
+        }
+      ]
+    };
+  };
+  state.sectionFiles = { bundle: members };
+  await panel._reloadBatch();
+  await panel._planNow();
+  return { ...fixture, bundleId };
+}
+
+test('one choice on a bundle moves every file in it to one folder, and the card says where they are (R32)', async () => {
+  const { doc, calls, bundleId } = await bundleFixtureOnPage();
+  const title = surface(doc).all(node => node.className === 'fj-bundle-title')[0];
+  assert.equal(title.textContent, 'Song 130 · 3 files · moves or stays together');
+  choose(doc.getElementById('fileJanitorBundleMenu-' + bundleId), 'move:documents');
+  await planSettled();
+  const [edit] = draftEdits(calls);
+  assert.equal(edit.action, 'select_files');
+  assert.deepEqual(edit.candidate_ids.sort(), [
+    'group-member-0',
+    'group-member-1',
+    'group-member-2'
+  ]);
+  assert.equal(edit.category, 'documents');
+  assert.equal(
+    surface(doc).all(node => node.className === 'fj-row-note fj-bundle-note')[0].textContent,
+    'All in Filed/Documents'
+  );
+  assert.equal(pressButton(doc).textContent, 'File 3 files');
+});
+
+test('a bundle with more files than the card shows still moves all of them', async () => {
+  const { doc, calls, bundleId } = await bundleFixtureOnPage(true);
+  choose(doc.getElementById('fileJanitorBundleMenu-' + bundleId), 'move:archives');
+  await planSettled();
+  assert.ok(
+    calls.some(call => call.target.includes('/picture/files?section=bundle&key=' + bundleId)),
+    'the rest of the bundle was read before the choice'
+  );
+  const [edit] = draftEdits(calls);
+  assert.deepEqual(edit.candidate_ids.sort(), [
+    'group-member-0',
+    'group-member-1',
+    'group-member-2'
+  ]);
+});
+
+test('a bundle split by single-file choices says how it is split (R33), and Leave here takes it all back', async () => {
+  const { doc, calls, bundleId } = await bundleFixtureOnPage();
+  // One of the three goes to Documents by itself, from the one-file bar.
+  doc.getElementById('fileJanitorFile-group-member-0').click();
+  choose(doc.getElementById('fileJanitorFileMenu'), 'move:documents');
+  await planSettled();
+  const note = surface(doc).all(node => node.className === 'fj-row-note fj-bundle-note')[0];
+  assert.equal(note.textContent, 'Split: 2 stay here, 1 in Filed/Documents');
+  assert.equal(
+    doc.getElementById('fileJanitorBundleMenu-' + bundleId).children.find(option => option.selected)
+      .value,
+    'mixed'
+  );
+  choose(doc.getElementById('fileJanitorBundleMenu-' + bundleId), 'leave');
+  await planSettled();
+  const edits = draftEdits(calls);
+  assert.deepEqual(
+    [edits[1].action, edits[1].candidate_ids],
+    ['exclude_files', ['group-member-0']]
+  );
+  assert.equal(
+    surface(doc).all(node => node.className === 'fj-row-note fj-bundle-note').length,
+    0,
+    'all together again: nothing to say'
+  );
+});
+
+test('a bundle choice never overwrites a file already marked for Trash', async () => {
+  const { doc, calls, state, bundleId } = await bundleFixtureOnPage();
+  state.choices = [{ candidate_id: 'group-member-1', operation: 'trash' }];
+  state.generation++;
+  await panel._reloadBatch();
+  await planSettled();
+  choose(doc.getElementById('fileJanitorBundleMenu-' + bundleId), 'move:documents');
+  await planSettled();
+  const [edit] = draftEdits(calls);
+  assert.deepEqual(edit.candidate_ids.sort(), ['group-member-0', 'group-member-2']);
 });
 
 test('a row menu is off while a save is in flight', async () => {

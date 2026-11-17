@@ -270,7 +270,6 @@ func TestReviewPictureHTTP_ContentReadFact(t *testing.T) {
 // Decision (f): pairs and bundles are identified by opaque, stable IDs and a
 // kind of name ending, with no name in any ID and no change to membership.
 func TestReviewGroupMembersHTTP_PairAndBundleIDs(t *testing.T) {
-	pendingTask(t, "4.1")
 	h, _ := pictureHandler(t, mixedPictureFiles(0))
 	_, review := serve(t, h, http.MethodGet, pathFor("file-janitor", "ws-1", "/batches/latest/groups"), "")
 	batchID := review["review"].(map[string]any)["batch_id"].(string)

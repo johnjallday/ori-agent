@@ -346,6 +346,60 @@
   min-height: 44px;
 }
 
+/* Possible copies as pair cards and music as bundle cards (R26 to R33). A card is a
+   quiet box inside its row: the lines are plain text with the file name as the
+   clickable part, the facts after it are muted, and where a file has gone is said in
+   words ("in Trash", "in Filed/Audio"), never by colour alone. */
+.fj-pair,
+.fj-bundle {
+  margin: 0.5rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--fj-line);
+  border-radius: 8px;
+}
+
+.fj-pair-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fj-pair-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.15rem 0.6rem;
+  padding: 0.2rem 0;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.85rem;
+}
+
+.fj-pair-line .fj-file-name {
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-pair-state {
+  font-weight: 600;
+}
+
+.fj-pair-line .fj-link {
+  min-height: 32px;
+}
+
+.fj-pair-hint {
+  margin: 0.35rem 0 0;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.8rem;
+}
+
+.fj-bundle-title {
+  margin: 0 0 0.4rem;
+  color: var(--text-primary, #e8e8e8);
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 /* The one-file bar sits above the File button: a hint until a file is selected,
    then the file's name and its one menu. */
 .fj-file-bar {

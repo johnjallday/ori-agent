@@ -2384,6 +2384,69 @@
     }
   }
 
+  // Every file of a bundle with where it is now. A card shows at most twelve; when it
+  // holds more, the rest are read (pinned to the revisions on screen) so one choice
+  // really covers the whole bundle.
+  async function bundleMembers(bundle) {
+    if (!bundle.more) return bundle.files;
+    const scope = requestScope();
+    const files = [];
+    for (let offset = 0; offset < bundle.count; offset += 200) {
+      const response = await fetch(
+        apiBase(scope.id) +
+          '/batches/' +
+          encodeURIComponent(lastBatch.id) +
+          '/picture/files?section=bundle&key=' +
+          encodeURIComponent(bundle.bundle_id) +
+          '&limit=200&offset=' +
+          offset +
+          '&revision=' +
+          encodeURIComponent(picture.revision) +
+          '&draft_revision=' +
+          encodeURIComponent(picture.draft_revision)
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !Array.isArray(body.page?.files)) throw new Error('bundle unavailable');
+      files.push(...body.page.files);
+      if (body.page.files.length === 0) break;
+    }
+    return files;
+  }
+
+  // R32: one choice for a bundle applies to every file in it, and they all go to the
+  // same folder. A file already in Trash is a file the person decided about on its
+  // own: a bundle choice never overwrites that.
+  async function answerBundle(bundle, choice, binding) {
+    if (!reviewEditsAvailable()) return;
+    let members;
+    busy = true;
+    try {
+      members = await bundleMembers(bundle);
+    } catch (_) {
+      showError('Ori could not read these files, so nothing was changed. Try again.');
+      return;
+    } finally {
+      busy = false;
+      updateSelectionSummary();
+    }
+    const notTrashed = members.filter(file => file.placement !== 'trash').map(file => file.id);
+    if (choice.kind === 'move')
+      await submitReviewEdit(
+        'select_files',
+        { candidate_ids: notTrashed, category: choice.category },
+        null,
+        binding
+      );
+    else if (choice.kind === 'stop')
+      await submitReviewEdit('keep_files', { candidate_ids: notTrashed }, null, binding);
+    else if (choice.kind === 'leave') {
+      const placed = members.filter(file => file.placement === 'filed').map(file => file.id);
+      if (placed.length)
+        await submitReviewEdit('exclude_files', { candidate_ids: placed }, null, binding);
+      else renderBatch();
+    }
+  }
+
   // R23: what the person chose for the one selected file.
   async function answerFile(file, choice, binding) {
     selectedFile = null;
@@ -2448,6 +2511,13 @@
         onReviewAgain: kept => void reviewKeptAgain(kept, binding),
         onRetry: file =>
           void submitReviewEdit('retry_files', { candidate_ids: [file.id] }, null, binding),
+        // Possible copies and music bundles (R26 to R33): a copy marked for Trash
+        // (one file, never a row or a pair), put back, and one choice for a bundle.
+        onTrashCopy: file =>
+          void submitReviewEdit('mark_trash', { candidate_ids: [file.id] }, null, binding),
+        onPutBack: file =>
+          void submitReviewEdit('unmark_trash', { candidate_ids: [file.id] }, null, binding),
+        onBundleChoice: (bundle, choice) => void answerBundle(bundle, choice, binding),
         onTickFolder: (folder, ticked) =>
           void submitReviewEdit(
             ticked ? 'select_group' : 'deselect_group',
@@ -2806,7 +2876,7 @@
     // whatever they were on: a folder tick, an "and N more" control, the Trash tick
     // or the main button as much as a table control.
     if (
-      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|File|ReviewAgain|Retry)-|Approve$|TrashAck$|ShowEarlier$|FileMenu$|FileBarCancel$|Picture$)/.test(
+      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|TrashCopy|PutBack|File|ReviewAgain|Retry)-|Approve$|TrashAck$|ShowEarlier$|FileMenu$|FileBarCancel$|Picture$)/.test(
         focusedReviewControlID
       )
     ) {

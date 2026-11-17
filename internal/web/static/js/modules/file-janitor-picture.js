@@ -14,6 +14,9 @@ const LOOSE = 'loose';
 const LEFT_OUT = 'left_out';
 const TRASH = 'trash';
 const COULD_NOT_FILE = 'could_not_file';
+// The lists behind a pair card and a bundle card that hold more files than they show.
+const FAMILY = 'family';
+const BUNDLE = 'bundle';
 
 // The words on screen for each question group, keyed by the server's fixed rule
 // word (R17). The "Why?" sentence says what Ori actually checked (R18).
@@ -27,7 +30,8 @@ export const LOOSE_LABELS = {
 
 export const LOOSE_WHY = {
   sensitive: 'A name has a word like passport or tax in it. Ori has not looked inside the files.',
-  versions: 'The names match apart from a copy ending. Ori has not compared what is inside.',
+  versions:
+    'The names match apart from a copy or version ending. Ori has not compared what is inside.',
   audio:
     'These are music files, or files that share a name with one. Ori does not know which belong together.',
   unresolved:
@@ -199,6 +203,14 @@ export function moreTitle(picture, more) {
   if (more.section === LOOSE) {
     const row = (picture?.loose || []).find(item => item.group_id === more.key);
     return row ? looseLabel(row) : LOOSE_LABELS.unmatched;
+  }
+  if (more.section === FAMILY) return LOOSE_LABELS.versions;
+  if (more.section === BUNDLE) {
+    for (const row of picture?.loose || []) {
+      const bundle = (row.bundles || []).find(item => item.bundle_id === more.key);
+      if (bundle) return bundle.name;
+    }
+    return LOOSE_LABELS.audio;
   }
   if (more.section === LEFT_OUT) return LEFT_OUT_LABEL;
   if (more.section === TRASH) return 'Trash';
@@ -506,16 +518,108 @@ export function fileMenuOptions(file, destinations) {
   return options;
 }
 
+// ------------------------------------------------------- pairs and bundles
+
+// R3 of the pair card (R27): sizes and dates only. Ori does not compare what is
+// inside files, so no sentence here may say two files are "duplicates" or
+// "identical" (tests render every state and look for those words).
+export const PAIR_BANNED_WORDS = ['duplicate', 'identical'];
+
+export function formatSize(bytes) {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size < 0) return '';
+  if (size < 1024) return size + ' B';
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = size / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return value.toFixed(value >= 10 ? 0 : 1).replace(/\.0$/, '') + ' ' + units[unit];
+}
+
+// The calendar day a file was last changed, as the person would read it.
+export function dayOf(iso) {
+  const time = Date.parse(iso || '');
+  if (!Number.isFinite(time)) return '';
+  const date = new Date(time);
+  return date.getFullYear() + '-' + (date.getMonth() + 1) + '-' + date.getDate();
+}
+
+export function formatDay(iso) {
+  const time = Date.parse(iso || '');
+  if (!Number.isFinite(time)) return '';
+  return new Date(time).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+}
+
+// One hint line under a pair card, from size and date alone (R27). A file whose date
+// is not known is never claimed to share a day with another.
+export function pairHint(files) {
+  const list = (files || []).filter(Boolean);
+  if (list.length < 2) return '';
+  if (list.some(file => file.size !== list[0].size)) return 'Different size';
+  const days = list.map(file => dayOf(file.modified_at));
+  const sameDay = days[0] !== '' && days.every(day => day === days[0]);
+  return sameDay ? 'Same size, same day' : 'Same size, different day';
+}
+
+// R28: "Trash the copy" is offered next to a file only when its name ends in a number
+// in brackets or in "copy" (not "v2" or "version 2": the higher version may be the
+// one to keep), the card has exactly one file with no ending, and the two files are
+// the same size in bytes. A file that is not loose has no such button: it already
+// went somewhere. Pure, so the whole table is tested.
+export function trashCopyAllowed(file, files) {
+  if (!file || file.placement !== LOOSE) return false;
+  if (file.ending !== 'number' && file.ending !== 'copy') return false;
+  const originals = (files || []).filter(item => item.ending === 'none');
+  if (originals.length !== 1) return false;
+  return Number.isFinite(file.size) && file.size === originals[0].size;
+}
+
+// R33: when the files of a bundle no longer share one destination, the card says so
+// in plain words ("Split: 4 stay here, 1 in Filed/Audio"). Empty while they do.
+export function bundleNote(bundle, ctx) {
+  const {
+    count,
+    loose_count: loose = 0,
+    placed_count: placed = 0,
+    trash_count: trash = 0
+  } = bundle || {};
+  const folder = (ctx?.destinations || []).find(item => item.id === bundle?.placed_category);
+  const where = folder
+    ? (ctx?.filedRoot || 'Filed') + '/' + (folder.folder_name || folder.label)
+    : '';
+  if (placed === count && where) return 'All in ' + where;
+  if (loose === count || count === 0) return '';
+  const parts = [];
+  if (loose > 0) parts.push(loose + (loose === 1 ? ' stays here' : ' stay here'));
+  if (placed > 0) parts.push(placed + (where ? ' in ' + where : ' placed in other folders'));
+  if (trash > 0) parts.push(trash + ' in Trash');
+  return 'Split: ' + parts.join(', ');
+}
+
+export function bundleMenuValue(bundle) {
+  if ((bundle?.loose_count || 0) === bundle?.count) return 'leave';
+  if (bundle?.placed_count === bundle?.count && bundle?.placed_category)
+    return 'move:' + bundle.placed_category;
+  return 'mixed';
+}
+
 export const FILE_BAR_HINT = 'Click any file to move just that one.';
 export const KEPT_NOTE = 'Ori will not ask about these again.';
 
-function rowMenu(h, row, ctx) {
-  const value = rowMenuValue(row);
+// The menu of a row or a bundle: the same choices, one value in, one choice out.
+function choiceMenu(h, { id, label, value, destinations, disabled, onChoice }) {
   const select = h('select', 'fj-row-menu');
-  select.id = 'fileJanitorRowMenu-' + row.key;
-  select.setAttribute('aria-label', looseLabel(row) + ': what to do with these files');
-  select.disabled = !ctx.editsAvailable;
-  for (const option of rowMenuOptions(ctx.destinations, value)) {
+  select.id = id;
+  select.setAttribute('aria-label', label);
+  select.disabled = disabled;
+  for (const option of rowMenuOptions(destinations, value)) {
     const node = h('option', '', option.label);
     node.value = option.value;
     node.selected = option.value === value;
@@ -524,9 +628,108 @@ function rowMenu(h, row, ctx) {
   }
   select.addEventListener('change', () => {
     const choice = parseChoice(select.value);
-    if (choice) ctx.onRowChoice?.(row, choice);
+    if (choice) onChoice(choice);
   });
   return select;
+}
+
+function rowMenu(h, row, ctx) {
+  return choiceMenu(h, {
+    id: 'fileJanitorRowMenu-' + row.key,
+    label: looseLabel(row) + ': what to do with these files',
+    value: rowMenuValue(row),
+    destinations: ctx.destinations,
+    disabled: !ctx.editsAvailable,
+    onChoice: choice => ctx.onRowChoice?.(row, choice)
+  });
+}
+
+// One line of a pair card: the file's name (a button, like every listed file), its
+// size and the day it last changed, and where it is now when it is not loose (R26,
+// R29). The one button on a line is "Trash the copy" or, for a copy already marked,
+// "Put the copy back".
+function pairLine(h, file, files, ctx) {
+  const line = h('li', 'fj-pair-line');
+  const name = h('button', 'fj-file-name', file.name);
+  name.type = 'button';
+  name.id = 'fileJanitorFile-' + file.id;
+  name.setAttribute('aria-pressed', ctx.selectedFile?.id === file.id ? 'true' : 'false');
+  name.addEventListener('click', () => ctx.onSelectFile?.(file));
+  line.appendChild(name);
+  const facts = [formatSize(file.size), formatDay(file.modified_at)].filter(Boolean);
+  if (facts.length) line.appendChild(h('span', 'fj-pair-facts', facts.join(' · ')));
+  if (file.placement === TRASH) {
+    line.appendChild(h('span', 'fj-pair-state', 'in Trash'));
+    const back = h('button', 'fj-link', 'Put the copy back');
+    back.type = 'button';
+    back.id = 'fileJanitorPutBack-' + file.id;
+    back.setAttribute('aria-label', 'Put ' + file.name + ' back');
+    back.addEventListener('click', () => ctx.onPutBack?.(file));
+    line.appendChild(back);
+  } else if (file.placement === FILED) {
+    const folder = (ctx.destinations || []).find(item => item.id === file.category);
+    const where = folder
+      ? (ctx.filedRoot || 'Filed') + '/' + (folder.folder_name || folder.label)
+      : 'a folder';
+    line.appendChild(h('span', 'fj-pair-state', 'in ' + where));
+  } else if (trashCopyAllowed(file, files)) {
+    const trash = h('button', 'fj-link', 'Trash the copy');
+    trash.type = 'button';
+    trash.id = 'fileJanitorTrashCopy-' + file.id;
+    trash.setAttribute('aria-label', 'Trash the copy ' + file.name);
+    trash.addEventListener('click', () => ctx.onTrashCopy?.(file));
+    line.appendChild(trash);
+  }
+  return line;
+}
+
+// R26, R27: possible copies as one card per family: the file with no ending first,
+// then each with an ending, and one hint line from size and date.
+function pairCard(h, pair, ctx) {
+  const card = h('article', 'fj-pair');
+  card.setAttribute('data-fj-family', pair.family_id);
+  const original = pair.files.find(file => file.ending === 'none') || pair.files[0];
+  card.setAttribute('aria-label', 'Possible copies of ' + original.name);
+  const list = h('ul', 'fj-pair-files');
+  for (const file of pair.files) list.appendChild(pairLine(h, file, pair.files, ctx));
+  card.appendChild(list);
+  const hint = pairHint(pair.files);
+  if (hint) card.appendChild(h('p', 'fj-pair-hint', hint));
+  if (pair.more > 0)
+    card.appendChild(moreButton(h, ctx, FAMILY, pair.family_id, pair.files.length, pair.count));
+  return card;
+}
+
+// R31 to R33: music that shares a name apart from the extension is one bundle. One
+// menu choice applies to every file in it and sends them all to one folder.
+function bundleCard(h, bundle, ctx) {
+  const card = h('article', 'fj-bundle');
+  card.setAttribute('data-fj-bundle', bundle.bundle_id);
+  card.appendChild(
+    h(
+      'h6',
+      'fj-bundle-title',
+      bundle.name + ' · ' + filesWord(bundle.count) + ' · moves or stays together'
+    )
+  );
+  card.appendChild(
+    choiceMenu(h, {
+      id: 'fileJanitorBundleMenu-' + bundle.bundle_id,
+      label: bundle.name + ': what to do with these ' + bundle.count + ' files',
+      value: bundleMenuValue(bundle),
+      destinations: ctx.destinations,
+      disabled: !ctx.editsAvailable,
+      onChoice: choice => ctx.onBundleChoice?.(bundle, choice)
+    })
+  );
+  const note = bundleNote(bundle, ctx);
+  if (note) card.appendChild(h('p', 'fj-row-note fj-bundle-note', note));
+  card.appendChild(nameList(h, bundle.files, 'fj-loose-files', ctx));
+  if (bundle.more > 0)
+    card.appendChild(
+      moreButton(h, ctx, BUNDLE, bundle.bundle_id, bundle.files.length, bundle.count)
+    );
+  return card;
 }
 
 function looseSection(h, picture, folderName, total, ctx) {
@@ -554,7 +757,9 @@ function looseSection(h, picture, folderName, total, ctx) {
     why.appendChild(h('summary', 'fj-why-toggle', 'Why?'));
     why.appendChild(h('p', 'fj-why-text', LOOSE_WHY[row.key] || LOOSE_WHY.unmatched));
     box.appendChild(why);
-    if (row.loose_count > 0) box.appendChild(nameList(h, row.singles, 'fj-loose-files', ctx));
+    for (const pair of row.pairs || []) box.appendChild(pairCard(h, pair, ctx));
+    for (const bundle of row.bundles || []) box.appendChild(bundleCard(h, bundle, ctx));
+    if (row.singles?.length) box.appendChild(nameList(h, row.singles, 'fj-loose-files', ctx));
     if (row.more > 0)
       box.appendChild(moreButton(h, ctx, LOOSE, row.group_id, row.singles.length, row.loose_count));
     section.appendChild(box);

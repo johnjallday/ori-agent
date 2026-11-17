@@ -430,7 +430,16 @@ write, the connector contract (`mcp_mover.go`, the `Mover` interface).
   placed_count, placed_category, trash_count, loose_count, singles <=12, more}`
   (`count` is the whole group and equals `loose_count + placed_count +
   trash_count`; `placed_category` is set only when every placed file shares one
-  folder; task 4.1 adds `pairs <=3 x files <=6` and `bundles <=3 x files <=12`),
+  folder). A row also carries `pairs` (at most three `{family_id, count, files
+  <=6, more}` cards, possible-copies row) and `bundles` (at most three
+  `{bundle_id, name, count, files <=12, more, loose_count, placed_count,
+  placed_category, trash_count}` cards, music row). `singles` are then only the
+  loose files with no sibling, and `more` counts the loose files beyond everything
+  drawn. A card lists every member wherever it is now (`placement` loose, filed or
+  trash), the file with no `ending` first, so a copy sent to Trash reads "in Trash"
+  on its own line; a card is drawn while any member is loose or placed and is
+  left to the Trash box when every member is in Trash. `name` is the first file's
+  name without its extension, display text only. The picture also has
   `left_out`, `trash`, `could_not_file` (`{count, files <=12}`). A file entry is
   `{id, name, size, modified_at, category, your_choice, placement, family_id,
   ending, bundle_id}` (the last three from task 4.1) plus `state`, `reason` and
@@ -449,7 +458,10 @@ write, the connector contract (`mcp_mover.go`, the `Mover` interface).
   up to `waiting` (R8).
 - `GET .../picture/files?section=filed|unfiled|loose|left_out|trash|could_not_file|family|bundle&key=&revision=&draft_revision=&limit=50&offset=0`
   pages the same placement (50 default, 200 maximum); a mismatch is 409
-  `review_changed`.
+  `review_changed`. For `family` and `bundle` the `key` is the pair's or bundle's
+  opaque ID (`fam-` or `bun-` and 24 hex digits, else 400) and the page holds every
+  member of that card with its own `placement`; the browser reads a bundle this way
+  so one bundle choice covers every file in it, not only the twelve the card shows.
 - `content_read` is computed over every candidate: `some` if any `Classifier` is
   `content`, `none` if all are `metadata`, `model` or `fallback`, else `unknown`.
   The lead line's third sentence follows it; for `unknown` it is left out rather

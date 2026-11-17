@@ -2,6 +2,7 @@ package filejanitor
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -137,6 +138,198 @@ func TestReviewPicture_EveryWaitingFileIsDrawnExactlyOnce(t *testing.T) {
 				t.Fatalf("earlier attempts: could not file %d, kept %d", picture.CouldNotFile.Count, picture.Counts.Kept)
 			}
 		})
+	}
+}
+
+func looseRowOf(t *testing.T, picture ReviewPicture, key string) PictureLooseRow {
+	t.Helper()
+	for _, row := range picture.Loose {
+		if row.Key == key {
+			return row
+		}
+	}
+	t.Fatalf("no %q row in %+v", key, picture.Loose)
+	return PictureLooseRow{}
+}
+
+func names(files []PictureFile) []string {
+	out := make([]string, 0, len(files))
+	for _, file := range files {
+		out = append(out, file.Name)
+	}
+	return out
+}
+
+// R26, R64: possible copies are drawn as pair cards with the file that has no
+// ending first, three cards at most, and what is not drawn is counted in "more".
+func TestReviewPicture_PossibleCopiesArePairCards(t *testing.T) {
+	batch, candidates := groupFixture(
+		"Budget-v2.pdf", "Budget (2).pdf", "Budget.pdf", // the original is listed first whatever the order
+		"Plan.pdf", "Plan copy.pdf",
+		"Memo.pdf", "Memo (2).pdf",
+		"Notes.pdf", "Notes (2).pdf", // the fourth family is not drawn
+		"alone.pdf",
+	)
+	groups := mustGroup(t, batch, candidates)
+	picture := buildReviewPicture(groups, ReviewDraftView{Revision: "draft", State: "default"}, candidates)
+	row := looseRowOf(t, picture, "versions")
+	if row.Count != 9 || row.LooseCount != 9 || len(row.Pairs) != PicturePairLimit || len(row.Singles) != 0 || len(row.Bundles) != 0 {
+		t.Fatalf("the row: %+v", row)
+	}
+	// The scan listed Budget-v2.pdf, then Budget (2).pdf, then Budget.pdf: the original
+	// moves to the front and the rest keep their scan order.
+	if got := names(row.Pairs[0].Files); strings.Join(got, "|") != "Budget.pdf|Budget-v2.pdf|Budget (2).pdf" {
+		t.Fatalf("the original first, then the others in scan order, got %v", got)
+	}
+	if row.Pairs[0].Files[0].Ending != EndingNone || row.Pairs[0].Files[1].Ending != EndingV || row.Pairs[0].Files[2].Ending != EndingNumber {
+		t.Fatalf("endings: %+v", row.Pairs[0].Files)
+	}
+	if row.Pairs[0].Count != 3 || row.Pairs[0].More != 0 || !familyPattern.MatchString(row.Pairs[0].FamilyID) {
+		t.Fatalf("pair: %+v", row.Pairs[0])
+	}
+	// Notes and Notes (2) are the fourth family: not drawn, counted as more.
+	if row.More != 2 {
+		t.Fatalf("two files are beyond the three cards, got more=%d", row.More)
+	}
+}
+
+// A copy marked for Trash stays on its pair's card with its own line (R29), its file
+// is counted in the Trash box and not in the row, and a card with nothing loose left
+// is not drawn.
+func TestReviewPicture_ATrashedCopyStaysOnItsCard(t *testing.T) {
+	batch, candidates := groupFixture("Budget.pdf", "Budget (2).pdf", "Plan.pdf", "Plan copy.pdf")
+	groups := mustGroup(t, batch, candidates)
+	id := func(name string) string { return candidateIDByName(t, candidates, name) }
+	view := ReviewDraftView{Revision: "draft", State: "saved", Choices: []ReviewChoiceView{
+		{CandidateID: id("Budget (2).pdf"), Operation: OperationTrash},
+		{CandidateID: id("Plan.pdf"), Operation: OperationTrash},
+		{CandidateID: id("Plan copy.pdf"), Operation: OperationTrash},
+	}}
+	picture := buildReviewPicture(groups, view, candidates)
+	row := looseRowOf(t, picture, "versions")
+	if row.Count != 4 || row.TrashCount != 3 || row.LooseCount != 1 {
+		t.Fatalf("one file is still loose and three are in Trash: %+v", row)
+	}
+	if len(row.Pairs) != 1 || row.Pairs[0].Count != 2 {
+		t.Fatalf("only the Budget card still has a loose file: %+v", row.Pairs)
+	}
+	byName := map[string]string{}
+	for _, file := range row.Pairs[0].Files {
+		byName[file.Name] = file.Placement
+	}
+	if byName["Budget.pdf"] != PictureLoose || byName["Budget (2).pdf"] != PictureTrash {
+		t.Fatalf("the copy's line must say it is in Trash while the original stays loose: %v", byName)
+	}
+	if picture.Trash.Count != 3 {
+		t.Fatalf("the Trash box still counts every marked file once: %+v", picture.Trash)
+	}
+	if row.More != 0 {
+		t.Fatalf("everything loose is drawn: more=%d", row.More)
+	}
+}
+
+// A bundle the person placed in a folder stays drawn, so the choice can be changed
+// back from the card; the card reports where each file is, and a bundle whose files
+// are all in Trash is left to the Trash box.
+func TestReviewPicture_APlacedBundleStaysDrawnAndATrashedOneDoesNot(t *testing.T) {
+	batch, candidates := groupFixture("Song.wav", "Song.als", "Take.wav", "Take.als")
+	groups := mustGroup(t, batch, candidates)
+	id := func(name string) string { return candidateIDByName(t, candidates, name) }
+	view := ReviewDraftView{Revision: "draft", State: "saved", Choices: []ReviewChoiceView{
+		{CandidateID: id("Song.wav"), Operation: OperationMove, Category: CategoryAudio},
+		{CandidateID: id("Song.als"), Operation: OperationMove, Category: CategoryAudio},
+		{CandidateID: id("Take.wav"), Operation: OperationTrash},
+		{CandidateID: id("Take.als"), Operation: OperationTrash},
+	}}
+	row := looseRowOf(t, buildReviewPicture(groups, view, candidates), "audio")
+	if len(row.Bundles) != 1 || row.Bundles[0].Name != "Song" {
+		t.Fatalf("only the placed bundle is drawn: %+v", row.Bundles)
+	}
+	for _, file := range row.Bundles[0].Files {
+		if file.Placement != PictureFiled || file.Category != CategoryAudio || !file.YourChoice {
+			t.Fatalf("each file says where it went: %+v", file)
+		}
+	}
+	if row.LooseCount != 0 || row.PlacedCount != 2 || row.TrashCount != 2 || row.More != 0 {
+		t.Fatalf("row accounting: %+v", row)
+	}
+	// The card knows where its whole bundle is, for its menu and its split note.
+	if bundle := row.Bundles[0]; bundle.LooseCount != 0 || bundle.PlacedCount != 2 || bundle.PlacedCategory != CategoryAudio || bundle.TrashCount != 0 {
+		t.Fatalf("bundle state: %+v", bundle)
+	}
+}
+
+// R33: a bundle whose files no longer share one destination says how they are split.
+func TestReviewPicture_ASplitBundleCountsWhereEachFileIs(t *testing.T) {
+	batch, candidates := groupFixture("Song.wav", "Song.als", "Song.mp3", "Song.aiff")
+	groups := mustGroup(t, batch, candidates)
+	id := func(name string) string { return candidateIDByName(t, candidates, name) }
+	view := ReviewDraftView{Revision: "draft", State: "saved", Choices: []ReviewChoiceView{
+		{CandidateID: id("Song.wav"), Operation: OperationMove, Category: CategoryAudio},
+		{CandidateID: id("Song.als"), Operation: OperationMove, Category: CategoryDocuments},
+		{CandidateID: id("Song.mp3"), Operation: OperationTrash},
+	}}
+	bundle := looseRowOf(t, buildReviewPicture(groups, view, candidates), "audio").Bundles[0]
+	if bundle.Count != 4 || bundle.LooseCount != 1 || bundle.PlacedCount != 2 || bundle.TrashCount != 1 || bundle.PlacedCategory != "" {
+		t.Fatalf("split bundle: %+v", bundle)
+	}
+}
+
+// R31: files that share a name apart from the extension are a bundle card; a song
+// with no partner is a single beside it; a card shows twelve files and counts the
+// rest.
+func TestReviewPicture_AudioFilesThatShareANameAreABundle(t *testing.T) {
+	extensions := []string{".wav", ".als", ".mp3", ".aiff", ".flac", ".ogg", ".m4a", ".cue", ".band", ".logicx", ".flp", ".ptx", ".aup", ".aup3"}
+	files := []string{"solo.mp3", "other.wav"}
+	for _, extension := range extensions {
+		files = append(files, "Song 130"+extension)
+	}
+	batch, candidates := groupFixture(files...)
+	groups := mustGroup(t, batch, candidates)
+	picture := buildReviewPicture(groups, ReviewDraftView{Revision: "draft", State: "default"}, candidates)
+	row := looseRowOf(t, picture, "audio")
+	if len(row.Bundles) != 1 || len(row.Pairs) != 0 {
+		t.Fatalf("one bundle: %+v", row)
+	}
+	bundle := row.Bundles[0]
+	if bundle.Name != "Song 130" || bundle.Count != len(extensions) || len(bundle.Files) != PictureBundleFileLimit || bundle.More != len(extensions)-PictureBundleFileLimit || !bundlePattern.MatchString(bundle.BundleID) {
+		t.Fatalf("bundle: %+v", bundle)
+	}
+	if got := strings.Join(names(row.Singles), "|"); got != "solo.mp3|other.wav" {
+		t.Fatalf("files with no partner are singles, got %s", got)
+	}
+	if want := len(extensions) - PictureBundleFileLimit; row.More != want {
+		t.Fatalf("the files beyond the card are counted in more: got %d want %d", row.More, want)
+	}
+}
+
+// A card with more files than it shows is paged by its own identifier, and the page
+// holds every member wherever it is now. A malformed key is refused.
+func TestReviewPicture_PairAndBundleListsPageByIdentifier(t *testing.T) {
+	batch, candidates := groupFixture("Budget.pdf", "Budget (2).pdf", "Budget copy.pdf", "Song.wav", "Song.als")
+	groups := mustGroup(t, batch, candidates)
+	id := func(name string) string { return candidateIDByName(t, candidates, name) }
+	view := ReviewDraftView{Revision: "draft", State: "saved", Choices: []ReviewChoiceView{
+		{CandidateID: id("Budget (2).pdf"), Operation: OperationTrash},
+	}}
+	layout := layoutReviewPicture(groups, view, candidates)
+	row := looseRowOf(t, buildReviewPicture(groups, view, candidates), "versions")
+	family, err := layout.pictureList(PictureSectionFamily, row.Pairs[0].FamilyID)
+	if err != nil || len(family) != 3 || family[0].Name != "Budget.pdf" {
+		t.Fatalf("the whole family, original first: %v %v", names(family), err)
+	}
+	audio := looseRowOf(t, buildReviewPicture(groups, view, candidates), "audio")
+	bundle, err := layout.pictureList(PictureSectionBundle, audio.Bundles[0].BundleID)
+	if err != nil || len(bundle) != 2 {
+		t.Fatalf("the whole bundle: %v %v", names(bundle), err)
+	}
+	for _, key := range []string{"", "fam-xyz", "../etc", "bun-" + strings.Repeat("g", 24)} {
+		if _, err := layout.pictureList(PictureSectionFamily, key); !errors.Is(err, ErrInvalidAction) {
+			t.Errorf("key %q should be refused, got %v", key, err)
+		}
+	}
+	if list, err := layout.pictureList(PictureSectionFamily, "fam-"+strings.Repeat("0", 24)); err != nil || len(list) != 0 {
+		t.Errorf("an unknown family is empty, not an error: %v %v", list, err)
 	}
 }
 

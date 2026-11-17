@@ -2,6 +2,7 @@ package filejanitor
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -25,9 +26,16 @@ func TestQuestionRow_AStaleViewRejectsTheWholeChoice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A revision that is certainly not the current one, whatever its first character.
+	differs := func(revision string) string {
+		if strings.HasPrefix(revision, "0") {
+			return "1" + revision[1:]
+		}
+		return "0" + revision[1:]
+	}
 	for name, edit := range map[string]ReviewDraftEdit{
-		"older choices": {ExpectedRevision: "0" + before.Revision[1:], ExpectedGroupRevision: before.GroupRevision},
-		"older members": {ExpectedRevision: before.Revision, ExpectedGroupRevision: "0" + before.GroupRevision[1:]},
+		"older choices": {ExpectedRevision: differs(before.Revision), ExpectedGroupRevision: before.GroupRevision},
+		"older members": {ExpectedRevision: before.Revision, ExpectedGroupRevision: differs(before.GroupRevision)},
 	} {
 		edit.Action, edit.GroupID, edit.Category = "select_group", reviewGroupID("sensitive"), "documents"
 		if _, err := s.EditReviewDraft("local", "ws-1", batch.ID, edit); !errors.Is(err, ErrReviewConflict) {
