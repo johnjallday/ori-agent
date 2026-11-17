@@ -39,6 +39,10 @@ func (b *ServerBuilder) wireFolderAgent() {
 		return
 	}
 	store := folderagent.NewStore(b.workspaceFileStore.GetFolderPath)
+	// A folder agent that is set up or kept frees its workspace's held welcome:
+	// wake the welcome worker now instead of at its next check (it reads the
+	// workspace updates service when called; none yet is fine).
+	store.OnWelcomeRelease(func(string) { b.notifyWorkspaceWelcomeReady(context.Background(), "") })
 	service := folderagent.NewService(folderagent.Deps{
 		Store:      store,
 		Folders:    b.personalAssistantFolderDigest,

@@ -1086,6 +1086,37 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   height: 20px;
 }
 
+/* The Commander's name-derived figure (the card's own fallback face) sizes from
+   its slot, the way workspace-map.css crops it (--face-size, --face-radius): the
+   line above a message at 20px, the header and launcher at the avatar's 54px. */
+.personal-assistant-message__author-avatar {
+  --face-size: 20px;
+  --face-radius: 6px;
+}
+
+.personal-assistant-launcher__avatar,
+.personal-assistant-panel__avatar {
+  --face-size: 54px;
+  --face-radius: 12px;
+}
+
+.personal-assistant-panel--exploring.personal-assistant-panel--inline-toolbar
+  .personal-assistant-panel__avatar {
+  --face-size: 40px;
+}
+
+/* The figure's crown takes the map's keeper colour. The drawer sits outside the
+   map's scope, where the light theme sets it to brown, so it would draw gold
+   against the brown crown on the card and balloon: one face, one colour. */
+[data-bs-theme="light"]
+  :is(
+    .personal-assistant-launcher__avatar,
+    .personal-assistant-panel__avatar,
+    .personal-assistant-message__author-avatar
+  ) {
+  --ws-keeper: #9b641b;
+}
+
 /* The shared renderer sizes a portrait from --aa-size, not from its box. */
 .personal-assistant-message__author-avatar .agent-avatar {
   --aa-size: 20px;

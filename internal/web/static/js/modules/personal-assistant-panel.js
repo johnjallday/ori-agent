@@ -35,7 +35,8 @@ import {
   folderAgentChatUnread,
   FOLDER_AGENT_CHAT_EVENT,
   markFolderAgentChatSeen,
-  postFolderAgentChatSeen
+  postFolderAgentChatSeen,
+  syncFolderReport
 } from './folder-agent-chat.js';
 import { briefModeView, briefSend } from './personal-assistant-brief-mode.js';
 
@@ -954,15 +955,35 @@ function syncPanelViewport() {
   }
 }
 
-export function assistantAvatarMarkup(name, appearance, win = window) {
+export function assistantAvatarMarkup(name, appearance, win = window, size = 40) {
   if (win.AgentAvatar?.markup) {
     const characterId = appearance?.character?.catalog_id;
     return win.AgentAvatar.markup(
       { name, appearance: appearance || {}, character: win.CharacterCatalog?.get?.(characterId) },
-      { size: 40 }
+      { size }
     );
   }
   return '<span class="agent-avatar agent-avatar--generated">P</span>';
+}
+
+/**
+ * The face of a workspace's Commander as its card on the map draws it: a chosen
+ * character or upload through the shared renderer (the catalog character
+ * resolved, as the card does), and for an agent with no saved face the card's
+ * own fallback, the name-derived figure, not the renderer's generated initials.
+ * The drawer's header and launcher and the line above each of its messages use
+ * this, so the card, the balloon and the chat show one face (FR24 to FR27).
+ */
+export function commanderAvatarMarkup(name, appearance, win = window, size = 40) {
+  const mode = String(appearance?.mode || '')
+    .trim()
+    .toLowerCase();
+  const portrait = win.OriWorkspaceAgentPortrait;
+  if ((!mode || mode === 'generated') && typeof portrait?.markup === 'function') {
+    const figure = portrait.markup(name, { className: 'ori-commander-figure', isKeeper: true });
+    if (figure) return figure;
+  }
+  return assistantAvatarMarkup(name, appearance, win, size);
 }
 
 function recipients() {
@@ -1238,10 +1259,12 @@ async function openFolderReport(workspaceId, ref, trigger) {
   if (changing) {
     recipients().rememberSession(workspaceId, { id: target.sessionID, title: '' });
   }
-  const hydrated =
-    changing || !document.querySelector(`#homeAssistantConversation [data-lead-message-id]`)
-      ? await hydrateEntryConversation({ force: true, exact: true })
-      : true;
+  // The thread was loaded before the report's message arrived (the drawer was
+  // closed, or the load held only the welcome): the message is loaded now,
+  // whichever control opened the chat. Same thread, so a typed draft stays.
+  const hydrated = changing
+    ? await hydrateEntryConversation({ force: true, exact: true })
+    : await syncFolderReportThread(workspaceId, target);
   open(trigger, { preserveConversation: true });
   if (!hydrated && changing) {
     setStatus('This saved conversation is unavailable. Try again from the map.');
@@ -1254,6 +1277,44 @@ async function openFolderReport(workspaceId, ref, trigger) {
   return true;
 }
 
+// What the thread was last loaded again for, and the workspace whose reload had
+// to wait (a reply was in flight, or a pending confirmation or plan would have
+// been dropped). A message reloaded for once is not reloaded for again.
+const reportReload = { attempted: '', deferred: '' };
+
+// syncFolderReportThread makes sure the open or about-to-open thread holds the
+// folder agent's report message, loading it again when it does not. It is the
+// one rule for every way into the chat (the launcher, the "New message" bar,
+// the page's "Open in chat", a report landing while the drawer is open):
+// reload when the thread shown is the report's (or none is) and no row holds
+// the message. It never changes thread (a draft only blocks that), never
+// interrupts a reply in flight, and never drops a pending confirmation or plan;
+// those wait, and a reply ending retries (see the busy listener). Resolves
+// true when the thread holds the message, false when the load had to wait or
+// failed.
+async function syncFolderReportThread(workspaceId, ref = null) {
+  const current = recipients()?.current?.();
+  if (current?.kind !== RECIPIENT_WORKSPACE_ENTRY || current.workspaceId !== workspaceId)
+    return false;
+  const transcript = document.getElementById('homeAssistantConversation');
+  const result = await syncFolderReport({
+    ref: ref || chatRefOf(folderAgentChat(workspaceId)?.raw),
+    shownSessionID: recipients()?.sessionId?.() || '',
+    rowIDs: Array.from(transcript?.querySelectorAll?.('[data-lead-message-id]') || []).map(
+      node => node.dataset.leadMessageId
+    ),
+    busy: window.OriAskRouting?.getState?.().busy === true,
+    locked: Boolean(switchLock()) || creationTransition.blocksReveal(),
+    attempted: reportReload.attempted,
+    hydrate: options => hydrateEntryConversation(options)
+  });
+  reportReload.attempted = result.attempted;
+  if (result.deferred) reportReload.deferred = workspaceId;
+  else if (result.loaded) reportReload.deferred = '';
+  if (result.reloaded) scheduleWelcomeExposure();
+  return result.loaded;
+}
+
 // The report changed on the workspace page (a new message, an answer, a run's
 // step): redraw its card in the thread, or load the thread again when the
 // report's message arrived after the thread was loaded.
@@ -1263,10 +1324,7 @@ function onFolderAgentChat(event) {
   if (current?.kind === RECIPIENT_WORKSPACE_ENTRY && current.workspaceId === workspaceId) {
     const transcript = document.getElementById('homeAssistantConversation');
     const row = attachFolderAgentChatCard(transcript, workspaceId);
-    const ref = chatRefOf(folderAgentChat(workspaceId)?.raw);
-    const shown = recipients()?.sessionId?.() || '';
-    if (!row && ref && state.open && (!shown || shown === ref.sessionID))
-      void hydrateEntryConversation({ force: true });
+    if (!row && state.open) void syncFolderReportThread(workspaceId);
   }
   renderWelcomeIndicator();
 }
@@ -1563,7 +1621,7 @@ function renderIdentity() {
     );
   const avatar = who.personal
     ? assistantAvatarMarkup(view.name, personalAssistant?.appearance)
-    : assistantAvatarMarkup(who.name, who.appearance);
+    : commanderAvatarMarkup(who.name, who.appearance);
   els.launcherAvatar.innerHTML = avatar;
   els.panelAvatar.innerHTML = avatar;
   els.panelAvatar.hidden = !who.openable;
@@ -2490,6 +2548,13 @@ function init() {
   });
   state.els.openWelcome?.addEventListener('click', event => openUnread(event.currentTarget));
   window.addEventListener(FOLDER_AGENT_CHAT_EVENT, onFolderAgentChat);
+  // A reload that had to wait for a reply in flight runs when the reply ends,
+  // after the turn's own cleanup (the turn's rows are stored by then).
+  document.addEventListener('personal-assistant:busy', event => {
+    if (event?.detail?.busy !== false || !reportReload.deferred || !state.open) return;
+    const workspaceId = reportReload.deferred;
+    setTimeout(() => void syncFolderReportThread(workspaceId), 0);
+  });
   state.els.openWelcome?.addEventListener('blur', () => renderWelcomeIndicator());
   document.addEventListener('personal-assistant:exposure', scheduleWelcomeExposure);
   document.addEventListener('personal-assistant:opened', scheduleWelcomeExposure);
@@ -2789,6 +2854,13 @@ const api = {
   syncBriefMode: () => renderIdentity(),
   // Notes asks for the hired assistant through the guarded switch.
   choosePersonal,
+  // The face the drawer's header draws for a workspace's Commander (see
+  // commanderAvatarMarkup), at any size: the line above a message in the thread
+  // draws the same one. '' when no renderer is loaded.
+  avatarMarkup: (name, appearance, size) =>
+    window.AgentAvatar?.markup || window.OriWorkspaceAgentPortrait?.markup
+      ? commanderAvatarMarkup(name, appearance, window, size)
+      : '',
   _state: state
 };
 if (typeof window !== 'undefined') window.PersonalAssistantPanel = api;

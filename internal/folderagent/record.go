@@ -343,12 +343,78 @@ func validCause(text string) bool {
 // ErrNoRecord means the workspace was not started from a folder.
 var ErrNoRecord = errors.New("folderagent: no folder record for this workspace")
 
+// WelcomeHold says whether the lead's welcome message waits on this folder
+// agent: a workspace made by feeding a folder is first asked about by its
+// Commander, so a second, unrelated question must not arrive beside it.
+type WelcomeHold int
+
+const (
+	// WelcomeNotFed: no folder record, so the workspace was not made by feeding
+	// a folder, and its welcome is unchanged.
+	WelcomeNotFed WelcomeHold = iota
+	// WelcomeHeld: the Commander is looking, asking, reporting a failure or
+	// setting up (or a setup stopped and waits for Retry). No welcome yet.
+	WelcomeHeld
+	// WelcomeAfterSetUp: the folder was set up. The welcome may be posted, and
+	// leaves out the goal question, because the Commander offers a goal itself.
+	WelcomeAfterSetUp
+	// WelcomeAfterKept: the folder was kept as it is. The welcome may be posted
+	// as it always was.
+	WelcomeAfterKept
+)
+
+// WelcomeHoldOf is the hold a record puts on the welcome. looking, reported,
+// failed and setting_up hold it, and so does a state this code does not know
+// (an unknown state is not a reason to speak). A set_up record whose setup
+// stopped at a step still waits on the owner (Retry), so it holds too.
+func WelcomeHoldOf(r *Record) WelcomeHold {
+	if r == nil {
+		return WelcomeNotFed
+	}
+	switch r.State {
+	case StateKept:
+		return WelcomeAfterKept
+	case StateSetUp:
+		if r.Setup != nil && r.Setup.Status == personalassistant.FolderSetupStopped {
+			return WelcomeHeld
+		}
+		return WelcomeAfterSetUp
+	default:
+		return WelcomeHeld
+	}
+}
+
 // Store reads and writes records in each workspace's sidecar folder. Writes
 // are atomic (temp file + rename) and serialized per process.
 type Store struct {
 	sidecarDir func(workspaceID string) (string, error)
 	mu         sync.Mutex
 	now        func() time.Time
+	// onRelease is told when a write takes a record from holding the welcome to
+	// not holding it (see OnWelcomeRelease).
+	onRelease func(workspaceID string)
+}
+
+// OnWelcomeRelease sets the function called after a write that took a record
+// from WelcomeHeld to any other hold, so whoever waits to post the welcome can
+// look again at once instead of at its next scheduled check. Progress writes
+// (held to held) never call it. fn must not block and must not call back into
+// the store.
+func (s *Store) OnWelcomeRelease(fn func(workspaceID string)) {
+	s.mu.Lock()
+	s.onRelease = fn
+	s.mu.Unlock()
+}
+
+// notifyRelease tells the OnWelcomeRelease listener, for a workspace whose hold
+// ended without a record write (a Start that could not save its record).
+func (s *Store) notifyRelease(workspaceID string) {
+	s.mu.Lock()
+	fn := s.onRelease
+	s.mu.Unlock()
+	if fn != nil {
+		fn(workspaceID)
+	}
 }
 
 // NewStore builds a store over a resolver from workspace id to its managed
@@ -406,23 +472,37 @@ func (s *Store) Create(rec *Record) error {
 	return s.write(rec)
 }
 
-// Update applies fn to the current record and writes it back.
+// Update applies fn to the current record and writes it back. A write that
+// takes the record from holding the welcome to not holding it tells
+// OnWelcomeRelease, after the store's lock is released.
 func (s *Store) Update(workspaceID string, fn func(*Record) error) (*Record, error) {
+	rec, release, err := s.update(workspaceID, fn)
+	if err == nil && release != nil {
+		release(workspaceID)
+	}
+	return rec, err
+}
+
+func (s *Store) update(workspaceID string, fn func(*Record) error) (*Record, func(string), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, err := s.Read(workspaceID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	before := WelcomeHoldOf(rec)
 	if err := fn(rec); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rec.Revision++
 	rec.UpdatedAt = s.now().UTC()
 	if err := s.write(rec); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return rec, nil
+	if before == WelcomeHeld && WelcomeHoldOf(rec) != WelcomeHeld {
+		return rec, s.onRelease, nil
+	}
+	return rec, nil, nil
 }
 
 func (s *Store) write(rec *Record) error {

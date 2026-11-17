@@ -70,7 +70,7 @@ func (r folderAgentReports) Latest(ctx context.Context, workspaceID string) (fol
 	if err != nil {
 		return folderagent.ChatRef{}, false
 	}
-	return folderagent.ChatRef{SessionID: message.SessionID, MessageID: message.MessageID, Unread: message.SeenAt == nil}, true
+	return folderagent.ChatRef{SessionID: message.SessionID, MessageID: message.MessageID, Unread: message.SeenAt == nil, DeliveredAt: message.DeliveredAt}, true
 }
 
 func (r folderAgentReports) Seen(ctx context.Context, workspaceID, messageID string) error {

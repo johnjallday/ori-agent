@@ -4594,15 +4594,17 @@
   font-size: 12px;
   font-weight: 600;
   line-height: 20px;
-  white-space: nowrap;
+  /* The line says what the Commander waits on and the button's word (for example
+     "Albums Manager has a question about Albums · Answer"): it wraps to a second
+     row rather than cutting that word off with an ellipsis. */
+  white-space: normal;
   cursor: pointer;
   animation: commander-balloon-in 180ms ease-out both;
 }
 
 .commander-balloon-line-text {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .commander-balloon-line::after {
@@ -4664,6 +4666,96 @@
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+/* The Commander's own face, the same markup its card draws, instead of initials
+   (folder-question-said-once FR24). The avatar fills the slot; no ring behind it. */
+.commander-balloon-face.has-avatar {
+  --face-size: 26px;
+  --face-radius: 50%;
+
+  width: var(--face-size);
+  height: var(--face-size);
+  overflow: hidden;
+  background: transparent;
+}
+
+.commander-balloon-face.has-avatar > * {
+  --aa-size: var(--face-size);
+
+  display: block;
+  width: var(--face-size);
+  height: var(--face-size);
+}
+
+/* The Commander's figure in a small slot: the balloon's header and folded line,
+   the drawer's header and launcher, the line above a chat message, Home's
+   balloon (folder-question-said-once FR24 to FR27). The card draws the figure
+   with a name plate and a star over it; in a slot that is only a face the name
+   sits beside it already, so the plate and star stay off, and the figure is
+   cropped to head and shoulders, scaled from the slot (--face-size) so it is the
+   card's figure and not a squashed copy. A slot sets --face-size and --face-radius. */
+:is(
+    .commander-balloon-face,
+    .personal-assistant-launcher__avatar,
+    .personal-assistant-panel__avatar,
+    .personal-assistant-message__author-avatar
+  )
+  .ws-map-av {
+  position: relative;
+  display: block;
+  flex: none;
+  width: var(--face-size, 26px);
+  min-width: 0;
+  max-width: none;
+  height: var(--face-size, 26px);
+  overflow: hidden;
+  border-radius: var(--face-radius, 50%);
+  clip-path: none;
+  box-shadow: inset 0 0 0 1px var(--ws-portrait-edge, rgba(255, 255, 255, 0.2));
+}
+
+:is(
+    .commander-balloon-face,
+    .personal-assistant-launcher__avatar,
+    .personal-assistant-panel__avatar,
+    .personal-assistant-message__author-avatar
+  )
+  .ws-map-av
+  :is(.ws-map-av-label, .ws-map-av-commander-mark) {
+  display: none;
+}
+
+:is(
+    .commander-balloon-face,
+    .personal-assistant-launcher__avatar,
+    .personal-assistant-panel__avatar,
+    .personal-assistant-message__author-avatar
+  )
+  .ws-map-av-figure {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: calc(var(--face-size, 26px) * 1.28);
+  height: calc(var(--face-size, 26px) * 1.48);
+  margin: 0;
+  transform: translateX(-50%);
+}
+
+/* Home's tile portrait wraps the shared renderer's face; it fills the slot too. */
+:is(
+    .commander-balloon-face,
+    .personal-assistant-launcher__avatar,
+    .personal-assistant-panel__avatar,
+    .personal-assistant-message__author-avatar
+  )
+  .ws-map-av
+  > .agent-avatar {
+  --aa-size: var(--face-size, 26px);
+
+  width: var(--face-size, 26px);
+  height: var(--face-size, 26px);
+  margin: 0;
 }
 
 .commander-balloon {
@@ -4739,6 +4831,12 @@
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+}
+
+/* Script focus lands here when the first control is below the fold. */
+.commander-balloon__body:focus-visible {
+  outline: 2px solid var(--cozy-accent, currentColor);
+  outline-offset: -2px;
 }
 
 /* The card inside drops its own frame: the balloon is the frame. */

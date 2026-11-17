@@ -69,18 +69,21 @@ test('a report waiting on its premise asks one question before any plan', () => 
     premise: {
       state: 'asked',
       sentence: 'This looks like a music production folder: 6 REAPER songs.',
-      confirm: 'Manage them as songs',
+      confirm: 'Yes, show me the plan',
       other: "It's something else"
     }
   });
   const speech = commanderSpeech(asked);
   assert.equal(speech.phase, 'premise');
-  assert.equal(speech.line, 'One question about Albums · Review');
+  assert.equal(speech.line, 'Albums Manager has a question about Albums · Answer');
   assert.equal(speech.review, true);
+  assert.equal(speech.announce, 'I have a question about Albums');
   assert.deepEqual(commanderOneLine(asked), {
     phase: 'premise',
     text: 'Albums Manager has a question about Albums',
-    action: 'Review'
+    action: 'Answer',
+    status: 'Has a question for you',
+    waiting: true
   });
   const confirmed = view({
     premise: { state: 'confirmed', sentence: 'A music production folder.' }
@@ -95,12 +98,13 @@ test('a report waiting on its premise asks one question before any plan', () => 
       withdrawn: true
     }
   });
-  assert.equal(commanderSpeech(withdrawn).line, 'Nothing planned for Albums · Review');
+  assert.equal(commanderSpeech(withdrawn).line, 'Nothing is planned for Albums · Review');
   assert.equal(commanderOneLine(withdrawn).text, 'Nothing is planned for Albums');
 });
 
 test('the report and cause lines (FR9, FR7)', () => {
-  assert.equal(commanderSpeech(view()).line, 'I have a plan for Albums · Review');
+  assert.equal(commanderSpeech(view()).line, 'Albums Manager has a plan for Albums · Review');
+  assert.equal(commanderSpeech(view()).announce, 'I have a plan for Albums');
   assert.equal(commanderSpeech(view()).phase, 'report');
   const cause = commanderSpeech(
     view({
@@ -109,11 +113,13 @@ test('the report and cause lines (FR9, FR7)', () => {
     })
   );
   assert.equal(cause.phase, 'cause');
-  assert.equal(cause.line, "I couldn't look · Review");
+  assert.equal(cause.line, 'Albums Manager could not look itself · Review');
+  assert.equal(cause.announce, "I couldn't look");
   assert.equal(
     commanderSpeech(view({ state: 'failed' })).line,
-    "I couldn't finish looking · Review"
+    'Albums Manager could not look itself · Review'
   );
+  assert.equal(commanderSpeech(view({ state: 'failed' })).announce, "I couldn't finish looking");
 });
 
 const runLines = [
@@ -156,7 +162,8 @@ test('the receipt and stopped lines', () => {
   const done = view({ state: 'set_up', setup: { status: 'done', lines: runLines } });
   assert.equal(commanderSpeech(done).line, 'Albums is set up · See what I made');
   const stopped = view({ state: 'set_up', setup: { status: 'stopped', lines: runLines } });
-  assert.equal(commanderSpeech(stopped).line, 'A step did not finish · Review');
+  assert.equal(commanderSpeech(stopped).line, 'Albums: a step did not finish · Review');
+  assert.equal(commanderSpeech(stopped).announce, 'A step did not finish');
   assert.equal(commanderSpeech(view({ state: 'kept' })), null);
   assert.equal(commanderSpeech(null), null);
 });
@@ -169,12 +176,14 @@ test('a done run with a goal offer asks about the goal (folder-setup-ends-in-hom
   });
   const speech = commanderSpeech(offering);
   assert.equal(speech.phase, 'goal');
-  assert.equal(speech.line, 'A goal for Albums? · Review');
+  assert.equal(speech.line, 'Albums Manager suggests a goal for Albums · Review');
   assert.equal(speech.review, true);
   assert.deepEqual(commanderOneLine(offering), {
     phase: 'goal',
     text: 'Albums Manager suggests a goal for Albums',
-    action: 'Review'
+    action: 'Review',
+    status: 'Suggests a goal',
+    waiting: true
   });
 });
 
@@ -195,13 +204,15 @@ test('a done run asks to learn the songs before it offers the goal (learn-the-so
   });
   const speech = commanderSpeech(asking);
   assert.equal(speech.phase, 'songs');
-  assert.equal(speech.line, 'Want me to learn the 7 songs? · Review');
+  assert.equal(speech.line, 'Albums Manager asks to learn the songs · Answer');
   assert.equal(speech.announce, 'Want me to learn the 7 songs?');
   assert.equal(speech.review, true);
   assert.deepEqual(commanderOneLine(asking), {
     phase: 'songs',
     text: 'Albums Manager asks to learn the songs',
-    action: 'Review'
+    action: 'Answer',
+    status: 'Has a question for you',
+    waiting: true
   });
   // Given both, the Commander speaks the songs question: one thing at a time.
   const both = view({
@@ -239,7 +250,9 @@ test('while it reads the songs the Commander says where it is, and announces it 
   assert.deepEqual(commanderOneLine(reading('Learning Closer… (6 of 7)', 5)), {
     phase: 'learning',
     text: 'Learning Closer… (6 of 7)',
-    action: 'Review'
+    action: 'Review',
+    status: '',
+    waiting: false
   });
   // The reading outranks an offer that is still on the view, and a goal waits.
   const mixed = view({
@@ -290,7 +303,9 @@ test('the one-line card words per phase (FR13)', () => {
   assert.deepEqual(commanderOneLine(view()), {
     phase: 'report',
     text: 'Albums Manager has a plan for Albums',
-    action: 'Review'
+    action: 'Review',
+    status: 'Has a plan for you',
+    waiting: true
   });
   assert.equal(
     commanderOneLine(view({ state: 'setting_up', setup: { status: 'running', lines: runLines } }))
@@ -302,13 +317,128 @@ test('the one-line card words per phase (FR13)', () => {
     {
       phase: 'done',
       text: 'Albums is set up',
-      action: 'See what I made'
+      action: 'See what I made',
+      status: '',
+      waiting: false
     }
   );
   assert.equal(
     commanderOneLine(view({ state: 'looking' })).text,
     'Albums Manager is looking around Albums'
   );
+  assert.equal(commanderOneLine(view({ state: 'kept' })), null);
+});
+
+// FR13: at each moment the Commander waits on the person, the Next action
+// strip's title and button, the Commander card's status and the balloon's folded
+// line all come from this one function.
+test('the seven waiting moments share one set of words (FR13)', () => {
+  const done = { status: 'done', lines: runLines };
+  const rows = [
+    {
+      name: 'the question is asked',
+      view: view({ premise: { state: 'asked', sentence: 'This looks like a music folder.' } }),
+      text: 'Albums Manager has a question about Albums',
+      action: 'Answer',
+      status: 'Has a question for you'
+    },
+    {
+      name: 'a plan is ready to review',
+      view: view(),
+      text: 'Albums Manager has a plan for Albums',
+      action: 'Review',
+      status: 'Has a plan for you'
+    },
+    {
+      name: "It's something else was chosen and nothing is planned",
+      view: view({ premise: { state: 'something_else', sentence: 'Nothing.', withdrawn: true } }),
+      text: 'Nothing is planned for Albums',
+      action: 'Review',
+      status: 'Nothing planned yet'
+    },
+    {
+      name: 'the agent could not look',
+      view: view({ model_sentence: 'Albums Manager could not look itself: no key.' }),
+      text: 'Albums Manager could not look itself',
+      action: 'Review',
+      status: 'Could not look'
+    },
+    {
+      name: 'the agent could not finish looking',
+      view: view({ state: 'failed' }),
+      text: 'Albums Manager could not look itself',
+      action: 'Review',
+      status: 'Could not look'
+    },
+    {
+      name: 'a setup step did not finish',
+      view: view({ state: 'set_up', setup: { status: 'stopped', lines: runLines } }),
+      text: 'Albums: a step did not finish',
+      action: 'Review',
+      status: 'A step did not finish'
+    },
+    {
+      name: 'the offer to learn the songs',
+      view: view({ state: 'set_up', setup: done, songs_offer: songsOffer }),
+      text: 'Albums Manager asks to learn the songs',
+      action: 'Answer',
+      status: 'Has a question for you'
+    },
+    {
+      name: 'a suggested goal',
+      view: view({
+        state: 'set_up',
+        setup: done,
+        goal_offer: { goal: 'Finish it', max_runes: 300 }
+      }),
+      text: 'Albums Manager suggests a goal for Albums',
+      action: 'Review',
+      status: 'Suggests a goal'
+    }
+  ];
+  for (const row of rows) {
+    const words = commanderOneLine(row.view);
+    assert.equal(words.waiting, true, row.name);
+    assert.equal(words.text, row.text, row.name);
+    assert.equal(words.action, row.action, row.name);
+    assert.equal(words.status, row.status, row.name);
+    // The balloon's folded line says the same words, then the button.
+    assert.equal(commanderSpeech(row.view).line, `${row.text} · ${row.action}`, row.name);
+  }
+  // "Answer" is for the two moments the person is asked something.
+  assert.deepEqual(
+    rows.filter(row => row.action === 'Answer').map(row => row.name),
+    ['the question is asked', 'the offer to learn the songs']
+  );
+});
+
+// FR17: outside a waiting moment (looking, setting up, learning, finished) the
+// strip and the card behave as they do today: no waiting flag, no status, and
+// the folded line is the speech it always was.
+test('outside a waiting moment nothing is waiting and nothing is renamed (FR17)', () => {
+  const done = { status: 'done', lines: runLines };
+  const quiet = {
+    looking: view({ state: 'looking' }),
+    'setting up': view({ state: 'setting_up', setup: { status: 'running', lines: runLines } }),
+    learning: view({
+      state: 'set_up',
+      setup: done,
+      learning: { status: 'running', line: 'Learning Closer… (6 of 7)', done: 5, total: 7 }
+    }),
+    finished: view({ state: 'set_up', setup: done })
+  };
+  for (const [name, v] of Object.entries(quiet)) {
+    const words = commanderOneLine(v);
+    assert.equal(words.waiting, false, name);
+    assert.equal(words.status, '', name);
+  }
+  assert.equal(commanderSpeech(quiet.learning).line, 'Learning Closer… (6 of 7)');
+  assert.equal(commanderSpeech(quiet.finished).line, 'Albums is set up · See what I made');
+  assert.equal(
+    commanderSpeech(quiet['setting up']).line,
+    'Setting up Albums · step 1 of 2 · Downloading 0.5.0'
+  );
+  // A kept folder says nothing at all.
   assert.equal(commanderOneLine(view({ state: 'kept' })), null);
 });
 

@@ -25,7 +25,11 @@ import {
 } from './folder-agent-card.js';
 import { homeCommanders, homeMapShowing, revealHiredTile } from './commander-map.js';
 import { commanderBuildingLine } from './commander-speech.js';
-import { createHomeAgentDirectory, homeAgentPortraitHTML } from './home-agent-portrait.js';
+import {
+  HOME_AGENT_FACES_EVENT,
+  createHomeAgentDirectory,
+  homeAgentPortraitHTML
+} from './home-agent-portrait.js';
 
 // The folder agents whose Commander speaks on Home's map without the drawer:
 // one looking, setting up, or with a report or a cause waiting. A finished
@@ -5330,6 +5334,8 @@ import {
   const mapCommanders = homeCommanders({
     reportView: folderAgentReportView,
     renderCard: (view, options) => renderFolderAgentReport(view, document, options),
+    // A balloon speaks from its tile with the tile's own face, not initials.
+    face: name => commanderFace(name),
     act: async (view, action, extra) => {
       const result = await postFolderAgentAction(view, action, globalThis.fetch, extra);
       if (action === 'set_up' && result?.view) {
@@ -5365,6 +5371,11 @@ import {
       options
     );
   }
+  // The face a Commander's balloon on Home speaks with: its tile's own portrait
+  // (a chosen character or upload, else the figure its card draws).
+  function commanderFace(name) {
+    return homePortrait(name, true, { className: 'commander-balloon-avatar' });
+  }
   function repaintAgentFaces() {
     state.folderAgentFaces = folderAgentTileFaces(
       lastFolderAgentViews,
@@ -5374,6 +5385,13 @@ import {
     );
     mountMap();
     renderRail({ announceChange: false });
+    // The balloons speak with the same faces: draw them again with the new ones.
+    mapCommanders.repaint();
+    // The drawer's own followed Commander has its balloon too, made by the
+    // drawer's folder code; it draws its face again from here as well.
+    if (typeof CustomEvent === 'function') {
+      document.dispatchEvent(new CustomEvent(HOME_AGENT_FACES_EVENT));
+    }
   }
   // The role catalog gives a face its ring and emblem; Home does not load it, so
   // first time an agent is visible it is asked for, and faces redraw once it is
@@ -6037,6 +6055,8 @@ import {
     refresh,
     refreshQuietly,
     refreshLibraryBadges,
+    // The Commander's face for a balloon the drawer makes on Home's map.
+    commanderFace: name => commanderFace(name),
     getState: () => state,
     setView: applyView,
     showHQCreationMap: () => {

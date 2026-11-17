@@ -227,6 +227,10 @@ type Service struct {
 	choices map[string]choice
 	running map[string]bool
 	wg      sync.WaitGroup
+	// starting counts Start calls between "about to create the workspace" and
+	// "the record is written". In that span the workspace exists (its welcome is
+	// enrolled and its worker woken) and the record does not; see FolderWelcome.
+	starting int
 }
 
 type choice struct {
@@ -376,6 +380,23 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string, hire H
 	// record; it is not the workspace goal, which only the owner's answer to
 	// the goal offer sets (folder-setup-ends-in-home FR15–FR18).
 	req.OwnerUserID, req.Name, req.AnchorPath = userID, s.freeName(ctx, folder), path
+	// From here until the record is written the workspace exists without one,
+	// and the lead's welcome must wait (see FolderWelcome: the counter goes up
+	// BEFORE the workspace is created and down only AFTER the record is saved).
+	s.mu.Lock()
+	s.starting++
+	s.mu.Unlock()
+	counting := true
+	endStarting := func() {
+		if !counting {
+			return
+		}
+		counting = false
+		s.mu.Lock()
+		s.starting--
+		s.mu.Unlock()
+	}
+	defer endStarting()
 	created, err := s.deps.Workspaces.CreateAnchored(ctx, req)
 	if err != nil {
 		return View{}, err
@@ -390,7 +411,13 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string, hire H
 		AgentName: created.AgentName, TicketID: ticketID, Brief: brief, State: StateLooking,
 		AsksPremise: true, FedFromHome: held.fedFromHome,
 	}
-	if err := s.deps.Store.Create(rec); err != nil {
+	err = s.deps.Store.Create(rec)
+	endStarting() // only now: the record is written (or never will be)
+	if err != nil {
+		// The workspace exists and will have no record from this Start, so
+		// nothing here asks the owner a question: its welcome is free to post.
+		// Tell whoever waits, after the counter is down.
+		s.deps.Store.notifyRelease(created.ID)
 		return View{}, err
 	}
 	s.pin(created.ID, created.AgentName, false)
@@ -441,6 +468,41 @@ func (s *Service) startLook(workspaceID string, first []string) {
 		}()
 		s.look(context.Background(), workspaceID, first)
 	}()
+}
+
+// FolderWelcome says whether the lead's welcome waits on this workspace's
+// folder agent (see WelcomeHold). A workspace made by feeding a folder is
+// exactly one that has a record, and Start saves the record only after it has
+// created the workspace, whose welcome the worker may try to post at once
+// (measured: 45 ms before the record existed). The counter closes that gap.
+//
+// The ORDER below is the whole mechanism. Start raises the counter before it
+// creates the workspace and lowers it only after the record is written, so a
+// reader that reads the counter FIRST and the record SECOND either sees the
+// counter above zero or sees the record already there. Reading the record
+// first, or lowering the counter before the record is written, reopens the
+// race, and no test from outside can tell. Do not reorder either.
+//
+// While any Start is in that span, a workspace with no record also reads as
+// held: the host cannot tell which new workspace is the fed one until its record
+// exists, and the span is a fraction of a second. A record that cannot be read
+// is held, not released: unreadable storage is not proof the record is gone.
+func (s *Service) FolderWelcome(workspaceID string) WelcomeHold {
+	s.mu.Lock()
+	starting := s.starting > 0
+	s.mu.Unlock()
+	rec, err := s.deps.Store.Read(workspaceID)
+	switch {
+	case err == nil:
+		return WelcomeHoldOf(rec)
+	case errors.Is(err, ErrNoRecord):
+		if starting {
+			return WelcomeHeld
+		}
+		return WelcomeNotFed
+	default:
+		return WelcomeHeld
+	}
 }
 
 // Wait blocks until background looks finish (tests, shutdown).

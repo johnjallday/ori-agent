@@ -291,7 +291,7 @@ func setUpOf(req setUpRequest) folderagent.SetUpRequest {
 }
 
 type premiseRequest struct {
-	// Answer is "confirmed" (Manage them as …) or "something_else".
+	// Answer is "confirmed" (Yes, show me the plan) or "something_else".
 	Answer string `json:"answer"`
 }
 

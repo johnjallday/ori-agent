@@ -22,6 +22,9 @@ type recoveryFixture struct {
 	service  *Service
 	calls    atomic.Int32
 	assessed atomic.Bool
+	// held makes the composer answer "waiting" as it does for a workspace whose
+	// folder agent is still asking its own question.
+	held atomic.Bool
 }
 
 func newRecoveryFixture(t *testing.T) *recoveryFixture {
@@ -49,6 +52,9 @@ func (f *recoveryFixture) open() {
 	f.folders = workspace.NewSyncStore(primary, f.files)
 	composer := composerFunc(func(_ context.Context, owner, id string) (session.LeadConversationInput, string, error) {
 		f.calls.Add(1)
+		if f.held.Load() {
+			return session.LeadConversationInput{}, StateWaitingSetup, nil
+		}
 		ws, err := ReadWorkspace(f.folders, id)
 		if err != nil {
 			return session.LeadConversationInput{}, "", err
@@ -254,6 +260,77 @@ func TestWelcomeReconcileReportsProgressOnlyWhenSomethingChanged(t *testing.T) {
 	// Nothing pending: an idle service must not report progress either.
 	if progressed() {
 		t.Fatal("an empty keyset counted as progress")
+	}
+}
+
+// While the composer says "waiting" (the folder agent is asking its own
+// question) a pass writes no message, settles nothing and reports no progress,
+// so the worker backs off instead of spinning, and the enrolment is still there
+// for the pass that follows the release.
+func TestHeldWelcomeStaysPendingAndIsDeliveredOnceReleased(t *testing.T) {
+	f := newRecoveryFixture(t)
+	f.held.Store(true)
+	f.create(false)
+
+	pending := func() int {
+		t.Helper()
+		items, err := f.sessions.(Store).PendingWelcomes(t.Context(), 0, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(items)
+	}
+	for i := range 3 {
+		_, did, err := f.service.reconcile(t.Context(), 0)
+		if err != nil || did {
+			t.Fatalf("held pass %d: progress=%v err=%v, want none", i, did, err)
+		}
+	}
+	if got := f.read(); len(got.Messages) != 0 || got.SessionID != "" {
+		t.Fatalf("a held welcome was written: %+v", got)
+	}
+	if pending() != 1 {
+		t.Fatalf("the held enrolment is not pending: %d", pending())
+	}
+
+	f.held.Store(false)
+	if _, did, err := f.service.reconcile(t.Context(), 0); err != nil || !did {
+		t.Fatalf("released pass: progress=%v err=%v, want progress", did, err)
+	}
+	if got := f.read(); len(got.Messages) != 1 {
+		t.Fatalf("the released welcome was not delivered: %+v", got)
+	}
+}
+
+// With the worker's interval far in the future, only a wake can bring the next
+// pass: releasing the hold and calling Notify delivers the welcome at once, so
+// setting up or keeping a folder does not leave the welcome minutes late.
+func TestHeldWelcomeIsDeliveredOnNotifyNotOnTheTimer(t *testing.T) {
+	f := newRecoveryFixture(t)
+	f.service.interval = time.Hour
+	f.service.maxInterval = time.Hour
+	f.held.Store(true)
+	f.create(false)
+	f.service.Start()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for f.calls.Load() < 1 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if f.calls.Load() < 1 {
+		t.Fatal("the worker never ran its first pass")
+	}
+	if got := f.read(); len(got.Messages) != 0 {
+		t.Fatalf("delivered while held: %+v", got)
+	}
+
+	f.held.Store(false)
+	f.service.Notify()
+	for len(f.read().Messages) == 0 && time.Now().Before(deadline.Add(3*time.Second)) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := f.read(); len(got.Messages) != 1 {
+		t.Fatalf("Notify did not deliver the released welcome: %+v", got)
 	}
 }
 

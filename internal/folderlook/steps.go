@@ -139,7 +139,7 @@ func Steps(folderName string, facts foldermap.Facts, candidates []Candidate) []S
 		// The folder becomes a place with its projects inside: the default
 		// whenever no Home takes it (the Group stage, or a portfolio without a
 		// Home yet).
-		noun := memberNoun(facts)
+		noun := MemberNoun(facts)
 		step := Step{
 			Handle: HandleGroup, Kind: StepGroup, Name: "a group", Default: stage == foldermap.StageGroup || !homeDefault,
 			Title: fmt.Sprintf("Turn %s into a group with one workspace per %s (%d)", folderName, noun, n),
@@ -188,8 +188,10 @@ func memberShape(facts foldermap.Facts) folderdigest.Shape {
 	return shape
 }
 
-// memberNoun names one member: "song", "draft", or "project" for a mix.
-func memberNoun(facts foldermap.Facts) string {
+// MemberNoun names one member of a group in the capability table's words
+// ("song", "manuscript"), or "project" for a mix. The group step's title and the premise's outcome sentence use it, so
+// they name the same thing.
+func MemberNoun(facts foldermap.Facts) string {
 	if shape := memberShape(facts); shape != "" {
 		return foldermap.ShapeNoun(shape, 1)
 	}

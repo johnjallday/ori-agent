@@ -137,6 +137,96 @@ func TestLeadConversation_FolderReportBeforeWelcome(t *testing.T) {
 	}
 }
 
+// A fed folder's welcome is held until the folder is set up or kept, so the
+// Commander's question now creates the thread (titled for the folder) and the
+// welcome joins it later. A workspace from before the hold has the welcome
+// first, and the report lands in that thread. Either order is one thread.
+func TestLeadConversation_TheQuestionAndTheWelcomeShareOneThreadInEitherOrder(t *testing.T) {
+	setup := func(t *testing.T) (*hybridStore, LeadConversationInput, func()) {
+		store, cleanup := setupHybridStore(t, 10)
+		h := store.(*hybridStore)
+		if err := store.CreateWorkspace(t.Context(), &Workspace{ID: "ws", Name: "Albums", OwnerUserID: "local", Status: WorkspaceStatusActive}); err != nil {
+			t.Fatal(err)
+		}
+		in := LeadConversationInput{WorkspaceID: "ws", OwnerUserID: "local", AgentName: "Albums Manager", AgentInstanceID: "albums-lead", Introduction: "Hi, I’m Albums Manager."}
+		if err := h.EnrollWelcome(t.Context(), WelcomeScope{WorkspaceID: "ws", OwnerUserID: "local", AgentName: in.AgentName, AgentInstanceID: in.AgentInstanceID}); err != nil {
+			t.Fatal(err)
+		}
+		return h, in, cleanup
+	}
+	question := FolderReportInput{WorkspaceID: "ws", AgentName: "Albums Manager", ReportKey: "reported@1", Title: "Plan for Albums",
+		Content: "I looked around Albums. One question first:\n\nThis looks like a music production folder."}
+	contents := func(t *testing.T, h *hybridStore, id string) (string, []string) {
+		t.Helper()
+		loaded, err := h.GetSession(t.Context(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, m := range loaded.Messages {
+			out = append(out, m.Content)
+		}
+		return loaded.Title, out
+	}
+
+	t.Run("held welcome: the question creates the thread and the welcome joins it", func(t *testing.T) {
+		h, in, cleanup := setup(t)
+		defer cleanup()
+		report, changed, err := h.DeliverFolderReport(t.Context(), question)
+		if err != nil || !changed {
+			t.Fatalf("report: %+v %v %v", report, changed, err)
+		}
+		welcome, err := h.EnsureLeadConversation(t.Context(), in)
+		if err != nil || !welcome.Changed || welcome.SessionID != report.SessionID {
+			t.Fatalf("the welcome did not join the question's thread: %+v %v (report in %s)", welcome, err, report.SessionID)
+		}
+		title, got := contents(t, h, report.SessionID)
+		if title != "Plan for Albums" || len(got) != 2 || got[0] != question.Content || got[1] != in.Introduction {
+			t.Fatalf("thread %q = %q, want the question then the welcome", title, got)
+		}
+		// The newest report is still the question's own message.
+		if latest, err := h.LatestFolderReport(t.Context(), "ws"); err != nil || latest.MessageID != report.MessageID {
+			t.Fatalf("latest report %+v %v", latest, err)
+		}
+	})
+
+	t.Run("welcome first (a workspace from before): the report lands in the welcome's thread", func(t *testing.T) {
+		h, in, cleanup := setup(t)
+		defer cleanup()
+		welcome, err := h.EnsureLeadConversation(t.Context(), in)
+		if err != nil || !welcome.Changed || welcome.SessionID == "" {
+			t.Fatalf("welcome: %+v %v", welcome, err)
+		}
+		report, changed, err := h.DeliverFolderReport(t.Context(), question)
+		if err != nil || !changed || report.SessionID != welcome.SessionID {
+			t.Fatalf("the report did not join the welcome's thread: %+v %v %v", report, changed, err)
+		}
+		title, got := contents(t, h, welcome.SessionID)
+		if title != "Getting started" || len(got) != 2 || got[0] != in.Introduction || got[1] != question.Content {
+			t.Fatalf("thread %q = %q, want the welcome then the question", title, got)
+		}
+	})
+
+	t.Run("the owner already typed: the held welcome is not posted into their conversation", func(t *testing.T) {
+		h, in, cleanup := setup(t)
+		defer cleanup()
+		report, _, err := h.DeliverFolderReport(t.Context(), question)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := h.AddMessage(t.Context(), report.SessionID, &Message{Role: RoleUser, Content: "What is this?", CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+		welcome, err := h.EnsureLeadConversation(t.Context(), in)
+		if err != nil || welcome.Changed || welcome.SessionID != "" || welcome.AwaitingAssessment {
+			t.Fatalf("a held welcome was posted into a conversation the owner started: %+v %v", welcome, err)
+		}
+		if _, got := contents(t, h, report.SessionID); len(got) != 2 {
+			t.Fatalf("thread = %q, want only the question and the owner's message", got)
+		}
+	})
+}
+
 func TestLeadConversation_FencesOwnershipVersionAndUserConversations(t *testing.T) {
 	for _, mode := range []string{"existing", "user replied", "owner", "version", "moved", "replacement"} {
 		t.Run(mode, func(t *testing.T) {

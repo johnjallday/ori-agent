@@ -480,7 +480,8 @@ export function homeCommanders({
   win = globalThis.window,
   reportView,
   renderCard,
-  act
+  act,
+  face = null
 } = {}) {
   const live = new Map();
   // opening is the line a balloon says while Home leaves for where its run
@@ -489,7 +490,7 @@ export function homeCommanders({
     let entry = live.get(id);
     if (!entry) {
       entry = {
-        presenter: commanderPresenter(homeCommanderMap(id, { doc, win }), { watched: false })
+        presenter: commanderPresenter(homeCommanderMap(id, { doc, win }), { watched: false, face })
       };
       live.set(id, entry);
     }
@@ -538,7 +539,12 @@ export function homeCommanders({
         live.delete(id);
       });
     },
-    ids: () => [...live.keys()]
+    ids: () => [...live.keys()],
+    // repaint draws every balloon again, for a face that arrived after it did
+    // (the agent's record or the character catalog loaded).
+    repaint() {
+      live.forEach(entry => entry.presenter.retick());
+    }
   };
 }
 
@@ -596,9 +602,23 @@ export function commanderPresenter(
     hostLine = true,
     onNarrated = null,
     chatHolds = null,
-    chatLine = null
+    chatLine = null,
+    onView = null,
+    face = null
   } = {}
 ) {
+  // faceOf is the Commander's face as its host draws it everywhere else (the
+  // Commander card on the workspace page, the tile on Home): the balloon's header
+  // and folded line show that, not initials (folder-question-said-once FR24).
+  // '' when the host has none yet; the balloon then falls back to initials.
+  const faceOf = name => {
+    try {
+      const markup = typeof face === 'function' ? face(name) : '';
+      return typeof markup === 'string' ? markup : '';
+    } catch (_) {
+      return '';
+    }
+  };
   let last = null;
   let narrated = '';
   let tickets = [];
@@ -652,7 +672,7 @@ export function commanderPresenter(
       const held = chatHeld();
       const entrance = map.openingLine?.(view) || '';
       return {
-        speaker: { name: view.agent, role: 'Commander' },
+        speaker: { name: view.agent, role: 'Commander', face: faceOf(view.agent) },
         // A balloon leaving with its run says where it goes (a line); the
         // workspace page's own follower passes true and keeps its speech.
         line: entrance || (typeof opening === 'string' && opening ? opening : item.speech.line),
@@ -668,7 +688,11 @@ export function commanderPresenter(
       };
     }
     return {
-      speaker: { name: item.agent || last?.view.agent || 'Commander', role: 'Commander' },
+      speaker: {
+        name: item.agent || last?.view.agent || 'Commander',
+        role: 'Commander',
+        face: faceOf(item.agent || last?.view.agent)
+      },
       line: item.line,
       headline: item.headline,
       announce: item.announce,
@@ -823,6 +847,9 @@ export function commanderPresenter(
       if (phase !== lastPhase) shift = 0;
       lastPhase = phase;
       last = args;
+      // The page's Next action strip speaks for the same folder agent: it is
+      // handed the view the page already fetched, here, not a second request.
+      onView?.(args ? { view: args.view, raw: args.raw } : null);
       const drawn = draw({ report: true });
       // While the report has something to say, its own look ticket is told by
       // the report: a host that lists tickets leaves that one to the Commander.
@@ -835,6 +862,22 @@ export function commanderPresenter(
     },
     // retick redraws the tickets after an answer, an error or a dismissal.
     retick,
+    // review is what the one-line card's Review button does, for a caller that
+    // has no such button (the Next action strip when the report has no message
+    // in the chat): on the map it brings the map into view and opens the
+    // Commander's balloon; elsewhere the full card the host shows comes into
+    // view. false when there is no report to review.
+    review() {
+      if (!last) return false;
+      if (map.visible?.() && !map.narrow?.()) {
+        map.reveal?.();
+        map.balloon.expand();
+        onReview?.();
+        return true;
+      }
+      revealHost();
+      return true;
+    },
     // release stops following the map but leaves the balloon to its next
     // presenter (the same workspace, spoken for by another host).
     release() {

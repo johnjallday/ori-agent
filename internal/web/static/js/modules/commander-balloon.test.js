@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   BALLOON_ANNOUNCE_GAP_MS,
@@ -390,6 +391,181 @@ function reportContent(doc, line = 'I have a plan for Albums · Review') {
     }
   };
 }
+
+// FR24, FR26: the header and the folded line draw the Commander's face (the
+// markup its card draws), initials only when the host has no face to give.
+test("the balloon's header and folded line show the Commander's face, else initials", () => {
+  resetCommanderBalloons();
+  const doc = fakeDocument();
+  const { root, unit } = mapRoot(doc);
+  const balloon = commanderBalloon('ws:face', { doc, now: () => 0, setTimer: () => 1 });
+  balloon.attach(root, { anchor: () => unit, narrow: () => false });
+  const slots = () => [balloon.nodes.lineFace, balloon.nodes.face];
+  const speaking = face => ({
+    ...reportContent(doc),
+    speaker: { name: 'Albums Manager', role: 'Commander', ...(face === undefined ? {} : { face }) }
+  });
+
+  // No face from the host: initials, as before.
+  balloon.update(speaking());
+  for (const slot of slots()) {
+    assert.equal(slot.textContent, 'AM');
+    assert.equal(slot.classList.contains('has-avatar'), false);
+  }
+
+  // The host's face fills both slots.
+  const squirrel = '<span class="agent-avatar agent-avatar--character"></span>';
+  balloon.update(speaking(squirrel));
+  for (const slot of slots()) {
+    assert.equal(slot.innerHTML, squirrel);
+    assert.equal(slot.classList.contains('has-avatar'), true);
+  }
+
+  // The same face again is not written again, so a redraw cannot make it flicker.
+  slots().forEach(slot => (slot.innerHTML = 'untouched'));
+  balloon.update(speaking(squirrel));
+  slots().forEach(slot => assert.equal(slot.innerHTML, 'untouched'));
+
+  // A different face replaces it.
+  const robot = '<span class="agent-avatar agent-avatar--generated"></span>';
+  balloon.update(speaking(robot));
+  slots().forEach(slot => assert.equal(slot.innerHTML, robot));
+
+  // The face goes away (an empty string counts as none): initials come back.
+  balloon.update(speaking(''));
+  for (const slot of slots()) {
+    assert.equal(slot.textContent, 'AM');
+    assert.equal(slot.classList.contains('has-avatar'), false);
+  }
+});
+
+// FR24 to FR27, demo finding 6.4: the card draws the Commander's figure with a
+// name plate and a star over it. In a 20 to 54 px slot those covered the face (and
+// the start of the agent's name in the chat), so every slot that holds a face keeps
+// them off and crops the figure from its own size. A DOM test cannot see layout, so
+// the stylesheet's contract is pinned: the slots that hold a face, what is hidden,
+// and where each slot gets its size.
+test('the small face slots keep the figure free of the card’s plate and star', () => {
+  const mapCSS = readFileSync(new URL('../../css/workspace-map.css', import.meta.url), 'utf8');
+  const guideCSS = readFileSync(new URL('../../css/ori-guide.css', import.meta.url), 'utf8');
+  const slots = [
+    '.commander-balloon-face',
+    '.personal-assistant-launcher__avatar',
+    '.personal-assistant-panel__avatar',
+    '.personal-assistant-message__author-avatar'
+  ];
+  // Prettier wraps long selectors; match on the sheet with its whitespace collapsed.
+  const flat = mapCSS.replace(/\s+/g, ' ');
+  const rule = selectorTail => {
+    const found = [
+      ...flat.matchAll(
+        new RegExp(
+          ':is\\(([^)]*)\\)\\s*' + selectorTail.replace(/[.()>]/g, '\\$&') + '\\s*\\{([^}]*)\\}',
+          'g'
+        )
+      )
+    ];
+    assert.equal(found.length, 1, `one shared rule for ${selectorTail}`);
+    return found[0];
+  };
+  const card = rule('.ws-map-av');
+  for (const slot of slots) {
+    assert.ok(card[1].includes(slot), `${slot} is covered by the compact figure rule`);
+  }
+  assert.match(card[2], /width:\s*var\(--face-size/);
+  assert.match(card[2], /height:\s*var\(--face-size/);
+  assert.match(card[2], /overflow:\s*hidden/);
+  assert.match(card[2], /clip-path:\s*none/, 'the card’s notched corner is not cut from a face');
+  assert.match(card[2], /border-radius:\s*var\(--face-radius/);
+
+  const hidden = rule('.ws-map-av :is(.ws-map-av-label, .ws-map-av-commander-mark)');
+  assert.match(hidden[2], /display:\s*none/);
+  assert.match(rule('.ws-map-av-figure')[2], /calc\(var\(--face-size/);
+  assert.match(rule('.ws-map-av > .agent-avatar')[2], /--aa-size:\s*var\(--face-size/);
+
+  // Each slot sets the size it offers: the balloon in the map's sheet, the
+  // drawer's three in the guide's.
+  assert.match(
+    mapCSS,
+    /\.commander-balloon-face\.has-avatar\s*\{[^}]*--face-size:\s*26px;[^}]*--face-radius:\s*50%/
+  );
+  assert.match(
+    guideCSS,
+    /\.personal-assistant-message__author-avatar\s*\{[^}]*--face-size:\s*20px;[^}]*--face-radius:\s*6px/
+  );
+  assert.match(
+    guideCSS,
+    /\.personal-assistant-launcher__avatar,\s*\.personal-assistant-panel__avatar\s*\{[^}]*--face-size:\s*54px;[^}]*--face-radius:\s*12px/
+  );
+  // The crown is the map's light-theme brown in the drawer too, not the gold fallback.
+  const mapKeeper = mapCSS.match(/--ws-keeper:\s*(#9b641b);/);
+  assert.ok(mapKeeper, 'the map sets its light-theme keeper colour');
+  assert.match(
+    guideCSS,
+    new RegExp(
+      '\\[data-bs-theme="light"\\][^{]*\\.personal-assistant-message__author-avatar[^{]*\\{[^}]*--ws-keeper:\\s*' +
+        mapKeeper[1]
+    )
+  );
+});
+
+// FR31, demo finding 7.1b: opening the balloon scrolled its first control into
+// view, so a card taller than the balloon (the folder question: sentence, names,
+// outcome, safety line, then the buttons) opened with the question sentence
+// scrolled out of sight above the buttons. Opening never scrolls the body now.
+test('opening a balloon whose first control is below the fold keeps the question in view', () => {
+  resetCommanderBalloons();
+  const doc = fakeDocument();
+  const { root, unit } = mapRoot(doc);
+  const balloon = commanderBalloon('ws:tall', { doc, now: () => 0, setTimer: () => 1 });
+  balloon.attach(root, { anchor: () => unit, narrow: () => false });
+  balloon.update(reportContent(doc));
+  const body = balloon.nodes.body;
+  const goal = body.querySelector('.goal');
+  let scrolled = 0;
+  goal.scrollIntoView = () => (scrolled += 1);
+  body.scrollIntoView = () => (scrolled += 1);
+
+  assert.equal(body.getAttribute('tabindex'), '-1', 'the body can take script focus');
+  assert.equal(body.getAttribute('role'), 'group');
+  assert.match(body.getAttribute('aria-labelledby'), /-title$/);
+
+  // The body shows 100 px (top 100); the control sits at 250: not in view.
+  body.rect = { left: 0, top: 100, width: 360, height: 100 };
+  goal.rect = { left: 0, top: 250, width: 200, height: 44 };
+  body.scrollTop = 0;
+  assert.equal(balloon.expand(), true);
+  assert.equal(doc.activeElement, body, 'focus waits on the body, not on a control no one can see');
+  assert.equal(body.scrollTop, 0, 'the question is still at the top');
+  assert.equal(scrolled, 0, 'nothing was scrolled into view');
+  assert.equal(balloon.outOfView(goal), true);
+
+  // Closing and opening again, and the "and N more" step, behave the same.
+  balloon.collapse({ returnFocus: false });
+  assert.equal(balloon.expand(), true);
+  assert.equal(doc.activeElement, body);
+  assert.equal(body.scrollTop, 0);
+
+  // A control that is in view takes focus, as before, still without scrolling.
+  goal.rect = { left: 0, top: 120, width: 200, height: 44 };
+  balloon.collapse({ returnFocus: false });
+  assert.equal(balloon.expand(), true);
+  assert.equal(doc.activeElement, goal);
+  assert.equal(balloon.outOfView(goal), false);
+  assert.equal(scrolled, 0);
+
+  // A control cut by the body's lower edge counts as out of view; one wholly
+  // inside, or a body with no height yet, does not.
+  goal.rect = { left: 0, top: 180, width: 200, height: 44 };
+  assert.equal(balloon.outOfView(goal), true);
+  goal.rect = { left: 0, top: 156, width: 200, height: 44 };
+  assert.equal(balloon.outOfView(goal), false);
+  body.rect = { left: 0, top: 100, width: 360, height: 0 };
+  goal.rect = { left: 0, top: 900, width: 200, height: 44 };
+  assert.equal(balloon.outOfView(goal), false, 'no layout yet: cannot tell, so focus the control');
+  assert.equal(balloon.outOfView(null), false);
+  assert.equal(balloon.outOfView(body), false);
+});
 
 test('three mounts within 100 ms keep one expanded balloon with its content and focus', () => {
   resetCommanderBalloons();

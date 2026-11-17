@@ -9,6 +9,7 @@ import {
   folderAgentHireChoice,
   folderAgentLineTime,
   folderAgentNeedsView,
+  folderAgentPremiseNamesLine,
   folderAgentReceiptRows,
   followFolderAgent,
   notifyPlacement,
@@ -3264,8 +3265,19 @@ test('during and after a run each install row shows its state from the run line'
 const askedPremise = {
   state: 'asked',
   sentence: 'This looks like a music production folder: 7 REAPER songs and 1 Logic Pro song.',
-  confirm: 'Manage them as songs',
+  confirm: 'Yes, show me the plan',
   other: "It's something else"
+};
+
+// What the host sends with the question since folder-question-said-once: a few
+// of the owner's song names, the sentence the plan after the answer backs, and
+// that nothing happens yet.
+const askedPremiseWithOutcome = {
+  ...askedPremise,
+  names: ['Album-1', 'Album-2', 'Album-3'],
+  names_more: 5,
+  outcome: "I'll plan turning Albums into a group: a workspace for each song.",
+  nothing_yet: 'Nothing is installed or created until you approve the plan.'
 };
 
 test('while the premise is asked the card shows only it, with two real buttons in order', async () => {
@@ -3290,7 +3302,7 @@ test('while the premise is asked the card shows only it, with two real buttons i
   assert.deepEqual(
     buttons.map(b => [b.textContent, b.type, b.className.includes('btn-primary')]),
     [
-      ['Manage them as songs', 'button', true],
+      ['Yes, show me the plan', 'button', true],
       ["It's something else", 'button', false]
     ]
   );
@@ -3310,9 +3322,167 @@ test('while the premise is asked the card shows only it, with two real buttons i
   await buttons[0].listeners.click();
   await buttons[1].listeners.click();
   assert.deepEqual(actions, [
-    ['premise_confirm', 'Manage them as songs'],
+    ['premise_confirm', 'Yes, show me the plan'],
     ['premise_other', "It's something else"]
   ]);
+});
+
+const PREMISE_ORDER = [
+  'folder-agent-card__premise-text',
+  'folder-agent-card__premise-names',
+  'folder-agent-card__premise-rule',
+  'folder-agent-card__premise-label',
+  'folder-agent-card__premise-outcome',
+  'folder-agent-card__premise-nothing',
+  'folder-agent-card__actions'
+];
+
+function askedCard(premise, options = {}) {
+  return renderFolderAgentReport(
+    folderAgentReportView(reported({ what_it_is: 'A music demo folder.', premise })),
+    stubDocument(),
+    options
+  );
+}
+
+test('the question says what you get: sentence, names, divider, label, outcome, nothing yet, buttons', async () => {
+  for (const options of [{}, { compact: true }]) {
+    const actions = [];
+    const card = askedCard(askedPremiseWithOutcome, {
+      ...options,
+      onAction: id => actions.push(id)
+    });
+    const premise = card.querySelector('.folder-agent-card__premise');
+    assert.deepEqual(
+      premise.children.map(node => node.className),
+      PREMISE_ORDER,
+      JSON.stringify(options)
+    );
+    assert.equal(text(premise, '.folder-agent-card__premise-text'), askedPremise.sentence);
+    assert.equal(
+      text(premise, '.folder-agent-card__premise-names'),
+      'Album-1 · Album-2 · Album-3 · and 5 more'
+    );
+    assert.equal(text(premise, '.folder-agent-card__premise-label'), "If that's right");
+    assert.equal(
+      text(premise, '.folder-agent-card__premise-outcome'),
+      askedPremiseWithOutcome.outcome
+    );
+    assert.equal(
+      text(premise, '.folder-agent-card__premise-nothing'),
+      askedPremiseWithOutcome.nothing_yet
+    );
+    // The divider is decoration, not content.
+    assert.equal(
+      premise.querySelector('.folder-agent-card__premise-rule').attributes['aria-hidden'],
+      'true'
+    );
+    // The counts are said once, in the sentence.
+    assert.equal(/\d+ REAPER/.test(text(premise, '.folder-agent-card__premise-names')), false);
+    // Both answers keep their actions, confirm first.
+    const buttons = card.querySelectorAll('button');
+    assert.deepEqual(
+      buttons.map(b => [b.textContent, b.dataset.folderAgentAction]),
+      [
+        ['Yes, show me the plan', 'premise_confirm'],
+        ["It's something else", 'premise_other']
+      ]
+    );
+    await buttons[0].listeners.click();
+    await buttons[1].listeners.click();
+    assert.deepEqual(actions, ['premise_confirm', 'premise_other']);
+  }
+});
+
+test('what the host did not send draws nothing: no label without its sentence, no empty lines', () => {
+  const nothingYetOnly = askedCard({
+    ...askedPremise,
+    nothing_yet: askedPremiseWithOutcome.nothing_yet
+  }).querySelector('.folder-agent-card__premise');
+  assert.deepEqual(
+    nothingYetOnly.children.map(node => node.className),
+    [
+      'folder-agent-card__premise-text',
+      'folder-agent-card__premise-rule',
+      'folder-agent-card__premise-nothing',
+      'folder-agent-card__actions'
+    ]
+  );
+  const namesOnly = askedCard({ ...askedPremise, names: ['Album-1'], names_more: 0 }).querySelector(
+    '.folder-agent-card__premise'
+  );
+  assert.deepEqual(
+    namesOnly.children.map(node => node.className),
+    [
+      'folder-agent-card__premise-text',
+      'folder-agent-card__premise-names',
+      'folder-agent-card__actions'
+    ]
+  );
+  assert.equal(text(namesOnly, '.folder-agent-card__premise-names'), 'Album-1');
+  const bare = askedCard({
+    ...askedPremise,
+    names: [],
+    names_more: 0,
+    outcome: '  ',
+    nothing_yet: ''
+  });
+  assert.deepEqual(
+    bare.querySelector('.folder-agent-card__premise').children.map(node => node.className),
+    ['folder-agent-card__premise-text', 'folder-agent-card__actions']
+  );
+  // Junk in the optional fields never reaches the page.
+  const junk = askedCard({
+    ...askedPremise,
+    names: [null, '', 7, '  '],
+    names_more: 'x'
+  }).querySelector('.folder-agent-card__premise');
+  assert.equal(text(junk, '.folder-agent-card__premise-names'), '7');
+});
+
+test('song names are drawn as text, never as markup', () => {
+  const hostile = ['<img src=x onerror=alert(1)>', '<b>Bold</b> & "quotes"', 'a‮b'];
+  const card = askedCard({ ...askedPremiseWithOutcome, names: hostile, names_more: 0 });
+  const line = card.querySelector('.folder-agent-card__premise-names');
+  assert.equal(line.textContent, hostile.join(' · '));
+  assert.equal(line.children.length, 0);
+  assert.equal(card.querySelector('img'), null);
+  assert.equal(card.querySelector('b'), null);
+});
+
+test('the names line counts what it leaves out', () => {
+  assert.equal(folderAgentPremiseNamesLine({ names: [], namesMore: 3 }), '');
+  assert.equal(folderAgentPremiseNamesLine({ names: ['A', 'B'], namesMore: 0 }), 'A · B');
+  assert.equal(
+    folderAgentPremiseNamesLine({ names: ['A', 'B', 'C'], namesMore: 3 }),
+    'A · B · C · and 3 more'
+  );
+  assert.equal(folderAgentPremiseNamesLine(null), '');
+});
+
+test('the question reads in the card colours with real touch targets', () => {
+  const css = readFileSync(new URL('../../css/home-command.css', import.meta.url), 'utf8');
+  // The label is the small upper-case mono label in the amber accent text token,
+  // which is at least 4.5:1 on the card paper in light and dark (a text token, not
+  // the filled-button token, which is too dark on the dark card).
+  const label = css.match(/\.folder-agent-card__premise-label\s*\{([^}]*)\}/)?.[1] || '';
+  assert.match(label, /color: var\(--hc-amber, var\(--cozy-amber-strong\)\)/);
+  assert.match(label, /font-family: var\(--font-mono/);
+  assert.match(label, /text-transform: uppercase/);
+  // The names and the "nothing yet" line are the card's muted ink.
+  const muted =
+    css.match(
+      /\.folder-agent-card__premise-names,\s*\.folder-agent-card__premise-nothing\s*\{([^}]*)\}/
+    )?.[1] || '';
+  assert.match(muted, /color: var\(--hc-ink-dim, var\(--cozy-ink-dim\)\)/);
+  // Long words wrap rather than cut, and both answers are at least 44px tall
+  // where a finger presses.
+  assert.match(css, /\.folder-agent-card__premise-outcome,[^{]*\{[^}]*overflow-wrap: anywhere/);
+  assert.match(
+    css,
+    /@media \(pointer: coarse\), \(max-width: 720px\)\s*\{\s*\.folder-agent-card__premise \.folder-agent-card__actions \.btn\s*\{[^}]*min-height: 44px/
+  );
+  assert.doesNotMatch(label, /#[0-9a-f]{3,8}\b|rgb\(/i);
 });
 
 test('the premise answers post to the premise route with the answer', async () => {

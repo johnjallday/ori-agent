@@ -192,7 +192,7 @@ test('a waiting ticket comes before a waiting report, with "and 1 more" opening 
     doc,
     card: () => doc.createElement('article')
   });
-  assert.equal(balloon.content.line, 'I have a plan for Albums · Review');
+  assert.equal(balloon.content.line, 'Albums Manager has a plan for Albums · Review');
   assert.equal(balloon.content.more, null);
   activityFn({
     workspaceId: 'ws-1',
@@ -204,12 +204,12 @@ test('a waiting ticket comes before a waiting report, with "and 1 more" opening 
   assert.match(balloon.content.line, /^I need your input/);
   assert.equal(balloon.content.more.label, 'and 1 more');
   balloon.content.onMore();
-  assert.equal(balloon.content.line, 'I have a plan for Albums · Review');
+  assert.equal(balloon.content.line, 'Albums Manager has a plan for Albums · Review');
   // The ticket is answered elsewhere: its controls leave the balloon (FR30).
   activityFn({ workspaceId: 'ws-1', agent: 'Albums Manager', line: 'Back to it.', taskId: 't1' });
   assert.equal(balloon.content.more.label, 'and 1 more');
   activityFn(null);
-  assert.equal(balloon.content.line, 'I have a plan for Albums · Review');
+  assert.equal(balloon.content.line, 'Albums Manager has a plan for Albums · Review');
   assert.equal(balloon.content.more, null);
   assert.equal(typeof fire, 'function');
   // A setup run in progress outranks the ticket line the same work makes.
@@ -372,13 +372,13 @@ test("the folder agent's own look ticket stays out; a new report phase starts fr
     line: 'On it.',
     taskId: 'look-1'
   });
-  assert.equal(balloon.content.line, 'I have a plan for Picker Songs · Review');
+  assert.equal(balloon.content.line, 'Picker Songs Manager has a plan for Picker Songs · Review');
   assert.equal(balloon.content.more, null);
   // Another ticket at work leads; the owner steps to the plan with "and 1 more".
   activityFn({ workspaceId: 'ws-1', agent: 'Picker Songs Manager', line: 'On it.', taskId: 't2' });
   assert.match(balloon.content.line, /^Working on: Ticket/);
   balloon.content.onMore();
-  assert.equal(balloon.content.line, 'I have a plan for Picker Songs · Review');
+  assert.equal(balloon.content.line, 'Picker Songs Manager has a plan for Picker Songs · Review');
   // Set it up: the run leads again, not the ticket the owner had stepped past.
   present({
     ...reported,

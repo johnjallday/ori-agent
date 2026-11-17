@@ -7,6 +7,20 @@ import {
   resolveTicketStatePill,
   resolveRunSignal
 } from './task-presentation.js';
+import { commanderOneLine } from './commander-speech.js';
+
+/**
+ * folderAgentWaiting is the words of the moment the workspace's Commander waits
+ * on the person (the question, a plan, a stopped step, the songs offer, a
+ * suggested goal, …), or null. They come from commanderOneLine, the one source
+ * the one-line card, the Commander card's status and the balloon's folded line
+ * also use, so the strip cannot say something else.
+ */
+export function folderAgentWaiting(view, workspaceId) {
+  if (!view || String(view.workspaceID || '') !== String(workspaceId || '')) return null;
+  const words = commanderOneLine(view);
+  return words?.waiting ? words : null;
+}
 
 /** @typedef {'loading'|'ready'|'unavailable'|'not_applicable'} SourceState */
 /**
@@ -65,7 +79,9 @@ function resultOrder(a, b) {
 }
 
 /**
- * @param {{workspaceId:string, tasks:{state:SourceState,items?:object[]}, console?:object|null}} input
+ * @param {{workspaceId:string, tasks:{state:SourceState,items?:object[]}, console?:object|null, folderAgent?:object|null}} input
+ *   folderAgent is the folder agent's report view (folderAgentReportView) for this
+ *   workspace, when it has one; without it the output is exactly what it was.
  * @returns {NextAction}
  */
 export function resolveWorkspaceNextAction(input) {
@@ -216,6 +232,25 @@ export function resolveWorkspaceNextAction(input) {
       }
     });
   if (attention.length) return taskDescriptor(attention[0]);
+  // The folder's Commander waits on the person: its question, plan, stopped step,
+  // offer or goal, named once here, directly below a ticket that needs the
+  // person and above everything else (running work, filing, finished results and
+  // an unread message). The title and the button are the shared row's words.
+  const waiting = folderAgentWaiting(input.folderAgent, workspaceId);
+  if (waiting)
+    return finish({
+      kind: 'folder_agent',
+      title: waiting.text,
+      description: '',
+      tone: 'attention',
+      action: {
+        owner: 'folder_agent',
+        kind: waiting.phase,
+        id: workspaceId,
+        key: `folder-agent:${waiting.phase}:${workspaceId}`,
+        label: waiting.action
+      }
+    });
   if (known) {
     if (janitor.readiness === 'needs_attention')
       return consoleDescriptor(

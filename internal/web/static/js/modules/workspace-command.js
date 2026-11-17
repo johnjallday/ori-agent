@@ -48,7 +48,8 @@ import {
   setupProjectsChipHTML
 } from './workspace-overview.js';
 import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
-import { resolveWorkspaceNextAction } from './workspace-next-action.js';
+import { folderAgentWaiting, resolveWorkspaceNextAction } from './workspace-next-action.js';
+import { chatRefOf } from './folder-agent-chat.js';
 import { workspaceUpdates, watchWorkspaceUpdates } from './workspace-updates.js';
 import {
   parseWorkspaceUpdateIntent,
@@ -2431,6 +2432,65 @@ export class WorkspaceCommandView {
     if (this.active && this.workspaceId() === workspaceId) this.render();
   }
 
+  // The folder agent's view, handed over by the workspace page each time it
+  // draws (WorkspaceDetailPage.noteFolderAgentView): the strip and the
+  // Commander card speak for it. entry is {view, raw, review} or null. Only a
+  // change in what the Commander waits on redraws the command, so a look's
+  // progress polling does not.
+  setFolderAgent(workspaceId, entry) {
+    const id = String(workspaceId || '');
+    if (id && id !== this.workspaceId()) return;
+    const before = this.folderAgentWordsKey();
+    this._folderAgent = entry?.view ? { ...entry, workspaceId: id } : null;
+    if (before !== this.folderAgentWordsKey()) this.refreshNextAction(id);
+  }
+
+  // folderAgentView is the folder agent's view for the workspace shown, or null.
+  folderAgentView() {
+    const entry = this._folderAgent;
+    return entry?.view && entry.workspaceId === this.workspaceId() ? entry.view : null;
+  }
+
+  // folderAgentWordsKey changes only when the words of a waiting moment do.
+  folderAgentWordsKey() {
+    const waiting = folderAgentWaiting(this.folderAgentView(), this.workspaceId());
+    return waiting ? [waiting.phase, waiting.text, waiting.action, waiting.status].join('|') : '';
+  }
+
+  // folderAgentWaitingFor is the waiting words when the named agent is the
+  // folder's Commander and it waits on the person; null otherwise.
+  folderAgentWaitingFor(agentName) {
+    const view = this.folderAgentView();
+    const name = String(agentName || '')
+      .trim()
+      .toLowerCase();
+    if (
+      !view ||
+      !name ||
+      String(view.agent || '')
+        .trim()
+        .toLowerCase() !== name
+    )
+      return null;
+    return folderAgentWaiting(view, this.workspaceId());
+  }
+
+  // openFolderAgent is the Next action strip's button while the Commander waits
+  // (FR15): it opens the Commander's chat thread at the report's message when
+  // the question or plan has one, and otherwise does what Review on the
+  // one-line card does.
+  openFolderAgent(trigger) {
+    const entry = this._folderAgent;
+    if (!entry?.view) return false;
+    const ref = chatRefOf(entry.raw);
+    const panel = typeof window === 'undefined' ? null : window.PersonalAssistantPanel;
+    if (ref && typeof panel?.openFolderReport === 'function') {
+      void panel.openFolderReport(this.workspaceId(), ref, trigger);
+      return true;
+    }
+    return entry.review?.() === true;
+  }
+
   disposeNextAction() {
     if (typeof window !== 'undefined' && this.chromeResize) {
       window.removeEventListener?.('resize', this.chromeResize);
@@ -2530,7 +2590,8 @@ export class WorkspaceCommandView {
         page.workspace?.entry_agent_name ||
         page.workspace?.shared_data?.entry_agent_name ||
         '',
-      updates: this.updatesView()
+      updates: this.updatesView(),
+      folderAgent: this.folderAgentView()
     });
     view.narratedElsewhere = Array.isArray(page.tasks) && items.length !== page.tasks.length;
     return view;
@@ -2611,7 +2672,7 @@ export class WorkspaceCommandView {
       (view.updateLabel
         ? `<p class="ws-cmd-update-label">${escapeHtml(view.updateLabel)}</p>`
         : '') +
-      `<h3>${escapeHtml(view.title)}</h3><p>${escapeHtml(view.description)}</p>` +
+      `<h3>${escapeHtml(view.title)}</h3>${view.description ? `<p>${escapeHtml(view.description)}</p>` : ''}` +
       '<div class="ws-cmd-update-actions">' +
       primary +
       (view.message && action?.kind !== 'welcome'
@@ -2746,6 +2807,7 @@ export class WorkspaceCommandView {
     }
     this.workNotice = '';
     if (action.owner === 'updates') return void this.openUpdateMessage(trigger);
+    if (action.owner === 'folder_agent') return void this.openFolderAgent(trigger);
     if (action.owner === 'console' && action.kind === 'review' && this.updatesView())
       return void this.openUpdateReview(trigger);
     if (action.owner === 'task') {
@@ -4995,7 +5057,7 @@ export class WorkspaceCommandView {
   statusTone(statusKey, statusLabel) {
     const s = (String(statusKey || '') + ' ' + String(statusLabel || '')).toLowerCase();
     if (/error|fail|blocked/.test(s)) return 'alert';
-    if (/needs?[-_\s]?input|choice|human/.test(s)) return 'needs-input';
+    if (/needs?[-_\s]?(input|you)|choice|human/.test(s)) return 'needs-input';
     if (/work|run|busy|active|progress/.test(s)) return 'working';
     if (/wait|queue|pending|scheduled/.test(s)) return 'waiting';
     if (/complete|done|success/.test(s)) return 'done';
@@ -5197,7 +5259,7 @@ export class WorkspaceCommandView {
         ? page.getAgentModelPresentation(profile)
         : { model: '', label: 'Model not set', empty: true };
     const tasks = Array.isArray(group.tasks) ? group.tasks : [];
-    const status = this.mapAgentStatus({ tasks, status: rosterStatus });
+    const status = this.mapAgentStatus({ tasks, status: rosterStatus, name });
     const currentTask =
       tasks.find(task => String(task?.status || '').toLowerCase() === 'in_progress') || null;
 
@@ -6432,6 +6494,12 @@ export class WorkspaceCommandView {
     if (tasks.some(task => ['failed', 'timed_out'].includes(resolveTaskPresentation(task).state))) {
       return { key: 'blocked', label: 'Needs attention', detail: 'Inspect the run result' };
     }
+    // The folder's Commander waits on the person: its card says so, in the words
+    // the Next action strip and the balloon's folded line use, instead of a status
+    // taken from tickets ("Working", "Ready to help"). A ticket that itself needs
+    // the person keeps its own status (above).
+    const waiting = this.folderAgentWaitingFor(agent?.name);
+    if (waiting) return { key: 'needs-you', label: waiting.status, detail: waiting.text };
     if (tasks.some(task => this.isWorkingTask(task))) {
       return { key: 'working', label: 'Working', detail: 'Ticket in progress' };
     }

@@ -229,6 +229,28 @@ export function shouldAnnounce(text, last, now, gap = BALLOON_ANNOUNCE_GAP_MS) {
   return { now: false, wait: gap - since };
 }
 
+// showFace puts the Commander's face in a balloon face slot: the host's own
+// avatar markup (the same the Commander card draws, so the card, the balloon's
+// header and its folded line show one face), or the initials when the host has
+// no face to give. Markup is only written when it changed, so a redraw does not
+// make the face flicker.
+function showFace(node, face, initials) {
+  if (!node) return;
+  if (face) {
+    if (node.faceMarkup !== face) {
+      node.innerHTML = face;
+      node.faceMarkup = face;
+    }
+    node.classList?.add('has-avatar');
+    return;
+  }
+  if (node.faceMarkup !== undefined || node.textContent !== initials) {
+    node.textContent = initials;
+    node.faceMarkup = undefined;
+  }
+  node.classList?.remove('has-avatar');
+}
+
 function initialsOf(name) {
   const words = String(name || '')
     .trim()
@@ -361,6 +383,11 @@ class CommanderBalloon {
     show.addEventListener('click', () => this.onShow?.());
     dock.append(arrow, show);
     const body = make('div', 'commander-balloon__body');
+    // Focusable by script only: focusFirst lands here when the first control is
+    // below the fold, and the group is named by the balloon's own title.
+    body.setAttribute('tabindex', '-1');
+    body.setAttribute('role', 'group');
+    body.setAttribute('aria-labelledby', `${this.id}-title`);
     body.addEventListener('scroll', () => {
       this.scrollTop = body.scrollTop;
     });
@@ -503,7 +530,7 @@ class CommanderBalloon {
   }
 
   // update sets what the Commander says. content: {speaker: {name, role,
-  // initials}, line, announce, headline, signature, body(doc) → Element,
+  // initials, face}, line, announce, headline, signature, body(doc) → Element,
   // more: {label}, onMore}. A null content removes the balloon (FR30).
   update(content) {
     if (!content) {
@@ -517,8 +544,10 @@ class CommanderBalloon {
     this.content = content;
     const speaker = content.speaker || {};
     const initials = speaker.initials || initialsOf(speaker.name);
-    nodes.lineFace.textContent = initials;
-    nodes.face.textContent = initials;
+    // The Commander's own face, the markup its card draws (speaker.face), in the
+    // header and in the folded line; initials only when the host has none.
+    const face = typeof speaker.face === 'string' ? speaker.face : '';
+    for (const node of [nodes.lineFace, nodes.face]) showFace(node, face, initials);
     nodes.lineText.textContent = content.line || '';
     nodes.line.setAttribute('aria-label', `${speaker.name || 'Commander'}: ${content.line || ''}`);
     nodes.line.setAttribute('aria-expanded', this.expanded ? 'true' : 'false');
@@ -599,14 +628,31 @@ class CommanderBalloon {
     return true;
   }
 
+  // focusFirst puts focus where the balloon's content starts, without scrolling
+  // it. A card taller than the balloon (the folder question now carries a names
+  // line, an outcome and a safety line above its buttons) used to be scrolled so
+  // its first control showed, which put the question sentence out of view the
+  // moment the balloon opened. A control that is not in view inside the body
+  // leaves focus on the body itself: the question reads from its top, and Tab
+  // takes the person to the control, which the browser then scrolls into view.
   focusFirst() {
     const nodes = this.nodes;
     if (!nodes) return;
     const first =
       (!nodes.dock.hidden && nodes.show) || firstFocusable(nodes.body) || nodes.close || null;
-    first?.focus?.({ preventScroll: true });
-    // Inside the balloon's own scroll, the focused control comes into view.
-    first?.scrollIntoView?.({ block: 'nearest' });
+    const target = first && this.outOfView(first) ? nodes.body : first;
+    target?.focus?.({ preventScroll: true });
+  }
+
+  // outOfView: whether node, inside the body, is not wholly in the body's visible
+  // area. False when that cannot be told (the body has no height yet).
+  outOfView(node) {
+    const body = this.nodes?.body;
+    if (!node || node === body || !body?.contains?.(node)) return false;
+    const host = body.getBoundingClientRect?.();
+    const rect = node.getBoundingClientRect?.();
+    if (!host || !rect || !(host.height > 0)) return false;
+    return rect.top < host.top - 0.5 || rect.bottom > host.bottom + 0.5;
   }
 
   // collapse closes the balloon; returnFocus sends focus back to the unit.

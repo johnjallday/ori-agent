@@ -13889,9 +13889,17 @@
     var avatar = document.createElement('span');
     avatar.className = 'personal-assistant-message__author-avatar';
     avatar.setAttribute('aria-hidden', 'true');
-    if (window.AgentAvatar && typeof window.AgentAvatar.markup === 'function') {
+    // The face the drawer's header draws for this agent: a chosen character is
+    // resolved from the catalog there. Asking the renderer here with only
+    // {name, appearance} left the character out, so a character-faced agent's
+    // messages showed initials beside a header that showed its face.
+    var appearance = (author && author.appearance) || {};
+    var panel = window.PersonalAssistantPanel;
+    if (panel && typeof panel.avatarMarkup === 'function') {
+      avatar.innerHTML = panel.avatarMarkup(name, appearance, 20);
+    } else if (window.AgentAvatar && typeof window.AgentAvatar.markup === 'function') {
       avatar.innerHTML = window.AgentAvatar.markup(
-        { name: name, appearance: (author && author.appearance) || {} },
+        { name: name, appearance: appearance },
         { size: 20 }
       );
     }

@@ -2707,6 +2707,103 @@ test('a linked song shows the Song card above the Command view; other workspaces
   });
 });
 
+// The folder agent writes its own tickets straight to the workspace, with no
+// event the page listens to: a page opened during the look kept an "In progress"
+// ticket (and a "Working" Commander card) after the look ended, until a reload.
+// The page therefore reloads its tickets when the agent's phase changes, and
+// hands each view on to the Next action strip and the Commander card.
+test('the page reloads its tickets when the folder agent changes phase and hands each view on', () => {
+  const loads = [];
+  const handed = [];
+  let reviewed = 0;
+  const page = {
+    workspaceId: 'ws-1',
+    folderAgentPhase: undefined,
+    loadTasks: () => loads.push('load'),
+    commanderPresenter: {
+      review: () => {
+        reviewed += 1;
+        return true;
+      }
+    }
+  };
+  const previous = global.window;
+  global.window = { workspaceCommand: { setFolderAgent: (id, entry) => handed.push([id, entry]) } };
+  try {
+    const note = state =>
+      WorkspaceDetailPage.prototype.noteFolderAgentView.call(
+        page,
+        state ? { view: { state }, raw: { state } } : null
+      );
+    // The first view only records the phase (the page has just loaded its tickets).
+    note('looking');
+    assert.equal(loads.length, 0);
+    // Progress while it looks is the same phase: nothing to reload.
+    note('looking');
+    assert.equal(loads.length, 0);
+    // The look ended (its ticket completed): the tickets are read again.
+    note('reported');
+    assert.equal(loads.length, 1);
+    note('reported');
+    assert.equal(loads.length, 1);
+    note('setting_up');
+    assert.equal(loads.length, 2);
+    // No view says nothing, and does not reload; the next one only records.
+    note(null);
+    note('set_up');
+    assert.equal(loads.length, 2);
+
+    // Every view was handed to the command, with a Review that is the presenter's.
+    assert.equal(handed.length, 7);
+    assert.equal(handed[0][0], 'ws-1');
+    assert.equal(handed[0][1].view.state, 'looking');
+    handed[0][1].review();
+    assert.equal(reviewed, 1);
+    assert.equal(handed[5][1], null);
+  } finally {
+    global.window = previous;
+  }
+});
+
+// FR24: the Commander's balloon shows the face its card draws. The card calls
+// getAgentAvatarPresentation(name) (the default variant), so the balloon must ask
+// for exactly that and nothing else, and draw nothing of its own when there is none.
+test("the Commander's balloon takes its face from the card's own avatar presentation", () => {
+  const asked = [];
+  const page = {
+    getAgentAvatarPresentation: (...args) => {
+      asked.push(args);
+      return { markup: className => `<span class="${className}">face</span>` };
+    }
+  };
+  const face = WorkspaceDetailPage.prototype.commanderFaceMarkup.call(page, 'Albums Manager');
+  assert.equal(face, '<span class="commander-balloon-avatar">face</span>');
+  assert.deepEqual(asked, [['Albums Manager']], 'the default variant, as the card asks');
+
+  // No renderer yet, or no presentation: an empty face (the balloon then uses initials).
+  assert.equal(
+    WorkspaceDetailPage.prototype.commanderFaceMarkup.call(
+      { getAgentAvatarPresentation: () => ({ markup: () => '' }) },
+      'A'
+    ),
+    ''
+  );
+  assert.equal(
+    WorkspaceDetailPage.prototype.commanderFaceMarkup.call(
+      { getAgentAvatarPresentation: () => null },
+      'A'
+    ),
+    ''
+  );
+  assert.equal(
+    WorkspaceDetailPage.prototype.commanderFaceMarkup.call(
+      { getAgentAvatarPresentation: () => ({}) },
+      'A'
+    ),
+    ''
+  );
+});
+
 test('template setup still starts and monitors, but only a pending HQ first visit suppresses the toast', async () => {
   const originals = { fetch: global.fetch, body: document.body, toast: window.Toast };
   try {

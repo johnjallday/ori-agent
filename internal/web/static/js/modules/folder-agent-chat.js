@@ -20,13 +20,100 @@ function text(value) {
   return String(value ?? '').trim();
 }
 
-// chatRefOf is the report's place in the conversation, or null.
+// chatRefOf is the report's place in the conversation, or null. lead is the
+// words the drawer shows for the message while the card under it asks the
+// question ('' when the message is drawn as stored).
 export function chatRefOf(raw) {
   const chat = raw?.chat;
   const sessionID = text(chat?.session_id);
   const messageID = text(chat?.message_id);
   if (!sessionID || !messageID) return null;
-  return { sessionID, messageID, unread: chat.unread === true };
+  return { sessionID, messageID, unread: chat.unread === true, lead: text(chat.lead) };
+}
+
+// folderReportReload decides whether the drawer's thread must be loaded again
+// so the report's message (and the card under it) is in it: 'reload' when the
+// thread shown is the report's (or none is remembered) and no row holds the
+// message; 'defer' when that load must wait (a reply is in flight, or a pending
+// confirmation or plan would be dropped); 'none' otherwise. A message already
+// reloaded for (attempted) is not reloaded again, so a row the transcript cut
+// off cannot loop. Whether the report is unread does not matter: a stale thread
+// is wrong either way.
+export function folderReportReload({
+  ref,
+  shownSessionID = '',
+  rowIDs = [],
+  busy = false,
+  locked = false,
+  attempted = ''
+} = {}) {
+  if (!ref?.sessionID || !ref?.messageID) return 'none';
+  const shown = text(shownSessionID);
+  if (shown && shown !== ref.sessionID) return 'none';
+  if (Array.from(rowIDs || []).includes(ref.messageID)) return 'none';
+  if (attempted === folderReportReloadKey(ref)) return 'none';
+  return busy || locked ? 'defer' : 'reload';
+}
+
+// syncFolderReport runs that decision with its one effect injected: hydrate
+// (force, exact) loads the thread again and resolves true when it did. It never
+// changes thread, never touches a draft (a same-thread load leaves the
+// composer alone) and loads nothing while a reply is in flight or a pending
+// confirmation or plan would be dropped. Resolves the outcome:
+//   loaded     the thread holds the message (it did, or it does now)
+//   reloaded   a load ran and succeeded
+//   deferred   a load is still owed (waiting on a reply, a lock, or a failure)
+//   attempted  the message reloaded for, to carry into the next call
+export async function syncFolderReport({
+  ref,
+  shownSessionID = '',
+  rowIDs = [],
+  busy = false,
+  locked = false,
+  attempted = '',
+  hydrate
+}) {
+  const verdict = folderReportReload({ ref, shownSessionID, rowIDs, busy, locked, attempted });
+  if (verdict === 'none') return { loaded: true, reloaded: false, deferred: false, attempted };
+  if (verdict === 'defer' || typeof hydrate !== 'function')
+    return { loaded: false, reloaded: false, deferred: true, attempted };
+  const shown = text(shownSessionID);
+  const hydrated = await hydrate({ force: true, exact: Boolean(shown) && shown === ref.sessionID });
+  if (!hydrated) return { loaded: false, reloaded: false, deferred: true, attempted };
+  return { loaded: true, reloaded: true, deferred: false, attempted: folderReportReloadKey(ref) };
+}
+
+// folderReportReloadKey names one report message in one thread.
+export function folderReportReloadKey(ref) {
+  return ref?.sessionID && ref?.messageID ? `${ref.sessionID}\n${ref.messageID}` : '';
+}
+
+// A row whose words were replaced by the lead-in keeps its stored words here.
+const STORED_ATTR = 'data-folder-agent-stored';
+const STORED_DATASET = 'folderAgentStored';
+
+// The message's words are the bubble's last text node (an author line may come
+// before it).
+function messageTextNode(row) {
+  const nodes = Array.from(row?.firstElementChild?.childNodes || []);
+  for (let i = nodes.length - 1; i >= 0; i -= 1) if (nodes[i].nodeType === 3) return nodes[i];
+  return null;
+}
+
+// showLead puts the lead-in in place of a message's stored words (the question
+// is then said once, by the card under it) and keeps the stored words on the
+// row, or puts them back when lead is ''. The stored message is untouched: the
+// agent reads it back on its next turn. Plain text only.
+function showLead(row, lead) {
+  const node = messageTextNode(row);
+  if (!node) return;
+  if (lead) {
+    if (row.dataset[STORED_DATASET] === undefined) row.dataset[STORED_DATASET] = node.textContent;
+    if (node.textContent !== lead) node.textContent = lead;
+  } else if (row.dataset[STORED_DATASET] !== undefined) {
+    node.textContent = row.dataset[STORED_DATASET];
+    delete row.dataset[STORED_DATASET];
+  }
 }
 
 // publishFolderAgentChat records a workspace's latest report and its card
@@ -131,6 +218,12 @@ export function attachFolderAgentChatCard(
   const row = ref
     ? transcript.querySelector(`[data-lead-message-id="${escapeAttr(ref.messageID)}"]`)
     : null;
+  // A row whose words were replaced by a lead-in gets them back once the report
+  // is no longer the question (answered, or a newer report came).
+  transcript.querySelectorAll(`[${STORED_ATTR}]`).forEach(node => {
+    if (!ref?.lead || node.dataset.leadMessageId !== ref.messageID) showLead(node, '');
+  });
+  if (row && ref.lead) showLead(row, ref.lead);
   if (row) {
     let host = transcript.querySelector(
       `[${CARD_ATTR}][data-message-id="${escapeAttr(ref.messageID)}"]`
