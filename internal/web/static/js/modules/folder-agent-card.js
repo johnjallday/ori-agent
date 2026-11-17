@@ -35,7 +35,7 @@ const ACTION_PATHS = {
   dismiss_songs: 'songs',
   // Try again on a reading that stopped (the owner already said yes).
   retry_songs: 'songs',
-  // The premise's answers (Manage them as …, and It's something else).
+  // The premise's answers (Yes, show me the plan, and It's something else).
   premise_confirm: 'premise',
   premise_other: 'premise'
 };
@@ -308,10 +308,31 @@ function premiseView(raw) {
   return {
     state: String(raw.state),
     sentence: String(raw.sentence),
+    // The names of a few of the owner's own songs, so they can check the
+    // recognition, and how many more there are. Folder names from disk: only
+    // ever drawn as text.
+    names: Array.isArray(raw.names)
+      ? raw.names.map(name => String(name ?? '').trim()).filter(Boolean)
+      : [],
+    namesMore: Math.max(0, Math.trunc(Number(raw.names_more) || 0)),
+    // What the plan after the answer will make, in one sentence (absent when
+    // the host cannot say it truthfully), and that the answer changes nothing.
+    outcome: String(raw.outcome || '').trim(),
+    nothingYet: String(raw.nothing_yet || '').trim(),
     confirm: String(raw.confirm || ''),
     other: String(raw.other || ''),
     withdrawn: Boolean(raw.withdrawn)
   };
+}
+
+// The names line under the question: "Album-1 · Album-2 · Album-3 · and 3 more".
+// '' when the host sent no names.
+export function folderAgentPremiseNamesLine(premise) {
+  const names = Array.isArray(premise?.names) ? premise.names : [];
+  if (!names.length) return '';
+  const parts = names.slice();
+  if (premise.namesMore > 0) parts.push(`and ${premise.namesMore} more`);
+  return parts.join(' · ');
 }
 
 // The premise is asked: the card shows only it until the owner answers.
@@ -2470,11 +2491,32 @@ export function renderFolderAgentReport(
     card.append(alert);
   };
   if (folderAgentPremiseAsked(view)) {
-    // What the folder is comes first (FR1–FR4, FR12): the host's sentence and
-    // two real buttons, in that reading order. The recommendation, the plan,
-    // the install block and the report's buttons wait for the answer.
+    // What the folder is comes first (FR1–FR4, FR12): the host's sentence, the
+    // owner's own song names to check it by, what the plan after the answer
+    // will make, that nothing happens yet, and two real buttons, in that
+    // reading order. The recommendation, the plan, the install block and the
+    // report's buttons wait for the answer. Every part but the sentence and the
+    // buttons is optional: what the host did not send draws nothing, and the
+    // "If that's right" label is drawn only with its sentence. All of it is
+    // set as text, never as markup (the names come from folder names on disk).
     const ask = el(doc, 'section', 'folder-agent-card__premise');
     ask.append(el(doc, 'p', 'folder-agent-card__premise-text', premise.sentence));
+    const namesLine = folderAgentPremiseNamesLine(premise);
+    if (namesLine) ask.append(el(doc, 'p', 'folder-agent-card__premise-names', namesLine));
+    if (premise.outcome || premise.nothingYet) {
+      const rule = el(doc, 'hr', 'folder-agent-card__premise-rule');
+      rule.setAttribute('aria-hidden', 'true');
+      ask.append(rule);
+    }
+    if (premise.outcome) {
+      ask.append(
+        el(doc, 'p', 'folder-agent-card__premise-label', "If that's right"),
+        el(doc, 'p', 'folder-agent-card__premise-outcome', premise.outcome)
+      );
+    }
+    if (premise.nothingYet) {
+      ask.append(el(doc, 'p', 'folder-agent-card__premise-nothing', premise.nothingYet));
+    }
     const answers = el(doc, 'div', 'folder-agent-card__actions');
     [
       ['premise_confirm', premise.confirm, 'btn btn-primary btn-sm'],

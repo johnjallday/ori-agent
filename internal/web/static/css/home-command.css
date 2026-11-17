@@ -4717,6 +4717,63 @@ button.folder-agent-card__hire-face:focus-visible {
   gap: 8px;
 }
 
+/* The question (folder-question-said-once FR2–FR6): the sentence, the owner's
+   own song names, a divider, what the plan after the answer will make, and
+   that nothing happens yet. The names and the "nothing yet" line are the
+   card's muted note; the label is the small mono label in the amber accent
+   text token (at least 4.5:1 on the card paper in both themes). Long words
+   wrap, so nothing is cut off at the narrowest balloon or chat width. */
+.folder-agent-card__premise {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.folder-agent-card__premise-text,
+.folder-agent-card__premise-names,
+.folder-agent-card__premise-label,
+.folder-agent-card__premise-outcome,
+.folder-agent-card__premise-nothing {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.folder-agent-card__premise-names,
+.folder-agent-card__premise-nothing {
+  color: var(--hc-ink-dim, var(--cozy-ink-dim));
+  font-size: 12px;
+}
+
+.folder-agent-card__premise-rule {
+  width: 100%;
+  height: 0;
+  margin: 2px 0;
+  border: 0;
+  border-top: 1px solid var(--hc-line, var(--cozy-line));
+  opacity: 1;
+}
+
+.folder-agent-card__premise-label {
+  color: var(--hc-amber, var(--cozy-amber-strong));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.folder-agent-card__premise-outcome {
+  font-size: 13px;
+}
+
+/* Both answers are real buttons at least 44px tall where a finger presses, and
+   they wrap to two rows rather than shrink (FR28, FR31). */
+@media (pointer: coarse), (max-width: 720px) {
+  .folder-agent-card__premise .folder-agent-card__actions .btn {
+    min-height: 44px;
+  }
+}
+
 .folder-agent-card__open,
 .folder-agent-card__opening {
   font-size: 12px;

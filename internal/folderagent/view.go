@@ -320,7 +320,7 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 		goal, basis := offeredGoal(rec)
 		v.GoalOffer = &GoalOfferView{Goal: goal, MaxRunes: personalassistant.BriefMaxRunes, Basis: basis}
 	}
-	v.Premise = premiseView(rec)
+	v.Premise = premiseView(rec, plan)
 	withdrawn := premiseWithdrawn(rec)
 	if withdrawn {
 		// "Something else": nothing is recommended until a look with the

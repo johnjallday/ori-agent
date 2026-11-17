@@ -166,7 +166,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   ).route;
   await page.goto(musicRoute);
   const openMusicChat = page.getByRole('button', { name: 'Open in chat', exact: true });
-  const musicPremise = page.getByRole('button', { name: 'Manage them as songs', exact: true });
+  const musicPremise = page.getByRole('button', { name: 'Yes, show me the plan', exact: true });
   await expect(openMusicChat.or(musicPremise).first()).toBeVisible();
   if (await openMusicChat.isVisible()) await openMusicChat.click({ timeout: 10_000 });
   await musicPremise.click({ timeout: 10_000 });

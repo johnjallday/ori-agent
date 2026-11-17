@@ -69,7 +69,7 @@ test('a report waiting on its premise asks one question before any plan', () => 
     premise: {
       state: 'asked',
       sentence: 'This looks like a music production folder: 6 REAPER songs.',
-      confirm: 'Manage them as songs',
+      confirm: 'Yes, show me the plan',
       other: "It's something else"
     }
   });
