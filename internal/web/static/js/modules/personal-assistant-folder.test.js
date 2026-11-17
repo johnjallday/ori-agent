@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 import {
   chatHoldsFolderPlan,
@@ -2518,4 +2518,68 @@ test('Hire & build narrows the box only after an accepted hire, and only on Home
   assert.doesNotMatch(helper, /revealHiredTile\(/, 'the cockpit owns the one pan for every entry');
   // Nothing here saves a width: the saved Expand choice is not changed.
   assert.doesNotMatch(helper, /localStorage|setItem|writeDrawerPrefs/);
+});
+
+// FR24, FR27, demo finding 7.1a: the balloon the drawer makes for the Commander
+// it follows on Home's map drew initials ("AM") while Home's other balloons drew
+// faces, because that one creator passed no face. The rule is the class of bug:
+// every page that makes a Commander balloon gives it a face provider.
+test("every Commander balloon's presenter is given its face", () => {
+  const dir = new URL('./', import.meta.url);
+  const modules = readdirSync(dir).filter(
+    name => name.endsWith('.js') && !name.endsWith('.test.js')
+  );
+  const sites = [];
+  for (const name of modules) {
+    const text = readFileSync(new URL(name, dir), 'utf8');
+    for (const match of text.matchAll(/commanderPresenter\(/g)) {
+      const before = text.slice(Math.max(0, match.index - 16), match.index);
+      if (/function\s+$/.test(before)) continue; // the definition itself
+      // The call's arguments, up to the parenthesis that closes it.
+      let depth = 0;
+      let end = match.index + match[0].length - 1;
+      for (; end < text.length; end += 1) {
+        if (text[end] === '(') depth += 1;
+        else if (text[end] === ')' && (depth -= 1) === 0) break;
+      }
+      sites.push({ name, call: text.slice(match.index, end + 1) });
+    }
+  }
+  assert.deepEqual(sites.map(s => s.name).sort(), [
+    'commander-map.js',
+    'personal-assistant-folder.js',
+    'workspace-detail.js'
+  ]);
+  for (const { name, call } of sites) {
+    // An option named face (face: provider, or the shorthand), not the word in a comment.
+    const code = call.replace(/\/\/[^\n]*/g, '');
+    assert.match(code, /\bface\s*(:|,|\})/, `${name}: commanderPresenter(...) is given a face`);
+  }
+});
+
+test("the drawer's followed Commander on Home speaks with the tile's face and redraws it", () => {
+  const folder = readFileSync(new URL('./personal-assistant-folder.js', import.meta.url), 'utf8');
+  assert.match(
+    folder,
+    /commanderPresenter\(homeCommanderMap\(workspaceID\), \{[^}]*face: name => window\.OriHomeCockpit\?\.commanderFace\?\.\(name\) \|\| ''/
+  );
+  assert.match(
+    folder,
+    /document\.addEventListener\(HOME_AGENT_FACES_EVENT, \(\) => mapPresenter\?\.presenter\.retick\?\.\(\)\)/
+  );
+  // Home supplies the face from its own agent directory and says when it learns more.
+  const cockpit = readFileSync(new URL('./home-workspace-cockpit.js', import.meta.url), 'utf8');
+  assert.match(cockpit, /commanderFace: name => commanderFace\(name\)/);
+  assert.match(
+    cockpit,
+    /return homePortrait\(name, true, \{ className: 'commander-balloon-avatar' \}\)/
+  );
+  const repaint = cockpit.slice(
+    cockpit.indexOf('function repaintAgentFaces()'),
+    cockpit.indexOf('function repaintAgentFaces()') + 900
+  );
+  assert.match(
+    repaint,
+    /mapCommanders\.repaint\(\);[\s\S]*dispatchEvent\(new CustomEvent\(HOME_AGENT_FACES_EVENT\)\)/
+  );
 });

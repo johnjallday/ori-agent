@@ -17,6 +17,10 @@ function escapeHtml(value) {
 // Home owns the identity lookup and all markup supplied to the shared Map.
 // The resident remains the local default; an explicit face is never inferred
 // from dormant uploaded/character fields in a generated appearance.
+// Fired on the document when Home's agent directory learns agents' faces, so a
+// balloon made elsewhere (the drawer's followed Commander) draws them again.
+export const HOME_AGENT_FACES_EVENT = 'ori:home-agent-faces';
+
 export function homeAgentPortraitHTML(
   name,
   record,

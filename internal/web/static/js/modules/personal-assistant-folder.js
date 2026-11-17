@@ -33,6 +33,7 @@ import { FOLDER_CHIP_ICON, folderChooserView } from './personal-assistant-folder
 import { createFolderPathEntry } from './folder-path-entry.js';
 import { collectCurrentWorkspaceContext } from './personal-assistant-workspace-context.js';
 import { commanderPresenter, homeCommanderMap, homeMapShowing } from './commander-map.js';
+import { HOME_AGENT_FACES_EVENT } from './home-agent-portrait.js';
 import { folderLookEnded } from './commander-speech.js';
 import {
   chooseFolder,
@@ -6923,7 +6924,12 @@ function folderAgentPresenter(workspaceID) {
   if (!workspaceID || !document.getElementById('cockpitMap')) return null;
   mapPresenter = {
     workspaceID,
-    presenter: commanderPresenter(homeCommanderMap(workspaceID), { action: 'Show on map' })
+    presenter: commanderPresenter(homeCommanderMap(workspaceID), {
+      action: 'Show on map',
+      // The balloon speaks with the face its tile on Home's map draws, not
+      // initials. Home's cockpit gives it; a page without one draws initials.
+      face: name => window.OriHomeCockpit?.commanderFace?.(name) || ''
+    })
   };
   return mapPresenter.presenter;
 }
@@ -7770,6 +7776,9 @@ function init() {
     void onSetupProjectReady(String(event.detail?.run_id || ''));
   });
   document.addEventListener('personal-assistant:sent', keepLatestLast);
+  // Home's agent directory learned faces: the followed Commander's balloon draws
+  // its face again (it was drawn with the fallback until the record arrived).
+  document.addEventListener(HOME_AGENT_FACES_EVENT, () => mapPresenter?.presenter.retick?.());
   document.addEventListener('personal-assistant:conversation-loading', render);
   // The first look is followed only while the drawer is open. Opening it reads
   // the look once, which also resumes the poll when it is still running.
