@@ -140,6 +140,37 @@ func TestReviewPicture_EveryWaitingFileIsDrawnExactlyOnce(t *testing.T) {
 	}
 }
 
+// R6: a file the person placed in a folder is listed first in that folder's card,
+// ahead of the files Ori suggested for it, and the order is otherwise stable.
+func TestReviewPicture_AFilePlacedByYouIsListedFirstInItsFolder(t *testing.T) {
+	batch, candidates := groupFixture("x.pdf", "y.pdf", "z.pdf", "passport-a.pdf")
+	groups := mustGroup(t, batch, candidates)
+	id := func(name string) string { return candidateIDByName(t, candidates, name) }
+	docs := reviewGroupID("filing-documents")
+	view := ReviewDraftView{Revision: "draft", State: "saved", Choices: []ReviewChoiceView{
+		{CandidateID: id("x.pdf"), Operation: OperationMove, Category: CategoryDocuments, SourceGroupID: docs},
+		{CandidateID: id("y.pdf"), Operation: OperationMove, Category: CategoryDocuments, SourceGroupID: docs},
+		{CandidateID: id("z.pdf"), Operation: OperationMove, Category: CategoryDocuments, SourceGroupID: docs},
+		{CandidateID: id("passport-a.pdf"), Operation: OperationMove, Category: CategoryDocuments, SourceGroupID: reviewGroupID("sensitive")},
+	}}
+	picture := buildReviewPicture(groups, view, candidates)
+	if len(picture.Folders) != 1 || picture.Folders[0].Count != 4 {
+		t.Fatalf("expected one Documents card of four files: %+v", picture.Folders)
+	}
+	names := []string{}
+	for _, file := range picture.Folders[0].Files {
+		names = append(names, file.Name)
+	}
+	if names[0] != "passport-a.pdf" || !picture.Folders[0].Files[0].YourChoice {
+		t.Fatalf("the file the person placed must come first and be tagged, got %v", names)
+	}
+	for _, file := range picture.Folders[0].Files[1:] {
+		if file.YourChoice {
+			t.Fatalf("a file Ori suggested must not be tagged: %+v", file)
+		}
+	}
+}
+
 // R4 to R6, R13, R24, R25: each placement rule, on a small folder.
 func TestReviewPicture_PlacementRules(t *testing.T) {
 	batch, candidates := groupFixture("a.png", "b.png", "c.png", "d.png", "x.pdf", "y.pdf", "passport-a.pdf", "passport-b.pdf", "song.wav", "old.dmg", "gone.pdf")

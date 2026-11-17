@@ -223,6 +223,9 @@ export function renderPicture(doc, picture, ctx) {
   const root = h('section', 'fj-picture');
   root.id = 'fileJanitorPicture';
   root.setAttribute('aria-label', 'Your folder as it will look after filing');
+  // Focusable by script only: when the control a person was on goes away (a row
+  // that became a note), focus lands on the picture, never on the page top.
+  root.setAttribute('tabindex', '-1');
 
   const lead = h('p', 'fj-lead', leadSentences(folderName, picture.content_read).join(' '));
   lead.id = 'fileJanitorLead';
@@ -254,7 +257,11 @@ export function renderPicture(doc, picture, ctx) {
   frame.appendChild(filed);
 
   const loose = looseTotal(picture);
-  if (loose > 0) frame.appendChild(looseSection(h, picture, folderName, loose, ctx));
+  // A row whose files were all placed is not loose any more, but it stays drawn so
+  // the choice can be changed back (R20); so does a row Ori was told to stop asking
+  // about (R22).
+  const rows = picture.loose.some(row => row.count > 0) || (ctx.keptRows || []).length > 0;
+  if (loose > 0 || rows) frame.appendChild(looseSection(h, picture, folderName, loose, ctx));
   if (picture.trash.count > 0) frame.appendChild(trashBox(h, picture, ctx));
   if (picture.could_not_file.count > 0) frame.appendChild(couldNotFile(h, picture, ctx));
   if (ctx.more) frame.appendChild(morePanel(h, picture, ctx));
@@ -273,16 +280,91 @@ export function renderPicture(doc, picture, ctx) {
   return root;
 }
 
+// The one-file bar lives beside the File button, not in the picture: it stays in
+// view while a file far down a long list is selected, and clicking a file never
+// scrolls that file away. The console draws it in the footer.
+export function renderFileBar(doc, picture, ctx) {
+  return pictureHasFiles(picture) ? fileBar(builder(doc), ctx) : null;
+}
+
+export function pictureHasFiles(picture) {
+  return (
+    picture.folders.length > 0 ||
+    picture.loose.some(row => row.count > 0) ||
+    picture.left_out.count > 0 ||
+    picture.trash.count > 0
+  );
+}
+
+// R23: the one-file bar, above the File button. With nothing selected it says how
+// to start; with a file selected it names it and offers one menu for that file only.
+function fileBar(h, ctx) {
+  const bar = h('section', 'fj-file-bar');
+  bar.id = 'fileJanitorFileBar';
+  bar.setAttribute('aria-label', 'Move one file');
+  const file = ctx.selectedFile;
+  if (!file) {
+    bar.appendChild(h('p', 'fj-sub', FILE_BAR_HINT));
+    return bar;
+  }
+  const name = h('p', 'fj-file-bar-name', file.name);
+  name.id = 'fileJanitorFileBarName';
+  bar.appendChild(name);
+  const select = h('select', 'fj-row-menu');
+  select.id = 'fileJanitorFileMenu';
+  select.setAttribute('aria-labelledby', 'fileJanitorFileBarName');
+  select.disabled = !ctx.editsAvailable;
+  const prompt = h('option', '', 'What should happen to this file?');
+  prompt.value = '';
+  prompt.selected = true;
+  prompt.disabled = true;
+  select.appendChild(prompt);
+  for (const option of fileMenuOptions(file, ctx.destinations)) {
+    const node = h('option', '', option.label);
+    node.value = option.value;
+    select.appendChild(node);
+  }
+  select.addEventListener('change', () => {
+    const choice = parseFileChoice(select.value);
+    if (choice) ctx.onFileChoice?.(file, choice);
+  });
+  bar.appendChild(select);
+  const cancel = h('button', 'fj-btn', 'Cancel');
+  cancel.type = 'button';
+  cancel.id = 'fileJanitorFileBarCancel';
+  cancel.addEventListener('click', () => ctx.onSelectFile?.(null));
+  bar.appendChild(cancel);
+  return bar;
+}
+
+export function parseFileChoice(value) {
+  if (value === 'leave' || value === 'stop' || value === 'trash') return { kind: value };
+  if (String(value).startsWith('move:')) return { kind: 'move', category: String(value).slice(5) };
+  return null;
+}
+
 // A file the plan says will get a new name (a file of that name is already in the
 // destination) is shown under the new name, tagged "renamed" (R7). The plan check
 // is a read of disk, so the names arrive after the picture; until then, and for a
-// file the plan does not cover, the name is the file's own.
-function nameList(h, files, className, ctx) {
+// file the plan does not cover, the name is the file's own. Any file listed here
+// can be clicked to select it (R23): the console shows what can be done with that
+// one file in the bar above the File button.
+function nameList(h, files, className, ctx, { planned: usePlan = false } = {}) {
   const list = h('ul', className);
   for (const file of files) {
-    const planned = ctx?.plan?.items?.[file.id];
+    const planned = usePlan ? ctx?.plan?.items?.[file.id] : undefined;
     const renamed = Boolean(planned?.renamed && planned.final_name);
-    const item = h('li', 'fj-file', renamed ? planned.final_name : file.name);
+    const shown = renamed ? planned.final_name : file.name;
+    const selectable = Boolean(ctx?.onSelectFile);
+    const item = h('li', 'fj-file', selectable ? undefined : shown);
+    if (selectable) {
+      const control = h('button', 'fj-file-name', shown);
+      control.type = 'button';
+      control.id = 'fileJanitorFile-' + file.id;
+      control.setAttribute('aria-pressed', ctx.selectedFile?.id === file.id ? 'true' : 'false');
+      control.addEventListener('click', () => ctx.onSelectFile(file));
+      item.appendChild(control);
+    }
     if (renamed) item.appendChild(h('span', 'fj-tag', 'renamed'));
     if (file.your_choice) item.appendChild(h('span', 'fj-tag', 'your choice'));
     // R36: a press that found the plan had changed moved nothing; the files whose
@@ -335,7 +417,7 @@ function folderCard(h, folder, ctx) {
   card.appendChild(head);
   if (unticked) card.appendChild(h('p', 'fj-not-filed', 'Not filed'));
   if (folder.count > 0) {
-    card.appendChild(nameList(h, folder.files, 'fj-folder-files', ctx));
+    card.appendChild(nameList(h, folder.files, 'fj-folder-files', ctx, { planned: true }));
     if (folder.count > folder.files.length)
       card.appendChild(
         moreButton(h, ctx, FILED, folder.category, folder.files.length, folder.count)
@@ -343,7 +425,7 @@ function folderCard(h, folder, ctx) {
   }
   if (folder.unfiled_count > 0) {
     if (folder.count > 0) card.appendChild(h('p', 'fj-not-filed', 'Not filed'));
-    card.appendChild(nameList(h, folder.unfiled_files, 'fj-folder-files'));
+    card.appendChild(nameList(h, folder.unfiled_files, 'fj-folder-files', ctx));
     if (folder.unfiled_count > folder.unfiled_files.length)
       card.appendChild(
         moreButton(
@@ -359,27 +441,144 @@ function folderCard(h, folder, ctx) {
   return card;
 }
 
+// What the one menu on a question row can do (R19), in this order: leave the files
+// where they are, leave them and stop asking, then one entry per destination folder.
+// A row menu never offers Trash. When the row's files are in several folders none of
+// the choices describes the row, so a disabled line says so and "Leave here" stays
+// selectable.
+export function rowMenuValue(row) {
+  const placed = row?.placed_count || 0;
+  if (placed === 0) return 'leave';
+  if (placed === row.count && row.placed_category) return 'move:' + row.placed_category;
+  return 'mixed';
+}
+
+export function rowMenuOptions(destinations, value = 'leave') {
+  const options = [
+    { value: 'leave', label: 'Leave here' },
+    { value: 'stop', label: 'Leave here, stop asking' }
+  ];
+  for (const destination of destinations || [])
+    options.push({ value: 'move:' + destination.id, label: 'Move to ' + destination.label });
+  // Some placed, some still loose or in Trash, or placed in different folders: no
+  // single choice describes the row, and the note below it says exactly what.
+  if (value === 'mixed') options.push({ value: 'mixed', label: 'Mixed choices', disabled: true });
+  return options;
+}
+
+export function parseChoice(value) {
+  if (value === 'leave' || value === 'stop') return { kind: value };
+  if (String(value).startsWith('move:')) return { kind: 'move', category: String(value).slice(5) };
+  return null;
+}
+
+// R20: the row stays visible with a short note, so the choice can be changed back.
+export function rowNote(row, ctx) {
+  const placed = row?.placed_count || 0;
+  const trash = row?.trash_count || 0;
+  const parts = [];
+  const folder = (ctx?.destinations || []).find(item => item.id === row?.placed_category);
+  const where = folder
+    ? (ctx?.filedRoot || 'Filed') + '/' + (folder.folder_name || folder.label)
+    : '';
+  if (placed > 0) {
+    if (placed === row.count && where) parts.push('All in ' + where);
+    else if (where) parts.push(placed + ' in ' + where);
+    else parts.push(placed + ' placed in other folders');
+  }
+  if (trash > 0) parts.push(trash + ' in Trash');
+  return parts.join(' · ');
+}
+
+// R23: what can be done with one file, by where it is now. Moving to a folder is
+// always offered except to the folder it is already filed in; "Leave here" only
+// means something for a file that would otherwise move or be trashed.
+export function fileMenuOptions(file, destinations) {
+  const options = [];
+  for (const destination of destinations || []) {
+    if (file?.placement === FILED && file.category === destination.id) continue;
+    options.push({ value: 'move:' + destination.id, label: 'Move to ' + destination.label });
+  }
+  if (file?.placement === FILED || file?.placement === TRASH)
+    options.push({ value: 'leave', label: 'Leave here' });
+  options.push({ value: 'stop', label: 'Leave here, stop asking' });
+  if (file?.placement !== TRASH) options.push({ value: 'trash', label: 'Move to Trash' });
+  return options;
+}
+
+export const FILE_BAR_HINT = 'Click any file to move just that one.';
+export const KEPT_NOTE = 'Ori will not ask about these again.';
+
+function rowMenu(h, row, ctx) {
+  const value = rowMenuValue(row);
+  const select = h('select', 'fj-row-menu');
+  select.id = 'fileJanitorRowMenu-' + row.key;
+  select.setAttribute('aria-label', looseLabel(row) + ': what to do with these files');
+  select.disabled = !ctx.editsAvailable;
+  for (const option of rowMenuOptions(ctx.destinations, value)) {
+    const node = h('option', '', option.label);
+    node.value = option.value;
+    node.selected = option.value === value;
+    if (option.disabled) node.disabled = true;
+    select.appendChild(node);
+  }
+  select.addEventListener('change', () => {
+    const choice = parseChoice(select.value);
+    if (choice) ctx.onRowChoice?.(row, choice);
+  });
+  return select;
+}
+
 function looseSection(h, picture, folderName, total, ctx) {
   const section = h('div', 'fj-box fj-loose');
-  section.appendChild(h('h4', 'fj-box-title', 'Still loose in ' + folderName + ' · ' + total));
+  section.appendChild(
+    h('h4', 'fj-box-title', 'Still loose in ' + folderName + (total > 0 ? ' · ' + total : ''))
+  );
   for (const row of picture.loose) {
-    if (!row.loose_count) continue;
+    if (!row.count) continue;
     const box = h('div', 'fj-loose-row');
     box.setAttribute('data-fj-group', row.group_id);
-    box.appendChild(h('h5', 'fj-loose-label', looseLabel(row) + ' · ' + row.count));
+    // The heading counts what is listed under it: the files still loose. A placed
+    // row keeps its heading and says where its files went in the note below.
+    box.appendChild(
+      h(
+        'h5',
+        'fj-loose-label',
+        looseLabel(row) + ' · ' + (row.loose_count > 0 ? row.loose_count : row.count)
+      )
+    );
+    box.appendChild(rowMenu(h, row, ctx));
+    const note = rowNote(row, ctx);
+    if (note) box.appendChild(h('p', 'fj-row-note', note));
     const why = h('details', 'fj-why');
     why.appendChild(h('summary', 'fj-why-toggle', 'Why?'));
     why.appendChild(h('p', 'fj-why-text', LOOSE_WHY[row.key] || LOOSE_WHY.unmatched));
     box.appendChild(why);
-    box.appendChild(nameList(h, row.singles, 'fj-loose-files'));
+    if (row.loose_count > 0) box.appendChild(nameList(h, row.singles, 'fj-loose-files', ctx));
     if (row.more > 0)
       box.appendChild(moreButton(h, ctx, LOOSE, row.group_id, row.singles.length, row.loose_count));
+    section.appendChild(box);
+  }
+  // R22: a row the person asked Ori to stop asking about is no longer waiting, so
+  // the picture does not hold its files. It stays as a note with a way back.
+  for (const kept of ctx.keptRows || []) {
+    const box = h('div', 'fj-loose-row fj-kept-row');
+    box.setAttribute('data-fj-kept', kept.key);
+    box.appendChild(
+      h('h5', 'fj-loose-label', (LOOSE_LABELS[kept.key] || kept.key) + ' · ' + kept.count)
+    );
+    box.appendChild(h('p', 'fj-row-note', KEPT_NOTE));
+    const again = h('button', 'fj-link', 'Review again');
+    again.type = 'button';
+    again.id = 'fileJanitorReviewAgain-' + kept.key;
+    again.addEventListener('click', () => ctx.onReviewAgain?.(kept));
+    box.appendChild(again);
     section.appendChild(box);
   }
   if (picture.left_out.count > 0) {
     const box = h('div', 'fj-loose-row');
     box.appendChild(h('h5', 'fj-loose-label', LEFT_OUT_LABEL + ' · ' + picture.left_out.count));
-    box.appendChild(nameList(h, picture.left_out.files, 'fj-loose-files'));
+    box.appendChild(nameList(h, picture.left_out.files, 'fj-loose-files', ctx));
     if (picture.left_out.count > picture.left_out.files.length)
       box.appendChild(
         moreButton(h, ctx, LEFT_OUT, '', picture.left_out.files.length, picture.left_out.count)
@@ -392,7 +591,7 @@ function looseSection(h, picture, folderName, total, ctx) {
 function trashBox(h, picture, ctx) {
   const box = h('div', 'fj-box fj-trash');
   box.appendChild(h('h4', 'fj-box-title', 'Trash · ' + picture.trash.count));
-  box.appendChild(nameList(h, picture.trash.files, 'fj-loose-files'));
+  box.appendChild(nameList(h, picture.trash.files, 'fj-loose-files', ctx));
   if (picture.trash.count > picture.trash.files.length)
     box.appendChild(moreButton(h, ctx, TRASH, '', picture.trash.files.length, picture.trash.count));
   return box;
@@ -405,6 +604,16 @@ function couldNotFile(h, picture, ctx) {
   for (const file of picture.could_not_file.files) {
     const item = h('li', 'fj-file', file.name);
     if (file.reason) item.appendChild(h('span', 'fj-file-reason', file.reason));
+    // R25: a file an earlier attempt left behind can be tried again. It comes back
+    // unticked, so trying again never files anything by itself.
+    if (file.can_retry) {
+      const retry = h('button', 'fj-link', 'Try again');
+      retry.type = 'button';
+      retry.id = 'fileJanitorRetry-' + file.id;
+      retry.setAttribute('aria-label', 'Try ' + file.name + ' again');
+      retry.addEventListener('click', () => ctx.onRetry?.(file));
+      item.appendChild(retry);
+    }
     list.appendChild(item);
   }
   box.appendChild(list);
@@ -445,7 +654,7 @@ function morePanel(h, picture, ctx) {
       )
     );
     panel.appendChild(
-      nameList(h, more.files, 'fj-loose-files', more.section === FILED ? ctx : undefined)
+      nameList(h, more.files, 'fj-loose-files', ctx, { planned: more.section === FILED })
     );
     const nav = h('nav', 'fj-actions');
     nav.setAttribute('aria-label', 'File list pages');
@@ -485,6 +694,11 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     pictureAccounting,
     earlierLine,
     folderLabel,
+    renderFileBar,
+    rowMenuValue,
+    rowMenuOptions,
+    rowNote,
+    fileMenuOptions,
     fileButtonModel,
     trashTickLabel,
     OVER_LIMIT_NOTE

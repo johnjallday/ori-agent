@@ -13,6 +13,8 @@ import {
   OVER_LIMIT_NOTE,
   earlierLine,
   fileButtonModel,
+  fileMenuOptions,
+  renderFileBar,
   folderAriaLabel,
   folderLabel,
   frameTitle,
@@ -21,6 +23,9 @@ import {
   moreLabel,
   pictureAccounting,
   renderPicture,
+  rowMenuOptions,
+  rowMenuValue,
+  rowNote,
   trashTickLabel
 } from './file-janitor-picture.js';
 
@@ -171,6 +176,8 @@ test('the lead line is three short sentences and the third is true for the scan'
 test('opening draws the lead line, the frame title and ticked folders, and nothing else first', () => {
   const root = renderPicture(doc, pictureFixture(), ctx());
   const children = root.children.map(child => child.className);
+  // Before the first folder there is only the lead line and the frame title (R56);
+  // the one-file bar comes after the frame, above the File button.
   assert.deepEqual(children, ['fj-lead', 'fj-frame']);
   assert.equal(
     textOf(root.children[0]),
@@ -319,8 +326,9 @@ test('Still loose has one row per question group with the short label, a count a
   const why = find(rows[0], node => node.className === 'fj-why-text')[0];
   assert.equal(textOf(why), LOOSE_WHY.sensitive);
   assert.equal(find(rows[0], node => node.tagName === 'DETAILS').length, 1);
-  // The rows are lists only: no menu and no tick for a question group.
-  assert.equal(find(rows[0], node => ['INPUT', 'SELECT'].includes(node.tagName)).length, 0);
+  // A row has one menu and no tick: Ori never ticks a question group (R11).
+  assert.equal(find(rows[0], node => node.tagName === 'INPUT').length, 0);
+  assert.equal(find(rows[0], node => node.tagName === 'SELECT').length, 1);
 });
 
 test('a loose row names at most twelve files and says how many more', () => {
@@ -625,6 +633,316 @@ test('a file that will get a new name is shown under it, tagged "renamed" (R7)',
   ).map(textOf);
   assert.equal(names0[0], 'Invoice 100.pdf');
   assert.ok(!names0.join(' ').includes('renamed'));
+});
+
+// ------------------------------------------------- answers on the loose rows
+
+const DESTINATIONS = [
+  { id: 'documents', label: 'Documents', folder_name: 'Documents' },
+  { id: 'images', label: 'Images', folder_name: 'Images' },
+  { id: 'archives', label: 'Archives', folder_name: 'Archives' }
+];
+const answerCtx = (over = {}) => ctx({ destinations: DESTINATIONS, filedRoot: 'Filed', ...over });
+const options = select => select.children.map(option => option.value);
+
+test('a row menu offers Leave here, Leave here, stop asking, then one folder each, and never Trash (R19)', () => {
+  const root = renderPicture(doc, pictureFixture(), answerCtx());
+  const menu = find(
+    root,
+    node => node.tagName === 'SELECT' && node.id === 'fileJanitorRowMenu-sensitive'
+  )[0];
+  assert.deepEqual(options(menu), [
+    'leave',
+    'stop',
+    'move:documents',
+    'move:images',
+    'move:archives'
+  ]);
+  assert.deepEqual(
+    menu.children.map(option => textOf(option)),
+    [
+      'Leave here',
+      'Leave here, stop asking',
+      'Move to Documents',
+      'Move to Images',
+      'Move to Archives'
+    ]
+  );
+  assert.ok(!menu.children.some(option => /trash/i.test(textOf(option))));
+  assert.equal(menu.children.find(option => option.selected).value, 'leave');
+  assert.match(menu.getAttribute('aria-label'), /^Sensitive-looking names: /);
+});
+
+test('choosing in a row menu reports the row and the choice, and only while edits are possible', () => {
+  const calls = [];
+  const root = renderPicture(
+    doc,
+    pictureFixture(),
+    answerCtx({ onRowChoice: (row, choice) => calls.push([row.key, choice]) })
+  );
+  const menu = find(root, node => node.id === 'fileJanitorRowMenu-sensitive')[0];
+  for (const value of ['move:documents', 'stop', 'leave']) {
+    menu.value = value;
+    menu.fire('change');
+  }
+  assert.deepEqual(calls, [
+    ['sensitive', { kind: 'move', category: 'documents' }],
+    ['sensitive', { kind: 'stop' }],
+    ['sensitive', { kind: 'leave' }]
+  ]);
+  const busy = renderPicture(doc, pictureFixture(), answerCtx({ editsAvailable: false }));
+  assert.ok(find(busy, node => node.tagName === 'SELECT').every(select => select.disabled));
+});
+
+test('a row whose files were all placed stays drawn with a note so the choice can be changed back (R20)', () => {
+  const picture = pictureFixture();
+  picture.loose[0] = {
+    ...picture.loose[0],
+    placed_count: 2,
+    placed_category: 'documents',
+    loose_count: 0,
+    singles: []
+  };
+  const root = renderPicture(doc, picture, answerCtx());
+  const row = find(root, node => node.getAttribute('data-fj-group') === 'g-sens')[0];
+  assert.ok(row, 'the placed row is still drawn');
+  assert.match(textOf(row), /^Sensitive-looking names/);
+  // The heading keeps the row's count; the note says where the files went.
+  assert.equal(
+    textOf(find(row, node => node.className === 'fj-loose-label')[0]),
+    'Sensitive-looking names · 2'
+  );
+  assert.equal(
+    textOf(find(row, node => node.className === 'fj-row-note')[0]),
+    'All in Filed/Documents'
+  );
+  assert.equal(
+    find(row, node => node.tagName === 'SELECT')[0].children.find(o => o.selected).value,
+    'move:documents'
+  );
+  // Still loose counts only what is listed loose: the audio row's 14.
+  assert.ok(
+    find(root, node => node.className === 'fj-box-title')
+      .map(textOf)
+      .includes('Still loose in Downloads · 14')
+  );
+});
+
+test('when every row is placed the section is still there, with no count in its heading', () => {
+  const picture = pictureFixture();
+  picture.loose = picture.loose.map(row => ({
+    ...row,
+    placed_count: row.count,
+    placed_category: 'images',
+    loose_count: 0,
+    singles: [],
+    more: 0
+  }));
+  const root = renderPicture(doc, picture, answerCtx());
+  const titles = find(root, node => node.className === 'fj-box-title').map(textOf);
+  assert.ok(titles.includes('Still loose in Downloads'), titles.join(' | '));
+  assert.equal(find(root, node => node.className === 'fj-loose-row').length, 2);
+});
+
+test('row notes say where the files went, in plain words', () => {
+  const dest = answerCtx();
+  assert.equal(
+    rowNote({ count: 2, placed_count: 2, placed_category: 'images', trash_count: 0 }, dest),
+    'All in Filed/Images'
+  );
+  assert.equal(
+    rowNote({ count: 5, placed_count: 3, placed_category: 'images', trash_count: 0 }, dest),
+    '3 in Filed/Images'
+  );
+  assert.equal(
+    rowNote({ count: 5, placed_count: 3, placed_category: '', trash_count: 0 }, dest),
+    '3 placed in other folders'
+  );
+  assert.equal(rowNote({ count: 5, placed_count: 0, trash_count: 1 }, dest), '1 in Trash');
+  assert.equal(
+    rowNote({ count: 5, placed_count: 3, placed_category: 'images', trash_count: 2 }, dest),
+    '3 in Filed/Images · 2 in Trash'
+  );
+  assert.equal(rowNote({ count: 5, placed_count: 0, trash_count: 0 }, dest), '');
+  assert.equal(rowMenuValue({ count: 5, placed_count: 3, placed_category: '' }), 'mixed');
+  assert.ok(
+    rowMenuOptions(DESTINATIONS, 'mixed').some(
+      option => option.disabled && option.value === 'mixed'
+    )
+  );
+});
+
+test('any listed file is a button that selects it, and the selected one says so', () => {
+  const picked = [];
+  const picture = pictureFixture();
+  const root = renderPicture(
+    doc,
+    picture,
+    answerCtx({
+      onSelectFile: item => picked.push(item?.name ?? null),
+      selectedFile: picture.folders[0].files[1]
+    })
+  );
+  const buttons = find(root, node => node.className === 'fj-file-name');
+  assert.ok(buttons.length >= 20, 'folder cards and loose rows alike');
+  assert.equal(
+    buttons.find(node => node.id === 'fileJanitorFile-id-doc-1').getAttribute('aria-pressed'),
+    'true'
+  );
+  assert.equal(
+    buttons.find(node => node.id === 'fileJanitorFile-id-doc-0').getAttribute('aria-pressed'),
+    'false'
+  );
+  buttons.find(node => node.id === 'fileJanitorFile-id-passport-0').fire('click');
+  assert.deepEqual(picked, ['passport-0']);
+});
+
+test('the one-file bar: a hint when nothing is selected, then the name and one menu (R23)', () => {
+  // The bar is drawn beside the File button, not inside the picture, so it stays in
+  // view; it is only drawn when the picture has a file to select.
+  const idle = renderPicture(doc, pictureFixture(), answerCtx());
+  assert.equal(find(idle, node => node.id === 'fileJanitorFileBar').length, 0);
+  assert.equal(
+    renderFileBar(doc, pictureFixture({ folders: [], loose: [] }), answerCtx()),
+    null,
+    'nothing to select, no bar'
+  );
+  const bar = renderFileBar(doc, pictureFixture(), answerCtx());
+  assert.equal(bar.id, 'fileJanitorFileBar');
+  assert.equal(textOf(bar), 'Click any file to move just that one.');
+  assert.equal(find(bar, node => node.tagName === 'SELECT').length, 0);
+
+  const choices = [];
+  const unselect = [];
+  const chosen = file('doc-1', { placement: 'filed', category: 'documents' });
+  const open = renderFileBar(
+    doc,
+    pictureFixture(),
+    answerCtx({
+      selectedFile: chosen,
+      onFileChoice: (item, choice) => choices.push([item.name, choice]),
+      onSelectFile: item => unselect.push(item)
+    })
+  );
+  assert.equal(textOf(find(open, node => node.id === 'fileJanitorFileBarName')[0]), 'doc-1');
+  const menu = find(open, node => node.id === 'fileJanitorFileMenu')[0];
+  // Already filed in Documents: no "Move to Documents"; leaving, stopping and Trash are offered.
+  assert.deepEqual(options(menu), ['', 'move:images', 'move:archives', 'leave', 'stop', 'trash']);
+  menu.value = 'trash';
+  menu.fire('change');
+  menu.value = 'move:images';
+  menu.fire('change');
+  assert.deepEqual(choices, [
+    ['doc-1', { kind: 'trash' }],
+    ['doc-1', { kind: 'move', category: 'images' }]
+  ]);
+  find(open, node => node.id === 'fileJanitorFileBarCancel')[0].fire('click');
+  assert.deepEqual(unselect, [null]);
+});
+
+test('what the one-file menu offers follows where the file is now', () => {
+  const labels = placement =>
+    fileMenuOptions({ placement, category: 'documents' }, DESTINATIONS).map(option => option.value);
+  assert.deepEqual(labels('filed'), ['move:images', 'move:archives', 'leave', 'stop', 'trash']);
+  assert.deepEqual(labels('loose'), [
+    'move:documents',
+    'move:images',
+    'move:archives',
+    'stop',
+    'trash'
+  ]);
+  assert.deepEqual(labels('left_out'), [
+    'move:documents',
+    'move:images',
+    'move:archives',
+    'stop',
+    'trash'
+  ]);
+  assert.deepEqual(labels('trash'), [
+    'move:documents',
+    'move:images',
+    'move:archives',
+    'leave',
+    'stop'
+  ]);
+});
+
+test('a row Ori was told to stop asking about stays as a note with a way back (R22)', () => {
+  const again = [];
+  const root = renderPicture(
+    doc,
+    pictureFixture(),
+    answerCtx({
+      keptRows: [{ key: 'versions', count: 3, ids: ['a', 'b', 'c'] }],
+      onReviewAgain: kept => again.push(kept.key)
+    })
+  );
+  const row = find(root, node => node.getAttribute('data-fj-kept') === 'versions')[0];
+  assert.match(textOf(row), /^Possible copies · 3/);
+  assert.match(textOf(row), /Ori will not ask about these again\./);
+  find(row, node => node.id === 'fileJanitorReviewAgain-versions')[0].fire('click');
+  assert.deepEqual(again, ['versions']);
+});
+
+test('"Try again" is offered only for a file an earlier attempt can retry (R25)', () => {
+  const picture = pictureFixture({
+    could_not_file: {
+      count: 2,
+      files: [
+        file('failed.pdf', {
+          state: 'failed',
+          reason: 'Ori could not move this file.',
+          can_retry: true
+        }),
+        file('changed.pdf', {
+          state: 'changed',
+          reason: 'This file changed since you looked, so Ori left it alone.',
+          can_retry: false
+        })
+      ]
+    }
+  });
+  const retried = [];
+  const root = renderPicture(doc, picture, answerCtx({ onRetry: item => retried.push(item.name) }));
+  const retries = find(root, node => node.textContent === 'Try again');
+  assert.equal(retries.length, 1);
+  assert.equal(retries[0].getAttribute('aria-label'), 'Try failed.pdf again');
+  retries[0].fire('click');
+  assert.deepEqual(retried, ['failed.pdf']);
+});
+
+test('the border tokens exist wherever the picture and the footer use them', () => {
+  // A border that names an undefined custom property is not drawn at all: the Trash
+  // tick and the one-file bar sit in the footer, outside the picture, and lost their
+  // borders once. Both scopes must define the tokens.
+  const css = readFileSync(new URL('../../css/file-janitor.css', import.meta.url), 'utf8');
+  const definition = css.match(/([^{}]+)\{[^{}]*--fj-line-strong:[^{}]*\}/);
+  assert.ok(definition, 'the tokens are defined in one rule');
+  assert.match(definition[1], /\.fj-picture-host/);
+  assert.match(definition[1], /\.fj-footer/);
+});
+
+test('no word on the answer controls is a retired word', () => {
+  const picture = pictureFixture({
+    could_not_file: {
+      count: 1,
+      files: [file('x.pdf', { reason: 'Ori could not move this file.', can_retry: true })]
+    }
+  });
+  const root = renderPicture(
+    doc,
+    picture,
+    answerCtx({
+      keptRows: [{ key: 'versions', count: 1, ids: ['a'] }],
+      selectedFile: file('doc-1', { category: 'documents' })
+    })
+  );
+  const text = find(root, () => true)
+    .map(node => node._text)
+    .join(' ')
+    .toLowerCase();
+  for (const word of BANNED_WORDS)
+    assert.doesNotMatch(text, new RegExp('\\b' + word + '\\b'), word);
 });
 
 test('small helpers read plainly', () => {

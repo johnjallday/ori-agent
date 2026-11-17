@@ -312,7 +312,6 @@ func TestTickedOnOpen_CardGridScansLoadUnchanged(t *testing.T) {
 // Decision (b): one menu choice sends a whole question group to one folder, keeps
 // a Trash mark, requires a destination, and never leaks into select_filing_groups.
 func TestReviewDraftEdits_QuestionGroupToOneFolderKeepsTrash(t *testing.T) {
-	pendingTask(t, "3.1")
 	s, batch, candidates := draftServiceFixture(t, "passport-a.pdf", "passport-b.pdf", "tax-return.pdf", "one.png")
 	sensitive := reviewGroupID("sensitive")
 

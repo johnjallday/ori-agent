@@ -167,13 +167,29 @@ type reviewDraftBinding struct {
 
 // moveAnswered reports whether a move may go ahead for this candidate. A file
 // whose type Ori could not settle (NeedsReview) moves only once the person has
-// answered with a destination for that file alone; a destination that arrived
-// with a group's suggestion does not count. It is the single rule behind the
-// draft projection, the edit that selects a file, and the execution fence, so the
-// three cannot drift apart.
+// answered with a destination: for that file alone, or for a whole row of
+// question files in the picture ("Move to Documents"), which records the same
+// destination on each file it covers and names the row as its source. A
+// destination that arrived with a folder's group-level suggestion does not count:
+// a file that newly needs review must not move on an older folder-level choice.
+// It is the single rule behind the draft projection, the edit that selects a
+// file, and the execution fence, so the three cannot drift apart.
 func moveAnswered(candidate JanitorCandidate) bool {
-	return !candidate.NeedsReview || (candidate.DecisionCategory != "" && candidate.DecisionGroupID == "")
+	if !candidate.NeedsReview {
+		return true
+	}
+	return candidate.DecisionCategory != "" && (candidate.DecisionGroupID == "" || questionGroupIDs[candidate.DecisionGroupID])
 }
+
+// questionGroupIDs are the IDs of the fixed question rows, which are the only group
+// answers that count for a file that needs review.
+var questionGroupIDs = func() map[string]bool {
+	ids := make(map[string]bool, len(questionGroups))
+	for _, definition := range questionGroups {
+		ids[reviewGroupID(definition.key)] = true
+	}
+	return ids
+}()
 
 // reviewDefaultsApply reports whether a batch opens with its confident folders
 // ticked: it was made by a build that sets the marker, and nothing has touched it

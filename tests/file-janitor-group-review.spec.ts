@@ -294,8 +294,12 @@ test('206 mixed files are each drawn once, question groups are never ticked, and
     'Music and audio · 20',
     'Unknown type · 20'
   ]);
-  // No tick box and no menu for a question group; the question files stay loose.
-  await expect(console.locator('.fj-loose-row input, .fj-loose-row select')).toHaveCount(0);
+  // No tick box for a question group (Ori never ticks one); each row has one menu,
+  // starting on "Leave here", and the question files stay loose.
+  await expect(console.locator('.fj-loose-row input')).toHaveCount(0);
+  const menus = console.locator('.fj-loose-row select');
+  await expect(menus).toHaveCount(4);
+  for (const menu of await menus.all()) await expect(menu).toHaveValue('leave');
   await expect(fileButton(console)).toHaveText(filesLabel(149));
   await expect(console.getByRole('heading', { name: /^Still loose in .* · 57$/ })).toBeVisible();
   mkdirSync(evidence, { recursive: true });
@@ -527,7 +531,15 @@ test('question groups stay loose and unticked, are described truthfully, and nam
   await console.locator('#fileJanitorView-groups').click();
   await expect(console.locator('.fj-trash')).toContainText('Trash · 1');
   await expect(console.locator('.fj-trash')).toContainText('song.rpp');
-  await expect(console.locator('.fj-loose-label').nth(2)).toHaveText('Music and audio · 4');
+  // The heading counts what is listed under it (the three still loose); the row's
+  // note says where the fourth went.
+  await expect(console.locator('.fj-loose-label').nth(2)).toHaveText('Music and audio · 3');
+  await expect(
+    console
+      .locator('.fj-loose-row')
+      .filter({ has: page.locator('#fileJanitorRowMenu-audio') })
+      .locator('.fj-row-note')
+  ).toHaveText('1 in Trash');
   const picture = await pictureOf(request, ws.base);
   expect(drawn(picture)).toBe(9);
   expect(picture.trash.count).toBe(1);
@@ -1073,6 +1085,10 @@ test('files marked for Trash need their own tick, which is never restored and cl
   // The tick names the count, is never ticked for the person, and gates the button.
   await expect(console.locator('.fj-trash-ack')).toContainText('Yes, move 1 file to Trash');
   await expect(tick).not.toBeChecked();
+  // An unticked box is an empty outline, never an invisible one: the footer is not
+  // inside the picture, and a border that names an undefined colour is not drawn.
+  await expect(tick).toHaveCSS('border-top-width', '2px');
+  await expect(tick).toHaveCSS('border-top-style', 'solid');
   await expect(fileButton(console)).toBeDisabled();
   await tick.check();
   await expect(fileButton(console)).toBeEnabled();
@@ -1182,4 +1198,390 @@ test('pressing twice, or again after a lost answer, files once and reports the f
     filing_id: filing.filing_id
   });
   expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(2);
+});
+
+// ------------------------------------------------ answers on the loose rows
+//
+// Each question row has one menu; any listed file can be selected for a bar that
+// decides that one file. Every choice is a saved edit: nothing moves until File.
+
+// The one menu on a question row, by the row's rule word.
+const rowMenu = (console: ReturnType<Page['locator']>, key: string) =>
+  console.locator(`#fileJanitorRowMenu-${key}`);
+
+// A listed file, by its name: the button that selects it for the one-file bar.
+const fileNamed = (console: ReturnType<Page['locator']>, name: string) =>
+  console.getByRole('button', { name, exact: true });
+
+const draftPosts = (page: Page) => {
+  const edits: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && /\/batches\/[^/]+\/draft$/.test(new URL(req.url()).pathname))
+      edits.push(req.postDataJSON().action);
+  });
+  return edits;
+};
+
+test('one menu choice sends the sensitive-looking row to Documents, and one press files it with the rest', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const sensitive = ['passport-a.pdf', 'passport-b.pdf', 'tax-record.pdf'];
+  const confident = ['one.png', 'two.png'];
+  const names = [...sensitive, ...confident];
+  const ws = await manualReview(request, names, 'Row to Documents');
+  const batchID = (await pictureOf(request, ws.base)).batch_id;
+  const console = await openReview(page, ws.slug);
+  const edits = draftPosts(page);
+  const filePosts: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && isFileRequest(req.url())) filePosts.push(req.url());
+  });
+  // Only the confident folder is ticked; the question row is loose and unplaced.
+  await expect(fileButton(console)).toHaveText(filesLabel(2));
+  await expect(rowMenu(console, 'sensitive')).toHaveValue('leave');
+  await expect(rowMenu(console, 'sensitive').locator('option')).toHaveText([
+    'Leave here',
+    'Leave here, stop asking',
+    'Move to Documents',
+    'Move to Images',
+    'Move to Audio',
+    'Move to Video',
+    'Move to Archives',
+    'Move to Installers',
+    'Move to Data',
+    'Move to Other'
+  ]);
+  mkdirSync(evidence, { recursive: true });
+  await page.screenshot({ path: `${evidence}/03-e2e-row-menu.png`, fullPage: true });
+
+  // One choice, one request.
+  await rowMenu(console, 'sensitive').selectOption({ label: 'Move to Documents' });
+  await expect(fileButton(console)).toHaveText(filesLabel(5));
+  expect(edits).toEqual(['select_group']);
+  const row = console
+    .locator('.fj-loose-row')
+    .filter({ has: page.locator('#fileJanitorRowMenu-sensitive') });
+  await expect(row.locator('.fj-row-note')).toHaveText('All in Filed/Documents');
+  // The heading keeps the row's count; the note says where the files went.
+  await expect(row.locator('.fj-loose-label')).toHaveText('Sensitive-looking names · 3');
+  await expect(rowMenu(console, 'sensitive')).toHaveValue('move:documents');
+  // The files are drawn in the Documents card, first, tagged as the person's choice.
+  const documents = console.locator('[data-fj-folder="documents"]');
+  await expect(documents).toContainText('Documents');
+  for (const name of sensitive) await expect(documents).toContainText(name);
+  await expect(documents.locator('.fj-tag').filter({ hasText: 'your choice' })).toHaveCount(3);
+  // The picture still adds up, and nothing has moved: this was a choice, not a move.
+  const picture = await pictureOf(request, ws.base, batchID);
+  expect(drawn(picture)).toBe(5);
+  expect(picture.loose.find((item: { key: string }) => item.key === 'sensitive')).toMatchObject({
+    count: 3,
+    placed_count: 3,
+    placed_category: 'documents',
+    loose_count: 0
+  });
+  for (const name of names) expect(existsSync(join(ws.root, name)), name).toBe(true);
+  expect(destinations(ws.root)).toEqual([]);
+  expect(filePosts).toEqual([]);
+  await page.screenshot({ path: `${evidence}/03-e2e-row-placed.png`, fullPage: true });
+
+  // The choice is saved: it survives a reload and can be changed back.
+  await page.reload();
+  await expect(rowMenu(console, 'sensitive')).toHaveValue('move:documents');
+  await expect(fileButton(console)).toHaveText(filesLabel(5));
+  await expect(fileButton(console)).toBeEnabled();
+
+  // One press files exactly those files and the ticked folder's, and nothing else.
+  await fileButton(console).click();
+  await expect(console.locator('#fileJanitorResultsSummary')).toHaveText('5 files filed.', {
+    timeout: 60_000
+  });
+  expect(filePosts).toHaveLength(1);
+  for (const name of sensitive) {
+    expect(existsSync(join(ws.root, name)), name).toBe(false);
+    expect(existsSync(join(ws.root, 'Filed', 'Documents', name)), name).toBe(true);
+  }
+  for (const name of confident) {
+    expect(existsSync(join(ws.root, name)), name).toBe(false);
+    expect(existsSync(join(ws.root, 'Filed', 'Images', name)), name).toBe(true);
+  }
+  expect(destinations(ws.root).sort()).toEqual(['Documents', 'Images']);
+});
+
+test('"Leave here" takes a placed row back, and a row can be sent to another folder', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const ws = await manualReview(request, ['passport-a.pdf', 'passport-b.pdf', 'one.png']);
+  const console = await openReview(page, ws.slug);
+  const edits = draftPosts(page);
+  await expect(fileButton(console)).toHaveText(filesLabel(1));
+  // Nothing to take back yet: choosing it again asks the server for nothing.
+  await rowMenu(console, 'sensitive').selectOption({ label: 'Move to Documents' });
+  await expect(fileButton(console)).toHaveText(filesLabel(3));
+  await rowMenu(console, 'sensitive').selectOption({ label: 'Move to Archives' });
+  await expect(console.locator('.fj-row-note')).toHaveText('All in Filed/Archives');
+  await expect(console.locator('[data-fj-folder="documents"]')).toHaveCount(0);
+  await expect(console.locator('[data-fj-folder="archives"]')).toContainText('passport-a.pdf');
+  await rowMenu(console, 'sensitive').selectOption({ label: 'Leave here' });
+  await expect(fileButton(console)).toHaveText(filesLabel(1));
+  await expect(console.locator('[data-fj-folder="archives"]')).toHaveCount(0);
+  await expect(console.locator('.fj-row-note')).toHaveCount(0);
+  await expect(console.locator('.fj-loose-label').first()).toHaveText(
+    'Sensitive-looking names · 2'
+  );
+  expect(edits).toEqual(['select_group', 'select_group', 'clear_group']);
+  // The files never left the folder, and "Leave here" remembers nothing: they are
+  // still waiting in this scan.
+  const picture = await pictureOf(request, ws.base);
+  expect(picture.loose.find((item: { key: string }) => item.key === 'sensitive')).toMatchObject({
+    placed_count: 0,
+    loose_count: 2
+  });
+  expect(destinations(ws.root)).toEqual([]);
+  for (const name of ['passport-a.pdf', 'passport-b.pdf', 'one.png'])
+    expect(existsSync(join(ws.root, name)), name).toBe(true);
+});
+
+test('"Leave here, stop asking" keeps a row out of the next scan, and Review again brings it back', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const names = ['passport-a.pdf', 'passport-b.pdf', 'one.png'];
+  const ws = await manualReview(request, names, 'Stop asking');
+  const console = await openReview(page, ws.slug);
+  const edits = draftPosts(page);
+  await expect(fileButton(console)).toHaveText(filesLabel(1));
+  await rowMenu(console, 'sensitive').selectOption({ label: 'Leave here, stop asking' });
+  // The row says so, and offers the way back; its files are not waiting any more.
+  const kept = console.locator('[data-fj-kept="sensitive"]');
+  await expect(kept).toContainText('Sensitive-looking names · 2');
+  await expect(kept).toContainText('Ori will not ask about these again.');
+  await expect(rowMenu(console, 'sensitive')).toHaveCount(0);
+  expect(edits).toEqual(['keep_group']);
+  await page.screenshot({ path: `${evidence}/03-e2e-stop-asking.png`, fullPage: true });
+  // Nothing moved, and the files are still in the folder.
+  for (const name of names) expect(existsSync(join(ws.root, name)), name).toBe(true);
+  expect(destinations(ws.root)).toEqual([]);
+
+  // A new scan does not suggest those exact files again (nothing else is new).
+  const scanned = await request.post(`${ws.base}/scan`);
+  expect(scanned.ok(), await scanned.text()).toBe(true);
+  expect((await scanned.json()).created).toBe(false);
+
+  // Review again forgets the choice; the files come back in the next scan.
+  await kept.getByRole('button', { name: 'Review again' }).click();
+  await expect(kept).toHaveCount(0);
+  // Said beside the File button, where the person is looking and where it is announced.
+  await expect(console.locator('#fileJanitorSelection')).toHaveText(
+    'Ori will offer these again the next time it scans.'
+  );
+  expect(edits).toEqual(['keep_group', 'reconsider_files']);
+  const rescanned = await request.post(`${ws.base}/scan`);
+  expect(rescanned.ok(), await rescanned.text()).toBe(true);
+  expect((await rescanned.json()).created).toBe(true);
+  const again = await pictureOf(request, ws.base);
+  expect(again.loose.find((item: { key: string }) => item.key === 'sensitive')).toMatchObject({
+    count: 2,
+    loose_count: 2
+  });
+  for (const name of names) expect(existsSync(join(ws.root, name)), name).toBe(true);
+});
+
+test('one file can be left out of a ticked folder, or sent to Trash and put back, from the one-file bar', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const names = ['a.png', 'b.png', 'c.png'];
+  const ws = await manualReview(request, names, 'One-file bar');
+  const console = await openReview(page, ws.slug);
+  const edits = draftPosts(page);
+  const filePosts: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && isFileRequest(req.url())) filePosts.push(req.url());
+  });
+  const bar = console.locator('#fileJanitorFileBar');
+  await expect(fileButton(console)).toHaveText(filesLabel(3));
+  await expect(bar).toHaveText('Click any file to move just that one.');
+
+  // Selecting a file names it in the bar and offers one menu for that file only.
+  await fileNamed(console, 'b.png').click();
+  await expect(console.locator('#fileJanitorFileBarName')).toHaveText('b.png');
+  await expect(fileNamed(console, 'b.png')).toHaveAttribute('aria-pressed', 'true');
+  await expect(console.locator('#fileJanitorFileMenu')).toBeFocused();
+  await expect(console.locator('#fileJanitorFileMenu option')).toHaveText([
+    'What should happen to this file?',
+    'Move to Documents',
+    'Move to Audio',
+    'Move to Video',
+    'Move to Archives',
+    'Move to Installers',
+    'Move to Data',
+    'Move to Other',
+    'Leave here',
+    'Leave here, stop asking',
+    'Move to Trash'
+  ]);
+  mkdirSync(evidence, { recursive: true });
+  await page.screenshot({ path: `${evidence}/03-e2e-one-file-bar.png`, fullPage: true });
+  // Cancel closes it without asking the server for anything.
+  await console.locator('#fileJanitorFileBarCancel').click();
+  await expect(bar).toHaveText('Click any file to move just that one.');
+  expect(edits).toEqual([]);
+
+  // Leave one file out of its ticked folder.
+  await fileNamed(console, 'b.png').click();
+  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Leave here' });
+  await expect(console.locator('.fj-loose-label')).toHaveText(['Left out by you · 1']);
+  await expect(fileButton(console)).toHaveText(filesLabel(2));
+  await expect(folder(console, 'images')).toHaveJSProperty('indeterminate', true);
+  await expect(bar).toHaveText('Click any file to move just that one.');
+  expect(edits).toEqual(['exclude_files']);
+
+  // Send one file to Trash from the bar: the Trash box shows it, the button says so
+  // and waits for the Trash tick. Nothing is pressed.
+  await fileNamed(console, 'c.png').click();
+  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Move to Trash' });
+  await expect(console.locator('.fj-trash')).toContainText('Trash · 1');
+  await expect(console.locator('.fj-trash')).toContainText('c.png');
+  await expect(fileButton(console)).toHaveText(filesLabel(1, 1));
+  await expect(console.locator('.fj-trash-ack')).toContainText('Yes, move 1 file to Trash');
+  await expect(console.locator('#fileJanitorTrashAck')).not.toBeChecked();
+  await expect(fileButton(console)).toBeDisabled();
+  expect(edits).toEqual(['exclude_files', 'mark_trash']);
+  await page.screenshot({ path: `${evidence}/03-e2e-left-out-and-trash.png`, fullPage: true });
+
+  // A file in Trash is not offered Trash again; "Leave here" puts it back.
+  await fileNamed(console, 'c.png').click();
+  await expect(
+    console.locator('#fileJanitorFileMenu option').filter({ hasText: 'Move to Trash' })
+  ).toHaveCount(0);
+  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Leave here' });
+  await expect(console.locator('.fj-trash')).toHaveCount(0);
+  await expect(console.locator('#fileJanitorTrashAck')).toHaveCount(0);
+  await expect(console.locator('.fj-loose-label')).toHaveText(['Left out by you · 2']);
+  await expect(fileButton(console)).toHaveText(filesLabel(1));
+  expect(edits).toEqual(['exclude_files', 'mark_trash', 'unmark_trash']);
+
+  // Move a single file to another folder: the person's choice, listed first, tagged.
+  await fileNamed(console, 'a.png').click();
+  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Move to Archives' });
+  const archives = console.locator('[data-fj-folder="archives"]');
+  await expect(archives).toContainText('a.png');
+  await expect(archives.locator('.fj-tag').filter({ hasText: 'your choice' })).toHaveCount(1);
+  await expect(fileButton(console)).toHaveText(filesLabel(1));
+  expect(edits.at(-1)).toBe('select_files');
+
+  // Every file is still where it was: this was all choices.
+  const picture = await pictureOf(request, ws.base);
+  expect(drawn(picture)).toBe(3);
+  expect(filePosts).toEqual([]);
+  expect(destinations(ws.root)).toEqual([]);
+  for (const name of names) expect(existsSync(join(ws.root, name)), name).toBe(true);
+  expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
+});
+
+test('a row menu and a file button work by keyboard, and focus stays in the picture afterwards', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const ws = await manualReview(request, [
+    'passport-a.pdf',
+    'passport-b.pdf',
+    'one.png',
+    'two.png'
+  ]);
+  const console = await openReview(page, ws.slug);
+  await expect(fileButton(console)).toHaveText(filesLabel(2));
+  await expect(fileButton(console)).toBeEnabled();
+  const tabTo = async (target: ReturnType<Page['locator']>) => {
+    for (let i = 0; i < 120; i++) {
+      if (await target.evaluate(node => node === document.activeElement).catch(() => false)) return;
+      await page.keyboard.press('Tab');
+    }
+    throw new Error('Keyboard target unreachable');
+  };
+  const insideConsole = () =>
+    page.evaluate(() => {
+      const active = document.activeElement;
+      return Boolean(active && active !== document.body && active.closest('#fileJanitorConsole'));
+    });
+
+  // Tab to the row menu and choose a folder from the keyboard.
+  const menu = rowMenu(console, 'sensitive');
+  await tabTo(menu);
+  await expect(menu).toBeFocused();
+  await menu.selectOption({ label: 'Move to Documents' });
+  await expect(fileButton(console)).toHaveText(filesLabel(4));
+  // The picture redrew; focus is still on the row's menu, not thrown to the top.
+  await expect(menu).toBeFocused();
+  expect(await insideConsole()).toBe(true);
+
+  // Tab to a file, press Enter: the bar opens on that file with focus on its menu.
+  const one = fileNamed(console, 'one.png');
+  await tabTo(one);
+  await page.keyboard.press('Enter');
+  await expect(console.locator('#fileJanitorFileBarName')).toHaveText('one.png');
+  await expect(console.locator('#fileJanitorFileMenu')).toBeFocused();
+  // Decide it from the bar. The bar closes with the choice, so focus must land
+  // somewhere sensible in the picture rather than on the page.
+  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Move to Trash' });
+  await expect(console.locator('.fj-trash')).toContainText('one.png');
+  await expect(console.locator('#fileJanitorFileBar')).toHaveText(
+    'Click any file to move just that one.'
+  );
+  const active = await page.evaluate(() => {
+    const node = document.activeElement;
+    return node ? `${node.tagName.toLowerCase()}${node.id ? '#' + node.id : ''}` : 'none';
+  });
+  expect(
+    await insideConsole(),
+    `focus fell out of the picture after the bar closed (on ${active})`
+  ).toBe(true);
+});
+
+test('a row menu and the one-file bar fit at 390px with a long file name', async ({
+  page,
+  request
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const long = 'passport-scan-of-a-very-long-descriptive-file-name-for-the-overflow-check-2026.pdf';
+  const ws = await manualReview(request, [long, 'passport-b.pdf', 'one.png'], 'Narrow answers');
+  const console = await openReview(page, ws.slug);
+  await expect(fileButton(console)).toHaveText(filesLabel(1));
+  const fits = async () => {
+    expect(await console.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)
+    ).toBe(true);
+  };
+  await fits();
+  const menu = rowMenu(console, 'sensitive');
+  await menu.scrollIntoViewIfNeeded();
+  const menuBox = await menu.boundingBox();
+  expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+  expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(391);
+  expect(menuBox!.height).toBeGreaterThanOrEqual(44);
+  // Placed, the row keeps its note and the files move into a card; still no overflow.
+  await menu.selectOption({ label: 'Move to Documents' });
+  await expect(fileButton(console)).toHaveText(filesLabel(3));
+  await fits();
+  // Select the long-named file: the bar names it and shows its menu inside the page.
+  await fileNamed(console, long).click();
+  const bar = console.locator('#fileJanitorFileBar');
+  await expect(console.locator('#fileJanitorFileBarName')).toHaveText(long);
+  await fits();
+  const barBox = await bar.boundingBox();
+  expect(barBox!.x).toBeGreaterThanOrEqual(0);
+  expect(barBox!.x + barBox!.width).toBeLessThanOrEqual(391);
+  const fileMenuBox = await console.locator('#fileJanitorFileMenu').boundingBox();
+  expect(fileMenuBox!.x + fileMenuBox!.width).toBeLessThanOrEqual(391);
+  mkdirSync(evidence, { recursive: true });
+  await bar.evaluate(node => node.scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: `${evidence}/03-e2e-bar-390.png`, fullPage: true });
 });

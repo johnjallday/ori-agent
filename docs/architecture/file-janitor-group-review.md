@@ -376,7 +376,15 @@ write, the connector contract (`mcp_mover.go`, the `Mover` interface).
   `DecisionCategory=category`, `DecisionGroupID=group.ID`, then selects the move
   with `SourceGroupID=group.ID`. Choosing another folder for the row rewrites only
   the choices that came from that group.
-- One predicate `moveAnswered(candidate, groupID)` replaces the four places that
+- A group tick (`select_group`, and `select_filing_groups` for each filing group)
+  ticks the members that are still the scanned file and leaves a member that changed
+  or went missing since the scan unticked, instead of refusing the folder: one
+  changed file would otherwise make the whole folder impossible to tick. Only when a
+  `select_group` ticks nothing because every candidate changed is it refused
+  (`ErrCandidateNotActionable`, wrapping `errMemberChanged`, HTTP 409
+  `review_member_changed`); the browser shows that as a notice, not a failed save.
+- One predicate `moveAnswered(candidate)` (the fixed question-row IDs are a package
+  set, `questionGroupIDs`, so it needs no group argument) replaces the four places that
   reject a `NeedsReview` move whose `DecisionGroupID != ""`:
   `selectMove` (`review_draft_service.go`), `projectReviewDraft`
   (`review_draft.go`), `validExecutionCandidate` (`review_execution.go`) and the
@@ -386,9 +394,15 @@ write, the connector contract (`mcp_mover.go`, the `Mover` interface).
   file pass the picture and then fail the per-item fence as a conflict.
   `reconcileLegacyDraftDecision` keeps dropping such a choice on a legacy category
   edit, the safe direction.
-- Row "Leave here" is `clear_group`; for question groups it also clears
+- Choosing another folder for a row rewrites the choices that came from that row
+  (`SourceGroupID == group.ID`, a move) and never a Trash mark or a choice the
+  person made for one file.
+- Row "Leave here" is `clear_group`; for question groups it takes back every move
+  in the row, including a file the person placed one at a time (the picture counts
+  it as placed in its row, so the row menu has to be able to undo it; a Trash mark
+  stays), and it also clears
   `Decision`, `DecisionCategory`, `DecisionGroupID` and `DecidedAt` where
-  `DecisionGroupID==group.ID` and no choice is left, so nothing is remembered.
+  `Decision==Move` and no choice is left, so nothing is remembered.
   Row "Leave here, stop asking" is `keep_group`; for question groups it skips
   only members without a Trash choice or a per-file move choice (those are drawn
   elsewhere, so each file stays in one place). Filing-group keep is as today.

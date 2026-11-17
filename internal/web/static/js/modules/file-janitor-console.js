@@ -141,6 +141,14 @@
   let pressNotice = '';
   // A File request is in flight: the console does not close under it.
   let pressing = false;
+  // What the last press reported, shown until the person leaves the Review tab,
+  // closes the console, changes folder or presses again.
+  let lastResults = null;
+  // The file selected for the bar above the File button (R23); one at a time.
+  let selectedFile = null;
+  // Rows the person asked Ori to stop asking about, kept only for this page so the
+  // row can say so and offer "Review again" (R22). Keyed by scan.
+  const keptRows = new Map();
   let protectionFact = null;
   let protectionRequest = 0;
   let departingForProtection = false;
@@ -196,6 +204,8 @@
 
   function invalidateFolderState() {
     generation++;
+    keptRows.clear();
+    lastResults = null;
     discardProtectionApproval();
     protectionRequest++;
     protectionFact = null;
@@ -1754,6 +1764,8 @@
     changedMarks = new Set();
     pressNotice = '';
     markRemovedSeen();
+    // Whatever one file was being decided is decided now (or refused): close the bar.
+    selectedFile = null;
     draftLoadState = 'saving';
     failedDraftEdit = null;
     const write = draftWriteChain.then(async () => {
@@ -1783,12 +1795,20 @@
           throw error;
         }
         applyReviewDraft(body.draft);
-        if (request.action === 'reconsider_files')
+        // In the picture the answer is said beside the File button, in view and
+        // announced, not at the top of the page; the row itself already says "Ori
+        // will not ask about these again".
+        if (request.action === 'reconsider_files') {
+          const said = 'Ori will offer these again the next time it scans.';
+          if (reviewView === 'groups') pressNotice = said;
+          else reviewStatusMessage = said;
+        }
+        if (
+          (request.action === 'keep_group' || request.action === 'keep_files') &&
+          reviewView !== 'groups'
+        )
           reviewStatusMessage =
-            'Only the requested skip choices were forgotten. Nothing scanned or selected. Choose Scan now explicitly for fresh proposals; old kept candidates remain inactive.';
-        if (request.action === 'keep_group' || request.action === 'keep_files')
-          reviewStatusMessage =
-            'Kept here without moving or opening contents. Changed files may be proposed again; existing skip retention applies.';
+            'Left here. Ori will not ask about these again unless a file changes.';
         showError('');
         await loadBatch();
         return true;
@@ -1818,17 +1838,23 @@
       pendingDecisionWrites.delete(write);
       if (scopeCurrent(scope)) {
         renderBatch();
+        // Back to what the person was on. When that control is gone (the one-file
+        // bar closes once its file is decided), to the file where it now sits, so
+        // they land where the result is; failing that, a control that always exists.
         const target =
           document.getElementById(focusID) ||
           (request.group_id &&
-            document.getElementById('fileJanitorGroup-select-' + request.group_id));
+            document.getElementById('fileJanitorGroup-select-' + request.group_id)) ||
+          (request.candidate_ids?.length &&
+            document.getElementById('fileJanitorFile-' + request.candidate_ids[0]));
         if (target && !target.disabled) target.focus?.();
         else {
           const fallback =
             document.getElementById('fileJanitorDraftStatus')?.querySelector('button') ||
             document.getElementById('fileJanitorKept') ||
             document.getElementById('fileJanitorView-groups');
-          fallback?.focus?.();
+          if (fallback) fallback.focus?.();
+          else focusInPicture();
         }
       }
     };
@@ -1907,6 +1933,7 @@
   }
 
   function resetPicture() {
+    selectedFile = null;
     pictureRequest++;
     pictureMoreRequest++;
     picture = null;
@@ -2221,6 +2248,159 @@
     return bar;
   }
 
+  // ------------------------------------------------ answers on the loose rows
+  //
+  // A row menu and the one-file bar are the person's answers to what Ori could not
+  // decide. Each is one of the existing saved-choice edits, quoting the revisions
+  // the picture was drawn from, so a stale control changes nothing. They only record
+  // what the person chose: files move when File is pressed.
+
+  // When the control the person was on has gone, focus goes to the next thing they
+  // can act on in the picture: a row menu, or the picture itself. A disabled File
+  // button cannot take focus, so it is not the fallback.
+  const ROW_KEYS = ['sensitive', 'versions', 'audio', 'unresolved', 'unmatched'];
+  function focusInPicture() {
+    const target =
+      ROW_KEYS.map(key => document.getElementById('fileJanitorRowMenu-' + key)).find(Boolean) ||
+      document.getElementById('fileJanitorPicture');
+    target?.focus?.();
+  }
+
+  function selectFile(file) {
+    const previous = selectedFile;
+    selectedFile = file ? { ...file } : null;
+    renderBatch();
+    if (selectedFile) document.getElementById('fileJanitorFileMenu')?.focus?.();
+    // Closing the bar returns to the file it was about, not to the page top.
+    else if (previous) {
+      const back = document.getElementById('fileJanitorFile-' + previous.id);
+      if (back) back.focus?.();
+      else focusInPicture();
+    }
+  }
+
+  // R19, R20, R21, R22: the one menu on a question row.
+  async function answerRow(row, choice, binding) {
+    if (choice.kind === 'move') {
+      await submitReviewEdit(
+        'select_group',
+        { group_id: row.group_id, category: choice.category },
+        null,
+        binding
+      );
+    } else if (choice.kind === 'leave') {
+      // Nothing recorded for the row any more; nothing to ask the server when
+      // nothing was placed.
+      if (row.placed_count > 0)
+        await submitReviewEdit('clear_group', { group_id: row.group_id }, null, binding);
+      else renderBatch();
+    } else if (choice.kind === 'stop') {
+      await stopAskingAboutRow(row, binding);
+    }
+  }
+
+  // The files "Leave here, stop asking" will cover, which Review again must be able
+  // to name afterwards: the row's members, except those drawn elsewhere (a Trash
+  // mark or a choice of the person's own for that one file).
+  async function rowMemberIDs(row) {
+    const scope = requestScope();
+    const batchID = lastBatch?.id;
+    const elsewhere = new Set(
+      (reviewDraft?.choices || [])
+        .filter(
+          choice =>
+            choice.operation === 'trash' ||
+            (choice.operation === 'move' && choice.source_group_id !== row.group_id)
+        )
+        .map(choice => choice.candidate_id)
+    );
+    const ids = [];
+    for (let offset = 0; offset < row.count; offset += 200) {
+      const response = await fetch(
+        apiBase(scope.id) +
+          '/batches/' +
+          encodeURIComponent(batchID) +
+          '/groups/' +
+          encodeURIComponent(row.group_id) +
+          '/members?limit=200&offset=' +
+          offset +
+          '&revision=' +
+          encodeURIComponent(reviewDraft.group_revision)
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || !Array.isArray(body.candidates)) throw new Error('members unavailable');
+      for (const member of body.candidates) if (!elsewhere.has(member.id)) ids.push(member.id);
+      if (body.candidates.length === 0) break;
+    }
+    return ids;
+  }
+
+  async function stopAskingAboutRow(row, binding) {
+    if (!reviewEditsAvailable()) return;
+    const batchID = lastBatch?.id;
+    let ids;
+    busy = true;
+    try {
+      ids = await rowMemberIDs(row);
+    } catch (_) {
+      showError('Ori could not read these files, so nothing was changed. Try again.');
+      return;
+    } finally {
+      busy = false;
+      updateSelectionSummary();
+    }
+    if (lastBatch?.id !== batchID) return;
+    const saved = await submitReviewEdit('keep_group', { group_id: row.group_id }, null, binding);
+    if (saved && ids.length) {
+      keptRows.set(batchID, [
+        ...(keptRows.get(batchID) || []).filter(item => item.key !== row.key),
+        { key: row.key, count: ids.length, ids }
+      ]);
+      reviewStatusMessage = '';
+      renderBatch();
+      // The row's menu is gone; land on the note that replaced it.
+      document.getElementById('fileJanitorReviewAgain-' + row.key)?.focus?.();
+    }
+  }
+
+  // R22: Ori forgets the choice, and the files come back in the next scan.
+  async function reviewKeptAgain(kept, binding) {
+    const batchID = lastBatch?.id;
+    const saved = await submitReviewEdit(
+      'reconsider_files',
+      { candidate_ids: kept.ids },
+      null,
+      binding
+    );
+    if (saved && batchID) {
+      keptRows.set(
+        batchID,
+        (keptRows.get(batchID) || []).filter(item => item.key !== kept.key)
+      );
+      pressNotice = 'Ori will offer these again the next time it scans.';
+      renderBatch();
+      // The note that held this button is gone.
+      focusInPicture();
+    }
+  }
+
+  // R23: what the person chose for the one selected file.
+  async function answerFile(file, choice, binding) {
+    selectedFile = null;
+    const ids = { candidate_ids: [file.id] };
+    if (choice.kind === 'move')
+      await submitReviewEdit('select_files', { ...ids, category: choice.category }, null, binding);
+    else if (choice.kind === 'trash') await submitReviewEdit('mark_trash', ids, null, binding);
+    else if (choice.kind === 'stop') await submitReviewEdit('keep_files', ids, null, binding);
+    else if (choice.kind === 'leave')
+      await submitReviewEdit(
+        file.placement === 'trash' ? 'unmark_trash' : 'exclude_files',
+        ids,
+        null,
+        binding
+      );
+  }
+
   // The Review tab: the folder as it will look after filing. This only draws what
   // the picture read says. A tick or untick is one saved edit through the same
   // lifecycle as every other choice, and the picture is redrawn from the server's
@@ -2256,6 +2436,18 @@
         // press, the files that changed since the person looked (R36).
         plan: planMatchesDraft() ? { items: planItems } : undefined,
         changedIds: changedMarks,
+        // Answers on the loose rows and for one file (R19 to R25). Every one is an
+        // existing saved-choice edit; nothing here moves a file.
+        destinations: categories,
+        filedRoot: lastStatus?.settings?.filing_root_name || 'Filed',
+        selectedFile,
+        keptRows: keptRows.get(lastBatch.id) || [],
+        onSelectFile: file => selectFile(file),
+        onRowChoice: (row, choice) => void answerRow(row, choice, binding),
+        onFileChoice: (file, choice) => void answerFile(file, choice, binding),
+        onReviewAgain: kept => void reviewKeptAgain(kept, binding),
+        onRetry: file =>
+          void submitReviewEdit('retry_files', { candidate_ids: [file.id] }, null, binding),
         onTickFolder: (folder, ticked) =>
           void submitReviewEdit(
             ticked ? 'select_group' : 'deselect_group',
@@ -2544,6 +2736,18 @@
 
   function appendReviewFooter(container, focusedReviewControlID) {
     const footer = el('div', 'fj-footer');
+    // R23: the one-file bar sits right above the File button, so it stays in view
+    // however far down the picture the selected file is.
+    if (reviewView === 'groups' && picture?.batch_id === lastBatch?.id) {
+      const bar = window.FileJanitorPicture?.renderFileBar?.(document, picture, {
+        editsAvailable: reviewEditsAvailable(),
+        destinations: categories,
+        selectedFile,
+        onSelectFile: file => selectFile(file),
+        onFileChoice: (file, choice) => void answerFile(file, choice, reviewEditBinding())
+      });
+      if (bar) footer.appendChild(bar);
+    }
     const selection = el('p', 'fj-selection');
     selection.id = 'fileJanitorSelection';
     selection.setAttribute('role', 'status');
@@ -2602,7 +2806,7 @@
     // whatever they were on: a folder tick, an "and N more" control, the Trash tick
     // or the main button as much as a table control.
     if (
-      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More)-|Approve$|TrashAck$|ShowEarlier$)/.test(
+      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|File|ReviewAgain|Retry)-|Approve$|TrashAck$|ShowEarlier$|FileMenu$|FileBarCancel$|Picture$)/.test(
         focusedReviewControlID
       )
     ) {
@@ -2644,6 +2848,7 @@
     pressing = true;
     showError('');
     pressNotice = '';
+    lastResults = null;
     markRemovedSeen();
     updateSelectionSummary();
     const control = document.getElementById('fileJanitorApprove');
@@ -3649,7 +3854,10 @@
   // renderResults reports what happened per file. Operation evidence comes
   // from each authoritative outcome: an applied Trash is never called "filed",
   // and an older response without operation data gets neutral wording.
-  function renderResults(result) {
+  function renderResults(result, { focus = true } = {}) {
+    // Kept so a redraw of the console (a status refresh that lands after the press)
+    // shows the same account again instead of wiping it.
+    lastResults = result;
     const host = document.getElementById('fileJanitorResultsHost');
     if (!host) return;
     clear(host);
@@ -3732,8 +3940,8 @@
     panel.appendChild(actions);
     host.appendChild(panel);
     // Move focus to the outcome so a keyboard user lands on what happened instead
-    // of at the top of the document.
-    panel.focus?.();
+    // of at the top of the document (not when the same account is only redrawn).
+    if (focus) panel.focus?.();
   }
 
   // pauseControl is the real Pause/Resume, shared by every surface that offers
@@ -4166,6 +4374,7 @@
     if (healthBelow) host.appendChild(healthBelow);
     host.appendChild(errorRegion());
     renderBatch();
+    if (lastResults) renderResults(lastResults, { focus: false });
   }
 
   // repairAction offers "Choose the folder again" when readiness says the
@@ -4395,6 +4604,7 @@
   function close(options = {}) {
     if (!consoleOpen) return false;
     discardProtectionApproval();
+    lastResults = null;
     consoleOpen = false;
     settingsOpen = false;
     consoleCloseButton = null;
@@ -4728,6 +4938,7 @@
     // Moving tabs drops the Trash tick: it is never restored after coming back
     // from another page (R37).
     discardProtectionApproval();
+    lastResults = null;
     consoleItem = '';
     renderConsole();
     document.getElementById('fileJanitorTab-' + next)?.focus?.();
@@ -6357,6 +6568,9 @@
       trashMarked = new Set();
       resetPlan();
       pressing = false;
+      lastResults = null;
+      selectedFile = null;
+      keptRows.clear();
       approvalGeneration++;
       protectionFact = null;
       protectionCandidates.clear();
