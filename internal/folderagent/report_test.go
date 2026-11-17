@@ -137,6 +137,36 @@ func TestChat_ALaterLooksMessageIsDrawnAsStored(t *testing.T) {
 	}
 }
 
+// "It's something else" answers the question too: the message that asked it
+// describes a card with no question buttons any more ("Nothing is installed or
+// created. Tell the agent what it is"), so the drawer shows what the look found,
+// the same as after "Yes". The stored text keeps the question for the agent.
+func TestChat_AWithdrawnQuestionIsDrawnAsItsOpeningToo(t *testing.T) {
+	h := newHarness(t, demo(t))
+	h.svc.deps.Reports = &fakeReports{latest: map[string]ChatRef{}}
+	view := h.start(t, "")
+	asked, err := h.svc.View(context.Background(), "u1", view.WorkspaceID)
+	if err != nil || asked.Chat == nil || asked.Chat.Lead != "I looked around Ori Music Demo. One question first:" {
+		t.Fatalf("while asked: %+v %v", asked.Chat, err)
+	}
+	withdrawn, err := h.svc.AnswerPremise(context.Background(), "u1", view.WorkspaceID, PremiseSomethingElse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withdrawn.Premise == nil || !withdrawn.Premise.Withdrawn {
+		t.Fatalf("the question should be withdrawn: %+v", withdrawn.Premise)
+	}
+	got, err := h.svc.View(context.Background(), "u1", view.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Chat == nil || !strings.HasPrefix(got.Chat.Lead, "I looked around Ori Music Demo.") ||
+		strings.Contains(got.Chat.Lead, "One question first") || strings.Contains(got.Chat.Lead, "Answer it in the card") ||
+		strings.Contains(got.Chat.Lead, "Is that right") {
+		t.Fatalf("lead after something else = %+v", got.Chat)
+	}
+}
+
 func TestLook_WithoutReportsPostsNothingAndViewsHaveNoChat(t *testing.T) {
 	h := newHarness(t, demo(t))
 	view := h.start(t, "")
