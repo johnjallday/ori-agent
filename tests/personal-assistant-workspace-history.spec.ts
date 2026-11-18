@@ -115,9 +115,9 @@ test('wt demo: page/selection context, pinned generation, saved and legacy histo
   await page
     .locator('#personalAssistantInput')
     .fill('Draft kept through group and project navigation');
-  await page.goto(`/workspaces/${group.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${group.folder_slug}/catalog`);
   await expect(label).toHaveText('Context · Group: Music portfolio history fixture');
-  await page.goto(`/workspaces/${a.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${a.folder_slug}/catalog`);
   await expect(label).toHaveText(
     'Context · Project: Album-1 history fixture · Music portfolio history fixture'
   );
@@ -156,7 +156,7 @@ test('wt demo: page/selection context, pinned generation, saved and legacy histo
   expect(before.folder_reviews[current.offerId].status).toBe('pending');
 
   // Navigate before Send: B owns the next scope, never the HQ session.
-  await page.goto(`/workspaces/${b.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${b.folder_slug}/catalog`);
   await expect(label).toHaveText('Context · Project: Second project history fixture');
   await expect(card).toBeVisible();
   const send = async (prompt: string) => {
@@ -193,7 +193,7 @@ test('wt demo: page/selection context, pinned generation, saved and legacy histo
   );
 
   // Actual generation is held at the provider, not an HTTP response mock.
-  await page.goto(`/workspaces/${a.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${a.folder_slug}/catalog`);
   await expect(label).toContainText('Album-1 history fixture');
   await page.locator('#personalAssistantInput').fill('Hold this workspace reply');
   const delayed = page.waitForResponse(
@@ -211,7 +211,7 @@ test('wt demo: page/selection context, pinned generation, saved and legacy histo
     .toBe(a.id);
   await page.locator('#personalAssistantInput').fill('New unsent draft for the second project');
   await page.evaluate(slug => {
-    history.pushState({}, '', `/workspaces/${slug}/canvas`);
+    history.pushState({}, '', `/workspaces/${slug}/catalog`);
     dispatchEvent(new PopStateEvent('popstate'));
   }, b.folder_slug);
   await expect(label).toHaveText('Context · Project: Second project history fixture');

@@ -339,9 +339,6 @@ func locationLabelFor(route string) string {
 func aboutThisScreen(route string) string {
 	if strings.HasPrefix(route, "/workspaces/") {
 		parts := strings.Split(strings.TrimPrefix(route, "/workspaces/"), "/")
-		if len(parts) > 1 && parts[1] == "canvas" {
-			return "The workspace canvas shows agents, tasks, and their connections. Select a node to inspect it; workspace work stays in the workspace or your Personal Assistant."
-		}
 		if len(parts) > 1 && (parts[1] == "task" || parts[1] == "tasks") {
 			return "This workspace task page shows the task, its progress, and results. Review the task here; Help never starts or changes it."
 		}

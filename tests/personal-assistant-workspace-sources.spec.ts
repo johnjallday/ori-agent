@@ -131,7 +131,7 @@ test('wt demo: notes and tasks are read, cited, re-read when they change, and ne
   const shot = (name: string) =>
     page.locator('#personalAssistantPanel').screenshot({ path: join(evidence, name) });
 
-  await page.goto(`/workspaces/${project.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${project.folder_slug}/catalog`);
   await openDrawer();
   await expect(label).toHaveText('Context · Project: Album-1 sources fixture');
 
@@ -194,7 +194,7 @@ test('wt demo: notes and tasks are read, cited, re-read when they change, and ne
     expect((await request.get(href)).status(), href).toBe(200);
   await noteLink.click();
   await expect(page).toHaveURL(new RegExp(`/workspaces/${project.folder_slug}/notes/${noteId}$`));
-  await page.goto(`/workspaces/${project.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${project.folder_slug}/catalog`);
   await openDrawer();
 
   // 3. The records change. The next reply reads them as they are now.

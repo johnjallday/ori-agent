@@ -2715,9 +2715,7 @@ export class WorkspaceDetailPage {
         window.OriAskRouting.refreshWorkspaceIdentity({
           workspace_id: this.workspaceId,
           page_path: window.location?.pathname || '',
-          surface: window.location?.pathname?.includes('/canvas')
-            ? 'workspace_canvas'
-            : 'workspace_detail',
+          surface: 'workspace_detail',
           origin: 'ask_ori'
         });
       }
@@ -2728,10 +2726,9 @@ export class WorkspaceDetailPage {
       // not read a UUID (FR4/FR41).
       if (window.OriGuide && typeof window.OriGuide.setContext === 'function') {
         const workspaceName = String(this.workspace?.name || '').trim();
-        const onCanvas = Boolean(window.location?.pathname?.includes('/canvas'));
         window.OriGuide.setContext({
           workspaceId: this.workspaceId,
-          label: workspaceName ? (onCanvas ? 'Canvas: ' : 'Workspace: ') + workspaceName : ''
+          label: workspaceName ? 'Workspace: ' + workspaceName : ''
         });
       }
       await this.renderWorkspaceInfo(request);

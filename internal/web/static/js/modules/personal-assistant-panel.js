@@ -2614,7 +2614,7 @@ function init() {
       const recipient = recipients()?.current?.();
       if (recipient?.kind !== RECIPIENT_WORKSPACE_ENTRY || !recipient.available) return null;
       const context = routeContext();
-      if (!['workspace_detail', 'workspace_canvas'].includes(context.surface)) return null;
+      if (context.surface !== 'workspace_detail') return null;
       return {
         workspaceId: recipient.workspaceId,
         name: recipient.name,

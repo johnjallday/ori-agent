@@ -131,7 +131,7 @@ test('wt demo: the workspace-aware drawer works from the keyboard, announces con
   };
   const shot = (name: string) => page.screenshot({ path: join(evidence, name) });
 
-  await page.goto(`/workspaces/${project.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${project.folder_slug}/catalog`);
   await ready();
   await expect(launcher).toBeVisible();
 
@@ -231,7 +231,7 @@ test('wt demo: the workspace-aware drawer works from the keyboard, announces con
   // context line changes to the new page (announced by its live region). A page
   // outside any workspace says so rather than keeping the last project.
   await input.fill('An unsent draft about the next step');
-  await page.goto(`/workspaces/${second.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${second.folder_slug}/catalog`);
   await ready();
   await expect(panel).toBeVisible();
   await expect(label).toHaveText(`Context · Project: ${longName}`);
@@ -248,7 +248,7 @@ test('wt demo: the workspace-aware drawer works from the keyboard, announces con
   // composer stays on screen while the conversation scrolls.
   const layout = async (width: number, height: number) => {
     await page.setViewportSize({ width, height });
-    await page.goto(`/workspaces/${second.folder_slug}/canvas`);
+    await page.goto(`/workspaces/${second.folder_slug}/catalog`);
     await ready();
     if (!(await panel.isVisible())) await launcher.click();
     await expect(label).toHaveText(`Context · Project: ${longName}`);

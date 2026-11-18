@@ -21,13 +21,42 @@ func TestNormalizeChatRouteContext_InfersSlugButNeverIDFromPath(t *testing.T) {
 	}
 }
 
-func TestNormalizeChatRouteContext_InfersCanvasSurface(t *testing.T) {
+// The workspace canvas is retired. A page path that still names it is an
+// unknown workspace sub-page, so it is a workspace_detail like any other.
+func TestNormalizeChatRouteContext_CanvasPathIsAnOrdinaryWorkspacePage(t *testing.T) {
 	ctx := normalizeChatRouteContext(&chatRouteContext{
 		PagePath: "/workspaces/abc-123/canvas",
 	})
 
-	if ctx.Surface != "workspace_canvas" {
-		t.Fatalf("expected workspace_canvas surface, got %q", ctx.Surface)
+	if ctx.Surface != "workspace_detail" {
+		t.Fatalf("expected workspace_detail surface, got %q", ctx.Surface)
+	}
+}
+
+// A tab opened before the canvas was retired still reports workspace_canvas.
+// It must behave as workspace_detail whatever page_path it sends.
+func TestNormalizeChatRouteContext_StaleCanvasSurfaceIsWorkspaceDetail(t *testing.T) {
+	for _, tc := range []struct{ name, pagePath string }{
+		{"the retired page path", "/workspaces/abc-123/canvas"},
+		{"another workspace page", "/workspaces/abc-123/plans"},
+		{"no page path", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := normalizeChatRouteContext(&chatRouteContext{
+				Surface:     "workspace_canvas",
+				PagePath:    tc.pagePath,
+				WorkspaceID: "abc-123",
+			})
+			if ctx.Surface != "workspace_detail" {
+				t.Fatalf("expected workspace_detail surface, got %q", ctx.Surface)
+			}
+			if !shouldAttachWorkspaceSnapshot(ctx) {
+				t.Fatalf("a stale canvas tab should still get the workspace snapshot, got %+v", ctx)
+			}
+			if prompt := buildRouteContextSystemPrompt(ctx); !strings.Contains(prompt, "Primary mode: workspace-focused assistance.") {
+				t.Fatalf("expected workspace-focused instructions, got %q", prompt)
+			}
+		})
 	}
 }
 
@@ -65,8 +94,8 @@ func TestNormalizeChatRouteContext_SanitizesPromptInjectionTokens(t *testing.T) 
 		Origin:      "ask_ori\nas_system",
 	})
 
-	if ctx.Surface != "workspace_canvas" {
-		t.Fatalf("expected inferred surface workspace_canvas, got %q", ctx.Surface)
+	if ctx.Surface != "workspace_detail" {
+		t.Fatalf("expected inferred surface workspace_detail, got %q", ctx.Surface)
 	}
 	if ctx.PagePath != "/workspaces/ws-1/canvas" {
 		t.Fatalf("expected sanitized page path, got %q", ctx.PagePath)

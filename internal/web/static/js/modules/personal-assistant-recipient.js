@@ -11,7 +11,7 @@ export const RECIPIENT_PERSONAL = 'personal';
 export const RECIPIENT_WORKSPACE_ENTRY = 'workspace_entry';
 
 // The surfaces the page-context collector already calls a workspace page.
-const WORKSPACE_SURFACES = new Set(['workspace_detail', 'workspace_canvas', 'workspace_task']);
+const WORKSPACE_SURFACES = new Set(['workspace_detail', 'workspace_task']);
 
 export const PICK_KEY_PREFIX = 'ori.personalAssistant.recipient.';
 export const SESSION_KEY_PREFIX = 'ori.personalAssistant.recipientSession.';

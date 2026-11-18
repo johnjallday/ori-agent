@@ -602,7 +602,7 @@ func shouldAttachWorkspaceSnapshot(routeCtx normalizedChatRouteContext) bool {
 		return false
 	}
 	switch routeCtx.Surface {
-	case "workspace_detail", "workspace_canvas", "workspace_chat", "workspace_task":
+	case "workspace_detail", "workspace_chat", "workspace_task":
 		return true
 	default:
 		return false

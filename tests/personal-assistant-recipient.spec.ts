@@ -284,9 +284,9 @@ test('a vacant Commander defaults to the Personal Assistant with a disabled row'
 }) => {
   await installLocalCdn(page);
   // The workspace's own page opens a mandatory "Create a Commander" dialog
-  // (it predates the picker), so the drawer is checked on its canvas, which
-  // is the same workspace page for the recipient rules (FR2, FR4).
-  await page.goto(`/workspaces/${seeded.vacant.slug}/canvas`);
+  // (it predates the picker), so the drawer is checked on its catalog page,
+  // which is the same workspace page for the recipient rules (FR2, FR4).
+  await page.goto(`/workspaces/${seeded.vacant.slug}/catalog`);
   await expect(page.locator('#personalAssistantLauncherName')).toHaveText('Atlas');
   await openDrawer(page);
   await expect(page.locator('#personalAssistantPanelTitle')).toHaveText('Atlas');

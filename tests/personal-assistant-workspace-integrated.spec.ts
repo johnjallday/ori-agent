@@ -172,7 +172,7 @@ test('wt demo: one conversation from setup review through notes, files, a delaye
 
   // 1. On the group's page: attach Album-5, ask to add it, and review. The card
   // names the group as the destination. Nothing is created.
-  await page.goto(`/workspaces/${group.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${group.folder_slug}/catalog`);
   await openDrawer();
   await expect(label).toHaveText('Context · Group: Music portfolio integrated fixture');
   await openFolderAttach(page);
@@ -201,7 +201,7 @@ test('wt demo: one conversation from setup review through notes, files, a delaye
 
   // 2. Move to Album-1. The same conversation and its review come along; the
   // review still names the group, not the page now on screen.
-  await page.goto(`/workspaces/${album1.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${album1.folder_slug}/catalog`);
   await openDrawer();
   await expect(label).toContainText('Project: Album-1 integrated fixture');
   await expect(card).toContainText(
@@ -265,7 +265,7 @@ test('wt demo: one conversation from setup review through notes, files, a delaye
     .toBe(album1.id);
   await input.fill('A draft typed while the reply was being written');
   await page.evaluate(slug => {
-    history.pushState({}, '', `/workspaces/${slug}/canvas`);
+    history.pushState({}, '', `/workspaces/${slug}/catalog`);
     dispatchEvent(new PopStateEvent('popstate'));
   }, group.folder_slug);
   await expect(label).toHaveText('Context · Group: Music portfolio integrated fixture');
@@ -282,7 +282,7 @@ test('wt demo: one conversation from setup review through notes, files, a delaye
 
   // 6. Album-1's linked folder is removed. The next request cannot read it; the
   // earlier reply keeps the source it read then.
-  await page.goto(`/workspaces/${album1.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${album1.folder_slug}/catalog`);
   await openDrawer();
   await expect(label).toContainText('Project: Album-1 integrated fixture');
   const removed = await request.delete(`/api/workspaces/${album1.id}/directories/${directoryId}`);

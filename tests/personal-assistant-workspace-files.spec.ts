@@ -134,7 +134,7 @@ test('wt demo: linked files and attachments are read with coverage; an attached 
       expect(text, `an absolute location leaked: ${location}`).not.toContain(location);
   };
 
-  await page.goto(`/workspaces/${project.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${project.folder_slug}/catalog`);
   await openDrawer();
   await expect(label).toHaveText('Context · Project: Album-1 files fixture');
 
@@ -248,7 +248,7 @@ test('wt demo: linked files and attachments are read with coverage; an attached 
 
   // 6. Access removed during the conversation stops the next read. Earlier
   // replies keep what they read then; the user's files are untouched.
-  await page.goto(`/workspaces/${project.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${project.folder_slug}/catalog`);
   await openDrawer();
   const removed = await request.delete(`/api/workspaces/${project.id}/directories/${directoryId}`);
   expect(removed.ok(), await removed.text()).toBeTruthy();

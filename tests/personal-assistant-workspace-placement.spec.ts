@@ -140,7 +140,7 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
 
   // 1. On the group's page, "add this" proposes a separate project in that
   // named group. Nothing is prepared until the user asks for the review.
-  await page.goto(`/workspaces/${group.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${group.folder_slug}/catalog`);
   await openDrawer();
   await expect(label).toHaveText('Context · Group: Music portfolio placement fixture');
   await attachDocuments();
@@ -191,7 +191,7 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
   // group. A blocked review then says why and how to recover. Renaming the group
   // makes the reviewed destination stale; only an explicit Review refreshes it,
   // and it follows the saved review, not the page now on screen.
-  await page.goto(`/workspaces/${album1.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${album1.folder_slug}/catalog`);
   await openDrawer();
   await expect(label).toContainText('Project: Album-1 placement fixture');
   await expect(card).toContainText(
@@ -260,7 +260,7 @@ test('wt demo: named review, blocked refresh, confirmed setup, project choice an
 
   // 5. Inside Album-1 the same request is a question first: link the folder
   // there as a supporting source, or create a separate project.
-  await page.goto(`/workspaces/${album1.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${album1.folder_slug}/catalog`);
   await openDrawer();
   await expect(label).toContainText('Project: Album-1 placement fixture');
   await attachDocuments();

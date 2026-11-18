@@ -36,7 +36,6 @@ const (
 
 var allowedRouteSurfaces = map[string]struct{}{
 	"workspace_detail": {},
-	"workspace_canvas": {},
 	"workspace_chat":   {},
 	"workspace_task":   {},
 	"workspace_hub":    {},
@@ -67,6 +66,13 @@ func normalizeChatRouteContext(input *chatRouteContext) normalizedChatRouteConte
 	}
 
 	surface := sanitizeRouteContextSurface(input.Surface)
+	// A tab opened before the workspace canvas was retired still reports that
+	// surface. The page is gone and every workspace page left is a
+	// workspace_detail, so the request is treated as one whatever page_path says.
+	// agenthttp's normalizeHomeAssistantRouteContext does the same.
+	if surface == "workspace_canvas" {
+		surface = "workspace_detail"
+	}
 	if surface == "" {
 		surface = inferChatRouteSurface(pagePath, workspaceID)
 	} else if _, ok := allowedRouteSurfaces[surface]; !ok {
@@ -92,9 +98,6 @@ func inferChatRouteSurface(pathname, workspaceID string) string {
 		return "dashboard"
 	}
 	if strings.HasPrefix(path, "/workspaces/") {
-		if strings.Contains(path, "/canvas") {
-			return "workspace_canvas"
-		}
 		if strings.Contains(path, "/task/") || strings.Contains(path, "/tasks/") {
 			return "workspace_task"
 		}
@@ -181,7 +184,7 @@ func buildRouteContextSystemPrompt(ctx normalizedChatRouteContext) string {
 			"Stay focused on the active task identified below. Use current_task and task_runs tools to inspect its details and run history before suggesting changes.",
 			"Only branch into broader workspace topics when explicitly asked.",
 		)
-	case "workspace_detail", "workspace_canvas", "workspace_chat":
+	case "workspace_detail", "workspace_chat":
 		lines = append(lines,
 			"Primary mode: workspace-focused assistance.",
 			"Prioritize actions for this workspace: tasks, notes, files, directories, and workspace sessions.",

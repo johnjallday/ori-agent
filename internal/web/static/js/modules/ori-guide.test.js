@@ -1703,7 +1703,9 @@ test('context is derived from the page path for every workspace surface', () => 
     ['/', 'home', '', ''],
     ['/workspaces', 'workspace_hub', '', ''],
     ['/workspaces/launch', 'workspace_detail', 'launch', ''],
-    ['/workspaces/launch/canvas', 'workspace_canvas', 'launch', ''],
+    ['/workspaces/launch/plans', 'workspace_detail', 'launch', ''],
+    // The canvas page is retired: its old path is an ordinary workspace page.
+    ['/workspaces/launch/canvas', 'workspace_detail', 'launch', ''],
     ['/workspaces/launch/tasks/t-42', 'workspace_task', 'launch', 't-42'],
     ['/agents', 'app', '', '']
   ];

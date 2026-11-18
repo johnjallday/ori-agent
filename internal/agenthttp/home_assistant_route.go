@@ -1185,8 +1185,15 @@ func normalizeHomeAssistantRouteContext(context *HomeAssistantRouteContext) norm
 	if context == nil {
 		return normalizedHomeAssistantRouteContext{}
 	}
+	surface := normalizeRouteToken(context.Surface)
+	// A tab opened before the workspace canvas was retired still reports that
+	// surface; every workspace page left is a workspace_detail. chathttp's
+	// normalizeChatRouteContext does the same.
+	if surface == "workspace_canvas" {
+		surface = "workspace_detail"
+	}
 	return normalizedHomeAssistantRouteContext{
-		Surface:     normalizeRouteToken(context.Surface),
+		Surface:     surface,
 		PagePath:    normalizeRouteToken(context.PagePath),
 		WorkspaceID: strings.TrimSpace(context.WorkspaceID),
 		TaskID:      strings.TrimSpace(context.TaskID),
@@ -1206,7 +1213,7 @@ func (c normalizedHomeAssistantRouteContext) hasWorkspaceSurfaceContext() bool {
 	if strings.HasPrefix(c.PagePath, "/workspaces/") {
 		return true
 	}
-	return c.Surface == "workspace" || c.Surface == "workspace_detail" || c.Surface == "workspace_canvas" || c.Surface == "workspace_task"
+	return c.Surface == "workspace" || c.Surface == "workspace_detail" || c.Surface == "workspace_task"
 }
 
 func determineRouteModeAndTargetSurface(intent homeAssistantIntent, intentVariant string, context normalizedHomeAssistantRouteContext, workspaceRecommended bool) (string, string) {

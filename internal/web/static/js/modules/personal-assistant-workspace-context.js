@@ -35,11 +35,7 @@ export function collectWorkspaceContext({
     // The app's task page is /workspaces/<slug>/task/<id>; the plural is kept
     // for older references.
     out.surface =
-      match[2] === 'canvas'
-        ? 'workspace_canvas'
-        : ['task', 'tasks'].includes(match[2]) && match[3]
-          ? 'workspace_task'
-          : 'workspace_detail';
+      ['task', 'tasks'].includes(match[2]) && match[3] ? 'workspace_task' : 'workspace_detail';
     if (out.surface === 'workspace_task') {
       try {
         out.task_id = decodeURIComponent(match[3]);
