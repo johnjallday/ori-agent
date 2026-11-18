@@ -128,7 +128,9 @@ for (const theme of ['light', 'dark']) {
         });
       }
     } finally {
-      await page.request.delete(`/api/workspaces/${folder.id}`);
+      if (process.env.ORI_UI_RETAIN_FIXTURES !== '1') {
+        await page.request.delete(`/api/workspaces/${folder.id}`);
+      }
     }
   });
   // PRD 766 FR29: the Personal HQ's Details page, header first and station-first.
@@ -379,7 +381,9 @@ for (const theme of ['light', 'dark']) {
       });
       expect(scan, JSON.stringify(scan, null, 2)).toEqual([]);
     } finally {
-      await page.request.delete(`/api/workspaces/${folder.id}`);
+      if (process.env.ORI_UI_RETAIN_FIXTURES !== '1') {
+        await page.request.delete(`/api/workspaces/${folder.id}`);
+      }
     }
   });
 
@@ -600,7 +604,9 @@ for (const theme of ['light', 'dark']) {
       await expect(page.locator('.ws-cmd-map-shell.is-flow')).toBeVisible();
       await expect(page.locator('.ws-cmd-flow-node').first()).toBeFocused();
     } finally {
-      await page.request.delete(`/api/workspaces/${folder.id}`);
+      if (process.env.ORI_UI_RETAIN_FIXTURES !== '1') {
+        await page.request.delete(`/api/workspaces/${folder.id}`);
+      }
     }
   });
 
@@ -694,8 +700,11 @@ for (const theme of ['light', 'dark']) {
     const expectMapTheme = async expectedTheme => {
       const expectedNameColor =
         expectedTheme === 'light' ? 'rgb(10, 10, 10)' : 'rgb(238, 240, 243)';
-      const expectedCaptureColor =
-        expectedTheme === 'light' ? 'rgb(31, 33, 40)' : 'rgb(214, 217, 222)';
+      // Shared controls use canonical on-primary/text-primary ink; the map's
+      // artwork/agent paint assertions below intentionally stay unchanged.
+      const expectedCaptureColor = 'rgb(255, 255, 255)';
+      const expectedControlColor =
+        expectedTheme === 'light' ? 'rgb(10, 10, 10)' : 'rgb(201, 204, 209)';
       await expect(operationsMap.locator('.ws-cmd-map-agent-copy strong').first()).toHaveCSS(
         'color',
         expectedNameColor
@@ -741,19 +750,19 @@ for (const theme of ['light', 'dark']) {
         expect(style.agentNameColor).toBe(expectedNameColor);
         expect(style.agentStatusBackground).toBe('rgba(255, 255, 255, 0.88)');
         expect(style.toolbarBackground).toBe('rgba(0, 0, 0, 0)');
-        expect(style.resourcesButtonColor).toBe('rgb(92, 92, 94)');
+        expect(style.resourcesButtonColor).toBe(expectedControlColor);
         expect(style.captureButtonColor).toBe(expectedCaptureColor);
         expect(style.viewSwitchBackground).toBe('rgba(0, 0, 0, 0)');
-        expect(style.inactiveViewColor).toBe('rgb(31, 33, 40)');
+        expect(style.inactiveViewColor).toBe(expectedControlColor);
       } else {
         expect(style.agentBackgroundImage).toContain('rgba(0, 0, 0, 0.16)');
         expect(style.agentNameColor).toBe(expectedNameColor);
         expect(style.agentStatusBackground).toBe('rgba(0, 0, 0, 0.24)');
         expect(style.toolbarBackground).toBe('rgba(0, 0, 0, 0)');
-        expect(style.resourcesButtonColor).toBe('rgb(139, 144, 154)');
+        expect(style.resourcesButtonColor).toBe(expectedControlColor);
         expect(style.captureButtonColor).toBe(expectedCaptureColor);
         expect(style.viewSwitchBackground).toBe('rgba(0, 0, 0, 0)');
-        expect(style.inactiveViewColor).toBe('rgb(133, 139, 150)');
+        expect(style.inactiveViewColor).toBe(expectedControlColor);
       }
       return style;
     };

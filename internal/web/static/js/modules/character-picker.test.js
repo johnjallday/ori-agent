@@ -64,6 +64,19 @@ function makeDom() {
       innerHTML: '',
       textContent: '',
       focused: false,
+      open: false,
+      showModal() {
+        this.open = true;
+      },
+      close() {
+        this.open = false;
+      },
+      getBoundingClientRect() {
+        return { left: 0, top: 0, right: 880, bottom: 720 };
+      },
+      querySelector() {
+        return null;
+      },
       listeners: {},
       attributes: {},
       classList: {
@@ -110,7 +123,6 @@ function makeDom() {
 
   for (const id of [
     'charPicker',
-    'charPickerBackdrop',
     'charPickerClose',
     'charPickerSearch',
     'charPickerGrid',
@@ -302,13 +314,31 @@ test('cancel resolves as cancel, so the caller leaves everything alone', async (
   assert.equal(result.catalogId, undefined);
 });
 
-test('the backdrop and close control both cancel', async () => {
-  for (const control of ['charPickerBackdrop', 'charPickerClose']) {
+test('native modal backdrop and close control both cancel', async () => {
+  for (const control of ['charPicker', 'charPickerClose']) {
     const { picker, dom } = load();
     const promise = picker.open({});
-    dom.nodes.get(control).fire('click');
+    const root = dom.nodes.get('charPicker');
+    assert.equal(root.open, true);
+    dom.nodes.get(control).fire('click', { target: root, clientX: -1, clientY: -1 });
     assert.equal((await promise).action, 'cancel', `${control} should cancel`);
+    assert.equal(root.open, false);
   }
+});
+
+test('native cancel resolves the pending decision once and releases modal authority', async () => {
+  const { picker, dom } = load();
+  const promise = picker.open({});
+  let prevented = false;
+  dom.nodes.get('charPicker').fire('cancel', {
+    preventDefault() {
+      prevented = true;
+    }
+  });
+  assert.equal((await promise).action, 'cancel');
+  assert.equal(prevented, true);
+  assert.equal(picker.isOpen(), false);
+  assert.equal(dom.nodes.get('charPicker').open, false);
 });
 
 /* ---- selection (FR-53/FR-59) ----------------------------------------------------- */

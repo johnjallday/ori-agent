@@ -12,59 +12,40 @@
     <div class="main-content">
       <div class="container-fluid py-4">
         <!-- Header -->
-        <div class="modern-card p-4 mb-4">
-          <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
-            <div style="min-width: 0;">
-              <h2 class="mb-2" style="color: var(--text-primary);">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
-                  <path d="M15,7H20.5L15,1.5V7M8,0H16L22,6V18A2,2 0 0,1 20,20H8C6.89,20 6,19.1 6,18V2A2,2 0 0,1 8,0M4,4V22H20V24H4A2,2 0 0,1 2,22V4H4Z"/>
-                </svg>
-                Templates
-              </h2>
-              <p class="mb-0" style="color: var(--text-secondary);">
-                Project templates are folder skeletons copied into a workspace to become its project.
-                A template is just a folder — drop one into the library or create one here.
-              </p>
-              <div class="mt-2 d-flex align-items-baseline gap-2 flex-wrap">
-                <span style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary);">Library</span>
-                <span id="tplRootPath" style="font-size: 12px; color: var(--text-primary); font-family: var(--font-mono, monospace); overflow-wrap: anywhere;"></span>
-                <a href="/settings#templates" style="font-size: 12px;">Change…</a>
-              </div>
-            </div>
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <button id="tplCreateBtn" class="modern-btn modern-btn-primary btn-sm">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>
-                New Template
-              </button>
-              <button id="tplImportBtn" class="modern-btn modern-btn-secondary btn-sm">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,3.5L18.5,9H13V3.5M12,19L8,15H10.5V12H13.5V15H16L12,19Z"/></svg>
-                Import Folder…
-              </button>
-              <button id="tplOpenLibraryBtn" class="modern-btn modern-btn-secondary btn-sm">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/></svg>
-                Open Library
-              </button>
-              <button id="tplRefreshBtn" class="modern-btn modern-btn-secondary btn-sm" aria-label="Refresh">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></svg>
-              </button>
-            </div>
+        <header class="ui-page-header">
+          <div>
+            <h1>Templates</h1>
+            <p>Folder skeletons for new workspace projects. Create a template here or import a folder.</p>
           </div>
-        </div>
+          <div class="ui-actions" aria-label="Template library actions">
+            <button id="tplCreateBtn" class="modern-btn modern-btn-primary">New Template</button>
+            <button id="tplImportBtn" class="modern-btn modern-btn-secondary">Import Folder…</button>
+            <button id="tplRefreshBtn" class="modern-btn modern-btn-secondary">Refresh</button>
+          </div>
+        </header>
+        <details class="tpl-provenance mb-4">
+          <summary class="ui-disclosure-title">Library location</summary>
+          <code id="tplRootPath"></code>
+          <div class="ui-actions mt-2">
+            <a href="/settings#templates" class="modern-btn modern-btn-secondary btn-sm">Change location…</a>
+            <button id="tplOpenLibraryBtn" class="modern-btn modern-btn-secondary btn-sm">Open Library</button>
+          </div>
+        </details>
 
-        <div id="tplError" class="alert alert-danger d-none" style="font-size: 0.875rem;"></div>
+        <div id="tplError" class="alert alert-danger d-none" role="alert"></div>
 
         <!-- Master / detail -->
         <div class="row g-3">
           <!-- Master list -->
           <div class="col-12 col-lg-4">
-            <div class="modern-card p-3">
+            <div class="tpl-library">
               <div class="d-flex justify-content-between align-items-center mb-2">
-                <h6 class="mb-0" style="color: var(--text-primary);">Library</h6>
-                <span id="tplCount" class="badge bg-secondary" style="font-size: 12px;">0</span>
+                <h2 class="tpl-section-title">Library</h2>
+                <span id="tplCount" class="badge badge-secondary" aria-label="Matching templates">0</span>
               </div>
               <input id="tplSearch" type="text" class="modern-input w-100 mb-2" placeholder="Search templates…" aria-label="Search templates">
               <div id="tplTagFilter" class="mb-2"></div>
-              <div id="tplEmpty" class="text-center py-4" style="font-size: 13px; color: var(--text-secondary);" hidden>
+              <div id="tplEmpty" class="tpl-section-copy py-4" hidden>
                 No templates yet. Create one above, import a folder, or drop a folder into the library.
               </div>
               <div id="tplList" class="d-flex flex-column gap-2" role="list" aria-label="Project templates">
@@ -74,8 +55,8 @@
           </div>
 
           <!-- Detail -->
-          <div class="col-12 col-lg-8">
-            <div class="modern-card p-4">
+          <div id="tplDetailColumn" class="col-12 col-lg-8">
+            <div class="ui-section p-3">
               <!-- Empty detail -->
               <div id="tplDetailEmpty" class="text-center py-5" style="color: var(--text-secondary);">
                 <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor" style="opacity: 0.4;"><path d="M15,7H20.5L15,1.5V7M8,0H16L22,6V18A2,2 0 0,1 20,20H8C6.89,20 6,19.1 6,18V2A2,2 0 0,1 8,0M4,4V22H20V24H4A2,2 0 0,1 2,22V4H4Z"/></svg>
@@ -84,22 +65,23 @@
 
               <!-- Detail body -->
               <div id="tplDetail" hidden>
+                <button id="tplBackToLibrary" type="button" class="modern-btn modern-btn-secondary btn-sm mb-3 d-lg-none">Back to library</button>
                 <div class="d-flex justify-content-between align-items-start gap-3 mb-3 flex-wrap">
                   <div style="min-width: 0;">
                     <div class="d-flex align-items-center flex-wrap gap-2 mb-1">
-                      <h4 id="tplDetailName" class="mb-0" style="color: var(--text-primary); word-break: break-word;">Template</h4>
-                      <span id="tplDetailBuiltinBadge" hidden class="badge" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-secondary);">Built-in · read-only</span>
+                      <h2 id="tplDetailName" class="tpl-detail-title mb-0" tabindex="-1">Template</h2>
+                      <span id="tplDetailBuiltinBadge" hidden class="badge badge-secondary">Built-in · read-only</span>
                     </div>
-                    <code id="tplDetailId" style="font-size: 12px; color: var(--text-secondary);"></code>
+                    <code id="tplDetailId" class="tpl-metadata"></code>
                   </div>
                   <div class="d-flex gap-2 flex-wrap">
                     <button id="tplDuplicateBtn" class="modern-btn modern-btn-secondary btn-sm">Duplicate</button>
                     <button id="tplRevealBtn" class="modern-btn modern-btn-secondary btn-sm">Reveal</button>
-                    <button id="tplDeleteBtn" class="modern-btn modern-btn-secondary btn-sm" style="color: #ef4444;">Delete</button>
+                    <button id="tplDeleteBtn" class="modern-btn modern-btn-danger btn-sm">Delete</button>
                   </div>
                 </div>
 
-                <section id="tplSetupQuest" class="mb-3 p-3 rounded-3 text-break" hidden aria-labelledby="tplQuestHeading" style="border: 1px solid var(--border-color); background: var(--bg-tertiary);">
+                <section id="tplSetupQuest" class="tpl-setup-section mb-3" hidden aria-labelledby="tplQuestHeading">
                   <div class="d-flex align-items-start justify-content-between flex-wrap gap-3">
                     <div style="min-width: 0;">
                       <div class="tpl-section-kicker">Guided setup</div>
@@ -134,30 +116,30 @@
                 <div class="tab-content">
                   <!-- Overview / metadata -->
                   <div class="tab-pane fade show active" id="tplOverviewPane" role="tabpanel" aria-labelledby="tplTabOverview">
-                    <div id="tplReadOnlyNotice" hidden class="mb-3" style="padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-tertiary); font-size: 12px; color: var(--text-secondary);">
+                    <div id="tplReadOnlyNotice" hidden class="tpl-readonly mb-3">
                       <span id="tplReadOnlyText">This is a built-in template and is read-only.</span>
                       <button id="tplDuplicateToCustomizeBtn" class="modern-btn modern-btn-primary btn-sm ms-2">Customize as a variant</button>
                     </div>
                     <div class="mb-3">
-                      <label for="tplEditName" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Display name</label>
+                      <label for="tplEditName" class="form-label">Display name</label>
                       <input id="tplEditName" type="text" class="modern-input w-100" maxlength="120" placeholder="Defaults to the folder id">
                     </div>
                     <div class="mb-3">
-                      <label for="tplEditDescription" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Description</label>
-                      <textarea id="tplEditDescription" class="form-control" rows="3" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;" placeholder="What is this template for?"></textarea>
+                      <label for="tplEditDescription" class="form-label">Description</label>
+                      <textarea id="tplEditDescription" class="form-control" rows="3" placeholder="What is this template for?"></textarea>
                     </div>
                     <div class="mb-3">
-                      <label for="tplEditGoal" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Default goal</label>
+                      <label for="tplEditGoal" class="form-label">Default goal</label>
                       <textarea id="tplEditGoal" class="modern-input w-100" rows="3" style="resize: vertical;" placeholder="No default goal" aria-describedby="tplEditGoalHelp"></textarea>
                       <p id="tplEditGoalHelp" class="small text-muted mt-1 mb-0">An outcome for future workspaces, not permission to act. Keep it concise. Leave blank to remove this default; existing workspace goals stay unchanged.</p>
                     </div>
                     <div class="row g-3 mb-3">
                       <div class="col-12 col-sm-4">
-                        <label for="tplEditIcon" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Icon</label>
+                        <label for="tplEditIcon" class="form-label">Icon</label>
                         <input id="tplEditIcon" type="text" class="modern-input w-100" maxlength="8" placeholder="✈" autocomplete="off">
                       </div>
                       <div class="col-12 col-sm-8">
-                        <label for="tplEditBehavior" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Agent behavior</label>
+                        <label for="tplEditBehavior" class="form-label">Agent behavior</label>
                         <select id="tplEditBehavior" class="modern-input w-100">
                           <option value="general">General</option>
                           <option value="research">Research</option>
@@ -166,9 +148,9 @@
                       </div>
                     </div>
                     <div class="mb-3">
-                      <label for="tplEditProjectEntryPath" class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Project entry file</label>
+                      <label for="tplEditProjectEntryPath" class="form-label">Project entry file</label>
                       <input id="tplEditProjectEntryPath" type="text" class="modern-input w-100" placeholder="{{`{{name}}`}}.project" autocomplete="off" aria-describedby="tplEditProjectEntryHelp">
-                      <div id="tplEditProjectEntryHelp" style="margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
+                      <div id="tplEditProjectEntryHelp" class="form-helper mt-2">
                         Relative to the generated project folder. It must name a scaffolded file and may use only
                         <code>{{`{{name}}`}}</code> or <code>{{`{{date}}`}}</code> in file names. Leave blank to remove it.
                       </div>
@@ -178,8 +160,8 @@
                       </label>
                     </div>
                     <div class="mb-3">
-                      <label class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Tags</label>
-                      <div id="tplEditTags"></div>
+                      <div id="tplEditTagsLabel" class="form-label">Tags</div>
+                      <div id="tplEditTags" role="group" aria-labelledby="tplEditTagsLabel"></div>
                     </div>
                     <section id="tplGroupRequirements" class="tpl-group-requirements mb-3" aria-labelledby="tplGroupHeading">
                       <div class="d-flex align-items-start justify-content-between gap-2 flex-wrap">
@@ -220,11 +202,11 @@
                       <div class="d-flex gap-2 align-items-center flex-wrap mt-3">
                         <button id="tplGroupPreviewBtn" type="button" class="modern-btn modern-btn-secondary btn-sm">Preview consequences</button>
                         <button id="tplGroupCustomizeBtn" type="button" class="modern-btn modern-btn-primary btn-sm" hidden>Customize as a variant</button>
-                        <span id="tplGroupDirty" class="small" style="color: #f59e0b;" hidden>● Unsaved placement changes</span>
+                        <span id="tplGroupDirty" class="small ui-status-warning" hidden>● Unsaved placement changes</span>
                       </div>
                     </section>
                     <div class="mb-3">
-                      <label class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Starter tickets</label>
+                      <div class="form-label">Starter tickets</div>
                       <div id="tplStarterTasksList" class="d-flex flex-column gap-2 mb-2"></div>
                       <button id="tplStarterTaskAddBtn" type="button" class="modern-btn modern-btn-secondary btn-sm">Add ticket</button>
                       <div style="margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
@@ -291,8 +273,8 @@
                         <button id="tplUserQuestPreviewBtn" type="button" class="modern-btn modern-btn-secondary btn-sm">Preview</button>
                         <button id="tplUserQuestSaveBtn" type="button" class="modern-btn modern-btn-primary btn-sm">Save setup quest</button>
                         <button id="tplUserQuestCancelBtn" type="button" class="modern-btn modern-btn-secondary btn-sm">Cancel edits</button>
-                        <button id="tplUserQuestRemoveBtn" type="button" class="modern-btn modern-btn-secondary btn-sm" style="color: #ef4444;" hidden>Remove…</button>
-                        <span id="tplUserQuestDirty" class="small" style="color: #f59e0b;" hidden>● Unsaved changes</span>
+                        <button id="tplUserQuestRemoveBtn" type="button" class="modern-btn modern-btn-danger btn-sm" hidden>Remove…</button>
+                        <span id="tplUserQuestDirty" class="small ui-status-warning" hidden>● Unsaved changes</span>
                       </div>
                     </div>
 
@@ -329,15 +311,14 @@
                             <code id="tplEditorPath" style="font-size: 12px; color: var(--text-primary); word-break: break-all;"></code>
                             <div class="d-flex gap-2">
                               <button id="tplFileRenameBtn" class="modern-btn modern-btn-secondary btn-sm">Rename</button>
-                              <button id="tplFileDeleteBtn" class="modern-btn modern-btn-secondary btn-sm" style="color: #ef4444;">Delete</button>
+                              <button id="tplFileDeleteBtn" class="modern-btn modern-btn-danger btn-sm">Delete</button>
                             </div>
                           </div>
                           <div id="tplEditorNotice" class="alert alert-secondary py-2 mb-2" style="font-size: 12px;" hidden></div>
-                          <textarea id="tplEditorTextarea" class="form-control" spellcheck="false" wrap="off"
-                                    style="min-height: 360px; background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-family: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', monospace; font-size: 0.85em; resize: vertical;"></textarea>
+                          <textarea id="tplEditorTextarea" class="form-control tpl-file-editor" aria-label="File content" spellcheck="false" wrap="off"></textarea>
                           <div class="d-flex gap-2 mt-2 align-items-center">
                             <button id="tplEditorSaveBtn" class="modern-btn modern-btn-primary btn-sm">Save</button>
-                            <span id="tplEditorDirty" style="font-size: 12px; color: #f59e0b;" hidden>● Unsaved changes</span>
+                            <span id="tplEditorDirty" class="small ui-status-warning" hidden>● Unsaved changes</span>
                           </div>
                         </div>
                       </div>
@@ -398,9 +379,9 @@
   {{template "modals.tmpl" .}}
 
   <!-- Name modal: reused for Create and Duplicate -->
-  <div class="modal fade" id="tplNameModal" tabindex="-1" aria-hidden="true">
+  <div class="modal fade" id="tplNameModal" tabindex="-1" aria-labelledby="tplNameModalTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-content">
         <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
           <h5 class="modal-title" id="tplNameModalTitle" style="color: var(--text-primary);">New Template</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
@@ -419,11 +400,11 @@
   </div>
 
   <!-- Dirty-editor guard: shown when switching away with unsaved file edits -->
-  <div class="modal fade" id="tplDirtyModal" tabindex="-1" aria-hidden="true">
+  <div class="modal fade" id="tplDirtyModal" tabindex="-1" aria-labelledby="tplDirtyModalTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
+      <div class="modal-content">
         <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-          <h5 class="modal-title" style="color: var(--text-primary);">Unsaved changes</h5>
+          <h5 class="modal-title" id="tplDirtyModalTitle">Unsaved changes</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body" style="color: var(--text-primary);">

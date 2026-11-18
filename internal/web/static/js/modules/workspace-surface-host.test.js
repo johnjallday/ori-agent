@@ -417,6 +417,9 @@ test('host opens an opaque sandbox through the overlay coordinator and invokes o
     'workspace-surface:plugin:workspace-surface-demo:demo-tools:main'
   );
   assert.equal(document.body.children.length, 1);
+  const panel = document.body.children[0].children[1];
+  assert.match(panel.className, /ui-section/);
+  assert.match(panel.children[0].children[1].className, /modern-btn modern-btn-secondary/);
   const frame = find(document.body, 'iframe');
   assert.ok(frame);
   assert.equal(frame.getAttribute('sandbox'), 'allow-scripts');

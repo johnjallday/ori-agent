@@ -2,6 +2,16 @@
    agent details drawer and dedicated Claude Code / Codex agent pages.
    Self-contained class names so it does not depend on page-specific styles. */
 
+.cli-detail-container {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px 20px calc(24px + var(--ori-launcher-clearance-y, 88px));
+}
+
+.cli-detail-back {
+  margin-bottom: var(--space-4);
+}
+
 .claude-sync,
 .codex-sync {
   display: flex;
@@ -19,27 +29,25 @@
 
 .claude-sync-readonly,
 .codex-sync-readonly {
-  font-size: 11px;
+  font-size: 0.8125rem;
   color: var(--text-muted);
 }
 
 .claude-sync-card,
 .codex-sync-card {
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  background: var(--bg-secondary);
-  padding: 12px;
+  min-width: 0;
+  border-top: 1px solid var(--border-color);
+  padding: var(--space-3) 0;
+  overflow-wrap: anywhere;
 }
 
 .claude-sync-label,
 .codex-sync-label {
   display: block;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--text-muted);
-  margin-bottom: 6px;
-  font-weight: 700;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  margin-bottom: var(--space-2);
+  font-weight: 600;
 }
 
 .claude-sync-value,
@@ -76,7 +84,7 @@
 
 .claude-sync-path,
 .codex-sync-path {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -157,7 +165,7 @@
 }
 
 .stage__limits-refresh:focus-visible {
-  outline: 2px solid var(--primary-color);
+  outline: 2px solid var(--focus-color);
   outline-offset: 3px;
 }
 

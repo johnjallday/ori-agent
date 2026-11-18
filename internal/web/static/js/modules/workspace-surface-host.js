@@ -283,7 +283,7 @@ export class WorkspaceSurfaceHost {
     const backdrop = createElement(this.document, 'button', 'workspace-surface-backdrop');
     backdrop.type = 'button';
     backdrop.setAttribute('aria-label', 'Close ' + text(surface.label));
-    const panel = createElement(this.document, 'div', 'workspace-surface-panel');
+    const panel = createElement(this.document, 'div', 'workspace-surface-panel ui-section');
     const header = createElement(this.document, 'header', 'workspace-surface-header');
     const identity = createElement(this.document, 'div', 'workspace-surface-identity');
     identity.appendChild(
@@ -297,7 +297,12 @@ export class WorkspaceSurfaceHost {
     );
     title.id = 'workspaceSurfaceTitle';
     identity.appendChild(title);
-    const close = createElement(this.document, 'button', 'workspace-surface-close', 'Close');
+    const close = createElement(
+      this.document,
+      'button',
+      'workspace-surface-close modern-btn modern-btn-secondary',
+      'Close'
+    );
     close.type = 'button';
     close.setAttribute('aria-label', 'Close ' + text(surface.label));
     header.appendChild(identity);

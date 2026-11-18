@@ -151,9 +151,19 @@ export class AgentCanvasInteractionHandler {
   onKeyDown(e) {
     // Track modifier keys
     if (e.key === ' ') {
-      this.state.spacePressed = true;
-      if (!this.state.isDragging) {
-        this.canvas.style.cursor = 'grab';
+      const active = document.activeElement;
+      const canvasIntent =
+        active === this.canvas || (active === document.body && this.canvas.matches(':hover'));
+      if (
+        canvasIntent &&
+        !this.state.forms.createTaskDescriptionFocused &&
+        !document.querySelector('.modal.show, dialog[open]')
+      ) {
+        // Space+drag pans locally; the same Space must not scroll the document.
+        // Inputs, buttons, other page regions and modal editors keep native keys.
+        e.preventDefault();
+        this.state.spacePressed = true;
+        if (!this.state.isDragging) this.canvas.style.cursor = 'grab';
       }
     }
     if (e.ctrlKey || e.metaKey) {

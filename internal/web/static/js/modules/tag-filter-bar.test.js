@@ -1,9 +1,9 @@
-// Tests for tag-filter-bar.js pure helpers.
+// Tag filtering and focus-preserving native control behavior.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { itemTags, collectTags, matchesActiveTags, filterItems } =
+const { itemTags, collectTags, matchesActiveTags, filterItems, createTagFilterBar } =
   await import('./tag-filter-bar.js');
 
 const items = [
@@ -60,4 +60,63 @@ test('filterItems supports a custom tag getter', () => {
     filtered.map(row => row.name),
     ['y']
   );
+});
+
+test('toggling keeps the focused chip alive; Clear restores focus before hiding itself', t => {
+  const original = globalThis.document;
+  t.after(() => {
+    globalThis.document = original;
+  });
+  function node() {
+    const events = {};
+    const classes = new Set();
+    return {
+      children: [],
+      attrs: {},
+      hidden: false,
+      classList: {
+        add: name => classes.add(name),
+        toggle: (name, on) => (on ? classes.add(name) : classes.delete(name))
+      },
+      set innerHTML(_value) {
+        this.children = [];
+      },
+      get firstElementChild() {
+        return this.children[0];
+      },
+      appendChild(child) {
+        this.children.push(child);
+      },
+      setAttribute(name, value) {
+        this.attrs[name] = value;
+      },
+      addEventListener(name, fn) {
+        events[name] = fn;
+      },
+      click() {
+        events.click();
+      },
+      focus() {
+        globalThis.document.activeElement = this;
+      }
+    };
+  }
+  globalThis.document = { createElement: node, activeElement: null };
+  const changes = [];
+  const bar = createTagFilterBar({ container: node(), onChange: active => changes.push(active) });
+  bar.setAvailableTags(['notes', 'research']);
+  const chips = bar.element.children[1];
+  const clear = bar.element.children[2];
+  const chip = chips.children[0];
+  chip.focus();
+  chip.click();
+  assert.equal(chips.children[0], chip);
+  assert.equal(globalThis.document.activeElement, chip);
+  assert.equal(chip.attrs['aria-pressed'], 'true');
+  clear.focus();
+  clear.click();
+  assert.equal(globalThis.document.activeElement, chip);
+  assert.equal(clear.hidden, true);
+  assert.equal(chip.attrs['aria-pressed'], 'false');
+  assert.deepEqual(changes, [['notes'], []]);
 });

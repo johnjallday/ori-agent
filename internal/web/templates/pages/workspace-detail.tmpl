@@ -178,9 +178,9 @@
               <!-- List and Board render the SAME loaded tickets, so
                    switching never re-queries and the two views cannot
                    show different data (FR-58). -->
-              <div class="hub-tickets-view-switch" role="tablist" aria-label="Ticket view">
-                <button type="button" class="hub-tickets-view-btn is-active" id="hubTicketsViewList" role="tab" aria-selected="true" aria-controls="hubTicketsList">List</button>
-                <button type="button" class="hub-tickets-view-btn" id="hubTicketsViewBoard" role="tab" aria-selected="false" aria-controls="hubTicketsBoard">Board</button>
+              <div class="hub-tickets-view-switch nav nav-tabs" role="tablist" aria-label="Ticket view">
+                <button type="button" class="hub-tickets-view-btn nav-link is-active active" id="hubTicketsViewList" role="tab" aria-selected="true" aria-controls="hubTicketsList">List</button>
+                <button type="button" class="hub-tickets-view-btn nav-link" id="hubTicketsViewBoard" role="tab" aria-selected="false" aria-controls="hubTicketsBoard">Board</button>
               </div>
             </div>
             <button id="hubTicketsRefreshBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" title="Refresh tickets">
@@ -205,13 +205,13 @@
           -->
           <div class="hub-tickets-controls">
             <div class="hub-tickets-filters" id="hubTicketsFilters" role="group" aria-label="Filter tickets by state">
-              <button type="button" class="ticket-filter-chip is-active" data-ticket-state-filter="all" aria-pressed="true">All</button>
-              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="backlog" aria-pressed="false">Backlog</button>
-              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="ready" aria-pressed="false">Ready</button>
-              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="in_progress" aria-pressed="false">In Progress</button>
-              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="review" aria-pressed="false">Review</button>
-              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="done" aria-pressed="false">Done</button>
-              <button type="button" class="ticket-filter-chip" data-ticket-state-filter="cancelled" aria-pressed="false">Cancelled</button>
+              <button type="button" class="ticket-filter-chip modern-btn modern-btn-sm ui-filter is-active" data-ticket-state-filter="all" aria-pressed="true">All</button>
+              <button type="button" class="ticket-filter-chip modern-btn modern-btn-sm ui-filter" data-ticket-state-filter="backlog" aria-pressed="false">Backlog</button>
+              <button type="button" class="ticket-filter-chip modern-btn modern-btn-sm ui-filter" data-ticket-state-filter="ready" aria-pressed="false">Ready</button>
+              <button type="button" class="ticket-filter-chip modern-btn modern-btn-sm ui-filter" data-ticket-state-filter="in_progress" aria-pressed="false">In Progress</button>
+              <button type="button" class="ticket-filter-chip modern-btn modern-btn-sm ui-filter" data-ticket-state-filter="review" aria-pressed="false">Review</button>
+              <button type="button" class="ticket-filter-chip modern-btn modern-btn-sm ui-filter" data-ticket-state-filter="done" aria-pressed="false">Done</button>
+              <button type="button" class="ticket-filter-chip modern-btn modern-btn-sm ui-filter" data-ticket-state-filter="cancelled" aria-pressed="false">Cancelled</button>
             </div>
 
             <div class="hub-tickets-controls-row">
@@ -246,10 +246,6 @@
             </div>
           </div>
 
-          <div class="hub-ticket-create">
-            {{/* Give work is owned by the persistent shared workspace header. */}}
-          </div>
-
           <div class="hub-tickets-body">
             <ul class="hub-tickets-list" id="hubTicketsList" aria-label="Tickets"></ul>
             <!--
@@ -260,16 +256,16 @@
               configuration is left untouched on the workspace for
               migration diagnostics and rollback.
             -->
-            <div class="ticket-board" id="hubTicketsBoard" aria-label="Ticket board" hidden></div>
+            <div class="ticket-board" id="hubTicketsBoard" role="region" tabindex="0" aria-label="Ticket board" hidden></div>
             <div class="hub-tickets-empty" id="hubTicketsEmpty">
               <p>No tickets yet. Create one above to get started.</p>
             </div>
           </div>
 
-          <aside class="hub-ticket-detail" id="hubTicketDetail" aria-labelledby="hubTicketDetailTitle" hidden>
+          <aside class="hub-ticket-detail ui-section" id="hubTicketDetail" aria-labelledby="hubTicketDetailTitle" hidden>
             <div class="hub-ticket-detail-header">
               <h4 class="hub-ticket-detail-title" id="hubTicketDetailTitle"></h4>
-              <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" id="hubTicketDetailClose" aria-label="Close ticket detail">×</button>
+              <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm modern-btn-icon" id="hubTicketDetailClose" aria-label="Close ticket detail">×</button>
             </div>
             <div class="hub-ticket-detail-body" id="hubTicketDetailBody"></div>
           </aside>
@@ -9500,6 +9496,15 @@
        read by sessions.js while it binds the wizard. -->
   <script defer src="/js/modules/workspace-creator-state.js"></script>
   <script defer src="/js/modules/create-workspace-build-pane.js"></script>
+  <!-- Resources hosts the real shared Note editor, not just its modal markup. -->
+  <script type="module" src="/js/modules/note-editor.js"></script>
+  <script type="module" src="/js/modules/note-toc.js"></script>
+  <script type="module" src="/js/modules/note-staging.js"></script>
+  <script type="module" src="/js/modules/note-wikilinks.js"></script>
+  <script type="module" src="/js/modules/note-backlinks.js"></script>
+  <script type="module" src="/js/modules/note-presence.js"></script>
+  <script type="module" src="/js/modules/note-rail-notes.js"></script>
+  <script type="module" src="/js/modules/note-ai-assist.js"></script>
   <script defer src="/js/modules/sessions.js"></script>
   <script defer src="/js/modules/toast.js"></script>
   <script defer src="/js/modules/voice-input.js"></script>

@@ -7,20 +7,14 @@
  * and a visible border, never by colour alone (FR-100).
  */
 
-/* Above this app's overlay scale, not Bootstrap's.
-   The picker is opened *from* the Appearance editor, which on the agent detail
-   page lives inside `#profileEditModal`. That modal is not at Bootstrap's
-   default 1055 — the app overrides it to 10100, and the scale runs up to 10700
-   (workspace-hub). At the picker's original 1050/1051 it opened *behind* the
-   very dialog that launched it, so its cards were visible but every click was
-   intercepted by the modal on top.
-   10800/10801 clears the whole scale. Measure before changing it: the numbers
-   here are the app's, not the framework's. */
-.char-picker__backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 10800;
+/* Native top-layer authority works over both sheet and Bootstrap parents;
+   their forms remain intact and inert until this decision closes. */
+.char-picker::backdrop {
   background: rgb(0 0 0 / 45%);
+}
+
+.char-picker:not([open]) {
+  display: none;
 }
 
 .char-picker {
@@ -32,20 +26,16 @@
   --picker-muted: var(--card-muted, var(--cozy-ink-dim, var(--text-secondary, #6b7280)));
 
   position: fixed;
-  z-index: 10801;
   top: 50%;
   left: 50%;
   display: flex;
   flex-direction: column;
+  margin: 0;
+  max-width: none;
   width: min(880px, calc(100vw - 32px));
   max-height: min(720px, calc(100vh - 48px));
   padding: 20px;
   transform: translate(-50%, -50%);
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 14px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #111827);
-  box-shadow: 0 24px 60px rgb(0 0 0 / 32%);
 }
 
 .char-picker__head {
@@ -61,15 +51,7 @@
 }
 
 .char-picker__close {
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
+  font-size: 1.25rem;
 }
 
 /* States plainly that a character changes nothing operational, before the user
@@ -88,35 +70,14 @@
 }
 
 .char-picker__search {
-  flex: 1;
-  min-width: 200px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 9px;
-  background: var(--bg-primary, #fff);
-  color: inherit;
-  font: inherit;
+  flex: 1 1 12rem;
 }
 
 .char-picker__families {
   display: flex;
-  gap: 6px;
-}
-
-.char-picker__family {
-  padding: 6px 12px;
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 999px;
-  background: transparent;
-  color: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.char-picker__family.is-active {
-  border-color: var(--primary-color, #4f46e5);
-  background: color-mix(in srgb, var(--primary-color, #4f46e5) 12%, transparent);
-  font-weight: 600;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  min-width: 0;
 }
 
 .char-picker__main {
@@ -130,6 +91,8 @@
 .char-picker__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 10px;
   overflow-y: auto;
   padding-right: 4px;
@@ -149,20 +112,19 @@
 }
 
 .char-card:hover {
-  border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 50%, var(--border-color, #e5e7eb));
+  border-color: var(--focus-color);
 }
 
 /* Selection is a 2px border plus aria-checked, so it survives a colour-blind
    reader and a high-contrast mode (FR-118). */
 .char-card.is-selected {
-  border: 2px solid var(--primary-color, #4f46e5);
+  border: 2px solid var(--focus-color);
   padding: 9px;
 }
 
 .char-card:focus-visible,
-.char-picker__family:focus-visible,
-.char-picker__close:focus-visible {
-  outline: 3px solid var(--primary-color, #4f46e5);
+.char-preview:focus-visible {
+  outline: 2px solid var(--focus-color);
   outline-offset: 2px;
 }
 
@@ -282,41 +244,6 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 14px;
-}
-
-/* The picker styles its own actions. They previously used `.btn-ghost` and
-   `.btn-primary`, defined only in agents-roster.css — so the moment the picker
-   became reachable from the detail page, the create page, and the session
-   modal, its Cancel/Skip/Choose buttons rendered as browser defaults. */
-.char-picker__btn {
-  padding: 8px 16px;
-  border: 1px solid var(--border-color, #d1d5db);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-primary, #111827);
-  font: inherit;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.char-picker__btn:hover:not(:disabled) {
-  border-color: var(--primary-color, #4f46e5);
-}
-
-.char-picker__btn--primary {
-  border-color: var(--primary-color, #4f46e5);
-  background: var(--primary-color, #4f46e5);
-  color: #fff;
-}
-
-.char-picker__btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.char-picker__btn:focus-visible {
-  outline: 3px solid var(--primary-color, #4f46e5);
-  outline-offset: 2px;
 }
 
 /* The Inspector's own Appearance markup used to live here. It is now the shared

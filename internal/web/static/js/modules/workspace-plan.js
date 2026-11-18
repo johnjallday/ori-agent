@@ -139,11 +139,11 @@ export function planCardHtml(plan, workspaceSlug) {
   const href = planDetailPath(workspaceSlug, plan.id);
 
   return `
-    <li class="plan-card" data-plan-id="${escapeHtml(plan.id)}">
-      <a class="plan-card-link" href="${escapeHtml(href)}">
+    <li class="plan-card ui-section" data-plan-id="${escapeHtml(plan.id)}">
+      <a class="plan-card-link ui-card-link" href="${escapeHtml(href)}">
         <div class="plan-card-head">
           <h3 class="plan-card-title">${escapeHtml(plan.title || 'Untitled plan')}</h3>
-          <span class="plan-status" data-tone="${escapeHtml(meta.tone)}">
+          <span class="plan-status modern-badge" data-tone="${escapeHtml(meta.tone)}">
             <span class="plan-status-icon" aria-hidden="true">${escapeHtml(meta.icon)}</span>
             <span class="plan-status-label">${escapeHtml(meta.label)}</span>
           </span>

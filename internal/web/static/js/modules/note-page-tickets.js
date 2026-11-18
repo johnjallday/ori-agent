@@ -16,12 +16,13 @@
 
   const SECTION_ID = 'notePageTickets';
   const LIST_ID = 'notePageTicketsList';
+  let loadSequence = 0;
 
   /**
    * Resolves the workspace and note from the page.
    *
-   * The dataset is set server-side in note.tmpl, so it is available on first
-   * paint — unlike module state, which classic `defer` scripts race.
+   * The focused route starts with server-rendered identity; note-page.js also
+   * synchronizes it after validated initial selection and primary-pane swaps.
    */
   function routeFromPage() {
     if (typeof document === 'undefined') return { workspaceId: '', noteId: '' };
@@ -38,7 +39,7 @@
     item.className = 'note-page-ticket';
 
     const link = document.createElement('a');
-    link.className = 'note-page-ticket-link';
+    link.className = 'note-page-ticket-link ui-card-link';
     link.href = `/workspaces/${encodeURIComponent(ticket.owningWorkspaceSlug)}?ticket=${encodeURIComponent(ticket.id)}`;
 
     const number = document.createElement('span');
@@ -66,6 +67,7 @@
   }
 
   async function load() {
+    const sequence = ++loadSequence;
     if (typeof document === 'undefined') return;
     const section = document.getElementById(SECTION_ID);
     const list = document.getElementById(LIST_ID);
@@ -75,6 +77,8 @@
     if (!tickets || !tickets.api || typeof tickets.api.ticketsForNote !== 'function') return;
 
     const { workspaceId, noteId } = routeFromPage();
+    section.hidden = true;
+    list.replaceChildren();
     if (!workspaceId || !noteId) return;
 
     let linked = [];
@@ -83,10 +87,17 @@
     } catch {
       // A note that cannot load its tickets is still a perfectly good note.
       // Staying hidden beats showing a broken section on the editor.
-      section.hidden = true;
+      if (sequence === loadSequence) section.hidden = true;
       return;
     }
 
+    const current = routeFromPage();
+    if (
+      sequence !== loadSequence ||
+      current.workspaceId !== workspaceId ||
+      current.noteId !== noteId
+    )
+      return;
     list.replaceChildren();
     if (!linked.length) {
       // Nothing links here: no empty state, because most notes are not

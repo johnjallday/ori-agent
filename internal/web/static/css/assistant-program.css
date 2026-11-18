@@ -1,45 +1,45 @@
+/* Compatibility names for the older library modules consume the canonical
+   theme pairs. Only the explicitly decorative hero retains its warm artwork. */
 :root {
-  --assistant-ink: #17130d;
-  --assistant-paper: #f4efe3;
-  --assistant-panel: rgba(255, 252, 244, 0.88);
-  --assistant-amber: #d98219;
-  --assistant-amber-deep: #9a4f0b;
-  --assistant-red: #a33b2c;
-  --assistant-line: rgba(62, 42, 18, 0.18);
-  --assistant-muted: #726554;
+  --assistant-ink: var(--text-primary);
+  --assistant-paper: var(--bg-primary);
+  --assistant-panel: var(--surface-solid);
+  --assistant-amber: var(--primary-color);
+  --assistant-amber-deep: var(--accent-text);
+  --assistant-red: var(--danger-text);
+  --assistant-line: var(--border-color);
+  --assistant-muted: var(--text-secondary);
 }
-
-.assistant-program-body {
-  background:
-    radial-gradient(circle at 76% 8%, rgba(217, 130, 25, 0.15), transparent 31rem),
-    repeating-linear-gradient(90deg, transparent 0, transparent 39px, rgba(42, 32, 19, 0.022) 40px),
-    var(--assistant-paper) !important;
+html:has(.assistant-program-body) {
+  scroll-padding-top: calc(var(--navbar-offset, 76px) + var(--space-3));
+  scroll-padding-bottom: var(--ori-launcher-clearance-y, 88px);
 }
 
 .assistant-program-shell {
   color: var(--assistant-ink);
-  min-height: calc(100vh - 64px);
+  min-height: calc(100vh - var(--navbar-offset, 76px));
+  padding: var(--space-6);
 }
 
 .assistant-program-page {
-  width: min(1240px, calc(100% - 2.5rem));
+  width: 100%;
+  max-width: 72rem;
+  min-width: 0;
   margin: 0 auto;
-  padding: 2rem 0 5rem;
+  padding: 0 0 var(--ori-launcher-clearance-y, 88px);
+  overflow-wrap: anywhere;
 }
 
 .assistant-program-breadcrumb {
   display: flex;
-  gap: 0.65rem;
+  flex-wrap: wrap;
+  gap: var(--space-2);
   align-items: center;
   margin-bottom: 1.5rem;
   color: var(--assistant-muted);
   font: 500 0.72rem/1 var(--font-mono, "JetBrains Mono", monospace);
   letter-spacing: 0.09em;
   text-transform: uppercase;
-}
-
-.assistant-program-breadcrumb a {
-  color: var(--assistant-amber-deep);
 }
 
 .assistant-program-loading,
@@ -77,33 +77,13 @@
   gap: 0.75rem;
 }
 
-.project-library-destructive {
-  background: var(--danger-color, #9f2f24);
-  border: 1px solid var(--danger-color, #9f2f24);
-  color: #fff;
-}
-
-.project-library-destructive:hover {
-  background: #81251d;
-  border-color: #81251d;
-  color: #fff;
-}
-
-.project-library-destructive:focus-visible {
-  outline: 3px solid #81251d;
-  outline-offset: 3px;
-}
-
 .assistant-program-disabled {
   display: flex;
   gap: 0.75rem;
   align-items: baseline;
   padding: 0.85rem 1rem;
   margin-bottom: 1rem;
-  color: #6d2c21;
-  background: rgba(163, 59, 44, 0.1);
-  border: 1px solid rgba(163, 59, 44, 0.32);
-  border-radius: 3px;
+  border-left: 3px solid var(--warning-color);
 }
 
 .assistant-program-upgrade {
@@ -113,28 +93,10 @@
   justify-content: space-between;
   padding: 0.85rem 1rem;
   margin-bottom: 1rem;
-  color: var(--assistant-ink);
-  background: rgba(217, 130, 25, 0.12);
-  border: 1px solid rgba(154, 79, 11, 0.35);
-  border-radius: 3px;
+  border-left: 3px solid var(--warning-color);
 }
 .assistant-program-upgrade[data-state="reconcile_required"] {
-  color: #6d2c21;
-  background: rgba(163, 59, 44, 0.1);
-  border-color: rgba(163, 59, 44, 0.32);
-}
-/* The card's paper-ink colours assume a light page. In the dark theme it
-   takes the theme's own opaque surface, so it reads the same whatever lies
-   behind it; the border keeps its amber (or red) meaning. */
-[data-bs-theme="dark"] .assistant-program-upgrade {
-  color: var(--text-primary, #c9ccd1);
-  background: var(--bg-secondary, #1f2128);
-  border-color: rgba(217, 130, 25, 0.6);
-}
-[data-bs-theme="dark"] .assistant-program-upgrade[data-state="reconcile_required"] {
-  color: var(--text-primary, #c9ccd1);
-  background: var(--bg-secondary, #1f2128);
-  border-color: rgba(239, 68, 68, 0.6);
+  border-left-color: var(--danger-color);
 }
 .assistant-program-upgrade-copy {
   display: grid;
@@ -178,16 +140,18 @@
 .assistant-program-hero {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 180px;
-  align-items: end;
-  gap: 2rem;
-  min-height: 300px;
-  padding: clamp(2rem, 5vw, 4.75rem);
+  --assistant-amber: #f0b56f;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 0;
+  padding: var(--space-5);
   overflow: hidden;
   color: #fff8e9;
   background: linear-gradient(118deg, rgba(19, 15, 10, 0.98), rgba(41, 29, 16, 0.93)), #17130d;
-  border-radius: 5px 5px 20px 5px;
-  box-shadow: 0 22px 60px rgba(48, 30, 10, 0.16);
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+  margin-bottom: 0;
 }
 
 .assistant-program-hero::before {
@@ -213,20 +177,23 @@
 
 .assistant-program-kicker,
 .assistant-program-panel-index {
-  color: var(--assistant-amber);
+  color: var(--accent-text);
   font: 500 0.72rem/1.2 var(--font-mono, "JetBrains Mono", monospace);
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
+.assistant-program-hero .assistant-program-kicker {
+  color: var(--assistant-amber);
+}
 .assistant-program-hero h1 {
-  max-width: 13ch;
-  margin: 0.35rem 0 0.7rem;
+  max-width: none;
+  margin: var(--space-2) 0;
   color: inherit;
-  font:
-    700 clamp(2.6rem, 7vw, 5.7rem)/0.9 "Chakra Petch",
-    sans-serif;
-  letter-spacing: -0.055em;
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  line-height: 1.15;
+  letter-spacing: normal;
 }
 
 .assistant-program-hero p {
@@ -239,24 +206,15 @@
 
 .assistant-program-stage-chip,
 .assistant-program-project-count {
-  padding: 0.35rem 0.65rem;
-  font: 500 0.72rem/1 var(--font-mono, "JetBrains Mono", monospace);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  border: 1px solid rgba(255, 248, 233, 0.25);
-  border-radius: 99px;
-}
-
-.assistant-program-stage-chip {
-  color: #18120b;
-  background: var(--assistant-amber);
-  border-color: var(--assistant-amber);
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .assistant-program-meter {
   display: grid;
   place-items: center;
-  width: 150px;
+  width: 96px;
   justify-self: end;
 }
 
@@ -291,26 +249,23 @@
 
 .assistant-program-meter-copy strong {
   color: #fff8e9;
-  font:
-    700 2.4rem/1 "Chakra Petch",
-    sans-serif;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  line-height: 1;
 }
 
 /* The next step of an unfinished project library. A fresh Home opens on this
    rather than on a level meter; it disappears once a scan has finished. */
 .assistant-program-setup-next {
   display: flex;
-  gap: 1rem;
+  flex-wrap: wrap;
+  gap: var(--space-4);
   align-items: center;
   justify-content: space-between;
-  margin: 1rem 0;
-  padding: 1.1rem 1.25rem;
-  color: var(--assistant-ink);
-  background: var(--assistant-panel);
-  border: 1px solid var(--assistant-line);
-  border-left: 4px solid var(--assistant-amber);
-  border-radius: 3px 12px 12px 3px;
-  scroll-margin-top: 96px;
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  border-left: 3px solid var(--primary-color);
+  scroll-margin-top: calc(var(--navbar-offset, 76px) + var(--space-3));
 }
 .assistant-program-setup-next[hidden] {
   display: none;
@@ -425,8 +380,7 @@
 }
 .assistant-program-page.is-setup-first .assistant-program-hero h1 {
   max-width: none;
-  margin: 0.25rem 0 0.4rem;
-  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  margin: var(--space-2) 0;
 }
 .assistant-program-page.is-setup-first .assistant-program-hero p {
   margin-bottom: 0.8rem;
@@ -447,19 +401,18 @@
 
 .assistant-program-panel {
   position: relative;
-  padding: clamp(1.25rem, 3vw, 2rem);
-  background: var(--assistant-panel);
-  border: 1px solid var(--assistant-line);
-  border-radius: 4px;
-  box-shadow: 0 8px 30px rgba(56, 38, 16, 0.06);
+  min-width: 0;
+  padding: var(--space-4) 0;
+  border-top: 1px solid var(--border-color);
 }
 
 .assistant-program-panel-head {
   display: flex;
   align-items: start;
   justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.35rem;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
 }
 
 .assistant-program-suggestions-panel {
@@ -467,12 +420,11 @@
 }
 
 .assistant-program-panel h2 {
-  margin: 0.3rem 0 0;
-  color: var(--assistant-ink);
-  font:
-    700 1.45rem/1.1 "Chakra Petch",
-    sans-serif;
-  letter-spacing: -0.025em;
+  margin: var(--space-1) 0 0;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  line-height: 1.25;
 }
 
 .assistant-program-roster {
@@ -482,28 +434,24 @@
 }
 
 .assistant-program-role {
-  min-height: 165px;
-  padding: 1rem;
-  background: rgba(239, 230, 211, 0.5);
-  border: 1px solid var(--assistant-line);
-  border-top: 3px solid var(--assistant-amber);
+  min-width: 0;
+  padding: var(--space-3);
+  border-left: 3px solid var(--border-color);
 }
-
 .assistant-program-role[data-primary="true"] {
-  background: var(--assistant-ink);
-  color: #fff8e9;
+  border-left-color: var(--primary-color);
 }
 .assistant-program-role-id {
-  color: var(--assistant-amber);
+  color: var(--accent-text);
   font: 500 0.65rem var(--font-mono, monospace);
   text-transform: uppercase;
 }
 .assistant-program-role h3 {
-  margin: 0.7rem 0 0.45rem;
-  color: inherit;
-  font:
-    700 1.08rem "Chakra Petch",
-    sans-serif;
+  margin: var(--space-2) 0;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 1rem;
 }
 .assistant-program-role p {
   margin: 0;
@@ -511,14 +459,11 @@
   font-size: 0.82rem;
   line-height: 1.5;
 }
-.assistant-program-role[data-primary="true"] p {
-  color: rgba(255, 248, 233, 0.62);
-}
 .assistant-program-role-agent {
-  display: block;
-  margin-top: 0.8rem;
-  color: var(--assistant-amber);
-  font: 500 0.72rem var(--font-mono, monospace);
+  max-width: 100%;
+  margin-top: var(--space-3);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .assistant-program-role-readiness {
   display: block;
@@ -526,9 +471,6 @@
   color: var(--assistant-muted);
   font-size: 0.74rem;
   line-height: 1.4;
-}
-.assistant-program-role[data-primary="true"] .assistant-program-role-readiness {
-  color: rgba(255, 248, 233, 0.68);
 }
 
 .assistant-program-stages {
@@ -540,7 +482,6 @@
   grid-template-columns: 27px 1fr;
   gap: 0.75rem;
   padding: 0.75rem 0;
-  opacity: 0.45;
   border-bottom: 1px solid var(--assistant-line);
 }
 .assistant-program-stage.is-current,
@@ -556,7 +497,7 @@
 }
 .assistant-program-stage strong {
   display: block;
-  font-family: "Chakra Petch", sans-serif;
+  font-family: var(--font-body);
 }
 .assistant-program-stage span:last-child {
   color: var(--assistant-muted);
@@ -586,9 +527,7 @@
   display: grid;
   gap: 0.4rem;
   padding: 0.75rem;
-  border: 1px dashed var(--assistant-line);
-  background: rgba(255, 255, 255, 0.38);
-  color: var(--assistant-ink);
+  border-bottom: 1px solid var(--border-color);
 }
 .home-resource-workspace-title {
   margin: 0;
@@ -610,14 +549,9 @@
   gap: 0.5rem;
 }
 .assistant-program-project {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 0.75rem;
-  color: var(--assistant-ink);
-  background: rgba(239, 230, 211, 0.55);
-  border: 1px solid var(--assistant-line);
-  text-decoration: none;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .assistant-program-project::before {
   content: "";
@@ -633,9 +567,8 @@
   display: grid;
   gap: 0.55rem;
   min-width: min(100%, 18rem);
-  padding: 0.7rem;
-  border: 1px solid var(--assistant-line);
-  background: rgba(255, 255, 255, 0.38);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-color);
 }
 .assistant-program-project-meta {
   margin: 0;
@@ -653,9 +586,6 @@
   max-height: calc(100vh - 2rem);
   padding: 1.25rem;
   overflow: auto;
-  color: var(--assistant-ink);
-  border: 1px solid var(--assistant-line);
-  background: var(--assistant-paper);
 }
 .assistant-program-action-dialog::backdrop {
   background: rgba(17, 24, 20, 0.58);
@@ -676,11 +606,7 @@
 .assistant-program-action-field select,
 .assistant-program-action-field textarea {
   width: 100%;
-  min-height: 2.6rem;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--assistant-line);
-  color: var(--assistant-ink);
-  background: #fffdf8;
+  min-width: 0;
 }
 .assistant-program-action-field textarea {
   min-height: 5rem;
@@ -716,9 +642,8 @@
   gap: 0.7rem;
 }
 .assistant-program-learning-card {
-  padding: 0.9rem;
-  background: rgba(239, 230, 211, 0.5);
-  border-left: 3px solid var(--assistant-amber);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-color);
 }
 .assistant-program-learning-card p {
   margin: 0.45rem 0 0.65rem;
@@ -726,9 +651,8 @@
   line-height: 1.5;
 }
 .assistant-program-learning-impact {
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--assistant-line);
-  background: rgba(255, 255, 255, 0.5);
+  padding: var(--space-2) 0;
+  border-left: 3px solid var(--border-color);
 }
 .assistant-program-learning-card details {
   color: var(--assistant-muted);
@@ -760,11 +684,6 @@
   max-height: calc(100vh - 2rem);
   padding: 0;
   overflow: auto;
-  color: var(--assistant-ink);
-  background: #f7f0e2;
-  border: 1px solid rgba(217, 130, 25, 0.5);
-  border-radius: 5px 5px 18px 5px;
-  box-shadow: 0 35px 100px rgba(18, 12, 5, 0.55);
 }
 .assistant-program-hire-dialog::backdrop {
   background: rgba(13, 10, 6, 0.76);
@@ -774,10 +693,10 @@
   padding: clamp(1.5rem, 4vw, 3rem);
 }
 .assistant-program-dialog-head h2 {
-  margin: 0.35rem 0;
-  font:
-    700 clamp(2rem, 5vw, 3.5rem)/1 "Chakra Petch",
-    sans-serif;
+  margin: var(--space-2) 0;
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  line-height: 1.2;
 }
 .assistant-program-dialog-head p {
   max-width: 680px;
@@ -796,9 +715,7 @@
   gap: 0.45rem;
 }
 .assistant-program-hire-fields label {
-  font:
-    600 0.78rem "Chakra Petch",
-    sans-serif;
+  font-weight: 600;
 }
 .assistant-program-model-grid {
   display: grid;
@@ -816,12 +733,11 @@
 }
 .assistant-program-hire-role {
   padding: 0.75rem 0.9rem;
-  border-left: 3px solid var(--assistant-amber);
-  background: rgba(255, 255, 255, 0.4);
+  border-left: 3px solid var(--border-color);
 }
 .assistant-program-hire-role strong {
   display: block;
-  font-family: "Chakra Petch", sans-serif;
+  font-family: var(--font-body);
 }
 .assistant-program-hire-role span {
   color: var(--assistant-muted);
@@ -881,14 +797,14 @@
 
 @media (max-width: 560px) {
   .assistant-program-page {
-    width: min(100% - 1rem, 1240px);
-    padding-top: 1rem;
+    width: 100%;
+    padding-top: 0;
   }
   .assistant-program-hero {
     padding: 1.5rem;
   }
   .assistant-program-meter {
-    width: 120px;
+    width: 84px;
   }
   .assistant-program-model-grid {
     grid-template-columns: 1fr;
@@ -917,11 +833,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--bs-border-color);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--bs-body-bg) 88%, #d9c6a2 12%);
+  gap: var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-color);
 }
 .sample-library-root > div {
   display: flex;
@@ -945,8 +859,8 @@
 .sample-library-table-wrap {
   overflow: auto;
   max-height: 22rem;
-  border: 1px solid var(--bs-border-color);
-  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
 }
 .sample-library-table {
   width: 100%;
@@ -954,8 +868,8 @@
 }
 .sample-library-table th,
 .sample-library-table td {
-  padding: 0.7rem 0.8rem;
-  border-bottom: 1px solid var(--bs-border-color);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--border-color);
   text-align: left;
 }
 .sample-library-table tbody tr:last-child td {
@@ -1001,13 +915,7 @@
 .project-library-panel {
   grid-column: 1 / -1;
   min-width: 0; /* Let the results table scroll inside its labelled wrapper, not the page. */
-  border-top: 4px solid var(--assistant-amber);
-  background:
-    linear-gradient(115deg, rgba(217, 130, 25, 0.055), transparent 34%), var(--assistant-panel);
-}
-.project-library-panel button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+  border-top: 1px solid var(--border-color);
 }
 .project-library-intro,
 .project-library-status,
@@ -1021,12 +929,9 @@
 }
 /* The Home's switch for its shared assistant: one line, its note, one action. */
 .project-library-sharing {
-  margin: 0 0 1rem;
-  padding: 0.85rem 1rem;
-  border: 1px solid var(--assistant-line);
-  border-left: 3px solid var(--assistant-amber);
-  border-radius: 4px;
-  background: var(--assistant-panel);
+  margin: 0 0 var(--space-4);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-color);
 }
 .project-library-sharing-head {
   display: flex;
@@ -1303,16 +1208,13 @@
   max-width: min(92vw, 42rem);
 }
 .project-library-detail-dialog {
-  padding: clamp(1.5rem, 4vw, 3rem);
-  color: var(--assistant-ink);
-  font:
-    400 0.95rem/1.55 system-ui,
-    sans-serif;
+  padding: var(--space-5);
+  line-height: 1.55;
 }
 .project-library-detail-dialog h2,
 .project-library-detail-dialog h3 {
-  margin: 0 0 0.8rem;
-  font-family: "Chakra Petch", sans-serif;
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-display);
   line-height: 1.2;
 }
 .project-library-detail-dialog h2 {
@@ -1340,8 +1242,8 @@
   background: var(--assistant-panel);
 }
 .project-library-resume h3 {
-  margin: 0 0 1rem;
-  font-family: "Chakra Petch", sans-serif;
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-display);
 }
 /* How old the library picture is, with the one-click Rescan. Past a day it
    takes the shelf's amber attention edge; no new colour. */
@@ -1403,15 +1305,13 @@
 }
 .project-library-resume-card {
   min-width: 0;
-  padding: 1rem;
-  border: 1px solid var(--assistant-line);
-  border-radius: 3px 12px 12px 3px;
-  background: #fffdf7;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border-color);
   overflow-wrap: anywhere;
 }
 .project-library-resume-card h4 {
-  margin: 0 0 0.6rem;
-  font-family: "Chakra Petch", sans-serif;
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-body);
 }
 .project-library-resume-card small {
   display: block;
@@ -1545,11 +1445,6 @@
   /* A link to the card lands below the page's sticky header, not under it. */
   scroll-margin-top: 96px;
 }
-.home-profile-panel button:disabled,
-.home-profile-panel select:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
 .home-profile-readonly {
   margin: 0.8rem 0 0;
   padding: 0.6rem 0.8rem;
@@ -1614,24 +1509,12 @@
   gap: 0.4rem;
 }
 .home-profile-badge {
-  padding: 0.25rem 0.55rem;
-  font: 500 0.68rem/1 var(--font-mono, "JetBrains Mono", monospace);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  border: 1px solid var(--assistant-line);
-  border-radius: 99px;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 /* A hint: outlined, dashed. An instruction: filled. */
 .home-profile-badge.is-detected {
-  color: var(--assistant-amber-deep);
   border-style: dashed;
-  border-color: var(--assistant-amber);
-  background: transparent;
-}
-.home-profile-badge.is-confirmed {
-  color: #18120b;
-  border-color: var(--assistant-amber);
-  background: var(--assistant-amber);
 }
 .home-profile-select {
   width: auto;

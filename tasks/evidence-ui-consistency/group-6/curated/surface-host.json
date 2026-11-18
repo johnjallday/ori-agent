@@ -1,0 +1,31 @@
+{
+  "captureMode": "viewport",
+  "revision": "d052a96626a6fd025b13c1cc10e9e0a8dd4d9b2d",
+  "dirty": true,
+  "servedBuild": "group-6-current",
+  "route": "/workspaces/workspace-surface-browser-mwm1nrht",
+  "viewport": {
+    "width": 320,
+    "height": 900
+  },
+  "engine": "webkit",
+  "theme": "dark",
+  "fontMode": "real",
+  "loadedFaces": [
+    "Fraunces",
+    "Fraunces",
+    "Manrope",
+    "Manrope",
+    "Manrope",
+    "Manrope",
+    "Chakra Petch",
+    "JetBrains Mono",
+    "JetBrains Mono"
+  ],
+  "computedFonts": {
+    "body": "Manrope, \"Segoe UI\", sans-serif",
+    "heading": "Fraunces, Georgia, serif"
+  },
+  "workspaceId": "3e47d315-8ac9-45b3-b84a-23d426113a10",
+  "fixture": "Actual repository example opaque sandboxed iframe and fixed status service; one narrowly checked opens UI-state increment and exact session revocation. Host styling only, not iframe/AT/native or live provider certification."
+}

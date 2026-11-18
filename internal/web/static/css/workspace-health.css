@@ -1,21 +1,32 @@
-.workspace-detail-health-card {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    radial-gradient(circle at top right, rgba(255, 171, 95, 0.12), transparent 32%),
-    linear-gradient(180deg, rgba(31, 33, 40, 0.96), rgba(31, 33, 40, 0.92));
+html:has(#workspace-diagnostics-view) {
+  scroll-padding-top: calc(var(--navbar-offset, 76px) + var(--space-3));
+  scroll-padding-bottom: var(--ori-launcher-clearance-y, 88px);
+}
+#workspace-diagnostics-view {
+  padding-bottom: var(--ori-launcher-clearance-y, 88px);
+}
+.diagnostics-breadcrumb {
+  overflow-wrap: anywhere;
 }
 
-.workspace-detail-health-card::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(115deg, transparent 0%, rgba(255, 255, 255, 0.04) 22%, transparent 44%),
-    linear-gradient(0deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
-  opacity: 0.75;
+.workspace-detail-health-card,
+.workspace-detail-health-card:hover {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+  --health-success: var(--success-text);
+  --health-warning: var(--warning-text);
+  --health-danger: var(--danger-text);
+  --health-info: var(--info-text);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  transform: none;
+}
+
+[data-bs-theme="dark"] .workspace-detail-health-card,
+[data-bs-theme="dark"] .workspace-detail-health-card:hover {
+  background: var(--bg-secondary);
 }
 
 .workspace-detail-health-header,
@@ -39,19 +50,12 @@
 }
 
 .workspace-detail-health-kicker {
-  color: rgba(255, 196, 143, 0.84);
+  color: var(--health-warning);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
   margin-bottom: 0.35rem;
-}
-
-.workspace-detail-health-title {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 1.08rem;
-  font-weight: 650;
 }
 
 .workspace-detail-health-summary {
@@ -72,59 +76,24 @@
   max-width: 100%;
 }
 
-#workspace-detail-health-refresh {
-  width: auto;
-  height: auto;
-  min-height: 34px;
-  padding: 0.52rem 0.88rem;
-  border-radius: 999px;
-  gap: 0.45rem;
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
 #workspace-detail-health-refresh svg {
   flex: 0 0 auto;
 }
 
-.workspace-detail-health-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-height: 34px;
-  padding: 0.42rem 0.82rem;
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-primary);
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 .workspace-detail-health-badge.is-healthy {
-  border-color: rgba(62, 207, 142, 0.3);
-  background: rgba(34, 197, 94, 0.14);
-  color: #81f2b6;
+  color: var(--health-success);
 }
 
 .workspace-detail-health-badge.is-warning {
-  border-color: rgba(255, 179, 102, 0.34);
-  background: rgba(245, 158, 11, 0.16);
-  color: #ffd08a;
+  color: var(--health-warning);
 }
 
 .workspace-detail-health-badge.is-error {
-  border-color: rgba(255, 113, 113, 0.3);
-  background: rgba(239, 68, 68, 0.15);
-  color: #ffaeae;
+  color: var(--health-danger);
 }
 
 .workspace-detail-health-badge.is-checking {
-  border-color: rgba(125, 176, 255, 0.26);
-  background: rgba(31, 107, 78, 0.12);
-  color: #b5d4ff;
+  color: var(--health-info);
 }
 
 .workspace-detail-health-meta {
@@ -140,8 +109,8 @@
   gap: 0.4rem;
   padding: 0.38rem 0.68rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
   color: var(--text-secondary);
   font-size: 0.74rem;
   font-weight: 600;
@@ -163,8 +132,8 @@
   gap: 0.85rem;
   padding: 1rem 1.05rem;
   border-radius: 18px;
-  border: 1px solid rgba(62, 207, 142, 0.18);
-  background: rgba(19, 44, 35, 0.42);
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
 }
 
 .workspace-detail-health-empty-icon {
@@ -175,8 +144,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(62, 207, 142, 0.12);
-  color: #8df4be;
+  background: var(--bg-primary);
+  color: var(--health-success);
 }
 
 .workspace-detail-health-empty-title {
@@ -200,18 +169,16 @@
   align-items: flex-start;
   padding: 0.95rem 1rem;
   border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(31, 33, 40, 0.66);
+  border: 1px solid var(--border-color);
+  background: var(--bg-primary);
 }
 
 .workspace-detail-health-issue.is-error {
-  border-color: rgba(239, 68, 68, 0.24);
-  background: linear-gradient(180deg, rgba(55, 20, 24, 0.42), rgba(24, 12, 15, 0.78));
+  border-color: var(--health-danger);
 }
 
 .workspace-detail-health-issue.is-warning {
-  border-color: rgba(245, 158, 11, 0.22);
-  background: linear-gradient(180deg, rgba(60, 38, 15, 0.4), rgba(20, 15, 10, 0.78));
+  border-color: var(--health-warning);
 }
 
 .workspace-detail-health-issue-icon {
@@ -221,19 +188,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--bg-primary);
   color: var(--text-primary);
   flex: 0 0 auto;
 }
 
 .workspace-detail-health-issue.is-error .workspace-detail-health-issue-icon {
-  background: rgba(239, 68, 68, 0.12);
-  color: #c9ccd1;
+  color: var(--health-danger);
 }
 
 .workspace-detail-health-issue.is-warning .workspace-detail-health-issue-icon {
-  background: rgba(245, 158, 11, 0.12);
-  color: #ffd496;
+  color: var(--health-warning);
 }
 
 .workspace-detail-health-issue > :nth-child(2) {
@@ -267,8 +232,8 @@
   gap: 0.35rem;
   padding: 0.28rem 0.55rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
   color: var(--text-secondary);
   font-size: 0.72rem;
   line-height: 1.3;
@@ -276,12 +241,6 @@
 
 .workspace-detail-health-action.workspace-detail-panel-btn {
   display: inline-flex;
-  width: auto;
-  height: auto;
-  min-width: max-content;
-  min-height: 38px;
-  padding: 0.52rem 0.92rem;
-  border-radius: 999px;
   align-self: center;
   justify-self: end;
   flex: 0 0 auto;
@@ -291,26 +250,28 @@
 .workspace-detail-ui-smoke-result {
   margin: 0 1.35rem 1.35rem;
   border-radius: 18px;
-  border: 1px solid rgba(125, 176, 255, 0.18);
-  background: rgba(31, 33, 40, 0.58);
-  overflow: hidden;
+  border: 1px solid var(--health-info);
+  background: var(--bg-primary);
+  max-height: 24rem;
+  overflow: auto;
 }
 
 .workspace-detail-ui-smoke-result.is-passed {
-  border-color: rgba(62, 207, 142, 0.22);
+  border-color: var(--health-success);
 }
 
 .workspace-detail-ui-smoke-result.is-failed {
-  border-color: rgba(239, 68, 68, 0.25);
+  border-color: var(--health-danger);
 }
 
 .workspace-detail-ui-smoke-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.95rem 1rem;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .workspace-detail-ui-smoke-title {
@@ -335,19 +296,17 @@
   font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
-  background: rgba(125, 176, 255, 0.14);
-  color: #b5d4ff;
+  background: var(--bg-secondary);
+  color: var(--health-info);
   white-space: nowrap;
 }
 
 .workspace-detail-ui-smoke-status.is-passed {
-  background: rgba(62, 207, 142, 0.12);
-  color: #8df4be;
+  color: var(--health-success);
 }
 
 .workspace-detail-ui-smoke-status.is-failed {
-  background: rgba(239, 68, 68, 0.14);
-  color: #c9ccd1;
+  color: var(--health-danger);
 }
 
 .workspace-detail-ui-smoke-checks {
@@ -362,9 +321,11 @@
   gap: 0.7rem;
   align-items: center;
   padding: 0.7rem 0.75rem;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.workspace-detail-ui-smoke-check:last-child {
+  border-bottom: 0;
 }
 
 .workspace-detail-ui-smoke-check-icon {
@@ -374,15 +335,14 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(62, 207, 142, 0.12);
-  color: #8df4be;
+  background: var(--bg-secondary);
+  color: var(--health-success);
   font-weight: 800;
   font-size: 0.85rem;
 }
 
 .workspace-detail-ui-smoke-check.is-failed .workspace-detail-ui-smoke-check-icon {
-  background: rgba(239, 68, 68, 0.14);
-  color: #c9ccd1;
+  color: var(--health-danger);
 }
 
 .workspace-detail-ui-smoke-check-name {
@@ -408,6 +368,10 @@
 @media (max-width: 991px) {
   .workspace-detail-health-header {
     flex-direction: column;
+  }
+
+  .workspace-detail-health-header > :first-child {
+    flex-basis: auto;
   }
 
   .workspace-detail-health-controls {

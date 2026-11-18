@@ -14,10 +14,18 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 function initializeEventListeners() {
-  // Add server button
-  document.getElementById('addServerBtn').addEventListener('click', function () {
-    const modal = new bootstrap.Modal(document.getElementById('addServerModal'));
-    modal.show();
+  // Add server button. Retain its actual invoker in WebKit as well as Chromium.
+  document.getElementById('addServerBtn').addEventListener('click', event => {
+    showMcpModal('addServerModal', event.currentTarget);
+  });
+  document.querySelectorAll('.category-pill').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.classList.contains('active')));
+  });
+  document.getElementById('sourcesPanel').addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      toggleSourcesPanel(false);
+    }
   });
 
   // Manual config form
@@ -34,9 +42,28 @@ function initializeEventListeners() {
   document.getElementById('marketplaceSearch').addEventListener('input', filterMarketplace);
 }
 
+function showMcpModal(id, trigger, initialFocus) {
+  const element = document.getElementById(id);
+  const invoker = trigger || document.activeElement;
+  element.addEventListener(
+    'hidden.bs.modal',
+    () => {
+      const target = currentMcpAction(invoker) || document.getElementById('addServerBtn');
+      target?.focus({ preventScroll: true });
+    },
+    { once: true }
+  );
+  if (initialFocus)
+    element.addEventListener('shown.bs.modal', () => initialFocus.focus(), { once: true });
+  const modal = bootstrap.Modal.getOrCreateInstance(element);
+  modal.show();
+  return modal;
+}
+
 async function loadMarketplaceServers() {
   try {
     const response = await fetch('/api/mcp/marketplace');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     marketplaceServers = data.servers || [];
     renderMarketplace();
@@ -60,18 +87,17 @@ function renderMarketplace() {
     const item = document.createElement('div');
     item.className =
       'list-group-item d-flex justify-content-between align-items-start marketplace-item';
-    item.style =
-      'background: var(--bg-tertiary); border-color: var(--border-color); cursor: pointer;';
+    item.style = 'background: var(--surface-solid); border-color: var(--border-color);';
 
     const envRequired = server.env_required ? Object.keys(server.env_required).join(', ') : '';
 
     item.innerHTML = `
-      <div class="flex-grow-1">
-        <h6 class="mb-1" style="color: var(--text-primary);">${server.name}</h6>
-        <p class="mb-1 small" style="color: var(--text-secondary);">${server.description}</p>
-        <div class="d-flex gap-2 mt-1">
-          <span class="badge bg-secondary">${server.category}</span>
-          ${envRequired ? `<span class="badge bg-warning text-dark">Requires: ${envRequired}</span>` : ''}
+      <div class="mcp-server-copy">
+        <h6 class="mb-1">${mcpEscapeHtml(server.name)}</h6>
+        <p class="mb-1 mcp-metadata">${mcpEscapeHtml(server.description || '')}</p>
+        <div class="ui-actions mt-1">
+          <span class="badge badge-secondary">${mcpEscapeHtml(server.category || '')}</span>
+          ${envRequired ? `<span class="badge badge-warning">Requires: ${mcpEscapeHtml(envRequired)}</span>` : ''}
         </div>
       </div>
       <button class="modern-btn modern-btn-primary modern-btn-sm install-btn" data-server="${encodeURIComponent(JSON.stringify(server))}">
@@ -266,12 +292,15 @@ async function loadServers() {
   const container = document.getElementById('mcpServersList');
   const emptyState = document.getElementById('emptyState');
 
-  container.innerHTML =
-    '<div class="text-center py-3"><div class="spinner-border text-primary"></div></div>';
+  if (mcpServers.length === 0) {
+    container.innerHTML =
+      '<div class="text-center py-3"><div class="spinner-border text-primary" role="status" aria-label="Loading servers"></div></div>';
+  }
   emptyState.style.display = 'none';
 
   try {
     const response = await fetch('/api/mcp/servers');
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     const servers = data.servers || [];
     const stats = data.stats || {};
@@ -296,23 +325,43 @@ async function loadServers() {
     renderServers();
   } catch (error) {
     console.error('Failed to load servers:', error);
-    container.innerHTML = '<div class="alert alert-danger">Failed to load servers</div>';
+    container.innerHTML =
+      '<div class="alert alert-danger" role="alert">Failed to load servers. <button type="button" class="modern-btn modern-btn-secondary btn-sm" onclick="loadServers()">Try again</button></div>';
   }
+}
+
+function currentMcpAction(invoker) {
+  if (invoker?.isConnected) return invoker;
+  const serverName = invoker?.closest?.('.mcp-server-card')?.dataset.serverName;
+  const action = invoker?.dataset?.mcpAction;
+  if (!serverName || !action) return null;
+  const card = Array.from(document.querySelectorAll('.mcp-server-card')).find(
+    node => node.dataset.serverName === serverName
+  );
+  return (
+    Array.from(card?.querySelectorAll('[data-mcp-action]') || []).find(
+      node => node.dataset.mcpAction === action
+    ) || null
+  );
 }
 
 function renderServers() {
   const container = document.getElementById('mcpServersList');
+  const invoker = container.contains(document.activeElement) ? document.activeElement : null;
   container.innerHTML = '';
 
   mcpServers.forEach(server => {
     const card = createServerCard(server);
     container.appendChild(card);
   });
+  // Polling may replace the row, but must not strand keyboard focus on body.
+  currentMcpAction(invoker)?.focus({ preventScroll: true });
 }
 
 function createServerCard(server) {
   const div = document.createElement('div');
-  div.className = 'modern-card p-3 mb-3';
+  div.className = 'ui-section mcp-server-card p-3 mb-3';
+  div.dataset.serverName = server.name;
 
   const statusBadge = getStatusBadge(server.status || 'stopped');
   const argsDisplay = server.args ? server.args.join(' ') : '';
@@ -331,31 +380,31 @@ function createServerCard(server) {
   const pluginBadge = isPlugin ? '<span class="badge bg-info ms-2">Plugin (read-only)</span>' : '';
 
   div.innerHTML = `
-    <div class="d-flex justify-content-between align-items-start">
-      <div class="flex-grow-1">
-        <h6 class="mb-1" style="color: var(--text-primary);">${server.name}</h6>
-        <p class="mb-1 small text-muted">${server.command} ${argsDisplay}</p>
-        <div class="mt-2">
+    <div class="mcp-wrap-row">
+      <div class="mcp-server-copy">
+        <h3 class="mcp-section-title mb-1">${mcpEscapeHtml(server.name)}</h3>
+        <p class="mb-1 mcp-metadata">${mcpEscapeHtml(server.command || '')} ${mcpEscapeHtml(argsDisplay)}</p>
+        <div class="ui-actions mt-2">
           ${statusBadge}
           ${toolCountBadge}
           ${enabledBadge}
           ${pluginBadge}
         </div>
       </div>
-      <div class="d-flex gap-2 flex-wrap justify-content-end">
-        <button class="modern-btn modern-btn-secondary modern-btn-sm" onclick="viewServerDetails('${encodeURIComponent(server.name)}')">
+      <div class="ui-actions">
+        <button class="modern-btn modern-btn-secondary modern-btn-sm" data-mcp-action="details">
           Details
         </button>
-        <button class="modern-btn ${toggleClass} modern-btn-sm" onclick="toggleServerEnabled('${encodeURIComponent(server.name)}', ${server.enabled})">
+        <button class="modern-btn ${toggleClass} modern-btn-sm" data-mcp-action="toggle">
           ${toggleLabel}
         </button>
-        <button class="modern-btn modern-btn-secondary modern-btn-sm" onclick="testConnection('${server.name}')">
+        <button class="modern-btn modern-btn-secondary modern-btn-sm" data-mcp-action="test">
           Test
         </button>
         ${
           server.status === 'error'
             ? `
-          <button class="modern-btn modern-btn-warning modern-btn-sm" onclick="retryConnection('${server.name}')">
+          <button class="modern-btn modern-btn-secondary modern-btn-sm" data-mcp-action="retry">
             Retry
           </button>
         `
@@ -363,13 +412,23 @@ function createServerCard(server) {
         }
         ${
           isPlugin
-            ? '<span class="modern-btn modern-btn-secondary modern-btn-sm disabled" title="Managed by its plugin; uninstall from the Plugins page">Managed by plugin</span>'
-            : `<button class="modern-btn modern-btn-danger modern-btn-sm" onclick="confirmRemoveServer('${server.name}')">Remove</button>`
+            ? '<span class="badge badge-secondary" title="Managed by its plugin; uninstall from the Plugins page">Managed by plugin</span>'
+            : '<button class="modern-btn modern-btn-danger modern-btn-sm" data-mcp-action="remove">Remove</button>'
         }
       </div>
     </div>
   `;
 
+  div.querySelectorAll('[data-mcp-action]').forEach(button => {
+    const actions = {
+      details: () => viewServerDetails(encodeURIComponent(server.name), button),
+      toggle: () => toggleServerEnabled(encodeURIComponent(server.name), server.enabled),
+      test: () => testConnection(server.name),
+      retry: () => retryConnection(server.name),
+      remove: () => confirmRemoveServer(server.name, button)
+    };
+    button.addEventListener('click', actions[button.dataset.mcpAction]);
+  });
   return div;
 }
 
@@ -451,10 +510,9 @@ async function retryConnection(serverName) {
   }
 }
 
-function confirmRemoveServer(serverName) {
+function confirmRemoveServer(serverName, trigger) {
   document.getElementById('removeServerName').textContent = serverName;
-  const modal = new bootstrap.Modal(document.getElementById('removeServerModal'));
-  modal.show();
+  const modal = showMcpModal('removeServerModal', trigger);
 
   document.getElementById('confirmRemoveBtn').onclick = function () {
     removeServer(serverName);
@@ -495,30 +553,8 @@ function startStatusPolling() {
 }
 
 function showToast(message, type = 'info') {
-  // Create a simple toast notification
-  const toastContainer = document.getElementById('toastContainer') || createToastContainer();
-
-  const toast = document.createElement('div');
-  toast.className = `alert alert-${type === 'error' ? 'danger' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : 'info'} alert-dismissible fade show`;
-  toast.style = 'margin-bottom: 0.5rem;';
-  toast.innerHTML = `
-    ${message}
-    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-  `;
-
-  toastContainer.appendChild(toast);
-
-  setTimeout(() => {
-    toast.remove();
-  }, 5000);
-}
-
-function createToastContainer() {
-  const container = document.createElement('div');
-  container.id = 'toastContainer';
-  container.style = 'position: fixed; top: 100px; right: 20px; z-index: 9999; min-width: 300px;';
-  document.body.appendChild(container);
-  return container;
+  // Shared feedback participates in the active dialog instead of hiding behind it.
+  window.Toast.show(message, type);
 }
 
 // Cleanup on page unload
@@ -537,6 +573,7 @@ let registrySources = []; // from /api/mcp/registry-sources
 let browseLoaded = false; // avoid duplicate fetches on tab re-click
 let activeCategoryFilter = 'all';
 let sourcesPanelOpen = false;
+let registrySourcesError = false;
 
 /**
  * Called when the Browse tab is first clicked.
@@ -553,13 +590,19 @@ function onBrowseTabActivated() {
 async function loadRegistrySources() {
   try {
     const res = await fetch('/api/mcp/registry-sources');
-    registrySources = await res.json();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const sources = await res.json();
+    if (!Array.isArray(sources)) throw new Error('Invalid sources response');
+    registrySources = sources;
+    registrySourcesError = false;
     populateSourceFilter(registrySources);
     if (sourcesPanelOpen) {
       renderSourcesList(registrySources);
     }
   } catch (err) {
     console.error('Failed to load registry sources:', err);
+    registrySourcesError = true;
+    if (sourcesPanelOpen) renderSourcesList(registrySources);
   }
 }
 
@@ -656,24 +699,25 @@ function renderSearchResults(entries) {
     const col = document.createElement('div');
     col.className = 'col-12 col-md-6 col-xl-4';
     col.innerHTML = `
-      <div class="browse-server-card h-100 d-flex flex-column">
-        <div class="d-flex justify-content-between align-items-start mb-2">
-          <h6 class="mb-0 fw-semibold" style="color: var(--text-primary);">${mcpEscapeHtml(entry.name)}</h6>
-          <div class="d-flex gap-1 flex-shrink-0 ms-2">
+      <div class="browse-server-card ui-section p-3 h-100 d-flex flex-column">
+        <div class="mcp-wrap-row mb-2">
+          <h3 class="mcp-section-title">${mcpEscapeHtml(entry.name)}</h3>
+          <div class="ui-actions">
             <span class="badge bg-secondary">${mcpEscapeHtml(entry.category || 'other')}</span>
             ${entry.source ? `<span class="badge" style="background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-color);">${mcpEscapeHtml(entry.source)}</span>` : ''}
           </div>
         </div>
         <p class="small mb-2 flex-grow-1" style="color: var(--text-secondary);">${mcpEscapeHtml(entry.description || '')}</p>
-        <div class="d-flex align-items-center justify-content-between mt-auto pt-2" style="border-top: 1px solid var(--border-color);">
+        <div class="mcp-wrap-row mt-auto pt-2" style="border-top: 1px solid var(--border-color);">
           <div>${envWarning}${entry.maintainer ? `<small style="color: var(--text-secondary);">${mcpEscapeHtml(entry.maintainer)}</small>` : ''}</div>
           ${
             isInstalled
               ? `<button class="modern-btn modern-btn-secondary modern-btn-sm" disabled>Added</button>`
-              : `<button class="modern-btn modern-btn-primary modern-btn-sm" onclick='addFromRegistry(${JSON.stringify(entry)})'>Add</button>`
+              : '<button class="modern-btn modern-btn-primary modern-btn-sm" data-mcp-add>Add</button>'
           }
         </div>
       </div>`;
+    col.querySelector('[data-mcp-add]')?.addEventListener('click', () => addFromRegistry(entry));
     grid.appendChild(col);
   });
 
@@ -714,8 +758,10 @@ async function addFromRegistry(entry) {
 
 /** Update the active category filter pill and re-filter. */
 function setCategoryFilter(btn) {
-  document.querySelectorAll('.category-pill').forEach(p => p.classList.remove('active'));
-  btn.classList.add('active');
+  document.querySelectorAll('.category-pill').forEach(p => {
+    p.classList.toggle('active', p === btn);
+    p.setAttribute('aria-pressed', String(p === btn));
+  });
   activeCategoryFilter = btn.dataset.category || 'all';
   filterSearch();
 }
@@ -742,11 +788,10 @@ async function refreshRegistry() {
 }
 
 /** Show the "Add Registry Source" modal. */
-function showAddSourceModal() {
+function showAddSourceModal(trigger) {
   document.getElementById('sourceNameInput').value = '';
   document.getElementById('sourceUrlInput').value = '';
-  const modal = new bootstrap.Modal(document.getElementById('addSourceModal'));
-  modal.show();
+  showMcpModal('addSourceModal', trigger, document.getElementById('sourceNameInput'));
 }
 
 /** Submit the Add Registry Source form. */
@@ -802,21 +847,17 @@ async function deleteRegistrySource(id) {
 }
 
 /** Toggle the registry sources collapsible panel. */
-function toggleSourcesPanel() {
-  sourcesPanelOpen = !sourcesPanelOpen;
+function toggleSourcesPanel(forceOpen) {
   const panel = document.getElementById('sourcesPanel');
-  const chevron = document.getElementById('sourcesChevron');
-  if (!panel) return;
-
-  panel.style.display = sourcesPanelOpen ? 'block' : 'none';
-  if (chevron) chevron.style.transform = sourcesPanelOpen ? 'rotate(180deg)' : '';
-
+  const toggle = document.getElementById('mcpSourcesToggle');
+  if (!panel || !toggle) return;
+  sourcesPanelOpen = typeof forceOpen === 'boolean' ? forceOpen : !sourcesPanelOpen;
+  if (!sourcesPanelOpen && panel.contains(document.activeElement)) toggle.focus();
+  panel.hidden = !sourcesPanelOpen;
+  toggle.setAttribute('aria-expanded', String(sourcesPanelOpen));
   if (sourcesPanelOpen) {
-    if (registrySources.length === 0) {
-      loadRegistrySources().then(() => renderSourcesList(registrySources));
-    } else {
-      renderSourcesList(registrySources);
-    }
+    if (registrySources.length === 0) void loadRegistrySources();
+    else renderSourcesList(registrySources);
   }
 }
 
@@ -826,6 +867,11 @@ function renderSourcesList(sources) {
   if (!container) return;
   container.innerHTML = '';
 
+  if (registrySourcesError) {
+    container.innerHTML =
+      '<div class="alert alert-danger" role="alert">Could not load registry sources. <button type="button" class="modern-btn modern-btn-secondary btn-sm" onclick="loadRegistrySources()">Try again</button></div>';
+    return;
+  }
   if (!sources || sources.length === 0) {
     container.innerHTML = '<p class="text-muted small">No sources configured.</p>';
     return;
@@ -833,21 +879,23 @@ function renderSourcesList(sources) {
 
   sources.forEach(src => {
     const row = document.createElement('div');
-    row.className = 'd-flex align-items-center justify-content-between py-2';
-    row.style = 'border-bottom: 1px solid var(--border-color);';
+    row.className = 'mcp-wrap-row mcp-source-row';
     row.innerHTML = `
-      <div>
+      <div class="mcp-server-copy">
         <span class="fw-semibold small" style="color: var(--text-primary);">${mcpEscapeHtml(src.name)}</span>
-        ${src.is_builtin ? '<span class="badge bg-secondary ms-2" style="font-size:0.7rem;">built-in</span>' : ''}
+        ${src.is_builtin ? '<span class="badge badge-secondary ms-2">built-in</span>' : ''}
         ${src.url ? `<br><small style="color: var(--text-secondary);">${mcpEscapeHtml(src.url)}</small>` : ''}
       </div>
       <div>
         ${
           !src.is_builtin
-            ? `<button class="modern-btn modern-btn-danger modern-btn-sm" onclick="deleteRegistrySource('${mcpEscapeHtml(src.id)}')">Remove</button>`
+            ? '<button class="modern-btn modern-btn-danger modern-btn-sm" data-mcp-remove-source>Remove</button>'
             : ''
         }
       </div>`;
+    row
+      .querySelector('[data-mcp-remove-source]')
+      ?.addEventListener('click', () => deleteRegistrySource(src.id));
     container.appendChild(row);
   });
 }
@@ -860,12 +908,11 @@ function renderSourcesList(sources) {
  * Open the details modal for an installed server and load its README,
  * native MCP instructions, and live tool list from the backend.
  */
-async function viewServerDetails(encodedServerName) {
+async function viewServerDetails(encodedServerName, trigger) {
   const serverName = decodeURIComponent(encodedServerName);
   const modalEl = document.getElementById('serverDetailsModal');
   if (!modalEl) return;
 
-  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
   document.getElementById('serverDetailsTitle').textContent = serverName;
   const body = document.getElementById('serverDetailsBody');
   body.innerHTML = `
@@ -873,7 +920,7 @@ async function viewServerDetails(encodedServerName) {
       <div class="spinner-border text-primary" role="status"></div>
       <p class="mt-3 mb-0 small" style="color: var(--text-secondary);">Loading details…</p>
     </div>`;
-  modal.show();
+  showMcpModal('serverDetailsModal', trigger);
 
   // Opening details does NOT start the server — README/Info load without it.
   await loadServerDetails(serverName, false);
@@ -974,9 +1021,9 @@ function renderDetailTools(data) {
       const params = renderToolParams(tool.inputSchema);
       const collapseId = `toolParams${i}`;
       return `
-      <div class="modern-card p-3 mb-2">
-        <div class="d-flex justify-content-between align-items-start">
-          <div class="flex-grow-1">
+      <div class="ui-section p-3 mb-2">
+        <div class="mcp-wrap-row">
+          <div class="mcp-server-copy">
             <code style="color: var(--text-primary); font-weight: 600;">${mcpEscapeHtml(tool.name)}</code>
             ${tool.title && tool.title !== tool.name ? `<span class="ms-2 small" style="color: var(--text-secondary);">${mcpEscapeHtml(tool.title)}</span>` : ''}
             ${tool.description ? `<p class="mb-0 mt-1 small" style="color: var(--text-secondary);">${mcpEscapeHtml(tool.description)}</p>` : ''}
@@ -1011,10 +1058,10 @@ function renderToolParams(schema) {
       let type = p.type || (Array.isArray(p.enum) ? 'enum' : '');
       if (Array.isArray(type)) type = type.join(' | ');
       const reqBadge = required.has(name)
-        ? '<span class="badge bg-danger ms-1" style="font-size:0.65rem;">required</span>'
+        ? '<span class="badge badge-danger ms-1">required</span>'
         : '';
       const typeBadge = type
-        ? `<span class="badge bg-secondary ms-1" style="font-size:0.65rem;">${mcpEscapeHtml(type)}</span>`
+        ? `<span class="badge badge-secondary ms-1">${mcpEscapeHtml(type)}</span>`
         : '';
       return `
       <div class="py-1" style="border-bottom: 1px solid var(--border-color);">
@@ -1088,19 +1135,15 @@ function renderDetailInfo(data) {
   }
 
   return `
-    <table class="table table-sm align-middle mb-0">
-      <tbody>
-        ${rows
-          .map(
-            ([label, value]) => `
-          <tr>
-            <th scope="row" class="text-nowrap" style="color: var(--text-secondary); font-weight: 600; width: 140px;">${label}</th>
-            <td style="color: var(--text-primary);">${value}</td>
-          </tr>`
-          )
-          .join('')}
-      </tbody>
-    </table>`;
+    <dl class="mcp-info-list">
+      ${rows
+        .map(
+          ([label, value]) => `
+        <div><dt>${label}</dt><dd>${value}</dd></div>
+      `
+        )
+        .join('')}
+    </dl>`;
 }
 
 /** Render markdown to sanitized HTML using marked + DOMPurify, with a safe fallback. */

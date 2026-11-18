@@ -240,8 +240,28 @@ test("rowHTML shows a View in Backlog deep link once planned, using Group 5's pa
 test('statusChip labels "planned" distinctly and mutes it like resolved/dismissed', () => {
   const { api } = loadActionCenter();
   assert.match(api.statusChip('planned'), />Planned</);
-  assert.match(api.statusChip('planned'), /color: var\(--text-secondary\)/);
-  assert.match(api.statusChip('new'), /color: var\(--text-primary\)/);
+  assert.match(api.statusChip('planned'), /class="badge badge-secondary"/);
+  assert.match(api.statusChip('new'), /class="badge action-center-status-active"/);
+});
+
+test('priority and status chips consume shared badge geometry and escape unknown values', () => {
+  const { api } = loadActionCenter();
+  assert.match(api.priorityChip('critical'), /class="badge action-center-priority-danger"/);
+  assert.match(api.priorityChip('high'), /class="badge action-center-priority-warning"/);
+  assert.doesNotMatch(api.priorityChip('critical'), /style=/);
+  assert.match(api.statusChip('<fictional>'), /&lt;fictional&gt;/);
+  assert.match(api.statusChip('toString'), />toString</);
+  assert.doesNotMatch(api.priorityChip('toString'), /native code/);
+});
+
+test('row action intents and metadata use shared controls without local inline sizing', () => {
+  const { api } = loadActionCenter();
+  const html = api.rowHTML({ id: 'fictional', workspace_id: 'fictional-workspace', status: 'new' });
+  assert.match(html, /class="btn btn-secondary" type="button" data-action="resolve"/);
+  assert.match(html, /class="btn btn-outline-danger" type="button" data-action="dismiss"/);
+  assert.match(html, /class="action-center-summary"/);
+  assert.match(html, /class="action-center-unread-dot"/);
+  assert.doesNotMatch(html, /style=/);
 });
 
 test('handleAddToBacklog shows a pending state on the clicked button while the request is in flight', async () => {

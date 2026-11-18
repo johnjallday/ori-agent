@@ -100,6 +100,51 @@ test('workspace run overview and report render reference URL details', () => {
   assert.match(page.elements.report.innerHTML, /Login required/);
 });
 
+test('cancelling the rejection prompt sends no decision and releases the busy guard', async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.window = { prompt: () => null };
+  globalThis.fetch = async (...args) => {
+    requests.push(args);
+    return { ok: true };
+  };
+  try {
+    const page = new WorkspaceRunPage('owned-workspace', 'presented-run');
+    page.refreshLiveData = async () => {};
+    await page.handleRunAction('reject');
+    assert.deepEqual(requests, []);
+    assert.equal(page.loadingAction, false);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('accepting an empty optional rejection reason retains the existing request contract', async () => {
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.window = { prompt: () => '' };
+  globalThis.fetch = async (...args) => {
+    requests.push(args);
+    return { ok: true };
+  };
+  try {
+    const page = new WorkspaceRunPage('owned-workspace', 'presented-run');
+    page.refreshLiveData = async () => {};
+    await page.handleRunAction('reject');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0][0], '/api/workspaces/owned-workspace/runs/presented-run/reject');
+    assert.equal(requests[0][1].method, 'POST');
+    assert.deepEqual(JSON.parse(requests[0][1].body), { reason: '' });
+    assert.equal(page.loadingAction, false);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 // --- Wrap-up: the run's immutable toolbox and what it measurably used ---
 //
 // renderToolbox reads its hosts from the document rather than page.elements, so

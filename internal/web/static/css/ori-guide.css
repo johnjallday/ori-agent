@@ -16,7 +16,9 @@
   /* The vertical companion. A bar can dodge the launcher sideways, but the last
      row of a scrolling page cannot — once you reach the bottom there is nowhere
      further to scroll, so whatever lands in that corner stays covered. Pages end
-     their scroll content this far above the viewport floor. */
+     their scroll content this far above the viewport floor. The assistant
+     controller raises this fallback to the measured footprint when a long
+     recipient wraps; pages consume the value rather than guessing a larger gap. */
   --ori-launcher-clearance-y: 88px;
 }
 
@@ -147,6 +149,11 @@
    panel would cover the very app controls the walkthrough asks users to open. */
 .ori-guide__panel:has(.ori-guide__reply[data-status="quest"]) {
   top: auto;
+  /* The mobile Help sheet may span the screen, but a walkthrough must leave
+     its marked control exposed, including short native-zoom viewports. */
+  left: auto;
+  right: 20px;
+  width: min(360px, calc(100vw - 40px));
   max-height: min(
     440px,
     calc(

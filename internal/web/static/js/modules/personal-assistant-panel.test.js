@@ -13,6 +13,7 @@ import {
   NEEDS_YOU_URL,
   assistantCheckInLine,
   assistantFocusNeedsScroll,
+  launcherBottomClearance,
   assistantChipView,
   assistantMoreLinks,
   assistantNeedsLine,
@@ -51,6 +52,13 @@ import {
   suggestedReplyDraft
 } from './personal-assistant-panel.js';
 import { resolveRecipient } from './personal-assistant-recipient.js';
+
+test('launcher clearance keeps its normal floor and measures wrapped or hidden recipient chrome', () => {
+  assert.equal(launcherBottomClearance(900, { top: 828, width: 200, height: 52 }), 88);
+  assert.equal(launcherBottomClearance(900, { top: 776, width: 280, height: 104 }), 136);
+  assert.equal(launcherBottomClearance(900.5, { top: 776.2, width: 280, height: 104 }), 137);
+  assert.equal(launcherBottomClearance(900, { top: 900, width: 0, height: 0 }), 88);
+});
 
 test('drawer gives the saved character to the shared avatar renderer', () => {
   const appearance = { mode: 'character', character: { catalog_id: 'project-coordinator' } };

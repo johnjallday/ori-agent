@@ -66,7 +66,7 @@
     } catch (error) {
       console.error('Error loading agent catalog:', error);
       host.innerHTML =
-        '<p class="form-help" role="alert">Could not load the roles. Try reloading the page.</p>';
+        '<p class="form-helper" role="alert">Could not load the roles. Try reloading the page.</p>';
       button.disabled = true;
       return;
     }

@@ -32,7 +32,7 @@ function ensureCreateReasoningField() {
   field.innerHTML = `
     <label class="form-label" for="llmReasoning">Reasoning Level</label>
     <select id="llmReasoning" class="form-select" name="llm_reasoning_effort"></select>
-    <div class="form-help" id="llmReasoningHelp"></div>
+    <div class="form-helper" id="llmReasoningHelp"></div>
   `;
 
   modelRow.insertAdjacentElement('afterend', field);
@@ -221,8 +221,8 @@ function renderPlugins() {
     item.className = 'plugin-item';
     const displayName = plugin.metadata?.name || stripVersionSuffix(plugin.name || '');
     item.innerHTML = `
-            <input type="checkbox" id="plugin-${index}" class="plugin-checkbox" value="${escapeHtml(plugin.name)}">
-            <label for="plugin-${index}" class="plugin-info" style="cursor: pointer;">
+            <input type="checkbox" id="plugin-${index}" class="plugin-checkbox form-check-input" value="${escapeHtml(plugin.name)}">
+            <label for="plugin-${index}" class="plugin-info form-check-label" style="cursor: pointer;">
                 <div class="plugin-name">${escapeHtml(displayName)}</div>
                 ${plugin.description ? `<div class="plugin-description">${escapeHtml(plugin.description)}</div>` : ''}
             </label>
@@ -274,16 +274,20 @@ function renderTags() {
   // Add tags before input
   selectedTags.forEach(tag => {
     const tagEl = document.createElement('div');
-    tagEl.className = 'tag-item';
+    tagEl.className = 'tag-item tag-chip';
     const textEl = document.createElement('span');
+    textEl.className = 'tag-chip-label';
     textEl.textContent = tag;
 
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
-    removeBtn.className = 'tag-remove';
+    removeBtn.className = 'tag-remove tag-chip-remove';
     removeBtn.setAttribute('aria-label', `Remove tag ${tag}`);
     removeBtn.textContent = '×';
-    removeBtn.addEventListener('click', () => removeTag(tag));
+    removeBtn.addEventListener('click', () => {
+      removeTag(tag);
+      input.focus({ preventScroll: true });
+    });
 
     tagEl.appendChild(textEl);
     tagEl.appendChild(removeBtn);

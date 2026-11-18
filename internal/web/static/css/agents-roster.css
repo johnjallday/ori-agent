@@ -11,18 +11,10 @@
  * deterministic avatar variables, which agent-avatar.js supplies per element.
  */
 
-/*
- * The page's own token names are kept and re-pointed at the shared cozy palette
- * (cozy-character.css), the same way Home's --hc-* were. Every rule below
- * already reads through these names, so warming the surface is a change of
- * VALUES, not of structure — no layout, no selector, and no behaviour moves
- * (PRD FR-1/FR-4).
- *
- * The result is that the Gallery, the Inspector, the picker, and the guide all
- * sit on one palette instead of four that merely look similar.
- */
+/* Gallery artwork keeps shared cozy paper, role tints and portrait geometry.
+   Routine controls/overlays use the canonical application tokens and aliases. */
 body.agents-roster-page {
-  --collection-gap: 18px;
+  --collection-gap: var(--space-4);
   --inspector-width: clamp(360px, 30vw, 420px);
   --roster-radius: var(--cozy-radius-lg, 14px);
   /* Moss is the page accent, matching Home's signal colour. Both themes are
@@ -32,14 +24,7 @@ body.agents-roster-page {
   --card-surface: var(--cozy-paper-raised, #fff);
   --card-soft: var(--cozy-paper, #f9fafb);
   --card-muted: var(--cozy-ink-dim, #5b6472);
-  /* Page-level surfaces the roster paints itself onto. */
-  --bg-primary: var(--cozy-paper-raised, #fff);
-  --bg-secondary: var(--cozy-paper, #f9fafb);
-  /* Left unmapped, this stayed the app's cool #c9ccd1 behind muted-ink pills
-     such as the progression slot count — 4.06:1, an axe violation. */
-  --bg-tertiary: var(--cozy-paper, #f3f4f6);
-  --text-primary: var(--cozy-ink, #111827);
-  --border-color: var(--cozy-line, #e5e7eb);
+  /* Artwork keeps its warm paper; routine controls use canonical app tokens. */
   --roster-grid: rgb(90 74 46 / 8%);
   --roster-grid-soft: rgb(90 74 46 / 4%);
   /* Paper grid, same 24px rhythm and warm ink as Home (home-command.css), so
@@ -74,6 +59,13 @@ body.agents-roster-page {
     linear-gradient(90deg, var(--roster-grid-soft) 1px, transparent 1px) !important;
 }
 
+/* Native focus/scroll must account for the sticky shared navbar, including
+   when the first-visit coachmark has scrolled the collection into view. */
+html:has(body.agents-roster-page) {
+  scroll-padding-block-start: calc(var(--navbar-offset) + var(--space-4));
+  scroll-padding-block-end: calc(var(--ori-launcher-clearance-y, 88px) + var(--space-4));
+}
+
 .roster-layout {
   display: flex;
   flex-direction: column;
@@ -92,12 +84,7 @@ body.agents-roster-page {
 /* ---- Collection header ---------------------------------------------------- */
 
 .collection-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  min-width: 0;
+  margin-bottom: 0;
 }
 
 .collection-head__intro {
@@ -105,60 +92,15 @@ body.agents-roster-page {
   max-width: 680px;
 }
 
-.collection-head__eyebrow {
-  margin: 0 0 6px;
-  color: var(--roster-accent, #4f46e5);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-
-.collection-head__title {
-  margin: 0;
-  font-size: clamp(24px, 2.4vw, 34px);
-  line-height: 1.1;
-  color: var(--text-primary, #111827);
-}
-
-.collection-head__copy {
-  margin: 8px 0 0;
-  color: var(--card-muted);
-  font-size: 13px;
-  line-height: 1.55;
-}
-
-.collection-head__actions {
+.collection-summary {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
+  gap: var(--space-2) var(--space-4);
 }
 
-.collection-head__new {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 40px;
-  padding: 0 16px;
-  border: none;
-  border-radius: 10px;
-  background: var(--primary-color, #4f46e5);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.collection-head__new:hover {
-  filter: brightness(1.05);
-}
-
-.collection-head__new:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 2px;
+.collection-summary:not(:has(> :not([hidden]))) {
+  display: none;
 }
 
 /* ---- Summary tiles -------------------------------------------------------- */
@@ -172,31 +114,7 @@ body.agents-roster-page {
 /* A pill, not a tile: it only appears when its bucket holds something to act
    on, so it reads as a sentence ("2 need attention") rather than a dashboard. */
 .roster-stat {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 40px;
-  padding: 0 14px;
-  border: 1px solid var(--card-line);
-  border-radius: 10px;
-  background: var(--card-soft);
-  cursor: pointer;
   text-align: left;
-  transition: border-color 0.14s ease;
-}
-
-.roster-stat:hover {
-  border-color: color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--card-line));
-}
-
-.roster-stat:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 2px;
-}
-
-.roster-stat.is-selected {
-  border-color: var(--primary-color, #4f46e5);
-  box-shadow: inset 0 0 0 1px var(--primary-color, #4f46e5);
 }
 
 /* Selection is stated in text, not only by the border colour. */
@@ -218,7 +136,7 @@ body.agents-roster-page {
 }
 
 .roster-stat--needs .roster-stat__value {
-  color: #b91c1c;
+  color: var(--danger-text);
 }
 
 .roster-stat--needs.roster-stat--zero .roster-stat__value,
@@ -240,36 +158,16 @@ body.agents-roster-page {
 }
 
 .roster-limit {
-  min-height: 40px;
-  max-width: 100%;
-  padding: 8px 14px;
-  border: 1px solid var(--card-line);
-  border-radius: 10px;
-  background: var(--card-soft);
-  color: var(--text-primary);
-  font-size: 13px;
   text-align: left;
   overflow-wrap: anywhere;
-  cursor: pointer;
-}
-
-.roster-limit:hover {
-  border-color: var(--primary-color);
-}
-
-.roster-limit:focus-visible {
-  outline: 2px solid var(--primary-color);
-  outline-offset: 2px;
 }
 
 .roster-limit--warn {
-  border-color: var(--warning-color);
-  background: color-mix(in srgb, var(--warning-color) 10%, var(--card-soft));
+  border-color: var(--warning-text);
 }
 
 .roster-limit--exhausted {
-  border-color: var(--danger-color);
-  background: color-mix(in srgb, var(--danger-color) 10%, var(--card-soft));
+  border-color: var(--danger-text);
   font-weight: 600;
 }
 
@@ -302,30 +200,15 @@ body.agents-roster-page {
   min-width: 0;
 }
 
-/* The search field is the one elastic item, so it gives up width before the row
-   wraps. At a 220px basis the toolbar overflowed a ~1000px pane by a few pixels
-   and pushed Filters onto a second row of its own; 140px keeps the row whole
-   with the Inspector open, and the field still grows to fill whatever is left. */
+/* Search gets a useful line before optional presentation controls wrap. */
 .collection-search {
-  flex: 1 1 140px;
-  min-width: 0;
+  flex: 1 1 20rem;
+  min-width: min(100%, 16rem);
   margin: 0;
 }
 
 .collection-search input {
   width: 100%;
-  height: 38px;
-  padding: 0 12px;
-  border: 1px solid var(--card-line);
-  border-radius: 10px;
-  background: var(--card-surface);
-  color: var(--text-primary, #111827);
-  font-size: 14px;
-}
-
-.collection-search input:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 1px;
 }
 
 /* Inside the Filters panel the selects are a labelled stack, not a wrapping
@@ -357,56 +240,14 @@ body.agents-roster-page {
 }
 
 .collection-select__label {
-  color: var(--card-muted);
-  font-size: 11px;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .collection-select select {
   width: 100%;
-  height: 38px;
   min-width: 0;
-  padding: 0 8px;
-  border: 1px solid var(--card-line);
-  border-radius: 10px;
-  background: var(--card-surface);
-  color: var(--text-primary, #111827);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.collection-select select:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 1px;
-}
-
-.collection-chip {
-  height: 38px;
-  padding: 0 12px;
-  border: 1px solid var(--card-line);
-  border-radius: 10px;
-  background: var(--card-surface);
-  color: var(--text-primary, #111827);
-  font-size: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.collection-chip:hover {
-  border-color: var(--primary-color, #4f46e5);
-}
-
-.collection-chip:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 1px;
-}
-
-.collection-chip[aria-pressed="true"] {
-  border-color: var(--primary-color, #4f46e5);
-  box-shadow: inset 0 0 0 1px var(--primary-color, #4f46e5);
-  font-weight: 600;
 }
 
 .quick-filters {
@@ -421,72 +262,36 @@ body.agents-roster-page {
    the toolbar's budget of four. */
 .view-cluster {
   display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 6px;
+  flex: 1 1 26rem;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-2);
   min-width: 0;
+  max-width: 100%;
 }
 
 .view-sort {
+  display: grid;
+  gap: var(--space-1);
   margin: 0;
   min-width: 0;
 }
 
 .view-sort select {
-  height: 38px;
-  max-width: 150px;
+  max-width: 12rem;
   min-width: 0;
-  padding: 0 8px;
-  border: 1px solid var(--card-line);
-  border-radius: 10px;
-  background: var(--card-soft);
-  color: var(--text-primary, #111827);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.view-sort select:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 1px;
 }
 
 .view-toggle {
   display: flex;
   flex: 0 0 auto;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--card-line);
-  border-radius: 10px;
-  background: var(--card-soft);
+  gap: var(--space-1);
 }
 
 .view-button {
-  display: grid;
-  width: 34px;
-  height: 32px;
-  place-items: center;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--card-muted);
-  cursor: pointer;
-  font-size: 15px;
-}
-
-.view-button:hover {
-  color: var(--text-primary, #111827);
-}
-
-/* The active view is carried by weight and a filled chip, not hue alone. */
-.view-button[aria-pressed="true"] {
-  background: var(--card-surface);
-  color: var(--text-primary, #111827);
-  box-shadow: inset 0 0 0 1px var(--primary-color, #4f46e5);
-}
-
-.view-button:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 1px;
+  --bs-btn-active-color: var(--accent-text);
+  --bs-btn-active-bg: var(--bg-secondary);
+  --bs-btn-active-border-color: var(--accent-text);
 }
 
 /* ---- Card context menu ---------------------------------------------------- */
@@ -536,6 +341,7 @@ body.agents-roster-page {
 
 .roster-coachmark__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
 }
@@ -543,36 +349,13 @@ body.agents-roster-page {
 /* ---- Filters button + panel ----------------------------------------------- */
 
 .collection-filters-btn {
-  display: inline-flex;
   flex: 0 0 auto;
-  align-items: center;
-  gap: 7px;
-  height: 38px;
-  padding: 0 13px;
-  border: 1px solid var(--card-line);
-  border-radius: 10px;
-  background: var(--card-surface);
-  color: var(--text-primary, #111827);
-  font-size: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.collection-filters-btn:hover {
-  border-color: var(--primary-color, #4f46e5);
-}
-
-.collection-filters-btn:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 1px;
 }
 
 /* Active filters are carried by the badge's presence and the button's weight,
    not by colour alone (FR-88). */
 .collection-filters-btn.is-active {
-  border-color: var(--primary-color, #4f46e5);
-  box-shadow: inset 0 0 0 1px var(--primary-color, #4f46e5);
-  font-weight: 600;
+  border-color: var(--accent-text);
 }
 
 .collection-filters-btn__badge {
@@ -602,11 +385,11 @@ body.agents-roster-page {
   max-height: min(70vh, 560px);
   padding: 0;
   overflow: auto;
-  border: 1px solid var(--card-line);
-  border-radius: var(--roster-radius);
-  background: var(--card-surface);
-  color: var(--text-primary, #111827);
-  box-shadow: 0 24px 60px -30px rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  background: var(--surface-solid);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-xl);
 }
 
 .filters-panel::backdrop {
@@ -628,27 +411,7 @@ body.agents-roster-page {
 }
 
 .filters-panel__close {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--card-muted);
-  font-size: 19px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.filters-panel__close:hover {
-  border-color: var(--card-line);
-  color: var(--text-primary, #111827);
-}
-
-.filters-panel__close:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 1px;
+  font-size: 1.25rem;
 }
 
 .filters-panel .collection-selects {
@@ -707,6 +470,7 @@ body.agents-roster-page {
   padding: 40px 20px;
   border: 1px dashed var(--card-line);
   border-radius: var(--roster-radius);
+  background: var(--card-soft);
   text-align: center;
 }
 
@@ -1117,11 +881,7 @@ body.agents-roster-page {
 /* ---- Agent card ----------------------------------------------------------- */
 
 .roster-card {
-  /* Fallback for agents whose role has no catalog accent — chiefly the built-in
-     CLI agents. It resolves through --roster-accent rather than the raw brand
-     primary because the brand green is fixed across themes and gives only
-     2.39:1 on the dark paper surface, which axe flags as a serious contrast
-     violation on the role line (FR-119). --roster-accent is lifted per theme. */
+  /* Catalog colours remain artwork data, not text/selection foregrounds. */
   --role-accent: var(--roster-accent, var(--primary-color, #4f46e5));
   position: relative;
   display: flex;
@@ -1129,6 +889,7 @@ body.agents-roster-page {
   border: 1px solid var(--card-line);
   border-radius: var(--roster-radius);
   background: var(--card-surface);
+  box-shadow: var(--cozy-shadow-sm);
   transition:
     border-color 0.14s ease,
     box-shadow 0.14s ease,
@@ -1152,16 +913,20 @@ body.agents-roster-page {
 
 .roster-card:hover {
   border-color: color-mix(in srgb, var(--role-accent) 50%, var(--card-line));
-  box-shadow: 0 10px 26px -20px rgba(15, 23, 42, 0.55);
   transform: translateY(-1px);
+}
+
+/* Interactive artwork may lift; selection rings always retain authority. */
+.roster-card:hover:not(.is-focused):not(.is-checked) {
+  box-shadow: var(--cozy-shadow);
 }
 
 /* Focused (drives the Inspector) reads as a solid ring plus a corner marker;
    checked (drives bulk actions) reads as an inset outline. Both can be present
    at once and stay tellable apart without colour (FR41). */
 .roster-card.is-focused {
-  border-color: var(--role-accent);
-  box-shadow: inset 0 0 0 1px var(--role-accent);
+  border-color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent-text);
 }
 
 /* Bottom-right, not top-right: the top-right corner now carries the status chip
@@ -1173,29 +938,26 @@ body.agents-roster-page {
   bottom: 9px;
   width: 8px;
   height: 8px;
-  border: 1px solid var(--role-accent);
+  color: var(--accent-text);
+  border: 1px solid currentColor;
   background: var(--card-surface);
   transform: rotate(45deg);
 }
 
 .roster-card.is-checked {
-  box-shadow: inset 0 0 0 2px var(--primary-color, #4f46e5);
+  box-shadow: inset 0 0 0 2px var(--accent-text);
 }
 
 .roster-card.is-focused.is-checked {
   box-shadow:
-    inset 0 0 0 2px var(--primary-color, #4f46e5),
-    0 0 0 1px var(--role-accent);
+    inset 0 0 0 2px var(--accent-text),
+    0 0 0 1px var(--accent-text);
 }
 
 /* Needs-attention is carried by a dashed left edge as well as the status text,
    so it survives a monochrome or colour-blind reading (FR24/FR90). */
 .roster-card.is-attention {
-  border-left: 3px dashed #b45309;
-}
-
-.roster-card.is-disabled {
-  opacity: 0.72;
+  border-left: 3px dashed var(--warning-text);
 }
 
 .roster-card.is-disabled .agent-avatar {
@@ -1256,7 +1018,7 @@ body.agents-roster-page {
 }
 
 .roster-card__check:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
+  outline: 2px solid var(--focus-color);
   outline-offset: 2px;
 }
 
@@ -1284,7 +1046,7 @@ body.agents-roster-page {
 }
 
 .roster-card__open:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
+  outline: 2px solid var(--focus-color);
   outline-offset: -3px;
 }
 
@@ -1472,7 +1234,7 @@ body.agents-roster-page {
   min-width: 0;
   margin-top: 3px;
   overflow: hidden;
-  color: var(--role-accent);
+  color: var(--card-muted);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -1751,6 +1513,7 @@ body.agents-roster-page {
   padding: 40px 20px;
   border: 1px dashed var(--card-line);
   border-radius: var(--roster-radius);
+  background: var(--card-soft);
   text-align: center;
   color: var(--card-muted);
   font-size: 14px;
@@ -1767,20 +1530,7 @@ body.agents-roster-page {
   gap: 14px;
 }
 
-.roster-linkbtn {
-  background: none;
-  border: none;
-  color: var(--roster-accent, #4f46e5);
-  cursor: pointer;
-  font-size: 13px;
-  text-decoration: underline;
-}
-
-.roster-linkbtn:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
+/* .roster-linkbtn remains a controller/legacy hook; shared aliases paint it. */
 
 /* ---- Bulk action bar ------------------------------------------------------ */
 
@@ -1788,21 +1538,20 @@ body.agents-roster-page {
    it stays reachable while the collection scrolls (PRD FR45). */
 .bulk-bar {
   position: sticky;
-  bottom: 12px;
+  bottom: calc(
+    var(--collection-launcher-clearance, var(--ori-launcher-clearance-y, 88px)) + var(--space-3)
+  );
   z-index: 20;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  /* The global Ori launcher is fixed to the bottom-right of the viewport. When
-     this bar reaches that far — which depends on viewport width and whether the
-     Inspector is open — its right-hand actions would sit underneath the
-     launcher and stop being clickable. Reserve the launcher's own declared
-     footprint instead of guessing. */
-  padding: 10px var(--ori-launcher-clearance, 12px) 10px 12px;
+  gap: var(--space-2) var(--space-3);
+  /* Vertical clearance keeps whole controls usable even when the assistant's
+     name/portrait makes it wider than the narrow bar's remaining space. */
+  padding: var(--space-3);
   border: 1px solid
     color-mix(in srgb, var(--primary-color, #4f46e5) 40%, var(--border-color, #e5e7eb));
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--primary-color, #4f46e5) 6%, var(--bg-primary, #fff));
   box-shadow: 0 -4px 12px color-mix(in srgb, #000 8%, transparent);
 }
@@ -1819,48 +1568,6 @@ body.agents-roster-page {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-
-.bulk-bar__btn {
-  border: 1px solid var(--border-color, #d1d5db);
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #111827);
-  border-radius: 8px;
-  padding: 6px 11px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    background 0.15s ease;
-}
-
-.bulk-bar__btn:hover {
-  border-color: var(--primary-color, #4f46e5);
-}
-
-.bulk-bar__btn:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 1px;
-}
-
-.bulk-bar__btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.bulk-bar__btn--danger {
-  border-color: color-mix(in srgb, #ef4444 55%, var(--border-color, #d1d5db));
-  color: #b91c1c;
-}
-
-.bulk-bar__btn--danger:hover {
-  border-color: #ef4444;
-  background: color-mix(in srgb, #ef4444 8%, var(--bg-primary, #fff));
-}
-
-[data-bs-theme="dark"] .bulk-bar__btn--danger {
-  color: #f87171;
 }
 
 /* ---- Bulk result surface -------------------------------------------------- */
@@ -1923,14 +1630,21 @@ body.agents-roster-page {
 /* ---- Bulk-delete confirmation dialog -------------------------------------- */
 
 .bulk-dialog {
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 14px;
-  padding: 22px 24px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  padding: var(--modal-padding);
   max-width: 460px;
   width: calc(100vw - 32px);
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #111827);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.25);
+  max-height: calc(100dvh - 2rem);
+  background: var(--surface-solid);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-xl);
+  overflow-wrap: anywhere;
+}
+
+.bulk-dialog[open] {
+  display: flex;
+  flex-direction: column;
 }
 
 .bulk-dialog::backdrop {
@@ -1949,7 +1663,7 @@ body.agents-roster-page {
 }
 
 .bulk-dialog__body {
-  max-height: 46vh;
+  min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -1957,13 +1671,12 @@ body.agents-roster-page {
 }
 
 .bulk-dialog__group {
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border-top: 1px solid var(--border-color);
+  padding-block: var(--space-3);
 }
 
-.bulk-dialog__group.is-danger {
-  border-color: color-mix(in srgb, #ef4444 40%, var(--border-color, #e5e7eb));
+.bulk-dialog__group.is-danger .bulk-dialog__grouptitle {
+  color: var(--danger-text);
 }
 
 .bulk-dialog__grouptitle {
@@ -2018,9 +1731,11 @@ body.agents-roster-page {
 
 .bulk-dialog__actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 18px;
+  flex-shrink: 0;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
 }
 
 /* ---- Give faces ------------------------------------------------------------- */
@@ -2072,8 +1787,7 @@ body.agents-roster-page {
   background: var(--card-soft);
 }
 
-/* common.css sizes every checkbox 44x44; the attribute selector is what wins
-   the specificity fight, the same way the card checkbox does. */
+/* Normal-sized artwork; common.css gives its native label the touch floor. */
 .faces-row__check[type="checkbox"] {
   width: 16px;
   height: 16px;
@@ -2128,42 +1842,8 @@ body.agents-roster-page {
   font-size: 12px;
 }
 
-.btn-danger {
-  border: 1px solid #b91c1c;
-  background: #b91c1c; /* white text meets WCAG AA (contrast > 5:1) */
-  color: #fff;
-  border-radius: 8px;
-  padding: 8px 16px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.btn-danger:hover:not(:disabled) {
-  background: #991b1b;
-}
-.btn-danger:focus-visible {
-  outline: 2px solid #b91c1c;
-  outline-offset: 2px;
-}
-.btn-danger:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-[data-bs-theme="dark"] .bulk-dialog {
-  background: var(--bg-primary, #1f2430);
-}
-
 .bulk-dialog__text {
   width: 100%;
-  border: 1px solid var(--border-color, #d1d5db);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 14px;
-  background: var(--bg-primary, #fff);
-  color: var(--text-primary, #111827);
 }
 
 .bulk-tags-checklist {
@@ -2251,23 +1931,26 @@ body.agents-roster-page {
 /* ---- Inspector (selected agent) ------------------------------------------- */
 
 .inspector {
+  position: sticky;
+  top: calc(var(--navbar-offset) + var(--space-4));
   min-width: 0;
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: var(--roster-radius);
-  background: var(--bg-primary, #fff);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--surface-solid);
   overflow: hidden;
-}
-
-[data-bs-theme="dark"] .inspector {
-  background: var(--bg-primary, #1f2430);
 }
 
 /* Its own scroll region, so a long agent scrolls inside the Inspector instead
    of scrolling the collection away (PRD FR50). */
 .inspector-scroll {
-  max-height: calc(100vh - 190px);
+  max-height: var(
+    --inspector-available-height,
+    calc(100dvh - var(--navbar-offset) - var(--ori-launcher-clearance-y, 88px) - var(--space-8))
+  );
   overflow: auto;
   scrollbar-width: thin;
+  scroll-padding-block-start: calc(var(--control-height-lg) + var(--space-4));
+  scroll-padding-block-end: calc(var(--ori-launcher-clearance-y, 88px) + var(--space-4));
 }
 
 .inspector-topline {
@@ -2280,11 +1963,7 @@ body.agents-roster-page {
   gap: 10px;
   padding: 8px 10px 8px 16px;
   border-bottom: 1px solid var(--border-color, #e5e7eb);
-  background: var(--bg-primary, #fff);
-}
-
-[data-bs-theme="dark"] .inspector-topline {
-  background: var(--bg-primary, #1f2430);
+  background: var(--surface-solid);
 }
 
 .inspector-kicker {
@@ -2296,28 +1975,7 @@ body.agents-roster-page {
 }
 
 .inspector-close {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--card-line);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--card-muted);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-}
-
-.inspector-close:hover {
-  border-color: var(--primary-color, #4f46e5);
-  color: var(--text-primary, #111827);
-}
-
-.inspector-close:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 2px;
+  font-size: 1.25rem;
 }
 
 /* Closed: the column collapses and the Gallery re-columns into the space.
@@ -2353,8 +2011,8 @@ body.agents-roster-page {
 }
 
 .collection-shell.is-inspector-sheet .inspector-scroll {
-  max-height: 100vh;
-  height: 100vh;
+  max-height: 100dvh;
+  height: 100dvh;
 }
 
 body.inspector-sheet-open {
@@ -2421,10 +2079,8 @@ body.inspector-sheet-open {
 }
 
 .stage {
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: var(--roster-radius);
-  background: var(--bg-primary, #fff);
-  overflow: hidden;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .stage__hero {
@@ -2437,14 +2093,9 @@ body.inspector-sheet-open {
     "purpose purpose"
     "nextstep nextstep"
     "actions actions";
-  gap: 14px 16px;
-  padding: 22px 24px;
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--primary-color, #4f46e5) 6%, transparent),
-    transparent
-  );
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border-color);
 }
 
 /* The actions take a row of their own rather than overlaying the hero's
@@ -2457,76 +2108,14 @@ body.inspector-sheet-open {
   grid-area: actions;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 /* Favorite/Unfavorite — the first of the Inspector's three actions (FR-43).
    Quieter than "Open full page", which is the primary way out of a reader. */
-.stage__action {
-  font-size: 12px;
-  border: 1px solid var(--border-color, #e5e7eb);
-  color: var(--text-primary, #111827);
-  background: transparent;
-  border-radius: 8px;
-  padding: 6px 12px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.stage__action:hover {
-  border-color: var(--roster-accent, #4f46e5);
-}
-.stage__action:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 2px;
-}
-/* Favorited reads as a filled state, not only as a different star glyph. */
-.stage__action[aria-pressed="true"] {
-  border-color: #b45309;
-  background: color-mix(in srgb, #b45309 12%, transparent);
-  color: #b45309;
-}
-[data-bs-theme="dark"] .stage__action[aria-pressed="true"] {
-  border-color: #fbbf24;
-  color: #fbbf24;
-}
-
-.stage__fullpage {
-  font-size: 12px;
-  border: 1px solid
-    color-mix(in srgb, var(--primary-color, #4f46e5) 45%, var(--border-color, #e5e7eb));
-  color: var(--primary-color, #4f46e5);
-  background: transparent;
-  border-radius: 8px;
-  padding: 6px 12px;
-  cursor: pointer;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.stage__fullpage:hover {
-  background: color-mix(in srgb, var(--primary-color, #4f46e5) 12%, transparent);
-}
-.stage__fullpage:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 2px;
-}
-
-.stage__delete {
-  font-size: 12px;
-  border: 1px solid color-mix(in srgb, #dc2626 55%, var(--border-color, #e5e7eb));
-  color: #dc2626;
-  background: transparent;
-  border-radius: 8px;
-  padding: 6px 12px;
-  cursor: pointer;
-}
-.stage__delete:hover {
-  background: color-mix(in srgb, #dc2626 12%, transparent);
-}
-.stage__delete:focus-visible {
-  outline: 2px solid #dc2626;
-  outline-offset: 2px;
-}
+/* Action metrics and selected/hover/disabled/focus states use shared aliases. */
 
 /* Geometry comes from the shared avatar renderer (--aa-size); the stage only
    places it in the hero grid. */
@@ -2541,10 +2130,11 @@ body.inspector-sheet-open {
 }
 
 .stage__name {
-  display: inline;
+  display: block;
   margin: 0;
-  font-size: 22px;
-  line-height: 1.15;
+  font-size: 1.375rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 /* Repeats the card's favorite star beside the name so it reads at a glance
@@ -2679,9 +2269,9 @@ body.inspector-sheet-open {
 
 .stage__vitals {
   grid-area: vitals;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 /* Progression block: role emblem + name, level/stage, XP bar, slot usage.
@@ -2777,29 +2367,19 @@ body.inspector-sheet-open {
   white-space: nowrap;
 }
 
-/* --card-muted rather than --text-secondary: the dark value of the latter
-   (#8A8A8A) only reaches 4.03:1 against --bg-tertiary (#2A2C33). */
 .stage__progression-slots {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--card-muted);
   white-space: nowrap;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--bg-tertiary, #f3f4f6);
-  border: 1px solid var(--border-color, #e5e7eb);
 }
 
 .vital {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 6px;
-  font-size: 12px;
-  padding: 5px 10px;
-  border-radius: 999px;
-  background: var(--bg-secondary, #f3f4f6);
-  border: 1px solid var(--border-color, #e5e7eb);
-  color: var(--text-primary, #111827);
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  font-size: 0.8125rem;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .vital b {
@@ -2819,39 +2399,8 @@ body.inspector-sheet-open {
 
 /* Tabs */
 .stage__tabs {
-  display: flex;
-  gap: 2px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--border-color, #e5e7eb);
-}
-
-.stage__tab {
-  appearance: none;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: 12px 14px;
-  font-size: 14px;
-  color: var(--card-muted);
-  cursor: pointer;
-}
-
-.stage__tab:hover {
-  color: var(--text-primary, #111827);
-}
-
-.stage__tab.is-active {
-  /* High-contrast text; the colored underline + weight signal the active tab
-     (the brand primary can be too dark for AA as text on dark surfaces). */
-  color: var(--text-primary, #111827);
-  border-bottom-color: var(--primary-color, #4f46e5);
-  font-weight: 600;
-}
-
-.stage__tab:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: -2px;
-  border-radius: 4px 4px 0 0;
+  flex-wrap: wrap;
+  padding-inline: var(--space-2);
 }
 
 .stage__panels {
@@ -2874,8 +2423,10 @@ body.inspector-sheet-open {
 }
 .stage-facts dd {
   margin: 0;
+  min-width: 0;
   font-size: 14px;
-  color: var(--text-primary, #111827);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .stage-desc {
@@ -3093,36 +2644,6 @@ body.inspector-sheet-open {
   color: #f87171;
 }
 
-.btn-primary,
-.btn-ghost {
-  border-radius: 8px;
-  padding: 8px 16px;
-  font-size: 14px;
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-.btn-primary {
-  background: var(--primary-color, #4f46e5);
-  color: #fff;
-}
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.btn-ghost {
-  background: transparent;
-  border-color: var(--border-color, #d1d5db);
-  color: var(--text-primary, #111827);
-}
-.btn-ghost:hover {
-  border-color: var(--primary-color, #4f46e5);
-}
-.btn-primary:focus-visible,
-.btn-ghost:focus-visible {
-  outline: 2px solid var(--primary-color, #4f46e5);
-  outline-offset: 2px;
-}
-
 [data-bs-theme="dark"] .field__control input,
 [data-bs-theme="dark"] .field__control select,
 [data-bs-theme="dark"] .field__control textarea {
@@ -3187,7 +2708,7 @@ body.inspector-sheet-open {
   cursor: pointer;
 }
 .create-preset__more-summary:focus-visible {
-  outline: 2px solid var(--primary-color, currentColor);
+  outline: 2px solid var(--focus-color);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -3313,9 +2834,8 @@ body.inspector-sheet-open {
 
 /* ---- Dark theme nudges ---------------------------------------------------- */
 
-[data-bs-theme="dark"] .vital,
 [data-bs-theme="dark"] .stage-prompt pre {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--bg-secondary);
 }
 [data-bs-theme="dark"] .vital--warn {
   background: color-mix(in srgb, #f59e0b 20%, transparent);
@@ -3323,10 +2843,6 @@ body.inspector-sheet-open {
 [data-bs-theme="dark"] .vital--warn b,
 [data-bs-theme="dark"] .model-note.is-legacy {
   color: #fbbf24;
-}
-
-[data-bs-theme="dark"] .stage {
-  background: var(--bg-primary, #1f2430);
 }
 
 /* ---- Responsive ----------------------------------------------------------- */
@@ -3379,30 +2895,6 @@ body.inspector-sheet-open {
   }
 }
 
-/* common.css inflates every checkbox to a 44x44 box at this breakpoint. On the
-   old tall card that was absorbed by pushing the body down 58px; on a ~115px
-   card that band is half the card, so the touch target is met without the
-   visual inflation: the control keeps its 15px box and the LABEL grows a
-   transparent ring out to 45px square.
-   Clicking a label toggles its input, and a pseudo-element is part of the
-   label's hit area, so the target is real rather than declared. */
-@media (max-width: 768px) {
-  /* The attribute selector is load-bearing: common.css sets the min-height on
-     `input[type="checkbox"]`, which out-specifies a bare class and left the
-     control 50px square however small this rule asked for. */
-  .roster-card__check[type="checkbox"] {
-    width: 15px;
-    height: 15px;
-    min-width: 0;
-    min-height: 0;
-  }
-  .roster-card__checkwrap::after {
-    content: "";
-    position: absolute;
-    inset: -12px;
-  }
-}
-
 /* Mobile: one full-width card column, and every control wraps rather than
    overflowing (FR81/FR93). */
 @media (max-width: 640px) {
@@ -3423,18 +2915,15 @@ body.inspector-sheet-open {
      Inspector already makes when narrow (FR-16). It is still the same modal
      <dialog>, so the focus trap and Escape behaviour do not change with the
      breakpoint — only where it sits. */
-  /* !important because positionFilters() writes inline top/left on the way up
-     from a wide viewport, and an inline style beats a stylesheet rule. The
-     function clears those values below this breakpoint, but the sheet must be
-     correct even in the frame before it runs. */
+  /* positionFilters() clears its desktop inline coordinates at this breakpoint. */
   .filters-panel {
-    inset: auto 0 0 !important;
-    top: auto !important;
+    inset: auto 0 0;
+    top: auto;
     width: 100%;
     max-width: 100%;
     max-height: 82vh;
     border-width: 1px 0 0;
-    border-radius: var(--roster-radius) var(--roster-radius) 0 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   }
   .view-cluster {
     flex: 1 1 auto;
@@ -3454,80 +2943,10 @@ body.inspector-sheet-open {
   .roster-stat,
   .bulk-bar__btn,
   .bulk-bar__btn--danger,
-  .btn-primary,
-  .btn-ghost,
-  .btn-danger,
   .stage__progression-xpfill {
     transition: none;
   }
   .roster-card:hover {
     transform: none;
   }
-}
-
-/* ---- Cozy surface treatment ------------------------------------------------ */
-
-/*
- * Re-pointing the token block above changed the page's COLOURS; this section
- * changes its MATERIAL. Both are needed: a warm palette applied to floating
- * rectangles with soft blur still reads as a dashboard.
- *
- * The treatment is deliberately narrow — corner rounding onto the shared 4px
- * step grid, and a flat bottom edge in place of a blurred drop shadow, so a
- * card reads as a stacked physical thing. Nothing here changes size, spacing,
- * position, or any state class, so every focus/checked/attention/read-only cue
- * defined earlier survives untouched (FR-1/FR-4, FR-41, FR-90).
- *
- * It lives at the end of the file rather than being threaded through each
- * component so the cozy layer stays one reviewable block — and so reverting the
- * look is a single deletion.
- */
-
-/* Cards and the Inspector are already on --roster-radius, which the token block
-   above now derives from --cozy-radius-lg; only the smaller controls needed
-   moving onto the step grid. */
-.roster-stat,
-.collection-search input,
-.collection-select select,
-.collection-chip,
-.view-toggle,
-.bulk-bar {
-  border-radius: var(--cozy-radius);
-}
-
-/* The bulk bar is excluded from the flat bottom edge on purpose: it is sticky,
-   and its existing upward shadow is what says "this floats above the list you
-   are still scrolling". A bottom edge would flatten it into the content. */
-.roster-card,
-.roster-stat,
-.collection-search input,
-.collection-select select,
-.collection-chip,
-.view-toggle,
-.stage {
-  box-shadow: var(--cozy-shadow-sm);
-}
-
-/* Warm-toned rather than the slate-blue blur this replaced; the 1px rise
-   defined earlier still carries the actual hover feedback.
-   Focused and checked cards are excluded: their rings ARE box-shadows, and this
-   rule sits later in the file at equal specificity, so without the guard simply
-   hovering the focused card would erase the ring that says which agent the
-   Inspector is showing (FR-41/FR-95). */
-.roster-card:hover:not(.is-focused):not(.is-checked) {
-  box-shadow: var(--cozy-shadow);
-}
-
-.collection-head__new {
-  border-radius: var(--cozy-radius);
-  box-shadow: var(--cozy-shadow-sm);
-}
-
-/* Loading and empty states are surfaces too — left transparent, they were the
-   one place the page fell back to a bare dashed rectangle. The error variant is
-   excluded: its red-tinted fill is the state cue, and this rule would sit after
-   it in the cascade and quietly erase it. */
-.collection-state:not(.collection-state--error),
-.roster-empty {
-  background: var(--card-soft);
 }

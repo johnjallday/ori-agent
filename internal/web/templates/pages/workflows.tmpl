@@ -3,993 +3,275 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light workflows-page">
   {{template "navbar.tmpl" .}}
 
   <style>
+    /* Page geometry only: controls, badges and dialogs use the shared kit. */
+    .workflows-page .main-content-wrapper { background: var(--bg-primary); }
     #behaviorStudioPage {
-      --behavior-paper: color-mix(in srgb, var(--bg-primary) 76%, #C9CCD1 24%);
-      --behavior-paper-strong: color-mix(in srgb, var(--bg-secondary) 68%, #C9CCD1 32%);
-      --behavior-surface: color-mix(in srgb, var(--bg-primary) 84%, #ffffff 16%);
-      --behavior-surface-strong: color-mix(in srgb, var(--bg-primary) 74%, #ffffff 26%);
-      --behavior-card-surface: color-mix(in srgb, var(--bg-primary) 80%, #ffffff 20%);
-      --behavior-subtle-surface: color-mix(in srgb, var(--bg-secondary) 78%, #ffffff 22%);
-      --behavior-input-surface: color-mix(in srgb, var(--bg-primary) 88%, white 12%);
-      --behavior-input-highlight: rgba(255, 255, 255, 0.82);
-      --behavior-code-surface: color-mix(in srgb, var(--bg-secondary) 80%, #ffffff 20%);
-      --behavior-panel-sheen: linear-gradient(135deg, rgba(255, 255, 255, 0.72), rgba(232, 234, 237, 0.86));
-      --behavior-panel-sheen-soft: linear-gradient(180deg, rgba(255, 255, 255, 0.65), rgba(232, 234, 237, 0.88));
-      --behavior-section-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.68), rgba(232, 234, 237, 0.9));
-      --behavior-modal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(232, 234, 237, 0.96));
-      --behavior-page-wash: linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.08));
-      --behavior-line: color-mix(in srgb, var(--border-color) 72%, #5C5C5E 28%);
-      --behavior-line-strong: color-mix(in srgb, var(--border-color) 54%, #5C5C5E 46%);
+      --behavior-line: var(--border-color);
       --behavior-ink: var(--text-primary);
       --behavior-ink-soft: var(--text-secondary);
-      --behavior-title: color-mix(in srgb, var(--text-primary) 90%, #0A0A0A 10%);
-      --behavior-grid: rgba(10, 10, 10, 0.045);
-      --behavior-grid-strong: rgba(10, 10, 10, 0.032);
-      --behavior-accent: #1F6B4E;
-      --behavior-accent-strong: #155039;
-      --behavior-signal: #d97706;
-      --behavior-danger: #be123c;
-      --behavior-badge-surface: color-mix(in srgb, var(--bg-primary) 82%, white 18%);
-      --behavior-builtin-text: #9a3412;
-      --behavior-builtin-bg: rgba(251, 146, 60, 0.12);
-      --behavior-builtin-border: rgba(154, 52, 18, 0.18);
-      --behavior-custom-text: #115e59;
-      --behavior-custom-bg: rgba(45, 212, 191, 0.14);
-      --behavior-custom-border: rgba(13, 148, 136, 0.18);
-      --behavior-warning-text: #9a3412;
-      --behavior-warning-bg: rgba(251, 191, 36, 0.14);
-      --behavior-warning-border: rgba(217, 119, 6, 0.18);
-      --behavior-graph-surface: color-mix(in srgb, var(--bg-primary) 74%, #ffffff 26%);
-      --behavior-empty-surface: color-mix(in srgb, var(--bg-secondary) 82%, #ffffff 18%);
-      --behavior-json-bg: rgba(10, 10, 10, 0.92);
-      --behavior-shadow: 0 28px 80px rgba(0, 0, 0, 0.14);
-      position: relative;
-      min-height: calc(100vh - 64px);
-      padding: 32px 28px 40px;
-      color: var(--behavior-ink);
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
-      background:
-        radial-gradient(circle at 0% 0%, rgba(31, 107, 78, 0.14), transparent 32%),
-        radial-gradient(circle at 100% 0%, rgba(31, 107, 78, 0.1), transparent 30%),
-        var(--behavior-page-wash),
-        var(--behavior-paper);
-      overflow: hidden;
+      --behavior-title: var(--text-primary);
+      padding: var(--space-6) var(--space-3);
+      color: var(--text-primary);
+      background: var(--bg-primary);
     }
-
-    [data-bs-theme="dark"] #behaviorStudioPage {
-      --behavior-paper: color-mix(in srgb, var(--bg-primary) 82%, #0D140D 18%);
-      --behavior-paper-strong: color-mix(in srgb, var(--bg-secondary) 86%, #0D140D 14%);
-      --behavior-surface: rgba(13, 20, 13, 0.84);
-      --behavior-surface-strong: rgba(13, 20, 13, 0.94);
-      --behavior-card-surface: rgba(13, 20, 13, 0.82);
-      --behavior-subtle-surface: rgba(13, 20, 13, 0.9);
-      --behavior-input-surface: rgba(10, 10, 10, 0.94);
-      --behavior-input-highlight: rgba(138, 138, 138, 0.08);
-      --behavior-code-surface: rgba(10, 10, 10, 0.96);
-      --behavior-panel-sheen: linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(13, 20, 13, 0.08));
-      --behavior-panel-sheen-soft: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(13, 20, 13, 0.12));
-      --behavior-section-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(13, 20, 13, 0.14));
-      --behavior-modal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(13, 20, 13, 0.14));
-      --behavior-page-wash: linear-gradient(180deg, rgba(10, 10, 10, 0.24), rgba(10, 10, 10, 0.05));
-      --behavior-line: rgba(92, 92, 94, 0.28);
-      --behavior-line-strong: rgba(201, 204, 209, 0.42);
-      --behavior-ink: var(--text-primary);
-      --behavior-ink-soft: var(--text-secondary);
-      --behavior-title: color-mix(in srgb, var(--text-primary) 94%, #C9CCD1 6%);
-      --behavior-grid: rgba(201, 204, 209, 0.08);
-      --behavior-grid-strong: rgba(201, 204, 209, 0.06);
-      --behavior-badge-surface: rgba(13, 20, 13, 0.84);
-      --behavior-builtin-text: #fdba74;
-      --behavior-builtin-bg: rgba(249, 115, 22, 0.16);
-      --behavior-builtin-border: rgba(251, 146, 60, 0.24);
-      --behavior-custom-text: #5eead4;
-      --behavior-custom-bg: rgba(13, 148, 136, 0.18);
-      --behavior-custom-border: rgba(45, 212, 191, 0.24);
-      --behavior-warning-text: #fcd34d;
-      --behavior-warning-bg: rgba(245, 158, 11, 0.16);
-      --behavior-warning-border: rgba(251, 191, 36, 0.26);
-      --behavior-graph-surface: rgba(10, 10, 10, 0.96);
-      --behavior-empty-surface: rgba(13, 20, 13, 0.84);
-      --behavior-json-bg: rgba(0, 0, 0, 0.96);
-      --behavior-shadow: 0 28px 80px rgba(0, 0, 0, 0.48);
-    }
-
-    [data-bs-theme="dark"] #behaviorStudioPage::before {
-      mix-blend-mode: normal;
-      opacity: 0.34;
-    }
-
-    #behaviorStudioPage::before,
-    #behaviorStudioPage::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      pointer-events: none;
-    }
-
-    #behaviorStudioPage::before {
-      background-image:
-        linear-gradient(var(--behavior-grid) 1px, transparent 1px),
-        linear-gradient(90deg, var(--behavior-grid) 1px, transparent 1px);
-      background-size: 28px 28px;
-      mix-blend-mode: multiply;
-      opacity: 0.45;
-    }
-
-    #behaviorStudioPage::after {
-      background:
-        radial-gradient(circle at 15% 20%, rgba(31, 107, 78, 0.1), transparent 22%),
-        radial-gradient(circle at 82% 28%, rgba(31, 107, 78, 0.08), transparent 22%);
-      opacity: 0.9;
-    }
-
-    .behavior-page {
-      position: relative;
-      z-index: 1;
-    }
-
-    .behavior-page__masthead {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 18px;
-      align-items: end;
-      margin-bottom: 24px;
-      padding: 26px 28px;
-      border: 1px solid var(--behavior-line);
-      border-radius: 28px;
-      background: var(--behavior-panel-sheen), var(--behavior-surface-strong);
-      box-shadow: var(--behavior-shadow);
-      backdrop-filter: blur(20px);
-    }
-
-    .behavior-page__eyebrow,
-    .behavior-section__eyebrow,
-    .behavior-step-card__eyebrow,
-    .behavior-preview-card__eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 12px;
-      letter-spacing: 0.18em;
-      text-transform: uppercase;
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--behavior-accent-strong);
-    }
-
-    .behavior-page__title,
-    .behavior-section__title,
-    .behavior-preview-card__title,
-    .behavior-step-card__title {
-      margin: 0;
-      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-      font-weight: 600;
-      letter-spacing: -0.03em;
-      color: var(--behavior-title);
-    }
-
-    .behavior-page__title {
-      font-size: clamp(2rem, 3.4vw, 3.25rem);
-      line-height: 0.95;
-      max-width: 13ch;
-    }
-
-    .behavior-page__copy,
-    .behavior-preview-card__copy,
-    .behavior-subsection__copy,
-    .behavior-field__hint,
-    .behavior-launch-note,
-    .behavior-card__summary,
-    .behavior-empty-state__copy {
-      color: var(--behavior-ink-soft);
-      line-height: 1.55;
-    }
-
-    .behavior-page__copy {
-      max-width: 60ch;
-      margin: 14px 0 0;
-      font-size: 1rem;
-    }
-
+    .behavior-page__masthead { margin-bottom: var(--space-4); }
     .behavior-page__stats {
-      display: grid;
-      grid-auto-flow: column;
-      gap: 12px;
-      justify-content: end;
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--space-4);
+      margin: 0 0 var(--space-6);
+      color: var(--text-muted);
+      font-size: 0.875rem;
     }
-
-    .behavior-page__stat {
-      min-width: 132px;
-      padding: 14px 16px;
-      border-radius: 22px;
-      border: 1px solid var(--behavior-line);
-      background: var(--behavior-card-surface);
-      box-shadow: 0 18px 42px rgba(31, 41, 51, 0.08);
-    }
-
-    .behavior-page__stat strong {
-      display: block;
-      font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-      font-size: 1.65rem;
-      color: var(--behavior-title);
-      line-height: 1.05;
-    }
-
-    .behavior-page__stat span {
-      display: block;
-      margin-top: 4px;
-      font-size: 0.8rem;
-      text-transform: uppercase;
-      letter-spacing: 0.14em;
-      color: var(--behavior-ink-soft);
-    }
-
+    .behavior-page__stat { display: flex; gap: var(--space-2); }
+    .behavior-page__stat strong { color: var(--text-primary); }
     .behavior-page__layout {
       display: grid;
-      grid-template-columns: 320px minmax(0, 1fr) 410px;
-      gap: 18px;
+      grid-template-columns: minmax(16rem, 19rem) minmax(0, 1fr);
+      gap: var(--space-6);
       align-items: start;
     }
-
-    .behavior-panel {
-      border: 1px solid var(--behavior-line);
-      border-radius: 28px;
-      background: var(--behavior-panel-sheen-soft), var(--behavior-surface);
-      box-shadow: var(--behavior-shadow);
-      backdrop-filter: blur(20px);
-    }
-
-    .behavior-page__sidebar,
-    .behavior-page__preview {
+    .behavior-page__layout > *, .behavior-field { min-width: 0; }
+    .behavior-page__sidebar {
       position: sticky;
-      top: 88px;
+      top: calc(var(--navbar-height, 64px) + var(--space-4));
     }
-
-    .behavior-page__sidebar .behavior-panel,
-    .behavior-page__preview .behavior-panel,
-    .behavior-page__editor .behavior-panel,
-    .behavior-preview-card,
-    .behavior-section {
-      animation: behaviorPanelRise 0.45s ease both;
-    }
-
-    .behavior-sidebar__top {
-      padding: 22px 22px 18px;
-      border-bottom: 1px solid var(--behavior-line);
-    }
-
-    .behavior-sidebar__label {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 10px;
-      font-size: 0.78rem;
-      font-weight: 700;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--behavior-ink-soft);
-    }
-
-    .behavior-sidebar__actions,
-    .behavior-preview-card__actions,
-    .behavior-subsection__actions,
-    .behavior-card__actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    .behavior-filter-grid {
+    .behavior-library-summary { margin: 0; padding: var(--space-4); }
+    .behavior-sidebar__top { padding: 0 var(--space-4) var(--space-4); }
+    .behavior-filter-grid, .behavior-form-grid {
       display: grid;
-      gap: 10px;
-      margin-top: 14px;
+      gap: var(--space-4);
     }
-
-    .behavior-filter-grid--double,
-    .behavior-form-grid--meta,
-    .behavior-form-grid--rules,
-    .behavior-form-grid--schema,
-    .behavior-launch-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
+    .behavior-filter-grid { margin-top: var(--space-3); }
     .behavior-sidebar__list {
       display: grid;
-      gap: 12px;
-      padding: 18px;
-      max-height: calc(100vh - 260px);
+      gap: var(--space-3);
+      padding: var(--space-4);
+      border-top: 1px solid var(--border-color);
+      max-height: min(32rem, 60vh);
       overflow: auto;
     }
-
     .behavior-card {
-      padding: 16px 16px 14px;
-      border-radius: 22px;
-      border: 1px solid var(--behavior-line);
-      background: var(--behavior-card-surface);
-      cursor: pointer;
-      transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .behavior-card:hover,
-    .behavior-card.is-selected {
-      transform: translateY(-2px);
-      border-color: rgba(13, 148, 136, 0.28);
-      box-shadow: 0 18px 36px rgba(13, 148, 136, 0.1);
-    }
-
-    .behavior-card__head,
-    .behavior-section__head,
-    .behavior-subsection__head,
-    .behavior-step-card__head,
-    .behavior-preview-panel__head,
-    .behavior-preview-card__hero {
-      display: flex;
-      gap: 16px;
-      align-items: flex-start;
-      justify-content: space-between;
-    }
-
-    .behavior-card__title {
-      margin-bottom: 6px;
-      font-weight: 700;
-      color: var(--behavior-title);
-    }
-
-    .behavior-card__meta,
-    .behavior-preview-panel__head span {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      font-size: 0.76rem;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--behavior-ink-soft);
-    }
-
-    .behavior-card__summary {
-      margin: 12px 0 0;
-      font-size: 0.92rem;
-    }
-
-    .behavior-badge,
-    .behavior-readonly-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 10px;
-      border-radius: 999px;
-      font-size: 0.74rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      border: 1px solid var(--behavior-line);
-      background: var(--behavior-badge-surface);
-      color: var(--behavior-ink-soft);
-    }
-
-    .behavior-badge--builtin {
-      color: var(--behavior-builtin-text);
-      border-color: var(--behavior-builtin-border);
-      background: var(--behavior-builtin-bg);
-    }
-
-    .behavior-badge--custom,
-    .behavior-readonly-pill--active {
-      color: var(--behavior-custom-text);
-      border-color: var(--behavior-custom-border);
-      background: var(--behavior-custom-bg);
-    }
-
-    .behavior-section,
-    .behavior-preview-card {
-      padding: 24px;
-      border: 1px solid var(--behavior-line);
-      border-radius: 28px;
-      background: var(--behavior-section-sheen), var(--behavior-surface-strong);
-      box-shadow: var(--behavior-shadow);
-      backdrop-filter: blur(20px);
-    }
-
-    .behavior-section__title,
-    .behavior-preview-card__title {
-      font-size: clamp(1.5rem, 2.2vw, 2.2rem);
-    }
-
-    .behavior-editor-fieldset {
-      border: 0;
-      padding: 0;
-      margin: 0;
       min-width: 0;
+      padding-bottom: var(--space-3);
+      border-bottom: 1px solid var(--border-color);
     }
-
-    .behavior-stack,
-    .behavior-step-list,
-    .behavior-schema-field-list {
-      display: grid;
-      gap: 16px;
-      margin-top: 14px;
-    }
-
-    .behavior-subsection {
-      margin-top: 26px;
-      padding-top: 22px;
-      border-top: 1px solid var(--behavior-line);
-    }
-
-    .behavior-subsection--schema {
-      padding: 18px;
-      border: 1px solid var(--behavior-line);
-      border-radius: 22px;
-      background: var(--behavior-subtle-surface);
-    }
-
-    .behavior-subsection__title {
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
-      font-weight: 700;
-      color: var(--behavior-title);
-    }
-
-    .behavior-form-grid {
-      display: grid;
-      gap: 14px;
-      margin-top: 14px;
-    }
-
-    .behavior-form-grid--step {
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
-
-    .behavior-form-grid--schema-row {
-      grid-template-columns: 1.25fr 0.9fr 0.55fr;
-    }
-
-    .behavior-form-grid--launch-steps {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .behavior-field {
-      display: grid;
-      gap: 8px;
-    }
-
-    .behavior-field--toggle {
-      align-content: start;
-      justify-items: start;
-    }
-
-    .behavior-field__label {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.82rem;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--behavior-ink-soft);
-    }
-
-    .behavior-field__optional {
-      color: color-mix(in srgb, var(--behavior-ink-soft) 72%, transparent);
-      font-weight: 500;
-      letter-spacing: 0.06em;
-    }
-
-    .behavior-input,
-    .behavior-textarea {
+    .behavior-card:last-child { border-bottom: 0; padding-bottom: 0; }
+    .behavior-card__select {
+      display: block;
       width: 100%;
-      border: 1px solid var(--behavior-line);
-      border-radius: 16px;
-      padding: 12px 14px;
-      background: var(--behavior-input-surface);
-      color: var(--behavior-ink);
-      font-size: 0.96rem;
-      box-shadow: inset 0 1px 0 var(--behavior-input-highlight);
-      transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
-    }
-
-    .behavior-input:focus,
-    .behavior-textarea:focus {
-      outline: none;
-      border-color: rgba(13, 148, 136, 0.45);
-      box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.14);
-      transform: translateY(-1px);
-    }
-
-    .behavior-input--mono,
-    .behavior-textarea--code,
-    .behavior-json-inspector pre {
-      font-family: "SFMono-Regular", "IBM Plex Mono", "Cascadia Code", monospace;
-      font-size: 0.92rem;
-    }
-
-    .behavior-textarea {
-      resize: vertical;
-      min-height: 92px;
-    }
-
-    .behavior-textarea--compact {
-      min-height: 76px;
-    }
-
-    .behavior-textarea--code {
-      min-height: 126px;
-      background: linear-gradient(180deg, color-mix(in srgb, var(--behavior-code-surface) 88%, white 12%), var(--behavior-code-surface));
-    }
-
-    .behavior-btn,
-    .behavior-icon-btn,
-    .behavior-link-btn {
-      border: 0;
-      cursor: pointer;
-      transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
-    }
-
-    .behavior-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      min-height: 44px;
-      padding: 0 16px;
-      border-radius: 999px;
-      font-size: 0.9rem;
-      font-weight: 700;
-      letter-spacing: 0.02em;
-      color: #fff;
-      background: linear-gradient(135deg, #1F6B4E, #155039);
-      box-shadow: 0 14px 26px rgba(31, 107, 78, 0.24);
-    }
-
-    .behavior-btn:hover,
-    .behavior-icon-btn:hover,
-    .behavior-link-btn:hover {
-      transform: translateY(-1px);
-    }
-
-    .behavior-btn:disabled,
-    .behavior-icon-btn:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-      transform: none;
-      box-shadow: none;
-    }
-
-    .behavior-btn--secondary {
-      color: var(--behavior-ink);
-      background: var(--behavior-badge-surface);
-      border: 1px solid var(--behavior-line);
-      box-shadow: 0 12px 22px rgba(31, 41, 51, 0.08);
-    }
-
-    .behavior-btn--danger {
-      background: linear-gradient(135deg, #e11d48, #9f1239);
-      box-shadow: 0 14px 24px rgba(225, 29, 72, 0.16);
-    }
-
-    .behavior-icon-btn {
-      width: 34px;
-      height: 34px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 12px;
-      background: var(--behavior-badge-surface);
-      color: var(--behavior-ink-soft);
-      border: 1px solid var(--behavior-line);
-    }
-
-    .behavior-link-btn {
-      padding: 0;
+      padding: var(--space-2);
+      border: 1px solid transparent;
+      border-radius: var(--radius-md);
+      text-align: left;
+      color: var(--text-primary);
       background: transparent;
-      color: var(--behavior-accent-strong);
-      font-weight: 700;
-      text-decoration: underline;
-      text-decoration-thickness: 1px;
-      text-underline-offset: 3px;
+      font: inherit;
     }
-
-    .behavior-parameter-row,
-    .behavior-step-card,
-    .behavior-schema-field-row,
-    .behavior-launch-panel {
-      padding: 18px;
-      border-radius: 22px;
-      border: 1px solid var(--behavior-line);
-      background: var(--behavior-subtle-surface);
+    .behavior-card__select[aria-pressed="true"] {
+      border-color: var(--focus-color);
+      background: var(--bg-secondary);
     }
-
-    .behavior-parameter-row__grid {
-      display: grid;
-      gap: 14px;
-      grid-template-columns: 1.2fr 0.9fr 0.45fr;
-      align-items: start;
-    }
-
-    .behavior-parameter-row__footer {
-      margin-top: 12px;
-      display: flex;
-      justify-content: flex-end;
-    }
-
-    .behavior-step-card__title {
-      font-size: 1.22rem;
-    }
-
-    .behavior-dependency-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-
-    .behavior-dependency-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      border-radius: 999px;
-      border: 1px solid var(--behavior-line);
-      background: var(--behavior-badge-surface);
-      color: var(--behavior-ink);
-      font-size: 0.88rem;
-    }
-
-    .behavior-preview-card__status {
-      padding: 8px 12px;
-      border-radius: 999px;
-      background: var(--behavior-badge-surface);
-      border: 1px solid var(--behavior-line);
-      font-size: 0.78rem;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--behavior-ink-soft);
-      white-space: nowrap;
-    }
-
-    .behavior-preview-card__status.is-dirty {
-      color: var(--behavior-warning-text);
-      border-color: var(--behavior-warning-border);
-      background: var(--behavior-warning-bg);
-    }
-
-    .behavior-preview-stats {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-      margin: 20px 0;
-    }
-
-    .behavior-preview-stat {
-      padding: 14px;
-      border-radius: 18px;
-      background: var(--behavior-card-surface);
-      border: 1px solid var(--behavior-line);
-    }
-
-    .behavior-preview-stat strong {
-      display: block;
-      margin-top: 4px;
-      font-size: 1rem;
-      color: var(--behavior-title);
-    }
-
-    .behavior-preview-stat__label {
-      display: block;
-      font-size: 0.74rem;
-      font-weight: 700;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--behavior-ink-soft);
-    }
-
-    .behavior-preview-panel {
-      margin-top: 18px;
-      padding: 18px;
-      border-radius: 22px;
-      border: 1px solid var(--behavior-line);
-      background: var(--behavior-subtle-surface);
-    }
-
-    .behavior-graph-frame {
-      margin-top: 14px;
-      overflow: hidden;
-      border-radius: 22px;
-      border: 1px solid var(--behavior-line);
-      background:
-        linear-gradient(180deg, color-mix(in srgb, var(--behavior-graph-surface) 74%, white 26%), var(--behavior-graph-surface)),
-        linear-gradient(90deg, var(--behavior-grid-strong) 1px, transparent 1px),
-        linear-gradient(var(--behavior-grid-strong) 1px, transparent 1px);
-      background-size: auto, 24px 24px, 24px 24px;
-    }
-
-    .behavior-graph-svg {
-      width: 100%;
-      height: auto;
-      display: block;
-    }
-
-    .behavior-graph-edge {
-      stroke: rgba(13, 148, 136, 0.48);
-      stroke-width: 2.4px;
-    }
-
-    .behavior-graph-label,
-    .behavior-graph-sublabel {
-      fill: var(--behavior-title);
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
-    }
-
-    .behavior-graph-label {
-      font-size: 12px;
-      font-weight: 700;
-    }
-
-    .behavior-graph-sublabel {
-      font-size: 10px;
-      opacity: 0.7;
-    }
-
-    .behavior-graph-empty,
-    .behavior-empty-state,
-    .behavior-output-summary--empty {
-      padding: 24px;
-      border-radius: 22px;
-      border: 1px dashed var(--behavior-line-strong);
-      background: var(--behavior-empty-surface);
-      text-align: center;
-    }
-
-    .behavior-graph-empty__title,
-    .behavior-empty-state__title {
-      font-weight: 700;
-      color: var(--behavior-title);
-    }
-
+    .behavior-card__title { display: block; font-weight: 600; }
+    .behavior-card__meta, .behavior-card__actions,
+    .behavior-step-card__actions, .behavior-preview-card__actions,
+    .behavior-subsection__actions, .behavior-dependency-grid,
     .behavior-output-summary {
       display: flex;
       flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 12px;
+      align-items: center;
+      gap: var(--space-2);
     }
-
-    .behavior-output-chip {
-      display: inline-flex;
-      flex-direction: column;
-      gap: 3px;
-      padding: 10px 12px;
-      border-radius: 16px;
-      background: var(--behavior-card-surface);
-      border: 1px solid var(--behavior-line);
+    .behavior-card__meta { margin-top: var(--space-2); font-size: 0.8125rem; color: var(--text-secondary); }
+    .behavior-card__actions { margin-top: var(--space-2); }
+    .behavior-card__summary { display: block; margin-top: var(--space-2); font-size: 0.875rem; color: var(--text-secondary); }
+    .behavior-badge--builtin { color: var(--warning-text); }
+    .behavior-badge--custom, .behavior-readonly-pill--active { color: var(--success-text); }
+    .behavior-preview-card__status.is-dirty { color: var(--warning-text); }
+    .behavior-section, .behavior-preview-card { padding: var(--space-4); }
+    .behavior-section__head, .behavior-subsection__head,
+    .behavior-step-card__head, .behavior-preview-panel__head,
+    .behavior-preview-card__hero {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: start;
+      justify-content: space-between;
+      gap: var(--space-3);
     }
-
-    .behavior-output-chip__name {
-      font-weight: 700;
-      color: var(--behavior-title);
+    .behavior-section__head > div, .behavior-subsection__head > div,
+    .behavior-step-card__head > div, .behavior-preview-card__hero > div { min-width: 0; }
+    .behavior-section__eyebrow, .behavior-preview-card__eyebrow,
+    .behavior-step-card__eyebrow { margin-bottom: var(--space-1); font-size: 0.8125rem; color: var(--text-muted); }
+    .behavior-section__title, .behavior-preview-card__title {
+      margin: 0;
+      font-family: var(--font-body);
+      font-size: 1.25rem;
+      line-height: 1.4;
+      font-weight: 600;
     }
-
-    .behavior-output-chip__meta {
-      font-size: 0.8rem;
-      color: var(--behavior-ink-soft);
+    .behavior-step-card__title, .behavior-preview-panel__head h3 {
+      margin: 0;
+      font-family: var(--font-body);
+      font-size: 1rem;
+      font-weight: 600;
     }
-
-    .behavior-json-inspector {
-      margin-top: 20px;
-      padding-top: 18px;
-      border-top: 1px solid var(--behavior-line);
-    }
-
-    .behavior-json-inspector summary {
-      cursor: pointer;
-      font-weight: 700;
-      color: var(--behavior-accent-strong);
-    }
-
-    .behavior-json-inspector pre {
-      margin: 14px 0 0;
-      padding: 16px;
-      overflow: auto;
-      border-radius: 18px;
-      background: var(--behavior-json-bg);
-      color: #e2e8f0;
-    }
-
-    .behavior-launch-grid {
+    .behavior-editor-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .behavior-editor-actions { margin-top: var(--space-4); gap: var(--space-2); }
+    [data-editor-heading], #behaviorStudioEditor [data-field="name"] { scroll-margin-top: calc(var(--navbar-height, 64px) + var(--space-4)); }
+    .behavior-editor-actions details { position: relative; }
+    .behavior-editor-actions details[open] .ui-actions { margin-top: var(--space-2); }
+    .behavior-editor-feedback { grid-column: 1 / -1; margin-top: var(--space-2); }
+    .behavior-stack, .behavior-step-list, .behavior-schema-field-list {
       display: grid;
-      gap: 16px;
+      gap: var(--space-4);
+      margin-top: var(--space-4);
     }
-
-    .behavior-launch-note {
-      margin-top: 10px;
-      padding: 12px 14px;
-      border-radius: 16px;
-      background: var(--behavior-badge-surface);
-      border: 1px solid var(--behavior-line);
-      font-size: 0.92rem;
+    .behavior-subsection, .behavior-preview-panel, .behavior-json-inspector {
+      margin-top: var(--space-6);
+      padding-top: var(--space-4);
+      border-top: 1px solid var(--border-color);
     }
-
-    #behaviorLaunchModal .modal-content {
-      border: 1px solid var(--behavior-line);
-      border-radius: 28px;
-      background: var(--behavior-modal-sheen), var(--behavior-paper);
-      box-shadow: var(--behavior-shadow);
+    .behavior-subsection__title { font-weight: 600; }
+    .behavior-subsection__copy, .behavior-preview-card__copy,
+    .behavior-field__hint, .behavior-empty-state__copy,
+    .behavior-output-chip__meta, .behavior-preview-panel__head span { color: var(--text-secondary); font-size: 0.875rem; }
+    .behavior-field__optional { color: var(--text-muted); font-weight: 400; }
+    .behavior-form-grid { margin-top: var(--space-4); }
+    .behavior-form-grid--meta, .behavior-form-grid--rules,
+    .behavior-form-grid--schema, .behavior-parameter-row__grid,
+    .behavior-form-grid--step, .behavior-form-grid--schema-row,
+    .behavior-form-grid--launch-steps, .behavior-launch-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-
-    #behaviorLaunchModal .modal-header,
-    #behaviorLaunchModal .modal-footer {
-      border-color: var(--behavior-line);
-      padding: 18px 22px;
+    .behavior-field { display: grid; gap: var(--space-2); margin-top: var(--space-3); }
+    .behavior-form-grid > .behavior-field, .behavior-parameter-row__grid > .behavior-field { margin-top: 0; }
+    .behavior-field--toggle { align-content: start; justify-items: start; }
+    .behavior-field__label { margin: 0; font-size: 0.875rem; font-weight: 600; color: var(--text-secondary); }
+    .behavior-input--mono, .behavior-textarea--code, .behavior-json-inspector pre { font-family: var(--font-mono); }
+    .behavior-textarea { resize: vertical; min-height: 5rem; }
+    .behavior-textarea--code { min-height: 8rem; }
+    .behavior-parameter-row, .behavior-schema-field-row, .behavior-launch-panel { min-width: 0; }
+    .behavior-parameter-row + .behavior-parameter-row,
+    .behavior-schema-field-row + .behavior-schema-field-row {
+      padding-top: var(--space-4);
+      border-top: 1px solid var(--border-color);
     }
-
-    #behaviorLaunchModal .modal-body {
-      padding: 18px 22px 24px;
+    .behavior-parameter-row__grid { display: grid; gap: var(--space-4); align-items: start; }
+    .behavior-parameter-row__footer { margin-top: var(--space-3); }
+    .behavior-step-card { padding: var(--space-4); border: 1px solid var(--border-color); border-radius: var(--radius-lg); }
+    .behavior-dependency-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      padding: var(--space-2);
+      border: 1px solid var(--control-border);
+      border-radius: var(--radius-md);
     }
-
-    @keyframes behaviorPanelRise {
-      from {
-        opacity: 0;
-        transform: translateY(14px);
-      }
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+    .behavior-preview-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-4); margin-top: var(--space-4); }
+    .behavior-preview-stat strong { display: block; font-size: 0.875rem; }
+    .behavior-preview-stat__label { color: var(--text-muted); font-size: 0.8125rem; }
+    .behavior-graph-frame {
+      margin-top: var(--space-3);
+      overflow: auto;
+      border: 1px solid var(--control-border);
+      border-radius: var(--radius-lg);
+      background: var(--bg-secondary);
     }
-
-    @media (max-width: 1480px) {
-      .behavior-page__layout {
-        grid-template-columns: 300px minmax(0, 1fr);
-      }
-
-      .behavior-page__preview {
-        grid-column: 1 / -1;
-        position: static;
-      }
+    .behavior-graph-svg { display: block; width: 100%; min-width: 720px; height: auto; }
+    .behavior-graph-edge { stroke: var(--control-border); stroke-width: 2.4px; }
+    .behavior-graph-label, .behavior-graph-sublabel { fill: var(--text-primary); font-family: var(--font-body); }
+    .behavior-graph-label { font-size: 12px; font-weight: 600; }
+    .behavior-graph-sublabel { font-size: 10px; }
+    .behavior-graph-empty, .behavior-empty-state, .behavior-output-summary--empty { padding: var(--space-4); }
+    .behavior-empty-state__title { font-weight: 600; }
+    .behavior-output-summary { margin-top: var(--space-3); }
+    .behavior-output-chip { max-width: 100%; padding: var(--space-2); border: 1px solid var(--border-color); border-radius: var(--radius-md); }
+    .behavior-output-chip__name, .behavior-output-chip__meta { display: block; }
+    .behavior-json-inspector summary { color: var(--text-primary); font-weight: 600; }
+    .behavior-json-inspector pre { margin-top: var(--space-3); padding: var(--space-3); overflow: auto; background: var(--bg-secondary); color: var(--text-primary); border-radius: var(--radius-md); font-size: 0.875rem; }
+    .behavior-launch-grid { display: grid; gap: var(--space-6); }
+    .behavior-launch-panel + .behavior-launch-panel { margin-top: var(--space-4); }
+    .behavior-launch-grid > .behavior-launch-panel { margin-top: 0; }
+    .behavior-launch-note { margin-top: var(--space-3); color: var(--text-secondary); font-size: 0.875rem; }
+    #behaviorStudioPage :is(h2, h3, p, strong, .behavior-card__select),
+    #behaviorLaunchModal :is(.behavior-field__label, .behavior-launch-note) { overflow-wrap: anywhere; }
+    @media (max-width: 991px) {
+      #behaviorStudioPage { padding-block: var(--space-4); }
+      .behavior-page__stats { margin-bottom: var(--space-4); }
+      .behavior-page__layout { grid-template-columns: 1fr; gap: var(--space-4); }
+      .behavior-page__sidebar { position: static; }
+      .behavior-sidebar__list { max-height: 24rem; }
     }
-
-    @media (max-width: 1140px) {
-      #behaviorStudioPage {
-        padding: 24px 18px 30px;
-      }
-
-      .behavior-page__masthead,
-      .behavior-page__layout {
-        grid-template-columns: 1fr;
-      }
-
-      .behavior-page__stats {
-        justify-content: start;
-        grid-auto-flow: row;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      .behavior-page__sidebar,
-      .behavior-page__preview {
-        position: static;
-      }
-
-      .behavior-sidebar__list {
-        max-height: none;
-      }
-
-      .behavior-form-grid--step,
-      .behavior-parameter-row__grid,
-      .behavior-form-grid--launch-steps,
-      .behavior-preview-stats {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-    }
-
     @media (max-width: 720px) {
-      .behavior-filter-grid--double,
-      .behavior-form-grid--meta,
-      .behavior-form-grid--rules,
-      .behavior-form-grid--schema,
-      .behavior-launch-grid,
-      .behavior-form-grid--step,
-      .behavior-parameter-row__grid,
-      .behavior-form-grid--schema-row,
-      .behavior-form-grid--launch-steps,
-      .behavior-preview-stats,
-      .behavior-page__stats {
-        grid-template-columns: 1fr;
-      }
-
-      .behavior-page__masthead,
-      .behavior-section,
-      .behavior-preview-card {
-        padding: 20px;
-      }
+      .behavior-form-grid--meta, .behavior-form-grid--rules,
+      .behavior-form-grid--schema, .behavior-form-grid--step,
+      .behavior-parameter-row__grid, .behavior-form-grid--schema-row,
+      .behavior-form-grid--launch-steps, .behavior-launch-grid { grid-template-columns: 1fr; }
+      .behavior-preview-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
   </style>
 
   <div class="main-content-wrapper">
     <div class="main-content">
       <div id="behaviorStudioPage" class="behavior-page">
-        <section class="behavior-page__masthead">
-          <div>
-            <div class="behavior-page__eyebrow">Orchestration Skills</div>
-            <h1 class="behavior-page__title">Reusable workspace orchestration skills with graphs and structured outputs.</h1>
-            <p class="behavior-page__copy">
-              Create reusable orchestration skills, model full dependency graphs, lock outputs to JSON schemas, and launch them directly into a workspace without hard-coded completion flow.
-            </p>
+        <header class="ui-page-header behavior-page__masthead">
+          <div class="ui-page-heading">
+            <h1 class="behavior-page__title">Workflows</h1>
+            <p class="ui-page-description behavior-page__copy">Reusable orchestration skills with graphs and structured outputs.</p>
           </div>
-          <div class="behavior-page__stats">
-            <div class="behavior-page__stat">
-              <strong id="behaviorStudioCount">0</strong>
-              <span>Total skills</span>
-            </div>
-            <div class="behavior-page__stat">
-              <strong id="behaviorStudioCustomCount">0</strong>
-              <span>Custom skills</span>
-            </div>
+          <div class="ui-page-actions behavior-sidebar__actions">
+            <button id="behaviorStudioNewBtn" class="btn btn-primary behavior-btn behavior-btn--primary" type="button">New skill</button>
+            <button id="behaviorStudioImportBtn" class="btn btn-secondary behavior-btn behavior-btn--secondary" type="button">Import JSON</button>
           </div>
-        </section>
+        </header>
+        <div class="behavior-page__stats" aria-label="Library totals">
+          <div class="behavior-page__stat"><strong id="behaviorStudioCount">0</strong><span>Total skills</span></div>
+          <div class="behavior-page__stat"><strong id="behaviorStudioCustomCount">0</strong><span>Custom skills</span></div>
+        </div>
 
         <div class="behavior-page__layout">
-          <aside class="behavior-page__sidebar">
-            <section class="behavior-panel">
+          <aside class="behavior-page__sidebar" aria-label="Orchestration skills library">
+            <details class="behavior-panel ui-section" id="behaviorStudioLibrary" open>
+              <summary class="ui-disclosure-title behavior-library-summary">Skills library</summary>
               <div class="behavior-sidebar__top">
-                <div class="behavior-sidebar__label">Skills Library</div>
-                <div class="behavior-sidebar__actions">
-                  <button id="behaviorStudioNewBtn" class="behavior-btn behavior-btn--primary" type="button">New skill</button>
-                  <button id="behaviorStudioImportBtn" class="behavior-btn behavior-btn--secondary" type="button">Import JSON</button>
-                </div>
                 <div class="behavior-filter-grid">
-                  <input id="behaviorStudioSearch" class="behavior-input" type="search" placeholder="Search orchestration skills, categories, descriptions">
-                  <div class="behavior-filter-grid behavior-filter-grid--double">
-                    <select id="behaviorStudioSourceFilter" class="behavior-input">
-                      <option value="all">All sources</option>
-                      <option value="custom">Custom only</option>
-                      <option value="builtin">Built-in only</option>
-                    </select>
-                    <select id="behaviorStudioCategoryFilter" class="behavior-input">
-                      <option value="all">All categories</option>
-                    </select>
-                  </div>
+                  <label for="behaviorStudioSearch" class="form-label mb-0">Search skills</label>
+                  <input id="behaviorStudioSearch" class="form-control behavior-input" type="search" placeholder="Search skills…">
+                  <label for="behaviorStudioSourceFilter" class="form-label mb-0">Source</label>
+                  <select id="behaviorStudioSourceFilter" class="form-select behavior-input">
+                    <option value="all">All sources</option><option value="custom">Custom only</option><option value="builtin">Built-in only</option>
+                  </select>
+                  <label for="behaviorStudioCategoryFilter" class="form-label mb-0">Category</label>
+                  <select id="behaviorStudioCategoryFilter" class="form-select behavior-input"><option value="all">All categories</option></select>
                 </div>
               </div>
-              <div class="behavior-sidebar__list" id="behaviorStudioList">
-                <div class="behavior-empty-state">
+              <div class="behavior-sidebar__list" id="behaviorStudioList" aria-label="Available skills">
+                <div class="behavior-empty-state" role="status">
                   <div class="behavior-empty-state__title">Loading orchestration skills…</div>
                   <div class="behavior-empty-state__copy">The reusable orchestration library is being loaded.</div>
                 </div>
               </div>
-            </section>
+            </details>
           </aside>
 
-          <main class="behavior-page__editor">
-            <div id="behaviorStudioEditor" class="behavior-panel">
+          <main class="behavior-page__editor" aria-label="Orchestration skill editor">
+            <div id="behaviorStudioEditor" class="behavior-panel ui-section">
               <section class="behavior-section">
-                <div class="behavior-section__head">
-                  <div>
-                    <div class="behavior-section__eyebrow">Editor</div>
-                    <h2 class="behavior-section__title">Loading orchestration skill editor</h2>
-                  </div>
-                  <span class="behavior-readonly-pill">Preparing</span>
-                </div>
+                <h2 class="behavior-section__title">Loading orchestration skill editor</h2>
+              </section>
+            </div>
+            <div id="behaviorStudioPreview" class="behavior-panel ui-section mt-4">
+              <section class="behavior-preview-card">
+                <h2 class="behavior-preview-card__title" id="behaviorStudioSelectedLabel">Loading</h2>
+                <p class="behavior-preview-card__copy">The graph preview and orchestration skill launch controls will appear here.</p>
               </section>
             </div>
           </main>
-
-          <aside class="behavior-page__preview">
-            <div id="behaviorStudioPreview" class="behavior-panel">
-              <section class="behavior-preview-card">
-                <div class="behavior-preview-card__hero">
-                  <div>
-                    <div class="behavior-preview-card__eyebrow">Preview</div>
-                    <h2 class="behavior-preview-card__title" id="behaviorStudioSelectedLabel">Loading</h2>
-                    <p class="behavior-preview-card__copy">The graph preview and orchestration skill launch controls will appear here.</p>
-                  </div>
-                </div>
-              </section>
-            </div>
-          </aside>
         </div>
-
         <input id="behaviorStudioImportInput" type="file" accept=".json,application/json" hidden>
       </div>
     </div>
@@ -999,21 +281,18 @@
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
       <div class="modal-content">
         <div class="modal-header">
-          <div>
-            <div class="behavior-page__eyebrow mb-1">Instantiate Orchestration Skill</div>
-            <h5 class="modal-title m-0" id="behaviorLaunchModalLabel" style="font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif; font-size: 1.6rem; color: var(--behavior-title);">Add orchestration skill to workspace</h5>
-          </div>
+          <h2 class="modal-title" id="behaviorLaunchModalLabel">Add orchestration skill to workspace</h2>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body" id="behaviorLaunchModalBody">
-          <div class="behavior-empty-state">
+          <div class="behavior-empty-state" role="status">
             <div class="behavior-empty-state__title">Preparing launch form…</div>
             <div class="behavior-empty-state__copy">Workspace selection and parameter controls will load here.</div>
           </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="behavior-btn behavior-btn--secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="button" class="behavior-btn behavior-btn--primary" id="behaviorLaunchSubmit">Add to Workspace</button>
+          <button type="button" class="btn btn-secondary behavior-btn behavior-btn--secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="button" class="btn btn-primary behavior-btn behavior-btn--primary" id="behaviorLaunchSubmit">Add to Workspace</button>
         </div>
       </div>
     </div>
@@ -1027,6 +306,5 @@
   <script defer src="/js/modules/behavior-studio.js"></script>
   {{template "theme-init.tmpl" .}}
 </body>
-
 </html>
 {{end}}

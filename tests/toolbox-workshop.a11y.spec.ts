@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 /**
  * Accessibility coverage for the Workshop and Goal Prepare surfaces
@@ -15,6 +16,7 @@ import { test, expect, type Page } from '@playwright/test';
 const WORKSPACE_NAME = 'Toolbox Demo';
 
 async function openToolbox(page: Page) {
+  await installLocalCdn(page);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.route('**/api/onboarding/status', route =>
     route.fulfill({
@@ -30,7 +32,10 @@ async function openToolbox(page: Page) {
   const workspace = folders.find((entry: { name?: string }) => entry?.name === WORKSPACE_NAME);
   test.skip(!workspace, `needs a workspace named "${WORKSPACE_NAME}" in the sandbox`);
 
-  await page.goto(`/workspaces/${workspace.id}`);
+  const slug = workspace.folder_slug || workspace.slug;
+  expect(slug, 'fixture needs a canonical workspace route, not an API UUID').toBeTruthy();
+  await page.goto(`/workspaces/${encodeURIComponent(slug)}`);
+  await page.locator('[data-cmd-team-agent]').first().click();
   await page.locator('[data-cmd-agent-tab="loadout"]').first().click();
   const panel = page.locator('#workspace-toolbox-panel');
   await expect(panel).toBeVisible({ timeout: 15000 });

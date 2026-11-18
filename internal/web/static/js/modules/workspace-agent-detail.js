@@ -119,6 +119,12 @@ export class WorkspaceAgentDetailPage {
     this.promptEditable = base !== null;
     this.currentPrompt = base === null ? '' : base;
     this.renderPromptView(this.currentPrompt, this.promptEditable);
+    this.setText(
+      'wad-prompt-permission',
+      this.promptEditable
+        ? 'Workspace-local prompt. Edits stay in this workspace.'
+        : 'Read-only here. No editable workspace-local prompt is available.'
+    );
     this.renderRefinement(effective);
     this.bindPromptEditor();
   }
@@ -252,12 +258,14 @@ export class WorkspaceAgentDetailPage {
             .toLowerCase() === 'orchestrator'
             ? 'Commander'
             : 'Acting Commander';
-        chips.push(`<span class="wad-badge is-leader">${this.escape(commanderLabel)}</span>`);
+        chips.push(
+          `<span class="wad-badge modern-badge is-leader">${this.escape(commanderLabel)}</span>`
+        );
       }
-      chips.push('<span class="wad-badge is-muted">Workspace-local</span>');
+      chips.push('<span class="wad-badge modern-badge is-muted">Workspace-local</span>');
       const provider = String(profile?.provider || '').trim();
       if (provider) {
-        chips.push(`<span class="wad-badge">${this.escape(provider)}</span>`);
+        chips.push(`<span class="wad-badge modern-badge">${this.escape(provider)}</span>`);
       }
       badges.innerHTML = chips.join('');
     }
@@ -310,6 +318,7 @@ export class WorkspaceAgentDetailPage {
   }
 
   enterEditMode() {
+    if (!this.promptEditable) return;
     const editor = this.el('wad-prompt-editor');
     if (editor) editor.value = this.currentPrompt || '';
     this.togglePromptEditing(true);
@@ -320,6 +329,7 @@ export class WorkspaceAgentDetailPage {
   exitEditMode() {
     this.togglePromptEditing(false);
     this.setPromptStatus('');
+    this.el('wad-prompt-edit')?.focus();
   }
 
   togglePromptEditing(editing) {
@@ -331,6 +341,7 @@ export class WorkspaceAgentDetailPage {
   }
 
   async savePrompt() {
+    if (!this.promptEditable) return;
     const editor = this.el('wad-prompt-editor');
     if (!editor) return;
     const value = editor.value;
@@ -356,6 +367,7 @@ export class WorkspaceAgentDetailPage {
       this.currentPrompt = String(data?.system_prompt ?? value.trim());
       this.renderPromptView(this.currentPrompt, true);
       this.togglePromptEditing(false);
+      this.el('wad-prompt-edit')?.focus();
       this.setPromptStatus('Saved.', 'success');
     } catch (error) {
       console.error('Failed to save system prompt:', error);
@@ -410,9 +422,9 @@ export class WorkspaceAgentDetailPage {
     list.innerHTML = items
       .map(it => {
         const enabled = it.enabled !== false;
-        return `<span class="wad-chip${enabled ? '' : ' is-disabled'}" title="${
+        return `<span class="wad-chip modern-badge${enabled ? '' : ' is-disabled'}" title="${
           enabled ? 'Enabled' : 'Disabled'
-        }"><span class="wad-chip-dot"></span>${this.escape(it.label)}</span>`;
+        }"><span class="wad-chip-dot" aria-hidden="true"></span>${enabled ? '' : '<span class="visually-hidden">Disabled: </span>'}${this.escape(it.label)}</span>`;
       })
       .join('');
   }

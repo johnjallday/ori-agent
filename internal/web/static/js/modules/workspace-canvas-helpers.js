@@ -23,21 +23,21 @@ const currentWorkspaceDashboard = null;
 /**
  * Hide agent details panel
  */
-function hideAgentDetails() {
+function hideAgentDetails(invoker = document.activeElement) {
   const panel = document.getElementById('agent-details-panel');
-  if (panel) {
-    panel.style.display = 'none';
-  }
+  const restore = panel?.contains(invoker);
+  if (panel) panel.style.display = 'none';
+  if (restore) document.getElementById('agent-canvas')?.focus();
 }
 
 /**
  * Hide attachment details panel
  */
-function hideAttachmentDetails() {
+function hideAttachmentDetails(invoker = document.activeElement) {
   const panel = document.getElementById('attachment-details-panel');
-  if (panel) {
-    panel.style.display = 'none';
-  }
+  const restore = panel?.contains(invoker);
+  if (panel) panel.style.display = 'none';
+  if (restore) document.getElementById('agent-canvas')?.focus();
 }
 
 /**
@@ -69,11 +69,11 @@ function showTaskDetails(task) {
 
   const statusBadge =
     {
-      pending: '<span class="badge bg-warning">Pending</span>',
-      in_progress: '<span class="badge bg-primary">In Progress</span>',
-      completed: '<span class="badge bg-success">Completed</span>',
-      failed: '<span class="badge bg-danger">Failed</span>'
-    }[task.status] || '<span class="badge bg-secondary">Unknown</span>';
+      pending: '<span class="badge badge-secondary">Pending</span>',
+      in_progress: '<span class="badge badge-info">In progress</span>',
+      completed: '<span class="badge badge-success">Completed</span>',
+      failed: '<span class="badge badge-danger">Failed</span>'
+    }[task.status] || '<span class="badge badge-secondary">Unknown</span>';
 
   // Check if this is a combiner task
   const isCombinerTask = task.combiner_type || task.combinerType;
@@ -130,8 +130,8 @@ function showTaskDetails(task) {
                 const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
                 return `
                 <div class="mb-1 d-flex align-items-center justify-content-between" style="background: rgba(155, 89, 182, 0.1); padding: 6px 8px; border-radius: 4px;">
-                  <span>🔗 Input ${idx + 1}: ${inputTask ? inputTask.description.substring(0, 30) : id.substring(0, 8)}...</span>
-                  <button class="btn btn-sm btn-outline-danger" style="padding: 2px 8px; font-size: 0.75rem; line-height: 1;" onclick="removeTaskInput('${task.id}', '${id}')" title="Remove this input">
+                  <span>🔗 Input ${idx + 1}: ${inputTask ? escapeHtml(inputTask.description.substring(0, 30)) : escapeHtml(id.substring(0, 8))}...</span>
+                  <button type="button" class="modern-btn modern-btn-danger modern-btn-sm" onclick="removeTaskInput('${task.id}', '${id}')" title="Remove this input">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <line x1="18" y1="6" x2="6" y2="18"></line>
                       <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -167,20 +167,20 @@ function showTaskDetails(task) {
           : ''
       }
       <div class="mb-3">
-        <button class="btn btn-sm btn-primary w-100 mb-2" onclick="addCombinerInput('${task.id}')">
+        <button class="modern-btn modern-btn-secondary w-100 mb-2" onclick="addCombinerInput('${task.id}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <line x1="12" y1="5" x2="12" y2="19"></line>
             <line x1="5" y1="12" x2="19" y2="12"></line>
           </svg>
           Add Input Ticket
         </button>
-        <button class="btn btn-sm btn-success w-100 mb-2" onclick="assignCurrentTask()">
+        <button class="modern-btn modern-btn-secondary w-100 mb-2" onclick="assignCurrentTask()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M9,10H7V12H9V10M13,10H11V12H13V10M17,10H15V12H17V10M19,3H18V1H16V3H8V1H6V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V8H19V19Z"/>
           </svg>
           Assign to Agent
         </button>
-        <button class="btn btn-sm btn-warning w-100" onclick="executeCombinerTask('${task.id}')">
+        <button class="modern-btn modern-btn-primary w-100" onclick="executeCombinerTask('${task.id}')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
             <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
           </svg>
@@ -218,7 +218,7 @@ function showTaskDetails(task) {
       </div>
       <div class="mb-3">
         <strong style="color: var(--text-primary);">Description:</strong>
-        <div style="color: var(--text-secondary);">${task.description || 'No description'}</div>
+        <div style="color: var(--text-secondary);">${escapeHtml(task.description || 'No description')}</div>
       </div>
       <div class="mb-3">
         <strong style="color: var(--text-primary);">Status:</strong>
@@ -235,8 +235,8 @@ function showTaskDetails(task) {
                 const inputTask = window.agentCanvas?.state?.tasks?.find(t => t.id === id);
                 return `
                 <div class="mb-1 d-flex align-items-center justify-content-between" style="background: rgba(155, 89, 182, 0.1); padding: 6px 8px; border-radius: 4px;">
-                  <span>🔗 ${inputTask ? inputTask.description : id.substring(0, 8) + '...'}</span>
-                  <button class="btn btn-sm btn-outline-danger" style="padding: 2px 8px; font-size: 0.75rem; line-height: 1;" onclick="removeTaskInput('${task.id}', '${id}')" title="Remove this input">
+                  <span>🔗 ${escapeHtml(inputTask ? inputTask.description : id.substring(0, 8) + '...')}</span>
+                  <button type="button" class="modern-btn modern-btn-danger modern-btn-sm" onclick="removeTaskInput('${task.id}', '${id}')" title="Remove this input">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                       <line x1="18" y1="6" x2="6" y2="18"></line>
                       <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -247,7 +247,7 @@ function showTaskDetails(task) {
               })
               .join('')}
           </div>
-          <button class="btn btn-sm btn-outline-primary mt-2 w-100" onclick="addTaskInput('${task.id}')">
+          <button class="modern-btn modern-btn-secondary mt-2 w-100" onclick="addTaskInput('${task.id}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -258,7 +258,7 @@ function showTaskDetails(task) {
       `
           : `
         <div class="mb-3">
-          <button class="btn btn-sm btn-outline-primary w-100" onclick="addTaskInput('${task.id}')">
+          <button class="modern-btn modern-btn-secondary w-100" onclick="addTaskInput('${task.id}')">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="12" y1="5" x2="12" y2="19"></line>
               <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -556,14 +556,14 @@ function showAttachmentDetails(att) {
       <span class="badge" style="background:${badgeColor}; color: #fff; font-size: 0.7rem;">${typeLabel}</span>
     </div>
     <div class="mb-3 d-flex gap-2">
-      <button class="btn btn-sm btn-outline-primary flex-fill" onclick="editAttachment('${att.id || ''}')">
+      <button class="modern-btn modern-btn-secondary flex-fill" onclick="editAttachment('${att.id || ''}')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom;">
           <path d="M12 20h9"></path>
           <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>
         </svg>
         Edit
       </button>
-      <button class="btn btn-sm btn-outline-secondary flex-fill" onclick="editAttachmentColor('${att.id || ''}')">
+      <button class="modern-btn modern-btn-secondary flex-fill" onclick="editAttachmentColor('${att.id || ''}')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: text-bottom;">
           <circle cx="12" cy="12" r="10"></circle>
           <path d="M12 2v20"></path>
@@ -592,8 +592,9 @@ function showAttachmentDetails(att) {
 /**
  * Hide task details panel
  */
-function hideTaskDetails() {
+function hideTaskDetails(invoker = document.activeElement) {
   const panel = document.getElementById('task-details-panel');
+  const restore = panel?.contains(invoker);
   if (panel) {
     panel.style.display = 'none';
   }
@@ -606,6 +607,7 @@ function hideTaskDetails() {
   if (window.agentCanvas && window.agentCanvas.state) {
     window.agentCanvas.state.expandedTask = null;
   }
+  if (restore) document.getElementById('agent-canvas')?.focus();
 }
 
 /**
@@ -727,7 +729,7 @@ function hideCombinerDetails() {
 /**
  * Show add task modal using shared TaskModalController
  */
-function showAddTaskModal() {
+function showAddTaskModal(invoker = document.activeElement) {
   // Get workspace ID from canvas (multiple possible sources)
   const workspaceId =
     window.currentWorkspaceId || window.agentCanvas?.workspaceId || window.canvasWorkspaceId;
@@ -743,7 +745,15 @@ function showAddTaskModal() {
     window.OriGiveWork.open({
       workspaceId,
       agents: agents.map(agent => agent.name).filter(Boolean),
-      trigger: document.activeElement,
+      // The selected tool is about to be hidden. Give work removes its native
+      // dialog synchronously, so give it a persistent door rather than relying
+      // on a later document-level close event from a detached dialog.
+      trigger:
+        invoker?.closest('#canvas-add-disclosure')?.querySelector('summary') ||
+        invoker
+          ?.closest('#workflow-selector-dropdown')
+          ?.querySelector('.workflow-selector-trigger') ||
+        invoker,
       onSaved: () => window.agentCanvas?.initModule?.fetchInitialProgressData?.()
     });
     return;
@@ -765,7 +775,8 @@ function showAddTaskModal() {
  * Show add attachment modal
  */
 function showAddAttachmentModal() {
-  const modal = new bootstrap.Modal(document.getElementById('addAttachmentNodeModal'));
+  const element = document.getElementById('addAttachmentNodeModal');
+  const modal = new bootstrap.Modal(element);
   const titleInput = document.getElementById('attachmentTitle');
   const bodyInput = document.getElementById('attachmentBody');
   const linkInput = document.getElementById('attachmentLink');
@@ -777,12 +788,15 @@ function showAddAttachmentModal() {
   if (linkInput) linkInput.value = '';
   if (filePathInput) filePathInput.value = '';
 
+  element.addEventListener(
+    'shown.bs.modal',
+    () => {
+      if (document.activeElement === element || document.activeElement === document.body)
+        titleInput?.focus();
+    },
+    { once: true }
+  );
   modal.show();
-
-  // Focus on title after modal is shown
-  setTimeout(() => {
-    if (titleInput) titleInput.focus();
-  }, 500);
 }
 
 function guessAttachmentType(body, link, fileMeta) {
@@ -1372,7 +1386,7 @@ function showStoreDetails(storeNode) {
 
     <!-- Save Button -->
     <div class="mb-3">
-      <button id="store-save-btn" class="btn btn-sm w-100" style="background: #14b8a6; color: white; font-weight: 500;">
+      <button type="button" id="store-save-btn" class="modern-btn modern-btn-primary w-100">
         Save Changes
       </button>
     </div>
@@ -2210,7 +2224,7 @@ function updateCurrentAgentsList() {
                             <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: ${agent.color}; margin-right: 8px;"></span>
                             <span style="color: var(--text-primary);">${escapeHtml(agent.name)}</span>
                         </div>
-                        <button class="btn btn-sm" onclick="removeAgentFromCanvas('${escapeHtml(agent.name)}')" style="padding: 2px 6px; font-size: 0.75rem; color: var(--danger-color);" title="Remove agent">
+                        <button type="button" class="modern-btn modern-btn-danger modern-btn-sm" onclick="removeAgentFromCanvas('${escapeHtml(agent.name)}')" title="Remove agent">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
                             </svg>

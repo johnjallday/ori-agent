@@ -19,7 +19,7 @@ const editorSource = readFileSync(new URL('./agent-appearance.js', import.meta.u
  * A DOM stand-in just rich enough for the editor: it renders markup into a host
  * as a flat element list keyed by id, and dispatches listeners.
  */
-function makeHost() {
+function makeHost(doc = {}) {
   const listeners = new Map();
   const elements = new Map();
 
@@ -58,6 +58,9 @@ function makeHost() {
       files: [],
       innerHTML: '',
       className: '',
+      focus() {
+        doc.activeElement = this;
+      },
       attributes: {},
       setAttribute(k, v) {
         this.attributes[k] = v;
@@ -130,6 +133,7 @@ function load() {
         ? { id, name: 'Field Scout', assets: { portrait: '/p.webp' }, palette: {} }
         : null
   };
+  sandbox.window.document = sandbox.document;
   return sandbox.window;
 }
 
@@ -165,7 +169,7 @@ function recordingAdapter(resolveWith) {
 }
 
 function mount(win, options = {}) {
-  const host = makeHost();
+  const host = makeHost(win.document);
   const editor = win.AgentAppearanceEditor.create({
     host,
     agent: { name: 'Atlas', source: 'user' },
@@ -173,6 +177,20 @@ function mount(win, options = {}) {
   });
   return { host, editor };
 }
+
+test('a staged character confirmation restores the replacement invoker, not a detached node', async () => {
+  const win = load();
+  win.CharacterPicker = { open: () => Promise.resolve({ action: 'choose', catalogId: 'sable' }) };
+  const { host, editor } = mount(win, { mode: 'create' });
+  const before = host.get('appearance-character-choose');
+  before.focus();
+  before.fire('click');
+  await Promise.resolve();
+  const after = host.get('appearance-character-choose');
+  assert.notEqual(after, before);
+  assert.equal(win.document.activeElement, after);
+  assert.equal(editor.createRequest().character.catalog_id, 'sable');
+});
 
 /* ---- the three-way choice (FR-27, FR-96) ---------------------------------- */
 

@@ -3,7 +3,7 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light models-page">
   <!-- Navigation -->
   {{template "navbar.tmpl" .}}
 
@@ -12,12 +12,12 @@
     <div class="main-content">
       <div class="container-fluid py-4">
   <!-- Header -->
-  <div class="d-flex justify-content-between align-items-center mb-4">
+  <div class="ui-page-header">
     <div>
-      <h1 class="h3 mb-1">Available Models</h1>
+      <h1>Available Models</h1>
       <p class="text-muted mb-0">Browse all AI models available across different providers</p>
     </div>
-    <div class="d-flex gap-2">
+    <div class="ui-actions">
       <button id="autoCategorizeAllBtn" class="btn btn-outline-primary d-none" title="Auto-categorize all models with AI">
         <i class="bi bi-magic me-2"></i>Auto-Categorize
       </button>
@@ -49,7 +49,7 @@
     <!-- Filter Bar -->
     <div class="card mb-4">
       <div class="card-body">
-        <div class="row g-3 align-items-end">
+        <div class="row g-3 align-items-start">
           <div class="col-md-3">
             <label for="providerFilter" class="form-label" style="color: var(--text-secondary); font-weight: 500;">Provider</label>
             <select id="providerFilter" class="form-select">
@@ -73,12 +73,12 @@
             </div>
           </div>
           <div class="col-md-3">
-            <label class="form-label" style="color: var(--text-secondary); font-weight: 500;">View</label>
-            <div class="btn-group w-100" role="group">
+            <div id="modelsViewLabel" class="form-label">View</div>
+            <div class="btn-group w-100" role="group" aria-labelledby="modelsViewLabel">
               <input type="radio" class="btn-check" name="viewToggle" id="viewProvider" value="provider" checked>
-              <label class="btn btn-outline-primary" for="viewProvider">By Provider</label>
+              <label class="btn btn-outline-secondary" for="viewProvider">By Provider</label>
               <input type="radio" class="btn-check" name="viewToggle" id="viewCategory" value="category">
-              <label class="btn btn-outline-primary" for="viewCategory">By Category</label>
+              <label class="btn btn-outline-secondary" for="viewCategory">By Category</label>
             </div>
           </div>
         </div>
@@ -99,15 +99,15 @@
 </div>
 
 <!-- Category Management Modal -->
-<div class="modal fade" id="categoryModal" tabindex="-1">
+<div class="modal fade" id="categoryModal" tabindex="-1" aria-labelledby="categoryModalTitle">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Manage Categories</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <h5 class="modal-title" id="categoryModalTitle">Manage Categories</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
-        <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="ui-actions justify-content-between mb-3">
           <span class="text-muted" id="categoryCount">0 / 20 custom categories</span>
           <button id="addCategoryBtn" class="btn btn-primary btn-sm">
             <i class="bi bi-plus me-1"></i>Add Category
@@ -122,47 +122,49 @@
 </div>
 
 <!-- Category Editor Modal -->
-<div class="modal fade" id="categoryEditorModal" tabindex="-1">
+<div class="modal fade" id="categoryEditorModal" tabindex="-1" aria-labelledby="categoryEditorTitle">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="categoryEditorTitle">Add Category</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
-      <div class="modal-body">
+      <form class="modal-body" id="categoryEditorForm" novalidate>
         <div class="mb-3">
-          <label class="form-label">Name</label>
-          <input type="text" class="form-control" id="categoryName" placeholder="Enter category name">
+          <label for="categoryName" class="form-label">Name</label>
+          <input type="text" class="form-control" id="categoryName" required maxlength="50" aria-describedby="categoryNameError" placeholder="Enter category name">
           <div class="invalid-feedback" id="categoryNameError"></div>
         </div>
         <div class="mb-3">
-          <label class="form-label">Color</label>
-          <div class="color-picker-grid" id="colorPicker">
+          <div id="categoryColorLabel" class="form-label">Color</div>
+          <div class="color-picker-grid" id="colorPicker" role="group" aria-labelledby="categoryColorLabel">
             <!-- Populated by JS -->
           </div>
           <div class="mt-2">
-            <label class="form-label small">Custom Color</label>
-            <input type="color" class="form-control form-control-color" id="customColor" value="#3b82f6">
+            <label for="customColor" class="form-label models-custom-color">
+              <span>Custom Color</span>
+              <input type="color" class="form-control form-control-color" id="customColor" value="#3b82f6">
+            </label>
           </div>
         </div>
         <div class="mb-3">
-          <label class="form-label">Icon</label>
-          <div class="icon-picker-grid" id="iconPicker">
+          <div id="categoryIconLabel" class="form-label">Icon</div>
+          <div class="icon-picker-grid" id="iconPicker" role="group" aria-labelledby="categoryIconLabel">
             <!-- Populated by JS -->
           </div>
         </div>
         <div class="mb-3">
-          <label class="form-label">Preview</label>
+          <div class="form-label">Preview</div>
           <div class="category-preview">
-            <span class="category-badge-preview" id="categoryPreview">
+            <span class="badge category-badge-preview category-swatch-badge" id="categoryPreview">
               <i class="bi bi-code-slash me-1"></i>Category Name
             </span>
           </div>
         </div>
-      </div>
+      </form>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" id="saveCategoryBtn">Save</button>
+        <button type="submit" form="categoryEditorForm" class="btn btn-primary" id="saveCategoryBtn">Save</button>
       </div>
     </div>
   </div>
@@ -172,12 +174,12 @@
 {{template "modals.tmpl" .}}
 
 <!-- Model Assignment Modal -->
-<div class="modal fade" id="assignmentModal" tabindex="-1">
+<div class="modal fade" id="assignmentModal" tabindex="-1" aria-labelledby="assignmentModalTitle">
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Assign Categories</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <h5 class="modal-title" id="assignmentModalTitle">Assign Categories</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
         <p class="text-muted mb-3">Select categories for <strong id="assignmentModelName"></strong>:</p>
@@ -195,26 +197,26 @@
 
 <!-- Floating Action Bar for Bulk Actions -->
 <div id="floatingActionBar" class="floating-action-bar d-none">
-  <div class="d-flex align-items-center gap-3">
-    <span id="selectedCount" class="text-light">0 models selected</span>
+  <div class="ui-actions">
+    <span id="selectedCount">0 models selected</span>
     <button id="autoCategorizeSelectedBtn" class="btn btn-primary btn-sm">
       <i class="bi bi-magic me-1"></i>Auto-Categorize Selected
     </button>
-    <button id="cancelSelectionBtn" class="btn btn-outline-light btn-sm">
+    <button id="cancelSelectionBtn" class="btn btn-outline-secondary btn-sm">
       <i class="bi bi-x-lg me-1"></i>Cancel
     </button>
   </div>
 </div>
 
 <!-- Auto-Categorize Preview Modal -->
-<div class="modal fade" id="autoCategorizeModal" tabindex="-1">
+<div class="modal fade" id="autoCategorizeModal" tabindex="-1" aria-labelledby="autoCategorizeTitle">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">
+        <h5 class="modal-title" id="autoCategorizeTitle">
           <i class="bi bi-magic me-2"></i>Auto-Categorize Preview
         </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
       </div>
       <div class="modal-body">
         <p class="text-muted mb-3">Review AI suggestions before applying. You can modify or exclude any suggestion.</p>
@@ -228,12 +230,12 @@
           <i class="bi bi-exclamation-triangle me-2"></i>
           <span id="suggestionsErrorMessage">Failed to generate suggestions</span>
         </div>
-        <div id="suggestionsList" class="d-none">
+        <div id="suggestionsList" class="d-none models-table-scroll" role="region" aria-label="Suggested model categories" tabindex="0">
           <table class="table table-hover">
             <thead>
               <tr>
                 <th style="width: 40px;">
-                  <input type="checkbox" class="form-check-input" id="selectAllSuggestions" checked>
+                  <label class="models-checkbox-target"><input type="checkbox" class="form-check-input" id="selectAllSuggestions" aria-label="Select all suggestions" checked></label>
                 </th>
                 <th>Model</th>
                 <th>Current</th>
@@ -258,35 +260,40 @@
 </div>
 
 <style>
-/* Placeholder text styling */
-#searchFilter::placeholder {
-  color: var(--text-secondary);
-  opacity: 0.6;
-}
-
-[data-bs-theme="dark"] #searchFilter::placeholder {
-  opacity: 0.5;
-}
+/* Models owns collection geometry; shared components own field/control states. */
+.models-page .main-content-wrapper { background: var(--bg-primary); }
+.models-page .modal-title { overflow-wrap: anywhere; }
+.models-table-scroll { max-width: 100%; overflow: auto; }
+.models-table-scroll table { min-width: 38rem; }
+.suggestion-row code { white-space: normal; overflow-wrap: anywhere; }
+.models-checkbox-target { display: inline-flex; align-items: center; justify-content: center; min-width: var(--touch-target); min-height: var(--touch-target); }
+.models-section-heading { margin: 0; }
+.models-custom-color { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--touch-target); }
+.provider-title { font: 600 1rem var(--font-body); min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 
 .provider-section, .category-section {
   margin-bottom: 1rem;
 }
 
 .provider-header, .category-header {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 1rem 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  width: 100%;
+  background: var(--surface-solid);
+  color: var(--text-primary);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  text-align: left;
+  font: 400 1rem var(--font-body);
   cursor: pointer;
-  transition: all 0.2s ease;
 }
 
 .provider-header:hover, .category-header:hover {
-  border-color: var(--primary-color);
-  background: rgba(99, 102, 241, 0.05);
+  background: var(--bg-secondary);
 }
 
 .provider-header .chevron, .category-header .chevron {
@@ -298,143 +305,82 @@
   transform: rotate(0deg);
 }
 
-.provider-badge {
+/* Shared .badge owns padding, weight, line height and pill geometry. */
+.provider-badge, .model-tag, .api-key-status, .category-badge,
+.category-badge-preview, .category-header-badge, .confidence-badge {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.375rem 0.75rem;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-weight: 500;
+  gap: var(--space-1);
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border-color);
+  font-size: 0.8125rem;
 }
-
-.provider-badge.cloud {
-  background: #3b82f6;
-  color: #ffffff;
-}
-
-[data-bs-theme="dark"] .provider-badge.cloud {
-  background: #2563eb;
-  color: #ffffff;
-}
-
-.provider-badge.local {
-  background: #16a34a;
-  color: #ffffff;
-}
-
-[data-bs-theme="dark"] .provider-badge.local {
-  background: #059669;
-  color: #ffffff;
-}
+.provider-badge.cloud { color: var(--info-text); }
+.provider-badge.local { color: var(--success-text); }
 
 .models-list {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin-top: 1rem;
-  overflow: hidden;
-  transition: max-height 0.3s ease, opacity 0.3s ease, margin-top 0.3s ease;
-  opacity: 1;
-}
-
-.models-list.collapsed {
-  max-height: 0 !important;
-  opacity: 0;
-  margin-top: 0;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
 .model-item {
-  background: var(--card-bg);
+  position: relative;
+  background: var(--surface-solid);
   border: 1px solid var(--border-color);
-  border-radius: 6px;
-  padding: 0.875rem 1rem;
-  transition: all 0.15s ease;
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  gap: var(--space-3);
   cursor: pointer;
 }
-
-.model-item:hover {
-  border-color: var(--primary-color);
-  background: rgba(99, 102, 241, 0.05);
-}
-
+.model-item:hover { border-color: var(--control-border); }
 .model-info {
+  min-width: 0;
+  min-height: var(--control-height);
   display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  flex: 1 1 12rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .model-name {
   font-size: 0.9375rem;
   font-weight: 500;
   color: var(--text-color);
-  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
-  min-width: 200px;
+  font-family: var(--font-mono);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .model-meta {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   display: flex;
   gap: 0.5rem;
   flex-wrap: wrap;
   align-items: center;
 }
 
-.model-tag {
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-}
-
-.model-tag.category {
-  background: #7c3aed;
-  color: #ffffff;
-}
-
-[data-bs-theme="dark"] .model-tag.category {
-  background: #6d28d9;
-  color: #ffffff;
-}
-
-.model-tag.price {
-  background: #d97706;
-  color: #ffffff;
-}
-
-[data-bs-theme="dark"] .model-tag.price {
-  background: #b45309;
-  color: #ffffff;
-}
-
-.model-tag.use-case {
-  background: #059669;
-  color: #ffffff;
-  font-size: 0.7rem;
-}
-
-[data-bs-theme="dark"] .model-tag.use-case {
-  background: #047857;
-  color: #ffffff;
-}
-
-.model-tag.pricing {
-  background: #7c3aed;
-  color: #ffffff;
-  font-size: 0.7rem;
-}
-
-[data-bs-theme="dark"] .model-tag.pricing {
-  background: #6d28d9;
-  color: #ffffff;
-}
+.model-tag.category, .model-tag.pricing { color: var(--info-text); }
+.model-tag.price { color: var(--warning-text); }
+.model-tag.use-case { color: var(--success-text); }
 
 .model-use-cases {
   display: flex;
@@ -443,62 +389,20 @@
   margin-top: 0.25rem;
 }
 
-.model-tag.legacy {
-  background: #dc2626;
-  color: #ffffff;
-  font-size: 0.7rem;
-}
-
-[data-bs-theme="dark"] .model-tag.legacy {
-  background: #b91c1c;
-  color: #ffffff;
-}
-
-.model-tag.deprecating {
-  background: #f59e0b;
-  color: #000000;
-  font-size: 0.7rem;
-}
-
-[data-bs-theme="dark"] .model-tag.deprecating {
-  background: #d97706;
-  color: #000000;
-}
+.model-tag.legacy { color: var(--danger-text); }
+.model-tag.deprecating { color: var(--warning-text); }
 
 .provider-info, .category-info {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  flex-wrap: wrap;
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-.api-key-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-}
-
-.api-key-status.configured {
-  background: #16a34a;
-  color: #ffffff;
-}
-
-[data-bs-theme="dark"] .api-key-status.configured {
-  background: #059669;
-  color: #ffffff;
-}
-
-.api-key-status.missing {
-  background: #dc2626;
-  color: #ffffff;
-}
-
-[data-bs-theme="dark"] .api-key-status.missing {
-  background: #b91c1c;
-  color: #ffffff;
-}
+.api-key-status.configured { color: var(--success-text); }
+.api-key-status.missing { color: var(--warning-text); }
 
 /* Category Management Styles */
 .categories-list {
@@ -509,33 +413,35 @@
 
 .category-item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  padding: 0.75rem 1rem;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-}
-
-.category-item.default {
-  background: rgba(99, 102, 241, 0.05);
+  gap: var(--space-3);
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .category-item-info {
   display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-2);
 }
 
-.category-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.75rem;
-  border-radius: 6px;
+.category-badge, .category-badge-preview, .category-header-badge {
+  gap: var(--space-2);
   font-size: 0.875rem;
-  font-weight: 500;
-  color: #ffffff;
+  color: var(--text-primary);
+}
+.category-swatch-badge::before {
+  content: '';
+  flex: 0 0 0.75rem;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 1px solid var(--control-border);
+  border-radius: 2px;
+  background: var(--category-color);
 }
 
 .category-item-actions {
@@ -543,80 +449,40 @@
   gap: 0.5rem;
 }
 
-.color-picker-grid {
+.color-picker-grid, .icon-picker-grid {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(var(--touch-target), 1fr));
+  gap: var(--space-2);
 }
 
-.color-option {
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  cursor: pointer;
-  border: 2px solid transparent;
-  transition: all 0.15s ease;
-}
-
-.color-option:hover {
-  transform: scale(1.1);
-}
-
-.color-option.selected {
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 2px var(--primary-color);
-}
-
-.icon-picker-grid {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 0.5rem;
-}
-
-.icon-option {
-  width: 40px;
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  cursor: pointer;
-  border: 2px solid var(--border-color);
-  background: var(--card-bg);
-  transition: all 0.15s ease;
-}
-
-.icon-option:hover {
-  border-color: var(--primary-color);
-  background: rgba(99, 102, 241, 0.1);
-}
-
-.icon-option.selected {
-  border-color: var(--primary-color);
-  background: var(--primary-color);
-  color: #ffffff;
-}
-
-.category-preview {
-  padding: 1rem;
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.category-badge-preview {
+.color-option, .icon-option {
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
-  font-size: 1rem;
-  font-weight: 500;
-  color: #ffffff;
+  justify-content: center;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  border: 1px solid var(--control-border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
 }
+.color-option::before {
+  content: '';
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 1px solid var(--control-border);
+  border-radius: 2px;
+  background: var(--category-color);
+}
+.color-option.selected, .icon-option.selected {
+  border-color: var(--focus-color);
+  box-shadow: inset 0 0 0 1px var(--focus-color);
+}
+.color-option:hover, .icon-option:hover { border-color: var(--focus-color); }
+
+.category-preview { display: flex; min-width: 0; }
 
 /* Assignment Modal */
 .assignment-category-item {
@@ -624,130 +490,63 @@
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  margin-bottom: 0.5rem;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--space-2);
   cursor: pointer;
-  transition: all 0.15s ease;
 }
 
-.assignment-category-item:hover {
-  border-color: var(--primary-color);
-  background: rgba(99, 102, 241, 0.05);
-}
-
-.assignment-category-item.selected {
-  border-color: var(--primary-color);
-  background: rgba(99, 102, 241, 0.1);
-}
-
-/* Category Badge in Section Header */
-.category-header-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.375rem 0.75rem;
-  border-radius: 6px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #ffffff;
-}
+.assignment-category-item:hover { background: var(--bg-secondary); }
+.assignment-category-item.selected { border-color: var(--focus-color); }
+.assignment-category-item input { flex-shrink: 0; }
 
 /* Floating Action Bar */
 .floating-action-bar {
   position: fixed;
-  bottom: 2rem;
-  left: 50%;
-  transform: translateX(-50%);
-  background: #1f2937;
-  padding: 0.75rem 1.5rem;
-  border-radius: 12px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  bottom: var(--space-4);
+  left: var(--space-4);
+  right: var(--space-4);
+  width: fit-content;
+  max-width: calc(100% - 2rem);
+  margin-inline: auto;
+  background: var(--surface-solid);
+  color: var(--text-primary);
+  border: 1px solid var(--control-border);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
   z-index: 1050;
-  animation: slideUp 0.2s ease-out;
-}
-
-@keyframes slideUp {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
 }
 
 /* Auto-categorize button on model items */
-.auto-categorize-btn {
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.model-item:hover .auto-categorize-btn {
-  opacity: 1;
-}
-
-.auto-categorize-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.auto-categorize-btn { flex-shrink: 0; }
 
 .auto-categorize-btn.loading {
   pointer-events: none;
 }
 
-/* Selection mode checkbox */
-.model-select-checkbox {
+/* Hidden selection controls must also leave the keyboard tab order. */
+.model-select-label {
   position: absolute;
-  left: 0.5rem;
+  left: 0;
   top: 50%;
   transform: translateY(-50%);
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  min-width: var(--touch-target);
+  min-height: var(--touch-target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-
-.selection-mode .model-select-checkbox {
-  opacity: 1;
-}
-
-.selection-mode .model-item {
-  padding-left: 2.5rem;
-}
-
-.model-item.selected {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: var(--primary-color);
+.selection-mode .model-item { padding-left: 3rem; }
+.model-item.selected { border-color: var(--focus-color); }
+@media (max-width: 768px), (pointer: coarse) {
+  .model-info { min-height: var(--touch-target); }
 }
 
 /* Confidence indicator */
-.confidence-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  padding: 0.25rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-
-.confidence-badge.high {
-  background: #16a34a;
-  color: white;
-}
-
-.confidence-badge.medium {
-  background: #f59e0b;
-  color: black;
-}
-
-.confidence-badge.low {
-  background: #6b7280;
-  color: white;
-}
+.confidence-badge.high { color: var(--success-text); }
+.confidence-badge.medium { color: var(--warning-text); }
+.confidence-badge.low { color: var(--text-secondary); }
 
 /* Suggestion row highlight animation */
 .suggestion-row.applied {
@@ -772,6 +571,7 @@ let editingCategoryId = null;
 let selectedColor = '#3b82f6';
 let selectedIcon = 'code-slash';
 let currentModelId = null;
+let modelsAccordionSequence = 0;
 
 // Auto-categorize state
 let autoCategorizeAvailable = false;
@@ -790,18 +590,29 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('categoryFilter').addEventListener('change', applyFilters);
   document.getElementById('searchFilter').addEventListener('input', applyFilters);
   document.getElementById('showLegacyFilter').addEventListener('change', applyFilters);
-  document.getElementById('addCategoryBtn').addEventListener('click', openCategoryEditor);
-  document.getElementById('saveCategoryBtn').addEventListener('click', saveCategory);
+  document.getElementById('addCategoryBtn').addEventListener('click', event => openCategoryEditor(null, event.currentTarget));
+  document.getElementById('categoryEditorForm').addEventListener('submit', event => {
+    event.preventDefault();
+    saveCategory();
+  });
   document.getElementById('saveAssignmentBtn').addEventListener('click', saveAssignment);
   document.getElementById('customColor').addEventListener('input', updateCustomColor);
-  document.getElementById('categoryName').addEventListener('input', updatePreview);
+  document.getElementById('categoryName').addEventListener('input', updateCategoryName);
 
   // View toggle
   document.querySelectorAll('input[name="viewToggle"]').forEach(input => {
-    input.addEventListener('change', (e) => {
-      viewPreference = e.target.value;
-      saveViewPreference();
+    input.addEventListener('change', async event => {
+      const previous = viewPreference;
+      viewPreference = event.target.value;
+      const toggles = document.querySelectorAll('input[name="viewToggle"]');
+      toggles.forEach(toggle => { toggle.disabled = true; });
       applyFilters();
+      if (!await saveViewPreference()) {
+        viewPreference = previous;
+        document.getElementById(previous === 'category' ? 'viewCategory' : 'viewProvider').checked = true;
+        applyFilters();
+      }
+      toggles.forEach(toggle => { toggle.disabled = false; });
     });
   });
 
@@ -821,6 +632,9 @@ async function loadData() {
   loadingState.classList.remove('d-none');
   errorState.classList.add('d-none');
   modelsContent.classList.add('d-none');
+  document.getElementById('manageCategoriesBtn').disabled = true;
+  autoCategorizeAvailable = false;
+  document.getElementById('autoCategorizeAllBtn').classList.add('d-none');
 
   try {
     // Load providers, categories, and auto-categorize availability in parallel
@@ -833,12 +647,13 @@ async function loadData() {
     // Check auto-categorize availability
     if (autoCatRes.ok) {
       const autoCatData = await autoCatRes.json();
-      autoCategorizeAvailable = autoCatData.available;
+      autoCategorizeAvailable = autoCatData.available === true;
       // Show/hide auto-categorize button based on availability
       document.getElementById('autoCategorizeAllBtn').classList.toggle('d-none', !autoCategorizeAvailable);
     }
 
     if (!providersRes.ok) throw new Error('Failed to fetch providers');
+    if (!categoriesRes.ok) throw new Error('Failed to fetch categories');
 
     const providersData = await providersRes.json();
     allProviders = providersData.providers || [];
@@ -862,12 +677,17 @@ async function loadData() {
 
     loadingState.classList.add('d-none');
     modelsContent.classList.remove('d-none');
+    document.getElementById('manageCategoriesBtn').disabled = false;
+    return true;
 
   } catch (error) {
     console.error('Error loading data:', error);
     document.getElementById('errorMessage').textContent = error.message;
     loadingState.classList.add('d-none');
     errorState.classList.remove('d-none');
+    autoCategorizeAvailable = false;
+    document.getElementById('autoCategorizeAllBtn').classList.add('d-none');
+    return false;
   }
 }
 
@@ -1021,74 +841,61 @@ function getAllUncategorizedModels(providerFilter, searchFilter, showLegacy) {
   });
 }
 
+function modelsEscapeHTML(value) {
+  return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+}
+
+function modelsColor(color) {
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : '#3b82f6';
+}
+
+function modelsIcon(icon) {
+  return /^[a-z0-9-]{1,50}$/i.test(icon) ? icon : 'tag';
+}
+
+function categoryBadgeMarkup(category, className = 'category-badge') {
+  return `<span class="badge ${className} category-swatch-badge" style="--category-color: ${modelsColor(category.color)}"><i class="bi bi-${modelsIcon(category.icon)}" aria-hidden="true"></i>${modelsEscapeHTML(category.name)}</span>`;
+}
+
+function modelsSectionHeader(section, className, content, count) {
+  const heading = document.createElement('h2');
+  heading.className = 'models-section-heading';
+  const header = document.createElement('button');
+  header.type = 'button';
+  header.className = className;
+  header.innerHTML = `${content}<span class="ui-actions"><span class="text-muted">${count} model${count !== 1 ? 's' : ''}</span><i class="bi bi-chevron-down chevron" aria-hidden="true"></i></span>`;
+  heading.appendChild(header);
+  section.appendChild(heading);
+  return header;
+}
+
 function createProviderSection(provider, models) {
-  const section = document.createElement('div');
+  const section = document.createElement('section');
   section.className = 'provider-section';
-
   const uniqueModels = dedupeModels(models);
-
-  const header = document.createElement('div');
-  header.className = 'provider-header';
-  header.innerHTML = `
-    <div class="provider-info">
-      <h2 class="h5 mb-0">${provider.display_name}</h2>
-      <span class="provider-badge ${provider.type}">
-        <i class="bi bi-${provider.type === 'cloud' ? 'cloud' : 'laptop'}"></i>
-        ${provider.type}
+  const header = modelsSectionHeader(section, 'provider-header', `
+    <span class="provider-info">
+      <span class="provider-title">${modelsEscapeHTML(provider.display_name)}</span>
+      <span class="badge provider-badge ${provider.type === 'cloud' ? 'cloud' : provider.type === 'local' ? 'local' : ''}">
+        <i class="bi bi-${provider.type === 'cloud' ? 'cloud' : 'laptop'}" aria-hidden="true"></i>${modelsEscapeHTML(provider.type)}
       </span>
-      ${provider.requires_key ? `
-        <span class="api-key-status ${provider.available ? 'configured' : 'missing'}">
-          <i class="bi bi-${provider.available ? 'check-circle' : 'exclamation-circle'}"></i>
-          ${provider.available ? 'API Key Configured' : 'API Key Required'}
-        </span>
-      ` : ''}
-    </div>
-    <div style="display: flex; align-items: center; gap: 1rem;">
-      <div class="text-muted">${uniqueModels.size} model${uniqueModels.size !== 1 ? 's' : ''}</div>
-      <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
-        <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
-      </svg>
-    </div>
-  `;
-  section.appendChild(header);
-
+      ${provider.requires_key ? `<span class="badge api-key-status ${provider.available ? 'configured' : 'missing'}"><i class="bi bi-${provider.available ? 'check-circle' : 'exclamation-circle'}" aria-hidden="true"></i>${provider.available ? 'API Key Configured' : 'API Key Required'}</span>` : ''}
+    </span>`, uniqueModels.size);
   const list = createModelsList(uniqueModels, provider.name);
   section.appendChild(list);
   setupAccordion(header, list);
-
   return section;
 }
 
 function createCategorySection(category, models) {
-  const section = document.createElement('div');
+  const section = document.createElement('section');
   section.className = 'category-section';
-
-  const header = document.createElement('div');
-  header.className = 'category-header';
-  header.innerHTML = `
-    <div class="category-info">
-      <span class="category-header-badge" style="background: ${category.color}">
-        <i class="bi bi-${category.icon}"></i>
-        ${category.name}
-      </span>
-    </div>
-    <div style="display: flex; align-items: center; gap: 1rem;">
-      <div class="text-muted">${models.length} model${models.length !== 1 ? 's' : ''}</div>
-      <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
-        <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
-      </svg>
-    </div>
-  `;
-  section.appendChild(header);
-
+  const header = modelsSectionHeader(section, 'category-header', `<span class="category-info">${categoryBadgeMarkup(category, 'category-header-badge')}</span>`, models.length);
   const list = document.createElement('div');
   list.className = 'models-list';
-  models.forEach(model => {
-    list.appendChild(createModelItemForCategory(model));
-  });
+  models.forEach(model => list.appendChild(createModelItemForCategory(model)));
   section.appendChild(list);
   setupAccordion(header, list);
-
   return section;
 }
 
@@ -1111,195 +918,153 @@ function createModelsList(uniqueModels, providerName) {
   return list;
 }
 
-function createModelItem(model, providerName) {
+function createModelItem(model, providerName, categoryView = false) {
   const item = document.createElement('div');
   item.className = 'model-item';
-  item.style.position = 'relative';
   item.dataset.modelId = model.value;
-  item.dataset.provider = providerName;
-
-  const assignedCats = modelAssignments[model.value] || [];
-  const categoryTags = assignedCats.map(catId => {
+  if (providerName) item.dataset.provider = providerName;
+  const selected = selectedModels.has(model.value);
+  item.classList.toggle('selected', selected);
+  const categoryTags = (modelAssignments[model.value] || []).map(catId => {
     const cat = allCategories.find(c => c.id === catId);
-    if (!cat) return '';
-    return `<span class="model-tag" style="background: ${cat.color}"><i class="bi bi-${cat.icon}"></i>${cat.name}</span>`;
+    return cat ? categoryBadgeMarkup(cat, 'model-tag') : '';
   }).join('');
-
-  // Build use-case badges (limit to first 2 for inline display)
   const goodFor = model.good_for || [];
-  const useCaseTags = goodFor.slice(0, 2).map(useCase =>
-    `<span class="model-tag use-case"><i class="bi bi-check-circle me-1"></i>${useCase}</span>`
-  ).join('');
-  const moreCount = goodFor.length > 2 ? `<span class="model-tag use-case">+${goodFor.length - 2} more</span>` : '';
-
-  // Pricing badge
-  const pricingTag = model.pricing ? `<span class="model-tag pricing"><i class="bi bi-currency-dollar me-1"></i>${model.pricing}</span>` : '';
-
-  // Legacy/Deprecation badge
-  let statusTag = '';
-  if (model.is_legacy) {
-    statusTag = `<span class="model-tag legacy"><i class="bi bi-exclamation-triangle me-1"></i>Legacy</span>`;
-  } else if (model.deprecation_date) {
-    statusTag = `<span class="model-tag deprecating"><i class="bi bi-clock me-1"></i>Deprecates ${model.deprecation_date}</span>`;
-  }
-
-  // Auto-categorize button (only shown if available)
-  const autoCatBtn = autoCategorizeAvailable
-    ? `<button class="btn btn-outline-primary auto-categorize-btn" onclick="event.stopPropagation(); autoCategorizeModel('${model.value}')" title="Auto-categorize with AI">
-         <i class="bi bi-magic"></i>
-       </button>`
-    : '';
-
+  const useCaseTags = goodFor.slice(0, 2).map(useCase => `<span class="badge model-tag use-case"><i class="bi bi-check-circle" aria-hidden="true"></i>${modelsEscapeHTML(useCase)}</span>`).join('');
+  const moreCount = goodFor.length > 2 ? `<span class="badge model-tag use-case">+${goodFor.length - 2} more</span>` : '';
+  const pricingTag = model.pricing ? `<span class="badge model-tag pricing"><i class="bi bi-currency-dollar" aria-hidden="true"></i>${modelsEscapeHTML(model.pricing)}</span>` : '';
+  const statusTag = model.is_legacy ? '<span class="badge model-tag legacy">Legacy</span>' : (model.deprecation_date ? `<span class="badge model-tag deprecating">Deprecates ${modelsEscapeHTML(model.deprecation_date)}</span>` : '');
   item.innerHTML = `
-    <input type="checkbox" class="form-check-input model-select-checkbox" data-model-id="${model.value}" onclick="event.stopPropagation(); toggleModelSelection('${model.value}', this)">
-    <div class="model-info">
-      <div class="model-name">${model.label}</div>
-      <div class="model-meta">
-        ${statusTag}
-        ${pricingTag}
-        ${categoryTags || ''}
-      </div>
-      ${goodFor.length > 0 ? `<div class="model-use-cases">${useCaseTags}${moreCount}</div>` : ''}
-    </div>
-    <div class="d-flex align-items-center gap-2">
-      ${autoCatBtn}
-      <i class="bi bi-chevron-right text-muted"></i>
-    </div>
-  `;
-
-  item.addEventListener('click', (e) => {
+    <label class="model-select-label" ${selectionMode ? '' : 'hidden'}><input type="checkbox" class="form-check-input model-select-checkbox" data-model-id="${modelsEscapeHTML(model.value)}" aria-label="Select ${modelsEscapeHTML(model.label)}" ${selected ? 'checked' : ''}></label>
+    <button type="button" class="model-info" title="Assign categories">
+      <span class="model-name">${modelsEscapeHTML(model.label)}</span>
+      <span class="model-meta">${statusTag}${pricingTag}${categoryView ? `<span class="text-muted">${modelsEscapeHTML(model.providerName)}</span>` : categoryTags}</span>
+      ${goodFor.length > 0 ? `<span class="model-use-cases">${useCaseTags}${moreCount}</span>` : ''}
+    </button>
+    <span class="ui-actions">
+      ${autoCategorizeAvailable ? '<button type="button" class="btn btn-outline-secondary btn-sm auto-categorize-btn" aria-label="Auto-categorize with AI"><i class="bi bi-magic" aria-hidden="true"></i></button>' : ''}
+      <i class="bi bi-chevron-right text-muted" aria-hidden="true"></i>
+    </span>`;
+  const checkbox = item.querySelector('.model-select-checkbox');
+  checkbox.addEventListener('change', () => toggleModelSelection(model.value, checkbox));
+  item.querySelector('.auto-categorize-btn')?.addEventListener('click', event => {
+    event.stopPropagation();
+    autoCategorizeModel(model.value, event.currentTarget);
+  });
+  item.addEventListener('click', event => {
+    if (event.target.closest('.model-select-label')) return;
     if (selectionMode) {
-      const checkbox = item.querySelector('.model-select-checkbox');
       checkbox.checked = !checkbox.checked;
       toggleModelSelection(model.value, checkbox);
     } else {
-      openAssignmentModal(model.value, model.label);
+      openAssignmentModal(model.value, model.label, item.querySelector('.model-info'));
     }
   });
   return item;
 }
 
 function createModelItemForCategory(model) {
-  const item = document.createElement('div');
-  item.className = 'model-item';
-  item.style.position = 'relative';
-  item.dataset.modelId = model.value;
-
-  // Build use-case badges (limit to first 2 for inline display)
-  const goodFor = model.good_for || [];
-  const useCaseTags = goodFor.slice(0, 2).map(useCase =>
-    `<span class="model-tag use-case"><i class="bi bi-check-circle me-1"></i>${useCase}</span>`
-  ).join('');
-  const moreCount = goodFor.length > 2 ? `<span class="model-tag use-case">+${goodFor.length - 2} more</span>` : '';
-
-  // Pricing badge
-  const pricingTag = model.pricing ? `<span class="model-tag pricing"><i class="bi bi-currency-dollar me-1"></i>${model.pricing}</span>` : '';
-
-  // Legacy/Deprecation badge
-  let statusTag = '';
-  if (model.is_legacy) {
-    statusTag = `<span class="model-tag legacy"><i class="bi bi-exclamation-triangle me-1"></i>Legacy</span>`;
-  } else if (model.deprecation_date) {
-    statusTag = `<span class="model-tag deprecating"><i class="bi bi-clock me-1"></i>Deprecates ${model.deprecation_date}</span>`;
-  }
-
-  // Auto-categorize button (only shown if available)
-  const autoCatBtn = autoCategorizeAvailable
-    ? `<button class="btn btn-outline-primary auto-categorize-btn" onclick="event.stopPropagation(); autoCategorizeModel('${model.value}')" title="Auto-categorize with AI">
-         <i class="bi bi-magic"></i>
-       </button>`
-    : '';
-
-  item.innerHTML = `
-    <input type="checkbox" class="form-check-input model-select-checkbox" data-model-id="${model.value}" onclick="event.stopPropagation(); toggleModelSelection('${model.value}', this)">
-    <div class="model-info">
-      <div class="model-name">${model.label}</div>
-      <div class="model-meta">
-        ${statusTag}
-        ${pricingTag}
-        <span class="text-muted small">${model.providerName || ''}</span>
-      </div>
-      ${goodFor.length > 0 ? `<div class="model-use-cases">${useCaseTags}${moreCount}</div>` : ''}
-    </div>
-    <div class="d-flex align-items-center gap-2">
-      ${autoCatBtn}
-      <i class="bi bi-chevron-right text-muted"></i>
-    </div>
-  `;
-
-  item.addEventListener('click', (e) => {
-    if (selectionMode) {
-      const checkbox = item.querySelector('.model-select-checkbox');
-      checkbox.checked = !checkbox.checked;
-      toggleModelSelection(model.value, checkbox);
-    } else {
-      openAssignmentModal(model.value, model.label);
-    }
-  });
-  return item;
+  return createModelItem(model, undefined, true);
 }
 
 function setupAccordion(header, list) {
-  header.addEventListener('click', function() {
-    const isCollapsed = list.classList.contains('collapsed');
-    if (isCollapsed) {
-      list.classList.remove('collapsed');
-      header.classList.remove('collapsed');
-      list.style.maxHeight = list.scrollHeight + 'px';
-    } else {
-      list.classList.add('collapsed');
-      header.classList.add('collapsed');
-      list.style.maxHeight = '0';
-    }
+  list.id = `models-list-${++modelsAccordionSequence}`;
+  header.setAttribute('aria-controls', list.id);
+  header.setAttribute('aria-expanded', 'true');
+  header.addEventListener('click', () => {
+    const expanded = header.getAttribute('aria-expanded') === 'true';
+    if (expanded && list.contains(document.activeElement)) header.focus();
+    list.hidden = expanded;
+    list.classList.toggle('collapsed', expanded);
+    header.classList.toggle('collapsed', expanded);
+    header.setAttribute('aria-expanded', String(!expanded));
   });
-  setTimeout(() => { list.style.maxHeight = list.scrollHeight + 'px'; }, 0);
 }
 
 // Category Management
-function openCategoryModal() {
-  renderCategoriesList();
-  new bootstrap.Modal(document.getElementById('categoryModal')).show();
+function modelsReturnControl(trigger) {
+  if (trigger?.isConnected && trigger.getClientRects().length) return trigger;
+  const row = trigger?.closest?.('.model-item');
+  if (row) {
+    const current = Array.from(document.querySelectorAll('.model-item')).find(item => item.dataset.modelId === row.dataset.modelId && item.dataset.provider === row.dataset.provider);
+    if (current) return current.querySelector('.model-info');
+  }
+  return document.getElementById('manageCategoriesBtn');
 }
 
-function renderCategoriesList() {
+function showModelsModal(id, trigger = document.activeElement, initialFocus) {
+  const element = document.getElementById(id);
+  const show = () => {
+    element.addEventListener('shown.bs.modal', () => (element.querySelector(initialFocus || '.btn-close') || element).focus(), { once: true });
+    element.addEventListener('hidden.bs.modal', () => {
+      if (!document.querySelector('.modal.show')) modelsReturnControl(trigger)?.focus({ preventScroll: true });
+    }, { once: true });
+    bootstrap.Modal.getOrCreateInstance(element).show();
+  };
+  const previous = document.querySelector('#categoryModal.show, #categoryEditorModal.show, #assignmentModal.show, #autoCategorizeModal.show');
+  if (previous && previous !== element) {
+    previous.addEventListener('hidden.bs.modal', show, { once: true });
+    bootstrap.Modal.getInstance(previous).hide();
+  } else {
+    show();
+  }
+}
+
+function hideModelsModal(id) {
+  const element = document.getElementById(id);
+  if (!element.classList.contains('show')) return Promise.resolve();
+  return new Promise(resolve => {
+    element.addEventListener('hidden.bs.modal', resolve, { once: true });
+    bootstrap.Modal.getInstance(element).hide();
+  });
+}
+
+function openCategoryModal(trigger = document.activeElement) {
+  renderCategoriesList();
+  showModelsModal('categoryModal', trigger?.currentTarget || trigger, '#addCategoryBtn');
+}
+
+function renderCategoriesList(preferredControl = document.activeElement) {
   const container = document.getElementById('categoriesList');
   const customCount = allCategories.filter(c => !c.is_default).length;
   document.getElementById('categoryCount').textContent = `${customCount} / ${maxCategories} custom categories`;
 
+  const focused = preferredControl?.closest('[data-models-action]');
+  const focusedId = focused?.closest('.category-item')?.dataset.id;
   container.innerHTML = allCategories.map(cat => `
-    <div class="category-item ${cat.is_default ? 'default' : ''}" data-id="${cat.id}">
+    <div class="category-item ${cat.is_default ? 'default' : ''}" data-id="${modelsEscapeHTML(cat.id)}">
       <div class="category-item-info">
-        <span class="category-badge" style="background: ${cat.color}">
-          <i class="bi bi-${cat.icon}"></i>
-          ${cat.name}
-        </span>
+        ${categoryBadgeMarkup(cat)}
         ${cat.is_default ? '<span class="badge bg-secondary">Default</span>' : ''}
         ${cat.is_hidden ? '<span class="badge bg-warning text-dark">Hidden</span>' : ''}
       </div>
       <div class="category-item-actions">
-        ${cat.is_default ? `
-          <button class="btn btn-sm btn-outline-secondary" onclick="toggleCategoryVisibility('${cat.id}', ${!cat.is_hidden})">
-            <i class="bi bi-${cat.is_hidden ? 'eye' : 'eye-slash'}"></i>
-          </button>
-        ` : `
-          <button class="btn btn-sm btn-outline-primary" onclick="editCategory('${cat.id}')">
-            <i class="bi bi-pencil"></i>
-          </button>
-          <button class="btn btn-sm btn-outline-danger" onclick="deleteCategory('${cat.id}')">
-            <i class="bi bi-trash"></i>
-          </button>
-        `}
+        ${cat.is_default ? `<button type="button" class="btn btn-sm btn-outline-secondary" data-models-action="visibility" aria-label="${cat.is_hidden ? 'Show' : 'Hide'} ${modelsEscapeHTML(cat.name)}"><i class="bi bi-${cat.is_hidden ? 'eye' : 'eye-slash'}" aria-hidden="true"></i></button>` : `<button type="button" class="btn btn-sm btn-outline-secondary" data-models-action="edit" aria-label="Edit ${modelsEscapeHTML(cat.name)}"><i class="bi bi-pencil" aria-hidden="true"></i></button><button type="button" class="btn btn-sm btn-outline-danger" data-models-action="delete" aria-label="Delete ${modelsEscapeHTML(cat.name)}"><i class="bi bi-trash" aria-hidden="true"></i></button>`}
       </div>
-    </div>
-  `).join('');
+    </div>`).join('');
+  container.querySelectorAll('.category-item').forEach(row => {
+    const cat = allCategories.find(category => category.id === row.dataset.id);
+    row.querySelector('[data-models-action="visibility"]')?.addEventListener('click', event => toggleCategoryVisibility(cat.id, !cat.is_hidden, event.currentTarget));
+    row.querySelector('[data-models-action="edit"]')?.addEventListener('click', event => editCategory(cat.id, event.currentTarget));
+    row.querySelector('[data-models-action="delete"]')?.addEventListener('click', event => deleteCategory(cat.id, event.currentTarget));
+  });
+  if (focused) {
+    const row = Array.from(container.children).find(item => item.dataset.id === focusedId);
+    (row?.querySelector(`[data-models-action="${focused.dataset.modelsAction}"]`) || document.getElementById('addCategoryBtn')).focus();
+  }
 }
 
-function openCategoryEditor(categoryId = null) {
+function openCategoryEditor(categoryId = null, trigger = document.activeElement) {
   editingCategoryId = categoryId;
   const category = categoryId ? allCategories.find(c => c.id === categoryId) : null;
+  // Native reset clears :user-invalid too; removing our classes alone does not.
+  document.getElementById('categoryEditorForm').reset();
 
   document.getElementById('categoryEditorTitle').textContent = category ? 'Edit Category' : 'Add Category';
   document.getElementById('categoryName').value = category ? category.name : '';
+  document.getElementById('categoryName').classList.remove('is-invalid');
+  document.getElementById('categoryName').removeAttribute('aria-invalid');
+  document.getElementById('categoryNameError').textContent = '';
   selectedColor = category ? category.color : predefinedColors[0] || '#3b82f6';
   selectedIcon = category ? category.icon : predefinedIcons[0] || 'code-slash';
 
@@ -1307,58 +1072,71 @@ function openCategoryEditor(categoryId = null) {
   renderIconPicker();
   updatePreview();
 
-  bootstrap.Modal.getInstance(document.getElementById('categoryModal'))?.hide();
-  new bootstrap.Modal(document.getElementById('categoryEditorModal')).show();
+  showModelsModal('categoryEditorModal', trigger, '#categoryName');
 }
 
 function renderColorPicker() {
   const container = document.getElementById('colorPicker');
   container.innerHTML = predefinedColors.map(color => `
-    <div class="color-option ${color === selectedColor ? 'selected' : ''}"
-         style="background: ${color}"
-         data-color="${color}"
-         onclick="selectColor('${color}')"></div>
+    <button type="button" class="color-option ${color === selectedColor ? 'selected' : ''}"
+         style="--category-color: ${modelsColor(color)}" data-color="${modelsEscapeHTML(color)}"
+         aria-label="Choose color ${modelsEscapeHTML(color)}" aria-pressed="${color === selectedColor}"></button>
   `).join('');
+  container.querySelectorAll('.color-option').forEach(button => button.addEventListener('click', () => selectColor(button.dataset.color)));
   document.getElementById('customColor').value = selectedColor;
 }
 
 function renderIconPicker() {
   const container = document.getElementById('iconPicker');
   container.innerHTML = predefinedIcons.map(icon => `
-    <div class="icon-option ${icon === selectedIcon ? 'selected' : ''}"
-         data-icon="${icon}"
-         onclick="selectIcon('${icon}')">
-      <i class="bi bi-${icon}"></i>
-    </div>
+    <button type="button" class="icon-option ${icon === selectedIcon ? 'selected' : ''}"
+         data-icon="${modelsEscapeHTML(icon)}" aria-label="Choose icon ${modelsEscapeHTML(icon)}" aria-pressed="${icon === selectedIcon}">
+      <i class="bi bi-${modelsIcon(icon)}" aria-hidden="true"></i>
+    </button>
   `).join('');
+  container.querySelectorAll('.icon-option').forEach(button => button.addEventListener('click', () => selectIcon(button.dataset.icon)));
 }
 
 function selectColor(color) {
   selectedColor = color;
-  document.querySelectorAll('.color-option').forEach(el => el.classList.remove('selected'));
-  document.querySelector(`.color-option[data-color="${color}"]`)?.classList.add('selected');
+  document.querySelectorAll('.color-option').forEach(el => {
+    const selected = el.dataset.color === color;
+    el.classList.toggle('selected', selected);
+    el.setAttribute('aria-pressed', String(selected));
+  });
   document.getElementById('customColor').value = color;
   updatePreview();
 }
 
 function selectIcon(icon) {
   selectedIcon = icon;
-  document.querySelectorAll('.icon-option').forEach(el => el.classList.remove('selected'));
-  document.querySelector(`.icon-option[data-icon="${icon}"]`)?.classList.add('selected');
+  document.querySelectorAll('.icon-option').forEach(el => {
+    const selected = el.dataset.icon === icon;
+    el.classList.toggle('selected', selected);
+    el.setAttribute('aria-pressed', String(selected));
+  });
   updatePreview();
 }
 
 function updateCustomColor(e) {
-  selectedColor = e.target.value;
-  document.querySelectorAll('.color-option').forEach(el => el.classList.remove('selected'));
+  selectColor(e.target.value);
+}
+
+function updateCategoryName() {
+  const input = document.getElementById('categoryName');
+  if (input.value.trim()) {
+    input.classList.remove('is-invalid');
+    input.removeAttribute('aria-invalid');
+    document.getElementById('categoryNameError').textContent = '';
+  }
   updatePreview();
 }
 
 function updatePreview() {
   const name = document.getElementById('categoryName').value || 'Category Name';
   const preview = document.getElementById('categoryPreview');
-  preview.innerHTML = `<i class="bi bi-${selectedIcon} me-1"></i>${name}`;
-  preview.style.background = selectedColor;
+  preview.innerHTML = `<i class="bi bi-${modelsIcon(selectedIcon)}" aria-hidden="true"></i>${modelsEscapeHTML(name)}`;
+  preview.style.setProperty('--category-color', modelsColor(selectedColor));
 }
 
 async function saveCategory() {
@@ -1366,10 +1144,13 @@ async function saveCategory() {
   if (!name) {
     document.getElementById('categoryName').classList.add('is-invalid');
     document.getElementById('categoryNameError').textContent = 'Name is required';
+    document.getElementById('categoryName').setAttribute('aria-invalid', 'true');
+    document.getElementById('categoryName').focus();
     return;
   }
 
   document.getElementById('categoryName').classList.remove('is-invalid');
+  document.getElementById('categoryName').removeAttribute('aria-invalid');
 
   try {
     const url = editingCategoryId
@@ -1388,34 +1169,38 @@ async function saveCategory() {
       throw new Error(error.error || 'Failed to save category');
     }
 
-    bootstrap.Modal.getInstance(document.getElementById('categoryEditorModal')).hide();
-    await loadData();
-    openCategoryModal();
+    await hideModelsModal('categoryEditorModal');
+    if (await loadData()) openCategoryModal();
 
   } catch (error) {
     document.getElementById('categoryName').classList.add('is-invalid');
     document.getElementById('categoryNameError').textContent = error.message;
+    document.getElementById('categoryName').setAttribute('aria-invalid', 'true');
+    document.getElementById('categoryName').focus();
   }
 }
 
-function editCategory(id) {
-  openCategoryEditor(id);
+function editCategory(id, trigger) {
+  openCategoryEditor(id, trigger);
 }
 
-async function deleteCategory(id) {
-  if (!confirm('Are you sure you want to delete this category?')) return;
+async function deleteCategory(id, trigger = document.activeElement) {
+  if (!confirm('Are you sure you want to delete this category?')) {
+    trigger?.focus({ preventScroll: true });
+    return;
+  }
 
   try {
     const response = await fetch(`/api/model-categories/${id}`, { method: 'DELETE' });
     if (!response.ok) throw new Error('Failed to delete category');
-    await loadData();
-    renderCategoriesList();
+    if (await loadData()) renderCategoriesList(trigger);
+    else await hideModelsModal('categoryModal');
   } catch (error) {
     alert(error.message);
   }
 }
 
-async function toggleCategoryVisibility(id, hidden) {
+async function toggleCategoryVisibility(id, hidden, trigger = document.activeElement) {
   try {
     const response = await fetch(`/api/model-categories/${id}/visibility`, {
       method: 'PUT',
@@ -1423,15 +1208,15 @@ async function toggleCategoryVisibility(id, hidden) {
       body: JSON.stringify({ hidden })
     });
     if (!response.ok) throw new Error('Failed to update visibility');
-    await loadData();
-    renderCategoriesList();
+    if (await loadData()) renderCategoriesList(trigger);
+    else await hideModelsModal('categoryModal');
   } catch (error) {
     alert(error.message);
   }
 }
 
 // Model Assignment
-function openAssignmentModal(modelId, modelLabel) {
+function openAssignmentModal(modelId, modelLabel, trigger = document.activeElement) {
   currentModelId = modelId;
   document.getElementById('assignmentModelName').textContent = modelLabel;
 
@@ -1439,24 +1224,18 @@ function openAssignmentModal(modelId, modelLabel) {
   const currentAssignments = modelAssignments[modelId] || [];
 
   container.innerHTML = allCategories.filter(c => !c.is_hidden).map(cat => `
-    <div class="assignment-category-item ${currentAssignments.includes(cat.id) ? 'selected' : ''}"
-         data-category-id="${cat.id}"
-         onclick="toggleAssignment(this, '${cat.id}')">
+    <label class="assignment-category-item ${currentAssignments.includes(cat.id) ? 'selected' : ''}"
+         data-category-id="${modelsEscapeHTML(cat.id)}">
       <input type="checkbox" class="form-check-input" ${currentAssignments.includes(cat.id) ? 'checked' : ''}>
-      <span class="category-badge" style="background: ${cat.color}">
-        <i class="bi bi-${cat.icon}"></i>
-        ${cat.name}
-      </span>
-    </div>
+      ${categoryBadgeMarkup(cat)}
+    </label>
   `).join('');
-
-  new bootstrap.Modal(document.getElementById('assignmentModal')).show();
+  container.querySelectorAll('.assignment-category-item').forEach(label => label.querySelector('input').addEventListener('change', () => toggleAssignment(label)));
+  showModelsModal('assignmentModal', trigger, 'input[type="checkbox"]');
 }
 
-function toggleAssignment(element, categoryId) {
-  element.classList.toggle('selected');
-  const checkbox = element.querySelector('input[type="checkbox"]');
-  checkbox.checked = !checkbox.checked;
+function toggleAssignment(element) {
+  element.classList.toggle('selected', element.querySelector('input[type="checkbox"]').checked);
 }
 
 async function saveAssignment() {
@@ -1473,8 +1252,10 @@ async function saveAssignment() {
     if (!response.ok) throw new Error('Failed to save assignments');
 
     modelAssignments[currentModelId] = selectedCategories;
-    bootstrap.Modal.getInstance(document.getElementById('assignmentModal')).hide();
+    await hideModelsModal('assignmentModal');
+    const previous = document.activeElement;
     applyFilters();
+    modelsReturnControl(previous)?.focus({ preventScroll: true });
   } catch (error) {
     alert(error.message);
   }
@@ -1482,44 +1263,41 @@ async function saveAssignment() {
 
 async function saveViewPreference() {
   try {
-    await fetch('/api/model-categories/view-preference', {
+    const response = await fetch('/api/model-categories/view-preference', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ preference: viewPreference })
     });
+    if (!response.ok) throw new Error('Failed to save view preference');
+    return true;
   } catch (error) {
-    console.error('Failed to save view preference:', error);
+    showToast(error.message, 'danger');
+    return false;
   }
 }
 
 // ===== Auto-Categorize Functions =====
 
+function syncSelectionMode() {
+  const btn = document.getElementById('toggleSelectionBtn');
+  if (btn) {
+    btn.innerHTML = selectionMode ? '<i class="bi bi-x-lg me-2"></i>Cancel' : '<i class="bi bi-check2-square me-2"></i>Select';
+    btn.classList.toggle('btn-secondary', selectionMode);
+    btn.classList.toggle('btn-outline-secondary', !selectionMode);
+  }
+  document.getElementById('providersContainer').classList.toggle('selection-mode', selectionMode);
+  document.querySelectorAll('.model-select-label').forEach(label => { label.hidden = !selectionMode; });
+}
+
 function toggleSelectionMode() {
   selectionMode = !selectionMode;
-  const btn = document.getElementById('toggleSelectionBtn');
-  const container = document.getElementById('providersContainer');
-
-  if (selectionMode) {
-    btn.innerHTML = '<i class="bi bi-x-lg me-2"></i>Cancel';
-    btn.classList.remove('btn-outline-secondary');
-    btn.classList.add('btn-secondary');
-    container.classList.add('selection-mode');
-  } else {
-    btn.innerHTML = '<i class="bi bi-check2-square me-2"></i>Select';
-    btn.classList.remove('btn-secondary');
-    btn.classList.add('btn-outline-secondary');
-    container.classList.remove('selection-mode');
-    clearSelection();
-  }
+  syncSelectionMode();
+  if (!selectionMode) clearSelection();
 }
 
 function cancelSelection() {
   selectionMode = false;
-  const btn = document.getElementById('toggleSelectionBtn');
-  btn.innerHTML = '<i class="bi bi-check2-square me-2"></i>Select';
-  btn.classList.remove('btn-secondary');
-  btn.classList.add('btn-outline-secondary');
-  document.getElementById('providersContainer').classList.remove('selection-mode');
+  syncSelectionMode();
   clearSelection();
 }
 
@@ -1557,16 +1335,16 @@ function updateFloatingBar() {
   }
 }
 
-async function autoCategorizeModel(modelId) {
-  // Find the button and show loading state
-  const btn = document.querySelector(`.model-item[data-model-id="${modelId}"] .auto-categorize-btn`);
+async function autoCategorizeModel(modelId, trigger) {
+  const row = Array.from(document.querySelectorAll('.model-item')).find(item => item.dataset.modelId === modelId);
+  const btn = trigger || row?.querySelector('.auto-categorize-btn');
   if (btn) {
     btn.classList.add('loading');
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
   }
 
   try {
-    await openAutoCategorizeModal([modelId]);
+    await openAutoCategorizeModal([modelId], btn);
   } finally {
     if (btn) {
       btn.classList.remove('loading');
@@ -1575,12 +1353,12 @@ async function autoCategorizeModel(modelId) {
   }
 }
 
-async function autoCategorizeSelected() {
+async function autoCategorizeSelected(event) {
   if (selectedModels.size === 0) return;
-  await openAutoCategorizeModal(Array.from(selectedModels));
+  await openAutoCategorizeModal(Array.from(selectedModels), event?.currentTarget || document.activeElement);
 }
 
-async function autoCategorizeAll() {
+async function autoCategorizeAll(event) {
   // Collect all visible model IDs (respecting current filters)
   const modelIds = [];
   const providerFilter = document.getElementById('providerFilter').value;
@@ -1615,19 +1393,17 @@ async function autoCategorizeAll() {
     showToast(`Processing first 50 of ${modelIds.length} models`, 'info');
   }
 
-  await openAutoCategorizeModal(toProcess);
+  await openAutoCategorizeModal(toProcess, event?.currentTarget || document.activeElement);
 }
 
-async function openAutoCategorizeModal(modelIds) {
-  const modal = new bootstrap.Modal(document.getElementById('autoCategorizeModal'));
-
+async function openAutoCategorizeModal(modelIds, trigger = document.activeElement) {
   // Reset modal state
   document.getElementById('suggestionsLoading').classList.remove('d-none');
   document.getElementById('suggestionsError').classList.add('d-none');
   document.getElementById('suggestionsList').classList.add('d-none');
   document.getElementById('applySuggestionsBtn').disabled = true;
 
-  modal.show();
+  showModelsModal('autoCategorizeModal', trigger);
 
   try {
     const response = await fetch('/api/models/auto-categorize', {
@@ -1669,29 +1445,29 @@ function renderSuggestions() {
 
     // Build category dropdown options
     const categoryOptions = visibleCategories.map(cat =>
-      `<option value="${cat.id}" ${cat.id === suggestion.category_id ? 'selected' : ''}>${cat.name}</option>`
+      `<option value="${modelsEscapeHTML(cat.id)}" ${cat.id === suggestion.category_id ? 'selected' : ''}>${modelsEscapeHTML(cat.name)}</option>`
     ).join('');
 
     return `
       <tr class="suggestion-row" data-index="${index}">
         <td>
-          <input type="checkbox" class="form-check-input suggestion-checkbox" ${isChecked ? 'checked' : ''} onchange="updateApplyButton()">
+          <label class="models-checkbox-target"><input type="checkbox" class="form-check-input suggestion-checkbox" aria-label="Apply suggestion for ${modelsEscapeHTML(suggestion.model_id)}" ${isChecked ? 'checked' : ''} onchange="updateApplyButton()"></label>
         </td>
         <td>
-          <code>${suggestion.model_id}</code>
-          <div class="text-muted small">${suggestion.reasoning || ''}</div>
+          <code>${modelsEscapeHTML(suggestion.model_id)}</code>
+          <div class="text-muted small">${modelsEscapeHTML(suggestion.reasoning)}</div>
         </td>
         <td>
-          <span class="text-muted">${suggestion.current_category || 'None'}</span>
+          <span class="text-muted">${modelsEscapeHTML(suggestion.current_category || 'None')}</span>
         </td>
         <td>
-          <select class="form-select form-select-sm suggestion-category" data-index="${index}">
+          <select class="form-select form-select-sm suggestion-category" data-index="${index}" aria-label="Suggested category for ${modelsEscapeHTML(suggestion.model_id)}">
             <option value="">Uncategorized</option>
             ${categoryOptions}
           </select>
         </td>
         <td>
-          <span class="confidence-badge ${confidenceClass}">${confidencePercent}%</span>
+          <span class="badge confidence-badge ${confidenceClass}">${confidencePercent}%</span>
         </td>
       </tr>
     `;
@@ -1752,8 +1528,9 @@ async function applySuggestions() {
       modelAssignments[modelId] = [categoryId];
     }
 
-    // Close modal and refresh
-    bootstrap.Modal.getInstance(document.getElementById('autoCategorizeModal')).hide();
+    // Complete the focus-trap handoff before rebuilding the model rows.
+    await hideModelsModal('autoCategorizeModal');
+    const previous = document.activeElement;
 
     // Clear selection if in selection mode
     if (selectionMode) {
@@ -1762,6 +1539,7 @@ async function applySuggestions() {
 
     // Refresh the view
     applyFilters();
+    modelsReturnControl(previous)?.focus({ preventScroll: true });
 
     // Show success message
     showToast(`Successfully categorized ${toApply.length} model${toApply.length !== 1 ? 's' : ''}`, 'success');
@@ -1776,37 +1554,14 @@ async function applySuggestions() {
 }
 
 function showToast(message, type = 'info') {
-  // Create toast container if it doesn't exist
-  let container = document.getElementById('toastContainer');
-  if (!container) {
-    container = document.createElement('div');
-    container.id = 'toastContainer';
-    container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
-    container.style.zIndex = '1100';
-    document.body.appendChild(container);
-  }
-
-  const toast = document.createElement('div');
-  toast.className = `toast align-items-center text-bg-${type} border-0`;
-  toast.setAttribute('role', 'alert');
-  toast.innerHTML = `
-    <div class="d-flex">
-      <div class="toast-body">${message}</div>
-      <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-    </div>
-  `;
-  container.appendChild(toast);
-
-  const bsToast = new bootstrap.Toast(toast, { autohide: true, delay: 3000 });
-  bsToast.show();
-
-  toast.addEventListener('hidden.bs.toast', () => toast.remove());
+  window.Toast?.show(message, type === 'danger' ? 'error' : type);
 }
 </script>
 
 <!-- Include app.js and shared dependencies -->
 <script defer src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 {{template "scripts-dx-utils.tmpl" .}}
+<script defer src="/js/modules/toast.js"></script>
 <script defer src="/js/app.js?v=1694538177"></script>
 <script defer src="/js/modules/agents.js"></script>
 <script defer src="/js/modules/themeManager.js"></script>

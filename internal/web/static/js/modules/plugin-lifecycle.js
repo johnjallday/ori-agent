@@ -163,7 +163,7 @@ function plCreate(tag, className) {
 function plSection(title, className, open = false) {
   const wrapper = plCreate('details', className);
   wrapper.open = open;
-  const heading = plCreate('summary', 'plugin-trust-section-title');
+  const heading = plCreate('summary', 'ui-disclosure-title plugin-trust-section-title');
   heading.textContent = title;
   wrapper.appendChild(heading);
   return wrapper;
@@ -199,7 +199,10 @@ function plTrustSummary(model) {
 // The digest is what makes a download verifiable, so it can be taken away and
 // compared. Clipboard access is optional; the digest stays readable either way.
 function plCopyButton(value) {
-  const button = plCreate('button', 'plugin-trust-copy');
+  const button = plCreate(
+    'button',
+    'modern-btn modern-btn-secondary modern-btn-sm plugin-trust-copy'
+  );
   button.type = 'button';
   button.textContent = 'Copy';
   button.setAttribute('aria-label', 'Copy sha256');

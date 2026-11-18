@@ -4,6 +4,7 @@ import {
   compactTeamHTML,
   linkedWorkspacesHTML,
   resourceAccessHTML,
+  capabilityAccessHTML,
   bindOverview,
   setupProjectsChipHTML
 } from './workspace-overview.js';
@@ -53,6 +54,12 @@ test('unavailable roster/resource data is not empty, and labels remain literal',
   assert.match(compactTeamHTML(c), /data-cmd-team-toggle aria-expanded="false" disabled/);
   c.page.notesLoadFailed = true;
   c.page.notes = [];
+  assert.match(resourceAccessHTML(c), /ws-cmd-resource-row modern-btn modern-btn-secondary/);
+  c.mapStationRegistry = () => [{ key: 'fixture-station', label: 'Declared station' }];
+  assert.match(
+    capabilityAccessHTML(c),
+    /modern-btn modern-btn-secondary" data-cmd-hq-station="fixture-station"/
+  );
   assert.match(
     resourceAccessHTML(c),
     /data-cmd-resource-section="notes"><span>Notes<\/span><span>Unknown/

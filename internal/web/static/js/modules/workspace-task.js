@@ -177,6 +177,22 @@ export function getTaskEventData(event) {
 const assistQuestionPromptPattern = /^\s*(?:[-*]\s*)?(?:\d+)[.)]\s*(.+?)\s*$/;
 const assistLetteredOptionPattern = /^\s*(?:[-*]\s*)?([A-Z])[.)]\s*(.+)$/;
 
+// Pointer mousedown must beat the editor's blur-save, while keyboard activation
+// dispatches click only. Both paths share the editor's idempotent finish guard.
+function bindInlineEditActions(actions, finish) {
+  for (const [selector, save] of [
+    ['.workspace-task-page-edit-save', true],
+    ['.workspace-task-page-edit-cancel', false]
+  ]) {
+    const button = actions.querySelector(selector);
+    for (const type of ['mousedown', 'click'])
+      button?.addEventListener(type, event => {
+        event.preventDefault();
+        void finish(save);
+      });
+  }
+}
+
 function cleanAssistText(value) {
   return String(value ?? '')
     .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
@@ -932,6 +948,7 @@ export class WorkspaceTaskPage {
   async init() {
     if (this._destroyed) return;
     this.cacheElements();
+    this.setupHeaderGeometry();
     this.bindEvents();
     await this.loadData();
     this.setupRealtime();
@@ -971,9 +988,43 @@ export class WorkspaceTaskPage {
       this.pendingRefreshTimer = null;
     }
     this.stopActivityTick();
+    this.headerGeometryCleanup?.();
+    this.headerGeometryCleanup = null;
     // Tear down menu listeners + drop the menu DOM node if a contextual
     // result-section menu is open.
     this.closeResultSectionMenu();
+  }
+
+  setupHeaderGeometry() {
+    const hero = document.querySelector('.workspace-task-page-hero');
+    if (!hero) return;
+    const root = document.documentElement;
+    const navbar = document.querySelector('.navbar');
+    const previous = root.style.getPropertyValue('--workspace-task-scroll-offset');
+    const update = () => {
+      if (this._destroyed) return;
+      const height = hero.getBoundingClientRect().height;
+      // Retain the sticky header only while it leaves meaningful reading room.
+      hero.classList.toggle('is-too-tall', height > window.innerHeight * 0.35);
+      const navHeight = Math.max(76, navbar?.getBoundingClientRect().height || 0);
+      const stickyHeight = getComputedStyle(hero).position === 'sticky' ? height : 0;
+      root.style.setProperty(
+        '--workspace-task-scroll-offset',
+        `${navHeight + stickyHeight + 16}px`
+      );
+    };
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
+    observer?.observe(hero);
+    if (navbar) observer?.observe(navbar);
+    window.addEventListener('resize', update);
+    update();
+    this.headerGeometryCleanup = () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', update);
+      hero.classList.remove('is-too-tall');
+      if (previous) root.style.setProperty('--workspace-task-scroll-offset', previous);
+      else root.style.removeProperty('--workspace-task-scroll-offset');
+    };
   }
 
   cacheElements() {
@@ -1699,7 +1750,7 @@ export class WorkspaceTaskPage {
     this.titleEditInProgress = true;
 
     const input = document.createElement('textarea');
-    input.className = 'workspace-task-page-title-input';
+    input.className = 'workspace-task-page-title-input form-control';
     input.rows = 1;
     input.value = currentValue;
     input.setAttribute('aria-label', 'Edit ticket title');
@@ -1707,8 +1758,8 @@ export class WorkspaceTaskPage {
     const editActions = document.createElement('div');
     editActions.className = 'workspace-task-page-title-edit-actions';
     editActions.innerHTML = `
-      <button type="button" class="workspace-task-page-edit-save" aria-label="Save title">Save</button>
-      <button type="button" class="workspace-task-page-edit-cancel" aria-label="Cancel editing">Cancel</button>
+      <button type="button" class="workspace-task-page-edit-save modern-btn modern-btn-primary modern-btn-sm" aria-label="Save title">Save</button>
+      <button type="button" class="workspace-task-page-edit-cancel modern-btn modern-btn-secondary modern-btn-sm" aria-label="Cancel editing">Cancel</button>
       <span class="workspace-task-page-edit-hint">Enter to save, Esc to cancel</span>
     `;
 
@@ -1735,9 +1786,11 @@ export class WorkspaceTaskPage {
       titleElement.style.display = '';
       if (actionsContainer) actionsContainer.style.display = '';
 
-      if (!save || nextValue === currentValue) {
+      if (!save) {
+        titleElement.focus({ preventScroll: true });
         return;
       }
+      if (nextValue === currentValue) return;
 
       if (!nextValue) {
         this.notify('error', 'Ticket title cannot be empty.');
@@ -1753,18 +1806,7 @@ export class WorkspaceTaskPage {
       }
     };
 
-    editActions
-      .querySelector('.workspace-task-page-edit-save')
-      ?.addEventListener('mousedown', e => {
-        e.preventDefault();
-        finishEdit(true);
-      });
-    editActions
-      .querySelector('.workspace-task-page-edit-cancel')
-      ?.addEventListener('mousedown', e => {
-        e.preventDefault();
-        finishEdit(false);
-      });
+    bindInlineEditActions(editActions, finishEdit);
 
     input.addEventListener('input', syncHeight);
     input.addEventListener('keydown', event => {
@@ -1800,7 +1842,7 @@ export class WorkspaceTaskPage {
     editorWrap.className = 'workspace-task-page-subtitle-input-wrap';
 
     const textarea = document.createElement('textarea');
-    textarea.className = 'workspace-task-page-subtitle-input';
+    textarea.className = 'workspace-task-page-subtitle-input form-control';
     textarea.rows = 4;
     textarea.value = currentValue;
     textarea.placeholder =
@@ -1810,8 +1852,8 @@ export class WorkspaceTaskPage {
     const editActions = document.createElement('div');
     editActions.className = 'workspace-task-page-title-edit-actions';
     editActions.innerHTML = `
-      <button type="button" class="workspace-task-page-edit-save" aria-label="Save additional details">Save</button>
-      <button type="button" class="workspace-task-page-edit-cancel" aria-label="Cancel editing additional details">Cancel</button>
+      <button type="button" class="workspace-task-page-edit-save modern-btn modern-btn-primary modern-btn-sm" aria-label="Save additional details">Save</button>
+      <button type="button" class="workspace-task-page-edit-cancel modern-btn modern-btn-secondary modern-btn-sm" aria-label="Cancel editing additional details">Cancel</button>
       <span class="workspace-task-page-edit-hint">Cmd/Ctrl+Enter to save, Esc to cancel</span>
     `;
 
@@ -1841,9 +1883,11 @@ export class WorkspaceTaskPage {
       if (editButton) editButton.style.display = '';
       if (subtitleRow) subtitleRow.classList.remove('is-editing');
 
-      if (!save || nextValue === currentValue) {
+      if (!save) {
+        editButton?.focus({ preventScroll: true });
         return;
       }
+      if (nextValue === currentValue) return;
 
       try {
         await this.updateTaskFields({ details: nextValue });
@@ -1859,18 +1903,7 @@ export class WorkspaceTaskPage {
 
     if (subtitleRow) subtitleRow.classList.add('is-editing');
 
-    editActions
-      .querySelector('.workspace-task-page-edit-save')
-      ?.addEventListener('mousedown', e => {
-        e.preventDefault();
-        finishEdit(true);
-      });
-    editActions
-      .querySelector('.workspace-task-page-edit-cancel')
-      ?.addEventListener('mousedown', e => {
-        e.preventDefault();
-        finishEdit(false);
-      });
+    bindInlineEditActions(editActions, finishEdit);
 
     textarea.addEventListener('input', syncHeight);
     textarea.addEventListener('keydown', event => {
@@ -2964,13 +2997,13 @@ export class WorkspaceTaskPage {
           : hasAgent
             ? 'Run'
             : 'Assign & Run';
-      buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary" data-action="execute">
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-primary modern-btn modern-btn-primary" data-action="execute">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8,5.14V19.14L19,12.14L8,5.14Z"/></svg>${this.escapeHtml(runLabel)}
       </button>`);
     }
 
     if (status === 'failed' || status === 'completed') {
-      buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="execute">
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn modern-btn modern-btn-secondary" data-action="execute">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/></svg>${this.task?.context?.folder_first_task_recipe === 'learning_draft' ? 'Review learning / execution' : 'Re-run'}
       </button>`);
     }
@@ -2979,7 +3012,7 @@ export class WorkspaceTaskPage {
       // Secondary (not primary): "Create Skill" is an advanced/power-user
       // action and shouldn't compete with Run/Re-run for attention on a
       // non-technical user's first read of the page.
-      buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="create-skill">
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn modern-btn modern-btn-secondary" data-action="create-skill">
         <i class="bi bi-magic" aria-hidden="true"></i>Create Skill
       </button>`);
     }
@@ -2996,18 +3029,18 @@ export class WorkspaceTaskPage {
       (status === 'pending' || status === 'assigned' || status === 'in_progress') &&
       !statusInfo.isBlocked
     ) {
-      buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="complete">
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn modern-btn modern-btn-secondary" data-action="complete">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/></svg>Mark Complete
       </button>`);
     }
 
     if (status === 'in_progress' && !this._cancelConfirmActive) {
-      buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-danger" data-action="cancel-prompt">
+      buttons.push(`<button type="button" class="workspace-task-page-hero-btn workspace-task-page-hero-btn-danger modern-btn modern-btn-danger" data-action="cancel-prompt">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18,6H15V4A2,2 0 0,0 13,2H11A2,2 0 0,0 9,4V6H6V8H7V19A2,2 0 0,0 9,21H15A2,2 0 0,0 17,19V8H18V6M11,4H13V6H11V4M15,19H9V8H15V19Z"/></svg>Cancel
       </button>`);
     }
 
-    buttons.push(`<button type="button" class="workspace-task-page-hero-btn" data-action="schedule">
+    buttons.push(`<button type="button" class="workspace-task-page-hero-btn modern-btn modern-btn-secondary" data-action="schedule">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19,3H18V1H16V3H8V1H6V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V5A2,2 0 0,0 19,3M19,19H5V8H19V19M7,10H12V15H7V10Z"/></svg>${this.escapeHtml(scheduleLabel)}
     </button>`);
 
@@ -3528,8 +3561,8 @@ export class WorkspaceTaskPage {
     actions.className = 'workspace-task-page-title-edit-actions';
     actions.style.marginTop = '0.5rem';
     actions.innerHTML = `
-      <button type="button" class="workspace-task-page-edit-save" aria-label="Save details">Save</button>
-      <button type="button" class="workspace-task-page-edit-cancel" aria-label="Cancel editing">Cancel</button>
+      <button type="button" class="workspace-task-page-edit-save modern-btn modern-btn-primary modern-btn-sm" aria-label="Save details">Save</button>
+      <button type="button" class="workspace-task-page-edit-cancel modern-btn modern-btn-secondary modern-btn-sm" aria-label="Cancel editing">Cancel</button>
     `;
 
     valueEl.style.display = 'none';
@@ -3548,7 +3581,11 @@ export class WorkspaceTaskPage {
       valueEl.style.display = '';
       triggerBtn.style.display = '';
 
-      if (!save || nextValue === currentValue) return;
+      if (!save) {
+        triggerBtn.focus({ preventScroll: true });
+        return;
+      }
+      if (nextValue === currentValue) return;
 
       try {
         await this.updateTaskFields({ details: nextValue });
@@ -3558,14 +3595,7 @@ export class WorkspaceTaskPage {
       }
     };
 
-    actions.querySelector('.workspace-task-page-edit-save')?.addEventListener('mousedown', e => {
-      e.preventDefault();
-      finish(true);
-    });
-    actions.querySelector('.workspace-task-page-edit-cancel')?.addEventListener('mousedown', e => {
-      e.preventDefault();
-      finish(false);
-    });
+    bindInlineEditActions(actions, finish);
     textarea.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -4475,7 +4505,7 @@ export class WorkspaceTaskPage {
       <div class="workspace-task-result-artifact-chooser" data-role="append-chooser" hidden>
         <div class="workspace-task-result-artifact-chooser-header">
           <div class="workspace-task-page-mini-label">Append destination</div>
-          <button type="button" class="workspace-task-page-text-button" data-action="cancel-append-chooser">Cancel</button>
+          <button type="button" class="workspace-task-page-text-button modern-btn modern-btn-quiet modern-btn-sm" data-action="cancel-append-chooser">Cancel</button>
         </div>
         <div class="workspace-task-result-artifact-chooser-options" role="radiogroup" aria-label="Choose append destination">
           <label class="workspace-task-result-artifact-chooser-option">
@@ -4637,7 +4667,7 @@ export class WorkspaceTaskPage {
     return `
       <div class="workspace-task-result-contract-draft">
         <span>There is a draft that is not in use yet.</span>
-        <button type="button" class="workspace-task-page-text-button" data-action="discard-output-spec-draft">Discard draft</button>
+        <button type="button" class="workspace-task-page-text-button modern-btn modern-btn-quiet modern-btn-sm" data-action="discard-output-spec-draft">Discard draft</button>
       </div>`;
   }
 
@@ -4676,7 +4706,7 @@ export class WorkspaceTaskPage {
             <span class="workspace-task-result-contract-summary-list">${this.escapeHtml(preview + overflow)}</span>
             <span class="workspace-task-result-contract-projection">Saved as a JSON record per run · run info (run_id, executed_at, status…) is added automatically · export to CSV anytime</span>
           </div>
-          <button type="button" class="workspace-task-page-text-button" data-action="edit-result-contract">Edit fields</button>
+          <button type="button" class="workspace-task-page-text-button modern-btn modern-btn-quiet modern-btn-sm" data-action="edit-result-contract">Edit fields</button>
         </div>`;
     }
     if (!editing) {
@@ -4721,11 +4751,11 @@ export class WorkspaceTaskPage {
         ${this.renderResultFormatPreview(this.resultContractDraft)}
         ${this.renderOutputSpecMetadataEditor()}
         <div class="workspace-task-result-contract-row-add">
-          <button type="button" class="workspace-task-page-text-button" data-action="add-result-contract-row">+ Add field</button>
+          <button type="button" class="workspace-task-page-text-button modern-btn modern-btn-quiet modern-btn-sm" data-action="add-result-contract-row">+ Add field</button>
         </div>
         <div class="workspace-task-result-contract-error" data-role="result-contract-error" hidden></div>
         <div class="workspace-task-result-contract-actions">
-          <button type="button" class="workspace-task-page-text-button" data-action="cancel-result-contract">Cancel</button>
+          <button type="button" class="workspace-task-page-text-button modern-btn modern-btn-quiet modern-btn-sm" data-action="cancel-result-contract">Cancel</button>
           <button type="button" class="modern-btn modern-btn-primary" data-action="save-result-contract"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Save output')}</button>
         </div>
       </div>`;
@@ -5255,7 +5285,7 @@ export class WorkspaceTaskPage {
       <div class="workspace-task-column-modal" role="document">
         <div class="workspace-task-column-modal-header">
           <h2>Define what each run returns</h2>
-          <button type="button" class="workspace-task-page-icon-btn" data-action="close-column-modal" aria-label="Close">
+          <button type="button" class="workspace-task-page-icon-btn modern-btn modern-btn-secondary modern-btn-icon" data-action="close-column-modal" aria-label="Close">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/></svg>
           </button>
         </div>
@@ -5503,7 +5533,7 @@ export class WorkspaceTaskPage {
         <div class="workspace-task-automation-storage-error" data-role="automation-storage-error" hidden></div>
         <div class="workspace-task-automation-storage-actions">
           <button type="button" class="modern-btn modern-btn-primary" data-action="save-automation-storage"${saving ? ' disabled' : ''}>${this.escapeHtml(saving ? 'Saving...' : 'Save destination')}</button>
-          <button type="button" class="workspace-task-page-text-button" data-action="open-automation-storage-modal">Advanced settings</button>
+          <button type="button" class="workspace-task-page-text-button modern-btn modern-btn-quiet modern-btn-sm" data-action="open-automation-storage-modal">Advanced settings</button>
         </div>
       </div>`;
     container
@@ -7094,7 +7124,7 @@ export class WorkspaceTaskPage {
     if (result) {
       blocks.push(`
         <div class="workspace-task-page-mini-label">Result</div>
-        ${this.renderMarkdownOrPre(result)}
+        <div class="workspace-task-result-content" role="region" aria-label="Ticket result" tabindex="0">${this.renderMarkdownOrPre(result)}</div>
       `);
     }
     // The accumulated run-history dataset (the CSV across every run) is
@@ -7123,7 +7153,7 @@ export class WorkspaceTaskPage {
     if (error) {
       blocks.push(`
         <div class="workspace-task-page-mini-label">Error</div>
-        <pre class="workspace-task-page-code-block">${this.escapeHtml(error)}</pre>
+        <pre class="workspace-task-page-code-block" role="region" aria-label="Ticket error" tabindex="0">${this.escapeHtml(error)}</pre>
       `);
     }
 
@@ -7439,7 +7469,7 @@ export class WorkspaceTaskPage {
           ${tableEditor}
           <label class="workspace-task-review-editor" data-review-raw-pane${rawHidden}>
             <span>Edit the row before saving</span>
-            <textarea rows="7" data-review-draft>${this.escapeHtml(reviewDraft)}</textarea>
+            <textarea class="form-control" rows="7" data-review-draft>${this.escapeHtml(reviewDraft)}</textarea>
           </label>
           <div class="workspace-task-review-actions">
             <button type="button" class="modern-btn modern-btn-primary" data-review-action="approve_append">Save row</button>
@@ -8047,7 +8077,7 @@ export class WorkspaceTaskPage {
       <div class="workspace-task-output-note-status-inner">
         <span class="workspace-task-output-note-status-icon" aria-hidden="true"><i class="bi bi-journal-check"></i></span>
         <span class="workspace-task-output-note-status-copy">Saved as <strong>${this.escapeHtml(noteName)}</strong></span>
-        ${noteId ? `<button type="button" class="workspace-task-page-text-button workspace-task-output-note-open" data-action="open-result-note" data-note-id="${this.escapeHtml(noteId)}">Open note</button>` : ''}
+        ${noteId ? `<button type="button" class="workspace-task-page-text-button workspace-task-output-note-open modern-btn modern-btn-quiet modern-btn-sm" data-action="open-result-note" data-note-id="${this.escapeHtml(noteId)}">Open note</button>` : ''}
       </div>
     `;
 
@@ -9537,7 +9567,19 @@ export class WorkspaceTaskPage {
         this.currentBlockedTask.selectedChoiceId = choice.id;
         this.currentBlockedTask.selectedChoiceLabel = choice.label;
         this.currentBlockedTask.selectedChoiceNumber = choice.number || '';
-        this.renderChoiceWorkflow(workflowStep);
+        // Keep the native invoker connected and focused; only selection changes.
+        this.elements.assistFormFields
+          .querySelectorAll('[data-assist-choice-id]')
+          .forEach(option => {
+            const selected = option.getAttribute('data-assist-choice-id') === choice.id;
+            option.classList.toggle('is-selected', selected);
+            option.setAttribute('aria-pressed', String(selected));
+          });
+        if (this.elements.assistContinueBtn) {
+          const label = this.getAssistPrimaryActionLabel(workflowStep);
+          this.elements.assistContinueBtn.textContent = label;
+          this.elements.assistContinueBtn.setAttribute('aria-label', label);
+        }
       });
     });
   }

@@ -1009,7 +1009,7 @@ test('rows with a menu carry a "⋯" button that is out of the tab order', () =>
     const markup = rowMarkup(html, id);
     assert.match(
       markup,
-      /class="cockpit-tree-more"[^>]*tabindex="-1"[^>]*aria-haspopup="menu"/,
+      /class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-tree-more"[^>]*tabindex="-1"[^>]*aria-haspopup="menu"/,
       id
     );
   });

@@ -18,66 +18,73 @@
         <!-- Canvas View -->
         <div id="canvas-view">
           <div class="modern-card p-3 mb-3">
-            <div class="d-flex justify-content-between align-items-center">
-              <div class="d-flex align-items-center gap-3">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+              <div class="d-flex flex-wrap align-items-center gap-3" style="min-width: 0; max-width: 100%;">
                 <a href="/workspaces/{{.Extra.WorkspaceSlug}}" class="modern-btn modern-btn-secondary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
                   </svg>
                   Workspace
                 </a>
-                <div id="canvas-workspace-info" class="d-flex align-items-center gap-2">
+                <div id="canvas-workspace-info" class="d-flex flex-wrap align-items-center gap-2" style="min-width: 0; overflow-wrap: anywhere;">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
                     <path d="M12,5.5A3.5,3.5 0 0,1 15.5,9A3.5,3.5 0 0,1 12,12.5A3.5,3.5 0 0,1 8.5,9A3.5,3.5 0 0,1 12,5.5M5,8C5.56,8 6.08,8.15 6.53,8.42C6.38,9.85 6.8,11.27 7.66,12.38C7.16,13.34 6.16,14 5,14A3,3 0 0,1 2,11A3,3 0 0,1 5,8M19,8A3,3 0 0,1 22,11A3,3 0 0,1 19,14C17.84,14 16.84,13.34 16.34,12.38C17.2,11.27 17.62,9.85 17.47,8.42C17.92,8.15 18.44,8 19,8M5.5,18.25C5.5,16.18 8.41,14.5 12,14.5C15.59,14.5 18.5,16.18 18.5,18.25V20H5.5V18.25M0,20V18.5C0,17.11 1.89,15.94 4.45,15.6C3.86,16.28 3.5,17.22 3.5,18.25V20H0M24,20H20.5V18.25C20.5,17.22 20.14,16.28 19.55,15.6C22.11,15.94 24,17.11 24,18.5V20Z"/>
                   </svg>
                   <span id="canvas-workspace-name" style="color: var(--text-primary); font-weight: 500;">Loading...</span>
-                  <span id="canvas-workflow-title" style="color: var(--primary-color); font-weight: 600; display: none;">
+                  <span id="canvas-workflow-title" style="color: var(--accent-text); font-weight: 600; display: none;">
                     <span style="color: var(--text-muted); margin: 0 8px;">/</span>
                     <span id="canvas-workflow-name"></span>
                   </span>
                 </div>
                 <!-- Workflow Selector Dropdown -->
-                <div id="workflow-selector-container" class="ms-3"></div>
+                <div id="workflow-selector-container" style="min-width: 0; max-width: 100%;"></div>
               </div>
-              <div class="d-flex align-items-center gap-2">
-                <button class="modern-btn modern-btn-primary modern-btn-toolbar" onclick="showAddAgentModal()" title="Add Agent">
+              <div class="d-flex flex-wrap align-items-center gap-2" role="group" aria-label="Canvas actions">
+                <details id="canvas-add-disclosure" class="canvas-add-disclosure">
+                  <summary class="modern-btn modern-btn-primary" aria-controls="canvas-add-options">Add
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
+                  </summary>
+                  <div id="canvas-add-options" class="canvas-add-options ui-section" role="group" aria-label="Add to canvas">
+                <button type="button" class="modern-btn modern-btn-secondary" data-canvas-add-dialog="#addAgentNodeModal" onclick="showAddCanvasAgentModal()" title="Add Agent">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M15,14C12.33,14 7,15.33 7,18V20H23V18C23,15.33 17.67,14 15,14M15,12A4,4 0 0,0 19,8A4,4 0 0,0 15,4A4,4 0 0,0 11,8A4,4 0 0,0 15,12M5,8V10H3V12H5V14H7V12H9V10H7V8H5Z"/>
                   </svg>
                   Agent
                 </button>
-                <button class="modern-btn modern-btn-primary modern-btn-toolbar" onclick="showAddAttachmentModal()" title="Add Attachment">
+                <button type="button" class="modern-btn modern-btn-secondary" data-canvas-add-dialog="#addAttachmentNodeModal" onclick="showAddAttachmentModal()" title="Add Attachment">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M16.5,6.5V17.5A4.5,4.5 0 0,1 12,22A4.5,4.5 0 0,1 7.5,17.5V8A3.5,3.5 0 0,1 11,4.5A3.5,3.5 0 0,1 14.5,8V16.5A2.5,2.5 0 0,1 12,19A2.5,2.5 0 0,1 9.5,16.5V7.5H11V16.5A1,1 0 0,0 12,17.5A1,1 0 0,0 13,16.5V8A2,2 0 0,0 11,6A2,2 0 0,0 9,8V17.5A3.5,3.5 0 0,0 12.5,21A3.5,3.5 0 0,0 16,17.5V6.5H16.5Z" />
                   </svg>
                   Attachment
                 </button>
-                <button class="modern-btn modern-btn-primary modern-btn-toolbar" onclick="showAddTaskModal()" title="Add Ticket">
+                <button type="button" class="modern-btn modern-btn-secondary" data-canvas-add-dialog="dialog.give-work" onclick="showAddTaskModal(this)" title="Add Ticket">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
                   </svg>
                   Ticket
                 </button>
-                <button class="modern-btn modern-btn-primary modern-btn-toolbar" onclick="showAddStoreNodeModal()" title="Add Store Node">
+                <button type="button" class="modern-btn modern-btn-secondary" data-canvas-add-dialog="#addStoreNodeModal" onclick="showAddStoreNodeModal()" title="Add Store Node">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M6,2H18A2,2 0 0,1 20,4V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2M12,4A6,6 0 0,0 6,10C6,13.31 8.69,16 12.1,16L11.22,13.77C10.95,13.29 11.11,12.68 11.59,12.4L12.45,11.9C12.93,11.63 13.54,11.79 13.82,12.27L15.74,14.69C17.12,13.59 18,11.9 18,10A6,6 0 0,0 12,4M12,9A1,1 0 0,1 13,10A1,1 0 0,1 12,11A1,1 0 0,1 11,10A1,1 0 0,1 12,9M7,18A1,1 0 0,0 6,19A1,1 0 0,0 7,20A1,1 0 0,0 8,19A1,1 0 0,0 7,18M12.09,13.27L14.58,19.58L19.99,18.5L14.89,13.41L12.09,13.27Z"/>
                   </svg>
                   Store
                 </button>
-                <button class="modern-btn modern-btn-primary modern-btn-toolbar" onclick="showAddDirectoryModal()" title="Add Directory Reference">
+                <button type="button" class="modern-btn modern-btn-secondary" data-canvas-add-dialog="#addDirectoryModal" onclick="showAddDirectoryModal()" title="Add Directory Reference">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
                   </svg>
                   Directory
                 </button>
-                <button class="modern-btn modern-btn-secondary" onclick="exportCanvas()" title="Export as Image">
+                  </div>
+                </details>
+                <button type="button" class="modern-btn modern-btn-secondary" onclick="exportCanvas()" title="Export as Image">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
                   </svg>
                 </button>
-                <span class="d-inline-flex align-items-center gap-1 px-2 py-1" style="background: rgba(40,167,69,0.1); border-radius: 4px; font-size: 0.75rem;">
-                  <span class="status-indicator status-online"></span>
-                  <span style="color: var(--success-color); font-weight: 500;">Live Updates</span>
+                <span class="badge badge-success d-inline-flex align-items-center gap-1">
+                  <span class="status-indicator status-online" aria-hidden="true"></span>
+                  Live Updates
                 </span>
               </div>
             </div>
@@ -91,9 +98,9 @@
           <div class="row g-3">
             <!-- Canvas Area -->
             <div id="canvas-main-area" class="col-lg-9">
-              <div class="modern-card" style="height: calc(100vh - 250px); position: relative; overflow: hidden;">
-                <canvas id="agent-canvas" style="width: 100%; height: 100%; cursor: grab;"></canvas>
-                <div id="canvas-info" style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.75rem; font-family: monospace;">
+              <div class="modern-card" style="height: max(320px, calc(100vh - 250px)); position: relative; overflow: hidden;">
+                <canvas id="agent-canvas" tabindex="0" role="region" aria-label="Workspace canvas; Space plus drag to pan; wheel to zoom" style="width: 100%; height: 100%; cursor: grab;"></canvas>
+                <div id="canvas-info" role="status" aria-live="polite" style="position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: white; padding: 8px 12px; border-radius: 4px; font-size: 0.75rem; font-family: monospace;">
                   Loading workspace...
                 </div>
                 <!-- Workflow View Mode Banner (legacy - hidden when workflow selector is present) -->
@@ -104,7 +111,7 @@
                     </svg>
                     Workflow View: <strong id="workflow-view-name"></strong>
                   </span>
-                  <button onclick="exitWorkflowView()" class="btn btn-sm" style="background: rgba(255,255,255,0.2); color: white; border: none; padding: 4px 10px; border-radius: 4px;">
+                  <button type="button" onclick="exitWorkflowView()" class="modern-btn modern-btn-secondary modern-btn-sm">
                     View All Tickets
                   </button>
                 </div>
@@ -135,7 +142,7 @@
               <div class="modern-card p-3 mb-3" id="agent-details-panel" style="display: none;">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h6 class="mb-0" style="color: var(--text-primary); font-weight: 600;">Agent Details</h6>
-                  <button class="btn btn-sm btn-link p-0" onclick="hideAgentDetails()" style="color: var(--text-secondary);">
+                  <button type="button" class="modern-btn modern-btn-secondary modern-btn-icon" onclick="hideAgentDetails(this)" aria-label="Close agent details">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
                     </svg>
@@ -150,7 +157,7 @@
               <div class="modern-card p-3 mb-3" id="attachment-details-panel" style="display: none;">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h6 class="mb-0" style="color: var(--text-primary); font-weight: 600;">Attachment</h6>
-                  <button class="btn btn-sm btn-link p-0" onclick="hideAttachmentDetails()" style="color: var(--text-secondary);">
+                  <button type="button" class="modern-btn modern-btn-secondary modern-btn-icon" onclick="hideAttachmentDetails(this)" aria-label="Close attachment details">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
                     </svg>
@@ -165,7 +172,7 @@
               <div class="modern-card p-3 mb-3" id="task-details-panel" style="display: none;">
                 <div class="d-flex justify-content-between align-items-center mb-2">
                   <h6 class="mb-0" style="color: var(--text-primary); font-weight: 600;">Ticket Details</h6>
-                  <button class="btn btn-sm btn-link p-0" onclick="hideTaskDetails()" style="color: var(--text-secondary);">
+                  <button type="button" class="modern-btn modern-btn-secondary modern-btn-icon" onclick="hideTaskDetails(this)" aria-label="Close ticket details">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z"/>
                     </svg>
@@ -175,27 +182,27 @@
                   Click a ticket to see details
                 </div>
                 <div id="task-actions" class="mt-3" style="display: none;">
-                  <button id="execute-task-btn" class="btn btn-sm btn-primary w-100 mb-2" onclick="executeCurrentTask()" style="display: none;">
+                  <button id="execute-task-btn" class="modern-btn modern-btn-primary w-100 mb-2" onclick="executeCurrentTask()" style="display: none;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                       <path d="M8,5.14V19.14L19,12.14L8,5.14Z"/>
                     </svg>
                     Run Ticket
                   </button>
                   <div class="d-flex gap-2 mb-2">
-                    <button class="btn btn-sm btn-secondary flex-fill" onclick="editCurrentTask()">
+                    <button class="modern-btn modern-btn-secondary flex-fill" onclick="editCurrentTask()">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                         <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
                       </svg>
                       Edit
                     </button>
-                    <button class="btn btn-sm btn-danger flex-fill" onclick="deleteCurrentTask()">
+                    <button class="modern-btn modern-btn-danger flex-fill" onclick="deleteCurrentTask()">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                         <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
                       </svg>
                       Delete
                     </button>
                   </div>
-                  <button id="unassign-task-btn" class="btn btn-sm btn-warning w-100" onclick="unassignCurrentTask()" style="display: none;">
+                  <button id="unassign-task-btn" class="modern-btn modern-btn-secondary w-100" onclick="unassignCurrentTask()" style="display: none;">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                       <path d="M13,14H11V10H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/>
                     </svg>
@@ -212,7 +219,7 @@
                   </svg>
                   Timeline
                 </h6>
-                <div id="timeline-content" style="max-height: 300px; overflow-y: auto; font-size: 0.75rem;">
+                <div id="timeline-content" tabindex="0" role="region" aria-label="Canvas timeline" style="max-height: 300px; overflow-y: auto; font-size: 0.75rem;">
                   <div class="text-muted text-center py-3">No events yet</div>
                 </div>
               </div>
@@ -234,7 +241,7 @@
             </svg>
             Add Agent to Canvas
           </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" style="filter: invert(1);"></button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
           <p style="color: var(--text-secondary); margin-bottom: 1rem;">Select an existing agent to add to this workspace:</p>
@@ -247,7 +254,7 @@
           <hr style="border-color: var(--border-color); margin: 1rem 0;">
           <div class="text-center">
             <small style="color: var(--text-secondary);">Don't see the agent you need?</small>
-            <button type="button" class="btn btn-link btn-sm p-0 ms-1" onclick="switchToCreateAgentModal()">
+            <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm ms-1" onclick="switchToCreateAgentModal()">
               Create a new agent
             </button>
           </div>
@@ -276,7 +283,7 @@
             </svg>
             Create New Agent
           </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" style="filter: invert(1);"></button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
           <form id="canvasCreateAgentForm">
@@ -339,7 +346,7 @@
             </svg>
             Add Attachment
           </h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" style="filter: invert(1);"></button>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
           <form id="addAttachmentNodeForm">
@@ -670,6 +677,8 @@
   <script type="module" src="/js/modules/agent-canvas.js?v=1733603000"></script>
   <!-- Workspace management -->
   <link rel="stylesheet" href="/css/workspace.css">
+  <link rel="stylesheet" href="/css/workspace-canvas.css">
+  <script type="module" src="/js/modules/workspace-canvas-controls.js"></script>
   <script defer src="/js/modules/workspace-canvas-helpers.js?v=1733602000"></script>
   <script defer src="/js/modules/workflow-panel.js"></script>
 
@@ -881,7 +890,8 @@
     let selectedAgentToAdd = null;
 
     // Show add agent modal (for adding existing agents to canvas)
-    async function showAddAgentModal() {
+    // Page-specific name: deferred agents.js owns showAddAgentModal (hiring).
+    async function showAddCanvasAgentModal() {
       const modal = new bootstrap.Modal(document.getElementById('addAgentNodeModal'));
       const agentListContainer = document.getElementById('canvasAgentList');
       const addBtn = document.getElementById('canvasAddAgentBtn');

@@ -1002,7 +1002,7 @@ function renderAgentDetails() {
   const capabilitiesSection = document.getElementById('capabilitiesSection');
   if (capabilitiesSection) capabilitiesSection.style.display = 'block';
   const grid = document.getElementById('contentGrid');
-  if (grid) grid.style.display = 'grid';
+  if (grid) grid.style.display = 'flex';
 
   // A refresh repaints what is displayed; it never reinitializes an open
   // editor. A section being edited keeps its inputs, except fields the
@@ -1545,6 +1545,9 @@ function watchCharacterCatalog() {
   if (appearanceCatalogWatch || typeof window.CharacterCatalog?.onChange !== 'function') return;
   appearanceCatalogWatch = true;
   window.CharacterCatalog.onChange(() => {
+    // The header can render before the catalog, too. Refresh only its artwork
+    // regardless of which editor owns focus; never rebuild a profile draft.
+    renderCurrentAgentAvatar();
     const host = document.getElementById('agentAppearanceHost');
     if (!appearanceEditor || appearanceEditor.status() === 'saving') return;
     if (host?.contains(document.activeElement)) return;
@@ -1763,17 +1766,21 @@ function renderProfileTags() {
   container.querySelectorAll('.agent-profile-tag-chip').forEach(chip => chip.remove());
   profileSelectedTags.forEach(tag => {
     const chip = document.createElement('span');
-    chip.className = 'agent-profile-tag-chip';
+    chip.className = 'agent-profile-tag-chip tag-chip';
 
     const label = document.createElement('span');
+    label.className = 'tag-chip-label';
     label.textContent = tag;
 
     const remove = document.createElement('button');
     remove.type = 'button';
-    remove.className = 'agent-profile-tag-remove';
+    remove.className = 'agent-profile-tag-remove tag-chip-remove';
     remove.setAttribute('aria-label', `Remove ${tag}`);
     remove.textContent = '×';
-    remove.addEventListener('click', () => removeProfileTag(tag));
+    remove.addEventListener('click', () => {
+      removeProfileTag(tag);
+      input.focus({ preventScroll: true });
+    });
 
     chip.appendChild(label);
     chip.appendChild(remove);
@@ -2738,8 +2745,7 @@ function renderSetupHealthBanner() {
               ? `
             <button
               type="button"
-              class="modern-btn modern-btn-secondary"
-              style="padding: 6px 10px; font-size: 12px;"
+              class="modern-btn modern-btn-secondary modern-btn-sm"
               data-health-action="${escapeHtml(issue.action)}"
             >
               ${escapeHtml(issue.actionLabel || 'Fix')}
@@ -2780,7 +2786,7 @@ function renderCapabilitiesCard() {
 
   section.style.display = 'block';
   const readinessClass = capabilityState.issues.length === 0 ? 'ready' : 'warning';
-  badge.className = `capability-pill ${readinessClass}`;
+  badge.className = `capability-pill modern-badge ${readinessClass}`;
   badge.textContent = capabilityState.issues.length === 0 ? 'Ready' : 'Needs Setup';
 
   summaryText.textContent =
@@ -2792,17 +2798,17 @@ function renderCapabilitiesCard() {
     <div class="capability-summary-item">
       <div class="capability-summary-label">Skills</div>
       <div class="capability-summary-value">${capabilityState.enabledSkills.length} / ${capabilityState.skills.length}</div>
-      <span class="capability-pill ${capabilityState.enabledSkills.length > 0 ? 'ready' : 'warning'}">${capabilityState.enabledSkills.length > 0 ? 'Enabled' : 'None enabled'}</span>
+      <span class="capability-pill modern-badge ${capabilityState.enabledSkills.length > 0 ? 'ready' : 'warning'}">${capabilityState.enabledSkills.length > 0 ? 'Enabled' : 'None enabled'}</span>
     </div>
     <div class="capability-summary-item">
       <div class="capability-summary-label">MCP</div>
       <div class="capability-summary-value">${capabilityState.availableRequiredMCPCount} / ${capabilityState.requiredMCPCount}</div>
-      <span class="capability-pill ${capabilityState.requiredMCPCount === 0 || capabilityState.availableRequiredMCPCount === capabilityState.requiredMCPCount ? 'ready' : 'warning'}">${capabilityState.requiredMCPCount === 0 ? 'Not required' : 'Installed globally'}</span>
+      <span class="capability-pill modern-badge ${capabilityState.requiredMCPCount === 0 || capabilityState.availableRequiredMCPCount === capabilityState.requiredMCPCount ? 'ready' : 'warning'}">${capabilityState.requiredMCPCount === 0 ? 'Not required' : 'Installed globally'}</span>
     </div>
     <div class="capability-summary-item">
       <div class="capability-summary-label">Plugins</div>
       <div class="capability-summary-value">${capabilityState.enabledPlugins.length}</div>
-      <span class="capability-pill ${capabilityState.enabledPlugins.length > 0 ? 'ready' : 'warning'}">${capabilityState.enabledPlugins.length > 0 ? 'Connected' : 'None connected'}</span>
+      <span class="capability-pill modern-badge ${capabilityState.enabledPlugins.length > 0 ? 'ready' : 'warning'}">${capabilityState.enabledPlugins.length > 0 ? 'Connected' : 'None connected'}</span>
     </div>
   `;
 
@@ -2821,11 +2827,11 @@ function renderCapabilitiesCard() {
       let actionButton = '';
       if (!dependency.existsGlobal) {
         actionButton = `
-        <a class="modern-btn modern-btn-secondary" style="padding: 6px 10px; font-size: 12px;" href="/mcp">Add Server</a>
+        <a class="modern-btn modern-btn-secondary modern-btn-sm" href="/mcp">Add Server</a>
       `;
       } else {
         actionButton = `
-        <a class="modern-btn modern-btn-secondary" style="padding: 6px 10px; font-size: 12px;" href="/">Bind in Workspace</a>
+        <a class="modern-btn modern-btn-secondary modern-btn-sm" href="/">Bind in Workspace</a>
       `;
       }
 
@@ -2836,9 +2842,9 @@ function renderCapabilitiesCard() {
           <p class="capability-dependency-meta">Required by: ${escapeHtml(dependency.requiredBy.join(', '))}</p>
         </div>
         <div class="capability-dependency-status">
-          <span class="capability-pill ${dependency.existsGlobal ? 'ready' : 'error'}">${dependency.existsGlobal ? 'Installed' : 'Missing'}</span>
-          <span class="capability-pill ${dependency.existsGlobal ? 'warning' : 'error'}">${dependency.existsGlobal ? 'Workspace scoped' : 'Unavailable'}</span>
-          <span class="capability-pill ${dependency.running ? 'ready' : dependency.starting ? 'warning' : 'warning'}">${dependency.running ? 'Global: running' : dependency.starting ? 'Global: starting' : `Global: ${dependency.status}`}</span>
+          <span class="capability-pill modern-badge ${dependency.existsGlobal ? 'ready' : 'error'}">${dependency.existsGlobal ? 'Installed' : 'Missing'}</span>
+          <span class="capability-pill modern-badge ${dependency.existsGlobal ? 'warning' : 'error'}">${dependency.existsGlobal ? 'Workspace scoped' : 'Unavailable'}</span>
+          <span class="capability-pill modern-badge ${dependency.running ? 'ready' : dependency.starting ? 'warning' : 'warning'}">${dependency.running ? 'Global: running' : dependency.starting ? 'Global: starting' : `Global: ${dependency.status}`}</span>
           ${actionButton}
         </div>
       </div>
@@ -3420,15 +3426,15 @@ function renderMCPServers() {
             <div style="display: flex; flex-direction: column; gap: 10px; width: 100%;">
               <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
                 <div class="plugin-name">${escapeHtml(dependency.name)}</div>
-                <span class="capability-pill ${statusClass}">${escapeHtml(statusLabel)}</span>
+                <span class="capability-pill modern-badge ${statusClass}">${escapeHtml(statusLabel)}</span>
               </div>
               <div style="font-size: 12px; color: var(--text-secondary);">
                 Required by: ${escapeHtml(normalizeMCPServerList(dependency.requiredBy).join(', '))}
               </div>
               <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                <span class="capability-pill ${existsGlobal ? 'ready' : 'error'}">${existsGlobal ? 'Installed' : 'Missing'}</span>
-                <span class="capability-pill ${existsGlobal ? 'warning' : 'error'}">${existsGlobal ? 'Workspace scoped' : 'Unavailable'}</span>
-                ${toolCount > 0 ? `<span class="capability-pill ready">${toolCount} tool${toolCount === 1 ? '' : 's'}</span>` : ''}
+                <span class="capability-pill modern-badge ${existsGlobal ? 'ready' : 'error'}">${existsGlobal ? 'Installed' : 'Missing'}</span>
+                <span class="capability-pill modern-badge ${existsGlobal ? 'warning' : 'error'}">${existsGlobal ? 'Workspace scoped' : 'Unavailable'}</span>
+                ${toolCount > 0 ? `<span class="capability-pill modern-badge ready">${toolCount} tool${toolCount === 1 ? '' : 's'}</span>` : ''}
               </div>
             </div>
         `;

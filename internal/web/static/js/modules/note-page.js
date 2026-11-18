@@ -434,6 +434,14 @@ function syncNoteTagsWidget() {
   row.hidden = !noteTagsWidget;
 }
 
+function syncLinkedTicketContext() {
+  const root = document.getElementById('noteMainContent');
+  if (!root) return;
+  root.dataset.noteId = currentNote?.id || '';
+  root.dataset.workspaceId = currentWorkspaceId() || '';
+  void window.NotePageTickets?.load?.();
+}
+
 function primaryNoteIsDirty() {
   return Boolean(currentNote?.id && bundle?.autosave?.isDirty?.() && !switching);
 }
@@ -590,7 +598,7 @@ function bindGenerateWithAIControls() {
   document.getElementById('noteAIGenerateBtn')?.addEventListener('click', generatePageNoteWithAI);
   document.getElementById('noteAICancelBtn')?.addEventListener('click', () => {
     pendingGenerateDraft = null;
-    window.NoteEditor?.closeGeneratePanel?.();
+    window.NoteEditor?.closeGeneratePanel?.({ restoreFocus: true });
   });
   document
     .getElementById('noteAIReplaceBtn')
@@ -694,10 +702,10 @@ function renderTabStrip() {
       const label = escapeText(tabLabel(id));
       const buttonId = escapeAttr(noteTabButtonId(0, id));
       return `<li class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="0" data-index="${i}" role="presentation" draggable="true">
-      <button type="button" id="${buttonId}" class="note-tab-button" role="tab" aria-selected="${isActive}" aria-controls="notePagePrimaryPane" tabindex="${isActive ? '0' : '-1'}" title="${label}">
+      <button type="button" id="${buttonId}" class="note-tab-button nav-link${isActive ? ' active' : ''}" role="tab" aria-selected="${isActive}" aria-controls="notePagePrimaryPane" tabindex="${isActive ? '0' : '-1'}" title="${label}">
         <span class="note-tab-label">${label}</span>
       </button>
-      <button type="button" class="note-tab-close" data-note-id="${escapeAttr(id)}" aria-label="Close tab" title="Close">×</button>
+      <button type="button" class="note-tab-close modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon" data-note-id="${escapeAttr(id)}" aria-label="Close tab" title="Close">×</button>
     </li>`;
     })
     .join('');
@@ -861,10 +869,10 @@ async function renderSecondaryPane() {
       const label = escapeText(tabLabel(id));
       const buttonId = escapeAttr(noteTabButtonId(1, id));
       return `<div class="note-tab${isActive ? ' is-active' : ''}" data-note-id="${escapeAttr(id)}" data-pane="1" data-index="${i}" role="presentation" title="${label}" draggable="true">
-      <button type="button" id="${buttonId}" class="note-tab-button" role="tab" aria-selected="${isActive}" aria-controls="notePageSecondaryPane" tabindex="${isActive ? '0' : '-1'}" title="${label}">
+      <button type="button" id="${buttonId}" class="note-tab-button nav-link${isActive ? ' active' : ''}" role="tab" aria-selected="${isActive}" aria-controls="notePageSecondaryPane" tabindex="${isActive ? '0' : '-1'}" title="${label}">
         <span class="note-tab-label">${label}</span>
       </button>
-      <button type="button" class="note-tab-close note-tab-close-secondary" data-action="close" data-note-id="${escapeAttr(id)}" aria-label="Close tab" title="Close">×</button>
+      <button type="button" class="note-tab-close note-tab-close-secondary modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon" data-action="close" data-note-id="${escapeAttr(id)}" aria-label="Close tab" title="Close">×</button>
     </div>`;
     })
     .join('');
@@ -1001,6 +1009,7 @@ async function loadNoteIntoActivePane(noteId) {
   currentNote = next;
   resetPageAIAssistForCurrentNote(null);
   syncNoteTagsWidget();
+  syncLinkedTicketContext();
   fetchWorkspaceName(stateWorkspaceId).then(name =>
     populateBreadcrumb(currentNote, name, currentWorkspaceSlug())
   );
@@ -1229,6 +1238,7 @@ async function splitRight() {
   persistState();
   renderTabStrip();
   await renderSecondaryPane();
+  document.getElementById('notePageUnsplitBtn')?.focus();
 }
 
 async function unsplit() {
@@ -1238,6 +1248,7 @@ async function unsplit() {
   persistState();
   renderTabStrip();
   await renderSecondaryPane();
+  document.getElementById('notePageSplitRightBtn')?.focus();
 }
 
 // Cross-pane drag state — shared between both tab containers so a dragstart
@@ -1574,6 +1585,7 @@ async function bootstrap() {
     document.title = 'Workspace Notes - Ori Agent';
   }
   syncNoteTagsWidget();
+  syncLinkedTicketContext();
 
   // 4. Breadcrumb workspace name and current slug (best effort).
   const workspaceName = await fetchWorkspaceName(stateWorkspaceId);

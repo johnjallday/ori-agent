@@ -103,7 +103,7 @@
     );
     return `${header}${error}
       <div class="skills-import-rows mb-2">${candidates.map(candidate => rowHTML(candidate, selected, busy)).join('')}</div>
-      <div class="d-flex gap-2">
+      <div class="ui-actions">
         <button type="button" class="modern-btn modern-btn-primary btn-sm" data-import-action="import" ${busy || !anySelected ? 'disabled' : ''}>${busy ? 'Importing...' : 'Import selected'}</button>
         <button type="button" class="modern-btn modern-btn-secondary btn-sm" data-import-action="dismiss" ${busy ? 'disabled' : ''}>Not now</button>
       </div>`;

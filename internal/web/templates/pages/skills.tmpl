@@ -11,63 +11,45 @@
     <!-- Main Content -->
     <div class="main-content">
       <div class="container-fluid py-4">
-        <div class="modern-card p-4 mb-4">
-          <div class="d-flex justify-content-between align-items-start flex-wrap gap-3">
-            <div>
-              <h2 class="mb-2" style="color: var(--text-primary);">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" class="me-2" style="vertical-align: text-bottom;">
-                  <path d="M7,2V13H10V22L17,10H13L17,2H7Z"/>
-                </svg>
-                Skills
-              </h2>
-              <p class="mb-0" style="color: var(--text-secondary);">Browse skills available to your agents</p>
-            </div>
-            <div class="d-flex align-items-center gap-2 flex-wrap">
-              <button id="skillsCreateBtn" class="modern-btn modern-btn-primary btn-sm">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                  <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
-                </svg>
-                New Skill
-              </button>
-              <button id="skillsDiscoverBtn" class="modern-btn modern-btn-secondary btn-sm">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                  <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
-                </svg>
-                Discover Skills
-              </button>
-              <select id="skillsAgentSelect" class="form-select form-select-sm" style="min-width: 200px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
-                <option value="">Assistant Default</option>
-              </select>
-              <input id="skillsSearch" type="text" class="form-control form-control-sm" placeholder="Search skills..." style="min-width: 200px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
-              <button id="skillsRefreshBtn" class="modern-btn modern-btn-secondary btn-sm">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
-                  <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
-                </svg>
-                Refresh
-              </button>
-              <div class="dropdown">
-                <button id="skillsActionsMenuBtn" class="modern-btn modern-btn-secondary btn-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions">&#8943;</button>
-                <ul class="dropdown-menu dropdown-menu-end">
-                  <li><button type="button" class="dropdown-item" id="skillsImportMenuItem">Import from ~/.agents/skills&hellip;</button></li>
-                </ul>
-              </div>
-            </div>
+        <header class="ui-page-header">
+          <div>
+            <h1>Skills</h1>
+            <p>Browse skills available to your agents</p>
+          </div>
+          <div class="ui-actions">
+            <button id="skillsCreateBtn" class="modern-btn modern-btn-primary">New Skill</button>
+            <button id="skillsDiscoverBtn" class="modern-btn modern-btn-secondary">Discover Skills</button>
+          </div>
+        </header>
+        <div class="ui-toolbar" role="search" aria-label="Filter skills">
+          <label class="visually-hidden" for="skillsAgentSelect">Agent</label>
+          <select id="skillsAgentSelect" class="form-select">
+            <option value="">Assistant Default</option>
+          </select>
+          <label class="visually-hidden" for="skillsSearch">Search skills</label>
+          <input id="skillsSearch" type="search" class="form-control" placeholder="Search skills...">
+          <button id="skillsRefreshBtn" class="modern-btn modern-btn-secondary">Refresh</button>
+          <div class="dropdown">
+            <button id="skillsActionsMenuBtn" class="modern-btn modern-btn-quiet modern-btn-icon" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions">&#8943;</button>
+            <ul class="dropdown-menu dropdown-menu-end">
+              <li><button type="button" class="dropdown-item" id="skillsImportMenuItem">Import from ~/.agents/skills&hellip;</button></li>
+            </ul>
           </div>
         </div>
 
-        <div id="skillsImportPanel" class="modern-card p-4 mb-4 d-none" aria-live="polite"></div>
+        <div id="skillsImportPanel" class="ui-section p-3 mb-4 d-none" aria-live="polite"></div>
 
-        <div class="modern-card p-4">
+        <section class="ui-section ui-section--quiet" aria-labelledby="skillsAvailableTitle">
           <div id="skillsError" class="alert alert-danger d-none" style="font-size: 0.875rem;"></div>
           <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-            <h5 class="mb-0" style="color: var(--text-primary);">Available Skills</h5>
+            <h2 class="h5 mb-0" id="skillsAvailableTitle">Available Skills</h2>
             <span id="skillsCount" class="badge bg-secondary" style="font-size: 12px;">0</span>
           </div>
           <div id="skillsSourceFilters" class="d-flex gap-2 flex-wrap mb-3 d-none"></div>
-          <div id="skillsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
+          <div id="skillsList" class="ui-grid" aria-live="polite">
             <div class="text-center py-3" style="color: var(--text-secondary);">Loading skills...</div>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   </div>
@@ -76,7 +58,7 @@
   {{template "modals.tmpl" .}}
 
   <!-- Skills Modals -->
-  <div class="modal fade" id="skillsEditorModal" tabindex="-1" aria-hidden="true">
+  <div class="modal fade" id="skillsEditorModal" tabindex="-1" aria-labelledby="skillsEditorTitle" aria-hidden="true">
     <div class="modal-dialog modal-lg">
       <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
         <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
@@ -84,17 +66,16 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body" style="color: var(--text-primary);">
-          <div id="skillsEditorError" class="alert alert-danger d-none" style="font-size: 0.875rem;"></div>
+          <div id="skillsEditorError" class="alert alert-danger d-none" role="alert"></div>
           <form id="skillsEditorForm">
             <div class="mb-3">
               <label for="skillNameInput" class="form-label required">Skill Name</label>
-              <input type="text" id="skillNameInput" class="modern-input w-100" placeholder="e.g. summarize-session" required maxlength="64">
-              <small class="form-helper">Lowercase letters, numbers, and hyphens only.</small>
+              <input type="text" id="skillNameInput" class="modern-input w-100" placeholder="e.g. summarize-session" required maxlength="64" aria-describedby="skillNameHelp">
+              <small class="form-helper" id="skillNameHelp">Lowercase letters, numbers, and hyphens only.</small>
             </div>
             <div class="mb-3">
               <label for="skillDescriptionInput" class="form-label required">Description</label>
               <textarea id="skillDescriptionInput" class="form-control" rows="2" required
-                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
                         placeholder="What does this skill do?"></textarea>
             </div>
             <div class="mb-3">
@@ -103,7 +84,6 @@
                 <button type="button" id="skillsGeneratePromptBtn" class="modern-btn modern-btn-secondary btn-sm">Generate Prompt</button>
               </div>
               <textarea id="skillPromptInput" class="form-control" rows="8" required
-                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.9em; resize: vertical;"
                         placeholder="Skill instructions go here..."></textarea>
             </div>
             <div class="mb-1 d-flex justify-content-between align-items-center gap-2 flex-wrap">
@@ -112,7 +92,7 @@
             </div>
             <div class="mb-3">
               <textarea id="skillOpenAIYamlInput" class="form-control" rows="8"
-                        style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary); font-size: 0.85em; resize: vertical; font-family: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', monospace;"
+                        style="font-family: var(--font-mono);"
                         placeholder="agents/openai.yaml content (optional)"></textarea>
               <small class="form-helper">Saved to <code>agents/openai.yaml</code>. Leave empty to skip on create or keep existing config on edit.</small>
             </div>
@@ -126,7 +106,7 @@
     </div>
   </div>
 
-  <div class="modal fade" id="skillsDetailsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal fade" id="skillsDetailsModal" tabindex="-1" aria-labelledby="skillsDetailsTitle" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
       <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
         <div class="modal-header align-items-start" style="border-bottom: 1px solid var(--border-color);">
@@ -144,14 +124,14 @@
           </div>
           <div class="mb-3" id="skillsDetailsPathRow">
             <div class="form-label" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Path</div>
-            <div id="skillsDetailsPath" style="font-size: 12px; word-break: break-all; color: var(--text-secondary); font-family: 'SF Mono', Monaco, Inconsolata, 'Roboto Mono', monospace;"></div>
+            <div id="skillsDetailsPath" style="font-size: 12px; word-break: break-all; color: var(--text-secondary); font-family: var(--font-mono);"></div>
           </div>
           <div class="mb-3">
             <div class="d-flex justify-content-between align-items-center mb-1">
               <div class="form-label mb-0" style="color: var(--text-secondary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;">Prompt</div>
               <small id="skillsDetailsPromptStatus" style="color: var(--text-secondary);"></small>
             </div>
-            <pre id="skillsDetailsPrompt" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; font-size: 0.85em; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: var(--text-primary); margin: 0;"></pre>
+            <pre id="skillsDetailsPrompt" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 12px; font-size: 0.85em; max-height: 360px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: var(--text-primary); margin: 0;"></pre>
           </div>
         </div>
         <div class="modal-footer justify-content-between" style="border-top: 1px solid var(--border-color);">
@@ -162,7 +142,7 @@
     </div>
   </div>
 
-  <div class="modal fade" id="skillsRunModal" tabindex="-1" aria-hidden="true">
+  <div class="modal fade" id="skillsRunModal" tabindex="-1" aria-labelledby="skillsRunTitle" aria-hidden="true">
     <div class="modal-dialog modal-lg">
       <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
         <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
@@ -179,11 +159,11 @@
     </div>
   </div>
 
-  <div class="modal fade" id="skillsMarketplaceModal" tabindex="-1" aria-hidden="true">
+  <div class="modal fade" id="skillsMarketplaceModal" tabindex="-1" aria-labelledby="skillsMarketplaceTitle" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
       <div class="modal-content" style="background: var(--bg-primary); border: 1px solid var(--border-color);">
         <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-          <h5 class="modal-title" style="color: var(--text-primary);">Install Skills from skills.sh</h5>
+          <h5 class="modal-title" id="skillsMarketplaceTitle">Install Skills from skills.sh</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body" style="color: var(--text-primary);">
@@ -202,15 +182,15 @@
 
           <div class="tab-content">
             <div class="tab-pane fade show active" id="skillsMarketplaceSearchPane" role="tabpanel" aria-labelledby="skillsMarketplaceSearchTab">
-              <div class="d-flex gap-2 flex-wrap mb-3">
-                <input id="skillsMarketplaceSearchQuery" type="text" class="form-control form-control-sm" placeholder="e.g. find-skills, playwright, react" style="flex: 1; min-width: 240px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
+              <div class="ui-toolbar">
+                <input id="skillsMarketplaceSearchQuery" type="search" class="form-control" aria-label="Search skill packages" placeholder="e.g. find-skills, playwright, react">
                 <button id="skillsMarketplaceSearchBtn" class="modern-btn modern-btn-primary btn-sm">Search skills.sh</button>
               </div>
               <div class="d-flex justify-content-between align-items-center mb-2">
                 <small style="color: var(--text-secondary);">Searches public skills packages and shows install-ready package IDs.</small>
                 <a href="https://skills.sh/" target="_blank" rel="noopener noreferrer" style="font-size: 12px;">Open skills.sh</a>
               </div>
-              <div id="skillsMarketplaceResults" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
+              <div id="skillsMarketplaceResults" class="ui-grid">
                 <div class="text-center py-3" style="color: var(--text-secondary);">Search to discover installable skills.</div>
               </div>
             </div>
@@ -232,12 +212,12 @@
                 <button id="skillsMarketplaceManageRefreshBtn" class="modern-btn modern-btn-secondary btn-sm">Refresh Installed</button>
                 <button id="skillsMarketplaceCheckUpdatesBtn" class="modern-btn modern-btn-secondary btn-sm">Check for updates</button>
               </div>
-              <div class="d-flex gap-2 flex-wrap mb-2">
-                <input id="skillsMarketplaceRemoveSkillInput" type="text" class="form-control form-control-sm" placeholder="Skill name to remove (e.g. find-skills)" style="flex: 1; min-width: 240px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary);">
-                <button id="skillsMarketplaceRemoveBtn" class="modern-btn modern-btn-secondary btn-sm">Remove Skill</button>
+              <div class="ui-toolbar">
+                <input id="skillsMarketplaceRemoveSkillInput" type="text" class="form-control" aria-label="Skill name to remove" placeholder="Skill name to remove (e.g. find-skills)">
+                <button id="skillsMarketplaceRemoveBtn" class="modern-btn modern-btn-danger btn-sm">Remove Skill</button>
               </div>
               <small style="color: var(--text-secondary);">Skills installed from the marketplace, in your Workspace Directory's Skills folder. Removing one moves its folder to the Trash.</small>
-              <div id="skillsMarketplaceInstalledList" class="mt-3" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px;">
+              <div id="skillsMarketplaceInstalledList" class="ui-grid mt-3">
                 <div class="text-center py-3" style="color: var(--text-secondary);">Loading installed skills...</div>
               </div>
             </div>

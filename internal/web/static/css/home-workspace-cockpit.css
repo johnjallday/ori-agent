@@ -39,7 +39,7 @@
 .cockpit-workspace-area {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--space-2);
   min-width: 0;
   min-height: 0;
   border: 1px solid var(--hc-line);
@@ -66,17 +66,10 @@
    Both rows wrap deliberately — groups move down whole rather than clipping a
    label or pushing the page sideways (FR135). */
 .cockpit-area-header {
-  --cockpit-control-h: 32px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 11px 14px 0;
-}
-
-@media (pointer: coarse) {
-  .cockpit-area-header {
-    --cockpit-control-h: 44px;
-  }
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) 0;
 }
 
 .cockpit-area-main {
@@ -84,7 +77,7 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px 16px;
+  gap: var(--space-2) var(--space-4);
   min-width: 0;
 }
 
@@ -92,7 +85,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 18px;
+  gap: var(--space-2);
   min-width: 0;
 }
 
@@ -117,33 +110,6 @@
   border-left: 1px solid var(--hc-line);
 }
 
-/* Vertical padding is zeroed on purpose: common.css enlarges .modern-btn-sm's
-   padding on small screens, which made these 41px beside 32px neighbours. The
-   shared min-height (44px on touch) is what guarantees the target size. */
-.cockpit-area-actions .modern-btn {
-  justify-content: center;
-  min-height: var(--cockpit-control-h);
-  padding: 0 12px;
-  /* The cockpit's square-cut frame rather than the app-wide pill, so actions
-     and readouts read as one header (3.4). Ask Ori keeps its pill on purpose:
-     it is a different role. */
-  border-radius: 2px;
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-
-/* The app-wide primary gradient ends at #2a8762, where white text is about
-   4.4:1. Home's primary creation actions sit on the gradient's darker end as
-   a solid fill instead (6.4:1). */
-.cockpit-area-actions .modern-btn-primary {
-  background: #1f6b4e;
-  color: #fff;
-}
-
-.cockpit-area-actions .modern-btn-primary:hover {
-  background: #175a41;
-}
-
 /* On a phone-width cockpit the groups wrap under each other; a divider left at
    the start of a wrapped line reads as a stray rule, so it goes. */
 @container cockpit (max-width: 560px) {
@@ -163,7 +129,6 @@
   justify-content: space-between;
   gap: 8px 12px;
   min-width: 0;
-  padding-top: 8px;
   border-top: 1px solid color-mix(in srgb, var(--hc-line) 70%, transparent);
 }
 
@@ -177,13 +142,11 @@
 }
 
 .cockpit-area-title {
-  margin: 2px 0 0;
+  margin: 0;
   color: var(--hc-ink);
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: 0.95px;
-  line-height: 1;
-  text-transform: uppercase;
+  font-size: var(--ui-text-lg);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
 }
 
 /* Right-aligned even when the filters beside it are hidden (Tree, loading), so
@@ -200,41 +163,10 @@
 
 .cockpit-view-toggle {
   display: inline-flex;
-  border: 1px solid var(--hc-line);
-  background: var(--hc-panel-deep);
+  gap: var(--space-1);
 }
 
-/* Sentence case: switching the view is an action. See .cockpit-area-eyebrow
-   above for the labels that keep uppercase. */
-.cockpit-view-btn {
-  min-width: 52px;
-  padding: 0 12px;
-  border: 0;
-  background: transparent;
-  color: var(--hc-ink-dim);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  cursor: pointer;
-}
-
-.cockpit-view-btn + .cockpit-view-btn {
-  border-left: 1px solid var(--hc-line);
-}
-
-/* The active view is carried by a filled chip AND its aria-pressed state, so
-   it never depends on color alone (FR131). */
-.cockpit-view-btn[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--hc-signal) 18%, var(--hc-panel));
-  color: var(--hc-ink);
-  box-shadow: inset 0 -2px 0 var(--hc-signal);
-}
-
-.cockpit-view-btn:focus-visible {
-  outline: 2px solid var(--hc-signal);
-  outline-offset: -2px;
-}
+/* Native Map/Tree buttons use the shared pressed-filter state and focus ring. */
 
 /* City Economy HUD (city-economy FR34): what the city has, beside the view
    toggle it shares a shape with.
@@ -253,43 +185,23 @@
 .cockpit-economy {
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--hc-line);
-  background: var(--hc-panel-deep);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
 }
 
 .cockpit-economy__chip,
 .cockpit-economy__energy {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-height: var(--cockpit-control-h, 32px);
-  padding: 0 10px;
-  border: 0;
-  background: transparent;
-  color: var(--hc-ink);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  gap: var(--space-1);
+  padding-inline: var(--space-1);
+  font-size: var(--ui-text-sm);
   white-space: nowrap;
-  cursor: help;
 }
 
 .cockpit-economy > button + button {
   border-left: 1px solid var(--hc-line);
-}
-
-.cockpit-economy__chip:hover,
-.cockpit-economy__energy:hover {
-  background: color-mix(in srgb, var(--hc-signal) 8%, transparent);
-}
-
-.cockpit-economy__chip:focus-visible,
-.cockpit-economy__energy:focus-visible {
-  position: relative;
-  z-index: 1;
-  outline: 2px solid var(--hc-signal);
-  outline-offset: 2px;
 }
 
 /* The open element keeps its state visible while its panel is up: a tint AND
@@ -468,17 +380,7 @@
 }
 
 .cockpit-economy-help__close {
-  padding: 0 4px;
-  border: 0;
-  background: transparent;
-  color: var(--hc-ink-dim);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.cockpit-economy-help__close:hover {
-  color: var(--hc-ink);
+  font-size: 1.25rem;
 }
 
 .cockpit-economy-help__what {
@@ -534,36 +436,14 @@
    `#cockpitRailToggle` stays on the Updates button for compatibility (see
    dashboard.tmpl), but nothing here keys off it anymore. */
 .cockpit-flyout-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: var(--cockpit-control-h, 32px);
-  padding: 0 12px;
-  border: 1px solid var(--hc-line);
-  background: var(--hc-panel-deep);
-  color: var(--hc-ink-dim);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.cockpit-flyout-toggle:hover {
-  border-color: var(--hc-line-bright);
-  color: var(--hc-ink);
+  --bs-btn-padding-x: var(--space-2);
+  font-size: var(--ui-text-sm);
 }
 
 .cockpit-flyout-toggle[aria-expanded="true"] {
   background: color-mix(in srgb, var(--hc-signal) 18%, var(--hc-panel));
   color: var(--hc-ink);
   box-shadow: inset 0 -2px 0 var(--hc-signal);
-}
-
-.cockpit-flyout-toggle:focus-visible {
-  outline: 2px solid var(--hc-signal);
-  outline-offset: -2px;
 }
 
 /* The count is the whole reason to look at a closed Updates trigger, so it
@@ -688,24 +568,7 @@
 }
 
 .cockpit-flyout-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 1px solid var(--hc-line);
-  background: transparent;
-  color: var(--hc-ink-dim);
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.cockpit-flyout-close:hover,
-.cockpit-flyout-close:focus-visible {
-  border-color: var(--hc-signal);
-  color: var(--hc-signal);
-  outline: 0;
+  font-size: 1.25rem;
 }
 
 /* Real content — Daily Brief, Calendar, Activity, quest log — can run long;
@@ -778,24 +641,9 @@
 /* Sentence case: a chip applies a filter, so it is an action even though it
    also reports a count. The count's own caption is not a separate label. */
 .cockpit-signal-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: var(--cockpit-control-h, 32px);
-  padding: 0 10px;
-  border: 1px solid var(--hc-line);
-  background: var(--hc-panel-deep);
-  color: var(--hc-ink-dim);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
-  letter-spacing: 0.2px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.cockpit-signal-chip:hover {
-  border-color: var(--hc-line-bright);
-  color: var(--hc-ink);
+  gap: var(--space-1);
+  padding-inline: var(--space-1);
+  font-size: var(--ui-text-sm);
 }
 
 /* Nothing matches: still a working filter, just not asking for attention.
@@ -818,11 +666,6 @@
 
 .cockpit-signal-chip[aria-pressed="true"] .cockpit-signal-label::before {
   content: "✓ ";
-}
-
-.cockpit-signal-chip:focus-visible {
-  outline: 2px solid var(--hc-signal);
-  outline-offset: 1px;
 }
 
 .cockpit-signal-count {
@@ -1038,6 +881,20 @@
  * industrial visual language and bound its internal content.
  * ----------------------------------------------------------------------- */
 
+/* Routine overlay copy uses app semantics; portrait artwork keeps --ws-*.
+   Bootstrap/shared components own the frame, control metrics and lifecycle. */
+.cockpit-context-modal,
+.cockpit-capture-modal {
+  --hc-panel: var(--surface-solid);
+  --hc-panel-raised: var(--surface-solid);
+  --hc-panel-deep: var(--bg-secondary);
+  --hc-ink: var(--text-primary);
+  --hc-ink-dim: var(--text-secondary);
+  --hc-ink-faint: var(--text-muted);
+  --hc-line: var(--border-color);
+  --hc-alert: var(--danger-text);
+}
+
 .cockpit-context-modal {
   --bs-modal-width: 640px;
   --bs-modal-margin: 1rem;
@@ -1059,22 +916,8 @@
   max-width: min(var(--bs-modal-width), calc(100vw - 2rem));
 }
 
-.cockpit-context-modal__content {
-  max-height: calc(100dvh - 2rem);
-  border: 1px solid var(--hc-line) !important;
-  border-radius: 2px;
-  background: var(--cozy-paper-raised, #fff) !important;
-  color: var(--hc-ink);
-  box-shadow: 0 24px 70px rgb(0 0 0 / 42%) !important;
-  backdrop-filter: none !important;
-}
-
 .cockpit-context-modal__header {
-  gap: 16px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--hc-line) !important;
-  background: var(--cozy-paper, #f4efe3) !important;
-  backdrop-filter: none !important;
+  gap: var(--space-4);
 }
 
 .cockpit-context-modal__heading {
@@ -1106,16 +949,6 @@
   --ws-portrait-field: #182126;
   --ws-portrait-field-deep: #0b1013;
   --ws-portrait-edge: rgb(255 255 255 / 20%);
-}
-
-[data-bs-theme="dark"] .cockpit-context-modal .cockpit-context-modal__content {
-  border-color: var(--hc-line) !important;
-  background: var(--cozy-paper-raised, #303337) !important;
-}
-
-[data-bs-theme="dark"] .cockpit-context-modal .cockpit-context-modal__header {
-  border-bottom-color: var(--hc-line) !important;
-  background: var(--cozy-paper, #26282b) !important;
 }
 
 [data-bs-theme="dark"] .cockpit-context-modal .btn-close {
@@ -1495,12 +1328,6 @@
  * Accessibility and responsive guarantees (FR131, FR132, FR133, FR135, FR139)
  * ----------------------------------------------------------------------- */
 
-/* The page itself never scrolls sideways; Map and Tree scroll internally
-   instead (FR135). */
-body.home-command-page {
-  overflow-x: hidden;
-}
-
 /* Every interactive cockpit control keeps a visible focus ring and a target
    large enough to hit (FR124, FR132). */
 .home-cockpit button:focus-visible,
@@ -1514,17 +1341,6 @@ body.home-command-page {
 .cockpit-context-modal [tabindex]:focus-visible {
   outline: 2px solid var(--hc-signal);
   outline-offset: 2px;
-}
-
-.cockpit-tree-caret {
-  min-height: 24px;
-}
-
-/* Header controls share one height (see .cockpit-area-header): 32px, or the
-   full 44px on a touch pointer. */
-.cockpit-view-btn,
-.cockpit-area-controls button {
-  min-height: var(--cockpit-control-h, 32px);
 }
 
 @media (max-width: 575.98px), (max-height: 620px) {
@@ -1559,21 +1375,6 @@ body.home-command-page {
 
   .cockpit-context-modal .btn-close {
     min-width: 44px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .home-cockpit *,
-  .home-cockpit *::before,
-  .home-cockpit *::after,
-  .cockpit-context-modal,
-  .cockpit-context-modal *,
-  .cockpit-capture-modal,
-  .cockpit-capture-modal * {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
   }
 }
 
@@ -1634,31 +1435,6 @@ body.home-command-page {
   display: flex;
 }
 
-.cockpit-pane-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 32px;
-  padding: 0 10px 0 6px;
-  border: 1px solid var(--hc-line-bright);
-  border-radius: 6px;
-  background: var(--hc-panel-raised);
-  color: var(--hc-ink);
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.cockpit-pane-back:hover {
-  border-color: var(--hc-signal);
-}
-
-@media (pointer: coarse) {
-  .cockpit-pane-back {
-    min-height: 44px;
-  }
-}
-
 .cockpit-tree-toolbar {
   display: flex;
   flex-direction: column;
@@ -1708,34 +1484,6 @@ body.home-command-page {
 
 /* Header actions are icons: seven named buttons do not fit a 300px column as
    words. Each keeps its name as an accessible name and a tooltip. */
-.cockpit-tree-tool {
-  display: grid;
-  width: 30px;
-  min-height: 30px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--hc-ink-dim);
-  cursor: pointer;
-  place-items: center;
-}
-
-.cockpit-tree-tool:hover {
-  background: var(--hc-panel-deep);
-  color: var(--hc-ink);
-}
-
-.cockpit-tree-tool:disabled {
-  cursor: default;
-  opacity: 0.45;
-}
-
-.cockpit-tree-tool:disabled:hover {
-  background: none;
-  color: var(--hc-ink-dim);
-}
-
 .cockpit-tree-icon {
   flex: 0 0 auto;
   fill: none;
@@ -1878,20 +1626,12 @@ body.home-command-page {
 
 .cockpit-tree-caret,
 .cockpit-tree-caret-space {
-  width: 22px;
-  flex: 0 0 22px;
+  width: var(--control-height);
+  flex: 0 0 var(--control-height);
 }
 
 .cockpit-tree-caret {
-  display: grid;
   align-self: stretch;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: none;
-  color: var(--hc-ink-dim);
-  cursor: pointer;
-  place-items: center;
 }
 
 .cockpit-tree-caret .cockpit-tree-icon {
@@ -1974,27 +1714,13 @@ body.home-command-page {
    screen. It opens the same menu as a right-click or the Menu key (FR54). */
 .cockpit-tree-more {
   display: none;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: none;
-  color: var(--hc-ink-dim);
-  cursor: pointer;
-  place-items: center;
+  flex: 0 0 var(--control-height);
 }
 
 .cockpit-tree-row:hover > .cockpit-tree-more,
 .cockpit-tree-row:focus > .cockpit-tree-more,
 .cockpit-tree-row:focus-within > .cockpit-tree-more {
   display: grid;
-}
-
-.cockpit-tree-more:hover {
-  background: color-mix(in srgb, var(--hc-ink) 12%, transparent);
-  color: var(--hc-ink);
 }
 
 .cockpit-tree-more .cockpit-tree-icon {
@@ -2034,48 +1760,31 @@ body.home-command-page {
   font-family: var(--font-body, Manrope, system-ui, sans-serif);
 }
 
+/* aria-disabled retains its explanatory tooltip/keyboard target; handlers
+   still reject the action. Native disabled buttons keep shared behavior. */
 .cockpit-tree-tool[aria-disabled="true"] {
-  cursor: default;
-  opacity: 0.45;
-}
-
-.cockpit-tree-tool[aria-disabled="true"]:hover {
-  background: none;
-  color: var(--hc-ink-dim);
+  pointer-events: auto;
 }
 
 .cockpit-tree-retry {
   flex: 0 0 auto;
-  padding: 1px 8px;
-  border: 1px solid var(--hc-line-bright);
-  border-radius: 6px;
-  background: var(--hc-panel-raised);
-  color: var(--hc-ink);
-  font-size: 11.5px;
-  font-weight: 600;
-  cursor: pointer;
 }
 
-.cockpit-tree-retry:hover {
-  border-color: var(--hc-signal);
-}
-
-@media (pointer: coarse) {
-  .cockpit-tree-row,
-  .cockpit-tree-tool {
-    min-height: 44px;
+@media (pointer: coarse), (max-width: 768px) {
+  .cockpit-tree-row {
+    min-height: var(--touch-target);
   }
 
-  .cockpit-tree-tool {
-    width: 44px;
+  .cockpit-tree-caret,
+  .cockpit-tree-caret-space {
+    width: var(--touch-target);
+    flex-basis: var(--touch-target);
   }
 
-  /* No hover on a touch screen: the menu button is always there. */
+  /* Touch/narrow users never depend on hover to discover row actions. */
   .cockpit-tree-more {
-    display: grid;
-    width: 44px;
-    height: 44px;
-    flex-basis: 44px;
+    display: inline-flex;
+    flex-basis: var(--touch-target);
   }
 }
 
@@ -2142,60 +1851,17 @@ body.home-command-page {
 .cockpit-tree-filter-input {
   width: 100%;
   min-width: 0;
-  height: 30px;
-  padding: 0 30px 0 28px;
-  border: 1px solid var(--hc-line-bright);
-  border-radius: 6px;
-  background: var(--hc-panel-raised);
-  color: var(--hc-ink);
-  font: inherit;
-  font-size: 13px;
-}
-
-.cockpit-tree-filter-input::placeholder {
-  color: var(--hc-ink-dim);
-  opacity: 1;
-}
-
-.cockpit-tree-filter-input:focus {
-  border-color: var(--hc-signal);
-  outline: 2px solid color-mix(in srgb, var(--hc-signal) 35%, transparent);
-  outline-offset: 0;
+  padding-left: 28px;
+  padding-right: calc(var(--control-height) + var(--space-2));
 }
 
 .cockpit-tree-filter-clear {
   position: absolute;
   right: 3px;
-  display: grid;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 5px;
-  background: none;
-  color: var(--hc-ink-dim);
-  cursor: pointer;
-  place-items: center;
 }
 
 .cockpit-tree-filter-clear[hidden] {
   display: none;
-}
-
-.cockpit-tree-filter-clear:hover {
-  background: var(--hc-panel-deep);
-  color: var(--hc-ink);
-}
-
-@media (pointer: coarse) {
-  .cockpit-tree-filter-input {
-    height: 44px;
-  }
-
-  .cockpit-tree-filter-clear {
-    width: 40px;
-    height: 40px;
-  }
 }
 
 /* Move dialog — the keyboard/touch parity path for drag-and-drop (FR51). */
@@ -2290,43 +1956,18 @@ body.home-command-page {
 
 .cockpit-pane-tab-label {
   min-width: 0;
-  min-height: 33px;
-  padding: 0 4px 0 12px;
+  flex: 1 1 auto;
   overflow: hidden;
-  border: 0;
-  background: none;
-  color: inherit;
-  font-size: 13px;
-  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
-}
-
-.cockpit-pane-tab.is-active .cockpit-pane-tab-label {
-  font-weight: 600;
 }
 
 .cockpit-pane-tab-close {
-  display: grid;
-  width: 26px;
-  min-height: 33px;
-  flex: 0 0 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-  place-items: center;
+  flex: 0 0 auto;
 }
 
 .cockpit-pane-tab-close .cockpit-tree-icon {
   stroke-width: 1.8;
-}
-
-.cockpit-pane-tab-close:hover {
-  background: var(--hc-panel-deep);
 }
 
 .cockpit-pane-panel {
@@ -2926,23 +2567,6 @@ body.home-command-page {
   text-transform: uppercase;
 }
 
-.cockpit-tree-tagbar-chip,
-.cockpit-tree-tagbar-clear {
-  padding: 2px 8px;
-  border: 1px solid var(--hc-line);
-  border-radius: 999px;
-  background: var(--hc-panel-deep);
-  color: var(--hc-ink-dim);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.cockpit-tree-tagbar-chip[aria-pressed="true"] {
-  border-color: var(--hc-signal);
-  background: color-mix(in srgb, var(--hc-signal) 16%, var(--hc-panel));
-  color: var(--hc-ink);
-}
-
 /* A tick as well as a tint: which tags are filtering is not left to colour. */
 .cockpit-tree-tagbar-chip[aria-pressed="true"]::before {
   content: "✓ ";
@@ -3183,23 +2807,9 @@ a.workspace-update-signal:focus-visible {
   max-width: min(var(--bs-modal-width), calc(100vw - 2rem));
 }
 
-.cockpit-capture-modal__content {
-  max-height: calc(100dvh - 2rem);
-  border: 1px solid var(--hc-line) !important;
-  border-radius: 2px;
-  background: var(--cozy-paper-raised, #fff) !important;
-  color: var(--hc-ink);
-  box-shadow: 0 24px 70px rgb(0 0 0 / 42%) !important;
-  backdrop-filter: none !important;
-}
-
 .cockpit-capture-modal__header {
   align-items: flex-start;
-  gap: 16px;
-  padding: 14px 16px 10px;
-  border-bottom: 1px solid var(--hc-line) !important;
-  background: var(--cozy-paper, #f4efe3) !important;
-  backdrop-filter: none !important;
+  gap: var(--space-4);
 }
 
 .cockpit-capture-modal__heading {
@@ -3269,16 +2879,6 @@ a.workspace-update-signal:focus-visible {
    aria-expanded and in the words ("Add details" / "Hide details"). */
 .cockpit-capture-details-toggle {
   justify-self: start;
-  min-height: 32px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--hc-signal);
-  font-size: 13px;
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
 }
 
 .cockpit-capture-details-group {
@@ -3321,47 +2921,9 @@ a.workspace-update-signal:focus-visible {
   cursor: pointer;
 }
 
-.cockpit-capture-modal__footer {
-  gap: 8px;
-  padding: 10px 16px 14px;
-  border-top: 1px solid var(--hc-line) !important;
-  background: transparent !important;
-}
-
-.cockpit-capture-modal__footer .modern-btn {
-  justify-content: center;
-  min-height: 36px;
-  margin: 0;
-  padding: 0 14px;
-  border-radius: 2px;
-  font-size: 13px;
-}
-
-.cockpit-capture-modal__footer .modern-btn-primary {
-  background: #1f6b4e;
-  color: #fff;
-}
-
-.cockpit-capture-modal__footer .modern-btn-primary:hover:not(:disabled) {
-  background: #175a41;
-}
-
-.cockpit-capture-modal__footer .modern-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .cockpit-capture-modal .btn-close {
   flex: 0 0 auto;
   opacity: 0.72;
-}
-
-[data-bs-theme="dark"] .cockpit-capture-modal .cockpit-capture-modal__content {
-  background: var(--cozy-paper-raised, #303337) !important;
-}
-
-[data-bs-theme="dark"] .cockpit-capture-modal .cockpit-capture-modal__header {
-  background: var(--cozy-paper, #26282b) !important;
 }
 
 [data-bs-theme="dark"] .cockpit-capture-modal .btn-close {

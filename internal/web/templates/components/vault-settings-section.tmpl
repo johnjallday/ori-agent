@@ -27,21 +27,31 @@
         <section class="vault-page-card vault-page-card-primary">
           <div class="vault-page-explorer">
             <div class="vault-modal-records-toolbar vault-page-explorer-toolbar">
-              <input id="vaultPageSearchInput" type="search" class="form-control settings-input vault-page-input vault-modal-search" placeholder="Search label, folder, type, workspace, or tag">
+              <input id="vaultPageSearchInput" type="search" class="form-control settings-input vault-page-input vault-modal-search" placeholder="Search label, folder, type, workspace, or tag" aria-label="Search vault items">
               <div class="vault-page-explorer-tools">
                 <span id="vaultPageRecordsSummary" class="vault-modal-records-summary">Waiting for vault status...</span>
                 <div class="vault-page-explorer-actions">
-                  <button id="vaultOpenCreateDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Create</button>
-                  <button id="vaultAttachExistingBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button" title="Attach an existing .orivault package without moving or deleting it">Attach Existing</button>
-                  <button id="vaultOpenExportDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Export</button>
-                  <button id="vaultOpenImportDialogBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">Import</button>
-                  <button id="vaultExplorerNewFolderBtn" class="modern-btn modern-btn-secondary modern-btn-sm" type="button">New Folder</button>
-                  <button id="vaultExplorerAddBtn" class="modern-btn modern-btn-primary modern-btn-sm" type="button">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1"><path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>
+                  <button id="vaultExplorerAddBtn" class="modern-btn modern-btn-primary" type="button">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/></svg>
                     Add Item
                   </button>
+                  <button id="vaultOpenCreateDialogBtn" class="modern-btn modern-btn-secondary" type="button">Create vault</button>
+                  <details class="vault-page-tools-disclosure">
+                    <summary class="ui-disclosure-title">More actions</summary>
+                    <div class="ui-actions">
+                      <button id="vaultAttachExistingBtn" class="modern-btn modern-btn-secondary" type="button" title="Attach an existing .orivault package without moving or deleting it">Attach Existing</button>
+                      <button id="vaultOpenExportDialogBtn" class="modern-btn modern-btn-secondary" type="button">Export</button>
+                      <button id="vaultOpenImportDialogBtn" class="modern-btn modern-btn-secondary" type="button">Import</button>
+                      <button id="vaultExplorerNewFolderBtn" class="modern-btn modern-btn-secondary" type="button">New Folder</button>
+                    </div>
+                  </details>
                 </div>
               </div>
+            </div>
+
+            <div id="vaultPageEmptySetup" class="ui-section ui-section--quiet" hidden>
+              <h2 class="vault-page-card-title">Create your first vault</h2>
+              <p>Create a password-protected vault, or use More actions to attach an existing one.</p>
             </div>
 
             <div id="vaultPageFolderVaultTabs" class="vault-modal-folder-vault-tabs" role="tablist" aria-label="Vaults"></div>
@@ -54,7 +64,7 @@
 
               <div class="vault-page-explorer-side">
                 <details class="vault-page-advanced-details vault-page-explorer-details">
-                  <summary class="vault-page-subtitle" style="cursor: pointer; font-size: 0.85rem;">Edit vault details</summary>
+                  <summary class="ui-disclosure-title">Edit vault details</summary>
                   <div class="mt-2">
                     <div class="vault-page-field">
                       <label class="vault-page-label" for="vaultEditVaultName">Vault name</label>
@@ -290,7 +300,7 @@
               </div>
 
               <details id="vaultEmailAccountOauthAdvanced" class="vault-page-advanced-details mt-3">
-                <summary class="vault-page-subtitle" style="cursor: pointer; font-size: 0.9rem;">Advanced OAuth import</summary>
+                <summary class="ui-disclosure-title">Advanced OAuth import</summary>
                 <div id="vaultEmailAccountOauthFields" class="mt-2">
                   <div class="vault-page-meta mb-3">
                     Use this only if you already have OAuth tokens or custom client credentials. Most users should use the guided connect button instead.
@@ -335,7 +345,7 @@
             </div>
 
             <details class="vault-page-advanced-details mt-3">
-              <summary class="vault-page-subtitle" style="cursor: pointer; font-size: 0.9rem;">Advanced metadata</summary>
+              <summary class="ui-disclosure-title">Advanced metadata</summary>
               <div class="vault-page-field-grid mt-2">
                 <div class="vault-page-field">
                   <label class="vault-page-label" for="vaultEmailAccountWorkspaceId">Workspace scope</label>
@@ -499,8 +509,8 @@
           <input id="vaultImportVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Password">
         </div>
         <div class="vault-modal-field">
-          <label class="vault-modal-label" for="vaultConfirmVaultPassword">Confirm password</label>
-          <input id="vaultConfirmVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Confirm">
+          <label class="vault-modal-label" for="vaultImportConfirmVaultPassword">Confirm password</label>
+          <input id="vaultImportConfirmVaultPassword" type="password" class="form-control vault-modal-input" placeholder="Confirm">
         </div>
       </div>
 

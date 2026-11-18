@@ -14,38 +14,6 @@
   display: none;
 }
 
-.agent-create-tab {
-  appearance: none;
-  border: 1px solid color-mix(in srgb, var(--border-color) 78%, var(--primary-color) 22%);
-  background: var(--bg-secondary);
-  color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 600;
-  padding: 9px 18px;
-  border-radius: 10px 10px 0 0;
-  cursor: pointer;
-  transition:
-    background 0.15s ease,
-    color 0.15s ease,
-    border-color 0.15s ease;
-}
-
-.agent-create-tab:hover {
-  color: var(--text-primary);
-}
-
-.agent-create-tab.is-active {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  border-bottom-color: var(--bg-primary);
-  box-shadow: 0 -2px 0 var(--primary-color) inset;
-}
-
-.agent-create-tab:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 24%, transparent);
-}
-
 /* ---------- Catalog role cards ---------- */
 .catalog-grid {
   display: grid;
@@ -61,39 +29,27 @@
   gap: 8px;
   text-align: left;
   padding: 16px 16px 14px;
-  border: 1px solid color-mix(in srgb, var(--border-color) 82%, var(--primary-color) 18%);
-  border-radius: 14px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
   background: var(--bg-secondary);
   cursor: pointer;
-  clip-path: polygon(
-    0 0,
-    calc(100% - 12px) 0,
-    100% 12px,
-    100% 100%,
-    12px 100%,
-    0 calc(100% - 12px)
-  );
-  transition:
-    transform 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+  min-width: 0;
+  color: var(--text-primary);
 }
 
 .catalog-card:hover {
-  transform: translateY(-2px);
-  border-color: color-mix(in srgb, var(--catalog-accent) 55%, var(--border-color) 45%);
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.1);
+  border-color: var(--focus-color);
 }
 
 .catalog-card:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--catalog-accent) 32%, transparent);
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
 }
 
+/* Catalog tints belong to the emblem, not the essential selection cue. */
 .catalog-card.is-selected {
-  border-color: var(--catalog-accent);
-  background: color-mix(in srgb, var(--catalog-accent) 10%, var(--bg-secondary));
-  box-shadow: 0 0 0 1px var(--catalog-accent);
+  border-color: var(--focus-color);
+  box-shadow: inset 3px 0 0 var(--focus-color);
 }
 
 .catalog-card-emblem {

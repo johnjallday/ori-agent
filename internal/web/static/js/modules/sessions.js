@@ -22894,7 +22894,7 @@ const sessionManager = {
       ?.addEventListener('click', () => this.generateNoteWithAI());
     document
       .getElementById('noteAICancelBtn')
-      ?.addEventListener('click', () => this.hideNoteAIPanel());
+      ?.addEventListener('click', () => this.hideNoteAIPanel({ restoreFocus: true }));
     document
       .getElementById('noteAIReplaceBtn')
       ?.addEventListener('click', () => this.applyGeneratedNoteDraft('replace'));
@@ -23088,6 +23088,7 @@ const sessionManager = {
     }
     this.resetNoteHistory();
     this.setNotePreviewMode(true);
+    window.NoteEditor?.updateSaveStatus('unsaved');
     if (lastSaved) lastSaved.textContent = '';
     if (saveBtn) {
       saveBtn.textContent = 'Create note';
@@ -23116,11 +23117,17 @@ const sessionManager = {
     this.loadNoteAIAgents();
 
     const bsModal = new bootstrap.Modal(modal);
+    // Use the real lifecycle, not a delayed timer that can steal focus back
+    // from a user who already opened the Ask AI form.
+    modal.addEventListener(
+      'shown.bs.modal',
+      () => {
+        if (document.activeElement === modal || document.activeElement === document.body)
+          nameInput?.focus();
+      },
+      { once: true }
+    );
     bsModal.show();
-
-    setTimeout(() => {
-      nameInput?.focus();
-    }, 100);
   },
 
   showNoteWorkspaceBadge(workspaceId, allowChange = false) {
@@ -23759,9 +23766,9 @@ const sessionManager = {
   toggleNoteAIPanel() {
     window.NoteEditor?.toggleGeneratePanel();
   },
-  hideNoteAIPanel() {
+  hideNoteAIPanel(options = {}) {
     this.noteAIGeneratedDraft = null;
-    window.NoteEditor?.closeGeneratePanel();
+    window.NoteEditor?.closeGeneratePanel(options);
   },
 
   // Load agents for AI generation dropdown. Pass the current note's workspace

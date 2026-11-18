@@ -243,7 +243,7 @@ export function renderUpgradeReview(review, doc = globalThis.document) {
   const versions = element(doc, 'p', { className: 'home-package-upgrade__versions' });
   versions.append(
     element(doc, 'span', {
-      className: 'home-package-upgrade__version',
+      className: 'home-package-upgrade__version badge badge-secondary',
       text: review?.from_version
     }),
     element(doc, 'span', {
@@ -253,7 +253,8 @@ export function renderUpgradeReview(review, doc = globalThis.document) {
     }),
     element(doc, 'span', { className: 'visually-hidden', text: ' to ' }),
     element(doc, 'span', {
-      className: 'home-package-upgrade__version home-package-upgrade__version--new',
+      className:
+        'home-package-upgrade__version home-package-upgrade__version--new badge badge-secondary',
       text: review?.to_version
     })
   );
@@ -624,7 +625,7 @@ export class HomePackageUpgradeDialog {
     const doc = this.document;
     const id = `homePackageUpgrade${++dialogSequence}`;
     const dialog = element(doc, 'dialog', {
-      className: 'home-package-upgrade',
+      className: 'home-package-upgrade ui-section',
       attributes: { 'aria-labelledby': `${id}Title`, 'aria-describedby': `${id}Status` }
     });
     const eyebrow = element(doc, 'p', {

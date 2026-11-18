@@ -1881,8 +1881,10 @@ window.AgentCanvas = AgentCanvas;
 
 // Export canvas function - accessible globally for button onclick
 window.exportCanvas = function () {
-  if (window.currentCanvas) {
-    window.currentCanvas.exportCanvas();
+  // Workspace pages own agentCanvas; older embedded hosts use currentCanvas.
+  const canvas = window.agentCanvas || window.currentCanvas;
+  if (canvas) {
+    canvas.exportCanvas();
   } else {
     console.warn('No canvas instance available to export');
   }

@@ -31,22 +31,22 @@ for the native process. Install and update disclosures must state both facts.
 
 ## Fixed v1 choices
 
-| Item | V1 decision |
-| --- | --- |
-| Surface protocol | Integer `1`; host and contribution ranges must intersect at `1` |
-| Contribution manifest | Optional `.ori-plugin/plugin.json` at the resolved plugin root |
-| Portable identity | At least one Claude or Codex manifest remains required; every present manifest and the Ori manifest must have the same normalized name and exact non-empty version |
-| Placement | Workspace Map station → host-owned modal only |
-| Browser isolation | `<iframe sandbox="allow-scripts">`; no `allow-same-origin`, forms, popups, downloads, or top navigation |
-| Browser/service path | Frame SDK → exact parent window → authenticated Ori broker → trusted service manager |
-| Plugin routes | None; only generic catalog/frame/asset/session/state/intent/broker routes |
-| Workspace state | Inert capability/provenance identifiers only; no plugin key/value state in `workspace.json` |
-| Plugin key/value state | Ori-managed global namespaced store, per plugin + workspace, bounded and non-executable |
-| Blueprint boundary | Install-time validated inert blueprint descriptors and skeleton bytes in the trusted installed-plugin registry |
-| Service artifact | Host-selected OS/architecture artifact, SHA-256 verified into Ori's managed plugin directory before executable permission |
-| First REAPER artifact | `darwin/arm64`; all other platforms unavailable until explicitly declared |
-| Native trust | Full local code execution under the user's account; iframe isolation does not reduce this trust |
-| Legacy REAPER | No automatic attachment, state import, or fallback; generic missing-provider behavior after core removal |
+| Item                   | V1 decision                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Surface protocol       | Integer `1`; host and contribution ranges must intersect at `1`                                                                                                    |
+| Contribution manifest  | Optional `.ori-plugin/plugin.json` at the resolved plugin root                                                                                                     |
+| Portable identity      | At least one Claude or Codex manifest remains required; every present manifest and the Ori manifest must have the same normalized name and exact non-empty version |
+| Placement              | Workspace Map station → host-owned modal only                                                                                                                      |
+| Browser isolation      | `<iframe sandbox="allow-scripts">`; no `allow-same-origin`, forms, popups, downloads, or top navigation                                                            |
+| Browser/service path   | Frame SDK → exact parent window → authenticated Ori broker → trusted service manager                                                                               |
+| Plugin routes          | None; only generic catalog/frame/asset/session/state/intent/broker routes                                                                                          |
+| Workspace state        | Inert capability/provenance identifiers only; no plugin key/value state in `workspace.json`                                                                        |
+| Plugin key/value state | Ori-managed global namespaced store, per plugin + workspace, bounded and non-executable                                                                            |
+| Blueprint boundary     | Install-time validated inert blueprint descriptors and skeleton bytes in the trusted installed-plugin registry                                                     |
+| Service artifact       | Host-selected OS/architecture artifact, SHA-256 verified into Ori's managed plugin directory before executable permission                                          |
+| First REAPER artifact  | `darwin/arm64`; all other platforms unavailable until explicitly declared                                                                                          |
+| Native trust           | Full local code execution under the user's account; iframe isolation does not reduce this trust                                                                    |
+| Legacy REAPER          | No automatic attachment, state import, or fallback; generic missing-provider behavior after core removal                                                           |
 
 ## Actors
 
@@ -336,7 +336,14 @@ and deep-link eligibility. The plugin owns accessibility inside its frame.
    `Access-Control-Allow-Origin: null` without credentials so ES modules can
    load; broker/session routes never set it. Inline executable content requires
    installer-computed hashes/nonces; arbitrary remote origins are never copied
-   from a manifest into CSP.
+   from a manifest into CSP. The source expressions include an explicit
+   HTTP/HTTPS scheme: WebKit cannot resolve either `'self'` or a scheme-less
+   asset host for an opaque sandbox origin. The authenticated parent-side
+   session POST binds that scheme from a validated same-host `Origin` (including
+   equivalent default ports), or from the actual TLS transport for non-browser
+   callers. Forwarding headers are not trusted; TLS-terminating proxies must
+   preserve the browser's Host/Origin authority. The asset paths remain pinned
+   to the random frame token and exact asset version, not the whole host.
 7. SDK and parent complete a challenge handshake. The server session credential
    remains in parent memory and is not sent into the frame. The frame receives a
    local bridge ID only.
@@ -479,16 +486,16 @@ Task 1.4 exercised Ori's real `internal/mcp.Registry`, `mcp.Server`, SDK
 Measured on macOS arm64 (Apple M5), with five one-second samples and 12
 concurrent 100 ms calls:
 
-| Observation | Measured result |
-| --- | --- |
-| First process start + initialize + tool discovery | 201–325 ms across retained runs |
-| One-second cadence call median / p95 | 1.21–1.48 ms / 1.40–1.61 ms |
-| 12 concurrent 100 ms calls | 103.6–104.1 ms total; max active 12 |
-| Caller deadline propagation | 75.6 ms for a 75 ms deadline; service observed cancellation |
-| Background 200 ms call | 201.4–201.5 ms, proving no implicit per-call timeout |
-| Orderly stop | 1.65–2.49 ms |
-| Start after stopped/crashed cleanup | 14.8–16.9 ms |
-| Hot status benchmark, 100 calls × 3 | 130–305 µs/op, about 141 KiB and 79–80 allocations/op |
+| Observation                                       | Measured result                                             |
+| ------------------------------------------------- | ----------------------------------------------------------- |
+| First process start + initialize + tool discovery | 201–325 ms across retained runs                             |
+| One-second cadence call median / p95              | 1.21–1.48 ms / 1.40–1.61 ms                                 |
+| 12 concurrent 100 ms calls                        | 103.6–104.1 ms total; max active 12                         |
+| Caller deadline propagation                       | 75.6 ms for a 75 ms deadline; service observed cancellation |
+| Background 200 ms call                            | 201.4–201.5 ms, proving no implicit per-call timeout        |
+| Orderly stop                                      | 1.65–2.49 ms                                                |
+| Start after stopped/crashed cleanup               | 14.8–16.9 ms                                                |
+| Hot status benchmark, 100 calls × 3               | 130–305 µs/op, about 141 KiB and 79–80 allocations/op       |
 
 The measurements establish:
 

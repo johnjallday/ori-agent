@@ -333,6 +333,11 @@ func TestOpenSessionServesOnlyCanonicalBoundedAssets(t *testing.T) {
 		entry.Header().Get("Cache-Control") != "no-store" || entry.Header().Get("Access-Control-Allow-Origin") != "null" {
 		t.Fatalf("frame security headers = %#v", entry.Header())
 	}
+	assetRoot := "http://example.com" + strings.TrimSuffix(opened.FrameURL, "ui/index.html")
+	policy := entry.Header().Get("Content-Security-Policy")
+	if !strings.Contains(policy, "script-src "+assetRoot) || !strings.Contains(policy, "style-src "+assetRoot) || strings.Contains(policy, "script-src 'self'") {
+		t.Fatal("opaque frame resources must be pinned to the explicit current origin and versioned token path")
+	}
 	appURL := strings.TrimSuffix(opened.FrameURL, "index.html") + "app.js"
 	asset := fixture.serve(http.MethodGet, appURL, "")
 	if asset.Code != http.StatusOK || asset.Header().Get("Content-Type") != "text/javascript; charset=utf-8" ||

@@ -98,6 +98,18 @@ Brief generation, workspace memory, and user-profile services remain canonical.
 | Follow-ups | `followup.Service` | User-scoped commitments canonically owned by `FollowUp.WorkspaceID`, with source-key provenance/deduplication and optional project-task links. Direct first-assignment rows remain HQ-owned; authorized Email Ops rows remain Email-Ops-owned when projected in HQ. |
 | Profile and memory | `userprofile` and workspace `MemoryStore` | Global preferences are field-allowlisted; workspace facts remain in `MEMORY.md`; both reject secret-like text. |
 
+### HQ scheduling choice
+
+`POST /api/personal-assistant/hq` accepts optional `schedule_enabled`. Omission
+preserves the existing enabled default; explicit `false` writes the Daily Brief
+configuration disabled from its first write, while completing normal versioned
+HQ ownership/activation. The disabled choice is hashed into the durable claim
+and preserved by replay/resume. Omitted/explicit-enabled requests retain legacy
+normalized payload bytes and hashes; no stored-state/schema migration is needed.
+This does not pause the relationship, suppress manual/first-open actions, or
+change template setup autostart. A no-execution fixture must separately prevent
+its known starter ticket from running before opening the workspace.
+
 ## State and action matrix
 
 | State | Meaning | Required copy | Allowed next actions |

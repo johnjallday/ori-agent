@@ -1,0 +1,23 @@
+{
+  "captureMode": "viewport",
+  "revision": "06a47e32720e3c03f1293337f40ba48d890350a1",
+  "dirty": true,
+  "servedBuild": "group-4-shared-consumer-gate",
+  "route": "/",
+  "viewport": {
+    "width": 320,
+    "height": 900
+  },
+  "engine": "chromium",
+  "theme": "light",
+  "fontMode": "offline-fallback",
+  "loadedFaces": [
+    "JetBrains Mono",
+    "JetBrains Mono"
+  ],
+  "computedFonts": {
+    "body": "Manrope, \"Segoe UI\", sans-serif",
+    "heading": "Fraunces, Georgia, serif"
+  },
+  "fixture": "GET-only populated workspace tree, chosen portraits, relationship and economy; not actual hiring"
+}

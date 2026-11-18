@@ -245,7 +245,12 @@ test('bulk checkboxes and inspection buttons have separate state and never invok
   };
   panel.renderRows();
   const row = rows.children[0];
-  const checkbox = row.children[0].children[0];
+  const target = row.children[0].children[0];
+  assert.equal(target.tag, 'label', 'the label owns a large target, not the checkbox glyph');
+  assert.equal(target.className, 'project-library-pick');
+  const checkbox = target.children[0];
+  assert.equal(checkbox.tag, 'input');
+  assert.match(row.children[1].children[0].className, /modern-btn modern-btn-secondary/);
   checkbox.checked = true;
   checkbox.listeners.change();
   assert.equal(panel.selectedProjects.has('entry'), true);

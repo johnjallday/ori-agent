@@ -15,6 +15,7 @@
 const tplState = {
   templates: [],
   root: '',
+  loadError: false,
   selectedId: '',
   search: '',
   activeTags: [],
@@ -126,10 +127,12 @@ async function tplRefresh(selectId) {
     const data = await tplFetchJSON('/api/project-templates');
     tplState.templates = Array.isArray(data.templates) ? data.templates : [];
     tplState.root = data.templates_root || '';
+    tplState.loadError = false;
     tplShowError('');
   } catch (error) {
     console.error('Failed to load templates:', error);
     tplShowError('Could not load the template library.');
+    tplState.loadError = true;
     tplState.templates = [];
   }
 
@@ -181,14 +184,13 @@ function tplRenderList() {
 
   const visible = tplVisibleTemplates();
   if (count) count.textContent = String(visible.length);
-  if (empty) empty.hidden = tplState.templates.length > 0;
+  if (empty) empty.hidden = tplState.templates.length > 0 || tplState.loadError;
 
   list.innerHTML = '';
   if (tplState.templates.length === 0) return;
   if (visible.length === 0) {
     const none = document.createElement('div');
-    none.className = 'text-center py-3';
-    none.style.cssText = 'color: var(--text-secondary); font-size: 13px;';
+    none.className = 'tpl-section-copy py-3';
     none.textContent = 'No templates match the current filters.';
     list.appendChild(none);
     return;
@@ -202,50 +204,41 @@ function tplRenderList() {
 function tplBuildRow(template) {
   const row = document.createElement('button');
   row.type = 'button';
-  row.className = 'modern-card p-2 text-start w-100';
-  row.setAttribute('role', 'listitem');
-  row.style.cssText =
-    'border: 1px solid var(--border-color); background: var(--bg-secondary);' +
-    (template.id === tplState.selectedId
-      ? ' outline: 2px solid var(--accent-color, #6366f1);'
-      : '');
-  row.addEventListener('click', () => {
-    if (tplState.selectedId === template.id) return;
-    tplGuardDirty(() => tplSelectTemplate(template.id));
+  row.className = 'tpl-list-button';
+  row.setAttribute('aria-pressed', String(template.id === tplState.selectedId));
+  row.addEventListener('click', event => {
+    if (tplState.selectedId === template.id) {
+      tplFocusSelection();
+      return;
+    }
+    tplGuardDirty(() => tplSelectTemplate(template.id), event.currentTarget);
   });
 
   const title = document.createElement('div');
-  title.style.cssText =
-    'color: var(--text-primary); font-size: 14px; font-weight: 600; word-break: break-word;';
+  title.className = 'tpl-list-title';
   title.textContent = (template.icon ? `${template.icon} ` : '') + (template.name || template.id);
   if (tplTemplateReadOnly(template)) {
     const badge = document.createElement('span');
-    badge.className = 'badge ms-1';
-    badge.style.cssText =
-      'background: var(--bg-tertiary); color: var(--text-secondary); font-weight: 600; font-size: 9px; vertical-align: middle;';
+    badge.className = 'badge badge-secondary ms-1';
     badge.textContent = tplPluginOwned(template) ? 'PLUGIN · READ-ONLY' : 'BUILT-IN';
     title.appendChild(badge);
   }
   if (tplTemplateVariant(template)) {
     const badge = document.createElement('span');
-    badge.className = 'badge ms-1';
-    badge.style.cssText =
-      'background: rgba(14, 116, 144, 0.12); color: #0e7490; font-weight: 700; font-size: 9px; vertical-align: middle;';
+    badge.className = 'badge badge-info ms-1';
     badge.textContent = 'CUSTOM VARIANT';
     title.appendChild(badge);
   }
   row.appendChild(title);
 
   const id = document.createElement('div');
-  id.style.cssText =
-    'font-size: 11px; color: var(--text-secondary); font-family: var(--font-mono, monospace);';
+  id.className = 'tpl-metadata font-monospace';
   id.textContent = template.id;
   row.appendChild(id);
 
   if (template.description) {
     const desc = document.createElement('div');
-    desc.style.cssText =
-      'font-size: 12px; color: var(--text-secondary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;';
+    desc.className = 'tpl-list-description';
     desc.textContent = template.description;
     row.appendChild(desc);
   }
@@ -255,16 +248,18 @@ function tplBuildRow(template) {
     tags.className = 'd-flex gap-1 flex-wrap mt-1';
     for (const tag of template.tags) {
       const chip = document.createElement('span');
-      chip.className = 'badge';
-      chip.style.cssText =
-        'background: var(--bg-tertiary); color: var(--text-secondary); font-weight: 500; font-size: 10px;';
+      chip.className = 'badge badge-secondary';
       chip.textContent = tag;
       tags.appendChild(chip);
     }
     row.appendChild(tags);
   }
 
-  return row;
+  // Keep native button semantics inside the collection's list item.
+  const item = document.createElement('div');
+  item.setAttribute('role', 'listitem');
+  item.appendChild(row);
+  return item;
 }
 
 // --- Tag filter bar ---
@@ -308,6 +303,8 @@ function tplRenderDetail() {
   const detail = tplEl('tplDetail');
   const emptyDetail = tplEl('tplDetailEmpty');
   const template = tplSelected();
+  const column = tplEl('tplDetailColumn');
+  if (column) column.hidden = tplState.templates.length === 0;
   tplRenderQuest();
 
   if (!template) {
@@ -430,7 +427,7 @@ function tplStarterTaskRow(task) {
   row.dataset.role = 'starter-task';
 
   const top = document.createElement('div');
-  top.className = 'd-flex gap-2 align-items-center mb-2';
+  top.className = 'd-flex gap-2 align-items-center flex-wrap mb-2';
   const desc = document.createElement('input');
   desc.className = 'modern-input flex-grow-1';
   desc.placeholder = 'Ticket description';
@@ -738,10 +735,11 @@ async function tplGroupPreview() {
   }
 }
 
-function tplCustomizePluginTemplate() {
+function tplCustomizePluginTemplate(trigger) {
   const template = tplSelected();
   if (!template || !tplPluginOwned(template) || !template.group_requirement) return;
   tplOpenNameModal({
+    trigger,
     title: 'Customize Template',
     label: 'Variant name',
     confirm: 'Create variant',
@@ -950,6 +948,22 @@ function tplApplyReadOnly() {
 
 // --- Lifecycle ---
 
+function tplShowModal(modalEl, initialFocus, trigger) {
+  // Safari does not focus a button on pointer activation.
+  const invoker = trigger || document.activeElement;
+  modalEl.addEventListener(
+    'hidden.bs.modal',
+    () => {
+      if (invoker?.isConnected) invoker.focus({ preventScroll: true });
+    },
+    { once: true }
+  );
+  if (initialFocus) {
+    modalEl.addEventListener('shown.bs.modal', () => initialFocus.focus(), { once: true });
+  }
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
 function tplOpenNameModal(action) {
   tplState.nameAction = action;
   const titleEl = tplEl('tplNameModalTitle');
@@ -962,9 +976,7 @@ function tplOpenNameModal(action) {
   if (input) input.value = action.initial || '';
   const modalEl = tplEl('tplNameModal');
   if (!modalEl) return;
-  const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
-  modal.show();
-  if (input) setTimeout(() => input.focus(), 200);
+  tplShowModal(modalEl, input, action.trigger);
 }
 
 async function tplRunNameAction() {
@@ -981,8 +993,9 @@ async function tplRunNameAction() {
   }
 }
 
-function tplCreate() {
+function tplCreate(trigger) {
   tplOpenNameModal({
+    trigger,
     title: 'New Template',
     label: 'Template name',
     confirm: 'Create',
@@ -1001,10 +1014,11 @@ function tplCreate() {
   });
 }
 
-function tplDuplicate() {
+function tplDuplicate(trigger) {
   const template = tplSelected();
   if (!template || tplPluginOwned(template)) return;
   tplOpenNameModal({
+    trigger,
     title: 'Duplicate Template',
     label: 'New template name',
     confirm: 'Duplicate',
@@ -1410,6 +1424,23 @@ function tplSelectTemplate(id) {
   tplUserQuestReset();
   tplRenderList();
   tplRenderDetail();
+  tplFocusSelection();
+}
+
+function tplFocusSelection() {
+  if (window.matchMedia('(max-width: 991px)').matches) {
+    const heading = tplEl('tplDetailName');
+    heading?.scrollIntoView({ block: 'start', behavior: 'instant' });
+    heading?.focus({ preventScroll: true });
+  } else {
+    tplEl('tplList')?.querySelector('[aria-pressed="true"]')?.focus({ preventScroll: true });
+  }
+}
+
+function tplBackToLibrary() {
+  const target = tplEl('tplList')?.querySelector('[aria-pressed="true"]') || tplEl('tplSearch');
+  target?.scrollIntoView({ block: 'center', behavior: 'instant' });
+  target?.focus({ preventScroll: true });
 }
 
 function tplFilesReset() {
@@ -1476,16 +1507,12 @@ function tplBuildTreeRow(node) {
 
   const row = document.createElement(isDir ? 'div' : 'button');
   if (!isDir) row.type = 'button';
-  row.className = 'd-flex align-items-center gap-2 px-2 py-1 text-start w-100';
-  row.style.cssText =
-    `border: none; border-radius: 4px; font-size: 13px; padding-left: ${8 + depth * 16}px !important;` +
-    (isDir
-      ? ' background: transparent; color: var(--text-secondary);'
-      : ' background: var(--bg-secondary); color: var(--text-primary);') +
-    (node.path === tplFiles.selectedPath
-      ? ' outline: 2px solid var(--accent-color, #6366f1);'
-      : '');
+  row.className = 'tpl-tree-row';
+  row.style.setProperty('--tpl-tree-depth', depth);
+  row.title = node.path;
   row.setAttribute('role', 'treeitem');
+  row.setAttribute('aria-level', String(depth + 1));
+  row.setAttribute('aria-selected', String(node.path === tplFiles.selectedPath));
 
   const icon = document.createElement('span');
   icon.textContent = isDir ? '📁' : '📄';
@@ -1494,22 +1521,20 @@ function tplBuildTreeRow(node) {
 
   const label = document.createElement('span');
   label.textContent = name;
-  label.style.cssText = 'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;';
+  label.className = 'tpl-tree-label';
   row.appendChild(label);
 
   if (node.is_manifest) {
     const badge = document.createElement('span');
-    badge.className = 'badge';
+    badge.className = 'badge badge-secondary';
     badge.textContent = 'metadata';
-    badge.style.cssText =
-      'background: var(--bg-tertiary); color: var(--text-secondary); font-size: 9px; font-weight: 500;';
     row.appendChild(badge);
   }
 
   if (!isDir) {
-    row.addEventListener('click', () => {
+    row.addEventListener('click', event => {
       if (node.path === tplFiles.selectedPath) return;
-      tplGuardDirty(() => void tplOpenFile(node.path));
+      tplGuardDirty(() => void tplOpenFile(node.path), event.currentTarget);
     });
   }
   return row;
@@ -1614,7 +1639,7 @@ function tplClearDirty() {
 
 // tplGuardDirty runs `proceed` immediately unless the editor has unsaved
 // changes, in which case it opens the save / discard / keep-editing prompt.
-function tplGuardDirty(proceed) {
+function tplGuardDirty(proceed, trigger) {
   if (tplGroup.dirty) {
     if (!window.confirm('Discard unsaved placement policy changes?')) return;
     tplGroup.dirty = false;
@@ -1631,7 +1656,7 @@ function tplGuardDirty(proceed) {
   const fileEl = tplEl('tplDirtyFile');
   if (fileEl) fileEl.textContent = tplFiles.selectedPath || '(file)';
   const modalEl = tplEl('tplDirtyModal');
-  if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  if (modalEl) tplShowModal(modalEl, undefined, trigger);
 }
 
 async function tplDirtyResolve(action) {
@@ -1648,13 +1673,18 @@ async function tplDirtyResolve(action) {
   }
   tplClearDirty();
   tplFiles.pending = null;
+  // Wait until Bootstrap releases its focus trap before focusing the next selection.
+  if (modalEl && typeof proceed === 'function') {
+    modalEl.addEventListener('hidden.bs.modal', proceed, { once: true });
+  }
   if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).hide();
-  if (typeof proceed === 'function') proceed();
+  else if (typeof proceed === 'function') proceed();
 }
 
-function tplFileCreate(type) {
+function tplFileCreate(type, trigger) {
   if (!tplState.selectedId || tplSourceSectionsReadOnly()) return;
   tplOpenNameModal({
+    trigger,
     title: type === 'dir' ? 'New Folder' : 'New File',
     label: 'Path (relative to the template)',
     confirm: 'Create',
@@ -1673,11 +1703,12 @@ function tplFileCreate(type) {
   });
 }
 
-function tplFileRename() {
+function tplFileRename(trigger) {
   const path = tplFiles.selectedPath;
   if (!path || tplSourceSectionsReadOnly()) return;
   tplGuardDirty(() => {
     tplOpenNameModal({
+      trigger,
       title: 'Rename / Move',
       label: 'New path (relative to the template)',
       confirm: 'Rename',
@@ -1694,7 +1725,7 @@ function tplFileRename() {
         void tplOpenFile(node.path || to);
       }
     });
-  });
+  }, trigger);
 }
 
 async function tplFileDelete() {
@@ -2427,14 +2458,14 @@ function tplInit() {
   const page = tplEl('templatesPage');
   if (!page) return;
 
-  tplEl('tplCreateBtn')?.addEventListener('click', tplCreate);
+  tplEl('tplCreateBtn')?.addEventListener('click', event => tplCreate(event.currentTarget));
   tplEl('tplImportBtn')?.addEventListener('click', () => void tplImport());
   tplEl('tplOpenLibraryBtn')?.addEventListener('click', () => void tplReveal(''));
-  tplEl('tplRefreshBtn')?.addEventListener('click', () => {
+  tplEl('tplRefreshBtn')?.addEventListener('click', event => {
     tplGuardDirty(() => {
       tplUserQuestReset();
       void tplRefresh(tplState.selectedId);
-    });
+    }, event.currentTarget);
   });
 
   tplEl('tplQuestRetry')?.addEventListener('click', () => void tplLoadQuests());
@@ -2442,12 +2473,12 @@ function tplInit() {
     if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || !tplFiles.dirty) return;
     event.preventDefault();
     const href = event.currentTarget.getAttribute('href');
-    if (href) tplGuardDirty(() => window.location.assign(href));
+    if (href) tplGuardDirty(() => window.location.assign(href), event.currentTarget);
   });
 
-  tplEl('tplDuplicateBtn')?.addEventListener('click', () => {
-    if (tplPluginOwned()) tplCustomizePluginTemplate();
-    else tplDuplicate();
+  tplEl('tplDuplicateBtn')?.addEventListener('click', event => {
+    if (tplPluginOwned()) tplCustomizePluginTemplate(event.currentTarget);
+    else tplDuplicate(event.currentTarget);
   });
   tplEl('tplRevealBtn')?.addEventListener('click', () => {
     const t = tplSelected();
@@ -2463,8 +2494,12 @@ function tplInit() {
     tplResetOverviewFields();
     tplGroupRender();
   });
-  tplEl('tplDuplicateToCustomizeBtn')?.addEventListener('click', tplCustomizePluginTemplate);
-  tplEl('tplGroupCustomizeBtn')?.addEventListener('click', tplCustomizePluginTemplate);
+  tplEl('tplDuplicateToCustomizeBtn')?.addEventListener('click', event =>
+    tplCustomizePluginTemplate(event.currentTarget)
+  );
+  tplEl('tplGroupCustomizeBtn')?.addEventListener('click', event =>
+    tplCustomizePluginTemplate(event.currentTarget)
+  );
   tplEl('tplGroupPreviewBtn')?.addEventListener('click', () => void tplGroupPreview());
   ['tplGroupPolicy', 'tplGroupMissing', 'tplGroupHomeName'].forEach(id => {
     tplEl(id)?.addEventListener('input', tplGroupMarkDirty);
@@ -2479,6 +2514,7 @@ function tplInit() {
     });
   }
 
+  tplEl('tplBackToLibrary')?.addEventListener('click', tplBackToLibrary);
   tplEl('tplNameModalConfirm')?.addEventListener('click', () => void tplRunNameAction());
   tplEl('tplNameModalInput')?.addEventListener('keydown', event => {
     if (event.key === 'Enter') {
@@ -2517,13 +2553,17 @@ function tplInit() {
   });
 
   // Files tab wiring.
-  tplEl('tplFileNewBtn')?.addEventListener('click', () => tplFileCreate('file'));
-  tplEl('tplFolderNewBtn')?.addEventListener('click', () => tplFileCreate('dir'));
+  tplEl('tplFileNewBtn')?.addEventListener('click', event =>
+    tplFileCreate('file', event.currentTarget)
+  );
+  tplEl('tplFolderNewBtn')?.addEventListener('click', event =>
+    tplFileCreate('dir', event.currentTarget)
+  );
   tplEl('tplFilesRefreshBtn')?.addEventListener('click', () => {
     tplFiles.templateId = '';
     void tplFilesLoadTree();
   });
-  tplEl('tplFileRenameBtn')?.addEventListener('click', tplFileRename);
+  tplEl('tplFileRenameBtn')?.addEventListener('click', event => tplFileRename(event.currentTarget));
   tplEl('tplFileDeleteBtn')?.addEventListener('click', () => void tplFileDelete());
   tplEl('tplEditorSaveBtn')?.addEventListener('click', () => void tplEditorSave());
 
@@ -2551,7 +2591,7 @@ function tplInit() {
       event.preventDefault();
       tplGuardDirty(() => {
         if (target) bootstrap.Tab.getOrCreateInstance(target).show();
-      });
+      }, target);
     });
   }
 
@@ -2563,7 +2603,9 @@ function tplInit() {
   tplEl('tplTabAgents')?.addEventListener('shown.bs.tab', () => tplAgentsLoad());
   tplEl('tplAgentsAddBtn')?.addEventListener('click', tplAgentsAdd);
   tplEl('tplAgentsSaveBtn')?.addEventListener('click', () => void tplAgentsSave());
-  tplEl('tplAgentsDuplicateBtn')?.addEventListener('click', tplDuplicate);
+  tplEl('tplAgentsDuplicateBtn')?.addEventListener('click', event =>
+    tplDuplicate(event.currentTarget)
+  );
 
   void tplRefresh();
 }
