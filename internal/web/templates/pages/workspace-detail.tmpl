@@ -4138,10 +4138,13 @@
       padding: 0.5rem 0.75rem;
     }
 
+    /* The row wraps rather than squeezing: on a narrow page the agents and the
+       status drop under the name, which keeps its full width. */
     .group-member-open {
       display: flex;
       align-items: center;
-      gap: 0.625rem;
+      flex-wrap: wrap;
+      gap: 0.125rem 0.625rem;
       flex: 1 1 auto;
       min-width: 0;
       background: none;
@@ -4167,6 +4170,7 @@
       text-overflow: ellipsis;
     }
 
+    .group-member-agents,
     .group-member-desc,
     .group-member-meta {
       color: var(--text-secondary, #6c757d);

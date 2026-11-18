@@ -125,6 +125,7 @@ export default defineConfig([
       'internal/web/static/js/modules/song-learned.js',
       'internal/web/static/js/modules/field-labels.js',
       'internal/web/static/js/modules/home-song-roster.js',
+      'internal/web/static/js/modules/linked-agents.js',
       'internal/web/static/js/modules/library-freshness.js',
       'internal/web/static/js/modules/library-setup.js',
       'internal/web/static/js/modules/map-library-sheet.js',

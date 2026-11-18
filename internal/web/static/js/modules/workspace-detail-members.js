@@ -16,6 +16,7 @@
 
 import { openLibrarySheet } from './map-library-sheet.js';
 import { renderRoster, rosterURL, rosterView } from './home-song-roster.js';
+import { nodeAgentNames, rowAgentsLine } from './linked-agents.js';
 
 // --- Pure helpers (exported for unit testing) ----------------------------------
 
@@ -605,12 +606,22 @@ export class WorkspaceMembersPanel {
     const safeId = escapeHtml(member.id);
     const safeSlug = escapeHtml(member.folder_slug || '');
     const safeName = escapeHtml(name);
+    // Who works in it, from the tree this list was drawn from. A nested group
+    // names its own agents; the ones further down are in the page's Team.
+    const agentNames = nodeAgentNames(member);
+    const agents = escapeHtml(rowAgentsLine(agentNames));
+    // The button's label replaces its text for a screen reader, so the agents
+    // are said there too, every one of them.
+    const openLabel = agentNames.length
+      ? `Open ${safeName}. ${agentNames.length === 1 ? 'Agent' : 'Agents'}: ${escapeHtml(agentNames.join(', '))}`
+      : `Open ${safeName}`;
 
     return `
       <div class="group-member-row" role="listitem">
-        <button type="button" class="group-member-open" data-member-id="${safeId}" data-member-slug="${safeSlug}" aria-label="Open ${safeName}">
+        <button type="button" class="group-member-open" data-member-id="${safeId}" data-member-slug="${safeSlug}" aria-label="${openLabel}">
           <span class="group-member-kind">${kindLabel}</span>
           <span class="group-member-name">${safeName}</span>
+          ${agents ? `<span class="group-member-agents">${agents}</span>` : ''}
           ${desc ? `<span class="group-member-desc">${escapeHtml(desc)}</span>` : ''}
           ${meta ? `<span class="group-member-meta">${escapeHtml(meta)}</span>` : ''}
         </button>

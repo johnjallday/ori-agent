@@ -10682,6 +10682,21 @@ button.ws-cmd-rpg-class-card:focus-visible {
   height: 40px;
   flex: none;
 }
+/* The agents of the workspaces inside a group: named under the group's own
+   Team, as text. They are not controls, so they take no pointer or focus. */
+.ws-cmd-team-linked {
+  margin-top: 16px;
+}
+.ws-cmd-team-linked h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-team-agent.is-linked:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
 .ws-cmd-resource-row {
   display: flex;
   align-items: center;

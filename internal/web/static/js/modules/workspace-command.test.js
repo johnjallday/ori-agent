@@ -8439,6 +8439,105 @@ test('the scoped map re-mounts only when membership changes, and unmounts off Ma
   }
 });
 
+test('a group map’s member buildings wear their agents’ faces, re-mounted once when the faces are known', () => {
+  const commandView = detachmentCommandView('group', [
+    {
+      id: 'm1',
+      name: 'Mixing',
+      agents: ['REAPER Assistant'],
+      entry_agent_name: 'REAPER Assistant'
+    }
+  ]);
+  const mounts = [];
+  const host = { className: '', parentNode: null, addEventListener() {} };
+  const slot = {
+    appendChild: node => {
+      node.parentNode = slot;
+    }
+  };
+  commandView.container = {
+    querySelector: sel => (sel.includes('data-cmd-detachment-slot') ? slot : null)
+  };
+  commandView.detachmentMapEl = host;
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceMap: {
+      mount: (el, state) => mounts.push(state),
+      unmount() {},
+      scopeWorkspacesToGroup: (rows, id) =>
+        rows.filter(row => row.id === id || row.parent_id === id)
+    },
+    OriWorkspaceAgentPortrait: { markup: name => '<i>' + name + '</i>' },
+    AgentAvatar: { markup: input => '<b>' + input.name + ':' + input.appearance.mode + '</b>' },
+    CharacterCatalog: { get: () => null }
+  };
+  try {
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 1);
+    // Until the agent catalog answers the slot is empty: never a face that is
+    // not the agent's.
+    const early = mounts[0].agentPortraitHTML('REAPER Assistant', true);
+    assert.match(early, /home-agent-face-slot/);
+    assert.doesNotMatch(early, /<i>|<b>/);
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 1, 'a plain re-render must not re-mount the map');
+
+    commandView.page.agentCatalogLoaded = true;
+    commandView.page.getAgentProfile = name =>
+      name === 'REAPER Assistant'
+        ? { name, appearance: { mode: 'character', character: { catalog_id: 'c1' } } }
+        : null;
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 2, 'the faces becoming known re-mounts once');
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 2, 'and not again while they stay the same');
+
+    const portrait = mounts[1].agentPortraitHTML;
+    assert.match(portrait('REAPER Assistant', true), /<b>REAPER Assistant:character<\/b>/);
+    assert.doesNotMatch(
+      portrait('REAPER Assistant', true, { href: '/agents/REAPER%20Assistant' }),
+      /href=|<a /,
+      'a member’s agent is never a link here'
+    );
+    // An agent the catalog lacks falls back to its name's own figure.
+    assert.equal(portrait('Stranger', false), '<i>Stranger</i>');
+
+    // A changed appearance is a new face: one more mount.
+    commandView.page.getAgentProfile = name => ({ name, appearance: { mode: 'uploaded' } });
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 3);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a group with no agents in its members keeps one mount as the catalog arrives', () => {
+  const commandView = detachmentCommandView('group');
+  const mounts = [];
+  const host = { className: '', parentNode: null, addEventListener() {} };
+  const slot = {
+    appendChild: node => {
+      node.parentNode = slot;
+    }
+  };
+  commandView.container = {
+    querySelector: sel => (sel.includes('data-cmd-detachment-slot') ? slot : null)
+  };
+  commandView.detachmentMapEl = host;
+  const originalWindow = globalThis.window;
+  globalThis.window = {
+    OriWorkspaceMap: { mount: (el, state) => mounts.push(state), unmount() {} }
+  };
+  try {
+    commandView.syncDetachmentMap();
+    commandView.page.agentCatalogLoaded = true;
+    commandView.syncDetachmentMap();
+    assert.equal(mounts.length, 1);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
 test('agents reach the map as units; a status change patches them, a roster change re-mounts', () => {
   const agents = ['Boss', 'Scout'];
   const commandView = detachmentCommandView('group', undefined, { agents, entry: 'Boss' });
