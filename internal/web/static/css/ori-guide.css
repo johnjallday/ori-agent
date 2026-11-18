@@ -149,6 +149,11 @@
    panel would cover the very app controls the walkthrough asks users to open. */
 .ori-guide__panel:has(.ori-guide__reply[data-status="quest"]) {
   top: auto;
+  /* The mobile Help sheet may span the screen, but a walkthrough must leave
+     its marked control exposed, including short native-zoom viewports. */
+  left: auto;
+  right: 20px;
+  width: min(360px, calc(100vw - 40px));
   max-height: min(
     440px,
     calc(

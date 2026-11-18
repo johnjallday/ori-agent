@@ -159,7 +159,7 @@ export async function capture(
   testInfo: TestInfo,
   name: string,
   facts: object = {},
-  options: { fullPage?: boolean } = {}
+  options: { fullPage?: boolean; nativeWindow?: boolean } = {}
 ) {
   await page.evaluate(() => document.fonts.ready);
   const fonts = await page.evaluate(() =>
@@ -174,13 +174,25 @@ export async function capture(
   const modalVisible =
     (await page.locator('.modal.show:visible, dialog[open], [role="dialog"]:visible').count()) > 0;
   const fullPage = options.fullPage ?? !modalVisible;
+  if (options.nativeWindow) {
+    expect(page.viewportSize(), 'native capture must not use an emulated viewport').toBeNull();
+    expect(fullPage, 'native compositor captures the actual window, not a stitched page').toBe(
+      false
+    );
+  }
   const metadata = {
-    captureMode: fullPage ? 'full-page' : 'viewport',
+    captureMode: options.nativeWindow
+      ? 'native-window-compositor'
+      : fullPage
+        ? 'full-page'
+        : 'viewport',
     revision: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
     dirty: !!execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim(),
     servedBuild: process.env.ORI_UI_BUILD || 'working-tree (rebuild after asset changes)',
     route: new URL(page.url()).pathname,
-    viewport: page.viewportSize(),
+    viewport:
+      page.viewportSize() ??
+      (await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))),
     engine: testInfo.project.name,
     theme: await page.locator('html').getAttribute('data-bs-theme'),
     fontMode: process.env.ORI_UI_FONTS === 'real' ? 'real' : 'offline-fallback',
@@ -208,8 +220,13 @@ export async function capture(
   const phase = process.env.ORI_UI_EVIDENCE;
   if (!['before', 'after'].includes(phase))
     throw new Error('ORI_UI_EVIDENCE must be before or after');
+  const evidenceGroup = process.env.ORI_UI_EVIDENCE_GROUP;
+  if (evidenceGroup && evidenceGroup !== 'group-6') {
+    throw new Error('ORI_UI_EVIDENCE_GROUP only permits the final group-6 tour');
+  }
   const group =
-    testInfo.file.includes('ui-consistency-workspace') ||
+    evidenceGroup ||
+    (testInfo.file.includes('ui-consistency-workspace') ||
     testInfo.file.endsWith('resource-catalog-ui-consistency.spec.ts') ||
     testInfo.file.endsWith('resource-team-home-ui-consistency.spec.ts') ||
     testInfo.file.endsWith('resource-library-ui-consistency.spec.ts') ||
@@ -227,7 +244,7 @@ export async function capture(
           ? 'group-3'
           : testInfo.file.endsWith('ui-consistency-defects.spec.ts')
             ? 'group-1'
-            : 'group-2';
+            : 'group-2');
   const directory = resolve('tasks/evidence-ui-consistency', group, phase);
   mkdirSync(directory, { recursive: true });
   const stem = `${name}-${metadata.engine}-${metadata.theme}-${metadata.viewport?.width}-${metadata.fontMode}`;
@@ -236,7 +253,26 @@ export async function capture(
   const scrollTop = await page.evaluate(() => window.scrollY);
   if (fullPage) await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
   try {
-    await page.screenshot({ path: join(directory, `${stem}.png`), fullPage });
+    if (options.nativeWindow) {
+      // Playwright's ordinary clip is in legacy DIP coordinates and crops a
+      // natively zoomed window. Read the complete browser compositor instead;
+      // no clipping, scaling, emulation or image postprocessing is applied.
+      const session = await page.context().newCDPSession(page);
+      try {
+        const metrics = await session.send('Page.getLayoutMetrics');
+        expect(metrics.visualViewport.zoom).toBe(2);
+        const screenshot = await session.send('Page.captureScreenshot', {
+          format: 'png',
+          captureBeyondViewport: false,
+          fromSurface: true
+        });
+        writeFileSync(join(directory, `${stem}.png`), Buffer.from(screenshot.data, 'base64'));
+      } finally {
+        await session.detach();
+      }
+    } else {
+      await page.screenshot({ path: join(directory, `${stem}.png`), fullPage });
+    }
   } finally {
     if (fullPage)
       await page.evaluate(top => window.scrollTo({ top, behavior: 'instant' }), scrollTop);
@@ -258,10 +294,14 @@ export async function reachable(control: Locator, minimum = 0) {
     const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
     return {
       x: box.x,
+      y: box.y,
       right: box.right,
+      bottom: box.bottom,
       width: box.width,
       height: box.height,
       viewport: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      scrollY: window.scrollY,
       hit: hit === node || node.contains(hit),
       topElement: hit?.outerHTML.slice(0, 180)
     };

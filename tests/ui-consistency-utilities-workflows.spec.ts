@@ -45,7 +45,7 @@ async function workflowReads(page: Page, state = () => 'populated') {
 }
 
 for (const theme of themes) {
-  for (const width of [320, 1440]) {
+  for (const width of [320, 390, 768, 1440]) {
     test(`Workflows library, editor, draft focus and launch cancellation: ${theme} ${width}`, async ({
       page
     }, info) => {

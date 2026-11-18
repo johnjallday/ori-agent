@@ -5,6 +5,8 @@ import base from './playwright.config';
 export default defineConfig({
   ...base,
   testMatch: 'ui-consistency-*.spec.ts',
+  // Ordinary Playwright output cleanup must not erase README capture staging.
+  outputDir: '.tmp/ui-consistency/playwright-output',
   // Utility journeys restore singleton Profile/Settings values in the owned
   // installation. Serialize engines as well as cases to avoid racing that state.
   workers: 1,

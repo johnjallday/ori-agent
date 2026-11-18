@@ -35,6 +35,13 @@ for (const theme of ['light', 'dark'] as const)
       await page.locator('#darkModeToggle').click();
       const changedTheme = theme === 'light' ? 'dark' : 'light';
       const assertPreferences = async () => {
+        // Font swaps can move the newly navigated navbar/toolbar in WebKit.
+        // Measure only after fonts and the resulting resize/layout frame settle;
+        // capture still independently requires the intended faces to be loaded.
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        });
         await expect(page.locator('html')).toHaveAttribute('data-bs-theme', changedTheme);
         await expect(page.locator('html')).toHaveAttribute('data-ui-density', density);
         expect(

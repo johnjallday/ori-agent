@@ -17,8 +17,9 @@ func frameAssetPolicy(host, scheme, frameToken, assetVersion string) (string, er
 		return "", errors.New("invalid frame asset origin or identity")
 	}
 	for _, char := range host {
-		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') || strings.ContainsRune(".-:[]", char)) {
+		allowed := (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || strings.ContainsRune(".-:[]", char)
+		if !allowed {
 			return "", errors.New("invalid frame asset host")
 		}
 	}

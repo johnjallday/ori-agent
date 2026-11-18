@@ -70,7 +70,7 @@ test.beforeAll(async ({ request }) => {
 });
 
 for (const theme of themes) {
-  for (const width of [320, 1440]) {
+  for (const width of [320, 390, 768, 1440]) {
     test(`MCP controls, read-only details and keyboard Sources: ${theme} ${width}`, async ({
       page
     }, info) => {

@@ -33,7 +33,7 @@ test.beforeAll(async ({ request }) => {
 });
 
 for (const theme of themes) {
-  for (const width of [320, 1440]) {
+  for (const width of [320, 390, 768, 1440]) {
     test(`Settings sections, search, native links and measured navigation: ${theme} ${width}`, async ({
       page
     }, info) => {
@@ -157,7 +157,7 @@ for (const theme of themes) {
     });
   }
 
-  for (const width of [320, 1440]) {
+  for (const width of [320, 390, 768, 1440]) {
     test(`Vault empty setup, secondary actions and custom dialog focus: ${theme} ${width}`, async ({
       page
     }, info) => {
@@ -535,7 +535,7 @@ for (const theme of themes) {
 }
 
 for (const theme of themes) {
-  for (const width of [320, 1440]) {
+  for (const width of [320, 390, 768, 1440]) {
     test(`Templates native selection, long filters, provenance and cancelled dialog: ${theme} ${width}`, async ({
       page
     }, info) => {

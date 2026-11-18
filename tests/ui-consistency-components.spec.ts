@@ -11,6 +11,7 @@ import {
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { themes, skillScene, pluginScene } from './fixtures/ui-consistency-scenes';
+import { homeReads } from './fixtures/ui-consistency-home';
 
 async function buttonStyle(button: Locator) {
   return button.evaluate(node => {
@@ -92,6 +93,9 @@ for (const theme of themes) {
       expect(route.request().postDataJSON()).toEqual({ blank: true });
       await route.fallback();
     });
+    // Explicit read-only Home presentation, rather than depending on unrelated
+    // pre-existing workspaces to make this feedback-only host ready.
+    await homeReads(page);
     await page.goto('/');
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'ready');
     // Exercise the mounted wizard through Bootstrap, without creating a
@@ -114,7 +118,7 @@ for (const theme of themes) {
     const cancel = modal.locator('.modal-footer [data-bs-dismiss="modal"]');
     await reachable(cancel, 44);
     await capture(page, info, 'workspace-feedback-sentinel', {
-      fixture: 'synthetic feedback only; no creation or execution'
+      fixture: 'GET-only Home presentation and synthetic feedback; no creation, hire or execution'
     });
     await cancel.click();
     await expect(modal).toBeHidden();
@@ -382,7 +386,7 @@ for (const theme of themes) {
     }
   });
 
-  for (const width of [320, 390, 1440]) {
+  for (const width of [320, 390, 768, 1440]) {
     test(`static sections and editor surface ${theme} ${width}px`, async ({ page }, info) => {
       await preparePage(page, theme, width);
       await page.emulateMedia({ reducedMotion: 'no-preference' });

@@ -74,7 +74,7 @@ async function actionReads(page: Page, state = () => 'populated') {
 }
 
 for (const theme of themes) {
-  for (const width of [320, 1440])
+  for (const width of [320, 390, 768, 1440])
     test(`Action Center long findings, native details and cancelled dialogs: ${theme} ${width}`, async ({
       page
     }, info) => {

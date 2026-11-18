@@ -1,5 +1,10 @@
 # Form Comparison: Main Chat Page vs Workspace Dashboard
 
+> **Historical comparison:** current styling is owned by the
+> [Ori visual system](visual-system.md), not either old form shown here.
+> Preserve useful behavioral comparisons, but do not copy obsolete inline
+> skins, file paths, host assumptions or hover/gradient treatments.
+
 ## Side-by-Side HTML Comparison
 
 ### MAIN CHAT PAGE (Reference - Correct Implementation)

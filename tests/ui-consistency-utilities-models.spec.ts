@@ -67,7 +67,7 @@ test.beforeAll(async ({ request }) => {
 });
 
 for (const theme of themes) {
-  for (const width of [320, 1440]) {
+  for (const width of [320, 390, 768, 1440]) {
     test(`Models native disclosures, metadata and category dialogs: ${theme} ${width}`, async ({
       page
     }, info) => {
@@ -81,13 +81,28 @@ for (const theme of themes) {
       await expect(page.locator('.ui-page-header h1')).toHaveText('Available Models');
       await expect(page.locator('.model-item')).toHaveCount(2);
       await expect(page.locator('.model-select-checkbox:visible')).toHaveCount(0);
-      if (width >= 768) {
-        const tops = await page
-          .locator(
-            'label[for="providerFilter"], label[for="categoryFilter"], label[for="searchFilter"], #modelsViewLabel'
-          )
-          .evaluateAll(labels => labels.map(label => label.getBoundingClientRect().top));
+      // WebKit's classic scrollbar can make the CSS media viewport narrower
+      // than the requested screenshot width at the exact Bootstrap breakpoint.
+      const gridViewport = await page.evaluate(() => ({
+        columns: matchMedia('(min-width: 768px)').matches,
+        innerWidth,
+        clientWidth: document.documentElement.clientWidth
+      }));
+      await info.attach('filter-grid-viewport', {
+        body: JSON.stringify(gridViewport),
+        contentType: 'application/json'
+      });
+      const tops = await page
+        .locator(
+          'label[for="providerFilter"], label[for="categoryFilter"], label[for="searchFilter"], #modelsViewLabel'
+        )
+        .evaluateAll(labels => labels.map(label => label.getBoundingClientRect().top));
+      if (gridViewport.columns) {
         expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(2);
+      } else {
+        for (let index = 1; index < tops.length; index++) {
+          expect(tops[index] - tops[index - 1]).toBeGreaterThanOrEqual(44);
+        }
       }
       const header = page.locator('button.provider-header').first();
       await header.focus();

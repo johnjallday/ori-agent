@@ -80,7 +80,7 @@ test.beforeAll(async ({ request }) => {
 });
 
 for (const theme of themes) {
-  for (const width of [320, 1440]) {
+  for (const width of [320, 390, 768, 1440]) {
     test(`Usage precise summaries, readable long breakdowns and bounded table: ${theme} ${width}`, async ({
       page
     }, info) => {

@@ -1,0 +1,31 @@
+{
+  "captureMode": "viewport",
+  "revision": "e0774714c2a562d9af2770d5186e9dfe745335cb",
+  "dirty": true,
+  "servedBuild": "group-5-notes-controls",
+  "route": "/workspaces/owned-notes-webkit-hq",
+  "viewport": {
+    "width": 320,
+    "height": 900
+  },
+  "engine": "webkit",
+  "theme": "dark",
+  "fontMode": "real",
+  "loadedFaces": [
+    "Fraunces",
+    "Fraunces",
+    "Manrope",
+    "Manrope",
+    "Manrope",
+    "Manrope",
+    "Chakra Petch",
+    "JetBrains Mono",
+    "JetBrains Mono"
+  ],
+  "computedFonts": {
+    "body": "Manrope, \"Segoe UI\", sans-serif",
+    "heading": "Fraunces, Georgia, serif"
+  },
+  "workspaceId": "dbeb3a44-74cd-4104-a388-ea93dada33b0",
+  "fixture": "Native handled disclosure and bounded footer; Look again/Open folder not invoked. No schedule/model or fabricated successful writes."
+}

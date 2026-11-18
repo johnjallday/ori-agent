@@ -88,7 +88,20 @@ for (const theme of ['light', 'dark'] as const) {
       return route.continue();
     });
     const base = `/workspaces/${seed.workspace.folder_slug}`;
-    await page.goto(`${base}?mode=details`);
+    if (process.env.ORI_UI_HOME_TO_TICKET === '1') {
+      await page.goto('/');
+      await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'ready');
+      await page.locator('#cockpitViewMap').click();
+      await page.locator(`.ws-map-tile[data-ws-id="${seed.workspace.id}"]`).click();
+      const door = page.locator(
+        `[data-cockpit-rail-open][data-workspace-id="${seed.workspace.id}"]:visible`
+      );
+      await expect(door).toHaveAttribute('href', base);
+      await door.click();
+      await expect(page).toHaveURL(new RegExp(`${base}$`));
+    } else {
+      await page.goto(`${base}?mode=details`);
+    }
     await page.waitForFunction(() => (window as any).workspaceDetail?.initialListsLoaded === true);
     await page.locator('[data-cmd-give-work]').click();
     const dialog = page.locator('dialog.give-work');
@@ -198,7 +211,10 @@ for (const theme of ['light', 'dark'] as const) {
       const response = await request.get(`/api/sessions/${id}`);
       expect(response.ok()).toBe(true);
       const body = await response.json();
-      expect((body.session ?? body).workspace_id).toBe(seed.workspace.id);
+      // Session GET exposes its SQL workspace_id as folder_id, not as the
+      // workspace query parameter. Check actual persisted ownership.
+      expect((body.session ?? body).id).toBe(id);
+      expect((body.session ?? body).folder_id).toBe(seed.workspace.id);
     }
     const runs = await (await request.get(`/api/workspaces/${seed.workspace.id}/runs`)).json();
     expect(runs).toHaveProperty('runs');
