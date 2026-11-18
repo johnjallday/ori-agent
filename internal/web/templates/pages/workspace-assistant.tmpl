@@ -5,13 +5,13 @@
 <link rel="stylesheet" href="/css/assistant-program.css">
 <link rel="stylesheet" href="/css/project-library-browser.css">
 <link rel="stylesheet" href="/css/home-package-upgrade.css">
-<body class="bg-light assistant-program-body" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+<body class="assistant-program-body ui-page-body" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
   {{template "navbar.tmpl" .}}
   <div class="main-content-wrapper">
     <main class="main-content assistant-program-shell">
-      <div id="assistantProgramPage" class="assistant-program-page" aria-busy="true">
+      <div id="assistantProgramPage" class="assistant-program-page ui-page ui-page--wide" aria-busy="true">
         <nav class="assistant-program-breadcrumb" aria-label="Breadcrumb">
-          <a id="assistantProgramWorkspaceLink" href="#">Workspace</a>
+          <a id="assistantProgramWorkspaceLink" class="modern-btn modern-btn-secondary" href="#">Workspace</a>
           <span aria-hidden="true">/</span>
           <span id="assistantProgramBreadcrumbName">Team Home</span>
         </nav>
@@ -22,6 +22,7 @@
         </section>
 
         <section id="assistantProgramError" class="assistant-program-error" hidden role="alert">
+          <h2>Team Home</h2>
           <p id="assistantProgramErrorText">This team home is unavailable.</p>
           <div class="assistant-program-actions">
             <button id="assistantProgramActivate" class="modern-btn modern-btn-primary" type="button" hidden>Activate team</button>
@@ -30,12 +31,12 @@
         </section>
 
         <div id="assistantProgramContent" hidden>
-          <section id="assistantProgramDisabled" class="assistant-program-disabled" hidden role="status">
+          <section id="assistantProgramDisabled" class="assistant-program-disabled ui-section" hidden role="status">
             <strong>Contribution paused</strong>
             <span id="assistantProgramDisabledText"></span>
           </section>
 
-          <section id="assistantProgramUpgrade" class="assistant-program-upgrade" hidden aria-labelledby="assistantProgramUpgradeTitle" tabindex="-1">
+          <section id="assistantProgramUpgrade" class="assistant-program-upgrade ui-section" hidden aria-labelledby="assistantProgramUpgradeTitle" tabindex="-1">
             <div class="assistant-program-upgrade-copy">
               <strong id="assistantProgramUpgradeTitle">Package upgrade available</strong>
               <span id="assistantProgramUpgradeText"></span>
@@ -43,16 +44,16 @@
             <button id="assistantProgramUpgradeReview" class="modern-btn modern-btn-primary" type="button" hidden>Review upgrade</button>
           </section>
 
-          <header class="assistant-program-hero">
+          <header class="assistant-program-hero ui-page-header">
             <div class="assistant-program-hero-copy">
               <span class="assistant-program-kicker">Optional shared team overview</span>
               <h1 id="assistantProgramTitle">Team Home</h1>
               <p id="assistantProgramDescription"></p>
               <div class="assistant-program-status-row">
-                <span id="assistantProgramStage" class="assistant-program-stage-chip">Not hired</span>
-                <span id="assistantProgramProjectCount" class="assistant-program-project-count"></span>
-                <a id="projectLibraryJump" class="assistant-program-project-count" href="#projectLibraryPanel" hidden>Browse project library ↓</a>
-                <a id="homeProfileJump" class="assistant-program-project-count" href="#homeProfilePanel" hidden></a>
+                <span id="assistantProgramStage" class="assistant-program-stage-chip badge badge-secondary">Not hired</span>
+                <span id="assistantProgramProjectCount" class="assistant-program-project-count badge badge-secondary"></span>
+                <a id="projectLibraryJump" class="assistant-program-project-count modern-btn modern-btn-secondary" href="#projectLibraryPanel" hidden>Browse project library ↓</a>
+                <a id="homeProfileJump" class="assistant-program-project-count modern-btn modern-btn-secondary" href="#homeProfilePanel" hidden></a>
               </div>
             </div>
             <div class="assistant-program-meter" aria-label="Assistant progression">
@@ -67,7 +68,7 @@
             </div>
           </header>
 
-          <section id="projectSetupNext" class="assistant-program-setup-next" aria-labelledby="projectSetupNextTitle" hidden>
+          <section id="projectSetupNext" class="assistant-program-setup-next ui-section" aria-labelledby="projectSetupNextTitle" hidden>
             <div class="assistant-program-setup-next-copy">
               <span class="assistant-program-kicker">Next step</span>
               <h2 id="projectSetupNextTitle" tabindex="-1"></h2>
@@ -107,12 +108,12 @@
                   <h2 id="assistantProgramProjectsTitle">Linked projects</h2>
                 </div>
                 <div class="assistant-program-project-actions">
-                  <button id="assistantProgramMigration" class="modern-btn modern-btn-primary" type="button" hidden>Review roster migration</button>
+                  <button id="assistantProgramMigration" class="modern-btn modern-btn-secondary" type="button" hidden>Review roster migration</button>
                   <button id="assistantProgramRemoveHome" class="modern-btn modern-btn-secondary" type="button" hidden>Review Home removal</button>
                 </div>
               </div>
               <div id="assistantProgramProjects" class="assistant-program-projects"></div>
-              <div id="homeResourceWorkspaces" class="home-resource-workspaces" aria-label="Resource workspaces" hidden></div>
+              <div id="homeResourceWorkspaces" class="home-resource-workspaces" role="group" aria-label="Resource workspaces" hidden></div>
               <p id="assistantProgramActionLive" class="visually-hidden" aria-live="polite"></p>
             </section>
 
@@ -226,14 +227,14 @@
                   <p>Proposals and clarification are history, not approval. Opening them reads saved metadata only; it does not scan folders or call a model.</p>
                   <div id="projectLibraryArrangementRows" class="project-library-resume-cards"></div>
                 </section>
-                <div id="projectLibraryRoots" class="project-library-roots" aria-label="Approved discovery folders"></div>
+                <div id="projectLibraryRoots" class="project-library-roots" role="group" aria-label="Approved discovery folders"></div>
                 <div class="project-library-footer"><span id="projectLibraryRootCount"></span><button id="projectLibraryMoreRoots" class="modern-btn modern-btn-secondary" type="button" hidden>More folders</button></div>
                 </details>
                 <div class="project-library-scopes" role="group" aria-label="Project views">
-                  <button type="button" data-library-view="all" aria-pressed="true">All</button>
-                  <button type="button" data-library-view="recently_saved" aria-pressed="false">Recently saved</button>
-                  <button type="button" data-library-view="needs_attention" aria-pressed="false">Needs attention</button>
-                  <button type="button" data-library-view="archived" aria-pressed="false">Archived</button>
+                  <button type="button" class="modern-btn modern-btn-secondary" data-library-view="all" aria-pressed="true">All</button>
+                  <button type="button" class="modern-btn modern-btn-secondary" data-library-view="recently_saved" aria-pressed="false">Recently saved</button>
+                  <button type="button" class="modern-btn modern-btn-secondary" data-library-view="needs_attention" aria-pressed="false">Needs attention</button>
+                  <button type="button" class="modern-btn modern-btn-secondary" data-library-view="archived" aria-pressed="false">Archived</button>
                 </div>
                 <p id="projectLibraryViewNote" class="project-library-scope-note"></p>
                 <details id="projectLibraryCollections" class="project-library-collections"><summary>Collections</summary><div id="projectLibraryCollectionBrowser"></div></details>
@@ -260,7 +261,7 @@
                   <div class="project-library-applied"><span id="projectLibraryApplied" role="status"></span><button id="projectLibraryClear" type="button" class="modern-btn modern-btn-secondary" hidden>Clear filters</button></div>
                 </form>
                 <div class="project-library-selection-tools"><button id="projectLibrarySelectAll" class="modern-btn modern-btn-secondary" type="button" disabled>Select loaded projects</button><span id="projectLibrarySelectionNotice" role="status"></span></div>
-                <div id="projectLibraryQueueActions" class="project-library-queue" aria-label="Selected project setup queue" hidden>
+                <div id="projectLibraryQueueActions" class="project-library-queue" role="group" aria-label="Selected project setup queue" hidden>
                   <span id="projectLibraryQueueStatus" role="status" aria-live="polite">Choose catalog-only projects to review one at a time.</span>
                   <button id="projectLibraryConnectAll" class="modern-btn modern-btn-secondary" type="button" disabled>Connect all selected</button>
                   <button id="projectLibraryQueueStart" class="modern-btn modern-btn-secondary" type="button" disabled>Review selected projects</button>
@@ -280,18 +281,18 @@
                 </section>
                 <div id="projectLibraryBrowser" class="project-library-browser">
                   <section id="projectLibraryResults" class="project-library-results" aria-label="Project results">
-                    <div id="projectLibraryListScroll" class="project-library-table-wrap" tabindex="0" aria-label="Project library results" aria-describedby="projectLibraryStatus">
-                      <table class="project-library-table"><thead><tr><th scope="col"><span class="visually-hidden">Select for bulk actions</span></th><th scope="col">Project</th><th scope="col">Stage</th><th scope="col">Last saved</th></tr></thead><tbody id="projectLibraryRows"></tbody></table>
+                    <div id="projectLibraryListScroll" class="project-library-table-wrap" role="region" tabindex="0" aria-label="Project library results" aria-describedby="projectLibraryStatus">
+                      <table class="project-library-table" role="table"><thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col"><span class="visually-hidden">Select for bulk actions</span></th><th role="columnheader" scope="col">Project</th><th id="projectLibraryStageColumn" role="columnheader" scope="col">Stage</th><th id="projectLibrarySavedColumn" role="columnheader" scope="col">Last saved</th></tr></thead><tbody id="projectLibraryRows" role="rowgroup"></tbody></table>
                     </div>
                     <p id="projectLibraryEmpty" class="project-library-empty" hidden>No projects match. Change your search or clear filters to return to the catalog.</p>
                     <div class="project-library-footer"><span id="projectLibraryCount"></span><button id="projectLibraryMore" class="modern-btn modern-btn-secondary" type="button" hidden>More projects</button></div>
                   </section>
                   <section id="projectLibraryPane" class="project-library-pane" aria-label="Selected project">
                     <div class="project-library-pane-head"><button id="projectLibraryBack" type="button" class="modern-btn modern-btn-secondary" hidden>Back to projects</button><h3 id="projectLibraryPaneTitle" tabindex="-1">Select a project</h3></div>
-                    <div id="projectLibraryTabs" class="project-library-tabs" role="tablist" aria-label="Project information" hidden>
-                      <button id="projectLibraryTabOverview" type="button" role="tab" data-library-tab="overview" aria-selected="true" aria-controls="projectLibraryTabPanel">Overview</button>
-                      <button id="projectLibraryTabFiles" type="button" role="tab" data-library-tab="files" aria-selected="false" aria-controls="projectLibraryTabPanel" tabindex="-1">Files</button>
-                      <button id="projectLibraryTabSessions" type="button" role="tab" data-library-tab="sessions" aria-selected="false" aria-controls="projectLibraryTabPanel" tabindex="-1">Sessions</button>
+                    <div id="projectLibraryTabs" class="project-library-tabs nav-tabs" role="tablist" aria-label="Project information" hidden>
+                      <button id="projectLibraryTabOverview" type="button" class="nav-link" role="tab" data-library-tab="overview" aria-selected="true" aria-controls="projectLibraryTabPanel">Overview</button>
+                      <button id="projectLibraryTabFiles" type="button" class="nav-link" role="tab" data-library-tab="files" aria-selected="false" aria-controls="projectLibraryTabPanel" tabindex="-1">Files</button>
+                      <button id="projectLibraryTabSessions" type="button" class="nav-link" role="tab" data-library-tab="sessions" aria-selected="false" aria-controls="projectLibraryTabPanel" tabindex="-1">Sessions</button>
                     </div>
                     <div id="projectLibraryTabPanel" class="project-library-tab-panel" role="tabpanel" tabindex="0" aria-labelledby="projectLibraryPaneTitle"><p>Inspect saved information without opening a workspace or a project application.</p></div>
                   </section>
@@ -302,9 +303,9 @@
             <section id="sampleLibraryPanel" class="assistant-program-panel sample-library-panel" aria-labelledby="sampleLibraryTitle" hidden>
               <div class="assistant-program-panel-head"><div><span class="assistant-program-panel-index">07 / SAMPLE LIBRARY</span><h2 id="sampleLibraryTitle">Sample Library</h2></div><div class="assistant-program-project-actions"><button id="sampleLibraryRemove" class="modern-btn modern-btn-secondary" type="button">Review add-on removal</button><button id="sampleLibraryAddRoot" class="modern-btn modern-btn-primary" type="button">Connect folder</button></div></div>
               <p id="sampleLibraryStatus" class="assistant-program-learning-copy" role="status" aria-live="polite" tabindex="-1">Loading catalog…</p>
-              <div id="sampleLibraryRoots" class="sample-library-roots" aria-label="Connected sample folders"></div>
+              <div id="sampleLibraryRoots" class="sample-library-roots" role="group" aria-label="Connected sample folders"></div>
               <form id="sampleLibrarySearchForm" class="sample-library-search" role="search"><label for="sampleLibrarySearch">Search the active catalog</label><div><input id="sampleLibrarySearch" class="form-control" maxlength="200" autocomplete="off"><button class="modern-btn modern-btn-secondary" type="submit">Search</button></div></form>
-              <div class="sample-library-table-wrap" tabindex="0" aria-label="Sample catalog results" aria-describedby="sampleLibraryStatus"><table class="sample-library-table"><thead><tr><th scope="col"><span class="sr-only">Select</span></th><th scope="col">Sample</th><th scope="col">Type</th><th scope="col">Size</th></tr></thead><tbody id="sampleLibraryEntries"></tbody></table></div>
+              <div class="sample-library-table-wrap" role="region" tabindex="0" aria-label="Sample catalog results" aria-describedby="sampleLibraryStatus"><table class="sample-library-table"><thead><tr><th scope="col"><span class="sr-only">Select</span></th><th scope="col">Sample</th><th scope="col">Type</th><th scope="col">Size</th></tr></thead><tbody id="sampleLibraryEntries"></tbody></table></div>
               <div class="sample-library-copy"><label for="sampleLibraryProject">Copy selected samples to</label><select id="sampleLibraryProject" class="form-select"></select><button id="sampleLibraryCopy" class="modern-btn modern-btn-primary" type="button" disabled>Review copy</button></div>
               <form id="sampleLibraryCollectionForm" class="sample-library-search"><label for="sampleLibraryCollectionName">New collection</label><div><input id="sampleLibraryCollectionName" class="form-control" maxlength="120"><button class="modern-btn modern-btn-secondary" type="submit">Create</button></div></form>
             </section>
@@ -326,7 +327,7 @@
     </main>
   </div>
 
-  <dialog id="assistantProgramHireDialog" class="assistant-program-hire-dialog" aria-labelledby="assistantProgramHireTitle">
+  <dialog id="assistantProgramHireDialog" class="assistant-program-hire-dialog ui-section" aria-labelledby="assistantProgramHireTitle">
     <form id="assistantProgramHireForm" method="dialog">
       <div class="assistant-program-dialog-head">
         <span class="assistant-program-kicker">First session</span>
@@ -351,7 +352,7 @@
           </div>
           <p class="assistant-program-hire-note">You can leave provider and model blank. Ori will use your current defaults. Live app changes still require ordinary reviewed tickets.</p>
         </div>
-        <div id="assistantProgramHireRoles" class="assistant-program-hire-roles" aria-label="Assistant roles"></div>
+        <div id="assistantProgramHireRoles" class="assistant-program-hire-roles" role="group" aria-label="Assistant roles"></div>
       </div>
       <p id="assistantProgramHireError" class="assistant-program-form-error" role="alert"></p>
       <div class="assistant-program-dialog-actions">

@@ -2,8 +2,7 @@
  *
  * The in-app delete dialog for the Home cockpit (Map and Tree). It replaced a
  * chain of native `confirm()` prompts, so it has to read as the same kind of
- * surface as the cockpit's other overlays: cozy paper tokens, a hard edge, and
- * one danger action. Rendered by workspace-delete-dialog.js, loaded from the
+ * surface as Ori's shared dialogs, with one explicit danger action. Rendered by workspace-delete-dialog.js, loaded from the
  * shared head so it is styled wherever the cockpit mounts.
  */
 
@@ -13,11 +12,8 @@
   margin: auto;
   padding: 1.25rem 1.35rem 1.15rem;
   overflow: auto;
-  border: 1px solid var(--cozy-line-strong, #a8987b);
-  border-radius: 4px;
-  background: var(--cozy-paper-raised, #fdfaf2);
-  color: var(--cozy-ink, #23301f);
-  box-shadow: 0 24px 70px rgb(0 0 0 / 42%);
+  /* ui-section owns the opaque surface, border and radius. */
+  box-shadow: var(--shadow-xl);
 }
 
 .ws-delete-dialog::backdrop {
@@ -43,11 +39,11 @@
   margin: 0;
   font-size: 0.92rem;
   line-height: 1.5;
-  color: var(--cozy-ink-dim, #55614f);
+  color: var(--text-secondary);
 }
 
 .ws-delete-dialog__summary {
-  color: var(--cozy-ink, #23301f);
+  color: var(--text-primary);
 }
 
 /* The two group modes are a real choice, so they are radios with a label and
@@ -66,7 +62,7 @@
   margin-bottom: 0.35rem;
   font-size: 0.92rem;
   font-weight: 600;
-  color: var(--cozy-ink, #23301f);
+  color: var(--text-primary);
 }
 
 .ws-delete-dialog__mode {
@@ -75,29 +71,26 @@
   gap: 0.65rem;
   align-items: start;
   padding: 0.65rem 0.75rem;
-  border: 1px solid var(--cozy-line, #d2c6ae);
-  border-radius: 4px;
-  background: var(--cozy-paper, #f4efe3);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
   cursor: pointer;
 }
 
 /* The selected state is a class the dialog toggles on change, so the whole
    card can respond without a `:has()` selector. */
 .ws-delete-dialog__mode.is-selected {
-  border-color: var(--cozy-line-strong, #a8987b);
-  background: var(--cozy-paper-raised, #fdfaf2);
+  border-color: var(--accent-text);
+  background: var(--bg-secondary);
 }
 
 .ws-delete-dialog__mode input {
+  flex: none;
   margin: 0.2rem 0 0;
 }
 
-.ws-delete-dialog__mode input:focus-visible {
-  outline: 2px solid var(--cozy-moss, #3f6b45);
-  outline-offset: 2px;
-}
-
 .ws-delete-dialog__mode-copy {
+  flex: 1;
   display: grid;
   gap: 0.15rem;
   min-width: 0;
@@ -106,23 +99,23 @@
 .ws-delete-dialog__mode-copy strong {
   font-size: 0.92rem;
   font-weight: 600;
-  color: var(--cozy-ink, #23301f);
+  color: var(--text-primary);
 }
 
 .ws-delete-dialog__mode-detail {
   font-size: 0.82rem;
   line-height: 1.45;
-  color: var(--cozy-ink-dim, #55614f);
+  color: var(--text-secondary);
 }
 
 .ws-delete-dialog__impact {
   margin: 0;
   padding: 0.65rem 0.85rem 0.65rem 1.85rem;
-  border-left: 3px solid var(--cozy-amber, #b97a1e);
-  background: var(--cozy-paper, #f4efe3);
+  border-left: 3px solid var(--warning-text);
+  background: var(--bg-secondary);
   font-size: 0.85rem;
   line-height: 1.5;
-  color: var(--cozy-ink-dim, #55614f);
+  color: var(--text-secondary);
 }
 
 .ws-delete-dialog__impact li + li {
@@ -143,15 +136,11 @@
 }
 
 .ws-delete-dialog__status {
-  color: var(--cozy-ink-dim, #55614f);
+  color: var(--text-secondary);
 }
 
 .ws-delete-dialog__error {
-  color: #b91c1c;
-}
-
-[data-bs-theme="dark"] .ws-delete-dialog__error {
-  color: #fca5a5;
+  color: var(--danger-text);
 }
 
 .ws-delete-dialog__actions {

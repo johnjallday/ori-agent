@@ -33,9 +33,29 @@ test('settings fields use separate real saves and render untrusted identity as l
   const html = panels.content();
   assert.match(html, /&lt;untrusted&gt;/);
   assert.doesNotMatch(html, /<untrusted>/);
-  for (const field of ['name', 'description', 'tags'])
+  for (const field of ['name', 'description', 'tags']) {
     assert.match(html, new RegExp('data-panel-field="' + field + '"'));
+    assert.match(html, new RegExp('id="ws-panel-' + field + '" class="form-control"'));
+  }
   assert.match(html, /Each field saves separately/);
+});
+
+test('panel host opts into the shared opaque surface', () => {
+  const previous = globalThis.document;
+  const node = { addEventListener() {} };
+  globalThis.document = {
+    createElement: () => node,
+    body: { appendChild() {} },
+    addEventListener() {}
+  };
+  try {
+    const { panels } = panel();
+    assert.equal(panels.ensure(), node);
+    assert.match(node.innerHTML, /class="ws-panels-dialog ui-section"/);
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+  }
 });
 
 test('configuration and resource navigation dispatch to existing owners, never a creator API', () => {

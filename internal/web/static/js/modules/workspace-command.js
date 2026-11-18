@@ -3027,6 +3027,7 @@ export class WorkspaceCommandView {
 
     if (this.container.classList) {
       this.container.classList.toggle('is-settled', this.detailsViewSettled());
+      this.container.classList.toggle('is-tickets', this.viewMode === 'tickets');
     }
 
     // The follow-ups panel may be mounted inside this container; take it home

@@ -1,9 +1,10 @@
 {{define "workspace-plans"}}
 <!DOCTYPE html>
-<html data-bs-theme="light">
+<html lang="en" data-bs-theme="light">
 {{template "head.tmpl" .}}
+<link rel="stylesheet" href="/css/workspace-plans.css">
 
-<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+<body class="ui-page" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
   <script>
     window.currentWorkspaceId = document.body.dataset.workspaceId || '';
     window.currentWorkspaceSlug = document.body.dataset.workspaceSlug || '';
@@ -18,7 +19,7 @@
         data-workspace-id="{{.Extra.WorkspaceID}}"
         data-workspace-slug="{{.Extra.WorkspaceSlug}}"
       >
-        <section class="plans-hero">
+        <section class="plans-hero ui-page-header">
           <div class="plans-hero-copy">
             <div class="plans-breadcrumbs">
               <a href="/" class="plans-breadcrumb-link">Home</a>
@@ -34,7 +35,7 @@
             </p>
           </div>
           <div class="plans-hero-actions">
-            <button type="button" id="plan-refresh" class="plans-icon-btn" title="Refresh plans">
+            <button type="button" id="plan-refresh" class="plans-icon-btn modern-btn modern-btn-secondary modern-btn-icon" title="Refresh plans">
               <span aria-hidden="true">↻</span>
               <span class="visually-hidden">Refresh plans</span>
             </button>
@@ -47,18 +48,18 @@
 
         <!-- Planning off: history stays readable and Settings is one link away.
              Nothing here turns planning on (FR-159). -->
-        <section id="plan-disabled-banner" class="plans-disabled-banner" hidden>
+        <section id="plan-disabled-banner" class="plans-disabled-banner ui-section" hidden>
           <h2 class="plans-disabled-title">Structured planning is off for this workspace</h2>
           <p>
             Existing plans below stay readable. To draft new ones, turn on structured planning in
             Workspace Settings.
           </p>
-          <a class="plans-settings-link" href="/workspaces/{{.Extra.WorkspaceSlug}}?panel=settings">
+          <a class="plans-settings-link modern-btn modern-btn-secondary modern-btn-sm" href="/workspaces/{{.Extra.WorkspaceSlug}}?panel=settings">
             Open Workspace Settings
           </a>
         </section>
 
-        <section id="plan-create-panel" class="plans-create-panel" hidden>
+        <section id="plan-create-panel" class="plans-create-panel ui-section" hidden>
           <h2 class="plans-section-title">Start a plan</h2>
           <form id="plan-create-form" class="plans-create-form">
             <label class="plans-create-label" for="plan-create-request">
@@ -66,14 +67,14 @@
             </label>
             <textarea
               id="plan-create-request"
-              class="plans-create-input"
+              class="plans-create-input form-control"
               rows="3"
               placeholder="Describe the outcome you want. Ori will draft a plan for you to review."
             ></textarea>
             <p class="plans-create-hint">
               Creating a plan does not create tickets or start work. You approve an exact version first.
             </p>
-            <button type="submit" class="plans-create-btn">Create plan</button>
+            <button type="submit" class="plans-create-btn modern-btn modern-btn-primary">Create plan</button>
           </form>
         </section>
 
@@ -97,8 +98,10 @@
 
   <style>
     .plans-page-shell {
-      padding: 1.5rem 2rem 3rem;
+      padding-bottom: calc(var(--ori-launcher-clearance-y, 88px) + var(--space-6));
       max-width: 960px;
+      min-width: 0;
+      overflow-wrap: anywhere;
       margin: 0 auto;
     }
 
@@ -110,12 +113,18 @@
       margin-bottom: 1.25rem;
     }
 
+    .plans-hero .plans-hero-copy {
+      flex-basis: auto;
+      min-width: 0;
+    }
+
     .plans-breadcrumbs {
       display: flex;
       gap: 0.4rem;
       align-items: center;
       font-size: 0.85rem;
-      color: var(--bs-secondary-color, #6c757d);
+      flex-wrap: wrap;
+      color: var(--text-secondary);
       margin-bottom: 0.5rem;
     }
 
@@ -130,43 +139,31 @@
     }
 
     .plans-title {
-      font-size: 1.75rem;
-      margin: 0 0 0.35rem;
+      margin: 0 0 var(--space-2);
     }
 
     .plans-subtitle {
       margin: 0;
       max-width: 60ch;
-      color: var(--bs-secondary-color, #6c757d);
-    }
-
-    .plans-icon-btn {
-      border: 1px solid var(--bs-border-color, #dee2e6);
-      background: var(--bs-body-bg, #fff);
-      border-radius: 0.5rem;
-      padding: 0.4rem 0.6rem;
-      cursor: pointer;
+      color: var(--text-secondary);
     }
 
     .plans-status {
       margin: 0 0 1rem;
       padding: 0.6rem 0.85rem;
-      border-radius: 0.5rem;
-      border: 1px solid var(--bs-border-color, #dee2e6);
-      background: var(--bs-body-bg, #fff);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-color);
+      background: var(--surface-solid);
     }
 
     .plans-status[data-tone='error'] {
-      border-color: #dc3545;
-      color: #842029;
+      border-color: var(--danger-text);
+      color: var(--danger-text);
     }
 
     .plans-disabled-banner,
     .plans-create-panel {
-      border: 1px solid var(--bs-border-color, #dee2e6);
-      border-radius: 0.75rem;
-      background: var(--bs-body-bg, #fff);
-      padding: 1rem 1.15rem;
+      padding: var(--space-4);
       margin-bottom: 1.5rem;
     }
 
@@ -187,28 +184,14 @@
       gap: 0.5rem;
     }
 
-    .plans-create-input {
-      width: 100%;
-      border: 1px solid var(--bs-border-color, #dee2e6);
-      border-radius: 0.5rem;
-      padding: 0.6rem;
-      font: inherit;
-    }
-
     .plans-create-hint {
       margin: 0;
       font-size: 0.85rem;
-      color: var(--bs-secondary-color, #6c757d);
+      color: var(--text-secondary);
     }
 
     .plans-create-btn {
       align-self: flex-start;
-      border: none;
-      border-radius: 0.5rem;
-      padding: 0.5rem 1rem;
-      background: var(--bs-primary, #0d6efd);
-      color: #fff;
-      cursor: pointer;
     }
 
     .plans-section {
@@ -225,14 +208,13 @@
 
     .plans-empty {
       margin: 0;
-      color: var(--bs-secondary-color, #6c757d);
+      color: var(--text-secondary);
       max-width: 60ch;
     }
 
     .plan-card {
-      border: 1px solid var(--bs-border-color, #dee2e6);
-      border-radius: 0.75rem;
-      background: var(--bs-body-bg, #fff);
+      padding: 0;
+      min-width: 0;
     }
 
     .plan-card-link {
@@ -240,12 +222,6 @@
       padding: 0.9rem 1.1rem;
       color: inherit;
       text-decoration: none;
-    }
-
-    .plan-card-link:focus-visible {
-      outline: 2px solid var(--bs-primary, #0d6efd);
-      outline-offset: 2px;
-      border-radius: 0.75rem;
     }
 
     .plan-card-head {
@@ -260,30 +236,11 @@
       margin: 0;
     }
 
-    /* Every status shows an icon and a word, so the state never depends on
-       color alone (FR-162). */
-    .plan-status {
-      display: inline-flex;
-      gap: 0.35rem;
-      align-items: center;
-      white-space: nowrap;
-      font-size: 0.85rem;
-      border: 1px solid var(--bs-border-color, #dee2e6);
-      border-radius: 999px;
-      padding: 0.1rem 0.6rem;
-    }
-
-    .plan-status[data-tone='attention'] { border-color: #fd7e14; color: #8a4b00; }
-    .plan-status[data-tone='info'] { border-color: #0d6efd; color: #084298; }
-    .plan-status[data-tone='active'] { border-color: #0dcaf0; color: #055160; }
-    .plan-status[data-tone='success'] { border-color: #198754; color: #0f5132; }
-    .plan-status[data-tone='danger'] { border-color: #dc3545; color: #842029; }
-
     .plan-card-version,
     .plan-card-progress {
       margin: 0.35rem 0 0;
       font-size: 0.9rem;
-      color: var(--bs-secondary-color, #6c757d);
+      color: var(--text-secondary);
     }
 
     .plan-card-foot {
@@ -299,7 +256,6 @@
     }
 
     @media (max-width: 720px) {
-      .plans-page-shell { padding: 1rem; }
       .plans-hero { flex-direction: column; }
       .plan-card-head { flex-direction: column; align-items: flex-start; }
       .plan-card-foot { flex-direction: column; gap: 0.25rem; }

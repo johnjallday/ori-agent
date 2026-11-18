@@ -636,6 +636,27 @@ test('a quest step with focus:false marks without moving focus', () => {
   assert.equal(hire.focused, true);
 });
 
+test('coachmarks reveal only as far as needed, with no preliminary focus scroll or reduced-motion animation', () => {
+  for (const reduced of [false, true]) {
+    const focus = [],
+      scroll = [];
+    const card = makeElement('card', {
+      focus: options => focus.push(options),
+      scrollIntoView: options => scroll.push(options)
+    });
+    const { guide, sandbox, registerSelector } = load({ route: '/agents' });
+    registerSelector('.roster-card__open', card);
+    sandbox.window.matchMedia = query => {
+      assert.equal(query, '(prefers-reduced-motion: reduce)');
+      return { matches: reduced };
+    };
+    assert.equal(guide.markControl('select_agent'), true);
+    assert.equal(focus[0].preventScroll, true);
+    assert.equal(scroll[0].block, 'nearest');
+    assert.equal(scroll[0].behavior, reduced ? 'auto' : 'smooth');
+  }
+});
+
 // A group coachmark: the mark on the group, focus on one of its controls.
 function makeGroup(id, controls) {
   return makeElement(id, {

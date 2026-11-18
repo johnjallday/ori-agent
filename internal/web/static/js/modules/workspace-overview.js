@@ -113,7 +113,7 @@ export function resourceAccessHTML(c) {
     resources
       .map(
         ([key, label, rows]) =>
-          '<button type="button" class="ws-cmd-resource-row" data-cmd-resource-section="' +
+          '<button type="button" class="ws-cmd-resource-row modern-btn modern-btn-secondary" data-cmd-resource-section="' +
           key +
           '"><span>' +
           label +
@@ -140,7 +140,7 @@ export function capabilityAccessHTML(c) {
         stations
           .map(
             entry =>
-              '<button type="button" class="ws-cmd-resource-row" data-cmd-hq-station="' +
+              '<button type="button" class="ws-cmd-resource-row modern-btn modern-btn-secondary" data-cmd-hq-station="' +
               text(entry.key) +
               '">' +
               text(entry.label) +

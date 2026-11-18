@@ -130,38 +130,8 @@
   gap: 8px;
   flex-wrap: wrap;
 }
-.ws-cmd-nav-btn {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  padding: 7px 10px;
-  border: 1px solid var(--ws-line-bright);
-  background: var(--ws-bg-2);
-  color: var(--ws-ink-dim);
-  cursor: pointer;
-  font-family: var(--ws-font-mono);
-  font-size: 11px;
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-  transition: 0.15s;
-  text-decoration: none;
-  clip-path: polygon(0 0, 100% 0, 100% 100%, 10px 100%, 0 calc(100% - 10px));
-}
-.ws-cmd-nav-btn:hover {
-  color: var(--ws-faction);
-  border-color: var(--ws-faction-deep);
-  text-decoration: none;
-}
-/* Inside the border: the clip-path above cuts away anything drawn outside it,
-   which used to include the whole focus ring. */
-.ws-cmd-nav-btn:focus-visible {
-  outline: 2px solid var(--ws-faction);
-  outline-offset: -4px;
-}
-.ws-cmd-nav-btn:disabled {
-  cursor: progress;
-  opacity: 0.6;
-}
+/* Navigation and view controls are compact compatibility aliases owned by
+   components.css; common.css supplies their focus and narrow/coarse floor. */
 /* The parent group link. A long name gives way first; the link's text and
    title still carry all of it. The name keeps the case its owner chose. */
 .ws-cmd-nav-parent {
@@ -181,39 +151,6 @@
 .ws-cmd-nav-parent-name {
   text-transform: none;
   letter-spacing: 0.5px;
-}
-.ws-cmd-view-switch {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 3px;
-  border: 1px solid var(--ws-line);
-  background: rgba(0, 0, 0, 0.2);
-}
-.ws-cmd-view-btn {
-  min-height: 28px;
-  padding: 6px 10px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--ws-ink-faint);
-  cursor: pointer;
-  font-family: var(--ws-font-mono);
-  font-size: 10px;
-  letter-spacing: 1.4px;
-  text-transform: uppercase;
-}
-.ws-cmd-view-btn:hover {
-  color: var(--ws-faction);
-}
-.ws-cmd-view-btn.is-active {
-  color: var(--ws-faction);
-  border-color: var(--ws-faction-deep);
-  background: rgba(70, 211, 154, 0.08);
-}
-.ws-cmd-view-btn:focus-visible {
-  outline: 2px solid var(--ws-faction);
-  outline-offset: 2px;
 }
 /* Plans is an anchor rather than a button: it navigates to its own canonical
    page instead of swapping this one. It sits in the same switch so it reads as
@@ -6037,52 +5974,14 @@ button.ws-cmd-rpg-class-card:focus-visible {
     opacity: 1;
   }
 }
-.ws-notes-action,
-.ws-notes-link,
-.ws-notes-bulk {
-  padding: 4px 8px;
-  border: 1px solid var(--ws-line-bright);
-  background: transparent;
-  color: var(--ws-ink-dim);
-  cursor: pointer;
-  font-family: var(--ws-font-mono);
-  font-size: 10px;
-  letter-spacing: 0.4px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.ws-notes-link {
-  border-color: transparent;
-  padding-inline: 2px;
+/* Controls and native disclosures consume the shared owners. Only placement
+   and inline prose-link treatment belong to this feature. */
+.ws-notes-link:not(.modern-btn) {
+  color: var(--accent-text);
   text-decoration: underline;
-}
-.ws-notes-action:hover,
-.ws-notes-link:hover {
-  color: var(--ws-ink);
-  border-color: var(--ws-line-bright);
 }
 .ws-notes-bulk {
   align-self: flex-start;
-  border-color: var(--ws-faction-deep);
-  background: rgba(70, 211, 154, 0.09);
-  color: var(--ws-faction);
-}
-.ws-notes-bulk:hover {
-  background: rgba(70, 211, 154, 0.16);
-  border-color: var(--ws-faction);
-}
-.ws-notes-action:focus-visible,
-.ws-notes-link:focus-visible,
-.ws-notes-bulk:focus-visible,
-.ws-notes-capture-input:focus-visible,
-.ws-notes-handled summary:focus-visible {
-  outline: 2px solid var(--ws-faction);
-  outline-offset: 2px;
-}
-.ws-notes-action:disabled,
-.ws-notes-bulk:disabled {
-  opacity: 0.55;
-  cursor: default;
 }
 .ws-notes-footer .ws-notes-action {
   align-self: flex-start;
@@ -6095,11 +5994,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-notes-capture-input {
   flex: 1 1 auto;
   min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--ws-line-bright);
-  background: var(--ws-bg-2);
-  color: var(--ws-ink);
-  font-size: 13px;
 }
 .ws-notes-capture .ws-notes-bulk {
   align-self: stretch;
@@ -6181,14 +6075,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
   margin: 0;
   font-size: 12px;
   color: var(--ws-keeper);
-}
-.ws-notes-handled summary {
-  cursor: pointer;
-  font-family: var(--ws-font-mono);
-  font-size: 10px;
-  letter-spacing: 0.8px;
-  text-transform: uppercase;
-  color: var(--ws-ink-faint);
 }
 .ws-cmd-modal-config-body {
   flex: 1 1 auto;
@@ -6453,23 +6339,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
   --ws-avatar-text: #04110c;
   --ws-field-bg: rgba(255, 255, 255, 0.62);
   --ws-glow: 0 0 0 1px rgba(255, 255, 255, 0.7), 0 20px 42px -26px rgba(10, 10, 10, 0.34);
-}
-
-/* The workspace destinations sit on a clean light control surface rather than
-   the base rule's translucent black strip. Dark ink keeps every inactive tab
-   legible; green remains reserved for hover and the selected destination. */
-[data-bs-theme="light"] .ws-cmd-view-switch {
-  border-color: var(--ws-line);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.98);
-}
-[data-bs-theme="light"] .ws-cmd-view-btn {
-  color: var(--ws-ink);
-}
-[data-bs-theme="light"] .ws-cmd-view-btn:hover,
-[data-bs-theme="light"] .ws-cmd-view-btn.is-active {
-  background: rgba(31, 107, 78, 0.09);
-  color: var(--ws-faction);
 }
 
 /* Light mode treats the map as a crisp planning surface rather than placing
@@ -7048,10 +6917,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
 }
 @media (max-width: 640px) {
-  .ws-cmd-nav-btn {
-    flex: 1 1 calc(50% - 8px);
-    justify-content: center;
-  }
   /* Five views (with Dashboard and Plans) are wider than a phone: the tabs
      wrap onto a second row instead of pushing the page sideways. */
   .ws-cmd-view-switch {
@@ -7228,7 +7093,9 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
   /* Reserve space for the floating Workspace Assistant FAB so the last rail/panel
      controls are never trapped underneath it (PRD FR5.20). */
-  .ws-cmd {
+  /* Tickets owns its own sibling surface and launcher clearance below it;
+     the header-only command container must not reserve another empty footer. */
+  .ws-cmd:not(.is-tickets) {
     padding-bottom: 84px;
   }
   /* Three tabs to a line on a phone, so nine sections stay within three
@@ -8938,12 +8805,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
   height: min(var(--workspace-surface-height, 560px), calc(100vh - 1.5rem));
   min-height: min(340px, calc(100vh - 1.5rem));
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--border-color, #4b5563) 76%, #9fb8d4);
-  border-radius: 18px;
-  background: var(--bg-primary, #111419);
-  box-shadow:
-    0 34px 90px rgba(0, 0, 0, 0.52),
-    0 0 0 1px rgba(255, 255, 255, 0.035) inset;
 }
 
 .workspace-surface-header {
@@ -8951,61 +8812,39 @@ button.ws-cmd-rpg-class-card:focus-visible {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  min-height: 68px;
-  padding: 0.8rem 0.85rem 0.8rem 1.1rem;
-  border-bottom: 1px solid var(--border-color, #303640);
-  background:
-    linear-gradient(90deg, rgba(90, 119, 151, 0.12), transparent 42%), var(--bg-secondary, #181c22);
+  min-height: var(--control-height-lg);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-color);
+  background: var(--surface-solid);
 }
 
 .workspace-surface-identity {
+  flex: 1 1 12rem;
   min-width: 0;
 }
 
 .workspace-surface-eyebrow {
   display: block;
   margin-bottom: 0.15rem;
-  color: var(--text-muted, #8793a1);
-  font-size: 0.67rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.13em;
   text-transform: uppercase;
 }
 
 .workspace-surface-title {
-  overflow: hidden;
   margin: 0;
-  color: var(--text-primary, #f4f6f8);
-  font-family: var(--ws-font-display, Georgia, serif);
-  font-size: clamp(1.05rem, 2vw, 1.35rem);
-  font-weight: 650;
-  line-height: 1.15;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .workspace-surface-close {
   flex: 0 0 auto;
-  min-width: 74px;
-  min-height: 40px;
-  border: 1px solid var(--border-color, #3a424e);
-  border-radius: 999px;
-  background: var(--bg-primary, #111419);
-  color: var(--text-secondary, #c7ced7);
-  font: inherit;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-.workspace-surface-close:hover {
-  border-color: color-mix(in srgb, var(--primary-color, #5f8fc2) 65%, #fff);
-  color: var(--text-primary, #fff);
-}
-
-.workspace-surface-close:focus-visible {
-  outline: 2px solid var(--primary-color, #6d9dcb);
-  outline-offset: 3px;
 }
 
 .workspace-surface-frame {
@@ -10601,31 +10440,13 @@ button.ws-cmd-rpg-class-card:focus-visible {
   flex-wrap: wrap;
   gap: 8px;
 }
-.ws-cmd-compact .ws-cmd-nav-btn,
-.ws-cmd-compact .ws-cmd-view-btn {
-  clip-path: none;
-  font-family: var(--ws-font-display);
-  font-size: 14px;
-  letter-spacing: 0;
-  text-transform: none;
-  min-height: 36px;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  max-width: 100%;
-}
 .ws-cmd-compact .ws-cmd-nav-parent {
   max-width: min(320px, 100%);
 }
 .ws-cmd-compact .ws-cmd-view-btn.is-alert {
-  color: var(--ws-alert);
+  color: var(--warning-text);
 }
-.ws-cmd-compact .ws-cmd-give-work {
-  background: var(--ws-faction-deep);
-  border-color: var(--ws-faction);
-  color: var(--ws-ink);
-  font-weight: 600;
-}
-.ws-cmd-compact .ws-cmd-view-switch {
+.ws-cmd-view-switch {
   display: flex;
   flex-wrap: wrap;
   margin: 0;
@@ -10724,6 +10545,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
   display: grid;
   justify-items: end;
   padding: 16px;
+  font-family: var(--font-body);
 }
 .ws-workspace-panels[hidden] {
   display: none;
@@ -10738,11 +10560,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
   width: min(620px, 100%);
   max-height: calc(100dvh - 32px);
   overflow-y: auto;
-  padding: 24px;
-  border: 1px solid var(--ws-line-bright);
-  border-radius: 12px;
-  background: var(--ws-panel);
-  color: var(--ws-ink);
+  padding: var(--space-6);
 }
 .ws-panels-dialog > header {
   display: flex;
@@ -10751,25 +10569,17 @@ button.ws-cmd-rpg-class-card:focus-visible {
   gap: 12px;
 }
 .ws-panels-dialog h2 {
+  min-width: 0;
   font-size: 24px;
+}
+.ws-panels-dialog > header > [data-panel-close] {
+  flex-shrink: 0;
 }
 .ws-panels-dialog nav {
   display: flex;
   flex-wrap: wrap;
   margin: 16px 0;
   gap: 6px;
-}
-.ws-panels-dialog .ws-cmd-view-btn,
-.ws-panels-dialog .ws-cmd-nav-btn {
-  font-family: var(--ws-font-display);
-  text-transform: none;
-  letter-spacing: 0;
-  font-size: 14px;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  clip-path: none;
-  min-height: 36px;
-  max-width: 100%;
 }
 .ws-panels-dialog [data-panel-content] > button,
 .ws-panels-dialog [data-panel-content] > a {
@@ -10782,15 +10592,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
 }
 .ws-panels-dialog label {
   font-weight: 600;
-}
-.ws-panels-dialog input,
-.ws-panels-dialog textarea {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid var(--ws-line-bright);
-  border-radius: 6px;
-  color: var(--ws-ink);
-  background: var(--ws-bg-2);
 }
 .ws-panels-dialog p {
   overflow-wrap: anywhere;
@@ -10887,16 +10688,11 @@ button.ws-cmd-rpg-class-card:focus-visible {
   justify-content: space-between;
   gap: 8px;
   width: 100%;
-  min-height: 40px;
-  border: 0;
-  border-bottom: 1px solid var(--ws-line);
-  background: transparent;
-  color: var(--ws-ink);
   text-align: left;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
-.ws-cmd-team-agent:focus-visible,
-.ws-cmd-resource-row:focus-visible {
+.ws-cmd-team-agent:focus-visible {
   outline: 2px solid var(--ws-faction);
   outline-offset: 2px;
 }
@@ -10988,16 +10784,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
 }
 .ws-cmd-map-shell:not(.is-hq):not(.is-group) > .ws-cmd-map-toolbar .ws-cmd-nav-btn {
   background: var(--ws-panel);
-}
-.ws-cmd-map-toolbar .ws-cmd-nav-btn,
-.ws-cmd-add-workspace .ws-cmd-nav-btn,
-.ws-cmd-map-group-bar .ws-cmd-nav-btn,
-.ws-cmd-add-workspace .ws-cmd-view-btn {
-  font-family: var(--ws-font-display);
-  font-size: 14px;
-  text-transform: none;
-  letter-spacing: 0;
-  clip-path: none;
 }
 .ws-cmd-work-first.is-quiet {
   padding: 10px 16px;

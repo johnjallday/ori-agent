@@ -27,7 +27,7 @@ import { installLocalCdn } from './helpers/offline-cdn';
 const vault = process.env.SECOND_BRAIN_VAULT || '';
 const AXE_URL = 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js';
 const BRAIN = '/api/personal-assistant/second-brain';
-const EVIDENCE = 'tasks/evidence-notes-station-panel';
+const EVIDENCE = process.env.NOTES_STATION_EVIDENCE || 'tasks/evidence-notes-station-panel';
 
 test.describe.configure({ mode: 'serial' });
 test.skip(

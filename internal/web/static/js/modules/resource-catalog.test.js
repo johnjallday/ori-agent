@@ -290,6 +290,54 @@ const OVERVIEW = {
   sources: []
 };
 
+test('Catalog tabs opt into shared navigation without changing roving state', () => {
+  const doc = fakeDocument();
+  const page = new ResourceCatalogPage({ documentImpl: doc, workspaceId: 'studio-1' });
+  page.view = OVERVIEW;
+  page.category = 'templates';
+  page.renderCategory = () => {};
+  page.renderTabs();
+  const tabs = doc.getElementById('resourceCatalogTabs').children;
+  assert.match(tabs[0].className, /nav-link active/);
+  assert.equal(tabs[0].attributes['aria-selected'], 'true');
+  assert.equal(tabs[0].tabIndex, 0);
+  assert.match(tabs[1].className, /nav-link/);
+  assert.doesNotMatch(tabs[1].className, /active/);
+  assert.equal(tabs[1].attributes['aria-selected'], 'false');
+  assert.equal(tabs[1].tabIndex, -1);
+  assert.match(tabs[0].children[1].className, /badge badge-secondary/);
+});
+
+test('selected Catalog entries and annotation fields use the shared control owners', () => {
+  const doc = fakeDocument();
+  const page = new ResourceCatalogPage({ documentImpl: doc, workspaceId: 'studio-1' });
+  page.view = OVERVIEW;
+  page.category = 'templates';
+  page.rows = [
+    {
+      entry_id: 'entry-1',
+      name: 'Vocals',
+      kind_label: 'Project template',
+      source_label: 'Project templates',
+      identity: 'Band/Vocals.RPP',
+      state: 'access_withdrawn'
+    }
+  ];
+  page.detail = { entry_id: 'entry-1' };
+  page.renderList(false);
+  const button = doc.getElementById('resourceCatalogList').children[0].children[0];
+  assert.match(button.className, /modern-btn modern-btn-secondary/);
+  assert.equal(button.attributes['aria-current'], 'true');
+  assert.match(button.children[2].className, /badge badge-secondary/);
+  const panel = doc.createElement('aside');
+  page.renderAnnotationForm(panel, { entry_id: 'entry-1', annotation_revision: 7 });
+  const fields = panel.children[0].children.filter(
+    child => child.className === 'resource-catalog-field'
+  );
+  assert.equal(fields[0].children[1].className, 'form-control');
+  assert.equal(fields[1].children[1].className, 'form-control');
+});
+
 test('the page loads, offers Inspect, and approves only the sources the owner kept', async () => {
   const doc = fakeDocument();
   const requests = [];
@@ -581,4 +629,165 @@ test('saving notes sends the read revision and a conflict keeps the owner text',
   await form.listeners.submit({ preventDefault() {} });
   assert.equal(writes[1].base_revision, 4, 'saving again replaces knowingly');
   assert.equal(status.textContent, 'Saved.');
+});
+
+for (const id of [
+  'resourceCatalogFolder',
+  'resourceCatalogReview',
+  'resourceCatalogWithdraw',
+  'resourceCatalogRemoveFolder'
+]) {
+  test(`${id} closes to the latest actual invoker without rebinding`, () => {
+    const doc = fakeDocument();
+    const page = new ResourceCatalogPage({ documentImpl: doc });
+    const dialog = doc.getElementById(id);
+    let bindings = 0;
+    const add = dialog.addEventListener;
+    dialog.addEventListener = function (event, fn) {
+      bindings++;
+      add.call(this, event, fn);
+    };
+    for (const name of ['first door', 'latest door']) {
+      const door = {
+        isConnected: true,
+        focus() {
+          doc.activeElement = this;
+        }
+      };
+      page.showCatalogDialog(id, door);
+      dialog.close();
+      dialog.listeners.close();
+      assert.equal(doc.activeElement, door, name);
+    }
+    assert.equal(bindings, 1);
+  });
+}
+
+test('a follow-on native dialog owns focus and a replaced header door resolves by stable action', () => {
+  const doc = fakeDocument();
+  const page = new ResourceCatalogPage({ documentImpl: doc });
+  const dialog = doc.getElementById('resourceCatalogReview');
+  const old = { isConnected: false, dataset: { action: 'review' } };
+  const fresh = {
+    dataset: { action: 'review' },
+    focus() {
+      doc.activeElement = this;
+    }
+  };
+  doc.querySelectorAll = () => [fresh];
+  let otherOpen = true;
+  doc.querySelector = () => (otherOpen ? {} : null);
+  const editor = { name: 'follow-on dialog editor' };
+  doc.activeElement = editor;
+  page.showCatalogDialog('resourceCatalogReview', old);
+  dialog.close();
+  dialog.listeners.close();
+  assert.equal(doc.activeElement, editor);
+  otherOpen = false;
+  page.showCatalogDialog('resourceCatalogReview', old);
+  dialog.close();
+  dialog.listeners.close();
+  assert.equal(doc.activeElement, fresh);
+});
+
+test('header and source redraw restore owned focus only, never steal an editor', () => {
+  const doc = fakeDocument();
+  const create = doc.createElement;
+  doc.createElement = tag => {
+    const node = create(tag);
+    node.focus = () => {
+      doc.activeElement = node;
+    };
+    return node;
+  };
+  const page = new ResourceCatalogPage({ documentImpl: doc });
+  const actions = doc.getElementById('resourceCatalogActions');
+  const sources = doc.getElementById('resourceCatalogSources');
+  const all = node => [node, ...node.children.flatMap(all)];
+  doc.querySelectorAll = () =>
+    [...all(actions), ...all(sources)].filter(
+      node => node.dataset.action || node.dataset.catalogSourceId
+    );
+  for (const root of [actions, sources]) {
+    root.contains = node => all(root).includes(node);
+    const replace = root.replaceChildren;
+    root.replaceChildren = function (...nodes) {
+      for (const node of all(root).slice(1)) node.isConnected = false;
+      replace.call(this, ...nodes);
+    };
+  }
+  page.view = { ...OVERVIEW, sources: [{ source_id: 'one', label: 'Templates', approved: true }] };
+  page.renderActions();
+  let invoked;
+  page.openReview = door => {
+    invoked = door;
+  };
+  actions.children[0].listeners.click();
+  assert.equal(invoked, actions.children[0]);
+  actions.children[0].focus();
+  page.renderActions();
+  assert.equal(doc.activeElement, actions.children[0]);
+  page.renderSources();
+  const button = sources.children[0].children[1];
+  page.openWithdraw = (id, door) => {
+    assert.equal(id, 'one');
+    invoked = door;
+  };
+  button.listeners.click();
+  assert.equal(invoked, button);
+  button.focus();
+  page.renderSources();
+  assert.equal(doc.activeElement, sources.children[0].children[1]);
+  const editor = { name: 'unrelated draft' };
+  doc.activeElement = editor;
+  page.renderActions();
+  page.renderSources();
+  assert.equal(doc.activeElement, editor);
+});
+
+test('failed entry reads are not empty success and successful retries clear the error', async () => {
+  const doc = fakeDocument();
+  let failed = true;
+  const page = new ResourceCatalogPage({
+    documentImpl: doc,
+    fetchImpl: async () => ({
+      ok: !failed,
+      status: failed ? 503 : 200,
+      json: async () => (failed ? {} : { rows: [] })
+    })
+  });
+  page.view = structuredClone(OVERVIEW);
+  page.category = 'templates';
+  page.rows = [{ entry_id: 'one', name: 'Earlier result', state: 'present' }];
+  await page.loadEntries({ append: true });
+  assert.equal(page.rows.length, 1, 'an append failure retains already loaded rows');
+  assert.equal(doc.getElementById('resourceCatalogEmpty').hidden, false);
+  assert.match(
+    doc.getElementById('resourceCatalogEmpty').textContent,
+    /Entries could not be loaded/
+  );
+  failed = false;
+  await page.loadEntries();
+  assert.equal(page.entriesError, '');
+  assert.doesNotMatch(
+    doc.getElementById('resourceCatalogEmpty').textContent,
+    /could not be loaded/
+  );
+});
+
+test('an overview refresh failure unhides an honest stale-read message', async () => {
+  const doc = fakeDocument();
+  const page = new ResourceCatalogPage({
+    documentImpl: doc,
+    fetchImpl: async () => ({ ok: false, status: 503, json: async () => ({}) })
+  });
+  page.view = structuredClone(OVERVIEW);
+  doc.getElementById('resourceCatalogStatus').hidden = true;
+  await page.loadOverview();
+  assert.equal(doc.getElementById('resourceCatalogStatus').hidden, false);
+  assert.match(
+    doc.getElementById('resourceCatalogStatus').textContent,
+    /Showing the last loaded entries/
+  );
+  assert.equal(page.view.name, 'REAPER Studio');
 });

@@ -1,9 +1,9 @@
 {{define "workspace-run"}}
 <!DOCTYPE html>
-<html data-bs-theme="light">
+<html lang="en" data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+<body class="ui-page" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
   <script>
     window.currentWorkspaceId = document.body.dataset.workspaceId || '';
     window.currentWorkspaceSlug = document.body.dataset.workspaceSlug || '';
@@ -21,9 +21,9 @@
       >
         <div id="workspace-run-alert" class="workspace-run-alert" hidden></div>
 
-        <section class="workspace-run-hero">
+        <section class="workspace-run-hero ui-page-header">
           <div class="workspace-run-hero-copy">
-            <a href="/workspaces/{{.Extra.WorkspaceSlug}}" id="workspace-run-backlink" class="workspace-run-backlink">
+            <a href="/workspaces/{{.Extra.WorkspaceSlug}}" id="workspace-run-backlink" class="workspace-run-backlink modern-btn modern-btn-secondary modern-btn-sm">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
               </svg>
@@ -43,8 +43,8 @@
           </div>
 
           <div class="workspace-run-hero-meta">
-            <span id="workspace-run-status" class="workspace-run-status" data-state="pending">Pending</span>
-            <button type="button" id="workspace-run-refresh" class="workspace-run-icon-btn" title="Refresh run">
+            <span id="workspace-run-status" class="workspace-run-status modern-badge" data-state="pending">Pending</span>
+            <button type="button" id="workspace-run-refresh" class="workspace-run-icon-btn modern-btn modern-btn-secondary modern-btn-icon" title="Refresh run">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
               </svg>
@@ -57,14 +57,14 @@
         <div id="workspace-run-empty" class="workspace-run-empty" hidden>Workspace run not found.</div>
 
         <main id="workspace-run-content" class="workspace-run-content" hidden>
-          <section id="workspace-run-report-card" class="workspace-run-card" hidden>
+          <section id="workspace-run-report-card" class="workspace-run-card ui-section" hidden>
             <div class="workspace-run-card-header">
               <div>
                 <div class="workspace-run-card-kicker">Result</div>
                 <h2>What this run produced</h2>
               </div>
             </div>
-            <div id="workspace-run-report" class="workspace-run-report"></div>
+            <div id="workspace-run-report" class="workspace-run-report" role="region" tabindex="0" aria-label="Run result"></div>
           </section>
 
           <!-- Wrap-up: the immutable toolbox this run was given, and what it
@@ -72,7 +72,7 @@
                run's snapshot; hidden for runs that predate snapshots, since an
                empty section would read as "this run had no capabilities"
                (PRD FR-107-FR-120). -->
-          <section id="workspace-run-toolbox-card" class="workspace-run-card" hidden>
+          <section id="workspace-run-toolbox-card" class="workspace-run-card ui-section" hidden>
             <div class="workspace-run-card-header">
               <div>
                 <div class="workspace-run-card-kicker">Wrap-up</div>
@@ -82,7 +82,7 @@
             <div id="workspace-run-toolbox" class="workspace-run-report"></div>
           </section>
 
-          <section class="workspace-run-card">
+          <section class="workspace-run-card ui-section">
             <div class="workspace-run-card-header">
               <div>
                 <div class="workspace-run-card-kicker">Summary</div>
@@ -92,7 +92,7 @@
             <div id="workspace-run-overview" class="workspace-run-overview-grid"></div>
           </section>
 
-          <section id="workspace-run-context-card" class="workspace-run-card" hidden>
+          <section id="workspace-run-context-card" class="workspace-run-card ui-section" hidden>
             <div class="workspace-run-card-header">
               <div>
                 <div class="workspace-run-card-kicker">Inputs</div>
@@ -102,7 +102,7 @@
             <div id="workspace-run-context" class="workspace-run-context"></div>
           </section>
 
-          <section id="workspace-run-validation-card" class="workspace-run-card" hidden>
+          <section id="workspace-run-validation-card" class="workspace-run-card ui-section" hidden>
             <div class="workspace-run-card-header">
               <div>
                 <div class="workspace-run-card-kicker">Quality</div>
@@ -112,7 +112,7 @@
             <div id="workspace-run-validation" class="workspace-run-validation-list"></div>
           </section>
 
-          <section id="workspace-run-memory-card" class="workspace-run-card" hidden>
+          <section id="workspace-run-memory-card" class="workspace-run-card ui-section" hidden>
             <div class="workspace-run-card-header">
               <div>
                 <div class="workspace-run-card-kicker">Memory</div>
@@ -122,7 +122,7 @@
             <div id="workspace-run-memory" class="workspace-run-memory-list"></div>
           </section>
 
-          <section id="workspace-run-artifacts-card" class="workspace-run-card" hidden>
+          <section id="workspace-run-artifacts-card" class="workspace-run-card ui-section" hidden>
             <div class="workspace-run-card-header">
               <div>
                 <div class="workspace-run-card-kicker">Files</div>
@@ -132,7 +132,7 @@
             <div id="workspace-run-artifacts" class="workspace-run-artifact-list"></div>
           </section>
 
-          <section class="workspace-run-card">
+          <section class="workspace-run-card ui-section">
             <div class="workspace-run-card-header">
               <div>
                 <div class="workspace-run-card-kicker">Activity</div>
@@ -140,8 +140,8 @@
               </div>
               <div id="workspace-run-trace-count" class="workspace-run-trace-count"></div>
             </div>
-            <div id="workspace-run-trace" class="workspace-run-trace-list"></div>
-            <button type="button" id="workspace-run-trace-more" class="workspace-run-secondary-btn" hidden>Load more</button>
+            <div id="workspace-run-trace" class="workspace-run-trace-list" role="region" tabindex="0" aria-label="Run activity log"></div>
+            <button type="button" id="workspace-run-trace-more" class="workspace-run-secondary-btn modern-btn modern-btn-secondary" hidden>Load more</button>
           </section>
         </main>
       </div>
@@ -151,34 +151,33 @@
   <style>
     .workspace-run-page-shell {
       display: grid;
-      gap: 1rem;
-      padding: 1.5rem;
+      gap: var(--space-6);
+      padding-bottom: calc(var(--ori-launcher-clearance-y, 88px) + var(--space-6));
+      min-width: 0;
+    }
+
+    .workspace-run-content[hidden],
+    .workspace-run-card[hidden] {
+      display: none;
     }
 
     .workspace-run-alert,
     .workspace-run-loading,
     .workspace-run-empty {
       padding: 0.9rem 1rem;
-      border-radius: 16px;
-      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
-      background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-color);
+      background: var(--surface-solid);
       color: var(--text-secondary);
     }
 
     .workspace-run-alert {
-      border-color: color-mix(in srgb, #dc2626 32%, var(--border-color));
-      color: #dc2626;
+      border-color: var(--danger-text);
+      color: var(--danger-text);
     }
 
     .workspace-run-hero {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 1rem;
-      padding: 1.2rem 1.25rem;
-      border-radius: 20px;
-      background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
-      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      margin-bottom: 0;
     }
 
     .workspace-run-hero-copy {
@@ -187,24 +186,18 @@
       min-width: 0;
     }
 
-    .workspace-run-backlink,
+    .workspace-run-backlink {
+      justify-self: start;
+    }
+
     .workspace-run-breadcrumb-link {
       color: var(--text-secondary);
       text-decoration: none;
     }
 
-    .workspace-run-backlink {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      width: fit-content;
-      font-size: 0.88rem;
-      font-weight: 600;
-    }
-
-    .workspace-run-backlink:hover,
     .workspace-run-breadcrumb-link:hover {
-      color: var(--primary-color);
+      color: var(--accent-text);
+      text-decoration: underline;
     }
 
     .workspace-run-breadcrumbs {
@@ -219,7 +212,7 @@
     .workspace-run-title {
       margin: 0;
       color: var(--text-primary);
-      font-size: clamp(1.4rem, 2vw, 1.8rem);
+      overflow-wrap: anywhere;
       font-weight: 700;
       letter-spacing: 0;
     }
@@ -240,82 +233,35 @@
     }
 
     .workspace-run-status {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-width: 5.6rem;
-      padding: 0.35rem 0.65rem;
-      border-radius: 999px;
-      background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
-      color: var(--text-secondary);
-      font-size: 0.76rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
 
     .workspace-run-status[data-state="succeeded"] {
-      background: color-mix(in srgb, #16a34a 18%, transparent);
-      color: #15803d;
+      color: var(--success-text);
     }
 
     .workspace-run-status[data-state="preparing"],
     .workspace-run-status[data-state="preparing_context"],
     .workspace-run-status[data-state="executing"],
-    .workspace-run-status[data-state="validating"],
+    .workspace-run-status[data-state="validating"] {
+      color: var(--info-text);
+    }
+
     .workspace-run-status[data-state="awaiting_approval"] {
-      background: color-mix(in srgb, var(--primary-color) 18%, transparent);
-      color: var(--primary-color);
+      color: var(--warning-text);
     }
 
     .workspace-run-status[data-state="failed"],
     .workspace-run-status[data-state="cancelled"],
     .workspace-run-status[data-state="rejected"] {
-      background: color-mix(in srgb, #dc2626 16%, transparent);
-      color: #dc2626;
-    }
-
-    .workspace-run-icon-btn,
-    .workspace-run-action-btn,
-    .workspace-run-secondary-btn {
-      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
-      background: color-mix(in srgb, var(--bg-primary) 96%, transparent);
-      color: var(--text-primary);
-      cursor: pointer;
-    }
-
-    .workspace-run-icon-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 2.2rem;
-      height: 2.2rem;
-      border-radius: 999px;
+      color: var(--danger-text);
     }
 
     .workspace-run-actions {
       display: flex;
       flex-wrap: wrap;
       gap: 0.45rem;
-    }
-
-    .workspace-run-action-btn,
-    .workspace-run-secondary-btn {
-      min-height: 2.2rem;
-      padding: 0.45rem 0.8rem;
-      border-radius: 999px;
-      font-size: 0.84rem;
-      font-weight: 700;
-    }
-
-    .workspace-run-action-btn.primary {
-      background: var(--primary-color);
-      border-color: var(--primary-color);
-      color: #fff;
-    }
-
-    .workspace-run-action-btn.danger {
-      color: #dc2626;
     }
 
     .workspace-run-content {
@@ -326,10 +272,7 @@
     .workspace-run-card {
       display: grid;
       gap: 0.9rem;
-      padding: 1.1rem;
-      border-radius: 20px;
-      background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
-      border: 1px solid color-mix(in srgb, var(--border-color) 92%, transparent);
+      padding: var(--space-4);
     }
 
     .workspace-run-card-header {
@@ -364,10 +307,9 @@
     .workspace-run-overview-item {
       display: grid;
       gap: 0.28rem;
-      padding: 0.8rem 0.85rem;
-      border-radius: 14px;
-      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
-      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      min-width: 0;
+      padding-block: var(--space-2);
+      border-bottom: 1px solid var(--border-color);
     }
 
     .workspace-run-overview-item.full {
@@ -378,7 +320,7 @@
        full width and nests its own grid of developer fields. */
     .workspace-run-advanced {
       grid-column: 1 / -1;
-      border-top: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
+      border-top: 1px solid var(--border-color);
       padding-top: 0.5rem;
     }
 
@@ -391,7 +333,8 @@
       font-size: 0.82rem;
       font-weight: 600;
       color: var(--text-secondary);
-      padding: 0.3rem 0;
+      min-height: var(--touch-target);
+      padding: var(--space-2) 0;
       user-select: none;
     }
 
@@ -436,6 +379,14 @@
     .workspace-run-report {
       display: grid;
       gap: 0.8rem;
+    }
+
+    #workspace-run-report,
+    .workspace-run-trace-list {
+      min-width: 0;
+      max-height: 24rem;
+      overflow: auto;
+      overscroll-behavior: contain;
     }
 
     .workspace-run-context {
@@ -519,10 +470,9 @@
     .workspace-run-trace-item {
       display: grid;
       gap: 0.35rem;
-      padding: 0.8rem 0.85rem;
-      border-radius: 14px;
-      border: 1px solid color-mix(in srgb, var(--border-color) 88%, transparent);
-      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      min-width: 0;
+      padding-block: var(--space-3);
+      border-bottom: 1px solid var(--border-color);
     }
 
     .workspace-run-validation-head,
@@ -536,46 +486,24 @@
       gap: 0.5rem;
     }
 
-    .workspace-run-validation-status,
-    .workspace-run-context-access,
-    .workspace-run-artifact-kind,
-    .workspace-run-trace-kind {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0.22rem 0.48rem;
-      border-radius: 999px;
-      background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
-      color: var(--text-secondary);
-      font-size: 0.72rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-
     .workspace-run-validation-status[data-state="passed"] {
-      background: color-mix(in srgb, #16a34a 18%, transparent);
-      color: #15803d;
+      color: var(--success-text);
     }
 
     .workspace-run-validation-status[data-state="failed"] {
-      background: color-mix(in srgb, #dc2626 16%, transparent);
-      color: #dc2626;
+      color: var(--danger-text);
     }
 
     .workspace-run-context-access[data-state="injected"] {
-      background: color-mix(in srgb, #16a34a 18%, transparent);
-      color: #15803d;
+      color: var(--success-text);
     }
 
     .workspace-run-context-access[data-state="summarized"] {
-      background: color-mix(in srgb, #d97706 18%, transparent);
-      color: #b45309;
+      color: var(--warning-text);
     }
 
     .workspace-run-context-access[data-state="on_demand"] {
-      background: color-mix(in srgb, var(--primary-color) 18%, transparent);
-      color: var(--primary-color);
+      color: var(--info-text);
     }
 
     .workspace-run-meta,
@@ -603,10 +531,6 @@
     }
 
     @media (max-width: 860px) {
-      .workspace-run-page-shell {
-        padding: 1rem;
-      }
-
       .workspace-run-hero {
         flex-direction: column;
       }

@@ -1,5 +1,10 @@
 # Agent Form - Quick Reference Guide
 
+> **Historical reference:** use the [Ori visual system](visual-system.md) for
+> current control, field, focus and surface styling. The old host/file table and
+> visual recipes below are not implementation instructions; verify behavioral
+> examples against the live shared form before reusing them.
+
 ## Key Files
 
 | File | Purpose | Lines |

@@ -17,6 +17,7 @@ let marketplaceInstallBusy = false;
 let marketplaceManageBusy = false;
 let promptGenerationAbortController = null;
 let promptGenerationRequestId = 0;
+const skillModalFocusBound = new WeakSet();
 
 function getSkillPageDefaultAgent() {
   const page = document.getElementById('skillsPage');
@@ -129,7 +130,7 @@ function setSkillsCount(count) {
 function setSkillsMessage(message, isError) {
   const container = document.getElementById('skillsList');
   if (!container) return;
-  const color = isError ? 'var(--danger-color)' : 'var(--text-secondary)';
+  const color = isError ? 'var(--danger-text)' : 'var(--text-secondary)';
   container.innerHTML = `<div class="text-center py-3" style="color: ${color};">${safeText(message)}</div>`;
 }
 
@@ -156,21 +157,15 @@ function getSourceLabel(source) {
   return lower;
 }
 
-function getSourceTheme(source) {
-  switch (String(source || '').toLowerCase()) {
-    case 'agent':
-      return { bg: 'rgba(59, 130, 246, 0.22)', color: 'var(--text-primary)' };
-    case 'repo':
-      return { bg: 'rgba(168, 85, 247, 0.22)', color: 'var(--text-primary)' };
-    case '.agents':
-      return { bg: 'rgba(16, 185, 129, 0.22)', color: 'var(--text-primary)' };
-    case 'personal':
-      return { bg: 'rgba(92, 92, 94, 0.28)', color: 'var(--text-primary)' };
-    case 'plugin':
-      return { bg: 'rgba(14, 165, 233, 0.22)', color: 'var(--text-primary)' };
-    default:
-      return { bg: 'rgba(148, 163, 184, 0.22)', color: 'var(--text-primary)' };
+function renderSkillBadges(source, { hasErrors, hasScripts, isTrusted }) {
+  const badges = [`<span class="badge">${safeText(source)}</span>`];
+  if (hasErrors) badges.push('<span class="badge bg-danger">invalid</span>');
+  if (hasScripts) {
+    badges.push(
+      `<span class="badge ${isTrusted ? 'bg-success' : 'bg-danger'}">${isTrusted ? 'trusted' : 'untrusted'}</span>`
+    );
   }
+  return badges.join('');
 }
 
 function renderSourceFilters() {
@@ -206,25 +201,8 @@ function renderSourceFilters() {
     .map(source => {
       const count = source === 'all' ? skillsAll.length : counts.get(source) || 0;
       const isActive = selectedSource === source;
-      const theme =
-        source === 'all'
-          ? { bg: 'var(--bg-tertiary)', color: 'var(--text-primary)' }
-          : getSourceTheme(source);
       const label = source === 'all' ? 'All' : source;
-      const style = [
-        'font-size: 12px',
-        'padding: 4px 12px',
-        'border-radius: 999px',
-        'cursor: pointer',
-        `border: 1px solid ${isActive ? theme.color : 'var(--border-color)'}`,
-        `background: ${isActive ? theme.bg : 'transparent'}`,
-        `color: ${isActive ? theme.color : 'var(--text-secondary)'}`,
-        'display: inline-flex',
-        'align-items: center',
-        'gap: 6px',
-        'transition: background 120ms ease, border-color 120ms ease, color 120ms ease'
-      ].join('; ');
-      return `<button type="button" class="skill-source-chip" data-source="${safeText(source)}" style="${style}">${safeText(label)}<span style="opacity: 0.7;">${count}</span></button>`;
+      return `<button type="button" class="modern-btn modern-btn-sm ui-filter skill-source-chip" data-source="${safeText(source)}" aria-pressed="${isActive}">${safeText(label)}<span>${count}</span></button>`;
     })
     .join('');
   container.classList.remove('d-none');
@@ -264,36 +242,22 @@ function renderSkills(skills) {
     const requiresTrust = hasScripts && !isTrusted;
 
     const card = document.createElement('div');
-    card.className = 'plugin-item';
+    card.className = 'ui-section p-3';
     card.style.cursor = 'default';
     card.style.display = 'flex';
     card.style.flexDirection = 'column';
     card.style.height = '100%';
     card.style.overflow = 'visible';
 
-    const sourceTheme = getSourceTheme(source);
-    const badges = [];
-    badges.push(
-      `<span class="badge" style="background: ${sourceTheme.bg}; color: ${sourceTheme.color}; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`
-    );
-    if (hasErrors) {
-      badges.push(
-        '<span class="badge bg-danger" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>'
-      );
-    }
-    if (hasScripts) {
-      badges.push(
-        `<span class="badge ${isTrusted ? 'bg-success' : 'bg-danger'}" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${isTrusted ? 'trusted' : 'untrusted'}</span>`
-      );
-    }
+    const badges = renderSkillBadges(source, { hasErrors, hasScripts, isTrusted });
 
     const errorSummary = hasErrors
-      ? `<div style="font-size: 11px; color: var(--danger-color); margin-top: 6px;">${validationErrors.length} validation error${validationErrors.length === 1 ? '' : 's'}</div>`
+      ? `<div style="font-size: 13px; color: var(--danger-text); margin-top: 6px;">${validationErrors.length} validation error${validationErrors.length === 1 ? '' : 's'}</div>`
       : '';
 
     const skillPath = skill?.path || '';
     const pathHtml = skillPath
-      ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; opacity: 0.7; display: flex; align-items: center; gap: 4px; min-width: 0;" title="${safeText(skillPath)}">
+      ? `<div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px; display: flex; align-items: center; gap: 4px; min-width: 0;" title="${safeText(skillPath)}">
            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink: 0;">
              <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
            </svg><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;">${safeText(skillPath)}</span></div>`
@@ -302,17 +266,17 @@ function renderSkills(skills) {
     const cleanDescription = cleanSkillDescriptionForCard(description);
 
     card.innerHTML = `
-      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; flex: 1 1 auto;">
-        <div style="min-width: 0; flex: 1;">
+      <div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 8px; flex: 1 1 auto;">
+        <div style="min-width: 0; flex: 1 1 14rem;">
           <div style="font-weight: 600; color: var(--text-primary);">${safeText(name)}</div>
-          <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4;">${safeText(cleanDescription)}</div>
+          <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4;">${safeText(cleanDescription)}</div>
           ${pathHtml}
           ${errorSummary}
         </div>
-        <div style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end;">${badges.join('')}</div>
+        <div style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end;">${badges}</div>
       </div>
       <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: auto; padding-top: 12px;">
-        <button class="modern-btn modern-btn-primary btn-sm" data-action="details">Details</button>
+        <button class="modern-btn modern-btn-secondary btn-sm" data-action="details">Details</button>
         <button class="modern-btn modern-btn-secondary btn-sm" data-action="run" ${requiresTrust || hasErrors ? 'disabled' : ''}>Run</button>
         <div class="dropdown" style="margin-left: auto;">
           <button class="modern-btn modern-btn-secondary btn-sm" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="More actions" style="padding: 4px 8px;">
@@ -333,7 +297,7 @@ function renderSkills(skills) {
 
     const detailsBtn = card.querySelector('[data-action="details"]');
     if (detailsBtn) {
-      detailsBtn.addEventListener('click', () => openSkillDetails(skill));
+      detailsBtn.addEventListener('click', () => openSkillDetails(skill, detailsBtn));
     }
 
     const runBtn = card.querySelector('[data-action="run"]');
@@ -343,7 +307,7 @@ function renderSkills(skills) {
 
     const editBtn = card.querySelector('[data-action="edit"]');
     if (editBtn) {
-      editBtn.addEventListener('click', () => openSkillEditor(skill));
+      editBtn.addEventListener('click', () => openSkillEditor(skill, editBtn));
     }
 
     const deleteBtn = card.querySelector('[data-action="delete"]');
@@ -353,7 +317,7 @@ function renderSkills(skills) {
 
     const cloneBtn = card.querySelector('[data-action="clone"]');
     if (cloneBtn) {
-      cloneBtn.addEventListener('click', () => cloneSkillToAgent(skill));
+      cloneBtn.addEventListener('click', () => cloneSkillToAgent(skill, cloneBtn));
     }
 
     const trustBtn = card.querySelector('[data-action="trust"]');
@@ -508,6 +472,7 @@ function setupSkillsEvents() {
   const generatePromptBtn = document.getElementById('skillsGeneratePromptBtn');
   const discoverBtn = document.getElementById('skillsDiscoverBtn');
   const saveBtn = document.getElementById('skillsSaveBtn');
+  const editorForm = document.getElementById('skillsEditorForm');
   const generateConfigBtn = document.getElementById('skillsGenerateConfigBtn');
   const marketQuery = document.getElementById('skillsMarketplaceSearchQuery');
   const marketSearchBtn = document.getElementById('skillsMarketplaceSearchBtn');
@@ -540,7 +505,7 @@ function setupSkillsEvents() {
   }
 
   if (createBtn) {
-    createBtn.addEventListener('click', () => openSkillEditor(null));
+    createBtn.addEventListener('click', () => openSkillEditor(null, createBtn));
   }
 
   if (generatePromptBtn) {
@@ -550,11 +515,17 @@ function setupSkillsEvents() {
   }
 
   if (discoverBtn) {
-    discoverBtn.addEventListener('click', () => openSkillsMarketplace());
+    discoverBtn.addEventListener('click', () => openSkillsMarketplace(discoverBtn));
   }
 
   if (saveBtn) {
     saveBtn.addEventListener('click', () => saveSkillEditor());
+  }
+  if (editorForm) {
+    editorForm.addEventListener('submit', event => {
+      event.preventDefault();
+      saveSkillEditor();
+    });
   }
 
   if (generateConfigBtn) {
@@ -644,13 +615,34 @@ function cleanSkillDescriptionForCard(description) {
   );
 }
 
-function getDetailsModal() {
-  const el = document.getElementById('skillsDetailsModal');
+function getSkillsModal(id) {
+  const el = document.getElementById(id);
   if (!el) return null;
+  if (!skillModalFocusBound.has(el)) {
+    skillModalFocusBound.add(el);
+    let returnFocus;
+    el.addEventListener('show.bs.modal', event => {
+      returnFocus = event.relatedTarget || document.activeElement;
+    });
+    el.addEventListener('hidden.bs.modal', () => {
+      // A detail -> editor handoff must not steal the new dialog's focus.
+      if (document.querySelector('.modal.show')) return;
+      const fallback = id === 'skillsMarketplaceModal' ? 'skillsDiscoverBtn' : 'skillsCreateBtn';
+      const target =
+        returnFocus?.isConnected && returnFocus.getClientRects().length
+          ? returnFocus
+          : document.getElementById(fallback);
+      target?.focus();
+    });
+  }
   return bootstrap.Modal.getOrCreateInstance(el);
 }
 
-async function openSkillDetails(skill) {
+function getDetailsModal() {
+  return getSkillsModal('skillsDetailsModal');
+}
+
+async function openSkillDetails(skill, trigger = document.activeElement) {
   if (!skill) return;
 
   const titleEl = document.getElementById('skillsDetailsTitle');
@@ -678,21 +670,7 @@ async function openSkillDetails(skill) {
   if (titleEl) titleEl.textContent = name;
 
   if (badgesEl) {
-    const sourceTheme = getSourceTheme(source);
-    const badges = [
-      `<span class="badge" style="background: ${sourceTheme.bg}; color: ${sourceTheme.color}; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${safeText(source)}</span>`
-    ];
-    if (hasErrors) {
-      badges.push(
-        '<span class="badge bg-danger" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">invalid</span>'
-      );
-    }
-    if (hasScripts) {
-      badges.push(
-        `<span class="badge ${isTrusted ? 'bg-success' : 'bg-danger'}" style="font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;">${isTrusted ? 'trusted' : 'untrusted'}</span>`
-      );
-    }
-    badgesEl.innerHTML = badges.join('');
+    badgesEl.innerHTML = renderSkillBadges(source, { hasErrors, hasScripts, isTrusted });
   }
 
   if (descEl) descEl.textContent = description;
@@ -776,7 +754,7 @@ async function openSkillDetails(skill) {
   }
 
   const modal = getDetailsModal();
-  if (modal) modal.show();
+  if (modal) modal.show(trigger);
 
   if (!skill?.name || !selectedAgentName) {
     if (promptStatus) promptStatus.textContent = '';
@@ -802,21 +780,15 @@ async function openSkillDetails(skill) {
 }
 
 function getEditorModal() {
-  const el = document.getElementById('skillsEditorModal');
-  if (!el) return null;
-  return bootstrap.Modal.getOrCreateInstance(el);
+  return getSkillsModal('skillsEditorModal');
 }
 
 function getRunModal() {
-  const el = document.getElementById('skillsRunModal');
-  if (!el) return null;
-  return bootstrap.Modal.getOrCreateInstance(el);
+  return getSkillsModal('skillsRunModal');
 }
 
 function getMarketplaceModal() {
-  const el = document.getElementById('skillsMarketplaceModal');
-  if (!el) return null;
-  return bootstrap.Modal.getOrCreateInstance(el);
+  return getSkillsModal('skillsMarketplaceModal');
 }
 
 function setMarketplaceStatus(message, isError) {
@@ -889,20 +861,20 @@ function renderMarketplaceResults(results) {
       const installs = result?.installs || '';
       const url = result?.url || '';
       const urlHtml = url
-        ? `<a href="${safeText(url)}" target="_blank" rel="noopener noreferrer" style="font-size: 12px;">View on skills.sh</a>`
+        ? `<a class="modern-btn modern-btn-quiet modern-btn-sm" href="${safeText(url)}" target="_blank" rel="noopener noreferrer">View on skills.sh</a>`
         : '';
 
       return `
-      <div class="plugin-item" style="display: flex; flex-direction: column; gap: 10px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+      <div class="ui-section p-3" style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 8px;">
           <div style="min-width: 0;">
             <div style="font-weight: 600; color: var(--text-primary); word-break: break-word;">${safeText(skillName || packageSpec)}</div>
-            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px; word-break: break-word;">${safeText(repository)}</div>
-            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; opacity: 0.85; word-break: break-all;">${safeText(packageSpec)}</div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px; word-break: break-word;">${safeText(repository)}</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px; word-break: break-all;">${safeText(packageSpec)}</div>
           </div>
-          ${installs ? `<span class="badge bg-secondary" style="font-size: 10px;">${safeText(installs)}</span>` : ''}
+          ${installs ? `<span class="badge bg-secondary">${safeText(installs)}</span>` : ''}
         </div>
-        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+        <div class="ui-actions" style="justify-content: space-between;">
           ${urlHtml}
           <button class="modern-btn modern-btn-primary btn-sm" data-market-install="${safeText(packageSpec)}" ${anyMarketplaceBusy ? 'disabled' : ''}>
             Install
@@ -948,12 +920,10 @@ function renderInstalledMarketplaceSkills(skills) {
       const update = marketplaceUpdateStatus.get(name) || {};
       const badges = [];
       if (update.update_available) {
-        badges.push(
-          '<span class="badge bg-info" style="font-size: 10px;" data-market-update-badge>Update available</span>'
-        );
+        badges.push('<span class="badge bg-info" data-market-update-badge>Update available</span>');
       }
       if (update.locally_modified) {
-        badges.push('<span class="badge bg-secondary" style="font-size: 10px;">Edited</span>');
+        badges.push('<span class="badge bg-secondary">Edited</span>');
       }
       const updateButton = update.update_available
         ? `<button class="modern-btn modern-btn-primary btn-sm" data-market-update="${safeText(name)}" ${disabled}>Update</button>`
@@ -963,32 +933,32 @@ function renderInstalledMarketplaceSkills(skills) {
           ? `
         <div class="alert alert-warning mb-0 py-2" role="alert" style="font-size: 12px;">
           You changed this skill since it was installed. Updating will replace your changes.
-          <div class="d-flex gap-2 mt-2">
-            <button class="modern-btn modern-btn-primary btn-sm" data-market-update-anyway="${safeText(name)}" ${disabled}>Update anyway</button>
+          <div class="ui-actions mt-2">
+            <button class="modern-btn modern-btn-danger btn-sm" data-market-update-anyway="${safeText(name)}" ${disabled}>Update anyway</button>
             <button class="modern-btn modern-btn-secondary btn-sm" data-market-update-cancel="${safeText(name)}" ${disabled}>Cancel</button>
           </div>
         </div>`
           : '';
       const checkError = update.error
-        ? `<small style="color: var(--danger-color, #dc3545);">${safeText(update.error)}</small>`
+        ? `<small style="color: var(--danger-text);">${safeText(update.error)}</small>`
         : '';
 
       return `
-      <div class="plugin-item" style="display: flex; flex-direction: column; gap: 10px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+      <div class="ui-section p-3" style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 8px;">
           <div style="min-width: 0;">
             <div style="font-weight: 600; color: var(--text-primary); word-break: break-word;">${safeText(name)}</div>
-            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px; opacity: 0.85; word-break: break-all;">${safeText(location)}</div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-top: 6px; word-break: break-all;">${safeText(location)}</div>
           </div>
           <div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-end;">${badges.join('')}</div>
         </div>
         ${confirmation}
         ${checkError}
-        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+        <div class="ui-actions" style="justify-content: space-between;">
           <small style="color: var(--text-secondary); word-break: break-all;">${safeText(packageSpec)}</small>
-          <div style="display: flex; gap: 6px;">
+          <div class="ui-actions">
             ${updateButton}
-            <button class="modern-btn modern-btn-secondary btn-sm" data-market-remove="${safeText(name)}" ${disabled}>
+            <button class="modern-btn modern-btn-danger btn-sm" data-market-remove="${safeText(name)}" ${disabled}>
               Remove
             </button>
           </div>
@@ -1302,9 +1272,9 @@ async function installMarketplacePackage(packageSpec) {
   }
 }
 
-function openSkillsMarketplace() {
+function openSkillsMarketplace(trigger = document.activeElement) {
   const modal = getMarketplaceModal();
-  if (modal) modal.show();
+  if (modal) modal.show(trigger);
 
   setMarketplaceStatus('', false);
   if (!Array.isArray(marketplaceResults) || marketplaceResults.length === 0) {
@@ -1537,8 +1507,11 @@ function buildCloneSkillName(name) {
   return candidate;
 }
 
-async function cloneSkillToAgent(skill) {
+async function cloneSkillToAgent(skill, trigger = document.activeElement) {
   if (!skill?.name) return;
+  const form = document.getElementById('skillsEditorForm');
+  form?.reset();
+  form?.classList.remove('was-validated');
 
   const title = document.getElementById('skillsEditorTitle');
   const nameInput = document.getElementById('skillNameInput');
@@ -1564,7 +1537,7 @@ async function cloneSkillToAgent(skill) {
   if (openAIYamlInput) openAIYamlInput.value = '';
 
   const modal = getEditorModal();
-  if (modal) modal.show();
+  if (modal) modal.show(trigger);
 
   try {
     const response = await fetch(
@@ -1585,7 +1558,10 @@ async function cloneSkillToAgent(skill) {
   }
 }
 
-function openSkillEditor(skill) {
+function openSkillEditor(skill, trigger = document.activeElement) {
+  const form = document.getElementById('skillsEditorForm');
+  form?.reset();
+  form?.classList.remove('was-validated');
   editingSkillName = skill?.name || '';
   resetPromptGenerationState();
   const title = document.getElementById('skillsEditorTitle');
@@ -1611,7 +1587,7 @@ function openSkillEditor(skill) {
   if (openAIYamlInput) openAIYamlInput.value = '';
 
   const modal = getEditorModal();
-  if (modal) modal.show();
+  if (modal) modal.show(trigger);
 
   if (skill && promptInput) {
     fetch(
@@ -1633,6 +1609,11 @@ function openSkillEditor(skill) {
 }
 
 async function saveSkillEditor() {
+  const form = document.getElementById('skillsEditorForm');
+  if (form && !form.reportValidity()) {
+    form.classList.add('was-validated');
+    return;
+  }
   const nameInput = document.getElementById('skillNameInput');
   const descriptionInput = document.getElementById('skillDescriptionInput');
   const promptInput = document.getElementById('skillPromptInput');

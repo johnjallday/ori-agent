@@ -7,301 +7,546 @@
    MODERN CARD
    ============================================================================= */
 
-.modern-card {
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+/* Sections do not imply an action. Interactive surfaces opt in explicitly. */
+/* Native Team Home/library overlays still emitted by older modules share
+   this owner until their explicit ui-section migration is complete. */
+.modern-card,
+.card,
+.ui-section,
+.assistant-program-hire-dialog,
+.assistant-program-action-dialog {
+  background: var(--surface-solid);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s ease;
+  box-shadow: none;
 }
 
-.modern-card:hover {
-  background: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
-  transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.3);
+.ui-section {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-[data-bs-theme="dark"] .modern-card {
-  background: rgba(10, 10, 10, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+.ui-section--quiet {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 
-[data-bs-theme="dark"] .modern-card:hover {
-  background: rgba(10, 10, 10, 0.6);
-  border-color: rgba(255, 255, 255, 0.2);
+.ui-card-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
 }
 
-/* Bootstrap Card overrides */
-.card {
-  background: rgba(255, 255, 255, 0.95) !important;
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.3) !important;
-  transition: all 0.2s ease;
+.ui-card-link:hover {
+  border-color: var(--control-border);
+  background: var(--bg-secondary);
 }
 
-.card:hover {
-  background: rgba(255, 255, 255, 0.98) !important;
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+.ui-page-header,
+.ui-toolbar,
+.ui-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
 }
 
-[data-bs-theme="dark"] .card {
-  background: rgba(10, 10, 10, 0.3) !important;
-  backdrop-filter: blur(15px);
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+.ui-page-header {
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-6);
 }
 
-[data-bs-theme="dark"] .card:hover {
-  background: rgba(10, 10, 10, 0.4) !important;
-  border-color: rgba(255, 255, 255, 0.15) !important;
+.ui-page-header > :first-child {
+  flex: 1 1 18rem;
+  min-width: 0;
 }
 
-[data-bs-theme="dark"] .card .card-title,
-[data-bs-theme="dark"] .card .card-text,
-[data-bs-theme="dark"] .card h5,
-[data-bs-theme="dark"] .card p {
-  color: #f5f6f7 !important;
+.ui-page-header :is(h1, h2) {
+  margin: 0 0 var(--space-2);
+  font-size: clamp(1.5rem, 3vw, 2rem);
 }
 
-[data-bs-theme="dark"] .card .text-muted,
-[data-bs-theme="dark"] .card small {
-  color: #c9ccd1 !important;
+.ui-page-header p {
+  margin: 0;
+  max-width: 65ch;
+  color: var(--text-secondary);
+}
+
+.ui-toolbar {
+  margin-bottom: var(--space-6);
+}
+
+.ui-disclosure-title {
+  min-height: var(--touch-target);
+  padding-block: var(--space-3);
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ui-status-success {
+  color: var(--success-text);
+}
+.ui-status-warning {
+  color: var(--warning-text);
+}
+.ui-status-danger {
+  color: var(--danger-text);
+}
+
+.ui-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
+  gap: var(--space-4);
+}
+
+.ui-grid > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ui-toolbar > :is(input, select) {
+  flex: 1 1 14rem;
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
 }
 
 /* =============================================================================
    MODERN BUTTONS
    ============================================================================= */
 
-.modern-btn {
-  border-radius: var(--radius-md);
-  font-weight: 500;
-  font-size: 13px;
-  padding: 0.5rem 1rem;
-  transition: all 0.2s ease;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  cursor: pointer;
+/* Bootstrap and modern-* are compatibility names for one control family.
+   Bootstrap still owns toggle state, dropdowns and modal interactions. */
+.btn,
+.modern-btn,
+.ws-cmd-nav-btn,
+.ws-cmd-view-btn {
+  --bs-btn-color: var(--text-primary);
+  --bs-btn-bg: var(--bg-primary);
+  --bs-btn-border-color: var(--control-border);
+  --bs-btn-hover-color: var(--text-primary);
+  --bs-btn-hover-bg: var(--bg-secondary);
+  --bs-btn-hover-border-color: var(--control-border);
+  --bs-btn-active-color: var(--on-primary);
+  --bs-btn-active-bg: var(--primary-dark);
+  --bs-btn-active-border-color: var(--control-border);
+  --bs-btn-active-shadow: none;
+  --bs-btn-disabled-opacity: 0.55;
+  --bs-btn-disabled-color: var(--bs-btn-color);
+  --bs-btn-disabled-bg: var(--bs-btn-bg);
+  --bs-btn-disabled-border-color: var(--bs-btn-border-color);
+  --bs-btn-border-radius: var(--radius-md);
+  --bs-btn-font-size: 0.875rem;
+  --bs-btn-font-weight: 600;
+  --bs-btn-line-height: 1.4;
+  --bs-btn-padding-x: 1rem;
+  --bs-btn-padding-y: 0.5rem;
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  backdrop-filter: blur(10px);
-  position: relative;
-  overflow: hidden;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  max-width: 100%;
+  padding: var(--bs-btn-padding-y) var(--bs-btn-padding-x);
+  font-size: var(--bs-btn-font-size);
+  font-weight: var(--bs-btn-font-weight);
+  line-height: var(--bs-btn-line-height);
+  border: 1px solid var(--bs-btn-border-color);
+  border-radius: var(--bs-btn-border-radius);
+  color: var(--bs-btn-color);
+  background: var(--bs-btn-bg);
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease;
 }
 
-.modern-btn::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  transition: left 0.5s;
+.btn-primary,
+.modern-btn-primary,
+.btn-success,
+.modern-btn-success,
+.ws-cmd-give-work {
+  --bs-btn-color: var(--on-primary);
+  --bs-btn-bg: var(--primary-color);
+  --bs-btn-border-color: var(--control-border);
+  --bs-btn-hover-color: var(--on-primary);
+  --bs-btn-hover-bg: var(--primary-dark);
+  --bs-btn-hover-border-color: var(--control-border);
 }
 
-.modern-btn:hover::before {
-  left: 100%;
-}
-
-.modern-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.modern-btn-primary {
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-light) 100%);
-  color: white;
-}
-
-.modern-btn-secondary {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.modern-btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.2);
-  color: var(--text-primary);
-}
-
-[data-bs-theme="dark"] .modern-btn-secondary {
-  background: rgba(10, 10, 10, 0.3);
-  color: var(--text-primary);
-}
-
-[data-bs-theme="dark"] .modern-btn-secondary:hover {
-  background: rgba(10, 10, 10, 0.5);
-}
-
-.modern-btn-success {
-  background: linear-gradient(135deg, var(--success-color) 0%, #34d399 100%);
-  color: white;
-}
-
+.btn-danger,
+.btn-outline-danger,
 .modern-btn-danger {
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.45);
+  --bs-btn-color: var(--danger-text);
+  --bs-btn-border-color: var(--danger-text);
+  --bs-btn-hover-color: var(--danger-text);
+  --bs-btn-hover-border-color: var(--danger-text);
+  --bs-btn-active-bg: #a21d2b;
+  --bs-btn-active-border-color: var(--danger-text);
 }
 
-/* Bootstrap outline buttons enhancement */
-.btn-outline-primary {
-  color: white !important;
-  background-color: rgba(255, 255, 255, 0.15) !important;
-  border: 2px solid rgba(255, 255, 255, 0.4) !important;
-  font-weight: 600 !important;
-  backdrop-filter: blur(10px);
-  transition: all 0.2s ease;
+.btn-link,
+.modern-btn-ghost,
+.modern-btn-quiet {
+  --bs-btn-bg: transparent;
+  --bs-btn-border-color: transparent;
+  --bs-btn-hover-border-color: transparent;
 }
 
-.btn-outline-primary:hover {
-  background-color: rgba(21, 80, 57, 0.6) !important;
-  border-color: #155039 !important;
-  color: white !important;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 15px rgba(21, 80, 57, 0.3);
+.btn-warning,
+.modern-btn-warning {
+  --bs-btn-color: var(--warning-text);
+  --bs-btn-border-color: var(--warning-text);
+  --bs-btn-hover-color: var(--warning-text);
 }
 
-.btn-check:checked + .btn-outline-primary {
-  background-color: #155039 !important;
-  border-color: #155039 !important;
-  color: white !important;
-  box-shadow: 0 6px 20px rgba(21, 80, 57, 0.5);
-  transform: translateY(-2px);
+.modern-btn:hover,
+.ws-cmd-nav-btn:hover,
+.ws-cmd-view-btn:hover {
+  color: var(--bs-btn-hover-color);
+  background: var(--bs-btn-hover-bg);
+  border-color: var(--bs-btn-hover-border-color);
 }
 
-[data-bs-theme="dark"] .btn-outline-primary {
-  color: white !important;
-  background-color: rgba(255, 255, 255, 0.1) !important;
-  border: 2px solid rgba(255, 255, 255, 0.3) !important;
+.modern-btn:active,
+.modern-btn.active,
+.modern-btn.is-active,
+.modern-btn[aria-pressed="true"],
+.resource-catalog-row[aria-current="true"] {
+  color: var(--bs-btn-active-color);
+  background: var(--bs-btn-active-bg);
+  border-color: var(--bs-btn-active-border-color);
 }
 
-[data-bs-theme="dark"] .btn-outline-primary:hover {
-  background-color: rgba(31, 107, 78, 0.5) !important;
-  border-color: #155039 !important;
-  color: white !important;
+.resource-catalog-row[aria-current="true"] .resource-catalog-row-context {
+  color: inherit;
 }
 
-[data-bs-theme="dark"] .btn-check:checked + .btn-outline-primary {
-  background-color: #155039 !important;
-  border-color: #155039 !important;
-  color: white !important;
-  box-shadow: 0 6px 20px rgba(31, 107, 78, 0.5);
-  transform: translateY(-2px);
+/* Native workspace controllers retain their hooks, but not a second control
+   skin. Their compact aliases share the same padding and touch-floor owners. */
+.ws-cmd-nav-btn,
+.ws-cmd-view-btn {
+  font-family: var(--font-body);
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  clip-path: none;
+}
+
+.btn-sm,
+.modern-btn-sm,
+.ws-cmd-nav-btn,
+.ws-cmd-view-btn {
+  --bs-btn-padding-y: 0.25rem;
+  --bs-btn-padding-x: 0.75rem;
+  min-height: var(--control-height-sm);
+}
+
+.btn-lg,
+.modern-btn-lg {
+  --bs-btn-padding-y: 0.75rem;
+  --bs-btn-padding-x: 1.5rem;
+  min-height: var(--control-height-lg);
+}
+
+.ui-filter {
+  border-radius: 999px;
+}
+
+.ui-filter[aria-pressed="true"],
+.ws-cmd-view-btn:is(.is-active, [aria-pressed="true"]),
+.note-toolbar-btn:is(.active, .ai-active, [aria-pressed="true"], [aria-expanded="true"]),
+.note-rail-note-item.is-active {
+  color: var(--accent-text);
+  border-color: var(--accent-text);
+  background-color: var(--bg-secondary);
+}
+
+.modern-btn-icon {
+  min-width: var(--control-height);
+  padding-inline: var(--space-2);
+}
+
+/* Bootstrap keeps its native close artwork; only its hit-area geometry joins
+   the shared icon controls. common.css supplies the narrow/coarse floor. */
+.btn-close {
+  box-sizing: border-box;
+  min-width: var(--control-height);
+  min-height: var(--control-height);
+}
+
+.modern-btn-toolbar {
+  min-width: 110px;
+}
+
+.modern-btn:disabled,
+.modern-btn.disabled,
+.btn[aria-disabled="true"],
+.modern-btn[aria-disabled="true"],
+.ws-cmd-nav-btn:disabled,
+.ws-cmd-view-btn:disabled,
+.ws-cmd-nav-btn[aria-disabled="true"],
+.ws-cmd-view-btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.btn[aria-busy="true"],
+.modern-btn[aria-busy="true"] {
+  cursor: progress;
+}
+
+/* A shared display primitive must never unhide a controller-owned element. */
+:is(
+  .btn,
+  .modern-btn,
+  .ws-cmd-nav-btn,
+  .ws-cmd-view-btn,
+  .badge,
+  .modern-badge,
+  .ui-page-header,
+  .ui-toolbar,
+  .ui-actions,
+  .ui-grid,
+  .ui-card-link
+)[hidden] {
+  display: none;
 }
 
 /* =============================================================================
    MODERN INPUTS
    ============================================================================= */
 
-.modern-input {
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: var(--radius-md);
-  padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(10px);
+:is(.modern-input, .form-input, .form-control, .form-select):not(
+  :where([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="hidden"])
+) {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.5;
   color: var(--text-primary);
-  font-size: 14px;
-  transition: all 0.2s ease;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
 }
 
-.modern-input::placeholder {
-  color: rgba(255, 255, 255, 0.7);
+:is(.modern-input, .form-input, .form-control)::placeholder {
+  color: var(--text-muted);
   opacity: 1;
 }
 
-[data-bs-theme="dark"] .modern-input::placeholder {
-  color: rgba(255, 255, 255, 0.5);
+:is(.modern-input, .form-input, .form-control, .form-select):focus {
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  border-color: var(--focus-color);
+  box-shadow: none;
 }
 
-.modern-input:focus {
-  outline: none;
-  border-color: rgba(255, 255, 255, 0.4);
-  background: rgba(255, 255, 255, 0.15);
-  box-shadow: 0 0 0 3px rgba(42, 135, 98, 0.2);
+:is(.modern-input, .form-input, .form-control, .form-select):focus-visible {
+  outline: 2px solid var(--focus-color);
+  outline-offset: 2px;
 }
 
-[data-bs-theme="dark"] .modern-input {
-  background: rgba(10, 10, 10, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+:is(.modern-input, .form-input, .form-control, .form-select):is(:disabled, [readonly]) {
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
 }
 
-[data-bs-theme="dark"] .modern-input:focus {
-  background: rgba(10, 10, 10, 0.5);
-  border-color: rgba(255, 255, 255, 0.2);
+:is(.modern-input, .form-input, .form-control, .form-select):disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
-/* Bootstrap form controls with glassmorphism */
-.form-control,
-.form-select,
-textarea.form-control {
-  background: rgba(255, 255, 255, 0.1) !important;
-  backdrop-filter: blur(10px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  color: var(--text-primary) !important;
+/* Required is not an error until interaction/submission, or an explicit
+   controller validation result. Keep Bootstrap state-class compatibility. */
+:is(.modern-input, .form-input, .form-control, .form-select):is(
+  .is-invalid,
+  [aria-invalid="true"],
+  :user-invalid
+),
+.was-validated :is(.modern-input, .form-input, .form-control, .form-select):invalid {
+  border-color: var(--danger-text);
 }
 
-.form-control:focus,
-.form-select:focus,
-textarea.form-control:focus {
-  background: rgba(255, 255, 255, 0.15) !important;
-  border-color: rgba(255, 255, 255, 0.4) !important;
-  box-shadow: 0 0 0 3px rgba(42, 135, 98, 0.2) !important;
+:is(.modern-input, .form-input, .form-control, .form-select).is-valid {
+  border-color: var(--success-text);
 }
 
-[data-bs-theme="dark"] .form-control,
-[data-bs-theme="dark"] .form-select,
-[data-bs-theme="dark"] textarea.form-control {
-  background: rgba(10, 10, 10, 0.3) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+.form-control-sm,
+.form-select-sm,
+.form-input-sm,
+.modern-input-sm {
+  padding-block: 0.25rem;
+  min-height: var(--control-height-sm);
 }
 
-[data-bs-theme="dark"] .form-control:focus,
-[data-bs-theme="dark"] .form-select:focus,
-[data-bs-theme="dark"] textarea.form-control:focus {
-  background: rgba(10, 10, 10, 0.5) !important;
-  border-color: rgba(255, 255, 255, 0.2) !important;
+.form-control-lg,
+.form-select-lg,
+.form-input-lg,
+.modern-input-lg {
+  padding-block: 0.75rem;
+  min-height: var(--control-height-lg);
+}
+
+textarea:is(.modern-input, .form-input, .form-control) {
+  resize: vertical;
+  min-height: 5rem;
+}
+
+select:is(.modern-input, .form-input, .form-select) {
+  /* WebKit's native menulist ignores min-height. Keep native semantics but
+     paint the indicator so both engines honor the shared control metrics. */
+  appearance: none;
+  /* A painted single-line menulist still owns its native popup. WebKit can
+     otherwise propagate long optgroup/option overflow into the document even
+     when the field itself fits. Clip only the closed field, never its page. */
+  overflow: hidden;
+  background-image: var(--select-indicator);
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 1rem;
+  padding-right: 2.5rem;
+  cursor: pointer;
+}
+
+select:is(.modern-input, .form-input, .form-select):is([multiple], [size]:not([size="1"])) {
+  background-image: none;
+  overflow: auto;
+  padding-right: 0.75rem;
+}
+
+/* Opt-in report geometry: numeric summaries and genuinely wide data tables. */
+.ui-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-6);
+}
+
+.ui-metric {
+  min-width: 0;
+  min-block-size: 12rem;
+  padding: var(--space-4);
+}
+
+.ui-metric h2 {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.ui-number {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.ui-metric-value {
+  color: var(--text-primary);
+  font-size: 1.5rem;
+  line-height: 1.3;
+  font-weight: 600;
+}
+
+.ui-data-table {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-md);
+}
+
+.ui-data-table table {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
+.ui-data-table :is(th, td) {
+  padding: var(--space-3);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.ui-data-table th {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.ui-field-help,
+.ui-field-error {
+  display: block;
+  margin-top: var(--space-1);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.ui-field-error {
+  color: var(--danger-text);
 }
 
 /* =============================================================================
    BADGES
    ============================================================================= */
 
+.badge,
 .modern-badge {
-  font-size: 11px;
+  display: inline-block;
+  font-size: 0.75rem;
   font-weight: 600;
-  padding: 0.25rem 0.5rem;
-  border-radius: var(--radius-sm);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  background: rgba(255, 255, 255, 0.15) !important;
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-[data-bs-theme="dark"] .modern-badge {
-  background: rgba(10, 10, 10, 0.4) !important;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  line-height: 1.4;
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background-color: var(--bg-secondary);
+  vertical-align: middle;
 }
 
 .badge-primary {
-  background: var(--primary-color);
-  color: white;
+  background-color: var(--primary-color);
+  color: var(--on-primary);
 }
+
+.badge-success {
+  color: var(--success-text);
+}
+
+.badge-info {
+  color: var(--info-text);
+}
+
 .badge-secondary {
-  background: var(--bg-tertiary);
+  background-color: var(--bg-secondary);
   color: var(--text-secondary);
 }
-.badge-success {
-  background: var(--success-color);
-  color: white;
+
+.badge-danger {
+  color: var(--danger-text);
 }
-.badge-info {
-  background: var(--info-color);
-  color: white;
+
+.badge-warning {
+  color: var(--warning-text);
+}
+
+.badge:is(.bg-primary, .bg-secondary, .bg-success, .bg-danger, .bg-dark) {
+  color: #fff;
+}
+
+.badge:is(.bg-warning, .bg-info, .bg-light) {
+  color: #0a0a0a;
 }
 
 /* =============================================================================
@@ -365,58 +610,103 @@ textarea.form-control:focus {
    MODALS
    ============================================================================= */
 
-.modal-content {
-  background: rgba(255, 255, 255, 0.15) !important;
-  backdrop-filter: blur(20px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
-  border-radius: var(--radius-lg);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2) !important;
+/* Bootstrap keeps ownership of showing, trapping focus and dismissal. Only
+   the shared geometry/surface is normalized; native dialogs keep their hosts. */
+.modal {
+  --bs-modal-zindex: var(--app-modal-layer);
 }
 
-[data-bs-theme="dark"] .modal-content {
-  background: rgba(10, 10, 10, 0.25) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+.modal-dialog {
+  --bs-modal-margin: 1rem;
+  min-width: 0;
+}
+
+.modal-content {
+  max-height: calc(100dvh - 2rem);
+  background: var(--surface-solid);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--modal-border-radius);
+  box-shadow: var(--shadow-xl);
 }
 
 .modal-header {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.15) !important;
-  background: rgba(255, 255, 255, 0.1) !important;
-  backdrop-filter: blur(15px) !important;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-}
-
-[data-bs-theme="dark"] .modal-header {
-  background: rgba(10, 10, 10, 0.2) !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  padding: var(--modal-header-padding);
+  border-bottom: 1px solid var(--border-color);
+  border-radius: var(--modal-border-radius) var(--modal-border-radius) 0 0;
+  flex-shrink: 0;
 }
 
 .modal-title {
   color: var(--text-primary);
   font-weight: 600;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.modal-body {
+  padding: var(--modal-padding);
+  color: var(--text-primary);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.modal-footer {
+  padding: var(--modal-footer-padding);
+  border-top: 1px solid var(--border-color);
+  border-radius: 0 0 var(--modal-border-radius) var(--modal-border-radius);
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.modal-backdrop {
+  --bs-backdrop-zindex: var(--app-modal-backdrop-layer);
+  --bs-backdrop-opacity: var(--modal-backdrop-opacity);
+  background-color: #000;
 }
 
 /* =============================================================================
    NAV PILLS
    ============================================================================= */
 
+.nav-tabs .nav-link,
 .nav-pills .nav-link {
-  background: transparent;
-  border: none;
+  min-height: var(--control-height);
+  padding: 0.5rem 1rem;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
   color: var(--text-secondary);
-  font-weight: 500;
-  transition: all 0.2s ease;
+  background-color: transparent;
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
+.nav-tabs .nav-link:hover,
 .nav-pills .nav-link:hover {
-  background: rgba(42, 135, 98, 0.1);
-  color: var(--primary-color);
-  transform: translateY(-1px);
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
+.nav-tabs .nav-link.active,
+.nav-tabs .nav-link[aria-selected="true"],
 .nav-pills .nav-link.active {
-  background: var(--primary-color) !important;
-  color: white !important;
-  box-shadow: var(--shadow-sm);
+  border-bottom-color: var(--accent-text);
+  background-color: var(--bg-secondary);
+  color: var(--accent-text);
+}
+
+.nav-tabs .nav-link:disabled,
+.nav-tabs .nav-link.disabled,
+.nav-pills .nav-link:disabled,
+.nav-pills .nav-link.disabled {
+  color: var(--text-muted);
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 /* =============================================================================
@@ -985,21 +1275,78 @@ textarea.form-control:focus {
    NAVIGATION LINKS
    ============================================================================= */
 
+.ori-navbar-brand {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ori-navbar-brand-text {
+  font: inherit;
+}
+
 .nav-link-item {
   position: relative;
-  font-weight: 500;
-  font-size: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  min-block-size: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  text-decoration: none;
+  overflow-wrap: anywhere;
 }
 
-.nav-link-item:hover {
-  background: var(--bg-secondary) !important;
-  color: var(--primary-color) !important;
+.nav-link-item:is(:hover, :active, .active) {
+  border-color: var(--control-border);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
-.nav-link-item:active,
-.nav-link-item.active {
-  background: var(--bg-tertiary) !important;
-  color: var(--primary-color) !important;
+.nav-link-item[aria-current="page"] {
+  color: var(--accent-text);
+}
+
+.nav-link-item[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 3px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.ori-navbar-actions
+  :is(#navSettingsLink[aria-current="page"], #keyboardNavigationToggle[aria-pressed="true"]) {
+  border-color: var(--accent-text);
+  background: var(--bg-tertiary);
+  color: var(--accent-text);
+  box-shadow: none;
+}
+
+.ori-navbar-vault-count {
+  flex: 0 0 auto;
+  min-inline-size: 1.25rem;
+  padding: 0.125rem 0.375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ori-navbar-vault-count.is-hidden {
+  display: none;
 }
 
 /* =============================================================================
@@ -1111,69 +1458,6 @@ textarea.form-control:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* =============================================================================
-   ACTION CENTER — HOME LIBRARY CARDS (library-manager-notifications FR 13)
-   Navigation-only cards derived from a Home's scan digest and ready Manager
-   suggestions. Theme variables carry light and dark; no motion.
-   ============================================================================= */
-
-.action-center-library {
-  margin-bottom: 1rem;
-  padding: 1rem;
-  border: 1px solid var(--border-color);
-  border-left: 3px solid var(--primary-color);
-  border-radius: var(--radius-lg);
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-}
-
-.action-center-library-title {
-  margin: 0 0 0.35rem;
-  font-size: 1.05rem;
-}
-
-.action-center-library-intro {
-  margin: 0 0 0.75rem;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-}
-
-.action-center-library-cards {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.action-center-library-card {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.5rem 1rem;
-  padding: 0.75rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md, 8px);
-  background: var(--bg-primary);
-}
-
-.action-center-library-copy {
-  display: grid;
-  gap: 0.15rem;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.action-center-library-counts {
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-}
-
-.action-center-library-open {
-  flex: none;
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
 }
 
 /* "or paste a folder path": the typed alternative offered beside every button

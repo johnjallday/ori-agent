@@ -39,6 +39,7 @@
   // the version before an update) without an extra round-trip.
   let installedCache = [];
   let installedLoaded = false;
+  let installedLoadError = '';
   let questCache = [];
   let pluginLoadGeneration = 0;
   let updateIndex = new Map();
@@ -63,7 +64,7 @@
       marker.classList.add('bg-warning', 'text-dark');
       marker.textContent = model.count === 1 ? '1 update' : model.count + ' updates';
     } else if (model.state === 'empty') {
-      marker.classList.add('bg-success');
+      marker.classList.add('badge-success');
       marker.textContent = 'Up to date';
     } else {
       marker.classList.add('bg-secondary');
@@ -73,7 +74,15 @@
 
   function renderInstalledPlugins() {
     const list = byId('pluginList');
-    if (!list || !installedLoaded) return;
+    if (!list) return;
+    if (installedLoadError) {
+      list.innerHTML =
+        '<p class="ui-status-danger mb-0">Failed to load plugins: ' +
+        esc(installedLoadError) +
+        '</p>';
+      return;
+    }
+    if (!installedLoaded) return;
     // Redrawing replaces every row; keyboard focus stays on the same control.
     const active = document.activeElement;
     const focused =
@@ -278,7 +287,7 @@
           reviewListedInstall(change);
           break;
         case 'switch':
-          window.pluginUpdate(change.name, { fromList: true });
+          window.pluginUpdate(change.name, { fromList: true, trigger: button });
           break;
         case 'uninstall':
           window.pluginUninstall(change.name);
@@ -303,6 +312,7 @@
   // ---- trust disclosures ----
 
   let pendingConfirm = null;
+  let installReturnFocus = null;
   let pendingUpdateConfirm = null;
   let pendingUpdateName = '';
   let updateReturnFocus = null;
@@ -321,11 +331,15 @@
     if (confirmEl) confirmEl.textContent = opts.confirmLabel || DEFAULT_TRUST_CONFIRM;
     renderTrustBody(report || {});
     pendingConfirm = onConfirm;
+    installReturnFocus = opts.trigger || document.activeElement;
+    const installSection = byId('pluginInstallSection');
+    if (installSection) installSection.open = true;
     const panel = byId('pluginTrust');
     panel.style.display = 'block';
     if (typeof panel.scrollIntoView === 'function') {
-      panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      panel.scrollIntoView({ behavior: 'auto', block: 'nearest' });
     }
+    if (titleEl) titleEl.focus();
   }
 
   window.pluginConfirmInstall = async function () {
@@ -347,6 +361,9 @@
     const confirmEl = byId('pluginTrustConfirm');
     if (titleEl) titleEl.textContent = DEFAULT_TRUST_TITLE;
     if (confirmEl) confirmEl.textContent = DEFAULT_TRUST_CONFIRM;
+    const target = installReturnFocus?.isConnected ? installReturnFocus : byId('pluginPreviewBtn');
+    installReturnFocus = null;
+    if (target) target.focus();
   };
 
   // The disclosure itself is built by the shared lifecycle module: it is the
@@ -408,7 +425,7 @@
 
   // showUpdateTrust opens the update review. source, when given (a switch to
   // the plugin list's version), is shown first with its pinned commit.
-  function showUpdateTrust(name, report, onConfirm, source) {
+  function showUpdateTrust(name, report, onConfirm, source, trigger) {
     const titleEl = byId('pluginUpdateModalLabel');
     const bodyEl = byId('pluginUpdateTrustBody');
     if (!titleEl || !bodyEl) throw new Error('The update confirmation dialog is unavailable.');
@@ -429,9 +446,9 @@
     }
     pendingUpdateConfirm = onConfirm;
     pendingUpdateName = name;
-    updateReturnFocus = document.activeElement;
+    updateReturnFocus = trigger || document.activeElement;
     setUpdateApplying(false);
-    updateModalInstance().show();
+    updateModalInstance().show(updateReturnFocus);
   }
 
   async function confirmPluginUpdate() {
@@ -470,11 +487,11 @@
 
   window.loadPlugins = async function () {
     const generation = ++pluginLoadGeneration;
-    const list = byId('pluginList');
     try {
       const data = await api('GET', '/api/plugins');
       if (generation !== pluginLoadGeneration) return;
       installedCache = (data && data.plugins) || [];
+      installedLoadError = '';
       installedLoaded = true;
       questCache = [];
       renderInstalledPlugins();
@@ -490,10 +507,11 @@
         // normal lifecycle controls from working. Never invent a quest URL.
       }
     } catch (e) {
-      if (list) {
-        list.innerHTML =
-          '<p class="text-danger mb-0">Failed to load plugins: ' + esc(e.message) + '</p>';
-      }
+      if (generation !== pluginLoadGeneration) return;
+      installedLoadError = e.message || 'The list is unavailable.';
+      // Cached update/upgrade callbacks may redraw the list later. They must
+      // not turn a failed refresh back into a misleading empty/success state.
+      renderInstalledPlugins();
     }
   };
 
@@ -529,7 +547,7 @@
       // narrow width instead of running off the edge of the screen — a
       // pre-existing gap this feature's own narrow-width demo caught.
       '<div class="d-flex flex-wrap align-items-start justify-content-between gap-2 border-bottom py-3">' +
-      '<div style="min-width: 0; flex: 1 1 240px;">' +
+      '<div class="text-break" style="min-width: 0; flex: 1 1 240px;">' +
       '<div class="fw-semibold">' +
       name +
       ' <span class="text-muted small">' +
@@ -554,7 +572,7 @@
       // moving between the two surfaces is never told two different things
       // about one plugin.
       '<div class="small mt-1 ' +
-      (p.enabled ? 'text-success' : 'text-warning') +
+      (p.enabled ? 'ui-status-success' : 'ui-status-warning') +
       '">' +
       esc(
         window.PluginLifecycle.capitalize(
@@ -583,7 +601,7 @@
       '" data-plugin-action="update" data-plugin-name="' +
       name +
       '">Update</button>' +
-      '<button class="modern-btn modern-btn-secondary" data-plugin-action="uninstall" data-plugin-name="' +
+      '<button class="modern-btn modern-btn-danger" data-plugin-action="uninstall" data-plugin-name="' +
       name +
       '">Uninstall</button>' +
       '</div>' +
@@ -616,6 +634,8 @@
   // ---- install by source ----
 
   window.pluginPreview = async function () {
+    const installSection = byId('pluginInstallSection');
+    if (installSection) installSection.open = true;
     const source = byId('pluginSource').value.trim();
     const format = byId('pluginFormat').value;
     if (!source) {
@@ -624,23 +644,27 @@
     }
     try {
       const data = await api('POST', '/api/plugins/install', { source, format, confirm: false });
-      showTrust(data.trust, async () => {
-        const res = await api('POST', '/api/plugins/install', { source, format, confirm: true });
-        window.pluginCancelInstall();
-        byId('pluginSource').value = '';
-        await window.refreshPluginsPage();
-        // Installing does not switch a plugin on, and a bare "Installed" reads
-        // as if it did. Say which of the two states the plugin is actually in,
-        // in the same words the creation wizard uses.
-        const installed = (res && res.plugin) || {};
-        const name = installed.name || source;
-        const labels = window.PluginLifecycle.LIFECYCLE_LABELS;
-        if (installed.enabled) {
-          notify(name + ' is ' + labels.ENABLED + '.', 'success');
-        } else {
-          notify(name + ' is ' + labels.DISABLED + ' — enable it to use it.', 'warning');
-        }
-      });
+      showTrust(
+        data.trust,
+        async () => {
+          const res = await api('POST', '/api/plugins/install', { source, format, confirm: true });
+          window.pluginCancelInstall();
+          byId('pluginSource').value = '';
+          await window.refreshPluginsPage();
+          // Installing does not switch a plugin on, and a bare "Installed" reads
+          // as if it did. Say which of the two states the plugin is actually in,
+          // in the same words the creation wizard uses.
+          const installed = (res && res.plugin) || {};
+          const name = installed.name || source;
+          const labels = window.PluginLifecycle.LIFECYCLE_LABELS;
+          if (installed.enabled) {
+            notify(name + ' is ' + labels.ENABLED + '.', 'success');
+          } else {
+            notify(name + ' is ' + labels.DISABLED + ' — enable it to use it.', 'warning');
+          }
+        },
+        { trigger: byId('pluginPreviewBtn') }
+      );
     } catch (e) {
       notify('Preview failed: ' + e.message, 'error');
     }
@@ -780,7 +804,7 @@
         // The component set changed (or the source comes from the plugin
         // list), so disclose and confirm in context without moving the user
         // to the unrelated install form.
-        showUpdateTrust(name, data.trust, doUpdate, fromList ? data.source : '');
+        showUpdateTrust(name, data.trust, doUpdate, fromList ? data.source : '', trigger);
       } else {
         await doUpdate();
       }

@@ -739,7 +739,7 @@
   function buildStateChip(ticket) {
     const meta = stateMeta(ticket.state);
     const chip = document.createElement('span');
-    chip.className = `ticket-state-chip ticket-state-${meta.id}`;
+    chip.className = `ticket-state-chip modern-badge ticket-state-${meta.id}`;
     chip.dataset.tone = meta.tone;
     // The label is real text, not a color swatch, so state survives
     // greyscale, high-contrast mode, and screen readers (FR-131).
@@ -756,7 +756,7 @@
 
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = 'ticket-card-open';
+    button.className = 'ticket-card-open ui-section ui-card-link';
     button.setAttribute(
       'aria-label',
       `Open ticket ${ticket.displayNumber || ticket.id}: ${ticket.title} (${ticket.stateLabel})`
@@ -923,7 +923,7 @@
 
   function buildBoardColumn(column, tickets) {
     const el = document.createElement('section');
-    el.className = 'ticket-board-column';
+    el.className = 'ticket-board-column ui-section';
     el.dataset.state = column.id;
 
     const header = document.createElement('header');
@@ -1020,7 +1020,7 @@
     label.className = 'ticket-card-move-label';
     label.textContent = 'Move';
     const select = document.createElement('select');
-    select.className = 'ticket-card-move-select';
+    select.className = 'ticket-card-move-select form-select form-select-sm';
     select.setAttribute(
       'aria-label',
       `Move ticket ${ticket.displayNumber} ${ticket.title} from ${ticket.stateLabel}`
@@ -1114,6 +1114,7 @@
     ].forEach(([button, active]) => {
       if (!button) return;
       button.classList.toggle('is-active', active);
+      button.classList.toggle('active', active);
       button.setAttribute('aria-selected', active ? 'true' : 'false');
     });
 

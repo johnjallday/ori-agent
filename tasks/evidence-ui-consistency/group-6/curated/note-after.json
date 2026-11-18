@@ -1,0 +1,22 @@
+{
+  "captureMode": "viewport",
+  "revision": "e0774714c2a562d9af2770d5186e9dfe745335cb",
+  "dirty": true,
+  "servedBuild": "group-5-checkpoint",
+  "route": "/workspaces/ui-consistency-47905df2-da31-40fe-ab85-cb603ac2f3ab/notes",
+  "viewport": {
+    "width": 320,
+    "height": 900
+  },
+  "engine": "chromium",
+  "theme": "light",
+  "fontMode": "offline-fallback",
+  "loadedFaces": [],
+  "computedFonts": {
+    "body": "Manrope, \"Segoe UI\", sans-serif",
+    "heading": "Fraunces, Georgia, serif"
+  },
+  "workspaceId": "1e779fbe-4cf0-4fd8-a16b-2a68c42fe284",
+  "noteId": "74d0410e-9dec-4027-8cf3-31c222621726",
+  "fixture": "Genuine saved note and referencing manual ticket; no assistant, generation or edit writes"
+}

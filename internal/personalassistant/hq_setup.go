@@ -31,14 +31,17 @@ type HQSetupRequest struct {
 	RequestID string
 	IfVersion int64
 
-	HQName        string
-	Timezone      string
-	ScheduleDays  []string
-	ScheduleTime  string
-	Scope         string
-	SelectedIDs   []string
-	IncludeFuture bool
-	NotifyOnReady bool
+	HQName       string
+	Timezone     string
+	ScheduleDays []string
+	ScheduleTime string
+	// Nil preserves the existing enabled default; false builds HQ without
+	// ever enabling its daily schedule.
+	ScheduleEnabled *bool
+	Scope           string
+	SelectedIDs     []string
+	IncludeFuture   bool
+	NotifyOnReady   bool
 
 	// Notes is the reviewed notes choice (assistant-hq-onboarding 3.4). nil —
 	// every older client — authorizes nothing about notes; Include false is an
@@ -166,6 +169,8 @@ type normalizedHQSetupRequest struct {
 	SelectedIDs   []string `json:"selected_workspace_ids"`
 	IncludeFuture bool     `json:"include_future_workspaces"`
 	NotifyOnReady bool     `json:"notify_on_ready"`
+	// Omitted for the legacy enabled default, preserving existing bytes/hashes.
+	ScheduleDisabled bool `json:"schedule_disabled,omitempty"`
 	// Notes is omitted for a request without a notes choice, so every older
 	// payload keeps its exact bytes and hash and carries no notes effect.
 	Notes *normalizedHQNotes `json:"notes,omitempty"`
@@ -300,8 +305,10 @@ func (c *HQSetupCoordinator) Resume(ctx context.Context, userID string) (*HQSetu
 	if err != nil {
 		return nil, ErrRepairNeeded
 	}
+	scheduleEnabled := !stored.ScheduleDisabled
 	return c.Setup(ctx, userID, HQSetupRequest{
-		RequestID: stored.RequestID, IfVersion: state.StateVersion,
+		ScheduleEnabled: &scheduleEnabled,
+		RequestID:       stored.RequestID, IfVersion: state.StateVersion,
 		HQName: stored.HQName, Timezone: stored.Timezone,
 		ScheduleDays: stored.ScheduleDays, ScheduleTime: stored.ScheduleTime,
 		Scope: stored.Scope, SelectedIDs: stored.SelectedIDs,
@@ -605,7 +612,7 @@ func (c *HQSetupCoordinator) ensureBriefConfig(
 	desired, err := dailybrief.NormalizeConfig(dailybrief.Config{
 		WorkspaceID: workspaceID, UserID: userID, Timezone: request.Timezone,
 		ScheduleDays: append([]string(nil), request.ScheduleDays...),
-		ScheduleTime: request.ScheduleTime, ScheduleEnabled: true,
+		ScheduleTime: request.ScheduleTime, ScheduleEnabled: !request.ScheduleDisabled,
 		Scope:                   dailybrief.Scope(request.Scope),
 		SelectedWorkspaceIDs:    append([]string(nil), request.SelectedIDs...),
 		IncludeFutureWorkspaces: request.IncludeFuture,
@@ -682,6 +689,7 @@ const DefaultHQName = "Personal HQ"
 func normalizeHQSetupRequest(input HQSetupRequest) (normalizedHQSetupRequest, error) {
 	var out normalizedHQSetupRequest
 	out.Version = hqPayloadVersion
+	out.ScheduleDisabled = input.ScheduleEnabled != nil && !*input.ScheduleEnabled
 	if input.IfVersion < 0 {
 		return out, fmt.Errorf("%w: if_version cannot be negative", ErrValidation)
 	}

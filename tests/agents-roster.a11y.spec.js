@@ -20,7 +20,8 @@ async function runAxe(page, target) {
 
 for (const theme of ['light', 'dark']) {
   test(`contextual workspace choice is accessible in the narrow inspector (${theme})`, async ({
-    page
+    page,
+    browserName
   }, testInfo) => {
     await installLocalCdn(page);
     await mockWorkspaceActionRoster(page);
@@ -38,7 +39,9 @@ for (const theme of ['light', 'dark']) {
     await summary.focus();
     await expect(summary).toHaveCSS('outline-style', 'solid');
     await page.keyboard.press('Enter');
-    await page.keyboard.press('Tab');
+    // macOS WebKit's default Tab policy skips links. Option+Tab includes them
+    // natively; do not add product tabindex shims to emulate a Safari preference.
+    await page.keyboard.press(browserName === 'webkit' ? 'Alt+Tab' : 'Tab');
     await expect(page.locator('#stageNextStep a').first()).toBeFocused();
     await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
     const scan = await runAxe(page, '#stageNextStep');
@@ -56,7 +59,7 @@ for (const theme of ['light', 'dark']) {
     await opener.click();
     await checkNextActionReflow(page, '#stageNextStep');
     await page.screenshot({
-      path: testInfo.outputPath(`agent-choice-zoom-${theme}.png`),
+      path: testInfo.outputPath(`agent-choice-reflow-${theme}.png`),
       fullPage: true
     });
   });

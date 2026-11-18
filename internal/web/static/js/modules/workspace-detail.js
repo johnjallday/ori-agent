@@ -2064,8 +2064,12 @@ export class WorkspaceDetailPage {
       this.toggleWorkspaceConfigExpanded()
     );
     this.elements.refreshSettingsBtn?.addEventListener('click', () => this.loadWorkspace());
-    this.elements.healthRefreshBtn?.addEventListener('click', () => this.refreshWorkspaceHealth());
-    this.elements.uiSmokeTestBtn?.addEventListener('click', () => this.runUISmokeTest());
+    this.elements.healthRefreshBtn?.addEventListener('click', event =>
+      this.refreshWorkspaceHealth(event.currentTarget)
+    );
+    this.elements.uiSmokeTestBtn?.addEventListener('click', event =>
+      this.runUISmokeTest(event.currentTarget)
+    );
     this.elements.intentForm?.addEventListener('submit', event => {
       event.preventDefault();
       this.saveWorkspaceIntent();
@@ -3214,7 +3218,7 @@ export class WorkspaceDetailPage {
     if (issue?.action === 'entry_agent' && issue?.agentName) {
       actionMarkup = `
         <button type="button"
-                class="workspace-detail-panel-btn workspace-detail-health-action"
+                class="modern-btn modern-btn-secondary workspace-detail-panel-btn workspace-detail-health-action"
                 onclick="window.workspaceDetail?.openWorkspaceHealthAgentRecovery('${encodeURIComponent(issue.agentName)}', 'entry')">
           ${this.escapeHtml(issue.actionLabel || 'Create Commander')}
         </button>
@@ -3222,7 +3226,7 @@ export class WorkspaceDetailPage {
     } else if (issue?.action === 'agent' && issue?.agentName) {
       actionMarkup = `
         <button type="button"
-                class="workspace-detail-panel-btn workspace-detail-health-action"
+                class="modern-btn modern-btn-secondary workspace-detail-panel-btn workspace-detail-health-action"
                 onclick="window.workspaceDetail?.openWorkspaceHealthAgentRecovery('${encodeURIComponent(issue.agentName)}', 'agent')">
           ${this.escapeHtml(issue.actionLabel || 'Recreate Agent')}
         </button>
@@ -3232,14 +3236,14 @@ export class WorkspaceDetailPage {
       // rather than a recovery onclick — there's nothing broken to repair,
       // just a role to assign.
       actionMarkup = `
-        <a class="workspace-detail-panel-btn workspace-detail-health-action" href="/agents">
+        <a class="modern-btn modern-btn-secondary workspace-detail-panel-btn workspace-detail-health-action" href="/agents">
           ${this.escapeHtml(issue.actionLabel || 'Assign a Commander')}
         </a>
       `;
     } else if (issue?.action === 'file' && issue?.fileId) {
       actionMarkup = `
         <button type="button"
-                class="workspace-detail-panel-btn workspace-detail-health-action"
+                class="modern-btn modern-btn-secondary workspace-detail-panel-btn workspace-detail-health-action"
                 onclick="window.workspaceDetail?.openWorkspaceHealthFileRecovery('${this.escapeHtml(issue.fileId)}')">
           ${this.escapeHtml(issue.actionLabel || 'Relink File')}
         </button>
@@ -3283,7 +3287,7 @@ export class WorkspaceDetailPage {
     const health = this.summarizeWorkspaceHealth();
     this.elements.healthSummary.textContent = health.summary;
     this.elements.healthBadge.textContent = health.badge;
-    this.elements.healthBadge.className = `workspace-detail-health-badge is-${health.status}`;
+    this.elements.healthBadge.className = `badge workspace-detail-health-badge is-${health.status}`;
     this.elements.healthMeta.innerHTML = Array.isArray(health.meta)
       ? health.meta
           .map(item => `<span class="workspace-detail-health-chip">${this.escapeHtml(item)}</span>`)
@@ -3386,8 +3390,18 @@ export class WorkspaceDetailPage {
     `;
   }
 
-  async runUISmokeTest() {
+  restoreDiagnosticsFocus(invoker) {
+    if (!invoker?.isConnected || this.diagnosticsFocusOwner !== invoker) return;
+    if (
+      (document.activeElement === document.body || document.activeElement === invoker) &&
+      !document.querySelector('dialog[open], .modal.show')
+    )
+      invoker.focus();
+  }
+
+  async runUISmokeTest(invoker = null) {
     if (this.uiSmokeTestRunning) return;
+    if (invoker) this.diagnosticsFocusOwner = invoker;
 
     this.uiSmokeTestRunning = true;
     this.uiSmokeTestResult = null;
@@ -3422,11 +3436,13 @@ export class WorkspaceDetailPage {
     } finally {
       this.uiSmokeTestRunning = false;
       this.renderUISmokeTestResult();
+      this.restoreDiagnosticsFocus(invoker);
     }
   }
 
-  async refreshWorkspaceHealth() {
+  async refreshWorkspaceHealth(invoker = null) {
     if (this.workspaceHealthCheckRunning) return;
+    if (invoker) this.diagnosticsFocusOwner = invoker;
 
     this.workspaceHealthCheckRunning = true;
     this.agentCatalogLoaded = false;
@@ -3443,6 +3459,7 @@ export class WorkspaceDetailPage {
     } finally {
       this.workspaceHealthCheckRunning = false;
       this.renderWorkspaceHealth();
+      this.restoreDiagnosticsFocus(invoker);
     }
   }
 

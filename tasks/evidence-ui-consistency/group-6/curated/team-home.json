@@ -1,0 +1,28 @@
+{
+  "captureMode": "viewport",
+  "revision": "e0774714c2a562d9af2770d5186e9dfe745335cb",
+  "dirty": true,
+  "servedBuild": "group-5-checkpoint",
+  "route": "/workspaces/assistant-214308319167a149/assistant",
+  "viewport": {
+    "width": 320,
+    "height": 900
+  },
+  "engine": "webkit",
+  "theme": "dark",
+  "fontMode": "real",
+  "loadedFaces": [
+    "Fraunces",
+    "Fraunces",
+    "Manrope",
+    "Manrope",
+    "Manrope",
+    "Manrope"
+  ],
+  "computedFonts": {
+    "body": "Manrope, \"Segoe UI\", sans-serif",
+    "heading": "Fraunces, Georgia, serif"
+  },
+  "workspaceId": "8e75eb39-266d-42a3-b158-99ac1e0dd084",
+  "fixture": "Real repository Music Home declaration and staffed coordinator; no external provider or execution"
+}

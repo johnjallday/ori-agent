@@ -1,30 +1,20 @@
 /**
- * Theme Variables - Single Source of Truth
- * All CSS custom properties for the Ori Agent design system
+ * Ori visual tokens. One owner for shared palette, typography and metrics.
+ * Page-specific artwork/geometry tokens remain with their feature stylesheet.
+ * See docs/ui/visual-system.md for migration and compatibility rules.
  */
-
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap");
-
 :root {
-  /* Top bar height; navbar-offset.js replaces it with the measured value. */
+  /* navbar-offset.js replaces this fallback with the measured height. */
   --navbar-offset: 76px;
-
-  /* Full-screen modal layer, above ALL application chrome.
-     Measured stack this has to clear:
-       global nav                10002
-       in-map window (legacy)    10010
-       chat backdrop / panel     10400 / 10500
-       keyboard-navigation hint  20050
-       workspace assistant pill  20100
-     A surface that takes over the whole screen uses these. The workspace
-     page's own --wsx-layer-* scale (workspace-command.css) orders surfaces
-     WITHIN that page and is scoped to .ws-cmd, so a modal mounted on <body>
-     cannot see it — and at its modal layer (1010) the nav clipped the File
-     Janitor console's header and the assistant pill floated over its table. */
+  /* Above navigation (10002), assistant (20100) and keyboard hints (20050). */
   --app-modal-layer: 20200;
   --app-modal-backdrop-layer: 20190;
+  --app-toast-layer: 20180;
 
-  /* Palette swatches (single source of truth) */
+  --font-body: "Manrope", "Segoe UI", sans-serif;
+  --font-display: "Fraunces", "Georgia", serif;
+  --font-mono: "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+
   --swatch-black: #0a0a0a;
   --swatch-charred: #0d140d;
   --swatch-oxidized: #1f2128;
@@ -33,88 +23,188 @@
   --swatch-silver: #c9ccd1;
   --swatch-emerald: #1f6b4e;
 
-  /* Primary Colors - Emerald accent */
   --primary-color: #1f6b4e;
   --primary-light: #2a8762;
   --primary-dark: #155039;
+  --primary-color-light: rgba(31, 107, 78, 0.18);
   --secondary-color: #5c5c5e;
-
-  /* Status Colors */
+  /* Legacy status swatches remain available for artwork/status consumers.
+     Enabled text and controls use the semantic foreground tokens below. */
   --success-color: #10b981;
   --danger-color: #ef4444;
   --warning-color: #f59e0b;
   --info-color: #06b6d4;
 
-  /* Backgrounds - Light variant derived from silver/concrete */
   --bg-primary: #f5f6f7;
   --bg-secondary: #e8eaed;
   --bg-tertiary: #c9ccd1;
-
-  /* Text - Black/oxidized on light */
   --text-primary: #0a0a0a;
   --text-secondary: #1f2128;
-  --text-muted: #5c5c5e;
-
-  /* Borders */
+  --text-muted: #525257;
   --border-color: #c9ccd1;
   --border-light: #e8eaed;
+  --control-border: #767d87;
+  --select-indicator: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%230a0a0a' stroke-width='2' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  --focus-color: #1f6b4e;
+  --accent-text: #155039;
+  --danger-text: #a21d2b;
+  --success-text: #17603e;
+  --warning-text: #75430b;
+  --info-text: #1d4c86;
+  --on-primary: #fff;
+  --surface-card: rgba(245, 246, 247, 0.88);
+  --surface-glass: rgba(232, 234, 237, 0.78);
+  --surface-solid: #f5f6f7;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
-
-  /* Border Radius */
-  --radius-sm: 0.375rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --control-height-sm: 2rem;
+  --control-height: 2.5rem;
+  --control-height-lg: 3rem;
+  --touch-target: 44px;
+  --radius-sm: 0.5rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
   --radius-xl: 1rem;
+  --shadow-sm: 0 2px 6px rgba(10, 10, 10, 0.08);
+  --shadow-md: 0 8px 22px rgba(10, 10, 10, 0.13);
+  --shadow-lg: 0 18px 42px rgba(10, 10, 10, 0.2);
+  --shadow-xl: 0 26px 54px rgba(10, 10, 10, 0.26);
 
-  /* Provider Brand Colors */
+  --modal-padding: 1.25rem;
+  --modal-header-padding: 1rem 1.25rem;
+  --modal-footer-padding: 1rem 1.25rem;
+  --modal-border-radius: var(--radius-xl);
+  --modal-backdrop-opacity: 0.5;
+
   --provider-openai: #10a37f;
   --provider-claude: #cc785c;
+  --provider-gemini: #4285f4;
   --provider-ollama: #6366f1;
-
-  /* Category Colors */
   --category-research: #7c3aed;
   --category-analysis: #ec4899;
   --category-validation: #10b981;
-
-  /* Status Colors (aliases) */
   --status-online: var(--success-color);
   --status-offline: var(--danger-color);
   --status-warning: var(--warning-color);
+
+  /* Existing consumers in Models/legacy forms; do not invent another palette. */
+  --bg-color: var(--bg-primary);
+  --text-color: var(--text-primary);
+  --card-bg: var(--bg-secondary);
+  --muted-text: var(--text-muted);
+
+  --ui-density: 1;
+  --ui-type: 1;
+  --ui-space-2xs: calc(var(--space-1) * var(--ui-density));
+  --ui-space-xs: calc(var(--space-2) * var(--ui-density));
+  --ui-space-sm: calc(var(--space-3) * var(--ui-density));
+  --ui-space-md: calc(var(--space-4) * var(--ui-density));
+  --ui-space-lg: calc(var(--space-6) * var(--ui-density));
+  --ui-space-xl: calc(var(--space-8) * var(--ui-density));
+  --ui-text-xs: clamp(0.66rem, calc(0.7rem * var(--ui-type)), 0.78rem);
+  --ui-text-sm: clamp(0.74rem, calc(0.82rem * var(--ui-type)), 0.92rem);
+  --ui-text-md: clamp(0.82rem, calc(0.9rem * var(--ui-type)), 1rem);
+  --ui-text-lg: clamp(0.96rem, calc(1.06rem * var(--ui-type)), 1.2rem);
+  --ui-text-xl: clamp(1.2rem, calc(1.38rem * var(--ui-type)), 1.75rem);
+  --ui-text-2xl: clamp(1.55rem, calc(1.95rem * var(--ui-type)), 2.35rem);
 }
 
-/* Dark Mode - Palette applied directly */
+/* .dark-mode is a compatibility alias; themeManager owns data-bs-theme. */
+.dark-mode,
 [data-bs-theme="dark"] {
-  --bg-primary: #0a0a0a; /* black */
-  --bg-secondary: #1f2128; /* oxidized — cool neutral, was charred (green) */
-  --bg-tertiary: #2a2c33; /* elevated oxidized step */
-  --bg-organic: #0d140d; /* charred — reserve for ~5–10% "organic-cool" surfaces */
-
+  --secondary-color: #8a8a8a;
+  --primary-color-light: rgba(31, 107, 78, 0.22);
+  --bg-primary: #0a0a0a;
+  --bg-secondary: #1f2128;
+  --bg-tertiary: #2a2c33;
+  --bg-organic: #0d140d;
   --text-primary: #c9ccd1;
-  --text-secondary: #8a8a8a;
-  --text-muted: #5c5c5e;
-
-  --border-color: #383b43; /* slightly lighter so it reads against bg-tertiary */
+  --text-secondary: #b3b6bd;
+  --text-muted: #a6a8af;
+  --border-color: #383b43;
   --border-light: #5c5c5e;
-
-  /* Slightly stronger shadows for dark mode */
-  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.2);
-  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.2);
-  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4), 0 4px 6px -4px rgb(0 0 0 / 0.3);
-  --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.5), 0 8px 10px -6px rgb(0 0 0 / 0.4);
+  --control-border: #737985;
+  --select-indicator: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23c9ccd1' stroke-width='2' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  --focus-color: #8df4be;
+  --accent-text: #8df4be;
+  --danger-text: #ffaeae;
+  --success-text: #8df4be;
+  --warning-text: #ffd08a;
+  --info-text: #b5d4ff;
+  --surface-card: rgba(31, 33, 40, 0.88);
+  --surface-glass: rgba(31, 33, 40, 0.72);
+  --surface-solid: #1f2128;
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.45);
+  --shadow-md: 0 10px 26px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 20px 48px rgba(0, 0, 0, 0.65);
+  --shadow-xl: 0 28px 62px rgba(0, 0, 0, 0.72);
+  --bg-color: var(--bg-primary);
+  --text-color: var(--text-primary);
+  --card-bg: var(--bg-secondary);
+  --muted-text: var(--text-muted);
 }
 
-/* Global font family */
+/* Bootstrap's default pink inline-code foreground misses AA on shared light
+   surfaces. Code is content, not a status; use the theme's normal foreground. */
+:root,
+[data-bs-theme] {
+  --bs-code-color: var(--text-primary);
+}
+
+@media (min-width: 1400px) {
+  :root {
+    --ui-density: 1.08;
+    --ui-type: 1.05;
+  }
+}
+@media (max-width: 1200px) {
+  :root {
+    --ui-density: 0.95;
+    --ui-type: 0.97;
+  }
+}
+@media (max-width: 768px) {
+  :root {
+    --ui-density: 0.88;
+    --ui-type: 0.94;
+  }
+}
+:root[data-ui-density="compact"] {
+  --ui-density: 0.84;
+  --ui-type: 0.92;
+}
+:root[data-ui-density="roomy"] {
+  --ui-density: 1.14;
+  --ui-type: 1.09;
+}
+
+/* Explicit body specificity beats Bootstrap's body default. */
+body {
+  font-family: var(--font-body);
+}
 * {
-  font-family:
-    "Inter",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    Roboto,
-    sans-serif;
+  font-family: var(--font-body);
+}
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+}
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.navbar-brand,
+.home-assistant-title,
+.dashboard-greeting-bubble h4 {
+  font-family: var(--font-display);
 }

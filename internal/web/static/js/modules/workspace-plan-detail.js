@@ -305,9 +305,10 @@ export class WorkspacePlanPage {
 
   handleEditorAction(event) {
     const button = event?.target?.closest?.('button[data-action]');
-    if (!button) return;
+    if (!button || !this.canEditDraft()) return;
 
     const { action, itemId, groupId } = button.dataset;
+    const ownerGroup = groupId || button.closest('.plan-group')?.dataset.groupId;
     switch (action) {
       case 'item-up':
         this.moveItem(itemId, 'up');
@@ -334,8 +335,31 @@ export class WorkspacePlanPage {
         this.removeGroup(groupId);
         break;
       default:
-        break;
+        return;
     }
+    // Structural redraws retain stable ids: restore the actual action when it
+    // survives, a neighbouring action if it became disabled, or the group/add
+    // door after removal. Never leave a keyboard user on a detached button.
+    const controls = [
+      ...(this.el('#plan-editor-groups')?.querySelectorAll('button[data-action]') || [])
+    ];
+    const enabled = control => !control.disabled && !control.closest('[hidden]');
+    const same = controls.find(
+      control =>
+        enabled(control) &&
+        control.dataset.action === action &&
+        control.dataset.itemId === itemId &&
+        control.dataset.groupId === groupId
+    );
+    const neighbour = controls.find(
+      control =>
+        enabled(control) &&
+        (itemId ? control.dataset.itemId === itemId : control.dataset.groupId === ownerGroup)
+    );
+    const groupDoor = controls.find(
+      control => enabled(control) && control.dataset.groupId === ownerGroup
+    );
+    (same || neighbour || groupDoor || this.el('#plan-add-group'))?.focus({ preventScroll: true });
   }
 
   async request(path, options = {}) {
@@ -374,6 +398,19 @@ export class WorkspacePlanPage {
         activity: []
       }));
       this.render(plan, activity.activity || []);
+      // A canonical review deep-link/reload must show the exact retained
+      // version, not require another Request review mutation to reveal it.
+      if (plan.status === 'in_review' && Number(plan.current_version) > 0) {
+        await this.loadReviewContract(plan.current_version);
+      } else {
+        this.contract = null;
+        this.renderReviewContract(null);
+      }
+      const comparison = this.el('#plan-compare-panel');
+      if (comparison) comparison.hidden = true;
+      if (Number(plan.current_version) > 1) {
+        await this.compareVersions(plan.current_version - 1, plan.current_version);
+      }
       // Reconciliation is loaded after the plan renders rather than as part of
       // it: most plans are not revisions, so this request usually 4xxs, and
       // waiting on it would delay the page everyone else sees.
@@ -385,10 +422,18 @@ export class WorkspacePlanPage {
 
   // --- Editing -------------------------------------------------------------
 
-  // mutate applies a structural operation, reports a refusal, and schedules an
-  // autosave recovery point.
+  // Mirrors the server Edit boundary: retained review versions and terminal
+  // plans are readable, not a second mutable draft surface.
+  canEditDraft() {
+    return (
+      Boolean(this.plan) &&
+      !['in_review', 'completed', 'failed', 'cancelled', 'superseded'].includes(this.plan.status)
+    );
+  }
+
+  // Structural operations report refusals and schedule an autosave recovery point.
   mutate(operation, { announce = '' } = {}) {
-    if (!this.editor) return null;
+    if (!this.editor || !this.canEditDraft()) return null;
     const result = this.editor.apply(operation);
 
     if (result && result.removed === false) {
@@ -469,7 +514,7 @@ export class WorkspacePlanPage {
   // failure to retry: it keeps both versions and asks the user to choose
   // (FR-30, FR-151).
   async save({ autosave = false } = {}) {
-    if (!this.editor) return null;
+    if (!this.editor || !this.canEditDraft()) return null;
     this.clearTimeoutImpl(this.autosaveTimer);
 
     this.editor.markSaving();
@@ -488,7 +533,6 @@ export class WorkspacePlanPage {
       if (error.code === 'stale_draft') {
         this.editor.markConflicted(error.details);
         this.renderSaveState();
-        this.renderConflict();
         this.announce(
           'Someone else saved this plan first. Your changes are kept — choose which version to keep.',
           'error'
@@ -527,6 +571,10 @@ export class WorkspacePlanPage {
   // effects, because a summary that drifts from the behavior is worse than no
   // summary (FR-62, FR-63).
   async loadReviewContract(version) {
+    // Never leave an older approval target active while its replacement loads
+    // or if the new read is refused.
+    this.contract = null;
+    this.renderReviewContract(null);
     try {
       const contract = await this.request(`${this.basePath()}/versions/${version}`);
       this.contract = contract;
@@ -864,6 +912,8 @@ export class WorkspacePlanPage {
   }
 
   async compareVersions(from, to) {
+    const panel = this.el('#plan-compare-panel');
+    if (panel) panel.hidden = true;
     try {
       const diff = await this.request(`${this.basePath()}/compare?from=${from}&to=${to}`);
       this.renderDiff(diff);
@@ -889,6 +939,8 @@ export class WorkspacePlanPage {
   async discardConflict() {
     this.editor = null;
     await this.reload();
+    if (!this.editor) return;
+    this.el('#plan-save')?.focus();
     this.announce('Your unsaved changes were discarded');
   }
 
@@ -899,7 +951,9 @@ export class WorkspacePlanPage {
     const winning = this.editor.conflict.currentRevision;
     if (winning != null) this.editor.revision = winning;
     this.editor.state = 'unsaved';
-    return this.save();
+    const saved = await this.save();
+    if (saved) this.el('#plan-save')?.focus();
+    return saved;
   }
 
   render(plan, activity) {
@@ -977,6 +1031,13 @@ export class WorkspacePlanPage {
     const container = this.el('#plan-editor-groups');
     if (!container || !this.editor) return;
 
+    const editable = this.canEditDraft();
+    for (const selector of ['#plan-add-group', '#plan-save', '#plan-request-review']) {
+      const control = this.el(selector);
+      if (control) control.disabled = !editable;
+    }
+    const readonly = this.el('#plan-editor-readonly');
+    if (readonly) readonly.hidden = editable;
     const groups = this.editor.content.groups || [];
     const unavailable = new Set(
       unavailableAssignees(this.editor.content, this.availableAgents).map(entry => entry.id)
@@ -994,11 +1055,11 @@ export class WorkspacePlanPage {
                 <p class="plan-item-description">${escapeHtml(item.description)}</p>
                 ${item.assignee ? `<p class="plan-item-assignee">Assigned to ${escapeHtml(item.assignee)}</p>` : '<p class="plan-item-assignee">Unassigned</p>'}
                 ${warning}
-                <div class="plan-item-actions">
-                  <button type="button" data-action="item-up" data-item-id="${escapeHtml(item.id)}" ${itemIndex === 0 ? 'disabled' : ''}>Move up</button>
-                  <button type="button" data-action="item-down" data-item-id="${escapeHtml(item.id)}" ${itemIndex === (group.items || []).length - 1 ? 'disabled' : ''}>Move down</button>
-                  <button type="button" data-action="item-duplicate" data-item-id="${escapeHtml(item.id)}">Duplicate</button>
-                  <button type="button" data-action="item-remove" data-item-id="${escapeHtml(item.id)}">Remove</button>
+                <div class="plan-item-actions"${editable ? '' : ' hidden'}>
+                  <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-action="item-up" data-item-id="${escapeHtml(item.id)}" ${itemIndex === 0 ? 'disabled' : ''}>Move up</button>
+                  <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-action="item-down" data-item-id="${escapeHtml(item.id)}" ${itemIndex === (group.items || []).length - 1 ? 'disabled' : ''}>Move down</button>
+                  <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-action="item-duplicate" data-item-id="${escapeHtml(item.id)}">Duplicate</button>
+                  <button type="button" class="modern-btn modern-btn-danger modern-btn-sm" data-action="item-remove" data-item-id="${escapeHtml(item.id)}">Remove</button>
                 </div>
               </li>`;
           })
@@ -1008,11 +1069,11 @@ export class WorkspacePlanPage {
           <section class="plan-group" data-group-id="${escapeHtml(group.id)}" aria-label="${escapeHtml(group.title)}">
             <div class="plan-group-head">
               <h3 class="plan-group-title">${escapeHtml(group.title)}</h3>
-              <div class="plan-group-actions">
-                <button type="button" data-action="group-up" data-group-id="${escapeHtml(group.id)}" ${groupIndex === 0 ? 'disabled' : ''}>Move group up</button>
-                <button type="button" data-action="group-down" data-group-id="${escapeHtml(group.id)}" ${groupIndex === groups.length - 1 ? 'disabled' : ''}>Move group down</button>
-                <button type="button" data-action="group-add-item" data-group-id="${escapeHtml(group.id)}">Add ticket</button>
-                <button type="button" data-action="group-remove" data-group-id="${escapeHtml(group.id)}">Remove group</button>
+              <div class="plan-group-actions"${editable ? '' : ' hidden'}>
+                <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-action="group-up" data-group-id="${escapeHtml(group.id)}" ${groupIndex === 0 ? 'disabled' : ''}>Move group up</button>
+                <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-action="group-down" data-group-id="${escapeHtml(group.id)}" ${groupIndex === groups.length - 1 ? 'disabled' : ''}>Move group down</button>
+                <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm" data-action="group-add-item" data-group-id="${escapeHtml(group.id)}">Add ticket</button>
+                <button type="button" class="modern-btn modern-btn-danger modern-btn-sm" data-action="group-remove" data-group-id="${escapeHtml(group.id)}">Remove group</button>
               </div>
             </div>
             ${group.outcome ? `<p class="plan-group-outcome">${escapeHtml(group.outcome)}</p>` : ''}
@@ -1028,6 +1089,7 @@ export class WorkspacePlanPage {
   // renderSaveState pairs the state with a word and an icon, so "unsaved" is
   // never conveyed by color alone (FR-151, FR-162).
   renderSaveState() {
+    this.renderConflict();
     const node = this.el('#plan-save-state');
     if (!node || !this.editor) return;
     const meta = saveStateMeta(this.editor.state);
@@ -1038,8 +1100,9 @@ export class WorkspacePlanPage {
 
   renderConflict() {
     const panel = this.el('#plan-conflict-panel');
-    if (!panel || !this.editor?.conflict) return;
-    panel.hidden = false;
+    if (!panel) return;
+    panel.hidden = !this.editor?.conflict;
+    if (panel.hidden) return;
 
     const summary = this.el('#plan-conflict-summary');
     if (summary) {
@@ -1061,6 +1124,22 @@ export class WorkspacePlanPage {
   }
 
   renderMissing(error) {
+    // Keep any unsaved editor for a later successful retry, but never leave an
+    // approval target or a perpetual Loading badge behind a failed read.
+    this.contract = null;
+    this.renderReviewContract(null);
+    const badge = this.el('#plan-status-badge');
+    if (badge) {
+      badge.dataset.tone = 'danger';
+      badge.innerHTML = '<span aria-hidden="true">!</span> <span>Unavailable</span>';
+    }
+    this.setText('#plan-version-label', '');
+    this.announce(
+      error?.code === 'plan_not_found'
+        ? 'Plan not found in this workspace.'
+        : `Could not load plan: ${error?.message || 'Read unavailable'}`,
+      'error'
+    );
     const loading = this.el('#plan-loading');
     if (loading) loading.hidden = true;
     const content = this.el('#plan-content');

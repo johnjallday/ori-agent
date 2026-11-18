@@ -38,14 +38,13 @@
         <div class="cockpit-area-main">
           <div class="cockpit-area-identity">
             <div class="cockpit-area-heading">
-              <span class="cockpit-area-eyebrow">Workspaces</span>
               <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>Workspace Map</h2>
             </div>
             <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
                  active view; the visible labels carry it without color (FR24). -->
             <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">
-              <button type="button" id="cockpitViewMap" class="cockpit-view-btn is-active" data-cockpit-view="map" aria-pressed="true">Map</button>
-              <button type="button" id="cockpitViewTree" class="cockpit-view-btn" data-cockpit-view="tree" aria-pressed="false">Tree</button>
+              <button type="button" id="cockpitViewMap" class="modern-btn modern-btn-secondary modern-btn-sm ui-filter cockpit-view-btn is-active" data-cockpit-view="map" aria-pressed="true">Map</button>
+              <button type="button" id="cockpitViewTree" class="modern-btn modern-btn-secondary modern-btn-sm ui-filter cockpit-view-btn" data-cockpit-view="tree" aria-pressed="false">Tree</button>
             </div>
           </div>
           <div class="cockpit-area-actions" role="group" aria-label="Workspace actions">
@@ -96,7 +95,7 @@
           -->
           <button
             type="button"
-            class="cockpit-flyout-toggle"
+            class="modern-btn modern-btn-secondary modern-btn-sm cockpit-flyout-toggle"
             id="cockpitRailToggle"
             aria-expanded="false"
             aria-controls="cockpitUpdatesFlyout"
@@ -116,7 +115,7 @@
           -->
           <button
             type="button"
-            class="cockpit-flyout-toggle cockpit-flyout-toggle--quests"
+            class="modern-btn modern-btn-secondary modern-btn-sm cockpit-flyout-toggle cockpit-flyout-toggle--quests"
             id="cockpitQuestsToggle"
             aria-expanded="false"
             aria-controls="cockpitQuestsFlyout"
@@ -152,14 +151,14 @@
           -->
           <div class="cockpit-economy" id="cockpitEconomy" role="group"
                aria-label="City resources" aria-live="polite" hidden>
-            <button type="button" class="cockpit-economy__chip" data-economy-chip="craft"
+            <button type="button" class="modern-btn modern-btn-quiet modern-btn-sm cockpit-economy__chip" data-economy-chip="craft"
                     data-economy-help="craft" aria-expanded="false"
                     aria-controls="cockpitEconomyHelp"
                     aria-label="Craft — what it is and how to earn it">
               <span class="cockpit-economy__chip-label">Craft</span>
               <span class="cockpit-economy__chip-value" data-economy-craft>0</span>
             </button>
-            <button type="button" class="cockpit-economy__chip" data-economy-chip="harvest"
+            <button type="button" class="modern-btn modern-btn-quiet modern-btn-sm cockpit-economy__chip" data-economy-chip="harvest"
                     data-economy-help="harvest" aria-expanded="false"
                     aria-controls="cockpitEconomyHelp"
                     aria-label="Harvest — what it is and how to earn it">
@@ -176,7 +175,7 @@
               stop my work?" is exactly the question a filling bar raises and
               the answer is no.
             -->
-            <button type="button" class="cockpit-economy__energy" data-economy-energy
+            <button type="button" class="modern-btn modern-btn-quiet modern-btn-sm cockpit-economy__energy" data-economy-energy
                     data-economy-help="energy" aria-expanded="false"
                     aria-controls="cockpitEconomyHelp"
                     aria-label="Energy used today">
@@ -198,7 +197,7 @@
                aria-labelledby="cockpitEconomyHelpTitle" hidden>
             <div class="cockpit-economy-help__head">
               <h3 class="cockpit-economy-help__title" id="cockpitEconomyHelpTitle"></h3>
-              <button type="button" class="cockpit-economy-help__close"
+              <button type="button" class="modern-btn modern-btn-quiet modern-btn-icon cockpit-economy-help__close"
                       data-economy-help-close aria-label="Close">
                 <span aria-hidden="true">&times;</span>
               </button>
@@ -226,7 +225,7 @@
            role="region" aria-labelledby="cockpitUpdatesFlyoutTitle" hidden>
         <header class="cockpit-flyout-head">
           <h2 id="cockpitUpdatesFlyoutTitle" class="cockpit-flyout-title">Updates</h2>
-          <button type="button" class="cockpit-flyout-close" data-cockpit-flyout-close
+          <button type="button" class="modern-btn modern-btn-quiet modern-btn-icon cockpit-flyout-close" data-cockpit-flyout-close
                   aria-label="Close Updates">
             <span aria-hidden="true">&times;</span>
           </button>
@@ -318,7 +317,7 @@
            data-cockpit-flyout="quests" role="region" aria-labelledby="cockpitQuestsFlyoutTitle" hidden>
         <header class="cockpit-flyout-head">
           <h2 id="cockpitQuestsFlyoutTitle" class="cockpit-flyout-title">Quests</h2>
-          <button type="button" class="cockpit-flyout-close" data-cockpit-flyout-close
+          <button type="button" class="modern-btn modern-btn-quiet modern-btn-icon cockpit-flyout-close" data-cockpit-flyout-close
                   aria-label="Close Quests">
             <span aria-hidden="true">&times;</span>
           </button>
@@ -442,7 +441,7 @@
         <div id="cockpitCaptureReceipt" class="cockpit-capture-receipt" hidden>
           <span class="cockpit-capture-receipt__text" data-capture-receipt-text>Added to Personal HQ backlog</span>
           <a class="cockpit-capture-receipt__link" data-capture-receipt-link href="#" hidden>View backlog</a>
-          <button type="button" class="cockpit-capture-receipt__close" data-capture-receipt-close
+          <button type="button" class="modern-btn modern-btn-quiet modern-btn-icon cockpit-capture-receipt__close" data-capture-receipt-close
                   aria-label="Dismiss">
             <span aria-hidden="true">&times;</span>
           </button>
@@ -582,7 +581,7 @@
           <input type="text" id="cockpitCaptureTitle" class="modern-input cockpit-capture-title" maxlength="300"
                  aria-required="true" aria-describedby="cockpitCaptureStatus" autocomplete="off"
                  placeholder="What's on your mind?">
-          <button type="button" class="cockpit-capture-details-toggle" id="cockpitCaptureDetailsToggle"
+          <button type="button" class="modern-btn modern-btn-quiet cockpit-capture-details-toggle" id="cockpitCaptureDetailsToggle"
                   aria-expanded="false" aria-controls="cockpitCaptureDetailsGroup">Add details</button>
           <div class="cockpit-capture-details-group" id="cockpitCaptureDetailsGroup" hidden>
             <label class="cockpit-capture-label" for="cockpitCaptureDetails">Details <span class="cockpit-capture-optional">(optional)</span></label>

@@ -3,7 +3,7 @@
 <html data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light">
+<body class="bg-light mcp-page">
   <!-- Navigation -->
   {{template "navbar.tmpl" .}}
 
@@ -13,19 +13,17 @@
       <div class="container-fluid py-4">
 
         <!-- Page Header -->
-        <div class="modern-card p-4 mb-4">
-          <div class="d-flex align-items-center justify-content-between">
-            <div>
-              <h5 class="mb-1" style="color: var(--text-primary);">MCP Servers</h5>
-              <p class="mb-0 text-muted small">Manage and browse Model Context Protocol servers</p>
-            </div>
+        <header class="ui-page-header">
+          <div>
+            <h1>MCP Servers</h1>
+            <p>Manage and browse Model Context Protocol servers.</p>
           </div>
-        </div>
+        </header>
 
         <!-- Top-level Tabs -->
         <ul class="nav nav-tabs mb-4" id="mcpPageTabs" role="tablist">
           <li class="nav-item" role="presentation">
-            <button class="nav-link active" id="my-servers-tab" data-bs-toggle="tab" data-bs-target="#my-servers-pane" type="button" role="tab">
+            <button class="nav-link active" id="my-servers-tab" data-bs-toggle="tab" data-bs-target="#my-servers-pane" type="button" role="tab" aria-controls="my-servers-pane" aria-selected="true">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                 <path d="M4,6H20V16H4M20,18A2,2 0 0,0 22,16V6C22,4.89 21.1,4 20,4H4C2.89,4 2,4.89 2,6V16A2,2 0 0,0 4,18H0V20H24V18H20Z"/>
               </svg>
@@ -33,7 +31,7 @@
             </button>
           </li>
           <li class="nav-item" role="presentation">
-            <button class="nav-link" id="browse-tab" data-bs-toggle="tab" data-bs-target="#browse-pane" type="button" role="tab" onclick="onBrowseTabActivated()">
+            <button class="nav-link" id="browse-tab" data-bs-toggle="tab" data-bs-target="#browse-pane" type="button" role="tab" aria-controls="browse-pane" aria-selected="false" onclick="onBrowseTabActivated()">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                 <path d="M15.5,14H14.71L14.43,13.73C15.41,12.59 16,11.11 16,9.5A6.5,6.5 0 0,0 9.5,3A6.5,6.5 0 0,0 3,9.5A6.5,6.5 0 0,0 9.5,16C11.11,16 12.59,15.41 13.73,14.43L14,14.71V15.5L19,20.5L20.5,19L15.5,14M9.5,14C7,14 5,12 5,9.5C5,7 7,5 9.5,5C12,5 14,7 14,9.5C14,12 12,14 9.5,14Z"/>
               </svg>
@@ -45,11 +43,11 @@
         <div class="tab-content" id="mcpPageTabContent">
 
           <!-- ════════════ MY SERVERS TAB ════════════ -->
-          <div class="tab-pane fade show active" id="my-servers-pane" role="tabpanel">
+          <div class="tab-pane fade show active" id="my-servers-pane" role="tabpanel" aria-labelledby="my-servers-tab">
 
-            <div class="modern-card p-4 mb-4">
-              <div class="d-flex align-items-center justify-content-between">
-                <h6 class="mb-0" style="color: var(--text-primary);">Configured Servers</h6>
+            <div class="mb-4">
+              <div class="ui-toolbar justify-content-between">
+                <h2 class="mcp-section-title">Configured Servers</h2>
                 <button id="addServerBtn" class="modern-btn modern-btn-primary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
@@ -59,7 +57,7 @@
               </div>
             </div>
 
-            <div class="modern-card p-4">
+            <div class="ui-section ui-section--quiet">
               <div id="mcpServersList">
                 <div class="text-center py-5">
                   <div class="spinner-border text-primary" role="status">
@@ -74,45 +72,43 @@
                   <path d="M4,6H20V16H4M20,18A2,2 0 0,0 22,16V6C22,4.89 21.1,4 20,4H4C2.89,4 2,4.89 2,6V16A2,2 0 0,0 4,18H0V20H24V18H20Z"/>
                 </svg>
                 <p style="color: var(--text-secondary);">No MCP servers configured</p>
-                <button class="modern-btn modern-btn-primary mt-2" onclick="document.getElementById('addServerBtn').click()">
-                  Add Your First Server
-                </button>
+                <p class="small text-muted">Use Add MCP Server to configure your first server.</p>
               </div>
             </div>
 
           </div><!-- /my-servers-pane -->
 
           <!-- ════════════ BROWSE TAB ════════════ -->
-          <div class="tab-pane fade" id="browse-pane" role="tabpanel">
+          <div class="tab-pane fade" id="browse-pane" role="tabpanel" aria-labelledby="browse-tab">
 
             <!-- Search & Filter Bar -->
-            <div class="modern-card p-4 mb-4">
+            <div class="ui-section p-3 mb-4">
               <div class="row g-3 align-items-end">
                 <div class="col-12 col-md-5">
-                  <label class="form-label small fw-semibold mb-1" style="color: var(--text-secondary);">Search</label>
+                  <label for="browseSearch" class="form-label">Search</label>
                   <div class="input-group">
                     <span class="input-group-text" style="background: var(--bg-tertiary); border-color: var(--border-color);">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
                         <path d="M15.5,14H14.71L14.43,13.73C15.41,12.59 16,11.11 16,9.5A6.5,6.5 0 0,0 9.5,3A6.5,6.5 0 0,0 3,9.5A6.5,6.5 0 0,0 9.5,16C11.11,16 12.59,15.41 13.73,14.43L14,14.71V15.5L19,20.5L20.5,19L15.5,14M9.5,14C7,14 5,12 5,9.5C5,7 7,5 9.5,5C12,5 14,7 14,9.5C14,12 12,14 9.5,14Z"/>
                       </svg>
                     </span>
-                    <input type="text" id="browseSearch" class="form-control" placeholder="Search servers..." style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);" oninput="filterSearch()">
+                    <input type="search" id="browseSearch" class="form-control" placeholder="Search servers..." oninput="filterSearch()">
                   </div>
                 </div>
                 <div class="col-12 col-md-4">
-                  <label class="form-label small fw-semibold mb-1" style="color: var(--text-secondary);">Source</label>
-                  <select id="browseSource" class="form-select" style="background: var(--bg-tertiary); border-color: var(--border-color); color: var(--text-primary);" onchange="filterSearch()">
+                  <label for="browseSource" class="form-label">Source</label>
+                  <select id="browseSource" class="form-select" onchange="filterSearch()">
                     <option value="all">All Sources</option>
                   </select>
                 </div>
-                <div class="col-12 col-md-3 d-flex gap-2 justify-content-md-end">
+                <div class="col-12 col-md-3 ui-actions justify-content-md-end">
                   <button class="modern-btn modern-btn-secondary" onclick="refreshRegistry()" id="refreshBtn">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                       <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
                     </svg>
                     Refresh
                   </button>
-                  <button class="modern-btn modern-btn-primary" onclick="showAddSourceModal()">
+                  <button id="addSourceBtn" class="modern-btn modern-btn-secondary" onclick="showAddSourceModal(this)">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                       <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
                     </svg>
@@ -148,26 +144,21 @@
             </div>
 
             <!-- Registry Sources Management (collapsible) -->
-            <div class="modern-card p-4 mt-4">
-              <div class="d-flex align-items-center justify-content-between" style="cursor: pointer;" onclick="toggleSourcesPanel()">
-                <h6 class="mb-0" style="color: var(--text-primary);">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-2">
-                    <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6Z"/>
-                  </svg>
-                  Registry Sources
-                </h6>
-                <svg id="sourcesChevron" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary); transition: transform 0.2s;">
+            <section class="ui-section ui-section--quiet mt-4" aria-labelledby="mcpSourcesToggle">
+              <button id="mcpSourcesToggle" type="button" class="modern-btn modern-btn-secondary mcp-sources-toggle" aria-expanded="false" aria-controls="sourcesPanel" onclick="toggleSourcesPanel()">
+                Registry Sources
+                <svg id="sourcesChevron" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                   <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
                 </svg>
-              </div>
-              <div id="sourcesPanel" style="display: none; margin-top: 1rem;">
+              </button>
+              <div id="sourcesPanel" class="mt-3" role="region" aria-labelledby="mcpSourcesToggle" hidden>
                 <div id="sourcesList">
                   <div class="text-center py-3">
                     <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
                   </div>
                 </div>
               </div>
-            </div>
+            </section>
 
           </div><!-- /browse-pane -->
 
@@ -178,12 +169,12 @@
   </div>
 
   <!-- Add Server Modal -->
-  <div class="modal fade" id="addServerModal" tabindex="-1">
+  <div class="modal fade" id="addServerModal" tabindex="-1" aria-labelledby="addServerTitle">
     <div class="modal-dialog modal-lg">
-      <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
-        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-          <h5 class="modal-title" style="color: var(--text-primary);">Add MCP Server</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="addServerTitle">Add MCP Server</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
           <!-- Tabs -->
@@ -204,7 +195,7 @@
             <!-- Marketplace Tab -->
             <div class="tab-pane fade show active" id="marketplace" role="tabpanel">
               <div class="mb-3">
-                <input type="text" id="marketplaceSearch" class="form-control" placeholder="Search servers..." style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                <input type="search" id="marketplaceSearch" class="form-control" placeholder="Search servers..." aria-label="Search marketplace servers">
               </div>
               <div id="marketplaceList" class="list-group" style="max-height: 400px; overflow-y: auto;">
                 <div class="text-center py-3">
@@ -217,26 +208,26 @@
             <div class="tab-pane fade" id="manual" role="tabpanel">
               <form id="manualConfigForm">
                 <div class="mb-3">
-                  <label class="form-label fw-semibold" style="color: var(--text-primary);">Server Name *</label>
-                  <input type="text" id="manualName" class="form-control" required placeholder="e.g., filesystem" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                  <label for="manualName" class="form-label">Server Name *</label>
+                  <input type="text" id="manualName" class="form-control" required placeholder="e.g., filesystem">
                 </div>
                 <div class="mb-3">
-                  <label class="form-label fw-semibold" style="color: var(--text-primary);">Command *</label>
-                  <input type="text" id="manualCommand" class="form-control" required placeholder="e.g., npx" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                  <label for="manualCommand" class="form-label">Command *</label>
+                  <input type="text" id="manualCommand" class="form-control" required placeholder="e.g., npx">
                 </div>
                 <div class="mb-3">
-                  <label class="form-label fw-semibold" style="color: var(--text-primary);">Arguments (JSON array)</label>
-                  <textarea id="manualArgs" class="form-control" rows="3" placeholder='["-y", "@modelcontextprotocol/server-filesystem", "/path"]' style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);"></textarea>
+                  <label for="manualArgs" class="form-label">Arguments (JSON array)</label>
+                  <textarea id="manualArgs" class="form-control" rows="3" placeholder='["-y", "@modelcontextprotocol/server-filesystem", "/path"]'></textarea>
                   <small class="form-text" style="color: var(--text-secondary);">Enter as JSON array, e.g., ["-y", "package-name"]</small>
                 </div>
                 <div class="mb-3">
-                  <label class="form-label fw-semibold" style="color: var(--text-primary);">Environment Variables (JSON object)</label>
-                  <textarea id="manualEnv" class="form-control" rows="3" placeholder='{"API_KEY": "value"}' style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);"></textarea>
+                  <label for="manualEnv" class="form-label">Environment Variables (JSON object)</label>
+                  <textarea id="manualEnv" class="form-control" rows="3" placeholder='{"KEY": "value"}'></textarea>
                   <small class="form-text" style="color: var(--text-secondary);">Enter as JSON object, e.g., {"KEY": "value"}</small>
                 </div>
                 <div class="mb-3">
-                  <label class="form-label fw-semibold" style="color: var(--text-primary);">Transport</label>
-                  <select id="manualTransport" class="form-select" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                  <label for="manualTransport" class="form-label">Transport</label>
+                  <select id="manualTransport" class="form-select">
                     <option value="stdio" selected>stdio</option>
                     <option value="sse">sse</option>
                   </select>
@@ -248,29 +239,32 @@
             <!-- Import File Tab -->
             <div class="tab-pane fade" id="import" role="tabpanel">
               <div class="mb-3">
-                <label class="form-label fw-semibold" style="color: var(--text-primary);">Upload Configuration File</label>
-                <input type="file" id="importFileInput" class="form-control" accept=".json,.yaml,.yml" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+                <label for="importFileInput" class="form-label">Upload Configuration File</label>
+                <input type="file" id="importFileInput" class="form-control" accept=".json,.yaml,.yml">
                 <small class="form-text" style="color: var(--text-secondary);">Upload a JSON or YAML file containing MCP server configurations</small>
               </div>
               <div id="importPreview" class="mt-3" style="display: none;">
                 <h6 style="color: var(--text-primary);">Preview:</h6>
-                <pre id="importPreviewContent" style="background: var(--bg-tertiary); padding: 1rem; border-radius: 4px; color: var(--text-primary); max-height: 300px; overflow-y: auto;"></pre>
+                <pre id="importPreviewContent" class="mcp-code-preview" tabindex="0" aria-label="Configuration preview"></pre>
               </div>
               <button id="importBtn" class="modern-btn modern-btn-primary w-100" style="display: none;">Import Servers</button>
             </div>
           </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="modern-btn modern-btn-secondary" data-bs-dismiss="modal">Cancel</button>
         </div>
       </div>
     </div>
   </div>
 
   <!-- Remove Confirmation Modal -->
-  <div class="modal fade" id="removeServerModal" tabindex="-1">
+  <div class="modal fade" id="removeServerModal" tabindex="-1" aria-labelledby="removeServerTitle">
     <div class="modal-dialog">
-      <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
-        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-          <h5 class="modal-title" style="color: var(--text-primary);">Confirm Removal</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="removeServerTitle">Confirm Removal</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body" style="color: var(--text-primary);">
           <p>Are you sure you want to remove <strong id="removeServerName"></strong>?</p>
@@ -285,21 +279,21 @@
   </div>
 
   <!-- Add Registry Source Modal -->
-  <div class="modal fade" id="addSourceModal" tabindex="-1">
+  <div class="modal fade" id="addSourceModal" tabindex="-1" aria-labelledby="addSourceTitle">
     <div class="modal-dialog">
-      <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
-        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-          <h5 class="modal-title" style="color: var(--text-primary);">Add Registry Source</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="addSourceTitle">Add Registry Source</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
           <div class="mb-3">
-            <label class="form-label fw-semibold" style="color: var(--text-primary);">Source Name *</label>
-            <input type="text" id="sourceNameInput" class="form-control" placeholder="My Custom Registry" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+            <label for="sourceNameInput" class="form-label">Source Name *</label>
+            <input type="text" id="sourceNameInput" class="form-control" placeholder="My Custom Registry">
           </div>
           <div class="mb-3">
-            <label class="form-label fw-semibold" style="color: var(--text-primary);">URL or GitHub shorthand *</label>
-            <input type="text" id="sourceUrlInput" class="form-control" placeholder="https://example.com/registry.json  or  user/repo" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: var(--text-primary);">
+            <label for="sourceUrlInput" class="form-label">URL or GitHub shorthand *</label>
+            <input type="text" id="sourceUrlInput" class="form-control" placeholder="https://example.com/registry.json  or  user/repo">
             <small class="form-text" style="color: var(--text-secondary);">Provide a URL to a JSON registry file, or a GitHub "user/repo" shorthand (expects main/registry.json).</small>
           </div>
         </div>
@@ -312,12 +306,12 @@
   </div>
 
   <!-- Server Details Modal -->
-  <div class="modal fade" id="serverDetailsModal" tabindex="-1">
+  <div class="modal fade" id="serverDetailsModal" tabindex="-1" aria-labelledby="serverDetailsTitle">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
-      <div class="modal-content" style="background: var(--bg-secondary); border: 1px solid var(--border-color);">
-        <div class="modal-header" style="border-bottom: 1px solid var(--border-color);">
-          <h5 class="modal-title" id="serverDetailsTitle" style="color: var(--text-primary);">Server Details</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="serverDetailsTitle">Server Details</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body" id="serverDetailsBody" style="color: var(--text-primary);"></div>
       </div>
@@ -327,55 +321,31 @@
   {{template "modals.tmpl" .}}
 
   <style>
-    /* Better text contrast for light mode */
-    [data-bs-theme="light"] .form-label,
-    [data-bs-theme="light"] .modal-title,
-    [data-bs-theme="light"] .modal-body {
-      color: #1e293b !important;
-    }
-
-    [data-bs-theme="light"] .form-text,
-    [data-bs-theme="light"] .text-muted {
-      color: #64748b !important;
-    }
-
-    [data-bs-theme="light"] .form-control::placeholder,
-    [data-bs-theme="light"] .form-select::placeholder {
-      color: #94a3b8 !important;
-    }
-
-    /* Category filter pills */
-    .category-pill {
-      background: var(--bg-tertiary);
-      border: 1px solid var(--border-color);
-      color: var(--text-secondary);
-      border-radius: 20px;
-      padding: 0.25rem 0.75rem;
-      font-size: 0.8rem;
-      transition: all 0.15s;
-    }
-    .category-pill:hover {
-      border-color: var(--primary-color, #6366f1);
-      color: var(--primary-color, #6366f1);
-    }
-    .category-pill.active {
-      background: var(--primary-color, #6366f1);
-      border-color: var(--primary-color, #6366f1);
-      color: #fff;
-    }
-
-    /* Browse server cards */
-    .browse-server-card {
+    .mcp-page .main-content-wrapper { background: var(--bg-primary); }
+    .mcp-section-title { margin: 0; font: 600 1rem var(--font-body); }
+    .mcp-wrap-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-3); justify-content: space-between; }
+    .mcp-server-copy { flex: 1 1 18rem; min-width: 0; overflow-wrap: anywhere; }
+    .mcp-page :is(.badge, .modal-title) { white-space: normal; overflow-wrap: anywhere; }
+    .mcp-metadata { color: var(--text-secondary); font-size: 0.875rem; overflow-wrap: anywhere; }
+    .mcp-sources-toggle { width: 100%; justify-content: space-between; }
+    .mcp-sources-toggle[aria-expanded="true"] #sourcesChevron { transform: rotate(180deg); }
+    .mcp-page .category-pill { border-radius: 999px; }
+    .mcp-page .category-pill.active {
       background: var(--bg-secondary);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 1rem;
-      transition: border-color 0.15s, box-shadow 0.15s;
+      color: var(--text-primary);
+      border-color: var(--focus-color);
+      box-shadow: inset 0 0 0 1px var(--focus-color);
     }
-    .browse-server-card:hover {
-      border-color: var(--primary-color, #6366f1);
-      box-shadow: 0 2px 8px rgba(99,102,241,0.12);
+    .mcp-code-preview { background: var(--bg-secondary); color: var(--text-primary); border-radius: var(--radius-sm); padding: var(--space-4); max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .mcp-info-list { margin: 0; }
+    .mcp-info-list > div { display: grid; grid-template-columns: minmax(7rem, 30%) minmax(0, 1fr); gap: var(--space-2); padding-block: var(--space-3); border-bottom: 1px solid var(--border-color); }
+    .mcp-info-list dt { font-weight: 600; color: var(--text-secondary); }
+    .mcp-info-list dd { margin: 0; min-width: 0; overflow-wrap: anywhere; color: var(--text-primary); }
+    @media (max-width: 480px) {
+      .mcp-info-list > div { grid-template-columns: minmax(0, 1fr); }
     }
+    .mcp-source-row { padding-block: var(--space-3); border-bottom: 1px solid var(--border-color); }
+    .mcp-page .marketplace-item { gap: var(--space-3); flex-wrap: wrap; cursor: default; }
 
     /* Rendered README / instructions markdown inside the details modal */
     .mcp-markdown {
@@ -386,14 +356,15 @@
     .mcp-markdown pre {
       background: var(--bg-tertiary);
       border: 1px solid var(--border-color);
-      border-radius: 6px;
-      padding: 0.75rem;
+      border-radius: var(--radius-sm);
+      padding: var(--space-3);
       overflow-x: auto;
     }
     .mcp-markdown code {
       background: var(--bg-tertiary);
       padding: 0.1rem 0.3rem;
-      border-radius: 4px;
+      border-radius: var(--radius-sm);
+      color: var(--text-primary);
     }
     .mcp-markdown pre code { background: transparent; padding: 0; }
     .mcp-markdown table { width: 100%; border-collapse: collapse; }
@@ -401,7 +372,7 @@
       border: 1px solid var(--border-color);
       padding: 0.35rem 0.5rem;
     }
-    .mcp-markdown a { color: var(--primary-color, #6366f1); }
+    .mcp-markdown a { color: var(--accent-text); }
     .mcp-markdown h1, .mcp-markdown h2, .mcp-markdown h3 { color: var(--text-primary); }
   </style>
 
@@ -414,6 +385,7 @@
   <script defer src="/js/modules/agents.js"></script>
   <script defer src="/js/modules/themeManager.js"></script>
   {{template "theme-init.tmpl" .}}
+  <script defer src="/js/modules/toast.js"></script>
   <script defer src="/js/mcp.js"></script>
 </body>
 </html>

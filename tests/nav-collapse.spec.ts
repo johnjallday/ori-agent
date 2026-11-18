@@ -1,4 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
+import { createWorkspace, removeOwnedWorkspace } from './helpers/ui-consistency';
 
 // The collapsed navigation (nav-collapse PRD FR1–FR3, FR6, FR10, FR13, FR22):
 // every page's top bar is Home, Agents and a Settings gear, no page renders the
@@ -43,14 +45,18 @@ async function visibleNavLinks(page: Page) {
 
 test.describe('Collapsed navigation', () => {
   let workspaceSlug = '';
+  let workspace: Awaited<ReturnType<typeof createWorkspace>> | null = null;
 
   test.beforeAll(async ({ request }) => {
-    const res = await request.post('/api/workspaces', {
-      data: { name: `Nav Collapse ${Date.now().toString(36)}`, description: '' }
-    });
-    expect(res.ok(), await res.text()).toBeTruthy();
-    const body = await res.json();
-    workspaceSlug = (body.folder || body.workspace).folder_slug;
+    workspace = await createWorkspace(request);
+    workspaceSlug = workspace.folder_slug;
+  });
+  test.beforeEach(async ({ page }) => {
+    await installLocalCdn(page);
+  });
+  test.afterAll(async ({ request }, info) => {
+    info.setTimeout(30_000);
+    if (workspace) await removeOwnedWorkspace(request, workspace);
   });
 
   for (const target of [

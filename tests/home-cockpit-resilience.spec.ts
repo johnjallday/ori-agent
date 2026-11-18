@@ -1,4 +1,14 @@
 import { test, expect, Page } from '@playwright/test';
+import { installLocalCdn } from './helpers/offline-cdn';
+import {
+  assertSandbox,
+  createWorkspace,
+  guardReadTour,
+  removeOwnedWorkspace
+} from './helpers/ui-consistency';
+
+let ownedWorkspaces: Awaited<ReturnType<typeof createWorkspace>>[] = [];
+let unexpectedReads: string[] | null = null;
 
 /**
  * Failure isolation and state retention for the Home cockpit
@@ -31,10 +41,9 @@ async function ensureWorkspace(page: Page): Promise<string> {
       ws?.id && String(ws.kind || '').toLowerCase() !== 'group'
   );
   if (existing?.id) return existing.id;
-  const res = await page.request.post('/api/workspaces', {
-    data: { name: `Resilience spec ${Date.now()}`, workspace_preset: 'general' }
-  });
-  return (await res.json())?.folder?.id;
+  const workspace = await createWorkspace(page.request);
+  ownedWorkspaces.push(workspace);
+  return workspace.id;
 }
 
 /** Every optional Today source, and what breaking it must NOT take down. */
@@ -48,8 +57,20 @@ const OPTIONAL_SOURCES = [
 ];
 
 test.describe('Home cockpit resilience', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, request }, info) => {
+    ownedWorkspaces = [];
+    await assertSandbox(request);
+    await installLocalCdn(page);
+    unexpectedReads =
+      /a failing |the cockpit shell renders before optional Today data resolves/.test(info.title)
+        ? await guardReadTour(page)
+        : null;
     await skipOnboarding(page);
+  });
+  test.afterEach(async ({ request }, info) => {
+    info.setTimeout(30_000);
+    for (const workspace of ownedWorkspaces) await removeOwnedWorkspace(request, workspace);
+    if (unexpectedReads) expect(unexpectedReads).toEqual([]);
   });
 
   for (const source of OPTIONAL_SOURCES) {
@@ -68,15 +89,15 @@ test.describe('Home cockpit resilience', () => {
       await page.keyboard.press('Escape');
       await expect(page.locator('#cockpitContextModal')).toBeHidden();
 
-      // Ask Ori, the view toggle, and Quick Capture all still work.
-      await expect(page.locator('#oriGuideMapTrigger')).toBeEnabled();
+      // Help, the view toggle, and Quick Capture all still work.
+      await expect(page.locator('#oriGuideLauncher')).toBeEnabled();
       await expect(page.locator('#cockpitCaptureBtn')).toBeVisible();
       await page.locator('[data-cockpit-view="tree"]').click();
       await expect(page.locator('#cockpitTree')).toBeVisible();
     });
   }
 
-  test('a failing workspace list offers Retry while Ask Ori stays usable', async ({ page }) => {
+  test('a failing workspace list offers Retry while Help stays usable', async ({ page }) => {
     let fail = true;
     await page.route('**/api/workspaces?tree=true', route => {
       if (fail) return route.fulfill({ status: 500, body: 'induced failure' });
@@ -87,7 +108,7 @@ test.describe('Home cockpit resilience', () => {
 
     // FR113: a bounded, retryable error — not a blank cockpit.
     await expect(page.locator('[data-cockpit-retry]')).toBeVisible();
-    await expect(page.locator('#oriGuideMapTrigger')).toBeEnabled();
+    await expect(page.locator('#oriGuideLauncher')).toBeEnabled();
     // Updates (Issue #334) must still be reachable while the workspace list
     // is failing — a broken fetch must not take the rest of the header down
     // with it.

@@ -1,5 +1,10 @@
 # Create New Agent Form - Design & Structure Guide
 
+> **Historical reference:** visual styling here is superseded by the
+> [Ori visual system](visual-system.md). Do not copy glass/gradient/hover-lift
+> treatments or treat these old paths, line numbers and form hosts as current.
+> Retain useful behavior examples only after checking the live shared form.
+
 ## Overview
 The Create New Agent form appears in two locations in your application:
 1. **Main Chat Page** - Modal in the sidebar (`addAgentModal`)

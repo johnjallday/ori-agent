@@ -684,6 +684,7 @@ type hqSetupRequest struct {
 	Timezone                string   `json:"timezone"`
 	ScheduleDays            []string `json:"schedule_days"`
 	ScheduleTime            string   `json:"schedule_time"`
+	ScheduleEnabled         *bool    `json:"schedule_enabled,omitempty"`
 	Scope                   string   `json:"scope"`
 	SelectedWorkspaceIDs    []string `json:"selected_workspace_ids"`
 	IncludeFutureWorkspaces bool     `json:"include_future_workspaces"`
@@ -749,7 +750,8 @@ func (h *Handler) SetupHQ(w http.ResponseWriter, r *http.Request) {
 			RequestID: body.RequestID, IfVersion: body.IfVersion,
 			HQName: body.Name, Timezone: body.Timezone,
 			ScheduleDays: body.ScheduleDays, ScheduleTime: body.ScheduleTime,
-			Scope: body.Scope, SelectedIDs: body.SelectedWorkspaceIDs,
+			ScheduleEnabled: body.ScheduleEnabled,
+			Scope:           body.Scope, SelectedIDs: body.SelectedWorkspaceIDs,
 			IncludeFuture: body.IncludeFutureWorkspaces, NotifyOnReady: body.NotifyOnReady,
 			Notes: body.Notes.choice(),
 		})

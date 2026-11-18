@@ -2909,28 +2909,10 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 
 /* Note Editor Modal */
 .note-title-input {
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
-  font-size: 16px;
-  font-weight: 500;
   flex: 1;
-  padding: 4px 8px;
-  border-radius: 4px;
-}
-
-.note-title-input:focus {
-  outline: none;
-  background: var(--bg-hover);
-}
-
-.note-title-input:focus-visible {
-  outline: 2px solid var(--primary-color);
-  outline-offset: 2px;
-}
-
-.note-title-input::placeholder {
-  color: var(--text-tertiary);
+  min-width: 0;
+  font-size: 1rem;
+  font-weight: 500;
 }
 
 .note-editor-toolbar {
@@ -2942,45 +2924,12 @@ body:has(.chat-info-bar) #currentAgentDisplay {
   background: var(--bg-secondary);
 }
 
-.note-toolbar-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.note-toolbar-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.note-toolbar-btn:focus-visible,
-.note-tab-button:focus-visible,
-.note-tab-close:focus-visible,
-.note-tab-strip-action:focus-visible,
-.note-rail-tab:focus-visible,
-.note-rail-note-item:focus-visible,
-.note-rail-new-note:focus-visible,
 .note-backlink-item:focus-visible,
 .note-live-line-rendered:focus-visible,
 .note-page-secondary-editor:focus-visible,
 .note-content-input:focus-visible {
   outline: 2px solid var(--primary-color);
   outline-offset: 2px;
-}
-
-.note-toolbar-btn.active {
-  background: rgba(42, 135, 98, 0.15);
-  color: var(--primary-color);
 }
 
 .note-toolbar-spacer {
@@ -3159,7 +3108,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 @media (max-width: 1100px) {
   /* On narrower viewports, the AI assist rail floats over the editor instead
      of pushing it narrow. The TOC rail stays in the grid (it's smaller). */
-  .note-editor-grid {
+  .note-editor-grid:not(.note-modal-editor-grid) {
     grid-template-columns: auto 1fr 0;
   }
   .note-assist-rail:not([hidden]) {
@@ -3642,7 +3591,7 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .note-status-saved {
-  color: var(--success-color, #10b981);
+  color: var(--success-text);
 }
 
 .note-status-saving {
@@ -3650,11 +3599,11 @@ body:has(.chat-info-bar) #currentAgentDisplay {
 }
 
 .note-status-unsaved {
-  color: var(--warning-color, #f59e0b);
+  color: var(--warning-text);
 }
 
 .note-status-error {
-  color: var(--danger-color, #ef4444);
+  color: var(--danger-text);
 }
 
 /* ============================================
@@ -5604,11 +5553,6 @@ body.task-modal-open {
   flex-wrap: wrap;
 }
 
-.note-toolbar-btn.ai-active {
-  background: rgba(42, 135, 98, 0.15);
-  color: var(--primary-color);
-}
-
 @media (max-width: 760px) {
   .note-ai-form-grid {
     grid-template-columns: 1fr;
@@ -6204,12 +6148,17 @@ body.task-modal-open {
    Workspace notes page
    ============================================================================= */
 
+html:has(.note-page) {
+  scroll-padding-top: calc(var(--navbar-offset, 76px) + var(--space-3));
+  scroll-padding-bottom: var(--ori-launcher-clearance-y, 88px);
+}
+
 .note-page {
   display: flex;
   flex-direction: column;
   /* Full viewport minus navbar; the editor grid expands inside this. */
-  height: calc(100vh - 56px);
-  height: calc(100dvh - 56px);
+  height: calc(100vh - var(--navbar-offset, 76px));
+  height: calc(100dvh - var(--navbar-offset, 76px));
   background: var(--bg-primary);
 }
 
@@ -6278,6 +6227,7 @@ body.task-modal-open {
 }
 
 .note-page-editor-grid {
+  grid-template-rows: minmax(0, 1fr);
   flex: 1 1 auto;
   /* Override the modal cap so the page fills the viewport. */
   max-height: none;
@@ -6291,6 +6241,7 @@ body.task-modal-open {
 .note-page-editor-grid .note-content-input,
 .note-page-editor-grid .note-preview-content {
   height: 100%;
+  min-height: 0;
   max-height: none;
 }
 
@@ -6298,6 +6249,8 @@ body.task-modal-open {
    default. The textarea inside is hidden via inline style. */
 .note-page-editor-grid .note-preview-content {
   display: block !important;
+  padding-bottom: calc(var(--ori-launcher-clearance-y, 88px) + var(--space-4));
+  scroll-padding-bottom: var(--ori-launcher-clearance-y, 88px);
 }
 
 .note-page-loading,
@@ -6470,9 +6423,9 @@ body.task-modal-open {
 .note-tab-strip {
   display: flex;
   align-items: stretch;
-  gap: 4px;
-  padding: 0 12px;
-  overflow-x: auto;
+  gap: var(--space-1);
+  padding: 0 var(--space-3);
+  min-width: 0;
 }
 
 .note-tab-strip[hidden] {
@@ -6481,34 +6434,25 @@ body.task-modal-open {
 
 .note-tab-list {
   display: flex;
+  flex-wrap: nowrap;
   align-items: stretch;
-  gap: 2px;
+  gap: var(--space-1);
   margin: 0;
-  padding: 0;
+  padding: 6px;
   list-style: none;
   flex: 1 1 auto;
   min-width: 0;
+  overflow-x: auto;
 }
 
 .note-tab {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-top-left-radius: 6px;
-  border-top-right-radius: 6px;
+  flex: 0 0 auto;
+  gap: var(--space-1);
   position: relative;
-  top: 1px; /* tuck into the bottom border when active */
-  max-width: 220px;
-  font-size: 12px;
-}
-
-.note-tab.is-active {
-  background: var(--bg-secondary, #ffffff);
-  border-color: var(--border-color, #e8eaed);
+  max-width: 240px;
+  min-width: 0;
 }
 
 .note-tab.is-dragging {
@@ -6559,25 +6503,15 @@ body.task-modal-open {
 }
 
 .note-tab-button {
-  background: none;
-  border: none;
-  padding: 6px 4px 6px 10px;
-  font: inherit;
-  color: var(--text-secondary, #5c5c5e);
-  cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 180px;
   text-align: left;
-  min-height: 28px;
-}
-
-.note-tab.is-active .note-tab-button {
-  color: var(--text-primary, #0a0a0a);
-  font-weight: 500;
 }
 
 .note-tab-label {
-  display: inline-block;
-  max-width: 160px;
+  display: block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -6585,22 +6519,8 @@ body.task-modal-open {
 }
 
 .note-tab-close {
-  background: none;
-  border: none;
-  padding: 2px 8px 2px 4px;
-  color: var(--text-secondary, #5c5c5e);
-  font-size: 16px;
-  line-height: 1;
-  cursor: pointer;
-  border-radius: 50%;
-  margin-right: 4px;
-  min-width: 28px;
-  min-height: 28px;
-}
-
-.note-tab-close:hover {
-  background: var(--bg-hover, rgba(42, 135, 98, 0.1));
-  color: var(--text-primary, #0a0a0a);
+  flex: none;
+  margin-right: var(--space-1);
 }
 
 .note-tab-strip-actions {
@@ -6611,23 +6531,11 @@ body.task-modal-open {
 }
 
 .note-tab-strip-action {
-  background: none;
-  border: none;
-  padding: 4px 6px;
-  color: var(--text-secondary, #5c5c5e);
-  cursor: pointer;
-  border-radius: 4px;
+  flex: none;
 }
 
-.note-tab-strip-action:hover {
-  background: var(--bg-hover, var(--bg-tertiary));
-  color: var(--text-primary);
-}
-
-.note-tab-strip-action:disabled,
 .note-tab-strip-action[aria-busy="true"] {
   cursor: progress;
-  opacity: 0.55;
 }
 
 /* Split-pane grid (single pane by default; two columns when split). */
@@ -6807,37 +6715,16 @@ body.task-modal-open {
 
 .note-rail-tab-strip {
   display: flex;
-  gap: 4px;
-  margin: 8px;
-  padding: 3px;
-  border: 1px solid var(--border-color, #e8eaed);
-  border-radius: 6px;
-  background: var(--bg-secondary, #f5f6f7);
+  gap: var(--space-1);
+  margin: var(--space-2);
+  padding: 0;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .note-rail-tab {
   flex: 1 1 0;
   min-width: 0;
-  background: transparent;
-  border: none;
-  border-radius: 4px;
-  padding: 5px 8px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-secondary, #5c5c5e);
-  cursor: pointer;
   text-align: center;
-}
-
-.note-rail-tab:hover {
-  color: var(--text-primary, #0a0a0a);
-  background: var(--bg-hover, rgba(42, 135, 98, 0.08));
-}
-
-.note-rail-tab.is-active {
-  color: var(--text-primary, #0a0a0a);
-  background: var(--bg-primary, #ffffff);
-  box-shadow: 0 1px 2px rgba(10, 10, 10, 0.08);
 }
 
 .note-rail-tab-pane {
@@ -6858,7 +6745,6 @@ body.task-modal-open {
 
 .note-rail-notes-search input {
   width: 100%;
-  font-size: 12px;
 }
 
 .note-rail-notes-list {
@@ -6873,26 +6759,8 @@ body.task-modal-open {
 .note-rail-note-item {
   display: block;
   width: 100%;
+  min-width: 0;
   text-align: left;
-  background: none;
-  border: 1px solid transparent;
-  padding: 6px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--text-primary, #0a0a0a);
-  cursor: pointer;
-}
-
-.note-rail-note-item:hover {
-  background: var(--bg-hover, var(--bg-tertiary));
-  border-color: var(--border-color, #e8eaed);
-}
-
-.note-rail-note-item.is-active {
-  background: color-mix(in srgb, var(--primary-color) 12%, var(--bg-secondary));
-  border-color: var(--primary-color, #6366f1);
-  color: var(--text-primary);
-  font-weight: 500;
 }
 
 .note-rail-note-name {
@@ -6903,19 +6771,7 @@ body.task-modal-open {
 }
 
 .note-rail-new-note {
-  margin: 6px 8px 10px;
-  padding: 6px 10px;
-  border: 1px dashed var(--border-color, #e8eaed);
-  background: transparent;
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--text-secondary, #5c5c5e);
-  cursor: pointer;
-}
-
-.note-rail-new-note:hover {
-  border-color: var(--border-light, var(--border-color));
-  color: var(--text-primary);
+  margin: var(--space-2) var(--space-2) var(--space-3);
 }
 
 /* When the rail is collapsed the tab strip and panes should hide too. The
@@ -6928,6 +6784,12 @@ body.task-modal-open {
 }
 
 @media (max-width: 900px) {
+  .note-page {
+    height: auto;
+    min-height: calc(100dvh - var(--navbar-offset, 76px));
+    padding-bottom: calc(var(--ori-launcher-clearance-y, 88px) + var(--space-4));
+  }
+
   .note-page-top-bar {
     padding: 8px 12px 0;
   }
@@ -6953,10 +6815,19 @@ body.task-modal-open {
 
   .note-page-editor-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    height: auto;
+    flex: none;
   }
 
   .note-page-editor-grid .note-editor-center {
     grid-column: 1;
+    height: clamp(400px, 70dvh, 720px);
+  }
+
+  .note-page-editor-grid .note-toc-rail:not([data-collapsed="true"]) {
+    height: 220px;
+    min-height: 220px;
   }
 
   .note-toc-rail,

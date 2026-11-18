@@ -481,7 +481,7 @@ export class AssistantProgramPage {
       const profileName = profile?.profile_name || binding?.agent_name;
       if (profileName) {
         const agentName = document.createElement('a');
-        agentName.className = 'assistant-program-role-agent';
+        agentName.className = 'assistant-program-role-agent modern-btn modern-btn-secondary';
         agentName.href = `/agents/${encodeURIComponent(profileName)}`;
         agentName.textContent = `Open ${profileName} →`;
         card.append(agentName);
@@ -552,7 +552,7 @@ export class AssistantProgramPage {
       const card = document.createElement('article');
       card.className = 'assistant-program-project-card';
       const link = document.createElement('a');
-      link.className = 'assistant-program-project';
+      link.className = 'assistant-program-project modern-btn modern-btn-secondary';
       if (project.id === this.program.project_id) link.classList.add('is-current');
       link.href = project.folder_slug ? workspaceRootURL(project.folder_slug) : '#';
       link.textContent = project.name || project.id;
@@ -817,7 +817,7 @@ export class AssistantProgramPage {
 
   newActionDialog(title, trigger) {
     const dialog = document.createElement('dialog');
-    dialog.className = 'assistant-program-action-dialog';
+    dialog.className = 'assistant-program-action-dialog ui-section';
     dialog.setAttribute('aria-label', title);
     const close = () => {
       if (dialog.open && typeof dialog.close === 'function') dialog.close();
@@ -841,6 +841,7 @@ export class AssistantProgramPage {
     caption.textContent = label;
     const input = document.createElement('input');
     input.type = type;
+    input.className = 'form-control';
     input.value = text(value);
     input.maxLength = type === 'number' || type === 'date' ? 32 : 240;
     wrapper.append(caption, input);
@@ -909,6 +910,7 @@ export class AssistantProgramPage {
     const statusCaption = document.createElement('span');
     statusCaption.textContent = 'Status';
     const status = document.createElement('select');
+    status.className = 'form-select';
     for (const value of ['planning', 'active', 'on_hold', 'complete', 'archived'])
       status.append(selectOption(value.replaceAll('_', ' '), value));
     status.value = record.fields?.status || 'planning';
@@ -920,13 +922,17 @@ export class AssistantProgramPage {
     const releaseDate = this.actionField('Release date', record.fields?.release_date || '', 'date');
     const blockers = document.createElement('label');
     blockers.className = 'assistant-program-action-field';
-    blockers.append(document.createElement('span'), document.createElement('textarea'));
+    const blockerInput = document.createElement('textarea');
+    blockerInput.className = 'form-control';
+    blockers.append(document.createElement('span'), blockerInput);
     blockers.firstChild.textContent = 'Blockers (one per line)';
     blockers.lastChild.value = (record.fields?.blockers || []).join('\n');
     blockers.lastChild.maxLength = 4096;
     const deliverables = document.createElement('label');
     deliverables.className = 'assistant-program-action-field';
-    deliverables.append(document.createElement('span'), document.createElement('textarea'));
+    const deliverableInput = document.createElement('textarea');
+    deliverableInput.className = 'form-control';
+    deliverables.append(document.createElement('span'), deliverableInput);
     deliverables.firstChild.textContent = 'Deliverables (one per line)';
     deliverables.lastChild.value = (record.fields?.deliverables || []).join('\n');
     deliverables.lastChild.maxLength = 4096;
@@ -935,6 +941,7 @@ export class AssistantProgramPage {
     const archiveCaption = document.createElement('span');
     archiveCaption.textContent = 'Archive review';
     const archive = document.createElement('select');
+    archive.className = 'form-select';
     for (const value of ['not_ready', 'ready', 'reviewed'])
       archive.append(selectOption(value.replaceAll('_', ' '), value));
     archive.value = record.fields?.archive_review_state || 'not_ready';
@@ -1043,7 +1050,9 @@ export class AssistantProgramPage {
     title.input.required = true;
     const description = document.createElement('label');
     description.className = 'assistant-program-action-field';
-    description.append(document.createElement('span'), document.createElement('textarea'));
+    const descriptionInput = document.createElement('textarea');
+    descriptionInput.className = 'form-control';
+    description.append(document.createElement('span'), descriptionInput);
     description.firstChild.textContent = 'Description';
     description.lastChild.maxLength = 8000;
     const stateLabel = document.createElement('label');
@@ -1051,6 +1060,7 @@ export class AssistantProgramPage {
     const stateCaption = document.createElement('span');
     stateCaption.textContent = 'Child Ticket state';
     const ticketState = document.createElement('select');
+    ticketState.className = 'form-select';
     ticketState.append(selectOption('Backlog', 'backlog'), selectOption('Ready', 'ready'));
     stateLabel.append(stateCaption, ticketState);
     const error = document.createElement('p');

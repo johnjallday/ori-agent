@@ -1907,6 +1907,7 @@ const GEN_BUTTON_ID = 'noteAIGenerateBtn';
 // Tracks whether the Generate panel is currently the active rail mode so
 // closeGeneratePanel knows to delegate to NoteAIAssist.render() afterward.
 let _generatePanelActive = false;
+let _generatePanelInvoker = null;
 
 function _genPanelEl() {
   return typeof document !== 'undefined' ? document.getElementById(GEN_PANEL_ID) : null;
@@ -1976,6 +1977,16 @@ export function getPanelSelection() {
 export function openGeneratePanel(selection = null) {
   const panel = _genPanelEl();
   if (!panel) return;
+  const active = document.activeElement;
+  const modal = panel.closest?.('.modal');
+  if (
+    active &&
+    active !== document.body &&
+    !panel.contains(active) &&
+    (!modal || modal.contains(active))
+  ) {
+    _generatePanelInvoker = active;
+  } else if (!_generatePanelActive) _generatePanelInvoker = _genToggleEl();
   _setGenerateExpanded(true);
   const usesAssistRail = _genPanelUsesAssistRail(panel);
   if (usesAssistRail) showRail('assist');
@@ -1995,7 +2006,7 @@ export function openGeneratePanel(selection = null) {
 // closeGeneratePanel hides the panel, clears its inputs, and restores the
 // rail to whatever the AI Assist module wants (cards, empty state, or
 // hidden entirely).
-export function closeGeneratePanel() {
+export function closeGeneratePanel({ restoreFocus = false } = {}) {
   if (typeof document === 'undefined') return;
   const panel = _genPanelEl();
   const promptInput = document.getElementById('noteAIPromptInput');
@@ -2018,11 +2029,20 @@ export function closeGeneratePanel() {
   if (_genPanelUsesAssistRail(panel) && typeof window !== 'undefined') {
     window.NoteAIAssist?.render?.();
   }
+  const invoker = _generatePanelInvoker;
+  _generatePanelInvoker = null;
+  if (restoreFocus) {
+    const target =
+      invoker && invoker.isConnected !== false && !invoker.closest?.('[hidden], .d-none')
+        ? invoker
+        : _genToggleEl();
+    target?.focus?.();
+  }
 }
 
 // toggleGeneratePanel flips open ↔ closed.
 export function toggleGeneratePanel() {
-  if (isGeneratePanelOpen()) closeGeneratePanel();
+  if (isGeneratePanelOpen()) closeGeneratePanel({ restoreFocus: true });
   else openGeneratePanel();
 }
 

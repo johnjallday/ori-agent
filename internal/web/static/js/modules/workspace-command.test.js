@@ -3918,9 +3918,8 @@ test('Operations Map keeps its dark base and uses crisp light surfaces', () => {
   );
   const lightBeltRule = css.match(/\[data-bs-theme="light"\] \.ws-cmd-map-belt\s*\{([\s\S]*?)\n\}/);
   const agentFieldRule = css.match(/(?:^|\n)\.ws-cmd-map-agent-field\s*\{([\s\S]*?)\n\}/);
-  const lightViewSwitchRule = css.match(
-    /\[data-bs-theme="light"\] \.ws-cmd-view-switch\s*\{([\s\S]*?)\n\}/
-  );
+  const controls = readFileSync(new URL('../../css/components.css', import.meta.url), 'utf8');
+  const sharedViewControl = controls.match(/\.btn,[\s\S]*?\.ws-cmd-view-btn\s*\{([\s\S]*?)\n\}/);
 
   assert.ok(baseRule, 'the base Operations Map rule must remain present');
   assert.ok(lightRule, 'light mode must override the Operations Map directly');
@@ -3928,10 +3927,7 @@ test('Operations Map keeps its dark base and uses crisp light surfaces', () => {
   assert.ok(lightHQRule, 'light mode must give HQ stations a dedicated surface');
   assert.ok(lightBeltRule, 'light mode must give the tool belt a dedicated surface');
   assert.ok(agentFieldRule, 'the Operations Map must define its specialist field');
-  assert.ok(
-    lightViewSwitchRule,
-    'light mode must give the workspace destinations a dedicated surface'
-  );
+  assert.ok(sharedViewControl, 'workspace destinations must use the shared control surface');
   assert.match(
     baseRule[1],
     /linear-gradient\(180deg, var\(--ws-panel\), #0c0d11 78%\)/,
@@ -3971,14 +3967,21 @@ test('Operations Map keeps its dark base and uses crisp light surfaces', () => {
     'specialist cards remain bounded at the narrow breakpoint'
   );
   assert.match(
-    lightViewSwitchRule[1],
-    /background: rgba\(255, 255, 255, 0\.92\);/,
-    'the light workspace destinations use a clean raised surface'
+    sharedViewControl[1],
+    /--bs-btn-bg: var\(--bg-primary\);/,
+    'destination controls use the opaque theme surface'
   );
   assert.match(
+    sharedViewControl[1],
+    /--bs-btn-color: var\(--text-primary\);/,
+    'inactive destinations keep theme-paired readable ink'
+  );
+  assert.match(sharedViewControl[1], /background: var\(--bs-btn-bg\);/);
+  assert.match(sharedViewControl[1], /color: var\(--bs-btn-color\);/);
+  assert.doesNotMatch(
     css,
-    /\[data-bs-theme="light"\] \.ws-cmd-view-btn\s*\{\s*color: var\(--ws-ink\);/,
-    'inactive light workspace destinations use dark ink'
+    /\[data-bs-theme="light"\] \.ws-cmd-view-btn\s*\{/,
+    'feature CSS must not replace the canonical control palette'
   );
   assert.match(
     css,

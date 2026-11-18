@@ -33,90 +33,31 @@
   outline-offset: 2px;
 }
 
-/* Visible focus ring for keyboard navigation */
-:focus-visible {
-  outline: 2px solid var(--primary-color);
+/* One opaque, theme-paired keyboard cue. A transparent shadow alone does not
+   establish contrast, especially on dark controls. Keep the ring outside. */
+:focus-visible,
+.btn:focus-visible,
+.modern-btn:focus-visible,
+.btn-check:focus-visible + .btn,
+.form-control:focus-visible,
+.form-select:focus-visible {
+  outline: 2px solid var(--focus-color);
   outline-offset: 2px;
 }
 
-/* Remove default outline for mouse users */
 :focus:not(:focus-visible) {
   outline: none;
 }
 
-/* Enhanced focus for buttons */
-.modern-btn:focus-visible,
 .btn:focus-visible,
-button:focus-visible {
-  outline: 2px solid var(--primary-color);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px rgba(21, 80, 57, 0.2);
+.modern-btn:focus-visible,
+.btn-check:focus-visible + .btn {
+  box-shadow: none;
 }
 
-/* Enhanced focus for inputs */
-.modern-input:focus-visible,
-.form-control:focus-visible,
-.form-select:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--primary-color);
-  outline-offset: 0;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(21, 80, 57, 0.15);
-}
+/* Shared static/interactive surface rules live in components.css. */
 
-/* Enhanced focus for links */
-a:focus-visible {
-  outline: 2px solid var(--primary-color);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-}
-
-/* Focus for cards and interactive containers */
-.modern-card:focus-visible,
-[role="button"]:focus-visible {
-  outline: 2px solid var(--primary-color);
-  outline-offset: 2px;
-}
-
-/* Dark mode focus adjustments */
-[data-bs-theme="dark"] :focus-visible {
-  outline-color: var(--primary-light);
-}
-
-[data-bs-theme="dark"] .modern-btn:focus-visible {
-  box-shadow: 0 0 0 4px rgba(31, 107, 78, 0.3);
-}
-
-/* Modern card styles */
-.modern-card {
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-  transition: all 0.3s ease;
-}
-
-.modern-card:hover {
-  background: rgba(255, 255, 255, 0.25);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
-  transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-[data-bs-theme="dark"] .modern-card {
-  background: rgba(10, 10, 10, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-[data-bs-theme="dark"] .modern-card:hover {
-  background: rgba(10, 10, 10, 0.6);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-/* Glassmorphism effect for navbar */
+/* Retained legacy glass surfaces; the shared navbar is opaque. */
 .glassmorphism {
   background: rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(20px);
@@ -127,24 +68,6 @@ a:focus-visible {
 [data-bs-theme="dark"] .glassmorphism {
   background: rgba(10, 10, 10, 0.4);
   border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-/* Navigation link styles */
-.nav-link-item {
-  position: relative;
-  font-weight: 500;
-  font-size: 0.95rem;
-}
-
-.nav-link-item:hover {
-  background: var(--bg-secondary) !important;
-  color: var(--text-primary) !important;
-}
-
-.nav-link-item:active,
-.nav-link-item.active {
-  background: var(--bg-tertiary) !important;
-  color: var(--text-primary) !important;
 }
 
 /* Plugin Pages Dropdown Styles */
@@ -191,152 +114,7 @@ a:focus-visible {
   border: 1px solid rgba(255, 255, 255, 0.6);
 }
 
-/* Modern Button Styles */
-.modern-btn {
-  border-radius: var(--radius-md);
-  font-weight: 500;
-  font-size: 13px;
-  padding: 0.5rem 1rem;
-  transition: all 0.2s ease;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  backdrop-filter: blur(10px);
-  position: relative;
-  overflow: hidden;
-}
-
-.modern-btn::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  transition: left 0.5s;
-}
-
-.modern-btn:hover::before {
-  left: 100%;
-}
-
-.modern-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
-  border-color: rgba(255, 255, 255, 0.3);
-}
-
-.modern-btn-primary {
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-light) 100%);
-  color: white;
-}
-
-.modern-btn-secondary {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-primary);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
-.modern-btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.2);
-  color: var(--text-primary);
-}
-
-[data-bs-theme="dark"] .modern-btn-secondary {
-  background: rgba(10, 10, 10, 0.3);
-  color: var(--text-primary);
-}
-
-[data-bs-theme="dark"] .modern-btn-secondary:hover {
-  background: rgba(10, 10, 10, 0.5);
-}
-
-/* Danger button - universal soft-red delete style */
-.modern-btn-danger {
-  background: rgba(239, 68, 68, 0.12);
-  color: #ef4444;
-  border: 1px solid rgba(239, 68, 68, 0.45);
-}
-
-.modern-btn-danger:hover {
-  background: rgba(239, 68, 68, 0.22);
-  color: #dc2626;
-  border-color: rgba(239, 68, 68, 0.7);
-}
-
-/* Ghost button - subtle, text-only appearance */
-.modern-btn-ghost {
-  background: transparent;
-  color: var(--text-primary);
-  border: 1px solid transparent;
-}
-
-.modern-btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
-}
-
-[data-bs-theme="dark"] .modern-btn-ghost:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.1);
-}
-
-/* Warning button - for caution actions */
-.modern-btn-warning {
-  background: linear-gradient(135deg, var(--warning-color) 0%, #d97706 100%);
-  color: #1f2128;
-  border: 1px solid rgba(245, 158, 11, 0.3);
-}
-
-.modern-btn-warning:hover {
-  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
-  box-shadow: 0 8px 25px rgba(245, 158, 11, 0.25);
-}
-
-/* Success button - for positive actions */
-.modern-btn-success {
-  background: linear-gradient(135deg, var(--success-color) 0%, #10b981 100%);
-  color: white;
-  border: 1px solid rgba(52, 211, 153, 0.3);
-}
-
-.modern-btn-success:hover {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-  box-shadow: 0 8px 25px rgba(52, 211, 153, 0.25);
-}
-
-/* Button sizes */
-.modern-btn-sm {
-  padding: 0.25rem 0.5rem;
-  font-size: 12px;
-}
-
-.modern-btn-icon {
-  padding: 0.4rem;
-  min-width: unset;
-}
-
-.modern-btn-icon.is-active {
-  background: rgba(31, 107, 78, 0.15);
-  border-color: rgba(31, 107, 78, 0.4);
-  color: #1f6b4e;
-}
-
-.modern-btn-lg {
-  padding: 0.75rem 1.5rem;
-  font-size: 15px;
-}
-
-/* Disabled button state */
-.modern-btn:disabled,
-.modern-btn.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-  pointer-events: none;
-}
+/* Button families and compatibility aliases live in components.css. */
 
 /* Chat route provenance badge */
 .chat-route-badge {
@@ -394,93 +172,7 @@ a:focus-visible {
    Standardized Form Input Styles
    ============================================ */
 
-/* Base form input - use for text inputs, textareas, selects */
-.form-input,
-.modern-input {
-  width: 100%;
-  padding: 0.625rem 0.875rem;
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 1.5;
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: var(--radius-md);
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-  backdrop-filter: blur(10px);
-}
-
-.form-input::placeholder,
-.modern-input::placeholder {
-  color: var(--text-muted);
-}
-
-.form-input:hover,
-.modern-input:hover {
-  border-color: rgba(255, 255, 255, 0.3);
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.form-input:focus,
-.modern-input:focus {
-  border-color: var(--primary-color);
-  background: rgba(255, 255, 255, 0.2);
-  box-shadow: 0 0 0 3px rgba(21, 80, 57, 0.15);
-  outline: none;
-}
-
-/* Dark mode input adjustments */
-[data-bs-theme="dark"] .form-input,
-[data-bs-theme="dark"] .modern-input {
-  background: rgba(31, 33, 40, 0.88);
-  border-color: rgba(92, 92, 94, 0.32);
-}
-
-[data-bs-theme="dark"] .form-input:hover,
-[data-bs-theme="dark"] .modern-input:hover {
-  background: rgba(31, 33, 40, 0.94);
-  border-color: rgba(31, 107, 78, 0.42);
-}
-
-[data-bs-theme="dark"] .form-input:focus,
-[data-bs-theme="dark"] .modern-input:focus {
-  background: rgba(10, 10, 10, 0.98);
-  border-color: var(--primary-light);
-  box-shadow: 0 0 0 3px rgba(31, 107, 78, 0.25);
-}
-
-/* Input sizes */
-.form-input-sm,
-.modern-input-sm {
-  padding: 0.375rem 0.625rem;
-  font-size: 13px;
-}
-
-.form-input-lg,
-.modern-input-lg {
-  padding: 0.875rem 1rem;
-  font-size: 15px;
-}
-
-/* Textarea specific */
-textarea.form-input,
-textarea.modern-input {
-  resize: vertical;
-  min-height: 80px;
-}
-
-/* Select specific */
-select.form-input,
-select.modern-input {
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23475569' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 0.75rem center;
-  padding-right: 2.5rem;
-}
+/* Input geometry, states and compatibility aliases live in components.css. */
 
 /* Search input styling */
 .form-input-search,
@@ -489,40 +181,6 @@ select.modern-input {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%2394a3b8' viewBox='0 0 24 24'%3E%3Cpath d='M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: 0.75rem center;
-}
-
-/* Disabled input state */
-.form-input:disabled,
-.modern-input:disabled,
-.form-input[readonly],
-.modern-input[readonly] {
-  opacity: 0.6;
-  cursor: not-allowed;
-  background: rgba(255, 255, 255, 0.05);
-}
-
-/* Invalid input state */
-.form-input.is-invalid,
-.modern-input.is-invalid,
-.form-input:invalid,
-.modern-input:invalid {
-  border-color: var(--danger-color);
-}
-
-.form-input.is-invalid:focus,
-.modern-input.is-invalid:focus {
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
-}
-
-/* Valid input state */
-.form-input.is-valid,
-.modern-input.is-valid {
-  border-color: var(--success-color);
-}
-
-.form-input.is-valid:focus,
-.modern-input.is-valid:focus {
-  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.15);
 }
 
 /* Form label styling */
@@ -537,14 +195,14 @@ select.modern-input {
 /* Required field indicator */
 .form-label.required::after {
   content: " *";
-  color: var(--danger-color);
+  color: var(--danger-text);
 }
 
 /* Form helper text */
 .form-helper {
   display: block;
   margin-top: 0.25rem;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--text-muted);
 }
 
@@ -552,8 +210,8 @@ select.modern-input {
 .form-error {
   display: block;
   margin-top: 0.25rem;
-  font-size: 12px;
-  color: var(--danger-color);
+  font-size: 13px;
+  color: var(--danger-text);
 }
 
 /* Character counter */
@@ -604,14 +262,7 @@ select.modern-input {
    Standardized Modal Styles
    ============================================ */
 
-/* Modal CSS Variables */
-:root {
-  --modal-padding: 1.25rem;
-  --modal-header-padding: 1rem 1.25rem;
-  --modal-footer-padding: 1rem 1.25rem;
-  --modal-border-radius: var(--radius-lg);
-  --modal-backdrop-opacity: 0.5;
-}
+/* Shared modal metrics live in variables.css. */
 
 /* Modal size variants */
 .modal-sm .modal-dialog {
@@ -630,30 +281,7 @@ select.modern-input {
   max-width: 900px;
 }
 
-/* Glassmorphism modal content */
-.modal-content {
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--modal-border-radius);
-  box-shadow: var(--shadow-xl);
-  backdrop-filter: blur(20px);
-}
-
-/* Modal header */
-.modal-header {
-  padding: var(--modal-header-padding);
-  border-bottom: 1px solid var(--border-color);
-  border-radius: var(--modal-border-radius) var(--modal-border-radius) 0 0;
-}
-
-.modal-title {
-  font-weight: 600;
-  font-size: 1.1rem;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
+/* Shared dialog surface/header/body/footer live in components.css. */
 
 /* Modal close button */
 .modal-header .btn-close {
@@ -670,22 +298,6 @@ select.modern-input {
 
 [data-bs-theme="dark"] .modal-header .btn-close {
   filter: invert(1);
-}
-
-/* Modal body */
-.modal-body {
-  padding: var(--modal-padding);
-  color: var(--text-primary);
-}
-
-/* Modal footer - standardized button order */
-.modal-footer {
-  padding: var(--modal-footer-padding);
-  border-top: 1px solid var(--border-color);
-  border-radius: 0 0 var(--modal-border-radius) var(--modal-border-radius);
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.75rem;
 }
 
 /* Cancel button always comes first (left), action button last (right) */
@@ -706,20 +318,11 @@ select.modern-input {
     max-width: calc(100% - 1rem);
   }
 
-  .modal-content {
-    border-radius: var(--radius-md);
-  }
-
   .modal-header,
   .modal-body,
   .modal-footer {
     padding: 1rem;
   }
-}
-
-/* Modal backdrop */
-.modal-backdrop {
-  background-color: rgba(0, 0, 0, var(--modal-backdrop-opacity));
 }
 
 /* ============================================
@@ -817,7 +420,7 @@ select.modern-input {
   width: 1rem;
   height: 1rem;
   margin: -0.5rem 0 0 -0.5rem;
-  border: 2px solid currentColor;
+  border: 2px solid var(--bs-btn-color, var(--text-primary));
   border-right-color: transparent;
   border-radius: 50%;
   animation: spinner-rotate 0.75s linear infinite;
@@ -940,26 +543,59 @@ h3,
   font-size: clamp(1.1rem, 2.5vw, 1.5rem);
 }
 
-/* Minimum touch target size (44x44px) */
-@media (max-width: 768px) {
+/* Size hit areas, not checkbox/radio artwork (nor range/color controls). */
+@media (max-width: 768px), (pointer: coarse) {
   button,
   .btn,
+  .btn-close,
   .modern-btn,
+  .ws-cmd-nav-btn,
+  .ws-cmd-view-btn,
   a.btn,
-  [role="button"],
-  input[type="checkbox"],
-  input[type="radio"],
-  .form-check-input {
+  .nav-link-item,
+  .ori-navbar-brand,
+  .nav-tabs .nav-link,
+  .nav-pills .nav-link,
+  [role="button"] {
     min-height: 44px;
     min-width: 44px;
   }
 
-  /* Smaller buttons get padding to meet touch target */
-  .btn-sm,
-  .modern-btn-sm {
-    padding: 0.625rem 0.875rem;
+  :is(.modern-input, .form-input, .form-control, .form-select):not(
+    :where([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="hidden"])
+  ) {
+    min-height: var(--touch-target);
   }
 
+  /* Bootstrap's adjacent label and native wrapping labels both activate the
+     input. Do not style hidden .btn-check radios or enlarge the glyph. */
+  .form-check-label,
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"]),
+  label:has(> input[type="color"]) {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .form-check:has(> .form-check-label) {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .form-check:has(> .form-check-label) > .form-check-input {
+    flex-shrink: 0;
+    margin-top: 0;
+  }
+
+  /* The touch floor above provides the target. Compact button padding remains
+     owned by components.css instead of silently changing on narrow screens. */
+}
+
+@media (max-width: 768px) {
   /* Chat input reduced height on mobile */
   #input,
   .chat-input {
@@ -1144,16 +780,15 @@ h3,
    Navigation Indicators
    ============================================ */
 
-/* Active page indicator in navbar */
-.nav-link-item.active,
-.nav-link.active {
+/* Retained standalone legacy links; Bootstrap tabs/pills have one owner in
+   components.css, including their selected foreground and underline. */
+.nav-link.active:not(:where(.nav-tabs .nav-link, .nav-pills .nav-link)) {
   position: relative;
   background: var(--bg-tertiary) !important;
   color: var(--text-primary) !important;
 }
 
-.nav-link-item.active::after,
-.nav-link.active::after {
+.nav-link.active:not(:where(.nav-tabs .nav-link, .nav-pills .nav-link))::after {
   content: "";
   position: absolute;
   bottom: 0;
@@ -1483,41 +1118,8 @@ h3,
   height: 12px;
 }
 
-/* Ensure badges have sufficient contrast */
-.badge-success,
-.bg-success {
-  background-color: var(--success-color) !important;
-}
-
-.badge-danger,
-.bg-danger {
-  background-color: var(--danger-color) !important;
-}
-
-.bg-warning {
-  background-color: var(--warning-color) !important;
-  color: #1f2128 !important;
-}
-
-/* Badge Styles */
-.modern-badge {
-  display: inline-flex;
-  align-items: center;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.badge-secondary {
-  background: rgba(255, 255, 255, 0.15);
-  color: rgba(0, 0, 0, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.25);
-}
-
-[data-bs-theme="dark"] .badge-secondary {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.85);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
+/* Badge variants live in components.css. Do not replace Bootstrap's paired
+   bg-success/bg-danger colors with low-contrast artwork swatches. */
 
 /* ============================================
    Toast Notification Styles
@@ -1527,12 +1129,40 @@ h3,
   position: fixed;
   bottom: 20px;
   right: 20px;
-  z-index: 11050;
+  z-index: var(--app-toast-layer);
   display: flex;
   flex-direction: column-reverse;
   gap: 10px;
   max-width: 400px;
   pointer-events: none;
+}
+
+/* Feedback created by an open Bootstrap modal participates in its layout,
+   rather than covering the footer or escaping the modal's focus trap. Earlier
+   page notifications remain below the modal backdrop. */
+.modal-content > .toast-container--modal {
+  position: static;
+  z-index: auto;
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(35vh, 12rem);
+  overflow-y: auto;
+  padding: 0 var(--modal-padding);
+}
+
+.modal-content > .toast-container--modal:empty {
+  display: none;
+}
+
+.toast-container--modal .toast {
+  flex-shrink: 0;
+  width: 100%;
+  min-width: 0;
+  margin-block: var(--space-2);
+  box-shadow: none;
+  border: 1px solid var(--control-border);
 }
 
 .toast {
@@ -1738,7 +1368,9 @@ h3,
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    /* A nonzero duration also animates elements whose default transition
+       property is "all", briefly separating theme foreground/backdrop pairs. */
+    transition-duration: 0s !important;
     scroll-behavior: auto !important;
   }
 

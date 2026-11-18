@@ -1,19 +1,10 @@
 import { expect, type Page } from '@playwright/test';
 
-// Model desktop 200% zoom with its effective 720px CSS viewport and 2x DPR.
-// Unlike CSS zoom, this also exercises the correct responsive breakpoints.
-// This is Chromium reflow evidence, not a browser-chrome/AT certification.
+// Check 1440×1100 at 200%'s equivalent 720×550 CSS reflow viewport in either
+// engine. DPR/device-metrics emulation is not browser zoom and adds no reflow
+// coverage. Native browser-chrome zoom and AT certification remain separate.
 export async function checkNextActionReflow(page: Page, selector: string) {
   await page.setViewportSize({ width: 720, height: 550 });
-  const client = await page.context().newCDPSession(page);
-  await client.send('Emulation.setDeviceMetricsOverride', {
-    width: 720,
-    height: 550,
-    deviceScaleFactor: 2,
-    mobile: false,
-    screenWidth: 1440,
-    screenHeight: 1100
-  });
   const bounds = await page.locator(selector).evaluateAll(roots =>
     roots.flatMap(root =>
       [...root.querySelectorAll<HTMLElement>('a, button, input, select, textarea, summary')]

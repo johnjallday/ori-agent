@@ -131,8 +131,11 @@ test.describe('Workspace Backlog', () => {
       await expect(card).toBeVisible();
       await expect(card.locator('.ticket-state-chip')).toHaveText('Ready');
     } finally {
-      // Preserve a failed assertion rather than masking it with teardown timeout.
-      await page.request.delete(`/api/orchestration/workspace?id=${workspaceId}`).catch(() => {});
+      // Owned visual checkpoints retain their complete sandbox for inspection.
+      // Normal runs preserve an assertion rather than masking it with teardown timeout.
+      if (process.env.ORI_UI_RETAIN_FIXTURES !== '1') {
+        await page.request.delete(`/api/orchestration/workspace?id=${workspaceId}`).catch(() => {});
+      }
     }
   });
 });

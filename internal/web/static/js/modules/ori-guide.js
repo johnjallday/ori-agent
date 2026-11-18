@@ -752,10 +752,14 @@
     applyPointer(el);
     emit('coachmark', { key: key, resolved: true });
     var moveFocus = !(opts && opts.focus === false);
-    if (moveFocus) focusCoachmark(key, el, false);
+    // Focus must not center-scroll before the deliberate reveal: on a narrow
+    // collection that pushed the nearby first-visit explanation under the navbar.
+    if (moveFocus) focusCoachmark(key, el, true);
     state.coachmarkHeldFocus = coachmarkHoldsFocus(el);
     if (typeof el.scrollIntoView === 'function') {
-      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      var reducedMotion =
+        window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      el.scrollIntoView({ block: 'nearest', behavior: reducedMotion ? 'auto' : 'smooth' });
     }
   }
 

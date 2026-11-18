@@ -1,0 +1,49 @@
+{
+  "captureMode": "native-window-compositor",
+  "revision": "d052a96626a6fd025b13c1cc10e9e0a8dd4d9b2d",
+  "dirty": true,
+  "servedBuild": "group-6-native-quest",
+  "route": "/agents",
+  "viewport": {
+    "width": 720,
+    "height": 406
+  },
+  "engine": "chromium-native",
+  "theme": "light",
+  "fontMode": "real",
+  "loadedFaces": [
+    "Fraunces",
+    "Fraunces",
+    "Manrope",
+    "Manrope",
+    "Manrope",
+    "bootstrap-icons"
+  ],
+  "computedFonts": {
+    "body": "Manrope, \"Segoe UI\", sans-serif",
+    "heading": "Fraunces, Georgia, serif"
+  },
+  "workspaceId": "bdeb1104-37c9-4de1-9e27-75bb6685b60a",
+  "nativeZoom": {
+    "mechanism": "Chrome Appearance > Page zoom 200%",
+    "before": {
+      "innerWidth": 1440,
+      "innerHeight": 813,
+      "outerWidth": 1440,
+      "outerHeight": 900,
+      "devicePixelRatio": 1,
+      "visualScale": 1,
+      "cssZoom": "1"
+    },
+    "after": {
+      "innerWidth": 720,
+      "innerHeight": 406,
+      "outerWidth": 1440,
+      "outerHeight": 900,
+      "devicePixelRatio": 2,
+      "visualScale": 1,
+      "cssZoom": "1"
+    }
+  },
+  "fixture": "Owned real definitions and native browser setting; metadata-only read tour, no execution. Profiles retained, not shared user browser state."
+}

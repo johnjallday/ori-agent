@@ -1,0 +1,95 @@
+{
+  "scope": "Current representative user journeys and sentinels, not complete app-wide/manual certification",
+  "fallback": {
+    "tests/ui-consistency-home-preferences.spec.ts": {
+      "passed": 8,
+      "log": ".tmp/ui-consistency/group-6-settled-journeys-fallback.log"
+    },
+    "tests/ui-consistency-agent-detail-persistence.spec.ts": {
+      "passed": 4,
+      "log": ".tmp/ui-consistency/group-6-journeys-fallback.log"
+    },
+    "tests/ui-consistency-workspace.spec.ts": {
+      "passed": 16,
+      "log": ".tmp/ui-consistency/group-6-journeys-fallback.log"
+    },
+    "tests/ui-consistency-workspace-ticket-persistence.spec.ts": {
+      "passed": 4,
+      "log": ".tmp/ui-consistency/group-6-home-ticket-fallback.log",
+      "arrival": "Real Home Map tile -> native workspace link -> manual Ticket create/edit/reopen/cancel"
+    },
+    "tests/ui-consistency-workspace-note-persistence.spec.ts": {
+      "passed": 4,
+      "log": ".tmp/ui-consistency/group-6-journeys-fallback.log"
+    },
+    "tests/ui-consistency-workspace-plan-persistence.spec.ts": {
+      "passed": 4,
+      "log": ".tmp/ui-consistency/group-6-journeys-fallback.log"
+    },
+    "tests/ui-consistency-workspace-plan-conflicts.spec.ts": {
+      "passed": 8,
+      "log": ".tmp/ui-consistency/group-6-journeys-fallback.log"
+    },
+    "tests/ui-consistency-navigation.spec.ts": {
+      "passed": 40,
+      "log": ".tmp/ui-consistency/group-6-journeys-fallback.log"
+    },
+    "utilities": {
+      "passed": 12,
+      "log": ".tmp/ui-consistency/group-6-settled-utilities-fallback.log"
+    },
+    "pilot": {
+      "passed": 8,
+      "log": ".tmp/ui-consistency/group-6-pilot-journeys-fallback.log"
+    }
+  },
+  "intended_fonts": {
+    "tests/ui-consistency-agent-detail-persistence.spec.ts": {
+      "passed": 4,
+      "log": ".tmp/ui-consistency/group-6-journeys-fonts.log"
+    },
+    "tests/ui-consistency-workspace.spec.ts": {
+      "passed": 16,
+      "log": ".tmp/ui-consistency/group-6-journeys-fonts.log"
+    },
+    "tests/ui-consistency-workspace-note-persistence.spec.ts": {
+      "passed": 4,
+      "log": ".tmp/ui-consistency/group-6-journeys-fonts.log"
+    },
+    "tests/ui-consistency-workspace-plan-persistence.spec.ts": {
+      "passed": 4,
+      "log": ".tmp/ui-consistency/group-6-journeys-fonts.log"
+    },
+    "tests/ui-consistency-workspace-plan-conflicts.spec.ts": {
+      "passed": 8,
+      "log": ".tmp/ui-consistency/group-6-journeys-fonts.log"
+    },
+    "tests/ui-consistency-navigation.spec.ts": {
+      "passed": 40,
+      "log": ".tmp/ui-consistency/group-6-journeys-fonts.log"
+    },
+    "tests/ui-consistency-home-preferences.spec.ts": {
+      "passed": 8,
+      "log": ".tmp/ui-consistency/group-6-settled-journeys-fonts.log"
+    },
+    "tests/ui-consistency-workspace-ticket-persistence.spec.ts": {
+      "passed": 4,
+      "log": ".tmp/ui-consistency/group-6-home-ticket-fonts.log",
+      "arrival": "Real Home Map tile -> native workspace link -> manual Ticket create/edit/reopen/cancel"
+    },
+    "utilities": {
+      "passed": 12,
+      "log": ".tmp/ui-consistency/group-6-settled-utilities-fonts.log"
+    },
+    "pilot": {
+      "passed": 8,
+      "log": ".tmp/ui-consistency/group-6-pilot-journeys-fonts.log"
+    }
+  },
+  "counts": {
+    "fallback": 108,
+    "intended_fonts": 108
+  },
+  "rule": "Only complete passing spec sections count; later complete replacements supersede failed/partial sections. Native Home arrival replaces direct-arrival Ticket cases, not extra counts.",
+  "native_zoom": "NOT RUN: isolated headed/headless shortcut probes did not change viewport/DPR; equivalent CSS reflow is not native zoom."
+}

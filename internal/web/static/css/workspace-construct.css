@@ -61,34 +61,8 @@
   display: none !important;
 }
 
-/* Keep draft/success notifications visible without covering the wizard footer.
-   A bottom-right toast can sit directly over Review/Create; moving the stack
-   above the open modal also prevents hovering that blocked button from pausing
-   the toast indefinitely. */
-body:has(.workspace-create-modal.show) .toast-container {
-  top: 12px !important;
-  right: auto !important;
-  bottom: auto !important;
-  left: 50% !important;
-  width: min(400px, calc(100vw - 20px));
-  max-width: calc(100vw - 20px);
-  flex-direction: column;
-  transform: translateX(-50%);
-}
-
-body:has(.workspace-create-modal.show) .toast-container .toast {
-  box-sizing: border-box;
-  max-width: 100%;
-  transform: translateY(-100%);
-}
-
-body:has(.workspace-create-modal.show) .toast-container .toast.toast-enter {
-  transform: translateY(0);
-}
-
-body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
-  transform: translateY(-100%);
-}
+/* Modal feedback uses the shared in-flow host in common.css. A legacy
+   fixed-stack transform here would push that host outside this dialog. */
 
 /* ---------- chrome ---------- */
 .workspace-create-modal .modal-content {
@@ -2261,52 +2235,38 @@ body:has(.workspace-create-modal.show) .toast-container .toast.toast-exit {
 }
 .plugin-trust-summary {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 .plugin-trust-section-title {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  opacity: 0.85;
-  cursor: pointer;
-}
-.plugin-trust-section-title:focus-visible {
-  outline: 2px solid currentcolor;
-  outline-offset: 2px;
+  font-size: 13px;
+  font-weight: 600;
 }
 .plugin-trust-copy {
-  margin-left: 6px;
-  padding: 0 6px;
-  font: inherit;
-  color: inherit;
-  background: transparent;
-  border: 1px solid currentcolor;
-  border-radius: 4px;
-  cursor: pointer;
+  margin-left: var(--space-2);
 }
 .plugin-trust-list {
   margin: 4px 0 0;
   padding-left: 18px;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
 /* A command line is often long and unbroken. It must wrap: a command the user
    cannot read in full is a command they cannot meaningfully consent to. */
 .plugin-trust-list code {
+  color: inherit;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 .plugin-trust-value,
 .plugin-trust-empty {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 .plugin-trust-section.is-warning .plugin-trust-section-title,
 .plugin-trust-warning {
-  color: #e8b54b;
+  color: var(--warning-text);
 }
 
 .workspace-create-modal .workspace-review-readiness:empty,

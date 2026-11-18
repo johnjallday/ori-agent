@@ -64,7 +64,8 @@ test('next-action counts keep workspace tasks separate and disclose injected ref
   );
   await page.goto('/');
   const chip = page.locator('[data-cockpit-signal="attention"]');
-  await expect(chip).toContainText('Workspaces needing attention');
+  await expect(chip).toContainText('Attention');
+  await expect(chip).toHaveAccessibleName(/Workspaces needing attention/);
   await expect(chip).toContainText('1+');
   await page.getByRole('button', { name: 'Show Updates', exact: true }).click();
   const link = page.locator('#cockpitTodayAttention a.cockpit-today-link');

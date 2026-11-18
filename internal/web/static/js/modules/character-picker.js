@@ -89,13 +89,15 @@
 
   /* ---- rendering --------------------------------------------------------------- */
 
-  function cardHTML(ch, isSelected, isRecommended) {
+  function cardHTML(ch, isSelected, isRecommended, isTabStop) {
     var cls = 'char-card' + (isSelected ? ' is-selected' : '');
     return (
       '<button type="button" class="' +
       cls +
       '" role="radio" aria-checked="' +
       (isSelected ? 'true' : 'false') +
+      '" tabindex="' +
+      (isTabStop ? '0' : '-1') +
       '" data-char-id="' +
       esc(ch.id) +
       '">' +
@@ -139,9 +141,17 @@
     }
 
     var html = '';
+    var selectedVisible = state.filtered.some(function (ch) {
+      return ch.id === state.selectedId;
+    });
     for (var i = 0; i < state.filtered.length; i++) {
       var ch = state.filtered[i];
-      html += cardHTML(ch, ch.id === state.selectedId, ch.id === state.recommendedId);
+      html += cardHTML(
+        ch,
+        ch.id === state.selectedId,
+        ch.id === state.recommendedId,
+        ch.id === state.selectedId || (!selectedVisible && i === 0)
+      );
     }
     els.grid.innerHTML = html;
     renderPreview();
@@ -222,50 +232,45 @@
     if (!host) return null;
 
     host.innerHTML =
-      '<div class="char-picker" id="charPicker" role="dialog" aria-modal="true" ' +
+      '<dialog class="char-picker ui-section" id="charPicker" aria-modal="true" ' +
       'aria-labelledby="charPickerTitle">' +
       '<header class="char-picker__head">' +
       '<h3 class="char-picker__title" id="charPickerTitle">Choose a character</h3>' +
-      '<button type="button" class="char-picker__close" id="charPickerClose" ' +
+      '<button type="button" class="char-picker__close modern-btn modern-btn-quiet modern-btn-icon" id="charPickerClose" ' +
       'aria-label="Close character picker">&times;</button>' +
       '</header>' +
       '<p class="char-picker__lede">Appearance only — this does not change how the ' +
       'agent works. Its name, role, model, tools, and permissions are unchanged.</p>' +
       '<div class="char-picker__controls">' +
       '<label class="visually-hidden" for="charPickerSearch">Search characters</label>' +
-      '<input type="search" id="charPickerSearch" class="char-picker__search" ' +
+      '<input type="search" id="charPickerSearch" class="char-picker__search modern-input" ' +
       'placeholder="Search by name, family, or look…" autocomplete="off">' +
       '<div class="char-picker__families" role="group" aria-label="Filter by family">' +
-      '<button type="button" class="char-picker__family is-active" data-family="">All</button>' +
-      '<button type="button" class="char-picker__family" data-family="resident">Residents</button>' +
-      '<button type="button" class="char-picker__family" data-family="familiar">Familiars</button>' +
-      '<button type="button" class="char-picker__family" data-family="construct">Constructs</button>' +
+      '<button type="button" class="char-picker__family ui-filter modern-btn modern-btn-secondary modern-btn-sm is-active" aria-pressed="true" data-family="">All</button>' +
+      '<button type="button" class="char-picker__family ui-filter modern-btn modern-btn-secondary modern-btn-sm" aria-pressed="false" data-family="resident">Residents</button>' +
+      '<button type="button" class="char-picker__family ui-filter modern-btn modern-btn-secondary modern-btn-sm" aria-pressed="false" data-family="familiar">Familiars</button>' +
+      '<button type="button" class="char-picker__family ui-filter modern-btn modern-btn-secondary modern-btn-sm" aria-pressed="false" data-family="construct">Constructs</button>' +
       '</div>' +
       '</div>' +
       '<div class="char-picker__main">' +
       '<div class="char-picker__grid" id="charPickerGrid" role="radiogroup" ' +
       'aria-label="Available characters"></div>' +
-      '<aside class="char-preview" id="charPickerPreview"></aside>' +
+      '<aside class="char-preview" id="charPickerPreview" tabindex="0" aria-label="Character preview"></aside>' +
       '</div>' +
       // There is no voice control here, and no replacement for it. A character
       // is a picture; offering a toggle that implied otherwise is the promise
       // this feature removed (FR-19/FR-23).
       '<div class="char-picker__actions">' +
-      // These carry the picker's own classes rather than the roster's
-      // `.btn-ghost` / `.btn-primary`, which are defined only in
-      // agents-roster.css. Borrowing them left the picker's actions completely
-      // unstyled on every other host that opens it.
-      '<button type="button" class="char-picker__btn" id="charPickerCancel">Cancel</button>' +
-      '<button type="button" class="char-picker__btn" id="charPickerSkip">Skip for now</button>' +
-      '<button type="button" class="char-picker__btn char-picker__btn--primary" ' +
+      // Shared primitives load in every host, including nested create dialogs.
+      '<button type="button" class="char-picker__btn modern-btn modern-btn-secondary" id="charPickerCancel">Cancel</button>' +
+      '<button type="button" class="char-picker__btn modern-btn modern-btn-secondary" id="charPickerSkip">Skip for now</button>' +
+      '<button type="button" class="char-picker__btn modern-btn modern-btn-primary" ' +
       'id="charPickerConfirm">Choose character</button>' +
       '</div>' +
-      '</div>' +
-      '<div class="char-picker__backdrop" id="charPickerBackdrop"></div>';
+      '</dialog>';
 
     return {
       root: document.getElementById('charPicker'),
-      backdrop: document.getElementById('charPickerBackdrop'),
       close: document.getElementById('charPickerClose'),
       search: document.getElementById('charPickerSearch'),
       families: host.querySelectorAll('.char-picker__family'),
@@ -306,8 +311,12 @@
     applyFilter();
     wire();
 
-    // Focus the search box: typing is the fastest way through a grid.
-    if (els.search && typeof els.search.focus === 'function') els.search.focus();
+    // The top layer, not a guessed z-index, owns this nested decision. Native
+    // modal inertness also prevents an underlying Bootstrap focus trap from
+    // reclaiming focus and keeps the parent form/draft intact.
+    els.root.showModal();
+    if (els.search && typeof els.search.focus === 'function')
+      els.search.focus({ preventScroll: true });
 
     return new Promise(function (resolve) {
       state.resolve = resolve;
@@ -317,6 +326,7 @@
   function finish(result) {
     if (!state.open) return;
     state.open = false;
+    if (state.els && state.els.root.open) state.els.root.close();
 
     var host = document.getElementById('charPickerHost');
     if (host) host.innerHTML = '';
@@ -331,7 +341,7 @@
     // Focus returns to whatever opened the picker, so a keyboard user is not
     // dropped at the top of the page (FR-116).
     if (trigger && document.contains(trigger) && typeof trigger.focus === 'function') {
-      trigger.focus();
+      trigger.focus({ preventScroll: true });
     }
     if (resolve) resolve(result);
   }
@@ -346,6 +356,7 @@
         state.family = btn.getAttribute('data-family') || '';
         Array.prototype.forEach.call(els.families, function (b) {
           b.classList.toggle('is-active', b === btn);
+          b.setAttribute('aria-pressed', b === btn ? 'true' : 'false');
         });
         applyFilter();
       });
@@ -356,6 +367,31 @@
       if (!card) return;
       state.selectedId = card.getAttribute('data-char-id');
       renderGrid();
+      var selected = els.grid.querySelector('[aria-checked="true"]');
+      if (selected) selected.focus({ preventScroll: true });
+    });
+
+    els.grid.addEventListener('keydown', function (event) {
+      var card = event.target.closest('[data-char-id]');
+      if (!card || !state.filtered.length) return;
+      var at = state.filtered.findIndex(function (ch) {
+        return ch.id === card.getAttribute('data-char-id');
+      });
+      var step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+      var next =
+        event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? state.filtered.length - 1
+            : step
+              ? (at + step + state.filtered.length) % state.filtered.length
+              : -1;
+      if (next < 0) return;
+      event.preventDefault();
+      state.selectedId = state.filtered[next].id;
+      renderGrid();
+      var selected = els.grid.querySelector('[aria-checked="true"]');
+      if (selected) selected.focus({ preventScroll: true });
     });
 
     els.confirm.addEventListener('click', function () {
@@ -371,20 +407,60 @@
 
     els.cancel.addEventListener('click', cancel);
     els.close.addEventListener('click', cancel);
-    els.backdrop.addEventListener('click', cancel);
-    document.addEventListener('keydown', onKeydown);
+    // Native inertness owns the background; explicit edge wrapping keeps Tab
+    // inside this decision instead of transferring it to browser chrome.
+    els.root.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') {
+        // Preserve the picker's dismissal contract even when a native search
+        // field would consume the first Escape only to clear its query.
+        event.preventDefault();
+        event.stopPropagation();
+        cancel();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      var controls = Array.prototype.filter.call(
+        els.root.querySelectorAll('button, input, select, textarea, a[href], [tabindex]'),
+        function (node) {
+          return !node.disabled && node.tabIndex >= 0 && node.getClientRects().length;
+        }
+      );
+      if (!controls.length) return;
+      var first = controls[0],
+        last = controls[controls.length - 1];
+      if (
+        event.shiftKey &&
+        (document.activeElement === first || document.activeElement === els.root)
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+    els.root.addEventListener('cancel', function (event) {
+      event.preventDefault();
+      cancel();
+    });
+    els.root.addEventListener('close', function () {
+      if (state.els === els) cancel();
+    });
+    els.root.addEventListener('click', function (event) {
+      if (event.target !== els.root) return;
+      var bounds = els.root.getBoundingClientRect();
+      if (
+        event.clientX < bounds.left ||
+        event.clientX > bounds.right ||
+        event.clientY < bounds.top ||
+        event.clientY > bounds.bottom
+      )
+        cancel();
+    });
   }
 
   function cancel() {
     finish({ action: 'cancel' });
-  }
-
-  function onKeydown(event) {
-    if (!state.open) return;
-    if (event.key === 'Escape') {
-      event.stopPropagation();
-      cancel();
-    }
   }
 
   var api = {

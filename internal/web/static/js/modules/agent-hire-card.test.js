@@ -6,13 +6,47 @@ import vm from 'node:vm';
 const read = name => readFileSync(new URL(name, import.meta.url), 'utf8');
 
 function loadHire() {
-  const context = { console };
+  const context = { console, CSS: { escape: value => String(value) } };
   context.globalThis = context;
   vm.runInNewContext(read('./agent-hire-card.js'), context);
   return context.OriAgentHire;
 }
 
 const hire = loadHire();
+
+test('Hire/Advanced tabs keep shared and legacy active state in sync', () => {
+  const panels = new Map([
+    ['hire', {}],
+    ['advanced', {}]
+  ]);
+  const tabs = [...panels.keys()].map(id => ({
+    classes: new Set(),
+    attrs: { 'aria-controls': id },
+    getAttribute(name) {
+      return this.attrs[name];
+    },
+    setAttribute(name, value) {
+      this.attrs[name] = value;
+    },
+    ownerDocument: { getElementById: id => panels.get(id) }
+  }));
+  tabs.forEach(tab => {
+    tab.classList = {
+      toggle: (name, on) => (on ? tab.classes.add(name) : tab.classes.delete(name))
+    };
+  });
+  for (const selected of [tabs[1], tabs[0]]) {
+    hire.selectTab(tabs, selected);
+    for (const tab of tabs) {
+      const on = tab === selected;
+      assert.equal(tab.classes.has('active'), on);
+      assert.equal(tab.classes.has('is-active'), on);
+      assert.equal(tab.attrs['aria-selected'], String(on));
+      assert.equal(tab.tabIndex, on ? 0 : -1);
+      assert.equal(panels.get(tab.attrs['aria-controls']).hidden, !on);
+    }
+  }
+});
 
 // The catalog as GET /api/agents/catalog serves it (agentcatalog + hireCatalog).
 const catalog = {
@@ -391,4 +425,68 @@ test('the modal markup offers Hire and Advanced tabs, hidden until a page asks f
   const roster = read('../../../templates/pages/agents-roster.tmpl');
   assert.match(roster, /id="newAgentBtn"[\s\S]*?<\/span> Hire\s*<\/button>/);
   assert.match(roster, /agent-hire-card\.js/);
+});
+
+test('a pointer-selected role keeps focus after redraw and edited fields survive role changes', () => {
+  // Only the redraw/focus boundary is modelled here; native keyboard and hit
+  // geometry are exercised by the Chromium/WebKit browser cases.
+  const doc = { activeElement: null, createElement: () => node() };
+  function node() {
+    return {
+      dataset: {},
+      children: new Map(),
+      listeners: new Map(),
+      value: '',
+      append(child) {
+        this.child = child;
+      },
+      replaceChildren() {},
+      remove() {},
+      addEventListener(name, callback) {
+        this.listeners.set(name, callback);
+      },
+      querySelector(selector) {
+        if (!this.children.has(selector)) this.children.set(selector, node());
+        const child = this.children.get(selector);
+        if (selector === '[data-hire-roles]') child.roles = true;
+        return child;
+      },
+      focus() {
+        doc.activeElement = this;
+      },
+      set innerHTML(value) {
+        if (!this.roles) return;
+        if ([...this.children.values()].includes(doc.activeElement)) doc.activeElement = null;
+        this.children.clear();
+        for (const [, slug] of value.matchAll(/data-slug="([^"]+)"/g)) {
+          const button = node();
+          button.dataset.slug = slug;
+          button.closest = () => button;
+          this.children.set(`[data-slug="${slug}"]`, button);
+        }
+      }
+    };
+  }
+  const host = node();
+  hire.mountHireCard(host, {
+    catalog,
+    doc,
+    appearance: false,
+    fetchImpl: () => assert.fail('a role selection must not send requests')
+  });
+  const roles = host.child.querySelector('[data-hire-roles]');
+  const name = host.child.querySelector('#hireName');
+  name.value = 'A deliberately edited name';
+  name.focus();
+  name.listeners.get('input')();
+  const brief = host.child.querySelector('#hireBrief');
+  brief.value = 'Keep this user brief';
+  brief.listeners.get('input')();
+  const before = roles.querySelector('[data-slug="researcher"]');
+  before.focus();
+  roles.listeners.get('click')({ target: before });
+  assert.notEqual(doc.activeElement, before);
+  assert.equal(doc.activeElement, roles.querySelector('[data-slug="researcher"]'));
+  assert.equal(name.value, 'A deliberately edited name');
+  assert.equal(brief.value, 'Keep this user brief');
 });

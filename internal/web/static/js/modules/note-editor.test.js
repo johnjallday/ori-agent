@@ -34,8 +34,56 @@ import {
   NoteLiveEditor,
   mount,
   bindGenerateToggleButton,
+  openGeneratePanel,
+  closeGeneratePanel,
   readSelection
 } from './note-editor.js';
+
+for (const restoreFocus of [false, true])
+  test(`Ask AI close ${restoreFocus ? 'restores its native invoker' : 'does not steal focus during a programmatic switch'}`, t => {
+    const previous = globalThis.document;
+    t.after(() => {
+      if (previous === undefined) delete globalThis.document;
+      else globalThis.document = previous;
+    });
+    let focused = 'editor';
+    const editor = {
+      isConnected: true,
+      closest: () => null,
+      focus() {
+        focused = 'editor';
+      }
+    };
+    const panel = { hidden: true, style: {}, closest: () => null, contains: () => false };
+    const toggle = {
+      classList: { toggle() {} },
+      setAttribute() {},
+      focus() {
+        focused = 'toggle';
+      }
+    };
+    const prompt = {
+      value: '',
+      focus() {
+        focused = 'prompt';
+      }
+    };
+    const nodes = {
+      noteAIGeneratePanel: panel,
+      noteGenerateAIToggle: toggle,
+      noteAIPromptInput: prompt
+    };
+    globalThis.document = {
+      activeElement: editor,
+      body: {},
+      getElementById: id => nodes[id] || null
+    };
+    openGeneratePanel();
+    assert.equal(focused, 'prompt');
+    closeGeneratePanel({ restoreFocus });
+    assert.equal(focused, restoreFocus ? 'editor' : 'prompt');
+    assert.equal(panel.hidden, true);
+  });
 
 // =============================================================================
 // parseHeadingLevel

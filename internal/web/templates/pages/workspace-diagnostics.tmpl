@@ -13,12 +13,21 @@
 
   <div class="main-content-wrapper">
     <div class="main-content">
-      <div class="container-fluid py-4">
+      <div class="container-fluid py-4 ui-page ui-page--wide">
         <div id="workspace-diagnostics-view">
-          <!-- Header Card -->
-          <div class="modern-card p-3 mb-3">
-            <div class="d-flex justify-content-between align-items-center">
-              <div class="d-flex align-items-center gap-3">
+          <header class="ui-page-header diagnostics-header">
+            <div>
+              <nav aria-label="breadcrumb" class="diagnostics-breadcrumb">
+                <ol class="breadcrumb">
+                  <li class="breadcrumb-item"><a href="/">Home</a></li>
+                  <li class="breadcrumb-item"><a href="/workspaces/{{.Extra.WorkspaceSlug}}" id="workspace-breadcrumb-name">Workspace</a></li>
+                  <li class="breadcrumb-item active" aria-current="page">Diagnostics</li>
+                </ol>
+              </nav>
+              <h1>Diagnostics</h1>
+              <p>Check workspace references and UI routes without running agents.</p>
+            </div>
+            <div class="ui-actions">
                 <a href="/workspaces/{{.Extra.WorkspaceSlug}}" class="modern-btn modern-btn-secondary">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                     <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
@@ -26,36 +35,28 @@
                   Back to Workspace
                 </a>
 
-                <nav aria-label="breadcrumb">
-                  <ol class="breadcrumb mb-0" style="font-size: 0.875rem;">
-                    <li class="breadcrumb-item"><a href="/" style="color: var(--text-secondary); text-decoration: none;">Home</a></li>
-                    <li class="breadcrumb-item"><a href="/workspaces/{{.Extra.WorkspaceSlug}}" style="color: var(--text-secondary); text-decoration: none;" id="workspace-breadcrumb-name">Workspace</a></li>
-                    <li class="breadcrumb-item active" aria-current="page">Diagnostics</li>
-                  </ol>
-                </nav>
-              </div>
             </div>
-          </div>
+          </header>
 
           <!-- Workspace Health -->
-          <div class="modern-card workspace-detail-health-card mb-4" id="workspace-detail-health-panel">
+          <div class="ui-section workspace-detail-health-card mb-4" id="workspace-detail-health-panel">
             <div class="workspace-detail-health-header">
               <div>
                 <div class="workspace-detail-health-kicker">Workspace Health</div>
-                <h2 class="workspace-detail-health-title">Missing agents and broken file links</h2>
+                <h2 class="ui-section-title workspace-detail-health-title">Missing agents and broken file links</h2>
                 <p id="workspace-detail-health-summary" class="workspace-detail-health-summary">
                   Checking workspace agent references and linked files...
                 </p>
               </div>
               <div class="workspace-detail-health-controls">
-                <span id="workspace-detail-health-badge" class="workspace-detail-health-badge is-checking">Checking</span>
-                <button id="workspace-detail-health-refresh" class="workspace-detail-panel-btn" type="button" title="Run workspace health check">
+                <span id="workspace-detail-health-badge" class="badge workspace-detail-health-badge is-checking">Checking</span>
+                <button id="workspace-detail-health-refresh" class="modern-btn modern-btn-secondary workspace-detail-panel-btn" type="button" title="Run workspace health check">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
                   </svg>
                   <span id="workspace-detail-health-refresh-label">Run Health Check</span>
                 </button>
-                <button id="workspace-detail-ui-smoke-test" class="workspace-detail-panel-btn" type="button" title="Run UI smoke test">
+                <button id="workspace-detail-ui-smoke-test" class="modern-btn modern-btn-secondary workspace-detail-panel-btn" type="button" title="Run UI smoke test">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
                     <path d="M9,3H15V5H19A2,2 0 0,1 21,7V19A2,2 0 0,1 19,21H5A2,2 0 0,1 3,19V7A2,2 0 0,1 5,5H9V3M11,5H13V3H11V5M5,7V19H19V7H5M8,10.5L10.5,13L16,9L17.2,10.6L10.3,15.7L6.8,12.2L8,10.5Z"/>
                   </svg>
@@ -67,7 +68,7 @@
             <div id="workspace-detail-health-list" class="workspace-detail-health-list">
               <div class="workspace-detail-empty">Checking workspace health...</div>
             </div>
-            <div id="workspace-detail-ui-smoke-result" class="workspace-detail-ui-smoke-result d-none"></div>
+            <div id="workspace-detail-ui-smoke-result" class="workspace-detail-ui-smoke-result d-none" role="region" tabindex="0" aria-label="UI route check results"></div>
           </div>
         </div>
       </div>

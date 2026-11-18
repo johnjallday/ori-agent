@@ -774,7 +774,7 @@ export class WorkspaceRunPage {
           <article class="workspace-run-context-item">
             <div class="workspace-run-context-head">
               <strong>${escapeHtml(item?.name || formatKind(item?.kind))}</strong>
-              <span class="workspace-run-context-access" data-state="${escapeHtml(item?.access || '')}">
+              <span class="workspace-run-context-access modern-badge" data-state="${escapeHtml(item?.access || '')}">
                 ${escapeHtml(formatStatus(item?.access))}
               </span>
             </div>
@@ -822,7 +822,7 @@ export class WorkspaceRunPage {
       <article class="workspace-run-validation-item">
         <div class="workspace-run-validation-head">
           <strong>Run Output</strong>
-          <span class="workspace-run-validation-status" data-state="${escapeHtml(taskOutput.validation_status || taskOutput.storage_status || '')}">
+          <span class="workspace-run-validation-status modern-badge" data-state="${escapeHtml(taskOutput.validation_status || taskOutput.storage_status || '')}">
             ${escapeHtml(formatTaskOutputStatus(taskOutput))}
           </span>
         </div>
@@ -856,7 +856,7 @@ export class WorkspaceRunPage {
       <article class="workspace-run-validation-item">
         <div class="workspace-run-validation-head">
           <strong>${escapeHtml(check?.name || 'Check')}</strong>
-          <span class="workspace-run-validation-status" data-state="${escapeHtml(check?.status || '')}">
+          <span class="workspace-run-validation-status modern-badge" data-state="${escapeHtml(check?.status || '')}">
             ${escapeHtml(formatStatus(check?.status))}
           </span>
         </div>
@@ -896,7 +896,7 @@ export class WorkspaceRunPage {
         <article class="workspace-run-artifact">
           <div class="workspace-run-artifact-head">
             <strong>${escapeHtml(this.shortID(artifact?.id))}</strong>
-            <span class="workspace-run-artifact-kind">${escapeHtml(formatKind(artifact?.kind))}</span>
+            <span class="workspace-run-artifact-kind modern-badge">${escapeHtml(formatKind(artifact?.kind))}</span>
           </div>
           ${detailParts.length ? `<div class="workspace-run-artifact-copy">${escapeHtml(detailParts.join(' | '))}</div>` : ''}
           <div class="workspace-run-code">${escapeHtml(String(artifact?.id || ''))}</div>
@@ -937,7 +937,7 @@ export class WorkspaceRunPage {
         <article class="workspace-run-trace-item">
           <div class="workspace-run-trace-head">
             <strong>${escapeHtml(message)}</strong>
-            <span class="workspace-run-trace-kind">${escapeHtml(formatKind(event?.kind))}</span>
+            <span class="workspace-run-trace-kind modern-badge">${escapeHtml(formatKind(event?.kind))}</span>
           </div>
           ${meta ? `<div class="workspace-run-meta">${escapeHtml(meta)}</div>` : ''}
           ${event?.artifact_id ? `<div class="workspace-run-code">artifact ${escapeHtml(event.artifact_id)}</div>` : ''}
@@ -954,15 +954,15 @@ export class WorkspaceRunPage {
 
     if (ACTIVE_STATUSES.has(status)) {
       buttons.push(
-        `<button type="button" class="workspace-run-action-btn danger" data-run-action="stop">Stop</button>`
+        `<button type="button" class="workspace-run-action-btn danger modern-btn modern-btn-danger" data-run-action="stop">Stop</button>`
       );
     }
     if (status === 'awaiting_approval') {
       buttons.push(
-        `<button type="button" class="workspace-run-action-btn primary" data-run-action="approve">Approve</button>`
+        `<button type="button" class="workspace-run-action-btn primary modern-btn modern-btn-primary" data-run-action="approve">Approve</button>`
       );
       buttons.push(
-        `<button type="button" class="workspace-run-action-btn danger" data-run-action="reject">Reject</button>`
+        `<button type="button" class="workspace-run-action-btn danger modern-btn modern-btn-danger" data-run-action="reject">Reject</button>`
       );
     }
 
@@ -990,7 +990,8 @@ export class WorkspaceRunPage {
     try {
       let payload = null;
       if (action === 'reject') {
-        const reason = window.prompt('Reason for rejection (optional)') || '';
+        const reason = window.prompt('Reason for rejection (optional)');
+        if (reason === null) return;
         payload = { reason };
       }
       const response = await fetch(

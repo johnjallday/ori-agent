@@ -311,6 +311,7 @@
     tabs.forEach(tab => {
       const on = tab === chosen;
       tab.classList.toggle('is-active', on);
+      tab.classList.toggle('active', on);
       tab.setAttribute('aria-selected', on ? 'true' : 'false');
       tab.tabIndex = on ? 0 : -1;
       const panel = tab.ownerDocument.getElementById(tab.getAttribute('aria-controls'));
@@ -444,7 +445,7 @@
 
     els.roles.addEventListener('click', event => {
       const card = event.target.closest('[data-slug]');
-      if (card) chooseRole(card.dataset.slug);
+      if (card) chooseRole(card.dataset.slug, { focus: true });
     });
     // A radiogroup moves with the arrow keys.
     els.roles.addEventListener('keydown', event => {

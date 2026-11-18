@@ -68,6 +68,21 @@ func (s *Server) handleUISmokeTest(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, result)
 }
 
+// Validate the current command/ticket hosts and their controllers. The old
+// workspace-local composer/support-chat markers were intentionally retired.
+func workspaceDetailSmokeSpec(path string) uiSmokeCheckSpec {
+	return uiSmokeCheckSpec{
+		name: "Workspace detail page", path: path,
+		expectedStatuses: []int{http.StatusOK},
+		requiredSnippets: []string{
+			`id="workspaceCommandView"`,
+			`id="workspace-detail-tickets-surface"`,
+			`import { WorkspaceDetailPage } from '/js/modules/workspace-detail.js'`,
+			`import { WorkspaceCommandView } from '/js/modules/workspace-command.js'`,
+		},
+	}
+}
+
 func (s *Server) runUISmokeTest(workspaceID string) uiSmokeTestResponse {
 	startedAt := time.Now()
 	handler := s.Handler()
@@ -101,12 +116,7 @@ func (s *Server) runUISmokeTest(workspaceID string) uiSmokeTestResponse {
 	if workspaceSlug != "" {
 		escapedSlug := url.PathEscape(workspaceSlug)
 		specs = append(specs,
-			uiSmokeCheckSpec{
-				name:             "Workspace detail page",
-				path:             "/workspaces/" + escapedSlug,
-				expectedStatuses: []int{http.StatusOK},
-				requiredSnippets: []string{"hubSupportChat", "homeAssistantForm", "homeAssistantWorkspaceModeSwitch", "open-diagnostics-btn"},
-			},
+			workspaceDetailSmokeSpec("/workspaces/"+escapedSlug),
 			uiSmokeCheckSpec{
 				name:             "Workspace diagnostics page",
 				path:             "/workspaces/" + escapedSlug + "/diagnostics",

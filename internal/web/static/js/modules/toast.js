@@ -19,11 +19,22 @@ const Toast = (function () {
       container.setAttribute('aria-atomic', 'true');
       document.body.appendChild(container);
     }
-    // Ensure toast stack is always above modal stacks.
-    container.style.zIndex = '2147483647';
-    container.style.position = 'fixed';
-    container.style.right = '20px';
-    container.style.bottom = '20px';
+    // CSS owns the layer and responsive geometry. Existing page feedback is
+    // below a modal; feedback created inside one gets an in-flow host below.
+  }
+
+  function feedbackHost() {
+    const modal = document.querySelector('.modal.show .modal-content');
+    if (!modal) return container;
+    let host = modal.querySelector('.toast-container--modal');
+    if (!host) {
+      host = document.createElement('div');
+      host.className = 'toast-container toast-container--modal';
+      host.setAttribute('aria-live', 'polite');
+      host.setAttribute('aria-atomic', 'true');
+      modal.insertBefore(host, modal.querySelector('.modal-body'));
+    }
+    return host;
   }
 
   // Get icon SVG based on type
@@ -96,18 +107,15 @@ const Toast = (function () {
 
     const duration = options.duration || 5000;
     const toast = createToast(message, type, options);
+    const host = feedbackHost();
 
-    // Remove oldest toast if at max
-    while (container.children.length >= maxToasts) {
-      const oldest = container.firstChild;
-      if (oldest) {
-        oldest.classList.add('toast-exit');
-        setTimeout(() => oldest.remove(), 300);
-      }
+    // Remove synchronously: deferring removal inside a length-based loop
+    // never reduces the count and freezes the page at the sixth toast.
+    while (host.children.length >= maxToasts) {
+      removeToast(host.firstChild);
     }
 
-    // Add toast to container
-    container.appendChild(toast);
+    host.appendChild(toast);
 
     // Trigger entrance animation
     requestAnimationFrame(() => {
@@ -154,23 +162,30 @@ const Toast = (function () {
     return toast;
   }
 
+  function removeToast(toast) {
+    if (!toast?.parentNode) return;
+    // Removing the focused close/action button otherwise drops focus onto the
+    // page, outside Bootstrap's trap, and Escape no longer reaches the modal.
+    const modal = toast.contains(document.activeElement) ? toast.closest('.modal.show') : null;
+    toast.remove();
+    modal?.focus({ preventScroll: true });
+  }
+
   // Dismiss a toast
   function dismiss(toast) {
     if (!toast || !toast.parentNode) return;
 
     toast.classList.add('toast-exit');
-    setTimeout(() => {
-      if (toast.parentNode) {
-        toast.remove();
-      }
-    }, 300);
+    setTimeout(() => removeToast(toast), 300);
   }
 
   // Dismiss all toasts
   function dismissAll() {
     if (!container) return;
 
-    Array.from(container.children).forEach(toast => dismiss(toast));
+    document
+      .querySelectorAll('#toastContainer > .toast, .toast-container--modal > .toast')
+      .forEach(toast => dismiss(toast));
   }
 
   // Convenience methods

@@ -314,6 +314,8 @@ test('the review leads with the version change and its size, with accurate plura
   );
   const overview = content.children[0];
   assert.equal(overview.className, 'home-package-upgrade__overview');
+  assert.match(overview.children[0].children[0].className, /badge badge-secondary/);
+  assert.match(overview.children[0].children[3].className, /badge badge-secondary/);
   // Read aloud as "0.1.0 to 0.2.0"; the arrow is decoration.
   assert.equal(overview.children[0].textContent, '0.1.0→ to 0.2.0');
   assert.equal(overview.children[0].children[1].getAttribute('aria-hidden'), 'true');

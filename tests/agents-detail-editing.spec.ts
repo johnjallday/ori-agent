@@ -1,5 +1,15 @@
 import { test, expect, type APIRequestContext, type Page, type Request } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { guardReadTour } from './helpers/ui-consistency';
+import {
+  createOwnedAgent,
+  removeOwnedAgent,
+  type OwnedAgent
+} from './helpers/ui-consistency-owned-agent';
+
+const ownedReadOnly = process.env.ORI_UI_OWNED_AGENTS === '1';
+const ownedRecords = new Map<string, OwnedAgent>();
+let unexpectedReadTour: string[] | null = null;
 
 /**
  * Editing an existing agent on its full page (/agents/{name}).
@@ -14,6 +24,7 @@ import { installLocalCdn } from './helpers/offline-cdn';
  */
 
 test.beforeEach(async ({ page }) => {
+  unexpectedReadTour = null;
   await installLocalCdn(page);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.route('**/api/onboarding/status', route =>
@@ -21,8 +32,25 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
+test.afterEach(async ({ request }, info) => {
+  if (ownedReadOnly) {
+    info.setTimeout(30_000);
+    for (const owned of ownedRecords.values()) await removeOwnedAgent(request, owned);
+    ownedRecords.clear();
+  }
+  if (unexpectedReadTour) expect(unexpectedReadTour).toEqual([]);
+});
+
 let seq = 0;
 async function createAgent(request: APIRequestContext, prefix = 'PW Edit') {
+  if (ownedReadOnly) {
+    expect(test.info().title).toMatch(
+      /^(an invalid profile save leaves other drafts alone|a clean profile closes without asking)$/
+    );
+    const owned = await createOwnedAgent(request);
+    ownedRecords.set(owned.name, owned);
+    return owned.name;
+  }
   const name = `${prefix} ${Date.now()} ${++seq}`;
   const res = await request.post('/api/agents', {
     data: { name, model: 'gpt-4o-mini', system_prompt: 'Original prompt.', description: 'Original' }
@@ -38,10 +66,31 @@ async function detail(request: APIRequestContext, name: string) {
 }
 
 async function removeAgent(request: APIRequestContext, name: string) {
+  const owned = ownedRecords.get(name);
+  if (owned) return; // The opt-in adapter cleans up with its own afterEach budget.
   await request.delete(`/api/agents?name=${encodeURIComponent(name)}`).catch(() => undefined);
 }
 
 async function openAgent(page: Page, name: string) {
+  if (ownedReadOnly) {
+    unexpectedReadTour = await guardReadTour(page);
+    if (test.info().title === 'an invalid profile save leaves other drafts alone') {
+      const owned = ownedRecords.get(name)!;
+      // This case proves the real server's validation refusal, not a blocked
+      // transport or a fake save. Permit only this exact invalid-name attempt.
+      await page.route(`**/api/agents/${name}`, route => {
+        const body = route.request().postDataJSON();
+        if (
+          route.request().method() === 'PATCH' &&
+          body?.name === 'bad/name' &&
+          body.expected_version === owned.expected.version &&
+          Object.keys(body).every(key => ['name', 'expected_version'].includes(key))
+        )
+          return route.continue();
+        return route.fallback();
+      });
+    }
+  }
   await page.goto(`/agents/${encodeURIComponent(name)}`);
   await expect(page.locator('#agentName')).toHaveText(name);
 }
