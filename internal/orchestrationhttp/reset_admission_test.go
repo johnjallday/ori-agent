@@ -54,28 +54,6 @@ func (s *resetTaskFinalStore) Save(ws *workspace.Workspace) error {
 	return s.Store.Save(ws)
 }
 
-type resetSchedulerStore struct {
-	*resetTaskFinalStore
-	mu sync.Mutex
-	ws *workspace.Workspace
-}
-
-func (s *resetSchedulerStore) Get(id string) (*workspace.Workspace, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.ws == nil || s.ws.ID != id {
-		return nil, errors.New("workspace not found")
-	}
-	return s.ws, nil
-}
-
-func (s *resetSchedulerStore) Save(ws *workspace.Workspace) error {
-	s.mu.Lock()
-	s.ws = ws
-	s.mu.Unlock()
-	return s.resetTaskFinalStore.Save(ws)
-}
-
 func resetTaskWait[T any](t *testing.T, ch <-chan T) T {
 	t.Helper()
 	select {
@@ -100,7 +78,7 @@ func resetTaskIdle(t *testing.T, gate *resetstate.WorkGate) {
 }
 
 func TestResetAdmissionManualDispatchThroughFinalSave(t *testing.T) {
-	for _, kind := range []string{"manual", "manual_parent", "first_open", "assist", "assist_parent", "review", "review_parent", "scheduler", "manual_save_failure"} {
+	for _, kind := range []string{"manual", "manual_parent", "first_open", "assist", "assist_parent", "review", "review_parent", "manual_save_failure"} {
 		t.Run(kind, func(t *testing.T) {
 			f := resetfixture.New(t)
 			root := f.Paths().Workspaces
@@ -131,9 +109,6 @@ func TestResetAdmissionManualDispatchThroughFinalSave(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if kind == "scheduler" {
-				ws.ScheduledTasks = []workspace.ScheduledTask{{ID: "scheduled", CanvasNodeID: "node", TargetTaskID: "task"}}
-			}
 			if err := base.Save(ws); err != nil {
 				t.Fatal(err)
 			}
@@ -151,9 +126,6 @@ func TestResetAdmissionManualDispatchThroughFinalSave(t *testing.T) {
 				}
 			}
 			var taskStore workspace.Store = finalStore
-			if kind == "scheduler" {
-				taskStore = &resetSchedulerStore{resetTaskFinalStore: finalStore, ws: ws}
-			}
 			h := orchestrationhttp.NewTaskHandler(taskStore, agentcomm.NewCommunicator(taskStore), provider, nil)
 			h.SetAdmissionGate(gate)
 			finishProvider := sync.OnceFunc(func() { close(provider.release) })
@@ -175,8 +147,6 @@ func TestResetAdmissionManualDispatchThroughFinalSave(t *testing.T) {
 				handler, path, body, status = h.TasksPathHandler, "/api/orchestration/tasks/task/assist", `{"action":"retry"}`, http.StatusOK
 			case strings.HasPrefix(kind, "review"):
 				handler, path, body = h.TasksPathHandler, "/api/orchestration/tasks/task/review", `{"action":"rerun","history_index":0}`
-			case kind == "scheduler":
-				handler, path, status = h.SchedulerNodeTriggerHandler, "/scheduler-nodes/node/trigger?workspace_id="+ws.ID, http.StatusOK
 			}
 			srv := f.StartHTTP(t, handler)
 			resp, err := srv.Do(t.Context(), http.MethodPost, path, strings.NewReader(body))
@@ -259,7 +229,6 @@ func TestResetAdmissionTaskEntryRefusesBeforeOwners(t *testing.T) {
 		{h.ExecuteTaskHandler, "/execute"},
 		{h.TasksPathHandler, "/api/orchestration/tasks/task/assist"},
 		{h.TasksPathHandler, "/api/orchestration/tasks/task/review"},
-		{h.SchedulerNodeTriggerHandler, "/scheduler-nodes/node/trigger?workspace_id=workspace"},
 	} {
 		w := httptest.NewRecorder()
 		request.handle(w, httptest.NewRequest(http.MethodPost, request.path, strings.NewReader(`{}`)))

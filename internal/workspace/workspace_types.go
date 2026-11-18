@@ -324,7 +324,11 @@ func (w *Workspace) MissionLoaded() bool {
 	return w.missionLoaded
 }
 
-// CanvasLayout stores positions of tasks and agents on the canvas
+// CanvasLayout is a workspace's stored layout. The workspace canvas that drew
+// and saved the task, agent, attachment, scheduler, store, directory and folder
+// positions, the connections and the zoom is retired, so those fields are inert
+// stored data: nothing reads or writes them any more, and they stay only so an
+// older workspace file still decodes. StationPositions is the live part.
 type CanvasLayout struct {
 	TaskPositions       map[string]Position `json:"task_positions,omitempty"`       // task ID -> position
 	AgentPositions      map[string]Position `json:"agent_positions,omitempty"`      // agent node ID -> position (falls back to name for legacy layouts)
@@ -338,8 +342,7 @@ type CanvasLayout struct {
 	// this struct, values are FRACTIONAL coordinates in [0,1] relative to the
 	// command map's field, not canvas pixels — this keeps a saved position
 	// meaningful across viewport sizes. Written only by the scoped
-	// station-layout save path; the canvas layout save path must never touch
-	// this field (see SaveLayoutHandler / SaveStationLayoutHandler).
+	// station-layout save path (see SaveStationLayoutHandler).
 	StationPositions    map[string]Position        `json:"station_positions,omitempty"`
 	WorkflowConnections []WorkflowConnectionLayout `json:"workflow_connections,omitempty"` // connections between tasks/agents
 	Scale               float64                    `json:"scale,omitempty"`                // zoom level

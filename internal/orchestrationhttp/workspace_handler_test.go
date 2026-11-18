@@ -442,48 +442,6 @@ func TestSaveStationLayoutHandlerPreservesCanvasFields(t *testing.T) {
 	}
 }
 
-// TestSaveLayoutHandlerPreservesStationPositions covers the other direction
-// of the clobber regression (FR4): saving canvas layout must leave station
-// positions untouched, because SaveLayoutHandler's request struct never
-// carries station_positions and it assigns fields in-place onto ws.Layout.
-func TestSaveLayoutHandlerPreservesStationPositions(t *testing.T) {
-	store := workspace.NewInMemoryStore()
-	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{Name: "HQ Workspace"})
-	ws.ID = "hq-workspace"
-	ws.Layout = &workspace.CanvasLayout{
-		StationPositions: map[string]workspace.Position{
-			"email": {X: 0.92, Y: 0.15},
-		},
-	}
-	if err := store.Save(ws); err != nil {
-		t.Fatalf("Save workspace: %v", err)
-	}
-
-	handler := NewWorkspaceHandler(nil, store, workspace.NewEventBus(10, 10), nil)
-
-	body := `{"workspace_id":"hq-workspace","task_positions":{"task-1":{"x":400,"y":300}},"scale":1.5}`
-	req := httptest.NewRequest(http.MethodPut, "/api/orchestration/workspace/layout", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	handler.SaveLayoutHandler(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	saved, err := store.Get("hq-workspace")
-	if err != nil {
-		t.Fatalf("Get workspace: %v", err)
-	}
-	if saved.Layout == nil {
-		t.Fatalf("expected layout to survive canvas save")
-	}
-	if got := saved.Layout.TaskPositions["task-1"]; got.X != 400 || got.Y != 300 {
-		t.Fatalf("expected canvas task position saved, got %#v", got)
-	}
-	if got := saved.Layout.StationPositions["email"]; got.X != 0.92 || got.Y != 0.15 {
-		t.Fatalf("expected station position preserved across canvas save, got %#v", got)
-	}
-}
-
 // newLayoutHandler builds a workspace handler over the two stores a layout
 // save touches: a primary (SQLite-style) store that never carries a
 // designation, and a folder store whose copy of the same workspace does.
@@ -583,27 +541,5 @@ func TestSaveStationLayoutHandlerOrdinaryWorkspaceMemoryStation(t *testing.T) {
 	janitor, ok := stationPositions["file-janitor"].(map[string]any)
 	if !ok || janitor["x"] != 0.9 || janitor["y"] != 0.2 {
 		t.Fatalf("expected file-janitor station position {0.9, 0.2}, got %#v", stationPositions["file-janitor"])
-	}
-}
-
-// TestSaveLayoutHandlerPreservesDesignation is the same clobber guard for the
-// canvas layout save path.
-func TestSaveLayoutHandlerPreservesDesignation(t *testing.T) {
-	handler, store := newLayoutHandler(t, "hq-workspace", "HQ Workspace", "personal_hq")
-
-	body := `{"workspace_id":"hq-workspace","task_positions":{"task-1":{"x":10,"y":20}}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/orchestration/workspace/layout", strings.NewReader(body))
-	w := httptest.NewRecorder()
-	handler.SaveLayoutHandler(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	saved, err := store.Get("hq-workspace")
-	if err != nil {
-		t.Fatalf("Get workspace: %v", err)
-	}
-	if saved.Designation != "personal_hq" {
-		t.Fatalf("expected designation preserved across canvas save, got %q", saved.Designation)
 	}
 }

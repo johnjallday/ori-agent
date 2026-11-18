@@ -330,6 +330,37 @@ func TestWorkspaceCanvasRouteIsRetiredWhileOtherUnknownPagesRedirect(t *testing.
 	}
 }
 
+// The canvas layout save and the scheduler-node API are retired. The route
+// golden no longer lists the layout path, so this is what keeps them gone. The
+// station-layout write that the Personal HQ map still uses is a different,
+// live endpoint: it only accepts PUT, so a GET is refused rather than missing.
+func TestRetiredCanvasEndpointsStayGoneWhileStationLayoutRemains(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	do := func(method, path string) int {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader("{}")))
+		return rec.Code
+	}
+
+	for _, path := range []string{
+		"/api/orchestration/workspace/layout",
+		"/api/orchestration/workspaces/ws-1/scheduler-nodes",
+		"/api/orchestration/workspaces/ws-1/scheduler-nodes/node-1",
+		"/api/orchestration/workspaces/ws-1/scheduler-nodes/node-1/trigger",
+	} {
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+			if code := do(method, path); code != http.StatusNotFound {
+				t.Errorf("%s %s status = %d, want 404 (the endpoint is retired)", method, path, code)
+			}
+		}
+	}
+
+	if code := do(http.MethodGet, "/api/orchestration/workspace/station-layout"); code != http.StatusMethodNotAllowed {
+		t.Errorf("GET station-layout status = %d, want 405 (the route must stay registered)", code)
+	}
+}
+
 func TestWorkspaceDescendantPagesKeepUUIDStateSeparateFromSlugLinks(t *testing.T) {
 	handler := newRoutesTestHandler(t)
 	workspace := createRouteTestWorkspace(t, handler, "Descendant Route Workspace")

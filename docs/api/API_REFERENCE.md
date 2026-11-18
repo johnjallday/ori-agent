@@ -31,7 +31,7 @@ http://localhost:8765/api
 - [External Memory API](#external-memory-api)
 - [Home Library: Open a Song and the Shared Assistant](#home-library-open-a-song-and-the-shared-assistant)
 - [Workspace Outputs API](#workspace-outputs-api)
-- [Scheduler Nodes API](#scheduler-nodes-api)
+- [Scheduled Task Schedules and Events](#scheduled-task-schedules-and-events)
 - [Workspace Map Activity API](#workspace-map-activity-api)
 - [Custom Workflows API](#custom-workflows-api)
 - [Blueprint Intake API](#blueprint-intake-api)
@@ -3689,145 +3689,13 @@ Every answer carries `X-Content-Type-Options: nosniff` and `Content-Security-Pol
 
 A file named `tree` at the top of `outputs/` is listed but cannot be read: that address is the listing.
 
-## Scheduler Nodes API
+## Scheduled Task Schedules and Events
 
-Scheduler nodes enable automatic execution of tasks at scheduled times on the workspace canvas. They support various schedule types including cron expressions, intervals, daily/weekly schedules, and relative delays.
-
-### Create Scheduler Node
-
-Create a new scheduler node on the workspace canvas.
-
-**Endpoint:** `POST /api/orchestration/workspaces/:workspace_id/scheduler-nodes`
-
-**Request Body:**
-```json
-{
-  "name": "Daily Data Sync",
-  "prompt": "Sync data from external API",
-  "to": "data-agent",
-  "schedule_type": "cron",
-  "cron_expression": "0 9 * * *",
-  "enabled": true,
-  "x": 400,
-  "y": 300
-}
-```
-
-**Parameters:**
-- `name` (required): Display name for the scheduler node
-- `prompt` (required): Task description/prompt to execute
-- `to` (required): Target agent name to execute the task
-- `schedule_type` (required): One of: `"interval"`, `"daily"`, `"weekly"`, `"cron"`, `"relative_delay"`
-- `enabled` (optional): Whether scheduler is enabled (default: `true`)
-- `x`, `y` (optional): Canvas position coordinates
-
-**Schedule Type Parameters:**
-- For `interval`: `interval_minutes` (integer)
-- For `daily`: `time_of_day` (string, format: "HH:MM")
-- For `weekly`: `day_of_week` (integer, 0-6), `time_of_day` (string)
-- For `cron`: `cron_expression` (string, 5-field cron format)
-- For `relative_delay`: `delay_duration` (duration string, e.g., "5m", "1h")
-
-**Optional Parameters:**
-- `max_runs` (integer): Maximum number of executions (0 = unlimited)
-- `end_date` (string, ISO 8601): Stop executing after this date
-- `priority` (string): Task priority (`"low"`, `"medium"`, `"high"`)
-
-**Response:**
-```json
-{
-  "id": "sched-abc123",
-  "name": "Daily Data Sync",
-  "enabled": true,
-  "next_run": "2025-12-05T09:00:00Z",
-  "execution_count": 0,
-  "created_at": "2025-12-04T22:00:00Z"
-}
-```
-
-### Update Scheduler Node
-
-Update an existing scheduler node configuration.
-
-**Endpoint:** `PUT /api/orchestration/workspaces/:workspace_id/scheduler-nodes/:node_id`
-
-**Request Body:**
-```json
-{
-  "name": "Updated Name",
-  "enabled": false,
-  "cron_expression": "0 10 * * *"
-}
-```
-
-**Response:**
-```json
-{
-  "id": "sched-abc123",
-  "name": "Updated Name",
-  "enabled": false,
-  "next_run": null,
-  "execution_count": 5
-}
-```
-
-### Delete Scheduler Node
-
-Remove a scheduler node from the workspace.
-
-**Endpoint:** `DELETE /api/orchestration/workspaces/:workspace_id/scheduler-nodes/:node_id`
-
-**Response:**
-```json
-{
-  "success": true,
-  "message": "Scheduler node deleted"
-}
-```
-
-### Trigger Scheduler Node Manually
-
-Execute a scheduler node immediately, regardless of its schedule.
-
-**Endpoint:** `POST /api/orchestration/workspaces/:workspace_id/scheduler-nodes/:node_id/trigger`
-
-**Response:**
-```json
-{
-  "task_id": "task-xyz789",
-  "message": "Scheduler triggered successfully"
-}
-```
-
-### List Scheduler Nodes
-
-Get all scheduler nodes for a workspace.
-
-**Endpoint:** `GET /api/orchestration/workspaces/:workspace_id/scheduler-nodes`
-
-**Response:**
-```json
-{
-  "scheduler_nodes": [
-    {
-      "id": "sched-abc123",
-      "name": "Daily Data Sync",
-      "enabled": true,
-      "schedule_type": "cron",
-      "cron_expression": "0 9 * * *",
-      "next_run": "2025-12-05T09:00:00Z",
-      "last_run": "2025-12-04T09:00:00Z",
-      "execution_count": 5,
-      "x": 400,
-      "y": 300
-    }
-  ]
-}
-```
+A scheduled task runs a task at scheduled times. The schedule types are `once`, `interval`, `daily`, `weekly`, `monthly`, `cron` and `relative_delay`. This section covers the cron format scheduled tasks accept and the events they emit. The workspace canvas's scheduler nodes, and the `scheduler-nodes` endpoints that created them, are retired; scheduled tasks themselves are unchanged.
 
 ### Cron Expression Format
 
-Scheduler nodes support standard 5-field cron expressions:
+Scheduled tasks support standard 5-field cron expressions:
 
 ```
 * * * * *
@@ -3854,12 +3722,11 @@ Scheduler nodes support standard 5-field cron expressions:
 
 ### Real-Time Events
 
-Scheduler nodes emit Server-Sent Events (SSE) for real-time updates:
+Scheduled tasks emit Server-Sent Events (SSE) for real-time updates:
 
 **Event Types:**
-- `scheduled_task.triggered` - Scheduler executed and created a task
-- `scheduled_task.completed` - Scheduler execution completed successfully
-- `scheduled_task.failed` - Scheduler execution failed
+- `scheduled_task.triggered` - The schedule fired and created a task
+- `scheduled_task.failed` - A scheduled run failed
 
 **Event Data:**
 ```json

@@ -785,9 +785,9 @@ refusal → normal save completion → accepted admission → fenced ordinary me
 and retained sentinels. Real temporary file-store tests pause task, step and
 orchestrator final writes, prove admission stays busy without cancelling their
 contexts, and reopen the same files to verify normal completion. Manual task
-HTTP, first-open, assist/review reruns, parent sequences and legacy scheduler-node
-triggers register children before acknowledgment and retain them through final
-workspace saves, including failed saves. CLI HTTP similarly uses a fake
+HTTP, first-open, assist/review reruns and parent sequences register children
+before acknowledgment and retain them through final workspace saves, including
+failed saves. CLI HTTP similarly uses a fake
 provider/adapter and an empty executable PATH. Event tests prove that an
 already-dispatched save remains tracked even after the existing non-joining
 EventBus.Shutdown returns. Failed task claims release context, running slot and

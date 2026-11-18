@@ -765,7 +765,6 @@ func registerOrchestrationRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/workspace", s.Handlers.Orchestration.WorkspaceHandler)
 	mux.HandleFunc("/api/orchestration/workspace/activate", s.Handlers.Orchestration.WorkspaceActivateHandler)
 	mux.HandleFunc("/api/orchestration/workspace/agents", s.Handlers.Orchestration.WorkspaceAgentsHandler)
-	mux.HandleFunc("/api/orchestration/workspace/layout", s.Handlers.Orchestration.SaveLayoutHandler)
 	mux.HandleFunc("/api/orchestration/workspace/station-layout", s.Handlers.Orchestration.SaveStationLayoutHandler)
 	mux.HandleFunc("/api/orchestration/messages", s.Handlers.Orchestration.MessagesHandler)
 	mux.HandleFunc("/api/orchestration/delegate", s.Handlers.Orchestration.DelegateHandler)
@@ -813,41 +812,6 @@ func registerOrchestrationRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/orchestration/scheduled-tasks", s.Handlers.Orchestration.ScheduledTasksHandler)
 	mux.HandleFunc("/api/orchestration/scheduled-tasks/upcoming", s.Handlers.Orchestration.UpcomingScheduledTasksHandler)
 	mux.HandleFunc("/api/orchestration/scheduled-tasks/", s.Handlers.Orchestration.ScheduledTaskHandler)
-
-	// Scheduler node endpoints (canvas-based scheduled tasks)
-	mux.HandleFunc("/api/orchestration/workspaces/", func(w http.ResponseWriter, r *http.Request) {
-		// Route scheduler node endpoints
-		if strings.Contains(r.URL.Path, "/scheduler-nodes") {
-			// Check if this is a specific node operation (contains node ID after scheduler-nodes/)
-			parts := strings.Split(strings.TrimSuffix(r.URL.Path, "/"), "/")
-			schedulerNodesIndex := -1
-			for i, part := range parts {
-				if part == "scheduler-nodes" {
-					schedulerNodesIndex = i
-					break
-				}
-			}
-
-			if schedulerNodesIndex != -1 && len(parts) > schedulerNodesIndex+1 {
-				// Has node ID: /workspaces/{id}/scheduler-nodes/{node_id}
-				// Check for /trigger action
-				if len(parts) > schedulerNodesIndex+2 && parts[schedulerNodesIndex+2] == "trigger" {
-					s.Handlers.Orchestration.SchedulerNodeTriggerHandler(w, r)
-					return
-				}
-
-				// Regular node operations (GET/PUT/DELETE)
-				s.Handlers.Orchestration.SchedulerNodeHandler(w, r)
-			} else {
-				// No node ID: /workspaces/{id}/scheduler-nodes (list/create)
-				s.Handlers.Orchestration.SchedulerNodesHandler(w, r)
-			}
-			return
-		}
-
-		// Fall through to other workspace endpoints (handled elsewhere)
-		http.NotFound(w, r)
-	})
 }
 
 // registerSessionRoutes registers sessions, session files, notes, folders, workspaces, project templates, and tags.
