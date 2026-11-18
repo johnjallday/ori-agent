@@ -71,7 +71,7 @@ func BuildFinalPath(baseDir, filePath string) (string, error) {
 	if !isPathWithin(absFinal, absBase) {
 		return "", fmt.Errorf("file path escapes base directory: %s", filePath)
 	}
-	if _, statErr := os.Stat(absBase); statErr == nil {
+	if _, statErr := os.Stat(absBase); statErr == nil { // #nosec G703 -- absBase is the cleaned base directory; it is only stat'ed to decide whether the symlink-escape check applies, and absFinal was already proven to sit inside it above
 		if !pathWithinRootAfterSymlinks(absFinal, absBase) {
 			return "", fmt.Errorf("file path escapes base directory: %s", filePath)
 		}

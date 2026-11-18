@@ -69,7 +69,7 @@ func (h *HTTPHandler) OpenWorkspaceOutputDir(w http.ResponseWriter, r *http.Requ
 		outputDir = filepath.Join(baseOutputDir, workspace.Name)
 	}
 
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, 0o755); err != nil { // #nosec G301 G703 -- outputDir comes from the workspace store's own outputs path (or the platform default output dir joined with the workspace's stored name), never from the request; 0755 matches the user-facing output folders elsewhere
 		orihttp.InternalError(w, fmt.Sprintf("Failed to create output directory: %v", err))
 		return
 	}
