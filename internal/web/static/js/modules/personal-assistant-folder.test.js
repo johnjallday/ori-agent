@@ -933,8 +933,7 @@ test('the folder turn and work controller mount once on every drawer host', () =
   for (const page of [
     '../layout/base.tmpl',
     '../pages/workspace-detail.tmpl',
-    '../pages/workspace-task.tmpl',
-    '../pages/workspace-canvas.tmpl'
+    '../pages/workspace-task.tmpl'
   ]) {
     assert.doesNotMatch(read(page), /src="\/js\/modules\/dashboard.js"/, page);
   }

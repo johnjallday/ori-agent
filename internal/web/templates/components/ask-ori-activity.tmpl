@@ -10,7 +10,7 @@
 
   Before Issue #350 this markup existed three times — in dashboard.tmpl for
   Home, support-chat.tmpl for the workspace hub/detail/task pages, and inline in
-  workspace-canvas.tmpl — one copy per page, each with its own composer beside
+  the workspace canvas page (since retired) — one copy per page, each with its own composer beside
   it. They are mutually exclusive per page, so consolidating them meant moving
   all three at once: the universal panel is mounted on every page, so the moment
   it carries these ids, any surviving copy would be a duplicate id on that page.

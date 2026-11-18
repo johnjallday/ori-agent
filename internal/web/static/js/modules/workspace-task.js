@@ -9,7 +9,7 @@ import {
 } from './task-result-artifacts.js';
 import { taskSkillDraftMethods } from './workspace-task-skill-draft.js';
 import { taskResultActionsMethods } from './workspace-task-result-actions.js';
-import { showCanvasAgentPicker } from './agent-canvas-dialogs.js';
+import { showAgentPicker } from './agent-picker-dialog.js';
 import {
   getStatusClass,
   getDisplayStatus,
@@ -10143,7 +10143,7 @@ export class WorkspaceTaskPage {
     // would see the Run button do nothing meaningful (or a generic
     // server error) when the task has no agent — they'd have to leave
     // the hero, scroll to the snapshot card, change agent, then come
-    // back. The picker reuses the same dialog the canvas uses.
+    // back. The picker is a small modal (agent-picker-dialog.js).
     const currentAgent = String(this.task?.to || '').trim();
     if (!currentAgent || currentAgent === 'unassigned') {
       const agents = this.getAssignableAgentOptions();
@@ -10151,7 +10151,7 @@ export class WorkspaceTaskPage {
         this.notify('error', 'No agents in this workspace yet — add one before running tickets.');
         return;
       }
-      const picked = await showCanvasAgentPicker({
+      const picked = await showAgentPicker({
         title: 'Assign an agent',
         message: `This ticket is unassigned. Pick an agent to run "${this.getTaskDisplayLabel()}".`,
         agents
@@ -10214,7 +10214,7 @@ export class WorkspaceTaskPage {
 
   /**
    * Build the agent list for the inline assign-and-run picker, in the
-   * shape expected by showCanvasAgentPicker ([{ name, instanceNumber }]).
+   * shape expected by showAgentPicker ([{ name, instanceNumber }]).
    * Filters out the "unassigned" placeholder. Mirrors the existing
    * snapshot-card agent dropdown so the user sees the same set in
    * either place.

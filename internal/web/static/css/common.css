@@ -308,12 +308,6 @@ a:focus-visible {
   box-shadow: 0 8px 25px rgba(52, 211, 153, 0.25);
 }
 
-/* Toolbar button with uniform width */
-.modern-btn-toolbar {
-  min-width: 110px;
-  justify-content: center;
-}
-
 /* Button sizes */
 .modern-btn-sm {
   padding: 0.25rem 0.5rem;
@@ -1500,7 +1494,6 @@ h3,
   background-color: var(--danger-color) !important;
 }
 
-.badge-warning,
 .bg-warning {
   background-color: var(--warning-color) !important;
   color: #1f2128 !important;
