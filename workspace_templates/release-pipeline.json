@@ -52,7 +52,7 @@
       "from": "user",
       "to": "default",
       "assigned_node_id": "quality-checker-node",
-      "description": "Run pre-release checks (tests, lint, security, build verification). Execute: cd /Users/jjdev/Projects/ori/ori-agent && ./scripts/pre-release-check.sh ${VERSION}",
+      "description": "Run pre-release checks (tests, lint, security, build verification) for release version v0.0.20 (change the version here before running). Execute: cd /Users/jjdev/Projects/ori/ori-agent && ./scripts/pre-release-check.sh v0.0.20",
       "priority": 1,
       "context": {
         "script": "./scripts/pre-release-check.sh",
@@ -273,14 +273,6 @@
         "to": "task-generate-announcement",
         "toPort": "input",
         "color": "#6366f1"
-      },
-      {
-        "id": "conn-version-to-precheck",
-        "from": "attach-version-input",
-        "fromPort": "output",
-        "to": "task-pre-release-check",
-        "toPort": "input-0",
-        "color": "#f59e0b"
       },
       {
         "id": "conn-scheduler-to-precheck",

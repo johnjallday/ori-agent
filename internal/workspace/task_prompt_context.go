@@ -554,7 +554,7 @@ func (h *LLMTaskHandler) PrepareTaskContext(ctx context.Context, agentName strin
 				Kind:   "workspace_files",
 				Name:   "Workspace file summaries",
 				Access: "summarized",
-				Detail: fmt.Sprintf("%d workspace file(s) are summarized in the snapshot; full content is not injected unless attached to this task.", fileCount),
+				Detail: fmt.Sprintf("%d workspace file(s) are summarized in the snapshot; full content is available only through tools.", fileCount),
 			})
 		}
 		if directories := limitTaskPromptDirectories(ws.DirectoryReferences, taskPromptMaxDirectories); len(directories) > 0 {
@@ -585,8 +585,6 @@ func (h *LLMTaskHandler) PrepareTaskContext(ctx context.Context, agentName strin
 			})
 		}
 	}
-
-	prepared.Items = append(prepared.Items, buildAttachedTaskPreparedContextItems(ws, task)...)
 
 	ag, err := h.resolveExecutionAgent(agentName, task)
 	if err != nil {
@@ -626,45 +624,6 @@ func buildTaskPreparedContextSummary(items []TaskPreparedContextItem) string {
 		}
 	}
 	return fmt.Sprintf("%d injected, %d summarized, %d on-demand context surface(s)", injected, summarized, onDemand)
-}
-
-func buildAttachedTaskPreparedContextItems(ws *Workspace, task Task) []TaskPreparedContextItem {
-	if ws == nil || ws.Layout == nil {
-		return nil
-	}
-	attachmentsByID := make(map[string]Attachment, len(ws.Attachments))
-	for _, attachment := range ws.Attachments {
-		attachmentsByID[attachment.ID] = attachment
-	}
-
-	var items []TaskPreparedContextItem
-	for _, connection := range ws.Layout.WorkflowConnections {
-		if connection.To != task.ID {
-			continue
-		}
-		attachment, ok := attachmentsByID[connection.From]
-		if !ok {
-			continue
-		}
-		name := strings.TrimSpace(attachment.Title)
-		if name == "" {
-			name = "Attached file"
-		}
-		ref := ""
-		detail := "Attached content is injected into the prompt during execution."
-		if attachment.File != nil && strings.TrimSpace(attachment.File.URL) != "" {
-			ref = attachment.File.URL
-			detail = fmt.Sprintf("Attached content from %s is injected into the prompt during execution.", attachment.File.URL)
-		}
-		items = append(items, TaskPreparedContextItem{
-			Kind:   "attached_file",
-			Ref:    ref,
-			Name:   name,
-			Access: "injected",
-			Detail: detail,
-		})
-	}
-	return items
 }
 
 type taskPromptAgentSummary struct {
@@ -908,8 +867,8 @@ func (h *LLMTaskHandler) buildTaskPrompt(ctx context.Context, task Task) string 
 
 // buildTaskPromptSegments assembles the task user-prompt as ordered, labeled
 // segments. The task description, output-format instructions, and framing live
-// in protected segments (trimOrder 0); memory, workspace snapshot, attachments,
-// and upstream results carry trim ranks so the budget pass can shrink them in a
+// in protected segments (trimOrder 0); memory, workspace snapshot, and upstream
+// results carry trim ranks so the budget pass can shrink them in a
 // fixed order (WS2.6) without dropping load-bearing content. Concatenating the
 // segments in order reproduces the previous single-string prompt exactly when no
 // trimming occurs.
@@ -972,11 +931,6 @@ func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task,
 	// Workspace snapshot (task/file/note/session lists) — WS2.6 c.
 	if workspaceSnapshot := h.buildTaskWorkspaceSnapshot(ctx, task); workspaceSnapshot != "" {
 		segs = append(segs, promptSegment{label: "workspace_snapshot", text: workspaceSnapshot + "\n\n", trimOrder: 3})
-	}
-
-	// Attached file contents — trimmed first (WS2.6 a).
-	if attachmentSection := h.buildAttachmentsSection(task); attachmentSection != "" {
-		segs = append(segs, promptSegment{label: "attachments", text: attachmentSection, trimOrder: 1})
 	}
 
 	// Upstream task results / structured outputs — WS2.6 b. Runtime inputs
@@ -1044,34 +998,4 @@ func (h *LLMTaskHandler) buildTaskPromptSegments(ctx context.Context, task Task,
 	segs = append(segs, promptSegment{label: "tail", text: tail.String(), trimOrder: 0})
 
 	return segs
-}
-
-// buildAttachmentsSection renders the "Attached Files" prompt block, or "" when
-// the task has no attachments. Attachment contents are capped (per-file and
-// total) before injection (WS2.8) so a large file cannot blow the context window
-// before budgeting even runs.
-func (h *LLMTaskHandler) buildAttachmentsSection(task Task) string {
-	attachmentContents := h.getAttachedFileContents(task)
-	if len(attachmentContents) == 0 {
-		return ""
-	}
-
-	var prompt strings.Builder
-	prompt.WriteString("## Attached Files\n\n")
-	prompt.WriteString("The following files are attached to this task:\n\n")
-	for _, att := range attachmentContents {
-		fmt.Fprintf(&prompt, "### %s\n\n", att.Title)
-		if att.FilePath != "" {
-			fmt.Fprintf(&prompt, "**File**: `%s`\n\n", att.FilePath)
-		}
-		if att.Body != "" {
-			fmt.Fprintf(&prompt, "**Note**: %s\n\n", att.Body)
-		}
-		if att.Content != "" {
-			prompt.WriteString("**Content**:\n```\n")
-			prompt.WriteString(att.Content)
-			prompt.WriteString("\n```\n\n")
-		}
-	}
-	return prompt.String()
 }

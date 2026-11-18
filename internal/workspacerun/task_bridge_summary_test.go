@@ -32,7 +32,7 @@ func TestTaskRunBridge_SummaryRecordsDeniedEffectsAndNoToolContext(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Policy.Mutation != PolicyMutationDenied || run.Policy.ExternalEffects != PolicyExternalEffectsDenied || run.ContextPlan.ExposeWorkspaceTools || run.ContextPlan.IncludeWorkspaceSnapshot || run.ContextPlan.IncludeAttachedFiles {
+	if run.Policy.Mutation != PolicyMutationDenied || run.Policy.ExternalEffects != PolicyExternalEffectsDenied || run.ContextPlan.ExposeWorkspaceTools || run.ContextPlan.IncludeWorkspaceSnapshot {
 		t.Fatalf("summary trace overstates its authority: %+v %+v", run.Policy, run.ContextPlan)
 	}
 }

@@ -731,7 +731,6 @@ export class WorkspaceRunPage {
       ? [
           ['Strategy', plan.strategy || 'unspecified'],
           ['Workspace snapshot', plan.include_workspace_snapshot ? 'included' : 'not requested'],
-          ['Attached files', plan.include_attached_files ? 'included' : 'not requested'],
           ['Workspace tools', plan.expose_workspace_tools ? 'available' : 'not requested']
         ]
       : [];

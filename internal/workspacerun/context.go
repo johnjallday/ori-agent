@@ -10,7 +10,6 @@ func DefaultTaskContextPlan() ContextPlan {
 	return ContextPlan{
 		Strategy:                 "task_default",
 		IncludeWorkspaceSnapshot: true,
-		IncludeAttachedFiles:     true,
 		ExposeWorkspaceTools:     true,
 	}
 }
