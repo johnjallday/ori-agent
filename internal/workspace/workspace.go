@@ -156,6 +156,10 @@ func FromJSON(data []byte) (*Workspace, error) {
 // initializeDecodedWorkspace applies native read migrations without forcing a
 // second JSON decode that would round exact authored numbers in private files.
 func initializeDecodedWorkspace(ws *Workspace) {
+	// A retired store node becomes a plain ticket target. This runs first: it
+	// matches tickets to stores by the raw agent node ids, which
+	// NormalizeAgentInstances rewrites.
+	MigrateLegacyStoreNodes(ws)
 	ws.NormalizeAgentInstances()        // Collapse duplicate agent instances to one per profile
 	ws.NormalizeInstalledCapabilities() // Canonicalize IDs, drop unusable records, one per capability
 	ws.MigrateScheduledTasksToTasks()   // Auto-migrate legacy scheduled tasks
@@ -191,6 +195,7 @@ func FromJSONMetadata(data []byte) (*Workspace, error) {
 	}
 	ws := &lite.Workspace
 	ws.Messages = nil
+	MigrateLegacyStoreNodes(ws) // Before agent instances are normalized, as in initializeDecodedWorkspace
 	ws.NormalizeAgentInstances()
 	ws.NormalizeInstalledCapabilities()
 	ws.MigrateScheduledTasksToTasks()

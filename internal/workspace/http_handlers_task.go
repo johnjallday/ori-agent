@@ -393,10 +393,9 @@ func (h *HTTPHandler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 
 // AppendResultToCSVRequest is the body for POST .../results/append-csv.
 type AppendResultToCSVRequest struct {
-	CSV         string `json:"csv"`
-	UseStorage  bool   `json:"use_storage"`
-	FilePath    string `json:"file_path"`
-	StoreNodeID string `json:"store_node_id"`
+	CSV        string `json:"csv"`
+	UseStorage bool   `json:"use_storage"`
+	FilePath   string `json:"file_path"`
 }
 
 // AppendResultToCSV handles POST /api/workspaces/:id/tasks/:task_id/results/append-csv.
@@ -436,7 +435,6 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	storeNodeID := strings.TrimSpace(req.StoreNodeID)
 	filePath := strings.TrimSpace(req.FilePath)
 
 	// Derive the dataset filename from the storage OWNER (the workflow's last
@@ -455,7 +453,6 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 			orihttp.BadRequest(w, "Task is not configured to append results to a CSV file")
 			return
 		}
-		storeNodeID = strings.TrimSpace(storageCfg.StoreNodeID)
 		filePath = strings.TrimSpace(storageCfg.FilePath)
 	}
 
@@ -466,51 +463,6 @@ func (h *HTTPHandler) AppendResultToCSV(w http.ResponseWriter, r *http.Request) 
 	jsonlData, convErr := CSVToJSONL(csvData)
 	if convErr != nil {
 		orihttp.BadRequest(w, fmt.Sprintf("Could not parse rows to append: %v", convErr))
-		return
-	}
-
-	if storeNodeID != "" {
-		var storeNode *StoreNode
-		for i := range ws.StoreNodes {
-			if ws.StoreNodes[i].ID == storeNodeID || ws.StoreNodes[i].CanvasNodeID == storeNodeID {
-				storeNode = &ws.StoreNodes[i]
-				break
-			}
-		}
-		if storeNode == nil {
-			orihttp.BadRequest(w, "Store node not found")
-			return
-		}
-		storeFilePath := filePath
-		if storeFilePath == "" {
-			storeFilePath = AppendJSONLFileName(storageOwner, storageCfg)
-		}
-		nodeCopy := *storeNode
-		nodeCopy.WriteMode = "append"
-		nodeCopy.Format = "jsonl"
-		if err := WriteToStoreForWorkspace(&nodeCopy, h.store, ws.ID, storeFilePath, jsonlData); err != nil {
-			logger.Error("Failed to append task result to store node", logger.Fields{
-				"task_id":       task.ID,
-				"store_node_id": storeNode.ID,
-				"err":           err,
-			})
-			orihttp.InternalError(w, fmt.Sprintf("Append to store node failed: %v", err))
-			return
-		}
-		storeNode.LastWriteTime = nodeCopy.LastWriteTime
-		storeNode.WriteCount = nodeCopy.WriteCount
-		storeNode.LastFilePath = nodeCopy.LastFilePath
-		storeNode.LastError = nodeCopy.LastError
-		storeNode.UpdatedAt = nodeCopy.UpdatedAt
-		if err := h.store.Save(ws); err != nil {
-			logger.Error("Failed to persist workspace after manual append", logger.Fields{"workspace_id": ws.ID, "err": err})
-		}
-		resolved, _ := BuildFinalStorePath(storeNode, h.store, ws.ID, storeFilePath)
-		orihttp.WriteJSON(w, map[string]any{
-			"appended_rows": appendedRows,
-			"file_path":     resolved,
-			"label":         filepath.Base(storeFilePath),
-		})
 		return
 	}
 
@@ -629,29 +581,11 @@ func (h *HTTPHandler) ExportResultCSV(w http.ResponseWriter, r *http.Request) {
 
 // resolveTaskResultJSONLPath resolves the local .jsonl file a task's append
 // dataset is written to, mirroring the destination resolution the executor and
-// manual-append handler use (store node, workspace folder, explicit path, or
+// manual-append handler use (workspace folder, explicit path, or
 // the workspace's default output folder).
 func (h *HTTPHandler) resolveTaskResultJSONLPath(ws *Workspace, owner *Task, storage *ResultStorageConfig) (string, error) {
 	explicit := strings.TrimSpace(storage.FilePath)
 	jsonlName := AppendJSONLFileName(owner, storage)
-
-	if strings.TrimSpace(storage.StoreNodeID) != "" {
-		var storeNode *StoreNode
-		for i := range ws.StoreNodes {
-			if ws.StoreNodes[i].ID == storage.StoreNodeID || ws.StoreNodes[i].CanvasNodeID == storage.StoreNodeID {
-				storeNode = &ws.StoreNodes[i]
-				break
-			}
-		}
-		if storeNode == nil {
-			return "", fmt.Errorf("store node not found")
-		}
-		storeFilePath := explicit
-		if storeFilePath == "" {
-			storeFilePath = jsonlName
-		}
-		return BuildFinalStorePath(storeNode, h.store, ws.ID, storeFilePath)
-	}
 
 	if ResultStorageUsesWorkspaceFolder(storage) {
 		baseDir, _, err := ResolveWorkspaceFolderBaseDir(h.store, ws.ID, storage.Folder)

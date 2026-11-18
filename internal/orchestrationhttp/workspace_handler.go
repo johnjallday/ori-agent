@@ -164,7 +164,6 @@ func (wh *WorkspaceHandler) handleGetWorkspace(w http.ResponseWriter, r *http.Re
 			"ticket_counts":                         workspace.ComputeMapSummaryFields(ws).TicketCounts,
 			"attachments":                           ws.Attachments,
 			"scheduled_tasks":                       ws.ScheduledTasks,
-			"store_nodes":                           ws.StoreNodes,
 			"directory_references":                  ws.DirectoryReferences,
 			"mcp_bindings":                          ws.MCPBindings,
 			"agent_mcp_access":                      ws.AgentMCPAccess,

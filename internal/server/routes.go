@@ -1917,7 +1917,7 @@ func (s *Server) handleWorkspaceAPI(w http.ResponseWriter, r *http.Request) {
 		s.Handlers.Session.HandleWorkspaceNotes(w, r)
 		return
 	}
-	// Runtime subresources (attachments, tasks, store-nodes, files, folders,
+	// Runtime subresources (attachments, tasks, files, folders,
 	// directories, agents, project-open, events, output-dir, ...) are served by
 	// explicit Go 1.22 ServeMux patterns registered via workspace.RegisterRoutes.
 	// Everything else (workspace CRUD, agent add/remove, layout) is served by the

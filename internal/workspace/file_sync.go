@@ -268,17 +268,6 @@ func workspaceGeneratedFilePaths(ws *Workspace) map[string]bool {
 		}
 	}
 
-	for _, node := range ws.StoreNodes {
-		if !StoreNodeUsesWorkspaceFolder(&node) || strings.TrimSpace(node.LastFilePath) == "" {
-			continue
-		}
-		relativePath := node.LastFilePath
-		if strings.TrimSpace(node.Folder) != "" {
-			relativePath = filepath.Join(node.Folder, relativePath)
-		}
-		add(relativePath)
-	}
-
 	for i := range ws.Tasks {
 		if relativePath := resultStorageWorkspaceFilePath(&ws.Tasks[i], ws.Tasks[i].ResultStorage); relativePath != "" {
 			add(relativePath)

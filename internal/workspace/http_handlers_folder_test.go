@@ -135,21 +135,6 @@ func TestHTTPHandlerRenameWorkspaceFolderUpdatesNestedMetadataAndFiles(t *testin
 
 	now := time.Now()
 	ws.Folders = []Folder{{ID: "folder-1", Path: "research", CreatedAt: now, UpdatedAt: now}}
-	ws.StoreNodes = []StoreNode{
-		{
-			ID:            "store-1",
-			CanvasNodeID:  "store-node-1",
-			WorkspaceID:   ws.ID,
-			Name:          "Reports",
-			BaseDir:       filepath.Join("research", "exports"),
-			StorageTarget: StorageTargetWorkspaceFolder,
-			Folder:        filepath.Join("research", "exports"),
-			Format:        "csv",
-			WriteMode:     "append",
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		},
-	}
 	ws.Tasks = []Task{
 		{
 			ID:          "task-1",
@@ -217,12 +202,6 @@ func TestHTTPHandlerRenameWorkspaceFolderUpdatesNestedMetadataAndFiles(t *testin
 	if attachment.File.URL != workspaceFileURL(ws.ID, wantRelativePath) {
 		t.Fatalf("expected attachment URL to be updated, got %q", attachment.File.URL)
 	}
-	if stored.StoreNodes[0].Folder != filepath.Join("archive", "exports") {
-		t.Fatalf("expected store node workspace folder archive/exports, got %q", stored.StoreNodes[0].Folder)
-	}
-	if stored.StoreNodes[0].BaseDir != filepath.Join("archive", "exports") {
-		t.Fatalf("expected store node base dir archive/exports, got %q", stored.StoreNodes[0].BaseDir)
-	}
 	if stored.Tasks[0].ResultStorage.Folder != filepath.Join("archive", "results") {
 		t.Fatalf("expected task result storage folder archive/results, got %q", stored.Tasks[0].ResultStorage.Folder)
 	}
@@ -279,19 +258,21 @@ func TestHTTPHandlerDeleteWorkspaceFolderRejectsStorageReferences(t *testing.T) 
 	}
 	now := time.Now()
 	ws.Folders = []Folder{{ID: "folder-1", Path: "reports", CreatedAt: now, UpdatedAt: now}}
-	ws.StoreNodes = []StoreNode{
+	ws.Tasks = []Task{
 		{
-			ID:            "store-1",
-			CanvasNodeID:  "store-node-1",
-			WorkspaceID:   ws.ID,
-			Name:          "Reports",
-			BaseDir:       "reports",
-			StorageTarget: StorageTargetWorkspaceFolder,
-			Folder:        "reports",
-			Format:        "csv",
-			WriteMode:     "append",
-			CreatedAt:     now,
-			UpdatedAt:     now,
+			ID:          "task-1",
+			WorkspaceID: ws.ID,
+			Description: "Store result",
+			Status:      TaskStatusPending,
+			ResultStorage: &ResultStorageConfig{
+				Enabled:       true,
+				StorageTarget: StorageTargetWorkspaceFolder,
+				Folder:        "reports",
+				FileName:      "runs.csv",
+				Format:        "csv",
+				WriteMode:     "append",
+			},
+			CreatedAt: now,
 		},
 	}
 	if err := store.Save(ws); err != nil {

@@ -180,6 +180,10 @@ func DecodeContinuityWorkspace(record workspacecontinuity.Record, data []byte) (
 		value.MessageCount != len(ws.Messages) || value.AttachmentCount != len(ws.Attachments) {
 		return nil, workspacecontinuity.ErrInvalid
 	}
+	// The reviewed file is checked as written above. A retired store node in it
+	// becomes a plain ticket target here, before the import's rule that disables
+	// an absolute file target (ProjectContinuityWorkspace) looks at the tickets.
+	MigrateLegacyStoreNodes(ws)
 	return ws, nil
 }
 

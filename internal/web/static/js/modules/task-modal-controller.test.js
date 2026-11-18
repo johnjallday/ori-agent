@@ -153,6 +153,35 @@ test('modal state snapshot includes reference URL field', () => {
   assert.equal(snapshot.auto.referenceURL, 'https://example.com/auto-spec');
 });
 
+test('auto-save data offers only the default folder and a custom path', () => {
+  const { Controller, elements } = loadController();
+  const controller = new Controller();
+  elements.set('taskModalAutoSaveEnabled', { checked: true });
+  elements.set('taskModalAutoSaveWriteMode', { value: 'new_file' });
+  elements.set('taskModalAutoSaveFormat', { value: 'json' });
+  elements.set('taskModalAutoSavePath', { value: ' /tmp/out/ ' });
+
+  elements.set('taskModalAutoSaveTarget', { value: 'custom' });
+  assert.equal(
+    JSON.stringify(controller.getAutoSaveData().result_storage),
+    JSON.stringify({
+      enabled: true,
+      format: 'json',
+      write_mode: 'new_file',
+      file_path: '/tmp/out/'
+    })
+  );
+
+  // The retired "store" destination now behaves like the default folder.
+  for (const target of ['default', 'store']) {
+    elements.set('taskModalAutoSaveTarget', { value: target });
+    assert.equal(
+      JSON.stringify(controller.getAutoSaveData().result_storage),
+      JSON.stringify({ enabled: true, format: 'json', write_mode: 'new_file' })
+    );
+  }
+});
+
 test('auto mode task creation includes reference URL payload', async () => {
   const calls = [];
   const { Controller, elements } = loadController({

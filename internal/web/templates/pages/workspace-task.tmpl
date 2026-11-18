@@ -1972,11 +1972,6 @@
       border-color: color-mix(in srgb, var(--primary-color) 32%, var(--border-color));
     }
 
-    .workspace-task-result-artifact-chooser-option.is-disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-    }
-
     .workspace-task-result-artifact-chooser-option input[type="radio"] {
       margin: 0;
     }
@@ -1985,7 +1980,6 @@
       font-weight: 600;
     }
 
-    .workspace-task-result-artifact-chooser-select,
     .workspace-task-result-artifact-chooser-input {
       grid-column: 1 / -1;
       padding: 0.35rem 0.5rem;
@@ -2221,7 +2215,7 @@
     }
 
     /* Collapsible "Advanced settings" wrapper. Keeps developer-facing
-       controls (CSV storage, columns, store nodes) out of the default view
+       controls (CSV storage, columns, output specs) out of the default view
        for non-technical users while staying one click away. */
     .workspace-task-advanced {
       margin-top: 0.85rem;
@@ -2329,11 +2323,6 @@
 
     .workspace-task-automation-storage-option:hover {
       border-color: color-mix(in srgb, var(--primary-color) 32%, var(--border-color));
-    }
-
-    .workspace-task-automation-storage-option.is-disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
     }
 
     .workspace-task-automation-storage-option input[type="radio"] {

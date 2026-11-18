@@ -70,7 +70,7 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Find the task
-	task, ws, err := th.getTaskWithWorkspace(req.TaskID)
+	task, _, err := th.getTaskWithWorkspace(req.TaskID)
 	if err != nil {
 		orihttp.NotFound(w, fmt.Sprintf("Task not found: %v", err))
 		return
@@ -81,78 +81,39 @@ func (th *TaskHandler) handleSaveTaskResult(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	var finalPath string
-
-	if req.StoreNodeID != "" {
-		// Save via store node
-		var storeNode *workspace.StoreNode
-		for i := range ws.StoreNodes {
-			if ws.StoreNodes[i].ID == req.StoreNodeID || ws.StoreNodes[i].CanvasNodeID == req.StoreNodeID {
-				storeNode = &ws.StoreNodes[i]
-				break
-			}
-		}
-
-		if storeNode == nil {
-			orihttp.NotFound(w, "Store node not found")
-			return
-		}
-
-		// Override format with store node's format
-		storeNode.Format = req.Format
-
-		dataToStore := task.Result
-		if req.Format == "csv" {
-			dataToStore = workspace.TaskResultToCSV(task, task.Result, time.Now().Format("20060102-150405"), "")
-		}
-
-		// Write to store
-		if err := workspace.WriteToStoreForWorkspace(storeNode, th.workspaceStore, ws.ID, req.FilePath, dataToStore); err != nil {
-			orihttp.InternalError(w, fmt.Sprintf("Failed to save result: %v", err))
-			return
-		}
-
-		finalPath, _ = workspace.BuildFinalStorePath(storeNode, th.workspaceStore, ws.ID, req.FilePath)
-
-		// Save workspace to persist store node stats
-		if err := th.workspaceStore.Save(ws); err != nil {
-			logger.Warn("Failed to save workspace after store write", logger.Fields{"error": err})
-		}
-	} else {
-		// Direct file save (for Quick Save or custom path)
-		// Format data based on format type
-		var formattedData []byte
-		switch req.Format {
-		case "json":
-			// Pretty-print JSON
-			var obj any
-			if err := json.Unmarshal([]byte(task.Result), &obj); err != nil {
-				// If not valid JSON, treat as plain text
-				formattedData = []byte(task.Result)
-			} else {
-				formattedData, _ = json.MarshalIndent(obj, "", "  ")
-			}
-		case "csv":
-			formattedData = []byte(workspace.TaskResultToCSV(task, task.Result, time.Now().Format("20060102-150405"), ""))
-		default:
+	// Direct file save (for Quick Save or custom path)
+	// Format data based on format type
+	var formattedData []byte
+	switch req.Format {
+	case "json":
+		// Pretty-print JSON
+		var obj any
+		if err := json.Unmarshal([]byte(task.Result), &obj); err != nil {
+			// If not valid JSON, treat as plain text
 			formattedData = []byte(task.Result)
+		} else {
+			formattedData, _ = json.MarshalIndent(obj, "", "  ")
 		}
-
-		// Create directories
-		dir := filepath.Dir(req.FilePath)
-		if err := os.MkdirAll(dir, 0755); err != nil { // #nosec G301 -- preserves the 0755 permissions used for user-facing task output directories prior to this refactor
-			orihttp.InternalError(w, fmt.Sprintf("Failed to create directories: %v", err))
-			return
-		}
-
-		// Write file
-		if err := os.WriteFile(req.FilePath, formattedData, 0644); err != nil { // #nosec G306 -- preserves the 0644 permissions used for user-facing task output files prior to this refactor
-			orihttp.InternalError(w, fmt.Sprintf("Failed to write file: %v", err))
-			return
-		}
-
-		finalPath = req.FilePath
+	case "csv":
+		formattedData = []byte(workspace.TaskResultToCSV(task, task.Result, time.Now().Format("20060102-150405"), ""))
+	default:
+		formattedData = []byte(task.Result)
 	}
+
+	// Create directories
+	dir := filepath.Dir(req.FilePath)
+	if err := os.MkdirAll(dir, 0755); err != nil { // #nosec G301 -- preserves the 0755 permissions used for user-facing task output directories prior to this refactor
+		orihttp.InternalError(w, fmt.Sprintf("Failed to create directories: %v", err))
+		return
+	}
+
+	// Write file
+	if err := os.WriteFile(req.FilePath, formattedData, 0644); err != nil { // #nosec G306 -- preserves the 0644 permissions used for user-facing task output files prior to this refactor
+		orihttp.InternalError(w, fmt.Sprintf("Failed to write file: %v", err))
+		return
+	}
+
+	finalPath := req.FilePath
 
 	logger.Info("Saved task result", logger.Fields{
 		"task_id":   req.TaskID,
@@ -676,33 +637,6 @@ func appendApprovedTaskCSV(store workspace.Store, ws *workspace.Workspace, task 
 	storeFilePath := storage.FilePath
 	if strings.TrimSpace(storeFilePath) == "" {
 		storeFilePath = workspace.AppendJSONLFileName(task, storage)
-	}
-
-	if strings.TrimSpace(storage.StoreNodeID) != "" {
-		var storeNode *workspace.StoreNode
-		for i := range ws.StoreNodes {
-			if ws.StoreNodes[i].ID == storage.StoreNodeID || ws.StoreNodes[i].CanvasNodeID == storage.StoreNodeID {
-				storeNode = &ws.StoreNodes[i]
-				break
-			}
-		}
-		if storeNode == nil {
-			return fmt.Errorf("store node %q not found", storage.StoreNodeID)
-		}
-		storeNodeCopy := *storeNode
-		storeNodeCopy.WriteMode = "append"
-		storeNodeCopy.Format = "jsonl"
-		// JSONL records are self-describing; append them directly (no CSV
-		// header reconciliation).
-		if err := workspace.WriteToStoreForWorkspace(&storeNodeCopy, store, ws.ID, storeFilePath, jsonlData); err != nil {
-			return err
-		}
-		storeNode.LastWriteTime = storeNodeCopy.LastWriteTime
-		storeNode.WriteCount = storeNodeCopy.WriteCount
-		storeNode.LastFilePath = storeNodeCopy.LastFilePath
-		storeNode.LastError = storeNodeCopy.LastError
-		storeNode.UpdatedAt = storeNodeCopy.UpdatedAt
-		return nil
 	}
 
 	filePath := storage.FilePath

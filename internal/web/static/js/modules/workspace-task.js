@@ -2623,13 +2623,7 @@ export class WorkspaceTaskPage {
       Boolean(this.resultContractSuggesting),
       Boolean(this.resultContractSaving),
       Boolean(this.automationStorageToggleBusy),
-      Boolean(this.automationStorageSaving),
-      (this.workspace?.store_nodes || []).map(node => [
-        node?.id,
-        node?.canvas_node_id,
-        node?.name,
-        node?.base_dir
-      ])
+      Boolean(this.automationStorageSaving)
     ]);
 
     return {
@@ -2670,12 +2664,6 @@ export class WorkspaceTaskPage {
         this.currentRun?.profile_snapshot?.id,
         this.currentRun?.report?.validation_status,
         this.currentRun?.started_at,
-        (this.workspace?.store_nodes || []).map(node => [
-          node?.id,
-          node?.canvas_node_id,
-          node?.name,
-          node?.base_dir
-        ]),
         sigStatusInfo
       ]),
       relationships: JSON.stringify([t.id, t.parent_task_id, t.input_task_ids, sigGraphNeighbors]),
@@ -3355,13 +3343,10 @@ export class WorkspaceTaskPage {
     let target = defaultOutputDir
       ? `Default output folder: ${defaultOutputDir}`
       : 'Default output folder';
-    const storeNodeId = String(storage.store_node_id || '').trim();
     const filePath = String(storage.file_path || '').trim();
     const storageTarget = String(storage.storage_target || '').trim();
     const workspaceFolder = String(storage.workspace_folder || '').trim();
-    if (storeNodeId) {
-      target = `Store node: ${this.getStoreNodeDisplayLabel(storeNodeId)}`;
-    } else if (storageTarget === 'workspace_folder') {
+    if (storageTarget === 'workspace_folder') {
       target = `Workspace files: ${workspaceFolder || 'root'}`;
     } else if (filePath) {
       target = `Path: ${filePath}`;
@@ -3387,23 +3372,6 @@ export class WorkspaceTaskPage {
         : '';
 
     return [modeLabel, target, contractLabel, sourceLabel].filter(Boolean).join('\n');
-  }
-
-  getStoreNodeDisplayLabel(storeNodeId) {
-    const normalized = String(storeNodeId || '').trim();
-    if (!normalized) return 'Unknown store node';
-    const nodes = Array.isArray(this.workspace?.store_nodes) ? this.workspace.store_nodes : [];
-    const node = nodes.find(
-      item =>
-        String(item?.id || '').trim() === normalized ||
-        String(item?.canvas_node_id || '').trim() === normalized
-    );
-    if (!node) return normalized;
-
-    const name = String(node.name || '').trim();
-    const baseDir = String(node.base_dir || '').trim();
-    if (name && baseDir) return `${name} (${baseDir})`;
-    return name || baseDir || normalized;
   }
 
   async openTaskStorageEditor() {
@@ -4455,16 +4423,6 @@ export class WorkspaceTaskPage {
       </div>`
       : '';
 
-    const storeNodes = Array.isArray(this.workspace?.store_nodes) ? this.workspace.store_nodes : [];
-    const storeNodeOptions = storeNodes
-      .map(node => {
-        const id = String(node?.id || '').trim();
-        if (!id) return '';
-        const label = this.getStoreNodeDisplayLabel(id);
-        return `<option value="${this.escapeHtml(id)}">${this.escapeHtml(label)}</option>`;
-      })
-      .filter(Boolean)
-      .join('');
     const appendDefaultPath = String(this.workspaceOutputDir || '').trim();
     const appendDefaultPathHint = appendDefaultPath
       ? `<span class="workspace-task-automation-storage-path" title="${this.escapeHtml(appendDefaultPath)}">${this.escapeHtml(appendDefaultPath)}</span>`
@@ -4481,13 +4439,6 @@ export class WorkspaceTaskPage {
           <label class="workspace-task-result-artifact-chooser-option">
             <input type="radio" name="workspace-task-append-target" value="default" checked />
             <span>Default output folder${appendDefaultPathHint}</span>
-          </label>
-          <label class="workspace-task-result-artifact-chooser-option${storeNodeOptions ? '' : ' is-disabled'}">
-            <input type="radio" name="workspace-task-append-target" value="store"${storeNodeOptions ? '' : ' disabled'} />
-            <span>Store node</span>
-            <select data-role="append-store-node" class="workspace-task-result-artifact-chooser-select"${storeNodeOptions ? '' : ' disabled'}>
-              ${storeNodeOptions || '<option value="">No store nodes available</option>'}
-            </select>
           </label>
           <label class="workspace-task-result-artifact-chooser-option">
             <input type="radio" name="workspace-task-append-target" value="custom" />
@@ -4905,15 +4856,10 @@ export class WorkspaceTaskPage {
       return { configured: false, label: '', locationHint: '' };
     }
 
-    const storeNodeId = String(storage.store_node_id || '').trim();
     const filePath = String(storage.file_path || '').trim();
     let label = '';
     let locationHint = '';
-    if (storeNodeId) {
-      const storeLabel = this.getStoreNodeDisplayLabel(storeNodeId);
-      label = filePath || this.defaultAppendCsvFilename();
-      locationHint = `in ${storeLabel}`;
-    } else if (filePath) {
+    if (filePath) {
       const segments = filePath.split('/');
       label = segments[segments.length - 1] || filePath;
       if (segments.length > 1) {
@@ -5302,8 +5248,8 @@ export class WorkspaceTaskPage {
   // setCsvStorageEnabled drives the Automation card's storage checkbox.
   // Checking flips append-mode storage on with sensible defaults and opens
   // the column designer for the natural next step. Unchecking flips storage
-  // off while preserving file_path/store_node_id so re-enabling later
-  // doesn't lose the destination.
+  // off while preserving file_path and the workspace-folder target so
+  // re-enabling later doesn't lose the destination.
   async setCsvStorageEnabled(checked, checkbox) {
     if (this.automationStorageToggleBusy) return;
     this.automationStorageToggleBusy = true;
@@ -5317,7 +5263,6 @@ export class WorkspaceTaskPage {
       format: 'jsonl',
       write_mode: checked ? 'append' : String(existing.write_mode || 'append'),
       file_path: String(existing.file_path || ''),
-      store_node_id: String(existing.store_node_id || ''),
       storage_target: String(existing.storage_target || ''),
       workspace_folder: String(existing.workspace_folder || '')
     };
@@ -5398,7 +5343,7 @@ export class WorkspaceTaskPage {
 
   // renderAutomationStorage renders the storage sub-section. When storage
   // is off, it's just a short placeholder pointing back to the toggle above.
-  // When on, it shows an inline destination editor (radio + path/store-node
+  // When on, it shows an inline destination editor (radio + folder/path
   // inputs + Save) so the user can set where the CSV file lives without
   // bouncing through the full storage modal.
   renderAutomationStorage() {
@@ -5425,27 +5370,14 @@ export class WorkspaceTaskPage {
       return;
     }
 
-    const storeNodes = Array.isArray(this.workspace?.store_nodes) ? this.workspace.store_nodes : [];
     const workspaceFolders = Array.isArray(this.workspace?.folders) ? this.workspace.folders : [];
-    const storeNodeId = String(storage.store_node_id || '').trim();
     const filePath = String(storage.file_path || '').trim();
     const storageTarget = String(storage.storage_target || '').trim();
     const workspaceFolder = String(storage.workspace_folder || '').trim();
     let target = 'default';
-    if (storeNodeId) target = 'store';
-    else if (storageTarget === 'workspace_folder') target = 'workspace_folder';
+    if (storageTarget === 'workspace_folder') target = 'workspace_folder';
     else if (filePath) target = 'custom';
 
-    const storeOptions = storeNodes
-      .map(node => {
-        const id = String(node?.id || '').trim();
-        if (!id) return '';
-        const label = this.getStoreNodeDisplayLabel(id);
-        const selected = id === storeNodeId ? ' selected' : '';
-        return `<option value="${this.escapeHtml(id)}"${selected}>${this.escapeHtml(label)}</option>`;
-      })
-      .filter(Boolean)
-      .join('');
     const folderOptions = [
       '<option value="">Workspace files</option>',
       ...workspaceFolders.map(folder => {
@@ -5479,13 +5411,6 @@ export class WorkspaceTaskPage {
             <input type="radio" name="workspace-task-automation-storage-target" value="default"${target === 'default' ? ' checked' : ''} />
             <span>Default output folder${defaultPathHint}${openFolderBtn}</span>
             <input type="text" data-role="automation-storage-filename" class="workspace-task-automation-storage-input" placeholder="file name (e.g. nyc_pollen.jsonl)" value="${this.escapeHtml(fileName)}" aria-label="Dataset file name" />
-          </label>
-          <label class="workspace-task-automation-storage-option${storeOptions ? '' : ' is-disabled'}">
-            <input type="radio" name="workspace-task-automation-storage-target" value="store"${target === 'store' ? ' checked' : ''}${storeOptions ? '' : ' disabled'} />
-            <span>Store node</span>
-            <select data-role="automation-storage-store-node" class="workspace-task-automation-storage-select"${storeOptions ? '' : ' disabled'}>
-              ${storeOptions || '<option value="">No store nodes available</option>'}
-            </select>
           </label>
           <label class="workspace-task-automation-storage-option">
             <input type="radio" name="workspace-task-automation-storage-target" value="workspace_folder"${target === 'workspace_folder' ? ' checked' : ''} />
@@ -5571,8 +5496,6 @@ export class WorkspaceTaskPage {
     const target =
       container.querySelector('input[name="workspace-task-automation-storage-target"]:checked')
         ?.value || 'default';
-    const storeNodeId =
-      container.querySelector('[data-role="automation-storage-store-node"]')?.value || '';
     const workspaceFolder =
       container.querySelector('[data-role="automation-storage-workspace-folder"]')?.value || '';
     const customPath =
@@ -5593,10 +5516,6 @@ export class WorkspaceTaskPage {
     };
     setError('');
 
-    if (target === 'store' && !storeNodeId) {
-      setError('Pick a store node or choose a different destination.');
-      return;
-    }
     if (target === 'custom' && !customPath) {
       setError('Enter a file path or choose Default output folder.');
       return;
@@ -5620,7 +5539,6 @@ export class WorkspaceTaskPage {
       format: 'jsonl',
       write_mode: 'append',
       file_path: target === 'custom' ? customPath : '',
-      store_node_id: target === 'store' ? storeNodeId : '',
       storage_target: target === 'workspace_folder' ? 'workspace_folder' : '',
       workspace_folder: target === 'workspace_folder' ? workspaceFolder : '',
       file_name: customFileName
@@ -5628,7 +5546,6 @@ export class WorkspaceTaskPage {
     // No-op if nothing changed; avoids a needless PATCH + reload roundtrip.
     if (
       String(existing.file_path || '') === nextStorage.file_path &&
-      String(existing.store_node_id || '') === nextStorage.store_node_id &&
       String(existing.storage_target || '') === nextStorage.storage_target &&
       String(existing.workspace_folder || '') === nextStorage.workspace_folder &&
       String(existing.file_name || '') === nextStorage.file_name &&
@@ -5691,7 +5608,6 @@ export class WorkspaceTaskPage {
     // <slug>.csv appended.
     const owner = this.getTaskResultStorageTask();
     const storage = owner?.result_storage || {};
-    const storeNodeId = String(storage.store_node_id || '').trim();
     const filePath = String(storage.file_path || '').trim();
     const storageTarget = String(storage.storage_target || '').trim();
     const workspaceFolder = String(storage.workspace_folder || '').trim();
@@ -5703,9 +5619,7 @@ export class WorkspaceTaskPage {
     const joinFile = dir => `${String(dir || '').replace(/\/+$/, '')}/${filename}`;
 
     let dest;
-    if (storeNodeId) {
-      dest = `${this.getStoreNodeDisplayLabel(storeNodeId)} · ${filename}`;
-    } else if (storageTarget === 'workspace_folder') {
+    if (storageTarget === 'workspace_folder') {
       dest = joinFile(`Workspace files/${workspaceFolder}`);
     } else if (filePathIsFile) {
       dest = filePath;
@@ -5896,8 +5810,7 @@ export class WorkspaceTaskPage {
             enabled: true,
             format: 'jsonl',
             write_mode: 'append',
-            file_path: String(storage.file_path || ''),
-            store_node_id: String(storage.store_node_id || '')
+            file_path: String(storage.file_path || '')
           },
           result_sample: this.getResultSampleForSuggestion(),
           recent_execution_samples: this.getRecentExecutionSamplesForSuggestion()
@@ -6025,7 +5938,10 @@ export class WorkspaceTaskPage {
       format: 'jsonl',
       write_mode: 'append',
       file_path: String(existingStorage.file_path || ''),
-      store_node_id: String(existingStorage.store_node_id || '')
+      // A ticket that saves to a workspace folder keeps that folder through this
+      // save; a retired store node's folder target becomes one of these.
+      storage_target: String(existingStorage.storage_target || ''),
+      workspace_folder: String(existingStorage.workspace_folder || '')
     };
 
     this.resultContractSaving = true;
@@ -6235,15 +6151,10 @@ export class WorkspaceTaskPage {
     const target =
       chooser.querySelector('input[name="workspace-task-append-target"]:checked')?.value ||
       'default';
-    const storeNodeId = chooser.querySelector('[data-role="append-store-node"]')?.value || '';
     const customPath =
       chooser.querySelector('[data-role="append-custom-path"]')?.value?.trim() || '';
     const automate = Boolean(chooser.querySelector('[data-role="append-automate"]')?.checked);
 
-    if (target === 'store' && !storeNodeId) {
-      this.setAppendChooserError('Pick a store node or choose a different destination.');
-      return;
-    }
     if (target === 'custom' && !customPath) {
       this.setAppendChooserError('Enter a CSV path (e.g. /Users/me/Documents/runs.csv).');
       return;
@@ -6251,7 +6162,6 @@ export class WorkspaceTaskPage {
     this.setAppendChooserError('');
 
     const payload = {};
-    if (target === 'store') payload.storeNodeId = storeNodeId;
     if (target === 'custom') payload.filePath = customPath;
     const ok = await this.appendArtifactToCSV(payload);
     if (!ok) return;
@@ -6281,7 +6191,7 @@ export class WorkspaceTaskPage {
   // appendArtifactToCSV posts the current artifact's CSV to the workspace
   // task's append-csv endpoint. Returns true on success so callers can chain
   // follow-up UI (closing the chooser, opening the storage editor, etc.).
-  async appendArtifactToCSV({ useStorage = false, filePath = '', storeNodeId = '' } = {}) {
+  async appendArtifactToCSV({ useStorage = false, filePath = '' } = {}) {
     const csv = String(this.currentResultArtifact?.csv || '').trim();
     if (!csv) {
       this.notify('warning', 'No CSV artifact is available to append.');
@@ -6299,8 +6209,7 @@ export class WorkspaceTaskPage {
           body: JSON.stringify({
             csv,
             use_storage: Boolean(useStorage),
-            file_path: filePath,
-            store_node_id: storeNodeId
+            file_path: filePath
           })
         }
       );
@@ -8941,15 +8850,14 @@ export class WorkspaceTaskPage {
     this.elements.scheduleCard.hidden = false;
 
     // Surface the "Open output folder" action in the card header whenever the
-    // task writes to the workspace's default output folder. Store-node and
-    // explicit-path destinations are skipped because openWorkspaceOutputDir
+    // task writes to the workspace's default output folder. Workspace-folder
+    // and explicit-path destinations are skipped because openWorkspaceOutputDir
     // only reveals the default folder; for those the buried per-destination
     // control in Advanced > storage remains the right entry point.
     if (this.elements.scheduleOpenFolderBtn) {
       const storage = this.getTaskResultStorageTask()?.result_storage || null;
       const usesDefaultOutputDir =
         Boolean(storage?.enabled) &&
-        !String(storage.store_node_id || '').trim() &&
         String(storage.storage_target || '').trim() !== 'workspace_folder' &&
         !String(storage.file_path || '').trim();
       this.elements.scheduleOpenFolderBtn.hidden = !usesDefaultOutputDir;

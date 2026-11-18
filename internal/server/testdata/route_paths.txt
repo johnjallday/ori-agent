@@ -330,8 +330,6 @@
 /api/workspaces/x/blueprint-intakes/materials/sources/files
 /api/workspaces/x/blueprint-intakes/materials/sources/folder
 /api/workspaces/x/blueprint-intakes/materials/sources/links
-/api/workspaces/x/canvas/store-nodes
-/api/workspaces/x/canvas/store-nodes/x
 /api/workspaces/x/directories
 /api/workspaces/x/email/needs-you
 /api/workspaces/x/email/needs-you/mark
@@ -382,7 +380,6 @@
 /api/workspaces/x/sample-library/roots/x/revoke/commit
 /api/workspaces/x/sample-library/roots/x/revoke/review
 /api/workspaces/x/rename
-/api/workspaces/x/stores
 /api/workspaces/x/tasks
 /api/workspaces/x/tasks/x
 /api/workspaces/x/triggers
@@ -415,9 +412,6 @@
 /api/workspaces/x/attachments/x/move
 /api/workspaces/x/attachments/bulk-trash
 /api/workspaces/x/trash
-/api/workspaces/x/store-nodes
-/api/workspaces/x/store-nodes/status
-/api/workspaces/x/canvas/store-nodes
 /api/workspaces/x/files/tree
 /api/workspaces/x/folders
 /api/workspaces/x/files/open
@@ -436,12 +430,6 @@
 /api/sessions/x/files/x/download
 /api/sessions/x/files/x/relink
 /api/sessions/x/files/x
-# --- store-nodes {nodeId} variants (G2c) ---
-/api/workspaces/x/store-nodes/x
-/api/workspaces/x/store-nodes/x/status
-/api/workspaces/x/canvas/store-nodes
-/api/workspaces/x/canvas/store-nodes/x
-/api/workspaces/x/canvas/store-nodes/x/status
 # --- files + folders (G2d) ---
 /api/workspaces/x/files/tree
 /api/workspaces/x/folders

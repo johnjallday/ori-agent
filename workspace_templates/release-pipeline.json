@@ -99,7 +99,13 @@
       },
       "timeout": 300000000000,
       "status": "pending",
-      "input_task_ids": ["task-prepare-release"]
+      "input_task_ids": ["task-prepare-release"],
+      "result_storage": {
+        "enabled": true,
+        "storage_target": "workspace_folder",
+        "workspace_folder": "release-logs",
+        "format": "json"
+      }
     },
     {
       "id": "task-orchestrate-multi-component",
@@ -116,7 +122,13 @@
         "actions": ["validate components", "run tests", "build all", "create tags", "generate bundle"]
       },
       "timeout": 900000000000,
-      "status": "pending"
+      "status": "pending",
+      "result_storage": {
+        "enabled": true,
+        "storage_target": "workspace_folder",
+        "workspace_folder": "release-logs",
+        "format": "json"
+      }
     },
     {
       "id": "task-generate-changelog",
@@ -200,22 +212,6 @@
       "failure_count": 0
     }
   ],
-  "store_nodes": [
-    {
-      "id": "store-release-logs",
-      "canvas_node_id": "store-release-logs-node",
-      "agent_node_id": "release-builder-node",
-      "workspace_id": "TEMPLATE_RELEASE_PIPELINE",
-      "name": "Release Logs",
-      "base_dir": "/Users/jjdev/Projects/ori/releases/logs",
-      "format": "json",
-      "write_mode": "append",
-      "auto_create_dir": true,
-      "auto_store": true,
-      "x": 600,
-      "y": 0
-    }
-  ],
   "layout": {
     "task_positions": {
       "task-pre-release-check": {"x": 0, "y": -300},
@@ -237,9 +233,6 @@
     },
     "scheduler_positions": {
       "scheduler-weekly-check": {"x": -200, "y": -300}
-    },
-    "store_positions": {
-      "store-release-logs-node": {"x": 600, "y": 100}
     },
     "workflow_connections": [
       {

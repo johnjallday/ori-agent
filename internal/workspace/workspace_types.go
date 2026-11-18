@@ -119,12 +119,15 @@ type Workspace struct {
 	Attachments          []Attachment                `json:"attachments,omitempty"`
 	Folders              []Folder                    `json:"folders,omitempty"`
 	ScheduledTasks       []ScheduledTask             `json:"scheduled_tasks,omitempty"`
-	StoreNodes           []StoreNode                 `json:"store_nodes,omitempty"`
-	DirectoryReferences  []DirectoryReference        `json:"directory_references,omitempty"`
-	MCPBindings          []MCPBinding                `json:"mcp_bindings,omitempty"`
-	AgentMCPAccess       []AgentMCPAccess            `json:"agent_mcp_access,omitempty"`
-	SkillBindings        []SkillBinding              `json:"skill_bindings,omitempty"`
-	AgentSkillAccess     []AgentSkillAccess          `json:"agent_skill_access,omitempty"`
+	// LegacyStoreNodes is the retired canvas store nodes of an older workspace
+	// file or row. Only MigrateLegacyStoreNodes reads it, and it leaves it nil;
+	// the key stays declared so a legacy file still passes the strict decoder.
+	LegacyStoreNodes    []LegacyStoreNode    `json:"store_nodes,omitempty"`
+	DirectoryReferences []DirectoryReference `json:"directory_references,omitempty"`
+	MCPBindings         []MCPBinding         `json:"mcp_bindings,omitempty"`
+	AgentMCPAccess      []AgentMCPAccess     `json:"agent_mcp_access,omitempty"`
+	SkillBindings       []SkillBinding       `json:"skill_bindings,omitempty"`
+	AgentSkillAccess    []AgentSkillAccess   `json:"agent_skill_access,omitempty"`
 	// Toolboxes are the workspace's named, versioned capability recipes, and
 	// ToolboxAssignments pin one version of one Toolbox to each stable agent
 	// instance (see toolbox.go). Together they are the SOURCE OF TRUTH for
@@ -334,7 +337,7 @@ type CanvasLayout struct {
 	AgentPositions      map[string]Position `json:"agent_positions,omitempty"`      // agent node ID -> position (falls back to name for legacy layouts)
 	AttachmentPositions map[string]Position `json:"attachment_positions,omitempty"` // attachment ID -> position
 	SchedulerPositions  map[string]Position `json:"scheduler_positions,omitempty"`  // scheduler node ID -> position
-	StorePositions      map[string]Position `json:"store_positions,omitempty"`      // store node ID -> position
+	StorePositions      map[string]Position `json:"store_positions,omitempty"`      // retired store node ID -> position; stored data only, carried so an old file round-trips
 	DirectoryPositions  map[string]Position `json:"directory_positions,omitempty"`  // directory reference ID -> position
 	FolderPositions     map[string]Position `json:"folder_positions,omitempty"`     // managed workspace folder ID -> position
 	// StationPositions holds HQ command-map station positions, keyed by HQ
@@ -632,14 +635,17 @@ type TaskRuntimeInputs struct {
 
 // ResultStorageConfig specifies how task results should be automatically stored
 type ResultStorageConfig struct {
-	Enabled       bool   `json:"enabled"`                    // Enable auto-save on completion
-	StoreNodeID   string `json:"store_node_id,omitempty"`    // Save to specific store node (if set)
-	StorageTarget string `json:"storage_target,omitempty"`   // Destination mode: workspace_folder or external/default
-	Folder        string `json:"workspace_folder,omitempty"` // Folder path under the workspace-owned files root
-	FilePath      string `json:"file_path,omitempty"`        // Custom file path (if no store node)
-	FileName      string `json:"file_name,omitempty"`        // Custom file name within the default/derived folder (no directory); ignored when FilePath is a full file
-	Format        string `json:"format,omitempty"`           // Output format: text, json, markdown, csv
-	WriteMode     string `json:"write_mode,omitempty"`       // Output mode: new_file, append
+	Enabled bool `json:"enabled"` // Enable auto-save on completion
+	// LegacyStoreNodeID is the retired store node a ticket used to name. Only
+	// MigrateLegacyStoreNodes reads it, and it clears it; the key stays declared
+	// so a legacy workspace file still passes the strict decoder.
+	LegacyStoreNodeID string `json:"store_node_id,omitempty"`
+	StorageTarget     string `json:"storage_target,omitempty"`   // Destination mode: workspace_folder or external/default
+	Folder            string `json:"workspace_folder,omitempty"` // Folder path under the workspace-owned files root
+	FilePath          string `json:"file_path,omitempty"`        // Custom file path
+	FileName          string `json:"file_name,omitempty"`        // Custom file name within the default/derived folder (no directory); ignored when FilePath is a full file
+	Format            string `json:"format,omitempty"`           // Output format: text, json, markdown, csv
+	WriteMode         string `json:"write_mode,omitempty"`       // Output mode: new_file, append
 }
 
 // TaskStatus represents the current state of a task
@@ -986,8 +992,12 @@ type ScheduledTask struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// StoreNode represents a file storage node on the canvas
-type StoreNode struct {
+// LegacyStoreNode is the retired canvas "store node": an object that said where a
+// ticket's result file was written. Every ticket target now lives on the ticket
+// itself, so this type is only the shape an older workspace file or row still
+// carries (every tag it ever had, so the strict decoder accepts it). Only
+// MigrateLegacyStoreNodes reads it.
+type LegacyStoreNode struct {
 	ID            string    `json:"id"`
 	CanvasNodeID  string    `json:"canvas_node_id"`
 	AgentNodeID   string    `json:"agent_node_id"` // Agent instance this store is connected to

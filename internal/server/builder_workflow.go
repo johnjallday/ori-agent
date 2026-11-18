@@ -387,6 +387,13 @@ func (b *ServerBuilder) initializeWorkspaceStore() error {
 			if slugReconcileErr != nil {
 				return fmt.Errorf("startup workspace slug reconciliation failed: %w", slugReconcileErr)
 			}
+			if startupMaintenanceApproved && !injected {
+				// Canvas store nodes are retired: write each legacy workspace back
+				// as plain ticket file targets, with a backup and a marker. After
+				// the slug reconciliation (the workspaces are stable and reachable
+				// through ws) and before anything else reads their tickets.
+				b.migrateStoreNodes(ws, fileStore)
+			}
 			if startupMaintenanceApproved {
 				// Upgrade groups created before they supported direct work with
 				// the scoped scaffolding (files/, notes/, directory reference,

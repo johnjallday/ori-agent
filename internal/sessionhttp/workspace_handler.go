@@ -3000,9 +3000,13 @@ func buildFileStoreWorkspace(workspace *session.Workspace) (*agentworkspace.Work
 	if err := decodeSessionWorkspaceJSONField(workspace.ScheduledTasksJSON, &folderWS.ScheduledTasks); err != nil {
 		return nil, fmt.Errorf("failed to decode workspace schedules: %w", err)
 	}
-	if err := decodeSessionWorkspaceJSONField(workspace.StoreNodesJSON, &folderWS.StoreNodes); err != nil {
+	if err := decodeSessionWorkspaceJSONField(workspace.StoreNodesJSON, &folderWS.LegacyStoreNodes); err != nil {
 		return nil, fmt.Errorf("failed to decode workspace store nodes: %w", err)
 	}
+	// The tickets and any legacy store nodes are both decoded now: a row written
+	// before store nodes were retired becomes plain ticket targets, so the file
+	// this builds never carries a store node or a store reference.
+	agentworkspace.MigrateLegacyStoreNodes(folderWS)
 	if err := decodeSessionWorkspaceJSONField(workspace.WorkflowsJSON, &folderWS.Workflows); err != nil {
 		return nil, fmt.Errorf("failed to decode workspace workflows: %w", err)
 	}

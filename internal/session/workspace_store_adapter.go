@@ -357,13 +357,9 @@ func (a *WorkspaceStoreAdapter) toSessionWorkspace(ws *workspace.Workspace) *Wor
 			sessionWS.ScheduledTasksJSON = data
 		}
 	}
-	if len(ws.StoreNodes) > 0 {
-		if data, err := json.Marshal(ws.StoreNodes); err != nil {
-			logger.Warn("Failed to marshal workspace store nodes", logger.Fields{"workspace_id": ws.ID, "error": err})
-		} else {
-			sessionWS.StoreNodesJSON = data
-		}
-	}
+	// Store nodes are retired: tickets carry their own targets, and a legacy row's
+	// nodes are migrated when it is read (toAgentWorkspace), so none are written.
+	// The store_nodes_json column stays as a legacy read-only column.
 	if len(ws.Workflows) > 0 {
 		if data, err := json.Marshal(ws.Workflows); err != nil {
 			logger.Warn("Failed to marshal workspace workflows", logger.Fields{"workspace_id": ws.ID, "error": err})
@@ -611,7 +607,7 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 	}
 
 	if len(ws.StoreNodesJSON) > 0 {
-		if err := json.Unmarshal(ws.StoreNodesJSON, &agentWS.StoreNodes); err != nil {
+		if err := json.Unmarshal(ws.StoreNodesJSON, &agentWS.LegacyStoreNodes); err != nil {
 			logger.Warn("Failed to unmarshal workspace store nodes", logger.Fields{"workspace_id": ws.ID, "error": err})
 		}
 	}
@@ -737,6 +733,12 @@ func (a *WorkspaceStoreAdapter) toAgentWorkspace(ws *Workspace) *workspace.Works
 	if agentWS.SharedData == nil {
 		agentWS.SharedData = make(map[string]any)
 	}
+
+	// A row written before store nodes were retired still holds them. They are
+	// read here, with the tickets that name them, and become plain ticket targets,
+	// so nothing downstream ever sees a store node. The row itself is rewritten
+	// by the startup pass (with a backup), never by a read.
+	workspace.MigrateLegacyStoreNodes(agentWS)
 
 	return agentWS
 }

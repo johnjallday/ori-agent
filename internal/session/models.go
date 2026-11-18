@@ -474,7 +474,9 @@ type Workspace struct {
 	// ScheduledTasksJSON contains serialized scheduled task templates.
 	ScheduledTasksJSON json.RawMessage `json:"scheduled_tasks,omitempty"`
 
-	// StoreNodesJSON contains serialized file storage nodes.
+	// StoreNodesJSON is the legacy store_nodes_json column: the retired canvas
+	// store nodes of a row written before they were removed. It is read, never
+	// written with content (new rows hold "[]").
 	StoreNodesJSON json.RawMessage `json:"store_nodes,omitempty"`
 
 	// WorkflowsJSON contains serialized workflow definitions.
