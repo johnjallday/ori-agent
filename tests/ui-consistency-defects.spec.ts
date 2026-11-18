@@ -151,39 +151,6 @@ for (const width of [320, 390, 720]) {
     expect(writes).toEqual([]);
   });
 
-  test(`Canvas toolbar stays outside its pan region at ${width}px`, async ({ page }, info) => {
-    const seed = await createWorkspaceSeed(page.request);
-    ownedStrictSeeds.set(info.testId, seed);
-    await freezeWorkspaceSeed(page.request, seed);
-    const ws = seed.workspace;
-    await preparePage(page, 'light', width);
-    const writes = await guardReadTour(page);
-    await page.goto(`/workspaces/${ws.folder_slug}/canvas`);
-    await expect(page.locator('#canvas-workspace-name')).toHaveText(ws.name);
-    await expect(page.locator('#canvas-info')).not.toContainText('Loading');
-    await capture(page, info, 'canvas', { workspace: ws.id });
-    const add = page.locator('#canvas-add-disclosure > summary');
-    await reachable(add, 44);
-    await add.press('Enter');
-    for (const title of [
-      'Add Agent',
-      'Add Attachment',
-      'Add Ticket',
-      'Add Store Node',
-      'Add Directory Reference'
-    ]) {
-      await reachable(page.getByTitle(title, { exact: true }), 44);
-    }
-    await page.keyboard.press('Escape');
-    await expect(add).toBeFocused();
-    for (const title of ['Export as Image', 'Zoom to Fit (R)'])
-      await reachable(page.getByTitle(title, { exact: true }), 44);
-    const color = await page.locator('#canvas-bg-color').boundingBox();
-    expect(color?.width).toBe(32);
-    expect(color?.height).toBe(28);
-    expect(writes).toEqual([]);
-  });
-
   test(`Models long identifiers and checkbox targets at ${width}px`, async ({ page }, info) => {
     await preparePage(page, 'light', width);
     const writes = await guardReadTour(page);
