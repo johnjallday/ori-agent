@@ -3467,7 +3467,9 @@
         : '') +
       '</button>' +
       libraryBadgeHTML(ws.id) +
-      (d.bare ? '' : districtControlsHTML(ws.id, name, label, collapsed)) +
+      (d.bare
+        ? districtOpenHTML(ws.id, name)
+        : districtControlsHTML(ws.id, name, label, collapsed)) +
       '</div>' +
       districtConflictHTML(conflict) +
       '</div>'
@@ -3519,6 +3521,22 @@
       '" title="' +
       escapeHtml('Actions for ' + name) +
       '"><span aria-hidden="true">⋯</span></button>'
+    );
+  }
+
+  // A group page draws a group inside it without district chrome, but that
+  // group is still a place with a page of its own. This button is the visible
+  // way in; double-clicking the name and the menu's Open group are shortcuts to
+  // the same place. Clicking the name only selects, as everywhere on the map.
+  function districtOpenHTML(id, name) {
+    return (
+      '<button type="button" class="ws-map-district-open" data-group-open="' +
+      escapeHtml(id) +
+      '" aria-label="' +
+      escapeHtml('Open ' + name + ' group') +
+      '" title="' +
+      escapeHtml('Open ' + name) +
+      '">Open<span aria-hidden="true"> ›</span></button>'
     );
   }
 
@@ -3587,8 +3605,9 @@
             theme: district.theme,
             nested: !!district.parentId,
             // A group's own page draws no district chrome (group-map-build PRD
-            // §10): a sub-district there shows who and what it holds, and its
-            // members open from their buildings.
+            // §10): a sub-district there shows who and what it holds, its
+            // members open from their buildings, and it opens from its own
+            // Open button.
             bare: !!scopeGroupId
           },
           selectedId
@@ -5316,9 +5335,13 @@
     var district = renderedDistrict(groupId);
     var readOnly = isMapReadOnly();
     var collapsed = !!(district && district.collapsed);
-    // A group page draws no district of its own, so there is nothing here to
-    // open, resize, restyle, collapse, or delete (group-map-build PRD §10).
-    if (scoped) return [];
+    // A group page draws no district of its own, so the page's group has
+    // nothing here to resize, restyle, collapse, or delete (group-map-build PRD
+    // §10). The districts it does draw are the groups inside it; their layout
+    // belongs to Home, so opening their own page is all their menu offers.
+    if (scoped) {
+      return groupId && groupId !== scopeGroupId ? [{ label: 'Open group', action: 'open' }] : [];
+    }
     var items = [
       { label: 'Open group', action: 'open' },
       giveTaskMenuItem(ws),
@@ -5938,9 +5961,17 @@
       return { type: 'tile', id: tileId, ws: findWs(workspaces, tileId), element: tile };
     }
     var district = node.closest('.ws-map-district');
-    // A group page draws no district of its own; anything that still resolves
-    // here is ground being built on.
-    if (district && scopeGroupId) district = null;
+    // A group page draws no district of its own. The ones it draws are the
+    // groups inside it, and only a header names one of those: the ground inside
+    // its frame is still ground being built on.
+    if (
+      district &&
+      scopeGroupId &&
+      (!node.closest('.ws-map-district-header') ||
+        district.getAttribute('data-group-id') === scopeGroupId)
+    ) {
+      district = null;
+    }
     if (district) {
       var groupId = district.getAttribute('data-group-id');
       // Focus goes back to the district's label button, not to the outline: the
@@ -6140,7 +6171,28 @@
     });
   }
 
+  // The map's explicit open: the host's onOpen when it has one, else plain
+  // navigation to the workspace's page.
+  function openThroughHost(id, options) {
+    if (!id) return;
+    if (options && typeof options.onOpen === 'function') options.onOpen(id);
+    else openWorkspace(id);
+  }
+
   function bindTiles(container, workspaces, options) {
+    // A group page's Open button on a group inside it (districtOpenHTML). It
+    // claims the click, as the district header's other controls do.
+    Array.prototype.forEach.call(
+      container.querySelectorAll('[data-group-open]'),
+      function (button) {
+        if (!button || typeof button.addEventListener !== 'function') return;
+        button.addEventListener('click', function (e) {
+          if (e && e.preventDefault) e.preventDefault();
+          if (e && e.stopPropagation) e.stopPropagation();
+          openThroughHost(button.getAttribute('data-group-open'), options);
+        });
+      }
+    );
     // The empty lot's Set up button hands the group back to the host, which
     // owns the library setup sheet (folder-to-map-handoff FR-6).
     Array.prototype.forEach.call(
@@ -6287,13 +6339,11 @@
           openWorkspace(id);
         });
         // A group page has no rail to preview a selection in, so a member is
-        // also opened the direct way: double-clicking its building.
-        if (scopeGroupId && isTile) {
+        // also opened the direct way: double-clicking its building. A group
+        // inside the page's group opens the same way from its name.
+        if (scopeGroupId) {
           el.addEventListener('dblclick', function () {
-            var id = el.getAttribute('data-ws-id');
-            if (!id) return;
-            if (options && typeof options.onOpen === 'function') options.onOpen(id);
-            else openWorkspace(id);
+            openThroughHost(el.getAttribute('data-ws-id'), options);
           });
         }
         return;
