@@ -193,7 +193,7 @@ export function sortTasksForRollup(tasks) {
 
 // --- Notes/files helpers -------------------------------------------------------
 
-// A workspace canvas attachment counts as a "file" when it carries file metadata.
+// A workspace attachment counts as a "file" when it carries file metadata.
 export function isFileAttachment(attachment) {
   const meta = attachment && attachment.file_meta;
   return !!(meta && (meta.name || meta.url));

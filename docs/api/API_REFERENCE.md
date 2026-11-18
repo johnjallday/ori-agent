@@ -3914,7 +3914,7 @@ workspace.
 
 ## Custom Workflows API
 
-Custom workflows allow users to save selections of canvas nodes as reusable templates. These workflows can then be instantiated in any studio to recreate the node configuration.
+Custom workflows are reusable templates of canvas nodes. The workspace canvas where they were saved and applied is retired, so no screen creates, lists, applies, edits or deletes them any more; the endpoints below are unchanged, and workflows already saved remain in `workflow_templates/custom/`. They are a separate store from the Orchestration Skills at `/workflows` (`/api/orchestration/templates*`), which are unaffected.
 
 ### List Workflows
 
@@ -4075,6 +4075,8 @@ Check if all agents required by a workflow are available in a specific studio.
 ```
 
 ### Node Types and Configuration
+
+These are the node shapes stored in a workflow saved from the retired canvas. Scheduler and store nodes no longer exist as workspace objects (scheduled tasks are unchanged, and a ticket's save target is now plain file or folder settings on the ticket), so applying one of these nodes creates nothing.
 
 #### Task Node
 ```json
