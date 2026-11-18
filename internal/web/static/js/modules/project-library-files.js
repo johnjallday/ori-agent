@@ -178,6 +178,7 @@ export function mountLibraryFiles(container, options) {
   const button = (text, action) => {
     const item = element('button', text);
     item.type = 'button';
+    item.className = 'modern-btn modern-btn-secondary';
     item.addEventListener('click', () => void action());
     return item;
   };

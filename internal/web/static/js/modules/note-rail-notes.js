@@ -82,7 +82,7 @@ function escapeAttr(s) {
 export function renderListItem(note, isActive = false) {
   const id = escapeAttr(note.id);
   const name = escapeText(note.name || 'Untitled');
-  const cls = `note-rail-note-item${isActive ? ' is-active' : ''}`;
+  const cls = `note-rail-note-item modern-btn modern-btn-quiet modern-btn-sm${isActive ? ' is-active' : ''}`;
   return `<button type="button" class="${cls}" data-note-id="${id}" title="${name}">
     <span class="note-rail-note-name">${name}</span>
   </button>`;
@@ -139,6 +139,7 @@ function setTab(tab) {
   document.querySelectorAll('.note-rail-tab').forEach(btn => {
     const isActive = btn.dataset.tab === t;
     btn.classList.toggle('is-active', isActive);
+    btn.classList.toggle('active', isActive);
     btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
   });
   document.querySelectorAll('.note-rail-tab-pane').forEach(pane => {

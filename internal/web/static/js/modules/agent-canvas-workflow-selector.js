@@ -29,6 +29,9 @@ export class AgentCanvasWorkflowSelector {
     // Bind methods
     this.handleDocumentClick = this.handleDocumentClick.bind(this);
     this.handleWorkflowSelected = this.handleWorkflowSelected.bind(this);
+    this.updateWorkflowList = this.updateWorkflowList.bind(this);
+    this.handleChoice = this.handleChoice.bind(this);
+    this.handleKeydown = this.handleKeydown.bind(this);
   }
 
   /**
@@ -45,9 +48,11 @@ export class AgentCanvasWorkflowSelector {
     this.render();
 
     // Listen for task changes to update workflow list
-    this.state.on(EVENT_TYPES.TASK_CREATED, () => this.updateWorkflowList());
-    this.state.on(EVENT_TYPES.TASK_UPDATED, () => this.updateWorkflowList());
-    this.state.on(EVENT_TYPES.DATA_LOADED, () => this.updateWorkflowList());
+    this.state.on(EVENT_TYPES.TASK_CREATED, this.updateWorkflowList);
+    this.state.on(EVENT_TYPES.TASK_UPDATED, this.updateWorkflowList);
+    this.state.on(EVENT_TYPES.DATA_LOADED, this.updateWorkflowList);
+    this.container.addEventListener('click', this.handleChoice);
+    this.container.addEventListener('keydown', this.handleKeydown);
 
     // Listen for workflow selection changes
     this.state.on(EVENT_TYPES.WORKFLOW_SELECTED, this.handleWorkflowSelected);
@@ -83,6 +88,7 @@ export class AgentCanvasWorkflowSelector {
     const selectedWorkflow = this.state.getSelectedWorkflow();
     const totalTasks = this.state.getTotalTaskCount();
     const hasWorkflows = workflows.length > 0;
+    if (!hasWorkflows) this.dropdownOpen = false;
 
     // Determine display text
     let displayText = 'All Tickets';
@@ -93,10 +99,13 @@ export class AgentCanvasWorkflowSelector {
       displayCount = wf ? wf.taskCount : 1;
     }
 
+    const active = document.activeElement;
+    const ownedFocus = this.container.contains(active);
+    const focusedChoice = ownedFocus ? active?.dataset?.workflowChoice : undefined;
     this.container.innerHTML = `
       <div class="workflow-selector ${!hasWorkflows ? 'workflow-selector-disabled' : ''}" id="workflow-selector-dropdown">
-        <button class="workflow-selector-trigger modern-btn modern-btn-secondary"
-                onclick="event.stopPropagation(); window.workflowSelector?.toggleDropdown()"
+        <button type="button" class="workflow-selector-trigger modern-btn modern-btn-secondary"
+                aria-controls="workflow-selector-menu" aria-expanded="${this.dropdownOpen}"
                 ${!hasWorkflows ? 'disabled title="No workflows available"' : ''}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
             <path d="M17,3H7A2,2 0 0,0 5,5V21L12,18L19,21V5A2,2 0 0,0 17,3M15,14H13V17H11V14H9V12H11V9H13V12H15V14Z"/>
@@ -108,15 +117,14 @@ export class AgentCanvasWorkflowSelector {
           </svg>
         </button>
 
-        <div class="workflow-selector-menu ${this.dropdownOpen ? 'show' : ''}" id="workflow-selector-menu">
-          <div class="workflow-selector-item ${!selectedWorkflow ? 'selected' : ''}"
-               onclick="event.stopPropagation(); window.workflowSelector?.selectWorkflow(null)">
-            <span class="workflow-selector-item-icon">
+        <div class="workflow-selector-menu ui-section ${this.dropdownOpen ? 'show' : ''}" id="workflow-selector-menu" role="group" aria-label="Canvas workflow filter" ${this.dropdownOpen ? '' : 'hidden'}>
+          <button type="button" class="workflow-selector-item modern-btn modern-btn-secondary" data-workflow-choice="" aria-pressed="${!selectedWorkflow}">
+            <span class="workflow-selector-item-icon" aria-hidden="true">
               ${!selectedWorkflow ? '✓' : ''}
             </span>
             <span class="workflow-selector-item-text">All Tickets</span>
             <span class="workflow-selector-item-count">${totalTasks}</span>
-          </div>
+          </button>
 
           ${
             hasWorkflows
@@ -126,14 +134,13 @@ export class AgentCanvasWorkflowSelector {
             ${workflows
               .map(
                 wf => `
-              <div class="workflow-selector-item ${this.state.selectedWorkflowId === wf.id ? 'selected' : ''}"
-                   onclick="event.stopPropagation(); window.workflowSelector?.selectWorkflow('${wf.id}')">
-                <span class="workflow-selector-item-icon">
+              <button type="button" class="workflow-selector-item modern-btn modern-btn-secondary" data-workflow-choice="${this.escapeHtml(wf.id).replace(/"/g, '&quot;')}" aria-pressed="${this.state.selectedWorkflowId === wf.id}">
+                <span class="workflow-selector-item-icon" aria-hidden="true">
                   ${this.state.selectedWorkflowId === wf.id ? '✓' : ''}
                 </span>
                 <span class="workflow-selector-item-text">${this.escapeHtml(wf.name)}</span>
                 <span class="workflow-selector-item-count">${wf.taskCount}</span>
-              </div>
+              </button>
             `
               )
               .join('')}
@@ -143,14 +150,37 @@ export class AgentCanvasWorkflowSelector {
 
           <div class="workflow-selector-divider"></div>
 
-          <div class="workflow-selector-item workflow-selector-action"
-               onclick="event.stopPropagation(); window.workflowSelector?.handleCreateWorkflow()">
-            <span class="workflow-selector-item-icon">+</span>
+          <button type="button" class="workflow-selector-item modern-btn modern-btn-secondary" data-workflow-create>
+            <span class="workflow-selector-item-icon" aria-hidden="true">+</span>
             <span class="workflow-selector-item-text">Create Workflow</span>
-          </div>
+          </button>
         </div>
       </div>
     `;
+    if (ownedFocus) {
+      const replacement = [...this.container.querySelectorAll('[data-workflow-choice]')].find(
+        node => node.dataset.workflowChoice === focusedChoice
+      );
+      const trigger = this.container.querySelector('.workflow-selector-trigger');
+      if (trigger?.disabled) this.parent?.canvas?.focus?.();
+      else (replacement || trigger)?.focus();
+    }
+  }
+
+  handleChoice(event) {
+    const button = event.target.closest('button');
+    if (!button || !this.container.contains(button) || button.disabled) return;
+    if (button.classList.contains('workflow-selector-trigger')) this.toggleDropdown();
+    else if (button.hasAttribute('data-workflow-choice'))
+      this.selectWorkflow(button.dataset.workflowChoice || null);
+    else if (button.hasAttribute('data-workflow-create')) this.handleCreateWorkflow();
+  }
+
+  handleKeydown(event) {
+    if (event.key !== 'Escape' || !this.dropdownOpen) return;
+    event.preventDefault();
+    event.stopPropagation();
+    this.closeDropdown(true);
   }
 
   /**
@@ -161,18 +191,26 @@ export class AgentCanvasWorkflowSelector {
     const menu = document.getElementById('workflow-selector-menu');
     if (menu) {
       menu.classList.toggle('show', this.dropdownOpen);
+      menu.hidden = !this.dropdownOpen;
     }
+    this.container
+      ?.querySelector('.workflow-selector-trigger')
+      ?.setAttribute('aria-expanded', String(this.dropdownOpen));
   }
 
   /**
    * Close dropdown
    */
-  closeDropdown() {
+  closeDropdown(restoreFocus = false) {
     this.dropdownOpen = false;
     const menu = document.getElementById('workflow-selector-menu');
     if (menu) {
       menu.classList.remove('show');
+      menu.hidden = true;
     }
+    const trigger = this.container?.querySelector('.workflow-selector-trigger');
+    trigger?.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) trigger?.focus();
   }
 
   /**
@@ -193,6 +231,7 @@ export class AgentCanvasWorkflowSelector {
     this.closeDropdown();
     this.state.setSelectedWorkflow(workflowId);
     this.updateUrl(workflowId);
+    this.container?.querySelector('.workflow-selector-trigger')?.focus();
   }
 
   /**
@@ -265,7 +304,7 @@ export class AgentCanvasWorkflowSelector {
     // Open the task creation modal with workflow flag
     // Check for different modal systems
     if (typeof showAddTaskModal === 'function') {
-      showAddTaskModal();
+      showAddTaskModal(this.container?.querySelector('.workflow-selector-trigger'));
     } else if (
       this.parent &&
       this.parent.forms &&
@@ -295,6 +334,14 @@ export class AgentCanvasWorkflowSelector {
   destroy() {
     document.removeEventListener('click', this.handleDocumentClick);
     this.state.off(EVENT_TYPES.WORKFLOW_SELECTED, this.handleWorkflowSelected);
+    for (const event of [
+      EVENT_TYPES.TASK_CREATED,
+      EVENT_TYPES.TASK_UPDATED,
+      EVENT_TYPES.DATA_LOADED
+    ])
+      this.state.off(event, this.updateWorkflowList);
+    this.container?.removeEventListener('click', this.handleChoice);
+    this.container?.removeEventListener('keydown', this.handleKeydown);
   }
 }
 

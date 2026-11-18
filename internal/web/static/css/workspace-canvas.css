@@ -1,0 +1,34 @@
+/* Canvas owns placement, never a second control/surface palette. */
+html:has(#canvas-view) {
+  scroll-padding-top: calc(var(--navbar-offset, 76px) + var(--space-3));
+  scroll-padding-bottom: var(--ori-launcher-clearance-y, 88px);
+}
+.canvas-add-disclosure {
+  position: relative;
+}
+.canvas-add-disclosure > summary {
+  list-style: none;
+}
+.canvas-add-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.canvas-add-options {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  z-index: 200;
+  display: grid;
+  gap: var(--space-1);
+  width: 16rem;
+  max-width: calc(100vw - 48px);
+  padding: var(--space-2);
+}
+.canvas-add-options > button {
+  justify-content: flex-start;
+  width: 100%;
+}
+#canvas-sidebar {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding-bottom: var(--ori-launcher-clearance-y, 88px);
+}

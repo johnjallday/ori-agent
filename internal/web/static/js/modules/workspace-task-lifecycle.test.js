@@ -73,10 +73,140 @@ function makePage(t, snapshots = []) {
   page.closeResultSectionMenu = () => {};
   page.captureLiveActivity = () => {};
   page.cacheElements = () => {};
+  page.setupHeaderGeometry = () => {};
   page.bindEvents = () => {};
   t.mock.method(console, 'error', (...args) => view.errors.push(args));
   return { page, view };
 }
+
+test('header geometry measures sticky clearance, releases tall headers, and restores ownership on teardown', t => {
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    ResizeObserver: globalThis.ResizeObserver,
+    getComputedStyle: globalThis.getComputedStyle
+  };
+  t.after(() => Object.assign(globalThis, previous));
+  const values = new Map([['--workspace-task-scroll-offset', '18px']]);
+  const classes = new Set();
+  let height = 200;
+  let resize;
+  let disconnected = 0;
+  let removed = 0;
+  const observed = [];
+  const hero = {
+    getBoundingClientRect: () => ({ height }),
+    classList: {
+      toggle: (name, enabled) => (enabled ? classes.add(name) : classes.delete(name)),
+      remove: name => classes.delete(name)
+    }
+  };
+  const navbar = { getBoundingClientRect: () => ({ height: 90 }) };
+  globalThis.document = {
+    querySelector: selector => (selector === '.navbar' ? navbar : hero),
+    documentElement: {
+      style: {
+        getPropertyValue: key => values.get(key) || '',
+        setProperty: (key, value) => values.set(key, value),
+        removeProperty: key => values.delete(key)
+      }
+    }
+  };
+  globalThis.window = {
+    innerHeight: 1000,
+    addEventListener: () => {},
+    removeEventListener: () => removed++
+  };
+  globalThis.getComputedStyle = () => ({
+    position: classes.has('is-too-tall') ? 'static' : 'sticky'
+  });
+  globalThis.ResizeObserver = class {
+    constructor(callback) {
+      resize = callback;
+    }
+    observe(node) {
+      observed.push(node);
+    }
+    disconnect() {
+      disconnected++;
+    }
+  };
+  const { page } = makePage(t);
+  WorkspaceTaskPage.prototype.setupHeaderGeometry.call(page);
+  assert.deepEqual(observed, [hero, navbar]);
+  assert.equal(values.get('--workspace-task-scroll-offset'), '306px');
+  height = 500;
+  resize();
+  assert.equal(classes.has('is-too-tall'), true);
+  assert.equal(values.get('--workspace-task-scroll-offset'), '106px');
+  window.innerHeight = 2000;
+  resize();
+  assert.equal(classes.has('is-too-tall'), false);
+  assert.equal(values.get('--workspace-task-scroll-offset'), '606px');
+  page.destroy();
+  page.destroy();
+  assert.equal(disconnected, 1);
+  assert.equal(removed, 1);
+  resize(); // An already queued observer cannot reclaim a detached page's CSS.
+  assert.equal(values.get('--workspace-task-scroll-offset'), '18px');
+});
+
+test('choosing a blocked path updates selection and the continuation label without replacing the invoker or sending work', t => {
+  const { page } = makePage(t);
+  t.mock.method(globalThis, 'fetch', () => assert.fail('selection must not send a request'));
+  const buttons = ['writers', 'researchers'].map(id => {
+    const attributes = new Map([['data-assist-choice-id', id]]);
+    const classes = new Set();
+    return {
+      attributes,
+      classes,
+      getAttribute: name => attributes.get(name),
+      setAttribute: (name, value) => attributes.set(name, value),
+      classList: {
+        toggle: (name, selected) => (selected ? classes.add(name) : classes.delete(name))
+      },
+      addEventListener(_type, listener) {
+        this.activate = listener;
+      }
+    };
+  });
+  let paints = 0;
+  const continuation = {
+    setAttribute(name, value) {
+      this[name] = value;
+    }
+  };
+  page.elements = {
+    assistFormFields: {
+      set innerHTML(_value) {
+        paints++;
+      },
+      querySelectorAll: () => buttons
+    },
+    assistContinueBtn: continuation
+  };
+  page.escapeHtml = String;
+  page.currentBlockedTask = {};
+  page.renderChoiceWorkflow({
+    stepType: 'ask_choice',
+    choices: [
+      { id: 'writers', label: 'Workshop writers' },
+      { id: 'researchers', label: 'Workshop researchers' }
+    ]
+  });
+  buttons[0].activate();
+  assert.equal(paints, 1, 'keep the connected native buttons, including the focused invoker');
+  assert.equal(page.currentBlockedTask.selectedChoiceId, 'writers');
+  assert.equal(buttons[0].attributes.get('aria-pressed'), 'true');
+  assert.equal(buttons[1].attributes.get('aria-pressed'), 'false');
+  assert.equal(continuation.textContent, 'Continue With Selected Path');
+  assert.equal(continuation['aria-label'], continuation.textContent);
+  buttons[1].activate();
+  assert.equal(paints, 1);
+  assert.equal(page.currentBlockedTask.selectedChoiceId, 'researchers');
+  assert.equal(buttons[0].classes.has('is-selected'), false);
+  assert.equal(buttons[1].classes.has('is-selected'), true);
+});
 
 function loadedSnapshot(label) {
   const source = snapshot(label);

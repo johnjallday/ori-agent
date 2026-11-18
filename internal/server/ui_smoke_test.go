@@ -5,7 +5,35 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/johnjallday/ori-agent/internal/web"
 )
+
+func TestWorkspaceDetailSmokeContractMatchesCurrentRenderer(t *testing.T) {
+	renderer := web.NewTemplateRenderer()
+	if err := renderer.LoadTemplates(); err != nil {
+		t.Fatal(err)
+	}
+	html, err := renderer.RenderTemplate("workspace-detail", web.GetDefaultData())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := workspaceDetailSmokeSpec("/workspaces/owned-fixture")
+	check := func(body string) uiSmokeTestCheck {
+		return runUISmokeCheck(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}), spec)
+	}
+	if result := check(html); result.Status != "passed" {
+		t.Fatalf("current renderer: %#v", result)
+	}
+	// Keeping generic page text/controller references is not enough: removing
+	// the actual command mount must still make this real contract fail.
+	missing := strings.Replace(html, `id="workspaceCommandView"`, "", 1)
+	if result := check(missing); result.Status != "failed" {
+		t.Fatalf("missing mount: %#v", result)
+	}
+}
 
 func TestRunUISmokeCheckPassed(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

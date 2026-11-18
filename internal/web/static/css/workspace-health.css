@@ -1,11 +1,23 @@
+html:has(#workspace-diagnostics-view) {
+  scroll-padding-top: calc(var(--navbar-offset, 76px) + var(--space-3));
+  scroll-padding-bottom: var(--ori-launcher-clearance-y, 88px);
+}
+#workspace-diagnostics-view {
+  padding-bottom: var(--ori-launcher-clearance-y, 88px);
+}
+.diagnostics-breadcrumb {
+  overflow-wrap: anywhere;
+}
+
 .workspace-detail-health-card,
 .workspace-detail-health-card:hover {
   position: relative;
+  padding: 0;
   overflow: hidden;
-  --health-success: #17603e;
-  --health-warning: #75430b;
-  --health-danger: #a21d2b;
-  --health-info: #1d4c86;
+  --health-success: var(--success-text);
+  --health-warning: var(--warning-text);
+  --health-danger: var(--danger-text);
+  --health-info: var(--info-text);
   border: 1px solid var(--border-color);
   background: var(--bg-secondary);
   color: var(--text-primary);
@@ -14,10 +26,6 @@
 
 [data-bs-theme="dark"] .workspace-detail-health-card,
 [data-bs-theme="dark"] .workspace-detail-health-card:hover {
-  --health-success: #8df4be;
-  --health-warning: #ffd08a;
-  --health-danger: #ffaeae;
-  --health-info: #b5d4ff;
   background: var(--bg-secondary);
 }
 
@@ -50,13 +58,6 @@
   margin-bottom: 0.35rem;
 }
 
-.workspace-detail-health-title {
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 1.08rem;
-  font-weight: 650;
-}
-
 .workspace-detail-health-summary {
   margin: 0.45rem 0 0;
   color: var(--text-secondary);
@@ -75,35 +76,8 @@
   max-width: 100%;
 }
 
-#workspace-detail-health-refresh {
-  width: auto;
-  height: auto;
-  min-height: 34px;
-  padding: 0.52rem 0.88rem;
-  border-radius: 999px;
-  gap: 0.45rem;
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
 #workspace-detail-health-refresh svg {
   flex: 0 0 auto;
-}
-
-.workspace-detail-health-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  min-height: 34px;
-  padding: 0.42rem 0.82rem;
-  border-radius: 999px;
-  border: 1px solid currentColor;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .workspace-detail-health-badge.is-healthy {
@@ -267,12 +241,6 @@
 
 .workspace-detail-health-action.workspace-detail-panel-btn {
   display: inline-flex;
-  width: auto;
-  height: auto;
-  min-width: max-content;
-  min-height: 38px;
-  padding: 0.52rem 0.92rem;
-  border-radius: 999px;
   align-self: center;
   justify-self: end;
   flex: 0 0 auto;
@@ -284,7 +252,8 @@
   border-radius: 18px;
   border: 1px solid var(--health-info);
   background: var(--bg-primary);
-  overflow: hidden;
+  max-height: 24rem;
+  overflow: auto;
 }
 
 .workspace-detail-ui-smoke-result.is-passed {
@@ -297,6 +266,7 @@
 
 .workspace-detail-ui-smoke-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
@@ -351,9 +321,11 @@
   gap: 0.7rem;
   align-items: center;
   padding: 0.7rem 0.75rem;
-  border-radius: 14px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.workspace-detail-ui-smoke-check:last-child {
+  border-bottom: 0;
 }
 
 .workspace-detail-ui-smoke-check-icon {

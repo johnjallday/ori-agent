@@ -191,7 +191,7 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="color: var(--text-secondary);">
               <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M13,9V3.5L18.5,9H13M12,12H7V10H12V12M17,16H7V14H17V16M17,20H7V18H17V20Z"/>
             </svg>
-            <input type="text" id="noteNameInput" class="note-title-input" placeholder="Note title" aria-label="Note title" autocomplete="off">
+            <input type="text" id="noteNameInput" class="note-title-input form-control" placeholder="Note title" aria-label="Note title" autocomplete="off">
           </div>
           <div style="display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
             <div id="noteWorkspaceBadge" style="display: none; font-size: 0.75rem; color: var(--text-secondary);">
@@ -226,7 +226,7 @@
       </div>
       <div class="modal-body p-0">
         <div class="note-editor-toolbar">
-          <button type="button" id="noteGenerateAIToggle" class="note-toolbar-btn" title="Ask AI (⌘J)" aria-controls="noteAIGeneratePanel" aria-expanded="false">
+          <button type="button" id="noteGenerateAIToggle" class="note-toolbar-btn modern-btn modern-btn-secondary modern-btn-sm" title="Ask AI (⌘J)" aria-controls="noteAIGeneratePanel" aria-expanded="false">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M12,2L15.09,8.26L22,9.27L17,14.14L18.18,21.02L12,17.77L5.82,21.02L7,14.14L2,9.27L8.91,8.26L12,2Z"/>
             </svg>
@@ -246,13 +246,13 @@
             <div class="note-ai-form-grid">
               <label for="noteAIAgentSelect" class="note-ai-field">
                 <span>Agent</span>
-                <select id="noteAIAgentSelect" class="modern-input w-100">
+                <select id="noteAIAgentSelect" class="form-select w-100">
                   <option value="">Use workspace agent</option>
                 </select>
               </label>
               <label for="noteAIPromptInput" class="note-ai-field note-ai-field-prompt">
                 <span>Prompt</span>
-                <textarea id="noteAIPromptInput" class="modern-input w-100" rows="3" placeholder="Describe the note you want…"></textarea>
+                <textarea id="noteAIPromptInput" class="form-control w-100" rows="3" placeholder="Describe the note you want…"></textarea>
               </label>
             </div>
             <div id="noteAIError" class="note-ai-message note-ai-message-error" role="alert" aria-live="assertive" hidden></div>
@@ -289,20 +289,20 @@
         <span class="me-auto d-flex align-items-center gap-2" style="font-size: 12px;">
           <span id="noteLastSaved" class="text-muted"></span>
           <span id="noteSaveStatus" aria-live="polite" aria-atomic="true">
-            <span class="note-status-saved text-success" style="display: none;">
+            <span class="note-status-saved" style="display: none;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                 <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
               </svg>Saved
             </span>
-            <span class="note-status-saving text-muted" style="display: none;">
+            <span class="note-status-saving" style="display: none;">
               <span class="spinner-border spinner-border-sm me-1" style="width: 12px; height: 12px;"></span>Saving…
             </span>
-            <span class="note-status-unsaved text-warning" style="display: none;">
+            <span class="note-status-unsaved" style="display: none;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                 <path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,17A1.5,1.5 0 0,1 10.5,15.5A1.5,1.5 0 0,1 12,14A1.5,1.5 0 0,1 13.5,15.5A1.5,1.5 0 0,1 12,17M12,12A1.5,1.5 0 0,1 10.5,10.5V7A1.5,1.5 0 0,1 12,5.5A1.5,1.5 0 0,1 13.5,7V10.5A1.5,1.5 0 0,1 12,12Z"/>
               </svg>Unsaved
             </span>
-            <span class="note-status-error text-danger" style="display: none;">
+            <span class="note-status-error" style="display: none;">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                 <path d="M13,13H11V7H13M13,17H11V15H13M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
               </svg>Save failed

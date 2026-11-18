@@ -468,6 +468,8 @@ test('the panel offers triage per item, the bulk action, and says partial and fa
   assert.ok(html.includes('data-cmd-modal-action="notes-item-follow_up" data-cmd-id="a"'));
   assert.ok(!html.includes('data-cmd-modal-action="notes-item-follow_up" data-cmd-id="b"'));
   assert.ok(html.includes('Add 1 suggested as follow-ups'));
+  assert.ok(html.includes('ws-notes-action modern-btn modern-btn-secondary modern-btn-sm'));
+  assert.ok(html.includes('ws-notes-bulk modern-btn modern-btn-primary modern-btn-sm'));
   assert.ok(html.includes('1 handled'));
   assert.ok(html.includes('Dismissed'));
   assert.ok(html.includes('(partial look)'));
@@ -580,6 +582,7 @@ test('an expanded handled list stays expanded through a repaint', () => {
     });
   assert.ok(html(true).includes('<details class="ws-notes-handled" open>'));
   assert.ok(html(false).includes('<details class="ws-notes-handled">'));
+  assert.ok(html(false).includes('<summary class="ui-disclosure-title">1 handled</summary>'));
 });
 
 test('Today follows the state, and None leads into the Journal', () => {

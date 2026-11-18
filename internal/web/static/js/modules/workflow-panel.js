@@ -33,6 +33,8 @@ class WorkflowPanel {
     this.categoryFilter = '';
     /** @type {boolean} */
     this.isCollapsed = false;
+    this.loadError = false;
+    this.handleAction = this.handleAction.bind(this);
   }
 
   /**
@@ -49,7 +51,9 @@ class WorkflowPanel {
    * @returns {Promise<void>}
    */
   async loadWorkflows() {
+    if (this.isLoading) return;
     this.isLoading = true;
+    this.loadError = false;
     this.renderWorkflowList();
 
     try {
@@ -59,7 +63,8 @@ class WorkflowPanel {
       }
 
       const data = await response.json();
-      this.workflows = data.workflows || [];
+      if (!Array.isArray(data.workflows)) throw new Error('Invalid workflow list');
+      this.workflows = data.workflows;
 
       // Check agent availability for each workflow
       await this.checkAllAgentAvailability();
@@ -67,6 +72,7 @@ class WorkflowPanel {
       this.applyFilters();
     } catch (error) {
       console.error('Error loading workflows:', error);
+      this.loadError = true;
       this.workflows = [];
       this.filteredWorkflows = [];
     } finally {
@@ -93,15 +99,18 @@ class WorkflowPanel {
         if (response.ok) {
           const result = await response.json();
           workflow.missingAgents = result.missing_agents || [];
+          workflow.agentCheckUnavailable = false;
           workflow.allAgentsAvailable = workflow.missingAgents.length === 0;
         } else {
           workflow.missingAgents = [];
-          workflow.allAgentsAvailable = true;
+          workflow.agentCheckUnavailable = true;
+          workflow.allAgentsAvailable = false;
         }
       } catch (error) {
         console.error(`Error checking agents for workflow ${workflow.id}:`, error);
         workflow.missingAgents = [];
-        workflow.allAgentsAvailable = true;
+        workflow.agentCheckUnavailable = true;
+        workflow.allAgentsAvailable = false;
       }
     }
   }
@@ -147,7 +156,7 @@ class WorkflowPanel {
     container.innerHTML = `
       <div class="modern-card p-3 mb-3" id="workflow-panel">
         <div class="d-flex justify-content-between align-items-center mb-2">
-          <h6 class="mb-0" style="color: var(--text-primary); font-weight: 600; cursor: pointer;" onclick="workflowPanel.toggleCollapse()">
+          <h6 class="mb-0"><button type="button" id="workflow-panel-toggle" class="modern-btn modern-btn-secondary modern-btn-sm" data-workflow-action="collapse" aria-controls="workflow-panel-content" aria-expanded="true">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1" style="vertical-align: text-bottom;">
               <path d="M4,2H20A2,2 0 0,1 22,4V20A2,2 0 0,1 20,22H4A2,2 0 0,1 2,20V4A2,2 0 0,1 4,2M4,4V8H9V4H4M11,4V8H20V4H11M4,10V14H9V10H4M11,10V14H20V10H11M4,16V20H9V16H4M11,16V20H20V16H11Z"/>
             </svg>
@@ -155,8 +164,8 @@ class WorkflowPanel {
             <svg id="workflow-panel-chevron" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="ms-1" style="vertical-align: text-bottom; transition: transform 0.2s;">
               <path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/>
             </svg>
-          </h6>
-          <button class="btn btn-sm btn-link p-0" onclick="workflowPanel.loadWorkflows()" title="Refresh" style="color: var(--text-secondary);">
+          </button></h6>
+          <button type="button" id="workflow-refresh" class="modern-btn modern-btn-secondary modern-btn-icon" data-workflow-action="refresh" title="Refresh workflows" aria-label="Refresh workflows">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
             </svg>
@@ -167,19 +176,19 @@ class WorkflowPanel {
           <!-- Search and filter -->
           <div class="mb-2">
             <input type="text" class="form-control form-control-sm"
-                   placeholder="Search workflows..."
+                   placeholder="Search workflows..." aria-label="Search workflows"
                    id="workflow-search"
                    oninput="workflowPanel.onSearch(this.value)">
           </div>
 
           <div class="mb-2">
-            <select class="form-select form-select-sm" id="workflow-category-filter" onchange="workflowPanel.onCategoryFilter(this.value)">
+            <select class="form-select form-select-sm" id="workflow-category-filter" aria-label="Workflow category" onchange="workflowPanel.onCategoryFilter(this.value)">
               <option value="">All Categories</option>
             </select>
           </div>
 
           <!-- Workflow list -->
-          <div id="workflow-list" style="max-height: 400px; overflow-y: auto;">
+          <div id="workflow-list" tabindex="0" role="region" aria-label="Saved workflows" style="max-height: 24rem; overflow-y: auto;">
             <div class="text-center py-3">
               <div class="spinner-border spinner-border-sm text-primary" role="status">
                 <span class="visually-hidden">Loading...</span>
@@ -189,6 +198,28 @@ class WorkflowPanel {
         </div>
       </div>
     `;
+    container.removeEventListener('click', this.handleAction);
+    container.addEventListener('click', this.handleAction);
+  }
+
+  handleAction(event) {
+    const button = event.target.closest('[data-workflow-action]');
+    if (!button || !document.getElementById(this.containerId)?.contains(button) || button.disabled)
+      return;
+    switch (button.dataset.workflowAction) {
+      case 'collapse':
+        this.toggleCollapse();
+        break;
+      case 'refresh':
+        void this.loadWorkflows();
+        break;
+      case 'delete':
+        void this.deleteWorkflow(button.dataset.workflowId);
+        break;
+      case 'instantiate':
+        void this.instantiateWorkflow(button.dataset.workflowId);
+        break;
+    }
   }
 
   /**
@@ -198,6 +229,9 @@ class WorkflowPanel {
     this.isCollapsed = !this.isCollapsed;
     const content = document.getElementById('workflow-panel-content');
     const chevron = document.getElementById('workflow-panel-chevron');
+    document
+      .getElementById('workflow-panel-toggle')
+      ?.setAttribute('aria-expanded', String(!this.isCollapsed));
 
     if (content) {
       content.style.display = this.isCollapsed ? 'none' : 'block';
@@ -233,17 +267,37 @@ class WorkflowPanel {
     const categorySelect = document.getElementById('workflow-category-filter');
 
     if (!listContainer) return;
+    const active = document.activeElement;
+    const ownedFocus = listContainer.contains(active);
+    const focusId = active?.dataset?.workflowId,
+      focusAction = active?.dataset?.workflowAction;
+    const restoreFocus = () => {
+      if (!ownedFocus) return;
+      const replacement = [...listContainer.querySelectorAll('[data-workflow-action]')].find(
+        node => node.dataset.workflowId === focusId && node.dataset.workflowAction === focusAction
+      );
+      const refresh = document.getElementById('workflow-refresh');
+      const fallback = refresh?.disabled
+        ? document.getElementById('workflow-panel-toggle')
+        : refresh;
+      (replacement || fallback)?.focus();
+    };
+    listContainer.setAttribute('aria-busy', String(this.isLoading));
+    const refresh = document.getElementById('workflow-refresh');
+    refresh?.setAttribute('aria-busy', String(this.isLoading));
 
     // Update category dropdown
     if (categorySelect) {
       const categories = this.getCategories();
-      const currentValue = categorySelect.value;
+      const currentValue = this.categoryFilter;
+      // A failed/empty refresh must not silently change a person's filter.
+      if (currentValue && !categories.includes(currentValue)) categories.push(currentValue);
       categorySelect.innerHTML =
         `<option value="">All Categories</option>` +
         categories
           .map(
             cat =>
-              `<option value="${this.escapeHtml(cat)}" ${cat === currentValue ? 'selected' : ''}>${this.escapeHtml(cat)}</option>`
+              `<option value="${this.escapeAttribute(cat)}" ${cat === currentValue ? 'selected' : ''}>${this.escapeHtml(cat)}</option>`
           )
           .join('');
     }
@@ -256,6 +310,14 @@ class WorkflowPanel {
           </div>
         </div>
       `;
+      restoreFocus();
+      return;
+    }
+
+    if (this.loadError) {
+      listContainer.innerHTML =
+        '<p class="ui-status-danger" role="alert">Unable to load saved workflows. Refresh to retry.</p>';
+      restoreFocus();
       return;
     }
 
@@ -265,12 +327,14 @@ class WorkflowPanel {
           ${this.workflows.length === 0 ? 'No workflows saved yet' : 'No matching workflows'}
         </div>
       `;
+      restoreFocus();
       return;
     }
 
     listContainer.innerHTML = this.filteredWorkflows
       .map(workflow => this.renderWorkflowItem(workflow))
       .join('');
+    restoreFocus();
   }
 
   /**
@@ -284,32 +348,26 @@ class WorkflowPanel {
     const nodeCount = workflow.nodes ? workflow.nodes.length : 0;
     const hasWarning = workflow.missingAgents && workflow.missingAgents.length > 0;
 
-    const warningTooltip = hasWarning ? `Missing agents: ${workflow.missingAgents.join(', ')}` : '';
+    const warningTooltip = workflow.agentCheckUnavailable
+      ? 'Agent availability could not be checked'
+      : hasWarning
+        ? `Missing agents: ${workflow.missingAgents.join(', ')}`
+        : '';
 
     return `
-      <div class="workflow-item p-2 mb-2" style="background: var(--bg-secondary); border-radius: 6px; border: 1px solid var(--border-color);">
+      <div class="workflow-item" data-workflow-row="${this.escapeAttribute(workflow.id)}">
         <div class="d-flex justify-content-between align-items-start mb-1">
           <div class="d-flex align-items-center gap-1" style="flex: 1; min-width: 0;">
-            ${
-              hasWarning
-                ? `
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="#f59e0b" title="${this.escapeHtml(warningTooltip)}" style="flex-shrink: 0;">
-                <path d="M12,2L1,21H23M12,6L19.53,19H4.47M11,10V14H13V10M11,16V18H13V16"/>
-              </svg>
-            `
-                : ''
-            }
-            <strong style="color: var(--text-primary); font-size: 0.875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+            <strong class="workflow-item-name">
               ${this.escapeHtml(workflow.name)}
             </strong>
           </div>
           ${
             isCustom
               ? `
-            <button class="btn btn-link btn-sm p-0 ms-1"
-                    onclick="workflowPanel.deleteWorkflow('${workflow.id}')"
-                    title="Delete workflow"
-                    style="color: var(--danger-color); flex-shrink: 0;">
+            <button type="button" class="modern-btn modern-btn-danger modern-btn-icon ms-1"
+                    data-workflow-action="delete" data-workflow-id="${this.escapeAttribute(workflow.id)}"
+                    title="Delete workflow" aria-label="Delete workflow">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
               </svg>
@@ -322,24 +380,24 @@ class WorkflowPanel {
         ${
           workflow.description
             ? `
-          <p class="mb-1" style="color: var(--text-secondary); font-size: 0.75rem; line-height: 1.3; margin: 0;">
-            ${this.escapeHtml(workflow.description.substring(0, 80))}${workflow.description.length > 80 ? '...' : ''}
+          <p class="ui-field-help mb-1 workflow-item-description">
+            ${this.escapeHtml(workflow.description)}
           </p>
         `
             : ''
         }
 
-        <div class="d-flex justify-content-between align-items-center mt-2">
+        ${warningTooltip ? `<p class="ui-status-warning ui-field-help">${this.escapeHtml(warningTooltip)}</p>` : ''}
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-2">
           <div class="d-flex gap-1 flex-wrap">
-            ${workflow.category ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #3b82f6; font-size: 0.65rem; padding: 2px 6px;">${this.escapeHtml(workflow.category)}</span>` : ''}
-            <span class="badge" style="background: rgba(107, 114, 128, 0.15); color: var(--text-secondary); font-size: 0.65rem; padding: 2px 6px;">${nodeCount} node${nodeCount !== 1 ? 's' : ''}</span>
-            ${isCustom ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; font-size: 0.65rem; padding: 2px 6px;">Custom</span>` : ''}
+            ${workflow.category ? `<span class="badge badge-info">${this.escapeHtml(workflow.category)}</span>` : ''}
+            <span class="badge badge-secondary">${nodeCount} node${nodeCount !== 1 ? 's' : ''}</span>
+            ${isCustom ? `<span class="badge badge-success">Custom</span>` : ''}
           </div>
 
-          <button class="btn btn-sm btn-primary"
-                  onclick="workflowPanel.instantiateWorkflow('${workflow.id}')"
-                  style="font-size: 0.7rem; padding: 2px 8px;"
-                  ${hasWarning ? 'title="Warning: Some agents are missing"' : ''}>
+          <button type="button" class="modern-btn modern-btn-primary modern-btn-sm"
+                  data-workflow-action="instantiate" data-workflow-id="${this.escapeAttribute(workflow.id)}"
+                  ${warningTooltip ? `title="${this.escapeAttribute(warningTooltip)}"` : ''}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" class="me-1">
               <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
             </svg>
@@ -604,6 +662,10 @@ class WorkflowPanel {
    * @returns {string} Escaped HTML string
    * @private
    */
+  escapeAttribute(text) {
+    return this.escapeHtml(text).replace(/"/g, '&quot;');
+  }
+
   escapeHtml(text) {
     if (!text) return '';
     const div = document.createElement('div');

@@ -1,0 +1,33 @@
+/* Shared Plan index/detail status semantics; control and surface paint remains
+   in components.css. Icons and words continue to identify every state. */
+.plan-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--border-color);
+  white-space: normal;
+}
+
+.plan-status[data-tone="attention"],
+.plan-save-state[data-tone="attention"] {
+  color: var(--warning-text);
+  border-color: var(--warning-text);
+}
+
+.plan-status[data-tone="info"],
+.plan-status[data-tone="active"],
+.plan-save-state[data-tone="info"] {
+  color: var(--info-text);
+  border-color: var(--info-text);
+}
+
+.plan-status[data-tone="success"] {
+  color: var(--success-text);
+  border-color: var(--success-text);
+}
+
+.plan-status[data-tone="danger"],
+.plan-save-state[data-tone="danger"] {
+  color: var(--danger-text);
+  border-color: var(--danger-text);
+}

@@ -464,7 +464,11 @@ function button(label, action, id = '', disabled = false) {
 }
 
 function badge(label, kind) {
-  return element('span', `home-profile-badge is-${kind}`, label);
+  return element(
+    'span',
+    `home-profile-badge badge ${kind === 'confirmed' ? 'badge-success' : 'badge-secondary'} is-${kind}`,
+    label
+  );
 }
 
 // HomeProfilePanel mounts the card on the Home page. It reads once on load and

@@ -104,6 +104,69 @@ Success aliases primary; retain the action's meaningful name. Use a single
 primary action per context. Do not turn every row action into a primary button.
 Keep sentence case, accessible names and native anchors for navigation.
 
+Workspace `.ws-cmd-nav-btn` and `.ws-cmd-view-btn` are compact compatibility
+aliases of this family, not a tactical control skin. `components.css` owns their
+padding, states and typography; `common.css` owns focus and narrow/coarse floors.
+`.ws-cmd-give-work` is the primary action. Feature sheets retain toolbar/map
+geometry, not competing control colors or clipped focus rings. Persistent
+workspace panels and native Give work/delete dialogs opt into `.ui-section`;
+their fields use canonical field classes. Native dialog lifecycle, Start now
+gating, deletion choices and actual-invoker restoration stay controller-owned.
+Radio labels may wrap, but the native radio itself must not flex-shrink.
+Canvas Add is a native disclosure containing an ordinary named button group,
+not an ARIA application menu. Shared controls/surfaces own its appearance;
+`workspace-canvas.css` owns popup geometry. Keep Canvas node selection distinct
+from library hiring, including page-specific controller names. Workflow filters
+also use native buttons and explicit selected/expanded states, with shared
+appearance and feature-owned placement. Pass persistent invoking elements into
+native dialogs; Safari mouse clicks need not update `document.activeElement`.
+Space owns panning only for Canvas intent, never text fields or unrelated page
+scrolling. Exports must target the host's actual Canvas instance. Saved-workflow
+sidebar rows stay flat, with shared badges/actions and a bounded named reading
+region. Failed reads are not empty libraries or availability grants. Retain
+filters and actual-invoker focus through refresh/cancel; the server still owns
+all instantiation, deletion and agent-availability contracts. Diagnostics uses
+the same shell/control owners and semantic health text; its UI smoke check
+validates the current command/Ticket mounts and controller imports, never
+retired composer markup. Technical results stay in a named bounded scroll region.
+Catalog consumes the same native tab/field/section/control families. Its
+`aria-current` row alias and selected context ink are owned by `components.css`;
+`resource-catalog.css` owns reading geometry, not a separate Bootstrap palette.
+A selected catalog entry is not an inspection approval or permission grant.
+Team Home retains its decorative warm ring/meter artwork, but its host controls,
+flat roster/library sections and native overlays consume the same families.
+`ui-page-body` opts into the canonical document canvas in `layout.css`, which
+resolves the legacy Bootstrap-important background boundary once; feature CSS
+must not add another important chain. Two older native-dialog class names are
+surface aliases in `components.css` while their emitters migrate explicitly.
+The project library stacks labelled rows on phones with explicit native-table
+roles/header associations, preserving metadata instead of crushing the name
+column. Confirmed/detected profile labels remain distinct from permissions.
+
+Execution/run, Plan and workspace-agent pages use the same header/section,
+button, field and badge roles. Plan status semantics live in
+`workspace-plans.css`; feature sheets retain reading geometry and bounded
+technical/comparison regions, not another control palette. Plan editing follows
+server authority: a recorded approval alone stays under review; materialization
+marks it approved. An approved working draft may still be edited without changing
+its immutable reviewed version or already-created work. Do not style approved as
+terminal/read-only. A resolved draft-conflict disclosure retires only after the
+explicit choice succeeds and returns focus to the stable Save control; failed
+retries keep the conflict visible. Note page/modal
+controls opt into the same family and native `nav-tabs`/`nav-link` treatment.
+`components.css` also owns selected Note toolbar/rail aliases; `sessions.css`
+owns editor/rail placement and live-Markdown geometry. The HQ Notes station
+also consumes shared action/field classes and `ui-disclosure-title` on its native
+handled-items summary; keep its marker, keyboard toggle and expanded state.
+Do not restore its retired tiny monospace control/focus skin. Preserve the focused
+single-note host rather than restoring its intentionally hidden multi-note tools.
+
+The fixed assistant's controller measures its actual wrapped launcher footprint
+into `--ori-launcher-clearance-y`; 88px is only the pre-measurement floor. Consume
+that value for footer/scroll clearance instead of hiding the assistant or guessing
+a larger gap. Note documents use native scroll padding; narrow stacked editors
+allow page scrolling rather than compressing sidebar actions below usable bounds.
+
 Fields share `.form-control`, `.form-select`, `.modern-input` and `.form-input`
 metrics. Their small/large aliases remain supported. Labels belong in
 `.form-label`; `.form-helper` or `.ui-field-help` uses 13px text. Associate help
@@ -244,6 +307,19 @@ not disable native credential storage.
   --env ORI_UI_SANDBOX="$SANDBOX" --env ORI_UI_EVIDENCE=after --env ORI_UI_FONTS=real
 ./scripts/test-ui-consistency.test.sh # fake-only runner contracts
 ```
+
+Populated Catalog uses `tests/resource-catalog-ui-consistency.spec.ts` and
+`playwright.resource-ui.config.ts`, separately from the ordinary workspace
+fixture runner. It requires `ORI_RESOURCE_UI_FIXTURE=1`, `ORI_UI_SANDBOX`, and
+the exact verified retained repository-fixture receipt; it never installs
+plugins, confirms/moves a workspace directory, approves sources or saves notes.
+Run the fresh functional host journey with `scripts/resource-studio-demo.sh test`
+in a separately isolated sandbox. Neither fixed fixture certifies a live DAW,
+reader, candidate package or model. The read journey journals complete raw
+inventories/API records; only cryptographically verified managed checkpoint
+publication identity/time/sequence may normalize, not definitions, component
+coverage, source fingerprints or any other bytes. Its synthetic guard test is
+`node --experimental-strip-types --test tests/helpers/ui-consistency-resource.test.ts`.
 
 Offline/fallback screenshots and intended-font verification are separate evidence.
 Prove loaded Manrope/Fraunces **and computed families**; `document.fonts.ready`

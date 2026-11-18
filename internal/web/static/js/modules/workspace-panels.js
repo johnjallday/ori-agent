@@ -43,7 +43,7 @@ export class WorkspacePanels {
     node.hidden = true;
     node.innerHTML =
       '<div class="ws-panels-backdrop" data-panel-close></div>' +
-      '<section class="ws-panels-dialog" role="dialog" aria-modal="true" tabindex="-1">' +
+      '<section class="ws-panels-dialog ui-section" role="dialog" aria-modal="true" tabindex="-1">' +
       '<header><h2 data-panel-title></h2><button type="button" class="ws-cmd-nav-btn" data-panel-close aria-label="Close workspace panel">Close</button></header>' +
       '<nav data-panel-nav aria-label="Workspace panel sections"></nav>' +
       '<div data-panel-content></div><p data-panel-status role="status" aria-live="polite"></p></section>';
@@ -223,8 +223,8 @@ export class WorkspacePanels {
               ([key, label, value]) =>
                 `<form data-panel-field="${key}"><label for="ws-panel-${key}">${label}</label>` +
                 (key === 'description'
-                  ? `<textarea id="ws-panel-${key}" name="value" rows="3">${text(value)}</textarea>`
-                  : `<input id="ws-panel-${key}" name="value" value="${text(value)}">`) +
+                  ? `<textarea id="ws-panel-${key}" class="form-control" name="value" rows="3">${text(value)}</textarea>`
+                  : `<input id="ws-panel-${key}" class="form-control" name="value" value="${text(value)}">`) +
                 `<button type="submit" class="ws-cmd-nav-btn">Save ${label.split(' (')[0].toLowerCase()}</button></form>`
             )
             .join('') +

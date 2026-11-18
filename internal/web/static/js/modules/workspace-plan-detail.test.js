@@ -20,6 +20,10 @@ function el(extra = {}) {
     value: '',
     hidden: false,
     dataset: {},
+    querySelectorAll: () => [],
+    focus() {
+      this.focused = true;
+    },
     addEventListener() {},
     ...extra
   };
@@ -56,6 +60,10 @@ const SELECTORS = [
   '#plan-clarifications-list',
   '#plan-editor-groups',
   '#plan-editor-empty',
+  '#plan-add-group',
+  '#plan-save',
+  '#plan-request-review',
+  '#plan-editor-readonly',
   '#plan-save-state',
   '#plan-conflict-panel',
   '#plan-conflict-summary',
@@ -150,6 +158,122 @@ function makePage({ plan = planFixture(), activity = [], onSave, reconcile, onCo
 
   return { page, doc, runTimers: () => timers.splice(0).forEach(fn => fn()) };
 }
+
+test('a review deep-link reload reads the current immutable contract without mutations', async () => {
+  const { page, doc } = makePage({
+    plan: planFixture({ status: 'in_review', current_version: 2 })
+  });
+  const fallback = page.fetchImpl;
+  const calls = [];
+  const contract = {
+    version: 2,
+    content_hash: 'version-two',
+    approvable: false,
+    blockers: ['Planning is off'],
+    effects: []
+  };
+  page.fetchImpl = async (url, options) => {
+    calls.push({ url, method: options.method || 'GET' });
+    if (url.endsWith('/compare?from=1&to=2'))
+      return jsonResponse({ from: 1, to: 2, identical: true });
+    return url.endsWith('/versions/2') ? jsonResponse(contract) : fallback(url, options);
+  };
+  await page.reload();
+  assert.equal(page.contract, contract);
+  assert.equal(doc.elements['#plan-review-panel'].hidden, false);
+  assert.equal(doc.elements['#plan-review-version'].textContent, 'Version 2');
+  assert.equal(doc.elements['#plan-approve'].disabled, true);
+  assert.equal(calls.filter(call => call.url.endsWith('/versions/2')).length, 1);
+  assert.ok(calls.every(call => call.method === 'GET'));
+  assert.equal(calls.filter(call => call.url.endsWith('/compare?from=1&to=2')).length, 1);
+  assert.equal(doc.elements['#plan-compare-panel'].hidden, false);
+});
+
+test('a refused comparison hides an older displayed diff instead of relabelling it as current', async () => {
+  const { page, doc } = makePage();
+  page.fetchImpl = async () => jsonResponse({ message: 'Version unavailable' }, false, 404);
+  assert.equal(await page.compareVersions(1, 2), null);
+  assert.equal(doc.elements['#plan-compare-panel'].hidden, true);
+});
+
+test('a refused replacement review clears the previous approval target', async () => {
+  const { page, doc } = makePage();
+  page.contract = { version: 1, content_hash: 'old' };
+  page.fetchImpl = async () => jsonResponse({ error: 'Version unavailable' }, false, 404);
+  await page.loadReviewContract(2);
+  assert.equal(page.contract, null);
+  assert.equal(doc.elements['#plan-review-panel'].hidden, true);
+});
+
+test('reloading a non-review plan removes a previously visible approval contract', async () => {
+  const { page, doc } = makePage();
+  page.contract = { version: 1, content_hash: 'old' };
+  await page.reload();
+  assert.equal(page.contract, null);
+  assert.equal(doc.elements['#plan-review-panel'].hidden, true);
+});
+
+for (const status of ['in_review', 'completed', 'failed', 'cancelled', 'superseded']) {
+  test(`the ${status} editor stays read-only without creating a local draft or PATCH`, async () => {
+    let writes = 0;
+    const { page, doc } = makePage({
+      plan: planFixture({ status }),
+      onSave: () => {
+        writes++;
+        return jsonResponse(planFixture());
+      }
+    });
+    await page.reload();
+    const content = JSON.stringify(page.editor.content);
+    page.addGroup('Must not appear');
+    await page.save();
+    assert.equal(JSON.stringify(page.editor.content), content);
+    assert.equal(writes, 0);
+    for (const selector of ['#plan-add-group', '#plan-save', '#plan-request-review'])
+      assert.equal(doc.elements[selector].disabled, true);
+    assert.equal(doc.elements['#plan-editor-readonly'].hidden, false);
+    assert.match(doc.elements['#plan-editor-groups'].innerHTML, /class="plan-item-actions" hidden/);
+  });
+}
+
+test('a structural redraw restores the matching native action, then the group door after removal', async () => {
+  const { page, doc } = makePage();
+  await page.reload();
+  const native = dataset => ({
+    dataset,
+    disabled: false,
+    closest: () => null,
+    focus() {
+      this.focused = true;
+    }
+  });
+  const duplicate = native({ action: 'item-duplicate', itemId: 'itm-1' });
+  const groupDoor = native({ action: 'group-add-item', groupId: 'grp-1' });
+  doc.elements['#plan-editor-groups'].querySelectorAll = () => [duplicate, groupDoor];
+  const event = action => ({
+    target: {
+      closest: () => ({
+        dataset: { action, itemId: 'itm-1' },
+        closest: () => ({ dataset: { groupId: 'grp-1' } })
+      })
+    }
+  });
+  page.handleEditorAction(event('item-duplicate'));
+  assert.equal(duplicate.focused, true);
+  assert.equal(page.editor.content.groups[0].items.length, 3);
+  // Remove the copy, which has no dependents, so the original invoker is gone.
+  const copyId = page.editor.content.groups[0].items[1].id;
+  page.handleEditorAction({
+    target: {
+      closest: () => ({
+        dataset: { action: 'item-remove', itemId: copyId },
+        closest: () => ({ dataset: { groupId: 'grp-1' } })
+      })
+    }
+  });
+  assert.equal(groupDoor.focused, true);
+  assert.equal(page.editor.content.groups[0].items.length, 2);
+});
 
 // --- Rendering helpers -----------------------------------------------------
 
@@ -409,7 +533,7 @@ test('a stale save surfaces a conflict with both versions kept', async () => {
 test('keeping mine after a conflict retries against the winning revision', async () => {
   const sent = [];
   let attempt = 0;
-  const { page } = makePage({
+  const { page, doc } = makePage({
     onSave: body => {
       sent.push(body);
       attempt += 1;
@@ -437,6 +561,61 @@ test('keeping mine after a conflict retries against the winning revision', async
   assert.equal(sent[1].revision, 7, 'the retry did not use the winning revision');
   assert.equal(page.editor.state, 'saved');
   assert.equal(page.editor.revision, 8);
+  assert.equal(doc.elements['#plan-conflict-panel'].hidden, true);
+  assert.equal(doc.elements['#plan-save'].focused, true);
+});
+
+test('discarding a conflict loads the winner, retires the choice, and restores stable focus', async () => {
+  const plan = planFixture();
+  let writes = 0;
+  const { page, doc } = makePage({
+    plan,
+    onSave: () => {
+      writes++;
+      return jsonResponse(
+        {
+          code: 'stale_draft',
+          message: 'stale',
+          details: { current_revision: 7, current: planFixture() }
+        },
+        false,
+        409
+      );
+    }
+  });
+  await page.reload();
+  page.addGroup('Mine');
+  await page.save();
+  assert.equal(doc.elements['#plan-conflict-panel'].hidden, false);
+  plan.draft_revision = 7;
+  await page.discardConflict();
+  assert.equal(page.editor.revision, 7);
+  assert.equal(page.editor.content.groups.length, 1);
+  assert.equal(doc.elements['#plan-conflict-panel'].hidden, true);
+  assert.equal(doc.elements['#plan-save'].focused, true);
+  assert.equal(writes, 1, 'discarding must not write over the winner');
+});
+
+test('an unresolved retry preserves the conflict instead of hiding it or moving focus', async () => {
+  const { page, doc } = makePage({
+    onSave: () =>
+      jsonResponse(
+        {
+          code: 'stale_draft',
+          message: 'stale',
+          details: { current_revision: 7, current: planFixture() }
+        },
+        false,
+        409
+      )
+  });
+  await page.reload();
+  page.addGroup('Mine');
+  await page.save();
+  await page.keepMineAfterConflict();
+  assert.equal(doc.elements['#plan-conflict-panel'].hidden, false);
+  assert.equal(doc.elements['#plan-save'].focused, undefined);
+  assert.equal(page.editor.state, 'conflicted');
 });
 
 test('a save failure that is not a conflict returns to unsaved', async () => {
@@ -1054,4 +1233,21 @@ test('a missing plan renders the not-found state', async () => {
 
   assert.equal(doc.elements['#plan-missing'].hidden, false);
   assert.equal(doc.elements['#plan-content'].hidden, true);
+  assert.match(doc.elements['#plan-status-badge'].innerHTML, /Unavailable/);
+  assert.equal(page.contract, null);
+});
+
+test('a failed incidental read keeps an unsaved editor but removes the approval target', async () => {
+  const { page, doc } = makePage();
+  await page.reload();
+  page.addGroup('Unsaved context must survive');
+  const editor = page.editor;
+  page.contract = { version: 1, content_hash: 'old' };
+  page.fetchImpl = async () => jsonResponse({ message: 'Read refused' }, false, 503);
+  await page.reload();
+  assert.equal(page.editor, editor);
+  assert.equal(page.editor.state, 'unsaved');
+  assert.equal(page.contract, null);
+  assert.equal(doc.elements['#plan-review-panel'].hidden, true);
+  assert.match(doc.elements['#plan-detail-status'].textContent, /Read refused/);
 });

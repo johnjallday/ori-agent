@@ -1,9 +1,9 @@
 {{define "workspace-agent-detail"}}
 <!DOCTYPE html>
-<html data-bs-theme="light">
+<html lang="en" data-bs-theme="light">
 {{template "head.tmpl" .}}
 
-<body class="bg-light" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
+<body class="ui-page" data-workspace-id="{{.Extra.WorkspaceID}}" data-workspace-slug="{{.Extra.WorkspaceSlug}}">
   <script>
     window.currentWorkspaceId = document.body.dataset.workspaceId || '';
     window.currentWorkspaceSlug = document.body.dataset.workspaceSlug || '';
@@ -12,16 +12,16 @@
 
   <div class="main-content-wrapper">
     <div class="main-content">
-      <div class="container-fluid py-4">
+      <div class="workspace-agent-shell">
         <div id="workspace-agent-detail-view" class="workspace-agent-detail">
           <!-- Header / breadcrumb -->
-          <div class="modern-card p-3 mb-3">
+          <div class="wad-navigation mb-3">
             <div class="d-flex align-items-center gap-3 flex-wrap">
               <a href="/workspaces/{{.Extra.WorkspaceSlug}}" class="modern-btn modern-btn-secondary">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="me-1">
                   <path d="M20,11V13H8L13.5,18.5L12.08,19.92L4.16,12L12.08,4.08L13.5,5.5L8,11H20Z"/>
                 </svg>
-                Back to Workspace
+                Back to workspace
               </a>
               <nav aria-label="breadcrumb">
                 <ol class="breadcrumb mb-0" style="font-size: 0.875rem;">
@@ -34,7 +34,7 @@
           </div>
 
           {{if .Extra.IsPersonalHQEntry}}
-          <div class="modern-card p-3 mb-3" id="personalHQAgentKnowledgeEntry">
+          <div class="ui-section p-3 mb-3" id="personalHQAgentKnowledgeEntry">
             <strong>Your assistant’s reviewed knowledge</strong>
             <p class="mb-2">See, correct or forget what this assistant remembers in Personal HQ.</p>
             <a class="modern-btn modern-btn-secondary" href="/profile#personalHQKnowledge">Review what Ori knows about you</a>
@@ -43,10 +43,10 @@
           {{end}}
 
           <!-- Loading / error states -->
-          <div id="wad-loading" class="modern-card p-4 text-center">
+          <div id="wad-loading" class="ui-section p-4 text-center" role="status">
             <div class="wad-muted">Loading agent details…</div>
           </div>
-          <div id="wad-error" class="modern-card p-4 d-none">
+          <div id="wad-error" class="ui-section p-4 d-none" role="alert">
             <h2 class="wad-error-title">Agent not found in this workspace</h2>
             <p class="wad-muted" id="wad-error-detail">
               This agent is not attached to this workspace. Open the workspace to review its roster.
@@ -57,7 +57,7 @@
           <!-- Content -->
           <div id="wad-content" class="d-none">
             <!-- Identity -->
-            <div class="modern-card p-4 mb-3">
+            <div class="wad-summary ui-section ui-page-header p-4 mb-3">
               <div class="wad-identity">
                 <span class="wad-avatar" id="wad-avatar" aria-hidden="true"></span>
                 <div class="wad-identity-copy">
@@ -73,10 +73,10 @@
             </div>
 
             <!-- Model -->
-            <div class="modern-card p-4 mb-3">
+            <div class="ui-section p-4 mb-3">
               <div class="wad-section-head">
                 <h2 class="wad-section-title">Model</h2>
-                <a class="wad-section-action" href="/workspaces/{{.Extra.WorkspaceSlug}}" title="Edit this agent's model on the workspace page">Edit in workspace</a>
+                <a class="wad-section-action modern-btn modern-btn-secondary modern-btn-sm" href="/workspaces/{{.Extra.WorkspaceSlug}}" title="Edit this agent's model on the workspace page">Edit in workspace</a>
               </div>
               <div class="wad-kv">
                 <div class="wad-kv-row"><span class="wad-kv-key">Model</span><span class="wad-kv-val" id="wad-model">—</span></div>
@@ -87,29 +87,30 @@
             <!-- System prompt (editable base prompt from config.json). The id is
                  the deep-link target used by the agent page's "Where to change
                  it" (#wad-prompt). -->
-            <div id="wad-prompt" class="modern-card p-4 mb-3" style="scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px);">
+            <div id="wad-prompt" class="ui-section p-4 mb-3" style="scroll-margin-top: calc(var(--navbar-offset, 76px) + 24px);">
               <div class="wad-section-head">
                 <h2 class="wad-section-title">System prompt</h2>
                 <div class="wad-prompt-actions">
-                  <button id="wad-prompt-edit" class="wad-section-action" type="button">Edit</button>
-                  <button id="wad-prompt-cancel" class="wad-section-action d-none" type="button">Cancel</button>
-                  <button id="wad-prompt-save" class="wad-section-action is-primary d-none" type="button">Save</button>
+                  <button id="wad-prompt-edit" class="wad-section-action modern-btn modern-btn-secondary modern-btn-sm" type="button">Edit</button>
+                  <button id="wad-prompt-cancel" class="wad-section-action modern-btn modern-btn-secondary modern-btn-sm d-none" type="button">Cancel</button>
+                  <button id="wad-prompt-save" class="wad-section-action is-primary modern-btn modern-btn-primary modern-btn-sm d-none" type="button">Save</button>
                 </div>
               </div>
-              <div id="wad-prompt-view" class="wad-prompt-body is-empty">Loading…</div>
-              <textarea id="wad-prompt-editor" class="wad-prompt-editor d-none" rows="14"
+              <div id="wad-prompt-view" class="wad-prompt-body is-empty" role="region" aria-label="System prompt" tabindex="0">Loading…</div>
+              <textarea id="wad-prompt-editor" class="wad-prompt-editor form-control d-none" aria-label="Workspace-local system prompt" aria-describedby="wad-prompt-permission wad-prompt-note wad-prompt-status" rows="14"
                         placeholder="Describe how this agent should behave…"></textarea>
+              <p id="wad-prompt-permission" class="wad-note"></p>
               <div id="wad-prompt-status" class="wad-note" role="status" aria-live="polite"></div>
 
               <div id="wad-refinement-wrap" class="wad-refinement d-none">
                 <div class="wad-prompt-label">Workspace refinement</div>
-                <div id="wad-refinement" class="wad-prompt-body"></div>
+                <div id="wad-refinement" class="wad-prompt-body" role="region" aria-label="Workspace refinement" tabindex="0"></div>
               </div>
               <p class="wad-note" id="wad-prompt-note"></p>
             </div>
 
             <!-- Skills -->
-            <div class="modern-card p-4 mb-3">
+            <div class="ui-section p-4 mb-3">
               <div class="wad-section-head">
                 <h2 class="wad-section-title">Workspace skills <span class="wad-count" id="wad-skills-count"></span></h2>
               </div>
@@ -118,7 +119,7 @@
             </div>
 
             <!-- MCP -->
-            <div class="modern-card p-4 mb-3">
+            <div class="ui-section p-4 mb-3">
               <div class="wad-section-head">
                 <h2 class="wad-section-title">MCP servers <span class="wad-count" id="wad-mcp-count"></span></h2>
               </div>
@@ -132,42 +133,37 @@
   </div>
 
   <style>
-    .workspace-agent-detail { max-width: 960px; }
+    .workspace-agent-detail { max-width: 960px; margin: 0 auto; min-width: 0; overflow-wrap: anywhere; padding-bottom: calc(var(--ori-launcher-clearance-y, 88px) + var(--space-6)); }
     .workspace-agent-detail .wad-muted { color: var(--text-secondary); }
     .wad-error-title { font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.4rem; }
 
-    .wad-identity { display: flex; align-items: center; gap: 1rem; }
+    .wad-summary { display: block; }
+    .wad-identity { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-4); }
     .wad-avatar {
-      width: 64px; height: 64px; border-radius: 12px; flex-shrink: 0;
+      width: 72px; height: 72px; border-radius: 12px; flex-shrink: 0;
       display: inline-flex; align-items: center; justify-content: center;
       color: #fff; font-size: 1.2rem; font-weight: 800; letter-spacing: 0.04em;
       border: 1px solid hsla(var(--wad-hue, 205), 70%, 34%, 0.35);
       background: linear-gradient(135deg, hsla(var(--wad-hue, 205), 72%, 42%, 0.9), hsla(var(--wad-hue, 205), 74%, 28%, 0.95));
       box-shadow: inset 0 1px 0 rgba(255,255,255,0.18);
     }
-    .wad-identity-copy { min-width: 0; }
-    .wad-name { font-size: 1.4rem; font-weight: 800; color: var(--text-primary); margin: 0 0 0.15rem; }
+    .wad-identity-copy { min-width: 0; flex: 1 1 16rem; }
+    .wad-name { margin: 0 0 var(--space-1); }
     .wad-subtitle { color: var(--text-secondary); font-size: 0.85rem; font-weight: 600; }
     .wad-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.55rem; }
-    .wad-badge {
-      display: inline-flex; align-items: center; gap: 0.3rem;
-      padding: 0.16rem 0.55rem; border-radius: 999px; font-size: 0.72rem; font-weight: 700;
-      background: rgba(14,165,233,0.12); color: #0369a1; border: 1px solid rgba(14,165,233,0.25);
-    }
-    .wad-badge.is-leader { background: rgba(245,158,11,0.14); color: #92400e; border-color: rgba(245,158,11,0.35); }
-    .wad-badge.is-muted { background: var(--surface-2, rgba(148,163,184,0.14)); color: var(--text-secondary); border-color: rgba(148,163,184,0.3); }
+    .wad-badge { display: inline-flex; align-items: center; gap: 0.3rem; white-space: normal; color: var(--info-text); border: 1px solid var(--info-text); }
+    .wad-badge.is-leader { color: var(--warning-text); border-color: var(--warning-text); }
+    .wad-badge.is-muted { color: var(--text-secondary); border-color: var(--border-color); }
 
-    .wad-section-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.8rem; }
+    .wad-section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
     .wad-section-title { font-size: 0.95rem; font-weight: 700; color: var(--text-primary); margin: 0; }
     .wad-count { color: var(--text-secondary); font-weight: 600; font-size: 0.82rem; }
-    .wad-section-action { font-size: 0.78rem; font-weight: 600; color: #0369a1; text-decoration: none; white-space: nowrap; }
-    .wad-section-action:hover { text-decoration: underline; }
     .wad-scope-hint { font-size: 0.78rem; margin: -0.35rem 0 0.7rem; }
 
     .wad-kv { display: flex; flex-direction: column; gap: 0.4rem; }
-    .wad-kv-row { display: flex; gap: 0.75rem; align-items: baseline; }
+    .wad-kv-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: baseline; }
     .wad-kv-key { width: 84px; flex-shrink: 0; color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; }
-    .wad-kv-val { color: var(--text-primary); font-size: 0.86rem; font-weight: 600; font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
+    .wad-kv-val { min-width: 0; flex: 1 1 12rem; color: var(--text-primary); font-size: 0.875rem; font-weight: 600; font-family: var(--font-mono); }
 
     .wad-prompt-block { margin-bottom: 1rem; }
     .wad-prompt-block:last-child { margin-bottom: 0; }
@@ -176,41 +172,25 @@
       white-space: pre-wrap; word-break: break-word;
       font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
       font-size: 0.8rem; line-height: 1.5; color: var(--text-primary);
-      background: var(--surface-2, rgba(148,163,184,0.08)); border: 1px solid rgba(148,163,184,0.2);
-      border-radius: 8px; padding: 0.7rem 0.85rem; max-height: 340px; overflow: auto;
+      padding: var(--space-3) 0; max-height: 340px; overflow: auto;
     }
     .wad-prompt-body.is-empty { color: var(--text-secondary); font-style: italic; font-family: inherit; }
     .wad-note { color: var(--text-secondary); font-size: 0.75rem; margin: 0.75rem 0 0; }
-    .wad-note.is-error { color: #dc2626; }
-    .wad-note.is-success { color: #16a34a; }
+    .wad-note.is-error { color: var(--danger-text); }
+    .wad-note.is-success { color: var(--success-text); }
 
-    .wad-prompt-actions { display: flex; align-items: center; gap: 0.75rem; }
-    .wad-section-action { background: none; border: none; padding: 0; cursor: pointer; }
-    .wad-section-action.is-primary { color: #16a34a; font-weight: 700; }
-    .wad-section-action:disabled { opacity: 0.5; cursor: default; }
+    .wad-prompt-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 
-    .wad-prompt-editor {
-      width: 100%; resize: vertical; min-height: 220px;
-      font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-      font-size: 0.8rem; line-height: 1.5; color: var(--text-primary);
-      background: var(--surface-2, rgba(148,163,184,0.08)); border: 1px solid rgba(56,189,248,0.5);
-      border-radius: 8px; padding: 0.7rem 0.85rem;
-    }
-    .wad-prompt-editor:focus { outline: 2px solid rgba(56,189,248,0.85); outline-offset: 1px; }
+    .wad-prompt-editor { resize: vertical; min-height: 220px; font-family: var(--font-mono); }
 
     .wad-refinement { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(148,163,184,0.2); }
     .wad-refinement .wad-prompt-label { margin-bottom: 0.35rem; }
 
     .wad-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-    .wad-chip {
-      display: inline-flex; align-items: center; gap: 0.35rem;
-      padding: 0.24rem 0.6rem; border-radius: 8px; font-size: 0.78rem; font-weight: 600;
-      background: var(--surface-2, rgba(148,163,184,0.1)); color: var(--text-primary);
-      border: 1px solid rgba(148,163,184,0.25);
-    }
-    .wad-chip.is-disabled { opacity: 0.55; }
-    .wad-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
-    .wad-chip.is-disabled .wad-chip-dot { background: #94a3b8; }
+    .wad-chip { display: inline-flex; align-items: center; gap: 0.35rem; white-space: normal; border: 1px solid var(--border-color); }
+    .wad-chip.is-disabled { border-style: dashed; color: var(--text-secondary); }
+    .wad-chip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success-text); flex-shrink: 0; }
+    .wad-chip.is-disabled .wad-chip-dot { background: var(--text-secondary); }
     .wad-empty { color: var(--text-secondary); font-size: 0.82rem; font-style: italic; }
   </style>
 

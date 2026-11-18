@@ -339,8 +339,14 @@ func (h *Handler) OpenSession(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "surface_unavailable", "That workspace surface is not available.")
 		return
 	}
+	assetScheme, err := frameRequestScheme(r)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "surface_origin_invalid", "The surface parent origin is invalid.")
+		return
+	}
 	record, err := h.sessions.open(surfaceSession{
-		UserID: userID, WorkspaceID: workspaceID, SurfaceKey: surface.Key,
+		AssetScheme: assetScheme,
+		UserID:      userID, WorkspaceID: workspaceID, SurfaceKey: surface.Key,
 		PluginID: surface.Owner.ID, Generation: surface.Owner.Generation,
 		CapabilityID: surface.Capability.ID, SurfaceID: surface.Surface.ID,
 	})
@@ -373,13 +379,18 @@ func (h *Handler) FrameAsset(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "asset_not_found", "Plugin asset not found.")
 		return
 	}
+	policy, err := frameAssetPolicy(r.Host, record.AssetScheme, record.FrameToken, binding.AssetVersion)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "asset_host_invalid", "The surface asset host is invalid.")
+		return
+	}
 	w.Header().Set("Content-Type", asset.ContentType)
 	if asset.Path == binding.EntryAsset {
 		w.Header().Set("Cache-Control", "no-store")
 	} else {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	}
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
+	w.Header().Set("Content-Security-Policy", policy)
 	// Opaque sandbox documents have origin "null". ES module subresources
 	// therefore need explicit CORS even though they share this random frame-token
 	// path. The token authorizes assets only, credentials are never allowed, and

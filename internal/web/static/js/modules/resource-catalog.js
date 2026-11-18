@@ -259,11 +259,14 @@ export class ResourceCatalogPage {
     this.view = null;
     this.category = '';
     this.rows = [];
+    this.entriesError = '';
     this.cursor = '';
     this.review = null;
     this.withdraw = null;
     this.removing = null;
     this.pollTimer = null;
+    this.dialogDoors = new Map();
+    this.boundDialogs = new WeakSet();
   }
 
   el(id) {
@@ -322,7 +325,9 @@ export class ResourceCatalogPage {
       'click',
       () => void this.commitWithdraw()
     );
-    this.el('resourceCatalogAddFolder')?.addEventListener?.('click', () => this.openFolder());
+    this.el('resourceCatalogAddFolder')?.addEventListener?.('click', event =>
+      this.openFolder(event.currentTarget)
+    );
     this.el('resourceCatalogFolderChoose')?.addEventListener?.(
       'click',
       () => void this.chooseFolder()
@@ -343,6 +348,47 @@ export class ResourceCatalogPage {
     );
   }
 
+  resolveDoor(door) {
+    if (door?.isConnected !== false && !door?.closest?.('[hidden], .d-none')) return door;
+    if (door?.id) return this.el(door.id);
+    const candidates =
+      this.document?.querySelectorAll?.('[data-action], [data-catalog-source-id]') || [];
+    return (
+      [...candidates].find(node =>
+        door?.dataset?.catalogSourceId
+          ? node.dataset.catalogSourceId === door.dataset.catalogSourceId &&
+            node.dataset.catalogSourceAction === door.dataset.catalogSourceAction
+          : door?.dataset?.action && node.dataset.action === door.dataset.action
+      ) || null
+    );
+  }
+
+  focusCatalogFallback(id = 'resourceCatalogTitle') {
+    const title = this.el(id);
+    if (title?.isConnected === false) return;
+    if (title) title.tabIndex = -1;
+    title?.focus?.();
+  }
+
+  showCatalogDialog(id, invoker = null) {
+    const dialog = this.el(id);
+    if (!dialog) return;
+    this.dialogDoors.set(id, invoker || this.document?.activeElement || null);
+    if (!this.boundDialogs.has(dialog)) {
+      dialog.addEventListener?.('close', () => {
+        const door = this.dialogDoors.get(id);
+        this.dialogDoors.delete(id);
+        // A follow-on dialog owns the top layer; never steal its focus.
+        if (this.document?.querySelector?.('dialog[open], .modal.show')) return;
+        const target = this.resolveDoor(door);
+        if (target && !target.closest?.('[hidden], .d-none')) target.focus?.();
+        else this.focusCatalogFallback();
+      });
+      this.boundDialogs.add(dialog);
+    }
+    dialog.showModal?.();
+  }
+
   scheduleSearch() {
     clearTimeout(this.searchTimer);
     this.searchTimer = setTimeout(() => void this.loadEntries(), 250);
@@ -352,7 +398,12 @@ export class ResourceCatalogPage {
     const status = this.el('resourceCatalogStatus');
     const result = await this.request(this.api());
     if (!result.ok) {
-      if (status) status.textContent = 'This workspace has no catalog, or it is unavailable.';
+      if (status) {
+        status.hidden = false;
+        status.textContent = this.view
+          ? 'The catalog could not be refreshed. Showing the last loaded entries.'
+          : 'This workspace has no catalog, or it is unavailable.';
+      }
       this.el('resourceCatalogPage')?.setAttribute?.('aria-busy', 'false');
       return;
     }
@@ -388,6 +439,8 @@ export class ResourceCatalogPage {
   renderActions() {
     const root = this.el('resourceCatalogActions');
     if (!root) return;
+    const active = this.document?.activeElement;
+    const ownedFocus = root.contains?.(active);
     root.replaceChildren();
     for (const action of catalogActions(this.view)) {
       const button = this.document.createElement('button');
@@ -395,13 +448,18 @@ export class ResourceCatalogPage {
       button.className = `modern-btn ${action.primary ? 'modern-btn-primary' : 'modern-btn-secondary'}`;
       button.textContent = action.label;
       button.dataset.action = action.id;
-      button.addEventListener('click', () => void this.act(action.id));
+      button.addEventListener('click', () => void this.act(action.id, button));
       root.append(button);
+    }
+    if (ownedFocus) {
+      const replacement = this.resolveDoor(active);
+      if (replacement) replacement.focus?.();
+      else this.focusCatalogFallback();
     }
   }
 
-  async act(id) {
-    if (id === 'review') return this.openReview();
+  async act(id, invoker = null) {
+    if (id === 'review') return this.openReview(invoker);
     if (id === 'cancel') return this.cancelOperation();
     return this.startInspection(id);
   }
@@ -422,7 +480,7 @@ export class ResourceCatalogPage {
       const tab = this.document.createElement('button');
       tab.type = 'button';
       tab.id = `resourceCatalogTab-${category.id}`;
-      tab.className = 'resource-catalog-tab';
+      tab.className = `resource-catalog-tab nav-link${category.id === this.category ? ' active' : ''}`;
       tab.setAttribute('role', 'tab');
       tab.setAttribute('aria-selected', String(category.id === this.category));
       tab.tabIndex = category.id === this.category ? 0 : -1;
@@ -430,7 +488,7 @@ export class ResourceCatalogPage {
       label.className = 'resource-catalog-tab-label';
       label.textContent = category.label;
       const count = this.document.createElement('span');
-      count.className = 'resource-catalog-tab-count';
+      count.className = 'resource-catalog-tab-count badge badge-secondary';
       count.textContent = String(category.counts?.present ?? 0);
       tab.append(label, count);
       tab.addEventListener('click', () => this.selectCategory(category.id));
@@ -519,9 +577,11 @@ export class ResourceCatalogPage {
     const result = await this.request(`${this.api('/entries')}?${params.toString()}`);
     if (!result.ok) {
       if (append && result.body?.code === 'page_stale') return this.loadEntries();
+      this.entriesError = 'Entries could not be loaded. Try selecting the category again.';
       this.rows = append ? this.rows : [];
       this.cursor = '';
     } else {
+      this.entriesError = '';
       this.rows = append ? [...this.rows, ...result.body.rows] : result.body.rows;
       this.cursor = result.body.next_cursor || '';
     }
@@ -536,7 +596,7 @@ export class ResourceCatalogPage {
       const item = this.document.createElement('li');
       const button = this.document.createElement('button');
       button.type = 'button';
-      button.className = 'resource-catalog-row';
+      button.className = 'resource-catalog-row modern-btn modern-btn-secondary';
       button.dataset.entryId = row.entry_id;
       if (row.entry_id === this.detail?.entry_id) button.setAttribute('aria-current', 'true');
       const name = this.document.createElement('span');
@@ -549,7 +609,7 @@ export class ResourceCatalogPage {
       const state = entryStateLabel(row.state);
       if (state) {
         const badge = this.document.createElement('span');
-        badge.className = 'resource-catalog-row-state';
+        badge.className = 'resource-catalog-row-state badge badge-secondary';
         badge.textContent = state;
         button.append(badge);
       }
@@ -563,12 +623,10 @@ export class ResourceCatalogPage {
     }
     const empty = this.el('resourceCatalogEmpty');
     if (empty) {
-      empty.textContent = emptyCategoryLine(
-        this.currentCategory(),
-        filtered,
-        this.view?.sources || []
-      );
-      empty.hidden = this.rows.length > 0;
+      empty.textContent =
+        this.entriesError ||
+        emptyCategoryLine(this.currentCategory(), filtered, this.view?.sources || []);
+      empty.hidden = !this.entriesError && this.rows.length > 0;
     }
     const more = this.el('resourceCatalogMore');
     if (more) more.hidden = !this.cursor;
@@ -652,6 +710,7 @@ export class ResourceCatalogPage {
     tagsText.textContent = 'Tags, separated by commas';
     const tags = doc.createElement('input');
     tags.type = 'text';
+    tags.className = 'form-control';
     tags.maxLength = 700;
     tags.value = (detail.tags || []).join(', ');
     tagsLabel.append(tagsText, tags);
@@ -661,6 +720,7 @@ export class ResourceCatalogPage {
     noteText.textContent = 'Note';
     const noteInput = doc.createElement('textarea');
     noteInput.rows = 4;
+    noteInput.className = 'form-control';
     noteInput.maxLength = 4000;
     noteInput.value = detail.note || '';
     noteLabel.append(noteText, noteInput);
@@ -734,8 +794,7 @@ export class ResourceCatalogPage {
     }
   }
 
-  async openReview() {
-    const dialog = this.el('resourceCatalogReview');
+  async openReview(invoker = null) {
     const error = this.el('resourceCatalogReviewError');
     if (error) error.textContent = '';
     const result = await this.request(this.api('/sources/review'), { method: 'POST', body: '{}' });
@@ -774,7 +833,7 @@ export class ResourceCatalogPage {
       label.append(box, text);
       root?.append(label);
     }
-    dialog?.showModal?.();
+    this.showCatalogDialog('resourceCatalogReview', invoker);
   }
 
   async commitReview() {
@@ -846,12 +905,15 @@ export class ResourceCatalogPage {
     }
     const root = this.el('resourceCatalogSources');
     if (!root) return;
+    const active = this.document?.activeElement;
+    const ownedFocus = root.contains?.(active);
     root.replaceChildren();
     const sources = this.view?.sources || [];
     if (!sources.length) {
       const item = this.document.createElement('li');
       item.textContent = 'No source is approved on this computer.';
       root.append(item);
+      if (ownedFocus) this.focusCatalogFallback('resourceCatalogSourcesTitle');
       return;
     }
     for (const source of sources) {
@@ -862,23 +924,33 @@ export class ResourceCatalogPage {
       item.append(text);
       // A folder the owner added is removed; any other source is withdrawn.
       const action = source.folder
-        ? { label: 'Remove folder', run: () => this.openRemoveFolder(source) }
+        ? { label: 'Remove folder', run: invoker => this.openRemoveFolder(source, invoker) }
         : source.approved
-          ? { label: 'Withdraw access', run: () => void this.openWithdraw(source.source_id) }
+          ? {
+              label: 'Withdraw access',
+              run: invoker => void this.openWithdraw(source.source_id, invoker)
+            }
           : null;
       if (action) {
         const button = this.document.createElement('button');
         button.type = 'button';
         button.className = 'modern-btn modern-btn-secondary';
         button.textContent = action.label;
-        button.addEventListener('click', action.run);
+        button.dataset.catalogSourceId = source.source_id;
+        button.dataset.catalogSourceAction = source.folder ? 'remove' : 'withdraw';
+        button.addEventListener('click', () => action.run(button));
         item.append(button);
       }
       root.append(item);
     }
+    if (ownedFocus) {
+      const replacement = this.resolveDoor(active);
+      if (replacement) replacement.focus?.();
+      else this.focusCatalogFallback('resourceCatalogSourcesTitle');
+    }
   }
 
-  openFolder() {
+  openFolder(invoker = null) {
     const root = this.el('resourceCatalogFolderCategories');
     root?.replaceChildren();
     const categories = this.view?.folder_categories || [];
@@ -904,7 +976,7 @@ export class ResourceCatalogPage {
     }
     const path = this.el('resourceCatalogFolderPath');
     if (path) path.value = '';
-    this.el('resourceCatalogFolder')?.showModal?.();
+    this.showCatalogDialog('resourceCatalogFolder', invoker || this.el('resourceCatalogAddFolder'));
     path?.focus?.();
   }
 
@@ -955,10 +1027,10 @@ export class ResourceCatalogPage {
     await this.loadOverview();
     if (result.body?.warning_note) this.showStatus(result.body.warning_note);
     // Nothing is read until the owner approves the new folder.
-    await this.openReview();
+    await this.openReview(this.el('resourceCatalogAddFolder'));
   }
 
-  openRemoveFolder(source) {
+  openRemoveFolder(source, invoker = null) {
     this.removing = source;
     const text = this.el('resourceCatalogRemoveFolderText');
     if (text) {
@@ -969,7 +1041,7 @@ export class ResourceCatalogPage {
     }
     const error = this.el('resourceCatalogRemoveFolderError');
     if (error) error.textContent = '';
-    this.el('resourceCatalogRemoveFolder')?.showModal?.();
+    this.showCatalogDialog('resourceCatalogRemoveFolder', invoker);
   }
 
   async commitRemoveFolder() {
@@ -987,7 +1059,7 @@ export class ResourceCatalogPage {
     await this.loadOverview();
   }
 
-  async openWithdraw(sourceId) {
+  async openWithdraw(sourceId, invoker = null) {
     const result = await this.request(
       this.api(`/sources/${encodeURIComponent(sourceId)}/withdraw/review`),
       {
@@ -1002,7 +1074,7 @@ export class ResourceCatalogPage {
     this.withdraw = { ...result.body, sourceId };
     const text = this.el('resourceCatalogWithdrawText');
     if (text) text.textContent = result.body.consequence;
-    this.el('resourceCatalogWithdraw')?.showModal?.();
+    this.showCatalogDialog('resourceCatalogWithdraw', invoker);
   }
 
   async commitWithdraw() {

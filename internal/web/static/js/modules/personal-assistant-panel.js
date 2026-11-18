@@ -2383,6 +2383,23 @@ async function submit(event) {
   return true;
 }
 
+// The named recipient can wrap beyond the one-line launcher's 88px budget.
+// Measure only the fixed launcher, never the open conversation panel.
+export function launcherBottomClearance(viewportHeight, rect) {
+  if (!rect || rect.width <= 0 || rect.height <= 0) return 88;
+  return Math.max(88, Math.ceil(viewportHeight - rect.top + 12));
+}
+
+function syncLauncherClearance() {
+  const launcher = state.els?.launcher;
+  if (!launcher) return;
+  const clearance = launcherBottomClearance(window.innerHeight, launcher.getBoundingClientRect());
+  const value = `${clearance}px`;
+  if (document.documentElement.style.getPropertyValue('--ori-launcher-clearance-y') !== value) {
+    document.documentElement.style.setProperty('--ori-launcher-clearance-y', value);
+  }
+}
+
 export function assistantFocusNeedsScroll(viewport, target) {
   return Boolean(
     viewport && target && (target.top < viewport.top || target.bottom > viewport.bottom)
@@ -2680,6 +2697,7 @@ function init() {
     if (event.detail?.personalAssistant) applyPersonalAssistant(event.detail.personalAssistant);
   });
   window.addEventListener('resize', syncPanelViewport);
+  window.addEventListener('resize', syncLauncherClearance);
   // Resize/reflow can leave an already-focused folder control outside the one
   // scroll viewport. Recover only this feature's keyboard position; do not
   // interfere with existing message, saved-draft or memory focus lifecycles.
@@ -2693,7 +2711,9 @@ function init() {
   }
   if (typeof ResizeObserver !== 'undefined') {
     new ResizeObserver(syncPanelViewport).observe(panel);
+    new ResizeObserver(syncLauncherClearance).observe(launcher);
   }
+  syncLauncherClearance();
   // CSS zoom changes rendered geometry without a content-box resize. Native
   // zoom uses the resize listener; this also covers app/style reflow honestly.
   if (typeof MutationObserver !== 'undefined') {

@@ -10,11 +10,6 @@
   padding: 1.25rem 1.35rem;
   overflow: auto;
   overscroll-behavior: contain;
-  color: var(--text-primary, #0a0a0a);
-  background: var(--bg-primary, #f5f6f7);
-  border: 1px solid var(--border-color, #c9ccd1);
-  border-radius: var(--radius-md, 0.5rem);
-  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
 }
 
 .home-package-upgrade::backdrop {
@@ -32,13 +27,9 @@
 
 .home-package-upgrade__title {
   margin: 0 0 0.5rem;
-  font-size: 1.2rem;
-  line-height: 1.35;
+  font-size: 1.5rem;
+  line-height: 1.25;
   overflow-wrap: anywhere;
-}
-
-.home-package-upgrade__title:focus:not(:focus-visible) {
-  outline: none;
 }
 
 .home-package-upgrade__status {
@@ -49,7 +40,7 @@
 .home-package-upgrade__error {
   min-height: 1.25rem;
   margin: 0.5rem 0;
-  color: var(--danger-color, #9f2f24);
+  color: var(--danger-text);
   overflow-wrap: anywhere;
 }
 
@@ -59,10 +50,8 @@
   align-items: baseline;
   gap: 0.35rem 1rem;
   margin: 0.25rem 0 0.75rem;
-  padding: 0.6rem 0.75rem;
-  background: var(--bg-secondary, #e8eaed);
-  border: 1px solid var(--border-color, #c9ccd1);
-  border-radius: var(--radius-md, 0.5rem);
+  padding-block: var(--space-3);
+  border-block: 1px solid var(--border-color);
 }
 
 .home-package-upgrade__versions {
@@ -75,16 +64,9 @@
 }
 
 .home-package-upgrade__version {
-  padding: 0.1rem 0.45rem;
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.85rem;
-  border: 1px solid var(--border-color, #c9ccd1);
-  border-radius: 3px;
+  max-width: 100%;
+  white-space: normal;
   overflow-wrap: anywhere;
-}
-
-.home-package-upgrade__version--new {
-  border-color: var(--primary-color, #1f6b4e);
 }
 
 .home-package-upgrade__impact {
@@ -144,9 +126,8 @@
   overflow-wrap: anywhere;
   font-size: 0.82rem;
   color: inherit;
-  background: var(--bg-secondary, #e8eaed);
-  border: 1px solid var(--border-color, #c9ccd1);
-  border-radius: 3px;
+  background: var(--bg-secondary);
+  border-left: 3px solid var(--border-color);
 }
 
 .home-package-upgrade__home-link {

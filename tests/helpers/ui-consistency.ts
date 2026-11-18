@@ -56,7 +56,13 @@ export async function createWorkspace(request: APIRequestContext) {
  * greeting session. The orchestration DELETE only unlinks those sessions. */
 export async function removeOwnedWorkspace(
   request: APIRequestContext,
-  expected: { id: string; name: string; folder_slug: string }
+  expected: {
+    id: string;
+    name: string;
+    folder_slug: string;
+    kind?: 'workspace' | 'group';
+    parent?: { id: string; name: string; folder_slug: string };
+  }
 ) {
   const sandbox = await assertSandbox(request);
   expect(expected.name).toMatch(
@@ -68,11 +74,24 @@ export async function removeOwnedWorkspace(
   expect(workspace.id).toBe(expected.id);
   expect(workspace.name).toBe(expected.name);
   expect(workspace.folder_slug).toBe(expected.folder_slug);
-  expect(workspace.kind).toBe('workspace');
+  expect(workspace.kind).toBe(expected.kind ?? 'workspace');
   const sidecar = realpathSync(workspace.sidecar_path);
   const settings = await (await request.get('/api/settings/workspace-root')).json();
   const root = realpathSync(settings.effective_workspace_root);
-  expect(relative(root, sidecar)).toBe(expected.folder_slug);
+  let expectedPath = expected.folder_slug;
+  if (expected.parent) {
+    const response = await request.get(`/api/workspaces/${encodeURIComponent(expected.parent.id)}`);
+    expect(response.ok()).toBe(true);
+    const parent = await response.json();
+    expect(parent.id).toBe(expected.parent.id);
+    expect(parent.name).toBe(expected.parent.name);
+    expect(parent.kind).toBe('group');
+    expect(parent.folder_slug).toBe(expected.parent.folder_slug);
+    expect(relative(root, realpathSync(parent.sidecar_path))).toBe(expected.parent.folder_slug);
+    expect(workspace.parent_id).toBe(expected.parent.id);
+    expectedPath = join(expected.parent.folder_slug, 'sub-workspaces', expected.folder_slug);
+  }
+  expect(relative(root, sidecar)).toBe(expectedPath);
   expect(relative(sandbox, sidecar).startsWith('..')).toBe(false);
   for (const key of ['tasks', 'scheduled_tasks', 'messages', 'attachments', 'folders']) {
     expect(workspace[key] || [], `owned blank workspace unexpectedly gained ${key}`).toEqual([]);
@@ -190,16 +209,25 @@ export async function capture(
   if (!['before', 'after'].includes(phase))
     throw new Error('ORI_UI_EVIDENCE must be before or after');
   const group =
-    testInfo.file.includes('ui-consistency-navigation') ||
-    testInfo.file.includes('ui-consistency-home') ||
-    testInfo.file.includes('ui-consistency-agent')
-      ? 'group-4'
-      : testInfo.file.includes('ui-consistency-utilities') ||
-          testInfo.file.endsWith('default-model-utility.spec.ts')
-        ? 'group-3'
-        : testInfo.file.endsWith('ui-consistency-defects.spec.ts')
-          ? 'group-1'
-          : 'group-2';
+    testInfo.file.includes('ui-consistency-workspace') ||
+    testInfo.file.endsWith('resource-catalog-ui-consistency.spec.ts') ||
+    testInfo.file.endsWith('resource-team-home-ui-consistency.spec.ts') ||
+    testInfo.file.endsWith('resource-library-ui-consistency.spec.ts') ||
+    testInfo.file.endsWith('resource-upgrade-ui-consistency.spec.ts') ||
+    testInfo.file.endsWith('resource-surface-ui-consistency.spec.ts') ||
+    testInfo.file.endsWith('resource-plans-ui-consistency.spec.ts') ||
+    testInfo.file.endsWith('resource-notes-station-ui-consistency.spec.ts')
+      ? 'group-5'
+      : testInfo.file.includes('ui-consistency-navigation') ||
+          testInfo.file.includes('ui-consistency-home') ||
+          testInfo.file.includes('ui-consistency-agent')
+        ? 'group-4'
+        : testInfo.file.includes('ui-consistency-utilities') ||
+            testInfo.file.endsWith('default-model-utility.spec.ts')
+          ? 'group-3'
+          : testInfo.file.endsWith('ui-consistency-defects.spec.ts')
+            ? 'group-1'
+            : 'group-2';
   const directory = resolve('tasks/evidence-ui-consistency', group, phase);
   mkdirSync(directory, { recursive: true });
   const stem = `${name}-${metadata.engine}-${metadata.theme}-${metadata.viewport?.width}-${metadata.fontMode}`;

@@ -44,7 +44,7 @@ export function openDeleteDialog({ title = '', doc = globalThis.document } = {})
   if (!doc || !doc.body || typeof doc.createElement !== 'function') return null;
 
   const opener = doc.activeElement;
-  const dialog = node(doc, 'dialog', 'ws-delete-dialog');
+  const dialog = node(doc, 'dialog', 'ws-delete-dialog ui-section');
   const heading = node(doc, 'h2', 'ws-delete-dialog__title', title);
   heading.id = `ws-delete-dialog-title-${++dialogCounter}`;
   dialog.setAttribute('aria-labelledby', heading.id);
@@ -120,7 +120,7 @@ export function openDeleteDialog({ title = '', doc = globalThis.document } = {})
 
   function modeOption(value, label, detail, checked) {
     const wrapper = node(doc, 'label', 'ws-delete-dialog__mode');
-    const input = node(doc, 'input');
+    const input = node(doc, 'input', 'form-check-input');
     input.type = 'radio';
     input.name = `${heading.id}-mode`;
     input.value = value;

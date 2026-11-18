@@ -472,7 +472,7 @@ function itemRowHTML(item, lookId, now) {
   const actions = itemActions(item)
     .map(
       action =>
-        '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-item-' +
+        '<button type="button" class="ws-notes-action modern-btn modern-btn-secondary modern-btn-sm" data-cmd-modal-action="notes-item-' +
         action +
         '" data-cmd-id="' +
         escapeHtml(item.id) +
@@ -519,7 +519,7 @@ function loopsHTML(section, panel, now) {
   let html = '';
   if (section.suggested > 0) {
     html +=
-      '<button type="button" class="ws-notes-bulk" data-cmd-modal-action="notes-add-suggested">Add ' +
+      '<button type="button" class="ws-notes-bulk modern-btn modern-btn-primary modern-btn-sm" data-cmd-modal-action="notes-add-suggested">Add ' +
       section.suggested +
       ' suggested as follow-ups</button>';
   }
@@ -541,7 +541,7 @@ function loopsHTML(section, panel, now) {
   }
   if (!panel.showAll && section.count > MAX_ITEMS_SHOWN) {
     html +=
-      '<button type="button" class="ws-notes-action ws-notes-show-all" data-cmd-modal-action="notes-show-all">Show all ' +
+      '<button type="button" class="ws-notes-action ws-notes-show-all modern-btn modern-btn-secondary modern-btn-sm" data-cmd-modal-action="notes-show-all">Show all ' +
       section.count +
       '</button>';
   }
@@ -550,7 +550,7 @@ function loopsHTML(section, panel, now) {
     html +=
       '<details class="ws-notes-handled"' +
       (panel.handledOpen ? ' open' : '') +
-      '><summary>' +
+      '><summary class="ui-disclosure-title">' +
       groups.handled.length +
       ' handled</summary><ul class="ws-notes-list">' +
       groups.handled.map(item => itemRowHTML(item, lookId, now)).join('') +
@@ -565,7 +565,7 @@ function openButtonHTML(kind, name, label, panel) {
   const key = previewKey(kind, name);
   const open = panel?.preview?.key === key;
   return (
-    '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-preview" data-cmd-id="' +
+    '<button type="button" class="ws-notes-action modern-btn modern-btn-secondary modern-btn-sm" data-cmd-modal-action="notes-preview" data-cmd-id="' +
     escapeHtml(key) +
     '" aria-expanded="' +
     (open ? 'true' : 'false') +
@@ -594,7 +594,7 @@ export function previewHTML(preview, key) {
       (preview.note.truncated
         ? '<p class="ws-notes-muted">Showing the start of this note.</p>'
         : '') +
-      '<div class="ws-notes-preview-actions"><button type="button" class="ws-notes-action" data-cmd-modal-action="notes-open-folder">' +
+      '<div class="ws-notes-preview-actions"><button type="button" class="ws-notes-action modern-btn modern-btn-secondary modern-btn-sm" data-cmd-modal-action="notes-open-folder">' +
       escapeHtml(OPEN_FOLDER_LABEL) +
       '</button>' +
       obsidianAnchor(preview.note.link, preview.note.title || preview.note.name) +
@@ -616,7 +616,7 @@ export function checklistHTML(checklist, hidden = false) {
         escapeHtml(row.label) + (row.done ? '<span class="visually-hidden">, done</span>' : '');
       const control =
         row.id === 'capture'
-          ? '<button type="button" class="ws-notes-link" data-cmd-modal-action="notes-focus-capture">' +
+          ? '<button type="button" class="ws-notes-link modern-btn modern-btn-quiet modern-btn-sm" data-cmd-modal-action="notes-focus-capture">' +
             label +
             '</button>'
           : '<a class="ws-notes-link" href="' +
@@ -691,7 +691,7 @@ function todayHTML(section, panel) {
   if (today.state === 'none') {
     return (
       '<p class="ws-notes-line">No note for today yet.</p>' +
-      '<a class="ws-notes-bulk" href="/?journal=1" data-notes-journal>Write today\'s Journal</a>'
+      '<a class="ws-notes-bulk modern-btn modern-btn-primary modern-btn-sm" href="/?journal=1" data-notes-journal>Write today\'s Journal</a>'
     );
   }
   const line = today.state === 'ori' ? "Today's note is saved." : "Today's note is yours.";
@@ -748,7 +748,7 @@ function projectsHTML(section, panel) {
           escapeHtml(project.name) +
           '</span></div><div class="ws-notes-item-actions is-always">' +
           (project.oriNote ? openButtonHTML('project', project.name, project.name, panel) : '') +
-          '<a class="ws-notes-action" href="' +
+          '<a class="ws-notes-action modern-btn modern-btn-secondary modern-btn-sm" href="' +
           escapeHtml(secondBrainProjectLink(project.name)) +
           '" aria-label="' +
           escapeHtml(project.action.ariaLabel) +
@@ -773,12 +773,12 @@ function captureHTML(panel) {
     ? '<p class="ws-notes-problem" role="alert">' + escapeHtml(panel.captureProblem) + '</p>'
     : '';
   return (
-    '<div class="ws-notes-capture"><input type="text" class="ws-notes-capture-input" data-notes-capture ' +
+    '<div class="ws-notes-capture"><input type="text" class="ws-notes-capture-input form-control" data-notes-capture ' +
     'aria-label="Quick note for Inbox" placeholder="Quick note…" maxlength="4000" value="' +
     escapeHtml(panel.captureDraft || '') +
     '"' +
     (panel.captureBusy ? ' disabled' : '') +
-    '><button type="button" class="ws-notes-bulk" data-cmd-modal-action="notes-capture"' +
+    '><button type="button" class="ws-notes-bulk modern-btn modern-btn-primary modern-btn-sm" data-cmd-modal-action="notes-capture"' +
     (panel.captureBusy ? ' disabled' : '') +
     '>Save to Inbox</button></div>' +
     problem
@@ -821,7 +821,7 @@ function footerHTML(look, panel, now) {
   return (
     lines.join('') +
     message +
-    '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-look-again"' +
+    '<button type="button" class="ws-notes-action modern-btn modern-btn-secondary modern-btn-sm" data-cmd-modal-action="notes-look-again"' +
     (running ? ' disabled' : '') +
     '>' +
     (running ? 'Reading…' : 'Look again') +
@@ -944,11 +944,11 @@ export function notesPanelHTML({
     escapeHtml(panel.status === 'ready' ? notesPanelCount(sections) : '—') +
     '</span><div class="ws-cmd-modal-head-actions">' +
     (secondBrain?.source?.name && secondBrain?.status === 'connected'
-      ? '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-open-folder">' +
+      ? '<button type="button" class="ws-notes-action modern-btn modern-btn-secondary modern-btn-sm" data-cmd-modal-action="notes-open-folder">' +
         escapeHtml(OPEN_FOLDER_LABEL) +
         '</button>'
       : '') +
-    '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-connection">Connection…</button>' +
+    '<button type="button" class="ws-notes-action modern-btn modern-btn-secondary modern-btn-sm" data-cmd-modal-action="notes-connection">Connection…</button>' +
     '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close Notes">×</button>' +
     '</div></header>' +
     oneLinerHTML(secondBrain) +

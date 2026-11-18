@@ -162,9 +162,11 @@ test.describe('Workspace Ticket Management', () => {
     expect(noteAfter.content).toContain('Cold on boot.');
 
     // FR-76: editing the ticket never rewrites the note.
-    await request.patch(`/api/workspaces/${studioId}/tickets/${ticket.id}`, {
+    const changed = await request.patch(`/api/workspaces/${studioId}/tickets/${ticket.id}`, {
       data: { title: 'Ticket went its own way' }
     });
+    expect(changed.ok()).toBe(true);
+    const expectedTicket = await changed.json();
     const noteStill = await (await request.get(`/api/notes/${noteId}`)).json();
     expect(noteStill.name).toBe('Cache research');
 
@@ -178,9 +180,17 @@ test.describe('Workspace Ticket Management', () => {
     // A note gains no execution controls by being referenced.
     expect(await panel.locator('button').count()).toBe(0);
 
-    // FR-72: deleting the ticket keeps the note.
-    await request.delete(`/api/workspaces/${studioId}/tickets/${ticket.id}`);
-    expect((await request.get(`/api/notes/${noteId}`)).ok()).toBeTruthy();
+    // FR-72 is a behavior check, not teardown: do not skip it in retained mode.
+    // Check the complete acknowledged ticket and original note before DELETE.
+    const ticketPath = `/api/workspaces/${studioId}/tickets/${ticket.id}`;
+    expect(await (await request.get(ticketPath)).json()).toEqual(expectedTicket);
+    expect(await (await request.get(`/api/notes/${noteId}`)).json()).toEqual(noteAfter);
+    const removed = await request.delete(ticketPath);
+    expect(removed.ok()).toBe(true);
+    const preserved = await (await request.get(`/api/notes/${noteId}`)).json();
+    expect(preserved.id).toBe(noteAfter.id);
+    expect(preserved.name).toBe(noteAfter.name);
+    expect(preserved.content).toBe(noteAfter.content);
   });
 
   test('the board is fixed, server-authoritative, and keyboard-operable', async ({

@@ -59,7 +59,8 @@ function operationKey(action) {
 
 function node(tag, className, value) {
   const element = document.createElement(tag);
-  if (className) element.className = className;
+  if (tag === 'dialog') element.className = `${className || ''} ui-section`.trim();
+  else if (className) element.className = className;
   if (value != null) element.textContent = String(value);
   return element;
 }
@@ -2616,6 +2617,7 @@ export class ProjectLibraryPanel {
     tbody.replaceChildren();
     for (const row of this.rows) {
       const tr = node('tr');
+      tr.setAttribute('role', 'row');
       const pick = node('td');
       // Every song can be picked for a bulk stage/status/priority edit; the
       // setup queue still takes only the catalog-only ones (queueIds).
@@ -2642,10 +2644,16 @@ export class ProjectLibraryPanel {
           }
           this.renderQueueControls();
         });
-        pick.append(checkbox);
+        const target = node('label', 'project-library-pick');
+        target.append(checkbox);
+        pick.append(target);
       }
       const name = node('td');
-      const inspect = node('button', 'project-library-name', row.name || 'Unnamed project');
+      const inspect = node(
+        'button',
+        'project-library-name modern-btn modern-btn-secondary',
+        row.name || 'Unnamed project'
+      );
       inspect.type = 'button';
       inspect.dataset.libraryEntry = row.id;
       inspect.setAttribute('aria-label', `Inspect ${row.name || 'Unnamed project'}`);
@@ -2662,6 +2670,11 @@ export class ProjectLibraryPanel {
       if (!row.stage || row.stage === 'unknown') stage.setAttribute('aria-label', 'Stage not set');
       const saved = node('td', '', lastSavedLabel(row.last_saved_at) || '—');
       if (!row.last_saved_at) saved.setAttribute('aria-label', 'Project-file save time not known');
+      stage.dataset.columnLabel =
+        document.getElementById('projectLibraryStageColumn')?.textContent || '';
+      saved.dataset.columnLabel =
+        document.getElementById('projectLibrarySavedColumn')?.textContent || '';
+      for (const cell of [pick, name, stage, saved]) cell.setAttribute('role', 'cell');
       tr.append(pick, name, stage, saved);
       tbody.append(tr);
     }
@@ -3519,7 +3532,7 @@ export class ProjectLibraryPanel {
       cancel.type = 'button';
       const accept = node(
         'button',
-        `modern-btn ${destructive ? 'project-library-destructive' : 'modern-btn-primary'}`,
+        `modern-btn ${destructive ? 'modern-btn-danger' : 'modern-btn-primary'}`,
         action
       );
       accept.type = 'submit';

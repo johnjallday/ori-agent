@@ -28,6 +28,7 @@ type surfaceSession struct {
 	Generation        uint64
 	Credential        string
 	FrameToken        string
+	AssetScheme       string
 	CapabilityID      string
 	SurfaceID         string
 	CreatedAt         time.Time

@@ -7,33 +7,33 @@
   {{template "navbar.tmpl" .}}
   <div class="main-content-wrapper">
     <main class="main-content resource-catalog-shell">
-      <div id="resourceCatalogPage" class="resource-catalog-page" aria-busy="true">
+      <div id="resourceCatalogPage" class="resource-catalog-page ui-page ui-page--wide" aria-busy="true">
         <nav class="resource-catalog-breadcrumb" aria-label="Breadcrumb">
-          <a id="resourceCatalogWorkspaceLink" href="#">Workspace</a>
+          <a id="resourceCatalogWorkspaceLink" class="modern-btn modern-btn-secondary" href="#">Workspace</a>
           <span aria-hidden="true">/</span>
           <span>Catalog</span>
         </nav>
-        <p id="resourceCatalogStatus" class="resource-catalog-status" role="status">Loading the catalog…</p>
-        <div id="resourceCatalogContent" hidden>
-          <header class="resource-catalog-header">
+          <header class="resource-catalog-header ui-page-header">
             <div>
               <h1 id="resourceCatalogTitle">Catalog</h1>
               <p id="resourceCatalogProvider" class="resource-catalog-provider"></p>
             </div>
             <div id="resourceCatalogActions" class="resource-catalog-actions"></div>
           </header>
-          <section id="resourceCatalogOperation" class="resource-catalog-operation" aria-live="polite" hidden></section>
-          <div id="resourceCatalogTabs" class="resource-catalog-tabs" role="tablist" aria-label="Categories"></div>
+        <p id="resourceCatalogStatus" class="resource-catalog-status" role="status">Loading the catalog…</p>
+        <div id="resourceCatalogContent" hidden>
+          <section id="resourceCatalogOperation" class="resource-catalog-operation ui-section" aria-live="polite" hidden></section>
+          <div id="resourceCatalogTabs" class="resource-catalog-tabs nav-tabs" role="tablist" aria-label="Categories"></div>
           <section id="resourceCatalogCategory" class="resource-catalog-category" role="tabpanel">
             <p id="resourceCatalogCoverage" class="resource-catalog-coverage"></p>
             <form id="resourceCatalogFilters" class="resource-catalog-filters" role="search">
               <label class="resource-catalog-field">
                 <span>Search names, tags and notes</span>
-                <input id="resourceCatalogSearch" type="search" maxlength="120" autocomplete="off">
+                <input id="resourceCatalogSearch" class="form-control" type="search" maxlength="120" autocomplete="off">
               </label>
               <label class="resource-catalog-field">
                 <span>Source</span>
-                <select id="resourceCatalogSource"></select>
+                <select id="resourceCatalogSource" class="form-select"></select>
               </label>
               <label class="resource-catalog-check">
                 <input id="resourceCatalogFavorites" type="checkbox">
@@ -46,7 +46,7 @@
                 <p id="resourceCatalogEmpty" class="resource-catalog-empty" hidden></p>
                 <button id="resourceCatalogMore" class="modern-btn modern-btn-secondary" type="button" hidden>Show more</button>
               </div>
-              <aside id="resourceCatalogDetail" class="resource-catalog-detail" aria-live="polite" hidden></aside>
+              <aside id="resourceCatalogDetail" class="resource-catalog-detail ui-section" aria-live="polite" hidden></aside>
             </div>
           </section>
           <section class="resource-catalog-sources" aria-labelledby="resourceCatalogSourcesTitle">
@@ -62,7 +62,7 @@
     </main>
   </div>
 
-  <dialog id="resourceCatalogReview" class="resource-catalog-dialog" aria-labelledby="resourceCatalogReviewTitle">
+  <dialog id="resourceCatalogReview" class="resource-catalog-dialog ui-section" aria-labelledby="resourceCatalogReviewTitle">
     <form method="dialog" class="resource-catalog-dialog-body">
       <h2 id="resourceCatalogReviewTitle">Review sources</h2>
       <p id="resourceCatalogReviewIntro"></p>
@@ -79,7 +79,7 @@
     </form>
   </dialog>
 
-  <dialog id="resourceCatalogWithdraw" class="resource-catalog-dialog" aria-labelledby="resourceCatalogWithdrawTitle">
+  <dialog id="resourceCatalogWithdraw" class="resource-catalog-dialog ui-section" aria-labelledby="resourceCatalogWithdrawTitle">
     <form method="dialog" class="resource-catalog-dialog-body">
       <h2 id="resourceCatalogWithdrawTitle">Withdraw access</h2>
       <p id="resourceCatalogWithdrawText"></p>
@@ -91,7 +91,7 @@
     </form>
   </dialog>
 
-  <dialog id="resourceCatalogFolder" class="resource-catalog-dialog" aria-labelledby="resourceCatalogFolderTitle">
+  <dialog id="resourceCatalogFolder" class="resource-catalog-dialog ui-section" aria-labelledby="resourceCatalogFolderTitle">
     <form method="dialog" class="resource-catalog-dialog-body">
       <h2 id="resourceCatalogFolderTitle">Add a folder</h2>
       <fieldset>
@@ -101,7 +101,7 @@
       <div class="resource-catalog-field">
         <label for="resourceCatalogFolderPath">Folder path</label>
         <div class="resource-catalog-folder-path">
-          <input id="resourceCatalogFolderPath" type="text" maxlength="1024" autocomplete="off" spellcheck="false" placeholder="~/Music/My Templates">
+          <input id="resourceCatalogFolderPath" class="form-control" type="text" maxlength="1024" autocomplete="off" spellcheck="false" placeholder="~/Music/My Templates">
           <button id="resourceCatalogFolderChoose" class="modern-btn modern-btn-secondary" type="button">Choose…</button>
         </div>
       </div>
@@ -115,7 +115,7 @@
     </form>
   </dialog>
 
-  <dialog id="resourceCatalogRemoveFolder" class="resource-catalog-dialog" aria-labelledby="resourceCatalogRemoveFolderTitle">
+  <dialog id="resourceCatalogRemoveFolder" class="resource-catalog-dialog ui-section" aria-labelledby="resourceCatalogRemoveFolderTitle">
     <form method="dialog" class="resource-catalog-dialog-body">
       <h2 id="resourceCatalogRemoveFolderTitle">Remove folder</h2>
       <p id="resourceCatalogRemoveFolderText"></p>

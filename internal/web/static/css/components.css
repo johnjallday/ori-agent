@@ -8,9 +8,13 @@
    ============================================================================= */
 
 /* Sections do not imply an action. Interactive surfaces opt in explicitly. */
+/* Native Team Home/library overlays still emitted by older modules share
+   this owner until their explicit ui-section migration is complete. */
 .modern-card,
 .card,
-.ui-section {
+.ui-section,
+.assistant-program-hire-dialog,
+.assistant-program-action-dialog {
   background: var(--surface-solid);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
@@ -121,7 +125,9 @@
 /* Bootstrap and modern-* are compatibility names for one control family.
    Bootstrap still owns toggle state, dropdowns and modal interactions. */
 .btn,
-.modern-btn {
+.modern-btn,
+.ws-cmd-nav-btn,
+.ws-cmd-view-btn {
   --bs-btn-color: var(--text-primary);
   --bs-btn-bg: var(--bg-primary);
   --bs-btn-border-color: var(--control-border);
@@ -166,7 +172,8 @@
 .btn-primary,
 .modern-btn-primary,
 .btn-success,
-.modern-btn-success {
+.modern-btn-success,
+.ws-cmd-give-work {
   --bs-btn-color: var(--on-primary);
   --bs-btn-bg: var(--primary-color);
   --bs-btn-border-color: var(--control-border);
@@ -201,7 +208,9 @@
   --bs-btn-hover-color: var(--warning-text);
 }
 
-.modern-btn:hover {
+.modern-btn:hover,
+.ws-cmd-nav-btn:hover,
+.ws-cmd-view-btn:hover {
   color: var(--bs-btn-hover-color);
   background: var(--bs-btn-hover-bg);
   border-color: var(--bs-btn-hover-border-color);
@@ -210,14 +219,33 @@
 .modern-btn:active,
 .modern-btn.active,
 .modern-btn.is-active,
-.modern-btn[aria-pressed="true"] {
+.modern-btn[aria-pressed="true"],
+.resource-catalog-row[aria-current="true"] {
   color: var(--bs-btn-active-color);
   background: var(--bs-btn-active-bg);
   border-color: var(--bs-btn-active-border-color);
 }
 
+.resource-catalog-row[aria-current="true"] .resource-catalog-row-context {
+  color: inherit;
+}
+
+/* Native workspace controllers retain their hooks, but not a second control
+   skin. Their compact aliases share the same padding and touch-floor owners. */
+.ws-cmd-nav-btn,
+.ws-cmd-view-btn {
+  font-family: var(--font-body);
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  clip-path: none;
+}
+
 .btn-sm,
-.modern-btn-sm {
+.modern-btn-sm,
+.ws-cmd-nav-btn,
+.ws-cmd-view-btn {
   --bs-btn-padding-y: 0.25rem;
   --bs-btn-padding-x: 0.75rem;
   min-height: var(--control-height-sm);
@@ -234,7 +262,10 @@
   border-radius: 999px;
 }
 
-.ui-filter[aria-pressed="true"] {
+.ui-filter[aria-pressed="true"],
+.ws-cmd-view-btn:is(.is-active, [aria-pressed="true"]),
+.note-toolbar-btn:is(.active, .ai-active, [aria-pressed="true"], [aria-expanded="true"]),
+.note-rail-note-item.is-active {
   color: var(--accent-text);
   border-color: var(--accent-text);
   background-color: var(--bg-secondary);
@@ -260,7 +291,11 @@
 .modern-btn:disabled,
 .modern-btn.disabled,
 .btn[aria-disabled="true"],
-.modern-btn[aria-disabled="true"] {
+.modern-btn[aria-disabled="true"],
+.ws-cmd-nav-btn:disabled,
+.ws-cmd-view-btn:disabled,
+.ws-cmd-nav-btn[aria-disabled="true"],
+.ws-cmd-view-btn[aria-disabled="true"] {
   opacity: 0.55;
   cursor: not-allowed;
   pointer-events: none;
@@ -275,6 +310,8 @@
 :is(
   .btn,
   .modern-btn,
+  .ws-cmd-nav-btn,
+  .ws-cmd-view-btn,
   .badge,
   .modern-badge,
   .ui-page-header,
@@ -656,6 +693,7 @@ select:is(.modern-input, .form-input, .form-select):is([multiple], [size]:not([s
 }
 
 .nav-tabs .nav-link.active,
+.nav-tabs .nav-link[aria-selected="true"],
 .nav-pills .nav-link.active {
   border-bottom-color: var(--accent-text);
   background-color: var(--bg-secondary);

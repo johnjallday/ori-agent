@@ -1700,7 +1700,15 @@ function bindTree(container, state, cb, rows) {
       }
     ],
     ['[data-tree-group-selected]', () => void createGroup(Array.from(state.bulkSelection))],
-    ['[data-tree-delete-selected]', () => void deleteSelected()],
+    [
+      '[data-tree-delete-selected]',
+      el => {
+        // WebKit does not focus buttons on pointer activation. The native
+        // confirmation captures activeElement, so hand it the actual opener.
+        el.focus({ preventScroll: true });
+        void deleteSelected();
+      }
+    ],
     [
       '[data-tree-move-to]',
       el => {

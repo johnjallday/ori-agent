@@ -16,7 +16,9 @@
   /* The vertical companion. A bar can dodge the launcher sideways, but the last
      row of a scrolling page cannot — once you reach the bottom there is nowhere
      further to scroll, so whatever lands in that corner stays covered. Pages end
-     their scroll content this far above the viewport floor. */
+     their scroll content this far above the viewport floor. The assistant
+     controller raises this fallback to the measured footprint when a long
+     recipient wraps; pages consume the value rather than guessing a larger gap. */
   --ori-launcher-clearance-y: 88px;
 }
 

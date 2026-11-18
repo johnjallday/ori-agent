@@ -164,7 +164,7 @@ export function openGiveWork(options = {}) {
   if (!workspaceId || !api) return null;
 
   const dialog = document.createElement('dialog');
-  dialog.className = 'give-work';
+  dialog.className = 'give-work ui-section';
   dialog.setAttribute('aria-labelledby', 'giveWorkTitle');
   dialog.innerHTML = giveWorkHTML(options);
   document.body.appendChild(dialog);
