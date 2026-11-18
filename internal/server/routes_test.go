@@ -296,6 +296,40 @@ func TestWorkspaceDetailRouteUsesSlugAndBootstrapsUUID(t *testing.T) {
 	}
 }
 
+// The workspace canvas page is retired and /workspaces/{slug}/canvas is a 404,
+// by decision. Every other unknown descendant of a real workspace redirects to
+// its Overview, so the 404 has to be asserted next to that redirect: deleting
+// the page without the explicit branch would turn an old bookmark into a
+// silent landing on the Overview.
+func TestWorkspaceCanvasRouteIsRetiredWhileOtherUnknownPagesRedirect(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Retired Canvas Workspace")
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec
+	}
+
+	for _, path := range []string{
+		"/workspaces/" + workspace.Slug + "/canvas",
+		"/workspaces/" + workspace.Slug + "/canvas?mode=map",
+		"/workspaces/unknown-workspace/canvas",
+	} {
+		if rec := get(path); rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s status = %d, want 404", path, rec.Code)
+		}
+	}
+
+	rec := get("/workspaces/" + workspace.Slug + "/no-such-page?mode=map")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("an unknown descendant should still redirect, status = %d", rec.Code)
+	}
+	if got, want := rec.Header().Get("Location"), "/workspaces/"+workspace.Slug+"?mode=map"; got != want {
+		t.Errorf("redirect Location = %q, want %q", got, want)
+	}
+}
+
 func TestWorkspaceDescendantPagesKeepUUIDStateSeparateFromSlugLinks(t *testing.T) {
 	handler := newRoutesTestHandler(t)
 	workspace := createRouteTestWorkspace(t, handler, "Descendant Route Workspace")
@@ -305,7 +339,6 @@ func TestWorkspaceDescendantPagesKeepUUIDStateSeparateFromSlugLinks(t *testing.T
 		path   string
 		marker string
 	}{
-		{"canvas", "/canvas", "canvas-view"},
 		{"diagnostics", "/diagnostics", "workspace-diagnostics-view"},
 		{"task", "/task/task%201", "workspaceTaskPageRoot"},
 		{"run", "/runs/run%201", "workspaceRunPageRoot"},

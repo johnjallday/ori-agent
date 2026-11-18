@@ -1497,7 +1497,6 @@ export class WorkspaceDetailPage {
       workspaceTagsCancelBtn: document.getElementById('workspace-tags-cancel-btn'),
       workspaceTagsError: document.getElementById('workspace-tags-error'),
       workspaceBreadcrumb: document.getElementById('workspace-breadcrumb-name'),
-      openCanvasBtn: document.getElementById('open-canvas-btn'),
       openDiagnosticsBtn: document.getElementById('open-diagnostics-btn'),
       openWorkflowsBtn: document.getElementById('open-workflows-btn'),
       workflowLinksPanel: document.getElementById('workspace-detail-workflow-links-panel'),
@@ -2886,9 +2885,6 @@ export class WorkspaceDetailPage {
       this.elements.workspaceBreadcrumb.textContent = this.workspace.name || 'Workspace';
     }
     const workspaceSlug = String(this.workspaceSlug || this.workspace?.folder_slug || '').trim();
-    if (this.elements.openCanvasBtn && workspaceSlug) {
-      this.elements.openCanvasBtn.href = workspacePageURL(workspaceSlug, ['canvas']);
-    }
     if (this.elements.openDiagnosticsBtn && workspaceSlug) {
       this.elements.openDiagnosticsBtn.href = workspacePageURL(workspaceSlug, ['diagnostics']);
     }

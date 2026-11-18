@@ -82,8 +82,7 @@ test('Overview keeps the details key; primary modes and secondary native links s
   const html = workspaceNavigationHTML({
     mode: 'details',
     dashboard: true,
-    plans: '<a href="/workspaces/w/plans">Plans</a>',
-    canvas: '/workspaces/w/canvas'
+    plans: '<a href="/workspaces/w/plans">Plans</a>'
   });
   assert.match(html, /data-cmd-view-mode="details" aria-pressed="true">Overview/);
   for (const key of ['map', 'tickets', 'dashboard'])
@@ -91,7 +90,13 @@ test('Overview keeps the details key; primary modes and secondary native links s
   assert.match(html, /data-cmd-program-destinations/);
   assert.match(
     html,
-    /<details[^>]*data-cmd-disclosure="views"[\s\S]*href="\/workspaces\/w\/plans"[\s\S]*href="\/workspaces\/w\/canvas"/
+    /<details[^>]*data-cmd-disclosure="views"[\s\S]*href="\/workspaces\/w\/plans"/
+  );
+  // The workspace canvas is retired: More views lists no Canvas, even if a caller still passes one.
+  assert.doesNotMatch(html, />Canvas</);
+  assert.doesNotMatch(
+    workspaceNavigationHTML({ mode: 'details', plans: '', canvas: '/workspaces/w/canvas' }),
+    /More views|>Canvas</
   );
   assert.doesNotMatch(html, /data-cmd-view-mode="(?:plans|canvas)"/);
   assert.doesNotMatch(workspaceNavigationHTML({ mode: 'map' }), /data-cmd-view-mode="dashboard"/);

@@ -463,7 +463,7 @@ func TestSharedAgentCreateFormIsCanonicalAndLoadsBeforeConsumers(t *testing.T) {
 		t.Fatalf("LoadTemplates failed: %v", err)
 	}
 
-	pages := []string{"index", "workspace-detail", "workspace-canvas", "workspace-task"}
+	pages := []string{"index", "workspace-detail", "workspace-task"}
 	for _, page := range pages {
 		html, err := r.RenderTemplate(page, TemplateData{
 			Title: page + " - Ori Agent",
@@ -528,7 +528,7 @@ func TestCreateWorkspaceTeamDraftLoadsBeforeSessions(t *testing.T) {
 	// Every page whose layout includes session-modals.tmpl, which renders
 	// components/workspaces/create-workspace-modal.tmpl. "index" covers
 	// layout/base.tmpl, which owns its own script block.
-	pages := []string{"index", "workspace-detail", "workspace-canvas", "workspace-task"}
+	pages := []string{"index", "workspace-detail", "workspace-task"}
 	helpers := []string{
 		`/js/modules/create-workspace-team-draft.js`,
 		`/js/modules/create-workspace-placement-draft.js`,

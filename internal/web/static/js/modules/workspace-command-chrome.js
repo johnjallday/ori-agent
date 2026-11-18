@@ -11,7 +11,6 @@ export function workspaceNavigationHTML({
   mode,
   dashboard = false,
   plans = '',
-  canvas = '',
   ticketCount = '—',
   ticketDescription = '',
   ticketAlert = false
@@ -31,13 +30,10 @@ export function workspaceNavigationHTML({
       )
       .join('') +
     '<span class="ws-cmd-program-destinations" data-cmd-program-destinations></span>' +
-    (plans || canvas
+    (plans
       ? '<details class="ws-cmd-disclosure" data-cmd-disclosure="views"><summary class="ws-cmd-view-btn">More views</summary>' +
         '<div class="ws-cmd-disclosure-body">' +
         plans +
-        (canvas
-          ? `<a class="ws-cmd-view-btn ws-cmd-view-link" href="${chromeText(canvas)}">Canvas</a>`
-          : '') +
         '</div></details>'
       : '') +
     '</nav>'

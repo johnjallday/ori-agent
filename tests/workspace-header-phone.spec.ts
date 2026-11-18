@@ -155,7 +155,8 @@ for (const width of [375, 320]) {
     for (const tab of header.tabs) expect(tab.fits, `${tab.text} shows its whole word`).toBe(true);
     await page.locator('[data-cmd-disclosure="views"] > summary').click();
     await expect(page.getByRole('link', { name: 'Plans', exact: true })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Canvas', exact: true })).toBeVisible();
+    // The workspace canvas is retired: More views lists no Canvas.
+    await expect(page.getByRole('link', { name: 'Canvas', exact: true })).toHaveCount(0);
     await page.locator('[data-cmd-disclosure="views"] > summary').press('Escape');
     await page.locator('[data-cmd-settings]').click();
     await page.locator('[data-panel-section="advanced"]').click();

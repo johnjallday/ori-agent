@@ -18,7 +18,7 @@
 
     const confirmed = await window.WorkspaceHubModals.showDeleteConfirm({
       title: 'Move to Trash',
-      message: 'Move this file to trash? You can restore it later from the canvas.',
+      message: 'Move this file to trash?',
       variant: 'trash'
     });
     if (!confirmed) return;
@@ -50,7 +50,7 @@
 
     const confirmed = await window.WorkspaceHubModals.showDeleteConfirm({
       title: `Move ${ids.length} File${ids.length > 1 ? 's' : ''} to Trash`,
-      message: `Move ${ids.length} file${ids.length > 1 ? 's' : ''} to trash? You can restore them later from the canvas.`,
+      message: `Move ${ids.length} file${ids.length > 1 ? 's' : ''} to trash?`,
       variant: 'trash'
     });
     if (!confirmed) return;
@@ -136,18 +136,6 @@
     } catch (error) {
       console.error('Failed to relink workspace file:', error);
       if (window.Toast) window.Toast.error(error.message || 'Failed to relink file');
-    }
-  }
-
-  /**
-   * Open a file (navigate to canvas)
-   * @param {string} fileId - File ID
-   */
-  function openFile() {
-    const state = window.WorkspaceHubState.getState();
-    const slug = String(state.workspaceMap?.get(state.selectedId)?.folder_slug || '').trim();
-    if (slug) {
-      window.location.href = `/workspaces/${encodeURIComponent(slug)}/canvas`;
     }
   }
 
@@ -621,7 +609,7 @@
       if (isLikelyFolder) {
         if (window.Toast) {
           window.Toast.info(
-            'To add a linked folder, use the "Linked Folder" button in the canvas toolbar instead.',
+            'To add a linked folder, use the Linked Folders panel on the workspace page instead.',
             { title: 'Folder Detected' }
           );
         }
@@ -992,7 +980,6 @@
   window.WorkspaceHubFiles = {
     moveFileToTrash,
     bulkMoveFilesToTrash,
-    openFile,
     loadFiles,
     renderFiles,
     renderDirectories,

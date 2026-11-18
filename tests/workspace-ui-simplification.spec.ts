@@ -174,7 +174,7 @@ for (const variant of ['leaf', 'group', 'hq']) {
       const disclosure = page.locator('[data-cmd-disclosure="views"]');
       const summary = disclosure.locator('summary');
       const assertHitTargets = async () => {
-        for (const name of ['Plans', 'Canvas']) {
+        for (const name of ['Plans']) {
           await expect
             .poll(
               () =>
@@ -226,14 +226,17 @@ for (const variant of ['leaf', 'group', 'hq']) {
         await summary.press('Escape');
       }
       await summary.click();
-      const [canvas] = await Promise.all([
+      // The workspace canvas is retired: More views lists no Canvas.
+      await expect(disclosure.getByRole('link', { name: 'Canvas', exact: true })).toHaveCount(0);
+      // What is left is a native link: it opens in a new tab like any link.
+      const [plans] = await Promise.all([
         context.waitForEvent('page'),
         disclosure
-          .getByRole('link', { name: 'Canvas', exact: true })
+          .getByRole('link', { name: 'Plans', exact: true })
           .click({ modifiers: ['ControlOrMeta'] })
       ]);
-      await canvas.waitForURL(`**/workspaces/${ws.folder_slug}/canvas`);
-      await canvas.close();
+      await plans.waitForURL(`**/workspaces/${ws.folder_slug}/plans`);
+      await plans.close();
       // Raising a header menu must not let it paint over a real modal owner.
       await page.locator('[data-cmd-settings]').click();
       const panel = page.getByRole('dialog', { name: 'Workspace settings', exact: true });

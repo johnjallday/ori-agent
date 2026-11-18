@@ -92,7 +92,6 @@ test('workspace detail keeps UUID APIs separate from slug page links', async () 
     agent_instances: []
   };
   page.elements = {
-    openCanvasBtn: {},
     openDiagnosticsBtn: {}
   };
   page.renderWorkspaceTags = () => {};
@@ -104,7 +103,6 @@ test('workspace detail keeps UUID APIs separate from slug page links', async () 
   await page.renderWorkspaceInfo();
 
   assert.equal(page.workspaceId, '8d8c4de0-uuid');
-  assert.equal(page.elements.openCanvasBtn.href, '/workspaces/marketing-site/canvas');
   assert.equal(page.elements.openDiagnosticsBtn.href, '/workspaces/marketing-site/diagnostics');
 });
 

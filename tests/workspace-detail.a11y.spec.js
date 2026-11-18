@@ -353,9 +353,10 @@ for (const theme of ['light', 'dark']) {
       const more = page.locator('[data-cmd-disclosure="views"] > summary');
       await more.focus();
       await page.keyboard.press('Enter');
-      await expect(page.getByRole('link', { name: 'Canvas', exact: true })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Plans', exact: true })).toBeVisible();
+      await expect(page.getByRole('link', { name: 'Canvas', exact: true })).toHaveCount(0);
       await page.keyboard.press('Escape');
-      await expect(page.getByRole('link', { name: 'Canvas', exact: true })).not.toBeVisible();
+      await expect(page.getByRole('link', { name: 'Plans', exact: true })).not.toBeVisible();
       await expect(more).toBeFocused();
 
       // Plain names only, in what is shown and in what is announced (FR23).

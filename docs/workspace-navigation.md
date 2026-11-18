@@ -19,7 +19,8 @@ internal `details` preference and URL key; this is not a route migration.
 | Successful setup/portability badges               | Settings → Advanced; failures, missing requirements and imported routines-off remain visible |
 | Full agent deck                                   | Overview → Team → Manage team; existing selection, staffing and agent controls               |
 | Group Build / Add existing                        | Add workspace → Create new / Add existing, through the locked creator or member picker       |
-| Plans / Canvas                                    | More views, using their native full-page links                                               |
+| Plans                                             | More views, using its native full-page link                                                  |
+| Canvas (retired)                                  | None: `/workspaces/{slug}/canvas` is a 404; see Overview, Tickets and Resources              |
 | Program/profile/catalog links                     | Declaration-owned destinations; the profile jump stays on its owning assistant page          |
 
 Dashboard appears only when configured. Personal HQ keeps its station-first body;
