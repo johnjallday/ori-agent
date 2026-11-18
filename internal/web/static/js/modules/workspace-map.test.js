@@ -3788,6 +3788,11 @@ function createCameraHarness({
   const districtTagEls = districts.map(id =>
     makeNode(id, { attribute: 'data-ws-id', classes: ['ws-map-district-tag'] })
   );
+  // A group page's Open button on a group inside it. Only a scoped mount draws
+  // it, but like the other stubs it exists whatever the markup said.
+  const groupOpenEls = districts.map(id =>
+    makeNode(id, { attribute: 'data-group-open', classes: ['ws-map-district-open'] })
+  );
   // The screen-space resize handles (#346 FR-52 – FR-75). They live outside the
   // world layer, so unlike the district they are never re-created by a camera
   // change — one stub each for the whole harness.
@@ -4015,6 +4020,7 @@ function createCameraHarness({
     isConnected: true,
     querySelectorAll: sel => {
       if (sel.includes('data-resize-handle')) return resizeHandleEls;
+      if (sel.includes('data-group-open')) return groupOpenEls;
       if (sel.includes('data-group-collapse') || sel.includes('data-group-menu')) return [];
       if (sel.includes('data-group-drag')) return handleEls;
       // The district outlines themselves, which drop-target highlighting walks.
@@ -4073,6 +4079,7 @@ function createCameraHarness({
         ...districtEls,
         ...handleEls,
         ...districtTagEls,
+        ...groupOpenEls,
         ...resizeHandleEls
       ].forEach(el => el.resetListeners());
     }
@@ -4093,6 +4100,7 @@ function createCameraHarness({
     unit: id => unitEls.find(el => el.id === id),
     district: id => districtEls.find(el => el.id === id),
     districtTag: id => districtTagEls.find(el => el.id === id),
+    groupOpen: id => groupOpenEls.find(el => el.id === id),
     handle: id => handleEls.find(el => el.id === id),
     resizeHandle: edge => resizeHandleEls.find(el => el.id === edge),
     fire: (type, event) => (listeners[type] || []).forEach(fn => fn(event)),
@@ -11013,12 +11021,22 @@ test('a scoped mount draws only its group, without collapse controls, and unmoun
   // district frame is not drawn (PRD §10). A group inside it is a place on
   // that ground (nest-songs FR12): Stems is drawn as a district holding Drums,
   // with its name and count but none of the ⤧/⋯/collapse district controls.
+  // Its one control is the way into its own page.
   assert.doesNotMatch(container.innerHTML, /data-group-id="g"/);
   assert.match(
     container.innerHTML,
     /class="ws-map-district[^"]* is-nested[^"]*"[^>]*data-group-id="sub"/
   );
   assert.doesNotMatch(container.innerHTML, /data-group-drag|data-group-menu/);
+  assert.match(
+    container.innerHTML,
+    /<button type="button" class="ws-map-district-open" data-group-open="sub" aria-label="Open Stems group" title="Open Stems">Open<span aria-hidden="true"> ›<\/span><\/button>/
+  );
+  assert.doesNotMatch(
+    container.innerHTML,
+    /data-group-open="g"/,
+    'the page’s own group is not drawn'
+  );
   assert.doesNotMatch(container.innerHTML, /No members yet/, 'members are drawn, so no empty note');
 
   map.unmount(container);
@@ -11028,6 +11046,8 @@ test('a scoped mount draws only its group, without collapse controls, and unmoun
   assert.match(container.innerHTML, /ws-map-district[^"]*" role="group"/);
   assert.match(container.innerHTML, /ws-map-district-header/);
   assert.match(container.innerHTML, /data-group-menu="g"/);
+  // Home keeps its own controls; the Open button is the group page's.
+  assert.doesNotMatch(container.innerHTML, /data-group-open/);
 });
 
 test('a view-only scoped unmount preserves the camera without writing layout or leaking into Home', async () => {
@@ -11370,7 +11390,7 @@ test('scopedFrameBounds frames the district, falling back to everything drawn', 
   assert.deepEqual({ ...map.scopedFrameBounds(layout, 'missing') }, { ...layout.bounds });
 });
 
-test('scoped menus offer navigation, selection, deletion, and building, never a task or a district', () => {
+test('scoped menus offer navigation, selection, deletion, and building, never a task or district layout', () => {
   const map = loadOriWorkspaceMap();
   const labels = items => items.map(item => (item.divider ? '—' : item.label));
 
@@ -11387,16 +11407,17 @@ test('scoped menus offer navigation, selection, deletion, and building, never a 
   );
   map._setSetupStatusForTest('m1', { state: 'needs_setup', steps: [{ id: 'a', done: false }] });
 
-  // No district is drawn on a group page, so it has no menu of its own; the
-  // ground's menu is the whole story there (PRD §10).
+  // The page's own group is not drawn (PRD §10). A group inside it is, and its
+  // layout belongs to Home, so opening its own page is all its menu offers.
   const district = map.contextMenuItemsFor({
     type: 'district',
-    id: 'g',
-    ws: { id: 'g', kind: 'group' },
-    scoped: true,
-    nested: false
+    id: 'sub',
+    ws: { id: 'sub', kind: 'group', name: 'Stems' },
+    scoped: true
   });
-  assert.deepEqual([...district], []);
+  assert.deepEqual([...labels(district)], ['Open group']);
+  assert.deepEqual([...district.map(item => item.action)], ['open']);
+  assert.deepEqual([...map.contextMenuItemsFor({ type: 'district', scoped: true })], []);
 
   const canvas = map.contextMenuItemsFor({ type: 'canvas', scoped: true });
   assert.deepEqual(
@@ -11430,6 +11451,103 @@ test('unscoped menus are unchanged by the scoped flag defaulting off', () => {
       map.contextMenuItemsFor({ type: 'district', id: 'g', ws: { id: 'g', kind: 'group' } })
     ).includes('Delete group')
   );
+});
+
+// Studio's page: Mixing stands loose, and Stems is a group inside Studio,
+// drawn as a bare district holding Drums.
+async function nestedGroupPage(handlers = {}) {
+  const map = loadMapWithFetch(() =>
+    jsonResponse({ schema_version: 1, revision: 1, snap_to_grid: true, positions: {} })
+  );
+  const harness = createCameraHarness({ tiles: ['m1', 'deep'], districts: ['sub'] });
+  map.mount(harness.container, scopedMountState(handlers));
+  await flush();
+  return { map, harness };
+}
+
+// Right-click inside the Stems district: on its header, or on the ground its
+// frame encloses.
+const rightClickStems = (harness, { onHeader }) =>
+  harness.fire('contextmenu', {
+    target: {
+      closest: sel => {
+        if (sel === '.ws-map-district') return harness.district('sub');
+        if (sel === '.ws-map-district-header') return onHeader ? {} : null;
+        if (sel === '.ws-map-canvas') return harness.canvas;
+        return null;
+      }
+    },
+    clientX: 200,
+    clientY: 150,
+    preventDefault() {}
+  });
+
+test('a group page opens a group inside it from its Open button, its name, and its menu', async () => {
+  const opened = [];
+  const selected = [];
+  const { harness } = await nestedGroupPage({
+    onOpen: id => opened.push(id),
+    onSelect: id => selected.push(id)
+  });
+
+  // A click on the name selects, as it does everywhere on the map.
+  harness
+    .districtTag('sub')
+    .fire('click', { target: { closest: () => null }, preventDefault() {} });
+  assert.deepEqual(opened, [], 'a click on the name must not open');
+  assert.deepEqual(selected, ['sub']);
+
+  let claimed = false;
+  harness.groupOpen('sub').fire('click', {
+    preventDefault() {},
+    stopPropagation() {
+      claimed = true;
+    }
+  });
+  assert.deepEqual(opened, ['sub'], 'the Open button opens the group');
+  assert.equal(claimed, true, 'the button claims its click');
+
+  harness.districtTag('sub').fire('dblclick');
+  assert.deepEqual(opened, ['sub', 'sub'], 'a double-click on the name opens it');
+  // The members keep their own double-click.
+  harness.tile('m1').fire('dblclick');
+  assert.deepEqual(opened, ['sub', 'sub', 'm1']);
+
+  rightClickStems(harness, { onHeader: true });
+  assert.deepEqual([...harness.menu.labels()], ['Open group']);
+  harness.menu.item('open').fire('click');
+  assert.deepEqual(opened, ['sub', 'sub', 'm1', 'sub'], 'the menu opens it too');
+});
+
+test('a group page keeps the ground inside a nested district for building, and its own group menuless', async () => {
+  const { map, harness } = await nestedGroupPage({ onOpen() {} });
+  rightClickStems(harness, { onHeader: false });
+  assert.ok(harness.menu.labels().includes('Build'), 'the ground menu, not the group’s');
+  assert.equal(harness.menu.item('open'), null);
+  // The page's own group is never drawn, so it never offers a menu either.
+  assert.deepEqual(
+    [...map.contextMenuItemsFor({ type: 'district', id: 'g', ws: SCOPED_WORLD[0] })],
+    []
+  );
+});
+
+test('Home’s select-only map still opens no group on a double-click (FR36)', async () => {
+  const opened = [];
+  const map = loadMapWithFetch(() =>
+    jsonResponse({ schema_version: 1, revision: 1, snap_to_grid: true, positions: {} })
+  );
+  const harness = createCameraHarness({ tiles: ['m1', 'deep'], districts: ['sub'] });
+  map.mount(harness.container, {
+    workspaces: SCOPED_WORLD,
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    onOpen: id => opened.push(id)
+  });
+  await flush();
+  harness.districtTag('sub').fire('dblclick');
+  harness.tile('m1').fire('dblclick');
+  assert.deepEqual(opened, []);
 });
 
 async function mountedScopedDrag() {
@@ -13229,8 +13347,8 @@ test('district menu offers "Set up N projects…" only when the badge counts som
   assert.deepEqual(labels(), [], 'a non-integer count is ignored');
   assert.deepEqual(
     byValue(map.districtMenuItems(home, true)),
-    [],
-    'a scoped group page draws no district menu'
+    [{ label: 'Open group', action: 'open' }],
+    'a group page only opens a group inside it; setup stays on Home and the badge'
   );
   map.libraryBadges.setSnapshot(null);
 });

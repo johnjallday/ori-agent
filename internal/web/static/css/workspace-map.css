@@ -1270,6 +1270,32 @@
   outline: 2px solid rgb(var(--ws-district-accent));
   outline-offset: 2px;
 }
+/* A group page's way into a group inside it: the one control its bare header
+   carries, so it takes the place Collapse/Move/More take on Home (right end,
+   finger-sized) and fits the same reserved header band. A word, not a glyph:
+   it is the only route a pointer user can see. Ink text, like the nested tag
+   beside it: accent text is unreadable on the light theme's pale ground. */
+.ws-map-district-open {
+  flex: none;
+  margin-left: auto;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid rgba(var(--ws-district-accent), 0.42);
+  background: var(--ws-bg-2);
+  color: var(--ws-ink);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.ws-map-district-open:hover {
+  background: rgba(var(--ws-district-accent), 0.14);
+}
+.ws-map-district-open:focus-visible {
+  outline: 2px solid rgb(var(--ws-district-accent));
+  outline-offset: 2px;
+}
 
 /* A collapsed district: the same group, compact (#346 FR-106, FR-117). A solid
    filled surface rather than the dashed outline of an expanded one, so "this
