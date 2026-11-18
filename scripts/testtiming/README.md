@@ -103,7 +103,7 @@ cache; a restored successful test result is never evidence of faster execution.
 
 ```sh
 make test-unit-tools                  # reporter, shell, Python partition/merge and YAML contracts
-GOTOOLCHAIN=go1.26.0 go test -race ./scripts/testtiming ./scripts/ci
+GOTOOLCHAIN=go$(awk '/^go /{print $2}' go.mod) go test -race ./scripts/testtiming ./scripts/ci
 # Re-summarize existing, pure go-test JSON without executing tests:
 go run ./scripts/testtiming < events.json > summary.md
 ```
@@ -223,7 +223,7 @@ pushes) over at least three candidate runs against the pre-change baseline. Host
 on identical code, so a single run proves nothing.
 
 **3. Controlled local before/after** (fixture and test changes). Pin the toolchain CI uses:
-`GOTOOLCHAIN=go1.26.0` (CI follows `go.mod`'s exact patch; a newer local Go is a different
+`GOTOOLCHAIN=go$(awk '/^go /{print $2}' go.mod)` (CI follows `go.mod`'s exact patch; a newer local Go is a different
 environment) and `TZ=UTC`. Take one sample per package, sequentially, never beside another
 test run: hold the machine-wide unit lock (source `scripts/ci-local.sh` and call
 `ci_local_with_unit_lock`, with `TZ=UTC` like the gates: the lock compares process start times as

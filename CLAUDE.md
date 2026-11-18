@@ -95,7 +95,7 @@ make lint-new      # CI's changed-code ratchet; not the whole-tree baseline
 
 ### Core Technology Stack
 
-- **Language**: Go 1.26+
+- **Language**: Go 1.27+
 - **Tool System**: MCP (Model Context Protocol) servers + Skills
 - **LLM Providers**: OpenAI, Anthropic Claude, Ollama (via provider abstraction)
 - **Tool Interface**: `internal/toolapi/` defines the internal tool interface
