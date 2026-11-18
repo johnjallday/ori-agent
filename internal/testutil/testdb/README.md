@@ -173,11 +173,11 @@ Both include allocation, a local-user seed check and close; neither asserts a
 wall-clock threshold. Run a bounded comparison from the module root:
 
 ```sh
-ORI_SKIP_CACHE_PRUNE=1 GOTOOLCHAIN=go1.26.0 ./scripts/run-test-command.sh \
+ORI_SKIP_CACHE_PRUNE=1 GOTOOLCHAIN=go$(awk '/^go /{print $2}' go.mod) ./scripts/run-test-command.sh \
   go test -short -race -timeout 30m -run '^$' -bench '^BenchmarkOpen(Fresh|Clone)$' \
   -benchtime=3x -count=3 ./internal/testutil/testdb
 
-ORI_SKIP_CACHE_PRUNE=1 GOTOOLCHAIN=go1.26.0 ./scripts/run-test-command.sh \
+ORI_SKIP_CACHE_PRUNE=1 GOTOOLCHAIN=go$(awk '/^go /{print $2}' go.mod) ./scripts/run-test-command.sh \
   go test -short -race -count=5 -shuffle=on ./internal/testutil/testdb
 ```
 

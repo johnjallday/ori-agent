@@ -86,7 +86,7 @@ go test -short -race -covermode=atomic -count=50 -run '^TestName$' ./path/to/pkg
 `GOWORK=off` is needed when a parent directory holds a `go.work`. Racy or
 timing-dependent tests may need `-count=100` to `-count=300` and `GOMAXPROCS`
 of 1 or 2 to surface. Run the same loop once with the newest patch of the same
-Go minor (`golang:1.26` or `GOTOOLCHAIN=go1.26.x`) to tell toolchain-patch
+Go minor (e.g. `golang:1.27` for a `go 1.27.1` line) to tell toolchain-patch
 behaviour from a code bug. Record pass and fail counts; they go in the PR.
 
 ## 4. Fix at the root

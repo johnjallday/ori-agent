@@ -643,6 +643,12 @@ jobs:
 
       - name: Scan PR base
         uses: securego/gosec@598d6146b91b2370c6f11f7d3cb256119d8cbfc4 # pinned action/image: gosec 2.29.0
+        # gosec runs in its own image, not the setup-go toolchain. Its Go can
+        # be older than go.mod's `go` line, and golang images default to
+        # GOTOOLCHAIN=local, which refuses to load the module. auto fetches
+        # go.mod's toolchain only when the image's Go is too old.
+        env:
+          GOTOOLCHAIN: auto
         with:
           args: '-no-fail -fmt sarif -out results.sarif ./...'
 
@@ -687,6 +693,9 @@ jobs:
       # execution and SARIF upload errors themselves must fail the job.
       - name: Run Gosec Security Scanner
         uses: securego/gosec@598d6146b91b2370c6f11f7d3cb256119d8cbfc4 # pinned action/image: gosec 2.29.0
+        # See "Scan PR base": the image's Go may predate go.mod's `go` line.
+        env:
+          GOTOOLCHAIN: auto
         with:
           args: '-no-fail -fmt sarif -out results.sarif ./...'
 

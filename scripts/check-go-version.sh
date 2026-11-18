@@ -5,7 +5,8 @@
 
 set -e
 
-REQUIRED_GO_VERSION="1.26.0"
+# go.mod's `go` line is the single source of truth (CI installs exactly it).
+REQUIRED_GO_VERSION="$(awk '/^go /{print $2}' "$(cd "$(dirname "$0")/.." && pwd)/go.mod")"
 CURRENT_GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
 
 echo "Current Go version: $CURRENT_GO_VERSION"
