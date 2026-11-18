@@ -171,6 +171,62 @@ test('the Commander face is the card’s own: chosen through the renderer, else 
   assert.equal(commanderAvatarMarkup('Albums Manager', {}, empty), '<renderer>');
 });
 
+// The workspace page knows which face its card draws (a group's map draws a
+// generated Commander as the shared renderer's initials, a workspace page as the
+// figure), so the drawer takes the page's face whenever the page offers one.
+test('the Commander face is the workspace page’s own when the page can draw it', () => {
+  const asked = [];
+  const rendered = [];
+  const base = {
+    AgentAvatar: { markup: input => (rendered.push(input), '<renderer>') },
+    OriWorkspaceAgentPortrait: { markup: name => `<figure ${name}>` }
+  };
+  const win = {
+    ...base,
+    workspaceDetail: {
+      commanderChatFaceMarkup: (name, size) => (asked.push([name, size]), `<page ${name}>`)
+    }
+  };
+  // The page's face wins over both the figure and a saved appearance it already resolved.
+  assert.equal(commanderAvatarMarkup('Portfolio Manager 9', {}, win), '<page Portfolio Manager 9>');
+  assert.equal(
+    commanderAvatarMarkup('Portfolio Manager 9', { mode: 'character' }, win, 20),
+    '<page Portfolio Manager 9>'
+  );
+  assert.deepEqual(asked, [
+    ['Portfolio Manager 9', 40],
+    ['Portfolio Manager 9', 20]
+  ]);
+  assert.equal(rendered.length, 0);
+
+  // No page (Home), a page that cannot draw it yet, or one that fails: the drawer's own rule.
+  for (const workspaceDetail of [
+    undefined,
+    null,
+    {},
+    { commanderChatFaceMarkup: () => '' },
+    { commanderChatFaceMarkup: () => null },
+    {
+      commanderChatFaceMarkup: () => {
+        throw new Error('not ready');
+      }
+    }
+  ]) {
+    assert.equal(
+      commanderAvatarMarkup(
+        'Portfolio Manager 9',
+        { mode: 'generated' },
+        { ...base, workspaceDetail }
+      ),
+      '<figure Portfolio Manager 9>'
+    );
+  }
+
+  // The page asks the drawer to draw the face again once its record or the catalog arrives.
+  const panel = readFileSync(new URL('./personal-assistant-panel.js', import.meta.url), 'utf8');
+  assert.match(panel, /repaintFace: \(\) => renderIdentity\(\),/);
+});
+
 // The drawer's wiring for the folder question (folder-question-said-once FR11).
 // The panel's private functions need its globals, so the rule itself is tested
 // in folder-agent-chat.test.js (folderReportReload, syncFolderReport); these pin

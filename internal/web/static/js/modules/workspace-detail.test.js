@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 function escapeHTML(value) {
   return String(value || '')
@@ -2765,42 +2766,127 @@ test('the page reloads its tickets when the folder agent changes phase and hands
   }
 });
 
-// FR24: the Commander's balloon shows the face its card draws. The card calls
-// getAgentAvatarPresentation(name) (the default variant), so the balloon must ask
-// for exactly that and nothing else, and draw nothing of its own when there is none.
+// FR24: the Commander's balloon shows the face its card draws. On a workspace
+// page the card asks getAgentAvatarPresentation with the default variant; on a
+// group's page the card is the group map's unit, which opts into AgentAvatar.
+// The balloon asks for exactly that, and draws nothing of its own when there is none.
 test("the Commander's balloon takes its face from the card's own avatar presentation", () => {
   const asked = [];
-  const page = {
+  const pageOf = kind => ({
+    isGroupWorkspace: () => kind === 'group',
+    commanderFacePresentation: WorkspaceDetailPage.prototype.commanderFacePresentation,
     getAgentAvatarPresentation: (...args) => {
       asked.push(args);
       return { markup: className => `<span class="${className}">face</span>` };
     }
-  };
-  const face = WorkspaceDetailPage.prototype.commanderFaceMarkup.call(page, 'Albums Manager');
+  });
+  const face = WorkspaceDetailPage.prototype.commanderFaceMarkup.call(
+    pageOf('workspace'),
+    'Albums Manager'
+  );
   assert.equal(face, '<span class="commander-balloon-avatar">face</span>');
-  assert.deepEqual(asked, [['Albums Manager']], 'the default variant, as the card asks');
+  WorkspaceDetailPage.prototype.commanderFaceMarkup.call(pageOf('group'), 'Albums Manager');
+  assert.deepEqual(asked, [
+    ['Albums Manager', { useAgentAvatar: false }],
+    ['Albums Manager', { useAgentAvatar: true }]
+  ]);
 
   // No renderer yet, or no presentation: an empty face (the balloon then uses initials).
+  for (const presentation of [{ markup: () => '' }, null, {}]) {
+    assert.equal(
+      WorkspaceDetailPage.prototype.commanderFaceMarkup.call(
+        { commanderFacePresentation: () => presentation },
+        'A'
+      ),
+      ''
+    );
+  }
+});
+
+// The screenshot this guards: on a group's Map tab the Commander's unit drew the
+// shared renderer's initials portrait ("P9") while the chat drawer drew the
+// name-derived figure. The drawer now takes the page's face, so it is the unit's
+// exact AgentAvatar input (the same name, source and role, hence the same seed).
+test("on a group's page the chat drawer draws the Commander's group-map unit face", () => {
+  const rendered = [];
+  globalThis.window.OriWorkspaceAgentPortrait = {
+    markup: (name, options) => `<figure ${name} keeper=${options.isKeeper}>`
+  };
+  globalThis.window.AgentAvatar = {
+    markup: (input, options) => {
+      rendered.push({ input, options });
+      return `<span class="agent-avatar ${options.className}" data-size="${options.size}"></span>`;
+    }
+  };
+  try {
+    const page = new WorkspaceDetailPage('group-1');
+    page.workspace = { id: 'group-1', kind: 'group', entry_agent_name: 'Portfolio Manager 9' };
+    page.agentIndex = new Map([
+      [
+        'portfolio manager 9',
+        { name: 'Portfolio Manager 9', source: 'user', role: 'portfolio_manager', appearance: null }
+      ]
+    ]);
+
+    // What workspace-command's agentCharacterHTML(agent, 'map') draws for the unit.
+    page
+      .getAgentAvatarPresentation('Portfolio Manager 9', { useAgentAvatar: true })
+      .markup('ws-cmd-character is-roster idle');
+    const unit = rendered.at(-1);
+
+    const chat = page.commanderChatFaceMarkup('Portfolio Manager 9', 40);
+    assert.equal(chat, '<span class="agent-avatar " data-size="40"></span>');
+    assert.deepEqual(rendered.at(-1).input, unit.input, 'the unit’s identity, not a second one');
+    assert.equal(rendered.at(-1).options.size, 40, 'at the drawer’s size');
+    assert.equal(
+      page.commanderChatFaceMarkup('Portfolio Manager 9', 20),
+      '<span class="agent-avatar " data-size="20"></span>',
+      'the line above a message, at its own size'
+    );
+    // The balloon draws the same face.
+    page.commanderFaceMarkup('Portfolio Manager 9');
+    assert.deepEqual(rendered.at(-1).input, unit.input);
+
+    // A workspace page's card draws a generated Commander as the figure; so does the drawer.
+    page.workspace = { id: 'ws-1', kind: 'workspace', entry_agent_name: 'Portfolio Manager 9' };
+    assert.equal(
+      page.commanderChatFaceMarkup('Portfolio Manager 9', 40),
+      '<figure Portfolio Manager 9 keeper=true>'
+    );
+
+    // Before the page has the workspace or the agent's record it says nothing, and
+    // the drawer keeps its own face.
+    assert.equal(page.commanderChatFaceMarkup('Someone Else', 40), '');
+    page.workspace = null;
+    assert.equal(page.commanderChatFaceMarkup('Portfolio Manager 9', 40), '');
+  } finally {
+    delete globalThis.window.OriWorkspaceAgentPortrait;
+    delete globalThis.window.AgentAvatar;
+  }
+});
+
+test('the Commander’s faces repaint in the balloon and the chat drawer together', () => {
+  const calls = [];
+  const previousPanel = globalThis.window.PersonalAssistantPanel;
+  globalThis.window.PersonalAssistantPanel = { repaintFace: () => calls.push('drawer') };
+  try {
+    WorkspaceDetailPage.prototype.repaintCommanderFaces.call({
+      commanderPresenter: { retick: () => calls.push('balloon') }
+    });
+    assert.deepEqual(calls, ['balloon', 'drawer']);
+    // Neither is required: a page with no balloon and no drawer does nothing.
+    globalThis.window.PersonalAssistantPanel = undefined;
+    WorkspaceDetailPage.prototype.repaintCommanderFaces.call({});
+  } finally {
+    globalThis.window.PersonalAssistantPanel = previousPanel;
+  }
+  // Every place that used to retick the balloon for a face now repaints both.
+  const source = readFileSync(new URL('./workspace-detail.js', import.meta.url), 'utf8');
+  assert.equal(source.match(/this\.repaintCommanderFaces\(\);/g)?.length, 3);
   assert.equal(
-    WorkspaceDetailPage.prototype.commanderFaceMarkup.call(
-      { getAgentAvatarPresentation: () => ({ markup: () => '' }) },
-      'A'
-    ),
-    ''
-  );
-  assert.equal(
-    WorkspaceDetailPage.prototype.commanderFaceMarkup.call(
-      { getAgentAvatarPresentation: () => null },
-      'A'
-    ),
-    ''
-  );
-  assert.equal(
-    WorkspaceDetailPage.prototype.commanderFaceMarkup.call(
-      { getAgentAvatarPresentation: () => ({}) },
-      'A'
-    ),
-    ''
+    source.match(/this\.commanderPresenter\?\.retick\?\.\(\);/g)?.length,
+    1,
+    'the balloon is reticked for a face only inside repaintCommanderFaces'
   );
 });
 
