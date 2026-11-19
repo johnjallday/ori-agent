@@ -106,11 +106,10 @@ func TestCreateWorkspaceFromPersonalHQTemplateRosterReadsSeededAgentsAsFilled(t 
 		t.Fatalf("workspace read = %#v, err=%v", current, err)
 	}
 	roster := handler.buildWorkspaceRoster(current)
-	if roster.TotalCount != 2 || roster.FilledCount != 2 || roster.EntryAgentName != "Personal Chief of Staff" {
+	if roster.TotalCount != 1 || roster.FilledCount != 1 || roster.EntryAgentName != "Personal Chief of Staff" {
 		t.Fatalf("roster = %#v", roster)
 	}
-	if roster.Roles[0].Agent == nil || roster.Roles[0].Agent.Name != "Personal Chief of Staff" ||
-		roster.Roles[1].Agent == nil || roster.Roles[1].Agent.Name != "Journal" {
+	if roster.Roles[0].Agent == nil || roster.Roles[0].Agent.Name != "Personal Chief of Staff" {
 		t.Fatalf("roles = %#v", roster.Roles)
 	}
 	if len(roster.Unassigned) != 0 {

@@ -220,7 +220,8 @@ func TestCreatePersonalAssistantProfileRejectsReservedAndRosterNames(t *testing.
 	defer cleanup()
 
 	// "Ask Ori"/"Ori" are the protected system assistant; "Journal" is the
-	// Personal HQ support roster. "Personal Chief of Staff" is deliberately NOT
+	// support agent older HQs still carry (labelled by that name, so an
+	// assistant may not take it). "Personal Chief of Staff" is deliberately NOT
 	// in this list: it is the template's own entry-agent name, which the chosen
 	// name replaces, so the HQ path allows it and this path must match rather
 	// than invent a stricter rule for one of the two.
@@ -352,8 +353,8 @@ func TestCreatePersonalAssistantHQReusesTheHiredProfileAsEntryAgent(t *testing.T
 			beforeTags, after.Metadata.Tags)
 	}
 
-	// The workspace carries the hired assistant as its stable entry instance,
-	// plus the Journal support instance exactly once.
+	// The workspace carries the hired assistant as its stable entry instance
+	// and nothing else: the retired Journal is not seeded.
 	workspace, err := handler.store.GetWorkspace(ctx, result.WorkspaceID)
 	if err != nil {
 		t.Fatalf("GetWorkspace: %v", err)
@@ -373,7 +374,7 @@ func TestCreatePersonalAssistantHQReusesTheHiredProfileAsEntryAgent(t *testing.T
 			t.Fatal("HQ workspace attached a Personal Chief of Staff instance")
 		}
 	}
-	if entries != 1 || journals != 1 {
+	if entries != 1 || journals != 0 {
 		t.Fatalf("entry=%d journal=%d instances=%#v", entries, journals, workspace.AgentInstances)
 	}
 

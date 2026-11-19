@@ -28,6 +28,9 @@ test.beforeEach(async ({ page }) => {
   page.setDefaultTimeout(15_000);
 });
 const evidence = 'tasks/evidence-assisted-workspace-placement/group-2';
+// The saved agent the editing test assigns. The HQ the sandbox builds seeds no
+// agent besides the assistant, so the suite makes its own, through the real API.
+const savedAgent = 'Scribe';
 
 test.beforeAll(async ({ request }) => {
   expect(realpathSync(sandbox).startsWith(realpathSync(tmpdir()) + sep)).toBeTruthy();
@@ -37,6 +40,18 @@ test.beforeAll(async ({ request }) => {
   expect((await request.post('/api/onboarding/skip')).ok()).toBeTruthy();
   const readiness = await request.get('/api/workspaces/build-sessions/availability');
   expect(await readiness.json()).toMatchObject({ available: false, reason: 'no_model' });
+  if (!(await request.get(`/api/agents/${savedAgent}/detail`)).ok()) {
+    const created = await request.post('/api/agents', {
+      data: {
+        name: savedAgent,
+        llm_provider: 'lmstudio',
+        model: 'ori-synthetic-model',
+        description: 'Keeps a short daily log',
+        system_prompt: 'Keep this saved profile unchanged.'
+      }
+    });
+    expect(created.ok(), await created.text()).toBeTruthy();
+  }
 });
 
 test('suggested setup opens a canonical draft and cancellation creates no domain resources', async ({
@@ -199,7 +214,7 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
   utimesSync(file, old, old);
   const before = await json(page, '/api/workspaces');
   const profiles = await json(page, '/api/agents');
-  const saved = await json(page, '/api/agents/Journal/detail');
+  const saved = await json(page, `/api/agents/${savedAgent}/detail`);
   await attach(page, 'Desktop');
   await page.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   const sheet = page.locator('#assistedWorkspacePlacementPanel');
@@ -220,22 +235,22 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
   expect(await json(page, '/api/agents')).toEqual(profiles);
   await page.screenshot({ path: `${editingEvidence}/staged-agent.png`, fullPage: true });
   await sheet.getByRole('button', { name: 'Browse setup cards', exact: true }).click();
-  const journal = sheet
+  const savedCard = sheet
     .getByRole('list', { name: 'Available setup cards' })
-    .getByRole('button', { name: /^Journal / });
-  await expect(journal).toBeEnabled();
-  const staleKey = await journal.getAttribute('data-placement-card');
+    .getByRole('button', { name: new RegExp(`^${savedAgent} `) });
+  await expect(savedCard).toBeEnabled();
+  const staleKey = await savedCard.getAttribute('data-placement-card');
   // Both ends must be visible before pointer-down; scrolling between down and
   // move cancels Chromium's native drag rather than exercising a drop.
-  await journal.evaluate(element => element.scrollIntoView({ block: 'center' }));
-  await journal.dragTo(sheet.getByRole('region', { name: 'File Curator role', exact: true }));
+  await savedCard.evaluate(element => element.scrollIntoView({ block: 'center' }));
+  await savedCard.dragTo(sheet.getByRole('region', { name: 'File Curator role', exact: true }));
   await expect(sheet.getByRole('region', { name: 'File Curator role', exact: true })).toContainText(
-    'Journal · saved agent'
+    `${savedAgent} · saved agent`
   );
   await expect(
     sheet.getByRole('button', { name: 'Create workspace & scan', exact: true })
   ).toBeEnabled({ timeout: 30_000 });
-  for (const payload of [staleKey, '{"agent":"Journal","path":"/arbitrary"}']) {
+  for (const payload of [staleKey, `{"agent":"${savedAgent}","path":"/arbitrary"}`]) {
     const beforeEdits = edits.length;
     const data = await page.evaluateHandle(value => {
       const data = new DataTransfer();
@@ -254,9 +269,11 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
   await roster
     .getByRole('button', { name: 'Assign an agent to File Curator', exact: true })
     .click();
-  await page.getByRole('button', { name: 'Assign Journal to File Curator', exact: true }).click();
+  await page
+    .getByRole('button', { name: `Assign ${savedAgent} to File Curator`, exact: true })
+    .click();
   await page.getByRole('button', { name: 'Return to workspace review', exact: true }).click();
-  await expect(sheet).toContainText('Journal · saved agent');
+  await expect(sheet).toContainText(`${savedAgent} · saved agent`);
   await sheet.getByLabel('Workspace name').fill('Filing desk');
   await sheet.getByLabel('Goal', { exact: true }).fill('음악 — retain this exact goal.');
   await sheet.getByLabel('Goal', { exact: true }).press('Tab');
@@ -328,7 +345,7 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
   const workspaces = (await json(page, '/api/workspaces')).folders;
   const created = workspaces.find((workspace: any) => workspace.name === 'Filing desk');
   expect(workspaces.length).toBe(before.folders.length + 1);
-  expect(created.agents).toEqual(['Journal']);
+  expect(created.agents).toEqual([savedAgent]);
   expect(created.directory_references.some((reference: any) => reference.path === folder)).toBe(
     true
   );
@@ -338,7 +355,7 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
     monitoring: true,
     result: { eligible_count: 1 }
   });
-  const after = await json(page, '/api/agents/Journal/detail');
+  const after = await json(page, `/api/agents/${savedAgent}/detail`);
   for (const field of ['model', 'temperature', 'system_prompt', 'allow_web_search', 'appearance'])
     expect(after[field]).toEqual(saved[field]);
   expect(readFileSync(file, 'utf8')).toBe('synthetic receipt, unchanged');
@@ -354,7 +371,7 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
       async () => {
         const roster = await json(page, '/api/agents');
         return roster.agents
-          .find((agent: any) => agent.name === 'Journal')
+          .find((agent: any) => agent.name === savedAgent)
           ?.origin?.customised_in?.some((workspace: any) => workspace.id === created.id);
       },
       { timeout: 10_000 }

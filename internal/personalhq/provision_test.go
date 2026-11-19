@@ -59,14 +59,25 @@ func TestWriteReadProvisionStateRoundTrip(t *testing.T) {
 }
 
 func TestFindRoleInstanceMatchesByName(t *testing.T) {
-	ws := wsWithAgents("", "Personal Chief of Staff", "journal") // case-insensitive
-	// V1Roster is [Chief, Journal] after the Email Ops spin-off dropped Inbox.
-	if _, ok := FindRoleInstance(ws, V1Roster[1]); !ok {
-		t.Fatal("expected to find the Journal role case-insensitively")
+	ws := wsWithAgents("", "personal chief of staff") // case-insensitive
+	if _, ok := FindRoleInstance(ws, V1Roster[0]); !ok {
+		t.Fatal("expected to find the Chief of Staff role case-insensitively")
 	}
 	// A role the workspace does not have must not be found.
 	if _, ok := FindRoleInstance(ws, SpecialistRole{Slug: "inbox", AgentName: "Inbox"}); ok {
 		t.Fatal("did not expect to find an Inbox role")
+	}
+}
+
+// TestV1RosterHasRetiredInboxAndJournal: both left the roster (Inbox to Email
+// Ops, Journal retired), so an upgrade never seeds or offers either one.
+func TestV1RosterHasRetiredInboxAndJournal(t *testing.T) {
+	for _, role := range V1Roster {
+		for _, retired := range []string{"Inbox", LegacyJournalAgentName} {
+			if strings.EqualFold(role.AgentName, retired) {
+				t.Fatalf("V1Roster still carries the retired %s role: %+v", retired, V1Roster)
+			}
+		}
 	}
 }
 
@@ -105,10 +116,10 @@ func TestFindRoleInstanceAssistantEntryFulfilsEntryRole(t *testing.T) {
 
 func TestPlanUpgradeAssistantBuiltHQNeedsNoChiefOfStaff(t *testing.T) {
 	// Contract: a confirmed Map HQ build yields one entry instance (the hired
-	// assistant), one Journal support instance and zero Personal Chief of
-	// Staff. The planner must read that roster as complete rather than offer to
-	// add a second orchestrator beside the assistant.
-	ws := assistantBuiltHQ("Assistant", "Journal")
+	// assistant) and zero Personal Chief of Staff. The planner must read that
+	// roster as complete rather than offer to add a second orchestrator beside
+	// the assistant.
+	ws := assistantBuiltHQ("Assistant")
 	if err := writeProvisionState(ws, ProvisionState{Version: CurrentProvisioningVersion}); err != nil {
 		t.Fatalf("writeProvisionState: %v", err)
 	}
@@ -124,14 +135,32 @@ func TestPlanUpgradeAssistantBuiltHQNeedsNoChiefOfStaff(t *testing.T) {
 	}
 }
 
-func TestPlanUpgradeAssistantBuiltHQOnlyAddsMissingSupport(t *testing.T) {
-	ws := assistantBuiltHQ("Assistant")
-	plan := PlanUpgrade(ws, "user-1")
-	if len(plan.MissingRoles) != 1 || plan.MissingRoles[0] != "Journal" {
-		t.Fatalf("only the Journal support role may be missing, got %v", plan.MissingRoles)
+// TestPlanUpgradeKeepsAnOlderHQsJournalAsTheUsersAgent: HQs built before the
+// Journal role was retired still carry a Journal. The planner must neither
+// treat it as part of the roster nor remove it: it is listed among the user's
+// own agents, and an HQ without one is never offered it back.
+func TestPlanUpgradeKeepsAnOlderHQsJournalAsTheUsersAgent(t *testing.T) {
+	for name, ws := range map[string]*session.Workspace{
+		"assistant-built": assistantBuiltHQ("Assistant", "Journal"),
+		"template-built":  wsWithAgents("user-1", "Personal Chief of Staff", "Journal"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := writeProvisionState(ws, ProvisionState{Version: CurrentProvisioningVersion}); err != nil {
+				t.Fatalf("writeProvisionState: %v", err)
+			}
+			plan := PlanUpgrade(ws, "user-1")
+			if !plan.UpToDate || plan.HasChanges() || len(plan.Conflicts) > 0 {
+				t.Fatalf("an older HQ with Journal must be up to date with no changes: %+v", plan)
+			}
+			if !containsSubstr(plan.PreservedCustomizations, "Your other agents: Journal") {
+				t.Fatalf("the retired Journal must be listed as the user's own agent: %v", plan.PreservedCustomizations)
+			}
+		})
 	}
-	if len(plan.Conflicts) > 0 {
-		t.Fatalf("no conflicts expected, got %v", plan.Conflicts)
+
+	plan := PlanUpgrade(assistantBuiltHQ("Assistant"), "user-1")
+	if containsSubstr(plan.MissingRoles, "Journal") || containsSubstr(plan.Additions, "Journal") {
+		t.Fatalf("an HQ without Journal must not be offered it: %+v", plan)
 	}
 }
 
@@ -163,7 +192,6 @@ func TestPlanUpgradeArbitraryWorkspaceNeedsFullRoster(t *testing.T) {
 	if plan.UpToDate {
 		t.Fatal("a bare workspace must not report up to date")
 	}
-	// Post-spin-off roster is Chief + Journal (Inbox moved to Email Ops).
 	if len(plan.MissingRoles) != len(V1Roster) {
 		t.Fatalf("expected all %d specialist roles missing, got %v", len(V1Roster), plan.MissingRoles)
 	}

@@ -137,7 +137,7 @@ func applyPersonalAssistantTemplateOptions(tpl projecttemplates.Template, option
 	if strings.TrimSpace(tpl.ID) != personalhq.PersonalHQTemplateID {
 		return tpl, fmt.Errorf("personal assistant creation requires the %q template", personalhq.PersonalHQTemplateID)
 	}
-	if len(tpl.Agents) < 2 || !strings.EqualFold(strings.TrimSpace(tpl.Agents[0].Name), "Personal Chief of Staff") {
+	if len(tpl.Agents) == 0 || !strings.EqualFold(strings.TrimSpace(tpl.Agents[0].Name), "Personal Chief of Staff") {
 		return tpl, fmt.Errorf("personal assistant creation requires the canonical Personal Chief of Staff entry spec")
 	}
 
@@ -147,6 +147,9 @@ func applyPersonalAssistantTemplateOptions(tpl projecttemplates.Template, option
 	}
 	if systemassistant.IsKnownName(name) {
 		return tpl, fmt.Errorf("assistant name %q is reserved for Ori", name)
+	}
+	if strings.EqualFold(name, personalhq.LegacyJournalAgentName) {
+		return tpl, fmt.Errorf("assistant name %q collides with the Personal HQ support roster", name)
 	}
 	for _, spec := range tpl.Agents[1:] {
 		if strings.EqualFold(strings.TrimSpace(spec.Name), name) {
@@ -210,15 +213,16 @@ func applyPersonalAssistantTemplateOptions(tpl projecttemplates.Template, option
 }
 
 // markPersonalAssistantPresentation records only truthful presentation
-// metadata. It neither hides/removes Journal nor changes any role, prompt,
-// model, tool, skill, or permission.
+// metadata. It neither hides/removes an older HQ's Journal nor changes any
+// role, prompt, model, tool, skill, or permission. A new HQ has no Journal, so
+// its support list is empty.
 func markPersonalAssistantPresentation(ws *session.Workspace, options personalhq.AssistantCreationOptions) {
 	if ws == nil {
 		return
 	}
 	var supportIDs []string
 	for _, instance := range ws.AgentInstances {
-		if strings.EqualFold(strings.TrimSpace(instance.Name), "Journal") {
+		if strings.EqualFold(strings.TrimSpace(instance.Name), personalhq.LegacyJournalAgentName) {
 			supportIDs = append(supportIDs, instance.ID)
 		}
 	}

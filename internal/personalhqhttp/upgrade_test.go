@@ -91,7 +91,7 @@ func TestUpgradePreviewAndApplyFlow(t *testing.T) {
 	handler, store, userID := newUpgradeTestHandler(t)
 	_ = designateArbitraryHQ(t, handler.service, store, userID)
 
-	// Preview: 3 specialist roles missing, not blocked.
+	// Preview: every roster role missing, not blocked.
 	rec := httptest.NewRecorder()
 	handler.UpgradePreview(rec, httptest.NewRequest(http.MethodGet, "/api/personal-hq/upgrade/preview", nil))
 	if rec.Code != http.StatusOK {
@@ -103,7 +103,6 @@ func TestUpgradePreviewAndApplyFlow(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &previewResp); err != nil {
 		t.Fatalf("decode preview: %v (%s)", err, rec.Body.String())
 	}
-	// Post Email Ops spin-off, the HQ roster is Chief + Journal (Inbox moved out).
 	if len(previewResp.Plan.MissingRoles) != len(personalhq.V1Roster) {
 		t.Fatalf("expected %d missing roles, got %v", len(personalhq.V1Roster), previewResp.Plan.MissingRoles)
 	}

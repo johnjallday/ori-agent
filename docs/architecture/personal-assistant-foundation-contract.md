@@ -359,8 +359,8 @@ confirmed request:
 2. creates the `personal-ops` workspace through the canonical PAF template path,
    reusing the already-hired global profile as the stable entry-agent instance
    rather than creating a second one;
-3. adds only the truthful support roster (for example Journal) exactly once and
-   never a Personal Chief of Staff;
+3. adds no other agent: the template's support roster is empty since the
+   Journal specialist was retired, and a Personal Chief of Staff is never added;
 4. persists the returned workspace ID and entry-agent instance ID at the first
    safe checkpoint;
 5. designates the workspace as Personal HQ through `personalhq.Service`;
@@ -1604,10 +1604,15 @@ The first-assignment preview classifies before any save:
 - apply refuses a changed payload/hash so the user can never confirm one mapping
   and save another.
 
-Journal is not shown in the hire flow or ordinary Home UI. The existing Journal
-specialist remains attached to Personal HQ with unchanged permissions and may
-appear only in the truthful Advanced roster under the **Assistant support**
-group. It is never silently removed from an existing HQ.
+The Journal specialist is retired. Nothing handed it work: the end-of-day
+journal (`personalhq.JournalService`, the Updates and Notes buttons, Mission 07)
+drafts and saves without any agent. New HQs are built without it, and an
+upgrade never offers it. An HQ built before the retirement keeps its Journal
+with unchanged permissions as the user's own agent: the upgrade preview lists it
+under "Your other agents", the Roles roster shows it under "Also here", and the
+Advanced roster still labels it **Assistant support**. It is never silently
+removed. Because that label is applied by name, no hired assistant may be named
+Journal (`personalhq.LegacyJournalAgentName`).
 
 ## Personal HQ data boundaries
 
@@ -1970,8 +1975,8 @@ The package/API/browser suites must pin at least these cases:
 | Quest opened, site selected, or modal opened | no workspace, designation, brief, or quest completion; Build My HQ still featured |
 | **Do this later**, then resume | quest recorded skipped; Build My HQ / Resume mission still prominent; resume re-enters at step 1 |
 | Ori closed during the walkthrough | presentation pauses; quest is neither skipped nor completed |
-| Confirmed Map HQ build | one relationship, one global hired profile reused as entry agent, one HQ, one entry instance, one Journal support instance, one Daily Brief config, zero Personal Chief of Staff |
-| Personal HQ upgrade preview or apply, or the Roles roster, on an assistant-built HQ | the hired entry agent fulfils the Chief of Staff role and Journal its own; zero Personal Chief of Staff added or offered; only a genuinely missing support role (Journal) is offered |
+| Confirmed Map HQ build | one relationship, one global hired profile reused as entry agent, one HQ, one entry instance, zero Journal instances, one Daily Brief config, zero Personal Chief of Staff |
+| Personal HQ upgrade preview or apply, or the Roles roster, on an assistant-built HQ | the hired entry agent fulfils the Chief of Staff role; zero Personal Chief of Staff and zero Journal added or offered; an older HQ's Journal is kept and listed as the user's own agent |
 | Duplicate hire/apply or HQ setup request | same IDs/refs; one HQ, one assistant, one canonical record |
 | HQ setup replay with a changed payload, or stale version | `409`; no second workspace and no partial overwrite |
 | Pre-amendment active/paused relationship | unchanged byte-for-behavior; never replays the HQ walkthrough |
@@ -1980,7 +1985,7 @@ The package/API/browser suites must pin at least these cases:
 | Quest with no model configured | every step still works; no `/api/ori-guide` or provider call |
 | Fixed actionable commitment | due-dated HQ Ready Ticket shown in preview before save |
 | Time-only commitment | `needs_decision` Follow-Up shown in preview before save |
-| Journal presentation | hidden in hire/Home; visible under Advanced “Assistant support” only |
+| Journal presentation | new HQs have none; an older HQ's Journal is hidden in hire/Home and labelled “Assistant support” in the Advanced roster |
 | Rename/restart | stable assistant/instance/workspace IDs; new display name everywhere |
 | Drafting request, then “make it warmer”, then “give it to me in Korean” | one conversation, one canonical Session in Personal HQ; no workspace, agent, Ticket, or fact created by drafting |
 | Conversation ID from another agent, another workspace, or the browser's chat session | refused; never adopted, never listed, nothing answered against it |

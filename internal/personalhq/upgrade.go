@@ -20,7 +20,7 @@ type UpgradePlan struct {
 	UpToDate bool `json:"up_to_date"`
 
 	// MissingRoles names the canonical specialist agents that are absent and
-	// would be added by an apply (e.g. "Inbox", "Journal").
+	// would be added by an apply (e.g. "Personal Chief of Staff").
 	MissingRoles []string `json:"missing_roles,omitempty"`
 
 	// Additions is the human-readable list of changes an apply would make.
@@ -71,7 +71,7 @@ func (p UpgradePlan) Blocked() bool {
 //   - Assistant-built HQs: an HQ created around the hired personal assistant
 //     (PersonalAssistantPresentationKey) has no Personal Chief of Staff by
 //     contract; its entry agent fulfils that role, so the plan never proposes
-//     adding one and only tops up support roles such as Journal.
+//     adding one and only tops up any non-entry roster roles.
 func PlanUpgrade(ws *session.Workspace, userID string) UpgradePlan {
 	state := ReadProvisionState(ws)
 	plan := UpgradePlan{
