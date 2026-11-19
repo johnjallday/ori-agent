@@ -23,8 +23,16 @@ import {
   renderFolderAgentReport,
   setupFinished
 } from './folder-agent-card.js';
-import { homeCommanders, homeMapShowing, revealHiredTile } from './commander-map.js';
+import {
+  HOME_VIEW_EVENT,
+  MAP_MOUNTED_EVENT,
+  homeCommanders,
+  homeMapShowing,
+  revealHiredTile
+} from './commander-map.js';
 import { commanderBuildingLine } from './commander-speech.js';
+import { memberCommanders } from './member-commanders.js';
+import { memberWaits } from './member-folder-agents.js';
 import {
   HOME_AGENT_FACES_EVENT,
   createHomeAgentDirectory,
@@ -44,6 +52,25 @@ export function registerFolderBuild(detail, { hasMap = false, view = '', map } =
 
 export function speakingFolderAgents(views) {
   return (Array.isArray(views) ? views : []).filter(view => SPEAKING_STATES.has(view?.state));
+}
+
+// homeWaitMarks is which folder agents wear a quiet wait mark on Home's map
+// (waiting-agents-on-parent-map rule 4): those that wait on the owner and whose
+// Commander does NOT already stand there with a line. The ones in a speaking
+// state (looking, setting up, a question or a plan, a failure) keep that line and
+// get no mark; the drawer's followed folder is the drawer's. That leaves the
+// moments Home's map is silent about once a setup has run: the offer to learn the
+// songs, a suggested goal and a step that did not finish. It reuses the
+// Commander's own definition of a wait, so Home cannot disagree with a group's
+// page. Returns the waits by workspace id, in the shape the map takes.
+export function homeWaitMarks(views, owned = '') {
+  const own = String(owned || '');
+  return memberWaits(
+    (Array.isArray(views) ? views : []).filter(
+      view =>
+        view && view.workspace_id && view.workspace_id !== own && !SPEAKING_STATES.has(view.state)
+    )
+  );
 }
 
 // watchedRunsToOpen: the runs set up from a map balloon (watched, by
@@ -2225,6 +2252,10 @@ import {
     // The face each of those agents wears on its tile while it works, as
     // markup from the shared avatar renderer (visual-hire FR17).
     folderAgentFaces: {},
+    // The folder agents that wait on the owner without a Commander line on this
+    // map, keyed by workspace id: each gets a quiet mark at its place (see
+    // homeWaitMarks). Patched in place, never through a re-mount.
+    folderAgentWaits: {},
     workspaceUpdateBadges: {},
     onboardingGate: {
       state: ONBOARDING_GATE_LOADING,
@@ -2594,6 +2625,7 @@ import {
       songFacts: state.songFacts,
       folderAgentLines: state.folderAgentLines,
       folderAgentFaces: state.folderAgentFaces,
+      folderAgentWaits: state.folderAgentWaits,
       // Home-only trusted markup. Other map hosts retain their resident default.
       agentPortraitHTML: homePortrait,
       workspaceUpdateBadges: state.workspaceUpdateBadges,
@@ -5344,23 +5376,48 @@ import {
   // Runs set up from a balloon here: once one finishes, Home opens where it
   // landed, as the drawer and the card do (folder-setup-ends-in-home FR11).
   let watchedRuns = { watched: new Set(), previous: {} };
+  // What a card's button does from a map balloon: post it, remember a run set up
+  // from here (it opens where it lands), and let the tiles and the follow loop
+  // pick the change up the canonical way. Shared by every balloon on this map.
+  const actOnFolderAgent = async (view, action, extra) => {
+    const result = await postFolderAgentAction(view, action, globalThis.fetch, extra);
+    if (action === 'set_up' && result?.view) {
+      watchedRuns.watched.add(view.workspaceID);
+      watchedRuns.previous[view.workspaceID] = result.view;
+    }
+    window.dispatchEvent(
+      new CustomEvent('ori:folder-agent-changed', { detail: { workspaceID: view.workspaceID } })
+    );
+    return result;
+  };
   const mapCommanders = homeCommanders({
     reportView: folderAgentReportView,
     renderCard: (view, options) => renderFolderAgentReport(view, document, options),
     // A balloon speaks from its tile with the tile's own face, not initials.
     face: name => commanderFace(name),
-    act: async (view, action, extra) => {
-      const result = await postFolderAgentAction(view, action, globalThis.fetch, extra);
-      if (action === 'set_up' && result?.view) {
-        watchedRuns.watched.add(view.workspaceID);
-        watchedRuns.previous[view.workspaceID] = result.view;
-      }
-      // The tiles and the follow loop pick the change up the canonical way.
-      window.dispatchEvent(
-        new CustomEvent('ori:folder-agent-changed', { detail: { workspaceID: view.workspaceID } })
-      );
-      return result;
-    }
+    act: actOnFolderAgent
+  });
+  // The balloon a wait mark opens (waiting-agents-on-parent-map): a folder whose
+  // agent waits without a Commander line on this map (see homeWaitMarks) wears a
+  // quiet mark, and activating it, only ever by a person, speaks the agent's own
+  // line from that place. It is the same balloon a group's page uses, over
+  // Home's own map root; it lives only while the wait does.
+  const waitCommanders = memberCommanders({
+    host: () => els.map,
+    doc: document,
+    win: window,
+    reportView: folderAgentReportView,
+    renderCard: (view, options) => renderFolderAgentReport(view, document, options),
+    face: name => commanderFace(name),
+    act: actOnFolderAgent,
+    // Pressing the line when the window is too narrow for a balloon opens the
+    // workspace, where the full card is.
+    open: id => openItem(id),
+    root: () => document.querySelector('#cockpitMap .ws-map-canvas'),
+    showing: () =>
+      homeMapShowing({ hasMap: Boolean(document.getElementById('cockpitMap')), view: state.view }),
+    docEvents: [MAP_MOUNTED_EVENT, HOME_VIEW_EVENT, 'ori:map-build-changed'],
+    keyPrefix: 'home-wait'
   });
   // Each folder workspace's last finished setup this page has seen; a group
   // setup newer than that lands its members (null until the first read, so a
@@ -5476,6 +5533,15 @@ import {
     );
     if (leaving) openings.set(leaving.workspace_id, folderAgentOpeningLine(leaving));
     mapCommanders.sync(speaking, owned, openings);
+    // The agents that wait without a Commander line here wear a quiet mark. It
+    // is patched in place, so a wait appearing or clearing never re-mounts the
+    // map and costs its camera or selection; a balloon already open from a mark
+    // is drawn from this read, or closes once its agent no longer waits.
+    const waits = homeWaitMarks(views, owned);
+    const waitsChanged = JSON.stringify(waits) !== JSON.stringify(state.folderAgentWaits);
+    state.folderAgentWaits = waits;
+    if (waitsChanged) window.OriWorkspaceMap?.folderAgentWaits?.update?.(els.map, waits);
+    waitCommanders.sync({ views, waits });
     const changed = JSON.stringify(next) !== JSON.stringify(state.folderAgentLines);
     const finished = Object.keys(state.folderAgentLines).some(id => !next[id]);
     state.folderAgentLines = next;
@@ -5769,6 +5835,19 @@ import {
       }, 0);
     };
     els.map.addEventListener('contextmenu', markMapMenuSelection, true);
+    // A wait mark was activated by a person (waiting-agents-on-parent-map): the
+    // agent speaks its own line from that place. Taking the event stops the map's
+    // own fallback, which would open the workspace. Nothing else raises it, so
+    // nothing here opens by itself.
+    els.map.addEventListener('ori:map-wait-show', event => {
+      const took = waitCommanders.show(event.detail, {
+        views: lastFolderAgentViews,
+        waits: state.folderAgentWaits
+      });
+      if (took) event.preventDefault();
+    });
+    // A mount draws its marks afresh and without aria-expanded.
+    els.map.addEventListener('ori:map-mounted', () => waitCommanders.syncMarks());
     els.map.addEventListener(
       'keydown',
       event => {

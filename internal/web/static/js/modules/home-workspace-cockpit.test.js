@@ -35,6 +35,7 @@ import {
   setupSheetShouldOpen,
   watchedRunsToOpen,
   speakingFolderAgents,
+  homeWaitMarks,
   registerFolderBuild,
   searchForView,
   readCount,
@@ -214,6 +215,107 @@ test("Home's map never speaks a done run's goal offer", () => {
     goal_offer: { goal: 'Finish the album' }
   };
   assert.deepEqual(speakingFolderAgents([offering]), []);
+});
+
+// Which folder agents wear a quiet wait mark on Home's map (waiting-agents-on-
+// parent-map rule 4): those that wait on the owner without a Commander line there.
+const homeView = (id, overrides = {}) => ({
+  workspace_id: id,
+  workspace_name: id,
+  folder_name: id,
+  agent_name: `${id} Manager`,
+  state: 'set_up',
+  setup: { status: 'done', lines: [] },
+  ...overrides
+});
+const homeSongsOffer = { count: 5, noun: 'songs', ask: 'Want me to learn the 5 songs?' };
+
+test('Home marks the waits its map is silent about: the songs offer, a suggested goal, a stopped step', () => {
+  const marks = homeWaitMarks([
+    homeView('songs', { songs_offer: homeSongsOffer }),
+    homeView('goal', { goal_offer: { goal: 'Finish the album' } }),
+    homeView('stopped', { setup: { status: 'stopped', lines: [] } })
+  ]);
+  assert.deepEqual(Object.keys(marks).sort(), ['goal', 'songs', 'stopped']);
+  assert.deepEqual(marks.songs, {
+    status: 'Has a question for you',
+    text: 'songs Manager asks to learn the songs',
+    action: 'Answer',
+    phase: 'songs',
+    agent: 'songs Manager'
+  });
+  assert.equal(marks.goal.status, 'Suggests a goal');
+  assert.equal(marks.stopped.status, 'A step did not finish');
+});
+
+test('Home gives no mark to an agent whose Commander already speaks there, or that is not waiting', () => {
+  const speaking = [
+    homeView('looking', { state: 'looking' }),
+    homeView('setting', { state: 'setting_up' }),
+    // A plan, a question and a failure keep their Commander line.
+    homeView('plan', { state: 'reported' }),
+    homeView('question', {
+      state: 'reported',
+      premise: { state: 'asked', sentence: 'These look like songs.' }
+    }),
+    homeView('failed', { state: 'failed' })
+  ];
+  // They are speaking on Home's map today, so none of them gets a second cue.
+  assert.deepEqual(
+    speakingFolderAgents(speaking).map(view => view.workspace_id),
+    ['looking', 'setting', 'plan', 'question', 'failed']
+  );
+  assert.deepEqual(homeWaitMarks(speaking), {});
+  // Work in progress and a finished or kept folder are not waits at all.
+  assert.deepEqual(
+    homeWaitMarks([
+      homeView('learning', {
+        learning: { status: 'running', line: 'Learning Night Drive… (2 of 7)', done: 1, total: 7 }
+      }),
+      homeView('finished'),
+      homeView('kept', { state: 'kept' }),
+      { state: 'set_up', songs_offer: homeSongsOffer },
+      null
+    ]),
+    {}
+  );
+  assert.deepEqual(homeWaitMarks(null), {});
+});
+
+test('Home gives no mark to the folder the drawer follows: the drawer speaks for it', () => {
+  const views = [
+    homeView('followed', { songs_offer: homeSongsOffer }),
+    homeView('other', { songs_offer: homeSongsOffer })
+  ];
+  assert.deepEqual(Object.keys(homeWaitMarks(views, 'followed')), ['other']);
+  assert.deepEqual(Object.keys(homeWaitMarks(views, '')).sort(), ['followed', 'other']);
+  assert.deepEqual(Object.keys(homeWaitMarks(views)).sort(), ['followed', 'other']);
+});
+
+test('every wait the Commander calls one is either spoken on Home or marked there, never both, never neither', () => {
+  // The seven waiting moments, in the states they occur in.
+  const moments = {
+    premise: homeView('premise', {
+      state: 'reported',
+      premise: { state: 'asked', sentence: 'These look like songs.' }
+    }),
+    report: homeView('report', { state: 'reported' }),
+    withdrawn: homeView('withdrawn', {
+      state: 'reported',
+      premise: { state: 'withdrawn', sentence: 'Something else.', withdrawn: true }
+    }),
+    cause: homeView('cause', { state: 'failed' }),
+    stopped: homeView('stopped', { setup: { status: 'stopped', lines: [] } }),
+    songs: homeView('songs', { songs_offer: homeSongsOffer }),
+    goal: homeView('goal', { goal_offer: { goal: 'Finish the album' } })
+  };
+  const views = Object.values(moments);
+  const spoken = new Set(speakingFolderAgents(views).map(view => view.workspace_id));
+  const marked = new Set(Object.keys(homeWaitMarks(views)));
+  Object.keys(moments).forEach(id => {
+    assert.equal(spoken.has(id) !== marked.has(id), true, `${id}: spoken xor marked`);
+  });
+  assert.deepEqual([...marked].sort(), ['goal', 'songs', 'stopped']);
 });
 
 test('a run set up from a map balloon opens once it finished; a stopped one is let go', () => {

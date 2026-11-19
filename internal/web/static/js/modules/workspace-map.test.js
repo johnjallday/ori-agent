@@ -14681,3 +14681,99 @@ test('the wait mark is quiet, visible in both themes and at every zoom, and neve
   assert.match(inHeader, /flex:\s*0 1 auto/);
   assert.match(inHeader, /min-width:\s*0/);
 });
+
+// A tree deeper than Home draws as districts (waiting-agents-on-parent-map, rule 1
+// on Home's own top-level map). Home > Albums > songs is drawn as districts and
+// tiles; a group below that is a tile of its own and its children stay loose, so
+// every level is drawn somewhere, and collapsing hides whole subtrees.
+const DEEP_HOME = NESTED_HOME.concat([
+  { id: 'deeper', kind: 'group', parent_id: 'albums', name: 'Deeper' },
+  { id: 'deepest', parent_id: 'deeper', name: 'Deepest' }
+]);
+
+function deepRollUp(presentations, waitIds) {
+  const map = loadOriWorkspaceMap();
+  const layout = map.computeWorldLayout(DEEP_HOME, { groupPresentations: presentations });
+  const index = map.folderAgentWaits.placeIndex(layout, DEEP_HOME, '');
+  const waits = Object.fromEntries(waitIds.map(id => [id, waitOf()]));
+  return { layout, places: plainJSON(map.folderAgentWaits.rollUp(waits, index)) };
+}
+
+test('on Home’s own map a tree three levels deep puts each wait at the one place drawn for it', () => {
+  const all = ['home', 'albums', 'album-1', 'deeper', 'deepest'];
+  const { layout, places } = deepRollUp({}, all);
+  // Everything is drawn: districts for Home and Albums, tiles below them.
+  assert.deepEqual([...layout.districts.map(d => d.id)].sort(), ['albums', 'home']);
+  assert.ok(
+    layout.nodes.some(n => n.id === 'deeper'),
+    'a group below Albums is a tile'
+  );
+  // So each wait stands at its own place, once.
+  assert.deepEqual(Object.keys(places).sort(), [...all].sort());
+  Object.values(places).forEach(place => {
+    assert.equal(place.ids.length, 1);
+    assert.equal(place.own, true);
+  });
+  assert.equal(places.home.kind, 'district');
+  assert.equal(places.albums.kind, 'district');
+  assert.equal(places.deeper.kind, 'tile');
+  assert.equal(places.deepest.kind, 'tile');
+});
+
+test('a collapsed Home says how many wait below it, over every level it hides, and shows the rest as they are', () => {
+  const { layout, places } = deepRollUp({ home: { collapsed: true } }, [
+    'albums',
+    'album-1',
+    'album-2',
+    'deeper'
+  ]);
+  // Collapsing hides the folder district and everything inside it.
+  assert.equal(
+    layout.districts.some(d => d.id === 'albums'),
+    false
+  );
+  assert.equal(
+    layout.nodes.some(n => n.id === 'album-1' || n.id === 'deeper'),
+    false
+  );
+  // Four waits at three different depths stand at the one drawn place: Home.
+  assert.deepEqual(places, {
+    home: {
+      kind: 'district',
+      collapsed: true,
+      ids: ['album-1', 'album-2', 'albums', 'deeper'],
+      own: false
+    }
+  });
+  // A wait on a workspace that stays drawn is not swallowed: `deepest` is loose.
+  const withLoose = deepRollUp({ home: { collapsed: true } }, ['album-1', 'deepest']).places;
+  assert.deepEqual(Object.keys(withLoose).sort(), ['deepest', 'home']);
+  assert.equal(withLoose.home.ids.length, 1);
+  assert.equal(withLoose.deepest.own, true);
+  // Home's own wait is among the several: it is counted, not shown beside them.
+  const own = deepRollUp({ home: { collapsed: true } }, ['home', 'albums']).places;
+  assert.deepEqual(own.home.ids, ['albums', 'home']);
+  assert.equal(own.home.own, false);
+});
+
+test('collapsing only the folder rolls its songs up to the folder’s header, not to Home', () => {
+  const { layout, places } = deepRollUp({ albums: { collapsed: true } }, [
+    'album-1',
+    'album-3',
+    'deeper',
+    'home'
+  ]);
+  assert.equal(
+    layout.districts.find(d => d.id === 'albums').collapsed,
+    true,
+    'Albums is a collapsed district inside an open Home'
+  );
+  assert.deepEqual(places.albums, {
+    kind: 'district',
+    collapsed: true,
+    ids: ['album-1', 'album-3', 'deeper'],
+    own: false
+  });
+  assert.deepEqual(places.home, { kind: 'district', collapsed: false, ids: ['home'], own: true });
+  assert.equal(Object.keys(places).length, 2);
+});
