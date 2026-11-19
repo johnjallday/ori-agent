@@ -336,7 +336,7 @@ func isHiddenWorkspacePath(relativePath string) bool {
 // mirroring buildWorkspaceFileTree.
 func snapshotWorkspaceDiskFiles(filesPath string) (map[string]os.FileInfo, error) {
 	diskFiles := make(map[string]os.FileInfo)
-	walkErr := filepath.WalkDir(filesPath, func(p string, entry fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(filesPath, func(p string, entry fs.DirEntry, err error) error { // #nosec G703 -- filesPath is the workspace's own files root resolved by the store, never request input
 		if err != nil {
 			return err
 		}

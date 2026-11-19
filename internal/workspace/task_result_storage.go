@@ -256,7 +256,7 @@ func csvHeaderFromFile(filePath string) ([]string, bool, error) {
 	if info.Size() == 0 {
 		return nil, false, nil
 	}
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) // #nosec G304 -- filePath is the result file the user configured for this ticket; reading its header back is the point
 	if err != nil {
 		return nil, false, err
 	}
@@ -294,7 +294,7 @@ func AppendCSVToFile(filePath, csvData string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil { // #nosec G301 -- the folder of the result file the user configured; 0755 matches the other user-facing output folders
 		return err
 	}
 
@@ -307,7 +307,7 @@ func AppendCSVToFile(filePath, csvData string) error {
 		return nil
 	}
 
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644) // #nosec G302 G304 -- appends to the result file the user configured for this ticket; 0644 matches the other user-facing task output
 	if err != nil {
 		return err
 	}
@@ -357,7 +357,7 @@ func BootstrapOutputContractFromCSVHeader(_ *Workspace, task *Task) *TaskOutputC
 	if filePath == "" {
 		return nil
 	}
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) // #nosec G304 -- filePath is the result file the user configured for this ticket; it is only read to learn its header
 	if err != nil {
 		return nil
 	}
