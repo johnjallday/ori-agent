@@ -9792,6 +9792,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: var(--ws-ink);
   font-size: 13px;
   line-height: 1.45;
+  /* One short word is never left alone on the last line. */
+  text-wrap: pretty;
 }
 @media (prefers-reduced-motion: no-preference) {
   .ws-cmd.ws-hq-tip:not([hidden]) {
