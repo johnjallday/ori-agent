@@ -62,6 +62,10 @@
   --ws-idle: #4ec5e6;
   --ws-working: #46d39a;
   --ws-alert: #e2654d;
+  /* The amber of a folder agent that waits on the owner (the wait mark). The
+     group command page's --ws-waiting is only defined inside that page, so the
+     map carries its own, with the same two values, for Home and the page alike. */
+  --ws-wait-mark: #e8b54b;
   /* City Economy: one accent per thing, chosen so a Farm badge and a harvest
      pile are never confused with the working/idle LEDs beside them. Both have a
      light-theme value below — nothing in the economy's rules may hardcode a
@@ -2028,6 +2032,116 @@
     animation: ws-map-pulse 1.5s ease-in-out infinite;
   }
 }
+/* A folder agent that waits on the owner: a quiet mark at the place where it
+   stands (waiting-agents-on-parent-map). An amber dot and the status words in
+   the status type, nothing else: no glow, no animation loop, no count badge.
+   It is a real button and a SIBLING of its tile (a control cannot sit inside the
+   tile's own button), so it is the next tab stop after the tile and pans, zooms
+   and moves with it. The same markup serves a tile and a district header. */
+.ws-map-wait-mark {
+  /* One amber, resolved on the mark itself: Home's .ws-map declares
+     --ws-wait-mark, but a group page's map has no .ws-map ancestor (it lives in
+     .ws-cmd and declares --ws-waiting, with its own light value). A custom
+     property that resolves to nothing would silently drop the dot's fill, the
+     hover border and the focus ring, so the chain ends in a literal. */
+  --ws-wait-amber: var(--ws-wait-mark, var(--ws-waiting, #e8b54b));
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 3px 7px;
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 3px;
+  background: var(--ws-bg-2);
+  color: var(--ws-ink);
+  cursor: pointer;
+  font-family: var(--ws-font-mono);
+  font-size: 9px;
+  line-height: 1.3;
+  letter-spacing: 0.3px;
+  text-align: left;
+}
+.ws-map-wait-mark:hover {
+  border-color: var(--ws-wait-amber);
+}
+/* A visible ring in the mark's own amber, drawn INSIDE the box. Tiles abut and
+   the mark's top edge sits in the 5px between a tile and the text of the tile
+   above, so a ring that grew outward brushed that text (and the team avatar's
+   frame in dot mode); an inset ring adds nothing to the mark's footprint. */
+.ws-map-wait-mark:focus-visible {
+  outline: 2px solid var(--ws-wait-amber);
+  outline-offset: -2px;
+}
+.ws-map-wait-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 2px;
+  border-radius: 50%;
+  background: var(--ws-wait-amber);
+}
+/* The words wrap, they are never cut: the status the owner is asked about is
+   the whole message. Balanced, so a second line is never a lone "you". */
+.ws-map-wait-words {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+/* On a tile it takes the status flag's place (the flag is hidden, so the words
+   are not drawn twice). Its top edge is the flag's (tile y -4) and it hangs DOWN
+   over the building art, never up: tiles abut (the row pitch equals the tile's
+   height), so the tile above's name, type and meta text run to within 5px of
+   this tile's top, and the art (y 0 to 94) is the only part of a tile with no
+   text in it. Its right edge is x 118, just short of the team avatars that
+   stand at the corner (x 122 and on), and at most 80px wide keeps its left edge
+   at x 38, clear of the corner checkbox (x 20 to 35). It sits above its tile
+   (5) and an active one (7) and below a tile being dragged (9). The words
+   wrap onto up to three lines inside that width. */
+.ws-map-wait-mark.is-on-tile {
+  position: absolute;
+  z-index: 8;
+  max-width: 80px;
+  margin: -4px 0 0 118px;
+  transform: translate(-100%, 0);
+  transform-origin: 100% 0;
+}
+/* Zoomed out (below the map's far-zoom threshold) the words are too small to
+   read and would only crowd the tiles, so the mark is its amber dot alone,
+   undoing the world layer's scale up to 6x to keep a near-constant size on
+   screen. The words stay in its accessible name. Unlike an activity bubble it is
+   never hidden at any zoom: it is the only signal that something waits. It
+   grows from the same top-right corner, so it stays over the art; a 12px box
+   at 6x is 72 world px wide, which keeps its left edge at x 46, clear of the
+   checkbox (x 20 to 35). */
+.ws-map-canvas.is-activity-far .ws-map-wait-mark.is-on-tile {
+  min-width: 0;
+  min-height: 0;
+  padding: 1px;
+  transform: translate(-100%, 0) scale(clamp(1, calc(1 / var(--ws-map-zoom, 1)), 6));
+}
+.ws-map-canvas.is-activity-far .ws-map-wait-mark.is-on-tile .ws-map-wait-words {
+  display: none;
+}
+.ws-map-canvas.is-activity-far .ws-map-wait-mark.is-on-tile .ws-map-wait-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 0;
+}
+.ws-map-tile.has-wait-mark .ws-map-tile-flag {
+  visibility: hidden;
+}
+/* In a district header it is one more item of the row, right after the tag and
+   the Commander's name. It shrinks and wraps before it pushes the controls off
+   the frame; in the narrow nested header the tag takes the first row, so the
+   mark leads the second, left of Open. */
+.ws-map-wait-mark.is-in-header {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  align-self: center;
+}
 .ws-map-tile-crest {
   position: absolute;
   top: 30px;
@@ -3395,6 +3509,8 @@
   --ws-idle: #167c99;
   --ws-working: #1f6b4e;
   --ws-alert: #b94b3f;
+  /* Darkened to hold 3:1 against the pale surface, as the page's light amber. */
+  --ws-wait-mark: #8a5b18;
   /* Darkened for contrast against the light plate; the pile's own ink flips to
      white because the badge is a filled chip, not an outlined one. */
   --ws-farm: #4a6f3c;

@@ -318,6 +318,10 @@ class CommanderBalloon {
     this.narrowOf = null;
     this.onShow = null;
     this.onNarrow = null;
+    // onDismiss, when a host sets it, is what the close control and Escape do
+    // instead of folding the balloon to its line: the member balloon on a group
+    // page is closed outright, because its line exists only while its mark does.
+    this.onDismiss = null;
     this.pinLine = false;
     this.held = null;
     this.scrollTop = 0;
@@ -347,6 +351,14 @@ class CommanderBalloon {
     const lineText = make('span', 'commander-balloon-line-text');
     line.append(lineFace, lineText);
     line.addEventListener('click', () => this.expand());
+    // The folded line closes on Escape only for a host that dismisses (see
+    // onDismiss); every other balloon's line ignores the key, as it always did.
+    line.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || !this.onDismiss) return;
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      this.onDismiss();
+    });
 
     const live = make('p', 'commander-balloon-live visually-hidden');
     live.setAttribute('role', 'status');
@@ -370,7 +382,7 @@ class CommanderBalloon {
     const close = make('button', 'commander-balloon__close', '✕');
     close.type = 'button';
     close.setAttribute('aria-label', 'Collapse');
-    close.addEventListener('click', () => this.collapse());
+    close.addEventListener('click', () => (this.onDismiss ? this.onDismiss() : this.collapse()));
     const heading = make('div', 'commander-balloon__heading');
     heading.append(title, headline);
     header.append(face, heading, close);
@@ -402,7 +414,8 @@ class CommanderBalloon {
       if (event.key === 'Escape') {
         event.preventDefault?.();
         event.stopPropagation?.();
-        this.collapse();
+        if (this.onDismiss) this.onDismiss();
+        else this.collapse();
       }
     });
     box.addEventListener('focusin', event => {
@@ -442,7 +455,7 @@ class CommanderBalloon {
   // ignores the far-zoom rule and docks at the edge when its anchor is out of
   // view. The workspace page asks for it, because there the line is the only
   // place the Commander's status shows.
-  attach(root, { anchor, visibleArea, narrow, onShow, onNarrow, pinLine } = {}) {
+  attach(root, { anchor, visibleArea, narrow, onShow, onNarrow, onDismiss, pinLine } = {}) {
     if (!root || this.removed) return this;
     const nodes = this.build();
     if (!nodes) return this;
@@ -451,6 +464,11 @@ class CommanderBalloon {
     if (narrow !== undefined) this.narrowOf = narrow;
     if (onShow !== undefined) this.onShow = onShow;
     if (onNarrow !== undefined) this.onNarrow = onNarrow;
+    if (onDismiss !== undefined) {
+      this.onDismiss = typeof onDismiss === 'function' ? onDismiss : null;
+      // The control now closes the balloon, not just folds it: its name says so.
+      nodes.close.setAttribute('aria-label', this.onDismiss ? 'Close' : 'Collapse');
+    }
     if (pinLine !== undefined) this.pinLine = pinLine === true;
     nodes.line.classList?.toggle('is-pinned', this.pinLine);
     const moved = this.root !== root || !this.layer || this.layer.parentElement !== root;
@@ -625,6 +643,15 @@ class CommanderBalloon {
     this.paint();
     if (focus) this.focusFirst();
     if (!was) this.onExpandChange?.(true, this);
+    return true;
+  }
+
+  // focusLine puts focus on the folded line, for a host that opened the balloon
+  // on a person's activation and wants the keyboard to land on what it said.
+  // False when there is nothing to focus (no content, or removed).
+  focusLine() {
+    if (!this.content || this.removed || !this.nodes) return false;
+    this.nodes.line.focus?.({ preventScroll: true });
     return true;
   }
 
