@@ -4916,9 +4916,38 @@ button.folder-agent-card__hire-face:focus-visible {
 
 /* The sections were drawn to sit under other content in one card, with a rule
    above them. In their own card the first one is the card's top: no rule. */
-.folder-agent-card--chat > section:first-child {
+.folder-agent-card--chat > section:first-child,
+.folder-agent-card--chat .folder-agent-card__songs-offer,
+.folder-agent-card--chat .folder-agent-card__learning,
+.folder-agent-card--chat .folder-agent-card__goal-offer {
   padding-top: 0;
   border-top: 0;
+}
+
+/* A follow-up card names its one question or step; the heading is also where
+   focus lands when the control that was pressed has gone. */
+.folder-agent-card__chat-heading {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.folder-agent-card__chat-heading:focus {
+  outline: none;
+}
+
+.folder-agent-card__chat-heading:focus-visible {
+  outline: 2px solid var(--hc-signal, var(--cozy-moss));
+  outline-offset: 2px;
+}
+
+/* A notice behind a disclosure, under the decision it must not compete with. */
+.folder-agent-card__chat-notice {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  min-width: 0;
 }
 
 .folder-agent-card__chat-line {

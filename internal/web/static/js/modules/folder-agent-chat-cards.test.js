@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   chatAppRoute,
   chatDestination,
+  chatFollowUp,
   chatPlacementLine,
   chatSetupOf
 } from './folder-agent-chat-flow.js';
@@ -443,4 +444,375 @@ test('an opened receipt stays open while the same report is polled and closes fo
   // Let the poll end so no timer outlives the test.
   server = albums({ chat: { session_id: 's1', message_id: 'm2', unread: true } });
   await settle();
+});
+
+// ---- Group 2: the song question and the reading, each in its own card ----
+
+const REAPER_READS =
+  'REAPER reads tempo, length, track count, track names, markers and regions from each project file, and Ori keeps only those. Nothing is changed, and audio is not opened.';
+const offer = (overrides = {}) => ({
+  count: 5,
+  noun: 'songs',
+  format: 'REAPER',
+  ask: 'Want me to learn the 5 songs?',
+  reads: REAPER_READS,
+  not_read: "1 Logic Pro song can't be read this way.",
+  ...overrides
+});
+const firstTicket = {
+  id: 't1',
+  title: 'Open Album-1 and write a short note on its tracks.',
+  started: false
+};
+const goal = { goal: 'Keep these songs moving toward release.', max_runes: 300 };
+const TICKET = { next_ticket: firstTicket, actions: ['start_next', 'look_further'] };
+const reading = (status, extra = {}) => ({
+  status,
+  line: status === 'running' ? 'Learning Album-2… (2 of 5)' : 'Learned 4 of 5 songs.',
+  done: 2,
+  total: 5,
+  ...extra
+});
+
+// What the drawer would draw after the receipt, as step kinds ("ticket+update"
+// is a ticket card with the update behind its disclosure).
+const steps = raw =>
+  chatFollowUp(folderAgentReportView(albums(raw))).cards.map(card =>
+    card.details ? `${card.kind}+${card.details.kind}` : card.kind
+  );
+
+test('one follow-up at a time: every row of the sequencing table', () => {
+  // The song question is pending: neither the goal nor the ticket is shown.
+  assert.deepEqual(steps({ ...TICKET, songs_offer: offer(), goal_offer: goal }), ['question']);
+  // Reading or writing up: only its progress, the next decision waits.
+  assert.deepEqual(steps({ ...TICKET, learning: reading('running'), goal_offer: goal }), [
+    'learning'
+  ]);
+  assert.deepEqual(steps({ ...TICKET, learning: reading('summarizing') }), ['learning']);
+  // Finished (fully or partly): the actual result, then the goal, else the ticket.
+  assert.deepEqual(steps({ ...TICKET, learning: reading('done'), goal_offer: goal }), [
+    'learning',
+    'goal'
+  ]);
+  assert.deepEqual(steps({ ...TICKET, learning: reading('done') }), ['learning', 'ticket']);
+  // Not now (nothing left of the offer): straight to the next eligible decision.
+  assert.deepEqual(steps({ ...TICKET }), ['ticket']);
+  assert.deepEqual(steps({ ...TICKET, goal_offer: goal }), ['goal']);
+  // An update alone is informational: it never blocks an available ticket...
+  assert.deepEqual(steps({ ...TICKET, songs_offer: offer({ update: 'REAPER' }) }), [
+    'ticket+update'
+  ]);
+  // ...and when nothing else is available it is the card.
+  assert.deepEqual(steps({ songs_offer: offer({ update: 'REAPER' }) }), ['update', 'further']);
+  // A reading that stopped keeps its reason reachable beside a goal or a ticket...
+  const stopped = reading('stopped', { reason: 'No model is set.', action: 'choose_model' });
+  assert.deepEqual(steps({ ...TICKET, learning: stopped, goal_offer: goal }), ['goal+learning']);
+  assert.deepEqual(steps({ ...TICKET, learning: stopped }), ['ticket+learning']);
+  // ...is the card when it is all there is...
+  assert.deepEqual(steps({ learning: stopped }), ['learning', 'further']);
+  // ...and when consent must be asked again the decision is presented once.
+  const renewed = chatFollowUp(
+    folderAgentReportView(albums({ ...TICKET, learning: stopped, songs_offer: offer() }))
+  );
+  assert.deepEqual(
+    renewed.cards.map(card => card.kind),
+    ['question']
+  );
+  assert.equal(renewed.cards[0].stopped.reason, 'No model is set.');
+  // Look further stays when it is the only action; a started ticket is shown as
+  // started; with nothing to say there is no card.
+  assert.deepEqual(steps({}), ['further']);
+  assert.deepEqual(steps({ next_ticket: { ...firstTicket, started: true }, actions: [] }), [
+    'ticket'
+  ]);
+  assert.deepEqual(steps({ actions: [] }), []);
+  assert.equal(chatFollowUp(null).cards.length, 0);
+});
+
+const cardOf = stack => stack.children.find(card => card.dataset.chatStep);
+const labelsOf = card => card.querySelectorAll('button').map(button => button.textContent);
+
+test('the question stands alone below the receipt, with the disclosure and two answers', () => {
+  const doc = stubDocument();
+  const stack = renderFolderAgentChatThread(
+    folderAgentReportView(albums({ ...TICKET, songs_offer: offer(), goal_offer: goal })),
+    doc,
+    { fetchImpl: async () => okJSON([]) }
+  );
+  assert.deepEqual(parts(stack), ['receipt', 'follow-up']);
+  const card = cardOf(stack);
+  assert.equal(card.dataset.chatStep, 'question');
+  assert.equal(card.querySelector('h4').textContent, 'Learn the 5 REAPER songs?');
+  assert.equal(card.querySelector('.folder-agent-card__songs-reads').textContent, REAPER_READS);
+  assert.equal(
+    card.querySelector('.folder-agent-card__songs-not-read').textContent,
+    "1 Logic Pro song can't be read this way."
+  );
+  assert.deepEqual(labelsOf(card), ['Learn 5 songs', 'Not now']);
+  // Neither the ticket teaser nor its actions nor the goal while this is pending.
+  const everything = stack.textContent;
+  for (const hidden of ['First ticket', 'Open Album-1', 'Start this', 'Look further', goal.goal]) {
+    assert.equal(
+      everything.includes(hidden),
+      false,
+      `${hidden} is shown while the question is open`
+    );
+  }
+});
+
+test('the question names the format only when the host does, and counts in the right form', () => {
+  const doc = stubDocument();
+  const heading = raw => {
+    const stack = renderFolderAgentChatThread(folderAgentReportView(albums(raw)), doc, {
+      fetchImpl: async () => okJSON([])
+    });
+    return [cardOf(stack).querySelector('h4').textContent, labelsOf(cardOf(stack))[0]];
+  };
+  assert.deepEqual(heading({ songs_offer: offer({ format: '' }) }), [
+    'Learn the 5 songs?',
+    'Learn 5 songs'
+  ]);
+  assert.deepEqual(heading({ songs_offer: offer({ count: 1, noun: 'song', not_read: '' }) }), [
+    'Learn the 1 REAPER song?',
+    'Learn 1 song'
+  ]);
+  assert.deepEqual(heading({ songs_offer: offer({ count: 7, format: '' }) }), [
+    'Learn the 7 songs?',
+    'Learn 7 songs'
+  ]);
+});
+
+test('every word the host supplied is drawn as text, never as markup', () => {
+  const doc = stubDocument();
+  const hostile = '<img src=x onerror=alert(1)>';
+  const stack = renderFolderAgentChatThread(
+    folderAgentReportView(
+      albums({ songs_offer: offer({ format: hostile, reads: hostile, not_read: hostile }) })
+    ),
+    doc,
+    { fetchImpl: async () => okJSON([]) }
+  );
+  const card = cardOf(stack);
+  assert.equal(card.querySelector('h4').textContent, `Learn the 5 ${hostile} songs?`);
+  assert.equal(card.querySelector('.folder-agent-card__songs-reads').textContent, hostile);
+  // Nothing was parsed into elements: the only elements are the card's own.
+  assert.equal(card.all().filter(node => node.tagName === 'IMG').length, 0);
+});
+
+// harness is a server for one workspace: it answers the view, records every
+// request, and lets a test decide what each write does.
+function harness(initial, { onPost } = {}) {
+  const state = { view: initial, log: [], failGet: false, failPost: false };
+  const fetchImpl = async (url, init = {}) => {
+    const method = init.method || 'GET';
+    state.log.push([method, String(url), init.body || '']);
+    if (String(url).includes('/api/agents')) return okJSON([]);
+    if (method === 'GET') {
+      if (state.failGet) throw new Error('offline');
+      return okJSON({ folder_agent: state.view });
+    }
+    if (state.failPost) throw new Error('offline');
+    return onPost ? onPost(state, String(url), JSON.parse(init.body || '{}')) : okJSON({});
+  };
+  const posts = () => state.log.filter(([method]) => method === 'POST');
+  const gets = () => state.log.filter(([method]) => method === 'GET');
+  return { state, fetchImpl, posts, gets };
+}
+const refuse = (status, error) => ({ ok: false, status, json: async () => ({ error }) });
+const until = async condition => {
+  const deadline = Date.now() + 3000;
+  while (!condition()) {
+    if (Date.now() > deadline) assert.fail('timed out waiting');
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+};
+
+async function mountHarness(h) {
+  resetFolderAgentChat();
+  const doc = stubDocument();
+  const host = doc.createElement('div');
+  await mountWorkspaceFolderAgent(host, 'ws-albums', {
+    doc,
+    fetchImpl: h.fetchImpl,
+    openPlace: false,
+    pollMs: 5
+  });
+  const drawn = () => folderAgentChat('ws-albums').card(true, { presentation: 'chat' });
+  return { doc, drawn };
+}
+
+test('opening, expanding and polling never send an answer; Not now sends one dismiss and reads nothing', async () => {
+  const h = harness(albums({ ...TICKET, songs_offer: offer() }), {
+    onPost: (state, url, body) => {
+      assert.match(url, /\/folder-agent\/ws-albums\/songs$/);
+      assert.deepEqual(body, { answer: 'dismiss' });
+      // The host records the answer and moves on: no offer, no reading.
+      state.view = albums({ ...TICKET });
+      return okJSON({ folder_agent: state.view });
+    }
+  });
+  const { drawn } = await mountHarness(h);
+  // Restoring the view, opening the receipt details and redrawing send nothing.
+  drawn().querySelector('[data-chat-control="setup-details"]').click();
+  drawn();
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(h.posts().length, 0, 'a write was sent before any answer');
+
+  const stack = drawn();
+  stack.querySelector('[data-chat-control="dismiss_songs"]').click();
+  // The pair is one decision: both answers quiet while it is sent.
+  assert.equal(stack.querySelector('[data-chat-control="learn_songs"]').disabled, true);
+  await until(() => h.posts().length === 1 && cardOf(drawn()).dataset.chatStep === 'ticket');
+  assert.equal(h.posts().length, 1);
+  assert.equal(h.posts().filter(([, url]) => url.endsWith('/songs')).length, 1);
+  // Immediately the next eligible decision: the ticket, with its real title.
+  const next = cardOf(drawn());
+  assert.equal(
+    next.querySelector('.folder-agent-card__next-ticket').textContent,
+    firstTicket.title
+  );
+  assert.deepEqual(labelsOf(next), ['Start this ticket', 'Look further']);
+  assert.equal(drawn().textContent.includes('Learn 5 songs'), false);
+});
+
+test('Learn 5 songs sends exactly one learn answer, however often it is pressed', async () => {
+  const h = harness(albums({ ...TICKET, songs_offer: offer() }), {
+    onPost: (state, url, body) => {
+      assert.deepEqual(body, { answer: 'learn' });
+      state.view = albums({ learning: reading('running') });
+      return okJSON({ folder_agent: state.view });
+    }
+  });
+  const { drawn } = await mountHarness(h);
+  const first = drawn();
+  const learn = first.querySelector('[data-chat-control="learn_songs"]');
+  learn.click();
+  learn.click();
+  // A card redrawn while the answer is in flight must not offer another write.
+  const redrawn = drawn();
+  redrawn.querySelector('[data-chat-control="learn_songs"]')?.click();
+  await until(() => cardOf(drawn()).dataset.chatStep === 'learning');
+  assert.equal(h.posts().length, 1);
+  const card = cardOf(drawn());
+  assert.equal(card.querySelector('h4').textContent, 'Learning your songs');
+  assert.equal(
+    card.querySelector('.folder-agent-card__learning-line').textContent,
+    'Learning Album-2… (2 of 5)'
+  );
+  // No question, no ticket while it reads.
+  assert.equal(
+    drawn()
+      .querySelectorAll('button')
+      .filter(b => b.dataset.chatControl !== 'setup-details').length,
+    0
+  );
+  // The reading ends, so no poll timer outlives the test.
+  h.state.view = albums({ ...TICKET, learning: reading('done') });
+  await until(() => drawn().children.length === 3);
+});
+
+test('the reading moves through real states and ends with the actual, partial result', async () => {
+  const h = harness(albums({ ...TICKET, songs_offer: offer() }), {
+    onPost: state => {
+      state.view = albums({ learning: reading('running', { done: 1 }) });
+      return okJSON({ folder_agent: state.view });
+    }
+  });
+  const { drawn } = await mountHarness(h);
+  drawn().querySelector('[data-chat-control="learn_songs"]').click();
+  const line = () =>
+    cardOf(drawn())?.querySelector('.folder-agent-card__learning-line')?.textContent;
+  await until(() => line() === 'Learning Album-2… (2 of 5)' || h.state.view.learning?.done === 1);
+  // Progress moves with the host's own numbers.
+  h.state.view = albums({
+    learning: reading('running', { done: 3, line: 'Learning Album-4… (4 of 5)' })
+  });
+  await until(() => line() === 'Learning Album-4… (4 of 5)');
+  const bar = cardOf(drawn()).querySelector('progress');
+  assert.equal(bar.value, 3);
+  assert.equal(
+    cardOf(drawn()).querySelector('.folder-agent-card__learning-line').attributes.role,
+    'status'
+  );
+  // Writing up what it learned: the line only, nothing else is asked.
+  h.state.view = albums({
+    ...TICKET,
+    learning: reading('summarizing', { line: 'Writing up what I learned…' })
+  });
+  await until(() => line() === 'Writing up what I learned…');
+  assert.equal(cardOf(drawn()).dataset.chatStep, 'learning');
+  assert.equal(drawn().textContent.includes('Start this ticket'), false);
+  // It ends partly: 4 of the 5 songs, the summary, the exception, then the goal.
+  h.state.view = albums({
+    goal_offer: goal,
+    learning: reading('done', {
+      line: 'Learned 4 of 5 songs.',
+      summary: 'Mostly mid-tempo songs with a vocal on each.',
+      summary_by: 'agent',
+      not_read: "1 song couldn't be read."
+    })
+  });
+  await until(() => drawn().children.length === 3);
+  const [, result, decision] = drawn().children;
+  assert.equal(result.dataset.chatStep, 'learning');
+  assert.equal(result.querySelector('h4').textContent, 'What I learned');
+  assert.equal(
+    result.querySelector('.folder-agent-card__learning-line').textContent,
+    'Learned 4 of 5 songs.'
+  );
+  assert.equal(
+    result.querySelector('.folder-agent-card__learning-summary').textContent,
+    'Mostly mid-tempo songs with a vocal on each.'
+  );
+  assert.equal(decision.dataset.chatStep, 'goal');
+  assert.equal(h.posts().length, 1);
+});
+
+test('a refused answer keeps its error with the decision, refreshes the run, and offers the pair again', async () => {
+  const h = harness(albums({ ...TICKET, songs_offer: offer() }), {
+    onPost: () => refuse(409, "The Home's song switch is off.")
+  });
+  const { drawn } = await mountHarness(h);
+  const getsBefore = h.gets().length;
+  drawn().querySelector('[data-chat-control="learn_songs"]').click();
+  await until(() => h.posts().length === 1 && cardOf(drawn()).querySelector('[role="alert"]'));
+  const card = cardOf(drawn());
+  assert.equal(card.dataset.chatStep, 'question');
+  assert.equal(card.querySelector('[role="alert"]').textContent, "The Home's song switch is off.");
+  // The run was asked for again before another write was offered.
+  assert.ok(h.gets().length > getsBefore, 'the run was not refreshed after the refusal');
+  assert.equal(labelsOf(card).join('|'), 'Learn 5 songs|Not now');
+  assert.equal(
+    card.querySelectorAll('button').every(button => !button.disabled),
+    true
+  );
+  assert.equal(h.posts().length, 1);
+});
+
+test('an answer that may or may not have landed is checked first; if that fails the pair stays quiet', async () => {
+  const h = harness(albums({ ...TICKET, songs_offer: offer() }));
+  const { drawn } = await mountHarness(h);
+  // The request is lost, and the run cannot be read either.
+  h.state.failPost = true;
+  h.state.failGet = true;
+  drawn().querySelector('[data-chat-control="dismiss_songs"]').click();
+  await until(() => cardOf(drawn()).querySelector('[role="alert"]'));
+  const card = cardOf(drawn());
+  assert.match(
+    card.querySelector('[role="alert"]').textContent,
+    /That did not go through\. Reload to see where this stands\./
+  );
+  assert.equal(
+    card.querySelectorAll('button').every(button => button.disabled),
+    true
+  );
+  // One attempt was made, then the run was asked for again (and failed): no
+  // second write is possible from a redrawn card while the outcome is unknown.
+  assert.equal(h.posts().length, 1);
+  assert.ok(h.gets().length > 1, 'the run was not asked for again');
+  drawn()
+    .querySelectorAll('button')
+    .filter(button => button.dataset.chatControl !== 'setup-details')
+    .forEach(button => button.click());
+  assert.equal(h.posts().length, 1);
 });

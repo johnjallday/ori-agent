@@ -6,7 +6,12 @@
 
 import { renderHireDraftEditor } from './folder-agent-hire-editor.js';
 import { publishFolderAgentChat } from './folder-agent-chat.js';
-import { chatDestination, chatPlacementLine, chatSetupOf } from './folder-agent-chat-flow.js';
+import {
+  chatDestination,
+  chatFollowUp,
+  chatPlacementLine,
+  chatSetupOf
+} from './folder-agent-chat-flow.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 
 export const FOLDER_AGENT_ENDPOINT = '/api/personal-assistant/folder-agent';
@@ -220,6 +225,9 @@ export function folderAgentReportView(view) {
       ? {
           count: Number(view.songs_offer.count) || 0,
           noun: String(view.songs_offer.noun || 'songs'),
+          // The one application every readable song is from ("REAPER"); empty for
+          // a mixed folder or a format the host cannot name.
+          format: String(view.songs_offer.format || ''),
           ask: String(view.songs_offer.ask),
           reads: String(view.songs_offer.reads || ''),
           notRead: String(view.songs_offer.not_read || ''),
@@ -2904,53 +2912,186 @@ function chatReceiptCard(doc, view, setup, { state, fetchImpl }) {
   return card;
 }
 
-// chatFollowUpCard is the card under the receipt. It carries the sections the
-// report shows today until the sequenced follow-ups replace them.
-function chatFollowUpCard(doc, view, { onAction, error }) {
-  const card = chatCard(doc, 'follow-up', 'Next step');
-  const home = view.setup?.receipt?.home?.route || '';
-  if (view.learning) card.append(learningSection(doc, view.learning, onAction, home));
-  if (view.songsOffer) card.append(songsOfferSection(doc, view.songsOffer, onAction));
-  if (view.goalOffer) card.append(goalOfferSection(doc, view.goalOffer, onAction));
-  if (view.nextTicket) {
+// The drawer's follow-up cards. Which ones, and in what order, is
+// chatFollowUp's decision from the refreshed view; each is its own card under
+// the receipt. A card's buttons are one decision: pressing any of them quiets
+// the whole card while the answer is sent, and nothing here sends anything until
+// the owner presses one.
+function chatStepCard(doc, step, label) {
+  const card = chatCard(doc, 'follow-up', label);
+  card.dataset.chatStep = step;
+  return card;
+}
+
+// The heading is where focus goes when the control that was pressed is gone.
+function chatHeading(doc, text) {
+  const heading = el(doc, 'h4', 'folder-agent-card__chat-heading', text);
+  heading.tabIndex = -1;
+  return heading;
+}
+
+function chatButton(doc, id, label, primary, onAction) {
+  const button = el(
+    doc,
+    'button',
+    primary ? 'btn btn-primary btn-sm' : 'btn btn-sm folder-agent-card__secondary',
+    label
+  );
+  button.type = 'button';
+  button.dataset.folderAgentAction = id;
+  button.dataset.chatControl = id;
+  button.addEventListener('click', () => onAction?.(id, button, {}));
+  return button;
+}
+
+const LEARNING_HEADINGS = {
+  running: 'Learning your songs',
+  summarizing: 'Learning your songs',
+  stopped: 'Learning stopped'
+};
+
+// questionCard is the one decision while the offer is open: learn the songs, or
+// not now. The disclosure is the host's own words, drawn as text, and the
+// exception (a format that cannot be read) is named by the host.
+function chatQuestionCard(doc, step, onAction) {
+  const { offer, stopped } = step;
+  const card = chatStepCard(doc, 'question', 'Learn the songs');
+  const format = offer.format ? `${offer.format} ` : '';
+  card.append(chatHeading(doc, `Learn the ${offer.count} ${format}${offer.noun}?`));
+  if (offer.reads) card.append(el(doc, 'p', 'folder-agent-card__songs-reads', offer.reads));
+  if (offer.notRead) card.append(el(doc, 'p', 'folder-agent-card__songs-not-read', offer.notRead));
+  const why = stopped?.reason || stopped?.line;
+  if (why) card.append(el(doc, 'p', 'folder-agent-card__degraded', why));
+  const row = el(doc, 'div', 'folder-agent-card__actions folder-agent-card__songs-actions');
+  row.append(
+    chatButton(doc, 'learn_songs', `Learn ${offer.count} ${offer.noun}`, true, onAction),
+    chatButton(doc, 'dismiss_songs', 'Not now', false, onAction)
+  );
+  card.append(row);
+  return card;
+}
+
+// learningCard shows the reading as it runs, what it actually read, or why it
+// stopped with the one thing to do about it: the host's line and numbers, never
+// a count the owner was told earlier.
+function chatLearningCard(doc, step, onAction, home) {
+  const card = chatStepCard(doc, 'learning', 'Learning the songs');
+  card.append(chatHeading(doc, LEARNING_HEADINGS[step.learning.status] || 'What I learned'));
+  card.append(learningSection(doc, step.learning, onAction, home));
+  return card;
+}
+
+function chatUpdateCard(doc, step, onAction) {
+  const card = chatStepCard(doc, 'update', 'Update the plugin');
+  card.append(songsOfferSection(doc, step.offer, onAction));
+  return card;
+}
+
+// A notice that does not block the decision under it (a reading that stopped, a
+// plugin to update) sits behind a disclosure in that decision's card, so it
+// stays reachable without a second prompt.
+function chatDetails(doc, notice, onAction, home, state) {
+  const wrap = el(doc, 'div', 'folder-agent-card__chat-notice');
+  const learning = notice.kind === 'learning';
+  const panelID = `folder-agent-chat-notice-${++chatNoticeSeq}`;
+  const toggle = el(
+    doc,
+    'button',
+    'btn btn-sm folder-agent-card__secondary folder-agent-card__details-toggle',
+    learning ? 'Learning details' : 'Plugin update'
+  );
+  toggle.type = 'button';
+  toggle.dataset.chatControl = 'learning-details';
+  toggle.setAttribute('aria-controls', panelID);
+  const panel = el(doc, 'div', 'folder-agent-card__chat-details');
+  panel.id = panelID;
+  const show = open => {
+    toggle.setAttribute('aria-expanded', String(open));
+    panel.hidden = !open;
+    if (open && !panel.children.length)
+      panel.append(
+        learning
+          ? learningSection(doc, notice.learning, onAction, home)
+          : songsOfferSection(doc, notice.offer, onAction)
+      );
+  };
+  show(state?.open?.has('learning-details') === true);
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    if (open) state?.open?.add('learning-details');
+    else state?.open?.delete('learning-details');
+    show(open);
+  });
+  wrap.append(toggle, panel);
+  return wrap;
+}
+let chatNoticeSeq = 0;
+
+function chatGoalCard(doc, step, onAction) {
+  const card = chatStepCard(doc, 'goal', 'Suggested goal');
+  card.append(goalOfferSection(doc, step.offer, onAction));
+  return card;
+}
+
+// ticketCard is the first ticket once, with its real title and the answers the
+// host allows; a ticket already started is shown as started. With no ticket and
+// only Look further to offer, it is that one quiet action.
+function chatTicketCard(doc, step, onAction) {
+  const { ticket } = step;
+  const card = chatStepCard(doc, ticket.title ? 'ticket' : 'further', 'Next step');
+  if (ticket.title) {
     card.append(
-      el(
-        doc,
-        'p',
-        'folder-agent-card__next-ticket',
-        view.nextTicket.started
-          ? `Started: ${view.nextTicket.title}`
-          : `First ticket: ${view.nextTicket.title}`
-      )
+      chatHeading(doc, ticket.started ? 'Ticket started' : 'First ticket'),
+      el(doc, 'p', 'folder-agent-card__next-ticket', ticket.title)
+    );
+  } else {
+    card.append(
+      el(doc, 'p', 'folder-agent-card__chat-line', 'I can look further into this folder.')
     );
   }
-  const answers = view.actions.filter(
-    action => action.id === 'start_next' || action.id === 'look_further'
-  );
-  if (answers.length) {
+  if (ticket.start || ticket.further) {
     const row = el(doc, 'div', 'folder-agent-card__actions');
-    answers.forEach(action => {
-      const button = el(
-        doc,
-        'button',
-        action.id === 'start_next'
-          ? 'btn btn-primary btn-sm'
-          : 'btn btn-sm folder-agent-card__secondary',
-        action.label
-      );
-      button.type = 'button';
-      button.dataset.folderAgentAction = action.id;
-      button.addEventListener('click', () => onAction?.(action.id, button));
-      row.append(button);
-    });
+    if (ticket.start)
+      row.append(chatButton(doc, 'start_next', 'Start this ticket', true, onAction));
+    if (ticket.further)
+      row.append(chatButton(doc, 'look_further', 'Look further', false, onAction));
     card.append(row);
   }
-  if (error) {
-    const alert = el(doc, 'p', 'folder-agent-card__error', error);
-    alert.setAttribute('role', 'alert');
-    card.append(alert);
+  return card;
+}
+
+function chatStepElement(doc, step, { onAction, state }, home) {
+  // One decision, one guard: pressing any button quiets every button of the card.
+  let card = null;
+  const guarded = (id, button, extra) => {
+    card?.querySelectorAll('button').forEach(other => {
+      other.disabled = true;
+    });
+    return onAction?.(id, button, extra);
+  };
+  switch (step.kind) {
+    case 'question':
+      card = chatQuestionCard(doc, step, guarded);
+      break;
+    case 'learning':
+      card = chatLearningCard(doc, step, guarded, home);
+      break;
+    case 'update':
+      card = chatUpdateCard(doc, step, guarded);
+      break;
+    case 'goal':
+      card = chatGoalCard(doc, step, guarded);
+      break;
+    default:
+      card = chatTicketCard(doc, step, guarded);
   }
-  return card.children.length ? card : null;
+  if (step.details) card.append(chatDetails(doc, step.details, guarded, home, state));
+  // While an answer is in flight a redrawn card must not offer another write.
+  if (state?.pending === true)
+    card.querySelectorAll('button').forEach(button => {
+      button.disabled = true;
+    });
+  return card;
 }
 
 export function renderFolderAgentChatThread(
@@ -2963,12 +3104,19 @@ export function renderFolderAgentChatThread(
   const stack = el(doc, 'div', 'folder-agent-chat-stack');
   const receipt = chatReceiptCard(doc, view, setup, { state, fetchImpl });
   stack.append(receipt);
-  const followUp = chatFollowUpCard(doc, view, { onAction, error });
-  if (followUp) stack.append(followUp);
-  else if (error) {
+  const home = view.setup?.receipt?.home?.route || '';
+  const cards = chatFollowUp(view).cards.map(step =>
+    chatStepElement(doc, step, { onAction, state }, home)
+  );
+  cards.forEach(card => stack.append(card));
+  if (error) {
+    // The error stays with the decision it is about: the first card that asks
+    // something, else the last card, else the receipt.
+    const owner =
+      cards.find(card => card.querySelector('button')) || cards[cards.length - 1] || receipt;
     const alert = el(doc, 'p', 'folder-agent-card__error', error);
     alert.setAttribute('role', 'alert');
-    receipt.append(alert);
+    owner.append(alert);
   }
   return stack;
 }
@@ -3512,18 +3660,55 @@ export async function mountWorkspaceFolderAgent(
     }, pollMs);
   };
   let latestRaw = raw;
-  // What the owner opened in the drawer's cards, kept across the page's redraws.
-  const chatState = { messageID: '', open: new Set() };
+  // What the owner opened in the drawer's cards, kept across the page's redraws,
+  // and whether an answer is in flight (a redrawn card must not offer another).
+  const chatState = { messageID: '', open: new Set(), pending: false };
+  let acting = false;
+  // refreshRun asks for the run again a few times; null when it cannot be had.
+  const refreshRun = async () => {
+    for (let attempt = 0; attempt <= CHAT_RETRIES; attempt += 1) {
+      const fresh = await fetchFolderAgent(workspaceID, fetchImpl).catch(() => null);
+      if (fresh || !isActive()) return fresh;
+      await new Promise(resolve => setTimeout(resolve, pollMs));
+    }
+    return null;
+  };
   const draw = (current, error = '', opening = false) => {
     latestRaw = current;
     const view = folderAgentReportView(current);
     const onAction = async (action, button, extra) => {
+      // One write at a time for the workspace: a second press while one is in
+      // flight (a double click, or a card redrawn under the first) is dropped.
+      if (acting) return;
+      acting = true;
+      chatState.pending = true;
       if (button) button.disabled = true;
       if (action === 'set_up' || action === 'look_further' || action === 'start_next')
         followed = true;
-      const result = await postFolderAgentAction(view, action, fetchImpl, extra);
-      draw(result.view || current, result.error || '');
-      follow(result.view || current);
+      let result;
+      try {
+        result = await postFolderAgentAction(view, action, fetchImpl, extra);
+      } catch (_) {
+        result = { error: 'That did not go through.' };
+      }
+      // A refusal that carried no view leaves it unknown whether the server
+      // recorded the answer. Ask what it holds before offering another write, so
+      // a repeat press cannot answer twice.
+      let next = result.view || null;
+      if (!next && result.error) next = await refreshRun();
+      if (!isActive()) {
+        acting = false;
+        return;
+      }
+      acting = false;
+      // Still unknown: keep the controls quiet rather than offer a blind write.
+      chatState.pending = !next && Boolean(result.error);
+      const error =
+        chatState.pending && result.error
+          ? `${result.error} Reload to see where this stands.`
+          : result.error || '';
+      draw(next || current, error);
+      follow(next || current);
     };
     // What the owner opened inside the drawer's cards belongs to one report: a
     // newer report starts closed again.
@@ -3573,6 +3758,8 @@ export async function mountWorkspaceFolderAgent(
       isActive,
       pollMs,
       onView: (next, finished) => {
+        // A fresh view from the server settles an answer whose outcome was unknown.
+        if (!acting) chatState.pending = false;
         let opening = false;
         if (finished && openPlace) {
           const open = { navigate };
