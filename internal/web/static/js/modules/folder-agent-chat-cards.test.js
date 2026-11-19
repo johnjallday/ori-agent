@@ -16,6 +16,7 @@ import {
 import {
   attachFolderAgentChatCard,
   folderAgentChat,
+  publishFolderAgentChat,
   resetFolderAgentChat
 } from './folder-agent-chat.js';
 
@@ -395,9 +396,11 @@ test('one host sits under the matching message and holds the cards as siblings',
   assert.equal(hosts.length, 1);
   assert.equal(hosts[0].dataset.messageId, 'm1');
   assert.equal(transcript.children[transcript.children.indexOf(row) + 1], hosts[0]);
-  assert.equal(hosts[0].children.length, 1);
+  // The stack of sibling cards, and the host's one persistent live region.
+  assert.equal(hosts[0].children.length, 2);
   assert.equal(hosts[0].children[0].className, 'folder-agent-chat-stack');
   assert.deepEqual(parts(hosts[0].children[0]), ['receipt', 'follow-up']);
+  assert.equal(hosts[0].children[1].attributes.role, 'status');
   assert.ok(entry);
 });
 
@@ -638,7 +641,7 @@ async function mountHarness(h) {
     pollMs: 5
   });
   const drawn = () => folderAgentChat('ws-albums').card(true, { presentation: 'chat' });
-  return { doc, drawn };
+  return { doc, host, drawn };
 }
 
 test('opening, expanding and polling never send an answer; Not now sends one dismiss and reads nothing', async () => {
@@ -730,10 +733,13 @@ test('the reading moves through real states and ends with the actual, partial re
   await until(() => line() === 'Learning Album-4… (4 of 5)');
   const bar = cardOf(drawn()).querySelector('progress');
   assert.equal(bar.value, 3);
+  // The line itself is not a live region (a redrawn one is missed); the thread
+  // carries the words for the drawer's one persistent region instead.
   assert.equal(
     cardOf(drawn()).querySelector('.folder-agent-card__learning-line').attributes.role,
-    'status'
+    undefined
   );
+  assert.equal(drawn().dataset.announce, 'Learning Album-4… (4 of 5)');
   // Writing up what it learned: the line only, nothing else is asked.
   h.state.view = albums({
     ...TICKET,
@@ -815,4 +821,449 @@ test('an answer that may or may not have landed is checked first; if that fails 
     .filter(button => button.dataset.chatControl !== 'setup-details')
     .forEach(button => button.click());
   assert.equal(h.posts().length, 1);
+});
+
+// ---- Group 3: the right decision at the right time ----
+
+const transcriptFor = (doc, messageID = 'm1') => {
+  const transcript = doc.createElement('div');
+  const row = doc.createElement('div');
+  row.dataset.leadMessageId = messageID;
+  transcript.append(row);
+  return transcript;
+};
+const attach = (transcript, doc) =>
+  attachFolderAgentChatCard(transcript, 'ws-albums', { doc, win: null });
+const hostOf = transcript => transcript.querySelector('[data-folder-agent-chat-card]');
+const ended = () => reading('done');
+const stoppedReading = reading('stopped', {
+  line: 'Learning stopped.',
+  reason: 'No model is set for the app assistant.',
+  action: 'retry'
+});
+const posted = h => h.posts().map(([, url, body]) => [url.split('/').pop(), JSON.parse(body)]);
+
+test('a stopped reading or an update-only offer stays reachable beside the decision, behind one disclosure', async () => {
+  const h = harness(albums({ ...TICKET, learning: stoppedReading }), {
+    onPost: state => {
+      state.view = albums({ ...TICKET, learning: reading('running') });
+      return okJSON({ folder_agent: state.view });
+    }
+  });
+  const { drawn } = await mountHarness(h);
+  const card = cardOf(drawn());
+  // One primary prompt (the ticket); the recovery is not on screen yet.
+  assert.equal(card.dataset.chatStep, 'ticket');
+  assert.deepEqual(labelsOf(card), ['Start this ticket', 'Look further', 'Learning details']);
+  assert.equal(card.textContent.includes('Try again'), false);
+  assert.equal(card.textContent.includes('No model is set'), false);
+  card.querySelector('[data-chat-control="learning-details"]').click();
+  assert.ok(card.textContent.includes('Learning stopped.'));
+  assert.deepEqual(labelsOf(card), [
+    'Start this ticket',
+    'Look further',
+    'Learning details',
+    'Try again'
+  ]);
+  card
+    .querySelectorAll('button')
+    .find(button => button.textContent === 'Try again')
+    .click();
+  await until(() => h.posts().length === 1 && cardOf(drawn()).dataset.chatStep === 'learning');
+  assert.deepEqual(posted(h), [['songs', { answer: 'retry' }]]);
+  h.state.view = albums({ ...TICKET, learning: ended() });
+  await until(() => drawn().children.length === 3);
+
+  // An update-only offer is informational too: the ticket stays available.
+  const update = harness(albums({ ...TICKET, songs_offer: offer({ update: 'REAPER' }) }));
+  const again = await mountHarness(update);
+  const ticket = cardOf(again.drawn());
+  assert.equal(ticket.dataset.chatStep, 'ticket');
+  assert.deepEqual(labelsOf(ticket), ['Start this ticket', 'Look further', 'Plugin update']);
+  ticket.querySelector('[data-chat-control="learning-details"]').click();
+  assert.equal(ticket.querySelector('a').href, '/plugins');
+  assert.equal(update.posts().length, 0);
+});
+
+test('with nothing to continue to, a stopped reading or an update is the card; renewed consent is asked once', async () => {
+  const doc = stubDocument();
+  const draw = raw =>
+    renderFolderAgentChatThread(folderAgentReportView(albums(raw)), doc, {
+      fetchImpl: async () => okJSON([])
+    });
+  const alone = draw({ learning: stoppedReading });
+  assert.deepEqual(alone.children.map(card => card.dataset.chatStep).filter(Boolean), [
+    'learning',
+    'further'
+  ]);
+  assert.deepEqual(labelsOf(alone.children[1]), ['Try again']);
+  assert.ok(alone.children[1].textContent.includes('Learning stopped.'));
+  // Look further stays reachable, quietly, as the next card.
+  assert.deepEqual(labelsOf(alone.children[2]), ['Look further']);
+  const renewed = draw({ ...TICKET, learning: stoppedReading, songs_offer: offer() });
+  assert.deepEqual(renewed.children.map(card => card.dataset.chatStep).filter(Boolean), [
+    'question'
+  ]);
+  assert.ok(renewed.textContent.includes('No model is set for the app assistant.'));
+  assert.equal(renewed.textContent.includes('First ticket'), false);
+  const updateOnly = draw({ songs_offer: offer({ update: 'REAPER' }) });
+  assert.deepEqual(updateOnly.children.map(card => card.dataset.chatStep).filter(Boolean), [
+    'update',
+    'further'
+  ]);
+});
+
+// goalRun presses something on the goal card and waits for the host to accept.
+async function goalRun(press) {
+  const h = harness(albums({ ...TICKET, goal_offer: goal }), {
+    onPost: state => {
+      state.view = albums({ ...TICKET });
+      return okJSON({ folder_agent: state.view });
+    }
+  });
+  const { drawn } = await mountHarness(h);
+  assert.equal(cardOf(drawn()).dataset.chatStep, 'goal');
+  assert.equal(
+    drawn().textContent.includes('Start this ticket'),
+    false,
+    'the ticket waits for the goal'
+  );
+  press(drawn());
+  await until(() => cardOf(drawn()).dataset.chatStep === 'ticket');
+  return h;
+}
+const goalButton = (stack, id) => stack.querySelector(`[data-folder-agent-action="${id}"]`);
+
+test('each goal route sends one goal answer and never starts a ticket; the ticket follows once the host accepts', async () => {
+  const use = await goalRun(stack => goalButton(stack, 'use_goal').click());
+  assert.deepEqual(posted(use), [['goal', { answer: 'use' }]]);
+  const edited = await goalRun(stack => {
+    goalButton(stack, 'edit_goal').click();
+    stack.querySelector('input').value = 'Ship the EP by March.';
+    goalButton(stack, 'use_goal').click();
+  });
+  assert.deepEqual(posted(edited), [['goal', { answer: 'use', goal: 'Ship the EP by March.' }]]);
+  const later = await goalRun(stack => goalButton(stack, 'dismiss_goal').click());
+  assert.deepEqual(posted(later), [['goal', { answer: 'dismiss' }]]);
+  for (const h of [use, edited, later]) {
+    assert.equal(h.state.log.filter(([, url]) => url.endsWith('/start-next')).length, 0);
+  }
+});
+
+test('an edit in progress survives incidental redraws without taking focus, and Cancel forgets it', async () => {
+  const h = harness(albums({ ...TICKET, goal_offer: goal }));
+  const { doc, drawn } = await mountHarness(h);
+  let stack = drawn();
+  goalButton(stack, 'edit_goal').click();
+  const input = stack.querySelector('input');
+  input.value = 'My own words';
+  input.listeners.input.forEach(listener => listener());
+  // Someone else holds focus (the composer) while the thread redraws.
+  const composer = doc.createElement('textarea');
+  composer.focus();
+  stack = drawn();
+  assert.equal(stack.querySelector('input').value, 'My own words');
+  assert.equal(doc.activeElement, composer, 'a redraw took focus from the composer');
+  goalButton(stack, 'cancel_goal').click();
+  stack = drawn();
+  assert.equal(stack.querySelector('input'), null);
+  assert.ok(goalButton(stack, 'use_goal'));
+  // Editing again starts from the offer, not from the forgotten words.
+  goalButton(stack, 'edit_goal').click();
+  assert.equal(stack.querySelector('input').value, goal.goal);
+});
+
+test('the first ticket is started once, shown as started, and never offered to start again', async () => {
+  const h = harness(albums({ ...TICKET }), {
+    onPost: state => {
+      state.view = albums({
+        next_ticket: { ...firstTicket, started: true },
+        actions: ['look_further']
+      });
+      return okJSON({ folder_agent: state.view });
+    }
+  });
+  const { drawn } = await mountHarness(h);
+  const start = drawn().querySelector('[data-chat-control="start_next"]');
+  start.click();
+  start.click();
+  await until(() => cardOf(drawn()).querySelector('h4').textContent === 'Ticket started');
+  assert.deepEqual(posted(h), [['start-next', {}]]);
+  const card = cardOf(drawn());
+  assert.equal(
+    card.querySelector('.folder-agent-card__next-ticket').textContent,
+    firstTicket.title
+  );
+  assert.deepEqual(labelsOf(card), ['Look further']);
+  // A reopened thread draws it from the saved report: started, no second start.
+  assert.deepEqual(labelsOf(cardOf(drawn())), ['Look further']);
+  assert.equal(h.posts().length, 1);
+});
+
+test('a late reply never draws over a newer report or another workspace', async () => {
+  let release = null;
+  const view = (at, extra = {}) =>
+    albums({ updated_at: `2026-11-19T10:00:0${at}Z`, actions: ['look_further'], ...extra });
+  const h = harness(view(1, { learning: reading('summarizing') }), {
+    onPost: () =>
+      new Promise(resolve => {
+        release = resolve;
+      })
+  });
+  const { host } = await mountHarness(h);
+  const entry = () => folderAgentChat('ws-albums');
+  // An answer goes out from the page's card; before it lands a newer report is drawn.
+  host.querySelector('[data-folder-agent-action="look_further"]').click();
+  h.state.view = view(3, { learning: reading('done') });
+  await until(() => entry().raw.updated_at === '2026-11-19T10:00:03Z');
+  // The late reply is older than what is on screen: it is dropped.
+  release(okJSON({ folder_agent: view(2, { learning: reading('running') }) }));
+  await settle();
+  assert.equal(entry().raw.updated_at, '2026-11-19T10:00:03Z');
+  assert.equal(entry().raw.learning.status, 'done');
+  // A reply about another workspace is never drawn here, however new.
+  host.querySelector('[data-folder-agent-action="look_further"]').click();
+  release(
+    okJSON({ folder_agent: { ...view(9), workspace_id: 'ws-other', workspace_name: 'Other' } })
+  );
+  await settle();
+  assert.equal(entry().raw.workspace_id, 'ws-albums');
+  assert.equal(entry().raw.updated_at, '2026-11-19T10:00:03Z');
+});
+
+test('reopening derives the step from the saved report; a replaced report or another thread takes the controls away', async () => {
+  const h = harness(albums({ ...TICKET, songs_offer: offer() }));
+  const { doc } = await mountHarness(h);
+  const first = transcriptFor(doc);
+  const second = transcriptFor(doc);
+  attach(first, doc);
+  attach(second, doc);
+  // A second view of the workspace draws the same decision, and sends nothing.
+  assert.equal(hostOf(first).textContent, hostOf(second).textContent);
+  assert.ok(hostOf(first).textContent.includes('Learn the 5 REAPER songs?'));
+  assert.equal(h.posts().length, 0);
+  // A row from another thread is not this report's, whatever its message id.
+  const other = transcriptFor(doc);
+  other.children[0].dataset.leadSessionId = 'other-session';
+  assert.equal(attach(other, doc), null);
+  assert.equal(other.querySelectorAll('[data-folder-agent-chat-card]').length, 0);
+  const right = transcriptFor(doc);
+  right.children[0].dataset.leadSessionId = 's1';
+  assert.ok(attach(right, doc));
+  // A newer report replaces it: no stale control stays anywhere.
+  publishFolderAgentChat(
+    {
+      workspaceID: 'ws-albums',
+      raw: albums({ chat: { session_id: 's1', message_id: 'm2' } }),
+      card: () => doc.createElement('article')
+    },
+    { win: null }
+  );
+  assert.equal(attach(first, doc), null);
+  assert.equal(first.querySelectorAll('[data-chat-control="learn_songs"]').length, 0);
+  assert.equal(attach(right, doc), null);
+  assert.equal(right.querySelectorAll('[data-chat-control="learn_songs"]').length, 0);
+});
+
+test('focus comes back by control identity, even when two controls share a label', () => {
+  resetFolderAgentChat();
+  const doc = stubDocument();
+  const transcript = transcriptFor(doc);
+  const factory = () => {
+    const root = doc.createElement('div');
+    ['a', 'b'].forEach(step => {
+      const card = doc.createElement('article');
+      card.dataset.chatStep = step;
+      const button = doc.createElement('button');
+      button.textContent = 'Not now';
+      button.dataset.chatControl = `dismiss_${step}`;
+      card.append(button);
+      root.append(card);
+    });
+    return root;
+  };
+  publishFolderAgentChat({ workspaceID: 'ws-albums', raw: albums(), card: factory }, { win: null });
+  attach(transcript, doc);
+  transcript.querySelector('[data-chat-control="dismiss_b"]').focus();
+  publishFolderAgentChat(
+    { workspaceID: 'ws-albums', raw: albums({ updated_at: 'later' }), card: factory },
+    { win: null }
+  );
+  attach(transcript, doc);
+  assert.equal(doc.activeElement.dataset.chatControl, 'dismiss_b');
+});
+
+test('after an answer focus follows to the next heading, or back to the control that failed; background redraws never move it', async () => {
+  // Answered: the question's buttons are gone, focus goes to the next card's heading.
+  const answered = harness(albums({ ...TICKET, songs_offer: offer() }), {
+    onPost: state => {
+      state.view = albums({ ...TICKET });
+      return okJSON({ folder_agent: state.view });
+    }
+  });
+  let mounted = await mountHarness(answered);
+  let transcript = transcriptFor(mounted.doc);
+  attach(transcript, mounted.doc);
+  const dismiss = transcript.querySelector('[data-chat-control="dismiss_songs"]');
+  dismiss.focus();
+  dismiss.click();
+  await until(() => folderAgentChat('ws-albums').raw.songs_offer === undefined);
+  mounted.doc.activeElement = null; // the pressed button went quiet and lost focus
+  attach(transcript, mounted.doc);
+  assert.equal(mounted.doc.activeElement.tagName, 'H4');
+  assert.equal(mounted.doc.activeElement.textContent, 'First ticket');
+
+  // Failed: the same control gets focus back.
+  const refused = harness(albums({ ...TICKET, songs_offer: offer() }), {
+    onPost: () => refuse(409, 'Not right now.')
+  });
+  mounted = await mountHarness(refused);
+  transcript = transcriptFor(mounted.doc);
+  attach(transcript, mounted.doc);
+  const learn = transcript.querySelector('[data-chat-control="learn_songs"]');
+  learn.focus();
+  learn.click();
+  await until(() => {
+    attach(transcript, mounted.doc);
+    return transcript.querySelector('[role="alert"]');
+  });
+  assert.equal(mounted.doc.activeElement.dataset.chatControl, 'learn_songs');
+
+  // Background: a poll redraws the card while the composer holds focus.
+  const live = harness(albums({ learning: reading('running', { done: 1 }) }));
+  mounted = await mountHarness(live);
+  transcript = transcriptFor(mounted.doc);
+  attach(transcript, mounted.doc);
+  const composer = mounted.doc.createElement('textarea');
+  composer.focus();
+  live.state.view = albums({ learning: reading('running', { done: 3 }) });
+  await until(() => folderAgentChat('ws-albums').raw.learning.done === 3);
+  attach(transcript, mounted.doc);
+  assert.equal(mounted.doc.activeElement, composer);
+  live.state.view = albums({ learning: ended() });
+  await until(() => folderAgentChat('ws-albums').raw.learning.status === 'done');
+});
+
+test('a status change is announced once from one live region, and the card a thread opens on is not news', async () => {
+  const line = text => reading('running', { done: 2, line: text });
+  const h = harness(albums({ learning: line('Learning Album-2… (2 of 5)') }));
+  const { doc } = await mountHarness(h);
+  const transcript = transcriptFor(doc);
+  attach(transcript, doc);
+  const live = transcript.querySelector('[data-folder-agent-chat-live]');
+  assert.equal(live.attributes.role, 'status');
+  assert.equal(live.textContent, '');
+  // The reading moves on: said once.
+  h.state.view = albums({
+    learning: reading('running', { done: 3, line: 'Learning Album-4… (4 of 5)' })
+  });
+  await until(() => folderAgentChat('ws-albums').raw.learning.done === 3);
+  attach(transcript, doc);
+  assert.equal(live.textContent, 'Learning Album-4… (4 of 5)');
+  // The same words redrawn (the record changed, the words did not): not said again.
+  live.textContent = 'sentinel';
+  h.state.view = albums({
+    learning: reading('running', { done: 4, line: 'Learning Album-4… (4 of 5)' })
+  });
+  await until(() => folderAgentChat('ws-albums').raw.learning.done === 4);
+  attach(transcript, doc);
+  assert.equal(live.textContent, 'sentinel');
+  // It ends: the result is said, and the region is the same node throughout.
+  h.state.view = albums({ ...TICKET, learning: reading('done', { line: 'Learned 5 songs.' }) });
+  await until(() => folderAgentChat('ws-albums').raw.learning.status === 'done');
+  attach(transcript, doc);
+  assert.equal(live.textContent, 'Learned 5 songs.');
+  assert.equal(transcript.querySelector('[data-folder-agent-chat-live]'), live);
+});
+
+test('rendering, restoring and redrawing any state never sends a setup, song, goal or ticket action', async () => {
+  const states = [
+    albums({ ...TICKET, songs_offer: offer() }),
+    albums({ ...TICKET, goal_offer: goal }),
+    albums({ ...TICKET }),
+    albums({ ...TICKET, learning: stoppedReading }),
+    albums({ ...TICKET, songs_offer: offer({ update: 'REAPER' }) }),
+    albums({ learning: stoppedReading }),
+    albums({ learning: reading('running') }),
+    albums({ learning: reading('summarizing') }),
+    albums({ ...TICKET, learning: reading('done'), goal_offer: goal }),
+    albums({})
+  ];
+  for (const raw of states) {
+    const h = harness(raw);
+    const { doc, drawn } = await mountHarness(h);
+    const transcript = transcriptFor(doc);
+    attach(transcript, doc);
+    attach(transcriptFor(doc), doc);
+    drawn()
+      .querySelectorAll(
+        '[data-chat-control="setup-details"], [data-chat-control="learning-details"]'
+      )
+      .forEach(toggle => toggle.click());
+    await new Promise(resolve => setTimeout(resolve, 15));
+    assert.equal(h.posts().length, 0, `a write was sent for ${JSON.stringify(Object.keys(raw))}`);
+    // End any reading so no poll outlives the test.
+    h.state.view = albums({ ...TICKET });
+    await new Promise(resolve => setTimeout(resolve, 15));
+  }
+});
+
+test('fields the host left out do not break the cards', () => {
+  const doc = stubDocument();
+  const draw = raw =>
+    renderFolderAgentChatThread(folderAgentReportView(albums(raw)), doc, {
+      fetchImpl: async () => okJSON([])
+    });
+  const bare = draw({ songs_offer: { ask: 'Want me to learn the 5 songs?', count: 5 } });
+  const question = cardOf(bare);
+  assert.equal(question.querySelector('h4').textContent, 'Learn the 5 songs?');
+  assert.deepEqual(labelsOf(question), ['Learn 5 songs', 'Not now']);
+  assert.equal(question.querySelector('.folder-agent-card__songs-reads'), null);
+  assert.equal(cardOf(draw({ goal_offer: { goal: 'A goal.' } })).dataset.chatStep, 'goal');
+  const quiet = cardOf(draw({ next_ticket: { title: 'Just a title' }, actions: [] }));
+  assert.equal(quiet.querySelector('h4').textContent, 'First ticket');
+  assert.deepEqual(labelsOf(quiet), []);
+  // An offer with no sentence is no offer at all; Look further is what is left.
+  assert.equal(cardOf(draw({ songs_offer: { count: 5 } })).dataset.chatStep, 'further');
+});
+
+test('focus goes to the card an answer revealed, not back up to a result the owner already read', async () => {
+  // The result card sits above the goal; using the goal reveals the ticket below.
+  const h = harness(albums({ ...TICKET, learning: reading('done'), goal_offer: goal }), {
+    onPost: state => {
+      state.view = albums({ ...TICKET, learning: reading('done') });
+      return okJSON({ folder_agent: state.view });
+    }
+  });
+  const { doc } = await mountHarness(h);
+  const transcript = transcriptFor(doc);
+  attach(transcript, doc);
+  const use = goalButton(transcript, 'use_goal');
+  use.focus();
+  use.click();
+  await until(() => folderAgentChat('ws-albums').raw.goal_offer === undefined);
+  doc.activeElement = null; // the pressed button went quiet and lost focus
+  attach(transcript, doc);
+  assert.equal(doc.activeElement.tagName, 'H4');
+  assert.equal(doc.activeElement.textContent, 'First ticket');
+  assert.equal(h.posts().length, 1);
+});
+
+test('a redraw while the owner is on a card heading keeps focus on that heading', async () => {
+  const h = harness(albums({ learning: reading('running', { done: 1 }) }));
+  const { doc } = await mountHarness(h);
+  const transcript = transcriptFor(doc);
+  attach(transcript, doc);
+  const heading = transcript.querySelector('[data-chat-target]');
+  heading.focus();
+  assert.equal(doc.activeElement.textContent, 'Learning your songs');
+  // The reading moves on: a poll replaces the card, and the heading with it.
+  h.state.view = albums({ learning: reading('running', { done: 3, line: 'Learning Album-4…' }) });
+  await until(() => folderAgentChat('ws-albums').raw.learning.done === 3);
+  attach(transcript, doc);
+  assert.notEqual(doc.activeElement, heading, 'the old heading was not replaced');
+  assert.equal(doc.activeElement.textContent, 'Learning your songs');
+  assert.equal(doc.activeElement.dataset.chatTarget, '');
+  h.state.view = albums({ learning: ended() });
+  await until(() => folderAgentChat('ws-albums').raw.learning.status === 'done');
 });

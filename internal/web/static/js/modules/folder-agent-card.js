@@ -2013,7 +2013,9 @@ function learningStopActions(doc, learning, onAction, homeRoute) {
 // learningSection is the reading of the songs as it runs and once it ended
 // (FR14): the host's line ("Learning <song>… (2 of 7)", then "Learned 7 songs"),
 // a progress bar while it runs, and the songs that cannot be read this way.
-function learningSection(doc, learning, onAction = null, homeRoute = '') {
+// announce:false leaves the line without its own role=status: the drawer says a
+// change once from one persistent live region instead (redrawn nodes are missed).
+function learningSection(doc, learning, onAction = null, homeRoute = '', { announce = true } = {}) {
   const section = el(doc, 'section', 'folder-agent-card__learning');
   section.dataset.learningStatus = learning.status;
   if (learning.reason) section.dataset.learningReason = learning.reason;
@@ -2023,7 +2025,7 @@ function learningSection(doc, learning, onAction = null, homeRoute = '') {
   if (learning.status === 'stopped' && learning.action) {
     section.append(learningStopActions(doc, learning, onAction, homeRoute));
   }
-  if (learning.status === 'running' || learning.status === 'summarizing') {
+  if (announce && (learning.status === 'running' || learning.status === 'summarizing')) {
     // The poll redraws this card; role=status announces the line as it changes.
     line.setAttribute('role', 'status');
   }
@@ -2068,7 +2070,9 @@ function learningSection(doc, learning, onAction = null, homeRoute = '') {
 // the place exists (folder-setup-ends-in-home FR17, FR18): the sentence, then
 // Use this goal, Edit and Not now. Edit turns the sentence into a one-line
 // input (max_runes characters) with Save and Cancel, in place; Escape cancels.
-function goalOfferSection(doc, offer, onAction) {
+// draft ({editing, text}) is the drawer's memory of an edit in progress, so an
+// incidental redraw brings back the owner's words in the field, not the offer.
+function goalOfferSection(doc, offer, onAction, draft = null) {
   const section = el(doc, 'section', 'folder-agent-card__goal-offer');
   section.setAttribute('aria-label', 'Suggested goal');
   // A goal the agent wrote after it learned the songs says so (FR17).
@@ -2094,6 +2098,7 @@ function goalOfferSection(doc, offer, onAction) {
     return b;
   };
   const showOffer = () => {
+    if (draft) draft.editing = false;
     const use = button('Use this goal', 'use_goal', true);
     use.addEventListener('click', () => onAction?.('use_goal', use, {}));
     const edit = button('Edit', 'edit_goal');
@@ -2104,12 +2109,23 @@ function goalOfferSection(doc, offer, onAction) {
     row.replaceChildren(use, edit, later);
     return use;
   };
-  function showEdit() {
+  function showEdit(from) {
+    // A redraw restoring an edit in progress must not take focus from wherever
+    // the owner is; only their own press of Edit moves it into the field.
+    const restoring = from === 'restore';
     const input = doc.createElement('input');
     input.type = 'text';
     input.className = 'folder-agent-card__goal-input';
     input.maxLength = offer.maxRunes;
-    input.value = offer.goal;
+    if (draft) {
+      if (!restoring) draft.text = offer.goal;
+      draft.editing = true;
+      input.value = draft.text;
+      input.addEventListener('input', () => {
+        draft.text = input.value;
+      });
+    } else input.value = offer.goal;
+    input.dataset.chatControl = 'goal-text';
     input.setAttribute('aria-label', 'Goal');
     const save = button('Save', 'use_goal', true);
     const cancel = button('Cancel', 'cancel_goal');
@@ -2128,9 +2144,10 @@ function goalOfferSection(doc, offer, onAction) {
     });
     section.replaceChildren(lead, input, row);
     row.replaceChildren(save, cancel);
-    input.focus?.();
+    if (!restoring) input.focus?.();
   }
-  showOffer();
+  if (draft?.editing) showEdit('restore');
+  else showOffer();
   return section;
 }
 
@@ -2926,8 +2943,16 @@ function chatStepCard(doc, step, label) {
 // The heading is where focus goes when the control that was pressed is gone.
 function chatHeading(doc, text) {
   const heading = el(doc, 'h4', 'folder-agent-card__chat-heading', text);
-  heading.tabIndex = -1;
+  markChatTarget(heading);
   return heading;
+}
+
+// markChatTarget makes an element the place focus lands when the control the
+// owner pressed is gone (the next heading or the card's first words).
+function markChatTarget(node) {
+  node.tabIndex = -1;
+  node.dataset.chatTarget = '';
+  return node;
 }
 
 function chatButton(doc, id, label, primary, onAction) {
@@ -2977,7 +3002,7 @@ function chatQuestionCard(doc, step, onAction) {
 function chatLearningCard(doc, step, onAction, home) {
   const card = chatStepCard(doc, 'learning', 'Learning the songs');
   card.append(chatHeading(doc, LEARNING_HEADINGS[step.learning.status] || 'What I learned'));
-  card.append(learningSection(doc, step.learning, onAction, home));
+  card.append(learningSection(doc, step.learning, onAction, home, { announce: false }));
   return card;
 }
 
@@ -3011,7 +3036,7 @@ function chatDetails(doc, notice, onAction, home, state) {
     if (open && !panel.children.length)
       panel.append(
         learning
-          ? learningSection(doc, notice.learning, onAction, home)
+          ? learningSection(doc, notice.learning, onAction, home, { announce: false })
           : songsOfferSection(doc, notice.offer, onAction)
       );
   };
@@ -3027,9 +3052,18 @@ function chatDetails(doc, notice, onAction, home, state) {
 }
 let chatNoticeSeq = 0;
 
-function chatGoalCard(doc, step, onAction) {
+function chatGoalCard(doc, step, onAction, state) {
   const card = chatStepCard(doc, 'goal', 'Suggested goal');
-  card.append(goalOfferSection(doc, step.offer, onAction));
+  // The owner's edit survives a redraw for as long as the same goal is offered.
+  let draft = null;
+  if (state) {
+    draft = state.goal;
+    if (!draft || draft.base !== step.offer.goal)
+      draft = state.goal = { base: step.offer.goal, editing: false, text: '' };
+  }
+  card.append(goalOfferSection(doc, step.offer, onAction, draft));
+  const lead = card.querySelector('.folder-agent-card__goal-lead');
+  if (lead) markChatTarget(lead);
   return card;
 }
 
@@ -3046,7 +3080,9 @@ function chatTicketCard(doc, step, onAction) {
     );
   } else {
     card.append(
-      el(doc, 'p', 'folder-agent-card__chat-line', 'I can look further into this folder.')
+      markChatTarget(
+        el(doc, 'p', 'folder-agent-card__chat-line', 'I can look further into this folder.')
+      )
     );
   }
   if (ticket.start || ticket.further) {
@@ -3080,7 +3116,7 @@ function chatStepElement(doc, step, { onAction, state }, home) {
       card = chatUpdateCard(doc, step, guarded);
       break;
     case 'goal':
-      card = chatGoalCard(doc, step, guarded);
+      card = chatGoalCard(doc, step, guarded, state);
       break;
     default:
       card = chatTicketCard(doc, step, guarded);
@@ -3105,9 +3141,10 @@ export function renderFolderAgentChatThread(
   const receipt = chatReceiptCard(doc, view, setup, { state, fetchImpl });
   stack.append(receipt);
   const home = view.setup?.receipt?.home?.route || '';
-  const cards = chatFollowUp(view).cards.map(step =>
-    chatStepElement(doc, step, { onAction, state }, home)
-  );
+  const steps = chatFollowUp(view).cards;
+  // A goal edit belongs to the goal on offer; once it is gone so is the draft.
+  if (state && !steps.some(step => step.kind === 'goal')) state.goal = null;
+  const cards = steps.map(step => chatStepElement(doc, step, { onAction, state }, home));
   cards.forEach(card => stack.append(card));
   if (error) {
     // The error stays with the decision it is about: the first card that asks
@@ -3117,6 +3154,39 @@ export function renderFolderAgentChatThread(
     const alert = el(doc, 'p', 'folder-agent-card__error', error);
     alert.setAttribute('role', 'alert');
     owner.append(alert);
+  }
+  // What a status change would say, for the drawer's one live region: the
+  // reading's own line, never a count the owner was told earlier.
+  stack.dataset.announce = steps.find(step => step.kind === 'learning')?.learning.line || '';
+  // After an explicit answer the pressed control may be gone: focus goes back to
+  // it if the answer failed and it is still there, else to the new card's heading.
+  // Only an answer sets this, so a background redraw never moves focus.
+  const focus = state?.focusAfter;
+  if (focus && state.pending !== true) {
+    state.focusAfter = null;
+    const again = focus.failed
+      ? cards
+          .flatMap(card => card.querySelectorAll('button'))
+          .find(
+            button =>
+              (button.dataset.chatControl === focus.action ||
+                button.dataset.folderAgentAction === focus.action) &&
+              !button.disabled
+          )
+      : null;
+    // The newest card is the one the answer revealed: a result the owner has
+    // already read can sit above it, and focus must not jump back up to that.
+    const target =
+      again ||
+      cards
+        .map(card => card.querySelector('[data-chat-target]'))
+        .filter(Boolean)
+        .at(-1) ||
+      cards
+        .map(card => card.querySelector('button'))
+        .filter(Boolean)
+        .at(-1);
+    if (target) target.dataset.chatFocus = '';
   }
   return stack;
 }
@@ -3662,7 +3732,13 @@ export async function mountWorkspaceFolderAgent(
   let latestRaw = raw;
   // What the owner opened in the drawer's cards, kept across the page's redraws,
   // and whether an answer is in flight (a redrawn card must not offer another).
-  const chatState = { messageID: '', open: new Set(), pending: false };
+  const chatState = {
+    messageID: '',
+    open: new Set(),
+    pending: false,
+    goal: null,
+    focusAfter: null
+  };
   let acting = false;
   // refreshRun asks for the run again a few times; null when it cannot be had.
   const refreshRun = async () => {
@@ -3673,7 +3749,20 @@ export async function mountWorkspaceFolderAgent(
     }
     return null;
   };
+  // A reply that arrives late (a poll that began before an answer, an answer
+  // for a report since replaced) must not draw over what is newer. Views are
+  // ordered by the record's own updated_at, which every write moves forward;
+  // an equal one still draws (the offer also depends on state outside the
+  // record). Another workspace's view is never drawn here.
+  const staleView = next => {
+    if (!next || !latestRaw || next === latestRaw) return false;
+    if (next.workspace_id && String(next.workspace_id) !== String(workspaceID)) return true;
+    const drawn = Date.parse(latestRaw.updated_at);
+    const incoming = Date.parse(next.updated_at);
+    return Number.isFinite(drawn) && Number.isFinite(incoming) && incoming < drawn;
+  };
   const draw = (current, error = '', opening = false) => {
+    if (staleView(current)) return;
     latestRaw = current;
     const view = folderAgentReportView(current);
     const onAction = async (action, button, extra) => {
@@ -3707,8 +3796,10 @@ export async function mountWorkspaceFolderAgent(
         chatState.pending && result.error
           ? `${result.error} Reload to see where this stands.`
           : result.error || '';
-      draw(next || current, error);
-      follow(next || current);
+      // The answer is explicit, so focus may follow it (see the thread renderer).
+      chatState.focusAfter = { action, failed: Boolean(result.error) };
+      draw(next || latestRaw, error);
+      follow(latestRaw);
     };
     // What the owner opened inside the drawer's cards belongs to one report: a
     // newer report starts closed again.
