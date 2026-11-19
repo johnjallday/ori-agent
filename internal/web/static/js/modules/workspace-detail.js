@@ -687,6 +687,19 @@ export class WorkspaceDetailPage {
     return presentation.markup(className, size) || '';
   }
 
+  // The assistant's greeting in the drawer on an HQ's first visit
+  // (personal-assistant-hq-greeting.js). The drawer asks and the page answers,
+  // the same way it asks for the Commander's face: it never reads the HQ's
+  // station state itself. null until the command view has what it needs.
+  hqGreetingView() {
+    return window.workspaceCommand?.hqGreetingView?.() ?? null;
+  }
+
+  // Runs one of the greeting's choices through the owner the suggestions use.
+  runHQGreetingChoice(action, trigger) {
+    return window.workspaceCommand?.runHQGreetingChoice?.(action, trigger) === true;
+  }
+
   // repaintCommanderFaces draws the Commander's face again in the balloon and
   // the chat drawer once something that decides it has arrived: the agent's
   // record or the character catalog.

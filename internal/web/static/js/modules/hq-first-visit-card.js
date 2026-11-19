@@ -76,6 +76,8 @@ export class HQFirstVisitCard {
     if (this.view().finishSilently) await this.finish();
     else if (this.owner.active) this.owner.render();
     this.paint();
+    // The missions are what the assistant's greeting waits for.
+    this.owner.notifyHQGreeting?.();
   }
 
   door() {
@@ -296,6 +298,8 @@ export class HQFirstVisitCard {
     } finally {
       this.busy = false;
       this.paint();
+      // Hide suggestions ends the greeting too.
+      this.owner.notifyHQGreeting?.();
     }
   }
 }

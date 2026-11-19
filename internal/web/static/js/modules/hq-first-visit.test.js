@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { firstVisitView, firstVisitResolved, FIRST_VISIT_MISSIONS } from './hq-first-visit.js';
+import {
+  firstVisitView,
+  firstVisitResolved,
+  hqGreetingView,
+  notesKind,
+  FIRST_VISIT_MISSIONS
+} from './hq-first-visit.js';
 
 const notes = { status: 'connected', source: { origin: 'created_by_ori' } };
 const missions = (note = 'open', brief = 'open', folder = 'open') =>
@@ -85,6 +91,115 @@ test('unavailable or personal vaults point to connection management, never a sec
   assert.equal(own.action, 'notes');
   assert.equal(own.hint, 'Your own vault is connected. Ori does not write there.');
   assert.equal(view({ notes: null }).steps[2].disabled, true);
+});
+
+test('notesKind names the Notes the suggestions and the tips both read', () => {
+  assert.equal(notesKind({ status: 'connected', source: { origin: 'created_by_ori' } }), 'created');
+  assert.equal(notesKind({ status: 'missing', source: { origin: 'created_by_ori' } }), 'unset');
+  assert.equal(notesKind({ source: { origin: 'connected' } }), 'own');
+  assert.equal(
+    notesKind({ source: {} }),
+    'own',
+    'a source that is not Ori-created is the own vault'
+  );
+  assert.equal(notesKind({ status: 'unset' }), 'unset');
+  assert.equal(notesKind(null), 'unset');
+  assert.equal(notesKind(undefined), 'unset');
+});
+
+const card = (label, stateWord) => ({ label, stateWord });
+const greeting = (options = {}) =>
+  hqGreetingView({
+    state: 'pending',
+    missions: missions(),
+    notes,
+    cards: [card('Watchtower', 'Ready'), card('Daily Brief', 'Ready'), card('Memory', 'Ready')],
+    folded: [card('Email', 'Not set up'), card('Calendar Ops', 'Not set up')],
+    ...options
+  });
+
+test('the greeting is nothing unless the visit is pending and its progress was read', () => {
+  for (const state of ['done', '', 'dismissed', undefined])
+    assert.deepEqual(greeting({ state }), { show: false }, String(state));
+  assert.deepEqual(greeting({ failed: true }), { show: false }, 'progress could not be read');
+  // Not known yet is not "nothing": the drawer waits instead of guessing.
+  assert.equal(greeting({ missions: null }), null);
+  assert.equal(greeting({ missions: 'x' }), null);
+  assert.equal(greeting({ notes: null }), null, 'it needs the Notes to name what runs');
+  assert.deepEqual(hqGreetingView(), { show: false });
+});
+
+test('the greeting is gone once all three suggestions are resolved', () => {
+  assert.deepEqual(greeting({ missions: missions('completed', 'completed', 'completed') }), {
+    show: false
+  });
+  assert.deepEqual(greeting({ missions: missions('skipped', 'completed', 'skipped') }), {
+    show: false
+  });
+  const some = greeting({ missions: missions('completed', 'open', 'open') });
+  assert.equal(some.show, true, 'two still open: still greeting');
+});
+
+test('the greeting names what runs and what is off, in page order, Notes first', () => {
+  const view = greeting();
+  assert.equal(view.show, true);
+  assert.deepEqual(view.running, ['Notes', 'Watchtower', 'Daily Brief', 'Memory']);
+  assert.deepEqual(view.off, ['Email', 'Calendar Ops']);
+  // The three existing suggestions, untouched: same titles and hints, same owners.
+  assert.deepEqual(
+    view.steps.map(step => [step.key, step.action, step.title]),
+    [
+      ['folder', 'folder', 'Explore Documents'],
+      ['brief', 'brief', 'Read your Daily Brief'],
+      ['note', 'note', 'Save an idea']
+    ]
+  );
+  assert.deepEqual(
+    view.steps,
+    firstVisitView({ state: 'pending', missions: missions(), notes }).steps
+  );
+});
+
+test('Notes runs for a folder Ori set up and for the own vault, and is off when unset', () => {
+  const kinds = [
+    [notes, 'running'],
+    [{ status: 'connected', source: { origin: 'obsidian_vault' } }, 'running'],
+    [{ status: 'missing', source: { origin: 'created_by_ori' } }, 'off'],
+    [{ status: 'unset' }, 'off']
+  ];
+  for (const [source, where] of kinds) {
+    const view = greeting({ notes: source });
+    assert.equal(view.running.includes('Notes'), where === 'running', JSON.stringify(source));
+    assert.equal(view.off.includes('Notes'), where === 'off', JSON.stringify(source));
+  }
+  assert.equal(
+    greeting({ notes: { status: 'unset' } }).off[0],
+    'Notes',
+    'Notes leads the off line'
+  );
+});
+
+test('a card that needs you runs; one still being checked, or in error, is in neither line', () => {
+  const view = greeting({
+    cards: [
+      card('Watchtower', 'Needs you'),
+      card('Daily Brief', 'Running'),
+      card('Memory', 'Checking'),
+      card('Goal', 'Error')
+    ],
+    folded: []
+  });
+  assert.deepEqual(view.running, ['Notes', 'Watchtower', 'Daily Brief']);
+  assert.deepEqual(view.off, []);
+});
+
+test('with nothing folded and nothing drawn the lines are empty, not invented', () => {
+  const view = greeting({ cards: [], folded: [], notes: { status: 'unset' } });
+  assert.deepEqual(view.running, []);
+  assert.deepEqual(view.off, ['Notes']);
+  const bare = hqGreetingView({ state: 'pending', missions: missions(), notes });
+  assert.deepEqual(bare.running, ['Notes']);
+  assert.deepEqual(bare.off, []);
 });
 
 test('brief and folder use canonical results, never the chooser or a browser completion flag', () => {

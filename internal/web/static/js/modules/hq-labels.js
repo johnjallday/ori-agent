@@ -110,6 +110,37 @@ export const HQ_LABELS = Object.freeze({
   firstNoteReceiptError:
     'Ori could not confirm the saved note. Retry the same save; your draft is still here.',
   firstVisitFinishError: 'Your suggestions could not be dismissed. Try again.',
+  // First-visit tips: one sentence per part, in the assistant's voice. A tip says
+  // what the part is, never its state ("All clear", "being prepared"): the card
+  // already shows that. The Email and Calendar sentences are for a part that is
+  // not set up; a connected one has nothing to explain here.
+  tipWatchtower: 'Watches your other workspaces and tells you when one needs you.',
+  tipDailyBrief: 'A short read of your day, on the schedule you chose.',
+  tipMemory: 'What agents here remember between conversations. You can read and edit every entry.',
+  tipNotesCreated:
+    'A folder you own. I write there, you edit, and I never read your own notes back.',
+  tipNotesOwn: 'Your own vault. I read it and never write there.',
+  tipNotesUnset: 'Off for now. Set it up and I keep what I learn in plain Markdown you own.',
+  tipEmail: 'Off for now. Set it up and your brief shows what is waiting on you.',
+  tipCalendar: "Off for now. Connect it and your brief prepares you for today's meetings.",
+  tipNeedsYou: 'Anything waiting on your answer or review lands here.',
+  tipFollowUps: 'Replies and promises to keep. I collect them so nothing slips.',
+  tipTickets: 'Work handed to an agent. Open one to run it or review it.',
+  tipMapHint: "Point at any part of the map and I'll tell you what it does.",
+  // The assistant's greeting in the drawer on a first visit (host-written, no
+  // model call). Line 2 and 4 name the parts that run and the parts that are off.
+  greetingTitle: 'Your HQ is ready.',
+  greetingRunningMany: '{names} are already running.',
+  greetingRunningOne: '{name} is already running.',
+  greetingPoint: "Point at one on the page and I'll tell you what it does.",
+  greetingOffMany: '{names} are off until you set them up.',
+  greetingOffOne: '{name} is off until you set it up.',
+  greetingAsk: 'Where would you like to start?',
+  greetingFooter: 'Or just ask me. These stay under Things to try.',
+  tipWhatIs: 'What is {part}?',
+  tipMapHintClose: 'Close',
+  tipMapHintCloseName: 'Close the hint',
+
   more: 'More',
   moreCount: 'and {count} more',
   stationsUnused: 'Not in use yet',

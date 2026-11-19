@@ -21,6 +21,7 @@ import {
   setupLearningView,
   SETUP_LEARNING_HEADING,
   secondBrainAnsweredLine,
+  secondBrainAskHeld,
   secondBrainAskView,
   secondBrainAskPinned,
   secondBrainChecklistView,
@@ -287,6 +288,70 @@ test('the first showing is recorded only when the card is really in front of the
   const record = sourceBetween('function maybeRecordPrompt()', '// placeWaitingResult');
   assert.match(record, /'\/prompted'/);
   assert.doesNotMatch(record, /'\/ask'|decide\(|\/disconnect/);
+});
+
+test('the question waits for a Personal HQ setup result and for the first-visit greeting', () => {
+  assert.equal(secondBrainAskHeld(), false);
+  assert.equal(secondBrainAskHeld({ hqResultActive: true }), true);
+  assert.equal(secondBrainAskHeld({ greetingHolds: true }), true);
+  assert.equal(secondBrainAskHeld({ hqResultActive: true, greetingHolds: true }), true);
+  assert.equal(secondBrainAskHeld({ hqResultActive: false, greetingHolds: false }), false);
+  // Only a real `true` holds it: nothing else a caller passes can hold the question.
+  assert.equal(secondBrainAskHeld({ greetingHolds: 'yes' }), false);
+  assert.equal(secondBrainAskHeld({ hqResultActive: 1 }), false);
+});
+
+test('while the greeting holds the question, nothing can record it as shown', () => {
+  // The automatic path to the question is one function, and it reads the hold
+  // after every await, so a question that is held never reaches phase "ask".
+  const load = sourceBetween('async function load()', 'function maybeRecordPrompt');
+  assert.match(load, /if \(showAskIfDue\(\)\) return;/);
+  assert.doesNotMatch(load, /state\.phase = 'ask'/, 'load no longer sets the phase itself');
+  const show = sourceBetween('function showAskIfDue()', 'async function load()');
+  assert.match(show, /secondBrainAskView\(state\.secondBrain, state\.available && !askHeld\(\)\)/);
+  assert.match(show, /state\.phase !== 'idle'/);
+  assert.match(show, /state\.focusNext = false/, 'a card that shows itself never takes focus');
+  assert.doesNotMatch(show, /setPhase\(/, 'setPhase would take the composer’s focus');
+  assert.doesNotMatch(show, /request\(|\/prompted/, 'recording is render’s job, once it is seen');
+  // The first showing is recorded from maybeRecordPrompt alone, and it needs phase "ask".
+  const posts = moduleSource.match(/'\/prompted'/g) || [];
+  assert.equal(posts.length, 1, 'one place records it');
+  // The only other way to phase "ask" is the person asking for it (openAsk).
+  const setters = moduleSource.match(/(?:state\.phase = 'ask'|setPhase\('ask'\))/g) || [];
+  assert.equal(setters.length, 2, 'showAskIfDue and openAsk, nothing else');
+});
+
+test('the greeting holding steps a shown question back, and letting go shows it without a reload', () => {
+  const listener = sourceBetween(
+    "'personal-assistant:hq-greeting'",
+    'state.personal = secondBrainRecipientPersonal('
+  );
+  assert.match(listener, /event\.detail\?\.holds === true/);
+  assert.match(listener, /state\.phase === 'ask' && !state\.busy/);
+  assert.match(
+    listener,
+    /setPhase\('idle', \{ focus: false \}\)/,
+    'it steps back without taking focus'
+  );
+  assert.match(listener, /refresh\(\)\.then\(\(\) => showAskIfDue\(\)\)/);
+  assert.doesNotMatch(
+    listener,
+    /load\(\)/,
+    'load() returns early while one runs and would drop the release'
+  );
+  assert.doesNotMatch(listener, /request\(|\/prompted|decide\(/);
+});
+
+test('the hold reads the greeting on every ask and keeps no copy of its state', () => {
+  const read = sourceBetween('function greetingHoldsAsk()', 'function askHeld()');
+  assert.match(read, /window\.PersonalAssistantHQGreeting\?\.holdsNotesQuestion\?\.\(\) === true/);
+  assert.doesNotMatch(
+    moduleSource,
+    /from '\.\/personal-assistant-hq-greeting\.js'/,
+    'no import between the two'
+  );
+  // Without the greeting (every other page) nothing holds.
+  assert.match(read, /catch \(_\) \{\s+return false;/);
 });
 
 test('switching recipient hides and restores the card without answering or taking focus', () => {
