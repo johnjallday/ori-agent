@@ -2067,10 +2067,14 @@
   border-color: var(--ws-wait-amber);
 }
 /* A visible ring in the mark's own amber, drawn INSIDE the box. Tiles abut and
-   the mark's top edge sits in the 5px between a tile and the text of the tile
-   above, so a ring that grew outward brushed that text (and the team avatar's
-   frame in dot mode); an inset ring adds nothing to the mark's footprint. */
-.ws-map-wait-mark:focus-visible {
+   the mark's top edge sits in the few px between a tile and the text of the
+   tile above, so a ring that grew outward brushed that text (and the team
+   avatar's frame in dot mode); an inset ring adds nothing to the mark's
+   footprint. Home paints every cockpit button's ring green and 2px outward
+   (`.home-cockpit button:focus-visible`, specificity 0,2,1), which beats a bare
+   class here, so this is scoped under the world layer (0,3,0): the same ring on
+   every map. */
+.ws-map-world .ws-map-wait-mark:focus-visible {
   outline: 2px solid var(--ws-wait-amber);
   outline-offset: -2px;
 }
@@ -2090,20 +2094,22 @@
   text-wrap: balance;
 }
 /* On a tile it takes the status flag's place (the flag is hidden, so the words
-   are not drawn twice). Its top edge is the flag's (tile y -4) and it hangs DOWN
-   over the building art, never up: tiles abut (the row pitch equals the tile's
-   height), so the tile above's name, type and meta text run to within 5px of
-   this tile's top, and the art (y 0 to 94) is the only part of a tile with no
-   text in it. Its right edge is x 118, just short of the team avatars that
-   stand at the corner (x 122 and on), and at most 80px wide keeps its left edge
-   at x 38, clear of the corner checkbox (x 20 to 35). It sits above its tile
-   (5) and an active one (7) and below a tile being dragged (9). The words
-   wrap onto up to three lines inside that width. */
+   are not drawn twice). It hangs DOWN over the building art from the tile's top
+   edge, never up: tiles abut (the row pitch equals the tile's height), so the
+   tile above's name, type and meta text run to within a few px of this tile's
+   top, and the art (y 0 to 94) is the only part of a tile with no text in it.
+   Its top edge is y -1: Home's tiles put the line box of that last text line
+   1.5px lower than a group page's, and a mark at y -4 touched it there. Its
+   right edge is x 118, just short of the team avatars that stand at the corner
+   (x 122 and on), and at most 80px wide keeps its left edge at x 38, clear of
+   the corner checkbox (x 20 to 35). It sits above its tile (5) and an active one
+   (7) and below a tile being dragged (9). The words wrap onto up to three lines
+   inside that width. */
 .ws-map-wait-mark.is-on-tile {
   position: absolute;
   z-index: 8;
   max-width: 80px;
-  margin: -4px 0 0 118px;
+  margin: -1px 0 0 118px;
   transform: translate(-100%, 0);
   transform-origin: 100% 0;
 }
@@ -2133,11 +2139,19 @@
   visibility: hidden;
 }
 /* In a district header it is one more item of the row, right after the tag and
-   the Commander's name. It shrinks and wraps before it pushes the controls off
-   the frame; in the narrow nested header the tag takes the first row, so the
-   mark leads the second, left of Open. */
+   the Commander's name. It never shrinks: a mark that was allowed to give way was
+   squeezed to a 16px sliver in a collapsed header (a minimum-size box), its words
+   wrapping one character per line and the header growing 115px. Instead a header
+   that holds a mark may wrap, so the mark takes its natural width on whatever
+   row it fits, or a row of its own at most as wide as the header; in the narrow
+   nested header the tag already takes the first row, so the mark leads the
+   second, left of Open. */
+.ws-map-district-header.has-wait-mark {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
 .ws-map-wait-mark.is-in-header {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   max-width: 100%;
   align-self: center;

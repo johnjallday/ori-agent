@@ -14326,6 +14326,8 @@ test('a collapsed group wears one mark that counts the waits it hides, and names
     out,
     /class="ws-map-district-tag"[^>]*aria-label="Ops group, 2 workspaces, 2 waiting"[\s\S]*?<\/button><button type="button" class="ws-map-wait-mark is-in-header" data-wait-mark="grp" data-wait-count="2" aria-label="2 waiting in Ops\. Expand group"><span class="ws-map-wait-dot" aria-hidden="true"><\/span><span class="ws-map-wait-words">2 waiting<\/span><\/button>/
   );
+  // The header may wrap while it holds the mark, so the mark is never squeezed.
+  assert.match(out, /class="ws-map-district-header has-wait-mark"/);
   // The hidden members draw nothing of their own; the outsider keeps its own.
   assert.doesNotMatch(out, /data-wait-mark="m1"|data-wait-mark="m2"/);
   assert.match(out, /data-wait-mark="outsider"/);
@@ -14400,10 +14402,13 @@ test('update puts a mark in place without a re-mount, keeps it while it still wa
 
 test('update also marks a collapsed group’s header, counts in place, and clears it (rules 2, 6)', async () => {
   const { map, container, doc, attach } = await mountedWaits({ collapsed: true });
-  const { district, tag } = waitDistrict('grp', doc);
+  const { district, header, tag } = waitDistrict('grp', doc);
   attach([district]);
+  assert.equal(header.classList.contains('has-wait-mark'), false);
 
   map.folderAgentWaits.update(container, { m1: waitOf(), m2: waitOf() });
+  // The header may wrap while it holds a mark, so the mark is never squeezed.
+  assert.equal(header.classList.contains('has-wait-mark'), true);
   const mark = tag.nextSibling;
   assert.equal(mark.getAttribute('data-wait-mark'), 'grp');
   assert.equal(mark.getAttribute('data-wait-count'), '2');
@@ -14421,6 +14426,7 @@ test('update also marks a collapsed group’s header, counts in place, and clear
   map.folderAgentWaits.update(container, {});
   assert.equal(tag.nextSibling, null);
   assert.equal(tag.getAttribute('aria-label'), 'Ops group, 2 workspaces');
+  assert.equal(header.classList.contains('has-wait-mark'), false, 'the header stops wrapping');
 });
 
 test('update answers only for the map that is mounted, and a later re-mount keeps the waits it was given (rule 6)', async () => {
@@ -14610,17 +14616,21 @@ test('the wait mark is quiet, visible in both themes and at every zoom, and neve
     /--ws-wait-amber:\s*var\(--ws-wait-mark,\s*var\(--ws-waiting,\s*#[0-9a-f]{6}\)\)/i
   );
   assert.match(rule('.ws-map-wait-dot'), /background:\s*var\(--ws-wait-amber\)/);
-  assert.match(
-    rule('.ws-map-wait-mark:focus-visible'),
-    /outline:\s*2px solid var\(--ws-wait-amber\)/
+  // The focus ring is scoped under the world layer on purpose: Home paints every
+  // cockpit button's ring green and 2px outward with `.home-cockpit
+  // button:focus-visible` (specificity 0,2,1), which beat the bare class (0,2,0)
+  // on Home (the demo saw a green ring there), so the mark's own ring needs more.
+  assert.match(cockpitCSS, /\.home-cockpit button:focus-visible/, 'the rule this must outrank');
+  assert.doesNotMatch(
+    mapCSS,
+    /^\.ws-map-wait-mark:focus-visible\s*[{,]/m,
+    'no bare-class ring: Home’s rule would win'
   );
+  const ring = rule('.ws-map-world .ws-map-wait-mark:focus-visible');
+  assert.match(ring, /outline:\s*2px solid var\(--ws-wait-amber\)/);
   // The ring is drawn INSIDE the mark: tiles abut, and a ring that grew outward
   // brushed the text of the tile above (the demo measured it at 3px).
-  assert.match(
-    rule('.ws-map-wait-mark:focus-visible'),
-    /outline-offset:\s*-2px/,
-    'an inset ring adds nothing to the mark’s footprint'
-  );
+  assert.match(ring, /outline-offset:\s*-2px/, 'an inset ring adds nothing to the footprint');
   assert.match(rule('.ws-map-wait-mark:hover'), /border-color:\s*var\(--ws-wait-amber\)/);
   const bareUses = mapCSS.match(/var\(--ws-wait-mark\)/g) || [];
   assert.equal(bareUses.length, 0, 'nothing reads --ws-wait-mark without a fallback');
@@ -14640,7 +14650,11 @@ test('the wait mark is quiet, visible in both themes and at every zoom, and neve
   assert.match(onTile, /position:\s*absolute/);
   assert.match(onTile, /max-width:\s*80px/);
   assert.match(onTile, /z-index:\s*8/);
-  assert.match(onTile, /margin:\s*-4px 0 0 118px/, 'top edge on the flag, right edge at x 118');
+  assert.match(
+    onTile,
+    /margin:\s*-1px 0 0 118px/,
+    'top edge at y -1 (clear of the text above, on Home too), right edge at x 118'
+  );
   assert.match(onTile, /transform:\s*translate\(-100%, 0\);/);
   assert.match(onTile, /transform-origin:\s*100% 0/, 'it grows down, never up');
   assert.doesNotMatch(onTile, /-100%\)/, 'no vertical shift above its anchor');
@@ -14676,10 +14690,16 @@ test('the wait mark is quiet, visible in both themes and at every zoom, and neve
     'the mark itself is never hidden when zoomed out'
   );
   assert.doesNotMatch(mapCSS, /is-activity-far[^{]*\.ws-map-wait-dot[^{]*\{[^}]*display:\s*none/);
-  // In a header it shrinks before it pushes the header controls off the frame.
+  // In a header it never shrinks: a mark that gave way was squeezed to a 16px
+  // sliver in a collapsed header, one character per line, growing the header by
+  // 115px (the demo saw it on Home). A header that holds a mark wraps instead, so
+  // the mark takes its natural width or a row of its own, at most as wide as the
+  // header.
   const inHeader = rule('.ws-map-wait-mark.is-in-header');
-  assert.match(inHeader, /flex:\s*0 1 auto/);
-  assert.match(inHeader, /min-width:\s*0/);
+  assert.match(inHeader, /flex:\s*0 0 auto/);
+  assert.doesNotMatch(inHeader, /flex:\s*0 1/);
+  assert.match(inHeader, /max-width:\s*100%/);
+  assert.match(rule('.ws-map-district-header.has-wait-mark'), /flex-wrap:\s*wrap/);
 });
 
 // A tree deeper than Home draws as districts (waiting-agents-on-parent-map, rule 1

@@ -1182,6 +1182,10 @@
     })[0];
     var tag = districtEl && districtEl.querySelector('.ws-map-district-tag');
     if (!tag || !record) return;
+    // The header wraps only while it holds a mark.
+    if (tag.parentNode && tag.parentNode.classList) {
+      tag.parentNode.classList.toggle('has-wait-mark', !!waitMarkText(placeId));
+    }
     syncWaitMark(container, tag, placeId, record.ws && record.ws.name, null);
     var label = districtTagLabel({
       ws: record.ws,
@@ -3839,6 +3843,9 @@
       'px">' +
       '<div class="ws-map-district-header' +
       (libraryBadges[ws.id] ? ' has-library-badge' : '') +
+      // A header that holds a wait mark may wrap onto a second row (the mark
+      // never shrinks to fit a narrow one).
+      (waitMarkText(ws.id) ? ' has-wait-mark' : '') +
       '">' +
       '<button type="button" class="ws-map-district-tag' +
       (isSel ? ' is-selected' : '') +
