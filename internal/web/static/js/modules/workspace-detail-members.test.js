@@ -313,6 +313,60 @@ test('an empty Home member list offers the setup sheet when projects wait (folde
   assert.equal(libraryEmptyStateFromSummary(null), null);
 });
 
+test('a linked workspace row names the agents that work in it, as text', () => {
+  const panel = new WorkspaceMembersPanel('g');
+  const song = panel.memberRowHtml(
+    {
+      id: 's1',
+      kind: 'workspace',
+      name: 'Album-1',
+      status: 'active',
+      folder_slug: 'album-1',
+      agents: ['REAPER Assistant'],
+      entry_agent_name: 'REAPER Assistant'
+    },
+    0,
+    1
+  );
+  assert.match(song, /<span class="group-member-agents">REAPER Assistant<\/span>/);
+  assert.match(song, /aria-label="Open Album-1\. Agent: REAPER Assistant"/);
+  assert.doesNotMatch(song, /<a |href=/, 'an agent name is never a link');
+
+  // A nested group names its own agents; the lead comes first.
+  const nested = panel.memberRowHtml(
+    {
+      id: 'albums',
+      kind: 'group',
+      name: 'Albums',
+      agents: ['Scout', 'Albums Manager'],
+      entry_agent_name: 'Albums Manager',
+      children: [{ id: 's1', agents: ['REAPER Assistant'] }]
+    },
+    0,
+    1
+  );
+  assert.match(nested, /<span class="group-member-agents">Albums Manager, Scout<\/span>/);
+  assert.match(nested, /aria-label="Open Albums\. Agents: Albums Manager, Scout"/);
+  assert.doesNotMatch(nested, /REAPER Assistant/, 'agents further down are not on this row');
+
+  // Five agents: the row counts the rest, the label says them all.
+  const crowded = panel.memberRowHtml(
+    { id: 'w', name: 'Studio', agents: ['A', 'B', 'C', 'D', 'E'] },
+    0,
+    1
+  );
+  assert.match(crowded, /<span class="group-member-agents">A, B, C \+2 more<\/span>/);
+  assert.match(crowded, /aria-label="Open Studio\. Agents: A, B, C, D, E"/);
+
+  const unstaffed = panel.memberRowHtml({ id: 'w', name: 'Empty', agents: [] }, 0, 1);
+  assert.doesNotMatch(unstaffed, /group-member-agents/);
+  assert.match(unstaffed, /aria-label="Open Empty"/);
+
+  const hostile = panel.memberRowHtml({ id: 'w', name: 'X', agents: ['<img src=x>"'] }, 0, 1);
+  assert.match(hostile, /&lt;img src=x&gt;&quot;/);
+  assert.doesNotMatch(hostile, /<img/);
+});
+
 // A text-only node for the Songs and assistants mount (innerHTML throws).
 function rosterMount() {
   const doc = {

@@ -1,4 +1,5 @@
 import { chromeText as text } from './workspace-command-chrome.js';
+import { linkedAgents, placesLine } from './linked-agents.js';
 
 // Presentation and delegation only. Agent, member, work and resource state stay
 // with WorkspaceCommandView and WorkspaceDetailPage's canonical owners.
@@ -51,7 +52,37 @@ export function compactTeamHTML(c) {
     (c.teamExpanded && !unknown
       ? '<section class="ws-cmd-garrison">' + c.renderGarrison() + '</section>'
       : c.roleRosterHostHTML()) +
+    linkedTeamHTML(c) +
     '</section>'
+  );
+}
+
+// A group's Team also names the agents that work in the workspaces inside it,
+// at any depth, once each. They are owned by those workspaces, so a row is
+// text with a face: no status, no controls, no link to the agent. The tree is
+// the members panel's, already read for Linked workspaces.
+export function linkedTeamHTML(c) {
+  if (!c.isGroupWorkspace()) return '';
+  const agents = linkedAgents(c.page?.membersPanel?.group);
+  if (!agents.length) return '';
+  return (
+    '<section class="ws-cmd-team-linked" aria-labelledby="ws-cmd-team-linked-title">' +
+    '<h4 id="ws-cmd-team-linked-title">In linked workspaces <span>' +
+    agents.length +
+    '</span></h4><ul class="ws-cmd-team-list">' +
+    agents
+      .map(
+        agent =>
+          '<li class="ws-cmd-team-agent is-linked">' +
+          c.agentCharacterHTML({ name: agent.name, tone: 'idle' }, 'roster') +
+          '<span><strong>' +
+          text(agent.name) +
+          '</strong><small>' +
+          text(placesLine(agent.places)) +
+          '</small></span></li>'
+      )
+      .join('') +
+    '</ul></section>'
   );
 }
 

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   compactTeamHTML,
+  linkedTeamHTML,
   linkedWorkspacesHTML,
   resourceAccessHTML,
   capabilityAccessHTML,
@@ -67,6 +68,76 @@ test('unavailable roster/resource data is not empty, and labels remain literal',
   c.agentGroups = () => ({ agents: [{ name: '<script>team</script>' }] });
   assert.match(compactTeamHTML(c), /&lt;script&gt;team&lt;\/script&gt;/);
   assert.doesNotMatch(compactTeamHTML(c), /<script>/);
+});
+
+test('a group’s Team names the agents of the workspaces inside it, once each, as text', () => {
+  const c = view();
+  const song = n => ({ id: 's' + n, name: 'Album-' + n, agents: ['REAPER Assistant'] });
+  const group = {
+    id: 'w',
+    kind: 'group',
+    agents: ['Agent 0'],
+    children: [
+      {
+        id: 'albums',
+        name: 'Albums',
+        kind: 'group',
+        agents: ['Albums Manager'],
+        children: [1, 2, 3].map(song)
+      }
+    ]
+  };
+  c.page.membersPanel = { group };
+  const faces = [];
+  c.agentCharacterHTML = agent => {
+    faces.push(agent);
+    return '<span aria-hidden="true">Face</span>';
+  };
+
+  // A leaf workspace shows nothing more, whatever the tree holds.
+  assert.equal(linkedTeamHTML(c), '');
+  assert.doesNotMatch(compactTeamHTML(c), /In linked workspaces/);
+
+  c.page.workspace.kind = 'group';
+  const html = compactTeamHTML(c);
+  assert.match(
+    html,
+    /<h4 id="ws-cmd-team-linked-title">In linked workspaces <span>2<\/span><\/h4>/
+  );
+  assert.match(html, /<strong>Albums Manager<\/strong><small>Albums<\/small>/);
+  assert.match(html, /<strong>REAPER Assistant<\/strong><small>3 workspaces<\/small>/);
+  assert.equal((html.match(/REAPER Assistant/g) || []).length, 1, 'a shared agent is listed once');
+  // The group's own team keeps its count and its controls; a linked agent has none.
+  assert.match(html, /Team <span>1<\/span>/);
+  assert.equal((html.match(/data-cmd-team-agent=/g) || []).length, 1);
+  const linked = linkedTeamHTML(c);
+  assert.doesNotMatch(linked, /<button|<a |href=|data-cmd-team-agent/);
+  assert.deepEqual(
+    faces.filter(agent => agent.tone).map(agent => agent.name),
+    ['Albums Manager', 'REAPER Assistant', 'Albums Manager', 'REAPER Assistant']
+  );
+
+  // It stays under the open controls, and survives an unreadable own roster.
+  c.teamExpanded = true;
+  assert.match(compactTeamHTML(c), /data-real-agent-controls[\s\S]*In linked workspaces/);
+  c.agentGroups = () => {
+    throw new Error('unavailable');
+  };
+  assert.match(compactTeamHTML(c), /not yet available[\s\S]*In linked workspaces/);
+
+  // No agents inside, or no tree yet: no heading at all.
+  c.page.membersPanel = { group: { id: 'w', children: [{ id: 'm', name: 'Empty' }] } };
+  assert.equal(linkedTeamHTML(c), '');
+  c.page.membersPanel = { group: null };
+  assert.equal(linkedTeamHTML(c), '');
+  delete c.page.membersPanel;
+  assert.equal(linkedTeamHTML(c), '');
+
+  c.page.membersPanel = {
+    group: { id: 'w', children: [{ id: 'm', name: '<b>M</b>', agents: ['<script>x</script>'] }] }
+  };
+  assert.match(linkedTeamHTML(c), /&lt;script&gt;x&lt;\/script&gt;<\/strong><small>&lt;b&gt;M/);
+  assert.doesNotMatch(linkedTeamHTML(c), /<script>|<b>/);
 });
 
 test('only a group gets linked-workspace controls, backed by the existing members host', () => {

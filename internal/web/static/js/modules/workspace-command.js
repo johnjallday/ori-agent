@@ -80,6 +80,8 @@ import {
   isGroupWorkspace as isGroupRow
 } from './workspace-map-snapshot.js';
 import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
+import { homeAgentPortraitHTML } from './home-agent-portrait.js';
+import { nodeAgentNames } from './linked-agents.js';
 import { renderInteractiveSongCard, songCardURL, songCardView } from './song-card.js';
 import {
   deleteWorkspace as deleteWorkspaceAction,
@@ -14117,7 +14119,65 @@ export class WorkspaceCommandView {
       JSON.stringify(this.libraryEmptyState || null) +
       // A linked song's facts are drawn on its tile's meta line by the mount.
       '::' +
-      JSON.stringify(this.detachmentSongFacts || {})
+      JSON.stringify(this.detachmentSongFacts || {}) +
+      // So are its agents' faces, which arrive after the tree.
+      '::' +
+      this.detachmentFacesSignature(scoped)
+    );
+  }
+
+  /**
+   * A member building wears its agents' faces, as on Home's map. The face is
+   * the agent's saved appearance from the page's agent catalog, drawn by the
+   * renderer Home uses; until the catalog answers the slot stays empty rather
+   * than showing a face that is not the agent's. Never a link: the agents are
+   * the member's own.
+   */
+  memberAgentPortraitHTML(name, isCommander, options = {}) {
+    const page = this.page || {};
+    const record = typeof page.getAgentProfile === 'function' ? page.getAgentProfile(name) : null;
+    return homeAgentPortraitHTML(
+      name,
+      record || undefined,
+      !page.agentCatalogLoaded,
+      isCommander,
+      globalThis.window,
+      { className: options.className }
+    );
+  }
+
+  /**
+   * What decides those faces, as text: a change re-mounts the map once (the
+   * faces are drawn by the mount). Built from the saved appearances, never
+   * from markup, which need not be the same twice.
+   */
+  detachmentFacesSignature(rows) {
+    const page = this.page || {};
+    const win = globalThis.window;
+    const names = new Set();
+    (Array.isArray(rows) ? rows : []).forEach(row =>
+      nodeAgentNames(row).forEach(name => names.add(name))
+    );
+    if (!names.size) return '';
+    const profile = name =>
+      typeof page.getAgentProfile === 'function' ? page.getAgentProfile(name) : null;
+    return (
+      (page.agentCatalogLoaded ? 'c' : '') +
+      (win?.RoleCatalog?.isLoaded?.() ? 'r' : '') +
+      '|' +
+      [...names]
+        .sort()
+        .map(name => {
+          const appearance = profile(name)?.appearance || null;
+          const character = String(appearance?.character?.catalog_id || '');
+          return (
+            name +
+            ':' +
+            JSON.stringify(appearance) +
+            (character && win?.CharacterCatalog?.get?.(character) ? ':k' : '')
+          );
+        })
+        .join('|')
     );
   }
 
@@ -14498,6 +14558,9 @@ export class WorkspaceCommandView {
       // A linked song's tempo · length on its tile, as on Home's map (song-card
       // PRD FR10), and its card in the dock when selected (FR9).
       songFacts: this.detachmentSongFacts || {},
+      // Each member building wears its agents' faces, as on Home's map.
+      agentPortraitHTML: (name, isCommander, options) =>
+        this.memberAgentPortraitHTML(name, isCommander, options),
       onSelect: (id, row) => this.selectDetachmentMember(id, row),
       onSetupProjects: (groupId, { element } = {}) => this.openLibrarySetupSheet(element),
       // The combined surface's overlays cover the top band and the left
