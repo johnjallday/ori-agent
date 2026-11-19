@@ -153,11 +153,18 @@ export function memberCommanders({
     if (shown !== entry) return;
     entry.error = result?.error || '';
     const next = result?.view || entry.raw;
+    // The pressed button was disabled, which drops focus off it, but the balloon
+    // still remembers focus was inside its card; it is false only when the owner
+    // moved focus elsewhere meanwhile.
+    const inside = entry.adapter.balloon.focusInside === true;
     if (!entry.error && !memberWaits([next])[entry.id]) {
-      close(entry.id, { returnFocus: entry.adapter.balloon.focusInside === true });
+      close(entry.id, { returnFocus: inside });
       return;
     }
     present(entry, next);
+    // Following to the next question replaces the card the owner was in, so focus
+    // goes into the new one instead of falling to the page.
+    if (inside && entry.adapter.balloon.expanded) entry.adapter.balloon.focusFirst();
   };
 
   return {
@@ -203,6 +210,13 @@ export function memberCommanders({
       };
       shown = entry;
       present(entry, raw);
+      // present() attaches the balloon BEFORE it updates it, and a balloon that
+      // was dismissed earlier is kept (removed) and ignores attach until update()
+      // brings it back. So a line shown again after the map was re-mounted (a
+      // collapse, a layout settle, a refresh) would still hang in the OLD canvas:
+      // no line, nothing to focus, until the next mount event. Attach again, now
+      // that it is live, so it lands in the map that is on the page.
+      adapter.attach();
       adapter.balloon.focusLine();
       syncMarks();
       return true;

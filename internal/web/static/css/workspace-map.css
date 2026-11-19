@@ -2139,21 +2139,23 @@
   visibility: hidden;
 }
 /* In a district header it is one more item of the row, right after the tag and
-   the Commander's name. It never shrinks: a mark that was allowed to give way was
-   squeezed to a 16px sliver in a collapsed header (a minimum-size box), its words
-   wrapping one character per line and the header growing 115px. Instead a header
-   that holds a mark may wrap, so the mark takes its natural width on whatever
-   row it fits, or a row of its own at most as wide as the header; in the narrow
-   nested header the tag already takes the first row, so the mark leads the
-   second, left of Open. */
+   the Commander's name. A mark with no floor on its width was squeezed to a 16px
+   sliver in a collapsed header, its words wrapping one character per line and the
+   header growing 115px; so it has one: 74px, enough for the word "question" and
+   the dot. A header that holds a mark may wrap. Line breaking uses the item's
+   BASIS, so a basis of 74px lets the mark share a row with the header's other
+   controls (Open) in a narrow header, where its natural 126px put Open on a third
+   row and made the header 114px tall over the library badge below it; it then
+   grows to fill the row, up to its natural width. In the narrow nested header the
+   tag already takes the first row, so the mark leads the second, left of Open. */
 .ws-map-district-header.has-wait-mark {
   flex-wrap: wrap;
   row-gap: 4px;
 }
 .ws-map-wait-mark.is-in-header {
-  flex: 0 0 auto;
-  min-width: 0;
-  max-width: 100%;
+  flex: 1 1 74px;
+  min-width: 74px;
+  max-width: max-content;
   align-self: center;
 }
 .ws-map-tile-crest {

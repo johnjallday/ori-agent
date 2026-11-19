@@ -433,3 +433,76 @@ test('Home’s map is served by the same balloon through its own root, showing c
   assert.equal(p.commanders.shownId(), '');
   assert.equal(p.doc.activeElement, mark);
 });
+
+// The demo found it on Home: open the line, dismiss it, collapse the group (the map
+// is re-mounted), press the mark: no line appeared and nothing took focus, until the
+// next mount event. A dismissed balloon is kept, ignores attach() while it is
+// removed, and the presenter attaches BEFORE it updates, so the second life began in
+// the old, detached canvas.
+test('a line shown again after the map was re-mounted lands in the map that is on the page', () => {
+  const p = page();
+  p.addTile('m1');
+  p.addMark('m1');
+  const state = stateOf(waiting('m1'));
+  assert.equal(p.commanders.show(detail('m1'), state), true);
+  const oldRoot = p.balloonOf('m1').root;
+  assert.ok(oldRoot);
+  // Dismissed (the balloon is kept, as removed).
+  p.balloonOf('m1').nodes.line.dispatch('keydown', { key: 'Escape' });
+  assert.equal(p.commanders.shownId(), '');
+  assert.equal(p.balloonOf('m1').content, null);
+
+  // The map is re-mounted: a new canvas replaces the old one, with the same places.
+  const fresh = p.doc.createElement('div');
+  fresh.rect = { left: 0, top: 0, width: 1000, height: 700 };
+  fresh.querySelector = oldRoot.querySelector;
+  p.doc.body.append(fresh);
+  oldRoot.remove();
+  p.doc.querySelector = selector =>
+    selector === '.ws-cmd-detachment-host .ws-map-canvas' ? fresh : null;
+
+  assert.equal(p.commanders.show(detail('m1'), state), true);
+  const balloon = p.balloonOf('m1');
+  assert.equal(balloon.root, fresh, 'the balloon hangs in the canvas that is on the page');
+  assert.equal(balloon.nodes.line.parentElement.parentElement, fresh, 'its line is in that canvas');
+  assert.equal(p.doc.activeElement, balloon.nodes.line, 'and has the focus');
+  assert.equal(balloon.nodes.line.hidden, false);
+});
+
+test('following to the next question keeps focus in the card the owner was in, and leaves it alone otherwise', async () => {
+  const p = page();
+  p.addTile('m1');
+  const mark = p.addMark('m1');
+  const outside = p.addMark('other');
+  const next = () =>
+    waiting('m1', { songs_offer: undefined, goal_offer: { goal: 'Finish the album' } });
+
+  // Focus is inside the card when the answer is pressed: the card is replaced by
+  // the next question's, so focus must land in the new card, not fall to the page.
+  p.commanders.show(detail('m1'), stateOf(waiting('m1')));
+  let balloon = p.balloonOf('m1');
+  balloon.expand();
+  balloon.focusFirst();
+  assert.ok(balloon.nodes.box.contains(p.doc.activeElement), 'focus starts inside the card');
+  p.result.value = { view: next() };
+  await p.cards.at(-1).options.onAction('learn_songs', null, {});
+  assert.equal(p.commanders.shownId(), 'm1', 'it follows: the goal is the next question');
+  assert.match(balloon.nodes.lineText.textContent, /suggests a goal/);
+  assert.ok(
+    balloon.nodes.box.contains(p.doc.activeElement),
+    'focus went into the next card, not to the page'
+  );
+
+  // Focus was moved elsewhere while the request ran: it is not pulled back.
+  p.commanders.closeAll();
+  p.commanders.show(detail('m1'), stateOf(waiting('m1')));
+  balloon = p.balloonOf('m1');
+  balloon.expand();
+  balloon.focusFirst();
+  outside.focus();
+  p.result.value = { view: next() };
+  await p.cards.at(-1).options.onAction('learn_songs', null, {});
+  assert.equal(p.commanders.shownId(), 'm1');
+  assert.equal(p.doc.activeElement, outside, 'focus stayed where the owner put it');
+  assert.ok(mark);
+});

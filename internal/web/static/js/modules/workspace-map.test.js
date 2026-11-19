@@ -14690,15 +14690,18 @@ test('the wait mark is quiet, visible in both themes and at every zoom, and neve
     'the mark itself is never hidden when zoomed out'
   );
   assert.doesNotMatch(mapCSS, /is-activity-far[^{]*\.ws-map-wait-dot[^{]*\{[^}]*display:\s*none/);
-  // In a header it never shrinks: a mark that gave way was squeezed to a 16px
-  // sliver in a collapsed header, one character per line, growing the header by
-  // 115px (the demo saw it on Home). A header that holds a mark wraps instead, so
-  // the mark takes its natural width or a row of its own, at most as wide as the
-  // header.
+  // In a header it has a FLOOR on its width: a mark with none was squeezed to a
+  // 16px sliver in a collapsed header, one character per line, growing the header
+  // by 115px (the demo saw it on Home). The floor (74px, the word "question" and
+  // the dot) keeps that from happening, and a flex BASIS of the same width (line
+  // breaking uses the basis) lets the mark share a row with Open in a narrow header
+  // instead of pushing Open onto a third row over the library badge (the real
+  // Music district: header 114px tall); it then grows to its natural width at most.
   const inHeader = rule('.ws-map-wait-mark.is-in-header');
-  assert.match(inHeader, /flex:\s*0 0 auto/);
-  assert.doesNotMatch(inHeader, /flex:\s*0 1/);
-  assert.match(inHeader, /max-width:\s*100%/);
+  assert.match(inHeader, /flex:\s*1 1 74px/);
+  assert.match(inHeader, /min-width:\s*74px/, 'a floor, so never a sliver');
+  assert.match(inHeader, /max-width:\s*max-content/, 'never wider than its own words');
+  assert.ok(Number(/min-width:\s*(\d+)px/.exec(inHeader)[1]) >= 70);
   assert.match(rule('.ws-map-district-header.has-wait-mark'), /flex-wrap:\s*wrap/);
 });
 
