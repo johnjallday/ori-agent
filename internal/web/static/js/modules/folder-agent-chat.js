@@ -117,7 +117,8 @@ function showLead(row, lead) {
 }
 
 // publishFolderAgentChat records a workspace's latest report and its card
-// factory (card(compact) → Element), then tells the drawer.
+// factory (card(compact, {presentation}) → Element), then tells the drawer. The
+// drawer asks for presentation 'chat'; the Map's balloon asks for compact only.
 export function publishFolderAgentChat(
   { workspaceID, raw, card, error = '' },
   { win = globalThis.window } = {}
@@ -242,7 +243,7 @@ export function attachFolderAgentChatCard(
       const active = doc?.activeElement;
       const hadFocus = Boolean(active && host.contains?.(active));
       const label = hadFocus ? active.textContent : '';
-      host.replaceChildren(entry.card(true));
+      host.replaceChildren(entry.card(true, { presentation: 'chat' }));
       host.dataset.signature = entry.signature;
       if (hadFocus) {
         const again = Array.from(host.querySelectorAll?.('button') || []).find(

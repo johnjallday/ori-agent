@@ -6,6 +6,7 @@
 
 import { renderHireDraftEditor } from './folder-agent-hire-editor.js';
 import { publishFolderAgentChat } from './folder-agent-chat.js';
+import { chatDestination, chatPlacementLine, chatSetupOf } from './folder-agent-chat-flow.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 
 export const FOLDER_AGENT_ENDPOINT = '/api/personal-assistant/folder-agent';
@@ -176,6 +177,8 @@ export function folderAgentReportView(view) {
     projectHolders: view.project_holders || null,
     rootPolicy: String(view.root_policy || ''),
     policyNote: String(view.policy_note || ''),
+    // The setup is done but filing was not allowed yet: one step left.
+    filingPermissionRequired: Boolean(view.filing_permission_required),
     exploreFolder: Boolean(view.explore_folder),
     tools: [],
     toolsSentence: String(view.tools_sentence || ''),
@@ -2833,6 +2836,143 @@ export function renderFolderAgentReport(
   return card;
 }
 
+// The Commander's drawer draws a completed music setup as separate cards under
+// the report's message: a short receipt, then the follow-up. The Map's balloon
+// asks for the same report with compact:true, so the drawer asks for this
+// presentation by name (card(true, {presentation: 'chat'})). Any report the
+// view cannot show as a completed music setup gets null here and keeps the
+// single card.
+function chatCard(doc, part, label) {
+  const card = el(
+    doc,
+    'article',
+    `folder-agent-card folder-agent-card--chat folder-agent-card--chat-${part}`
+  );
+  card.dataset.folderAgentChatPart = part;
+  card.setAttribute('aria-label', label);
+  return card;
+}
+
+// chatReceiptCard is the compact receipt: where the folder was placed, the way
+// to open that place, anything still needing attention, and the rest of what
+// the run made behind one disclosure. Every word is the host's or built from
+// its receipt; nothing is claimed that the receipt did not report.
+function chatReceiptCard(doc, view, setup, { state, fetchImpl }) {
+  const card = chatCard(doc, 'receipt', 'Setup receipt');
+  card.dataset.workspaceId = view.workspaceID;
+  card.append(el(doc, 'p', 'folder-agent-card__chat-line', chatPlacementLine(view, setup)));
+  if (view.filingPermissionRequired) {
+    card.append(el(doc, 'p', 'folder-agent-card__degraded', 'One step left: allow filing.'));
+  }
+  const destination = chatDestination(view);
+  if (destination) {
+    const open = el(doc, 'a', 'folder-agent-card__open', `Open ${destination.name || 'it'}`);
+    open.href = destination.route;
+    card.append(open);
+  }
+  const rows = folderAgentReceiptRows(view);
+  if (!rows.length) return card;
+  const panelID = `folder-agent-chat-details-${String(view.workspaceID).replace(/[^\w-]/g, '_')}`;
+  const toggle = el(
+    doc,
+    'button',
+    'btn btn-sm folder-agent-card__secondary folder-agent-card__details-toggle',
+    'View setup details'
+  );
+  toggle.type = 'button';
+  toggle.dataset.chatControl = 'setup-details';
+  toggle.setAttribute('aria-controls', panelID);
+  const panel = el(doc, 'div', 'folder-agent-card__chat-details');
+  panel.id = panelID;
+  // The agents' faces come from a read of the agent list; it is made only once
+  // the owner opens the details.
+  let recordsReady = null;
+  const agentRecords = () => (recordsReady ||= fetchAgentRecords(fetchImpl));
+  const show = open => {
+    toggle.setAttribute('aria-expanded', String(open));
+    panel.hidden = !open;
+    if (open && !panel.children.length) panel.append(renderReceipt(doc, rows, view, agentRecords));
+  };
+  show(state?.open?.has('setup-details') === true);
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    if (open) state?.open?.add('setup-details');
+    else state?.open?.delete('setup-details');
+    show(open);
+  });
+  card.append(toggle, panel);
+  return card;
+}
+
+// chatFollowUpCard is the card under the receipt. It carries the sections the
+// report shows today until the sequenced follow-ups replace them.
+function chatFollowUpCard(doc, view, { onAction, error }) {
+  const card = chatCard(doc, 'follow-up', 'Next step');
+  const home = view.setup?.receipt?.home?.route || '';
+  if (view.learning) card.append(learningSection(doc, view.learning, onAction, home));
+  if (view.songsOffer) card.append(songsOfferSection(doc, view.songsOffer, onAction));
+  if (view.goalOffer) card.append(goalOfferSection(doc, view.goalOffer, onAction));
+  if (view.nextTicket) {
+    card.append(
+      el(
+        doc,
+        'p',
+        'folder-agent-card__next-ticket',
+        view.nextTicket.started
+          ? `Started: ${view.nextTicket.title}`
+          : `First ticket: ${view.nextTicket.title}`
+      )
+    );
+  }
+  const answers = view.actions.filter(
+    action => action.id === 'start_next' || action.id === 'look_further'
+  );
+  if (answers.length) {
+    const row = el(doc, 'div', 'folder-agent-card__actions');
+    answers.forEach(action => {
+      const button = el(
+        doc,
+        'button',
+        action.id === 'start_next'
+          ? 'btn btn-primary btn-sm'
+          : 'btn btn-sm folder-agent-card__secondary',
+        action.label
+      );
+      button.type = 'button';
+      button.dataset.folderAgentAction = action.id;
+      button.addEventListener('click', () => onAction?.(action.id, button));
+      row.append(button);
+    });
+    card.append(row);
+  }
+  if (error) {
+    const alert = el(doc, 'p', 'folder-agent-card__error', error);
+    alert.setAttribute('role', 'alert');
+    card.append(alert);
+  }
+  return card.children.length ? card : null;
+}
+
+export function renderFolderAgentChatThread(
+  view,
+  doc = document,
+  { onAction, error = '', fetchImpl = globalThis.fetch, state = null } = {}
+) {
+  const setup = chatSetupOf(view);
+  if (!setup) return null;
+  const stack = el(doc, 'div', 'folder-agent-chat-stack');
+  const receipt = chatReceiptCard(doc, view, setup, { state, fetchImpl });
+  stack.append(receipt);
+  const followUp = chatFollowUpCard(doc, view, { onAction, error });
+  if (followUp) stack.append(followUp);
+  else if (error) {
+    const alert = el(doc, 'p', 'folder-agent-card__error', error);
+    alert.setAttribute('role', 'alert');
+    receipt.append(alert);
+  }
+  return stack;
+}
+
 async function readJSON(response) {
   try {
     return await response.json();
@@ -3372,6 +3512,8 @@ export async function mountWorkspaceFolderAgent(
     }, pollMs);
   };
   let latestRaw = raw;
+  // What the owner opened in the drawer's cards, kept across the page's redraws.
+  const chatState = { messageID: '', open: new Set() };
   const draw = (current, error = '', opening = false) => {
     latestRaw = current;
     const view = folderAgentReportView(current);
@@ -3383,10 +3525,27 @@ export async function mountWorkspaceFolderAgent(
       draw(result.view || current, result.error || '');
       follow(result.view || current);
     };
-    const card = compact =>
+    // What the owner opened inside the drawer's cards belongs to one report: a
+    // newer report starts closed again.
+    const messageID = String(current?.chat?.message_id || '');
+    if (messageID !== chatState.messageID) {
+      chatState.messageID = messageID;
+      chatState.open.clear();
+    }
+    // The drawer asks for the chat presentation by name; the Map's balloon and
+    // the page ask for the one card, which is also what the drawer gets for a
+    // report that is not a completed music setup.
+    const card = (compact, { presentation } = {}) =>
+      (presentation === 'chat' &&
+        renderFolderAgentChatThread(view, doc, {
+          error,
+          onAction,
+          fetchImpl,
+          state: chatState
+        })) ||
       renderFolderAgentReport(view, doc, { error, opening, onAction, compact });
-    // The drawer draws the same card under the report's message in the
-    // Commander's conversation (workspace chat sync).
+    // The drawer draws the same report under its message in the Commander's
+    // conversation (workspace chat sync).
     publishFolderAgentChat({ workspaceID: view.workspaceID, raw: current, card, error });
     host.hidden = false;
     // A presenter (the Map tab's Commander) may draw the card in its balloon

@@ -4899,6 +4899,73 @@ button.folder-agent-card__hire-face:focus-visible {
   margin: 0;
 }
 
+/* A completed music setup in the drawer: the receipt and the follow-up are
+   separate cards in one stack, so the receipt reads as done and the follow-up
+   as the one thing to answer. Scoped to the chat presentation; the Map's
+   balloon keeps its single compact card. */
+.folder-agent-chat-stack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.folder-agent-card--chat {
+  gap: 8px;
+  padding: 10px 12px 12px;
+}
+
+/* The sections were drawn to sit under other content in one card, with a rule
+   above them. In their own card the first one is the card's top: no rule. */
+.folder-agent-card--chat > section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.folder-agent-card__chat-line {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* The disclosure is a quiet text button: it must never read as an answer. */
+.folder-agent-card__details-toggle {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.folder-agent-card__details-toggle::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 120ms ease-out;
+}
+
+.folder-agent-card__details-toggle[aria-expanded="true"]::after {
+  transform: rotate(225deg);
+}
+
+.folder-agent-card__chat-details {
+  min-width: 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--hc-line, var(--cozy-line));
+}
+
+.folder-agent-card__chat-details[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folder-agent-card__details-toggle::after {
+    transition: none;
+  }
+}
+
 .folder-agent-card--line[data-folder-agent-chat-line] .folder-agent-card__line-action {
   white-space: nowrap;
 }
