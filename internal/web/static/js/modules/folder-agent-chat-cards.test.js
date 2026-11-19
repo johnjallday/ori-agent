@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   chatAppRoute,
@@ -1247,6 +1248,17 @@ test('focus goes to the card an answer revealed, not back up to a result the own
   assert.equal(doc.activeElement.tagName, 'H4');
   assert.equal(doc.activeElement.textContent, 'First ticket');
   assert.equal(h.posts().length, 1);
+});
+
+test('the live region is anchored so a tall thread cannot stretch the drawer panel (CSS contract)', () => {
+  const css = readFileSync(new URL('../../css/home-command.css', import.meta.url), 'utf8');
+  const rule = css.match(/\.folder-agent-chat-live\s*\{([^}]*)\}/)?.[1] || '';
+  assert.match(rule, /position:\s*absolute/);
+  // Without top and left it sits at its static position, the bottom of the thread,
+  // inside an overflow-hidden panel, and scrolls the drawer's header out of view
+  // (seen at a 504 px tab with a receipt, a result and a ticket card).
+  assert.match(rule, /top:\s*0/);
+  assert.match(rule, /left:\s*0/);
 });
 
 test('a redraw while the owner is on a card heading keeps focus on that heading', async () => {

@@ -4943,9 +4943,14 @@ button.folder-agent-card__hire-face:focus-visible {
 }
 
 /* The one live region of a report in the drawer: said by screen readers, seen
-   by no one. It is never replaced, so a change in it is announced once. */
+   by no one. It is never replaced, so a change in it is announced once. It is
+   anchored to the top-left of the (overflow-hidden) panel: without top and left
+   it sits at its static position, the bottom of a tall thread, and stretches the
+   panel's scrollable area so the header is scrolled out of view. */
 .folder-agent-chat-live {
   position: absolute;
+  top: 0;
+  left: 0;
   width: 1px;
   height: 1px;
   margin: -1px;
