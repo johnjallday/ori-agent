@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -20,8 +21,10 @@ type personalAssistantSupportClassifier struct {
 	provider userprofile.UserProvider
 }
 
+// classify labels the Journal agent an older HQ still carries. New HQs have no
+// Journal, so this only ever matches a pre-retirement one.
 func (c personalAssistantSupportClassifier) classify(ctx context.Context, name string, refs []workspace.WorkspaceRef) string {
-	if c.reader == nil || !strings.EqualFold(strings.TrimSpace(name), "Journal") {
+	if c.reader == nil || !strings.EqualFold(strings.TrimSpace(name), personalhq.LegacyJournalAgentName) {
 		return ""
 	}
 	userID := userprofile.LocalUserID

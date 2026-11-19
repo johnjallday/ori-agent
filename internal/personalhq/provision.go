@@ -54,17 +54,26 @@ type SpecialistRole struct {
 }
 
 // V1Roster is the operational Personal HQ specialist roster, in template
-// declaration order (first is the entry agent). The Inbox specialist moved out
-// to the dedicated Email Ops workspace (Mail spin-off), so it is no longer part
-// of the HQ roster: the upgrade planner must not offer to add it back, and an
-// existing HQ's own Inbox agent is preserved as a user-owned non-roster agent
-// (upgrades only add, never remove). The mailbox-access gate still recognizes an
-// agent literally named "Inbox" regardless of this roster. No Calendar role
-// ships.
+// declaration order (first is the entry agent). Two specialists have left it,
+// and both stay on the HQs that already have them as user-owned non-roster
+// agents (upgrades only add, never remove), which the upgrade planner must not
+// offer to add back:
+//   - Inbox moved to the dedicated Email Ops workspace (Mail spin-off). The
+//     mailbox-access gate still recognizes an agent literally named "Inbox".
+//   - Journal was retired: nothing handed it work, and the end-of-day journal
+//     is drafted and saved by JournalService without any agent. See
+//     LegacyJournalAgentName.
+//
+// No Calendar role ships.
 var V1Roster = []SpecialistRole{
 	{Slug: "chief_of_staff", AgentName: "Personal Chief of Staff", Entry: true},
-	{Slug: "journal", AgentName: "Journal"},
 }
+
+// LegacyJournalAgentName is the support agent HQs built before the Journal role
+// was retired still carry. It is no longer seeded or offered by an upgrade, but
+// where it exists it is still labelled "Assistant support", so no hired
+// assistant may take the name.
+const LegacyJournalAgentName = "Journal"
 
 // ProvisionState is the durable, per-HQ record of applied provisioning.
 type ProvisionState struct {

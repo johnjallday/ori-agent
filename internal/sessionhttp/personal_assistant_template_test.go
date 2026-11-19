@@ -26,7 +26,6 @@ func TestPersonalAssistantTemplatePlanSubstitutesIdentityWithoutMutatingBase(t *
 		t.Fatalf("personalHQTemplate: %v", err)
 	}
 	baseEntry := base.Agents[0]
-	baseJournal := base.Agents[1]
 	appearance := &types.AgentAppearance{
 		Mode:      types.AppearanceModeCharacter,
 		Generated: &types.GeneratedAppearance{Color: "#112233"},
@@ -50,16 +49,15 @@ func TestPersonalAssistantTemplatePlanSubstitutesIdentityWithoutMutatingBase(t *
 		!strings.Contains(customized.Agents[0].SystemPrompt, testPAFPromptFragment) {
 		t.Fatal("custom prompt did not preserve the bounded Chief of Staff scope plus PAF fragment")
 	}
-	if customized.Agents[1].Name != "Journal" || customized.Agents[1].Role != baseJournal.Role ||
-		customized.Agents[1].SystemPrompt != baseJournal.SystemPrompt {
-		t.Fatal("Journal support specialist was changed")
+	if len(customized.Agents) != len(base.Agents) {
+		t.Fatalf("PAF substitution changed the roster size: %d -> %d", len(base.Agents), len(customized.Agents))
 	}
-	if !reflect.DeepEqual(base.Agents[0], baseEntry) || !reflect.DeepEqual(base.Agents[1], baseJournal) {
+	if !reflect.DeepEqual(base.Agents[0], baseEntry) {
 		t.Fatal("PAF substitution mutated the shared base template")
 	}
 
 	plan := handler.buildTemplateAgentPlan(customized)
-	if len(plan.Agents) != 2 || plan.Agents[0].Name != "Ada" || plan.Agents[0].Appearance == nil ||
+	if len(plan.Agents) != 1 || plan.Agents[0].Name != "Ada" || plan.Agents[0].Appearance == nil ||
 		plan.Agents[0].Appearance.CharacterCatalogID() != "navigator" {
 		t.Fatalf("template plan = %#v", plan)
 	}
@@ -67,8 +65,8 @@ func TestPersonalAssistantTemplatePlanSubstitutesIdentityWithoutMutatingBase(t *
 
 // TestCreatePersonalAssistantHQRosterShowsTheAssistantAsChiefOfStaff: the
 // Roles roster of an assistant-built HQ reads the hired assistant as holding
-// the blueprint's Personal Chief of Staff slot and Journal as holding its own,
-// so the workspace never offers to create or assign a second Chief of Staff.
+// the blueprint's only slot, Personal Chief of Staff, so the workspace never
+// offers to create or assign a second Chief of Staff.
 func TestCreatePersonalAssistantHQRosterShowsTheAssistantAsChiefOfStaff(t *testing.T) {
 	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
@@ -88,16 +86,12 @@ func TestCreatePersonalAssistantHQRosterShowsTheAssistantAsChiefOfStaff(t *testi
 		t.Fatalf("workspace read = %#v, err=%v", current, err)
 	}
 	roster := handler.buildWorkspaceRoster(current)
-	if roster.TotalCount != 2 || roster.FilledCount != 2 || roster.EntryAgentName != "Assistant" {
+	if roster.TotalCount != 1 || roster.FilledCount != 1 || roster.EntryAgentName != "Assistant" {
 		t.Fatalf("roster = %#v", roster)
 	}
 	chief := roster.Roles[0]
 	if chief.RoleID != "personal-chief-of-staff" || !chief.Primary || chief.State != "filled" || chief.Agent == nil || chief.Agent.Name != "Assistant" {
 		t.Fatalf("Chief of Staff slot = %#v", chief)
-	}
-	journal := roster.Roles[1]
-	if journal.RoleID != "journal" || journal.State != "filled" || journal.Agent == nil || journal.Agent.Name != "Journal" {
-		t.Fatalf("Journal slot = %#v", journal)
 	}
 	if len(roster.Unassigned) != 0 {
 		t.Fatalf("unassigned = %#v", roster.Unassigned)
@@ -137,7 +131,7 @@ func TestCreatePersonalAssistantHQCreatesOneSelectedEntryAndSupportMetadata(t *t
 	if err != nil {
 		t.Fatalf("GetWorkspace: %v", err)
 	}
-	if len(workspace.AgentInstances) != 2 {
+	if len(workspace.AgentInstances) != 1 {
 		t.Fatalf("agent instances = %#v", workspace.AgentInstances)
 	}
 	var entryCount, chiefCount, journalCount int
@@ -155,15 +149,19 @@ func TestCreatePersonalAssistantHQCreatesOneSelectedEntryAndSupportMetadata(t *t
 			journalCount++
 		}
 	}
-	if entryCount != 1 || chiefCount != 0 || journalCount != 1 {
+	if entryCount != 1 || chiefCount != 0 || journalCount != 0 {
 		t.Fatalf("entry=%d chief=%d journal=%d", entryCount, chiefCount, journalCount)
+	}
+	if _, exists := handler.agentStore.GetAgent("Journal"); exists {
+		t.Fatal("HQ creation created the retired Journal profile")
 	}
 	presentation, ok := workspace.SharedData[personalAssistantSupportSharedDataKey].(map[string]any)
 	if !ok || presentation["support_group"] != personalAssistantSupportGroup {
 		t.Fatalf("support metadata = %#v", workspace.SharedData[personalAssistantSupportSharedDataKey])
 	}
-	supportIDs, ok := presentation["support_agent_instance_ids"].([]any)
-	if !ok || len(supportIDs) != 1 || supportIDs[0] == "" {
+	// A new HQ has no support agents; an older HQ's Journal is listed only
+	// where it already exists.
+	if supportIDs, _ := presentation["support_agent_instance_ids"].([]any); len(supportIDs) != 0 {
 		t.Fatalf("support ids = %#v", presentation["support_agent_instance_ids"])
 	}
 
@@ -250,7 +248,7 @@ func TestPersonalAssistantCreationDoesNotChangeLegacyPersonalHQSetup(t *testing.
 	if _, exists := workspace.SharedData[personalAssistantSupportSharedDataKey]; exists {
 		t.Fatal("legacy setup received PAF-only presentation metadata")
 	}
-	if len(workspace.AgentInstances) != 2 {
+	if len(workspace.AgentInstances) != 1 {
 		t.Fatalf("legacy roster = %#v", workspace.AgentInstances)
 	}
 }

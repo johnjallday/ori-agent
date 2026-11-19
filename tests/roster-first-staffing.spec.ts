@@ -197,7 +197,7 @@ for (const choiceMode of [
         for (const agent of roster) {
           if (
             !/^(Aster|Harbor|Workshop|Cedar) \d+$/.test(agent.name) &&
-            !['Journal', 'Synthetic Assistant'].includes(agent.name)
+            !['Synthetic Assistant'].includes(agent.name)
           )
             continue;
           const current = await profile(agent.name);

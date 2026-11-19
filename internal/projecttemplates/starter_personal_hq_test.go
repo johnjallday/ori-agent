@@ -31,9 +31,10 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 		t.Fatal("personal-ops must remain a built-in template")
 	}
 	// The Email Ops spin-off (v5) dropped the in-HQ Inbox specialist; v6
-	// clarifies that HQ projects authorized Email Ops follow-ups without owning them.
-	if tpl.BuiltinVersion < 6 {
-		t.Fatalf("personal-ops builtin_version = %d, want at least 6", tpl.BuiltinVersion)
+	// clarifies that HQ projects authorized Email Ops follow-ups without owning
+	// them; v9 retires the Journal specialist.
+	if tpl.BuiltinVersion < 9 {
+		t.Fatalf("personal-ops builtin_version = %d, want at least 9", tpl.BuiltinVersion)
 	}
 
 	// Display metadata now presents this as Personal HQ.
@@ -44,10 +45,11 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 		t.Fatalf("description must describe a personal command center, got %q", tpl.Description)
 	}
 
-	// Roster after the Email Ops spin-off (v5): Personal Chief of Staff
-	// (entry/orchestrator) + Journal specialist. The Inbox specialist moved out
-	// to the dedicated Email Ops workspace; no Calendar role ships (deferred).
-	wantRoster := []string{"Personal Chief of Staff", "Journal"}
+	// Roster: the Personal Chief of Staff (entry/orchestrator) alone. The Inbox
+	// specialist moved out to the dedicated Email Ops workspace (v5), the
+	// Journal specialist was retired (v9) because the end-of-day journal is
+	// drafted without an agent, and no Calendar role ships (deferred).
+	wantRoster := []string{"Personal Chief of Staff"}
 	if len(tpl.Agents) != len(wantRoster) {
 		t.Fatalf("expected %d agents %v, got %d: %+v", len(wantRoster), wantRoster, len(tpl.Agents), tpl.Agents)
 	}
@@ -59,6 +61,9 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 	for _, a := range tpl.Agents {
 		if strings.EqualFold(a.Name, "Inbox") {
 			t.Errorf("Inbox specialist must not ship in personal-ops v5 (moved to Email Ops), found %+v", a)
+		}
+		if strings.EqualFold(a.Name, "Journal") {
+			t.Errorf("Journal specialist must not ship in personal-ops v9 (retired), found %+v", a)
 		}
 		if strings.EqualFold(a.Name, "Calendar") {
 			t.Errorf("no Calendar role should ship, found %+v", a)
@@ -86,11 +91,14 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 		t.Errorf("Chief of Staff prompt must not claim ownership of specialist project work: %s", prompt)
 	}
 
-	// The Journal specialist must state that memory promotion is user-driven,
-	// never automatic (contract §7).
-	journalPrompt := strings.ToLower(tpl.Agents[1].SystemPrompt)
-	if !strings.Contains(journalPrompt, "memory") || !strings.Contains(journalPrompt, "never") {
-		t.Errorf("Journal prompt must state memory promotion is never automatic: %s", tpl.Agents[1].SystemPrompt)
+	// Nothing may still point at the retired Journal specialist.
+	if strings.Contains(strings.ToLower(prompt), "journal specialist") {
+		t.Errorf("Chief prompt must not delegate to the retired Journal specialist: %s", prompt)
+	}
+	for _, task := range tpl.StarterTasks {
+		if strings.Contains(strings.ToLower(task.Details), "journal specialist") {
+			t.Errorf("starter task %q must not mention the retired Journal specialist: %s", task.Description, task.Details)
+		}
 	}
 
 	// Starter tasks: a small set, at most one (here exactly one) marked

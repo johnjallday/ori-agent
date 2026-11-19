@@ -29,16 +29,18 @@ func (f *fakeProvisioner) EnsureSpecialists(ctx context.Context, workspaceID str
 		return nil, err
 	}
 	var added []string
-	for i, role := range roles {
-		if f.failAfter > 0 && i >= f.failAfter {
-			_ = f.store.UpdateWorkspace(ctx, ws)
-			return added, errors.New("simulated provisioner failure")
-		}
+	for _, role := range roles {
 		if _, exists := FindRoleInstance(ws, role); exists {
 			continue // idempotent no-op
 		}
 		ws.AgentInstances = append(ws.AgentInstances, session.AgentInstance{ID: role.Slug + "-id", Name: role.AgentName})
 		added = append(added, role.AgentName)
+		// Fail right after the Nth attach (persisted), so a one-role roster can
+		// still end partial rather than needing a second role to fail on.
+		if f.failAfter > 0 && len(added) >= f.failAfter {
+			_ = f.store.UpdateWorkspace(ctx, ws)
+			return added, errors.New("simulated provisioner failure")
+		}
 	}
 	if f.failAll != nil {
 		return added, f.failAll
@@ -91,8 +93,8 @@ func TestApplyUpgradeAddsMissingSpecialistsAndStampsVersion(t *testing.T) {
 	if res.Outcome != UpgradeOutcomeSuccess || res.Version != CurrentProvisioningVersion {
 		t.Fatalf("expected success at current version, got %+v", res)
 	}
-	// The full roster (Chief + Journal after the Email Ops spin-off) should
-	// have been requested and added.
+	// The full roster (the Chief alone, since Inbox moved to Email Ops and
+	// Journal was retired) should have been requested and added.
 	if len(res.AddedRoles) != len(V1Roster) {
 		t.Fatalf("expected %d roles added, got %v", len(V1Roster), res.AddedRoles)
 	}
@@ -109,8 +111,9 @@ func TestApplyUpgradeAddsMissingSpecialistsAndStampsVersion(t *testing.T) {
 func TestApplyUpgradeAssistantBuiltHQAddsNoChiefOfStaff(t *testing.T) {
 	svc, profiles, store := newTestHarness(t)
 	userID := "user-1"
-	// An HQ built around the hired assistant (Assistant + Journal, presentation
-	// marker stamped) already has its full roster by contract.
+	// An older HQ built around the hired assistant (presentation marker
+	// stamped): the assistant fills the whole roster, and the retired Journal it
+	// still carries is the user's own agent, kept as it is.
 	hqID := designatedHQ(t, svc, profiles, store, userID, "Assistant", "Journal")
 	ws, err := store.GetWorkspace(context.Background(), hqID)
 	if err != nil {
@@ -140,7 +143,7 @@ func TestApplyUpgradeAssistantBuiltHQAddsNoChiefOfStaff(t *testing.T) {
 		t.Fatal("a Personal Chief of Staff was seeded beside the hired assistant")
 	}
 	if len(ws.AgentInstances) != 2 {
-		t.Fatalf("roster must stay Assistant + Journal, got %d instances", len(ws.AgentInstances))
+		t.Fatalf("roster must stay Assistant + the retired Journal, got %d instances", len(ws.AgentInstances))
 	}
 }
 
@@ -176,7 +179,7 @@ func TestApplyUpgradeRecordsPartialFailureAndRetries(t *testing.T) {
 	userID := "user-1"
 	hqID := designatedHQ(t, svc, profiles, store, userID, "My Assistant")
 
-	// Fail after attaching the first specialist -> partial.
+	// Fail right after attaching the first specialist -> partial.
 	prov := &fakeProvisioner{store: store, failAfter: 1}
 	coord := NewUpgradeCoordinator(svc, store, prov)
 
