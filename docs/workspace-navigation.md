@@ -51,6 +51,12 @@ including the initials-based Generated avatar, rather than substituting a reside
 Chosen characters and workspace-scoped uploads remain authoritative. This does not
 assign a character or change any saved appearance.
 
+The Commander's balloon and the chat drawer (header, launcher and the line above
+each message) take the Commander's face from the page, so they match its card: on
+a group's page that is the group-map unit's avatar, on any other workspace page
+the resident figure for a generated agent. Until the page has the agent's record,
+and on Home, the drawer keeps its own face.
+
 ## State and history
 
 - Tickets retains `?ticket=<stable-id>` and `?tickets=<state[,state]>`, not a new

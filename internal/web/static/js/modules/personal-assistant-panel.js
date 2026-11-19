@@ -967,14 +967,21 @@ export function assistantAvatarMarkup(name, appearance, win = window, size = 40)
 }
 
 /**
- * The face of a workspace's Commander as its card on the map draws it: a chosen
- * character or upload through the shared renderer (the catalog character
- * resolved, as the card does), and for an agent with no saved face the card's
- * own fallback, the name-derived figure, not the renderer's generated initials.
- * The drawer's header and launcher and the line above each of its messages use
- * this, so the card, the balloon and the chat show one face (FR24 to FR27).
+ * The face of a workspace's Commander as its card draws it. The drawer's header
+ * and launcher and the line above each of its messages use this, so the card,
+ * the balloon and the chat show one face (FR24 to FR27).
+ *
+ * The workspace page draws it when it can (pageCommanderFace): a group's map
+ * draws a generated agent as the shared renderer's initials portrait, any other
+ * workspace page as the name-derived figure, and the page knows which one it is
+ * showing. Until it can (Home, or before the page has the agent's record), the
+ * rule below applies: a chosen character or upload through the shared renderer
+ * with the catalog character resolved, and for an agent with no saved face the
+ * workspace card's fallback, the figure.
  */
 export function commanderAvatarMarkup(name, appearance, win = window, size = 40) {
+  const hosted = pageCommanderFace(name, size, win);
+  if (hosted) return hosted;
   const mode = String(appearance?.mode || '')
     .trim()
     .toLowerCase();
@@ -984,6 +991,18 @@ export function commanderAvatarMarkup(name, appearance, win = window, size = 40)
     if (figure) return figure;
   }
   return assistantAvatarMarkup(name, appearance, win, size);
+}
+
+// pageCommanderFace is the face the workspace page's own card draws for this
+// agent (WorkspaceDetailPage.commanderChatFaceMarkup), or '' when there is no
+// such page or it cannot draw it yet.
+function pageCommanderFace(name, size, win) {
+  try {
+    const markup = win?.workspaceDetail?.commanderChatFaceMarkup?.(name, size);
+    return typeof markup === 'string' ? markup : '';
+  } catch (_) {
+    return '';
+  }
 }
 
 function recipients() {
@@ -2881,6 +2900,9 @@ const api = {
     window.AgentAvatar?.markup || window.OriWorkspaceAgentPortrait?.markup
       ? commanderAvatarMarkup(name, appearance, window, size)
       : '',
+  // The workspace page has what decides the Commander's face (the agent's
+  // record, the character catalog): the header and launcher draw it again.
+  repaintFace: () => renderIdentity(),
   _state: state
 };
 if (typeof window !== 'undefined') window.PersonalAssistantPanel = api;

@@ -653,13 +653,46 @@ export class WorkspaceDetailPage {
    * agent-give-task.js) and open the task form with that agent chosen.
    * The parameter is removed so a reload does not open it again.
    */
-  // commanderFaceMarkup is the Commander's face for its balloon: the very
-  // presentation the Commander card on the map draws (a chosen character or
-  // upload through AgentAvatar, else the name-derived figure), so the card, the
-  // balloon's header and its folded line show one face. '' when none can be drawn.
+  // commanderFacePresentation is the Commander's face as its card on this page
+  // draws it. On a group's page the card is the Commander's unit on the group
+  // map, which draws every appearance mode through AgentAvatar, the initials
+  // portrait included (workspace-command.js agentCharacterHTML, variant 'map').
+  // On any other workspace page a generated agent is the name-derived figure.
+  // The balloon and the chat drawer both ask here, so neither can drift from
+  // the card.
+  commanderFacePresentation(name) {
+    return this.getAgentAvatarPresentation(name, { useAgentAvatar: this.isGroupWorkspace() });
+  }
+
+  // commanderFaceMarkup is the Commander's face for its balloon, so the card,
+  // the balloon's header and its folded line show one face. '' when none can
+  // be drawn.
   commanderFaceMarkup(name) {
-    const presentation = this.getAgentAvatarPresentation(name);
+    const presentation = this.commanderFacePresentation(name);
     return presentation?.markup ? presentation.markup('commander-balloon-avatar') || '' : '';
+  }
+
+  // commanderChatFaceMarkup is the same face for the chat drawer's header and
+  // launcher and the line above each message, at the drawer's size. It is ''
+  // until this page has the workspace and the agent's record. Before that it
+  // would only guess at a generated face, and the drawer's own appearance
+  // (read from /api/agents) is the better guess.
+  commanderChatFaceMarkup(name, size) {
+    if (!this.workspace || !this.getAgentProfile(name)) return '';
+    const presentation = this.commanderFacePresentation(name);
+    if (!presentation?.markup) return '';
+    // The figure is sized by its slot (ori-guide.css --face-size); the shared
+    // renderer is given the slot's size.
+    const className = presentation.kind === 'workspace-generated' ? 'ori-commander-figure' : '';
+    return presentation.markup(className, size) || '';
+  }
+
+  // repaintCommanderFaces draws the Commander's face again in the balloon and
+  // the chat drawer once something that decides it has arrived: the agent's
+  // record or the character catalog.
+  repaintCommanderFaces() {
+    this.commanderPresenter?.retick?.();
+    window.PersonalAssistantPanel?.repaintFace?.();
   }
 
   // noteFolderAgentView hears each view of the folder agent the page already
@@ -4583,9 +4616,10 @@ export class WorkspaceDetailPage {
     return {
       // `size` only picks the renderer's size class; the caller's own class
       // overrides --aa-size, so the box stays exactly what the layout expects.
-      markup: className =>
+      // A caller with no layout class of its own (the chat drawer) passes a size.
+      markup: (className, size = 54) =>
         window.AgentAvatar.markup(input, {
-          size: 54,
+          size,
           className,
           workspaceId: profile?.appearanceWorkspaceId || ''
         }),
@@ -4612,8 +4646,8 @@ export class WorkspaceDetailPage {
       if (this._destroyed) return;
       this.renderAgentGroups();
       window.workspaceCommand?.refresh();
-      // The Commander's balloon shows the same face its card does.
-      this.commanderPresenter?.retick?.();
+      // The Commander's balloon and the chat drawer show the same face its card does.
+      this.repaintCommanderFaces();
     });
     // The module does not fetch on its own — each page asks for it, so a page
     // that shows no agents pays nothing. Without this the catalog stays empty
@@ -13313,8 +13347,8 @@ export class WorkspaceDetailPage {
     if (!this.isResourceRequestCurrent(request)) return;
     this.renderAgentGroups();
     window.workspaceCommand?.refresh();
-    // The Commander's balloon shows the face its card does, once the profile is here.
-    this.commanderPresenter?.retick?.();
+    // The balloon and the chat drawer show the face its card does, once the profile is here.
+    this.repaintCommanderFaces();
   }
 
   hasWorkspaceAgentSnapshot(agentName) {
@@ -13415,8 +13449,8 @@ export class WorkspaceDetailPage {
     // it now so an explicit uploaded/character appearance replaces the local
     // generated default as soon as its authoritative profile is known.
     window.workspaceCommand?.refresh();
-    // The Commander's balloon shows the face its card does, once the profile is here.
-    this.commanderPresenter?.retick?.();
+    // The balloon and the chat drawer show the face its card does, once the profile is here.
+    this.repaintCommanderFaces();
 
     return this.agentCatalog;
   }
