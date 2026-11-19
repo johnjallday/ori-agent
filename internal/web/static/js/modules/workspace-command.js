@@ -81,6 +81,18 @@ import {
 } from './workspace-map-snapshot.js';
 import { rosterURL, songFactsSnapshot } from './home-song-roster.js';
 import { homeAgentPortraitHTML } from './home-agent-portrait.js';
+import {
+  folderAgentReportView,
+  listFolderAgents,
+  postFolderAgentAction,
+  renderFolderAgentReport
+} from './folder-agent-card.js';
+import {
+  MEMBER_POLL_FAST_MS,
+  memberFolderAgentState,
+  memberSetupsFinished
+} from './member-folder-agents.js';
+import { memberCommanders } from './member-commanders.js';
 import { nodeAgentNames } from './linked-agents.js';
 import { renderInteractiveSongCard, songCardURL, songCardView } from './song-card.js';
 import {
@@ -413,6 +425,17 @@ export class WorkspaceCommandView {
     this.detachmentMapEl = null;
     this.detachmentMountedKey = '';
     this.detachmentUnitsSignature = '';
+    // The folder agents of this group's members (waiting-agents-on-parent-map):
+    // what the mounted map was last told, plus the read's timer and token. See
+    // refreshMemberFolderAgents.
+    this.memberFolderAgents = { waits: {}, lines: {}, views: [] };
+    this.memberFolderAgentTimer = 0;
+    this.memberFolderAgentToken = 0;
+    this.memberFolderAgentEmpties = 0;
+    // Each member's last seen setup finish time (null before the first read),
+    // and the one balloon a mark's activation opens (created on first use).
+    this.memberFolderAgentSetups = null;
+    this.memberCommanders = null;
     this.detachmentPickerOpen = false;
     this.pendingDetachmentSelectionId = '';
     // Persistent, non-modal Backlog drawer (PRD workspace-backlog FR30, 35-37)
@@ -489,6 +512,7 @@ export class WorkspaceCommandView {
     this.boundGlobalKeydown = event => this.handleGlobalKeydown(event);
     this.boundPopState = event => this.handlePopState(event);
     this.boundWorkspacesChanged = event => void this.handleWorkspacesChanged(event);
+    this.boundFolderAgentChanged = () => this.handleFolderAgentChanged();
     this.setup();
   }
 
@@ -620,6 +644,9 @@ export class WorkspaceCommandView {
       // A member built or moved from this page changes the detachment, and the
       // creator that did it lives elsewhere (group-map-build FR-18, FR-25).
       window.addEventListener('ori:workspaces-changed', this.boundWorkspacesChanged);
+      // A member's folder agent was answered or changed anywhere on the page
+      // (waiting-agents-on-parent-map): its mark is read again.
+      window.addEventListener('ori:folder-agent-changed', this.boundFolderAgentChanged);
     }
     this.ensureCapabilityStations();
     this.ensureSurfaceStations();
@@ -14577,8 +14604,40 @@ export class WorkspaceCommandView {
     };
     host.addEventListener('pointerup', release);
     host.addEventListener('pointercancel', release);
+    // A member's mark was activated by a person (waiting-agents-on-parent-map):
+    // its agent speaks from that place. Taking the event stops the map's own
+    // fallback, which would open the member's page. Nothing else raises it, so
+    // nothing here ever opens by itself.
+    host.addEventListener('ori:map-wait-show', event => {
+      const took = this.memberCommanderSet().show(event?.detail, this.currentMemberFolderAgents());
+      if (took) event?.preventDefault?.();
+    });
+    // A mount draws its marks afresh and without aria-expanded.
+    host.addEventListener('ori:map-mounted', () => this.memberCommanders?.syncMarks());
     this.detachmentMapEl = host;
     return host;
+  }
+
+  // The balloon set for this group's members, created on first use. Built here
+  // (not in the constructor) so a view made without it still works.
+  memberCommanderSet() {
+    if (!this.memberCommanders) {
+      const doc = typeof document === 'undefined' ? null : document;
+      this.memberCommanders = memberCommanders({
+        host: () => this.detachmentMapEl,
+        doc,
+        win: typeof window === 'undefined' ? null : window,
+        reportView: folderAgentReportView,
+        renderCard: (view, options) => renderFolderAgentReport(view, doc, options),
+        // postFolderAgentAction announces the change itself.
+        act: (view, action, extra) => postFolderAgentAction(view, action, globalThis.fetch, extra),
+        open: id => this.openDetachmentMember(id),
+        // The balloon speaks with the member's own face, as its tile does.
+        face: name =>
+          this.memberAgentPortraitHTML(name, true, { className: 'commander-balloon-avatar' })
+      });
+    }
+    return this.memberCommanders;
   }
 
   /**
@@ -14647,6 +14706,12 @@ export class WorkspaceCommandView {
       // A linked song's tempo · length on its tile, as on Home's map (song-card
       // PRD FR10), and its card in the dock when selected (FR9).
       songFacts: this.detachmentSongFacts || {},
+      // A member whose agent waits on the owner wears a quiet mark, and one that
+      // is working shows its line on its tile. Both change in place through
+      // refreshMemberFolderAgents, never through detachmentMountKey, so a wait
+      // appearing never re-mounts the map and costs its camera and selection.
+      folderAgentWaits: this.currentMemberFolderAgents().waits,
+      folderAgentLines: this.currentMemberFolderAgents().lines,
       // Each member building wears its agents' faces, as on Home's map.
       agentPortraitHTML: (name, isCommander, options) =>
         this.memberAgentPortraitHTML(name, isCommander, options),
@@ -14678,6 +14743,9 @@ export class WorkspaceCommandView {
         this.selectAgent(unit.selectKey, { focus: false });
       }
     });
+    // The map was just drawn from what the page last knew of its members'
+    // agents; read the listing now so the marks and lines are current.
+    void this.refreshMemberFolderAgents();
     // mount keeps an existing selection when one is still valid, so a
     // just-built or just-moved member is selected explicitly (FR-18, FR-25).
     if (selectedId && typeof map.setSelectedId === 'function') {
@@ -14835,8 +14903,109 @@ export class WorkspaceCommandView {
     this.detachmentMountedKey = '';
     this.detachmentUnitsSignature = '';
     this._detachmentDragActive = false;
+    // The map is gone: so are its timer and any read still in flight.
+    this.stopMemberFolderAgents();
     // The card and the facts stay: the next mount reconciles the card with
     // whatever selection the map kept.
+  }
+
+  // ---------- Members' folder agents on the map (waiting-agents-on-parent-map) ----------
+
+  // The listing of every folder agent the user has. A method of its own so a
+  // test hands the page views without a network.
+  readFolderAgentListing() {
+    return listFolderAgents();
+  }
+
+  // What the mounted map was last told about its members' agents; nothing until
+  // the first read (and for a view built without the constructor, as tests do).
+  currentMemberFolderAgents() {
+    return this.memberFolderAgents || { waits: {}, lines: {}, views: [] };
+  }
+
+  stopMemberFolderAgents() {
+    if (this.memberFolderAgentTimer) clearTimeout(this.memberFolderAgentTimer);
+    this.memberFolderAgentTimer = 0;
+    // Any read still in flight is now stale and drops its answer.
+    this.memberFolderAgentToken = (this.memberFolderAgentToken || 0) + 1;
+    this.memberFolderAgentEmpties = 0;
+    this.memberFolderAgentSetups = null;
+    // No balloon outlives the map it spoke from.
+    this.memberCommanders?.closeAll();
+    this.memberFolderAgents = { waits: {}, lines: {}, views: [] };
+  }
+
+  handleFolderAgentChanged() {
+    if (this.detachmentMapEl && this.detachmentMountedKey) void this.refreshMemberFolderAgents();
+  }
+
+  /**
+   * Read the folder-agent listing and tell the mounted map what its members'
+   * agents show: a quiet mark where one waits on the owner, and a status line on
+   * the tile of one that is working. Both go through the map's in-place
+   * updates, never through detachmentMountKey, so an agent that starts waiting
+   * or finishes never re-mounts the map and costs its camera and selection.
+   *
+   * It runs when the map mounts and when a folder agent changed
+   * (ori:folder-agent-changed), and again every MEMBER_POLL_FAST_MS only while a
+   * member is looking, setting up or learning the songs; a wait is answered by
+   * the owner, so it needs no timer. Nothing here opens a card or moves focus.
+   */
+  async refreshMemberFolderAgents() {
+    if (this.memberFolderAgentTimer) clearTimeout(this.memberFolderAgentTimer);
+    this.memberFolderAgentTimer = 0;
+    const host = this.detachmentMapEl;
+    if (!host || !this.detachmentMountedKey || !this.isGroupWorkspace()) return;
+    const groupId = this.workspaceId();
+    this.memberFolderAgentToken = (this.memberFolderAgentToken || 0) + 1;
+    const token = this.memberFolderAgentToken;
+    const views = await this.readFolderAgentListing();
+    // A newer read, an unmount, or another group makes this answer stale.
+    if (
+      token !== this.memberFolderAgentToken ||
+      host !== this.detachmentMapEl ||
+      !this.detachmentMountedKey ||
+      groupId !== this.workspaceId()
+    ) {
+      return;
+    }
+    const retry = () => {
+      this.memberFolderAgentTimer = setTimeout(
+        () => void this.refreshMemberFolderAgents(),
+        MEMBER_POLL_FAST_MS
+      );
+    };
+    // The listing reads as empty both when the user has no folder agents and
+    // when the read failed. After members were seen, an empty answer is not
+    // believed at once: a failed read must not wipe a mark or end a live line
+    // (and with it the polling). It is read again, and believed after three.
+    if (!views.length && this.currentMemberFolderAgents().views.length) {
+      this.memberFolderAgentEmpties = (this.memberFolderAgentEmpties || 0) + 1;
+      if (this.memberFolderAgentEmpties <= 3) {
+        retry();
+        return;
+      }
+    }
+    this.memberFolderAgentEmpties = 0;
+    const { workspaces } = this.detachmentSnapshot();
+    const state = memberFolderAgentState(views, workspaces, groupId);
+    this.memberFolderAgents = { waits: state.waits, lines: state.lines, views: state.views };
+    const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
+    if (map && map.folderAgentWaits && typeof map.folderAgentWaits.update === 'function') {
+      map.folderAgentWaits.update(host, state.waits);
+    }
+    if (map && map.folderAgentLines && typeof map.folderAgentLines.update === 'function') {
+      map.folderAgentLines.update(host, state.lines);
+    }
+    // A shown balloon is drawn from the fresh view, or closed once its member no
+    // longer waits; the marks carry aria-expanded to match. This never opens one.
+    this.memberCommanderSet().sync({ views: state.views, waits: state.waits });
+    // A member's setup run finished: it may have added workspaces, so the
+    // members tree is read again. The page never navigates away by itself.
+    const setups = memberSetupsFinished(this.memberFolderAgentSetups ?? null, state.views);
+    this.memberFolderAgentSetups = setups.next;
+    if (setups.finished) void this.handleWorkspacesChanged({});
+    if (state.fast) retry();
   }
 
   renderDetachmentPanel() {

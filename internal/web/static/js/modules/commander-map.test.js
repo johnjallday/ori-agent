@@ -7,10 +7,12 @@ import { fakeDocument } from './commander-balloon.test.js';
 import { speakingFolderAgents } from './home-workspace-cockpit.js';
 import {
   commanderPresenter,
+  homeCommanderMap,
   homeCommanders,
   homeMapShowing,
   homeTileAnchor,
   MAP_MOUNTED_EVENT,
+  placeCommanderMap,
   revealHiredTile,
   tileIntoAreaDelta,
   visibleMapArea,
@@ -994,4 +996,159 @@ test('a hired tile that is not drawn yet is waited for until the map mounts, the
   );
   assert.deepEqual(never.calls, []);
   assert.equal(never.listeners[MAP_MOUNTED_EVENT], undefined);
+});
+
+// ---------------------------------------------------------------------------
+// One adapter for any map root (waiting-agents-on-parent-map)
+// ---------------------------------------------------------------------------
+
+// A map root that answers only the selectors a test names and records every
+// selector it was asked, so a test can see what the adapter looked for.
+function selectorRoot(found = {}) {
+  const asked = [];
+  return {
+    asked,
+    querySelector: selector => {
+      asked.push(selector);
+      return found[selector] || null;
+    }
+  };
+}
+
+test('the adapter anchors a place on any root: a tile, or a district header, and never a mark', () => {
+  const tile = { id: 'tile', closest: () => null };
+  const header = { id: 'header', closest: () => null };
+  const onTile = selectorRoot({ '.ws-map-tile[data-ws-id="m1"]': tile });
+  const onHeader = selectorRoot({
+    '.ws-map-district[data-group-id="albums"] .ws-map-district-header': header
+  });
+  let state = { showing: true };
+  const adapter = (id, root) =>
+    placeCommanderMap(id, {
+      key: `member:${id}`,
+      root: () => root,
+      showing: () => state.showing,
+      doc: { querySelector: () => null },
+      win: { innerWidth: 1200 }
+    });
+  assert.equal(adapter('m1', onTile).visible(), true, 'a tile on a non-Home root');
+  assert.equal(adapter('albums', onHeader).visible(), true, 'a district header on a non-Home root');
+  assert.equal(adapter('ghost', selectorRoot()).visible(), false, 'nothing drawn for it');
+  // The only selectors it ever asks for are the tile's and the district header's:
+  // the wait mark has neither, so a balloon is never anchored to a mark that the
+  // map re-creates on every update.
+  const asked = [...onTile.asked, ...onHeader.asked];
+  assert.ok(asked.length > 0);
+  asked.forEach(selector => assert.doesNotMatch(selector, /wait|mark/));
+  // A map that is not showing is not a place to speak from.
+  state = { showing: false };
+  assert.equal(adapter('m1', onTile).visible(), false);
+});
+
+test('a place filtered out of the map is not visible, and viewShowing replaces showing for visible', () => {
+  const filtered = { closest: () => ({ classList: { contains: c => c === 'is-filtered-out' } }) };
+  const root = selectorRoot({ '.ws-map-tile[data-ws-id="m1"]': filtered });
+  const base = { key: 'k', root: () => root, doc: {}, win: {} };
+  assert.equal(placeCommanderMap('m1', { ...base, showing: () => true }).visible(), false);
+  // viewShowing is the gate `visible` asks (Home's Tree view); showing is not.
+  const plain = { closest: () => null };
+  const open = selectorRoot({ '.ws-map-tile[data-ws-id="m1"]': plain });
+  const gated = placeCommanderMap('m1', {
+    ...base,
+    root: () => open,
+    showing: () => false,
+    viewShowing: () => true
+  });
+  assert.equal(gated.visible(), true);
+  assert.equal(gated.showing(), false);
+  const hidden = placeCommanderMap('m1', {
+    ...base,
+    root: () => open,
+    showing: () => true,
+    viewShowing: () => false
+  });
+  assert.equal(hidden.visible(), false);
+});
+
+test('key, pinLine, onDismiss and onNarrow reach the balloon; the presenter’s onNarrow is the default', () => {
+  resetCommanderBalloons();
+  const balloonDoc = fakeDocument();
+  const rootEl = balloonDoc.createElement('div');
+  rootEl.rect = { left: 0, top: 0, width: 1000, height: 700 };
+  balloonDoc.body.append(rootEl);
+  const own = () => 'own';
+  const dismiss = () => 'dismiss';
+  const adapter = placeCommanderMap('m1', {
+    key: 'member:m1',
+    root: () => rootEl,
+    showing: () => true,
+    pinLine: true,
+    onDismiss: dismiss,
+    onNarrow: own,
+    doc: balloonDoc,
+    win: { innerWidth: 1200 }
+  });
+  const presenterNarrow = () => 'presenter';
+  assert.equal(adapter.attach({ onNarrow: presenterNarrow }), true);
+  assert.equal(adapter.balloon.key, 'member:m1');
+  assert.equal(adapter.balloon.pinLine, true);
+  assert.equal(adapter.balloon.onDismiss, dismiss);
+  assert.equal(adapter.balloon.onNarrow, own, 'the adapter’s own onNarrow wins');
+  assert.equal(adapter.balloon.nodes.close.getAttribute('aria-label'), 'Close');
+
+  // Without its own onNarrow and onDismiss the adapter changes nothing: the
+  // presenter's onNarrow is used and the balloon folds as it always did.
+  const plain = placeCommanderMap('m2', {
+    key: 'home:m2',
+    root: () => rootEl,
+    showing: () => true,
+    doc: balloonDoc,
+    win: { innerWidth: 1200 }
+  });
+  plain.attach({ onNarrow: presenterNarrow });
+  assert.equal(plain.balloon.onNarrow, presenterNarrow);
+  assert.equal(plain.balloon.onDismiss, null);
+  assert.equal(plain.balloon.pinLine, false);
+  assert.equal(plain.balloon.nodes.close.getAttribute('aria-label'), 'Collapse');
+  // No root, nothing to attach to.
+  assert.equal(
+    placeCommanderMap('m3', {
+      key: 'k3',
+      root: () => null,
+      showing: () => true,
+      doc: balloonDoc
+    }).attach(),
+    false
+  );
+});
+
+test('Home’s adapter is the same adapter with Home’s own key, root, and Tree-view rule', () => {
+  resetCommanderBalloons();
+  const view = { value: 'map' };
+  const cockpit = { present: true };
+  const tile = { closest: () => null };
+  const canvas = selectorRoot({ '.ws-map-tile[data-ws-id="ws-1"]': tile });
+  const homeDoc = {
+    querySelector: selector => (selector === '#cockpitMap .ws-map-canvas' ? canvas : null),
+    getElementById: id => {
+      if (id === 'cockpitMap') return cockpit.present ? {} : null;
+      if (id === 'homeCockpit') return { dataset: { view: view.value } };
+      return null;
+    },
+    createElement: () => ({})
+  };
+  const adapter = homeCommanderMap('ws-1', { doc: homeDoc, win: { innerWidth: 1200 } });
+  assert.equal(adapter.balloon.key, 'home:ws-1');
+  assert.equal(adapter.showing(), true);
+  assert.equal(adapter.visible(), true);
+  // The Tree view hides it, as it always did.
+  view.value = 'tree';
+  assert.equal(adapter.showing(), false);
+  assert.equal(adapter.visible(), false);
+  // No cockpit map on the page: not showing; visible still reads the map's own
+  // canvas, as before.
+  view.value = 'map';
+  cockpit.present = false;
+  assert.equal(adapter.showing(), false);
+  assert.equal(adapter.visible(), true);
 });

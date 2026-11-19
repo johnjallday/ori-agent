@@ -8981,10 +8981,14 @@ test('a Home’s own map shows its songs’ facts and the selected linked song�
 
     // Not a managed Home: no roster read and no card.
     commandView.groupTemplateStatus = { kind: 'custom' };
-    const plain = requests.length;
+    // The map re-mounts when the facts clear, and every mount reads the folder
+    // agent listing (waiting-agents-on-parent-map); that read is not a roster or
+    // song-card read, which is what this step is about.
+    const songReads = () => requests.filter(url => !url.endsWith('/folder-agent')).length;
+    const plain = songReads();
     await commandView.loadDetachmentSongFacts();
     mounts.at(-1).onSelect('m1', { id: 'm1', parent_id: 'g', kind: 'workspace' });
-    assert.equal(requests.length, plain);
+    assert.equal(songReads(), plain);
     assert.equal(cardSlot.hidden, true);
   } finally {
     globalThis.window = originalWindow;
@@ -12224,5 +12228,487 @@ test('the Notes panel hands Connection… to the drawer, and a missing folder go
     assert.deepEqual(calls, ['close', 'nav /?quest=second-brain']);
   } finally {
     globalThis.window = originalWindow;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Members' folder agents on a group's map (waiting-agents-on-parent-map)
+// ---------------------------------------------------------------------------
+
+// A mounted group page whose map is a recording stub: what the page hands it on
+// mount, and what it patches in place afterwards. `listing` is what the folder
+// agent read returns; the timers are captured so a poll can be seen and run.
+function memberAgentsPage({ members, listing = [] } = {}) {
+  const commandView = detachmentCommandView(
+    'group',
+    members || [
+      { id: 'm1', name: 'Albums' },
+      { id: 'm2', name: 'Beats' }
+    ]
+  );
+  const host = { className: '', parentNode: null, addEventListener() {} };
+  const slot = { appendChild: node => (node.parentNode = slot) };
+  commandView.container = {
+    querySelector: sel => (sel.includes('data-cmd-detachment-slot') ? slot : null)
+  };
+  commandView.detachmentMapEl = host;
+  const log = { mounts: [], waits: [], lines: [], reads: 0, timers: [] };
+  const state = { listing };
+  commandView.readFolderAgentListing = async () => {
+    log.reads += 1;
+    return state.listing.slice();
+  };
+  const map = {
+    mount: (el, mountState) => log.mounts.push(mountState),
+    unmount() {},
+    scopeWorkspacesToGroup: (rows, id) => rows.filter(row => row.id === id || row.parent_id === id),
+    folderAgentWaits: { update: (el, waits) => log.waits.push({ el, waits }) },
+    folderAgentLines: { update: (el, lines) => log.lines.push({ el, lines }) }
+  };
+  const view = (id, overrides = {}) => ({
+    workspace_id: id,
+    workspace_name: id,
+    folder_name: id,
+    agent_name: `${id} Manager`,
+    state: 'reported',
+    ...overrides
+  });
+  const original = {
+    window: globalThis.window,
+    setTimeout: globalThis.setTimeout,
+    clearTimeout: globalThis.clearTimeout
+  };
+  globalThis.window = { OriWorkspaceMap: map };
+  globalThis.setTimeout = (fn, ms) => {
+    const timer = { fn, ms, cleared: false };
+    log.timers.push(timer);
+    return timer;
+  };
+  globalThis.clearTimeout = timer => {
+    if (timer) timer.cleared = true;
+  };
+  const restore = () => {
+    globalThis.window = original.window;
+    globalThis.setTimeout = original.setTimeout;
+    globalThis.clearTimeout = original.clearTimeout;
+  };
+  const settle = async () => {
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+  };
+  const live = () => log.timers.filter(timer => !timer.cleared);
+  return { commandView, host, log, state, view, restore, settle, live };
+}
+
+test('a group page reads its members’ agents when the map mounts and patches the marks in place, not through a re-mount', async () => {
+  const page = memberAgentsPage();
+  try {
+    const { commandView, host, log, state, view, settle } = page;
+    state.listing = [
+      view('m1', {
+        state: 'set_up',
+        setup: { status: 'done', lines: [] },
+        songs_offer: { count: 5, noun: 'songs', ask: 'Want me to learn the 5 songs?' }
+      }),
+      // The group's own agent and a stranger's are not this map's members.
+      view('g', { state: 'reported' }),
+      view('stranger', { state: 'reported' })
+    ];
+    commandView.syncDetachmentMap();
+    assert.equal(log.mounts.length, 1);
+    // The first draw knows nothing yet; the read that follows tells the map.
+    assert.deepEqual(log.mounts[0].folderAgentWaits, {});
+    assert.deepEqual(log.mounts[0].folderAgentLines, {});
+    await settle();
+    assert.equal(log.reads, 1);
+    assert.equal(log.mounts.length, 1, 'a wait appearing does not re-mount the map');
+    assert.equal(log.waits.length, 1);
+    assert.equal(log.waits[0].el, host);
+    assert.deepEqual(log.waits[0].waits, {
+      m1: {
+        status: 'Has a question for you',
+        text: 'm1 Manager asks to learn the songs',
+        action: 'Answer',
+        phase: 'songs',
+        agent: 'm1 Manager'
+      }
+    });
+    assert.deepEqual(log.lines[0].lines, {});
+
+    // A later re-mount (a member added) is drawn with what the page already knows.
+    commandView.page.membersPanel.group.children.push({ id: 'm3', name: 'Mastering' });
+    commandView.page.membersPanel.tree[0] = commandView.page.membersPanel.group;
+    commandView.syncDetachmentMap();
+    assert.equal(log.mounts.length, 2);
+    assert.deepEqual(Object.keys(log.mounts[1].folderAgentWaits), ['m1']);
+  } finally {
+    page.restore();
+  }
+});
+
+test('a wait appearing or clearing never changes the map’s mount key, so it can never re-mount it', async () => {
+  const page = memberAgentsPage();
+  try {
+    const { commandView, log, state, view, settle } = page;
+    commandView.syncDetachmentMap();
+    await settle();
+    const rows = commandView.detachmentSnapshot().workspaces;
+    const key = commandView.detachmentMountKey(rows, []);
+    state.listing = [view('m2', { state: 'reported' })];
+    commandView.handleFolderAgentChanged();
+    await settle();
+    assert.deepEqual(Object.keys(log.waits.at(-1).waits), ['m2']);
+    assert.equal(commandView.detachmentMountKey(rows, []), key);
+    commandView.syncDetachmentMap();
+    assert.equal(log.mounts.length, 1, 'still the one mount');
+    // The wait is answered: the next read clears it, again in place.
+    state.listing = [view('m2', { state: 'kept' })];
+    commandView.handleFolderAgentChanged();
+    await settle();
+    assert.deepEqual(log.waits.at(-1).waits, {});
+    assert.equal(commandView.detachmentMountKey(rows, []), key);
+    assert.equal(log.mounts.length, 1);
+  } finally {
+    page.restore();
+  }
+});
+
+test('a folder agent that changed anywhere on the page is read again; nothing reads without a mounted map', async () => {
+  const page = memberAgentsPage();
+  try {
+    const { commandView, log, settle } = page;
+    // No map yet: the event reads nothing.
+    commandView.handleFolderAgentChanged();
+    await settle();
+    assert.equal(log.reads, 0);
+    commandView.syncDetachmentMap();
+    await settle();
+    assert.equal(log.reads, 1);
+    commandView.handleFolderAgentChanged();
+    await settle();
+    assert.equal(log.reads, 2);
+    // The page registers for the event when it is shown.
+    const listeners = [];
+    globalThis.window.addEventListener = (type, fn) => listeners.push([type, fn]);
+    const originalDocument = globalThis.document;
+    globalThis.document = { addEventListener() {} };
+    try {
+      commandView.render = () => {};
+      commandView.applyBootURLState = () => {};
+      commandView.consumeUpdateArrival = () => Promise.resolve();
+      for (const name of [
+        'ensureCapabilityStations',
+        'ensureSurfaceStations',
+        'ensureRoleRoster',
+        'ensureGroupTemplateStatus',
+        'ensureWorkspaceProtection'
+      ]) {
+        commandView[name] = () => {};
+      }
+      commandView.container = { hidden: true, querySelector: () => null };
+      commandView.activate();
+    } finally {
+      globalThis.document = originalDocument;
+    }
+    const registered = listeners.filter(([type]) => type === 'ori:folder-agent-changed');
+    assert.equal(registered.length, 1);
+    assert.equal(registered[0][1], commandView.boundFolderAgentChanged);
+  } finally {
+    page.restore();
+  }
+});
+
+test('the listing is read every two seconds only while a member works, and the timer ends with the map', async () => {
+  const page = memberAgentsPage();
+  try {
+    const { commandView, log, state, view, settle, live } = page;
+    state.listing = [view('m1', { state: 'looking', progress_line: 'Looking around…' })];
+    commandView.syncDetachmentMap();
+    await settle();
+    assert.deepEqual(log.lines.at(-1).lines, { m1: 'Looking around…' });
+    assert.equal(live().length, 1, 'one timer while a member looks');
+    assert.equal(live()[0].ms, 2000);
+
+    // The timer fires: the line moves, the poll goes on.
+    state.listing = [view('m1', { state: 'setting_up' })];
+    live()[0].fn();
+    await settle();
+    assert.deepEqual(log.lines.at(-1).lines, { m1: 'Setting up…' });
+    assert.equal(live().length, 1);
+
+    // The work ends and the agent waits: the line goes, the mark comes, and the
+    // polling stops. A wait needs no timer.
+    state.listing = [view('m1', { state: 'reported' })];
+    live()[0].fn();
+    await settle();
+    assert.deepEqual(log.lines.at(-1).lines, {});
+    assert.deepEqual(Object.keys(log.waits.at(-1).waits), ['m1']);
+    assert.equal(live().length, 0, 'no timer once nothing works');
+
+    // Work starts again, then the map goes away: the timer is cleared and a
+    // later event reads nothing.
+    state.listing = [view('m1', { state: 'looking' })];
+    commandView.handleFolderAgentChanged();
+    await settle();
+    assert.equal(live().length, 1);
+    const reads = log.reads;
+    const updates = log.lines.length;
+    commandView.unmountDetachmentMap();
+    assert.equal(live().length, 0, 'unmounting stops the timer');
+    commandView.handleFolderAgentChanged();
+    await settle();
+    assert.equal(log.reads, reads, 'and nothing reads without a map');
+    assert.equal(log.lines.length, updates);
+  } finally {
+    page.restore();
+  }
+});
+
+test('an answer that arrives after the map was unmounted or replaced is dropped', async () => {
+  const page = memberAgentsPage();
+  try {
+    const { commandView, log, view, settle } = page;
+    const releases = [];
+    commandView.readFolderAgentListing = () =>
+      new Promise(resolve => {
+        releases.push(() => resolve([view('m1', { state: 'reported' })]));
+      });
+    commandView.syncDetachmentMap();
+    commandView.unmountDetachmentMap();
+    releases[0]();
+    await settle();
+    assert.equal(log.waits.length, 0, 'an unmounted map is not patched');
+
+    // A newer read wins over an older one that answers late.
+    commandView.syncDetachmentMap();
+    commandView.handleFolderAgentChanged();
+    assert.equal(releases.length, 3);
+    releases[2]();
+    await settle();
+    const patched = log.waits.length;
+    assert.equal(patched, 1, 'the newer read patched the map');
+    releases[1]();
+    await settle();
+    assert.equal(log.waits.length, patched, 'the older answer changed nothing');
+  } finally {
+    page.restore();
+  }
+});
+
+test('an empty listing is not believed at once after members were seen, so a failed read cannot wipe a mark or end the polling', async () => {
+  const page = memberAgentsPage();
+  try {
+    const { commandView, log, state, view, settle, live } = page;
+    state.listing = [view('m1', { state: 'looking' })];
+    commandView.syncDetachmentMap();
+    await settle();
+    assert.equal(log.lines.length, 1);
+    assert.equal(live().length, 1);
+
+    // The read fails (an empty list): nothing is patched, and it is read again.
+    state.listing = [];
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      live()[0].fn();
+      await settle();
+      assert.equal(log.lines.length, 1, `empty read ${attempt} patched nothing`);
+      assert.equal(live().length, 1, `and read ${attempt} was retried`);
+    }
+    // The fourth empty answer is believed: the agent is really gone.
+    live()[0].fn();
+    await settle();
+    assert.equal(log.lines.length, 2);
+    assert.deepEqual(log.lines.at(-1).lines, {});
+    assert.equal(live().length, 0);
+
+    // A good read resets the count.
+    state.listing = [view('m1', { state: 'looking' })];
+    commandView.handleFolderAgentChanged();
+    await settle();
+    state.listing = [];
+    live()[0].fn();
+    await settle();
+    assert.equal(commandView.memberFolderAgentEmpties, 1);
+    state.listing = [view('m1', { state: 'looking' })];
+    live()[0].fn();
+    await settle();
+    assert.equal(commandView.memberFolderAgentEmpties, 0);
+  } finally {
+    page.restore();
+  }
+});
+
+test('an agent that waits shows its mark without the page opening anything or moving focus (D4)', async () => {
+  const page = memberAgentsPage();
+  try {
+    const { commandView, log, state, view, settle } = page;
+    const calls = [];
+    commandView.selectDetachmentMember = () => calls.push('select');
+    commandView.openDetachmentMember = () => calls.push('open');
+    commandView.navigateTo = () => calls.push('navigate');
+    commandView.announceDetachment = () => calls.push('announce');
+    const originalDocument = globalThis.document;
+    globalThis.document = { activeElement: null, getElementById: () => null };
+    try {
+      commandView.syncDetachmentMap();
+      await settle();
+      state.listing = [view('m1', { state: 'reported' }), view('m2', { state: 'failed' })];
+      commandView.handleFolderAgentChanged();
+      await settle();
+      assert.deepEqual(Object.keys(log.waits.at(-1).waits).sort(), ['m1', 'm2']);
+      assert.deepEqual(calls, [], 'nothing was selected, opened, navigated or announced');
+      assert.equal(globalThis.document.activeElement, null, 'focus did not move');
+    } finally {
+      globalThis.document = originalDocument;
+    }
+  } finally {
+    page.restore();
+  }
+});
+
+// What the host does with the member balloon set. The set has its own tests
+// (member-commanders.test.js); here it is a recording stand-in, so these pin only
+// the host's side: when it is asked, with what, and in what order.
+function fakeMemberSet({ takes = true } = {}) {
+  const calls = [];
+  return {
+    calls,
+    show: (detail, state) => {
+      calls.push(['show', detail, state]);
+      return takes;
+    },
+    sync: state => calls.push(['sync', state]),
+    syncMarks: () => calls.push(['syncMarks']),
+    closeAll: () => calls.push(['closeAll']),
+    shownId: () => ''
+  };
+}
+
+test('the map host hears a mark’s activation, takes it only when the balloon set did, and re-marks after a mount', async () => {
+  const page = memberAgentsPage();
+  const originalDocument = globalThis.document;
+  const listeners = {};
+  const hostEl = {
+    className: '',
+    parentNode: null,
+    addEventListener: (type, fn) => (listeners[type] = fn)
+  };
+  globalThis.document = { createElement: () => hostEl, getElementById: () => null };
+  try {
+    const { commandView, state, view, settle } = page;
+    commandView.detachmentMapEl = null;
+    assert.equal(commandView.ensureDetachmentHost(), hostEl);
+    assert.equal(typeof listeners['ori:map-wait-show'], 'function');
+    assert.equal(typeof listeners['ori:map-mounted'], 'function');
+    const set = fakeMemberSet({ takes: true });
+    commandView.memberCommanders = set;
+    commandView.detachmentMapEl = hostEl;
+    commandView.syncDetachmentMap();
+    state.listing = [view('m1', { state: 'reported' })];
+    commandView.handleFolderAgentChanged();
+    await settle();
+    set.calls.length = 0;
+
+    // A taken activation is prevented, so the map does not open the page; the
+    // set is handed the detail and what the page last read.
+    let prevented = 0;
+    const detail = { workspaceId: 'm1', placeId: 'm1', count: 1 };
+    listeners['ori:map-wait-show']({ detail, preventDefault: () => (prevented += 1) });
+    assert.equal(prevented, 1);
+    assert.equal(set.calls[0][0], 'show');
+    assert.equal(set.calls[0][1], detail);
+    assert.deepEqual(Object.keys(set.calls[0][2].waits), ['m1']);
+    assert.equal(set.calls[0][2].views[0].workspace_id, 'm1');
+
+    // One it could not take is left to the map's own fallback.
+    commandView.memberCommanders = fakeMemberSet({ takes: false });
+    listeners['ori:map-wait-show']({ detail, preventDefault: () => (prevented += 1) });
+    assert.equal(prevented, 1, 'not taken: not prevented, so the map opens the member’s page');
+
+    // A mount draws the marks without aria-expanded; the set puts it back.
+    const again = fakeMemberSet();
+    commandView.memberCommanders = again;
+    listeners['ori:map-mounted']();
+    assert.deepEqual(again.calls, [['syncMarks']]);
+    // Before any balloon exists the listener is harmless.
+    commandView.memberCommanders = null;
+    assert.doesNotThrow(() => listeners['ori:map-mounted']());
+  } finally {
+    globalThis.document = originalDocument;
+    page.restore();
+  }
+});
+
+test('each read tells the balloon set after the map was patched, and the map going away closes it', async () => {
+  const page = memberAgentsPage();
+  try {
+    const { commandView, log, state, view, settle } = page;
+    const order = [];
+    const set = fakeMemberSet();
+    set.sync = next => order.push(['sync', Object.keys(next.waits), next.views.length]);
+    set.closeAll = () => order.push(['closeAll']);
+    commandView.memberCommanders = set;
+    globalThis.window.OriWorkspaceMap.folderAgentWaits.update = (el, waits) => {
+      log.waits.push({ el, waits });
+      order.push(['waits']);
+    };
+    globalThis.window.OriWorkspaceMap.folderAgentLines.update = (el, lines) => {
+      log.lines.push({ el, lines });
+      order.push(['lines']);
+    };
+    state.listing = [view('m1', { state: 'reported' }), view('m2', { state: 'looking' })];
+    commandView.syncDetachmentMap();
+    await settle();
+    // Marks and lines are patched first; then the set draws from the same read.
+    assert.deepEqual(order, [['waits'], ['lines'], ['sync', ['m1'], 2]]);
+    assert.equal(log.mounts.length, 1, 'no re-mount');
+
+    // The map goes away (leaving the Map tab): no balloon outlives it.
+    order.length = 0;
+    commandView.unmountDetachmentMap();
+    assert.deepEqual(order, [['closeAll']]);
+    assert.deepEqual(commandView.currentMemberFolderAgents().waits, {});
+  } finally {
+    page.restore();
+  }
+});
+
+test('a finished member setup reloads the members tree once and the page never navigates by itself', async () => {
+  const page = memberAgentsPage();
+  try {
+    const { commandView, state, view, settle, live } = page;
+    const calls = [];
+    commandView.handleWorkspacesChanged = async detail => calls.push(['reload', detail]);
+    commandView.navigateTo = url => calls.push(['navigate', url]);
+    commandView.openDetachmentMember = id => calls.push(['open', id]);
+    commandView.memberCommanders = fakeMemberSet();
+    const setUp = (at, extra = {}) =>
+      view('m1', {
+        state: 'set_up',
+        setup: { status: 'done', lines: [], finished_at: at },
+        ...extra
+      });
+    // The first read has no past, so an old finished run is not replayed.
+    state.listing = [setUp('2026-11-19T08:00:00Z')];
+    commandView.syncDetachmentMap();
+    await settle();
+    assert.deepEqual(calls, []);
+    // A run in progress, then done with a new finish time: one reload.
+    state.listing = [view('m1', { state: 'setting_up' })];
+    commandView.handleFolderAgentChanged();
+    await settle();
+    assert.equal(live().length, 1, 'the setup is polled while it runs');
+    assert.deepEqual(calls, []);
+    state.listing = [setUp('2026-11-19T09:00:00Z')];
+    live()[0].fn();
+    await settle();
+    assert.deepEqual(calls, [['reload', {}]]);
+    // The same finish time again is not a second run.
+    commandView.handleFolderAgentChanged();
+    await settle();
+    assert.deepEqual(calls, [['reload', {}]], 'one reload, no navigation, nothing opened');
+    // Leaving the map forgets what it saw, so the next mount replays nothing.
+    commandView.unmountDetachmentMap();
+    assert.equal(commandView.memberFolderAgentSetups, null);
+  } finally {
+    page.restore();
   }
 });

@@ -2546,6 +2546,8 @@ test("every Commander balloon's presenter is given its face", () => {
   }
   assert.deepEqual(sites.map(s => s.name).sort(), [
     'commander-map.js',
+    // The balloon a wait mark opens (waiting-agents-on-parent-map).
+    'member-commanders.js',
     'personal-assistant-folder.js',
     'workspace-detail.js'
   ]);

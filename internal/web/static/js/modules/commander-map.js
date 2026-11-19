@@ -379,14 +379,38 @@ export async function revealHiredTile(
   return typeof map?.panBy === 'function' && map.panBy(delta.dx, delta.dy) !== false;
 }
 
-// homeCommanderMap is Home's adapter for one folder workspace: the balloon
-// speaks from its tile on the cockpit map, laid out beside the drawer.
-export function homeCommanderMap(
+// placeCommanderMap is the adapter for one folder workspace on ANY map: the
+// balloon speaks from that workspace's place (its tile, or its district's
+// header) on the map root the caller names. Home calls it for its cockpit map
+// (homeCommanderMap below) and a group page calls it for a member whose mark
+// the owner activated (member-commanders.js).
+//   key          the balloon's name; one key is one balloon, so two hosts that
+//                share a map root keep separate balloons by key.
+//   root()       the map's non-scaling viewport.
+//   showing()    whether this map is on screen (FR10's "on this map").
+//   viewShowing  optional: what `visible` asks instead of showing(), for a host
+//                (Home) whose map can exist while its Tree view is up.
+//   docEvents    the document events after which the balloon is placed again.
+//   pinLine      keep the folded line on the map at any zoom and pan.
+//   onDismiss    what the close control and Escape do instead of folding.
+//   onNarrow     what a press on the line does below the balloon's width; else
+//                the presenter's own.
+export function placeCommanderMap(
   workspaceID,
-  { doc = globalThis.document, win = globalThis.window } = {}
+  {
+    key,
+    root,
+    showing,
+    viewShowing,
+    docEvents = [],
+    pinLine,
+    onDismiss,
+    onNarrow: ownNarrow,
+    doc = globalThis.document,
+    win = globalThis.window
+  } = {}
 ) {
-  const balloon = commanderBalloon(`home:${workspaceID}`, { doc });
-  const root = () => doc?.querySelector?.('#cockpitMap .ws-map-canvas') || null;
+  const balloon = commanderBalloon(key, { doc });
   const narrow = () => {
     const width = Number(win?.innerWidth) || 0;
     return width > 0 && width < BALLOON_NARROW_PX;
@@ -407,14 +431,11 @@ export function homeCommanderMap(
       win?.OriWorkspaceMap?.isAssembling?.(workspaceID)
         ? commanderBuildingLine(view.workspace)
         : '',
-    // Home shows its map (FR10's "on this map"), drawn or about to be.
-    showing: () =>
-      Boolean(doc?.getElementById?.('cockpitMap')) &&
-      doc?.getElementById?.('homeCockpit')?.dataset?.view !== 'tree',
-    // The tile is on the map the owner is looking at: Map view (not Tree),
+    showing,
+    // The place is on the map the owner is looking at: the map is showing,
     // drawn, and not filtered out (FR15).
     visible: () => {
-      if (doc?.getElementById?.('homeCockpit')?.dataset?.view === 'tree') return false;
+      if (!(viewShowing || showing)()) return false;
       const at = anchor();
       if (!at) return false;
       const tile = at.closest?.('.ws-map-tile') || null;
@@ -426,7 +447,9 @@ export function homeCommanderMap(
       balloon.attach(at, {
         anchor,
         narrow,
-        onNarrow,
+        onNarrow: ownNarrow || onNarrow,
+        pinLine,
+        onDismiss,
         visibleArea,
         // Show pans the camera to the tile; the camera never moves by itself.
         onShow: () => showTile(workspaceID, anchor, visibleArea, win)
@@ -447,7 +470,6 @@ export function homeCommanderMap(
           balloon.holdUntil(win?.OriWorkspaceMap?.whenMotionSettled?.(1000));
         }, 0);
       };
-      const docEvents = [MAP_MOUNTED_EVENT, HOME_VIEW_EVENT, 'ori:map-build-changed'];
       const winEvents = [
         'resize',
         'scroll',
@@ -468,6 +490,27 @@ export function homeCommanderMap(
       };
     }
   };
+}
+
+// homeCommanderMap is Home's adapter for one folder workspace: the balloon
+// speaks from its tile on the cockpit map, laid out beside the drawer.
+export function homeCommanderMap(
+  workspaceID,
+  { doc = globalThis.document, win = globalThis.window } = {}
+) {
+  const homeView = () => doc?.getElementById?.('homeCockpit')?.dataset?.view;
+  return placeCommanderMap(workspaceID, {
+    key: `home:${workspaceID}`,
+    root: () => doc?.querySelector?.('#cockpitMap .ws-map-canvas') || null,
+    // Home shows its map (FR10's "on this map"), drawn or about to be.
+    showing: () => Boolean(doc?.getElementById?.('cockpitMap')) && homeView() !== 'tree',
+    // Visible asks only the Tree view, as it always has: the tile is looked for
+    // inside the cockpit map's own canvas.
+    viewShowing: () => homeView() !== 'tree',
+    docEvents: [MAP_MOUNTED_EVENT, HOME_VIEW_EVENT, 'ori:map-build-changed'],
+    doc,
+    win
+  });
 }
 
 // homeCommanders keeps a balloon for every folder agent Home's map lists

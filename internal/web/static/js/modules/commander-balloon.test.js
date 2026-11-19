@@ -745,3 +745,81 @@ test('firstFocusable skips hidden and disabled controls', () => {
   wrap.append(off, gone, inner);
   assert.equal(firstFocusable(wrap), link);
 });
+
+// A host that dismisses (the member balloon on a group page) closes the balloon
+// outright: its line exists only while the mark that opened it does.
+test('with onDismiss, Escape in the box, on the line and the close control dismiss instead of folding', () => {
+  resetCommanderBalloons();
+  const doc = fakeDocument();
+  const { root, unit } = mapRoot(doc);
+  const balloon = commanderBalloon('member:dismiss', { doc, now: () => 0, setTimer: () => 1 });
+  const dismissed = [];
+  balloon.attach(root, {
+    anchor: () => unit,
+    narrow: () => false,
+    onDismiss: () => dismissed.push('dismissed')
+  });
+  balloon.update(reportContent(doc));
+  assert.equal(balloon.nodes.close.getAttribute('aria-label'), 'Close');
+  balloon.expand();
+  assert.equal(balloon.expanded, true);
+  const focused = doc.activeElement;
+
+  balloon.nodes.box.dispatch('keydown', { key: 'Escape' });
+  assert.equal(dismissed.length, 1, 'Escape in the box');
+  assert.equal(balloon.expanded, true, 'the balloon did not fold by itself: the host decides');
+  balloon.nodes.close.dispatch('click');
+  assert.equal(dismissed.length, 2, 'the close control');
+  assert.equal(balloon.expanded, true);
+  balloon.nodes.line.dispatch('keydown', { key: 'Escape' });
+  assert.equal(dismissed.length, 3, 'Escape on the folded line');
+  assert.equal(doc.activeElement, focused, 'dismissing does not move focus; the host does');
+
+  // Any other key on the line does nothing.
+  balloon.nodes.line.dispatch('keydown', { key: 'a' });
+  assert.equal(dismissed.length, 3);
+
+  // A later attach that says nothing about onDismiss keeps it.
+  balloon.attach(root, { anchor: () => unit });
+  balloon.nodes.box.dispatch('keydown', { key: 'Escape' });
+  assert.equal(dismissed.length, 4);
+  // A host that takes it away puts the old behaviour back.
+  balloon.attach(root, { onDismiss: null });
+  assert.equal(balloon.nodes.close.getAttribute('aria-label'), 'Collapse');
+  balloon.nodes.box.dispatch('keydown', { key: 'Escape' });
+  assert.equal(balloon.expanded, false, 'folded, as every other balloon');
+  assert.equal(dismissed.length, 4);
+});
+
+test('a balloon with no onDismiss folds on Escape and ignores Escape on its line, as it always did', () => {
+  resetCommanderBalloons();
+  const doc = fakeDocument();
+  const { root, unit } = mapRoot(doc);
+  const balloon = commanderBalloon('home:plain', { doc, now: () => 0, setTimer: () => 1 });
+  balloon.attach(root, { anchor: () => unit, narrow: () => false });
+  balloon.update(reportContent(doc));
+  assert.equal(balloon.nodes.close.getAttribute('aria-label'), 'Collapse');
+  balloon.expand();
+  balloon.nodes.line.dispatch('keydown', { key: 'Escape' });
+  assert.equal(balloon.expanded, true, 'Escape on the line does nothing');
+  balloon.nodes.box.dispatch('keydown', { key: 'Escape' });
+  assert.equal(balloon.expanded, false, 'Escape in the box folds');
+  balloon.expand();
+  balloon.nodes.close.dispatch('click');
+  assert.equal(balloon.expanded, false, 'the close control folds');
+});
+
+test('focusLine puts focus on the folded line, and says false when there is nothing to focus', () => {
+  resetCommanderBalloons();
+  const doc = fakeDocument();
+  const { root, unit } = mapRoot(doc);
+  const balloon = commanderBalloon('member:focus', { doc, now: () => 0, setTimer: () => 1 });
+  balloon.attach(root, { anchor: () => unit, narrow: () => false });
+  assert.equal(balloon.focusLine(), false, 'no content yet');
+  balloon.update(reportContent(doc));
+  assert.equal(balloon.focusLine(), true);
+  assert.equal(doc.activeElement, balloon.nodes.line);
+  assert.equal(balloon.expanded, false, 'focusing the line does not open it');
+  balloon.remove();
+  assert.equal(balloon.focusLine(), false, 'a removed balloon has no line');
+});

@@ -731,6 +731,21 @@
   // set, so it goes with the look (visual-hire FR17).
   var folderAgentFaces = Object.create(null);
   var FOLDER_AGENT_FACE_MAX = 4000;
+  // A folder agent that waits on the owner, keyed by workspace id and worded by
+  // the host from the Commander's own words (commanderOneLine): the status
+  // words ("Has a question for you"), the line's text, its button's label, the
+  // phase and the agent's name. The map rolls each wait up to the one place it
+  // draws for it (rollUpFolderAgentWaits) and shows a quiet mark there; the
+  // host owns what activating the mark does.
+  var folderAgentWaits = Object.create(null);
+  var FOLDER_WAIT_MAX = { status: 40, text: 120, action: 16, agent: 60 };
+  var FOLDER_WAIT_PHASE = /^[a-z]{1,16}$/;
+  // What the last draw made of those waits: the place index (what the map
+  // draws, from the layout) and each place's roll-up. canvasHTML sets both on
+  // every draw and an in-place update recomputes the roll-up from the same
+  // index, because an update never changes the layout.
+  var waitIndex = null;
+  var waitPlaces = Object.create(null);
   var workspaceUpdateBadges = Object.create(null);
 
   function setWorkspaceUpdateBadges(snapshot) {
@@ -855,6 +870,378 @@
     var line = ws && ws.id ? folderAgentLines[ws.id] : '';
     if (line) return line;
     return ws && ws.active ? 'Working' : 'Idle';
+  }
+
+  function cleanWaitField(value, max) {
+    var text = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
+    return text.length > max ? text.slice(0, max - 1).trim() + '…' : text;
+  }
+
+  // sanitizeFolderAgentWaits is the one gate for a host's snapshot: every
+  // string is collapsed, trimmed and capped (the map escapes it again when it
+  // draws), an entry with no status words or a phase that is not a plain
+  // lowercase word is dropped, and anything that is not an object is ignored.
+  function sanitizeFolderAgentWaits(snapshot) {
+    var clean = Object.create(null);
+    if (!snapshot || typeof snapshot !== 'object') return clean;
+    Object.keys(snapshot).forEach(function (id) {
+      var wait = snapshot[id];
+      if (!id || !wait || typeof wait !== 'object') return;
+      var status = cleanWaitField(wait.status, FOLDER_WAIT_MAX.status);
+      var phase = typeof wait.phase === 'string' ? wait.phase : '';
+      if (!status || !FOLDER_WAIT_PHASE.test(phase)) return;
+      clean[id] = {
+        status: status,
+        text: cleanWaitField(wait.text, FOLDER_WAIT_MAX.text),
+        action: cleanWaitField(wait.action, FOLDER_WAIT_MAX.action),
+        phase: phase,
+        agent: cleanWaitField(wait.agent, FOLDER_WAIT_MAX.agent)
+      };
+    });
+    return clean;
+  }
+
+  function setFolderAgentWaits(snapshot) {
+    folderAgentWaits = sanitizeFolderAgentWaits(snapshot);
+  }
+
+  // waitPlaceIndex reads what the map draws, from the layout it just computed:
+  // every tile and every district header that is on the canvas (a collapsed
+  // group's hidden members and sub-districts were already dropped from the
+  // layout, and the page's own group draws no header), plus each workspace's
+  // parent from the rows it was given. The page's own group is remembered so
+  // a wait never climbs past it.
+  function waitPlaceIndex(layout, rows, scopeId) {
+    var scope = String(scopeId || '').trim();
+    var drawn = Object.create(null);
+    var parentOf = Object.create(null);
+    (Array.isArray(rows) ? rows : []).forEach(function (row) {
+      if (row && row.id && row.parent_id) parentOf[String(row.id)] = String(row.parent_id);
+    });
+    if (layout) {
+      (layout.districts || []).forEach(function (district) {
+        if (!district || !district.id || district.id === scope) return;
+        drawn[district.id] = { kind: 'district', collapsed: !!district.collapsed };
+      });
+      (layout.nodes || []).forEach(function (node) {
+        if (!node || !node.id || node.id === scope) return;
+        drawn[node.id] = { kind: 'tile', collapsed: false };
+      });
+    }
+    return { drawn: drawn, parentOf: parentOf, scopeId: scope };
+  }
+
+  // rollUpFolderAgentWaits assigns each wait to exactly one place (rule 1): its
+  // own when the map draws it, else its nearest drawn ancestor (a collapsed
+  // group, or a level the map does not draw). A wait that reaches nothing drawn
+  // (the page's own group, an unknown or trashed workspace) is dropped. Pure.
+  // `own` is true only when the place holds just its own wait (rule 2).
+  function rollUpFolderAgentWaits(waits, index) {
+    var places = Object.create(null);
+    if (!waits || typeof waits !== 'object' || !index || !index.drawn) return places;
+    var parentOf = index.parentOf || Object.create(null);
+    Object.keys(waits).forEach(function (id) {
+      var visited = Object.create(null);
+      var cursor = id;
+      var placeId = '';
+      while (cursor && !visited[cursor]) {
+        visited[cursor] = true;
+        if (index.scopeId && cursor === index.scopeId) break;
+        if (index.drawn[cursor]) {
+          placeId = cursor;
+          break;
+        }
+        cursor = parentOf[cursor] || '';
+      }
+      if (!placeId) return;
+      if (!places[placeId]) {
+        places[placeId] = {
+          kind: index.drawn[placeId].kind,
+          collapsed: !!index.drawn[placeId].collapsed,
+          ids: [],
+          own: false
+        };
+      }
+      places[placeId].ids.push(id);
+    });
+    Object.keys(places).forEach(function (placeId) {
+      var place = places[placeId];
+      place.ids.sort();
+      place.own = place.ids.length === 1 && place.ids[0] === placeId;
+    });
+    return places;
+  }
+
+  // waitMarkText is the words a place's mark shows (rule 2): the status words
+  // when the place holds exactly its own wait, "N waiting" in every other case
+  // (one hidden wait is "1 waiting"). Empty when the place has no mark.
+  function waitMarkText(placeId) {
+    var place = placeId ? waitPlaces[placeId] : null;
+    if (!place || !place.ids.length) return '';
+    var own = place.own ? folderAgentWaits[placeId] : null;
+    return own ? own.status : place.ids.length + ' waiting';
+  }
+
+  // waitMarkName is the mark's accessible name (rule 5). One wait, however far
+  // away it stands, ends "Show"; several end with what the click will do.
+  function waitMarkName(placeId, placeName) {
+    var place = placeId ? waitPlaces[placeId] : null;
+    if (!place || !place.ids.length) return '';
+    var where = String(placeName || '').trim() || 'this place';
+    if (place.ids.length === 1) {
+      var wait = folderAgentWaits[place.ids[0]];
+      if (!wait) return place.ids.length + ' waiting in ' + where + '. Show';
+      if (place.own) return (wait.agent || where) + ': ' + wait.status + '. Show';
+      return (
+        '1 waiting in ' + where + ': ' + (wait.agent || 'an agent') + ', ' + wait.status + '. Show'
+      );
+    }
+    var verb =
+      place.kind === 'district'
+        ? place.collapsed && !isMapReadOnly()
+          ? 'Expand group'
+          : 'Open group'
+        : 'Open';
+    return place.ids.length + ' waiting in ' + where + '. ' + verb;
+  }
+
+  // waitMarkHTML is the mark: a SIBLING button, never inside the tile's own
+  // button (a control inside a control is invalid, and the controls a tile
+  // already holds are not tab stops). On a tile it carries the tile's own
+  // world coordinates and CSS lays it over the tile's flag; in a district
+  // header (no `placed`) it is one more item of the header's row. It has no
+  // data-ws-id, so nothing that looks for tiles can find it.
+  function waitMarkHTML(placeId, placeName, placed) {
+    var text = waitMarkText(placeId);
+    if (!text) return '';
+    return (
+      '<button type="button" class="ws-map-wait-mark' +
+      (placed ? ' is-on-tile' : ' is-in-header') +
+      '" data-wait-mark="' +
+      escapeHtml(placeId) +
+      '" data-wait-count="' +
+      waitPlaces[placeId].ids.length +
+      '" aria-label="' +
+      escapeHtml(waitMarkName(placeId, placeName)) +
+      '"' +
+      (placed
+        ? ' style="left:' +
+          (Number(placed.left) || 0) +
+          'px;top:' +
+          (Number(placed.top) || 0) +
+          'px"'
+        : '') +
+      '><span class="ws-map-wait-dot" aria-hidden="true"></span>' +
+      '<span class="ws-map-wait-words">' +
+      escapeHtml(text) +
+      '</span></button>'
+    );
+  }
+
+  // announceWaitShow raises the cancelable event a host answers (it opens the
+  // agent's line at the place and calls preventDefault). It returns true when
+  // nothing took it (no host handler, or no CustomEvent in a test sandbox), and
+  // the map then opens the workspace's own page, where the full card is.
+  function announceWaitShow(node, detail) {
+    if (!node || typeof node.dispatchEvent !== 'function') return true;
+    if (typeof CustomEvent !== 'function') return true;
+    return node.dispatchEvent(
+      new CustomEvent('ori:map-wait-show', { bubbles: true, cancelable: true, detail: detail })
+    );
+  }
+
+  function focusDistrictTag(container, groupId) {
+    if (!container || typeof container.querySelector !== 'function') return;
+    if (!isSafeSelectorValue(groupId)) return;
+    var tag = container.querySelector('.ws-map-district-tag[data-ws-id="' + groupId + '"]');
+    if (tag && typeof tag.focus === 'function') tag.focus();
+  }
+
+  // activateWaitMark is the mark's click, from a pointer, Enter or Space (rule
+  // 3). One wait asks the host to open that agent's line, else opens the
+  // workspace's page. Several expand the group when it is collapsed on this map
+  // and the layout can be saved, else open the place's page as its Open
+  // control does. Nothing here runs unless a person activated the mark.
+  function activateWaitMark(container, mark) {
+    var placeId = mark.getAttribute('data-wait-mark');
+    var place = placeId ? waitPlaces[placeId] : null;
+    if (!place || !place.ids.length) return;
+    var state = lastMount && lastMount.container === container ? lastMount.state : null;
+    if (place.ids.length === 1) {
+      var id = place.ids[0];
+      var wait = folderAgentWaits[id] || {};
+      var open = announceWaitShow(mark, {
+        workspaceId: id,
+        placeId: placeId,
+        placeKind: place.kind,
+        ids: [id],
+        count: 1,
+        own: place.own,
+        phase: wait.phase || '',
+        agent: wait.agent || ''
+      });
+      if (open) openThroughHost(id, state);
+      return;
+    }
+    if (place.kind === 'district' && place.collapsed && !isMapReadOnly()) {
+      void setGroupCollapsed(container, placeId, false).then(function () {
+        focusDistrictTag(container, placeId);
+      });
+      return;
+    }
+    openThroughHost(placeId, state);
+  }
+
+  function bindWaitMark(container, mark) {
+    if (!mark || typeof mark.addEventListener !== 'function') return;
+    mark.addEventListener('click', function (event) {
+      if (event && event.preventDefault) event.preventDefault();
+      if (event && event.stopPropagation) event.stopPropagation();
+      activateWaitMark(container, mark);
+    });
+  }
+
+  function bindWaitMarks(container) {
+    if (!container || typeof container.querySelectorAll !== 'function') return;
+    Array.prototype.forEach.call(container.querySelectorAll('[data-wait-mark]'), function (mark) {
+      bindWaitMark(container, mark);
+    });
+  }
+
+  function elementHasFocus(el) {
+    return !!el && typeof document !== 'undefined' && !!document && document.activeElement === el;
+  }
+
+  function elementPoint(el) {
+    var style = (el && el.style) || {};
+    return { left: parseFloat(style.left) || 0, top: parseFloat(style.top) || 0 };
+  }
+
+  // syncWaitMark makes one place's mark match the current waits, in place. A
+  // mark that is still needed has only its words, name and count rewritten
+  // where they differ: the element is never replaced or moved, so a mark that
+  // has the keyboard keeps it. A new mark is inserted right after its place
+  // without taking focus. A mark that goes hands focus to its place first.
+  function syncWaitMark(container, placeEl, placeId, placeName, placed) {
+    var text = waitMarkText(placeId);
+    var mark = isSafeSelectorValue(placeId)
+      ? container.querySelector('[data-wait-mark="' + placeId + '"]')
+      : null;
+    if (!text) {
+      if (!mark) return;
+      if (elementHasFocus(mark) && placeEl && typeof placeEl.focus === 'function') {
+        placeEl.focus({ preventScroll: true });
+      }
+      if (mark.parentNode) mark.parentNode.removeChild(mark);
+      return;
+    }
+    if (mark) {
+      var words = mark.querySelector('.ws-map-wait-words');
+      if (words && words.textContent !== text) words.textContent = text;
+      var name = waitMarkName(placeId, placeName);
+      if (mark.getAttribute('aria-label') !== name) mark.setAttribute('aria-label', name);
+      var count = String(waitPlaces[placeId].ids.length);
+      if (mark.getAttribute('data-wait-count') !== count)
+        mark.setAttribute('data-wait-count', count);
+      return;
+    }
+    if (!canBuildElements() || !placeEl || !placeEl.parentNode) return;
+    var holder = document.createElement('div');
+    holder.innerHTML = waitMarkHTML(placeId, placeName, placed);
+    var fresh = holder.firstElementChild || holder.firstChild;
+    if (!fresh) return;
+    placeEl.parentNode.insertBefore(fresh, placeEl.nextSibling);
+    bindWaitMark(container, fresh);
+  }
+
+  // syncWaitPlace brings one place (a tile or a district header) in step with
+  // the current roll-up: its mark, its has-wait-mark class, and its accessible
+  // name, which carries the same words.
+  function syncWaitPlace(container, placeId) {
+    var drawn = waitIndex && waitIndex.drawn ? waitIndex.drawn[placeId] : null;
+    if (!drawn || !isSafeSelectorValue(placeId)) return;
+    if (drawn.kind === 'tile') {
+      var tile = activityElement(container, { kind: 'tile', id: placeId });
+      if (!tile) return;
+      var ws = findWs(activityWorkspaces(), placeId);
+      if (tile.classList) tile.classList.toggle('has-wait-mark', !!waitMarkText(placeId));
+      syncWaitMark(container, tile, placeId, ws && ws.name, elementPoint(tile));
+      // The tile's name carries the words too; patchTileStatus rewrites it
+      // (and the status line) the way an activity change does.
+      patchTileStatus(
+        tile,
+        placeId,
+        aggregateActivity({ key: 'ws:' + placeId, kind: 'tile', id: placeId }),
+        true
+      );
+      return;
+    }
+    var districtEl = activityElement(container, { kind: 'district', id: placeId });
+    var record = ((lastWorldLayout && lastWorldLayout.districts) || []).filter(function (item) {
+      return item.id === placeId;
+    })[0];
+    var tag = districtEl && districtEl.querySelector('.ws-map-district-tag');
+    if (!tag || !record) return;
+    // The header wraps only while it holds a mark.
+    if (tag.parentNode && tag.parentNode.classList) {
+      tag.parentNode.classList.toggle('has-wait-mark', !!waitMarkText(placeId));
+    }
+    syncWaitMark(container, tag, placeId, record.ws && record.ws.name, null);
+    var label = districtTagLabel({
+      ws: record.ws,
+      memberCount: record.memberCount,
+      nested: !!record.parentId
+    });
+    if (tag.getAttribute('aria-label') !== label) tag.setAttribute('aria-label', label);
+  }
+
+  // updateFolderAgentWaits is the host's in-place entry point (rule 6): it takes
+  // a fresh waits snapshot, keeps it in the mount state so a later re-mount
+  // (the layout settling, the HQ status) draws the same marks, and patches only
+  // the places whose mark changed. A wait that appears or clears never
+  // re-mounts the map, so the camera and the selection are untouched. It
+  // returns false when this container is not the mounted map.
+  function updateFolderAgentWaits(container, snapshot) {
+    if (!container || !lastMount || lastMount.container !== container) return false;
+    var before = waitPlaces;
+    setFolderAgentWaits(snapshot);
+    lastMount.state = Object.assign({}, lastMount.state, { folderAgentWaits: folderAgentWaits });
+    waitPlaces = rollUpFolderAgentWaits(folderAgentWaits, waitIndex);
+    var seen = Object.create(null);
+    Object.keys(before)
+      .concat(Object.keys(waitPlaces))
+      .forEach(function (placeId) {
+        if (seen[placeId]) return;
+        seen[placeId] = true;
+        syncWaitPlace(container, placeId);
+      });
+    return true;
+  }
+
+  // updateFolderAgentLines is the same for a tile's live status line (rule 7):
+  // a member that is looking, setting up or learning shows it without the map
+  // being redrawn.
+  function updateFolderAgentLines(container, snapshot) {
+    if (!container || !lastMount || lastMount.container !== container) return false;
+    var before = folderAgentLines;
+    setFolderAgentLines(snapshot);
+    lastMount.state = Object.assign({}, lastMount.state, { folderAgentLines: snapshot });
+    var seen = Object.create(null);
+    Object.keys(before)
+      .concat(Object.keys(folderAgentLines))
+      .forEach(function (id) {
+        if (seen[id] || !isSafeSelectorValue(id)) return;
+        seen[id] = true;
+        var tile = activityElement(container, { kind: 'tile', id: id });
+        if (!tile) return;
+        patchTileStatus(
+          tile,
+          id,
+          aggregateActivity({ key: 'ws:' + id, kind: 'tile', id: id }),
+          true
+        );
+      });
+    return true;
   }
 
   function setSongFacts(snapshot) {
@@ -3029,7 +3416,10 @@
    */
   function tileAccessibleName(ws, isSel, activity) {
     var working = activity ? !!activity.working : !!ws.active;
-    var statusText = folderAgentLines[ws.id] || (working ? 'Working' : 'Idle');
+    // A tile with a wait mark says the mark's words (rule 5): the status the
+    // owner is asked about replaces "Idle", the same words the mark shows.
+    var statusText =
+      waitMarkText(ws.id) || folderAgentLines[ws.id] || (working ? 'Working' : 'Idle');
     var agentsWorking = activity && activity.working && activity.agents ? activity.agents : [];
     if (agentsWorking.length) {
       statusText +=
@@ -3163,6 +3553,9 @@
       // LED also marks the tile, so the mark ends when the look ends, fails or
       // reports (visual-hire FR18).
       (folderAgentLines[ws.id] ? ' is-agent-working' : '') +
+      // A wait stands on this tile: its mark (a sibling button, see
+      // waitMarkHTML) lies over the status flag, which is then not drawn twice.
+      (waitMarkText(ws.id) ? ' has-wait-mark' : '') +
       '" ' +
       'data-ws-id="' +
       escapeHtml(ws.id) +
@@ -3360,6 +3753,29 @@
    * a direct-manipulation target; the named Move control remains the clear,
    * touch-sized and keyboard-focusable affordance (FR-144, design §6).
    */
+  // The tag's accessible name. Home selects on click and opens on Enter, so the
+  // control cannot promise "Open" as its only meaning. It names the group and
+  // its state instead, and aria-pressed carries the selection (FR-141, FR-143).
+  // A wait under this header adds the mark's words (rule 5). Shared by the draw
+  // and the in-place update so the two can never disagree.
+  function districtTagLabel(d) {
+    var ws = (d && d.ws) || {};
+    var name = ws.name || 'Group';
+    var templateType =
+      ws.group_template && ws.group_template.kind === 'managed_home'
+        ? String(ws.group_template.name || '').trim()
+        : '';
+    var commander = d && d.nested ? String(ws.entry_agent_name || '').trim() : '';
+    var label =
+      name +
+      ' group, ' +
+      (templateType ? templateType + ' template, ' : '') +
+      districtCountLabel(d && d.memberCount);
+    if (commander) label += ', commander ' + commander;
+    var mark = waitMarkText(ws.id);
+    return mark ? label + ', ' + mark : label;
+  }
+
   function districtHTML(d, selectedId) {
     var ws = d.ws || {};
     // A selected GROUP must keep its highlight across a re-mount, not only
@@ -3389,11 +3805,6 @@
     // of thing: the same header, the same three controls, the same identity —
     // just without its buildings drawn (#346 FR-106, FR-117).
     var collapsed = !!d.collapsed;
-    // Home selects on click and opens on Enter, so the control cannot promise
-    // "Open" as its only meaning. It names the group and its state instead, and
-    // aria-pressed carries the selection (FR-141, FR-143).
-    var selectLabel =
-      name + ' group, ' + (templateType ? templateType + ' template, ' : '') + countLabel;
     // Preset CLASSES, never inline style. The identifier is validated against
     // the catalog first, so an unknown or hostile one becomes the default and
     // can never be interpolated into a rule (#346 FR-125, FR-194).
@@ -3432,6 +3843,9 @@
       'px">' +
       '<div class="ws-map-district-header' +
       (libraryBadges[ws.id] ? ' has-library-badge' : '') +
+      // A header that holds a wait mark may wrap onto a second row (the mark
+      // never shrinks to fit a narrow one).
+      (waitMarkText(ws.id) ? ' has-wait-mark' : '') +
       '">' +
       '<button type="button" class="ws-map-district-tag' +
       (isSel ? ' is-selected' : '') +
@@ -3447,7 +3861,7 @@
       escapeHtml(templateType ? name + ' — ' + templateType + ' template' : name) +
       '" ' +
       'aria-label="' +
-      escapeHtml(commander ? selectLabel + ', commander ' + commander : selectLabel) +
+      escapeHtml(districtTagLabel(d)) +
       '">' +
       '<span class="ws-map-district-name">' +
       escapeHtml(name) +
@@ -3466,6 +3880,9 @@
           '</span>'
         : '') +
       '</button>' +
+      // A wait under this header stands here, beside the Commander's name: a
+      // sibling of the tag, as the library badge is (see waitMarkHTML).
+      waitMarkHTML(ws.id, name) +
       libraryBadgeHTML(ws.id) +
       (d.bare
         ? districtOpenHTML(ws.id, name)
@@ -3578,6 +3995,10 @@
     // screen (FR-31). Nothing here subtracts an origin, so panning and zooming
     // move one element rather than rewriting every position.
     lastWorldLayout = layout;
+    // Each wait is assigned to the one place this layout draws for it, before
+    // any place is drawn: a tile, a header and a name all read the result.
+    waitIndex = waitPlaceIndex(layout, workspaces, scopeGroupId);
+    waitPlaces = rollUpFolderAgentWaits(folderAgentWaits, waitIndex);
     function toLayer(point) {
       return { left: point.x, top: point.y };
     }
@@ -3619,6 +4040,9 @@
       parts.push(
         tileHTML({ ws: node.ws, left: placed.left, top: placed.top }, selectedId, index, options)
       );
+      // The wait mark is the tile's next sibling in the world layer, at the
+      // tile's own coordinates, so it pans, zooms and tabs with its tile.
+      parts.push(waitMarkHTML(node.id, node.ws && node.ws.name, placed));
     });
     if (layout.hqSite) {
       parts.push(hqSiteHTML(toLayer(layout.hqSite), selectedId, layout.nodes.length, site));
@@ -8874,6 +9298,22 @@
     if (!el || !el.style) return;
     el.style.left = point.x + 'px';
     el.style.top = point.y + 'px';
+    // A tile's wait mark is its next sibling at the same coordinates; every
+    // drag, keyboard move and district move comes through here, so the mark
+    // follows without being rebuilt. A district's mark lives in its header and
+    // moves with the district.
+    var mark = el.nextElementSibling;
+    if (
+      mark &&
+      mark.style &&
+      typeof mark.getAttribute === 'function' &&
+      typeof el.getAttribute === 'function' &&
+      mark.getAttribute('data-wait-mark') &&
+      mark.getAttribute('data-wait-mark') === el.getAttribute('data-ws-id')
+    ) {
+      mark.style.left = point.x + 'px';
+      mark.style.top = point.y + 'px';
+    }
   }
 
   /**
@@ -12261,6 +12701,12 @@
     setSongFacts(state && state.songFacts);
     setFolderAgentLines(state && state.folderAgentLines);
     setFolderAgentFaces(state && state.folderAgentFaces);
+    // A host that passes none (a plain workspace page) draws no wait mark.
+    setFolderAgentWaits(state && state.folderAgentWaits);
+    // canvasHTML rolls the waits up against the layout it draws; until it runs
+    // (and when it never does, as on an empty map) no place holds a wait.
+    waitIndex = null;
+    waitPlaces = Object.create(null);
     setWorkspaceUpdateBadges(state && state.workspaceUpdateBadges);
     setLibraryEmptyState(state && state.libraryEmptyState);
     var allWorkspaces = (state && state.workspaces) || [];
@@ -12354,6 +12800,16 @@
     var canvasBefore = container.querySelector('[data-ws-map-viewport]');
     var canvasHadFocus =
       !!canvasBefore && typeof document !== 'undefined' && document.activeElement === canvasBefore;
+    // A wait mark that has the keyboard keeps it across the redraw: the id of
+    // its place is remembered, and focus returns to that mark afterwards (or to
+    // the place itself when the mark is gone).
+    var focusedMark =
+      typeof document !== 'undefined' &&
+      document &&
+      document.activeElement &&
+      typeof document.activeElement.getAttribute === 'function'
+        ? document.activeElement.getAttribute('data-wait-mark') || ''
+        : '';
     lastMount = { container: container, state: state };
 
     container.innerHTML = shellHTML(
@@ -12367,6 +12823,7 @@
     settleRenderedBuildings(container, onScreen);
     bindCreate(container);
     bindTiles(container, workspaces, state);
+    bindWaitMarks(container);
     bindContextMenu(container, workspaces, state);
     bindHQSite(container, state);
     bindOverviewActions(container, state);
@@ -12393,6 +12850,13 @@
     if (canvasHadFocus) {
       var canvasAfter = container.querySelector('[data-ws-map-viewport]');
       if (canvasAfter && canvasAfter.focus) canvasAfter.focus();
+    }
+    if (focusedMark && isSafeSelectorValue(focusedMark)) {
+      var markAfter =
+        container.querySelector('[data-wait-mark="' + focusedMark + '"]') ||
+        container.querySelector('.ws-map-tile[data-ws-id="' + focusedMark + '"]') ||
+        container.querySelector('.ws-map-district-tag[data-ws-id="' + focusedMark + '"]');
+      if (markAfter && markAfter.focus) markAfter.focus({ preventScroll: true });
     }
     if (preservedAnnouncement) {
       var liveAfterRemount = container.querySelector('[data-map-live]');
@@ -12647,11 +13111,25 @@
     // A folder agent's live line in its tile's status slot.
     folderAgentLines: {
       setSnapshot: setFolderAgentLines,
-      statusText: tileStatusText
+      statusText: tileStatusText,
+      // In place, with no re-mount: a member's live line on its tile (rule 7).
+      update: updateFolderAgentLines
     },
     // The face of the agent working on a tile, shown with its line.
     folderAgentFaces: {
       setSnapshot: setFolderAgentFaces
+    },
+    // A folder agent that waits on the owner: the snapshot gate and the pure
+    // roll-up that puts each wait at the one place the map draws for it.
+    folderAgentWaits: {
+      setSnapshot: setFolderAgentWaits,
+      sanitize: sanitizeFolderAgentWaits,
+      placeIndex: waitPlaceIndex,
+      rollUp: rollUpFolderAgentWaits,
+      // In place, with no re-mount (rule 6): marks appear, change and clear
+      // without costing the camera or the selection.
+      update: updateFolderAgentWaits,
+      markHTML: waitMarkHTML
     },
     workspaceUpdates: {
       setSnapshot: setWorkspaceUpdateBadges,

@@ -13859,3 +13859,944 @@ test('framing new songs after Put on the map covers the folder district they lan
   const home = layout.districts.find(d => d.id === 'home');
   assert.ok(inside(albums, home));
 });
+
+// ---------------------------------------------------------------------------
+// A folder agent that waits on the owner: the snapshot and the roll-up
+// (waiting-agents-on-parent-map, rules 1 and 2)
+// ---------------------------------------------------------------------------
+
+// The map's objects come from another realm, so compare them as plain JSON.
+const plainJSON = value => JSON.parse(JSON.stringify(value));
+
+function waitOf(overrides = {}) {
+  return {
+    status: 'Has a question for you',
+    text: 'Albums Manager asks to learn the songs',
+    action: 'Answer',
+    phase: 'songs',
+    agent: 'Albums Manager',
+    ...overrides
+  };
+}
+
+const OPS_ROWS = [
+  { id: 'g', kind: 'group', name: 'Ops' },
+  { id: 'm1', parent_id: 'g' },
+  { id: 'm2', parent_id: 'g' },
+  { id: 'solo', name: 'Outside' }
+];
+const OPS_POSITIONS = {
+  m1: { x: 400, y: 400 },
+  m2: { x: 900, y: 800 },
+  solo: { x: 4000, y: 4000 }
+};
+
+function waitIndexFor(rows, { collapsed = false, scope = '' } = {}) {
+  const map = loadOriWorkspaceMap();
+  const layout = map.computeWorldLayout(rows, {
+    positions: OPS_POSITIONS,
+    groupPresentations: collapsed ? { g: { collapsed: true } } : {},
+    scope: scope ? { groupId: scope, nested: false } : null
+  });
+  return { map, index: map.folderAgentWaits.placeIndex(layout, rows, scope) };
+}
+
+test('the waits snapshot is trimmed, capped and gated like the other folder agent snapshots', () => {
+  const { folderAgentWaits } = loadOriWorkspaceMap();
+  const clean = plainJSON(
+    folderAgentWaits.sanitize({
+      ok: waitOf({ status: '  Has a\n question   for you ', agent: 'x'.repeat(200) }),
+      noStatus: waitOf({ status: '   ' }),
+      badPhase: waitOf({ phase: 'Songs; DROP' }),
+      noPhase: waitOf({ phase: undefined }),
+      notObject: 'Has a question for you',
+      nothing: null,
+      long: waitOf({ status: 'S'.repeat(200), text: 'T'.repeat(500), action: 'A'.repeat(99) })
+    })
+  );
+  assert.deepEqual(Object.keys(clean).sort(), ['long', 'ok']);
+  assert.equal(clean.ok.status, 'Has a question for you', 'whitespace collapses and trims');
+  assert.ok(clean.ok.agent.endsWith('…') && clean.ok.agent.length <= 60, clean.ok.agent);
+  assert.ok(clean.long.status.endsWith('…') && clean.long.status.length <= 40);
+  assert.ok(clean.long.text.endsWith('…') && clean.long.text.length <= 120);
+  assert.ok(clean.long.action.endsWith('…') && clean.long.action.length <= 16);
+  // A host that passes nothing, or something that is not a snapshot, holds no waits.
+  for (const nothing of [null, undefined, 'waits', 7, []])
+    assert.deepEqual(plainJSON(folderAgentWaits.sanitize(nothing)), {});
+});
+
+test('a wait at a place the map draws stands at that place alone (rule 1, rule 2)', () => {
+  const { map, index } = waitIndexFor(OPS_ROWS);
+  const places = plainJSON(map.folderAgentWaits.rollUp({ solo: waitOf(), m1: waitOf() }, index));
+  assert.deepEqual(places, {
+    solo: { kind: 'tile', collapsed: false, ids: ['solo'], own: true },
+    m1: { kind: 'tile', collapsed: false, ids: ['m1'], own: true }
+  });
+  // A group's own header is a place too: its wait stands on the header.
+  const header = plainJSON(map.folderAgentWaits.rollUp({ g: waitOf() }, index));
+  assert.deepEqual(header, { g: { kind: 'district', collapsed: false, ids: ['g'], own: true } });
+});
+
+test('a wait in a collapsed group moves to the group and the group says how many (rule 1, rule 2)', () => {
+  const { map, index } = waitIndexFor(OPS_ROWS, { collapsed: true });
+  assert.equal(index.drawn.m1, undefined, 'the hidden member is not a place');
+  // One hidden wait is still "1 waiting": it is not the group's own.
+  assert.deepEqual(plainJSON(map.folderAgentWaits.rollUp({ m1: waitOf() }, index)), {
+    g: { kind: 'district', collapsed: true, ids: ['m1'], own: false }
+  });
+  // Several under one place, and the group's own wait among them: each once.
+  const several = plainJSON(
+    map.folderAgentWaits.rollUp({ m2: waitOf(), g: waitOf(), m1: waitOf(), solo: waitOf() }, index)
+  );
+  assert.deepEqual(several, {
+    g: { kind: 'district', collapsed: true, ids: ['g', 'm1', 'm2'], own: false },
+    solo: { kind: 'tile', collapsed: false, ids: ['solo'], own: true }
+  });
+  const assigned = Object.values(several).flatMap(place => place.ids);
+  assert.equal(assigned.length, new Set(assigned).size, 'every wait is assigned once');
+  assert.equal(assigned.length, 4);
+});
+
+test('a wait climbs to its nearest drawn ancestor over levels the map does not draw, and never loops', () => {
+  const map = loadOriWorkspaceMap();
+  const index = {
+    drawn: {
+      top: { kind: 'district', collapsed: false },
+      other: { kind: 'tile', collapsed: false }
+    },
+    parentOf: { deep: 'mid', mid: 'top', loop1: 'loop2', loop2: 'loop1', orphan: 'gone' },
+    scopeId: ''
+  };
+  const places = plainJSON(
+    map.folderAgentWaits.rollUp(
+      { deep: waitOf(), loop1: waitOf(), orphan: waitOf(), unknown: waitOf(), other: waitOf() },
+      index
+    )
+  );
+  assert.deepEqual(places, {
+    top: { kind: 'district', collapsed: false, ids: ['deep'], own: false },
+    other: { kind: 'tile', collapsed: false, ids: ['other'], own: true }
+  });
+  // No snapshot, no index, no places.
+  assert.deepEqual(plainJSON(map.folderAgentWaits.rollUp(null, index)), {});
+  assert.deepEqual(plainJSON(map.folderAgentWaits.rollUp({ other: waitOf() }, null)), {});
+});
+
+test('on a group’s page the group itself is never a place and its members stand at their own places', () => {
+  const map = loadOriWorkspaceMap();
+  const layout = map.computeWorldLayout(NESTED_HOME, {
+    scope: { groupId: 'home', nested: false }
+  });
+  const index = map.folderAgentWaits.placeIndex(layout, NESTED_HOME, 'home');
+  assert.equal(index.drawn.home, undefined, 'the page’s own group draws no header');
+  const places = plainJSON(
+    map.folderAgentWaits.rollUp(
+      {
+        home: waitOf(),
+        albums: waitOf(),
+        'album-1': waitOf(),
+        'album-2': waitOf(),
+        ghost: waitOf()
+      },
+      index
+    )
+  );
+  assert.deepEqual(places, {
+    albums: { kind: 'district', collapsed: false, ids: ['albums'], own: true },
+    'album-1': { kind: 'tile', collapsed: false, ids: ['album-1'], own: true },
+    'album-2': { kind: 'tile', collapsed: false, ids: ['album-2'], own: true }
+  });
+  // A wait reaching the page's own group stops there even when its parent is known.
+  const nested = plainJSON(
+    map.folderAgentWaits.rollUp(
+      { home: waitOf() },
+      {
+        drawn: { above: { kind: 'tile', collapsed: false } },
+        parentOf: { home: 'above' },
+        scopeId: 'home'
+      }
+    )
+  );
+  assert.deepEqual(nested, {});
+});
+
+// ---------------------------------------------------------------------------
+// The mark: markup, names, in-place update and activation
+// (waiting-agents-on-parent-map, rules 2, 3, 5 and 6)
+// ---------------------------------------------------------------------------
+
+// An element model with just what the in-place update touches: it inserts a
+// mark after its place, parses the one element the map builds, tracks focus and
+// records the events dispatched on it.
+class WaitNode extends ActivityNode {
+  constructor(tag, options, doc) {
+    super(tag, options);
+    this.style = { left: '', top: '' };
+    this.doc = doc || null;
+    this.dispatched = [];
+  }
+  get firstChild() {
+    return this.children[0] || null;
+  }
+  get firstElementChild() {
+    return this.children[0] || null;
+  }
+  get nextSibling() {
+    const siblings = this.parentNode ? this.parentNode.children : [];
+    return siblings[siblings.indexOf(this) + 1] || null;
+  }
+  get nextElementSibling() {
+    return this.nextSibling;
+  }
+  insertBefore(fresh, ref) {
+    fresh.parentNode = this;
+    const at = ref ? this.children.indexOf(ref) : -1;
+    if (at < 0) this.children.push(fresh);
+    else this.children.splice(at, 0, fresh);
+    return fresh;
+  }
+  querySelectorAll(selector) {
+    const found = [];
+    const walk = node =>
+      node.children.forEach(child => {
+        if (child.matches && child.matches(selector)) found.push(child);
+        walk(child);
+      });
+    walk(this);
+    return found;
+  }
+  focus() {
+    if (this.doc) this.doc.activeElement = this;
+  }
+  dispatchEvent(event) {
+    this.dispatched.push(event);
+    if (this.doc && this.doc.onEvent) this.doc.onEvent(event);
+    return !event.defaultPrevented;
+  }
+}
+
+function decodeEntities(text) {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+// The map builds a new mark through `holder.innerHTML`; this reads that one
+// element back into nodes, so the test sees the markup the map really wrote.
+function parseWaitMark(html, doc) {
+  const open = html.match(/^<button ([^>]*)>/);
+  assert.ok(open, 'a mark is a button: ' + html);
+  const attrs = {};
+  for (const m of open[1].matchAll(/([\w-]+)="([^"]*)"/g)) attrs[m[1]] = decodeEntities(m[2]);
+  const { class: className = '', style = '', ...rest } = attrs;
+  const mark = new WaitNode('button', { className, attrs: rest }, doc);
+  const left = style.match(/left:(-?[\d.]+)px/);
+  const top = style.match(/top:(-?[\d.]+)px/);
+  if (left) mark.style.left = left[1] + 'px';
+  if (top) mark.style.top = top[1] + 'px';
+  mark.appendChild(new WaitNode('span', { className: 'ws-map-wait-dot' }, doc));
+  const words = html.match(/<span class="ws-map-wait-words">([^<]*)<\/span>/);
+  mark.appendChild(
+    new WaitNode(
+      'span',
+      { className: 'ws-map-wait-words', text: decodeEntities(words ? words[1] : '') },
+      doc
+    )
+  );
+  return mark;
+}
+
+function waitHolder(doc) {
+  const holder = new WaitNode('div', {}, doc);
+  Object.defineProperty(holder, 'innerHTML', {
+    get: () => '',
+    set: html => {
+      const mark = parseWaitMark(html, doc);
+      mark.parentNode = holder;
+      holder.children = [mark];
+    }
+  });
+  return holder;
+}
+
+function waitTile(id, doc, { left = 152, top = 152 } = {}) {
+  const tile = new WaitNode(
+    'button',
+    {
+      className: 'ws-map-tile',
+      attrs: {
+        'data-ws-id': id,
+        'aria-label': `${id}, 0 agents, Idle. Activate to select, Enter to open`
+      }
+    },
+    doc
+  );
+  tile.style.left = left + 'px';
+  tile.style.top = top + 'px';
+  const flag = tile.appendChild(new WaitNode('span', { className: 'ws-map-tile-flag' }, doc));
+  flag.appendChild(new WaitNode('span', { className: 'ws-map-led' }, doc));
+  flag.appendChild(new WaitNode('#text', { text: 'Idle' }, doc));
+  return tile;
+}
+
+function waitDistrict(id, doc) {
+  const district = new WaitNode(
+    'div',
+    { className: 'ws-map-district', attrs: { 'data-group-id': id } },
+    doc
+  );
+  const header = district.appendChild(
+    new WaitNode('div', { className: 'ws-map-district-header' }, doc)
+  );
+  const tag = header.appendChild(
+    new WaitNode(
+      'button',
+      {
+        className: 'ws-map-district-tag',
+        attrs: { 'data-ws-id': id, 'aria-label': 'Ops group, 2 workspaces' }
+      },
+      doc
+    )
+  );
+  return { district, header, tag };
+}
+
+const WAIT_ROWS = [
+  { id: 'grp', kind: 'group', name: 'Ops' },
+  { id: 'm1', parent_id: 'grp', name: 'M1' },
+  { id: 'm2', parent_id: 'grp', name: 'M2' },
+  { id: 'outsider', name: 'Outside' }
+];
+
+// Mounts the map over a plain string container, lets the saved layout settle
+// (the settle is a re-mount from the same state), and returns the pieces. The
+// element tree is attached afterwards with `attach`, because the in-place
+// update works on elements that already exist.
+async function mountedWaits({ collapsed = false, waits = {} } = {}) {
+  const patches = [];
+  const opened = [];
+  const doc = {
+    activeElement: null,
+    getElementById: () => null,
+    createElement: () => waitHolder(doc),
+    onEvent: null
+  };
+  class FakeCustomEvent {
+    constructor(type, init = {}) {
+      this.type = type;
+      this.bubbles = Boolean(init.bubbles);
+      this.cancelable = Boolean(init.cancelable);
+      this.detail = init.detail;
+      this.defaultPrevented = false;
+    }
+    preventDefault() {
+      if (this.cancelable) this.defaultPrevented = true;
+    }
+  }
+  const window = { addEventListener() {} };
+  const fetchImpl = (url, init) => {
+    if (init && init.method === 'PATCH') {
+      patches.push(JSON.parse(init.body));
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            result: {
+              schema_version: 1,
+              revision: 7,
+              positions: {},
+              groups: {
+                grp: {
+                  sizing_mode: 'auto',
+                  frame: null,
+                  collapsed: false,
+                  accent: 'default',
+                  theme: 'default'
+                }
+              },
+              snap_to_grid: true
+            }
+          })
+      });
+    }
+    return jsonResponse({
+      schema_version: 1,
+      revision: 1,
+      snap_to_grid: true,
+      positions: { m1: { x: 152, y: 152 }, m2: { x: 380, y: 152 }, outsider: { x: 1520, y: 152 } },
+      groups: { grp: { collapsed } }
+    });
+  };
+  vm.runInNewContext(
+    source,
+    {
+      window,
+      document: doc,
+      setTimeout,
+      clearTimeout,
+      fetch: fetchImpl,
+      URLSearchParams,
+      CustomEvent: FakeCustomEvent,
+      console: { error() {}, warn() {}, log() {} }
+    },
+    { filename: 'workspace-map.js' }
+  );
+  const map = window.OriWorkspaceMap;
+  const container = {
+    innerHTML: '',
+    clientWidth: 1200,
+    hidden: false,
+    isConnected: true,
+    querySelectorAll: () => [],
+    querySelector: () => null
+  };
+  map.mount(container, {
+    workspaces: WAIT_ROWS,
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    folderAgentWaits: waits,
+    onOpen: id => opened.push(id)
+  });
+  await flush();
+  const attach = nodes => {
+    const world = new WaitNode('div', { className: 'ws-map-world' }, doc);
+    nodes.forEach(node => world.appendChild(node));
+    container.querySelector = selector => world.querySelector(selector);
+    container.querySelectorAll = selector => world.querySelectorAll(selector);
+    return world;
+  };
+  const detach = () => {
+    container.querySelector = () => null;
+    container.querySelectorAll = () => [];
+  };
+  return { map, container, doc, patches, opened, attach, detach, html: () => container.innerHTML };
+}
+
+test('a wait draws a mark as the tile’s next sibling, with the words and a name, and nothing else changes (rules 2, 5)', async () => {
+  const { html } = await mountedWaits({
+    waits: {
+      outsider: waitOf({ status: 'Has a question for you', agent: 'Albums Manager' }),
+      m1: waitOf({ status: 'Suggests a goal', phase: 'goal', agent: 'Hostile <b>"x"</b>' })
+    }
+  });
+  const out = html();
+  // The mark sits right after its tile in the world layer, as a sibling button.
+  assert.match(
+    out,
+    /data-ws-id="outsider"[^>]*>[\s\S]*?<\/button><button type="button" class="ws-map-wait-mark is-on-tile" data-wait-mark="outsider" data-wait-count="1" aria-label="Albums Manager: Has a question for you\. Show" style="left:1520px;top:152px"><span class="ws-map-wait-dot" aria-hidden="true"><\/span><span class="ws-map-wait-words">Has a question for you<\/span><\/button>/
+  );
+  // The tile knows (a class for CSS) and its own name says the same words.
+  assert.match(out, /class="ws-map-tile[^"]* has-wait-mark"[^>]*data-ws-id="outsider"/);
+  assert.match(
+    out,
+    /data-ws-id="outsider"[^>]*aria-label="Outside, 0 agents, Has a question for you\. Activate to select, Enter to open"/
+  );
+  // The mark is never found by anything that looks for tiles.
+  const marks = out.match(/<button[^>]*data-wait-mark="[^"]*"[^>]*>/g);
+  assert.equal(marks.length, 2);
+  marks.forEach(mark => assert.doesNotMatch(mark, /data-ws-id|ws-map-tile/));
+  // Hostile text is escaped wherever it is drawn.
+  assert.doesNotMatch(out, /<b>"x"/);
+  assert.match(
+    out,
+    /aria-label="Hostile &lt;b&gt;&quot;x&quot;&lt;\/b&gt;: Suggests a goal\. Show"/
+  );
+});
+
+test('a map handed no waits draws no mark and leaves every name as it was', async () => {
+  const { html } = await mountedWaits();
+  const out = html();
+  assert.doesNotMatch(out, /data-wait-mark|has-wait-mark|ws-map-wait/);
+  assert.match(out, /aria-label="Outside, 0 agents, Idle\. Activate to select, Enter to open"/);
+  assert.match(out, /aria-label="Ops group, 2 workspaces"/);
+});
+
+test('a collapsed group wears one mark that counts the waits it hides, and names what a click does (rules 2, 3, 5)', async () => {
+  const { html } = await mountedWaits({
+    collapsed: true,
+    waits: { m1: waitOf(), m2: waitOf({ agent: 'Beats Manager' }), outsider: waitOf() }
+  });
+  const out = html();
+  // The header's mark sits right after the tag, ahead of the controls.
+  assert.match(
+    out,
+    /class="ws-map-district-tag"[^>]*aria-label="Ops group, 2 workspaces, 2 waiting"[\s\S]*?<\/button><button type="button" class="ws-map-wait-mark is-in-header" data-wait-mark="grp" data-wait-count="2" aria-label="2 waiting in Ops\. Expand group"><span class="ws-map-wait-dot" aria-hidden="true"><\/span><span class="ws-map-wait-words">2 waiting<\/span><\/button>/
+  );
+  // The header may wrap while it holds the mark, so the mark is never squeezed.
+  assert.match(out, /class="ws-map-district-header has-wait-mark"/);
+  // The hidden members draw nothing of their own; the outsider keeps its own.
+  assert.doesNotMatch(out, /data-wait-mark="m1"|data-wait-mark="m2"/);
+  assert.match(out, /data-wait-mark="outsider"/);
+  assert.equal((out.match(/data-wait-mark=/g) || []).length, 2, 'each wait is drawn once');
+});
+
+test('one hidden wait is "1 waiting" and names the agent; an own wait on a header says its status (rule 2)', async () => {
+  const hidden = await mountedWaits({
+    collapsed: true,
+    waits: { m1: waitOf({ agent: 'Albums Manager' }) }
+  });
+  assert.match(
+    hidden.html(),
+    /data-wait-mark="grp" data-wait-count="1" aria-label="1 waiting in Ops: Albums Manager, Has a question for you\. Show"[^>]*>[\s\S]*?ws-map-wait-words">1 waiting</
+  );
+  const own = await mountedWaits({
+    collapsed: true,
+    waits: { grp: waitOf({ status: 'Suggests a goal', phase: 'goal', agent: 'Ops Manager' }) }
+  });
+  assert.match(
+    own.html(),
+    /data-wait-mark="grp"[^>]*aria-label="Ops Manager: Suggests a goal\. Show"[^>]*>[\s\S]*?ws-map-wait-words">Suggests a goal</
+  );
+  assert.match(own.html(), /aria-label="Ops group, 2 workspaces, Suggests a goal"/);
+});
+
+test('update puts a mark in place without a re-mount, keeps it while it still waits and removes it when it clears (rule 6)', async () => {
+  const { map, container, doc, attach, html } = await mountedWaits();
+  const tile = waitTile('outsider', doc, { left: 1520, top: 152 });
+  attach([tile]);
+  const before = html();
+
+  // A wait appears: a mark follows the tile, at its coordinates, without focus.
+  assert.equal(map.folderAgentWaits.update(container, { outsider: waitOf() }), true);
+  let mark = tile.nextSibling;
+  assert.equal(mark.getAttribute('data-wait-mark'), 'outsider');
+  assert.equal(mark.getAttribute('aria-label'), 'Albums Manager: Has a question for you. Show');
+  assert.equal(mark.querySelector('.ws-map-wait-words').textContent, 'Has a question for you');
+  assert.deepEqual({ ...mark.style }, { left: '1520px', top: '152px' });
+  assert.equal(tile.classList.contains('has-wait-mark'), true);
+  assert.equal(
+    tile.getAttribute('aria-label'),
+    'Outside, 0 agents, Has a question for you. Activate to select, Enter to open'
+  );
+  assert.equal(doc.activeElement, null, 'a new mark never takes focus (D4)');
+  assert.equal(html(), before, 'the map was not redrawn');
+  assert.equal(mark.listeners.click.length, 1, 'and it answers a click');
+
+  // The words change: the same element is rewritten, so focus on it would stay.
+  mark.focus();
+  map.folderAgentWaits.update(container, {
+    outsider: waitOf({ status: 'Has a plan for you', phase: 'report', action: 'Review' })
+  });
+  assert.equal(tile.nextSibling, mark, 'the mark is the same element');
+  assert.equal(mark.querySelector('.ws-map-wait-words').textContent, 'Has a plan for you');
+  assert.equal(mark.getAttribute('aria-label'), 'Albums Manager: Has a plan for you. Show');
+  assert.equal(doc.activeElement, mark, 'focus stayed on the mark');
+  assert.equal(mark.listeners.click.length, 1, 'and it was not bound twice');
+
+  // The wait clears while the mark has focus: focus goes to its tile first.
+  map.folderAgentWaits.update(container, {});
+  assert.equal(tile.nextSibling, null, 'the mark is gone');
+  assert.equal(tile.classList.contains('has-wait-mark'), false);
+  assert.doesNotMatch(tile.getAttribute('aria-label'), /plan/);
+  assert.equal(doc.activeElement, tile, 'focus was handed to the place, not lost');
+  assert.equal(html(), before, 'still no redraw');
+
+  // A wait for a place the map does not draw creates nothing and breaks nothing.
+  assert.equal(map.folderAgentWaits.update(container, { ghost: waitOf() }), true);
+  assert.equal(container.querySelector('[data-wait-mark]'), null);
+});
+
+test('update also marks a collapsed group’s header, counts in place, and clears it (rules 2, 6)', async () => {
+  const { map, container, doc, attach } = await mountedWaits({ collapsed: true });
+  const { district, header, tag } = waitDistrict('grp', doc);
+  attach([district]);
+  assert.equal(header.classList.contains('has-wait-mark'), false);
+
+  map.folderAgentWaits.update(container, { m1: waitOf(), m2: waitOf() });
+  // The header may wrap while it holds a mark, so the mark is never squeezed.
+  assert.equal(header.classList.contains('has-wait-mark'), true);
+  const mark = tag.nextSibling;
+  assert.equal(mark.getAttribute('data-wait-mark'), 'grp');
+  assert.equal(mark.getAttribute('data-wait-count'), '2');
+  assert.equal(mark.querySelector('.ws-map-wait-words').textContent, '2 waiting');
+  assert.equal(mark.getAttribute('aria-label'), '2 waiting in Ops. Expand group');
+  assert.equal(tag.getAttribute('aria-label'), 'Ops group, 2 workspaces, 2 waiting');
+  assert.equal(mark.style.left, '', 'a header mark is part of the header row, not positioned');
+
+  map.folderAgentWaits.update(container, { m1: waitOf() });
+  assert.equal(tag.nextSibling, mark, 'the same element');
+  assert.equal(mark.getAttribute('data-wait-count'), '1');
+  assert.equal(mark.querySelector('.ws-map-wait-words').textContent, '1 waiting');
+  assert.equal(tag.getAttribute('aria-label'), 'Ops group, 2 workspaces, 1 waiting');
+
+  map.folderAgentWaits.update(container, {});
+  assert.equal(tag.nextSibling, null);
+  assert.equal(tag.getAttribute('aria-label'), 'Ops group, 2 workspaces');
+  assert.equal(header.classList.contains('has-wait-mark'), false, 'the header stops wrapping');
+});
+
+test('update answers only for the map that is mounted, and a later re-mount keeps the waits it was given (rule 6)', async () => {
+  const { map, container, detach, html } = await mountedWaits();
+  assert.equal(map.folderAgentWaits.update({}, { outsider: waitOf() }), false);
+  assert.equal(map.folderAgentWaits.update(null, { outsider: waitOf() }), false);
+  assert.doesNotMatch(html(), /data-wait-mark/);
+
+  // No element to patch here: only the mount state records the wait. A redraw
+  // from that state (a layout settling, here a collapse) shows it.
+  detach();
+  assert.equal(map.folderAgentWaits.update(container, { outsider: waitOf() }), true);
+  await map.districtActions.setCollapsed('grp', true);
+  await flush();
+  assert.match(html(), /data-wait-mark="outsider"/);
+});
+
+test('a lines update patches a tile’s live status in place (rule 7)', async () => {
+  const { map, container, doc, attach, html } = await mountedWaits();
+  const tile = waitTile('outsider', doc);
+  attach([tile]);
+  const before = html();
+  assert.equal(
+    map.folderAgentLines.update(container, { outsider: 'Learning Night Drive… (2 of 7)' }),
+    true
+  );
+  assert.equal(
+    tile.querySelector('.ws-map-tile-flag').lastChild.textContent,
+    'Learning Night Drive… (2 of 7)'
+  );
+  assert.equal(tile.classList.contains('is-agent-working'), true);
+  assert.match(tile.getAttribute('aria-label'), /Learning Night Drive/);
+  map.folderAgentLines.update(container, {});
+  assert.equal(tile.classList.contains('is-agent-working'), false);
+  assert.equal(tile.querySelector('.ws-map-tile-flag').lastChild.textContent, 'Idle');
+  assert.equal(html(), before, 'no redraw');
+  assert.equal(map.folderAgentLines.update({}, {}), false);
+});
+
+test('activating a mark for one wait asks the host to show it, and opens the page only when no host does (rule 3, D4)', async () => {
+  const { map, container, doc, opened, attach } = await mountedWaits();
+  const tile = waitTile('outsider', doc);
+  attach([tile]);
+  map.folderAgentWaits.update(container, {
+    outsider: waitOf({ phase: 'songs', agent: 'Albums Manager' })
+  });
+  const mark = tile.nextSibling;
+  const click = () => mark.listeners.click[0]({ preventDefault() {}, stopPropagation() {} });
+
+  // Nothing opens until a person activates the mark.
+  assert.equal(mark.dispatched.length, 0);
+  assert.deepEqual(opened, []);
+
+  // No host handler answers: the map opens that workspace's own page.
+  click();
+  assert.equal(mark.dispatched.length, 1);
+  const event = mark.dispatched[0];
+  assert.equal(event.type, 'ori:map-wait-show');
+  assert.equal(event.bubbles, true);
+  assert.equal(event.cancelable, true);
+  assert.deepEqual(plainJSON(event.detail), {
+    workspaceId: 'outsider',
+    placeId: 'outsider',
+    placeKind: 'tile',
+    ids: ['outsider'],
+    count: 1,
+    own: true,
+    phase: 'songs',
+    agent: 'Albums Manager'
+  });
+  assert.deepEqual(opened, ['outsider']);
+
+  // A host that shows the line itself prevents the default: the page stays.
+  doc.onEvent = e => e.preventDefault();
+  click();
+  assert.equal(mark.dispatched.length, 2);
+  assert.deepEqual(opened, ['outsider'], 'the host took it, nothing else opened');
+});
+
+test('a mark for several waits expands its collapsed group and raises no show event (rule 3)', async () => {
+  const { map, container, doc, patches, attach, detach } = await mountedWaits({ collapsed: true });
+  const { district, tag } = waitDistrict('grp', doc);
+  attach([district]);
+  map.folderAgentWaits.update(container, { m1: waitOf(), m2: waitOf() });
+  const mark = tag.nextSibling;
+  // The settle that follows the save re-mounts; a neutral container keeps the
+  // hand-made elements out of it.
+  const click = mark.listeners.click[0];
+  detach();
+  click({ preventDefault() {}, stopPropagation() {} });
+  await flush();
+  assert.equal(mark.dispatched.length, 0, 'several waits raise no show event');
+  assert.equal(patches.length, 1);
+  assert.deepEqual(plainJSON(patches[0].operations), [
+    { op: 'set_group_collapsed', group_id: 'grp', collapsed: false }
+  ]);
+});
+
+test('a focused mark keeps the keyboard across a redraw, or hands it to its place when it is gone (rule 6)', async () => {
+  const { map, container, doc, html } = await mountedWaits({ waits: { outsider: waitOf() } });
+  const focusStub = id => ({
+    focused: 0,
+    focus() {
+      this.focused += 1;
+    },
+    id
+  });
+  const markStub = focusStub('mark');
+  const tileStub = focusStub('tile');
+  const state = {
+    workspaces: WAIT_ROWS,
+    hideChrome: true,
+    selectOnly: true,
+    noAutoSelect: true,
+    folderAgentWaits: { outsider: waitOf() }
+  };
+  doc.activeElement = { getAttribute: name => (name === 'data-wait-mark' ? 'outsider' : null) };
+  container.querySelector = selector =>
+    selector === '[data-wait-mark="outsider"]'
+      ? markStub
+      : selector === '.ws-map-tile[data-ws-id="outsider"]'
+        ? tileStub
+        : null;
+  map.mount(container, state);
+  assert.equal(markStub.focused, 1, 'focus returned to the mark');
+  assert.equal(tileStub.focused, 0);
+
+  // The wait ended before the redraw: its place takes the focus instead.
+  container.querySelector = selector =>
+    selector === '.ws-map-tile[data-ws-id="outsider"]' ? tileStub : null;
+  map.mount(container, { ...state, folderAgentWaits: {} });
+  assert.equal(tileStub.focused, 1);
+  assert.match(html(), /ws-map-tile/);
+});
+
+test('a tile’s mark follows it through a drag, by the one function every move uses (rule 6)', async () => {
+  const { harness } = await mountedDrag();
+  const tile = harness.tile('ws-1');
+  const attrs = { 'data-wait-mark': 'ws-1' };
+  const mark = {
+    style: { left: '10px', top: '20px' },
+    getAttribute: name => (name in attrs ? attrs[name] : null)
+  };
+  tile.nextElementSibling = mark;
+  tile.fire('pointerdown', tilePointer(100, 100));
+  for (let i = 1; i <= 10; i += 1) tile.fire('pointermove', tilePointer(100 + i * 8, 100 + i * 4));
+  assert.notEqual(tile.style.left, '', 'the tile followed the pointer');
+  assert.equal(mark.style.left, tile.style.left, 'and its mark followed it');
+  assert.equal(mark.style.top, tile.style.top);
+
+  // A neighbour that is not this tile's mark is left alone.
+  const other = harness.tile('ws-2');
+  other.nextElementSibling = { style: { left: '1px', top: '2px' }, getAttribute: () => 'ws-9' };
+  other.fire('pointerdown', tilePointer(300, 300));
+  for (let i = 1; i <= 10; i += 1) other.fire('pointermove', tilePointer(300 + i * 8, 300));
+  assert.deepEqual({ ...other.nextElementSibling.style }, { left: '1px', top: '2px' });
+});
+
+test('the wait mark is quiet, visible in both themes and at every zoom, and never hides what it marks (D2, rule 5)', () => {
+  const rule = selector =>
+    mapCSS.match(new RegExp(`${selector.replace(/[.[\]]/g, '\\$&')}\\s*\\{([^}]*)\\}`))?.[1] || '';
+  const mark = rule('.ws-map-wait-mark');
+  assert.ok(mark, 'the mark has styles');
+  // Quiet: no animation loop, no transition, no glow, whatever the motion setting.
+  for (const selector of [
+    '.ws-map-wait-mark',
+    '.ws-map-wait-mark.is-on-tile',
+    '.ws-map-wait-mark.is-in-header',
+    '.ws-map-wait-dot'
+  ]) {
+    assert.doesNotMatch(rule(selector), /animation|transition|box-shadow/, selector);
+  }
+  assert.doesNotMatch(mapCSS, /@keyframes[^{]*wait/i, 'no keyframes for the mark');
+  // The amber is one map token with a darker light-theme value, and the dot uses it.
+  const dark = mapCSS.match(/\.ws-map \{[\s\S]*?--ws-wait-mark:\s*(#[0-9a-f]{6})/i)?.[1];
+  const light = mapCSS.match(
+    /\[data-bs-theme="light"\] \.ws-map \{[\s\S]*?--ws-wait-mark:\s*(#[0-9a-f]{6})/i
+  )?.[1];
+  assert.ok(dark && light && dark !== light, 'defined for dark and light, and different');
+  // The dot, the hover border and the focus ring draw from an amber that is
+  // resolved ON the mark: a group page's map has no .ws-map ancestor, so a bare
+  // var(--ws-wait-mark) resolved to nothing there and the dot and the ring
+  // silently vanished. It falls back to the page's own --ws-waiting, then to a
+  // literal, so it can never resolve to nothing.
+  assert.match(
+    mark,
+    /--ws-wait-amber:\s*var\(--ws-wait-mark,\s*var\(--ws-waiting,\s*#[0-9a-f]{6}\)\)/i
+  );
+  assert.match(rule('.ws-map-wait-dot'), /background:\s*var\(--ws-wait-amber\)/);
+  // The focus ring is scoped under the world layer on purpose: Home paints every
+  // cockpit button's ring green and 2px outward with `.home-cockpit
+  // button:focus-visible` (specificity 0,2,1), which beat the bare class (0,2,0)
+  // on Home (the demo saw a green ring there), so the mark's own ring needs more.
+  assert.match(cockpitCSS, /\.home-cockpit button:focus-visible/, 'the rule this must outrank');
+  assert.doesNotMatch(
+    mapCSS,
+    /^\.ws-map-wait-mark:focus-visible\s*[{,]/m,
+    'no bare-class ring: Home’s rule would win'
+  );
+  const ring = rule('.ws-map-world .ws-map-wait-mark:focus-visible');
+  assert.match(ring, /outline:\s*2px solid var\(--ws-wait-amber\)/);
+  // The ring is drawn INSIDE the mark: tiles abut, and a ring that grew outward
+  // brushed the text of the tile above (the demo measured it at 3px).
+  assert.match(ring, /outline-offset:\s*-2px/, 'an inset ring adds nothing to the footprint');
+  assert.match(rule('.ws-map-wait-mark:hover'), /border-color:\s*var\(--ws-wait-amber\)/);
+  const bareUses = mapCSS.match(/var\(--ws-wait-mark\)/g) || [];
+  assert.equal(bareUses.length, 0, 'nothing reads --ws-wait-mark without a fallback');
+  // A two-line wording is balanced, never a lone word on the second line.
+  assert.match(rule('.ws-map-wait-words'), /text-wrap:\s*balance/);
+  // The words are never cut off, and the target is at least 24px (WCAG 2.2).
+  assert.match(rule('.ws-map-wait-words'), /overflow-wrap:\s*anywhere/);
+  assert.doesNotMatch(mark + rule('.ws-map-wait-words'), /text-overflow|white-space:\s*nowrap/);
+  assert.match(mark, /min-height:\s*24px/);
+  // On a tile it hangs DOWN from the flag's top edge over the building art. Tiles
+  // abut (the row pitch equals the tile's height) and a tile's name, type and
+  // meta text run to within 5px of the tile below, so a mark that grew UP covered
+  // the text of the tile above it, at every zoom (the demo measured it). It is
+  // never wider than the room beside the checkbox, sits above its tile and below
+  // a dragged one, and stays out of the team avatars' corner.
+  const onTile = rule('.ws-map-wait-mark.is-on-tile');
+  assert.match(onTile, /position:\s*absolute/);
+  assert.match(onTile, /max-width:\s*80px/);
+  assert.match(onTile, /z-index:\s*8/);
+  assert.match(
+    onTile,
+    /margin:\s*-1px 0 0 118px/,
+    'top edge at y -1 (clear of the text above, on Home too), right edge at x 118'
+  );
+  assert.match(onTile, /transform:\s*translate\(-100%, 0\);/);
+  assert.match(onTile, /transform-origin:\s*100% 0/, 'it grows down, never up');
+  assert.doesNotMatch(onTile, /-100%\)/, 'no vertical shift above its anchor');
+  assert.doesNotMatch(onTile, /scale/, 'at readable zoom it is its natural size');
+  assert.match(rule('.ws-map-tile.is-dragging'), /z-index:\s*9/);
+  // 80px wide from x 118 keeps the left edge at x 38, clear of the checkbox at x 20 to 35.
+  const edge = 118 - 80;
+  assert.ok(edge >= 35 + 3, `left edge ${edge} clears the checkbox`);
+  // The flag it replaces is not drawn twice.
+  assert.match(rule('.ws-map-tile.has-wait-mark .ws-map-tile-flag'), /visibility:\s*hidden/);
+  // Zoomed out it is its dot alone, counter-scaled, still growing from the same
+  // corner, and never hidden: unlike an activity bubble it is the only signal.
+  const far = rule('.ws-map-canvas.is-activity-far .ws-map-wait-mark.is-on-tile');
+  assert.match(far, /scale\(clamp\(1, calc\(1 \/ var\(--ws-map-zoom, 1\)\), 6\)\)/);
+  // A 12px box (8px dot, 1px padding, 1px border) at 6x is 72 world px: the left
+  // edge stays at x 118 - 72 = 46, clear of the checkbox at x 20 to 35.
+  assert.match(far, /padding:\s*1px/);
+  assert.match(
+    rule('.ws-map-canvas.is-activity-far .ws-map-wait-mark.is-on-tile .ws-map-wait-dot'),
+    /width:\s*8px/
+  );
+  assert.ok(118 - (8 + 2 * 1 + 2) * 6 >= 35 + 3, 'dot mode clears the checkbox');
+  assert.match(far, /translate\(-100%, 0\)/);
+  assert.doesNotMatch(far, /display:\s*none|visibility|opacity:\s*0|-100%\)/);
+  assert.match(
+    rule('.ws-map-canvas.is-activity-far .ws-map-wait-mark.is-on-tile .ws-map-wait-words'),
+    /display:\s*none/,
+    'only the words go, the name stays in aria-label'
+  );
+  assert.doesNotMatch(
+    mapCSS,
+    /is-activity-far[^{,]*\.ws-map-wait-mark(?:\.is-on-tile)?\s*(?:,|\{[^}]*display:\s*none)/,
+    'the mark itself is never hidden when zoomed out'
+  );
+  assert.doesNotMatch(mapCSS, /is-activity-far[^{]*\.ws-map-wait-dot[^{]*\{[^}]*display:\s*none/);
+  // In a header it has a FLOOR on its width: a mark with none was squeezed to a
+  // 16px sliver in a collapsed header, one character per line, growing the header
+  // by 115px (the demo saw it on Home). The floor (74px, the word "question" and
+  // the dot) keeps that from happening, and a flex BASIS of the same width (line
+  // breaking uses the basis) lets the mark share a row with Open in a narrow header
+  // instead of pushing Open onto a third row over the library badge (the real
+  // Music district: header 114px tall); it then grows to its natural width at most.
+  const inHeader = rule('.ws-map-wait-mark.is-in-header');
+  assert.match(inHeader, /flex:\s*1 1 74px/);
+  assert.match(inHeader, /min-width:\s*74px/, 'a floor, so never a sliver');
+  assert.match(inHeader, /max-width:\s*max-content/, 'never wider than its own words');
+  assert.ok(Number(/min-width:\s*(\d+)px/.exec(inHeader)[1]) >= 70);
+  assert.match(rule('.ws-map-district-header.has-wait-mark'), /flex-wrap:\s*wrap/);
+});
+
+// A tree deeper than Home draws as districts (waiting-agents-on-parent-map, rule 1
+// on Home's own top-level map). Home > Albums > songs is drawn as districts and
+// tiles; a group below that is a tile of its own and its children stay loose, so
+// every level is drawn somewhere, and collapsing hides whole subtrees.
+const DEEP_HOME = NESTED_HOME.concat([
+  { id: 'deeper', kind: 'group', parent_id: 'albums', name: 'Deeper' },
+  { id: 'deepest', parent_id: 'deeper', name: 'Deepest' }
+]);
+
+function deepRollUp(presentations, waitIds) {
+  const map = loadOriWorkspaceMap();
+  const layout = map.computeWorldLayout(DEEP_HOME, { groupPresentations: presentations });
+  const index = map.folderAgentWaits.placeIndex(layout, DEEP_HOME, '');
+  const waits = Object.fromEntries(waitIds.map(id => [id, waitOf()]));
+  return { layout, places: plainJSON(map.folderAgentWaits.rollUp(waits, index)) };
+}
+
+test('on Home’s own map a tree three levels deep puts each wait at the one place drawn for it', () => {
+  const all = ['home', 'albums', 'album-1', 'deeper', 'deepest'];
+  const { layout, places } = deepRollUp({}, all);
+  // Everything is drawn: districts for Home and Albums, tiles below them.
+  assert.deepEqual([...layout.districts.map(d => d.id)].sort(), ['albums', 'home']);
+  assert.ok(
+    layout.nodes.some(n => n.id === 'deeper'),
+    'a group below Albums is a tile'
+  );
+  // So each wait stands at its own place, once.
+  assert.deepEqual(Object.keys(places).sort(), [...all].sort());
+  Object.values(places).forEach(place => {
+    assert.equal(place.ids.length, 1);
+    assert.equal(place.own, true);
+  });
+  assert.equal(places.home.kind, 'district');
+  assert.equal(places.albums.kind, 'district');
+  assert.equal(places.deeper.kind, 'tile');
+  assert.equal(places.deepest.kind, 'tile');
+});
+
+test('a collapsed Home says how many wait below it, over every level it hides, and shows the rest as they are', () => {
+  const { layout, places } = deepRollUp({ home: { collapsed: true } }, [
+    'albums',
+    'album-1',
+    'album-2',
+    'deeper'
+  ]);
+  // Collapsing hides the folder district and everything inside it.
+  assert.equal(
+    layout.districts.some(d => d.id === 'albums'),
+    false
+  );
+  assert.equal(
+    layout.nodes.some(n => n.id === 'album-1' || n.id === 'deeper'),
+    false
+  );
+  // Four waits at three different depths stand at the one drawn place: Home.
+  assert.deepEqual(places, {
+    home: {
+      kind: 'district',
+      collapsed: true,
+      ids: ['album-1', 'album-2', 'albums', 'deeper'],
+      own: false
+    }
+  });
+  // A wait on a workspace that stays drawn is not swallowed: `deepest` is loose.
+  const withLoose = deepRollUp({ home: { collapsed: true } }, ['album-1', 'deepest']).places;
+  assert.deepEqual(Object.keys(withLoose).sort(), ['deepest', 'home']);
+  assert.equal(withLoose.home.ids.length, 1);
+  assert.equal(withLoose.deepest.own, true);
+  // Home's own wait is among the several: it is counted, not shown beside them.
+  const own = deepRollUp({ home: { collapsed: true } }, ['home', 'albums']).places;
+  assert.deepEqual(own.home.ids, ['albums', 'home']);
+  assert.equal(own.home.own, false);
+});
+
+test('collapsing only the folder rolls its songs up to the folder’s header, not to Home', () => {
+  const { layout, places } = deepRollUp({ albums: { collapsed: true } }, [
+    'album-1',
+    'album-3',
+    'deeper',
+    'home'
+  ]);
+  assert.equal(
+    layout.districts.find(d => d.id === 'albums').collapsed,
+    true,
+    'Albums is a collapsed district inside an open Home'
+  );
+  assert.deepEqual(places.albums, {
+    kind: 'district',
+    collapsed: true,
+    ids: ['album-1', 'album-3', 'deeper'],
+    own: false
+  });
+  assert.deepEqual(places.home, { kind: 'district', collapsed: false, ids: ['home'], own: true });
+  assert.equal(Object.keys(places).length, 2);
+});
