@@ -127,6 +127,16 @@ export const HQ_LABELS = Object.freeze({
   tipFollowUps: 'Replies and promises to keep. I collect them so nothing slips.',
   tipTickets: 'Work handed to an agent. Open one to run it or review it.',
   tipMapHint: "Point at any part of the map and I'll tell you what it does.",
+  // The assistant's greeting in the drawer on a first visit (host-written, no
+  // model call). Line 2 and 4 name the parts that run and the parts that are off.
+  greetingTitle: 'Your HQ is ready.',
+  greetingRunningMany: '{names} are already running.',
+  greetingRunningOne: '{name} is already running.',
+  greetingPoint: "Point at one on the page and I'll tell you what it does.",
+  greetingOffMany: '{names} are off until you set them up.',
+  greetingOffOne: '{name} is off until you set it up.',
+  greetingAsk: 'Where would you like to start?',
+  greetingFooter: 'Or just ask me. These stay under Things to try.',
   tipWhatIs: 'What is {part}?',
   tipMapHintClose: 'Close',
   tipMapHintCloseName: 'Close the hint',

@@ -3206,6 +3206,50 @@ function announce() {
   }
 }
 
+/**
+ * Whether the consent question waits its turn: while a Personal HQ setup result
+ * leads the drawer, and while the assistant's greeting on a first visit shows or
+ * may still show (personal-assistant-hq-greeting.js). The greeting goes first.
+ */
+export function secondBrainAskHeld({ hqResultActive = false, greetingHolds = false } = {}) {
+  return hqResultActive === true || greetingHolds === true;
+}
+
+// The greeting's own answer, asked fresh each time: there is no second copy of
+// its state here, and no import between the two modules.
+function greetingHoldsAsk() {
+  try {
+    return window.PersonalAssistantHQGreeting?.holdsNotesQuestion?.() === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function askHeld() {
+  return secondBrainAskHeld({
+    hqResultActive: state.hqResultActive,
+    greetingHolds: greetingHoldsAsk()
+  });
+}
+
+// Shows the consent question as the conversation's first message when it is due
+// and nothing holds it: true when it showed itself. It sets the phase directly
+// and never through setPhase, which would take the composer's focus: a card that
+// shows itself never takes focus. render records the first showing ("prompted")
+// once the card is really seen, so nothing is recorded while it is held.
+function showAskIfDue() {
+  const ask = secondBrainAskView(state.secondBrain, state.available && !askHeld());
+  if (!ask.show || state.phase !== 'idle') return false;
+  // The assistant speaks first: the ask is the conversation's first message the
+  // first time; later it waits under Needs you until it is answered.
+  state.phase = 'ask';
+  state.pinned = secondBrainAskPinned(state.secondBrain, { shownHere: state.askShownHere });
+  if (!state.pinned) state.askShownHere = true;
+  state.focusNext = false;
+  render();
+  return true;
+}
+
 async function load() {
   if (state.loading) return;
   state.loading = true;
@@ -3213,18 +3257,9 @@ async function load() {
     const { ok, payload } = await request('');
     if (!ok) return;
     state.secondBrain = payload.second_brain || null;
-    // While a Personal HQ setup result leads the drawer, the ask waits.
-    const ask = secondBrainAskView(state.secondBrain, state.available && !state.hqResultActive);
-    if (ask.show && state.phase === 'idle') {
-      // The assistant speaks first: the ask is the conversation's first message
-      // the first time; later it waits under Needs you until it is answered.
-      state.phase = 'ask';
-      state.pinned = secondBrainAskPinned(state.secondBrain, { shownHere: state.askShownHere });
-      if (!state.pinned) state.askShownHere = true;
-      // render records the first showing once the card is really seen.
-      render();
-      return;
-    }
+    // While a Personal HQ setup result or the first-visit greeting leads the
+    // drawer, the ask waits.
+    if (showAskIfDue()) return;
     if (state.phase === 'idle' && state.secondBrain?.status !== 'not_connected') {
       await placeWaitingResult();
     }
@@ -3349,6 +3384,18 @@ function init() {
     state.hqResultActive = event.detail?.active === true;
     if (state.hqResultActive && state.phase === 'ask' && !state.busy)
       setPhase('idle', { focus: false });
+  });
+  // The assistant's greeting on a first visit goes first. While it holds the
+  // question, one that showed itself steps back; once it lets go (a message was
+  // sent, the suggestions were hidden or all resolved) the question shows itself,
+  // with no reload. load() is not called here: while one is running it returns
+  // early and would drop the release.
+  document.addEventListener('personal-assistant:hq-greeting', event => {
+    if (event.detail?.holds === true) {
+      if (state.phase === 'ask' && !state.busy) setPhase('idle', { focus: false });
+      return;
+    }
+    if (state.phase === 'idle') void refresh().then(() => showAskIfDue());
   });
   state.personal = secondBrainRecipientPersonal(window.PersonalAssistantRecipient?.current?.());
   document.addEventListener('personal-assistant:recipient', event =>

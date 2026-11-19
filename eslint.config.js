@@ -137,6 +137,7 @@ export default defineConfig([
       'internal/web/static/js/modules/hq-part-tips.js',
       'internal/web/static/js/modules/hq-tip-layer.js',
       'internal/web/static/js/modules/hq-tip-looked.js',
+      'internal/web/static/js/modules/personal-assistant-hq-greeting.js',
       'internal/web/static/js/modules/hq-first-note.js',
       'internal/web/static/js/modules/work-labels.js',
       'internal/web/static/js/modules/hq-attention.js',

@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { WorkspaceCommandView } from './workspace-command.js';
 import { OverlayCoordinator } from './workspace-overlay-coordinator.js';
 import { wireWorkspaceFollowUps } from './workspace-followups.js';
-import { tacticalTermsIn } from './hq-labels.js';
+import { HQ_LABELS, tacticalTermsIn } from './hq-labels.js';
 
 // The constructor only reads the DOM (getElementById) and returns early from
 // setup() when there's no container — a null-returning stub is enough to build
@@ -11017,6 +11017,234 @@ test('first-visit tips: a focused ? keeps focus through a re-render', () => {
   } finally {
     globalThis.document = originalDocument;
   }
+});
+
+// --- The assistant's greeting: what the page tells the drawer ---------------------
+
+const GREETING_MISSIONS = [
+  { id: 'pa-capture-first-note', status: 'open' },
+  { id: 'pa-first-brief', status: 'open' },
+  { id: 'pa-show-folder', status: 'open' },
+  { id: 'pa-second-brain', status: 'completed' }
+];
+
+function greetingView(patch = {}) {
+  const { commandView } = hqDetailsMarkup();
+  commandView.notesState = () => ({ secondBrain: TIP_NOTES.created });
+  commandView.hqStationLayout = () => ({
+    cards: [
+      { label: 'Watchtower', stateWord: 'Ready' },
+      { label: 'Daily Brief', stateWord: 'Ready' },
+      { label: 'Memory', stateWord: 'Checking' }
+    ],
+    folded: [{ label: 'Email' }, { label: 'Calendar Ops' }]
+  });
+  commandView.firstVisit = {
+    state: 'pending',
+    missions: GREETING_MISSIONS,
+    resolvedOnLoad: false,
+    error: '',
+    view: () => ({ layout: { notes: true } }),
+    ensure() {},
+    bind() {},
+    ...patch
+  };
+  return commandView;
+}
+
+test('the greeting view: null until the page knows, { show: false } when there is nothing to greet', () => {
+  const view = greetingView();
+  withTipGlobals(view, view.firstVisit, () => {
+    const greeting = view.hqGreetingView();
+    assert.equal(greeting.show, true);
+    assert.deepEqual(greeting.running, ['Notes', 'Watchtower', 'Daily Brief']);
+    assert.deepEqual(greeting.off, ['Email', 'Calendar Ops']);
+    assert.deepEqual(
+      greeting.steps.map(step => [step.key, step.action]),
+      [
+        ['folder', 'folder'],
+        ['brief', 'brief'],
+        ['note', 'note']
+      ]
+    );
+    // The missions are not read yet: not known, so the drawer waits.
+    view.firstVisit.missions = null;
+    assert.equal(view.hqGreetingView(), null);
+    // They could not be read: nothing to greet.
+    view.firstVisit.error = HQ_LABELS.firstVisitLoadError;
+    assert.deepEqual(view.hqGreetingView(), { show: false });
+    view.firstVisit.error = '';
+    view.firstVisit.missions = GREETING_MISSIONS;
+    // The Notes have not been read: not known.
+    view.notesState = () => ({ secondBrain: null });
+    assert.equal(view.hqGreetingView(), null);
+    view.notesState = () => ({ secondBrain: TIP_NOTES.created });
+    // Done, or all three resolved: nothing.
+    view.firstVisit.state = 'done';
+    assert.deepEqual(view.hqGreetingView(), { show: false });
+    view.firstVisit.state = 'pending';
+    view.firstVisit.missions = GREETING_MISSIONS.map(mission => ({
+      ...mission,
+      status: 'completed'
+    }));
+    assert.deepEqual(view.hqGreetingView(), { show: false });
+  });
+});
+
+test('the greeting view is null with no workspace and { show: false } off the HQ', () => {
+  const view = greetingView();
+  withTipGlobals(view, view.firstVisit, () => {
+    view.isPersonalHQ = () => false;
+    assert.deepEqual(view.hqGreetingView(), { show: false });
+    const bare = Object.create(WorkspaceCommandView.prototype);
+    bare.page = {};
+    assert.equal(bare.hqGreetingView(), null);
+  });
+});
+
+test('a greeting choice runs the owner the suggestions use, and nothing is completed or skipped by it', () => {
+  const view = greetingView();
+  const calls = [];
+  Object.assign(view, {
+    openDailyBriefPanel: trigger => calls.push(['brief', trigger]),
+    openNotesStation: trigger => calls.push(['notes', trigger]),
+    focusHQNoteCapture: trigger => calls.push(['note', trigger, view.viewMode]),
+    setCommandViewMode: (mode, options) => {
+      calls.push(['mode', mode, options]);
+      view.viewMode = mode;
+    }
+  });
+  const trigger = { focus() {} };
+  withTipGlobals(view, view.firstVisit, () => {
+    assert.equal(view.runHQGreetingChoice('brief', trigger), true);
+    assert.equal(view.runHQGreetingChoice('note', null), true);
+    assert.deepEqual(calls, [
+      ['brief', trigger],
+      ['note', null, 'details']
+    ]);
+
+    // "Save an idea" is drawn on Details: from the Map the page goes there first.
+    calls.length = 0;
+    view.viewMode = 'map';
+    assert.equal(view.runHQGreetingChoice('note', null), true);
+    assert.deepEqual(calls, [
+      ['mode', 'details', { focus: false }],
+      ['note', null, 'details']
+    ]);
+
+    // A finished folder step opens Home through a link; the unset Notes opens Notes setup.
+    calls.length = 0;
+    assert.equal(view.runHQGreetingChoice('folder', trigger), false, 'a link, not a run');
+    assert.equal(view.runHQGreetingChoice('home', trigger), false);
+    assert.equal(view.runHQGreetingChoice('nope', trigger), false);
+    view.notesState = () => ({ secondBrain: TIP_NOTES.unset });
+    assert.equal(view.runHQGreetingChoice('notes', trigger), true);
+    assert.deepEqual(calls, [['notes', trigger]]);
+    assert.equal(
+      view.runHQGreetingChoice('note', trigger),
+      false,
+      'the note step became "notes" here'
+    );
+
+    // Not greeting: no choice runs.
+    calls.length = 0;
+    view.firstVisit.state = 'done';
+    assert.equal(view.runHQGreetingChoice('brief', trigger), false);
+    assert.deepEqual(calls, []);
+  });
+});
+
+test('"Save an idea" before the Notes Inbox has painted: the repaint that makes the capture box takes focus, once', () => {
+  const view = greetingView();
+  const originalDocument = globalThis.document;
+  const doc = { activeElement: null };
+  const capture = {
+    focused: 0,
+    focus: () => ((capture.focused += 1), (doc.activeElement = capture))
+  };
+  const tab = { focus: () => (doc.activeElement = tab) };
+  let painted = false;
+  const node = {
+    hidden: true,
+    contains: () => false,
+    scrollIntoView() {},
+    querySelector: selector => {
+      if (selector === '[data-notes-capture]') return painted ? capture : null;
+      if (selector.includes('data-notes-tab')) return tab;
+      return null;
+    },
+    set innerHTML(value) {
+      painted = true;
+    }
+  };
+  Object.assign(view, {
+    notesInlineNode: () => node,
+    setNotesTab() {},
+    inlineNotesHTML: () => '<input data-notes-capture>'
+  });
+  globalThis.document = doc;
+  try {
+    // Just switched to Details: the panel is mounted, its Inbox is not painted.
+    view.focusHQNoteCapture(null);
+    assert.equal(capture.focused, 0, 'there is no box yet');
+    assert.equal(doc.activeElement, tab, 'the panel has the focus meanwhile');
+    // The look finishes and the panel repaints: the box takes the focus, once.
+    view.paintInlineNotes(node);
+    assert.equal(capture.focused, 1);
+    assert.equal(doc.activeElement, capture);
+    view.paintInlineNotes(node);
+    assert.equal(capture.focused, 1, 'a later repaint does not ask again');
+
+    // An ask that lapsed (the person went elsewhere meanwhile) moves nothing.
+    painted = false;
+    doc.activeElement = null;
+    view.focusHQNoteCapture(null);
+    view._hqNoteCaptureWantedAt = Date.now() - 6000;
+    view.paintInlineNotes(node);
+    assert.equal(capture.focused, 1, 'stale: no focus pulled');
+    assert.equal(view._hqNoteCaptureWantedAt, 0);
+
+    // The box already there: focused at once, nothing left waiting.
+    view.focusHQNoteCapture(null);
+    assert.equal(capture.focused, 2);
+    assert.equal(view._hqNoteCaptureWantedAt, 0);
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
+test('the drawer is told only when the greeting changes, never about a page that never had one', () => {
+  const view = greetingView();
+  const events = [];
+  const originalCustomEvent = globalThis.CustomEvent;
+  withTipGlobals(view, view.firstVisit, () => {
+    globalThis.document.dispatchEvent = event => events.push(event.type);
+    view.notifyHQGreeting();
+    assert.deepEqual(events, ['ori:hq-first-visit'], 'the first answer');
+    view.notifyHQGreeting();
+    view.notifyHQGreeting();
+    assert.equal(events.length, 1, 'a repaint that changes nothing says nothing');
+    view.firstVisit.missions = GREETING_MISSIONS.map((mission, index) =>
+      index === 0 ? { ...mission, status: 'completed' } : mission
+    );
+    view.notifyHQGreeting();
+    assert.equal(events.length, 2, 'a suggestion was resolved');
+    view.firstVisit.state = 'done';
+    view.notifyHQGreeting();
+    assert.equal(events.length, 3, 'Hide suggestions ends the greeting');
+    view.notifyHQGreeting();
+    assert.equal(events.length, 3);
+  });
+  // An HQ whose visit was never pending: no signature, no event, no work.
+  const quiet = greetingView({ state: 'done' });
+  const quietEvents = [];
+  withTipGlobals(quiet, quiet.firstVisit, () => {
+    globalThis.document.dispatchEvent = event => quietEvents.push(event.type);
+    quiet.notifyHQGreeting();
+    quiet.notifyHQGreeting();
+    assert.deepEqual(quietEvents, []);
+  });
+  assert.equal(globalThis.CustomEvent, originalCustomEvent);
 });
 
 // --- First-visit tips on the Flow Map ----------------------------------------------

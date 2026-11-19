@@ -1134,6 +1134,105 @@ body.home-command-page .personal-assistant-launcher__status[data-tone="info"] {
   display: none;
 }
 
+/* The assistant's greeting on a first visit to the HQ, first thing in an empty
+   conversation (personal-assistant-hq-greeting.js). A host-written card, not a
+   message: it sits outside the thread. Drawer tokens only, so both themes hold. */
+.pa-hq-greeting-host[hidden] {
+  display: none;
+}
+.pa-hq-greeting-host {
+  margin: 0 0 0.75rem;
+}
+.pa-hq-greeting {
+  --pag-ink: var(--ori-ink, #3b2a12);
+  --pag-paper: var(--ori-paper, #f6ead6);
+  --pag-muted: color-mix(in srgb, var(--pag-ink) 72%, var(--pag-paper));
+  --pag-line: var(--ori-line, #d8c19b);
+  --pag-accent: var(--ori-accent, #bd7c24);
+  --pag-accent-text: var(--ori-accent-text, #8a5a15);
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--pag-line);
+  border-radius: 10px;
+  background: var(--pag-paper);
+  color: var(--pag-ink);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.pa-hq-greeting > * {
+  margin: 0;
+}
+.pa-hq-greeting__title {
+  font-size: 0.95rem;
+  font-weight: 650;
+}
+.pa-hq-greeting__ask {
+  margin-top: 0.2rem;
+  font-weight: 600;
+}
+.pa-hq-greeting__choices {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.pa-hq-greeting__choice {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: start;
+  gap: 0.6rem;
+  width: 100%;
+  min-height: 44px;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--pag-line);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+.pa-hq-greeting__choice:hover {
+  border-color: var(--pag-accent);
+}
+.pa-hq-greeting__choice:focus-visible,
+.pa-hq-greeting__alt:focus-visible {
+  outline: 2px solid var(--pag-accent-text);
+  outline-offset: 2px;
+}
+.pa-hq-greeting__choice strong {
+  display: block;
+  font-weight: 600;
+}
+.pa-hq-greeting__choice small {
+  display: block;
+  margin-top: 2px;
+  color: var(--pag-muted);
+  font-size: 0.75rem;
+}
+.pa-hq-greeting__mark {
+  color: var(--pag-accent-text);
+}
+.pa-hq-greeting__choices .is-resolved .pa-hq-greeting__choice strong {
+  color: var(--pag-muted);
+}
+.pa-hq-greeting__alt {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  margin: 0 0 0 2.2rem;
+  color: var(--pag-muted);
+  font-size: 0.75rem;
+  text-underline-offset: 3px;
+}
+.pa-hq-greeting__footer {
+  color: var(--pag-muted);
+  font-size: 0.75rem;
+}
+
 /* What a reply read: a compact disclosure under the answer, closed by default. */
 .personal-assistant-message__sources {
   margin: 6px 0 0;

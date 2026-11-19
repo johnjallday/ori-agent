@@ -150,6 +150,7 @@ import {
 import { readRailSection, resolveRailSection, writeRailSection } from './workspace-command-rail.js';
 import { HQ_LABELS, portabilityWord } from './hq-labels.js';
 import { HQFirstVisitCard } from './hq-first-visit-card.js';
+import { hqGreetingView as buildHQGreetingView } from './hq-first-visit.js';
 import { createHqTipLayer, TIP_ID } from './hq-tip-layer.js';
 import {
   MAP_HINT_PART,
@@ -199,6 +200,9 @@ const HQ_FOCUS_ATTRS = [
   // The first-visit `?` beside a part (hq-part-tips.js); never the part itself.
   'data-hq-tip-mark'
 ];
+// How long a suggestion's ask for the Notes capture box waits for the box to be
+// painted (focusHQNoteCapture); after that a repaint no longer moves focus.
+const HQ_NOTE_CAPTURE_WAIT_MS = 5000;
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
@@ -3116,6 +3120,7 @@ export class WorkspaceCommandView {
     this.restoreRailFocus();
     this.restoreMapStationFocus();
     this.syncHQTips();
+    this.notifyHQGreeting();
     this.hydrateActiveAgentPrompt();
     // The Workshop host only exists once the Toolbox tab has rendered, so it is
     // mounted here rather than at page load. Idempotent per instance.
@@ -16051,6 +16056,69 @@ export class WorkspaceCommandView {
     }
   }
 
+  // ── The assistant's greeting in the drawer ──────────────────────────────
+  // The drawer (personal-assistant-hq-greeting.js) asks the page what to say, so
+  // it never reads station state itself. null: not known yet; { show: false }:
+  // nothing to greet; { show: true, running, off, steps }: greet.
+  hqGreetingView() {
+    if (!this.page?.workspace) return null;
+    if (!this.isPersonalHQ()) return { show: false };
+    const visit = this.firstVisit;
+    if (!visit) return { show: false };
+    const { cards, folded } = this.hqStationLayout();
+    return buildHQGreetingView({
+      state: visit.state,
+      missions: visit.missions,
+      notes: this.notesState().secondBrain,
+      resolvedOnLoad: visit.resolvedOnLoad === true && !visit.error,
+      failed: visit.error === HQ_LABELS.firstVisitLoadError && !Array.isArray(visit.missions),
+      cards,
+      folded
+    });
+  }
+
+  // A choice in the greeting hands off to the owner the suggestions already use.
+  // The greeting completes and skips nothing itself. The folder choices are links
+  // the browser follows, so they have nothing to run here.
+  runHQGreetingChoice(action, trigger) {
+    const view = this.hqGreetingView();
+    const step = view?.show ? view.steps.find(item => item.action === action) : null;
+    if (!step || step.disabled) return false;
+    if (action === 'brief') {
+      this.openDailyBriefPanel(trigger);
+      return true;
+    }
+    if (action === 'notes') {
+      this.openNotesStation(trigger);
+      return true;
+    }
+    if (action === 'note') {
+      // The Inbox capture lives on Details; the greeting shows on every HQ view.
+      if (this.viewMode !== 'details') this.setCommandViewMode('details', { focus: false });
+      this.focusHQNoteCapture(trigger);
+      return true;
+    }
+    return false;
+  }
+
+  // Tells the drawer the greeting may have changed, only when it has: a live
+  // repaint that changes nothing must not redraw the drawer.
+  notifyHQGreeting() {
+    if (typeof document === 'undefined' || typeof document.dispatchEvent !== 'function') return;
+    if (typeof CustomEvent !== 'function') return;
+    // A page that never had a pending visit has nothing to say, and says nothing.
+    if (this.firstVisit?.state !== 'pending' && this._hqGreetingSignature === undefined) return;
+    let signature;
+    try {
+      signature = JSON.stringify(this.hqGreetingView());
+    } catch (_error) {
+      return;
+    }
+    if (signature === this._hqGreetingSignature) return;
+    this._hqGreetingSignature = signature;
+    document.dispatchEvent(new CustomEvent('ori:hq-first-visit'));
+  }
+
   hqTilesHTML(stats) {
     const jump = (value, label, key, aria) =>
       '<button type="button" class="ws-cmd-stat" data-cmd-hq-jump="' +
@@ -16261,6 +16329,7 @@ export class WorkspaceCommandView {
     }
     // A layout shift above the tip moves its part; follow it.
     this.hqTipLayer?.refresh();
+    this.notifyHQGreeting();
   }
 
   hqTilesValues() {
@@ -16752,6 +16821,19 @@ export class WorkspaceCommandView {
       const body = node.querySelector?.('.ws-notes-body');
       if (body) body.scrollTop = scroll;
     }
+    // A suggestion asked for the capture box before it existed
+    // (focusHQNoteCapture): this repaint made it, so it takes the focus. The ask
+    // lapses after a few seconds, so a late repaint never pulls focus back from
+    // wherever the person has gone since.
+    if (this._hqNoteCaptureWantedAt) {
+      const fresh = Date.now() - this._hqNoteCaptureWantedAt < HQ_NOTE_CAPTURE_WAIT_MS;
+      const capture = fresh ? node.querySelector?.('[data-notes-capture]') : null;
+      if (!fresh || capture) this._hqNoteCaptureWantedAt = 0;
+      if (capture && typeof capture.focus === 'function') {
+        capture.focus({ preventScroll: true });
+        return;
+      }
+    }
     if (!focus) return;
     let target = null;
     if (focus.capture) target = node.querySelector?.('[data-notes-capture]');
@@ -16841,8 +16923,17 @@ export class WorkspaceCommandView {
     this.setNotesTab('inbox');
     node.scrollIntoView?.({ block: 'start' });
     const input = node.querySelector?.('[data-notes-capture]');
-    if (input) input.focus({ preventScroll: true });
-    else this.focusInlineNotesPanel();
+    if (input) {
+      this._hqNoteCaptureWantedAt = 0;
+      input.focus({ preventScroll: true });
+      return;
+    }
+    // The panel has not painted its Inbox yet (the view was just switched to
+    // Details, or its look is still loading): the capture box does not exist.
+    // Bring the panel into focus meanwhile, and let the repaint that creates the
+    // box take it, within a few seconds.
+    this._hqNoteCaptureWantedAt = Date.now();
+    this.focusInlineNotesPanel();
   }
 
   // Brings the inline panel into view and focus; false when it is not mounted.

@@ -30,6 +30,7 @@ export function createTranscript({
   let generation = 0;
   let pending = null;
   let attentionSeen = null;
+  let greetingSeen = false;
   let userIntent = false;
   const scale = () => pane.getBoundingClientRect().height / pane.offsetHeight || 1;
   const offset = row =>
@@ -86,8 +87,25 @@ export function createTranscript({
     const shownAttention = attention && attention.getBoundingClientRect().height > 0;
     const firstAttention = shownAttention && attention !== attentionSeen;
     if (shownAttention) attentionSeen = attention;
+    // The assistant's first-visit greeting is the first thing in an empty
+    // conversation (personal-assistant-hq-greeting.js): shown from its top each
+    // time it appears, not pinned to the end where a card taller than the pane
+    // would lose its heading. It is one card, not a thread, so it is not
+    // "followed": once it goes (a message was sent) replies follow again.
+    const empty = !target && !Array.from(transcript.children).some(row => row.dataset.messageRole);
+    const greeting =
+      empty && !shownAttention
+        ? pane.querySelector?.('#personalAssistantHQGreeting:not([hidden])')
+        : null;
+    const shownGreeting = Boolean(greeting && greeting.getBoundingClientRect().height > 0);
+    const greetingJustShown = shownGreeting && !greetingSeen;
+    if (!shownGreeting && greetingSeen) following = true;
+    greetingSeen = shownGreeting;
     if (firstAttention && following) {
       move(pane.scrollTop + offset(attention) - 8);
+      following = false;
+    } else if (greetingJustShown) {
+      move(0);
       following = false;
     } else if (target && connected(target) && following) {
       const height = target.getBoundingClientRect().height / scale();

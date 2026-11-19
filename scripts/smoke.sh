@@ -4340,8 +4340,8 @@ agent_state_digest() {
 smoke_hq_first_visit() {
   local port="${2:-}" mode="${3:-home}"
   [[ "$port" =~ ^[0-9]+$ && "$port" -gt 0 && "$port" -le 65535 ]] ||
-    fail "usage: $0 hq-first-visit <port> [home|built]"
-  [[ "$mode" == home || "$mode" == built ]] || fail "mode must be home or built"
+    fail "usage: $0 hq-first-visit <port> [home|built|later]"
+  [[ "$mode" == home || "$mode" == built || "$mode" == later ]] || fail "mode must be home, built or later"
   python3 - "$port" "$mode" <<'PY'
 import json
 import sys
@@ -4379,6 +4379,14 @@ if sys.argv[2] == "built":
         "include_future_workspaces": True,
         "notes": {"include": True, "witness": notes["setup_default"]["path"]}})
     print("HQ built with notes:", base)
+elif sys.argv[2] == "later":
+    # Notes left for later: nothing is written, and the Notes question is still due.
+    api("POST", "/api/personal-assistant/hq", {
+        "request_id": "hq-first-visit-build", "if_version": state["state_version"],
+        "name": "My HQ", "timezone": "UTC", "scope": "all",
+        "include_future_workspaces": True,
+        "notes": {"include": False}})
+    print("HQ built, notes left for later:", base)
 else:
     print("Assistant ready; build the HQ through Home:", base)
 PY
@@ -4459,7 +4467,7 @@ seed-recap) smoke_seed_recap "$@" ;;
 propose-fields) smoke_propose_fields "$@" ;;
 *)
   echo "usage:" >&2
-  echo "  $0 hq-first-visit <port> [home|built]     # prepare a fresh isolated sandbox; optionally build its HQ with notes" >&2
+  echo "  $0 hq-first-visit <port> [home|built|later]  # prepare a fresh isolated sandbox; optionally build its HQ with notes, or with notes left for later" >&2
   echo "  $0 serve [port] [sandbox-name]           # run an ISOLATED demo server (Ctrl-C to stop)" >&2
   echo "  $0 serve-split [port] [sandbox-name]     # skills: isolated server with HOME and the data dir apart" >&2
   echo "  $0 seed-import <sandbox-dir>             # skills: fill the split sandbox's ~/.agents/skills for the import panel" >&2

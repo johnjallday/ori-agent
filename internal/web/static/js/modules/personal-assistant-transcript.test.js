@@ -259,6 +259,53 @@ test('a fresh drawer reveals saved setup recovery once, never overriding later r
   assert.equal(f.doc.activeElement, null);
 });
 
+test('a fresh drawer shows the first-visit greeting from its top, each time it appears; replies follow again once it is gone', () => {
+  const f = fixture([20]);
+  f.transcript.children[0].dataset.messageRole = ''; // the empty-thread placeholder is not a reply
+  f.prefix(600); // the greeting card and what is above it are taller than the pane
+  let shown = true;
+  const greeting = { getBoundingClientRect: () => ({ top: 90 - f.pane.scrollTop, height: 435 }) };
+  f.pane.querySelector = selector =>
+    selector.includes('personalAssistantHQGreeting') && shown ? greeting : null;
+  // A drawer opens pinned to the end of its content: that would clip the top.
+  f.pane.scrollTop = 320;
+  f.owner.opened();
+  f.flush();
+  assert.equal(f.pane.scrollTop, 0, 'from the top, so its heading and author are visible');
+  assert.equal(f.doc.activeElement, null, 'scrolling never takes focus');
+
+  // The person reads on: a later change does not snap them back, either way.
+  f.scroll(150);
+  f.owner.changed();
+  f.flush();
+  assert.equal(f.pane.scrollTop, 150);
+
+  // They send a message: the greeting goes, and the reply is followed again.
+  shown = false;
+  f.transcript.append(f.row(100, 'user'));
+  f.owner.changed();
+  f.flush();
+  assert.equal(f.pane.scrollTop, 420, 'back to following the end of the conversation');
+
+  // A new empty conversation brings the greeting back: from its top again.
+  f.transcript.children.pop();
+  shown = true;
+  f.owner.changed();
+  f.flush();
+  assert.equal(f.pane.scrollTop, 0);
+});
+
+test('without a greeting a fresh drawer still pins to the end', () => {
+  const f = fixture([20]);
+  f.transcript.children[0].dataset.messageRole = '';
+  f.prefix(600);
+  f.pane.querySelector = () => null;
+  f.pane.scrollTop = 0;
+  f.owner.opened();
+  f.flush();
+  assert.equal(f.pane.scrollTop, 320);
+});
+
 test('hydration reveals the current folder review, but a later reply still wins', () => {
   const f = fixture([100, 650]);
   const row = f.transcript.children[1];
