@@ -10576,6 +10576,441 @@ test('HQ Details: a focused station card keeps focus through a re-render', () =>
   }
 });
 
+// --- First-visit tips on the Overview (hq-part-tips.js, hq-tip-layer.js) ---------
+// A pending first visit marks each explainable card with an outline and a `?`;
+// a done one, and an HQ built before the feature, draws none of it.
+
+function withTipGlobals(commandView, firstVisit, fn) {
+  const originals = { document: globalThis.document, window: globalThis.window };
+  globalThis.document = { getElementById: () => null };
+  globalThis.window = {};
+  commandView.firstVisit = firstVisit;
+  try {
+    return fn();
+  } finally {
+    globalThis.document = originals.document;
+    globalThis.window = originals.window;
+  }
+}
+
+const pendingVisit = (state = 'pending') => ({
+  state,
+  view: () => ({ layout: { notes: true } })
+});
+
+function stationCell(grid, key) {
+  return grid.split('</li>').find(cell => cell.includes('data-cmd-hq-card="' + key + '"'));
+}
+
+test('first-visit tips: a pending visit marks the Daily Brief card with an outline and a ? beside it', () => {
+  const { commandView } = hqDetailsMarkup();
+  withTipGlobals(commandView, pendingVisit(), () => {
+    const grid = commandView.hqStationsGridHTML();
+    const cell = stationCell(grid, 'daily-brief');
+    assert.match(cell, /<button type="button" class="ws-hq-station [^"]*is-tip-marked"/);
+    assert.match(cell, /data-hq-tip-part="daily-brief"/);
+    assert.match(
+      cell,
+      /<button type="button" class="ws-hq-tip-mark" data-hq-tip-mark="daily-brief" aria-label="What is Daily Brief\?" aria-expanded="false" aria-controls="hq-part-tip"><span aria-hidden="true">\?<\/span><\/button>/
+    );
+    // The card is a button, so the ? sits beside it inside the same cell, never in it.
+    assert.equal((cell.match(/<button/g) || []).length, 2);
+    const card = cell.slice(0, cell.indexOf('</button>'));
+    assert.doesNotMatch(card, /data-hq-tip-mark|ws-hq-tip-mark/);
+    assert.ok(cell.indexOf('</button>') < cell.indexOf('ws-hq-tip-mark'));
+    // The delegated station click handlers must not see the ?.
+    const mark = cell.slice(cell.indexOf('ws-hq-tip-mark'));
+    assert.doesNotMatch(mark, /data-cmd-hq-card|data-cmd-flow-node|data-cmd-hq-station/);
+    // One ? per part, and the tip's words never land in the page markup.
+    assert.equal((grid.match(/data-hq-tip-mark="daily-brief"/g) || []).length, 1);
+    assert.doesNotMatch(grid, /A short read of your day/);
+  });
+});
+
+test('first-visit tips: a part that has nothing to say gets no mark, and a done visit draws none', () => {
+  const { commandView } = hqDetailsMarkup();
+  withTipGlobals(commandView, pendingVisit(), () => {
+    const grid = commandView.hqStationsGridHTML();
+    // Email and Calendar Ops here are connected cards, and their sentences say "off".
+    for (const key of ['email', 'calendar-ops']) {
+      const cell = stationCell(grid, key);
+      assert.ok(cell, key + ' is drawn');
+      assert.doesNotMatch(cell, /data-hq-tip|tip-mark|is-tip-marked/, key);
+    }
+  });
+  for (const state of ['done', '']) {
+    withTipGlobals(commandView, pendingVisit(state), () => {
+      assert.doesNotMatch(
+        commandView.hqStationsGridHTML(),
+        /data-hq-tip|tip-mark|is-tip-marked|hq-part-tip/,
+        'state ' + JSON.stringify(state)
+      );
+    });
+  }
+  // No first-visit state at all (an HQ built before the feature).
+  withTipGlobals(commandView, null, () => {
+    assert.doesNotMatch(commandView.hqStationsGridHTML(), /data-hq-tip|tip-mark|is-tip-marked/);
+  });
+  // The whole page, as the pinned specs see it, is unchanged when not pending.
+  assert.doesNotMatch(
+    hqDetailsMarkup().html,
+    /data-hq-tip|tip-mark|is-tip-marked|ws-hq-tip-cell|hq-part-tip/
+  );
+});
+
+test('first-visit tips: they run only on the Details view of the HQ while the visit is pending', () => {
+  const { commandView } = hqDetailsMarkup();
+  const scope = (state, patch = {}) => {
+    const saved = Object.fromEntries(Object.keys(patch).map(key => [key, commandView[key]]));
+    Object.assign(commandView, patch);
+    try {
+      return withTipGlobals(commandView, pendingVisit(state), () => commandView.hqTipScope());
+    } finally {
+      Object.assign(commandView, saved);
+    }
+  };
+  assert.equal(scope('pending'), 'overview');
+  assert.equal(scope('done'), '');
+  assert.equal(scope(''), '');
+  assert.equal(scope('pending', { viewMode: 'map' }), '');
+  assert.equal(scope('pending', { viewMode: 'tickets' }), '');
+  assert.equal(scope('pending', { active: false }), '');
+  assert.equal(scope('pending', { isPersonalHQ: () => false }), '');
+});
+
+test('first-visit tips: the tip speaks in the lead agent’s name, with a face and the part’s sentence', () => {
+  const { commandView } = hqDetailsMarkup();
+  withTipGlobals(commandView, pendingVisit(), () => {
+    const content = commandView.hqTipContent('daily-brief');
+    assert.equal(content.sentence, 'A short read of your day, on the schedule you chose.');
+    assert.equal(content.name, 'Atlas', 'the lead, not the first agent');
+    assert.match(content.faceHTML, /ws-cmd-character is-roster idle/);
+    assert.doesNotMatch(content.faceHTML, /working|alert|waiting/, 'no status ring on a tip');
+    assert.equal(commandView.hqTipContent('nope'), null);
+    assert.equal(commandView.hqTipContent('email'), null, 'a connected part has no tip');
+  });
+  withTipGlobals(commandView, pendingVisit('done'), () => {
+    assert.equal(commandView.hqTipContent('daily-brief'), null);
+  });
+});
+
+test('first-visit tips: the layer follows the visit and is gone once it is done', () => {
+  const { commandView } = hqDetailsMarkup();
+  withTipGlobals(commandView, pendingVisit(), () => {
+    commandView.syncHQTips();
+    assert.ok(commandView.hqTipLayer, 'created while pending');
+    commandView.firstVisit.state = 'done';
+    commandView.syncHQTips();
+    assert.equal(commandView.hqTipLayer, null, 'destroyed when the visit is done');
+    commandView.syncHQTips();
+    assert.equal(commandView.hqTipLayer, null, 'and not made again');
+  });
+  // A visit that was never pending never builds one.
+  const fresh = hqDetailsMarkup().commandView;
+  withTipGlobals(fresh, pendingVisit(''), () => {
+    fresh.syncHQTips();
+    assert.equal(fresh.hqTipLayer ?? null, null);
+  });
+});
+
+const TIP_NOTES = {
+  created: { status: 'connected', source: { origin: 'created_by_ori' } },
+  own: { status: 'connected', source: { origin: 'obsidian_vault' } },
+  unset: { status: 'unset' }
+};
+
+function tipStore(seed = {}) {
+  const data = new Map(Object.entries(seed));
+  return {
+    data,
+    getItem: key => (data.has(key) ? data.get(key) : null),
+    setItem: (key, value) => data.set(key, String(value)),
+    removeItem: key => data.delete(key)
+  };
+}
+
+test('first-visit tips: the Notes panel gets a ? beside its host, never inside it', () => {
+  const { commandView } = hqDetailsMarkup();
+  commandView.notesState = () => ({ secondBrain: TIP_NOTES.created });
+  withTipGlobals(commandView, pendingVisit(), () => {
+    const host = commandView.renderHQNotesHost();
+    assert.equal(
+      host,
+      '<div class="ws-hq-tip-cell"><div class="ws-hq-panel-host is-tip-marked" data-cmd-hq-host="notes" data-hq-tip-part="notes" data-hq-tip-trigger="mark"></div>' +
+        '<button type="button" class="ws-hq-tip-mark" data-hq-tip-mark="notes" aria-label="What is Notes?" aria-expanded="false" aria-controls="hq-part-tip"><span aria-hidden="true">?</span></button></div>',
+      'the host is empty and closed before the ?, which the panel move cannot erase'
+    );
+  });
+  // Not pending: exactly the markup the pinned specs know.
+  for (const state of ['done', '']) {
+    withTipGlobals(commandView, pendingVisit(state), () => {
+      assert.equal(
+        commandView.renderHQNotesHost(),
+        '<div class="ws-hq-panel-host" data-cmd-hq-host="notes"></div>'
+      );
+    });
+  }
+  // The sentence depends on which Notes there are, so it waits until they are read.
+  commandView.notesState = () => ({ secondBrain: null });
+  withTipGlobals(commandView, pendingVisit(), () => {
+    assert.equal(
+      commandView.renderHQNotesHost(),
+      '<div class="ws-hq-panel-host" data-cmd-hq-host="notes"></div>'
+    );
+  });
+});
+
+test('first-visit tips: the Notes sentence follows the Notes the first visit reads', () => {
+  const { commandView } = hqDetailsMarkup();
+  const sentence = notes => {
+    commandView.notesState = () => ({ secondBrain: notes });
+    return withTipGlobals(
+      commandView,
+      pendingVisit(),
+      () => commandView.hqTipContent('notes')?.sentence
+    );
+  };
+  assert.match(sentence(TIP_NOTES.created), /^A folder you own\. I write there/);
+  assert.match(sentence(TIP_NOTES.own), /^Your own vault\. I read it and never write there/);
+  assert.match(sentence(TIP_NOTES.unset), /^Off for now\. Set it up and I keep what I learn/);
+});
+
+test('first-visit tips: a looked-at part loses its mark, but not while its tip is open or its ? has focus', () => {
+  const { commandView } = hqDetailsMarkup();
+  commandView.notesState = () => ({ secondBrain: TIP_NOTES.created });
+  const storage = tipStore();
+  commandView.railStorage = () => storage;
+  withTipGlobals(commandView, pendingVisit(), () => {
+    const marks = () =>
+      [...commandView.hqStationsGridHTML().matchAll(/data-hq-tip-mark="([^"]+)"/g)]
+        .map(match => match[1])
+        .sort();
+    assert.deepEqual(marks(), ['daily-brief', 'memory', 'watchtower']);
+
+    commandView.hqTipShown('daily-brief');
+    assert.deepEqual(marks(), ['memory', 'watchtower'], 'looked at: the ? goes');
+    const grid = commandView.hqStationsGridHTML();
+    const cell = stationCell(grid, 'daily-brief');
+    assert.doesNotMatch(cell, /is-tip-marked/, 'and so does the outline');
+    assert.match(cell, /data-hq-tip-part="daily-brief"/, 'the card can still show its tip');
+    assert.match(cell, /<button type="button" class="ws-hq-station /, 'it is still a plain card');
+
+    // The tip showing now keeps its mark through a repaint.
+    commandView.hqTipLayer = { currentKey: () => 'daily-brief' };
+    assert.deepEqual(marks(), ['daily-brief', 'memory', 'watchtower']);
+    commandView.hqTipLayer = null;
+    assert.deepEqual(marks(), ['memory', 'watchtower']);
+
+    // So does a ? that holds focus: dropping it would drop the person's place.
+    globalThis.document.activeElement = {
+      getAttribute: name => (name === 'data-hq-tip-mark' ? 'daily-brief' : null)
+    };
+    commandView.container.contains = () => true;
+    assert.deepEqual(marks(), ['daily-brief', 'memory', 'watchtower']);
+    globalThis.document.activeElement = null;
+    assert.deepEqual(marks(), ['memory', 'watchtower']);
+  });
+});
+
+test('first-visit tips: a part looked at EARLIER does not get its mark back when its tip opens', () => {
+  const { commandView } = hqDetailsMarkup();
+  commandView.notesState = () => ({ secondBrain: TIP_NOTES.created });
+  const storage = tipStore({
+    'ori:hq-tips-looked:hq-1': JSON.stringify(['daily-brief'])
+  });
+  commandView.railStorage = () => storage;
+  withTipGlobals(commandView, pendingVisit(), () => {
+    const marks = () =>
+      [...commandView.hqStationsGridHTML().matchAll(/data-hq-tip-mark="([^"]+)"/g)]
+        .map(match => match[1])
+        .sort();
+    assert.deepEqual(marks(), ['memory', 'watchtower']);
+    // Its tip opens on hover or focus (the layer reports it as shown again):
+    // there was no mark to keep, so a repaint must not draw one.
+    commandView.hqTipLayer = { currentKey: () => 'daily-brief' };
+    commandView.hqTipShown('daily-brief');
+    assert.deepEqual(marks(), ['memory', 'watchtower']);
+    // A part looked at for the first time keeps the mark it has until its tip closes.
+    commandView.hqTipLayer = { currentKey: () => 'watchtower' };
+    commandView.hqTipShown('watchtower');
+    assert.deepEqual(marks(), ['memory', 'watchtower']);
+    commandView.hqTipLayer = null;
+    assert.deepEqual(marks(), ['memory'], 'and loses it once the tip is gone');
+  });
+});
+
+test('first-visit tips: a ? kept by focus is settled once focus leaves it', () => {
+  const { commandView } = hqDetailsMarkup();
+  const storage = tipStore();
+  commandView.railStorage = () => storage;
+  const removed = [];
+  const classes = [];
+  let onFocusOut = null;
+  let listeners = 0;
+  const mark = {
+    getAttribute: () => 'daily-brief',
+    remove: () => removed.push('daily-brief'),
+    addEventListener: (type, fn, options) => {
+      assert.equal(type, 'focusout');
+      assert.deepEqual(options, { once: true });
+      listeners += 1;
+      onFocusOut = fn;
+    }
+  };
+  const part = { classList: { remove: name => classes.push(name) } };
+  const timers = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = fn => timers.push(fn);
+  try {
+    withTipGlobals(commandView, pendingVisit(), () => {
+      commandView.container = {
+        querySelectorAll: () => [mark],
+        querySelector: () => part,
+        contains: () => true
+      };
+      commandView.hqTipShown('daily-brief');
+      globalThis.document.activeElement = {
+        getAttribute: name => (name === 'data-hq-tip-mark' ? 'daily-brief' : null)
+      };
+      // The tip closed (Escape) but the ? still has focus: it stays, and waits.
+      commandView.settleHQTipMarks();
+      commandView.settleHQTipMarks();
+      assert.deepEqual(removed, []);
+      assert.equal(listeners, 1, 'one watcher, however often it is asked');
+      // Focus leaves: after the browser has settled it, the mark goes.
+      globalThis.document.activeElement = null;
+      onFocusOut();
+      assert.equal(timers.length, 1);
+      timers.shift()();
+      assert.deepEqual(removed, ['daily-brief']);
+      assert.deepEqual(classes, ['is-tip-marked']);
+    });
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
+  }
+});
+
+test('first-visit tips: a blocked store only means the mark shows again, and nothing throws', () => {
+  const { commandView } = hqDetailsMarkup();
+  commandView.notesState = () => ({ secondBrain: TIP_NOTES.created });
+  const refusing = {
+    getItem() {
+      throw new Error('blocked');
+    },
+    setItem() {
+      throw new Error('blocked');
+    },
+    removeItem() {
+      throw new Error('blocked');
+    }
+  };
+  for (const storage of [refusing, null]) {
+    commandView.railStorage = () => storage;
+    withTipGlobals(commandView, pendingVisit(), () => {
+      commandView.hqTipShown('daily-brief');
+      assert.match(commandView.hqStationsGridHTML(), /data-hq-tip-mark="daily-brief"/);
+    });
+  }
+});
+
+test('first-visit tips: the looked-at store is never read to decide the visit is pending', () => {
+  const { commandView } = hqDetailsMarkup();
+  commandView.notesState = () => ({ secondBrain: TIP_NOTES.created });
+  // Everything looked at, yet a done visit draws nothing and a pending one is decided by the server.
+  const storage = tipStore({
+    'ori:hq-tips-looked:hq-1': JSON.stringify(['watchtower', 'daily-brief', 'memory', 'notes'])
+  });
+  commandView.railStorage = () => storage;
+  withTipGlobals(commandView, pendingVisit('done'), () => {
+    assert.equal(commandView.hqTipScope(), '');
+    assert.doesNotMatch(commandView.hqStationsGridHTML(), /data-hq-tip/);
+  });
+  withTipGlobals(commandView, pendingVisit(), () => {
+    assert.equal(commandView.hqTipScope(), 'overview', 'pending stays pending');
+    assert.doesNotMatch(commandView.hqStationsGridHTML(), /tip-mark/, 'but nothing is marked');
+    assert.match(commandView.hqStationsGridHTML(), /data-hq-tip-part="watchtower"/);
+  });
+});
+
+test('first-visit tips: finishing the visit forgets what was looked at', () => {
+  const { commandView } = hqDetailsMarkup();
+  const storage = tipStore();
+  commandView.railStorage = () => storage;
+  let destroyed = 0;
+  withTipGlobals(commandView, pendingVisit(), () => {
+    commandView.hqTipShown('notes');
+    assert.equal(storage.data.size, 1);
+    commandView.hqTipLayer = { refresh() {}, destroy: () => (destroyed += 1) };
+    commandView.syncHQTips();
+    assert.equal(storage.data.size, 1, 'still pending: remembered');
+    commandView.firstVisit.state = 'done';
+    commandView.syncHQTips();
+    assert.equal(storage.data.size, 0, 'done: forgotten');
+    assert.equal(destroyed, 1);
+    assert.equal(commandView.hqTipLayer, null);
+  });
+});
+
+test('first-visit tips: when a tip closes, a looked-at part drops its mark at once, unless the ? has focus', () => {
+  const { commandView } = hqDetailsMarkup();
+  const storage = tipStore();
+  commandView.railStorage = () => storage;
+  const removed = [];
+  const classes = [];
+  const mark = key => ({
+    getAttribute: () => key,
+    remove: () => removed.push(key)
+  });
+  const part = { classList: { remove: name => classes.push(name) } };
+  withTipGlobals(commandView, pendingVisit(), () => {
+    commandView.container = {
+      querySelectorAll: () => [mark('daily-brief'), mark('memory')],
+      querySelector: () => part,
+      contains: () => false
+    };
+    commandView.hqTipShown('daily-brief');
+    commandView.settleHQTipMarks();
+    assert.deepEqual(removed, ['daily-brief'], 'only the part that was looked at');
+    assert.deepEqual(classes, ['is-tip-marked']);
+
+    removed.length = 0;
+    globalThis.document.activeElement = {
+      getAttribute: name => (name === 'data-hq-tip-mark' ? 'daily-brief' : null)
+    };
+    commandView.container.contains = () => true;
+    commandView.settleHQTipMarks();
+    assert.deepEqual(removed, [], 'a focused ? stays until focus leaves');
+  });
+});
+
+test('first-visit tips: a focused ? keeps focus through a re-render', () => {
+  const page = hqPanelsPage();
+  const { doc, container, commandView } = page;
+  const originalOnHTML = container.onHTML;
+  container.onHTML = html => {
+    originalOnHTML(html);
+    const fresh = doc.createElement('button');
+    fresh.setAttribute('data-hq-tip-mark', 'daily-brief');
+    container.appendChild(fresh);
+  };
+  for (const name of ['rememberHQFocus', 'restoreHQFocus', 'syncHQNeedsYouSurface']) {
+    commandView[name] = WorkspaceCommandView.prototype[name];
+  }
+  const originalDocument = globalThis.document;
+  globalThis.document = doc;
+  try {
+    commandView.render();
+    const first = container.querySelector('[data-hq-tip-mark="daily-brief"]');
+    first.focus();
+    commandView.render();
+    const second = container.querySelector('[data-hq-tip-mark="daily-brief"]');
+    assert.notEqual(second, first, 'the ? was rebuilt');
+    assert.equal(doc.activeElement, second, 'and focus moved to its replacement');
+  } finally {
+    globalThis.document = originalDocument;
+  }
+});
+
 test('HQ Details says no tactical word, in text or aria-labels (FR23)', () => {
   const { html } = hqDetailsMarkup({
     window: {

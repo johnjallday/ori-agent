@@ -150,6 +150,9 @@ import {
 import { readRailSection, resolveRailSection, writeRailSection } from './workspace-command-rail.js';
 import { HQ_LABELS, portabilityWord } from './hq-labels.js';
 import { HQFirstVisitCard } from './hq-first-visit-card.js';
+import { createHqTipLayer, TIP_ID } from './hq-tip-layer.js';
+import { NOTES_PART, partKeyForCard, partTipsView, whatIsLabel } from './hq-part-tips.js';
+import { clearTipsLooked, readTipsLooked, writeTipLooked } from './hq-tip-looked.js';
 import { WORK_LABELS, startFromBacklogLabel } from './work-labels.js';
 import { hqNeedsYouRows } from './hq-attention.js';
 import { hqStationCards, hqStationGroups, stationsNeedingYou } from './hq-stations-grid.js';
@@ -185,7 +188,9 @@ const HQ_FOCUS_ATTRS = [
   'data-cmd-hq-more-toggle',
   'data-cmd-hq-goal-edit',
   'data-cmd-hq-rail',
-  'data-cmd-add-task'
+  'data-cmd-add-task',
+  // The first-visit `?` beside a part (hq-part-tips.js); never the part itself.
+  'data-hq-tip-mark'
 ];
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
@@ -3100,6 +3105,7 @@ export class WorkspaceCommandView {
     this.restoreLoadoutAddFocus();
     this.restoreRailFocus();
     this.restoreMapStationFocus();
+    this.syncHQTips();
     this.hydrateActiveAgentPrompt();
     // The Workshop host only exists once the Toolbox tab has rendered, so it is
     // mounted here rather than at page load. Idempotent per instance.
@@ -15373,7 +15379,25 @@ export class WorkspaceCommandView {
   }
 
   renderHQNotesHost() {
-    return '<div class="ws-hq-panel-host" data-cmd-hq-host="notes"></div>';
+    const tip =
+      this.hqTipScope() === 'overview'
+        ? this.hqTipView().parts.find(part => part.key === NOTES_PART)
+        : null;
+    if (!tip) return '<div class="ws-hq-panel-host" data-cmd-hq-host="notes"></div>';
+    // The panel is a live node moved into its host after every render, which
+    // empties the host first: the `?` is a sibling of the host, never in it.
+    // The host only triggers a tip through its `?`, not by hover or focus on a
+    // panel full of controls.
+    return (
+      '<div class="ws-hq-tip-cell">' +
+      '<div class="ws-hq-panel-host' +
+      (tip.marked ? ' is-tip-marked' : '') +
+      '" data-cmd-hq-host="notes" data-hq-tip-part="' +
+      NOTES_PART +
+      '" data-hq-tip-trigger="mark"></div>' +
+      (tip.marked ? this.hqTipMarkHTML(NOTES_PART, HQ_LABELS.notes) : '') +
+      '</div>'
+    );
   }
 
   // ── HQ header (FR5–FR9) ──
@@ -15672,13 +15696,23 @@ export class WorkspaceCommandView {
     this.mountSharedSurface('hq-needs-you', '#workspaceNeedsYouMount', host);
   }
 
-  hqStationsGridHTML() {
+  // The cards and folded setup buttons the grid draws. One place, so the
+  // first-visit tips explain exactly what is on the page.
+  hqStationLayout() {
     const layout = this.firstVisit?.view().layout;
     const revealed = layout?.stationKeys;
     const all = this.hqCards().filter(card => !revealed || revealed.includes(card.key));
     const { active, unused } = hqStationGroups(all);
-    const cards = revealed ? all : active;
-    const folded = layout?.foldedStations === false ? [] : unused;
+    return {
+      cards: revealed ? all : active,
+      folded: layout?.foldedStations === false ? [] : unused
+    };
+  }
+
+  hqStationsGridHTML() {
+    const { cards, folded } = this.hqStationLayout();
+    const tips = this.hqTipScope() === 'overview' ? this.hqTipView(cards) : null;
+    const tipFor = card => tips?.parts.find(part => part.key === partKeyForCard(card.key));
     if (!cards.length && !folded.length) return '';
     return (
       '<section class="ws-hq-panel ws-hq-stations" aria-labelledby="ws-hq-stations-title">' +
@@ -15695,18 +15729,22 @@ export class WorkspaceCommandView {
           cards
             .map(card => {
               const stateClass = card.stateWord.toLowerCase().replace(/\s+/g, '-');
+              const tip = tipFor(card);
               return (
                 '<li class="ws-hq-station-cell">' +
                 '<button type="button" class="ws-hq-station is-' +
                 escapeHtml(stateClass) +
                 (card.configured ? '' : ' is-unset') +
+                (tip?.marked ? ' is-tip-marked' : '') +
                 '" data-cmd-hq-card="' +
                 escapeHtml(card.key) +
                 '" aria-label="' +
                 escapeHtml(
                   [card.label + ': ' + card.stateWord, ...card.summary, card.action].join('. ')
                 ) +
-                '">' +
+                '"' +
+                (tip ? ' data-hq-tip-part="' + escapeHtml(tip.key) + '"' : '') +
+                '>' +
                 '<span class="ws-hq-station-head">' +
                 '<span class="ws-hq-station-name">' +
                 escapeHtml(card.label) +
@@ -15724,6 +15762,7 @@ export class WorkspaceCommandView {
                 escapeHtml(card.action) +
                 '</span>' +
                 '</button>' +
+                (tip?.marked ? this.hqTipMarkHTML(tip.key, card.label) : '') +
                 '</li>'
               );
             })
@@ -15752,6 +15791,156 @@ export class WorkspaceCommandView {
         : '') +
       '</section>'
     );
+  }
+
+  // ── First-visit tips (hq-part-tips.js, hq-tip-layer.js) ─────────────────
+  // Where the tips run right now: 'overview' on the HQ's Details view while the
+  // first visit is pending, '' everywhere else. A finished or never-offered
+  // visit, and every HQ built before it existed, sees nothing from this.
+  hqTipScope() {
+    if (this.firstVisit?.state !== 'pending') return '';
+    if (!this.active || !this.isPersonalHQ()) return '';
+    return this.viewMode === 'details' ? 'overview' : '';
+  }
+
+  // What this browser has already looked at in this HQ. It only decides whether
+  // a part still has its mark; it is never read to decide the visit is pending.
+  hqTipLooked() {
+    return readTipsLooked(this.railStorage(), this.workspaceId());
+  }
+
+  // Keys whose mark stays drawn through a repaint: the tip showing now for a
+  // part whose mark was drawn when it appeared (a part looked at earlier has
+  // none to keep, and must not get one back), and a `?` that holds focus.
+  // Dropping the node under the person's finger or focus ring would drop their
+  // place; the mark goes once both end.
+  hqTipHeldKeys() {
+    const held = new Set();
+    const open = this.hqTipLayer?.currentKey?.();
+    if (open && this.hqTipKeep?.has(open)) held.add(open);
+    const active = typeof document !== 'undefined' ? document.activeElement : null;
+    const root = this.container;
+    if (active && typeof root?.contains === 'function' && root.contains(active)) {
+      const key = active.getAttribute?.('data-hq-tip-mark');
+      if (key) held.add(key);
+    }
+    return held;
+  }
+
+  // Which parts are explained, from the cards the grid draws (or `cards`), plus
+  // the Notes panel, which is drawn in the main column and never as a card.
+  hqTipView(cards = this.hqStationLayout().cards) {
+    const state = this.firstVisit?.state || '';
+    const pending = state === 'pending';
+    const notes = pending ? this.notesState().secondBrain : null;
+    const parts = cards
+      .map(card => ({ key: partKeyForCard(card.key), configured: card.configured }))
+      .filter(part => part.key);
+    // The Notes sentence depends on which Notes there are, so it waits until
+    // they have been read rather than say "off" for a moment and then change.
+    if (notes && this.firstVisit?.view().layout.notes !== false) parts.push({ key: NOTES_PART });
+    let looked = null;
+    if (pending) {
+      looked = this.hqTipLooked();
+      for (const key of this.hqTipHeldKeys()) delete looked[key];
+    }
+    return partTipsView({ state, parts, notes, looked });
+  }
+
+  // The tip just became visible: that part has now been looked at. If this is the
+  // first look its mark is on the page right now, so it stays until the tip closes.
+  hqTipShown(key) {
+    const storage = this.railStorage();
+    const id = this.workspaceId();
+    if (!readTipsLooked(storage, id)[key]) (this.hqTipKeep ||= new Set()).add(key);
+    writeTipLooked(storage, id, key);
+  }
+
+  // A tip just closed, or focus left a `?` that was kept: a part that has been
+  // looked at loses its mark now, without waiting for the next render, unless a
+  // tip is still open on it or its `?` still holds focus.
+  settleHQTipMarks() {
+    const root = this.container;
+    if (!root || typeof root.querySelectorAll !== 'function') return;
+    const looked = this.hqTipLooked();
+    const held = this.hqTipHeldKeys();
+    for (const key of [...(this.hqTipKeep || [])]) if (!held.has(key)) this.hqTipKeep.delete(key);
+    const watching = (this.hqTipFocusWatch ||= new WeakSet());
+    root.querySelectorAll('[data-hq-tip-mark]').forEach(mark => {
+      const key = mark.getAttribute('data-hq-tip-mark');
+      if (!looked[key]) return;
+      if (held.has(key)) {
+        // Kept for now: settle again once focus has moved on.
+        if (!watching.has(mark) && typeof mark.addEventListener === 'function') {
+          watching.add(mark);
+          mark.addEventListener(
+            'focusout',
+            () => {
+              watching.delete(mark);
+              setTimeout(() => this.settleHQTipMarks(), 0);
+            },
+            { once: true }
+          );
+        }
+        return;
+      }
+      const part = root.querySelector('[data-hq-tip-part="' + key + '"]');
+      part?.classList?.remove('is-tip-marked');
+      mark.remove();
+    });
+  }
+
+  // The `?` beside a part. A sibling of the part's own button, never inside it,
+  // and never carrying an attribute the delegated station click handlers read.
+  hqTipMarkHTML(key, name) {
+    return (
+      '<button type="button" class="ws-hq-tip-mark" data-hq-tip-mark="' +
+      escapeHtml(key) +
+      '" aria-label="' +
+      escapeHtml(whatIsLabel(name)) +
+      '" aria-expanded="false" aria-controls="' +
+      TIP_ID +
+      '"><span aria-hidden="true">?</span></button>'
+    );
+  }
+
+  // The tip's header: the lead agent's name and face. The face is drawn with an
+  // idle tone so it does not borrow a status ring.
+  hqTipLead() {
+    const group = this.agentGroups().agents.find(item => this.isEntryAgentGroup(item));
+    if (!group) return { name: '', faceHTML: '' };
+    return {
+      name: String(group.name || ''),
+      faceHTML: this.agentCharacterHTML({ name: group.name, tone: 'idle' }, 'roster')
+    };
+  }
+
+  hqTipContent(key) {
+    const part = this.hqTipView().parts.find(item => item.key === key);
+    if (!part) return null;
+    return { sentence: part.sentence, ...this.hqTipLead() };
+  }
+
+  // Called by render() after the page is rebuilt and focus restored. The layer
+  // finds its anchors again by attribute, so nothing is bound per render.
+  syncHQTips() {
+    if (!this.hqTipLayer && this.hqTipScope()) {
+      this.hqTipLayer = createHqTipLayer({
+        root: () => this.container,
+        scope: () => this.hqTipScope(),
+        content: key => this.hqTipContent(key),
+        onShown: key => this.hqTipShown(key),
+        onHidden: () => this.settleHQTipMarks()
+      });
+    }
+    if (!this.hqTipLayer) return;
+    this.hqTipLayer.refresh();
+    if (this.firstVisit?.state !== 'pending') {
+      // The visit is over: the tips and what was remembered about them go.
+      clearTipsLooked(this.railStorage(), this.workspaceId());
+      this.hqTipLayer.destroy();
+      this.hqTipLayer = null;
+    }
   }
 
   hqTilesHTML(stats) {
@@ -15962,6 +16151,8 @@ export class WorkspaceCommandView {
         tile.setAttribute('aria-label', fresh[key].aria);
       });
     }
+    // A layout shift above the tip moves its part; follow it.
+    this.hqTipLayer?.refresh();
   }
 
   hqTilesValues() {

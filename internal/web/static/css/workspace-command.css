@@ -9665,6 +9665,145 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: var(--ws-ink-dim);
 }
 
+/* First-visit tips (hq-part-tips.js). A part the person has not looked at yet
+   carries a thin outline in neutral ink and a `?` button beside it. Neutral on
+   purpose: amber is "an agent is waiting on you", green is ready, red is an
+   error, dashed is "not set up". Nothing pulses or animates. The `?` is a
+   sibling of the card's button (a button cannot hold a button), laid over the
+   card's empty bottom-right corner, with a 44px hit area around a 20px ring. */
+.ws-hq-station-cell {
+  position: relative;
+}
+.ws-hq-station.is-tip-marked:not(:focus-visible) {
+  outline: 1px solid var(--ws-ink-dim);
+  outline-offset: 2px;
+}
+.ws-hq-tip-mark {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ws-ink-dim);
+  font: inherit;
+  cursor: pointer;
+}
+.ws-hq-tip-mark > span {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+.ws-hq-tip-mark:hover,
+.ws-hq-tip-mark[aria-expanded="true"] {
+  color: var(--ws-ink);
+}
+.ws-hq-tip-mark:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: -6px;
+  border-radius: 8px;
+}
+
+/* The Notes panel's mark. Its `?` is a sibling of the host (the host is emptied
+   when the live panel is moved in), in a cell that puts it at the panel's top
+   right. The header keeps that corner free for the whole visit, so nothing
+   shifts when the mark goes. */
+.ws-hq-tip-cell {
+  position: relative;
+}
+.ws-hq-tip-cell > .ws-hq-tip-mark {
+  top: 6px;
+  right: 6px;
+  bottom: auto;
+}
+.ws-hq-tip-cell .ws-hq-notes .ws-cmd-modal-head {
+  padding-right: 56px;
+}
+.ws-hq-panel-host.is-tip-marked {
+  outline: 1px solid var(--ws-ink-dim);
+  outline-offset: 2px;
+}
+
+/* The tip itself (hq-tip-layer.js): one box on <body>, placed by script next to
+   its part. `.ws-cmd` on it carries the theme tokens onto <body>, as the
+   suggestions layer does. It sits above the assistant drawer (.ori-guide,
+   1040) and below the stat modal (1050), the navbar and the app-level modal
+   layer, so anything that opens paints over a tip that is still showing. */
+.ws-cmd.ws-hq-tip {
+  position: fixed;
+  z-index: 1045;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 10px;
+  background: var(--ws-panel);
+  box-shadow: var(--ws-glow);
+  color: var(--ws-ink);
+  font-family: var(--font-body, system-ui, sans-serif);
+  letter-spacing: normal;
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+}
+.ws-hq-tip-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.ws-hq-tip-head[hidden] {
+  display: none;
+}
+/* The shared roster face is 46px; the tip shows it at 28px, no status ring. */
+.ws-hq-tip-face {
+  position: relative;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+}
+.ws-hq-tip-face:empty {
+  display: none;
+}
+.ws-hq-tip-face .ws-cmd-character {
+  transform: scale(0.6);
+  transform-origin: 0 0;
+  filter: none;
+}
+.ws-hq-tip-name {
+  min-width: 0;
+  color: var(--ws-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.ws-hq-tip-text {
+  margin: 0;
+  color: var(--ws-ink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ws-cmd.ws-hq-tip:not([hidden]) {
+    animation: ws-hq-tip-in 0.12s ease-out;
+  }
+  @keyframes ws-hq-tip-in {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
 /* Unconfigured stations keep their setup actions without empty cards. */
 .ws-hq-unused {
   display: flex;

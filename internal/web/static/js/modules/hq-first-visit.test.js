@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { firstVisitView, firstVisitResolved, FIRST_VISIT_MISSIONS } from './hq-first-visit.js';
+import {
+  firstVisitView,
+  firstVisitResolved,
+  notesKind,
+  FIRST_VISIT_MISSIONS
+} from './hq-first-visit.js';
 
 const notes = { status: 'connected', source: { origin: 'created_by_ori' } };
 const missions = (note = 'open', brief = 'open', folder = 'open') =>
@@ -85,6 +90,20 @@ test('unavailable or personal vaults point to connection management, never a sec
   assert.equal(own.action, 'notes');
   assert.equal(own.hint, 'Your own vault is connected. Ori does not write there.');
   assert.equal(view({ notes: null }).steps[2].disabled, true);
+});
+
+test('notesKind names the Notes the suggestions and the tips both read', () => {
+  assert.equal(notesKind({ status: 'connected', source: { origin: 'created_by_ori' } }), 'created');
+  assert.equal(notesKind({ status: 'missing', source: { origin: 'created_by_ori' } }), 'unset');
+  assert.equal(notesKind({ source: { origin: 'connected' } }), 'own');
+  assert.equal(
+    notesKind({ source: {} }),
+    'own',
+    'a source that is not Ori-created is the own vault'
+  );
+  assert.equal(notesKind({ status: 'unset' }), 'unset');
+  assert.equal(notesKind(null), 'unset');
+  assert.equal(notesKind(undefined), 'unset');
 });
 
 test('brief and folder use canonical results, never the chooser or a browser completion flag', () => {
