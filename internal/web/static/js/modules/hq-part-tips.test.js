@@ -2,10 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { HQ_LABELS, tacticalTermsIn } from './hq-labels.js';
 import {
+  FLOW_NODE_PARTS,
+  FLOW_STATION_PARTS,
   MAP_HINT_PART,
   NOTES_PART,
   OVERVIEW_CARD_PARTS,
   partKeyForCard,
+  partKeyForFlowNode,
   partTipsView,
   tipSentence,
   whatIsLabel
@@ -181,6 +184,63 @@ test('only the Overview cards with a sentence map to a part key', () => {
   assert.equal(partKeyForCard('toString'), '');
   assert.equal(partKeyForCard(''), '');
   assert.ok(Object.isFrozen(OVERVIEW_CARD_PARTS));
+});
+
+test('Flow nodes map to the same part keys the Overview uses', () => {
+  const station = key => partKeyForFlowNode({ key, station: key });
+  // Source nodes: the station is the key; the Notes station is `second-brain`.
+  assert.equal(station('second-brain'), 'notes');
+  assert.equal(station('watchtower'), 'watchtower');
+  assert.equal(station('email'), 'email');
+  assert.equal(station('calendar-ops'), 'calendar-ops');
+  assert.equal(station('memory'), 'memory');
+  // The right lane: the Daily Brief node is `brief` and also carries its station.
+  assert.equal(partKeyForFlowNode({ key: 'brief', station: 'daily-brief' }), 'daily-brief');
+  assert.equal(partKeyForFlowNode({ key: 'brief' }), 'daily-brief', 'also when not set up');
+  assert.equal(partKeyForFlowNode({ key: 'needs-you' }), 'needs-you');
+  assert.equal(partKeyForFlowNode({ key: 'follow-ups' }), 'follow-ups');
+  assert.equal(partKeyForFlowNode({ key: 'tasks' }), 'tickets');
+  // Not parts: the lead card (its hint is page markup), the unknown, the inherited.
+  for (const node of [{ key: 'lead' }, { key: 'nope' }, { key: 'toString' }, {}, null, undefined])
+    assert.equal(partKeyForFlowNode(node), '', JSON.stringify(node));
+  assert.equal(partKeyForFlowNode({ key: 'x', station: 'toString' }), '');
+  // One key per part: nothing maps two nodes onto the same anchor.
+  assert.ok(Object.isFrozen(FLOW_STATION_PARTS) && Object.isFrozen(FLOW_NODE_PARTS));
+  // Every key it can return has a sentence (a part with no words could carry no mark).
+  for (const key of [...Object.values(FLOW_STATION_PARTS), ...Object.values(FLOW_NODE_PARTS)]) {
+    assert.ok(tipSentence(key, { notes: 'created', configured: false }), key);
+  }
+});
+
+test('on the Map every node has a sentence, and a not-set-up node says it is off', () => {
+  const view = partTipsView({
+    state: 'pending',
+    notes: { status: 'connected', source: { origin: 'created_by_ori' } },
+    parts: [
+      { key: 'notes' },
+      { key: 'email', configured: false },
+      { key: 'calendar-ops', configured: false },
+      { key: 'memory' },
+      { key: 'needs-you' },
+      { key: 'follow-ups' },
+      { key: 'daily-brief' },
+      { key: 'tickets' }
+    ]
+  });
+  assert.deepEqual(
+    view.parts.map(p => p.key),
+    [
+      'notes',
+      'email',
+      'calendar-ops',
+      'memory',
+      'needs-you',
+      'follow-ups',
+      'daily-brief',
+      'tickets'
+    ]
+  );
+  assert.ok(view.parts.every(p => p.marked));
 });
 
 test('the `?` button names the part it explains', () => {

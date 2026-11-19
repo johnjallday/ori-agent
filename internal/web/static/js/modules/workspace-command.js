@@ -151,7 +151,14 @@ import { readRailSection, resolveRailSection, writeRailSection } from './workspa
 import { HQ_LABELS, portabilityWord } from './hq-labels.js';
 import { HQFirstVisitCard } from './hq-first-visit-card.js';
 import { createHqTipLayer, TIP_ID } from './hq-tip-layer.js';
-import { NOTES_PART, partKeyForCard, partTipsView, whatIsLabel } from './hq-part-tips.js';
+import {
+  MAP_HINT_PART,
+  NOTES_PART,
+  partKeyForCard,
+  partKeyForFlowNode,
+  partTipsView,
+  whatIsLabel
+} from './hq-part-tips.js';
 import { clearTipsLooked, readTipsLooked, writeTipLooked } from './hq-tip-looked.js';
 import { WORK_LABELS, startFromBacklogLabel } from './work-labels.js';
 import { hqNeedsYouRows } from './hq-attention.js';
@@ -1539,6 +1546,9 @@ export class WorkspaceCommandView {
       this.render();
       return;
     }
+    // The Map's first-visit hint is the quietest thing here: it goes last. (A
+    // tip that is open takes Escape before this handler ever runs.)
+    if (this.viewMode === 'map' && this.closeHQMapHint()) return;
     if (!this.activeRailSection) return;
     const closed = this.activeRailSection;
     // Escape is page-wide. Only when the keyboard was inside the rail does
@@ -4923,12 +4933,13 @@ export class WorkspaceCommandView {
     const active = document.activeElement;
     if (!active || typeof active.closest !== 'function' || !this.container) return;
     const building = active.closest(
-      '.ws-cmd-map-hq-station[data-cmd-hq-station], .ws-cmd-flow-node, .ws-cmd-flow-lead'
+      '.ws-cmd-map-hq-station[data-cmd-hq-station], .ws-cmd-flow-node, .ws-cmd-flow-lead, [data-hq-tip-mark]'
     );
     if (building && this.container.contains(building)) {
-      this._mapStationFocusAttribute = building.getAttribute('data-cmd-flow-node')
-        ? 'data-cmd-flow-node'
-        : 'data-cmd-hq-station';
+      // A first-visit `?` is found again by its own attribute, like the node.
+      this._mapStationFocusAttribute =
+        ['data-hq-tip-mark', 'data-cmd-flow-node'].find(name => building.getAttribute(name)) ||
+        'data-cmd-hq-station';
       this._mapStationFocus = building.getAttribute(this._mapStationFocusAttribute) || '';
     }
   }
@@ -4940,7 +4951,7 @@ export class WorkspaceCommandView {
     const attribute = this._mapStationFocusAttribute || 'data-cmd-hq-station';
     const building = Array.from(
       this.container.querySelectorAll(
-        '.ws-cmd-map-hq-station[data-cmd-hq-station], .ws-cmd-flow-node, .ws-cmd-flow-lead'
+        '.ws-cmd-map-hq-station[data-cmd-hq-station], .ws-cmd-flow-node, .ws-cmd-flow-lead, [data-hq-tip-mark]'
       )
     ).find(node => node.getAttribute(attribute) === key);
     if (building && document.activeElement !== building && typeof building.focus === 'function') {
@@ -12448,10 +12459,14 @@ export class WorkspaceCommandView {
         ? this.container.querySelector('.ws-cmd-map-shell')
         : null;
     if (shell && 'outerHTML' in shell) {
+      // The tip's part is about to be replaced (or gone, in Free): close it first.
+      this.hqTipLayer?.hide('arrangement');
       const { agents, selected } = this.mapAgentViewModels();
       shell.outerHTML = this.renderOperationsMapShell(agents, selected);
       this.bindOperationsMap();
       this.paintMapActivity();
+      // No render() ran, so make the layer here if Flow just gave it a scope.
+      this.syncHQTips();
     } else {
       this.render();
     }
@@ -12502,22 +12517,28 @@ export class WorkspaceCommandView {
     });
   }
 
-  flowNodeHTML(node) {
+  // `tips` is the first-visit view (hqTipView) while the Map's tips are running,
+  // else null: then the node is exactly what it always was.
+  flowNodeHTML(node, tips = null) {
     const attribute = node.station
       ? node.key === 'brief'
         ? 'data-cmd-flow-node="brief"'
         : 'data-cmd-hq-station="' + escapeHtml(node.station) + '"'
       : 'data-cmd-flow-node="' + escapeHtml(node.key) + '"';
+    const tip = tips?.parts.find(part => part.key === partKeyForFlowNode(node));
     return (
       '<li class="ws-cmd-flow-cell">' +
       '<button type="button" class="ws-cmd-flow-node is-' +
       escapeHtml(node.tone) +
       (node.dashed ? ' is-dashed' : '') +
+      (tip?.marked ? ' is-tip-marked' : '') +
       '" ' +
       attribute +
       ' aria-label="' +
       escapeHtml(node.accessibleName) +
-      '">' +
+      '"' +
+      (tip ? ' data-hq-tip-part="' + escapeHtml(tip.key) + '"' : '') +
+      '>' +
       '<span class="ws-cmd-flow-node-head">' +
       '<span class="ws-cmd-flow-node-name">' +
       escapeHtml(node.label) +
@@ -12529,8 +12550,57 @@ export class WorkspaceCommandView {
       (node.subtitle
         ? '<span class="ws-cmd-flow-node-sub">' + escapeHtml(node.subtitle) + '</span>'
         : '') +
-      '</button></li>'
+      '</button>' +
+      (tip?.marked ? this.hqTipMarkHTML(tip.key, node.label) : '') +
+      '</li>'
     );
+  }
+
+  // The Map's one-line hint on the lead card: open the first time the Map shows
+  // during a pending first visit (per browser, remembered like the tips), and
+  // gone once closed. Page markup, not the tip box: it has a Close button, so it
+  // cannot be a tooltip. It never takes focus.
+  hqMapHintOpenNow() {
+    if (this.hqTipScope() !== 'flow') return false;
+    if (!this.hqMapHintDecided) {
+      this.hqMapHintDecided = true;
+      if (!this.hqTipLooked()[MAP_HINT_PART]) {
+        this.hqMapHintOpen = true;
+        writeTipLooked(this.railStorage(), this.workspaceId(), MAP_HINT_PART);
+      }
+    }
+    return Boolean(this.hqMapHintOpen);
+  }
+
+  flowHintHTML() {
+    if (!this.hqMapHintOpenNow()) return '';
+    return (
+      '<div class="ws-cmd-flow-hint" data-hq-flow-hint>' +
+      '<span class="ws-cmd-flow-hint-text">' +
+      escapeHtml(HQ_LABELS.tipMapHint) +
+      '</span>' +
+      '<button type="button" class="ws-cmd-flow-hint-close" data-hq-flow-hint-close aria-label="' +
+      escapeHtml(HQ_LABELS.tipMapHintCloseName) +
+      '">' +
+      escapeHtml(HQ_LABELS.tipMapHintClose) +
+      '</button></div>'
+    );
+  }
+
+  // Closes the hint without a repaint. `focusLead` is for its own Close button:
+  // the pressed button is removed, so focus goes to the lead card beside it.
+  closeHQMapHint({ focusLead = false } = {}) {
+    if (!this.hqMapHintOpen) return false;
+    this.hqMapHintOpen = false;
+    this.container?.querySelector?.('[data-hq-flow-hint]')?.remove?.();
+    if (focusLead) {
+      this.container
+        ?.querySelector?.('[data-cmd-flow-node="lead"]')
+        ?.focus?.({ preventScroll: true });
+    }
+    // Stacked, the page below the hint just moved up: a tip that is open follows its part.
+    this.hqTipLayer?.refresh?.();
+    return true;
   }
 
   flowLeadHTML(lead, agents) {
@@ -12620,9 +12690,10 @@ export class WorkspaceCommandView {
       '</h3>' +
       body +
       '</section>';
+    const tips = this.hqTipScope() === 'flow' ? this.hqTipView(model) : null;
     const list = nodes =>
       '<ul class="ws-cmd-flow-nodes">' +
-      nodes.map(node => this.flowNodeHTML(node)).join('') +
+      nodes.map(node => this.flowNodeHTML(node, tips)).join('') +
       '</ul>';
     return (
       '<div class="ws-cmd-flow" data-cmd-flow style="--flow-rows:' +
@@ -12633,7 +12704,10 @@ export class WorkspaceCommandView {
       lane(
         'lead',
         HQ_LABELS.yourLeadAgent,
-        '<div class="ws-cmd-flow-lead-slot">' + this.flowLeadHTML(model.lead, agents) + '</div>'
+        '<div class="ws-cmd-flow-lead-slot">' +
+          this.flowHintHTML() +
+          this.flowLeadHTML(model.lead, agents) +
+          '</div>'
       ) +
       this.flowLinksHTML('out', model.needs) +
       lane('needs', HQ_LABELS.whatNeedsYou, list(model.needs)) +
@@ -12800,6 +12874,10 @@ export class WorkspaceCommandView {
       if (arrangement) {
         const value = arrangement.getAttribute('data-cmd-map-arrangement');
         if (value !== this.currentMapArrangement()) this.setMapArrangement(value);
+        return;
+      }
+      if (event.target.closest('[data-hq-flow-hint-close]')) {
+        this.closeHQMapHint({ focusLead: true });
         return;
       }
       const flowNode = event.target.closest('[data-cmd-flow-node]');
@@ -15794,13 +15872,15 @@ export class WorkspaceCommandView {
   }
 
   // ── First-visit tips (hq-part-tips.js, hq-tip-layer.js) ─────────────────
-  // Where the tips run right now: 'overview' on the HQ's Details view while the
-  // first visit is pending, '' everywhere else. A finished or never-offered
-  // visit, and every HQ built before it existed, sees nothing from this.
+  // Where the tips run right now: 'overview' on the HQ's Details view and 'flow'
+  // on its Map in the Flow arrangement, while the first visit is pending; ''
+  // everywhere else (the Free arrangement, Tickets, Plans). A finished or
+  // never-offered visit, and every HQ built before it existed, sees nothing.
   hqTipScope() {
     if (this.firstVisit?.state !== 'pending') return '';
     if (!this.active || !this.isPersonalHQ()) return '';
-    return this.viewMode === 'details' ? 'overview' : '';
+    if (this.viewMode === 'details') return 'overview';
+    return this.viewMode === 'map' && this.isHQFlowMap() ? 'flow' : '';
   }
 
   // What this browser has already looked at in this HQ. It only decides whether
@@ -15827,18 +15907,31 @@ export class WorkspaceCommandView {
     return held;
   }
 
-  // Which parts are explained, from the cards the grid draws (or `cards`), plus
-  // the Notes panel, which is drawn in the main column and never as a card.
-  hqTipView(cards = this.hqStationLayout().cards) {
+  // Which parts are explained. On the Map: the Flow's nodes (`source` is the Flow
+  // model, or it is read now). On the Overview: the cards the grid draws
+  // (`source` is those cards, or they are read now), plus the Notes panel, which
+  // is drawn in the main column and never as a card. Both views use the same
+  // part keys, so what has been looked at is shared between them.
+  hqTipView(source) {
     const state = this.firstVisit?.state || '';
     const pending = state === 'pending';
     const notes = pending ? this.notesState().secondBrain : null;
-    const parts = cards
-      .map(card => ({ key: partKeyForCard(card.key), configured: card.configured }))
-      .filter(part => part.key);
-    // The Notes sentence depends on which Notes there are, so it waits until
-    // they have been read rather than say "off" for a moment and then change.
-    if (notes && this.firstVisit?.view().layout.notes !== false) parts.push({ key: NOTES_PART });
+    let parts;
+    if (this.hqTipScope() === 'flow') {
+      const model = source || this.hqFlowModel(this.mapAgentViewModels().agents);
+      parts = [...model.sources, ...model.needs]
+        .map(node => ({ key: partKeyForFlowNode(node), configured: !node.dashed }))
+        .filter(part => part.key);
+      // The Notes sentence depends on which Notes there are, so it waits until
+      // they have been read rather than say "off" for a moment and then change.
+      if (!notes) parts = parts.filter(part => part.key !== NOTES_PART);
+    } else {
+      const cards = source || this.hqStationLayout().cards;
+      parts = cards
+        .map(card => ({ key: partKeyForCard(card.key), configured: card.configured }))
+        .filter(part => part.key);
+      if (notes && this.firstVisit?.view().layout.notes !== false) parts.push({ key: NOTES_PART });
+    }
     let looked = null;
     if (pending) {
       looked = this.hqTipLooked();
@@ -15854,6 +15947,21 @@ export class WorkspaceCommandView {
     const id = this.workspaceId();
     if (!readTipsLooked(storage, id)[key]) (this.hqTipKeep ||= new Set()).add(key);
     writeTipLooked(storage, id, key);
+    // A tip on the Map has taken over from the hint that told the person to
+    // point at things. Stacked, the hint is a line in the flow of the page:
+    // taking it away now would move the part the person is pointing at, so it
+    // stays until its own Close or Escape.
+    if (this.hqTipScope() === 'flow' && !this.hqMapIsStacked()) this.closeHQMapHint();
+  }
+
+  // The Map stacks its three lanes into one column below this width (the same
+  // breakpoint as workspace-command.css).
+  hqMapIsStacked() {
+    return (
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(max-width: 900px)').matches
+    );
   }
 
   // A tip just closed, or focus left a `?` that was kept: a part that has been

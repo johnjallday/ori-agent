@@ -42,6 +42,37 @@ export function partKeyForCard(cardKey) {
 }
 
 /**
+ * Map (Flow) anchors. A source node carries its station (`second-brain` is the
+ * Notes station, so its part is `notes`); the right-lane nodes carry their own
+ * key, and the Daily Brief node is `brief`. The lead card has no part: its hint
+ * is drawn by the page. The sentences live here, never on the Flow model, whose
+ * tests scan the whole model for tactical words.
+ */
+export const FLOW_STATION_PARTS = Object.freeze({
+  'second-brain': NOTES_PART,
+  watchtower: 'watchtower',
+  email: 'email',
+  'calendar-ops': 'calendar-ops',
+  memory: 'memory'
+});
+export const FLOW_NODE_PARTS = Object.freeze({
+  brief: 'daily-brief',
+  'needs-you': 'needs-you',
+  'follow-ups': 'follow-ups',
+  tasks: 'tickets'
+});
+
+const has = (table, key) => Object.prototype.hasOwnProperty.call(table, key);
+
+/** The part key for a Flow node (`{key, station}`), or '' when it has no tip. */
+export function partKeyForFlowNode(node) {
+  const key = String((node && node.key) || '');
+  if (has(FLOW_NODE_PARTS, key)) return FLOW_NODE_PARTS[key];
+  const station = String((node && node.station) || '');
+  return has(FLOW_STATION_PARTS, station) ? FLOW_STATION_PARTS[station] : '';
+}
+
+/**
  * The sentence for one part, or '' when that part has nothing to say in its
  * current state: Email and Calendar Ops explain themselves only while they are
  * not set up, because their sentence says they are off.

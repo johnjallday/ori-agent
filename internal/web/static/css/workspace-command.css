@@ -10376,9 +10376,69 @@ button.ws-cmd-rpg-class-card:focus-visible {
   color: var(--ws-ink-dim);
 }
 
+/* First-visit tips on the Map (hq-part-tips.js): the Overview's neutral outline
+   and `?`, drawn inside the node's cell so the Map's clipping cannot cut them
+   and the node's height never changes. The cell is their positioning context;
+   the subtitle keeps the `?` corner for the whole visit, so its text does not
+   move when the mark goes. */
+.ws-cmd-flow-cell {
+  position: relative;
+}
+.ws-cmd-flow-node.is-tip-marked:not(:focus-visible) {
+  outline: 1px solid var(--ws-ink-dim);
+  outline-offset: 2px;
+}
+.ws-cmd-flow-node[data-hq-tip-part] .ws-cmd-flow-node-sub {
+  padding-right: 26px;
+}
+
+/* The Map's one-line hint rests over the free space above the lead card, so the
+   card stays where the connector lines meet it. Neutral, like the tip. */
+.ws-cmd-flow-hint {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-panel);
+  color: var(--ws-ink);
+  font-family: var(--font-body, system-ui, sans-serif);
+  font-size: 13px;
+  letter-spacing: normal;
+  line-height: 1.4;
+}
+.ws-cmd-flow-hint-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-flow-hint-close {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink-dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ws-cmd-flow-hint-close:hover {
+  color: var(--ws-ink);
+}
+.ws-cmd-flow-hint-close:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+
 /* The lead sits centred on the tallest lane, so the one arrow in and the one
    line out meet it at its middle (FR13). */
 .ws-cmd-flow-lead-slot {
+  position: relative;
   display: flex;
   align-items: center;
   min-height: calc(var(--flow-rows, 4) * var(--flow-pitch) - var(--flow-gap));
@@ -10519,6 +10579,15 @@ button.ws-cmd-rpg-class-card:focus-visible {
   }
   .ws-cmd-flow-lead {
     min-height: 0;
+  }
+  /* Stacked, the hint is simply the line above the lead card. */
+  .ws-cmd-flow-lead-slot:has(.ws-cmd-flow-hint) {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .ws-cmd-flow-hint {
+    position: static;
   }
 }
 

@@ -252,10 +252,14 @@ export function createHqTipLayer({
     const width = box.width || 0;
     const height = box.height || 0;
     const rect = opener.getBoundingClientRect();
-    if (rect.bottom < 0 || rect.top > viewHeight || rect.right < 0 || rect.left > viewWidth) {
-      hide('offscreen');
-      return;
-    }
+    // An opener that is off screen keeps its tip open but unseen. Focus on a
+    // part below the fold starts a smooth scroll, so at that moment the part is
+    // not yet in view; closing the tip then would lose it for good. It shows as
+    // the part arrives (the scroll listener repositions it).
+    const offscreen =
+      rect.bottom < 0 || rect.top > viewHeight || rect.right < 0 || rect.left > viewWidth;
+    el.style.visibility = offscreen ? 'hidden' : '';
+    if (offscreen) return;
     const navbar = typeof doc.querySelector === 'function' ? doc.querySelector('nav.navbar') : null;
     const navBottom = Math.max(
       0,
@@ -307,6 +311,7 @@ export function createHqTipLayer({
     clearTimers();
     clearAria();
     const wasOpen = Boolean(openKey);
+    const previous = openKey;
     openKey = key;
     openScope = currentScope;
     origin = from;
@@ -315,7 +320,6 @@ export function createHqTipLayer({
     applyAria();
     el.hidden = false;
     position();
-    if (!openKey) return false; // positioned off screen: hide() ran
     if (!wasOpen && !keydownBound) {
       doc.addEventListener('keydown', onKey, true);
       keydownBound = true;
@@ -324,6 +328,15 @@ export function createHqTipLayer({
       onShown(key);
     } catch (_error) {
       // The caller's bookkeeping must never break the tip.
+    }
+    // A swap closes the tip it replaced: the page must hear that too, or the
+    // mark of a part whose tip just went would wait for some later close.
+    if (wasOpen && previous !== key) {
+      try {
+        onHidden(previous, 'swap');
+      } catch (_error) {
+        // As above.
+      }
     }
     return true;
   }

@@ -699,6 +699,80 @@ test('onHidden says which tip closed and why; it is not fired for nothing, or on
   assert.equal(hidden.length, 1, 'destroy is not a close the page needs to hear about');
 });
 
+test('an opener below the fold keeps its tip open but unseen, and shows it as the part scrolls in', () => {
+  const t = setup({ vh: 800 });
+  // Focus on a part below the fold starts a smooth scroll: when the tip opens
+  // the part is not in view yet.
+  const part = t.addPart('daily-brief', {
+    left: 20,
+    top: 1400,
+    right: 220,
+    bottom: 1490,
+    width: 200,
+    height: 90
+  });
+  assert.equal(t.layer.show('daily-brief', 'focus', 'mark'), true);
+  assert.equal(t.layer.isOpen(), true, 'not lost');
+  assert.equal(t.tip.style.visibility, 'hidden', 'but not drawn where its part is not');
+  assert.deepEqual(t.state.shown, ['daily-brief']);
+
+  // The scroll brings the part into view; the scroll listener repositions the tip.
+  part.mark.rect = { left: 176, top: 500, right: 220, bottom: 544, width: 44, height: 44 };
+  part.card.rect = { left: 20, top: 454, right: 220, bottom: 544, width: 200, height: 90 };
+  for (const l of t.listeners) if (l.target === 'win' && l.type === 'scroll') l.fn({});
+  t.clock.tick(16);
+  assert.equal(t.layer.isOpen(), true);
+  assert.equal(t.tip.style.visibility, '');
+  assert.ok(parseInt(t.tip.style.top, 10) > 500, 'placed beside the part now');
+  assert.deepEqual(t.state.shown, ['daily-brief'], 'shown once, not again');
+
+  // Scrolled far away again: unseen, still open, and it follows when it returns.
+  part.mark.rect = { left: 176, top: -900, right: 220, bottom: -856, width: 44, height: 44 };
+  for (const l of t.listeners) if (l.target === 'win' && l.type === 'scroll') l.fn({});
+  t.clock.tick(16);
+  assert.equal(t.layer.isOpen(), true);
+  assert.equal(t.tip.style.visibility, 'hidden');
+  t.layer.hide();
+});
+
+test('a swap tells the page which tip it closed, after the new one is showing', () => {
+  const t = setup();
+  const first = t.addPart('daily-brief', CARD);
+  const second = t.addPart('memory', {
+    left: 240,
+    top: 100,
+    right: 380,
+    bottom: 190,
+    width: 140,
+    height: 90
+  });
+  const events = [];
+  const layer = createHqTipLayer({
+    document: t.doc,
+    window: t.win,
+    root: () => t.root,
+    scope: () => 'overview',
+    content: key => ({ sentence: key }),
+    onShown: key => events.push(['shown', key, layer.currentKey()]),
+    onHidden: (key, reason) => events.push(['hidden', key, reason, layer.currentKey()]),
+    setTimeout: t.clock.setTimeout,
+    clearTimeout: t.clock.clearTimeout
+  });
+  layer.show('daily-brief', 'tap');
+  layer.show('memory', 'hover', 'part');
+  assert.deepEqual(events, [
+    ['shown', 'daily-brief', 'daily-brief'],
+    ['shown', 'memory', 'memory'],
+    ['hidden', 'daily-brief', 'swap', 'memory']
+  ]);
+  assert.equal(first.mark.getAttribute('aria-expanded'), 'false');
+  assert.equal(second.mark.getAttribute('aria-expanded'), 'true');
+  // Showing the visible key again swaps nothing.
+  layer.show('memory', 'tap');
+  assert.equal(events.length, 3);
+  layer.destroy();
+});
+
 test('destroy removes the element and every listener; a layer with no DOM is inert', () => {
   const t = setup();
   t.addPart('daily-brief', CARD);
