@@ -1748,7 +1748,6 @@ export class WorkspaceCommandView {
       mode: this.viewMode,
       dashboard: this.hasCustomDashboard(),
       plans: this.plansLinkHTML(),
-      canvas: this.workspaceSlug() ? this.workspaceRoute('/canvas') : '',
       ticketCount: TicketCounts.isKnown(this.currentTicketCounts())
         ? TicketCounts.openCount(this.currentTicketCounts())
         : '—',
@@ -15747,7 +15746,6 @@ export class WorkspaceCommandView {
       '"' +
       (open ? '' : ' hidden') +
       '>' +
-      item(this.workspaceRoute('/canvas'), 'Canvas') +
       item(this.workspaceRoute('/diagnostics'), 'Diagnostics') +
       item(this.workflowHref(), 'Orchestration Skills') +
       '</div>' +

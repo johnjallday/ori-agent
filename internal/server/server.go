@@ -707,9 +707,12 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 	workspaceID := identity.ID
 	workspaceSlug := identity.Slug
 
-	// Check if this is a canvas route: /workspaces/{slug}/canvas
+	// The workspace canvas page is retired: /workspaces/{slug}/canvas is a real
+	// 404, by decision. It has to be explicit. Every other unknown descendant
+	// falls through to the redirect at the end of this function, which would turn
+	// an old bookmark to the canvas into a silent landing on the Overview.
 	if len(parts) == 2 && parts[1] == "canvas" {
-		s.serveWorkspaceCanvas(w, workspaceID, workspaceSlug)
+		http.NotFound(w, r)
 		return
 	}
 
@@ -931,15 +934,6 @@ func (s *Server) serveWorkspaceDiagnostics(w http.ResponseWriter, workspaceID, w
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
 	s.renderAndWritePage(w, "workspace-diagnostics", data)
-}
-
-func (s *Server) serveWorkspaceCanvas(w http.ResponseWriter, workspaceID, workspaceSlug string) {
-	data := s.prepareBasePageData("workspaces")
-	data.Title = "Workspace Canvas - Ori Agent"
-	data.BrandText = "Ori Agent"
-	data.Extra["WorkspaceID"] = workspaceID
-	data.Extra["WorkspaceSlug"] = workspaceSlug
-	s.renderAndWritePage(w, "workspace-canvas", data)
 }
 
 func (s *Server) serveWorkspaceTask(w http.ResponseWriter, workspaceID, workspaceSlug, taskID string) {

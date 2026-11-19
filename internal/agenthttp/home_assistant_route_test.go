@@ -827,8 +827,8 @@ func TestHomeAssistantRouteHandler_WorkspaceContext_ForcesWorkspaceMode(t *testi
 	rr := postRouteRequest(t, handler, map[string]any{
 		"prompt": "Draft a migration checklist for our service",
 		"context": map[string]any{
-			"surface":      "workspace_canvas",
-			"page_path":    "/workspaces/ws-abc/canvas",
+			"surface":      "workspace_detail",
+			"page_path":    "/workspaces/ws-abc",
 			"workspace_id": "ws-abc",
 		},
 	})
@@ -846,6 +846,19 @@ func TestHomeAssistantRouteHandler_WorkspaceContext_ForcesWorkspaceMode(t *testi
 	}
 	if resp.TargetSurface != "workspace" {
 		t.Fatalf("expected target_surface workspace, got %q", resp.TargetSurface)
+	}
+}
+
+// A tab opened before the workspace canvas was retired still reports
+// workspace_canvas. It is a workspace_detail, and that alone, with no page path
+// and no workspace id, is enough to count as workspace context.
+func TestNormalizeHomeAssistantRouteContext_StaleCanvasSurfaceIsWorkspaceDetail(t *testing.T) {
+	ctx := normalizeHomeAssistantRouteContext(&HomeAssistantRouteContext{Surface: " Workspace_Canvas "})
+	if ctx.Surface != "workspace_detail" {
+		t.Fatalf("expected workspace_detail surface, got %q", ctx.Surface)
+	}
+	if !ctx.hasWorkspaceSurfaceContext() {
+		t.Fatalf("a stale canvas tab should still count as workspace context, got %+v", ctx)
 	}
 }
 

@@ -59,9 +59,6 @@ func TestNormalizeAgentInstancesDedupesAndRewritesReferences(t *testing.T) {
 			{ID: "task-2", To: "writer", AssignedNodeID: ""},
 			{ID: "task-3", To: "Reviewer", AssignedNodeID: ""},
 		},
-		StoreNodes: []StoreNode{
-			{ID: "store-1", AgentNodeID: "Writer-node-3"},
-		},
 		AgentMCPAccess: []AgentMCPAccess{
 			{AgentInstanceID: "writer-1", EnabledBindingIDs: []string{"filesystem"}},
 			{AgentInstanceID: "writer-2", EnabledBindingIDs: []string{"github"}},
@@ -114,10 +111,6 @@ func TestNormalizeAgentInstancesDedupesAndRewritesReferences(t *testing.T) {
 	}
 	if ws.Tasks[2].AssignedNodeID != "Reviewer-node-1" {
 		t.Fatalf("expected reviewer task to receive canonical node id, got %q", ws.Tasks[2].AssignedNodeID)
-	}
-
-	if ws.StoreNodes[0].AgentNodeID != "Writer-node-1" {
-		t.Fatalf("expected store node agent node id to normalize, got %q", ws.StoreNodes[0].AgentNodeID)
 	}
 
 	if _, exists := ws.Layout.AgentPositions["Writer-node-3"]; exists {

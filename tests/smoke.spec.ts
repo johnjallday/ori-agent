@@ -2847,7 +2847,7 @@ test.describe('Personal Assistant surface ownership', () => {
     });
   }
 
-  test('keeps the Home drawer and workspace canvas assistant surfaces distinct', async ({
+  test('keeps the Home drawer and workspace page assistant surfaces distinct', async ({
     page,
     request
   }) => {
@@ -2870,7 +2870,7 @@ test.describe('Personal Assistant surface ownership', () => {
       await expect(page.locator('#homeAssistantCard.modern-card')).toHaveCount(0);
       await expect(page.locator('#hubSupportChat')).toHaveCount(0);
 
-      await page.goto(`/workspaces/${workspaceSlug}/canvas`);
+      await page.goto(`/workspaces/${workspaceSlug}/catalog`);
       await expect(page.locator('#personalAssistantLauncher')).toBeVisible();
       await page.locator('#personalAssistantLauncher').click();
       await expect(page.locator('#personalAssistantPanel')).toBeVisible();

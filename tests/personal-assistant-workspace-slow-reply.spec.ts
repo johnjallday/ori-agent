@@ -89,7 +89,7 @@ test('wt demo: a reply slower than 30 seconds still arrives, and a failure names
   const heading = page.locator('#homeAssistantThinkingModalLabel');
   const busy = () => page.evaluate(() => Boolean((window as any).OriAskRouting.getState().busy));
 
-  await page.goto(`/workspaces/${group.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${group.folder_slug}/catalog`);
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantFolderContext));
   if (!(await panel.isVisible())) await page.locator('#personalAssistantLauncher').click();
   // The group has a Commander, so the drawer opens as it; this is about the

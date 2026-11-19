@@ -102,7 +102,6 @@ func mergePortableWorkspaceState(target, source *agentworkspace.Workspace) {
 	}
 	target.Attachments = source.Attachments
 	target.ScheduledTasks = source.ScheduledTasks
-	target.StoreNodes = source.StoreNodes
 	target.DirectoryReferences = source.DirectoryReferences
 	target.MCPBindings = source.MCPBindings
 	target.AgentMCPAccess = source.AgentMCPAccess

@@ -296,6 +296,71 @@ func TestWorkspaceDetailRouteUsesSlugAndBootstrapsUUID(t *testing.T) {
 	}
 }
 
+// The workspace canvas page is retired and /workspaces/{slug}/canvas is a 404,
+// by decision. Every other unknown descendant of a real workspace redirects to
+// its Overview, so the 404 has to be asserted next to that redirect: deleting
+// the page without the explicit branch would turn an old bookmark into a
+// silent landing on the Overview.
+func TestWorkspaceCanvasRouteIsRetiredWhileOtherUnknownPagesRedirect(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Retired Canvas Workspace")
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		return rec
+	}
+
+	for _, path := range []string{
+		"/workspaces/" + workspace.Slug + "/canvas",
+		"/workspaces/" + workspace.Slug + "/canvas?mode=map",
+		"/workspaces/unknown-workspace/canvas",
+	} {
+		if rec := get(path); rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s status = %d, want 404", path, rec.Code)
+		}
+	}
+
+	rec := get("/workspaces/" + workspace.Slug + "/no-such-page?mode=map")
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("an unknown descendant should still redirect, status = %d", rec.Code)
+	}
+	if got, want := rec.Header().Get("Location"), "/workspaces/"+workspace.Slug+"?mode=map"; got != want {
+		t.Errorf("redirect Location = %q, want %q", got, want)
+	}
+}
+
+// The canvas layout save and the scheduler-node API are retired. The route
+// golden no longer lists the layout path, so this is what keeps them gone. The
+// station-layout write that the Personal HQ map still uses is a different,
+// live endpoint: it only accepts PUT, so a GET is refused rather than missing.
+func TestRetiredCanvasEndpointsStayGoneWhileStationLayoutRemains(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+
+	do := func(method, path string) int {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader("{}")))
+		return rec.Code
+	}
+
+	for _, path := range []string{
+		"/api/orchestration/workspace/layout",
+		"/api/orchestration/workspaces/ws-1/scheduler-nodes",
+		"/api/orchestration/workspaces/ws-1/scheduler-nodes/node-1",
+		"/api/orchestration/workspaces/ws-1/scheduler-nodes/node-1/trigger",
+	} {
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+			if code := do(method, path); code != http.StatusNotFound {
+				t.Errorf("%s %s status = %d, want 404 (the endpoint is retired)", method, path, code)
+			}
+		}
+	}
+
+	if code := do(http.MethodGet, "/api/orchestration/workspace/station-layout"); code != http.StatusMethodNotAllowed {
+		t.Errorf("GET station-layout status = %d, want 405 (the route must stay registered)", code)
+	}
+}
+
 func TestWorkspaceDescendantPagesKeepUUIDStateSeparateFromSlugLinks(t *testing.T) {
 	handler := newRoutesTestHandler(t)
 	workspace := createRouteTestWorkspace(t, handler, "Descendant Route Workspace")
@@ -305,7 +370,6 @@ func TestWorkspaceDescendantPagesKeepUUIDStateSeparateFromSlugLinks(t *testing.T
 		path   string
 		marker string
 	}{
-		{"canvas", "/canvas", "canvas-view"},
 		{"diagnostics", "/diagnostics", "workspace-diagnostics-view"},
 		{"task", "/task/task%201", "workspaceTaskPageRoot"},
 		{"run", "/runs/run%201", "workspaceRunPageRoot"},

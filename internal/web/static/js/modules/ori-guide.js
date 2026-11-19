@@ -223,7 +223,6 @@
   //   /                                  home
   //   /workspaces                        workspace hub
   //   /workspaces/{id}                   workspace detail
-  //   /workspaces/{id}/canvas            workspace canvas
   //   /workspaces/{id}/tasks/{taskId}    workspace task
   function contextFromRoute(route) {
     var path = String(route || '/');
@@ -246,9 +245,7 @@
 
     out.workspaceId = decodeURIComponent(parts[0]);
     out.surface = 'workspace_detail';
-    if (parts[1] === 'canvas') {
-      out.surface = 'workspace_canvas';
-    } else if (parts[1] === 'tasks' && parts[2]) {
+    if (parts[1] === 'tasks' && parts[2]) {
       out.surface = 'workspace_task';
       out.taskId = decodeURIComponent(parts[2]);
     }
@@ -295,8 +292,6 @@
         return 'All workspaces';
       case 'workspace_detail':
         return 'Workspace: ' + ctx.workspace_id;
-      case 'workspace_canvas':
-        return 'Canvas: ' + ctx.workspace_id;
       case 'workspace_task':
         return 'Task: ' + (ctx.task_id || ctx.workspace_id);
       default:

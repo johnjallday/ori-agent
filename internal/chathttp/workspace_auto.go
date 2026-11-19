@@ -81,7 +81,7 @@ func applyWorkspaceRouteContext(routeCtx normalizedChatRouteContext, ws *workspa
 
 func isWorkspaceChatSurface(surface string) bool {
 	switch strings.TrimSpace(surface) {
-	case "workspace_detail", "workspace_canvas", "workspace_chat":
+	case "workspace_detail", "workspace_chat":
 		return true
 	default:
 		return false

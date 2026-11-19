@@ -52,7 +52,8 @@ differences on real installations — Build My HQ's brief-config stash and the
 HQ upgrade's provisioning marker are saved only to SQL, a canonicalized agent
 node only to the file — and refusing them kept those workspaces from ever
 becoming Ready. Both copies of the fields every read migrates (agent
-instances, tasks, scheduled tasks, store nodes, capabilities, folders) are
+instances, tasks, scheduled tasks, capabilities, folders, and the retired store
+nodes, which every read rewrites into plain ticket file targets) are
 compared after that same migration. `version` and `updated_at` are each
 store's own save counters, not content. This supersedes "rejects split
 canonical work" below; concurrent changes are still fenced by the dirty
@@ -184,8 +185,13 @@ Recorded, not changed here:
 
 - A checkpoint-less folder dropped into the Workspace Directory is still
   registered by rescan, as before this feature (it never had a review step).
-- Store-node base directories and file-watch paths keep their saved values.
-  Watches start only when routines are turned on.
+- Store nodes are retired. A legacy workspace file's store nodes are rewritten
+  into plain ticket file targets when the file is read, before the import's rule
+  that disables an absolute file target looks at the tickets. A ticket that
+  saved to a store's absolute base directory therefore arrives switched off,
+  like any ticket with an absolute file target, and so does a copy of an
+  agent-bound store's directory onto that agent's tickets. File-watch paths keep
+  their saved values. Watches start only when routines are turned on.
 - Checkpoints are written automatically, as the PRD intends. The user guide
   says to git-ignore `.ori/continuity/` in a repository.
 - Review has per-member but no whole-tree byte/record cap.

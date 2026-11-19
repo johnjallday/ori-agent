@@ -86,7 +86,6 @@ for (const theme of ['light', 'dark'] as const)
         ['workspace', root, '[data-cmd-give-work]'],
         ['note', `/notes/${data.noteId}`, '#noteNameInput'],
         ['plan', `${root}/plans/${data.plans.draft.id}`, '#plan-save'],
-        ['canvas', `${root}/canvas`, '#canvas-add-disclosure > summary'],
         ['diagnostics', `${root}/diagnostics`, '#darkModeToggle']
       ];
       for (const [name, path, control] of routes) {

@@ -779,7 +779,7 @@ func (te *TaskExecutor) executeTask(ws *Workspace, task Task, profile TaskProvid
 			// Refresh ws so autoStoreResult sees the post-mutation workspace.
 			// autoStoreResult is best-effort and does its own Save outside the
 			// per-workspace lock, so a concurrent Update can interleave; that's
-			// accepted today (store-node bookkeeping is not load-bearing).
+			// accepted today (that save is bookkeeping, not load-bearing).
 			if fresh, getErr := te.workspaceStore.Get(workspaceID); getErr == nil {
 				taskForStorage := task
 				if persisted, taskErr := fresh.GetTask(task.ID); taskErr == nil && persisted != nil {
@@ -869,144 +869,20 @@ func applyExecutorTaskBlockedContext(task *Task, blockedErr *TaskBlockedError) {
 	task.Context["human_loop"] = humanLoop
 }
 
-// AutoStoreResult automatically stores task result based on:
-// 1. Task-level ResultStorage configuration (if enabled)
-// 2. Agent's connected store node (if auto-store enabled)
-// This is a package-level function so it can be called from both executor and HTTP handlers
+// AutoStoreResult saves a ticket's result to the destination on the ticket
+// itself: its ResultStorage, when enabled. A ticket with no enabled storage
+// saves nothing. This is a package-level function so it can be called from both
+// the executor and HTTP handlers.
 func AutoStoreResult(ws *Workspace, task *Task, result string, workspaceStore Store) {
 	AutoStoreResultWithAssistant(context.Background(), ws, task, result, workspaceStore, nil)
 }
 
-// AutoStoreResultWithAssistant automatically stores task result based on:
-// 1. Task-level ResultStorage configuration (if enabled)
-// 2. Agent's connected store node (if auto-store enabled)
-//
-// When an active output spec exists, assistant can perform one bounded
-// normalize/repair pass before CSV projection.
+// AutoStoreResultWithAssistant is AutoStoreResult with an assistant: when an
+// active output spec exists, it can perform one bounded normalize/repair pass
+// before CSV projection.
 func AutoStoreResultWithAssistant(ctx context.Context, ws *Workspace, task *Task, result string, workspaceStore Store, assistant TaskOutputSpecAssistant) {
-	// Check for task-level result storage configuration first
 	if task.ResultStorage != nil && task.ResultStorage.Enabled {
 		autoStoreTaskResult(ctx, ws, task, result, workspaceStore, assistant)
-		return
-	}
-
-	// Fall back to agent-based store node lookup
-	// Find agent's canvas node ID (use AssignedNodeID for multi-instance agents)
-	agentNodeID := task.AssignedNodeID
-	if agentNodeID == "" || agentNodeID == "unassigned" {
-		return
-	}
-
-	// Find store node assigned to this agent
-	var assignedStore *StoreNode
-	for i := range ws.StoreNodes {
-		if ws.StoreNodes[i].AgentNodeID == agentNodeID {
-			assignedStore = &ws.StoreNodes[i]
-			break
-		}
-	}
-
-	// No store assigned - skip automatic storage
-	if assignedStore == nil {
-		return
-	}
-
-	// Check if auto-store is enabled for this store node
-	if !assignedStore.AutoStore {
-		return
-	}
-
-	validation, contractCSV := validateTaskOutputForStorage(ctx, task, result, assistant)
-	if validation.ValidationStatus == TaskValidationNeedsReview {
-		recordTaskStorageValidation(ws, task, workspaceStore, validation)
-		logger.Warn("Task result held for review; output contract validation failed", logger.Fields{
-			"task_id":          task.ID,
-			"store_node_id":    assignedStore.ID,
-			"contract_version": validation.ContractVersion,
-			"error_count":      len(validation.Errors),
-		})
-		return
-	}
-
-	// Generate filename: task-{short-id}-{timestamp}.{format}
-	taskIDShort := task.ID
-	if len(taskIDShort) > 8 {
-		taskIDShort = taskIDShort[:8]
-	}
-	timestamp := time.Now().Format("20060102-150405")
-
-	// Determine file extension based on store format
-	ext := "txt"
-	switch assignedStore.Format {
-	case "json":
-		ext = "json"
-	case "markdown":
-		ext = "md"
-	case "text":
-		ext = "txt"
-	case "csv":
-		ext = "csv"
-	case "binary":
-		ext = "bin"
-	}
-
-	filename := fmt.Sprintf("task-%s-%s.%s", taskIDShort, timestamp, ext)
-
-	// Prepare data for storage
-	dataToStore := result
-	switch assignedStore.Format {
-	case "json":
-		// Wrap plain text result in JSON structure
-		jsonData := map[string]any{
-			"task_id":     task.ID,
-			"agent":       agentNodeID,
-			"result":      result,
-			"timestamp":   timestamp,
-			"description": task.Description,
-		}
-		jsonBytes, err := json.Marshal(jsonData)
-		if err != nil {
-			logger.Error("Failed to marshal result to JSON", logger.Fields{
-				"task_id": task.ID,
-				"err":     err,
-			})
-			return
-		}
-		dataToStore = string(jsonBytes)
-	case "csv":
-		if validation.ValidationStatus == TaskValidationPassed && contractCSV != "" {
-			dataToStore = contractCSV
-		} else {
-			dataToStore = TaskResultToCSV(task, result, timestamp, agentNodeID)
-		}
-	}
-
-	// Write result to store
-	if err := WriteToStoreForWorkspace(assignedStore, workspaceStore, ws.ID, filename, dataToStore); err != nil {
-		logger.Error("Failed to auto-store task result", logger.Fields{
-			"task_id":       task.ID,
-			"store_node_id": assignedStore.ID,
-			"filename":      filename,
-			"err":           err,
-		})
-		// Don't fail the task - storage is best-effort
-		return
-	}
-
-	logger.Info("✅ Task result auto-stored", logger.Fields{
-		"task_id":       task.ID,
-		"store_node_id": assignedStore.ID,
-		"filename":      filename,
-		"write_count":   assignedStore.WriteCount,
-	})
-	if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
-		validation.StorageStatus = TaskStorageSaved
-		recordTaskStorageValidation(ws, task, workspaceStore, validation)
-	}
-
-	// Save workspace to persist store node stats (WriteToStore updated them)
-	if err := workspaceStore.Save(ws); err != nil {
-		logger.Error("Failed to save workspace after auto-store", logger.Fields{"workspace_id": ws.ID, "err": err})
 	}
 }
 
@@ -1120,79 +996,7 @@ func autoStoreTaskResult(ctx context.Context, ws *Workspace, task *Task, result 
 		}
 	}
 
-	// If store node is specified, use it
-	if storage.StoreNodeID != "" {
-		var storeNode *StoreNode
-		for i := range ws.StoreNodes {
-			if ws.StoreNodes[i].ID == storage.StoreNodeID || ws.StoreNodes[i].CanvasNodeID == storage.StoreNodeID {
-				storeNode = &ws.StoreNodes[i]
-				break
-			}
-		}
-
-		if storeNode == nil {
-			logger.Error("Store node not found for task result storage", logger.Fields{
-				"task_id":       task.ID,
-				"store_node_id": storage.StoreNodeID,
-			})
-			return
-		}
-
-		storeFilePath := filename
-		if storage.FilePath != "" {
-			storeFilePath = storage.FilePath
-		}
-		if appendMode {
-			storeNodeCopy := *storeNode
-			storeNodeCopy.WriteMode = "append"
-			storeNodeCopy.Format = "jsonl"
-			// JSONL needs no header reconciliation — each line is a
-			// self-describing record — so the records are appended directly
-			// (no CSV header strip, no reproject-on-mismatch).
-			if err := WriteToStoreForWorkspace(&storeNodeCopy, workspaceStore, ws.ID, storeFilePath, dataToStore); err != nil {
-				logger.Error("Failed to append task result to store node", logger.Fields{
-					"task_id":       task.ID,
-					"store_node_id": storeNode.ID,
-					"filename":      storeFilePath,
-					"err":           err,
-				})
-				return
-			}
-			storeNode.LastWriteTime = storeNodeCopy.LastWriteTime
-			storeNode.WriteCount = storeNodeCopy.WriteCount
-			storeNode.LastFilePath = storeNodeCopy.LastFilePath
-			storeNode.LastError = storeNodeCopy.LastError
-			storeNode.UpdatedAt = storeNodeCopy.UpdatedAt
-			if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
-				validation.StorageStatus = TaskStorageAppended
-				recordTaskStorageValidation(ws, task, workspaceStore, validation)
-			}
-		} else if err := WriteToStoreForWorkspace(storeNode, workspaceStore, ws.ID, storeFilePath, dataToStore); err != nil {
-			logger.Error("Failed to auto-store task result to store node", logger.Fields{
-				"task_id":       task.ID,
-				"store_node_id": storeNode.ID,
-				"filename":      storeFilePath,
-				"err":           err,
-			})
-			return
-		} else if validation.ValidationStatus == TaskValidationPassed || validation.ValidationStatus == TaskValidationNotApplicable {
-			validation.StorageStatus = TaskStorageSaved
-			recordTaskStorageValidation(ws, task, workspaceStore, validation)
-		}
-
-		logger.Info("Task result auto-stored to store node", logger.Fields{
-			"task_id":       task.ID,
-			"store_node_id": storeNode.ID,
-			"filename":      storeFilePath,
-		})
-
-		if err := workspaceStore.Save(ws); err != nil {
-			logger.Error("Failed to save workspace after auto-store", logger.Fields{"workspace_id": ws.ID, "err": err})
-		}
-		return
-	}
-
-	// Otherwise use file path (or default output directory)
+	// The ticket's own file path (or the default output directory)
 	filePath := storage.FilePath
 	if ResultStorageUsesWorkspaceFolder(storage) {
 		baseDir, _, err := ResolveWorkspaceFolderBaseDir(workspaceStore, ws.ID, storage.Folder)

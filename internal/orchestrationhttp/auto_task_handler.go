@@ -136,11 +136,10 @@ type ScheduleConfig struct {
 
 // ResultStorageConfig for auto task with jsonschema tags
 type ResultStorageConfig struct {
-	Enabled     bool   `json:"enabled" jsonschema_description:"True if result storage was requested"`
-	StoreNodeID string `json:"store_node_id" jsonschema_description:"Store node ID to save results to, empty string if not specified"`
-	FilePath    string `json:"file_path" jsonschema_description:"Custom file path to save results, empty string if not specified"`
-	Format      string `json:"format" jsonschema:"enum=text,enum=json,enum=markdown,enum=csv" jsonschema_description:"Output format: text, json, markdown, or csv"`
-	WriteMode   string `json:"write_mode" jsonschema:"enum=new_file,enum=append" jsonschema_description:"Use append only when adding each run to the same CSV dataset"`
+	Enabled   bool   `json:"enabled" jsonschema_description:"True if result storage was requested"`
+	FilePath  string `json:"file_path" jsonschema_description:"Custom file path to save results, empty string if not specified"`
+	Format    string `json:"format" jsonschema:"enum=text,enum=json,enum=markdown,enum=csv" jsonschema_description:"Output format: text, json, markdown, or csv"`
+	WriteMode string `json:"write_mode" jsonschema:"enum=new_file,enum=append" jsonschema_description:"Use append only when adding each run to the same CSV dataset"`
 }
 
 // OutputContractConfig for auto task with jsonschema tags
@@ -1133,7 +1132,6 @@ func (h *AutoTaskHandler) validateTaskConfig(config AutoTaskResponse, agents []s
 
 		// If not enabled and no storage details, set to nil
 		if !config.ResultStorage.Enabled &&
-			config.ResultStorage.StoreNodeID == "" &&
 			config.ResultStorage.FilePath == "" {
 			config.ResultStorage = nil
 		}

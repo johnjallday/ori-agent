@@ -15,7 +15,7 @@ class APIKeyManager {
     // Get modal and elements
     const modalElement = document.getElementById('apiKeyModal');
 
-    // Modal doesn't exist in all views (e.g., canvas view), skip initialization
+    // Modal doesn't exist in all views, skip initialization
     if (!modalElement) {
       return;
     }

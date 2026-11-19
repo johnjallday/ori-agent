@@ -83,7 +83,7 @@ for (const refs of [
   { surface: 'home', page_path: '/' },
   { surface: 'home', page_path: '/', selection_workspace_id: 'home-selected' },
   { surface: 'workspace', page_path: '/workspaces/community', workspace_id: 'project' },
-  { surface: 'workspace_canvas', page_path: '/workspaces/portfolio/canvas', workspace_id: 'group' }
+  { surface: 'workspace_detail', page_path: '/workspaces/portfolio/plans', workspace_id: 'group' }
 ]) {
   test(`canonical conversation wins over local build/agent heuristics on ${JSON.stringify(refs)}`, async () => {
     const h = harness({ route_mode: 'home_inline', intent: 'assistant_conversation' });

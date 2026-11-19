@@ -10,11 +10,6 @@
       ]
     },
     {
-      "file": "internal/web/static/js/modules/agent-canvas-helpers.js",
-      "reason": "Sent to the model as its instruction, never shown to the person (PRD 760 limitation: the assistant’s own prompts may still say \"task\"). buildCombinationInstruction lists the inputs for the model.",
-      "texts": ["Task : "]
-    },
-    {
       "file": "internal/web/static/js/modules/dashboard.js",
       "reason": "Sent to the model as its instruction, never shown to the person (PRD 760 limitation: the assistant’s own prompts may still say \"task\"). Also the calendar intent keywords, matched against what a person types; the new words sit beside them. The email and calendar dispatch messages are prompts to those agents.",
       "texts": [

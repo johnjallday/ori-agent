@@ -357,11 +357,24 @@ func TestUnknownTopicsSaySoAndOfferApprovedTopics(t *testing.T) {
 	}
 }
 
+// The workspace canvas is retired. Its old route is described like any other
+// workspace sub-page, never as a canvas.
+func TestGuideAboutThisScreenNoLongerDescribesTheRetiredCanvas(t *testing.T) {
+	canvas := askGuide(t, newGuide(), "", "/workspaces/fictional/canvas")
+	plans := askGuide(t, newGuide(), "", "/workspaces/fictional/plans")
+	if strings.Contains(strings.ToLower(canvas.About), "canvas") {
+		t.Errorf("the retired canvas route must not be described as a canvas, about=%q", canvas.About)
+	}
+	if canvas.About != plans.About {
+		t.Errorf("the retired canvas route should read like any workspace sub-page: %q vs %q", canvas.About, plans.About)
+	}
+}
+
 func TestGuideAboutThisScreenIsReviewedRouteMetadata(t *testing.T) {
 	cases := map[string]string{
 		"/": "workspace map", "/agents": "manage your agents", "/settings": "Global configuration",
-		"/workspaces/fictional/canvas": "workspace canvas", "/workspaces/fictional/task/42": "workspace task",
-		"/unknown": "not available", "/agents-imposter": "not available",
+		"/workspaces/fictional/task/42": "workspace task", "/unknown": "not available",
+		"/agents-imposter": "not available",
 	}
 	for route, want := range cases {
 		for _, question := range []string{"", "agent", "zzzzz"} {

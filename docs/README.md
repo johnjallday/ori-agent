@@ -31,7 +31,6 @@ This directory contains detailed documentation for Ori Agent.
 
 ### Feature Guides
 
-- [Scheduler Nodes Guide](./SCHEDULER_NODES_GUIDE.md) - Complete guide to using scheduler nodes for task automation
 - [Custom Workspace Dashboard](./features/custom-workspace-dashboard.md) - Write your own HTML
   dashboard for a workspace, reading live workspace data in a sandboxed frame
 - [Moving a Workspace](./features/moving-workspaces.md) - Copy a workspace folder to another computer
@@ -229,7 +228,6 @@ docs/
 ├── readme-screenshots.json             # Accepted README screenshot manifest
 ├── CHARACTER_ASSET_PROVENANCE.md       # Character asset review register
 ├── character-asset-hashes.txt          # SHA-256 of shipped character assets
-├── SCHEDULER_NODES_GUIDE.md            # Scheduler nodes usage guide
 ├── PRD_TASK_COVERAGE_AUDIT.md          # PRD-to-task planning audit
 ├── premium_features.md                 # Premium feature overview
 ├── devtools.md                         # External development tools

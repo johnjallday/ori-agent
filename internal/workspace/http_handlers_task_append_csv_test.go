@@ -190,7 +190,9 @@ func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStorage(t *testing.T) 
 	}
 }
 
-func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStoreNode(t *testing.T) {
+// A client from before store nodes were retired still sends store_node_id. The
+// field is ignored: the rows land at the ticket's own target.
+func TestHTTPHandler_AppendResultToCSV_IgnoresLegacyStoreNodeID(t *testing.T) {
 	store, err := NewFileStore(t.TempDir())
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
@@ -199,29 +201,19 @@ func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStoreNode(t *testing.T
 	handler := NewHTTPHandler(store, nil, nil)
 
 	ws := &Workspace{
-		ID:     "ws-folder-store-node",
-		Name:   "Folder Store Node",
+		ID:     "ws-legacy-store-id",
+		Name:   "Legacy Store Id",
 		Status: StatusActive,
-		StoreNodes: []StoreNode{{
-			ID:            "store-1",
-			CanvasNodeID:  "store-node-1",
-			WorkspaceID:   "ws-folder-store-node",
-			Name:          "CSV Store",
-			StorageTarget: StorageTargetWorkspaceFolder,
-			Folder:        "exports",
-			Format:        "csv",
-			WriteMode:     "append",
-			AutoCreateDir: true,
-		}},
 		Tasks: []Task{{
-			ID:          "task-store-node",
-			Description: "Store Node CSV",
+			ID:          "task-legacy-store-id",
+			Description: "Legacy request CSV",
 			ResultStorage: &ResultStorageConfig{
-				Enabled:     true,
-				Format:      "csv",
-				WriteMode:   "append",
-				StoreNodeID: "store-1",
-				FilePath:    "runs.csv",
+				Enabled:       true,
+				Format:        "csv",
+				WriteMode:     "append",
+				StorageTarget: StorageTargetWorkspaceFolder,
+				Folder:        "exports",
+				FilePath:      "runs.csv",
 			},
 		}},
 	}
@@ -230,8 +222,8 @@ func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStoreNode(t *testing.T
 	}
 
 	req := httptest.NewRequest(http.MethodPost,
-		"/api/workspaces/ws-folder-store-node/tasks/task-store-node/results/append-csv",
-		strings.NewReader(`{"csv":"timestamp,value\n2026-05-26,stored","use_storage":true}`))
+		"/api/workspaces/ws-legacy-store-id/tasks/task-legacy-store-id/results/append-csv",
+		strings.NewReader(`{"csv":"timestamp,value\n2026-05-26,stored","use_storage":true,"store_node_id":"store-1"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -244,17 +236,6 @@ func TestHTTPHandler_AppendResultToCSV_UsesWorkspaceFolderStoreNode(t *testing.T
 	records := readAppendedJSONL(t, wantPath)
 	if len(records) != 1 || records[0]["timestamp"] != "2026-05-26" || records[0]["value"] != "stored" {
 		t.Fatalf("unexpected appended records: %#v", records)
-	}
-
-	updated, err := store.Get(ws.ID)
-	if err != nil {
-		t.Fatalf("reload workspace: %v", err)
-	}
-	if updated.StoreNodes[0].WriteCount != 1 {
-		t.Fatalf("expected store node write count 1, got %d", updated.StoreNodes[0].WriteCount)
-	}
-	if updated.StoreNodes[0].LastFilePath != "runs.csv" {
-		t.Fatalf("expected last file path runs.csv, got %q", updated.StoreNodes[0].LastFilePath)
 	}
 }
 

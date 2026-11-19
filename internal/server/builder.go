@@ -512,8 +512,8 @@ type ServerBuilder struct {
 
 	// Coordinate-based Workspace Map: the current user's layout storage, the
 	// ownership/lifecycle service over it, and its HTTP handler. Kept entirely
-	// separate from the per-workspace CanvasLayout served by
-	// /api/workspaces/{id}/layout (#292 FR-5, FR-104).
+	// separate from the per-workspace CanvasLayout (retired canvas data, kept as
+	// stored fields only; #292 FR-5, FR-104).
 	workspaceMapStore   *workspacemap.SQLiteStore
 	workspaceMapService *workspacemap.Service
 	workspaceMapHandler *workspacemaphttp.Handler

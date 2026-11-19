@@ -28,10 +28,6 @@ const (
 	// base64 bytes/4 would be wildly wrong, so images are charged flat (WS2.5).
 	imageTokenCost = 768
 
-	// Attachment injection caps (bytes), applied before budgeting (WS2.8).
-	maxAttachmentBytesPerFile = 64 * 1024
-	maxAttachmentBytesTotal   = 128 * 1024
-
 	// Tool-result message caps (bytes) appended to the conversation (WS2.9).
 	maxToolResultBytesLocal = 4 * 1024
 	maxToolResultBytesCloud = 16 * 1024
@@ -187,8 +183,8 @@ func safeSuffix(s string, n int) string {
 // promptSegment is one region of the assembled task user-prompt. trimOrder 0
 // means protected (never trimmed — task description, output-format, headers);
 // segments with trimOrder > 0 are trimmed in ascending order until the prompt
-// fits (WS2.6): attachments (1), upstream results (2), workspace snapshot (3),
-// memory (4).
+// fits (WS2.6): upstream results (2), workspace snapshot (3), memory (4). Rank 1
+// is unused: it belonged to attached-file contents, which are no longer injected.
 type promptSegment struct {
 	label     string
 	text      string

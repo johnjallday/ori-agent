@@ -281,7 +281,7 @@ all keys. Other browsers/devices are outside browser-local cleanup.
 | --- | --- | --- |
 | Theme/density/voice/settings, `themeManager`, `settings-page`, `voice-input`, layout head | `ori-theme`, `ori-ui-density`, `voiceSettings`, `note.openBehavior` | F; settings category only when explicitly reviewed as preferences |
 | Chat input/layout, `app`, `resizer`, `sessions` | `enterToSend`, `planBeforeAction`, `chatPanelWidth`, `sidebarWidth`, `sessionSidebarCollapsed`, `sessionSidebarWidth` | F/preferences; not data-only cleanup |
-| Workspace presentation, hub/command/canvas | `oriWorkspaceHubLauncherView`, `oriWorkspaceCommandViewMode`, legacy `oriWorkspaceDetailView`, `canvas-bg-color`; session keys `oriWorkspaceHubOverviewExpanded`, `oriWorkspaceHubLauncherTab` | F/preferences |
+| Workspace presentation, hub/command | `oriWorkspaceHubLauncherView`, `oriWorkspaceCommandViewMode`, legacy `oriWorkspaceDetailView`, legacy `canvas-bg-color` (the retired canvas no longer writes it; it is still cleared if present); session keys `oriWorkspaceHubOverviewExpanded`, `oriWorkspaceHubLauncherTab` | F/preferences |
 | Notes presentation | `note.leftRail.tab`, `note.toc.collapsed`, `note.aiAssist.collapsed` | F/preferences |
 | Conversation caches/selections, `app`, `sessions`, `dashboard` | `ori_chat_session_*`, `ori_chat_assistant`, `ori_chat_assistant_*` (including slug variant), `activeSessionId`, session `activeSessionId_*`; `ori.homeAssistant.recentSessions` in local/session storage | R/F |
 | Workspace references, sync and directory explorer | `oriWorkspaceSyncDismissed`, `oriWorkspaceHubSelectedId` (session), `currentWorkspaceId` (session), `sessionFolderCollapsed`, `workspace-directory-explorer:*`, `ori-workspace-command-agent:*` | R/F; agent references also A where affected |
@@ -785,9 +785,9 @@ refusal → normal save completion → accepted admission → fenced ordinary me
 and retained sentinels. Real temporary file-store tests pause task, step and
 orchestrator final writes, prove admission stays busy without cancelling their
 contexts, and reopen the same files to verify normal completion. Manual task
-HTTP, first-open, assist/review reruns, parent sequences and legacy scheduler-node
-triggers register children before acknowledgment and retain them through final
-workspace saves, including failed saves. CLI HTTP similarly uses a fake
+HTTP, first-open, assist/review reruns and parent sequences register children
+before acknowledgment and retain them through final workspace saves, including
+failed saves. CLI HTTP similarly uses a fake
 provider/adapter and an empty executable PATH. Event tests prove that an
 already-dispatched save remains tracked even after the existing non-joining
 EventBus.Shutdown returns. Failed task claims release context, running slot and

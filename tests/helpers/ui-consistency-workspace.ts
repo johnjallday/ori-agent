@@ -840,7 +840,7 @@ export async function retireWorkspaceSeed(request: APIRequestContext, seed: Work
   expect(ids(workspace.attachments ?? []), 'unexpected workspace attachments').toEqual(
     (seed.generatedFiles ?? []).map(file => file.attachmentId).sort()
   );
-  for (const key of ['scheduled_tasks', 'messages', 'folders', 'store_nodes'])
+  for (const key of ['scheduled_tasks', 'messages', 'folders'])
     expect(workspace[key] ?? [], `unexpected workspace ${key}`).toEqual([]);
   for (const [kind, path, key] of [
     ['note', `${base}/notes`, 'notes'],

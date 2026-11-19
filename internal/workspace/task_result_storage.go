@@ -256,7 +256,7 @@ func csvHeaderFromFile(filePath string) ([]string, bool, error) {
 	if info.Size() == 0 {
 		return nil, false, nil
 	}
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) // #nosec G304 -- filePath is the result file the user configured for this ticket; reading its header back is the point
 	if err != nil {
 		return nil, false, err
 	}
@@ -294,7 +294,7 @@ func AppendCSVToFile(filePath, csvData string) error {
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil { // #nosec G301 -- the folder of the result file the user configured; 0755 matches the other user-facing output folders
 		return err
 	}
 
@@ -307,7 +307,7 @@ func AppendCSVToFile(filePath, csvData string) error {
 		return nil
 	}
 
-	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644) // #nosec G302 G304 -- appends to the result file the user configured for this ticket; 0644 matches the other user-facing task output
 	if err != nil {
 		return err
 	}
@@ -343,50 +343,8 @@ func AppendCSVToFileStrict(filePath, csvData string) error {
 	return AppendCSVToFile(filePath, trimmed)
 }
 
-func csvWithoutHeaderForExistingStoreStrict(node *StoreNode, filePath, csvData string) (string, error) {
-	return csvWithoutHeaderForExistingStoreStrictWithResolver(node, nil, "", filePath, csvData)
-}
-
-func csvWithoutHeaderForExistingStoreStrictWithResolver(node *StoreNode, resolver AttachmentFilePathResolver, workspaceID, filePath, csvData string) (string, error) {
-	if node == nil {
-		return csvData, nil
-	}
-	finalPath, err := BuildFinalStorePath(node, resolver, workspaceID, filePath)
-	if err != nil {
-		return csvData, err
-	}
-	incomingHeader, err := csvHeaderFromString(csvData)
-	if err != nil {
-		return csvData, err
-	}
-	existingHeader, exists, err := csvHeaderFromFile(finalPath)
-	if err != nil {
-		return csvData, err
-	}
-	if exists {
-		if !csvHeadersEqual(existingHeader, incomingHeader) {
-			return "", &CSVHeaderMismatchError{Expected: incomingHeader, Actual: existingHeader}
-		}
-		return csvWithoutHeader(csvData), nil
-	}
-	return csvData, nil
-}
-
-// CSVWithoutHeaderForExistingStoreStrict prepares a CSV append payload for a
-// store node while preserving the same strict header check used by task result
-// auto-storage.
-func CSVWithoutHeaderForExistingStoreStrict(node *StoreNode, filePath, csvData string) (string, error) {
-	return csvWithoutHeaderForExistingStoreStrict(node, filePath, csvData)
-}
-
-// CSVWithoutHeaderForExistingStoreStrictInWorkspace resolves workspace-folder
-// store nodes before checking the destination CSV header.
-func CSVWithoutHeaderForExistingStoreStrictInWorkspace(node *StoreNode, resolver AttachmentFilePathResolver, workspaceID, filePath, csvData string) (string, error) {
-	return csvWithoutHeaderForExistingStoreStrictWithResolver(node, resolver, workspaceID, filePath, csvData)
-}
-
 // BootstrapOutputContractFromCSVHeader derives a string-typed output contract from an existing CSV header.
-func BootstrapOutputContractFromCSVHeader(ws *Workspace, task *Task) *TaskOutputContract {
+func BootstrapOutputContractFromCSVHeader(_ *Workspace, task *Task) *TaskOutputContract {
 	if task == nil || NormalizeTaskOutputContract(task.OutputContract) != nil {
 		return NormalizeTaskOutputContract(task.OutputContract)
 	}
@@ -399,28 +357,7 @@ func BootstrapOutputContractFromCSVHeader(ws *Workspace, task *Task) *TaskOutput
 	if filePath == "" {
 		return nil
 	}
-	if strings.TrimSpace(storage.StoreNodeID) != "" {
-		if ws == nil {
-			return nil
-		}
-		var node *StoreNode
-		for i := range ws.StoreNodes {
-			if ws.StoreNodes[i].ID == storage.StoreNodeID || ws.StoreNodes[i].CanvasNodeID == storage.StoreNodeID {
-				node = &ws.StoreNodes[i]
-				break
-			}
-		}
-		if node == nil {
-			return nil
-		}
-		finalPath, err := BuildFinalStorePath(node, nil, ws.ID, filePath)
-		if err != nil {
-			return nil
-		}
-		filePath = finalPath
-	}
-
-	file, err := os.Open(filePath)
+	file, err := os.Open(filePath) // #nosec G304 -- filePath is the result file the user configured for this ticket; it is only read to learn its header
 	if err != nil {
 		return nil
 	}

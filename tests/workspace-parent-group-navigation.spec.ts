@@ -131,7 +131,7 @@ test('a member opened directly links to its group right after Home, and Back ret
   await expect(link).toHaveAttribute('href', `/workspaces/${group.folder_slug}`);
   await expect(page.getByRole('link', { name: `Group: ${group.name}` })).toBeVisible();
   await expect(link).toHaveAttribute('title', `Open the group ${group.name}`);
-  // Immediately after Home; Canvas is a native link in secondary navigation.
+  // Immediately after Home, and nothing follows it in the header navigation.
   const order = await page.evaluate(() => {
     const link = document.querySelector('.ws-cmd-nav [data-cmd-parent-group]');
     return [
@@ -140,10 +140,10 @@ test('a member opened directly links to its group right after Home, and Back ret
     ];
   });
   expect(order).toEqual([true, undefined]);
-  await expect(page.locator('[data-cmd-disclosure="views"] a[href$="/canvas"]')).toHaveAttribute(
-    'href',
-    `/workspaces/${member.folder_slug}/canvas`
-  );
+  // The workspace canvas is retired: no navigation links to it.
+  await expect(
+    page.locator('.ws-cmd-nav a[href$="/canvas"], [data-cmd-disclosure="views"] a[href$="/canvas"]')
+  ).toHaveCount(0);
 
   await link.click();
   await expect(page).toHaveURL(new RegExp(`/workspaces/${group.folder_slug}$`));

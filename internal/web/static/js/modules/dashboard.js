@@ -1809,11 +1809,6 @@
     }
     var displayName = getWorkspaceHomeAssistantDisplayName();
     var workspaceMode = getWorkspacePromptMode();
-    if (routeContext.surface === 'workspace_canvas') {
-      if (workspaceMode === 'ask') return 'Ask ' + displayName + ' about this workspace canvas…';
-      if (workspaceMode === 'note') return 'Save a note on this workspace canvas…';
-      return 'Create a ticket for ' + displayName + ' from this canvas…';
-    }
     if (hasWorkspaceRouteContext(routeContext)) {
       if (workspaceMode === 'ask')
         return 'Ask ' + displayName + ' about this workspace… (/task creates a ticket)';
@@ -7963,7 +7958,6 @@
     var path = normalizeToken(pathname || '');
     if (!path) return 'dashboard';
     if (path.indexOf('/workspaces/') === 0) {
-      if (path.indexOf('/canvas') >= 0) return 'workspace_canvas';
       if (path.indexOf('/task/') >= 0 || path.indexOf('/tasks/') >= 0) return 'workspace_task';
       return 'workspace_detail';
     }

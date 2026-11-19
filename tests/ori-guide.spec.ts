@@ -50,9 +50,9 @@ for (const [route, screen] of [
       expect(created.ok()).toBeTruthy();
       const workspace = (await created.json()).folder;
       workspaceId = workspace.id;
-      // Canvas is a real workspace shell without the detail page's mandatory
-      // Commander-creation dialog on an empty fixture.
-      targetRoute = `/workspaces/${workspace.folder_slug}/canvas`;
+      // The catalog page is a real workspace page without the detail page's
+      // mandatory Commander-creation dialog on an empty fixture.
+      targetRoute = `/workspaces/${workspace.folder_slug}/catalog`;
     }
     await gotoPage(page, targetRoute);
     await expect(page.locator('#oriGuideLauncher')).toHaveCount(1);

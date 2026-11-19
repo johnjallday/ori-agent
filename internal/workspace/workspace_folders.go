@@ -140,19 +140,9 @@ func deleteWorkspaceFolderMetadata(ws *Workspace, folderID string) (Folder, erro
 	return folder, nil
 }
 
-func rebaseWorkspaceFolderStorageReferences(ws *Workspace, oldPath, newPath string, now time.Time) {
+func rebaseWorkspaceFolderStorageReferences(ws *Workspace, oldPath, newPath string, _ time.Time) {
 	if ws == nil {
 		return
-	}
-	for i := range ws.StoreNodes {
-		if !StoreNodeUsesWorkspaceFolder(&ws.StoreNodes[i]) {
-			continue
-		}
-		if rebasedPath, ok := rebaseWorkspaceFolderPath(oldPath, newPath, ws.StoreNodes[i].Folder); ok {
-			ws.StoreNodes[i].Folder = rebasedPath
-			ws.StoreNodes[i].BaseDir = rebasedPath
-			ws.StoreNodes[i].UpdatedAt = now
-		}
 	}
 	for i := range ws.Tasks {
 		if !ResultStorageUsesWorkspaceFolder(ws.Tasks[i].ResultStorage) {
@@ -167,11 +157,6 @@ func rebaseWorkspaceFolderStorageReferences(ws *Workspace, oldPath, newPath stri
 func workspaceFolderHasStorageReferences(ws *Workspace, folderPath string) bool {
 	if ws == nil {
 		return false
-	}
-	for i := range ws.StoreNodes {
-		if StoreNodeUsesWorkspaceFolder(&ws.StoreNodes[i]) && workspaceFolderContainsPath(folderPath, ws.StoreNodes[i].Folder) {
-			return true
-		}
 	}
 	for i := range ws.Tasks {
 		if ResultStorageUsesWorkspaceFolder(ws.Tasks[i].ResultStorage) && workspaceFolderContainsPath(folderPath, ws.Tasks[i].ResultStorage.Folder) {

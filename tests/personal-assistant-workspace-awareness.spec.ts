@@ -166,12 +166,12 @@ test('navigation follows the next page while a delayed reply keeps its original 
   const rows = (await (await request.get('/api/workspaces')).json()).folders;
   const a = rows.find((row: any) => row.name === 'Navigation project A');
   const b = rows.find((row: any) => row.name === 'Navigation project B');
-  await page.goto(`/workspaces/${a.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${a.folder_slug}/catalog`);
   await page.locator('#personalAssistantLauncher').click();
   const label = page.locator('#personalAssistantWorkspaceContext');
   await expect(label).toHaveText('Context · Project: Navigation project A');
   await page.locator('#personalAssistantInput').fill('Draft kept across navigation');
-  await page.goto(`/workspaces/${b.folder_slug}/canvas`);
+  await page.goto(`/workspaces/${b.folder_slug}/catalog`);
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
   await expect(label).toHaveText('Context · Project: Navigation project B');
   await expect(page.locator('#personalAssistantInput')).toHaveValue('Draft kept across navigation');
@@ -179,7 +179,7 @@ test('navigation follows the next page while a delayed reply keeps its original 
   // In-page back/forward exercises stale body data versus the live route. The
   // server canonical slug, not the old body ID or a stale map selection, wins.
   await page.evaluate(slug => {
-    history.pushState({}, '', `/workspaces/${slug}/canvas`);
+    history.pushState({}, '', `/workspaces/${slug}/catalog`);
     dispatchEvent(new PopStateEvent('popstate'));
   }, a.folder_slug);
   await expect(label).toHaveText('Context · Project: Navigation project A');
@@ -203,7 +203,7 @@ test('navigation follows the next page while a delayed reply keeps its original 
   expect(accepted.context.workspace_id).not.toBe(a.folder_slug);
   await page.locator('#personalAssistantInput').fill('New draft for B');
   await page.evaluate(slug => {
-    history.pushState({}, '', `/workspaces/${slug}/canvas`);
+    history.pushState({}, '', `/workspaces/${slug}/catalog`);
     dispatchEvent(new PopStateEvent('popstate'));
   }, b.folder_slug);
   await expect(label).toHaveText('Context · Project: Navigation project B');

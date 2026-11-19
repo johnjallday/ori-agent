@@ -113,19 +113,8 @@ workspace panels and native Give work/delete dialogs opt into `.ui-section`;
 their fields use canonical field classes. Native dialog lifecycle, Start now
 gating, deletion choices and actual-invoker restoration stay controller-owned.
 Radio labels may wrap, but the native radio itself must not flex-shrink.
-Canvas Add is a native disclosure containing an ordinary named button group,
-not an ARIA application menu. Shared controls/surfaces own its appearance;
-`workspace-canvas.css` owns popup geometry. Keep Canvas node selection distinct
-from library hiring, including page-specific controller names. Workflow filters
-also use native buttons and explicit selected/expanded states, with shared
-appearance and feature-owned placement. Pass persistent invoking elements into
-native dialogs; Safari mouse clicks need not update `document.activeElement`.
-Space owns panning only for Canvas intent, never text fields or unrelated page
-scrolling. Exports must target the host's actual Canvas instance. Saved-workflow
-sidebar rows stay flat, with shared badges/actions and a bounded named reading
-region. Failed reads are not empty libraries or availability grants. Retain
-filters and actual-invoker focus through refresh/cancel; the server still owns
-all instantiation, deletion and agent-availability contracts. Diagnostics uses
+Pass persistent invoking elements into native dialogs; Safari mouse clicks need
+not update `document.activeElement`. Diagnostics uses
 the same shell/control owners and semantic health text; its UI smoke check
 validates the current command/Ticket mounts and controller imports, never
 retired composer markup. Technical results stay in a named bounded scroll region.

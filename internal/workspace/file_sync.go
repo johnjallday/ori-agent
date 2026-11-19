@@ -268,17 +268,6 @@ func workspaceGeneratedFilePaths(ws *Workspace) map[string]bool {
 		}
 	}
 
-	for _, node := range ws.StoreNodes {
-		if !StoreNodeUsesWorkspaceFolder(&node) || strings.TrimSpace(node.LastFilePath) == "" {
-			continue
-		}
-		relativePath := node.LastFilePath
-		if strings.TrimSpace(node.Folder) != "" {
-			relativePath = filepath.Join(node.Folder, relativePath)
-		}
-		add(relativePath)
-	}
-
 	for i := range ws.Tasks {
 		if relativePath := resultStorageWorkspaceFilePath(&ws.Tasks[i], ws.Tasks[i].ResultStorage); relativePath != "" {
 			add(relativePath)
@@ -347,7 +336,7 @@ func isHiddenWorkspacePath(relativePath string) bool {
 // mirroring buildWorkspaceFileTree.
 func snapshotWorkspaceDiskFiles(filesPath string) (map[string]os.FileInfo, error) {
 	diskFiles := make(map[string]os.FileInfo)
-	walkErr := filepath.WalkDir(filesPath, func(p string, entry fs.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(filesPath, func(p string, entry fs.DirEntry, err error) error { // #nosec G703 -- filesPath is the workspace's own files root resolved by the store, never request input
 		if err != nil {
 			return err
 		}

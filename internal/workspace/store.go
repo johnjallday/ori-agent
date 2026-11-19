@@ -45,7 +45,7 @@ type Store interface {
 
 	// GetOutputsPath returns the path for auto-saved task results inside the
 	// workspace's own folder (<workspace>/outputs). This is the default
-	// destination when a task has no store node or explicit file path.
+	// destination when a task has no explicit file path or folder.
 	GetOutputsPath(workspaceID string) string
 
 	// GetWorkspaceAgent returns a workspace-local agent snapshot if one exists

@@ -573,8 +573,8 @@ func TestBuildWorkspaceSnapshotPrompt_TruncatesAndCapsItems(t *testing.T) {
 	}
 
 	prompt := buildWorkspaceSnapshotPrompt(context.Background(), normalizedChatRouteContext{
-		Surface:     "workspace_canvas",
-		PagePath:    "/workspaces/" + ws.ID + "/canvas",
+		Surface:     "workspace_detail",
+		PagePath:    "/workspaces/" + ws.ID,
 		WorkspaceID: ws.ID,
 	}, wsStore, sessionStore)
 

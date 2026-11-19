@@ -57,10 +57,15 @@ test('page wins over Home selection and the route slug is not an ID', () => {
   assert.equal(collectWorkspaceContext({ ...page, workspaceId: '' }).workspace_id, '');
 });
 test('in-page navigation/back-forward drops stale page IDs and app-wide selections', () => {
-  const next = collectWorkspaceContext({ ...page, pathname: '/workspaces/second/canvas' });
+  const next = collectWorkspaceContext({ ...page, pathname: '/workspaces/second/plans' });
   assert.equal(next.workspace_id, '');
   assert.equal(next.workspace_slug, 'second');
-  assert.equal(next.surface, 'workspace_canvas');
+  assert.equal(next.surface, 'workspace_detail');
+  // The canvas page is retired: its old path is an ordinary workspace page.
+  assert.equal(
+    collectWorkspaceContext({ ...page, pathname: '/workspaces/second/canvas' }).surface,
+    'workspace_detail'
+  );
   assert.equal(collectWorkspaceContext(page).workspace_id, 'uuid-a');
   const global = collectWorkspaceContext({ ...page, pathname: '/settings' });
   assert.equal(global.workspace_id, '');

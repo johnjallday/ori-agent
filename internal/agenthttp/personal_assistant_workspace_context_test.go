@@ -49,7 +49,7 @@ func TestAssistantWorkspaceResolver_ReferencePrecedence(t *testing.T) {
 	}{
 		{"canonical ID", "hello", HomeAssistantRouteContext{WorkspaceID: alpha.ID}, alpha.ID, alpha.ID, ""},
 		{"canonical slug", "hello", HomeAssistantRouteContext{WorkspaceSlug: alpha.FolderSlug}, alpha.ID, alpha.ID, ""},
-		{"published page", "hello", HomeAssistantRouteContext{PagePath: "/workspaces/album-1/canvas", WorkspaceID: alpha.ID, WorkspaceSlug: "album-1", ContextVersion: 1}, alpha.ID, alpha.ID, ""},
+		{"published page", "hello", HomeAssistantRouteContext{PagePath: "/workspaces/album-1/diagnostics", WorkspaceID: alpha.ID, WorkspaceSlug: "album-1", ContextVersion: 1}, alpha.ID, alpha.ID, ""},
 		{"legacy guide slug", "hello", HomeAssistantRouteContext{PagePath: "/workspaces/album-1", WorkspaceID: "album-1"}, alpha.ID, alpha.ID, ""},
 		{"versioned slug is not ID", "hello", HomeAssistantRouteContext{PagePath: "/workspaces/album-1", WorkspaceID: "album-1", ContextVersion: 1}, "", "", "workspace_reference_conflict"},
 		{"stale map selection cannot override page", "hello", HomeAssistantRouteContext{PagePath: "/workspaces/album-1/assistant", SelectionWorkspaceID: beta.ID}, alpha.ID, alpha.ID, ""},

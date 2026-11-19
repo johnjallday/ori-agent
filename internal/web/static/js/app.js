@@ -2565,7 +2565,6 @@ function inferChatRouteSurface(pathname, workspaceId) {
     .toLowerCase();
   if (!path) return workspaceId ? 'workspace_detail' : 'dashboard';
   if (path.startsWith('/workspaces/')) {
-    if (path.includes('/canvas')) return 'workspace_canvas';
     return 'workspace_detail';
   }
   if (path.startsWith('/workspaces')) return 'workspace_hub';

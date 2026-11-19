@@ -310,7 +310,8 @@ test('rendered command copy uses detailed-view vocabulary', () => {
     /href="\/" aria-label="Back to the workspace map on Home">Home</
   );
   assert.doesNotMatch(container.innerHTML, /href="\/workspaces"/);
-  assert.match(container.innerHTML, /href="\/workspaces\/workspace-1\/canvas"/);
+  // The workspace canvas is retired: nothing in the header links to it.
+  assert.doesNotMatch(container.innerHTML, /\/canvas/);
   assert.match(container.innerHTML, /data-cmd-settings aria-haspopup="dialog"/);
   assert.match(container.innerHTML, /data-cmd-resources aria-haspopup="dialog"/);
   assert.doesNotMatch(container.innerHTML, /data-cmd-edit-identity=/);
@@ -9299,7 +9300,7 @@ function makeParentNav() {
   });
   items.push(
     element({ 'data-cmd-nav-home': '', href: '/' }),
-    element({ href: '/workspaces/drum-tracking/canvas' })
+    element({ href: '/workspaces/drum-tracking/plans' })
   );
   const nav = {
     items,
@@ -9331,7 +9332,7 @@ test('a resolved parent is patched in after Home without rebuilding the header',
     commandView.syncParentGroupLink();
     assert.deepEqual(
       nav.items.map(item => item.getAttribute('href')),
-      ['/', '/workspaces/studio-sessions', '/workspaces/drum-tracking/canvas']
+      ['/', '/workspaces/studio-sessions', '/workspaces/drum-tracking/plans']
     );
     assert.equal(link().getAttribute('title'), 'Open the group Studio Sessions');
 
@@ -9367,12 +9368,12 @@ test('a removed parent takes its link away; focus on it returns to Home, other f
   });
   withParentNav(STUDIO, ({ commandView, nav, link }) => {
     commandView.syncParentGroupLink();
-    const canvas = nav.items[2];
-    canvas.focus();
+    const plans = nav.items[2];
+    plans.focus();
     commandView.page.parentGroup = null;
     commandView.syncParentGroupLink();
     assert.equal(link(), null);
-    assert.equal(globalThis.document.activeElement, canvas, 'focus elsewhere is not moved');
+    assert.equal(globalThis.document.activeElement, plans, 'focus elsewhere is not moved');
   });
 });
 
@@ -10145,10 +10146,30 @@ test('HQ Overview uses the shared primary views, secondary links and Settings', 
   assert.match(nav, />Overview<\/button>/);
   const secondary = nav.match(/<details[^>]*data-cmd-disclosure="views"[^>]*>(.*?)<\/details>/)[1];
   assert.match(secondary, /href="[^"]*\/plans">Plans/);
-  assert.match(secondary, /href="[^"]*\/canvas">Canvas/);
+  assert.doesNotMatch(nav, /\/canvas|>Canvas</);
   assert.doesNotMatch(nav, /Diagnostics|Orchestration Skills/);
   assert.match(html, /data-cmd-settings aria-haspopup="dialog"/);
   assert.doesNotMatch(nav, /\/diagnostics/);
+});
+
+// The Personal HQ has its own More views menu, separate from the shared header
+// disclosure above. The workspace canvas is retired, so it lists two items.
+test('the Personal HQ More views menu lists Diagnostics and Orchestration Skills, no Canvas', () => {
+  const view = Object.create(WorkspaceCommandView.prototype);
+  Object.assign(view, {
+    hqMoreViewsOpen: true,
+    workspaceRoute: path => '/workspaces/my-hq' + path,
+    workflowHref: () => '/workflows'
+  });
+  const html = view.hqMoreViewsHTML();
+  const items = [
+    ...html.matchAll(/<a role="menuitem" class="ws-hq-menu-item" href="([^"]*)">([^<]*)<\/a>/g)
+  ].map(match => [match[2], match[1]]);
+  assert.deepEqual(items, [
+    ['Diagnostics', '/workspaces/my-hq/diagnostics'],
+    ['Orchestration Skills', '/workflows']
+  ]);
+  assert.doesNotMatch(html, /canvas/i);
 });
 
 test('HQ Overview keeps counts with Tickets and the specialized content instead of stat tiles', () => {

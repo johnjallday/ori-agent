@@ -1540,10 +1540,9 @@ func (th *TaskHandler) handleCompleteTask(w http.ResponseWriter, r *http.Request
 
 // SaveTaskResultRequest represents the request to save a task result
 type SaveTaskResultRequest struct {
-	TaskID      string `json:"task_id"`
-	StoreNodeID string `json:"store_node_id,omitempty"` // Optional: save to specific store node
-	FilePath    string `json:"file_path"`               // Required: relative file path within store or absolute path for direct save
-	Format      string `json:"format,omitempty"`        // Optional: json, text, markdown, csv (default: text)
+	TaskID   string `json:"task_id"`
+	FilePath string `json:"file_path"`        // Required: file path to save the result to
+	Format   string `json:"format,omitempty"` // Optional: json, text, markdown, csv (default: text)
 }
 
 type taskOutputReviewRequest struct {

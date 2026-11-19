@@ -184,7 +184,7 @@ test('real host: conversation-first viewport, delayed reading, Tree + Chat and c
   for (const [path, prefix] of [
     ['/', 'home'],
     ['/settings', 'settings'],
-    [`/workspaces/${group.folder_slug}/canvas`, 'workspace']
+    [`/workspaces/${group.folder_slug}/catalog`, 'workspace']
   ]) {
     await page.goto(path);
     await page.waitForFunction(() => (window as any).PersonalAssistantPanel?._state.view.available);

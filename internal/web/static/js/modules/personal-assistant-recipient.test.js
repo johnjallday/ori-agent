@@ -60,7 +60,7 @@ test('the Commander label matches the map command node', () => {
 });
 
 test('a workspace page with a Commander defaults to the entry agent (FR2)', () => {
-  for (const surface of ['workspace_detail', 'workspace_canvas', 'workspace_task']) {
+  for (const surface of ['workspace_detail', 'workspace_task']) {
     const out = resolveRecipient({ ...page, surface });
     assert.equal(out.pickerVisible, true, surface);
     assert.equal(out.current.kind, RECIPIENT_WORKSPACE_ENTRY, surface);
@@ -401,7 +401,7 @@ test('the controller drops a pick and a slow lookup when the tab leaves the work
 
 test('the controller keeps the entry session for this workspace in this tab', async () => {
   const { controller, storage } = controllerFor(
-    { surface: 'workspace_canvas', workspace_id: 'ws-1' },
+    { surface: 'workspace_detail', workspace_id: 'ws-1' },
     reaperRoutes
   );
   await controller.refresh();
@@ -672,8 +672,8 @@ test('the pick survives a reload and a mode change of the same workspace (FR7)',
   });
   await reloaded.refresh();
   assert.equal(reloaded.current().kind, RECIPIENT_PERSONAL);
-  // The canvas of the same workspace is still the same visit.
-  ctx = { surface: 'workspace_canvas', workspace_id: 'ws-1' };
+  // A ticket page of the same workspace is still the same visit.
+  ctx = { surface: 'workspace_task', workspace_id: 'ws-1' };
   await reloaded.refresh();
   assert.equal(reloaded.current().kind, RECIPIENT_PERSONAL);
   // Leaving for an app-wide page drops it; coming back starts at the default.

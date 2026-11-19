@@ -393,16 +393,6 @@ func (w *Workspace) NormalizeAgentInstances() bool {
 		}
 	}
 
-	if len(w.StoreNodes) > 0 {
-		for i := range w.StoreNodes {
-			agentNodeID := strings.TrimSpace(w.StoreNodes[i].AgentNodeID)
-			if mapped := nodeIDMap[agentNodeID]; mapped != "" && mapped != agentNodeID {
-				w.StoreNodes[i].AgentNodeID = mapped
-				changed = true
-			}
-		}
-	}
-
 	if w.Layout != nil {
 		if len(w.Layout.AgentPositions) > 0 {
 			normalizedPositions := make(map[string]Position, len(w.Layout.AgentPositions))

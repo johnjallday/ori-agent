@@ -269,30 +269,27 @@ test('one count and one way in: a ticket from each door reads the same on every 
   await page.locator('#hubTicketsGiveWork').click();
   await giveWork('From the board');
 
-  // Door 3: the canvas toolbar.
-  await page.goto(`/workspaces/${slug}/canvas`);
-  await page.locator('button[onclick="showAddTaskModal()"]').click();
-  await giveWork('From the canvas');
+  // The workspace canvas toolbar was a third door. It is retired: two doors remain.
 
   // Each door made the same kind of record: Ready, with the agent named.
   const listed = await json(request, 'get', `/api/workspaces/${owner.id}/tickets`);
-  const titles = ['From next action', 'From the board', 'From the canvas'];
+  const titles = ['From next action', 'From the board'];
   for (const title of titles) {
     const ticket = listed.tickets.find((t: { title: string }) => t.title === title);
     expect(ticket, title).toMatchObject({ state: 'ready', assignee: agent });
   }
-  expect(listed.counts).toMatchObject({ ready: 3, in_progress: 0, review: 0 });
+  expect(listed.counts).toMatchObject({ ready: 2, in_progress: 0, review: 0 });
 
   // The same number on the workspace, its board, its Next action and Home.
   await page.goto(`/workspaces/${slug}`);
-  await expect(tile.locator('.ws-v')).toHaveText('3 ready');
+  await expect(tile.locator('.ws-v')).toHaveText('2 ready');
   await tile.click();
   for (const title of titles) await expect(page.locator('#hubTicketsList')).toContainText(title);
   await page.goto(`/workspaces/${slug}`);
   await page.locator('[data-cmd-view-mode="details"]').click();
-  await expect(next).toContainText(/From (next action|the board|the canvas)/);
+  await expect(next).toContainText(/From (next action|the board)/);
   await page.goto('/');
   await expect(
     page.locator(`.ws-map-tile[data-ws-id="${owner.id}"] .ws-map-tile-meta`)
-  ).toContainText('3 ready');
+  ).toContainText('2 ready');
 });

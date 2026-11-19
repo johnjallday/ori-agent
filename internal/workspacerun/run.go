@@ -239,7 +239,6 @@ type Environment struct {
 type ContextPlan struct {
 	Strategy                 string `json:"strategy,omitempty"`
 	IncludeWorkspaceSnapshot bool   `json:"include_workspace_snapshot,omitempty"`
-	IncludeAttachedFiles     bool   `json:"include_attached_files,omitempty"`
 	ExposeWorkspaceTools     bool   `json:"expose_workspace_tools,omitempty"`
 }
 
