@@ -23,8 +23,23 @@ set -euo pipefail
 
 sandbox="${1:-}"
 folder="${2:-Albums}"
+pad_mib="${3:-0}"
 if [[ -z "$sandbox" || ! -d "$sandbox" || "$sandbox" != *"/ori-demo."* ]]; then
-	echo "usage: $0 <ori-demo-sandbox> [folder-under-home]" >&2
+	echo "usage: $0 <ori-demo-sandbox> [folder-under-home [pad-mib]]" >&2
+	exit 2
+fi
+# pad-mib makes each REAPER project about that many MiB (one extra track holding
+# many empty items), still valid and under the reader's 32 MiB cap, so reading the
+# five songs takes seconds and a reload in the middle of it can be caught. 0 (the
+# default) keeps the projects tiny.
+case "$pad_mib" in
+	"" | *[!0-9]*)
+		echo "pad-mib must be a whole number of MiB" >&2
+		exit 2
+		;;
+esac
+if ((pad_mib > 28)); then
+	echo "pad-mib is capped at 28 so a project stays under the 32 MiB read cap" >&2
 	exit 2
 fi
 case "$folder" in
@@ -49,6 +64,14 @@ for index in 0 1 2 3 4; do
 		printf '  <TRACK\n    NAME "Drums"\n  >\n'
 		printf '  <TRACK\n    NAME "Bass"\n  >\n'
 		printf '  <TRACK\n    NAME "Vocal %s"\n  >\n' "$n"
+		if ((pad_mib > 0)); then
+			# 50 bytes per item; 20000 items is a little under 1 MiB.
+			awk -v mib="$pad_mib" 'BEGIN {
+				printf "  <TRACK\n    NAME \"Pad\"\n"
+				for (i = 0; i < mib * 20000; i++) printf "    <ITEM\n      POSITION 0\n      LENGTH 4\n    >\n"
+				printf "  >\n"
+			}'
+		fi
 		printf '>\n'
 	} >"$dir/Song.rpp"
 	printf 'RIFF' >"$dir/Media/take.wav"
