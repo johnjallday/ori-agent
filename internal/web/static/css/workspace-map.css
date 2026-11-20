@@ -1922,6 +1922,10 @@
 .ws-map-tile:hover {
   transform: translateY(-4px);
 }
+.ws-map-tile:hover,
+.ws-map-tile:focus-visible {
+  z-index: 8;
+}
 .ws-map-canvas.is-drag-enabled .ws-map-tile {
   cursor: grab;
 }
@@ -2708,6 +2712,9 @@
   }
 }
 .ws-map-tile-name {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   margin-top: 2px;
   font-size: 12.5px;
   font-weight: 700;
@@ -2719,6 +2726,38 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.ws-map-tile-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-map-work-folder {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+.ws-map-work-folder-hint {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  z-index: 10;
+  transform: translateX(-50%) scale(calc(1 / var(--ws-map-zoom, 1)));
+  transform-origin: top center;
+  padding: 6px 9px;
+  border: 1px solid var(--ws-line);
+  border-radius: 4px;
+  background: var(--ws-panel);
+  color: var(--ws-ink);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.ws-map-tile:hover .ws-map-work-folder-hint:not([hidden]),
+.ws-map-tile:focus-visible .ws-map-work-folder-hint:not([hidden]) {
+  display: block;
 }
 .ws-map-tile-type {
   font-family: var(--ws-font-mono);

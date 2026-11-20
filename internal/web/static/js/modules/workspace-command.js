@@ -14682,6 +14682,9 @@ export class WorkspaceCommandView {
     const selectedId = this.pendingDetachmentSelectionId;
     const unitsSignature = JSON.stringify(units);
     if (key === this.detachmentMountedKey && !selectedId) {
+      // Shape is presentation, not part of the mount key. Keep live labels and
+      // the outline current without losing focus, selection or camera.
+      map.updateFolderShapes?.(host, workspaces);
       // Same buildings and the same agents: only what the agents show may have
       // changed, and that is patched in place rather than rebuilding the ground.
       if (unitsSignature === this.detachmentUnitsSignature) return;

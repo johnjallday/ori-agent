@@ -118,6 +118,7 @@ import {
 import { workspacePageURL } from './workspace-routes.js';
 import { MEET_ASSISTANT_AGENTS_ROUTE } from './personal-assistant-hire.js';
 import {
+  folderIndependentMapKey,
   normalizeKind,
   isGroupWorkspace,
   flattenWorkspaceTree,
@@ -5690,6 +5691,7 @@ import {
   async function refreshQuietly() {
     if (!canHydrateWorkspaceData()) return null;
     if (state.inFlight) return state.inFlight;
+    const beforeFolderKey = folderIndependentMapKey(state.flattened);
     const railScroll = els.railContext ? els.railContext.scrollTop : 0;
     const updatesScroll = els.updatesBody ? els.updatesBody.scrollTop : 0;
     // This refresh's mount animates a placement asked for before it started.
@@ -5722,7 +5724,13 @@ import {
         state.inFlight = null;
         renderAreaStatus();
         renderFilters();
-        mountMap({ animate: animate && fresh });
+        const patchedFolders =
+          fresh &&
+          !animate &&
+          state.view === VIEW_MAP &&
+          beforeFolderKey === folderIndependentMapKey(state.flattened) &&
+          window.OriWorkspaceMap?.updateFolderShapes?.(els.map, state.flattened);
+        if (!patchedFolders) mountMap({ animate: animate && fresh });
         mountTreeView();
         mountPaneView();
         renderToday();

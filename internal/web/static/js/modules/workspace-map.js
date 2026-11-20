@@ -3394,6 +3394,63 @@
     );
   }
 
+  var WORK_FOLDER_LABEL = 'Uses an existing work folder';
+
+  function usesExistingWorkFolder(ws) {
+    return !!(
+      ws &&
+      ws.id &&
+      (!ws.kind || ws.kind === 'workspace') &&
+      (ws.shape === 'anchored' || ws.shape === 'imported')
+    );
+  }
+
+  function tileNameHTML(ws) {
+    return (
+      (usesExistingWorkFolder(ws)
+        ? '<svg class="ws-map-work-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7V5h6l3 3h9v12H3Z" stroke-linejoin="round"/></svg>'
+        : '') +
+      '<span class="ws-map-tile-name-text">' +
+      escapeHtml(ws.name || 'Workspace') +
+      '</span>'
+    );
+  }
+
+  // Folder-only changes are presentation: keep the tile, its listeners, focus,
+  // coordinates and camera. Update the rows used by subsequent activity labels too.
+  function updateFolderShapes(container, rows) {
+    if (!container || !lastMount || lastMount.container !== container) return false;
+    var byId = Object.create(null);
+    (rows || []).forEach(function (row) {
+      byId[row.id] = row;
+    });
+    var previous = lastMount.state.workspaces || [];
+    previous.forEach(function (row) {
+      if (byId[row.id]) row.shape = byId[row.id].shape;
+    });
+    if (lastWorldLayout)
+      (lastWorldLayout.tiles || []).forEach(function (tile) {
+        if (tile.ws && byId[tile.ws.id]) tile.ws.shape = byId[tile.ws.id].shape;
+      });
+    container.querySelectorAll('.ws-map-tile[data-ws-id]').forEach(function (tile) {
+      var row = byId[tile.getAttribute('data-ws-id')];
+      if (!row) return;
+      var marked = usesExistingWorkFolder(row);
+      var name = tile.querySelector('.ws-map-tile-name');
+      if (name && !!name.querySelector('.ws-map-work-folder') !== marked)
+        name.innerHTML = tileNameHTML(row);
+      var hint = tile.querySelector('.ws-map-work-folder-hint');
+      if (hint) hint.hidden = !marked;
+      patchTileStatus(
+        tile,
+        row.id,
+        aggregateActivity({ key: 'ws:' + row.id, kind: 'tile', id: row.id }),
+        true
+      );
+    });
+    return true;
+  }
+
   function tileMeta(ws) {
     var agents = Number(ws.agent_count || 0);
     var agentsText = agents + (agents === 1 ? ' agent' : ' agents');
@@ -3467,6 +3524,7 @@
       statusText +
       (hasKeeper ? ', entry agent ' + ws.entry_agent_name : '') +
       (isHQ ? ', Personal HQ' : '') +
+      (usesExistingWorkFolder(ws) ? ', ' + WORK_FOLDER_LABEL : '') +
       economyLabel +
       actionHint +
       workspaceUpdateLabel(ws.id)
@@ -3608,7 +3666,12 @@
       '</span>' +
       structure +
       '<span class="ws-map-tile-name">' +
-      escapeHtml(ws.name || 'Workspace') +
+      tileNameHTML(ws) +
+      '</span>' +
+      '<span class="ws-map-work-folder-hint" aria-hidden="true"' +
+      (usesExistingWorkFolder(ws) ? '' : ' hidden') +
+      '>' +
+      WORK_FOLDER_LABEL +
       '</span>' +
       (mode ? '<span class="ws-map-tile-type">' + escapeHtml(mode) + '</span>' : '') +
       // A song tile's longer line is held to two lines so it never runs under
@@ -13184,6 +13247,8 @@
      * Returns false when the set of agents itself changed; the host re-mounts
      * then, because a new agent needs a place to stand.
      */
+    updateFolderShapes: updateFolderShapes,
+    usesExistingWorkFolder: usesExistingWorkFolder,
     updateUnits: function (container, units) {
       if (!container || !scopeGroupId || !lastMount || lastMount.container !== container) {
         return false;
