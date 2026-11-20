@@ -27,6 +27,48 @@ func TestReadability_DemoFolderSplitsReadableFromNot(t *testing.T) {
 	if got.UnreadableTotal() != 1 {
 		t.Fatalf("unreadable total = %d, want 1", got.UnreadableTotal())
 	}
+	// The readable songs are all REAPER's, so a sentence may name the application.
+	if got.ReadableFormat() != "REAPER" {
+		t.Fatalf("readable format = %q, want REAPER (readable formats %+v)", got.ReadableFormat(), got.ReadableFormats)
+	}
+}
+
+func TestReadability_TheReadableFormatIsNamedOnlyWhenOneNamedFormatCoversThem(t *testing.T) {
+	reads := func(format string) bool { return format == "reaper" || format == "ableton" }
+	facts := Facts{
+		Portfolio: &Portfolio{Shape: folderdigest.ShapeAudio, Count: 5},
+		Members: []Project{
+			{Shape: folderdigest.ShapeAudio, Format: "reaper", Marker: "*.rpp"},
+			{Shape: folderdigest.ShapeAudio, Format: "ableton", Marker: "*.als"},
+			{Shape: folderdigest.ShapeAudio, Format: "mystery"},
+		},
+		Shapes: []ShapeCount{
+			{Shape: folderdigest.ShapeAudio, Format: "reaper", Count: 3},
+			{Shape: folderdigest.ShapeAudio, Format: "ableton", Count: 2},
+		},
+	}
+	// Two readable formats: no single application to name.
+	if got := facts.Readability(reads); got.Readable != 5 || got.ReadableFormat() != "" || len(got.ReadableFormats) != 2 {
+		t.Fatalf("mixed readable formats = %+v", got)
+	}
+	// One readable format: it is named, with its count.
+	one := facts.Readability(readsReaper)
+	wantOne := []FormatCount{{Format: "reaper", Name: "REAPER", Count: 3}}
+	if one.ReadableFormat() != "REAPER" || !reflect.DeepEqual(one.ReadableFormats, wantOne) {
+		t.Fatalf("one readable format = %+v", one)
+	}
+	// One readable format the table names nothing for: never a guessed name.
+	unnamed := Facts{
+		Portfolio: &Portfolio{Shape: folderdigest.ShapeAudio, Count: 2},
+		Shapes:    []ShapeCount{{Shape: folderdigest.ShapeAudio, Format: "mystery", Count: 2}},
+	}
+	if got := unnamed.Readability(func(string) bool { return true }); got.Readable != 2 || got.ReadableFormat() != "" {
+		t.Fatalf("unnamed readable format = %+v", got)
+	}
+	// Nothing readable: nothing to name.
+	if got := facts.Readability(nil); got.ReadableFormat() != "" || len(got.ReadableFormats) != 0 {
+		t.Fatalf("no readers = %+v", got)
+	}
 }
 
 func TestReadability_NothingWithoutAPortfolio(t *testing.T) {

@@ -17,9 +17,23 @@ type FormatCount struct {
 // the rest by format. It is a count of what is on disk, not of what any Home
 // has read, and it opens no file.
 type Readability struct {
-	Shape      folderdigest.Shape
-	Readable   int
-	Unreadable []FormatCount
+	Shape    folderdigest.Shape
+	Readable int
+	// ReadableFormats is the readable projects by format, in the map's order, so
+	// a sentence can say whose files the readable ones are ("5 <App> songs").
+	// Name is "" when the tool table names no application for the format.
+	ReadableFormats []FormatCount
+	Unreadable      []FormatCount
+}
+
+// ReadableFormat is the one application whose projects are all of the readable
+// ones, or "" when they come from several formats or the table names none. A
+// caller that wants a name never guesses one for a mixed or unnamed folder.
+func (r Readability) ReadableFormat() string {
+	if len(r.ReadableFormats) != 1 {
+		return ""
+	}
+	return r.ReadableFormats[0].Name
 }
 
 // UnreadableTotal is how many projects nothing reads, in all formats.
@@ -54,11 +68,13 @@ func (f Facts) Readability(readable func(format string) bool) Readability {
 		if s.Shape != out.Shape || s.Count <= 0 {
 			continue
 		}
+		count := FormatCount{Format: s.Format, Name: FormatName(markers[s.Format]), Count: s.Count}
 		if readable != nil && readable(s.Format) {
 			out.Readable += s.Count
+			out.ReadableFormats = append(out.ReadableFormats, count)
 			continue
 		}
-		out.Unreadable = append(out.Unreadable, FormatCount{Format: s.Format, Name: FormatName(markers[s.Format]), Count: s.Count})
+		out.Unreadable = append(out.Unreadable, count)
 	}
 	return out
 }

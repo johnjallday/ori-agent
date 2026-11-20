@@ -199,9 +199,14 @@ type Songs interface {
 // goal offer (Learn them, Not now). Nil when no offer is waiting. The words are
 // the host's; nothing is read until the owner says yes.
 type SongsOfferView struct {
-	// Count is how many songs can be read this way, Noun the plural word for them.
-	Count int    `json:"count"`
-	Noun  string `json:"noun"`
+	// Count is how many songs can be read this way, Noun the word for them
+	// (singular for one), and Format the application they are all from, as the
+	// host's tool table names it, when every readable song is of one named
+	// format; "" for a mixed folder or a format the table does not name, never a
+	// guess.
+	Count  int    `json:"count"`
+	Noun   string `json:"noun"`
+	Format string `json:"format,omitempty"`
 	// Ask is the question; Reads says what is read and that nothing changes.
 	Ask   string `json:"ask"`
 	Reads string `json:"reads"`
@@ -287,6 +292,7 @@ func (s *Service) songsOffer(ctx context.Context, rec *Record) *SongsOfferView {
 	return &SongsOfferView{
 		Count:   readability.Readable,
 		Noun:    foldermap.ShapeNoun(readability.Shape, readability.Readable),
+		Format:  readability.ReadableFormat(),
 		Ask:     fmt.Sprintf("Want me to learn the %d %s?", readability.Readable, foldermap.ShapeNoun(readability.Shape, readability.Readable)),
 		Reads:   songsReadsBy(reader),
 		NotRead: notReadSentence(readability),

@@ -216,8 +216,11 @@ func TestSongsOffer_WordsAndCounts(t *testing.T) {
 		t.Fatal("no offer")
 	}
 	want := SongsOfferView{
-		Count:   7,
-		Noun:    "songs",
+		Count: 7,
+		Noun:  "songs",
+		// Every readable song is REAPER's; the one Logic Pro song is the exception
+		// NotRead names. The drawer's question says "REAPER songs" from this.
+		Format:  "REAPER",
 		Ask:     "Want me to learn the 7 songs?",
 		Reads:   "The app plugin reads tempo, length, track count, track names, markers and regions from each project file, and Ori keeps only those. Nothing is changed, and audio is not opened.",
 		NotRead: "1 Logic Pro song can't be read this way.",
@@ -233,8 +236,16 @@ func TestSongsOffer_WordsAndCounts(t *testing.T) {
 	rec := doneRecord()
 	rec.Facts.Shapes = []foldermap.ShapeCount{{Shape: folderdigest.ShapeAudio, Format: "reaper", Count: 1}}
 	one := songsService(songs).songsOffer(context.Background(), rec)
-	if one == nil || one.Ask != "Want me to learn the 1 song?" || one.Noun != "song" || one.NotRead != "" {
+	if one == nil || one.Ask != "Want me to learn the 1 song?" || one.Noun != "song" || one.NotRead != "" || one.Format != "REAPER" {
 		t.Fatalf("one song = %+v", one)
+	}
+	// A readable song whose format the tool table does not name carries no
+	// format: the question then says "songs", never a guessed application.
+	unnamed := doneRecord()
+	unnamed.Facts.Members = nil
+	named := songsService(songs).songsOffer(context.Background(), unnamed)
+	if named == nil || named.Format != "" || named.Count != 7 {
+		t.Fatalf("an unnamed readable format = %+v", named)
 	}
 }
 

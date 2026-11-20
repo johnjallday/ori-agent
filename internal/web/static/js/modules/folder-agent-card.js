@@ -6,6 +6,12 @@
 
 import { renderHireDraftEditor } from './folder-agent-hire-editor.js';
 import { publishFolderAgentChat } from './folder-agent-chat.js';
+import {
+  chatDestination,
+  chatFollowUp,
+  chatPlacementLine,
+  chatSetupOf
+} from './folder-agent-chat-flow.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 
 export const FOLDER_AGENT_ENDPOINT = '/api/personal-assistant/folder-agent';
@@ -176,6 +182,8 @@ export function folderAgentReportView(view) {
     projectHolders: view.project_holders || null,
     rootPolicy: String(view.root_policy || ''),
     policyNote: String(view.policy_note || ''),
+    // The setup is done but filing was not allowed yet: one step left.
+    filingPermissionRequired: Boolean(view.filing_permission_required),
     exploreFolder: Boolean(view.explore_folder),
     tools: [],
     toolsSentence: String(view.tools_sentence || ''),
@@ -217,6 +225,9 @@ export function folderAgentReportView(view) {
       ? {
           count: Number(view.songs_offer.count) || 0,
           noun: String(view.songs_offer.noun || 'songs'),
+          // The one application every readable song is from; empty for
+          // a mixed folder or a format the host cannot name.
+          format: String(view.songs_offer.format || ''),
           ask: String(view.songs_offer.ask),
           reads: String(view.songs_offer.reads || ''),
           notRead: String(view.songs_offer.not_read || ''),
@@ -2002,7 +2013,9 @@ function learningStopActions(doc, learning, onAction, homeRoute) {
 // learningSection is the reading of the songs as it runs and once it ended
 // (FR14): the host's line ("Learning <song>… (2 of 7)", then "Learned 7 songs"),
 // a progress bar while it runs, and the songs that cannot be read this way.
-function learningSection(doc, learning, onAction = null, homeRoute = '') {
+// announce:false leaves the line without its own role=status: the drawer says a
+// change once from one persistent live region instead (redrawn nodes are missed).
+function learningSection(doc, learning, onAction = null, homeRoute = '', { announce = true } = {}) {
   const section = el(doc, 'section', 'folder-agent-card__learning');
   section.dataset.learningStatus = learning.status;
   if (learning.reason) section.dataset.learningReason = learning.reason;
@@ -2012,7 +2025,7 @@ function learningSection(doc, learning, onAction = null, homeRoute = '') {
   if (learning.status === 'stopped' && learning.action) {
     section.append(learningStopActions(doc, learning, onAction, homeRoute));
   }
-  if (learning.status === 'running' || learning.status === 'summarizing') {
+  if (announce && (learning.status === 'running' || learning.status === 'summarizing')) {
     // The poll redraws this card; role=status announces the line as it changes.
     line.setAttribute('role', 'status');
   }
@@ -2057,7 +2070,9 @@ function learningSection(doc, learning, onAction = null, homeRoute = '') {
 // the place exists (folder-setup-ends-in-home FR17, FR18): the sentence, then
 // Use this goal, Edit and Not now. Edit turns the sentence into a one-line
 // input (max_runes characters) with Save and Cancel, in place; Escape cancels.
-function goalOfferSection(doc, offer, onAction) {
+// draft ({editing, text}) is the drawer's memory of an edit in progress, so an
+// incidental redraw brings back the owner's words in the field, not the offer.
+function goalOfferSection(doc, offer, onAction, draft = null) {
   const section = el(doc, 'section', 'folder-agent-card__goal-offer');
   section.setAttribute('aria-label', 'Suggested goal');
   // A goal the agent wrote after it learned the songs says so (FR17).
@@ -2083,6 +2098,7 @@ function goalOfferSection(doc, offer, onAction) {
     return b;
   };
   const showOffer = () => {
+    if (draft) draft.editing = false;
     const use = button('Use this goal', 'use_goal', true);
     use.addEventListener('click', () => onAction?.('use_goal', use, {}));
     const edit = button('Edit', 'edit_goal');
@@ -2093,12 +2109,23 @@ function goalOfferSection(doc, offer, onAction) {
     row.replaceChildren(use, edit, later);
     return use;
   };
-  function showEdit() {
+  function showEdit(from) {
+    // A redraw restoring an edit in progress must not take focus from wherever
+    // the owner is; only their own press of Edit moves it into the field.
+    const restoring = from === 'restore';
     const input = doc.createElement('input');
     input.type = 'text';
     input.className = 'folder-agent-card__goal-input';
     input.maxLength = offer.maxRunes;
-    input.value = offer.goal;
+    if (draft) {
+      if (!restoring) draft.text = offer.goal;
+      draft.editing = true;
+      input.value = draft.text;
+      input.addEventListener('input', () => {
+        draft.text = input.value;
+      });
+    } else input.value = offer.goal;
+    input.dataset.chatControl = 'goal-text';
     input.setAttribute('aria-label', 'Goal');
     const save = button('Save', 'use_goal', true);
     const cancel = button('Cancel', 'cancel_goal');
@@ -2117,9 +2144,10 @@ function goalOfferSection(doc, offer, onAction) {
     });
     section.replaceChildren(lead, input, row);
     row.replaceChildren(save, cancel);
-    input.focus?.();
+    if (!restoring) input.focus?.();
   }
-  showOffer();
+  if (draft?.editing) showEdit('restore');
+  else showOffer();
   return section;
 }
 
@@ -2833,6 +2861,336 @@ export function renderFolderAgentReport(
   return card;
 }
 
+// The Commander's drawer draws a completed music setup as separate cards under
+// the report's message: a short receipt, then the follow-up. The Map's balloon
+// asks for the same report with compact:true, so the drawer asks for this
+// presentation by name (card(true, {presentation: 'chat'})). Any report the
+// view cannot show as a completed music setup gets null here and keeps the
+// single card.
+function chatCard(doc, part, label) {
+  const card = el(
+    doc,
+    'article',
+    `folder-agent-card folder-agent-card--chat folder-agent-card--chat-${part}`
+  );
+  card.dataset.folderAgentChatPart = part;
+  card.setAttribute('aria-label', label);
+  return card;
+}
+
+// chatReceiptCard is the compact receipt: where the folder was placed, the way
+// to open that place, anything still needing attention, and the rest of what
+// the run made behind one disclosure. Every word is the host's or built from
+// its receipt; nothing is claimed that the receipt did not report.
+function chatReceiptCard(doc, view, setup, { state, fetchImpl }) {
+  const card = chatCard(doc, 'receipt', 'Setup receipt');
+  card.dataset.workspaceId = view.workspaceID;
+  card.append(el(doc, 'p', 'folder-agent-card__chat-line', chatPlacementLine(view, setup)));
+  if (view.filingPermissionRequired) {
+    card.append(el(doc, 'p', 'folder-agent-card__degraded', 'One step left: allow filing.'));
+  }
+  const destination = chatDestination(view);
+  if (destination) {
+    const open = el(doc, 'a', 'folder-agent-card__open', `Open ${destination.name || 'it'}`);
+    open.href = destination.route;
+    card.append(open);
+  }
+  const rows = folderAgentReceiptRows(view);
+  if (!rows.length) return card;
+  const panelID = `folder-agent-chat-details-${String(view.workspaceID).replace(/[^\w-]/g, '_')}`;
+  const toggle = el(
+    doc,
+    'button',
+    'btn btn-sm folder-agent-card__secondary folder-agent-card__details-toggle',
+    'View setup details'
+  );
+  toggle.type = 'button';
+  toggle.dataset.chatControl = 'setup-details';
+  toggle.setAttribute('aria-controls', panelID);
+  const panel = el(doc, 'div', 'folder-agent-card__chat-details');
+  panel.id = panelID;
+  // The agents' faces come from a read of the agent list; it is made only once
+  // the owner opens the details.
+  let recordsReady = null;
+  const agentRecords = () => (recordsReady ||= fetchAgentRecords(fetchImpl));
+  const show = open => {
+    toggle.setAttribute('aria-expanded', String(open));
+    panel.hidden = !open;
+    if (open && !panel.children.length) panel.append(renderReceipt(doc, rows, view, agentRecords));
+  };
+  show(state?.open?.has('setup-details') === true);
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    if (open) state?.open?.add('setup-details');
+    else state?.open?.delete('setup-details');
+    show(open);
+  });
+  card.append(toggle, panel);
+  return card;
+}
+
+// The drawer's follow-up cards. Which ones, and in what order, is
+// chatFollowUp's decision from the refreshed view; each is its own card under
+// the receipt. A card's buttons are one decision: pressing any of them quiets
+// the whole card while the answer is sent, and nothing here sends anything until
+// the owner presses one.
+function chatStepCard(doc, step, label) {
+  const card = chatCard(doc, 'follow-up', label);
+  card.dataset.chatStep = step;
+  return card;
+}
+
+// The heading is where focus goes when the control that was pressed is gone.
+function chatHeading(doc, text) {
+  const heading = el(doc, 'h4', 'folder-agent-card__chat-heading', text);
+  markChatTarget(heading);
+  return heading;
+}
+
+// markChatTarget makes an element the place focus lands when the control the
+// owner pressed is gone (the next heading or the card's first words).
+function markChatTarget(node) {
+  node.tabIndex = -1;
+  node.dataset.chatTarget = '';
+  return node;
+}
+
+function chatButton(doc, id, label, primary, onAction) {
+  const button = el(
+    doc,
+    'button',
+    primary ? 'btn btn-primary btn-sm' : 'btn btn-sm folder-agent-card__secondary',
+    label
+  );
+  button.type = 'button';
+  button.dataset.folderAgentAction = id;
+  button.dataset.chatControl = id;
+  button.addEventListener('click', () => onAction?.(id, button, {}));
+  return button;
+}
+
+const LEARNING_HEADINGS = {
+  running: 'Learning your songs',
+  summarizing: 'Learning your songs',
+  stopped: 'Learning stopped'
+};
+
+// questionCard is the one decision while the offer is open: learn the songs, or
+// not now. The disclosure is the host's own words, drawn as text, and the
+// exception (a format that cannot be read) is named by the host.
+function chatQuestionCard(doc, step, onAction) {
+  const { offer, stopped } = step;
+  const card = chatStepCard(doc, 'question', 'Learn the songs');
+  const format = offer.format ? `${offer.format} ` : '';
+  card.append(chatHeading(doc, `Learn the ${offer.count} ${format}${offer.noun}?`));
+  if (offer.reads) card.append(el(doc, 'p', 'folder-agent-card__songs-reads', offer.reads));
+  if (offer.notRead) card.append(el(doc, 'p', 'folder-agent-card__songs-not-read', offer.notRead));
+  const why = stopped?.reason || stopped?.line;
+  if (why) card.append(el(doc, 'p', 'folder-agent-card__degraded', why));
+  const row = el(doc, 'div', 'folder-agent-card__actions folder-agent-card__songs-actions');
+  row.append(
+    chatButton(doc, 'learn_songs', `Learn ${offer.count} ${offer.noun}`, true, onAction),
+    chatButton(doc, 'dismiss_songs', 'Not now', false, onAction)
+  );
+  card.append(row);
+  return card;
+}
+
+// learningCard shows the reading as it runs, what it actually read, or why it
+// stopped with the one thing to do about it: the host's line and numbers, never
+// a count the owner was told earlier.
+function chatLearningCard(doc, step, onAction, home) {
+  const card = chatStepCard(doc, 'learning', 'Learning the songs');
+  card.append(chatHeading(doc, LEARNING_HEADINGS[step.learning.status] || 'What I learned'));
+  card.append(learningSection(doc, step.learning, onAction, home, { announce: false }));
+  return card;
+}
+
+function chatUpdateCard(doc, step, onAction) {
+  const card = chatStepCard(doc, 'update', 'Update the plugin');
+  card.append(songsOfferSection(doc, step.offer, onAction));
+  return card;
+}
+
+// A notice that does not block the decision under it (a reading that stopped, a
+// plugin to update) sits behind a disclosure in that decision's card, so it
+// stays reachable without a second prompt.
+function chatDetails(doc, notice, onAction, home, state) {
+  const wrap = el(doc, 'div', 'folder-agent-card__chat-notice');
+  const learning = notice.kind === 'learning';
+  const panelID = `folder-agent-chat-notice-${++chatNoticeSeq}`;
+  const toggle = el(
+    doc,
+    'button',
+    'btn btn-sm folder-agent-card__secondary folder-agent-card__details-toggle',
+    learning ? 'Learning details' : 'Plugin update'
+  );
+  toggle.type = 'button';
+  toggle.dataset.chatControl = 'learning-details';
+  toggle.setAttribute('aria-controls', panelID);
+  const panel = el(doc, 'div', 'folder-agent-card__chat-details');
+  panel.id = panelID;
+  const show = open => {
+    toggle.setAttribute('aria-expanded', String(open));
+    panel.hidden = !open;
+    if (open && !panel.children.length)
+      panel.append(
+        learning
+          ? learningSection(doc, notice.learning, onAction, home, { announce: false })
+          : songsOfferSection(doc, notice.offer, onAction)
+      );
+  };
+  show(state?.open?.has('learning-details') === true);
+  toggle.addEventListener('click', () => {
+    const open = toggle.getAttribute('aria-expanded') !== 'true';
+    if (open) state?.open?.add('learning-details');
+    else state?.open?.delete('learning-details');
+    show(open);
+  });
+  wrap.append(toggle, panel);
+  return wrap;
+}
+let chatNoticeSeq = 0;
+
+function chatGoalCard(doc, step, onAction, state) {
+  const card = chatStepCard(doc, 'goal', 'Suggested goal');
+  // The owner's edit survives a redraw for as long as the same goal is offered.
+  let draft = null;
+  if (state) {
+    draft = state.goal;
+    if (!draft || draft.base !== step.offer.goal)
+      draft = state.goal = { base: step.offer.goal, editing: false, text: '' };
+  }
+  card.append(goalOfferSection(doc, step.offer, onAction, draft));
+  const lead = card.querySelector('.folder-agent-card__goal-lead');
+  if (lead) markChatTarget(lead);
+  return card;
+}
+
+// ticketCard is the first ticket once, with its real title and the answers the
+// host allows; a ticket already started is shown as started. With no ticket and
+// only Look further to offer, it is that one quiet action.
+function chatTicketCard(doc, step, onAction) {
+  const { ticket } = step;
+  const card = chatStepCard(doc, ticket.title ? 'ticket' : 'further', 'Next step');
+  if (ticket.title) {
+    card.append(
+      chatHeading(doc, ticket.started ? 'Ticket started' : 'First ticket'),
+      el(doc, 'p', 'folder-agent-card__next-ticket', ticket.title)
+    );
+  } else {
+    card.append(
+      markChatTarget(
+        el(doc, 'p', 'folder-agent-card__chat-line', 'I can look further into this folder.')
+      )
+    );
+  }
+  if (ticket.start || ticket.further) {
+    const row = el(doc, 'div', 'folder-agent-card__actions');
+    if (ticket.start)
+      row.append(chatButton(doc, 'start_next', 'Start this ticket', true, onAction));
+    if (ticket.further)
+      row.append(chatButton(doc, 'look_further', 'Look further', false, onAction));
+    card.append(row);
+  }
+  return card;
+}
+
+function chatStepElement(doc, step, { onAction, state }, home) {
+  // One decision, one guard: pressing any button quiets every button of the card.
+  let card = null;
+  const guarded = (id, button, extra) => {
+    card?.querySelectorAll('button').forEach(other => {
+      other.disabled = true;
+    });
+    return onAction?.(id, button, extra);
+  };
+  switch (step.kind) {
+    case 'question':
+      card = chatQuestionCard(doc, step, guarded);
+      break;
+    case 'learning':
+      card = chatLearningCard(doc, step, guarded, home);
+      break;
+    case 'update':
+      card = chatUpdateCard(doc, step, guarded);
+      break;
+    case 'goal':
+      card = chatGoalCard(doc, step, guarded, state);
+      break;
+    default:
+      card = chatTicketCard(doc, step, guarded);
+  }
+  if (step.details) card.append(chatDetails(doc, step.details, guarded, home, state));
+  // While an answer is in flight a redrawn card must not offer another write.
+  if (state?.pending === true)
+    card.querySelectorAll('button').forEach(button => {
+      button.disabled = true;
+    });
+  return card;
+}
+
+export function renderFolderAgentChatThread(
+  view,
+  doc = document,
+  { onAction, error = '', fetchImpl = globalThis.fetch, state = null } = {}
+) {
+  const setup = chatSetupOf(view);
+  if (!setup) return null;
+  const stack = el(doc, 'div', 'folder-agent-chat-stack');
+  const receipt = chatReceiptCard(doc, view, setup, { state, fetchImpl });
+  stack.append(receipt);
+  const home = view.setup?.receipt?.home?.route || '';
+  const steps = chatFollowUp(view).cards;
+  // A goal edit belongs to the goal on offer; once it is gone so is the draft.
+  if (state && !steps.some(step => step.kind === 'goal')) state.goal = null;
+  const cards = steps.map(step => chatStepElement(doc, step, { onAction, state }, home));
+  cards.forEach(card => stack.append(card));
+  if (error) {
+    // The error stays with the decision it is about: the first card that asks
+    // something, else the last card, else the receipt.
+    const owner =
+      cards.find(card => card.querySelector('button')) || cards[cards.length - 1] || receipt;
+    const alert = el(doc, 'p', 'folder-agent-card__error', error);
+    alert.setAttribute('role', 'alert');
+    owner.append(alert);
+  }
+  // What a status change would say, for the drawer's one live region: the
+  // reading's own line, never a count the owner was told earlier.
+  stack.dataset.announce = steps.find(step => step.kind === 'learning')?.learning.line || '';
+  // After an explicit answer the pressed control may be gone: focus goes back to
+  // it if the answer failed and it is still there, else to the new card's heading.
+  // Only an answer sets this, so a background redraw never moves focus.
+  const focus = state?.focusAfter;
+  if (focus && state.pending !== true) {
+    state.focusAfter = null;
+    const again = focus.failed
+      ? cards
+          .flatMap(card => card.querySelectorAll('button'))
+          .find(
+            button =>
+              (button.dataset.chatControl === focus.action ||
+                button.dataset.folderAgentAction === focus.action) &&
+              !button.disabled
+          )
+      : null;
+    // The newest card is the one the answer revealed: a result the owner has
+    // already read can sit above it, and focus must not jump back up to that.
+    const target =
+      again ||
+      cards
+        .map(card => card.querySelector('[data-chat-target]'))
+        .filter(Boolean)
+        .at(-1) ||
+      cards
+        .map(card => card.querySelector('button'))
+        .filter(Boolean)
+        .at(-1);
+    if (target) target.dataset.chatFocus = '';
+  }
+  return stack;
+}
+
 async function readJSON(response) {
   try {
     return await response.json();
@@ -3372,21 +3730,98 @@ export async function mountWorkspaceFolderAgent(
     }, pollMs);
   };
   let latestRaw = raw;
+  // What the owner opened in the drawer's cards, kept across the page's redraws,
+  // and whether an answer is in flight (a redrawn card must not offer another).
+  const chatState = {
+    messageID: '',
+    open: new Set(),
+    pending: false,
+    goal: null,
+    focusAfter: null
+  };
+  let acting = false;
+  // refreshRun asks for the run again a few times; null when it cannot be had.
+  const refreshRun = async () => {
+    for (let attempt = 0; attempt <= CHAT_RETRIES; attempt += 1) {
+      const fresh = await fetchFolderAgent(workspaceID, fetchImpl).catch(() => null);
+      if (fresh || !isActive()) return fresh;
+      await new Promise(resolve => setTimeout(resolve, pollMs));
+    }
+    return null;
+  };
+  // A reply that arrives late (a poll that began before an answer, an answer
+  // for a report since replaced) must not draw over what is newer. Views are
+  // ordered by the record's own updated_at, which every write moves forward;
+  // an equal one still draws (the offer also depends on state outside the
+  // record). Another workspace's view is never drawn here.
+  const staleView = next => {
+    if (!next || !latestRaw || next === latestRaw) return false;
+    if (next.workspace_id && String(next.workspace_id) !== String(workspaceID)) return true;
+    const drawn = Date.parse(latestRaw.updated_at);
+    const incoming = Date.parse(next.updated_at);
+    return Number.isFinite(drawn) && Number.isFinite(incoming) && incoming < drawn;
+  };
   const draw = (current, error = '', opening = false) => {
+    if (staleView(current)) return;
     latestRaw = current;
     const view = folderAgentReportView(current);
     const onAction = async (action, button, extra) => {
+      // One write at a time for the workspace: a second press while one is in
+      // flight (a double click, or a card redrawn under the first) is dropped.
+      if (acting) return;
+      acting = true;
+      chatState.pending = true;
       if (button) button.disabled = true;
       if (action === 'set_up' || action === 'look_further' || action === 'start_next')
         followed = true;
-      const result = await postFolderAgentAction(view, action, fetchImpl, extra);
-      draw(result.view || current, result.error || '');
-      follow(result.view || current);
+      let result;
+      try {
+        result = await postFolderAgentAction(view, action, fetchImpl, extra);
+      } catch (_) {
+        result = { error: 'That did not go through.' };
+      }
+      // A refusal that carried no view leaves it unknown whether the server
+      // recorded the answer. Ask what it holds before offering another write, so
+      // a repeat press cannot answer twice.
+      let next = result.view || null;
+      if (!next && result.error) next = await refreshRun();
+      if (!isActive()) {
+        acting = false;
+        return;
+      }
+      acting = false;
+      // Still unknown: keep the controls quiet rather than offer a blind write.
+      chatState.pending = !next && Boolean(result.error);
+      const error =
+        chatState.pending && result.error
+          ? `${result.error} Reload to see where this stands.`
+          : result.error || '';
+      // The answer is explicit, so focus may follow it (see the thread renderer).
+      chatState.focusAfter = { action, failed: Boolean(result.error) };
+      draw(next || latestRaw, error);
+      follow(latestRaw);
     };
-    const card = compact =>
+    // What the owner opened inside the drawer's cards belongs to one report: a
+    // newer report starts closed again.
+    const messageID = String(current?.chat?.message_id || '');
+    if (messageID !== chatState.messageID) {
+      chatState.messageID = messageID;
+      chatState.open.clear();
+    }
+    // The drawer asks for the chat presentation by name; the Map's balloon and
+    // the page ask for the one card, which is also what the drawer gets for a
+    // report that is not a completed music setup.
+    const card = (compact, { presentation } = {}) =>
+      (presentation === 'chat' &&
+        renderFolderAgentChatThread(view, doc, {
+          error,
+          onAction,
+          fetchImpl,
+          state: chatState
+        })) ||
       renderFolderAgentReport(view, doc, { error, opening, onAction, compact });
-    // The drawer draws the same card under the report's message in the
-    // Commander's conversation (workspace chat sync).
+    // The drawer draws the same report under its message in the Commander's
+    // conversation (workspace chat sync).
     publishFolderAgentChat({ workspaceID: view.workspaceID, raw: current, card, error });
     host.hidden = false;
     // A presenter (the Map tab's Commander) may draw the card in its balloon
@@ -3414,6 +3849,8 @@ export async function mountWorkspaceFolderAgent(
       isActive,
       pollMs,
       onView: (next, finished) => {
+        // A fresh view from the server settles an answer whose outcome was unknown.
+        if (!acting) chatState.pending = false;
         let opening = false;
         if (finished && openPlace) {
           const open = { navigate };

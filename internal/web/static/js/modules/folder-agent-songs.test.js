@@ -135,7 +135,10 @@ test('a done run offers to learn the songs: what it reads, what it cannot, and t
     ask: 'Want me to learn the 7 songs?',
     reads: songsOffer.reads,
     notRead: "1 Logic Pro song can't be read this way.",
-    update: ''
+    update: '',
+    // The host names the format only when every readable song is one named
+    // format; this fixture's offer carries none, so the view carries none.
+    format: ''
   });
   const calls = [];
   const card = renderFolderAgentReport(view, stubDocument(), {

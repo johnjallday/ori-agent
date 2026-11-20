@@ -117,7 +117,8 @@ function showLead(row, lead) {
 }
 
 // publishFolderAgentChat records a workspace's latest report and its card
-// factory (card(compact) → Element), then tells the drawer.
+// factory (card(compact, {presentation}) → Element), then tells the drawer. The
+// drawer asks for presentation 'chat'; the Map's balloon asks for compact only.
 export function publishFolderAgentChat(
   { workspaceID, raw, card, error = '' },
   { win = globalThis.window } = {}
@@ -193,6 +194,64 @@ function escapeAttr(value) {
   return id.replace(/["\\]/g, '\\$&');
 }
 
+// A control's identity: what it does, not what it says ("Not now" is on the
+// song question and on the goal).
+// A card's heading (or first words) is the "target" focus lands on; there is one
+// per card, so it is identified by the card that owns it.
+function controlIdentity(node) {
+  if (node?.dataset?.chatTarget !== undefined) return 'target';
+  return text(node?.dataset?.chatControl || node?.dataset?.folderAgentAction);
+}
+
+// owningStep is the follow-up card a control sits in ('' for the receipt or a
+// single card).
+function owningStep(host, node) {
+  for (let at = node; at && at !== host; at = at.parentElement ?? at.parent) {
+    const step = at.dataset?.chatStep;
+    if (step) return step;
+  }
+  return '';
+}
+
+const LIVE_ATTR = 'data-folder-agent-chat-live';
+
+// drawCard puts the card in its host. The host also keeps one live region that
+// is never replaced: a redrawn status node is missed by screen readers, a
+// region that already exists and changes is said.
+function drawCard(host, card, doc) {
+  let live = host.querySelector?.(`[${LIVE_ATTR}]`) || null;
+  Array.from(host.children || []).forEach(kid => {
+    if (kid !== live) kid.remove();
+  });
+  if (live && typeof host.insertBefore === 'function') {
+    // The card stays first and the live region is never moved.
+    host.insertBefore(card, live);
+    return;
+  }
+  host.append(card);
+  if (live) {
+    host.append(live);
+    return;
+  }
+  live = doc.createElement('div');
+  live.className = 'folder-agent-chat-live';
+  live.setAttribute(LIVE_ATTR, '');
+  live.setAttribute('role', 'status');
+  host.append(live);
+}
+
+// say announces a status change once: only when the words differ from the ones
+// last said, and never for the card a thread opens on (it is not news).
+function say(host, card) {
+  const live = host.querySelector?.(`[${LIVE_ATTR}]`);
+  if (!live) return;
+  const words = text(card?.dataset?.announce);
+  const first = host.dataset.announced === undefined;
+  if (host.dataset.announced === words) return;
+  host.dataset.announced = words;
+  if (!first || words === '') live.textContent = words;
+}
+
 // attachFolderAgentChatCard draws the report's card under its message in the
 // drawer's thread (transcript), or takes a stale card away. Returns the
 // message row the card sits under, or null when the thread does not hold it.
@@ -215,9 +274,11 @@ export function attachFolderAgentChatCard(
       changed = true;
     }
   });
-  const row = ref
+  let row = ref
     ? transcript.querySelector(`[data-lead-message-id="${escapeAttr(ref.messageID)}"]`)
     : null;
+  // A row from another thread is not this report's, whatever its message id.
+  if (row?.dataset.leadSessionId && row.dataset.leadSessionId !== ref.sessionID) row = null;
   // A row whose words were replaced by a lead-in gets them back once the report
   // is no longer the question (answered, or a newer report came).
   transcript.querySelectorAll(`[${STORED_ATTR}]`).forEach(node => {
@@ -242,14 +303,36 @@ export function attachFolderAgentChatCard(
       const active = doc?.activeElement;
       const hadFocus = Boolean(active && host.contains?.(active));
       const label = hadFocus ? active.textContent : '';
-      host.replaceChildren(entry.card(true));
+      const identity = hadFocus ? controlIdentity(active) : '';
+      const step = hadFocus ? owningStep(host, active) : '';
+      const caret =
+        hadFocus && typeof active.selectionStart === 'number' ? active.selectionStart : null;
+      const card = entry.card(true, { presentation: 'chat' });
+      drawCard(host, card, doc);
       host.dataset.signature = entry.signature;
-      if (hadFocus) {
-        const again = Array.from(host.querySelectorAll?.('button') || []).find(
-          button => button.textContent === label && !button.disabled
-        );
+      // After an explicit answer the card names where focus goes (the failed
+      // control again, or the next heading); a background redraw never does.
+      const answered = host.querySelector?.('[data-chat-focus]');
+      if (answered) {
+        delete answered.dataset.chatFocus;
+        answered.focus?.({ preventScroll: true });
+      } else if (hadFocus) {
+        const again = [
+          ...Array.from(host.querySelectorAll?.('button') || []),
+          ...Array.from(host.querySelectorAll?.('input') || []),
+          ...Array.from(host.querySelectorAll?.('[data-chat-target]') || [])
+        ].find(control => {
+          if (control.disabled) return false;
+          // The control itself, in the card that owns it (two cards can both
+          // offer "Not now"); older cards without identities match by label.
+          if (identity)
+            return controlIdentity(control) === identity && owningStep(host, control) === step;
+          return control.textContent === label;
+        });
         again?.focus?.({ preventScroll: true });
+        if (again && caret !== null) again.setSelectionRange?.(caret, caret);
       }
+      say(host, card);
     }
   }
   if (changed && typeof win?.CustomEvent === 'function')
