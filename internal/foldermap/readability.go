@@ -20,7 +20,7 @@ type Readability struct {
 	Shape    folderdigest.Shape
 	Readable int
 	// ReadableFormats is the readable projects by format, in the map's order, so
-	// a sentence can say whose files the readable ones are ("5 REAPER songs").
+	// a sentence can say whose files the readable ones are ("5 <App> songs").
 	// Name is "" when the tool table names no application for the format.
 	ReadableFormats []FormatCount
 	Unreadable      []FormatCount

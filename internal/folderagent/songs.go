@@ -200,9 +200,10 @@ type Songs interface {
 // the host's; nothing is read until the owner says yes.
 type SongsOfferView struct {
 	// Count is how many songs can be read this way, Noun the word for them
-	// (singular for one), and Format the application they are all from ("REAPER")
-	// when every readable song is of one named format; "" for a mixed folder or a
-	// format the tool table does not name, never a guess.
+	// (singular for one), and Format the application they are all from, as the
+	// host's tool table names it, when every readable song is of one named
+	// format; "" for a mixed folder or a format the table does not name, never a
+	// guess.
 	Count  int    `json:"count"`
 	Noun   string `json:"noun"`
 	Format string `json:"format,omitempty"`

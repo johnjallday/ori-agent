@@ -225,7 +225,7 @@ export function folderAgentReportView(view) {
       ? {
           count: Number(view.songs_offer.count) || 0,
           noun: String(view.songs_offer.noun || 'songs'),
-          // The one application every readable song is from ("REAPER"); empty for
+          // The one application every readable song is from; empty for
           // a mixed folder or a format the host cannot name.
           format: String(view.songs_offer.format || ''),
           ask: String(view.songs_offer.ask),
