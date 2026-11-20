@@ -2727,6 +2727,53 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Read-only folder facts shared by Home's context and the group dock. */
+.ws-map-folder-details {
+  margin-block: 12px;
+  font-size: 13px;
+  text-align: left;
+}
+.ws-map-folder-details dl,
+.ws-map-folder-details dd,
+.ws-map-folder-details ul {
+  margin: 0;
+}
+.ws-map-folder-details dl > div + div {
+  margin-top: 10px;
+}
+.ws-map-folder-details dt,
+.ws-map-folder-details h4 {
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+.ws-map-folder-details h4 {
+  margin-top: 12px;
+}
+.ws-map-folder-details ul {
+  padding-left: 18px;
+}
+.ws-map-folder-details li + li {
+  margin-top: 8px;
+}
+.ws-map-folder-detail-path,
+.ws-map-folder-note,
+.ws-map-folder-missing {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.ws-map-folder-detail-path {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+.ws-map-folder-note,
+.ws-map-folder-state {
+  margin: 6px 0;
+  font-size: 12px;
+}
+.ws-map-folder-missing {
+  margin-top: 4px;
+}
 .ws-map-tile-name-text {
   overflow: hidden;
   text-overflow: ellipsis;

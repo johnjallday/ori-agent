@@ -116,6 +116,10 @@ import {
   welcomeOverlayPlacement
 } from './home-welcome.js';
 import { workspacePageURL } from './workspace-routes.js';
+import {
+  createMapFolderSelection,
+  renderMapFolderDetails
+} from './workspace-map-folder-details.js';
 import { MEET_ASSISTANT_AGENTS_ROUTE } from './personal-assistant-hire.js';
 import {
   folderIndependentMapKey,
@@ -1593,6 +1597,9 @@ export function renderWorkspaceRailHTML(view) {
     '</p>' +
     '</div>' +
     '</header>' +
+    '<div data-map-folder-details>' +
+    renderMapFolderDetails(view.folderDetails) +
+    '</div>' +
     (view.mission ? `<p class="cockpit-rail-mission">${escapeHtml(view.mission)}</p>` : '') +
     '<section class="cockpit-rail-next" aria-label="Recommended next move">' +
     '<span class="cockpit-rail-next-kicker">Next move</span>' +
@@ -4259,8 +4266,23 @@ import {
     else openPanel(target);
   }
 
+  const selectedFolders = createMapFolderSelection({ onChange: paintSelectedFolders });
+
+  function paintSelectedFolders() {
+    const details = selectedFolders.read();
+    if (details.id !== state.selectedId || state.railState !== RAIL_WORKSPACE) return;
+    const slot = els.railContext?.querySelector?.('[data-map-folder-details]');
+    if (slot) slot.innerHTML = renderMapFolderDetails(details);
+  }
+
   function renderRail({ announceChange = true } = {}) {
     if (!els.railContext) return;
+    const folderItem = findWorkspace(state.flattened, state.selectedId);
+    void selectedFolders.select(
+      state.railState === RAIL_WORKSPACE && folderItem && !isGroupWorkspace(folderItem)
+        ? folderItem.id
+        : ''
+    );
 
     if (state.railState === RAIL_SUMMARY) {
       showContextPanel(renderSummaryRailHTML(summaryView(state.flattened, state.scheduleIndex)));
@@ -4308,7 +4330,8 @@ import {
             name: lastFolderAgentViews.find(view => view.workspace_id === item.id)?.agent_name,
             line: state.folderAgentLines[item.id]
           }),
-          portraitHTML: homePortrait
+          portraitHTML: homePortrait,
+          folderDetails: selectedFolders.read()
         });
     showContextPanel(
       isGroupWorkspace(item)
@@ -5711,6 +5734,7 @@ import {
         state.metadata = buildMapMetadata(state.flattened, state.tree);
         state.error = null;
         state.refreshError = false;
+        void selectedFolders.refresh();
         pruneTreeTabs();
         fresh = true;
         return true;

@@ -952,6 +952,31 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
   align-items: flex-start;
   gap: 10px;
 }
+.ws-cmd-map-shell.is-group .ws-cmd-map-quest-dock {
+  top: 80px;
+  max-height: min(65vh, 620px);
+  max-width: calc(100% - 36px);
+  overflow-y: auto;
+}
+.ws-cmd-map-member-folders {
+  width: min(340px, calc(100vw - 72px));
+  padding: 14px;
+  border: 1px solid var(--ws-line);
+  border-radius: 8px;
+  background: var(--ws-panel);
+  color: var(--ws-ink);
+}
+.ws-cmd-map-member-folders > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
+  overflow-wrap: anywhere;
+}
+.ws-cmd-map-member-folders > header button {
+  flex-shrink: 0;
+  font-size: 11px;
+}
 .ws-cmd-map-quest-fab {
   display: inline-flex;
   align-items: center;
