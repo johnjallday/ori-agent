@@ -26,6 +26,10 @@ import {
   filesystemBindingSubtitle
 } from './workspace-folder-shape.js';
 import { WorkspaceExecutionController, RUN_PHASE } from './workspace-execution-controller.js';
+import {
+  createMapFolderSelection,
+  renderMapFolderDetails
+} from './workspace-map-folder-details.js';
 import { workspaceNavigationHTML, workspaceSettingsHTML } from './workspace-command-chrome.js';
 import { WorkspacePanels } from './workspace-panels.js';
 import { libraryToSetUp } from './home-library-badges.js';
@@ -12840,6 +12844,9 @@ export class WorkspaceCommandView {
   mapGiveWorkHTML() {
     return (
       '<div class="ws-cmd-map-quest-dock">' +
+      (this.isGroupWorkspace()
+        ? '<div class="ws-cmd-map-member-folders" data-cmd-member-folders hidden></div>'
+        : '') +
       // A managed Home's selected linked song shows its card here (song-card
       // PRD FR9); song-card.js fills it. No other map gets the slot.
       (this.groupTemplateStatus?.kind === 'managed_home'
@@ -13954,6 +13961,7 @@ export class WorkspaceCommandView {
     const created = String((event && event.detail && event.detail.workspaceId) || '');
     if (created) this.pendingDetachmentSelectionId = created;
     await panel.reload();
+    void this.detachmentFolderSelection?.refresh();
     this.render();
   }
 
@@ -14334,6 +14342,18 @@ export class WorkspaceCommandView {
    */
   selectDetachmentMember(id, row, { fromMount = false } = {}) {
     const homeId = this.workspaceId();
+    const folders = this.memberFolderSelection();
+    if (!fromMount) this.detachmentFoldersHidden = '';
+    const rows = this.detachmentSnapshot().workspaces;
+    let parent = row?.parent_id;
+    const seen = new Set();
+    while (parent && parent !== homeId && !seen.has(parent)) {
+      seen.add(parent);
+      parent = rows.find(item => item.id === parent)?.parent_id;
+    }
+    this.detachmentFolderRow = row && !isGroupRow(row) && parent === homeId ? row : null;
+    void folders.select(this.detachmentFolderRow && id !== this.detachmentFoldersHidden ? id : '');
+    this.paintDetachmentFolders();
     const candidate =
       Boolean(id && row && homeId) &&
       row.parent_id === homeId &&
@@ -14346,8 +14366,54 @@ export class WorkspaceCommandView {
     if (candidate) void this.loadDetachmentSongCard(id);
   }
 
+  memberFolderSelection() {
+    if (!this.detachmentFolderSelection) {
+      this.detachmentFolderSelection = createMapFolderSelection({
+        onChange: () => this.paintDetachmentFolders()
+      });
+    }
+    if (this.detachmentFolderOwner !== this.workspaceId()) {
+      this.detachmentFolderOwner = this.workspaceId();
+      this.detachmentFolderRow = null;
+      this.detachmentFoldersHidden = '';
+      void this.detachmentFolderSelection.select('');
+    }
+    return this.detachmentFolderSelection;
+  }
+
+  paintDetachmentFolders() {
+    const slot = this.container?.querySelector?.('[data-cmd-member-folders]');
+    if (!slot) return;
+    const state = this.detachmentFolderSelection?.read();
+    const row = this.detachmentFolderRow;
+    const show =
+      state?.id && row?.id === state.id && this.detachmentFolderOwner === this.workspaceId();
+    slot.hidden = !show;
+    if (!show) {
+      slot.innerHTML = '';
+      return;
+    }
+    slot.innerHTML =
+      '<header><strong>' +
+      escapeHtml(row.name || 'Workspace') +
+      '</strong>' +
+      '<button type="button" class="ws-cmd-nav-btn" data-hide-member-folders>Hide folder details</button></header>' +
+      renderMapFolderDetails(state) +
+      '<a class="ws-cmd-nav-btn" href="' +
+      escapeHtml(workspacePageURL(row.folder_slug || row.id)) +
+      '">Open Workspace</a>';
+    slot.querySelector('[data-hide-member-folders]')?.addEventListener('click', () => {
+      this.detachmentFoldersHidden = state.id;
+      void this.detachmentFolderSelection.select('');
+      const tile = Array.from(this.detachmentMapEl?.querySelectorAll?.('[data-ws-id]') || []).find(
+        node => node.getAttribute('data-ws-id') === state.id
+      );
+      tile?.focus?.({ preventScroll: true });
+    });
+  }
+
   /**
-   * "Hide <noun> card": the card can cover the songs on a small screen, so it
+   * "Hide <noun> card":  the card can cover the songs on a small screen, so it
    * goes away until the next tile is chosen. The selection is left alone.
    */
   hideDetachmentSongCard() {
@@ -14662,6 +14728,8 @@ export class WorkspaceCommandView {
     // The dock was rebuilt with the rest of the view; the selected song's card
     // comes back from the last read, without a fetch.
     this.paintDetachmentSongCard();
+    this.memberFolderSelection();
+    this.paintDetachmentFolders();
     // The toolbar was rebuilt with the rest of the view; an Add existing picker
     // the user had open comes back, without pulling focus from wherever they are.
     if (this.detachmentPickerOpen) this.openDetachmentPicker({ focus: false });
@@ -14669,6 +14737,11 @@ export class WorkspaceCommandView {
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (!map || typeof map.mount !== 'function') return;
     const { tree, workspaces, metadata } = this.detachmentSnapshot();
+    const folderId = this.detachmentFolderSelection?.read().id;
+    const members = map.scopeWorkspacesToGroup?.(workspaces, this.workspaceId()) || workspaces;
+    if (folderId && !members.some(row => row.id === folderId)) {
+      this.selectDetachmentMember('', null, { fromMount: true });
+    }
     if (!workspaces.some(row => row.id === this.workspaceId())) {
       // An unreadable tree is not a known empty group. Do not draw the empty lot.
       if (this.detachmentMountedKey) map.unmount?.(host, { preservePresentation: true });
@@ -14682,6 +14755,9 @@ export class WorkspaceCommandView {
     const selectedId = this.pendingDetachmentSelectionId;
     const unitsSignature = JSON.stringify(units);
     if (key === this.detachmentMountedKey && !selectedId) {
+      // Shape is presentation, not part of the mount key. Keep live labels and
+      // the outline current without losing focus, selection or camera.
+      map.updateFolderShapes?.(host, workspaces);
       // Same buildings and the same agents: only what the agents show may have
       // changed, and that is patched in place rather than rebuilding the ground.
       if (unitsSignature === this.detachmentUnitsSignature) return;
@@ -14739,6 +14815,8 @@ export class WorkspaceCommandView {
       // A unit on the ground opens the same Unit Sheet its roster card did.
       onSelectUnit: unit => {
         if (!unit || !unit.selectKey) return;
+        map.setSelectedId?.(host, workspaces, '');
+        this.selectDetachmentMember('', null);
         this.activeMapWindow = 'inspector';
         this.selectAgent(unit.selectKey, { focus: false });
       }

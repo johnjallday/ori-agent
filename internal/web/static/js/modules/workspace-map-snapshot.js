@@ -4,6 +4,27 @@
 // Shared by Home's cockpit and the group page's Detachment map, so the Command
 // view never has to import the Home cockpit coordinator.
 
+// Compare everything except folder facts for a folder-only background refresh.
+// Children are already flattened; primary/reference changes never classify a tile.
+export function folderIndependentMapKey(rows) {
+  return JSON.stringify(rows, (key, value) =>
+    [
+      'children',
+      'shape',
+      'directory_references',
+      'anchor',
+      'sidecar_path',
+      'home_directory',
+      'primary_directory_id',
+      'anchor_directory_reference_id',
+      'folder_import',
+      'updated_at'
+    ].includes(key)
+      ? undefined
+      : value
+  );
+}
+
 export function normalizeKind(kind) {
   return String(kind || '')
     .trim()

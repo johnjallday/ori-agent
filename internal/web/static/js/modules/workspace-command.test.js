@@ -8982,9 +8982,12 @@ test('a Home’s own map shows its songs’ facts and the selected linked song�
     // Not a managed Home: no roster read and no card.
     commandView.groupTemplateStatus = { kind: 'custom' };
     // The map re-mounts when the facts clear, and every mount reads the folder
-    // agent listing (waiting-agents-on-parent-map); that read is not a roster or
-    // song-card read, which is what this step is about.
-    const songReads = () => requests.filter(url => !url.endsWith('/folder-agent')).length;
+    // agent listing; selection also reads ordinary folder facts. Neither is a
+    // roster or song-card read, which is what this step is about.
+    const songReads = () =>
+      requests.filter(
+        url => url.endsWith('/song-card') || url.endsWith('/assistant-program/library/roster')
+      ).length;
     const plain = songReads();
     await commandView.loadDetachmentSongFacts();
     mounts.at(-1).onSelect('m1', { id: 'm1', parent_id: 'g', kind: 'workspace' });

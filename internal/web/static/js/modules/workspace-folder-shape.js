@@ -1,3 +1,5 @@
+import { isInsideFolder } from './home-tree-sources.js';
+
 // Presentation only. Paths sent to the server always remain absolute.
 export function shortenWorkspacePath(path, workspace = {}) {
   workspace ||= {};
@@ -24,6 +26,66 @@ export function anchorFolder(workspace = {}) {
     id,
     path: workspace.anchor?.path || reference?.path || '',
     missing: workspace.anchor?.missing === true || reference?.missing === true
+  };
+}
+
+// Selection facts use actual local storage, never the primary reference or a
+// reconstructed slug. An unrecognised shape is not evidence of any folder type.
+export function workspaceFolderFacts(workspace = {}) {
+  workspace ||= {};
+  const shape = workspace.shape;
+  if (!['managed', 'anchored', 'imported'].includes(shape)) return null;
+  const refs = Array.isArray(workspace.directory_references) ? workspace.directory_references : [];
+  const own = String(workspace.sidecar_path || '');
+  const anchorId =
+    workspace.anchor?.directory_reference_id ||
+    workspace.shared_data?.anchor_directory_reference_id;
+  const anchorRef = anchorId ? refs.find(ref => ref?.id === anchorId) : null;
+  const main = shape === 'anchored' ? String(workspace.anchor?.path || anchorRef?.path || '') : own;
+  const missing =
+    shape === 'anchored' && (workspace.anchor?.missing === true || anchorRef?.missing === true);
+  const locations =
+    shape === 'anchored'
+      ? [
+          { label: 'Works in', path: main, missing },
+          { label: 'Ori’s notes and settings', path: own }
+        ]
+      : [
+          {
+            label: shape === 'imported' ? 'Imported folder' : 'Ori workspace folder',
+            path: own,
+            note: shape === 'imported' ? 'Ori keeps its notes and settings here.' : ''
+          }
+        ];
+  const seen = new Set();
+  const linked = refs
+    .filter(ref => {
+      if (!ref || ref.purpose === 'sample_library' || (shape === 'anchored' && ref.id === anchorId))
+        return false;
+      const path = String(ref.path || '')
+        .replace(/\\/g, '/')
+        .replace(/\/+$/, '');
+      if (
+        !path ||
+        seen.has(path) ||
+        isInsideFolder(path, own) ||
+        path === main.replace(/\\/g, '/').replace(/\/+$/, '')
+      )
+        return false;
+      seen.add(path);
+      return true;
+    })
+    .map(ref => ({
+      name: String(ref.name || ''),
+      path: String(ref.path),
+      missing: ref.missing === true
+    }));
+  return {
+    locations: locations.map(row => ({
+      ...row,
+      displayPath: shortenWorkspacePath(row.path, workspace)
+    })),
+    linked: linked.map(row => ({ ...row, displayPath: shortenWorkspacePath(row.path, workspace) }))
   };
 }
 

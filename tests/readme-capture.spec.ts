@@ -77,6 +77,8 @@ function workspace(id: string) {
         }
       }
     ],
+    shape: 'managed',
+    sidecar_path: `/fictional-workspaces/${sceneID.replace(/^ws-/, '')}`,
     directory_references: [],
     mcp_bindings: [],
     agent_mcp_access: [],
@@ -1067,8 +1069,17 @@ async function installFixtureRoutes(page: Page) {
       );
       return;
     }
-    if (url.pathname === `/api/workspaces/${README_SCENES.workspace_command.workspace_id}`) {
-      await json(route, workspace(README_SCENES.workspace_command.workspace_id));
+    // Selecting a map building reads its folder facts, even when the context
+    // is then dismissed for capture. Only known fictional workspace GETs qualify.
+    const detailID = /^\/api\/workspaces\/([^/]+)$/.exec(url.pathname)?.[1];
+    if (
+      request.method() === 'GET' &&
+      detailID &&
+      !url.search &&
+      (detailID === README_SCENES.workspace_command.workspace_id ||
+        README_SCENES.workspaces.some(row => row.id === detailID))
+    ) {
+      await json(route, workspace(detailID));
       return;
     }
     if (/^\/api\/workspaces\/[^/]+\/native-mcp$/.test(url.pathname)) {
