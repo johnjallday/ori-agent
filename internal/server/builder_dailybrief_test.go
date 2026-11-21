@@ -13,10 +13,24 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/followup"
+	"github.com/johnjallday/ori-agent/internal/integrationrelease"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// noReviewedTestReleases represents a catalog with no available release.
+// Returning no pin even from Resolve prevents retrying via a live Git checkout.
+type noReviewedTestReleases struct{}
+
+func (noReviewedTestReleases) Candidates(context.Context, reviewedintegration.Entry) []integrationrelease.Resolution {
+	return nil
+}
+
+func (noReviewedTestReleases) Resolve(context.Context, reviewedintegration.Entry) integrationrelease.Resolution {
+	return integrationrelease.Resolution{}
+}
 
 // newDailyBriefTestServer builds a full server (same wiring path as
 // production, via ServerBuilder.Build) rooted at a temp directory, mirroring
@@ -47,6 +61,9 @@ func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 	if err != nil {
 		t.Fatalf("NewServerBuilder failed: %v", err)
 	}
+	// Folder previews can check plugins even when the tests never request an
+	// install. Keep the shared fixture off GitHub and retain the real readers.
+	builder.integrationReleases = noReviewedTestReleases{}
 	srv, err := builder.Build()
 	if err != nil {
 		t.Fatalf("Build failed: %v", err)

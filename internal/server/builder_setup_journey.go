@@ -142,7 +142,9 @@ func (b *ServerBuilder) initializeSetupJourney() {
 		})
 	}
 	if b.pluginHandler != nil {
-		b.integrationReleases = newIntegrationReleaseResolver(os.Getenv(integrationReleasesAPIEnv))
+		if b.integrationReleases == nil {
+			b.integrationReleases = newIntegrationReleaseResolver(os.Getenv(integrationReleasesAPIEnv))
+		}
 		b.installReviewedIntegrationUpdates()
 		b.initializeHomePackageUpgrades()
 		integrationAdapter = setupjourney.NewReviewedIntegrationAdapterForDevelopment(

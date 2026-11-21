@@ -13,11 +13,6 @@ import (
 
 func fakeCodex(t *testing.T, ending string) string {
 	t.Helper()
-	return fakeCodexAfterStartup(t, "", ending)
-}
-
-func fakeCodexAfterStartup(t *testing.T, startup, ending string) string {
-	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX fake CLI")
 	}
@@ -26,35 +21,56 @@ func fakeCodexAfterStartup(t *testing.T, startup, ending string) string {
 	t.Setenv("PATH", dir)
 	t.Setenv("CODEX_HOME", dir)
 	t.Setenv("FAKE_PID_FILE", pid)
-	script := `#!/bin/sh
-[ "$1" = app-server ] || exit 1
-` + startup + `
-printf '%s' "$$" > "$FAKE_PID_FILE"
-read -r init
+	t.Chdir(dir)
+	// Invoke the system shell as codex so it reads the app-server argument
+	// as a script, rather than launching a newly generated executable.
+	if err := os.Symlink("/bin/sh", filepath.Join(dir, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	script := `read -r init
 case "$init" in *'"name":"ori"'*'"title":"Ori"'*) ;; *) exit 1;; esac
 printf '%s\n' '{"id":1,"result":{"userAgent":"fixture"}}'
 read -r initialized
 [ "$initialized" = '{"method":"initialized"}' ] || exit 1
 read -r request
 case "$request" in *'"method":"account/rateLimits/read","params":null'*) ;; *) exit 1;; esac
+printf '%s\n' "$$" > "$FAKE_PID_FILE"
 ` + ending
-	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte(script), 0700); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "app-server"), []byte(script), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return pid
 }
 
-func waitForCLIStarted(t *testing.T, pidFile string) {
+// startBlockedCodex waits for the fake CLI to accept the request before the
+// caller triggers cancellation. The PID file doubles as the readiness signal.
+func startBlockedCodex(t *testing.T) (string, context.CancelFunc, <-chan error) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	pid := fakeCodex(t, "read -r hold\n")
+	ctx, cancel := context.WithCancel(t.Context())
+	result, done := make(chan error, 1), make(chan struct{})
+	go func() {
+		defer close(done)
+		_, err := ReadCodexAppServer(ctx)
+		result <- err
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
 	for {
-		if data, err := os.ReadFile(pidFile); err == nil && len(data) > 0 {
-			return
+		select {
+		case err := <-result:
+			t.Fatalf("app-server returned before cancellation: %v", err)
+		case <-deadline.C:
+			t.Fatal("fake CLI did not accept the rate-limits request")
+		case <-poll.C:
+			if data, err := os.ReadFile(pid); err == nil && len(data) > 0 {
+				return pid, cancel, result
+			}
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("fake CLI did not start")
-		}
-		time.Sleep(5 * time.Millisecond)
 	}
 }
 
@@ -85,12 +101,7 @@ read -r hold
 }
 
 func TestCodexAppServerCancellationKillsChild(t *testing.T) {
-	pid := fakeCodex(t, "read -r hold\n")
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	result := make(chan error, 1)
-	go func() { _, err := ReadCodexAppServer(ctx); result <- err }()
-	waitForCLIStarted(t, pid)
+	pid, cancel, result := startBlockedCodex(t)
 	start := time.Now()
 	cancel()
 	if err := <-result; err == nil {
@@ -103,18 +114,7 @@ func TestCodexAppServerCancellationKillsChild(t *testing.T) {
 }
 
 func TestCodexAppServerTimeoutKillsChild(t *testing.T) {
-	// Longer than the read deadline: this deterministically catches starting
-	// that deadline before the child has had a chance to record its PID.
-	pid := fakeCodexAfterStartup(t, "/bin/sleep 1.1\n", "read -r hold\n")
-	ctx, cancelRead := context.WithCancel(t.Context())
-	result, done := make(chan error, 1), make(chan struct{})
-	go func() {
-		defer close(done)
-		_, err := ReadCodexAppServer(ctx)
-		result <- err
-	}()
-	defer func() { cancelRead(); <-done }()
-	waitForCLIStarted(t, pid)
+	pid, cancelRead, result := startBlockedCodex(t)
 
 	// Exercise expiry against a running child, not the scheduler's ability to
 	// start a process within one second on a loaded race-test host.
