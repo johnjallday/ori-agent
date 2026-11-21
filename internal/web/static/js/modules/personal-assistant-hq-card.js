@@ -265,7 +265,7 @@ function renderFirst(view, resultActive) {
   if (!first) return;
   first.hidden = !resultActive || !view.receipt || !plan.firstAction;
   if (first.hidden) return;
-  const choicesView = hqFirstActionView(plan.notesOutcome, { hqRoute: hqRoute() });
+  const choicesView = hqFirstActionView(plan.notesOutcome);
   const phase = plan.firstPhase;
   const choosing = phase === 'choices';
   el('FirstChoices').hidden = !choosing;

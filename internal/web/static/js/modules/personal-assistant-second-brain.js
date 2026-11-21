@@ -3334,7 +3334,9 @@ function onStatus(personalAssistant) {
     render();
     return;
   }
-  if (changed || !state.secondBrain) void load();
+  // My Notes owns its landing read. The drawer only fetches notebook details
+  // here when the user opens a connection/setup action.
+  if (!document.querySelector('[data-my-notes]') && (changed || !state.secondBrain)) void load();
 }
 
 // onRecipient follows who the drawer talks to. Switching away hides the card
@@ -3395,7 +3397,8 @@ function init() {
       if (state.phase === 'ask' && !state.busy) setPhase('idle', { focus: false });
       return;
     }
-    if (state.phase === 'idle') void refresh().then(() => showAskIfDue());
+    if (state.phase === 'idle' && !document.querySelector('[data-my-notes]'))
+      void refresh().then(() => showAskIfDue());
   });
   state.personal = secondBrainRecipientPersonal(window.PersonalAssistantRecipient?.current?.());
   document.addEventListener('personal-assistant:recipient', event =>

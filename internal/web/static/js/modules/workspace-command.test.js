@@ -1719,7 +1719,6 @@ test('systems shared surface mounts config without cloning persistence logic', (
     ['restore', 'followups'],
     // Nor the HQ's inbox or Notes hosts: those panels stay home too (PRD 766).
     ['restore', 'hq-needs-you'],
-    ['restore', 'hq-notes'],
     ['restore', 'tools'],
     ['restore', 'capabilities'],
     ['mount', 'config', '#workspace-detail-settings-panel'],
@@ -5455,119 +5454,17 @@ test('the Notes station says whether notes are set up, connected, or missing', (
   }
 });
 
-test('a connected Notes station opens its panel; closing it re-reads the badge', () => {
+test('the HQ Notes station navigates to My Notes regardless of connection state', () => {
   const originalWindow = globalThis.window;
-  globalThis.window = {};
+  const calls = [];
+  globalThis.window = { location: { assign: path => calls.push(path) } };
   try {
     const hq = makeHQCommandView({ id: 'hq-1' });
-    const calls = [];
-    hq._notes = {
-      hqWorkspaceID: 'hq-1',
-      status: 'ready',
-      secondBrain: { status: 'connected', source: { name: 'Second Brain' } }
-    };
-    hq.openStatModal = key => calls.push('panel ' + key);
-    hq.loadNotesPanel = () => calls.push('load');
-    hq.requestNotesData = force => calls.push('reread ' + force);
-    hq.runHQStationAction('second-brain');
-    assert.deepEqual(calls, ['panel second-brain', 'load']);
-
-    calls.length = 0;
-    hq.notesStation().onPanelClosed();
-    assert.deepEqual(calls, ['reread true']);
-    assert.equal(hq.statSectionMeta('second-brain').title, 'Notes');
-  } finally {
-    globalThis.window = originalWindow;
-  }
-});
-
-test('the Notes panel triages an item and shows what the server returned', async () => {
-  const originalWindow = globalThis.window;
-  const originalFetch = globalThis.fetch;
-  try {
-    const changed = [];
-    globalThis.window = { PersonalAssistantSecondBrain: { changed: async () => changed.push(1) } };
-    const requests = [];
-    globalThis.fetch = async (url, options) => {
-      requests.push([url, JSON.parse(options.body)]);
-      return {
-        ok: true,
-        json: async () => ({
-          look: { state: 'finished', look_id: 'look-1', result: { id: 'after' } }
-        })
-      };
-    };
-    const hq = makeHQCommandView({ id: 'hq-1' });
-    hq._notesPanel = {
-      status: 'ready',
-      look: { state: 'finished', look_id: 'look-1', result: {} }
-    };
-    await hq.triageFromNotesPanel('done', 'item-1');
-    assert.equal(requests[0][0], '/api/personal-assistant/second-brain/look/look-1/items/item-1');
-    assert.equal(requests[0][1].action, 'done');
-    assert.ok(requests[0][1].request_id.startsWith('notes-'));
-    assert.equal(hq._notesPanel.look.result.id, 'after');
-    assert.equal(changed.length, 1);
-  } finally {
-    globalThis.window = originalWindow;
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('Look again inside the rate limit says so, and a refused capture keeps the draft', async () => {
-  const originalWindow = globalThis.window;
-  const originalFetch = globalThis.fetch;
-  try {
-    globalThis.window = {};
-    globalThis.fetch = async () => ({
-      ok: false,
-      status: 429,
-      json: async () => ({ error: 'Ori looked a moment ago.' })
-    });
-    const hq = makeHQCommandView({ id: 'hq-1' });
-    hq._notesPanel = { status: 'ready', look: { state: 'finished' } };
-    await hq.lookAgainFromNotesPanel();
-    assert.equal(hq._notesPanel.lookMessage, 'Looked less than 10 minutes ago');
-
-    hq._notesPanel.captureDraft = '   ';
-    await hq.captureFromNotesPanel();
-    assert.equal(hq._notesPanel.captureProblem, 'Write the note first.');
-
-    hq._notesPanel.captureDraft = 'looks like a key';
-    await hq.captureFromNotesPanel();
-    assert.equal(hq._notesPanel.captureProblem, 'Ori looked a moment ago.');
-    assert.equal(hq._notesPanel.captureDraft, 'looks like a key');
-    assert.equal(hq._notesPanel.captureBusy, false);
-  } finally {
-    globalThis.window = originalWindow;
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('with nothing connected the Notes station opens the card in the drawer, or Home without one', () => {
-  const originalWindow = globalThis.window;
-  try {
-    const calls = [];
-    globalThis.window = {
-      location: { assign: p => calls.push('nav ' + p) },
-      PersonalAssistantPanel: {
-        open: (_trigger, options) => calls.push('open ' + options.focus) || true
-      },
-      PersonalAssistantSecondBrain: { openManage: async () => calls.push('manage') }
-    };
-    const hq = makeHQCommandView({ id: 'hq-1' });
-    hq._notes = {
-      hqWorkspaceID: 'hq-1',
-      status: 'ready',
-      secondBrain: { status: 'not_connected' }
-    };
-    hq.runHQStationAction('second-brain');
-    assert.deepEqual(calls, ['open false', 'manage']);
-
-    calls.length = 0;
-    globalThis.window = { location: { assign: p => calls.push('nav ' + p) } };
-    hq.runHQStationAction('second-brain');
-    assert.deepEqual(calls, ['nav /?quest=second-brain']);
+    for (const status of ['connected', 'not_connected', 'missing']) {
+      hq._notes = { hqWorkspaceID: 'hq-1', status: 'ready', secondBrain: { status } };
+      hq.runHQStationAction('second-brain');
+    }
+    assert.deepEqual(calls, ['/my-notes', '/my-notes', '/my-notes']);
   } finally {
     globalThis.window = originalWindow;
   }
@@ -9870,36 +9767,21 @@ test('follow-ups: a deep-linked card rendered while parked is scrolled into view
 });
 
 // --- HQ Details hosts (PRD 766 FR3/FR4) ---------------------------------------
-// The HQ's Notes panel is a live node in the main column. A background
-// render() must relocate it, never rebuild it: the node, a draft typed in it and
-// the focused control all survive. The stat modal's Daily Brief and Memory
-// panels already survive the same way; this pins that on the HQ branch.
+// Overview mounts only the quick capture; the Daily Brief and Memory
+// continue to use their existing stat modal.
 
 const HQ_PANELS_KEEP = new Set([
   ...FOLLOW_UPS_KEEP,
   'renderHQDetails',
   'renderHQNotesHost',
   'hqNotesHost',
-  'notesInlineNode',
   'parkHQPanels',
   'syncHQPanels',
-  'settleInlineNotes',
-  'inlineNotesHTML',
-  'paintInlineNotes',
-  'bindInlineNotes',
-  'focusInlineNotesPanel',
-  'inlineNotesMetaHTML',
-  'paintInlineNotesMeta',
-  'notesPanelOpen',
-  'notesModalOpen',
   'notesState',
-  'notesPanel',
-  'paintNotesPanel',
-  'openNotesPanel',
   'mountDailyBriefPanel'
 ]);
 
-// A folder Ori set up: its panel opens on the Inbox tab, which has the capture box.
+// A present notebook Ori set up.
 const CONNECTED_VAULT = {
   status: 'connected',
   source: { name: 'Second Brain', origin: 'created_by_ori' }
@@ -9925,26 +9807,10 @@ function hqPanelsPage({ secondBrain = CONNECTED_VAULT } = {}) {
   sharedHosts.hidden = true;
   const followups = doc.createElement('div');
   followups.id = 'workspaceFollowupMount';
-  const notes = doc.createElement('section');
-  notes.id = 'hqNotesPanelMount';
-  notes.hidden = true;
   const config = doc.createElement('div');
   config.id = 'workspace-detail-settings-panel';
   doc.body.append(container, sharedHosts);
-  sharedHosts.append(followups, notes, config);
-
-  // Each paint of the Notes panel builds a capture box, so a repaint is visible
-  // as a new input node.
-  let paints = 0;
-  notes.onHTML = html => {
-    paints += 1;
-    notes.lastHTML = html;
-    if (!html.includes('data-notes-capture')) return;
-    const input = doc.createElement('input');
-    input.setAttribute('data-notes-capture', '');
-    input.value = '';
-    notes.appendChild(input);
-  };
+  sharedHosts.append(followups, config);
 
   const commandView = new WorkspaceCommandView(null);
   for (const name of Object.getOwnPropertyNames(WorkspaceCommandView.prototype)) {
@@ -9961,141 +9827,25 @@ function hqPanelsPage({ secondBrain = CONNECTED_VAULT } = {}) {
     sharedSurfaceAnchors: {},
     isPersonalHQ: () => true,
     watchtowerWorkspaceID: () => 'hq-1',
-    // The panel's look/inbox read: answer at once with a ready, empty panel.
-    loadNotesPanel() {
-      loads.push(1);
-      const panel = this.notesPanel();
-      panel.status = 'ready';
-      panel.look = { state: 'none' };
-      panel.inbox = { notes: [], total: 0 };
-      panel.tab = 'inbox';
-      this.paintNotesPanel(panel);
-    },
+    hqQuickCapture: { mount: (host, view) => loads.push({ host, view }) },
     _notes: { hqWorkspaceID: 'hq-1', status: 'ready', secondBrain }
   });
-  const capture = () => notes.querySelector('[data-notes-capture]');
-  return {
-    doc,
-    container,
-    sharedHosts,
-    notes,
-    config,
-    commandView,
-    capture,
-    loads,
-    paints: () => paints
-  };
+  return { doc, container, sharedHosts, config, commandView, loads };
 }
 
-test('HQ Details: the Notes panel is mounted in its host, second only to nothing yet', () => {
-  const page = hqPanelsPage();
-  const { doc, container, commandView, notes } = page;
+test('HQ Overview attaches just quick capture to its Notes slot', () => {
+  const { doc, container, commandView, loads } = hqPanelsPage();
   const originalDocument = globalThis.document;
   globalThis.document = doc;
   try {
     commandView.render();
     const host = container.querySelector('[data-cmd-hq-host="notes"]');
-    assert.ok(host, 'the HQ layout has a Notes host');
-    assert.equal(notes.parentNode, host);
-    assert.equal(notes.hidden, false);
-    assert.equal(commandView.notesInlineNode(), notes);
-    assert.equal(commandView.notesPanelOpen(), true, 'the inline panel counts as open');
-    assert.equal(page.loads.length, 1, 'a connected folder starts the panel read once');
-    assert.match(notes.lastHTML, /Notes/);
-    // Under the panel's header: the folder's name and the station's own badge.
-    assert.match(
-      notes.lastHTML,
-      /<\/header><p class="ws-hq-notes-meta" data-cmd-hq-notes-meta><span class="ws-hq-notes-vault">Second Brain<\/span><span class="ws-hq-notes-badge" title="set up by Ori">Second Brain<\/span><\/p>/
+    assert.ok(host);
+    assert.deepEqual(loads.at(-1), { host, view: CONNECTED_VAULT });
+    assert.equal(
+      WorkspaceCommandView.prototype.statSectionMeta.call(commandView, 'second-brain'),
+      null
     );
-    // The panel's own close button is still in its markup (CSS hides it inline).
-    assert.match(notes.lastHTML, /data-cmd-modal-action="close"/);
-  } finally {
-    globalThis.document = originalDocument;
-  }
-});
-
-test('HQ Details: a render() while typing in Notes keeps the node, the draft and the focus (FR4)', () => {
-  const page = hqPanelsPage();
-  const { doc, commandView, notes, capture } = page;
-  const originalDocument = globalThis.document;
-  globalThis.document = doc;
-  try {
-    commandView.render();
-    const input = capture();
-    assert.ok(input, 'the ready panel has a capture box');
-    input.focus();
-    input.value = 'Call the venue';
-    input.selectionStart = input.selectionEnd = 4;
-    let caret = null;
-    input.setSelectionRange = (start, end) => {
-      caret = [start, end];
-    };
-    const paintsBefore = page.paints();
-
-    commandView.render();
-    commandView.render();
-
-    assert.equal(page.paints(), paintsBefore, 'a background render never repaints the panel');
-    assert.equal(capture(), input, 'the same capture box');
-    assert.equal(input.value, 'Call the venue', 'the draft is untouched');
-    assert.equal(doc.activeElement, input, 'focus comes back to the capture box');
-    assert.deepEqual(caret, [4, 4], 'with the caret where it was');
-    assert.equal(page.loads.length, 1, 'and the panel is not read again');
-
-    // A mode switch parks it at home; coming back puts the same node back.
-    commandView.setCommandViewMode('tickets', { focus: false });
-    assert.equal(notes.parentNode, page.sharedHosts, 'parked at home outside Details');
-    assert.equal(commandView.notesInlineNode(), null);
-    commandView.setCommandViewMode('details', { focus: false });
-    assert.equal(capture(), input);
-    assert.equal(input.value, 'Call the venue');
-  } finally {
-    globalThis.document = originalDocument;
-  }
-});
-
-test('HQ Details: the Notes panel repaints when the connection changes, not otherwise', () => {
-  const page = hqPanelsPage({ secondBrain: { status: 'none' } });
-  const { doc, commandView, notes } = page;
-  const originalDocument = globalThis.document;
-  globalThis.document = doc;
-  try {
-    commandView.render();
-    assert.match(notes.lastHTML, /Set up notes…/, 'nothing connected: the connect state');
-    assert.match(notes.lastHTML, /data-cmd-modal-action="notes-connection"/);
-    assert.equal(page.loads.length, 0, 'nothing to read');
-    const before = page.paints();
-    commandView.render();
-    assert.equal(page.paints(), before);
-
-    // A forced re-read passes through loading without a flash.
-    commandView._notes.status = 'loading';
-    commandView.render();
-    assert.equal(page.paints(), before);
-
-    commandView._notes = { hqWorkspaceID: 'hq-1', status: 'ready', secondBrain: CONNECTED_VAULT };
-    commandView.render();
-    assert.equal(page.loads.length, 1, 'connecting starts the read');
-    assert.doesNotMatch(notes.lastHTML, /Set up notes…/);
-  } finally {
-    globalThis.document = originalDocument;
-  }
-});
-
-test('HQ Details: opening the Notes station goes to the inline panel, not a dialog', () => {
-  const page = hqPanelsPage();
-  const { doc, commandView, capture } = page;
-  const originalDocument = globalThis.document;
-  globalThis.document = doc;
-  try {
-    commandView.render();
-    let modalOpened = false;
-    commandView.openStatModal = () => {
-      modalOpened = true;
-    };
-    commandView.openNotesPanel(null);
-    assert.equal(modalOpened, false);
-    assert.equal(doc.activeElement, capture());
   } finally {
     globalThis.document = originalDocument;
   }
@@ -11161,63 +10911,16 @@ test('a greeting choice runs the owner the suggestions use, and nothing is compl
   });
 });
 
-test('"Save an idea" before the Notes Inbox has painted: the repaint that makes the capture box takes focus, once', () => {
-  const view = greetingView();
-  const originalDocument = globalThis.document;
-  const doc = { activeElement: null };
-  const capture = {
-    focused: 0,
-    focus: () => ((capture.focused += 1), (doc.activeElement = capture))
-  };
-  const tab = { focus: () => (doc.activeElement = tab) };
-  let painted = false;
-  const node = {
-    hidden: true,
-    contains: () => false,
-    scrollIntoView() {},
-    querySelector: selector => {
-      if (selector === '[data-notes-capture]') return painted ? capture : null;
-      if (selector.includes('data-notes-tab')) return tab;
-      return null;
-    },
-    set innerHTML(value) {
-      painted = true;
-    }
-  };
-  Object.assign(view, {
-    notesInlineNode: () => node,
-    setNotesTab() {},
-    inlineNotesHTML: () => '<input data-notes-capture>'
-  });
-  globalThis.document = doc;
-  try {
-    // Just switched to Details: the panel is mounted, its Inbox is not painted.
-    view.focusHQNoteCapture(null);
-    assert.equal(capture.focused, 0, 'there is no box yet');
-    assert.equal(doc.activeElement, tab, 'the panel has the focus meanwhile');
-    // The look finishes and the panel repaints: the box takes the focus, once.
-    view.paintInlineNotes(node);
-    assert.equal(capture.focused, 1);
-    assert.equal(doc.activeElement, capture);
-    view.paintInlineNotes(node);
-    assert.equal(capture.focused, 1, 'a later repaint does not ask again');
-
-    // An ask that lapsed (the person went elsewhere meanwhile) moves nothing.
-    painted = false;
-    doc.activeElement = null;
-    view.focusHQNoteCapture(null);
-    view._hqNoteCaptureWantedAt = Date.now() - 6000;
-    view.paintInlineNotes(node);
-    assert.equal(capture.focused, 1, 'stale: no focus pulled');
-    assert.equal(view._hqNoteCaptureWantedAt, 0);
-
-    // The box already there: focused at once, nothing left waiting.
-    view.focusHQNoteCapture(null);
-    assert.equal(capture.focused, 2);
-    assert.equal(view._hqNoteCaptureWantedAt, 0);
-  } finally {
-    globalThis.document = originalDocument;
-  }
+test('Save an idea focuses quick capture when writable, otherwise navigates to the notebook', () => {
+  const view = Object.create(WorkspaceCommandView.prototype);
+  const calls = [];
+  view.openNotesStation = () => calls.push('notes');
+  view.hqQuickCapture = { focus: () => calls.push('focus') > 0 };
+  view.focusHQNoteCapture(null);
+  assert.deepEqual(calls, ['focus']);
+  view.hqQuickCapture = { focus: () => false };
+  view.focusHQNoteCapture(null);
+  assert.deepEqual(calls, ['focus', 'notes']);
 });
 
 test('the drawer is told only when the greeting changes, never about a page that never had one', () => {
@@ -11719,45 +11422,6 @@ test('HQ Details: closing a station panel returns focus to its card, even one re
   assert.equal(commandView.resolveStatModalTrigger(fresh), fresh);
 });
 
-test('HQ Notes first load reveals only its still-focused offscreen deep-linked follow-up', () => {
-  const originals = { document: globalThis.document, window: globalThis.window };
-  try {
-    for (const scenario of [
-      { scroll: true },
-      { bounds: { top: 100, bottom: 200 } },
-      { selected: false },
-      { contained: false },
-      { inline: false },
-      { stale: true }
-    ]) {
-      const calls = [];
-      const card = {
-        matches: selector =>
-          selector === '.workspace-followup-card.is-deep-linked' && scenario.selected !== false,
-        getBoundingClientRect: () => scenario.bounds || { top: 1300, bottom: 1400 },
-        scrollIntoView: options => calls.push(options)
-      };
-      globalThis.document = { activeElement: card };
-      globalThis.window = { innerHeight: 900 };
-      const view = Object.create(WorkspaceCommandView.prototype);
-      const panel = {};
-      view._notesPanel = panel;
-      view.notesInlineNode = () => scenario.inline !== false;
-      view.container = { contains: node => node === card && scenario.contained !== false };
-      view.revealFocusedFollowUpAfterNotes(scenario.stale ? {} : panel);
-      assert.deepEqual(
-        calls,
-        scenario.scroll ? [{ block: 'center' }] : [],
-        JSON.stringify(scenario)
-      );
-      assert.equal(globalThis.document.activeElement, card, 'scroll never changes focus');
-    }
-  } finally {
-    globalThis.document = originals.document;
-    globalThis.window = originals.window;
-  }
-});
-
 test('HQ Details: follow-ups made elsewhere show at once; the last one gone hides the panel', () => {
   const doc = makeTreeDoc();
   const host = doc.createElement('div');
@@ -11781,22 +11445,6 @@ test('HQ Details: follow-ups made elsewhere show at once; the last one gone hide
   mount.appendChild(panel);
   commandView.settleFollowUpsVisibility();
   assert.equal(mount.hidden, true);
-});
-
-test('HQ Details: Notes changes reload the follow-ups panel below', async () => {
-  const originalWindow = globalThis.window;
-  const originalDocument = globalThis.document;
-  let reloads = 0;
-  globalThis.window = { WorkspaceFollowUps: { reload: async () => (reloads += 1) } };
-  globalThis.document = { dispatchEvent() {} };
-  try {
-    WorkspaceCommandView.prototype.notesChanged.call(Object.create(WorkspaceCommandView.prototype));
-    await Promise.resolve();
-    assert.equal(reloads, 1);
-  } finally {
-    globalThis.window = originalWindow;
-    globalThis.document = originalDocument;
-  }
 });
 
 test('HQ Details: the Team tile scrolls Team clear of the fixed top bar, however tall', () => {
@@ -11910,90 +11558,6 @@ test('HQ Details marks the page so the top mounts hide, and only in Details (FR1
     assert.equal(body.dataset.hqDetails, '1');
   } finally {
     globalThis.document = originalDocument;
-  }
-});
-
-// --- notes-station-panel ------------------------------------------------------
-
-test('Look again inside the rate limit names the wait from Retry-After', async () => {
-  const originalWindow = globalThis.window;
-  const originalFetch = globalThis.fetch;
-  try {
-    globalThis.window = {};
-    globalThis.fetch = async () => ({
-      ok: false,
-      status: 429,
-      headers: { get: name => (name === 'Retry-After' ? '361' : null) },
-      json: async () => ({ error: 'Ori looked a moment ago.', retry_after_seconds: 361 })
-    });
-    const hq = makeHQCommandView({ id: 'hq-1' });
-    const fourMinutesAgo = new Date(Date.now() - 4 * 60000).toISOString();
-    hq._notesPanel = {
-      status: 'ready',
-      look: { state: 'finished', result: { finished_at: fourMinutesAgo } }
-    };
-    await hq.lookAgainFromNotesPanel();
-    assert.equal(hq._notesPanel.lookMessage, 'Looked 4 minutes ago. Try again in 7 minutes.');
-    assert.equal(hq._notesPanel.lookBusy, false);
-  } finally {
-    globalThis.window = originalWindow;
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('the Notes panel stops polling a look at the drawer limit and says it is still reading', async () => {
-  const originalWindow = globalThis.window;
-  const originalFetch = globalThis.fetch;
-  const originalSetTimeout = globalThis.setTimeout;
-  try {
-    globalThis.window = {};
-    const delays = [];
-    let pending = null;
-    globalThis.setTimeout = (fn, ms) => {
-      delays.push(ms);
-      pending = fn;
-      return delays.length;
-    };
-    let reads = 0;
-    globalThis.fetch = async () => {
-      reads += 1;
-      return { ok: true, json: async () => ({ look: { state: 'running', look_id: 'look-2' } }) };
-    };
-    const { LOOK_POLL_LIMIT, LOOK_POLL_MS } = await import('./personal-assistant-second-brain.js');
-    const hq = makeHQCommandView({ id: 'hq-1' });
-    const panel = { status: 'ready', look: { state: 'running', look_id: 'look-2' } };
-    hq._notesPanel = panel;
-    hq.notesPanelOpen = () => true;
-    hq.paintNotesPanel = () => {};
-    hq.pollNotesPanelLook(panel);
-    for (let i = 0; i < LOOK_POLL_LIMIT && pending; i += 1) {
-      const fn = pending;
-      pending = null;
-      await fn();
-    }
-    assert.equal(reads, LOOK_POLL_LIMIT);
-    assert.ok(delays.every(ms => ms === LOOK_POLL_MS));
-    assert.equal(pending, null, 'no poll is scheduled past the limit');
-    assert.equal(panel.lookMessage, 'Still reading. Check back in a moment.');
-  } finally {
-    globalThis.window = originalWindow;
-    globalThis.fetch = originalFetch;
-    globalThis.setTimeout = originalSetTimeout;
-  }
-});
-
-test('Show all lists every open item in the Notes panel', () => {
-  const originalWindow = globalThis.window;
-  try {
-    globalThis.window = {};
-    const hq = makeHQCommandView({ id: 'hq-1' });
-    const painted = [];
-    hq._notesPanel = { status: 'ready', look: { state: 'finished' } };
-    hq.paintNotesPanel = panel => painted.push(panel.showAll);
-    hq.handleNotesPanelAction('notes-show-all');
-    assert.deepEqual(painted, [true]);
-  } finally {
-    globalThis.window = originalWindow;
   }
 });
 
@@ -12124,7 +11688,7 @@ test('the Notes station turns to attention for a stale or came-due look, and the
   }
 });
 
-test('one second-brain announcement re-reads the badge once and an open Notes panel once', async () => {
+test('one second-brain announcement re-reads only the HQ notes status, not the notebook', async () => {
   const originalWindow = globalThis.window;
   const originalDocument = globalThis.document;
   const originalFetch = globalThis.fetch;
@@ -12153,33 +11717,6 @@ test('one second-brain announcement re-reads the badge once and an open Notes pa
     assert.equal(listeners['personal-assistant:second-brain'].length, 1);
     reads.length = 0;
 
-    const panel = { status: 'ready', look: { state: 'finished', look_id: 'look-1' } };
-    hq._notesPanel = panel;
-    hq.notesPanelOpen = () => true;
-    let painted = 0;
-    hq.paintNotesPanel = () => (painted += 1);
-    listeners['personal-assistant:second-brain'][0]();
-    await new Promise(resolve => setImmediate(resolve));
-    await new Promise(resolve => setImmediate(resolve));
-    assert.deepEqual(reads.sort(), [
-      '/api/personal-assistant/second-brain',
-      '/api/personal-assistant/second-brain/look'
-    ]);
-    assert.equal(panel.look.look_id, 'look-2');
-    assert.equal(painted, 1);
-
-    // The same look again (the drawer announcing a step of its own turn) does
-    // not repaint the panel.
-    reads.length = 0;
-    listeners['personal-assistant:second-brain'][0]();
-    await new Promise(resolve => setImmediate(resolve));
-    await new Promise(resolve => setImmediate(resolve));
-    assert.equal(reads.length, 2);
-    assert.equal(painted, 1, 'an unchanged look is not repainted');
-
-    // A closed panel is not read.
-    reads.length = 0;
-    hq.notesPanelOpen = () => false;
     listeners['personal-assistant:second-brain'][0]();
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(reads, ['/api/personal-assistant/second-brain']);
@@ -12187,50 +11724,6 @@ test('one second-brain announcement re-reads the badge once and an open Notes pa
     globalThis.window = originalWindow;
     globalThis.document = originalDocument;
     globalThis.fetch = originalFetch;
-  }
-});
-
-test('the Notes panel hands Connection… to the drawer, and a missing folder goes straight there', () => {
-  const originalWindow = globalThis.window;
-  try {
-    const calls = [];
-    globalThis.window = {
-      location: { assign: p => calls.push('nav ' + p) },
-      PersonalAssistantPanel: {
-        open: (trigger, options) =>
-          calls.push('open ' + (trigger ? trigger.id : null) + ' ' + options.focus) || true
-      },
-      PersonalAssistantSecondBrain: { openManage: async () => calls.push('manage') }
-    };
-    const hq = makeHQCommandView({ id: 'hq-1' });
-    const row = { id: 'notes-row' };
-    hq.statModalTrigger = row;
-    hq.closeStatModal = () => calls.push('close');
-    hq.handleNotesPanelAction('notes-connection');
-    assert.deepEqual(calls, ['close', 'open notes-row false', 'manage']);
-
-    calls.length = 0;
-    hq._notes = {
-      hqWorkspaceID: 'hq-1',
-      status: 'ready',
-      secondBrain: { status: 'missing', source: { name: 'Second Brain' } }
-    };
-    hq.openStatModal = () => calls.push('panel');
-    hq.runHQStationAction('second-brain');
-    assert.deepEqual(
-      calls,
-      ['open null false', 'manage'],
-      'a missing folder never opens the panel'
-    );
-
-    // Without a drawer on the page, Home's mission link opens the chooser.
-    calls.length = 0;
-    globalThis.window = { location: { assign: p => calls.push('nav ' + p) } };
-    hq.statModalTrigger = row;
-    hq.handleNotesPanelAction('notes-connection');
-    assert.deepEqual(calls, ['close', 'nav /?quest=second-brain']);
-  } finally {
-    globalThis.window = originalWindow;
   }
 });
 

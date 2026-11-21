@@ -377,7 +377,7 @@ export function assistantPanelOpenIntent(search, hasToday, pathname = '') {
   const updateArrival = parseWorkspaceUpdateIntent(search) !== null;
   return {
     requestedOpen: !updateArrival && (today || assistant),
-    restoreAllowed: !updateArrival && panel !== 'backup-recovery',
+    restoreAllowed: !updateArrival && panel !== 'backup-recovery' && pathname !== '/my-notes',
     // `/?panel=today` is the way to what needs the user (the "N need you"
     // line, the HQ card, a locked mission), so it opens Today's strip too.
     // `&folder=show` is the way to the folder flow in the conversation.

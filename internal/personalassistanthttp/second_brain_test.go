@@ -45,6 +45,10 @@ func (f *fakeSecondBrain) Status(context.Context, string) (personalassistant.Sec
 	return personalassistant.SecondBrainView{Status: "not_connected"}, f.record("status")
 }
 
+func (f *fakeSecondBrain) ConnectionStatus(context.Context, string) (personalassistant.SecondBrainView, error) {
+	return personalassistant.SecondBrainView{Status: "not_connected", SetupRequired: "hq"}, f.record("connectionStatus")
+}
+
 func (f *fakeSecondBrain) MarkPrompted(context.Context, string, string) (personalassistant.SecondBrainView, error) {
 	return personalassistant.SecondBrainView{}, f.record("prompted")
 }
@@ -88,7 +92,7 @@ func (f *fakeSecondBrain) Create(_ context.Context, _ string, input personalassi
 	return personalassistant.SecondBrainView{LookID: "look-1"}, f.record("create")
 }
 
-func (f *fakeSecondBrain) Capture(_ context.Context, _ string, text, requestID string) (personalassistant.SecondBrainCaptureView, error) {
+func (f *fakeSecondBrain) CaptureForSource(_ context.Context, _ string, text, requestID string, _ string) (personalassistant.SecondBrainCaptureView, error) {
 	f.capture = [2]string{text, requestID}
 	return personalassistant.SecondBrainCaptureView{Note: "Inbox/20261031-1407-note.md", Name: "20261031-1407-note"}, f.record("capture")
 }
@@ -129,7 +133,11 @@ func (f *fakeSecondBrain) OpenFolder(_ context.Context, _ string, requestID stri
 	return f.record("open_folder")
 }
 
-func (f *fakeSecondBrain) Preview(_ context.Context, _ string, kind, name string) (personalassistant.SecondBrainPreviewView, error) {
+func (f *fakeSecondBrain) Browse(_ context.Context, _ string, _ string, _ []string) (personalassistant.SecondBrainDirectory, error) {
+	return personalassistant.SecondBrainDirectory{}, f.record("browse")
+}
+
+func (f *fakeSecondBrain) Preview(_ context.Context, _ string, kind, name string, _ ...string) (personalassistant.SecondBrainPreviewView, error) {
 	f.preview = [2]string{kind, name}
 	return personalassistant.SecondBrainPreviewView{Name: name, Kind: kind, Title: "Launch", Body: "Finishing the plan\n"}, f.record("preview")
 }
@@ -167,6 +175,7 @@ func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	mux.HandleFunc("GET "+base+"/preview/{kind}/{name}", h.GetSecondBrainPreview)
 	mux.HandleFunc("GET "+base+"/people", h.GetSecondBrainPeople)
 	mux.HandleFunc("GET "+base+"/inbox", h.GetSecondBrainInbox)
+	mux.HandleFunc("GET "+base+"/browse", h.BrowseSecondBrain)
 	mux.HandleFunc("POST "+base+"/setup/retry", h.RetrySecondBrainSetup)
 	mux.HandleFunc("POST "+base+"/disconnect", h.DisconnectSecondBrain)
 	return mux
@@ -321,6 +330,37 @@ func TestSecondBrainItemRoute_TakesAClosedBodyAndMapsEachRefusal(t *testing.T) {
 				t.Fatalf("code = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSecondBrainBrowse_SameOriginAndClosedQuery(t *testing.T) {
+	fake := &fakeSecondBrain{}
+	handler := newSecondBrainHandler(fake)
+	const origin = "http://localhost:8931"
+	for _, q := range []string{"", "?ref=reference&path=/somewhere", "?ref=a&ref=b"} {
+		if got := secondBrainRequest(handler, http.MethodGet, "/browse"+q, "", origin).Code; got != http.StatusBadRequest {
+			t.Fatalf("invalid browse query %s = %d", q, got)
+		}
+	}
+	path := "/browse?ref=" + strings.Repeat("0", 64) + "&part=Projects&part=Work"
+	if got := secondBrainRequest(handler, http.MethodGet, path, "", "https://other.invalid").Code; got != http.StatusForbidden {
+		t.Fatalf("foreign origin browse = %d", got)
+	}
+	res := secondBrainRequest(handler, http.MethodGet, path, "", origin)
+	if res.Code != http.StatusOK || res.Header().Get("Cache-Control") != "no-store" || strings.Join(fake.calls, ",") != "browse" {
+		t.Fatalf("browse = %d %s, calls: %v", res.Code, res.Body, fake.calls)
+	}
+}
+
+func TestSecondBrainConnectionStatus_UsesLightweightReadAndKeepsOriginGuard(t *testing.T) {
+	fake := &fakeSecondBrain{}
+	handler := newSecondBrainHandler(fake)
+	if got := secondBrainRequest(handler, http.MethodGet, "?view=connection", "", "https://other.invalid").Code; got != http.StatusForbidden {
+		t.Fatalf("foreign origin status = %d", got)
+	}
+	res := secondBrainRequest(handler, http.MethodGet, "?view=connection", "", "http://localhost:8931")
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"setup_required":"hq"`) || strings.Join(fake.calls, ",") != "connectionStatus" {
+		t.Fatalf("connection status = %d %s, calls: %v", res.Code, res.Body, fake.calls)
 	}
 }
 

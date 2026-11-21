@@ -3,7 +3,7 @@ import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
-// The Notes station's panel, in the browser, against the sandboxes that
+// My Notes views, in the browser, against the sandboxes that
 // scripts/second-brain-demo.sh prints. One spec file covers both shapes; each
 // case skips unless its sandbox is named.
 //
@@ -58,24 +58,13 @@ async function waitForLook(request: APIRequestContext, notLook = '') {
     .not.toBe('');
 }
 
-async function hqSlug(request: APIRequestContext): Promise<string> {
-  const response = await request.get('/api/personal-assistant/today');
-  expect(response.ok(), await response.text()).toBeTruthy();
-  const slug = (await response.json()).today?.hq_workspace_slug;
-  expect(slug).toBeTruthy();
-  return slug;
-}
-
-// Home's result link can land in Overview's inline panel. The direct panel
-// cases below explicitly use Map so their modal scrolling assertions stay real.
-const panel = (page: Page) =>
-  page.locator('.ws-cmd-modal-panel.is-station:visible, [data-cmd-hq-host="notes"]:visible');
+const panel = (page: Page) => page.locator('[data-my-notes-tools]:visible');
 const section = (page: Page, key: string) => panel(page).locator(`[data-notes-section="${key}"]`);
 const tab = (page: Page, key: string) => panel(page).locator(`#notes-tab-${key}`);
 
-async function openPanel(page: Page, request: APIRequestContext) {
-  await page.goto(`/workspaces/${await hqSlug(request)}?mode=map&station=second-brain`);
-  await expect(panel(page).locator('.ws-cmd-modal-title')).toHaveText('Notes');
+async function openPanel(page: Page) {
+  await page.goto(create ? '/my-notes?view=inbox' : '/my-notes?view=loops');
+  await expect(panel(page).getByRole('tab', { selected: true })).toBeVisible();
 }
 
 test.describe('a connected vault', () => {
@@ -121,15 +110,16 @@ test.describe('a connected vault', () => {
     await expect(link).toBeVisible();
     await expect(page.getByText(/Also needs you/)).toBeHidden();
     await link.click();
-    await expect(panel(page).locator('.ws-cmd-modal-title')).toHaveText('Notes');
-    expect(page.url()).not.toContain('station=');
+    await expect(
+      panel(page).getByRole('tab', { name: /Open loops/, selected: true })
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/my-notes\?view=loops$/);
   });
 
   test('the panel groups open loops and has no Inbox, Today, Capture or Projects', async ({
-    page,
-    request
+    page
   }) => {
-    await openPanel(page, request);
+    await openPanel(page);
     await expect(section(page, 'loops').locator('.ws-notes-item').first()).toBeVisible();
     await expect(section(page, 'footer')).toContainText('open item');
     await expect(panel(page).getByRole('tab')).toHaveText([/Open loops/, /People/]);
@@ -149,7 +139,7 @@ test.describe('a connected vault', () => {
     page,
     request
   }) => {
-    await openPanel(page, request);
+    await openPanel(page);
     const loops = section(page, 'loops');
     const start = await loops.locator('.ws-notes-list .ws-notes-item').count();
     expect(start).toBeGreaterThanOrEqual(3);
@@ -177,35 +167,24 @@ test.describe('a connected vault', () => {
     expect(folderSnapshot(vault)).toBe(folderBefore);
   });
 
-  test('triaging low in a long list stays where the user had scrolled', async ({
-    page,
-    request
-  }) => {
+  test('triaging low in a long list does not jump to the top of My Notes', async ({ page }) => {
     await page.setViewportSize({ width: 1000, height: 560 });
-    await openPanel(page, request);
-    const body = panel(page).locator('.ws-notes-body');
+    await openPanel(page);
     const row = section(page, 'loops')
       .locator('.ws-notes-list:not(.ws-notes-handled *) .ws-notes-item')
       .last();
     await row.scrollIntoViewIfNeeded();
-    const before = await body.evaluate(element => element.scrollTop);
-    expect(before).toBeGreaterThan(0);
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
     await row.hover();
-    // The badge's re-read repaints once more after the triage itself.
-    const reread = page.waitForResponse(
-      response => new URL(response.url()).pathname === ENDPOINT && response.ok()
-    );
     await row.locator('[data-cmd-modal-action="notes-item-dismiss"]').click();
     await expect(section(page, 'loops').locator('.ws-notes-handled summary')).toHaveText(
       '4 handled'
     );
-    await reread;
-    await page.waitForTimeout(200);
-    expect(await body.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
   });
 
-  test('Look again inside the limit says so', async ({ page, request }) => {
-    await openPanel(page, request);
+  test('Look again inside the limit says so', async ({ page }) => {
+    await openPanel(page);
     await section(page, 'footer').locator('[data-cmd-modal-action="notes-look-again"]').click();
     // It says when Ori looked and how long to wait (notes-station-panel FR18).
     await expect(section(page, 'footer').locator('[role="status"]')).toHaveText(
@@ -228,8 +207,8 @@ test.describe('a second brain Ori set up', () => {
     await waitForLook(request);
   });
 
-  test('the panel opens on Inbox, and a capture lands at its top', async ({ page, request }) => {
-    await openPanel(page, request);
+  test('the panel opens on Inbox, and a capture lands at its top', async ({ page }) => {
+    await openPanel(page);
     await expect(section(page, 'inbox').locator('.ws-notes-item').first()).toBeVisible();
     await expect(panel(page).getByRole('tab')).toHaveText([
       /Inbox/,
@@ -249,8 +228,8 @@ test.describe('a second brain Ori set up', () => {
     });
   });
 
-  test('Today moves from none to saved through the Journal', async ({ page, request }) => {
-    await openPanel(page, request);
+  test('Today moves from none to saved through the Journal', async ({ page }) => {
+    await openPanel(page);
     const today = section(page, 'today');
     await expect(today).toContainText('No note for today yet.');
     await today.locator('[data-notes-journal]').click();
@@ -258,7 +237,7 @@ test.describe('a second brain Ori set up', () => {
     await page.locator('.hq-journal-editor').fill('Shipped the mix and talked to Dana.');
     await page.getByRole('button', { name: 'Save journal' }).click();
     await expect(page.locator('.hq-journal-launch')).toBeVisible();
-    await openPanel(page, request);
+    await openPanel(page);
     await expect(section(page, 'today')).toContainText('saved');
   });
 });

@@ -9484,48 +9484,34 @@ button.ws-cmd-rpg-class-card:focus-visible {
   margin: 0 0 18px;
 }
 
-/* The Notes panel inline: the station panel's own markup, minus the dialog's
-   close button, which has nothing to close in the main column. */
-.ws-hq-notes {
-  display: block;
-  border: 1px solid var(--ws-line);
-  background: var(--ws-panel-2);
+/* Personal capture on HQ Overview; the notebook itself lives on My Notes. */
+.ws-hq-capture {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  background: var(--bg-primary);
+  color: var(--text-primary);
 }
-.ws-hq-notes[hidden] {
-  display: none;
+.ws-hq-capture h3,
+.ws-hq-capture p {
+  margin: 0;
 }
-.ws-hq-notes .ws-cmd-modal-close {
-  display: none;
-}
-.ws-hq-notes .ws-notes-body {
-  max-height: 520px;
-  overflow-y: auto;
-}
-/* In the main column on a phone a row's actions take more than one line
-   rather than running past the panel ("Open in Obsidian", demo 5.5). */
-.ws-hq-notes .ws-notes-item-actions {
+.ws-hq-capture-actions {
+  display: flex;
+  gap: 0.5rem;
   flex-wrap: wrap;
-  max-width: 100%;
-  min-width: 0;
 }
-/* Its heading reads like the other main-column panels', not a dialog's. */
-.ws-hq-notes .ws-cmd-modal-head {
-  padding: 12px 14px 6px;
-  border-bottom: 0;
+.ws-hq-capture-form {
+  display: grid;
+  gap: 0.4rem;
 }
-.ws-hq-notes .ws-cmd-modal-title {
-  color: var(--ws-ink);
-  font-family: var(--font-display, Georgia, serif);
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: normal;
-  text-transform: none;
-}
-.ws-hq-notes-meta {
-  padding-top: 0;
+.ws-hq-capture-title {
+  font-size: 1.15rem;
 }
 
-/* Main-column panels: Needs you and Stations share the Notes panel's chrome. */
+/* Main-column panels for Needs you and Stations. */
 .ws-hq-panel {
   padding: 12px 14px 14px;
   border: 1px solid var(--ws-line);
@@ -9585,19 +9571,6 @@ button.ws-cmd-rpg-class-card:focus-visible {
   font-size: 13.5px;
   overflow-wrap: anywhere;
 }
-.ws-hq-notes-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  margin: 0;
-  padding: 0 14px 8px;
-  color: var(--ws-ink-dim);
-  font-size: 12.5px;
-}
-.ws-hq-notes-badge.is-attention {
-  color: var(--ws-keeper);
-}
-
 /* Stations grid: two columns by default, three when the column is wide, one
    on a phone (auto-fit with a minimum card width, FR27). */
 .ws-hq-station-grid {
@@ -9752,8 +9725,8 @@ button.ws-cmd-rpg-class-card:focus-visible {
   right: 6px;
   bottom: auto;
 }
-.ws-hq-tip-cell .ws-hq-notes .ws-cmd-modal-head {
-  padding-right: 56px;
+.ws-hq-tip-cell .ws-hq-capture-title {
+  padding-inline-end: 56px;
 }
 .ws-hq-panel-host.is-tip-marked {
   outline: 1px solid var(--ws-ink-dim);

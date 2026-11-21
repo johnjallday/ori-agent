@@ -169,7 +169,7 @@ test('shown is not answered: after a reload the ask waits under Needs you and on
   await expect(action(page, 'later')).toHaveCount(1);
   await expect
     .poll(async () => (await todayNeeds(request)).find(row => row.kind === 'second_brain_ask'))
-    .toMatchObject({ title: 'Set up your notes', route: '/?quest=second-brain' });
+    .toMatchObject({ title: 'Set up your notes', route: '/my-notes' });
 });
 
 test("Not now comes back on day 7 with Don't ask again, which ends it", async ({

@@ -202,14 +202,14 @@ test('Not now posts no data and reports only success', async () => {
   );
 });
 
-test('the first-week recap keeps its route to the Notes station and only a Dismiss', () => {
+test('the first-week recap keeps its route to My Notes Inbox and only a Dismiss', () => {
   const [recap, other] = todaySectionItems({
     items: [
       {
         id: 'second-brain-week-20261108',
         kind: 'second_brain_week',
         title: 'This week your notes gained 4 facts, 2 people, 1 project and 5 captures.',
-        route: '/workspaces/personal-hq?station=second-brain',
+        route: '/my-notes?view=inbox',
         actions: ['dismiss', 'delete_everything']
       },
       {
@@ -221,7 +221,7 @@ test('the first-week recap keeps its route to the Notes station and only a Dismi
     ]
   });
   assert.deepEqual(recap.actions, ['dismiss'], 'an unlisted control is dropped');
-  assert.equal(recap.route, '/workspaces/personal-hq?station=second-brain');
+  assert.equal(recap.route, '/my-notes?view=inbox');
   assert.equal(other.actions, undefined, 'only the recap has a Dismiss');
 });
 
@@ -232,13 +232,13 @@ test('the notes ask row keeps its route to the ask', () => {
         id: 'second-brain-ask',
         kind: 'second_brain_ask',
         title: 'Set up your notes',
-        route: '/?quest=second-brain'
+        route: '/my-notes'
       }
     ]
   });
   assert.equal(ask.kind, 'second_brain_ask');
   assert.equal(ask.title, 'Set up your notes');
-  assert.equal(ask.route, '/?quest=second-brain');
+  assert.equal(ask.route, '/my-notes');
   assert.equal(ask.actions, undefined, 'the row has no controls of its own');
 });
 
@@ -892,13 +892,13 @@ test('the stale-notes nudge keeps its route to the Notes panel and only a Not no
         id: 'second-brain-stale-look-1',
         kind: 'second_brain_stale',
         title: 'Your notes were last read 8 days ago',
-        route: '/workspaces/personal-hq?station=second-brain',
+        route: '/my-notes?view=loops',
         actions: ['not_now', 'disconnect']
       }
     ]
   });
   assert.deepEqual(nudge.actions, ['not_now'], 'an unlisted control is dropped');
-  assert.equal(nudge.route, '/workspaces/personal-hq?station=second-brain');
+  assert.equal(nudge.route, '/my-notes?view=loops');
 });
 
 test('Not now on the nudge posts only a request id and reports only success', async () => {

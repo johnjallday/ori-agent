@@ -468,6 +468,12 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	s.renderAndWritePage(w, "index", data)
 }
 
+func (s *Server) serveMyNotes(w http.ResponseWriter, _ *http.Request) {
+	data := s.prepareBasePageData("my-notes")
+	data.Title = "My Notes - Ori Agent"
+	s.renderAndWritePage(w, "index", data)
+}
+
 func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("agents")
 	// The roster/stage redesign is the Agents page. The classic dashboard has been
@@ -797,6 +803,10 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 
 	// If just /workspaces/{id}, serve the workspace detail page
 	if len(parts) == 1 {
+		if r.Method == http.MethodGet && r.URL.Query().Get("station") == "second-brain" && s.currentPersonalHQForPage(workspaceID, "") {
+			http.Redirect(w, r, "/my-notes", http.StatusFound)
+			return
+		}
 		s.serveWorkspaceDetail(w, workspaceID, workspaceSlug)
 		return
 	}

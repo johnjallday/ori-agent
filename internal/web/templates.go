@@ -97,6 +97,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/assistant-led-setup.tmpl",
 		"templates/components/daily-brief-settings-modal.tmpl",
 		"templates/components/dashboard.tmpl",
+		"templates/components/my-notes.tmpl",
 		"templates/components/session-modals.tmpl",
 		"templates/components/search-palette.tmpl",
 		"templates/components/chat-area.tmpl",

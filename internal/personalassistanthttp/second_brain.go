@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -19,11 +20,12 @@ import (
 // endpoint issued; no handler here accepts a path (FR41).
 type SecondBrainService interface {
 	Status(ctx context.Context, userID string) (personalassistant.SecondBrainView, error)
+	ConnectionStatus(ctx context.Context, userID string) (personalassistant.SecondBrainView, error)
 	MarkPrompted(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 	DecideAsk(ctx context.Context, userID, decision, requestID string) (personalassistant.SecondBrainView, error)
 	Connect(ctx context.Context, userID string, input personalassistant.SecondBrainConnectInput) (personalassistant.SecondBrainView, error)
 	Create(ctx context.Context, userID string, input personalassistant.SecondBrainCreateInput) (personalassistant.SecondBrainView, error)
-	Capture(ctx context.Context, userID, text, requestID string) (personalassistant.SecondBrainCaptureView, error)
+	CaptureForSource(ctx context.Context, userID, text, requestID, sourceRef string) (personalassistant.SecondBrainCaptureView, error)
 	Look(ctx context.Context, userID string) (personalassistant.SecondBrainLookView, error)
 	LookAgain(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainLookView, error)
 	AcceptFollowUps(ctx context.Context, userID, lookID string, input personalassistant.SecondBrainAcceptInput) (personalassistant.SecondBrainAcceptView, error)
@@ -37,7 +39,8 @@ type SecondBrainService interface {
 	DismissWeek(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 	DismissNudge(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 	OpenFolder(ctx context.Context, userID, requestID string) error
-	Preview(ctx context.Context, userID, kind, name string) (personalassistant.SecondBrainPreviewView, error)
+	Preview(ctx context.Context, userID, kind, name string, browseRef ...string) (personalassistant.SecondBrainPreviewView, error)
+	Browse(ctx context.Context, userID, ref string, parts []string) (personalassistant.SecondBrainDirectory, error)
 	People(ctx context.Context, userID string) (personalassistant.SecondBrainPeopleView, error)
 	// RetrySetup re-runs the recorded notes setup from a Personal HQ build, exactly
 	// as it was reviewed. It never touches HQ (assistant-hq-onboarding 3.4).
@@ -85,7 +88,11 @@ func (h *Handler) GetSecondBrain(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := h.secondBrain.Status(r.Context(), userID)
+	status := h.secondBrain.Status
+	if r.URL.Query().Get("view") == "connection" {
+		status = h.secondBrain.ConnectionStatus
+	}
+	view, err := status(r.Context(), userID)
 	if err != nil {
 		writeSecondBrainError(w, err)
 		return
@@ -403,8 +410,9 @@ func (h *Handler) RetrySecondBrainSetup(w http.ResponseWriter, r *http.Request) 
 }
 
 type secondBrainCaptureRequest struct {
-	Text      string `json:"text"`
-	RequestID string `json:"request_id"`
+	Text      string  `json:"text"`
+	RequestID string  `json:"request_id"`
+	SourceRef *string `json:"source_ref,omitempty"`
 }
 
 // CaptureSecondBrain writes one note to Inbox in a second brain Ori set up,
@@ -419,10 +427,18 @@ func (h *Handler) CaptureSecondBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req secondBrainCaptureRequest
-	if !decodeClosedBody(w, r, maxSecondBrainCaptureBodyBytes, &req, "text", "request_id") {
+	if !decodeClosedBody(w, r, maxSecondBrainCaptureBodyBytes, &req, "text", "request_id", "source_ref") {
 		return
 	}
-	view, err := h.secondBrain.Capture(r.Context(), userID, req.Text, strings.TrimSpace(req.RequestID))
+	var ref string
+	if req.SourceRef != nil {
+		ref = *req.SourceRef
+		if len(ref) != 64 {
+			orihttp.BadRequest(w, "The notes connection reference is invalid")
+			return
+		}
+	}
+	view, err := h.secondBrain.CaptureForSource(r.Context(), userID, req.Text, strings.TrimSpace(req.RequestID), ref)
 	if err != nil {
 		writeSecondBrainError(w, err)
 		return
@@ -614,6 +630,36 @@ func (h *Handler) OpenSecondBrainFolder(w http.ResponseWriter, r *http.Request) 
 	orihttp.Success(w, map[string]any{"opened": true})
 }
 
+// BrowseSecondBrain lists immediate child names of one approved folder.
+func (h *Handler) BrowseSecondBrain(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	if len(r.URL.RawQuery) > 8192 {
+		orihttp.BadRequest(w, "That folder path is too long")
+		return
+	}
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	ref, parts := query["ref"], query["part"]
+	delete(query, "ref")
+	delete(query, "part")
+	if err != nil || len(ref) != 1 || len(query) != 0 {
+		orihttp.BadRequest(w, "Choose a directory in your connected notes folder")
+		return
+	}
+	view, err := h.secondBrain.Browse(r.Context(), userID, ref[0], parts)
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	orihttp.Success(w, map[string]any{"directory": view})
+}
+
 // GetSecondBrainPreview shows one note Ori wrote, inline (FR16). kind and name
 // are checked before anything is read: name is one component, never a path.
 func (h *Handler) GetSecondBrainPreview(w http.ResponseWriter, r *http.Request) {
@@ -625,11 +671,14 @@ func (h *Handler) GetSecondBrainPreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	kind, name := r.PathValue("kind"), r.PathValue("name")
-	if _, err := secondbrain.PreviewRel(kind, name); err != nil || r.URL.RawQuery != "" {
+	query, queryErr := url.ParseQuery(r.URL.RawQuery)
+	ref := query["ref"]
+	if _, err := secondbrain.PreviewRel(kind, name); err != nil || queryErr != nil ||
+		(len(query) > 0 && (len(query) != 1 || len(ref) != 1 || len(ref[0]) != 64)) {
 		orihttp.BadRequest(w, "Name one note: inbox, daily or project, and one file or folder name")
 		return
 	}
-	view, err := h.secondBrain.Preview(r.Context(), userID, kind, name)
+	view, err := h.secondBrain.Preview(r.Context(), userID, kind, name, ref...)
 	if err != nil {
 		writeSecondBrainError(w, err)
 		return
@@ -703,6 +752,10 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 		orihttp.NotFound(w, "That vault is no longer in Obsidian's list. Choose it again")
 	case errors.Is(err, personalassistant.ErrSecondBrainSelection):
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Ori no longer has that folder open. Pick it again", "needs_pick": true, "needs_pick_reason": personalassistant.FolderPickReason(err)})
+	case errors.Is(err, personalassistant.ErrSecondBrainBrowseStale):
+		orihttp.Conflict(w, "Your notes connection changed. Reopen the notebook")
+	case errors.Is(err, personalassistant.ErrSecondBrainBrowseMissing):
+		orihttp.NotFound(w, "That folder is no longer available")
 	case errors.Is(err, personalassistant.ErrSecondBrainNotConnected):
 		orihttp.Conflict(w, "No notes folder is connected")
 	case errors.Is(err, secondbrain.ErrNotOwned):

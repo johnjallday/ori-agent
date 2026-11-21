@@ -86,6 +86,7 @@ func registerPageRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/", s.serveIndex)
 	mux.HandleFunc("/settings", s.serveSettings)
 	mux.HandleFunc("/profile", s.serveProfile)
+	mux.HandleFunc("GET /my-notes", s.serveMyNotes)
 	mux.HandleFunc("/vaults", s.serveVault)
 	mux.HandleFunc("/vault", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/vaults", http.StatusMovedPermanently)
@@ -1377,6 +1378,7 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("POST "+secondBrain+"/look/{lookID}/follow-ups", s.Handlers.PersonalAssistant.AcceptSecondBrainFollowUps)
 		mux.HandleFunc("POST "+secondBrain+"/look/{lookID}/dismiss", s.Handlers.PersonalAssistant.DismissSecondBrainLook)
 		mux.HandleFunc("POST "+secondBrain+"/look/{lookID}/items/{itemID}", s.Handlers.PersonalAssistant.ActOnSecondBrainItem)
+		mux.HandleFunc("GET "+secondBrain+"/browse", s.Handlers.PersonalAssistant.BrowseSecondBrain)
 		mux.HandleFunc("GET "+secondBrain+"/inbox", s.Handlers.PersonalAssistant.GetSecondBrainInbox)
 		// Doors that are not Obsidian (Issue 776): open the folder, preview a note
 		// Ori wrote, list People. A preview names one note by kind and one component.

@@ -1,0 +1,174 @@
+.my-notes {
+  --ws-line: var(--border-color);
+  --ws-bg-2: var(--bg-secondary);
+  --ws-ink: var(--text-primary);
+  --ws-ink-dim: var(--text-secondary);
+  --ws-ink-faint: var(--text-secondary);
+  --ws-faction: var(--primary-color);
+  --ws-font-mono: ui-monospace, monospace;
+  width: min(54rem, 100%);
+  margin-inline: auto;
+  padding: clamp(1rem, 4vw, 3rem);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.my-notes-heading {
+  margin-block-end: 2rem;
+}
+
+.my-notes-heading h1 {
+  width: fit-content;
+  margin-block: 0.2rem 0.4rem;
+  font:
+    500 clamp(2.5rem, 7vw, 4.5rem) / 1 Georgia,
+    serif;
+  letter-spacing: -0.055em;
+}
+
+.my-notes-heading p,
+.my-notes [data-my-notes-status] > p {
+  color: var(--text-secondary);
+}
+
+.my-notes-home {
+  display: inline-block;
+  margin-block-end: 2rem;
+}
+
+.my-notes-kicker {
+  margin: 0;
+  font: 700 0.7rem / 1.4 var(--ws-font-mono);
+  letter-spacing: 0.16em;
+}
+
+.my-notes-sheet {
+  border: 1px solid var(--border-color);
+  border-block-start: 3px solid var(--primary-color);
+  border-radius: 0.75rem;
+  background: var(--bg-primary);
+}
+
+.my-notes [data-my-notes-status] {
+  padding: clamp(1rem, 3vw, 1.5rem);
+}
+
+.my-notes [data-my-notes-status] h2 {
+  font-size: 1.25rem;
+}
+
+.my-notes-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.my-notes [data-my-notes-notice] {
+  margin: 0;
+}
+
+.my-notes [data-my-notes-notice]:not(:empty) {
+  margin-block-start: 0.75rem;
+}
+
+.my-notes-browser {
+  border-block-start: 1px solid var(--border-color);
+  padding: clamp(1rem, 3vw, 1.5rem);
+}
+
+.my-notes-browser h2 {
+  width: fit-content;
+  margin-block: 1rem 0.75rem;
+}
+
+.my-notes-crumbs,
+.my-notes-file-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.my-notes-crumbs button {
+  text-align: start;
+}
+
+.my-notes-filenames {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.my-notes-filename {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-block-start: 1px solid var(--border-color);
+  padding-block: 0.55rem;
+}
+
+.my-notes-child-folder::before {
+  content: "↳";
+  margin-inline-end: 0.5rem;
+}
+
+.my-notes-file-preview {
+  flex: 0 0 100%;
+  border-inline-start: 2px solid var(--primary-color);
+  padding: 0.7rem 1rem;
+  background: var(--bg-secondary);
+  white-space: pre-wrap;
+}
+
+.my-notes-file-preview p:last-child {
+  margin: 0;
+}
+
+.my-notes [data-my-notes-tools] {
+  border-block-start: 1px solid var(--border-color);
+}
+
+.my-notes .ws-notes-body {
+  overflow: visible;
+  min-height: 0;
+}
+
+.my-notes .ws-notes-tabs {
+  flex-wrap: wrap;
+}
+
+.my-notes .ws-notes-tabpanel {
+  min-height: 0;
+}
+
+.my-notes .ws-notes-item-actions {
+  flex-wrap: wrap;
+}
+
+.my-notes .ws-notes-capture {
+  flex-wrap: wrap;
+}
+
+.my-notes .ws-notes-capture-input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .my-notes {
+    padding-block-end: 5.5rem;
+  }
+  /* Keep the assistant available without covering the notebook's controls. */
+  #personalAssistantLauncher {
+    padding: 5px;
+  }
+  #personalAssistantLauncher .personal-assistant-launcher__copy {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}

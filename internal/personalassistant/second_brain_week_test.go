@@ -226,7 +226,7 @@ func TestSecondBrainWeek_TheRowReachesTodayInDoneWithADismiss(t *testing.T) {
 	if row == nil {
 		t.Fatalf("no second_brain_week row in Done: %+v", done)
 	}
-	if len(row.Actions) != 1 || row.Actions[0] != "dismiss" || row.Route != "/workspaces/personal-hq?station=second-brain" || row.Title == "" {
+	if len(row.Actions) != 1 || row.Actions[0] != "dismiss" || row.Route != "/my-notes?view=inbox" || row.Title == "" {
 		t.Fatalf("row = %+v", *row)
 	}
 }

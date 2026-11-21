@@ -122,10 +122,7 @@ test('the first step follows canonical notes states, never treating HQ success a
   );
   assert.match(writable.lead, /Notes are ready/);
   const readOnly = hqFirstActionView({ status: 'ready', writable: false }, { hqRoute: route });
-  assert.deepEqual(
-    [readOnly.note, readOnly.openNotes],
-    [false, '/workspaces/my-hq?station=second-brain']
-  );
+  assert.deepEqual([readOnly.note, readOnly.openNotes], [false, '/my-notes']);
   const deferred = hqFirstActionView(null, { hqRoute: route });
   assert.deepEqual([deferred.note, deferred.setupNotes], [false, true]);
   assert.doesNotMatch(deferred.lead, /notes have a home/);

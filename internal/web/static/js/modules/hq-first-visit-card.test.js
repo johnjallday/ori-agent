@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { WorkspaceCommandView } from './workspace-command.js';
 import { FIRST_VISIT_MISSIONS } from './hq-first-visit.js';
 import { readNoteDraft, writeNoteDraft } from './hq-first-note.js';
+import { HQQuickCapture } from './hq-quick-capture.js';
 
 const missionRows = (note = 'open') =>
   Object.entries(FIRST_VISIT_MISSIONS).map(([key, id]) => ({
@@ -193,27 +194,22 @@ test('switching away from HQ Overview closes any open suggestions without steali
   assert.equal(closed, false);
 });
 
-test('note handoff selects the existing Inbox and focuses capture without replacing its draft', () => {
+test('note handoff focuses HQ capture without replacing its draft', () => {
   const { owner } = fixture();
   const calls = [];
-  const panel = { captureDraft: 'Existing draft', tab: 'more' };
-  owner._notesPanel = panel;
-  const node = {
-    scrollIntoView: () => calls.push('scroll'),
+  const capture = new HQQuickCapture();
+  capture.draft.edit('Existing draft', 'same-connection');
+  capture.host = {
     querySelector: selector => {
-      assert.equal(selector, '[data-notes-capture]');
+      assert.equal(selector, 'input:not([readonly])');
       return { focus: () => calls.push('focus') };
     }
   };
-  owner.notesInlineNode = () => node;
-  owner.setNotesTab = tab => {
-    panel.tab = tab;
-    calls.push(tab);
-  };
+  owner.hqQuickCapture = capture;
   owner.focusHQNoteCapture();
-  assert.equal(panel.captureDraft, 'Existing draft');
-  assert.deepEqual(calls, ['inbox', 'scroll', 'focus']);
-  owner.notesState = () => ({ secondBrain: { source: { origin: 'connected' } } });
+  assert.equal(capture.draft.text, 'Existing draft');
+  assert.deepEqual(calls, ['focus']);
+  capture.mount(null);
   owner.openNotesStation = trigger => calls.push(trigger);
   owner.focusHQNoteCapture('connection');
   assert.equal(calls.at(-1), 'connection');

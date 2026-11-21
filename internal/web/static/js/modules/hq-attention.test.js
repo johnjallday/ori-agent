@@ -185,7 +185,7 @@ test('mail, stations and Notes keep their original actions', () => {
     [
       { label: 'Reply', kind: 'mail', index: 0 },
       { label: 'Review', kind: 'station', key: 'calendar-ops' },
-      { label: 'Look again', kind: 'notes' }
+      { label: 'Review in My Notes', kind: 'notes' }
     ]
   );
 });
