@@ -105,6 +105,10 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   const offerCard = page.locator('#personalAssistantFolderOffer');
   const today = page.locator('#personalAssistantTodayStripToggle');
   if ((await today.getAttribute('aria-expanded')) === 'false') await today.click();
+  await page
+    .locator('[data-source-setup-summary]:visible')
+    .getByRole('button', { name: 'Review setup', exact: true })
+    .click();
   await expect(offerCard).toBeVisible();
   // The collection already proposes its shape's Home, even before the
   // provider is installed. Missing packages retain the reviewed, step-by-step
@@ -122,11 +126,13 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   // template to plan from), so the card's own button is the step-by-step path:
   // it reviews the provider release, then opens the Home creator.
   await offerCard.getByRole('button', { name: 'Yes, set up Music Production Home' }).click();
+  await expect
+    .poll(() => disclosures.join('\n'), { timeout: 30_000 })
+    .toContain('Reviewed source: https://github.com/johnjallday/music-project-management#sha=');
   const creator = page.locator('#addFolderModal');
-  await expect(creator).toBeVisible({ timeout: 90_000 });
-  expect(disclosures.join('\n')).toContain(
-    'Reviewed source: https://github.com/johnjallday/music-project-management#sha='
-  );
+  await expect(creator.getByRole('button', { name: 'Continue →' })).toBeVisible({
+    timeout: 60_000
+  });
   const plugins = await json(await request.get('/api/plugins'));
   const installed = (plugins.plugins || []).find(
     (row: { name: string }) => row.name === 'music-project-management'
@@ -206,6 +212,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   expect(projects.rows).toHaveLength(5);
   const approvedRoots = await json(await request.get(`${base}/roots`));
   expect(approvedRoots.total_roots).toBe(1);
+  await expect(shelf.locator('#projectLibraryResume')).toBeHidden();
   await shot(page, '22-reviewed-portfolio-populated-shelf');
   await shelf.locator('.project-library-filters > summary').click();
   await expect(shelf.locator('#projectLibraryRoot option')).toHaveCount(2);
@@ -320,6 +327,20 @@ test('the reviewed release resolves a real portfolio offer, then separate review
       )
     ).toEqual(pluginsBefore);
   }
+  await setup.getByRole('button', { name: 'Close' }).click();
+  // Save a second entry before Album-3's recap so it is reachable, but not featured.
+  await shelf.getByRole('button', { name: 'Inspect Album-0', exact: true }).click();
+  await shelf.getByRole('tab', { name: 'Sessions', exact: true }).click();
+  await shelf
+    .locator('#projectLibraryPane')
+    .getByRole('button', { name: 'Plan a session' })
+    .click();
+  const otherGoal = page.getByRole('dialog', { name: 'Plan a studio session' });
+  await otherGoal.getByRole('textbox', { name: 'Session goal' }).fill('Compare two references');
+  await otherGoal.getByRole('button', { name: 'Review session' }).click();
+  await page.getByRole('button', { name: 'Save goal', exact: true }).click();
+  await expect(shelf.locator('#projectLibraryStatus')).toContainText('Goal saved');
+  await reviewProject(page, 'Album-3');
   await setup.getByRole('button', { name: 'Plan a session' }).click();
   const planner = page.getByRole('dialog', { name: 'Plan a studio session' });
   await planner.getByRole('textbox', { name: 'Session goal' }).fill('Listen to the rough mix');
@@ -349,16 +370,22 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await expect(recapReview).toContainText('Also replaces the project’s saved next action');
   await recapReview.getByRole('button', { name: 'Save recap' }).click();
   await expect(shelf.locator('#projectLibraryStatus')).toContainText('Recap saved');
-  await page.reload();
+  // A normal visit has no setup/selection hash or carried folder offer.
+  await page.goto(new URL(page.url()).pathname);
   await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
-  await management(page);
+  await expect(shelf.locator('#projectLibraryManagement')).not.toHaveAttribute('open', '');
   const resume = shelf.locator('#projectLibraryResume');
+  await expect(resume).toBeVisible();
+  await expect(
+    shelf.locator('#projectLibraryManagement + #projectLibraryResume + .project-library-scopes')
+  ).toHaveCount(1);
+  await expect(resume.getByRole('button', { name: 'View Album-0 session' })).toBeVisible();
   await expect(resume).toContainText('Pick up where you left off');
   await expect(resume).toContainText('User-authored note');
   await expect(resume).toContainText('Current saved project next action: Record a scratch vocal');
   await resume.scrollIntoViewIfNeeded();
   await shot(page, '22d-reviewed-portfolio-home-resume-after-reload');
-  await resume.getByRole('button', { name: 'View Album-3 session' }).click();
+  await resume.getByRole('button', { name: 'View session notes', exact: true }).click();
   const resumed = page.locator('#projectLibraryPane');
   await expect(page.getByRole('tab', { name: 'Sessions', exact: true })).toHaveAttribute(
     'aria-selected',
@@ -454,10 +481,9 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   });
   expect(refusedGoal.status()).toBe(409);
   expect((await json(await request.get(`${base}/projects/${albumID}/sessions`))).total).toBe(1);
-  await management(page);
   await shelf
     .locator('#projectLibraryResume')
-    .getByRole('button', { name: 'View Album-3 session' })
+    .getByRole('button', { name: 'View session notes', exact: true })
     .click();
   const pausedDetail = page.locator('#projectLibraryPane');
   await expect(pausedDetail).toContainText('User recap: Kept the quieter chorus');

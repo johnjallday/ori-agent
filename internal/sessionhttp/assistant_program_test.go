@@ -120,8 +120,12 @@ func TestAssistantProgramIndependentAvailabilityReadDoesNotMutateHome(t *testing
 	handler.SetInstalledPluginLister(assistantInstalledPluginLister{})
 	station, _ = store.Get(station.ID)
 	summary, err := handler.buildAssistantProgramSummary(station, project)
-	if err != nil || summary.HomeProviderAvailable || summary.PluginAvailable {
-		t.Fatalf("independent availability summary = %#v err %v", summary, err)
+	if err != nil || summary.HomeProviderAvailable || summary.PluginAvailable || summary.HomeProviderID != "" {
+		t.Fatalf("independent child availability summary = %#v err %v", summary, err)
+	}
+	homeSummary, err := handler.buildAssistantProgramSummary(station, nil)
+	if err != nil || homeSummary.HomeProviderAvailable || homeSummary.HomeProviderID != "music" {
+		t.Fatalf("unavailable Home's saved identity = %#v err %v", homeSummary, err)
 	}
 	stored, _ := store.Get(station.ID)
 	state := stored.GetAssistantProgramState()

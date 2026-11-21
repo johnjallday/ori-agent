@@ -678,11 +678,9 @@ test('only a distinct reviewed child staffing action fills the existing-file pro
   await expect(shelf.locator('#projectLibraryResume')).toContainText(
     'User-authored linked-project recap'
   );
-  await expect(
-    shelf
-      .locator('#projectLibraryResume')
-      .getByRole('button', { name: 'View Existing Documents Song session' })
-  ).toBeVisible();
+  const handoff = shelf.locator('#projectLibraryResume');
+  await expect(handoff.getByRole('heading', { name: 'Existing Documents Song' })).toBeVisible();
+  await expect(handoff.getByRole('button', { name: 'View session notes' })).toBeVisible();
   expect((await json(await request.get(sessionsURL))).rows[0].shared_from_project).toMatchObject({
     workspace_id: saved.existingID,
     link_id: child.assistant_project_link.id
@@ -797,11 +795,9 @@ test('restart preserves exact candidate identities for both children and the rev
   await expect(page.locator('#projectLibraryResume')).toContainText(
     'User-authored linked-project recap'
   );
-  await expect(
-    page
-      .locator('#projectLibraryResume')
-      .getByRole('button', { name: 'View Existing Documents Song session' })
-  ).toBeVisible();
+  const handoff = page.locator('#projectLibraryResume');
+  await expect(handoff.getByRole('heading', { name: 'Existing Documents Song' })).toBeVisible();
+  await expect(handoff.getByRole('button', { name: 'View session notes' })).toBeVisible();
   expect(
     (
       await json(
