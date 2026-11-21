@@ -125,6 +125,41 @@ function args(map, host, { view, previous = null, followed = false } = {}) {
   };
 }
 
+test('only the workspace Filing map suppresses its completed receipt while waiting for access', () => {
+  const map = fakeMap({ narrow: true });
+  map.filingStation = true;
+  map.showing = () => map.state.visible;
+  const host = fakeHost();
+  const presenter = commanderPresenter(map, { hostLine: false });
+  const completed = folderAgentReportView(
+    raw({
+      state: 'set_up',
+      setup: { status: 'done' },
+      filing_permission_required: true
+    })
+  );
+  presenter.present(args(map, host, { view: completed, followed: true }));
+  assert.equal(host.hidden, true);
+  assert.equal(map.balloon.content, null);
+
+  map.state.visible = false;
+  map.fire();
+  assert.equal(host.hidden, false, 'Details keeps its completed receipt');
+  assert.match(map.balloon.content.line, /See what I made/);
+
+  map.state.visible = true;
+  map.state.narrow = false;
+  map.fire();
+  assert.equal(map.balloon.content, null);
+  presenter.present(args(map, host, { view: { ...completed, filingPermissionRequired: false } }));
+  assert.match(map.balloon.content.line, /See what I made/);
+  assert.equal(map.balloon.expanded, false);
+
+  const home = fakeMap();
+  commanderPresenter(home).present(args(home, fakeHost(), { view: completed }));
+  assert.match(home.balloon.content.line, /See what I made/);
+});
+
 test('on the Map tab the header card is one line and the balloon carries the report', () => {
   const map = fakeMap();
   const host = fakeHost();

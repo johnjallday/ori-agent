@@ -251,6 +251,12 @@ export function resolveWorkspaceNextAction(input) {
         label: waiting.action
       }
     });
+  if (input.onMap && janitor?.preparingPreview) {
+    return {
+      ...consoleDescriptor('setup', 'Preparing your preview…', 'Nothing is moving.', 'Open Filing'),
+      kind: 'preparing_preview'
+    };
+  }
   if (known) {
     if (janitor.readiness === 'needs_attention')
       return consoleDescriptor(
@@ -260,7 +266,28 @@ export function resolveWorkspaceNextAction(input) {
         'Repair setup',
         'attention'
       );
-    if (!janitor.configured || janitor.readiness === 'setup_required')
+    if (
+      input.onMap &&
+      ['preparation_incomplete', 'preparation_changed'].includes(janitor.preparationState)
+    )
+      return consoleDescriptor(
+        'setup',
+        'Filing preview needs attention',
+        'Open Filing to review the current folder and permissions.',
+        'Open Filing',
+        'attention'
+      );
+    if (!janitor.configured || janitor.readiness === 'setup_required') {
+      if (input.onMap && janitor.linkedFolderName)
+        return {
+          ...consoleDescriptor(
+            'setup',
+            `Prepare a filing preview for ${janitor.linkedFolderName}?`,
+            'See where your files would go before deciding what to move.',
+            'Review folder access'
+          ),
+          filingNote: { name: String(input.leadAgentName || '').trim() || 'Ori' }
+        };
       return consoleDescriptor(
         'setup',
         janitor.linkedFolderName
@@ -271,6 +298,7 @@ export function resolveWorkspaceNextAction(input) {
           : 'Nothing is scanned or moved until you choose one.',
         janitor.linkedFolderName ? 'Review permission' : 'Set up filing'
       );
+    }
     if (janitor.consentRequired)
       return consoleDescriptor(
         'consent',
@@ -287,18 +315,46 @@ export function resolveWorkspaceNextAction(input) {
     : known && janitor.batch?.state === 'ready'
       ? janitor.pendingCount
       : 0;
+  const preview = input.onMap && known && janitor.firstPreview;
+  const exactPreview =
+    preview &&
+    preview.rootId === janitor.rootId &&
+    preview.batchId === janitor.batchId &&
+    preview.count === pending &&
+    (!updateView ||
+      (reviewReady &&
+        review.root_id === preview.rootId &&
+        (review.batch_id || '') === preview.batchId));
+  if (exactPreview && !preview.batchId && pending === 0)
+    return consoleDescriptor(
+      'review',
+      'No eligible files for this preview',
+      'The initial scan finished. Nothing moved. Scan again when you choose.',
+      'Open Filing'
+    );
   if (pending > 0) {
     const descriptor = consoleDescriptor(
       'review',
       `${pending} file${pending === 1 ? '' : 's'} ready for review`,
-      'Review the proposed filing locations. Nothing moves without your approval.',
-      'Review files',
+      exactPreview
+        ? 'Your preview is at the Filing station. Nothing moved.'
+        : 'Review the proposed filing locations. Nothing moves without your approval.',
+      exactPreview ? 'Review preview' : 'Review files',
       'attention'
     );
     if (updateView)
       descriptor.action.key = `review:${workspaceId}:${review.installed_at}:${review.root_id}:${review.batch_id}`;
+    if (exactPreview) descriptor.filingPreview = preview;
     return descriptor;
   }
+  if (input.onMap && known && janitor.preparationState === 'result_unavailable')
+    return consoleDescriptor(
+      'setup',
+      'Initial preview unavailable',
+      'Open Filing to check the current folder. Nothing was rescanned.',
+      'Open Filing',
+      'attention'
+    );
   if (current) return taskDescriptor(current);
   if (known && janitor.scanning)
     return consoleDescriptor(

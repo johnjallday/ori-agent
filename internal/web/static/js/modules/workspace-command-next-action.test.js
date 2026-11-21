@@ -143,6 +143,49 @@ function bindPrimary(command) {
   return { html, button, click: () => click({ target: { closest: () => button } }) };
 }
 
+test('Map preview invitation uses the manager face and escapes folder and manager names', t => {
+  const janitorState = {
+    ...reviewState(),
+    configured: false,
+    linkedFolderName: 'Loose <Files>'
+  };
+  const command = view([], {
+    janitorState,
+    workspace: { entry_agent_name: 'My <Manager>' },
+    commanderFaceMarkup: name => {
+      assert.equal(name, 'My <Manager>');
+      return '<img src="/characters/operations-keeper/portrait.svg" alt="">';
+    }
+  });
+  assert.match(command.renderWorkFirst(), /Review permission/);
+  command.viewMode = 'map';
+  const calls = [];
+  globalThis.window = { FileJanitorConsole: { focusSetup: (...args) => calls.push(args) } };
+  t.after(() => delete globalThis.window);
+  const primary = bindPrimary(command);
+  assert.match(primary.html, /A note from My &lt;Manager&gt;/);
+  assert.match(primary.html, /operations-keeper\/portrait.svg/);
+  assert.match(primary.html, /Prepare a filing preview for Loose &lt;Files&gt;\?/);
+  assert.match(primary.html, />Review folder access<\/button>/);
+  assert.match(primary.html, /What access is needed\?/);
+  assert.doesNotMatch(primary.html, /All tickets/);
+  assert.equal((primary.html.match(/is-primary/g) || []).length, 1);
+  primary.click();
+  assert.deepEqual(calls, [[primary.button, { source: 'workspace-next-action' }]]);
+
+  delete command.page.commanderFaceMarkup;
+  delete command.page.workspace.entry_agent_name;
+  assert.match(command.renderWorkFirst(), /A note from Ori/);
+  assert.match(command.renderWorkFirst(), /ori-guide\/portrait.svg/);
+  command.page.tasks = [{ id: 'urgent', status: 'blocked' }];
+  assert.match(command.renderWorkFirst(), /Open ticket/);
+  assert.doesNotMatch(command.renderWorkFirst(), /Review folder access/);
+  command.page.tasks = [];
+  janitorState.linkedFolderName = '';
+  assert.match(command.renderWorkFirst(), /Choose the folder to file/);
+  assert.doesNotMatch(command.renderWorkFirst(), /A note from/);
+});
+
 function updateData(batch = 'current') {
   return {
     workspace_id: 'w',
@@ -213,6 +256,38 @@ test('update Review binding re-reads and opens the current batch without any wor
   assert.deepEqual(opened, [
     { source: 'workspace-updates', trigger: primary.button, batchId: 'new' }
   ]);
+});
+
+test('the map handoff waits for the overlay to close and marks each prepared batch once', t => {
+  let reducedMotion = false;
+  globalThis.window = { location: { search: '' }, matchMedia: () => ({ matches: reducedMotion }) };
+  t.after(() => delete globalThis.window);
+  const command = view([]);
+  command.viewMode = 'map';
+  const classes = [];
+  const node = { classList: { add: name => classes.push(name) } };
+  command.container = { querySelector: () => node };
+  const preview = { id: 'new', rootId: 'root', batchId: 'batch', consoleOpen: true };
+  let action = {};
+  command.nextAction = () => action;
+  command.markFilingPreviewHandoff();
+  action = { filingPreview: preview };
+  command.markFilingPreviewHandoff();
+  assert.deepEqual(classes, [], 'no hydration or animation behind the console');
+  preview.consoleOpen = false;
+  command.markFilingPreviewHandoff();
+  command.markFilingPreviewHandoff();
+  preview.consoleOpen = true;
+  command.markFilingPreviewHandoff();
+  preview.consoleOpen = false;
+  command.markFilingPreviewHandoff();
+  assert.deepEqual(classes, ['is-preview-handoff', 'is-preview-arriving']);
+  reducedMotion = true;
+  preview.batchId = 'second';
+  command.markFilingPreviewHandoff();
+  reducedMotion = false;
+  command.markFilingPreviewHandoff();
+  assert.equal(classes.length, 2, 'reduced motion suppresses rather than postpones the effect');
 });
 
 test('mounted Command shares one disposable watcher and ignores unchanged observations', async t => {
@@ -697,6 +772,21 @@ test('the Commander card says what it waits on, unless a ticket itself needs the
     command.mapAgentStatus({ tasks: [working], name: 'Albums Manager' }).label,
     'Working'
   );
+});
+
+test('the linked manager waits quietly for Filing permission only on the Map', () => {
+  const command = commandWithFolderAgent();
+  const receipt = { state: 'set_up', setup: { status: 'done' }, premise: undefined };
+  const status = name => command.mapAgentStatus({ name, tasks: [] }).label;
+  command.setFolderAgent('w', folderEntry({ ...receipt, filing_permission_required: true }));
+  assert.equal(status('Albums Manager'), 'Waiting for permission');
+  assert.equal(status('Someone Else'), 'Ready to help');
+  command.viewMode = 'details';
+  assert.equal(status('Albums Manager'), 'Ready to help');
+  command.viewMode = 'map';
+  command.setFolderAgent('w', folderEntry(receipt));
+  assert.equal(status('Albums Manager'), 'Ready to help');
+  assert.equal(command.renders, 2);
 });
 
 test('on the Map the look the Commander narrates is not the next action; Overview lists it (map-above-the-fold)', () => {

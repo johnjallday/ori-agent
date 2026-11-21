@@ -53,6 +53,7 @@ import {
 } from './workspace-overview.js';
 import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
 import { folderAgentWaiting, resolveWorkspaceNextAction } from './workspace-next-action.js';
+import { commanderWaitingForFiling } from './commander-speech.js';
 import { chatRefOf } from './folder-agent-chat.js';
 import { workspaceUpdates, watchWorkspaceUpdates } from './workspace-updates.js';
 import {
@@ -2482,7 +2483,10 @@ export class WorkspaceCommandView {
 
   // folderAgentWordsKey changes only when the words of a waiting moment do.
   folderAgentWordsKey() {
-    const waiting = folderAgentWaiting(this.folderAgentView(), this.workspaceId());
+    const view = this.folderAgentView();
+    if (this.viewMode === 'map' && commanderWaitingForFiling(view))
+      return `filing-permission:${view.agent}`;
+    const waiting = folderAgentWaiting(view, this.workspaceId());
     return waiting ? [waiting.phase, waiting.text, waiting.action, waiting.status].join('|') : '';
   }
 
@@ -2552,7 +2556,10 @@ export class WorkspaceCommandView {
     this._nextActionWorkspace = id;
     const signatureOf = () => {
       const { taskWork: _taskWork, sourceRows: _sourceRows, ...descriptor } = this.nextAction();
-      return JSON.stringify(descriptor);
+      return JSON.stringify([
+        descriptor,
+        this.viewMode === 'map' ? controller?.stationState?.() : null
+      ]);
     };
     let signature = signatureOf();
     if (typeof window.addEventListener === 'function') {
@@ -2614,6 +2621,7 @@ export class WorkspaceCommandView {
       workspaceId: this.workspaceId(),
       tasks: { state, items },
       console: this.janitorActionState(),
+      onMap: this.viewMode === 'map',
       leadAgentName:
         (page.buildAgentGroups?.() || []).find(group => this.isEntryAgentGroup(group))?.name ||
         page.workspace?.entry_agent_name ||
@@ -2658,14 +2666,38 @@ export class WorkspaceCommandView {
     }
     const view = this.nextAction();
     // Poll/retry starts and unchanged refreshes must not repeat the same action.
-    if (view.isLoading) return;
-    const text = [view.title, view.action?.label, ...view.qualifications]
+    if (view.isLoading || view.filingPreview?.consoleOpen || view.kind === 'preparing_preview')
+      return;
+    const text = [
+      view.title,
+      view.filingPreview ? 'Nothing moved' : '',
+      view.action?.label,
+      ...view.qualifications
+    ]
       .filter(Boolean)
       .join('. ');
     const key = this.workspaceId() + ':' + text;
     if (key === this._lastNextActionAnnouncement) return;
     this._lastNextActionAnnouncement = key;
     region.textContent = text;
+  }
+
+  markFilingPreviewHandoff() {
+    const preview = this.nextAction().filingPreview;
+    if (!preview || preview.consoleOpen) return;
+    const station = this.container?.querySelector(
+      '.ws-cmd-opmap [data-cmd-hq-station="file-janitor"]'
+    );
+    if (!station) return;
+    const key = `${this.workspaceId()}:${preview.rootId}:${preview.batchId}:${preview.id}`;
+    this._shownFilingPreviews ??= new Set();
+    if (this._shownFilingPreviews.has(key)) return;
+    this._shownFilingPreviews.add(key);
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    station.classList.add('is-preview-handoff');
+    this.container
+      .querySelector('#workspaceNextActionRegion')
+      ?.classList.add('is-preview-arriving');
   }
 
   renderWorkFirst() {
@@ -2677,6 +2709,11 @@ export class WorkspaceCommandView {
     // "No open work" beside it would contradict it, so the Map says nothing.
     if (onMap && view.narratedElsewhere && view.kind === 'idle') return '';
     const action = view.action;
+    const note = view.filingNote;
+    const portrait = note
+      ? this.page?.commanderFaceMarkup?.(note.name) ||
+        '<img src="/characters/ori-guide/portrait.svg" alt="" width="44" height="44">'
+      : '';
     const taskAttrs =
       action?.owner === 'task'
         ? ` data-cmd-work-action="${escapeHtml(action.kind)}" data-cmd-work-task="${escapeHtml(action.id)}"`
@@ -2689,14 +2726,16 @@ export class WorkspaceCommandView {
       '<section id="workspaceNextActionRegion" class="ws-cmd-work-first' +
       // On the Map the card is one row above the map (is-map), whatever it says.
       (onMap ? ' is-map' : '') +
+      (note ? ' is-filing-note' : '') +
       (onMap && action?.owner === 'workspace' && action.kind === 'create' ? ' is-quiet' : '') +
       '" aria-label="Next action" tabindex="-1" data-cmd-work-key="next-pending"' +
       (view.kind === 'setup' && action?.owner === 'console'
         ? ' data-filing-setup-ask="true"'
         : '') +
       '>' +
-      '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span>' +
-      '<button type="button" class="ws-cmd-agent-action" data-cmd-open-tickets data-cmd-work-key="tickets">All tickets</button></div>' +
+      (note
+        ? `<span class="ws-cmd-filing-note-face" aria-hidden="true">${portrait}</span><div class="ws-cmd-filing-note-body"><span class="ws-kicker">A note from ${escapeHtml(note.name)}</span>`
+        : '<div class="ws-cmd-work-heading"><span class="ws-kicker">Next action</span><button type="button" class="ws-cmd-agent-action" data-cmd-open-tickets data-cmd-work-key="tickets">All tickets</button></div>') +
       (this.workNotice ? `<p role="status">${escapeHtml(this.workNotice)}</p>` : '') +
       (view.updateLabel
         ? `<p class="ws-cmd-update-label">${escapeHtml(view.updateLabel)}</p>`
@@ -2704,6 +2743,9 @@ export class WorkspaceCommandView {
       `<h3>${escapeHtml(view.title)}</h3>${view.description ? `<p>${escapeHtml(view.description)}</p>` : ''}` +
       '<div class="ws-cmd-update-actions">' +
       primary +
+      (note
+        ? `<details class="ws-cmd-filing-note-help"${this.filingHelpExpanded ? ' open' : ''}><summary data-cmd-work-key="filing-access">What access is needed?</summary><p>Filing creates or reuses Filed/ and scans the top level without opening file contents. Watching is optional.</p></details>`
+        : '') +
       (view.message && action?.kind !== 'welcome'
         ? `<button type="button" class="ws-cmd-agent-action" data-cmd-update-message data-cmd-work-key="update-message">${escapeHtml(view.message.label)}${view.message.unread ? ' · New message' : ''}</button>`
         : '') +
@@ -2720,6 +2762,7 @@ export class WorkspaceCommandView {
       '<div class="ws-cmd-work-context">' +
       view.ongoing.map(text => `<p>${escapeHtml(text)}</p>`).join('') +
       '</div>' +
+      (note ? '</div>' : '') +
       '</section>'
     );
   }
@@ -3013,6 +3056,8 @@ export class WorkspaceCommandView {
     if (admin) this.adminExpanded = admin.open;
     const updateSources = this.container.querySelector('[data-cmd-update-sources]');
     if (updateSources) this.updateSourcesExpanded = updateSources.open;
+    const filingHelp = this.container.querySelector('.ws-cmd-filing-note-help');
+    if (filingHelp) this.filingHelpExpanded = filingHelp.open;
     this.rememberCapabilityInspectorFocus();
     this.rememberLoadoutAddFocus();
     this.rememberRailFocus();
@@ -3103,6 +3148,7 @@ export class WorkspaceCommandView {
       this.bindOperationsMap();
       this.paintMapActivity();
       this.announceMapRendered();
+      this.markFilingPreviewHandoff();
     } else {
       // Leaving Map mode takes the map's listeners and timers with it (FR-6).
       this.unmountDetachmentMap();
@@ -6482,6 +6528,14 @@ export class WorkspaceCommandView {
       return { key: 'unknown', label: 'Checking work', detail: 'Ticket status is not confirmed' };
     }
     if (agent?.status && agent.status.key !== 'idle') return agent.status;
+    const folder = this.folderAgentView();
+    if (
+      this.viewMode === 'map' &&
+      agent?.name &&
+      folder?.agent?.trim().toLowerCase() === agent.name.trim().toLowerCase() &&
+      commanderWaitingForFiling(folder)
+    )
+      return { key: 'waiting', label: 'Waiting for permission', detail: 'Filing folder access' };
     return { key: 'idle', label: 'Ready to help', detail: 'No queued or active tickets' };
   }
 

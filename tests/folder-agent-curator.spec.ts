@@ -107,7 +107,7 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
     if (await closeAssistant.isVisible()) await closeAssistant.click();
     await page.locator('#workspaceNextAction').click();
     const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
-    await expect(permissions).toContainText('Every move into Filed/');
+    await expect(permissions).toContainText('Both require separate approval');
     await permissions
       .getByRole('button', { name: `Allow filing in ${folder}`, exact: true })
       .click();
@@ -116,7 +116,7 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
     // handoff opens Review. Wait for that real completion, not an intermediate
     // repaint that can reclaim a Settings click made too early.
     const settings = page.locator('#fileJanitorConsoleBody');
-    await expect(settings).toContainText('Your first review is ready. Nothing was moved.');
+    await expect(settings).toContainText('24 files ready for review. Nothing moved.');
     const settingsTab = page.getByRole('tab', { name: 'Settings', exact: true });
     await settingsTab.click();
     await expect(settingsTab).toHaveAttribute('aria-selected', 'true');

@@ -77,6 +77,30 @@ test('setup names the reviewed linked folder and the lead, with an Ori fallback'
   assert.equal(resolve({ ...input, leadAgentName: '' }).title, 'Let Ori file Downloads');
 });
 
+test('the selected linked-folder setup on Map has a preview invitation with the same action key', () => {
+  const input = {
+    workspaceId: 'w',
+    tasks: { state: 'ready', items: [] },
+    console: consoleState({ configured: false, linkedFolderName: 'Loose Files' }),
+    leadAgentName: 'Curator'
+  };
+  const map = resolve({ ...input, onMap: true });
+  assert.equal(map.title, 'Prepare a filing preview for Loose Files?');
+  assert.equal(map.action.label, 'Review folder access');
+  assert.deepEqual(map.filingNote, { name: 'Curator' });
+  assert.equal(map.action.key, resolve(input).action.key);
+  assert.deepEqual(resolve({ ...input, onMap: true, leadAgentName: '' }).filingNote, {
+    name: 'Ori'
+  });
+  const urgent = resolve({
+    ...input,
+    onMap: true,
+    tasks: { state: 'ready', items: [{ id: 'urgent', status: 'blocked' }] }
+  });
+  assert.equal(urgent.action.owner, 'task');
+  assert.equal(urgent.filingNote, undefined);
+});
+
 test('setup without a reviewed folder asks for one, without suggesting access', () => {
   const view = guidance([], consoleState({ configured: false, linkedFolderName: '' }));
   assert.equal(view.title, 'Choose the folder to file');
@@ -167,6 +191,73 @@ test('live filing uses the shared saved projection, never old console or welcome
   updates.data.welcome = { state: 'not_applicable' };
   assert.equal(resolve(input).message, null);
   assert.equal(resolve(input).action.label, 'Review files');
+});
+
+test('Map handoff requires a fresh exact root, batch and count, not just a ready receipt', () => {
+  const console = consoleState({
+    pendingCount: 1,
+    firstPreview: {
+      id: 'prepared',
+      rootId: 'root',
+      batchId: 'batch',
+      count: 1,
+      consoleOpen: false
+    }
+  });
+  const input = {
+    onMap: true,
+    workspaceId: 'w',
+    console,
+    tasks: { state: 'ready', items: [] },
+    updates: savedUpdates({ pending_count: 1 })
+  };
+  const handoff = resolve(input);
+  assert.equal(handoff.title, '1 file ready for review');
+  assert.equal(handoff.action.label, 'Review preview');
+  assert.match(handoff.description, /Nothing moved/);
+  assert.equal(handoff.filingPreview.id, 'prepared');
+  for (const mismatch of [
+    { stale: true },
+    { batch_id: 'later' },
+    { root_id: 'other' },
+    { pending_count: 2 }
+  ]) {
+    const view = resolve({ ...input, updates: savedUpdates({ pending_count: 1, ...mismatch }) });
+    assert.equal(view.filingPreview, undefined);
+    assert.doesNotMatch(view.description, /Nothing moved/);
+  }
+  assert.equal(
+    resolve({ ...input, console: { ...console, preparingPreview: true } }).kind,
+    'preparing_preview'
+  );
+  assert.equal(resolve({ ...input, onMap: false }).action.label, 'Review files');
+  assert.equal(
+    resolve({ ...input, console: { ...console, firstPreview: null } }).action.label,
+    'Review files'
+  );
+});
+
+test('empty and incomplete preparation do not pretend a review batch exists', () => {
+  const input = {
+    onMap: true,
+    workspaceId: 'w',
+    tasks: { state: 'ready', items: [] },
+    console: consoleState({
+      batchId: '',
+      firstPreview: { id: 'empty', rootId: 'root', batchId: '', count: 0 }
+    }),
+    updates: savedUpdates({ batch_id: '', pending_count: 0 })
+  };
+  const empty = resolve(input);
+  assert.equal(empty.title, 'No eligible files for this preview');
+  assert.equal(empty.filingPreview, undefined);
+  assert.equal(empty.action.label, 'Open Filing');
+  const incomplete = resolve({
+    ...input,
+    console: { ...input.console, firstPreview: null, preparationState: 'preparation_incomplete' }
+  });
+  assert.match(incomplete.title, /needs attention/);
+  assert.equal(incomplete.action.kind, 'setup');
 });
 
 test('source details keep completion, observation and exposure distinct without parsing prose', () => {

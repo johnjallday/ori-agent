@@ -11075,6 +11075,87 @@ button.ws-cmd-rpg-class-card:focus-visible {
   flex-basis: auto;
 }
 
+/* A compact letter from the manager, not a second map toolbar. */
+.ws-cmd-work-first.is-map.is-filing-note {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 14px 16px;
+}
+.ws-cmd-filing-note-face {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.ws-cmd-filing-note-face :is(img, svg, .commander-balloon-avatar) {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.ws-cmd-work-first.is-map .ws-cmd-filing-note-body h3 {
+  margin: 4px 0;
+  font-size: clamp(16px, 2vw, 20px);
+}
+.ws-cmd-filing-note-body .ws-cmd-update-actions {
+  margin-top: 10px;
+}
+.ws-cmd-filing-note-help {
+  font-size: 13px;
+  color: var(--ws-ink-dim);
+}
+.ws-cmd-filing-note-help[open] {
+  flex-basis: 100%;
+}
+.ws-cmd-filing-note-help summary {
+  cursor: pointer;
+  width: fit-content;
+  padding-block: 8px;
+}
+.ws-cmd-filing-note-help summary:focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 4px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ws-cmd-work-first.is-preview-arriving {
+    animation: ws-filing-preview-arrive 180ms ease-out both;
+  }
+  .ws-cmd-map-hq-station.is-preview-handoff::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border: 2px solid var(--ws-faction);
+    border-radius: inherit;
+    pointer-events: none;
+    animation: ws-filing-preview-mark 620ms ease-out both;
+  }
+}
+@keyframes ws-filing-preview-arrive {
+  from {
+    opacity: 0.55;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ws-filing-preview-mark {
+  from {
+    opacity: 0.9;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.045);
+  }
+}
+
 @media (max-width: 900px) {
   .ws-cmd-overview {
     grid-template-columns: minmax(0, 1fr);

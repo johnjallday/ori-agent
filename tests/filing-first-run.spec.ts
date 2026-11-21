@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { mkdir, readFile, realpath, utimes, writeFile } from 'node:fs/promises';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { mkdir, readdir, readFile, realpath, utimes, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
@@ -11,32 +11,37 @@ const folderName = process.env.ORI_FILING_FOLDER || 'Downloads';
 const entryPoint = process.env.ORI_FILING_ENTRY || 'home';
 const theme = process.env.ORI_FILING_THEME || 'light';
 
-test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`, async ({
-  page,
-  request
-}) => {
+async function requireSandbox() {
   test.skip(!sandbox, 'requires the isolated server HOME');
-  test.setTimeout(120_000);
   expect(basename(await realpath(sandbox)), 'disposable demo HOME').toMatch(/^ori-(e2e|demo)[.-]/);
   expect(await readFile(join(sandbox, '.ori-demo-owner'), 'utf8')).toBe(
     `worktree=${await realpath(process.cwd())}\n`
   );
-  await mkdir(evidence, { recursive: true, mode: 0o750 });
+}
+
+async function fedFolder(page: Page, request: APIRequestContext, shots: string, variant = '') {
+  await requireSandbox();
+  expect(basename(folderName), 'fixture folder must be a single name').toBe(folderName);
+  expect(['', '.', '..']).not.toContain(folderName);
+  test.setTimeout(120_000);
+  await mkdir(shots, { recursive: true, mode: 0o750 });
   await installLocalCdn(page);
   await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
   for (const known of ['Downloads', 'Desktop', 'Documents'])
     await mkdir(join(sandbox, known), { recursive: true, mode: 0o750 });
-  const root = join(sandbox, folderName);
+  const root = join(sandbox, variant, folderName);
+  const files: string[] = [];
   await mkdir(root, { recursive: true, mode: 0o750 });
   const old = new Date(Date.now() - 3_600_000);
   for (let n = 0; n < 36; n++) {
     const path = join(root, `filing-${n}.${['pdf', 'png', 'zip', 'csv', 'txt', 'qqq'][n % 6]}`);
+    files.push(path);
     await writeFile(path, 'synthetic fixture', { mode: 0o600 });
     await utimes(path, old, old);
   }
   await request.post('/api/onboarding/skip');
   let assistant = (await (await request.get('/api/personal-assistant')).json()).personal_assistant;
-  if (!assistant.hired) {
+  if (!assistant.assistant_id) {
     const hire = await request.post('/api/personal-assistant/hire', {
       data: {
         request_id: 'filing-hire',
@@ -48,6 +53,8 @@ test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`
     });
     expect(hire.status(), await hire.text()).toBe(201);
     assistant = (await hire.json()).personal_assistant;
+  }
+  if (!assistant.hq_workspace_id) {
     const hq = await request.post('/api/personal-assistant/hq', {
       data: {
         request_id: 'filing-hq',
@@ -58,6 +65,10 @@ test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`
     });
     expect(hq.status(), await hq.text()).toBe(201);
   }
+  const list = async () => (await (await request.get(endpoint)).json()).folder_agents || [];
+  const existing = new Set(
+    (await list()).map((view: { workspace_id: string }) => view.workspace_id)
+  );
   await page.goto('/');
   if (entryPoint === 'composer') {
     if (!(await page.locator('#personalAssistantInput').isVisible()))
@@ -75,8 +86,9 @@ test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`
   await expect(hire).toContainText(`Hire an agent for ${folderName}`);
   await hire.locator('[data-folder-agent-action="start"]').click();
   const get = async () =>
-    (await (await request.get(endpoint)).json()).folder_agents.find(
-      (view: { folder_name: string }) => view.folder_name === folderName
+    (await list()).find(
+      (view: { folder_name: string; workspace_id: string }) =>
+        view.folder_name === folderName && !existing.has(view.workspace_id)
     );
   await expect.poll(async () => (await get())?.state).toBe('reported');
   const view = await get();
@@ -92,9 +104,19 @@ test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`
     `Organize loose files in ${folderName} (you approve every move)`
   );
   await expect(report).toContainText(`Adds filing to ${folderName}`);
-  await page.screenshot({ path: join(evidence, '01-downloads-hire.png'), fullPage: true });
+  await page.screenshot({ path: join(shots, '01-folder-hire.png'), fullPage: true });
   await report.getByRole('button', { name: 'Set it up', exact: true }).click();
   await expect.poll(async () => (await get())?.setup?.status).toBe('done');
+  const api = `/api/workspaces/${view.workspace_id}/file-janitor`;
+  const status = async () => (await (await request.get(api)).json()).status;
+  return { view, root, files, closeAssistant, status, api };
+}
+
+test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`, async ({
+  page,
+  request
+}) => {
+  const { view, root, closeAssistant, status } = await fedFolder(page, request, evidence);
   await page.goto('/?panel=today');
   await page.locator('#personalAssistantProgressRow').click();
   await expect(page.locator('#personalAssistantDoneItems')).toContainText(
@@ -131,14 +153,12 @@ test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`
   const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
   await expect(permissions.getByRole('heading')).toHaveText(`Allow filing in ${folderName}`);
   await page.screenshot({ path: join(evidence, '05-named-folder-consent.png'), fullPage: true });
-  const status = async () =>
-    (await (await request.get(`/api/workspaces/${view.workspace_id}/file-janitor`)).json()).status;
   expect((await status()).settings.root_path || '').toBe('');
   expect(mutations).toEqual([]);
   await permissions
     .getByRole('button', { name: `Allow filing in ${folderName}`, exact: true })
     .click();
-  await expect(console).toContainText('Your first review is ready. Nothing was moved.');
+  await expect(console).toContainText('36 files ready for review. Nothing moved.');
   expect((await status()).settings.root_path).toBe(root);
   expect(mutations.filter(url => /\/(apply|preview|scan|setup)$/.test(url))).toEqual([]);
   expect(mutations.filter(url => url.endsWith('/prepare-review'))).toHaveLength(1);
@@ -178,6 +198,247 @@ test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`
     await page.screenshot({ path: join(evidence, `11-privacy-${width}.png`), fullPage: true });
   }
 });
+
+const mapEvidence = resolve(
+  'tasks/evidence-filing-preview-handoff',
+  process.env.ORI_FILING_CASE || '.'
+);
+
+async function openFilingMap(page: Page, fixture: Awaited<ReturnType<typeof fedFolder>>) {
+  await page.goto(`${fixture.view.route}?mode=map`);
+  if (await fixture.closeAssistant.isVisible()) await fixture.closeAssistant.click();
+  const guidance = page.getByRole('region', { name: 'Next action', exact: true });
+  const invite = guidance.getByRole('button', { name: 'Review folder access', exact: true });
+  const station = page.locator('.ws-cmd-opmap [data-cmd-hq-station="file-janitor"]');
+  const panel = page.getByRole('dialog', { name: 'Filing', exact: true });
+  const access = panel.getByRole('region', { name: 'Review Filing permissions' });
+  const allow = access.getByRole('button', { name: `Allow filing in ${folderName}`, exact: true });
+  return { guidance, invite, station, panel, access, allow };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function recordFilingWrites(page: Page, api: string) {
+  const writes: string[] = [];
+  page.on('request', req => {
+    const { pathname } = new URL(req.url());
+    if (req.method() !== 'GET' && pathname.startsWith(`${api}/`))
+      writes.push(pathname.slice(api.length));
+  });
+  return writes;
+}
+
+test(`a fed ${folderName} preview hands off on the map (${entryPoint}, ${theme})`, async ({
+  page,
+  request
+}) => {
+  const late = entryPoint === 'composer';
+  await page.emulateMedia({ reducedMotion: late ? 'reduce' : 'no-preference' });
+  await page.setViewportSize({ width: late ? 390 : 1440, height: late ? 844 : 1050 });
+  const fixture = await fedFolder(page, request, mapEvidence, 'map-case');
+  const { guidance, invite, station, panel, access, allow } = await openFilingMap(page, fixture);
+  const writes = recordFilingWrites(page, fixture.api);
+  const snapshot = (state: string) =>
+    page.screenshot({ path: join(mapEvidence, state + '.png'), animations: 'disabled' });
+  await expect(guidance.getByRole('heading')).toHaveText(
+    `Prepare a filing preview for ${folderName}?`
+  );
+  await expect(guidance).toContainText(`A note from ${folderName} Manager`);
+  await expect(page.locator('html')).toHaveAttribute('data-bs-theme', theme);
+  await expect(guidance.getByRole('button', { name: 'All tickets' })).toHaveCount(0);
+  const tickets = page.locator('[data-cmd-view-mode="tickets"]');
+  await expect(tickets).toBeVisible();
+  await expect(page.locator('.ws-cmd-map-agent.is-command-node')).toContainText(
+    'Waiting for permission'
+  );
+  await expect(page.getByText('See what I made', { exact: false })).toHaveCount(0);
+  await expect(station).toBeVisible();
+  expect(await guidance.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await snapshot('02-map-before');
+  for (const trigger of [invite, station]) {
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await expect(access.getByRole('heading')).toHaveText(`Allow filing in ${folderName}`);
+    await expect(access).toContainText('This changes the folder on disk');
+    await expect(access).toContainText('No file contents are opened');
+    await expect(access).toContainText('Both require separate approval');
+    await expect(access.getByRole('checkbox', { name: /watch new arrivals/i })).not.toBeChecked();
+    await snapshot(`03-access-${trigger === invite ? 'note' : 'station'}`);
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+    await expect(trigger).toBeFocused();
+    expect((await fixture.status()).settings.root_path || '').toBe('');
+    expect(await readdir(fixture.root)).not.toContain('Filed');
+    expect(writes).toEqual([]);
+  }
+
+  await page.evaluate(() => {
+    document.documentElement.dataset.filingMotion = '';
+    document.addEventListener('animationstart', event => {
+      if (event.animationName.startsWith('ws-filing-preview-'))
+        document.documentElement.dataset.filingMotion += event.animationName + ' ';
+    });
+  });
+  const release = deferred<void>();
+  const accepted = deferred<number>();
+  await page.route(`**${fixture.api}/prepare-review`, async route => {
+    const response = await route.fetch();
+    accepted.resolve(response.status());
+    await release.promise;
+    await route.fulfill({ response });
+  });
+  let dismissedUrl = '';
+  try {
+    await invite.click();
+    await allow.click();
+    await expect(panel.getByText('Preparing your preview…', { exact: true })).toBeVisible();
+    expect(await accepted.promise).toBe(200);
+    if (late) {
+      await page.keyboard.press('Escape');
+      await expect(panel).toBeHidden();
+      await expect(guidance).toContainText('Preparing your preview…');
+      await tickets.focus();
+      dismissedUrl = page.url();
+    }
+  } finally {
+    release.resolve();
+  }
+  const ready = '36 files ready for review. Nothing moved.';
+  if (!late) {
+    await expect(panel.getByText(ready, { exact: true })).toBeVisible();
+    await expect(panel.locator('.fj-console-title')).toBeFocused();
+    await snapshot('04-panel-ready');
+    await panel.getByRole('button', { name: 'Back to map' }).click();
+  }
+  await expect(panel).toBeHidden();
+  await expect(guidance).toContainText('36 files ready for review');
+  await expect(guidance).toContainText('Nothing moved.');
+  await expect(station).toContainText('36 files ready for review');
+  await expect(page.locator('.ws-cmd-map-agent.is-command-node')).not.toContainText(
+    'Waiting for permission'
+  );
+  if (late) {
+    expect(page.url()).toBe(dismissedUrl);
+    await expect(tickets).toBeFocused();
+  }
+  const motions = () => page.locator('html').getAttribute('data-filing-motion');
+  if (late) expect(await motions()).toBe('');
+  else await expect.poll(motions).toContain('ws-filing-preview-mark');
+  await snapshot('05-map-ready');
+
+  const saved = (await (await request.get(`${fixture.api}/setup-review`)).json()).review.result;
+  expect(saved.outcome).toBe('batch');
+  expect(saved.eligible_count).toBe(36);
+  const openers = [station, guidance.getByRole('button', { name: 'Review preview', exact: true })];
+  for (const trigger of openers) {
+    await trigger.click();
+    await expect(panel).toContainText(ready);
+    await expect(page).toHaveURL(new RegExp(`[?&]batch_id=${saved.batch_id}(?:&|$)`));
+    await panel.getByRole('button', { name: 'Back to map' }).click();
+    await expect(panel).toBeHidden();
+  }
+  expect(((await motions()) || '').match(/ws-filing-preview-mark/g)?.length || 0).toBe(
+    late ? 0 : 1
+  );
+  expect(writes).toEqual(['/prepare-review']);
+  const observed = await fixture.status();
+  expect(observed.settings.root_path).toBe(fixture.root);
+  expect(observed.settings.setup_decision.mode).toBe('manual');
+  expect(await readdir(fixture.root)).toContain('Filed');
+  expect(await Promise.all(fixture.files.map(file => readFile(file, 'utf8')))).toEqual(
+    fixture.files.map(() => 'synthetic fixture')
+  );
+  await snapshot('06-map-returned');
+  await page.reload();
+  await expect(guidance.getByRole('button', { name: 'Review files', exact: true })).toBeVisible();
+  await expect(station).not.toHaveClass(/is-preview-handoff/);
+});
+
+for (const scenario of ['empty', 'retry', 'urgent'] as const) {
+  test(`map preview edge: ${scenario}`, async ({ page, request }) => {
+    const shots = join(mapEvidence, scenario);
+    const fixture = await fedFolder(page, request, shots, `map-${scenario}`);
+    if (scenario === 'urgent') {
+      const created = await request.post('/api/orchestration/tasks', {
+        data: { workspace_id: fixture.view.workspace_id, description: 'Review the urgent draft' }
+      });
+      expect(created.ok(), await created.text()).toBe(true);
+      const { task } = await created.json();
+      const started = await request.post(
+        `/api/workspaces/${fixture.view.workspace_id}/tickets/${task.id}/transition`,
+        { data: { to: 'in_progress' } }
+      );
+      expect(started.ok(), await started.text()).toBe(true);
+      const updated = await request.put('/api/orchestration/tasks', {
+        data: {
+          task_id: task.id,
+          context: {
+            human_loop: { state: 'blocked', repair: { label: 'Review connection', url: '/agents' } }
+          }
+        }
+      });
+      expect(updated.ok(), await updated.text()).toBe(true);
+      const { guidance, invite, station } = await openFilingMap(page, fixture);
+      await expect(guidance).toContainText('Review the urgent draft');
+      await expect(invite).toHaveCount(0);
+      await expect(station).toBeVisible();
+      await page.screenshot({ path: join(shots, 'urgent.png'), animations: 'disabled' });
+      await guidance.getByRole('button', { name: 'Open ticket', exact: true }).click();
+      await expect(page.locator('#hubTicketDetailTitle')).toContainText('Review the urgent draft');
+      return;
+    }
+    const { guidance, invite, station, panel, allow } = await openFilingMap(page, fixture);
+    const writes = recordFilingWrites(page, fixture.api);
+    await invite.click();
+    if (scenario === 'empty') {
+      const now = new Date();
+      await Promise.all(fixture.files.map(file => utimes(file, now, now)));
+    } else {
+      // Simulate an unavailable request before it reaches the server. The next
+      // attempt is real and must be explicitly confirmed again.
+      await page.route(
+        `**${fixture.api}/prepare-review`,
+        route =>
+          route.fulfill({
+            status: 503,
+            json: { error: { message: 'Preview preparation is unavailable. Try again.' } }
+          }),
+        { times: 1 }
+      );
+      await allow.click();
+      await expect(panel.locator('#fileJanitorError')).toHaveText(
+        'Preview preparation is unavailable. Try again.'
+      );
+      expect((await fixture.status()).settings.root_path || '').toBe('');
+      expect(writes).toEqual(['/prepare-review']);
+      await page.screenshot({ path: join(shots, 'failure.png'), animations: 'disabled' });
+    }
+    await allow.click();
+    if (scenario === 'empty') {
+      await expect(panel).toContainText('No eligible files are ready for review');
+      await panel.getByRole('button', { name: 'Close Filing', exact: true }).click();
+      await expect(guidance).toContainText('No eligible files for this preview');
+      await expect(station).not.toHaveClass(/is-preview-handoff/);
+      const saved = (await (await request.get(`${fixture.api}/setup-review`)).json()).review.result;
+      expect(saved.outcome).toBe('no_eligible');
+      expect(saved.batch_id).toBeUndefined();
+      expect(writes).toEqual(['/prepare-review']);
+    } else {
+      await expect(panel).toContainText('36 files ready for review. Nothing moved.');
+      expect(writes).toEqual(['/prepare-review', '/prepare-review']);
+    }
+    await page.screenshot({ path: join(shots, 'outcome.png'), animations: 'disabled' });
+    expect(await Promise.all(fixture.files.map(file => readFile(file, 'utf8')))).toEqual(
+      fixture.files.map(() => 'synthetic fixture')
+    );
+  });
+}
 
 test('capability-only filing asks for a folder and never prefills access', async ({
   page,
