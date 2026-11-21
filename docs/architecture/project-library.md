@@ -14,6 +14,14 @@ Search and advanced filters run against the whole catalog before paging (25 rows
 
 User/Home-scoped session storage contains bounded navigation intent: filters/sort, view and collection identity, selected entry/tab, scroll position and up to 20 loaded pages. It contains no file bytes, directory paths, cursor authority, membership snapshots or permission tokens. Reload/workspace return requeries metadata and tab authority; missing or filtered-out selections are cleared. Independent request generations reject late list/detail/tab results. A Files instance is disposed when its project or tab changes, cancelling requests and releasing image Blob URLs.
 
+### Returning to Music Home
+
+An initialized Music Production Home shows **Pick up where you left off** above the catalog controls, outside **Library tools and saved activity**. The treatment uses the host's saved package and program identity, not the workspace name. It uses the first entry in the existing Home-wide `/resume` order: latest accepted record per entry, most recently updated first. Up to two other entries remain available as session links. The note labels the user-authored recap (including historical linked-project attribution) or, if there is no recap, the saved goal. The saved date is a note timestamp, not inferred production activity. A current saved project next action takes precedence over a separately labeled historical session next action.
+
+**View session notes** reads the exact entry's metadata and Sessions history, never Files or activation. **Back to projects** focuses that entry's currently loaded row with a brief cue (a focus outline without animation under reduced motion), or the initiating handoff control or library heading when the row is not visible. **Browse songs** focuses search without changing entries, filters, collections, pages or bulk picks. An empty history shows just the usual catalog; an unavailable history read shows a notice without delaying browsing. Explicit setup and suggestions arrivals keep their original destinations; **Recently saved** remains a separate file-timestamp view.
+
+Planning another session uses the existing review and explicit save. If the Home provider disappears, the Sessions read still shows permitted history and suppresses write actions. A saved recap or goal is not a folder grant, a workspace connection, or proof of work. Separate workspace shortcuts still recheck the exact reciprocal link before navigating. None of these reading or browsing actions starts a scan, staffing, ticket, model call, or DAW operation.
+
 ### Files authority is independent of discovery
 
 The owner-only routes are:

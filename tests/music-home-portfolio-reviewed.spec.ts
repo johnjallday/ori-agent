@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page, type Request } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -27,6 +27,31 @@ async function json(response: Awaited<ReturnType<APIRequestContext['get']>>) {
 async function shot(page: Page, name: string) {
   mkdirSync(evidenceDir, { recursive: true });
   await page.screenshot({ path: join(evidenceDir, `${name}.png`) });
+}
+
+// Observe only the handoff interaction, not fixture setup, explicit reviews,
+// or unrelated background reads. The library request list has an exact allowlist.
+function watchHandoff(page: Page, base: string) {
+  const library: string[] = [];
+  const effects: string[] = [];
+  const onRequest = (request: Request) => {
+    const path = new URL(request.url()).pathname;
+    const method = request.method();
+    if (path.startsWith(`${base}/`)) library.push(`${method} ${path.slice(base.length)}`);
+    if (
+      request.isNavigationRequest() ||
+      (path.startsWith('/api/') &&
+        ((method !== 'GET' && method !== 'HEAD') ||
+          /\/(?:tickets|tasks|chat|quests|applications|setup-quests|services)(?:\/|$)/.test(path)))
+    )
+      effects.push(`${method} ${path}`);
+  };
+  page.on('request', onRequest);
+  return (expected: string[]) => {
+    page.off('request', onRequest);
+    expect(library).toEqual(expected);
+    expect(effects).toEqual([]);
+  };
 }
 
 // Setup remains an explicit action after inert row inspection. Keep all of the
@@ -396,9 +421,55 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await expect(recapReview).toContainText('Also replaces the project’s saved next action');
   await recapReview.getByRole('button', { name: 'Save recap' }).click();
   await expect(shelf.locator('#projectLibraryStatus')).toContainText('Recap saved');
-  // A normal visit has no setup/selection hash or carried folder offer.
-  await page.goto(new URL(page.url()).pathname);
+  // Edit the project's current next action separately. The accepted recap's
+  // historical next action must not change when the project note changes.
+  await shelf.getByRole('tab', { name: 'Overview', exact: true }).click();
+  await sessionDetail.getByRole('button', { name: 'Edit project notes' }).click();
+  const currentNotes = page.getByRole('dialog', { name: 'Edit Album-3' });
+  await currentNotes
+    .getByRole('textbox', { name: 'Next action', exact: true })
+    .fill('Print the review mix');
+  await currentNotes.getByRole('button', { name: 'Review changes' }).click();
+  await page.getByRole('button', { name: 'Save notes', exact: true }).click();
+  const search = shelf.locator('#projectLibrarySearch');
+  await expect(shelf.locator('#projectLibraryResume')).toContainText('Print the review mix');
+  await search.press('Enter'); // Reset inspection intent, not a handoff action.
+  await expect(sessionDetail.locator('#projectLibraryPaneTitle')).toHaveText('Select a project');
   await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
+
+  // On a normal arrival, the real catalog is usable while /resume is pending.
+  // A failed read is distinct from the earlier successful zero-history visit.
+  const homePath = new URL(page.url()).pathname;
+  const rootsBeforeArrival = await json(await request.get(`${base}/roots`));
+  let completeResume: () => void = () => {};
+  const heldResume = new Promise<void>(resolve => {
+    completeResume = resolve;
+  });
+  await page.route(
+    `**${base}/resume`,
+    async route => {
+      await heldResume;
+      await route.fulfill({ status: 503, json: { error: 'Fixture read unavailable' } });
+    },
+    { times: 1 }
+  );
+  try {
+    await page.goto(homePath);
+    await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
+    await expect(shelf.locator('#projectLibraryResume')).toBeHidden();
+    await expect(search).toBeVisible();
+    await search.focus();
+  } finally {
+    completeResume();
+  }
+  await expect(shelf.locator('#projectLibraryResume')).toContainText(
+    'Session notes could not be loaded'
+  );
+  await expect(search).toBeFocused();
+  await shot(page, '22d0-handoff-read-unavailable');
+  await page.reload();
+  await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
+  expect(await json(await request.get(`${base}/roots`))).toEqual(rootsBeforeArrival);
   await expect(shelf.locator('#projectLibraryManagement')).not.toHaveAttribute('open', '');
   const resume = shelf.locator('#projectLibraryResume');
   await expect(resume).toBeVisible();
@@ -408,9 +479,15 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await expect(resume.getByRole('button', { name: 'View Album-0 session' })).toBeVisible();
   await expect(resume).toContainText('Pick up where you left off');
   await expect(resume).toContainText('User-authored note');
-  await expect(resume).toContainText('Current saved project next action: Record a scratch vocal');
-  await resume.scrollIntoViewIfNeeded();
-  await shot(page, '22d-reviewed-portfolio-home-resume-after-reload');
+  await expect(resume).toContainText('Current saved project next action: Print the review mix');
+  await expect(resume).not.toContainText('Record a scratch vocal');
+  await expect(shelf).toHaveCSS('opacity', '1'); // Capture after the Home panel's entrance animation.
+  await resume.evaluate(node => node.scrollIntoView({ block: 'center', behavior: 'instant' }));
+  await page.screenshot({
+    path: join(evidenceDir, '22d-reviewed-portfolio-home-resume-after-reload.png'),
+    animations: 'disabled'
+  });
+  const catalogHandoff = watchHandoff(page, base);
   await resume.getByRole('button', { name: 'View session notes', exact: true }).click();
   const resumed = page.locator('#projectLibraryPane');
   await expect(page.getByRole('tab', { name: 'Sessions', exact: true })).toHaveAttribute(
@@ -419,6 +496,8 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   );
   await expect(resumed).toContainText('User recap: Kept the quieter chorus');
   await expect(resumed).toContainText('Saved session next action: Record a scratch vocal');
+  await expect(resumed).toContainText('Catalog only');
+  catalogHandoff([`GET /projects/${album3Entry}`, `GET /projects/${album3Entry}/sessions`]);
   await shot(page, '22d-reviewed-portfolio-resume-after-reload');
   await resumed.getByRole('button', { name: 'View full session' }).click();
   const fullSession = page.getByRole('dialog', { name: 'Studio session · Album-3' });
@@ -429,22 +508,46 @@ test('the reviewed release resolves a real portfolio offer, then separate review
 
   const formerRow = shelf.getByRole('button', { name: 'Inspect Album-3', exact: true });
   const back = resumed.getByRole('button', { name: 'Back to projects' });
+  const returnAndBrowse = watchHandoff(page, base);
   await back.click();
   await expect(formerRow).toBeFocused();
   await expect(formerRow).toHaveClass(/is-handoff-return/);
   await expect(formerRow).toHaveCSS('animation-name', 'library-handoff-return');
   await shot(page, '22d1-handoff-wide-return');
   const browse = resume.getByRole('button', { name: 'Browse songs', exact: true });
-  const search = shelf.locator('#projectLibrarySearch');
   await browse.click();
   await expect(search).toBeFocused();
   await expect(formerRow).not.toHaveClass(/is-handoff-return/);
   await expect(shelf.locator('[data-library-entry][aria-pressed="true"]')).toHaveCount(0);
   await shelf.getByRole('button', { name: 'Inspect Album-1', exact: true }).click();
   await expect(resumed.locator('#projectLibraryPaneTitle')).toHaveText('Album-1');
+  await expect(resumed).toContainText('No saved goals yet');
+  const album1ID = projects.rows.find((row: { name: string }) => row.name === 'Album-1').id;
+  returnAndBrowse([`GET /projects/${album1ID}`, `GET /projects/${album1ID}/sessions`]);
+  await resumed.getByRole('button', { name: 'Plan a session' }).click();
+  await planner.getByRole('textbox', { name: 'Session goal' }).fill('Listen for a better intro');
+  await planner.getByRole('button', { name: 'Review session' }).click();
+  await expect(goalReview).toContainText('Listen for a better intro');
+  await goalReview.screenshot({
+    path: join(evidenceDir, '22d4-alternate-song-goal.png'),
+    animations: 'disabled'
+  });
+  await goalReview.getByRole('button', { name: 'Cancel' }).click();
+  expect(await json(await request.get(`${base}/projects/${album1ID}/sessions`))).toMatchObject({
+    total: 0
+  });
+  expect(songs.map(path => createHash('sha256').update(readFileSync(path)).digest('hex'))).toEqual(
+    before
+  );
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.getByRole('button', { name: 'Switch to dark mode' }).click();
+  await resume.screenshot({
+    path: join(evidenceDir, '22d5-handoff-narrow-dark.png'),
+    animations: 'disabled'
+  });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   const secondary = resume.getByRole('button', { name: 'View Album-0 session' });
   await secondary.focus();
   await page.keyboard.press('Enter');
@@ -469,6 +572,22 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await shelf.getByRole('button', { name: 'Inspect Album-1', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect(narrowTitle).toHaveText('Album-1');
+  // The secondary note is a Home-wide target, not a filter/paging result.
+  await search.fill('Album-1');
+  await search.press('Enter');
+  await expect(shelf.locator('#projectLibraryCount')).toHaveText('1 of 1 projects');
+  await secondary.focus();
+  await page.keyboard.press('Enter');
+  await expect(narrowTitle).toHaveText('Album-0');
+  await expect(resumed).toContainText('Compare two references');
+  await back.press('Enter');
+  await expect(secondary).toBeFocused();
+  await expect(search).toHaveValue('Album-1');
+  await expect(shelf.locator('.is-handoff-return')).toHaveCount(0);
+  await search.fill('');
+  await search.press('Enter');
+  await expect(shelf.locator('#projectLibraryCount')).toHaveText('5 of 5 projects');
+  await page.getByRole('button', { name: 'Switch to light mode' }).click();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 900 });
 
@@ -561,7 +680,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await page.reload();
   await expect(shelf.locator('#projectLibraryStatus')).toContainText('Saved records are readable');
   await expect(shelf.locator('#projectLibraryResume')).toContainText('Kept the quieter chorus');
-  await expect(shelf.locator('#projectLibraryResume')).toContainText('Record a scratch vocal');
+  await expect(shelf.locator('#projectLibraryResume')).toContainText('Print the review mix');
   const readOnlySessions = await json(await request.get(`${base}/projects/${albumID}/sessions`));
   expect(readOnlySessions.total).toBe(1);
   expect(readOnlySessions.rows[0].id).toBe(savedSessions.rows[0].id);
@@ -736,6 +855,18 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     ).toEqual(before);
     await page.reload();
     const afterRestartView = await json(await request.get(`${base}/projects`));
+    await expect(
+      resume.getByRole('button', { name: 'View session notes', exact: true })
+    ).toBeVisible();
+    const connectedHandoff = watchHandoff(page, base);
+    await resume.getByRole('button', { name: 'View session notes', exact: true }).click();
+    await expect(resumed).toContainText('Connected workspace');
+    await expect(resumed).toContainText('User recap: Kept the quieter chorus');
+    await expect(resumed).toContainText('Saved session next action: Record a scratch vocal');
+    await back.click();
+    await expect(formerRow).toBeFocused();
+    connectedHandoff([`GET /projects/${albumID}`, `GET /projects/${albumID}/sessions`]);
+    await shot(page, '25c-connected-handoff-return');
     await reviewProject(page, 'Album-3');
     const linkedDetail = page.getByRole('dialog', { name: 'Album-3' });
     await expect(
@@ -1067,6 +1198,7 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     await expect(disconnect).toContainText('5 catalog records retain their historical notes');
     await shot(page, '31-reviewed-discovery-disconnect-impact');
     await disconnect.getByRole('button', { name: 'Cancel' }).click();
+    await expect(shelf).toHaveAttribute('aria-busy', 'false'); // Cancel refreshes the review revision.
     expect((await json(await request.get(`${base}/roots`))).roots[0].revoked_at).toBeFalsy();
     await shelf.locator('#projectLibraryRoots').getByRole('button', { name: 'Disconnect' }).click();
     await page
@@ -1122,11 +1254,21 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     // A direct native tool invocation exercises the production chat/tool
     // adapter without a model. The Manager only saves an inert suggestion;
     // the Home owner must separately review and confirm the canonical note.
-    const home = await json(await request.get(`/api/workspaces/${homeID}`));
-    const manager = home.agent_instances.find(
-      (instance: { role_id: string }) => instance.role_id === 'portfolio_manager'
-    );
-    expect(manager?.name).toBeTruthy();
+    const homeURL = `/api/workspaces/${homeID}`;
+    const primaryManager = (home: { agent_instances?: { role_id: string; name: string }[] }) =>
+      home.agent_instances?.find(instance => instance.role_id === 'portfolio_manager');
+    let manager = primaryManager(await json(await request.get(homeURL)));
+    if (!manager) {
+      // The returning-visit fixture does not require staffing at creation.
+      // Bind the sandbox role only for this existing direct-tool regression.
+      await json(
+        await request.put(`${homeURL}/roles/portfolio_manager`, {
+          data: { mode: 'create', name: 'Music Portfolio Manager' }
+        })
+      );
+      manager = primaryManager(await json(await request.get(homeURL)));
+    }
+    if (!manager?.name) throw new Error('The reviewed Home Manager role is not bound');
     const beforeSuggestion = await json(await request.get(`${base}/projects/${savedEntry.id}`));
     const suggestedAction = 'Choose one vocal take to revisit';
     const direct = await json(
@@ -1153,9 +1295,13 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     expect(
       (await json(await request.get(`${base}/projects/${savedEntry.id}`))).fields.next_action
     ).toBe(beforeSuggestion.fields.next_action);
+    // A deep link arriving from elsewhere loads a new document, unlike a
+    // same-document hash update which should not replay arrival focus.
+    await page.goto(`${homePath}#projectLibraryProposals`);
     await page.reload();
-    await management(page);
     const suggestions = page.locator('#projectLibraryProposals');
+    await expect(suggestions.locator('#projectLibraryProposalsTitle')).toBeFocused();
+    await expect(shelf.locator('#projectLibraryManagement')).toHaveAttribute('open', '');
     await expect(suggestions).toContainText(suggestedAction);
     await expect(suggestions).toContainText('Only a Home suggestion; no DAW progress inferred.');
     await suggestions.getByRole('button', { name: 'Review Album-4 suggestion' }).click();
