@@ -35,6 +35,9 @@
   let setupReview = null;
   let setupReviewRequest = 0;
   let setupDraft = null;
+  let preparation = null;
+  // This page can celebrate only a receipt from its own explicit confirmation.
+  let firstPreview = null;
   let statusRequest = 0;
   let batchRequest = 0;
   let historyRequest = 0;
@@ -229,6 +232,7 @@
     receiptRequest++;
     setupReviewRequest++;
     setupDraft = null;
+    firstPreview = null;
     lastBatch = null;
     lastCandidates = [];
     resetPicture();
@@ -272,6 +276,7 @@
   // Page teardown invalidates asynchronous callbacks, not operations already sent.
   function dispose() {
     disposed = true;
+    preparation = null;
     close({ keepUrl: true });
     invalidateFolderState();
     statusRequest++;
@@ -2918,8 +2923,14 @@
 
     const loadNotice = batchLoadNotice(Boolean(lastBatch));
     if (loadNotice) container.appendChild(loadNotice);
-    if (reviewStatusMessage) {
-      const notice = el('p', 'fj-batch-scan-status', reviewStatusMessage);
+    const preview = currentPreview();
+    const statusMessage = preview?.batchId
+      ? reviewCountLabel(preview.count) + '. Nothing moved.'
+      : preview
+        ? 'Initial scan finished. No eligible files are ready for review. Nothing moved.'
+        : reviewStatusMessage;
+    if (statusMessage) {
+      const notice = el('p', 'fj-batch-scan-status', statusMessage);
       notice.setAttribute('role', 'status');
       notice.setAttribute('aria-live', 'polite');
       container.appendChild(notice);
@@ -4715,11 +4726,20 @@
   // the inline panel already had: they address their hosts by id, so moving
   // those hosts into the console moves the surfaces with them.
   function renderConsoleBody(host, status) {
+    if (preparation && consoleTab === 'review') {
+      const progress = el('p', 'fj-sub', 'Preparing your preview…');
+      progress.setAttribute('role', 'status');
+      host.appendChild(progress);
+      return;
+    }
     if (
       ['preparation_incomplete', 'preparation_changed'].includes(setupReview?.state) ||
       !isConfigured(status)
     ) {
-      if (renderLinkedSetupReview(host)) return;
+      if (renderLinkedSetupReview(host)) {
+        host.appendChild(errorRegion());
+        return;
+      }
       // An unconfigured install opens straight into the real setup experience
       // — the wizard when the blueprint declares one, the folder card
       // otherwise. Never a placeholder, and never a second chooser beside the
@@ -4864,6 +4884,7 @@
   const CONSOLE_PANEL_PARAM = 'file-janitor';
 
   let consoleOpen = false;
+  let consoleVisit = 0;
   let consoleTab = 'review';
   let consoleItem = '';
   // The element focus returns to on close. Held rather than re-derived: by
@@ -4955,6 +4976,7 @@
       historyLoaded = false;
     }
     consoleOpen = true;
+    consoleVisit++;
 
     const coordinator = overlayCoordinator();
     if (coordinator && typeof coordinator.open === 'function') {
@@ -5030,6 +5052,7 @@
     discardProtectionApproval();
     lastResults = null;
     consoleOpen = false;
+    consoleVisit++;
     settingsOpen = false;
     consoleCloseButton = null;
     const host = document.getElementById(CONSOLE_HOST_ID);
@@ -5261,8 +5284,11 @@
     const activity = activityState(status);
     const statusLine = el('p', 'fj-console-status');
     statusLine.id = 'fileJanitorConsoleStatus';
-    statusLine.setAttribute('role', 'status');
-    statusLine.setAttribute('aria-live', 'polite');
+    // The preview progress/result has its own status in the Review body.
+    if (!preparation && !(consoleTab === 'review' && currentPreview())) {
+      statusLine.setAttribute('role', 'status');
+      statusLine.setAttribute('aria-live', 'polite');
+    }
     const pending = pendingCount();
     statusLine.textContent =
       activity.label + (pending > 0 ? ' · ' + reviewCountLabel(pending) : '');
@@ -5270,7 +5296,7 @@
     header.appendChild(heading);
 
     const actions = el('div', 'fj-console-actions');
-    if (configured) {
+    if (configured && !preparation) {
       const scan = button('Scan now', 'fj-btn fj-btn-secondary', () => void scanNow());
       scan.id = 'fileJanitorScan';
       scan.disabled = scanning;
@@ -5292,9 +5318,13 @@
       actions.appendChild(scan);
       actions.appendChild(pauseControl(settings));
     }
-    const closeButton = button('Close', 'fj-btn fj-btn-secondary', () => close());
+    const backToMap = workspaceViewMode() === 'map' && currentPreview()?.batchId;
+    const closeButton = button(backToMap ? 'Back to map' : 'Close', 'fj-btn fj-btn-secondary', () =>
+      close()
+    );
+    closeButton.id = 'fileJanitorClose';
     closeButton.setAttribute('data-fj-console-close', '');
-    closeButton.setAttribute('aria-label', 'Close Filing');
+    closeButton.setAttribute('aria-label', backToMap ? 'Back to map' : 'Close Filing');
     consoleCloseButton = closeButton;
     actions.appendChild(closeButton);
     header.appendChild(actions);
@@ -5302,7 +5332,7 @@
     // Before setup finishes there are no tabs: there is nothing to review, no
     // history, and no settings to change. Showing three empty tabs would
     // suggest otherwise (FR-103, FR-104).
-    if (configured) header.appendChild(renderConsoleTabs());
+    if (configured && !preparation) header.appendChild(renderConsoleTabs());
     return header;
   }
 
@@ -5357,6 +5387,7 @@
   function selectTab(tab) {
     const next = validTab(tab);
     if (!next) return;
+    if (consoleTab !== next) consoleVisit++;
     consoleTab = next;
     rememberedTab.set(wsId(), next);
     // Moving tabs drops the Trash tick: it is never restored after coming back
@@ -5605,33 +5636,94 @@
       result.eligible_count >= 0 &&
       Number.isSafeInteger(result.ineligible_count) &&
       result.ineligible_count >= 0 &&
-      ((result.outcome === 'batch' && result.batch_id) ||
+      ((result.outcome === 'batch' && result.batch_id && result.eligible_count > 0) ||
         (result.outcome === 'no_eligible' && result.eligible_count === 0 && !result.batch_id))
     );
   }
 
-  async function landOnPreparedReview(result, ctx) {
-    const id = wsId();
-    const current = () => !disposed && wsId() === id;
-    busy = false;
-    ctx?.setBusy?.(false, '');
-    await window.SetupWizard?.refresh?.();
-    if (!current()) return;
-    if (window.SetupWizard?.getStatus?.()?.state === 'ready') await window.SetupWizard.close?.();
-    if (!current()) return;
+  function preparationCurrent(intent) {
+    return (
+      !disposed &&
+      preparation === intent &&
+      wsId() === intent.id &&
+      window.location?.pathname === intent.path
+    );
+  }
+
+  function currentPreview() {
+    if (
+      !firstPreview ||
+      setupReview?.state !== 'prepared' ||
+      setupReview.result?.operation_id !== firstPreview.operation_id ||
+      statusLoadState !== 'ready' ||
+      batchLoadState !== 'loaded' ||
+      firstPreview.root_id !== lastStatus?.settings?.root_id ||
+      lastStatus?.readiness?.state === 'needs_attention' ||
+      lastStatus?.privacy?.consent_required ||
+      scanning ||
+      scanFailed ||
+      (lastBatch?.id || '') !== (firstPreview.batch_id || '') ||
+      pendingCount() !== firstPreview.eligible_count
+    )
+      return null;
+    return {
+      id: firstPreview.operation_id,
+      rootId: firstPreview.root_id,
+      batchId: firstPreview.batch_id || '',
+      count: pendingCount(),
+      consoleOpen
+    };
+  }
+
+  async function landOnPreparedReview(result, intent, ctx) {
+    // Wizard readiness publishes a capability refresh. Let that start before
+    // our own canonical Filing read, so it cannot supersede the handoff's read.
+    if (ctx && intent.ownsOverlay()) await ctx.refresh?.();
+    if (!preparationCurrent(intent)) return;
+    // Refresh even after dismissal. Reading authority is not permission to
+    // reopen the panel or navigate the person back to it.
     await refresh();
-    if (!current() || lastStatus?.settings?.root_id !== result?.root_id) return;
-    // The first linked status installs a new managed root and clears the old
-    // folder's display state. Adopt the verified result only after that reset.
-    linkedBatchID = result?.batch_id || '';
-    emptyReviewState = result?.outcome === 'no_eligible' ? 'no_proposals' : 'unscanned';
-    reviewStatusMessage =
-      result?.outcome === 'no_eligible'
-        ? 'Initial scan finished. No eligible files are ready for review. Files may still be settling; scan again when you choose.'
-        : 'Your first review is ready. Nothing was moved.';
-    setPreparationRoute(setupReview?.operation_id || '');
-    open({ tab: 'review', source: 'folder-preparation' });
-    document.getElementById('fileJanitorConsoleTitle')?.focus();
+    if (!preparationCurrent(intent)) return;
+    const observed = setupReview?.state === 'prepared' && setupReview.result;
+    if (
+      statusLoadState !== 'ready' ||
+      result.root_id !== lastStatus?.settings?.root_id ||
+      !isPreparedResult(observed) ||
+      observed.operation_id !== result.operation_id ||
+      observed.root_id !== result.root_id ||
+      observed.batch_id !== result.batch_id
+    )
+      return;
+    firstPreview = observed;
+    if (currentPreview()?.count === 0) emptyReviewState = 'no_proposals';
+    if (ctx) {
+      if (
+        !intent.ownsOverlay() ||
+        !currentPreview() ||
+        window.SetupWizard?.getStatus?.()?.state !== 'ready'
+      )
+        return;
+      ctx.setBusy?.(false, '');
+      // A ready wizard's close is synchronous; leave focus with Filing only for
+      // this intentional handoff, not when a new overlay has since opened.
+      const consoleAtClose = consoleVisit;
+      const closed = await window.SetupWizard.close?.();
+      if (
+        !closed ||
+        !preparationCurrent(intent) ||
+        consoleAtClose !== consoleVisit ||
+        !currentPreview()
+      )
+        return;
+      setPreparationRoute(setupReview.operation_id);
+      open({ tab: 'review', source: 'folder-preparation' });
+    } else {
+      if (!intent.ownsOverlay() || !currentPreview()) return;
+      setPreparationRoute(setupReview.operation_id);
+      // The finally block redraws this visit without changing its focus owner.
+      syncUrl({ replace: true });
+    }
+    intent.focusReview = true;
   }
 
   // One host-rendered consent card serves the console and the existing wizard's
@@ -5666,6 +5758,11 @@
     );
     const card = el('section', 'fj-setup-review');
     card.setAttribute('aria-label', 'Review Filing permissions');
+    if (ctx && preparation) {
+      card.appendChild(el('p', 'fj-sub', 'Preparing your preview…'));
+      host.appendChild(card);
+      return true;
+    }
     card.appendChild(
       el(
         'h3',
@@ -5689,7 +5786,7 @@
     // would repeat every stage. Errors still become their own alert below.
     card.appendChild(message);
     const repaint = async (choice, control) => {
-      if (busy || setupDraft || review !== setupReview) return;
+      if (busy || preparation || setupDraft || review !== setupReview) return;
       const draft = {};
       setupDraft = draft;
       card.querySelectorAll?.('input, select, button').forEach(node => (node.disabled = true));
@@ -5812,18 +5909,32 @@
       async () => {
         if (
           busy ||
+          preparation ||
           setupDraft ||
           review !== setupReview ||
           !['review', 'preparation_incomplete'].includes(review.state)
         )
           return;
-        busy = true;
+        const visit = consoleVisit;
+        const mode = workspaceViewMode();
+        const intent = {
+          id: wsId(),
+          path: window.location?.pathname,
+          ownsOverlay: () =>
+            workspaceViewMode() === mode &&
+            (ctx
+              ? ctx.isCurrentOverlay?.()
+              : consoleOpen && consoleTab === 'review' && visit === consoleVisit)
+        };
+        preparation = intent;
         confirm.disabled = true;
         monitor.disabled = true;
-        ctx?.setBusy?.(true, 'Preparing a metadata-only review…');
-        message.textContent = 'Preparing a metadata-only review…';
+        showError('');
+        if (ctx) ctx.setBusy?.(true, 'Preparing your preview…');
+        else if (consoleOpen) renderConsole();
+        notifySubscribers();
         try {
-          const response = await fetch(apiBase(wsId()) + '/prepare-review', {
+          const response = await fetch(apiBase(intent.id) + '/prepare-review', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -5847,33 +5958,40 @@
               'The initial result could not be confirmed. Reload this workspace to observe the accepted preparation; do not create again.'
             );
           }
-          await landOnPreparedReview(body.preparation.result, ctx);
+          if (preparationCurrent(intent))
+            await landOnPreparedReview(body.preparation.result, intent, ctx);
         } catch (error) {
-          busy = false;
-          ctx?.setBusy?.(false, '');
-          await loadSetupReview();
+          if (!preparationCurrent(intent)) return;
+          // A lost response can still have a saved result. Re-read authority;
+          // the retry control must never retain its old reviewed revision.
+          await refresh();
+          if (!preparationCurrent(intent)) return;
           if (setupReview?.state === 'prepared' && isPreparedResult(setupReview.result)) {
-            await landOnPreparedReview(setupReview.result, ctx);
-            return;
+            await landOnPreparedReview(setupReview.result, intent, ctx);
+          } else {
+            intent.error = error.message;
           }
-          // Re-render from fresh authority, not a closure over the failed review.
-          // A stale/revoked choice loses its retry rather than silently regranting.
-          clear(host);
-          message.textContent = error.message;
-          message.setAttribute('role', 'alert');
-          host.appendChild(message);
-          if (!renderLinkedSetupReview(host, ctx)) {
-            host.appendChild(
-              button('Open current settings', 'fj-btn fj-btn-secondary', () => {
-                void window.SetupWizard?.refresh?.();
-                void refresh();
-              })
-            );
-          }
-          host.querySelector('button')?.focus();
         } finally {
-          busy = false;
-          ctx?.setBusy?.(false, '');
+          if (preparationCurrent(intent)) {
+            preparation = null;
+            if (ctx && intent.ownsOverlay()) {
+              ctx.setBusy?.(false, '');
+              window.SetupWizard?.registerStepRenderer?.('directory', directoryStepRenderer);
+              window.SetupWizard?.registerStepRenderer?.(
+                'automation_review',
+                automationStepRenderer
+              );
+              if (intent.error) ctx.setError?.(intent.error);
+            }
+            if (consoleOpen) {
+              if (intent.error && intent.ownsOverlay()) lastErrorMessage = intent.error;
+              renderConsole();
+              if (intent.focusReview) document.getElementById(CONSOLE_TITLE_ID)?.focus();
+            }
+            notifySubscribers();
+          } else if (preparation === intent) {
+            preparation = null;
+          }
         }
       }
     );
@@ -6261,7 +6379,7 @@
   // loadBatch fetches the newest batch still awaiting the user. Selection and
   // disclosure state survive a same-batch reload; a new batch clears both, and
   // candidates that became ineligible are dropped individually below.
-  async function loadBatch() {
+  async function loadBatch({ syncRoute = true } = {}) {
     const scope = requestScope();
     const id = scope.id;
     if (!id || disposed) return;
@@ -6293,6 +6411,7 @@
       const body = await response.json();
       if (!current()) return;
       lastBatch = body.batch || null;
+      if (lastBatch && emptyReviewState === 'no_proposals') reviewStatusMessage = '';
       emptyReviewState = lastBatch ? 'active' : previousBatchID ? 'completed' : emptyReviewState;
       lastCandidates = Array.isArray(body.candidates) ? body.candidates : [];
       batchTotal = Number(body.total) || 0;
@@ -6318,7 +6437,7 @@
           expandedCandidates = new Set();
         }
         pageOffset = Math.max(0, (Math.ceil(filteredTotal / PAGE_SIZE) - 1) * PAGE_SIZE);
-        return loadBatch();
+        return loadBatch({ syncRoute });
       }
     } catch (_) {
       if (!current()) return;
@@ -6388,7 +6507,7 @@
     }
     renderBatch();
     if (consoleOpen && consoleItem) focusRequestedItem();
-    if (draftEnabled && consoleOpen) syncUrl({ replace: true });
+    if (syncRoute && draftEnabled && consoleOpen) syncUrl({ replace: true });
     refreshStats();
     // Status arrives before the paged batch on a cold workspace load. Once the
     // queue count is known, promote Watching to Review ready on the compact
@@ -6436,18 +6555,16 @@
         isPreparedResult(setupReview.result) &&
         setupReview.result.root_id === status.settings?.root_id
       ) {
-        if (setupReview.result.outcome === 'no_eligible') {
+        if (setupReview.result.outcome === 'no_eligible' && !lastBatch) {
           emptyReviewState = 'no_proposals';
           reviewStatusMessage =
             'Initial scan finished. No eligible files are ready for review. Files may still be settling; scan again when you choose.';
-        } else {
-          reviewStatusMessage = 'Your first review is ready. Nothing was moved.';
         }
       }
       const renderedScope = requestScope();
       const renderedSequence = statusRequest;
       if (status && status.applies && status.settings && status.settings.root_path) {
-        await loadBatch();
+        await loadBatch({ syncRoute: !preparation });
         if (!scopeCurrent(renderedScope) || renderedSequence !== statusRequest) return;
         await loadHistory();
         await loadProtection();
@@ -6615,6 +6732,15 @@
       historyList: source(historyListLoadState, historyListLoadState !== 'ready' && historyLoaded),
       rootId: String(settings.root_id || ''),
       linkedFolderName: reviewedFolderName(),
+      preparingPreview: preparation !== null,
+      firstPreview: currentPreview(),
+      preparationState: [
+        'preparation_incomplete',
+        'preparation_changed',
+        'result_unavailable'
+      ].includes(setupReview?.state)
+        ? setupReview.state
+        : '',
       batchId: String(lastBatch?.id || ''),
       pendingCount: batchLoaded ? pendingCount() : null,
       needsReviewCount: batchLoaded ? Number(lastBatch?.summary?.needs_review) || 0 : null,
@@ -6650,11 +6776,49 @@
         tone: 'degraded'
       };
     }
+    if (preparation) {
+      return {
+        applies: true,
+        value: 'Preparing preview…',
+        description: 'Nothing is moving.',
+        tone: 'idle'
+      };
+    }
+    const preview = currentPreview();
+    if (preview) {
+      return {
+        applies: true,
+        value: preview.count ? reviewCountLabel(preview.count) : 'No eligible files',
+        description: 'Nothing moved.',
+        tone: preview.count ? 'attention' : 'idle'
+      };
+    }
+    if (
+      setupReview?.state === 'preparation_incomplete' ||
+      setupReview?.state === 'preparation_changed'
+    ) {
+      return {
+        applies: true,
+        value: 'Preparation needs attention',
+        description: 'Open Filing to review current settings.',
+        tone: 'attention'
+      };
+    }
+    if (statusLoadState === 'unavailable' || batchLoadState === 'error') {
+      return {
+        applies: true,
+        value: 'Filing status unavailable',
+        description: 'Open Filing to refresh.',
+        tone: 'degraded'
+      };
+    }
     if (readiness.state === 'setup_required' || !isConfigured(lastStatus)) {
       return {
         applies: true,
         value: 'Setup needed',
-        description: 'waiting for you to choose a folder to file',
+        description: reviewedFolderName()
+          ? 'Waiting for folder access'
+          : 'waiting for you to choose a folder to file',
         tone: 'attention'
       };
     }
@@ -7071,6 +7235,9 @@
       linkedBatchID = '';
       expandedCandidates = new Set();
       setupReview = null;
+      setupDraft = null;
+      preparation = null;
+      firstPreview = null;
       setupReviewRequest++;
       statusRequest++;
       batchRequest++;

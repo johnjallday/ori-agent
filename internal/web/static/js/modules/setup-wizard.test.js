@@ -859,6 +859,34 @@ test('a step whose own control is the action does not offer a Continue that must
   assert.equal(elements.setupWizardPrimary.disabled, false);
 });
 
+test('a domain renderer can check its wizard visit without claiming a reopened overlay', async () => {
+  const current = status({ state: 'in_progress' });
+  const { api } = load({
+    status: current,
+    routes: {
+      'POST /open': current,
+      'POST /dismiss': current
+    }
+  });
+  await api.init();
+  let context;
+  api.registerStepRenderer('directory', {
+    render(_host, ctx) {
+      context = ctx;
+    }
+  });
+  api.open();
+  const first = context;
+  assert.equal(first.isCurrentOverlay(), true);
+  await api.refresh();
+  assert.equal(first.isCurrentOverlay(), true, 'a status refresh is not a new visit');
+  await api.close();
+  assert.equal(first.isCurrentOverlay(), false);
+  api.open();
+  assert.equal(context.isCurrentOverlay(), true);
+  assert.equal(first.isCurrentOverlay(), false);
+});
+
 test('late domain review refreshes the current step and its primary label together', async () => {
   const { api, elements } = load({ status: status({ state: 'in_progress' }) });
   await api.init();

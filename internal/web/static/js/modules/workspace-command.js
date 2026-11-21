@@ -2556,7 +2556,10 @@ export class WorkspaceCommandView {
     this._nextActionWorkspace = id;
     const signatureOf = () => {
       const { taskWork: _taskWork, sourceRows: _sourceRows, ...descriptor } = this.nextAction();
-      return JSON.stringify(descriptor);
+      return JSON.stringify([
+        descriptor,
+        this.viewMode === 'map' ? controller?.stationState?.() : null
+      ]);
     };
     let signature = signatureOf();
     if (typeof window.addEventListener === 'function') {
@@ -2663,14 +2666,38 @@ export class WorkspaceCommandView {
     }
     const view = this.nextAction();
     // Poll/retry starts and unchanged refreshes must not repeat the same action.
-    if (view.isLoading) return;
-    const text = [view.title, view.action?.label, ...view.qualifications]
+    if (view.isLoading || view.filingPreview?.consoleOpen || view.kind === 'preparing_preview')
+      return;
+    const text = [
+      view.title,
+      view.filingPreview ? 'Nothing moved' : '',
+      view.action?.label,
+      ...view.qualifications
+    ]
       .filter(Boolean)
       .join('. ');
     const key = this.workspaceId() + ':' + text;
     if (key === this._lastNextActionAnnouncement) return;
     this._lastNextActionAnnouncement = key;
     region.textContent = text;
+  }
+
+  markFilingPreviewHandoff() {
+    const preview = this.nextAction().filingPreview;
+    if (!preview || preview.consoleOpen) return;
+    const station = this.container?.querySelector(
+      '.ws-cmd-opmap [data-cmd-hq-station="file-janitor"]'
+    );
+    if (!station) return;
+    const key = `${this.workspaceId()}:${preview.rootId}:${preview.batchId}:${preview.id}`;
+    this._shownFilingPreviews ??= new Set();
+    if (this._shownFilingPreviews.has(key)) return;
+    this._shownFilingPreviews.add(key);
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    station.classList.add('is-preview-handoff');
+    this.container
+      .querySelector('#workspaceNextActionRegion')
+      ?.classList.add('is-preview-arriving');
   }
 
   renderWorkFirst() {
@@ -3121,6 +3148,7 @@ export class WorkspaceCommandView {
       this.bindOperationsMap();
       this.paintMapActivity();
       this.announceMapRendered();
+      this.markFilingPreviewHandoff();
     } else {
       // Leaving Map mode takes the map's listeners and timers with it (FR-6).
       this.unmountDetachmentMap();

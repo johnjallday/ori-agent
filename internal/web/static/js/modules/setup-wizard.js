@@ -86,6 +86,7 @@
   let currentStepId = '';
   let busy = false;
   let openedOnce = false;
+  let overlayVisit = 0;
   // The last thing said in the live region, so the same sentence is not
   // repeated over a user on every re-render.
   let lastAnnouncement = '';
@@ -702,11 +703,13 @@
   // the step, act through the shared actions, and report progress — but it
   // cannot navigate, complete, or decide readiness.
   function rendererContext(step) {
+    const visit = overlayVisit;
     return {
       step,
       status,
       runtimeStatus,
       workspaceId,
+      isCurrentOverlay: () => overlayVisit === visit && Boolean(els().dialog?.open),
       setBusy: (value, message) => setBusy(value, message),
       setError: message => setError(message),
       announce: message => announce(message),
@@ -1039,6 +1042,7 @@
   function openDialog(stepId) {
     const { dialog } = els();
     if (!dialog || !status || !status.applicable) return;
+    overlayVisit++;
     currentStepId = stepId && stepById(stepId) ? stepId : firstUnresolvedId();
     render();
     if (!dialog.open && typeof dialog.showModal === 'function') {
@@ -1077,6 +1081,7 @@
   }
 
   function closeDialog() {
+    overlayVisit++;
     const { dialog } = els();
     if (dialog?.open && typeof dialog.close === 'function') dialog.close();
     else if (dialog) dialog.removeAttribute('open');

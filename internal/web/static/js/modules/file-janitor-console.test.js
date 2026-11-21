@@ -367,8 +367,8 @@ for (const source of ['workspace-next-action', 'map-station']) {
 test('confirmation waits for the reviewed draft and posts its exact terms only once', async () => {
   const doc = setup();
   const initial = attachedReview();
+  panel.render(setupRequiredStatus);
   panel._setSetupReview(initial);
-  const host = doc.register('draft');
   const reviewed = { ...initial, monitoring: true, review_revision: 'b'.repeat(64) };
   const choice = Promise.withResolvers();
   const preparation = Promise.withResolvers();
@@ -379,14 +379,22 @@ test('confirmation waits for the reviewed draft and posts its exact terms only o
     if (String(url).endsWith('/prepare-review')) return preparation.promise;
     return {
       ok: true,
-      json: async () => ({ review: attachedReview({ state: 'preparation_changed' }) })
+      json: async () =>
+        String(url).endsWith('/setup-review')
+          ? {
+              review: writes.some(([route]) => route === 'prepare-review')
+                ? attachedReview({ state: 'preparation_changed' })
+                : initial
+            }
+          : { status: setupRequiredStatus }
     };
   };
   const confirm = () =>
-    host.all(
+    surface(doc).all(
       node => node.tagName === 'BUTTON' && node.textContent.startsWith('Allow filing in')
     )[0];
-  panel._renderSetupReview(host);
+  panel.open();
+  await settle();
   const monitor = doc.getElementById('fileJanitorReviewMonitoring');
   monitor.checked = true;
   monitor.dispatch('change');
@@ -397,8 +405,9 @@ test('confirmation waits for the reviewed draft and posts its exact terms only o
   choice.resolve({ ok: true, json: async () => ({ review: reviewed }) });
   await settle();
   assert.equal(doc.activeElement, doc.getElementById('fileJanitorReviewMonitoring'));
-  confirm().click();
-  confirm().click();
+  const original = confirm();
+  original.click();
+  original.click();
   assert.deepEqual(writes.slice(1), [
     [
       'prepare-review',
@@ -414,7 +423,7 @@ test('confirmation waits for the reviewed draft and posts its exact terms only o
     json: async () => ({ error: { message: 'Permissions changed' } })
   });
   await settle();
-  assert.match(host.textContent, /Permissions changed/);
+  assert.match(text(doc), /Permissions changed/);
   assert.equal(confirm().disabled, true);
   confirm().click();
   assert.equal(writes.length, 2);
@@ -435,23 +444,127 @@ for (const state of ['folder_conflict', 'folder_unavailable']) {
 
 test('a malformed success response cannot invent a prepared result', async () => {
   const doc = setup();
-  panel._setSetupReview(attachedReview());
-  const host = doc.createElement('div');
+  panel.render(setupRequiredStatus);
+  let sent = false;
   globalThis.fetch = async url => ({
     ok: true,
-    json: async () =>
-      String(url).endsWith('/prepare-review')
-        ? { preparation: { workspace_id: 'ws-1' } }
-        : { review: { state: 'repair_required', workspace_id: 'ws-1' } }
+    json: async () => {
+      if (String(url).endsWith('/prepare-review')) {
+        sent = true;
+        return { preparation: { workspace_id: 'ws-1' } };
+      }
+      if (String(url).endsWith('/setup-review'))
+        return {
+          review: sent ? { state: 'repair_required', workspace_id: 'ws-1' } : attachedReview()
+        };
+      return { status: setupRequiredStatus };
+    }
   });
-  panel._renderSetupReview(host);
-  host
+  panel.open();
+  await settle();
+  surface(doc)
     .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Allow filing in'))[0]
     .click();
   await settle();
-  assert.match(host.textContent, /initial result could not be confirmed/);
-  assert.doesNotMatch(host.textContent, /Your first review is ready/);
+  assert.match(text(doc), /initial result could not be confirmed/);
+  assert.doesNotMatch(text(doc), /Nothing moved\./);
 });
+
+for (const destination of ['stay', 'dismiss', 'reopen', 'workspace', 'root']) {
+  test(`deferred preparation respects ${destination} without losing the saved authority`, async t => {
+    const doc = setup();
+    const priorLocation = window.location;
+    const priorHistory = window.history;
+    t.after(() => Object.assign(window, { location: priorLocation, history: priorHistory }));
+    window.location = new URL('http://localhost/workspaces/synthetic?mode=map');
+    window.history = {
+      replaceState(_state, _title, url) {
+        window.location = new URL(url);
+      },
+      pushState(_state, _title, url) {
+        window.location = new URL(url);
+      }
+    };
+    const trigger = doc.register('map-invite');
+    const grant = Promise.withResolvers();
+    const result = {
+      privacy_mode: 'metadata_only',
+      operation_id: 'accepted:scan',
+      root_id: 'root-1',
+      batch_id: 'batch-1',
+      completed_at: '2026-10-26T12:00:00Z',
+      outcome: 'batch',
+      eligible_count: 1,
+      ineligible_count: 0
+    };
+    let status = setupRequiredStatus;
+    let review = attachedReview();
+    const requests = [];
+    globalThis.fetch = async (url, options) => {
+      requests.push([String(url), options?.method]);
+      if (String(url).endsWith('/prepare-review')) return grant.promise;
+      return {
+        ok: true,
+        json: async () => {
+          if (String(url).endsWith('/setup-review')) return { review };
+          if (String(url).endsWith('/file-janitor')) return { status };
+          if (isBatchDetailRequest(url))
+            return { batch: { id: 'batch-1', summary: { proposed: 1 } } };
+          return { batches: [], actions: [], candidates: [] };
+        }
+      };
+    };
+    panel.render(status);
+    panel._setSetupReview(review);
+    panel.focusSetup(trigger);
+    await settle();
+    surface(doc)
+      .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Allow filing in'))[0]
+      .click();
+    if (destination !== 'stay' && destination !== 'root') panel.close();
+    if (destination === 'workspace') {
+      panel.dispose();
+      window.location = new URL('http://localhost/workspaces/other?mode=map');
+      panel.init('ws-2');
+    }
+    if (destination === 'reopen') panel.open({ source: 'map-station', trigger });
+    const focusBefore = doc.activeElement;
+    const routeBefore = window.location.href;
+    status = statusFixture();
+    status.settings.root_id = destination === 'root' ? 'other-root' : 'root-1';
+    status.settings.setup_preparation = { operation_id: 'accepted' };
+    review = attachedReview({ state: 'prepared', operation_id: 'accepted', result });
+    grant.resolve({
+      ok: true,
+      json: async () => ({
+        preparation: { workspace_id: 'ws-1', operation_id: 'accepted', result }
+      })
+    });
+    await settle();
+    await settle();
+    if (destination === 'stay') {
+      assert.equal(window.location.searchParams.get('preparation'), 'accepted');
+      assert.equal(doc.activeElement?.id, 'fileJanitorConsoleTitle');
+      assert.match(text(doc), /1 file ready for review.*Nothing moved/s);
+    } else {
+      assert.equal(window.location.href, routeBefore);
+      if (destination === 'dismiss') {
+        assert.equal(doc.activeElement, focusBefore);
+        assert.equal(doc.getElementById('fileJanitorConsole').hidden, true);
+        panel.open({ source: 'map-station', trigger });
+        await settle();
+        assert.equal(panel.getActionState().batchId, 'batch-1');
+      } else if (destination === 'reopen') {
+        assert.notEqual(doc.activeElement?.id, 'fileJanitorConsoleTitle');
+        assert.match(text(doc), /Nothing moved/);
+      } else {
+        assert.doesNotMatch(text(doc), /Nothing moved|first review is ready/);
+      }
+    }
+    assert.equal(requests.filter(([url]) => url.endsWith('/prepare-review')).length, 1);
+    assert.ok(requests.every(([url]) => !url.endsWith('/apply')));
+  });
+}
 
 test('a newly linked empty folder retains its verified initial result through status repaint', async t => {
   const doc = setup();
@@ -480,27 +593,32 @@ test('a newly linked empty folder retains its verified initial result through st
   status.settings.root_id = 'root-1';
   status.settings.setup_preparation = { operation_id: 'accepted' };
   panel.render(setupRequiredStatus);
-  panel._setSetupReview(attachedReview());
+  let accepted = false;
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
     calls.push([String(url), options.method || 'GET']);
     return {
       ok: true,
       json: async () => {
-        if (String(url).endsWith('/prepare-review'))
-          return { preparation: { workspace_id: 'ws-1', result } };
+        if (String(url).endsWith('/prepare-review')) {
+          accepted = true;
+          return { preparation: { workspace_id: 'ws-1', operation_id: 'accepted', result } };
+        }
         if (String(url).endsWith('/setup-review'))
           return {
-            review: attachedReview({ state: 'prepared', operation_id: 'accepted', result })
+            review: accepted
+              ? attachedReview({ state: 'prepared', operation_id: 'accepted', result })
+              : attachedReview()
           };
-        if (String(url).endsWith('/file-janitor')) return { status };
+        if (String(url).endsWith('/file-janitor'))
+          return { status: accepted ? status : setupRequiredStatus };
         return { batches: [], actions: [], candidates: [] };
       }
     };
   };
-  const host = doc.createElement('div');
-  panel._renderSetupReview(host);
-  host
+  panel.open();
+  await settle();
+  surface(doc)
     .all(node => node.tagName === 'BUTTON' && node.textContent.startsWith('Allow filing in'))[0]
     .click();
   await settle();

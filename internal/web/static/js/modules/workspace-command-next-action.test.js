@@ -258,6 +258,38 @@ test('update Review binding re-reads and opens the current batch without any wor
   ]);
 });
 
+test('the map handoff waits for the overlay to close and marks each prepared batch once', t => {
+  let reducedMotion = false;
+  globalThis.window = { location: { search: '' }, matchMedia: () => ({ matches: reducedMotion }) };
+  t.after(() => delete globalThis.window);
+  const command = view([]);
+  command.viewMode = 'map';
+  const classes = [];
+  const node = { classList: { add: name => classes.push(name) } };
+  command.container = { querySelector: () => node };
+  const preview = { id: 'new', rootId: 'root', batchId: 'batch', consoleOpen: true };
+  let action = {};
+  command.nextAction = () => action;
+  command.markFilingPreviewHandoff();
+  action = { filingPreview: preview };
+  command.markFilingPreviewHandoff();
+  assert.deepEqual(classes, [], 'no hydration or animation behind the console');
+  preview.consoleOpen = false;
+  command.markFilingPreviewHandoff();
+  command.markFilingPreviewHandoff();
+  preview.consoleOpen = true;
+  command.markFilingPreviewHandoff();
+  preview.consoleOpen = false;
+  command.markFilingPreviewHandoff();
+  assert.deepEqual(classes, ['is-preview-handoff', 'is-preview-arriving']);
+  reducedMotion = true;
+  preview.batchId = 'second';
+  command.markFilingPreviewHandoff();
+  reducedMotion = false;
+  command.markFilingPreviewHandoff();
+  assert.equal(classes.length, 2, 'reduced motion suppresses rather than postpones the effect');
+});
+
 test('mounted Command shares one disposable watcher and ignores unchanged observations', async t => {
   workspaceUpdates.reset();
   const priorDocument = globalThis.document;
