@@ -71,6 +71,61 @@
   margin-block-start: 0.75rem;
 }
 
+.my-notes-browser {
+  border-block-start: 1px solid var(--border-color);
+  padding: clamp(1rem, 3vw, 1.5rem);
+}
+
+.my-notes-browser h2 {
+  width: fit-content;
+  margin-block: 1rem 0.75rem;
+}
+
+.my-notes-crumbs,
+.my-notes-file-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.my-notes-crumbs button {
+  text-align: start;
+}
+
+.my-notes-filenames {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.my-notes-filename {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-block-start: 1px solid var(--border-color);
+  padding-block: 0.55rem;
+}
+
+.my-notes-child-folder::before {
+  content: "↳";
+  margin-inline-end: 0.5rem;
+}
+
+.my-notes-file-preview {
+  flex: 0 0 100%;
+  border-inline-start: 2px solid var(--primary-color);
+  padding: 0.7rem 1rem;
+  background: var(--bg-secondary);
+  white-space: pre-wrap;
+}
+
+.my-notes-file-preview p:last-child {
+  margin: 0;
+}
+
 .my-notes [data-my-notes-tools] {
   border-block-start: 1px solid var(--border-color);
 }

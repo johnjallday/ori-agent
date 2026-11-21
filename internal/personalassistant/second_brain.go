@@ -304,6 +304,7 @@ type SecondBrainView struct {
 	Version    int64                 `json:"version"`
 	// SetupRequired names an existing prerequisite for the lightweight connection view.
 	SetupRequired string `json:"setup_required,omitempty"`
+	BrowseRef     string `json:"browse_ref,omitempty"`
 	// LookID names the look a connect started (or the replayed one).
 	LookID string `json:"look_id,omitempty"`
 	// Nudge says the notes deserve another look, by the same rule Today's
@@ -534,7 +535,11 @@ func (s *SecondBrainService) ConnectionStatus(ctx context.Context, userID string
 	case err != nil:
 		return SecondBrainView{}, err
 	}
-	return s.connectionView(doc), nil
+	view := s.connectionView(doc)
+	if view.Status == SecondBrainConnected {
+		view.BrowseRef = browseReference(doc)
+	}
+	return view, nil
 }
 
 // Inbox lists the notes directly under Inbox in a second brain Ori set up.

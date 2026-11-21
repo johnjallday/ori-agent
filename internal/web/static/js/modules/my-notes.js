@@ -1,4 +1,5 @@
 import { notesPost, notesRequest } from './notes-api.js';
+import { MyNotesBrowser } from './my-notes-browser.js';
 import {
   isCreatedByOri,
   lookTooSoonLine,
@@ -112,6 +113,9 @@ class MyNotes {
     this.title = root.querySelector('#my-notes-title');
     this.status = root.querySelector('[data-my-notes-status]');
     this.tools = root.querySelector('[data-my-notes-tools]');
+    this.browser = new MyNotesBrowser(root.querySelector('[data-my-notes-browser]'), {
+      openFolder: () => this.openFolder()
+    });
     this.request = latestNotesRequest();
     this.arrival = new URLSearchParams(window.location.search).get('view');
     root.addEventListener('click', event => this.click(event));
@@ -128,6 +132,7 @@ class MyNotes {
     window.addEventListener('pagehide', () => {
       this.suspended = true;
       this.request.cancel();
+      this.browser.clear();
       this.clearTools();
     });
     window.addEventListener('pageshow', event => {
@@ -150,7 +155,13 @@ class MyNotes {
       // A failed request is not the same as having no source.
     }
     if (!this.request.isCurrent(request)) return;
-    if (connectionKey(view) !== connectionKey(this.view)) this.clearTools();
+    if (
+      connectionKey(view) !== connectionKey(this.view) ||
+      view?.browse_ref !== this.view?.browse_ref
+    ) {
+      this.browser.clear();
+      this.clearTools();
+    }
     this.view = view;
     this.paintStatus();
     this.status.removeAttribute('aria-busy');
@@ -170,6 +181,7 @@ class MyNotes {
     const actions = node('div', '');
     actions.className = 'my-notes-actions';
     if (state.connected) {
+      if (this.view.browse_ref) actions.append(button('Browse notebook', 'browse'));
       if (isCreatedByOri(this.view)) actions.append(button('Inbox', 'inbox'));
       actions.append(button('Open loops', 'loops'));
       actions.append(button(isCreatedByOri(this.view) ? 'People & Projects' : 'People', 'more'));
@@ -324,6 +336,14 @@ class MyNotes {
     }
   }
 
+  async openFolder() {
+    const view = this.view;
+    const result = await openSecondBrainFolder();
+    const message = result.ok ? 'Folder handoff requested.' : result.message;
+    if (connectionKey(view) === connectionKey(this.view)) this.notice(message);
+    return message;
+  }
+
   async click(event) {
     const control = event.target.closest('button');
     if (!control || control.disabled) return;
@@ -333,13 +353,10 @@ class MyNotes {
         return this.load();
       case 'manage':
         return this.manage(control);
-      case 'folder': {
-        const view = this.view;
-        const result = await openSecondBrainFolder();
-        if (view === this.view)
-          this.notice(result.ok ? 'Folder handoff requested.' : result.message);
-        return;
-      }
+      case 'folder':
+        return this.openFolder();
+      case 'browse':
+        return this.browser.start(this.view);
       case 'inbox':
       case 'loops':
       case 'more':
@@ -401,6 +418,7 @@ class MyNotes {
       panel.captureDraft = '';
       panel.captureID = null;
       panel.captureReceipt = secondBrainCaptureReceipt(payload.capture);
+      if (panel === this.panel) this.browser.refreshInbox();
       const [inbox, progression] = await Promise.all([
         notesRequest('/inbox').catch(() => null),
         fetch('/api/progression', { cache: 'no-store' })

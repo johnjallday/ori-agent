@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -38,7 +39,8 @@ type SecondBrainService interface {
 	DismissWeek(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 	DismissNudge(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 	OpenFolder(ctx context.Context, userID, requestID string) error
-	Preview(ctx context.Context, userID, kind, name string) (personalassistant.SecondBrainPreviewView, error)
+	Preview(ctx context.Context, userID, kind, name string, browseRef ...string) (personalassistant.SecondBrainPreviewView, error)
+	Browse(ctx context.Context, userID, ref string, parts []string) (personalassistant.SecondBrainDirectory, error)
 	People(ctx context.Context, userID string) (personalassistant.SecondBrainPeopleView, error)
 	// RetrySetup re-runs the recorded notes setup from a Personal HQ build, exactly
 	// as it was reviewed. It never touches HQ (assistant-hq-onboarding 3.4).
@@ -619,6 +621,36 @@ func (h *Handler) OpenSecondBrainFolder(w http.ResponseWriter, r *http.Request) 
 	orihttp.Success(w, map[string]any{"opened": true})
 }
 
+// BrowseSecondBrain lists immediate child names of one approved folder.
+func (h *Handler) BrowseSecondBrain(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	userID, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	if len(r.URL.RawQuery) > 8192 {
+		orihttp.BadRequest(w, "That folder path is too long")
+		return
+	}
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	ref, parts := query["ref"], query["part"]
+	delete(query, "ref")
+	delete(query, "part")
+	if err != nil || len(ref) != 1 || len(query) != 0 {
+		orihttp.BadRequest(w, "Choose a directory in your connected notes folder")
+		return
+	}
+	view, err := h.secondBrain.Browse(r.Context(), userID, ref[0], parts)
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	orihttp.Success(w, map[string]any{"directory": view})
+}
+
 // GetSecondBrainPreview shows one note Ori wrote, inline (FR16). kind and name
 // are checked before anything is read: name is one component, never a path.
 func (h *Handler) GetSecondBrainPreview(w http.ResponseWriter, r *http.Request) {
@@ -630,11 +662,14 @@ func (h *Handler) GetSecondBrainPreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	kind, name := r.PathValue("kind"), r.PathValue("name")
-	if _, err := secondbrain.PreviewRel(kind, name); err != nil || r.URL.RawQuery != "" {
+	query, queryErr := url.ParseQuery(r.URL.RawQuery)
+	ref := query["ref"]
+	if _, err := secondbrain.PreviewRel(kind, name); err != nil || queryErr != nil ||
+		(len(query) > 0 && (len(query) != 1 || len(ref) != 1 || len(ref[0]) != 64)) {
 		orihttp.BadRequest(w, "Name one note: inbox, daily or project, and one file or folder name")
 		return
 	}
-	view, err := h.secondBrain.Preview(r.Context(), userID, kind, name)
+	view, err := h.secondBrain.Preview(r.Context(), userID, kind, name, ref...)
 	if err != nil {
 		writeSecondBrainError(w, err)
 		return
@@ -708,6 +743,10 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 		orihttp.NotFound(w, "That vault is no longer in Obsidian's list. Choose it again")
 	case errors.Is(err, personalassistant.ErrSecondBrainSelection):
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Ori no longer has that folder open. Pick it again", "needs_pick": true, "needs_pick_reason": personalassistant.FolderPickReason(err)})
+	case errors.Is(err, personalassistant.ErrSecondBrainBrowseStale):
+		orihttp.Conflict(w, "Your notes connection changed. Reopen the notebook")
+	case errors.Is(err, personalassistant.ErrSecondBrainBrowseMissing):
+		orihttp.NotFound(w, "That folder is no longer available")
 	case errors.Is(err, personalassistant.ErrSecondBrainNotConnected):
 		orihttp.Conflict(w, "No notes folder is connected")
 	case errors.Is(err, secondbrain.ErrNotOwned):

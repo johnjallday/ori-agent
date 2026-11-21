@@ -96,7 +96,7 @@ type SecondBrainPreviewView struct {
 // Preview reads one note in a folder Ori set up, only when its marker proves
 // Ori wrote it as it is. A connected vault is never previewed: Ori wrote none
 // of it.
-func (s *SecondBrainService) Preview(ctx context.Context, userID, kind, name string) (SecondBrainPreviewView, error) {
+func (s *SecondBrainService) Preview(ctx context.Context, userID, kind, name string, browseRef ...string) (SecondBrainPreviewView, error) {
 	if _, err := secondbrain.PreviewRel(kind, name); err != nil {
 		return SecondBrainPreviewView{}, ErrValidation
 	}
@@ -107,6 +107,9 @@ func (s *SecondBrainService) Preview(ctx context.Context, userID, kind, name str
 	source := doc.Connected()
 	if source == nil {
 		return SecondBrainPreviewView{}, ErrSecondBrainNotConnected
+	}
+	if len(browseRef) > 0 && browseReference(doc) != browseRef[0] {
+		return SecondBrainPreviewView{}, ErrSecondBrainBrowseStale
 	}
 	if !source.CreatedByOri() {
 		return SecondBrainPreviewView{}, ErrSecondBrainNoteIsYours
@@ -121,6 +124,11 @@ func (s *SecondBrainService) Preview(ctx context.Context, userID, kind, name str
 		return SecondBrainPreviewView{}, ErrSecondBrainNoteNotFound
 	case err != nil:
 		return SecondBrainPreviewView{}, ErrSecondBrainUnavailable
+	}
+	if len(browseRef) > 0 {
+		if err := s.checkBrowseReference(ctx, userID, browseRef[0]); err != nil {
+			return SecondBrainPreviewView{}, err
+		}
 	}
 	return SecondBrainPreviewView{
 		Name: preview.Name, Kind: preview.Kind, Title: preview.Title, Body: preview.Body, Truncated: preview.Truncated,
