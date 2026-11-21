@@ -34,6 +34,7 @@
   let lastStatus = null;
   let setupReview = null;
   let setupReviewRequest = 0;
+  let setupDraft = null;
   let statusRequest = 0;
   let batchRequest = 0;
   let historyRequest = 0;
@@ -227,6 +228,7 @@
     historyRequest++;
     receiptRequest++;
     setupReviewRequest++;
+    setupDraft = null;
     lastBatch = null;
     lastCandidates = [];
     resetPicture();
@@ -5542,6 +5544,8 @@
   async function loadSetupReview(choice) {
     const id = wsId();
     if (!id) return null;
+    // A background read must not overwrite the terms the person is reviewing.
+    if (!choice && setupDraft) return setupReview;
     const sequence = ++setupReviewRequest;
     try {
       const response = await fetch(
@@ -5684,24 +5688,46 @@
     // The wizard already announces ctx.setBusy; a second live region here
     // would repeat every stage. Errors still become their own alert below.
     card.appendChild(message);
-    const repaint = async choice => {
+    const repaint = async (choice, control) => {
+      if (busy || setupDraft || review !== setupReview) return;
+      const draft = {};
+      setupDraft = draft;
+      card.querySelectorAll?.('input, select, button').forEach(node => (node.disabled = true));
       message.textContent = 'Updating the permission review…';
+      let problem = '';
       try {
         await loadSetupReview(choice);
-        if (!card.isConnected) return;
-        clear(host);
-        if (!renderLinkedSetupReview(host, ctx)) {
-          message.textContent = 'Setup changed. Close this review and open the current settings.';
-          host.appendChild(message);
-        }
-        host.querySelector('input, select, button')?.focus();
       } catch (error) {
-        message.textContent = error.message;
+        problem = error.message;
       }
+      if (setupDraft !== draft) return;
+      setupDraft = null;
+      if (!card.isConnected) {
+        // A status repaint may have replaced the disabled copy while we read.
+        if (ctx) window.SetupWizard?.registerStepRenderer?.('directory', directoryStepRenderer);
+        else if (consoleOpen) renderConsole();
+        return;
+      }
+      clear(host);
+      if (problem || !setupReview) {
+        message.setAttribute('role', 'alert');
+        message.textContent =
+          problem || 'Setup changed. Close this review and open current settings.';
+        host.appendChild(message);
+      }
+      if (!renderLinkedSetupReview(host, ctx)) {
+        host.appendChild(
+          button('Refresh folder review', 'fj-btn fj-btn-secondary', () => void refresh())
+        );
+      }
+      const target = document.getElementById(control.id);
+      if (isVisibleFocusTarget(target)) target.focus();
+      else host.querySelector('button')?.focus();
     };
     if ((review.candidates || []).length > 1) {
       const label = el('label', 'fj-label', 'Attached folder');
       const select = el('select', 'fj-input');
+      select.id = 'fileJanitorReviewFolder';
       select.setAttribute('aria-label', 'Attached folder');
       const placeholder = el('option', '', 'Choose which folder to file');
       placeholder.value = '';
@@ -5712,10 +5738,13 @@
         select.appendChild(option);
       });
       select.value = review.reference_id || '';
-      select.disabled = Boolean(review.operation_id) || busy;
+      select.disabled = Boolean(review.operation_id) || busy || Boolean(setupDraft);
       select.addEventListener('change', () => {
         if (select.value)
-          void repaint({ reference_id: select.value, monitoring: Boolean(review.monitoring) });
+          void repaint(
+            { reference_id: select.value, monitoring: Boolean(review.monitoring) },
+            select
+          );
       });
       label.appendChild(select);
       card.appendChild(label);
@@ -5732,18 +5761,19 @@
     [
       'Create or reuse Filed/ inside this folder. This changes the folder on disk.',
       'Scan top-level file names, types, sizes, and dates once. No file contents are opened.',
-      'Every move into Filed/ or action to Trash needs your separate approval.'
+      'Nothing is moved or sent to Trash in this preview. Both require separate approval.'
     ].forEach(line => disclosure.appendChild(el('li', 'fj-disclosure-item', line)));
     card.appendChild(disclosure);
     const monitorLabel = el('label', 'fj-setup-monitor');
     const monitor = el('input');
     monitor.type = 'checkbox';
+    monitor.id = 'fileJanitorReviewMonitoring';
     monitor.checked = Boolean(review.monitoring);
-    monitor.disabled = busy || Boolean(review.operation_id) || !review.reference_id;
-    monitor.addEventListener(
-      'change',
-      () => void repaint({ reference_id: review.reference_id, monitoring: monitor.checked })
-    );
+    monitor.disabled =
+      busy || Boolean(setupDraft) || Boolean(review.operation_id) || !review.reference_id;
+    monitor.addEventListener('change', () => {
+      void repaint({ reference_id: review.reference_id, monitoring: monitor.checked }, monitor);
+    });
     monitorLabel.appendChild(monitor);
     monitorLabel.appendChild(el('span', '', 'Also watch new arrivals and run a daily scan'));
     card.appendChild(monitorLabel);
@@ -5780,7 +5810,13 @@
         : 'Allow filing in ' + safeName(candidate?.name, 'folder'),
       'fj-btn fj-btn-primary',
       async () => {
-        if (busy || !['review', 'preparation_incomplete'].includes(review.state)) return;
+        if (
+          busy ||
+          setupDraft ||
+          review !== setupReview ||
+          !['review', 'preparation_incomplete'].includes(review.state)
+        )
+          return;
         busy = true;
         confirm.disabled = true;
         monitor.disabled = true;
@@ -5841,17 +5877,18 @@
         }
       }
     );
-    confirm.disabled = busy || !['review', 'preparation_incomplete'].includes(review.state);
+    confirm.disabled =
+      busy || Boolean(setupDraft) || !['review', 'preparation_incomplete'].includes(review.state);
     actions.appendChild(confirm);
     const change = button('Choose another folder', 'fj-btn fj-btn-secondary', () => {
-      if (busy) return;
+      if (busy || setupDraft) return;
       if (ctx) void chooseFolder(ctx);
       else {
         clear(host);
         renderSetupCard(host, lastStatus || {});
       }
     });
-    change.disabled = busy || Boolean(review.operation_id);
+    change.disabled = busy || Boolean(setupDraft) || Boolean(review.operation_id);
     actions.appendChild(change);
     if (review.operation_id) {
       const stop = button('Stop here — keep saved setup', 'fj-btn fj-btn-secondary', async () => {

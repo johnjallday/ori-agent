@@ -335,6 +335,104 @@ test('attached folder review is default-off and discloses its actual filesystem 
   assert.equal(calls, 0);
 });
 
+for (const source of ['workspace-next-action', 'map-station']) {
+  test(`${source} opens and dismisses the linked review without initiating work`, async () => {
+    const doc = setup();
+    const trigger = doc.register('opener');
+    const writes = [];
+    globalThis.fetch = async (url, options) => {
+      if (options?.method) writes.push([url, options.method]);
+      return {
+        ok: true,
+        json: async () =>
+          String(url).endsWith('/setup-review')
+            ? { review: attachedReview() }
+            : { status: setupRequiredStatus }
+      };
+    };
+    await panel.refresh();
+    if (source === 'map-station') panel.open({ source, trigger });
+    else panel.focusSetup(trigger, { source });
+    await settle();
+    assert.match(text(doc), /Allow filing in Synthetic Inbox/);
+    assert.match(text(doc), /Folder details/);
+    assert.match(text(doc), /No watcher or daily scan/);
+    panel.close();
+    assert.equal(doc.getElementById('fileJanitorConsole').hidden, true);
+    assert.equal(doc.activeElement, trigger);
+    assert.deepEqual(writes, []);
+  });
+}
+
+test('confirmation waits for the reviewed draft and posts its exact terms only once', async () => {
+  const doc = setup();
+  const initial = attachedReview();
+  panel._setSetupReview(initial);
+  const host = doc.register('draft');
+  const reviewed = { ...initial, monitoring: true, review_revision: 'b'.repeat(64) };
+  const choice = Promise.withResolvers();
+  const preparation = Promise.withResolvers();
+  const writes = [];
+  globalThis.fetch = async (url, options) => {
+    if (options?.method) writes.push([String(url).split('/').pop(), JSON.parse(options.body)]);
+    if (String(url).endsWith('/setup-review') && options?.method) return choice.promise;
+    if (String(url).endsWith('/prepare-review')) return preparation.promise;
+    return {
+      ok: true,
+      json: async () => ({ review: attachedReview({ state: 'preparation_changed' }) })
+    };
+  };
+  const confirm = () =>
+    host.all(
+      node => node.tagName === 'BUTTON' && node.textContent.startsWith('Allow filing in')
+    )[0];
+  panel._renderSetupReview(host);
+  const monitor = doc.getElementById('fileJanitorReviewMonitoring');
+  monitor.checked = true;
+  monitor.dispatch('change');
+  confirm().click();
+  assert.deepEqual(writes, [
+    ['setup-review', { reference_id: initial.reference_id, monitoring: true }]
+  ]);
+  choice.resolve({ ok: true, json: async () => ({ review: reviewed }) });
+  await settle();
+  assert.equal(doc.activeElement, doc.getElementById('fileJanitorReviewMonitoring'));
+  confirm().click();
+  confirm().click();
+  assert.deepEqual(writes.slice(1), [
+    [
+      'prepare-review',
+      {
+        reference_id: reviewed.reference_id,
+        review_revision: reviewed.review_revision,
+        monitoring: true
+      }
+    ]
+  ]);
+  preparation.resolve({
+    ok: false,
+    json: async () => ({ error: { message: 'Permissions changed' } })
+  });
+  await settle();
+  assert.match(host.textContent, /Permissions changed/);
+  assert.equal(confirm().disabled, true);
+  confirm().click();
+  assert.equal(writes.length, 2);
+});
+
+for (const state of ['folder_conflict', 'folder_unavailable']) {
+  test(`${state} blocks linked confirmation`, () => {
+    const doc = setup();
+    panel._setSetupReview(attachedReview({ state }));
+    const host = doc.createElement('div');
+    panel._renderSetupReview(host);
+    globalThis.fetch = () => assert.fail('blocked review cannot submit');
+    const confirm = host.all(node => node.tagName === 'BUTTON')[0];
+    assert.equal(confirm.disabled, true);
+    confirm.click();
+  });
+}
+
 test('a malformed success response cannot invent a prepared result', async () => {
   const doc = setup();
   panel._setSetupReview(attachedReview());
