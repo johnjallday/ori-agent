@@ -45,6 +45,10 @@ func (f *fakeSecondBrain) Status(context.Context, string) (personalassistant.Sec
 	return personalassistant.SecondBrainView{Status: "not_connected"}, f.record("status")
 }
 
+func (f *fakeSecondBrain) ConnectionStatus(context.Context, string) (personalassistant.SecondBrainView, error) {
+	return personalassistant.SecondBrainView{Status: "not_connected", SetupRequired: "hq"}, f.record("connectionStatus")
+}
+
 func (f *fakeSecondBrain) MarkPrompted(context.Context, string, string) (personalassistant.SecondBrainView, error) {
 	return personalassistant.SecondBrainView{}, f.record("prompted")
 }
@@ -321,6 +325,18 @@ func TestSecondBrainItemRoute_TakesAClosedBodyAndMapsEachRefusal(t *testing.T) {
 				t.Fatalf("code = %d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSecondBrainConnectionStatus_UsesLightweightReadAndKeepsOriginGuard(t *testing.T) {
+	fake := &fakeSecondBrain{}
+	handler := newSecondBrainHandler(fake)
+	if got := secondBrainRequest(handler, http.MethodGet, "?view=connection", "", "https://other.invalid").Code; got != http.StatusForbidden {
+		t.Fatalf("foreign origin status = %d", got)
+	}
+	res := secondBrainRequest(handler, http.MethodGet, "?view=connection", "", "http://localhost:8931")
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"setup_required":"hq"`) || strings.Join(fake.calls, ",") != "connectionStatus" {
+		t.Fatalf("connection status = %d %s, calls: %v", res.Code, res.Body, fake.calls)
 	}
 }
 

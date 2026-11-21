@@ -149,12 +149,11 @@ import {
   SECOND_BRAIN_ENDPOINT,
   fetchSecondBrainPreview,
   followUpReceiptLine,
-  newRequestID,
   openSecondBrainFolder,
   secondBrainCaptureProblem,
-  secondBrainCaptureReceipt,
-  secondBrainError
+  secondBrainCaptureReceipt
 } from './personal-assistant-second-brain.js';
+import { notesPost } from './notes-api.js';
 import {
   parseWorkspaceURLState,
   sanitizeWorkspaceURLState,
@@ -8706,22 +8705,7 @@ export class WorkspaceCommandView {
   }
 
   notesPost(path, body) {
-    return fetch(SECOND_BRAIN_ENDPOINT + path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, request_id: newRequestID('notes') })
-    }).then(async response => {
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        const error = new Error(secondBrainError(payload));
-        error.status = response.status;
-        const retryAfter = Number(response.headers?.get?.('Retry-After'));
-        error.retryAfterSeconds =
-          retryAfter > 0 ? retryAfter : Number(payload?.retry_after_seconds) || 0;
-        throw error;
-      }
-      return payload;
-    });
+    return notesPost(path, body);
   }
 
   handleNotesPanelAction(action, id) {

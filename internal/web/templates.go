@@ -116,6 +116,7 @@ func (tr *TemplateRenderer) LoadTemplates() error {
 		"templates/components/workspaces/sync-modal.tmpl",
 		"templates/components/workspaces/workspace-details-modal.tmpl",
 		"templates/pages/index.tmpl",
+		"templates/pages/my-notes.tmpl",
 		"templates/pages/agents-roster.tmpl",
 		"templates/pages/agents-detail.tmpl",
 		"templates/pages/agents-claude-detail.tmpl",

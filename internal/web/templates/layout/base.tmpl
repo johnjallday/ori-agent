@@ -14,8 +14,12 @@
 
   <div class="main-content-wrapper">
     <!-- Main Content -->
-    <main id="main-content" class="main-content{{if index .Extra "HomeCommandBridge"}} home-command-main{{end}}" role="main" aria-label="Dashboard">
-      {{template "dashboard.tmpl" .}}
+    <main id="main-content" class="main-content{{if index .Extra "HomeCommandBridge"}} home-command-main{{end}}" role="main" {{if ne .CurrentPage "my-notes"}}aria-label="Dashboard"{{end}}>
+      {{if eq .CurrentPage "my-notes"}}
+        {{template "my-notes.tmpl" .}}
+      {{else}}
+        {{template "dashboard.tmpl" .}}
+      {{end}}
     </main>
   </div>
 
@@ -253,6 +257,9 @@
   <script defer src="/js/app.js?v=1694538177"></script>
   <script defer src="/js/modules/workspace-realtime.js"></script>
   <script type="module" src="/js/modules/relative-time.js"></script>
+  {{if eq .CurrentPage "my-notes"}}
+  <script type="module" src="/js/modules/my-notes.js"></script>
+  {{else}}
   <script defer src="/js/modules/home-dashboard.js"></script>
   <!--
     Home cockpit. workspace-map.js is a classic deferred script and MUST run
@@ -312,5 +319,6 @@
        first step, the page dimmed around the Agents nav entry. Asked for by
        ?quest=meet-assistant only; a plain page load makes no request. -->
   <script type="module" src="/js/modules/meet-assistant-home-prompt.js"></script>
+  {{end}}
 </body>
 </html>

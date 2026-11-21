@@ -302,6 +302,8 @@ type SecondBrainView struct {
 	InboxCount *int                  `json:"inbox_count,omitempty"`
 	TodayNote  *SecondBrainTodayNote `json:"today_note,omitempty"`
 	Version    int64                 `json:"version"`
+	// SetupRequired names an existing prerequisite for the lightweight connection view.
+	SetupRequired string `json:"setup_required,omitempty"`
 	// LookID names the look a connect started (or the replayed one).
 	LookID string `json:"look_id,omitempty"`
 	// Nudge says the notes deserve another look, by the same rule Today's
@@ -520,6 +522,21 @@ func (s *SecondBrainService) Status(ctx context.Context, userID string) (SecondB
 	return view, nil
 }
 
+// ConnectionStatus reports only the existing connection and its availability.
+// It does not discover vaults, read note files, or queue any follow-up work.
+func (s *SecondBrainService) ConnectionStatus(ctx context.Context, userID string) (SecondBrainView, error) {
+	doc, err := s.read(ctx, userID)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return SecondBrainView{Status: SecondBrainNotConnected, SetupRequired: "assistant"}, nil
+	case errors.Is(err, ErrNeedsHQ):
+		return SecondBrainView{Status: SecondBrainNotConnected, SetupRequired: "hq"}, nil
+	case err != nil:
+		return SecondBrainView{}, err
+	}
+	return s.connectionView(doc), nil
+}
+
 // Inbox lists the notes directly under Inbox in a second brain Ori set up.
 func (s *SecondBrainService) Inbox(ctx context.Context, userID string) (SecondBrainInboxView, error) {
 	doc, err := s.read(ctx, userID)
@@ -533,8 +550,6 @@ func (s *SecondBrainService) Inbox(ctx context.Context, userID string) (SecondBr
 	if !connected.CreatedByOri() {
 		return SecondBrainInboxView{}, ErrSecondBrainNoInbox
 	}
-	// Only the Notes panel reads this, so this is the panel opening (FR6).
-	s.SyncSoon(userID, "notes opened")
 	return s.inboxListing(*connected)
 }
 
@@ -1715,6 +1730,25 @@ func latestLook(source *secondbrain.Source) *secondbrain.Look {
 }
 
 func (s *SecondBrainService) view(doc SecondBrainDocument) SecondBrainView {
+	view := s.connectionView(doc)
+	if s.deps.Vaults != nil {
+		for _, vault := range s.deps.Vaults.Vaults() {
+			view.Detected = append(view.Detected, SecondBrainDetected{
+				ID: vault.ID, Name: vault.Name, Parent: filepath.Base(filepath.Dir(vault.Path)), Path: vault.Path,
+			})
+		}
+	}
+	if view.Source == nil {
+		if parent := s.defaultParent(); parent != "" {
+			view.SetupDefault = &SecondBrainSetupDefault{
+				ParentName: filepath.Base(parent), Path: filepath.Join(parent, secondbrain.DefaultFolderName),
+			}
+		}
+	}
+	return view
+}
+
+func (s *SecondBrainService) connectionView(doc SecondBrainDocument) SecondBrainView {
 	view := SecondBrainView{
 		Status:   SecondBrainNotConnected,
 		Detected: []SecondBrainDetected{},
@@ -1725,20 +1759,8 @@ func (s *SecondBrainService) view(doc SecondBrainDocument) SecondBrainView {
 		setup := s.setupResult(doc)
 		view.Setup = &setup
 	}
-	if s.deps.Vaults != nil {
-		for _, vault := range s.deps.Vaults.Vaults() {
-			view.Detected = append(view.Detected, SecondBrainDetected{
-				ID: vault.ID, Name: vault.Name, Parent: filepath.Base(filepath.Dir(vault.Path)), Path: vault.Path,
-			})
-		}
-	}
 	connected := doc.Connected()
 	if connected == nil {
-		if parent := s.defaultParent(); parent != "" {
-			view.SetupDefault = &SecondBrainSetupDefault{
-				ParentName: filepath.Base(parent), Path: filepath.Join(parent, secondbrain.DefaultFolderName),
-			}
-		}
 		return view
 	}
 	view.Status = SecondBrainConnected

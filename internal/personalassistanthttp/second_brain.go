@@ -19,6 +19,7 @@ import (
 // endpoint issued; no handler here accepts a path (FR41).
 type SecondBrainService interface {
 	Status(ctx context.Context, userID string) (personalassistant.SecondBrainView, error)
+	ConnectionStatus(ctx context.Context, userID string) (personalassistant.SecondBrainView, error)
 	MarkPrompted(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainView, error)
 	DecideAsk(ctx context.Context, userID, decision, requestID string) (personalassistant.SecondBrainView, error)
 	Connect(ctx context.Context, userID string, input personalassistant.SecondBrainConnectInput) (personalassistant.SecondBrainView, error)
@@ -85,7 +86,11 @@ func (h *Handler) GetSecondBrain(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	view, err := h.secondBrain.Status(r.Context(), userID)
+	status := h.secondBrain.Status
+	if r.URL.Query().Get("view") == "connection" {
+		status = h.secondBrain.ConnectionStatus
+	}
+	view, err := status(r.Context(), userID)
 	if err != nil {
 		writeSecondBrainError(w, err)
 		return

@@ -766,13 +766,15 @@ function projectsHTML(section, panel) {
 }
 
 function captureHTML(panel) {
-  if (panel.captureReceipt) {
-    return '<p class="ws-notes-receipt" role="status">' + escapeHtml(panel.captureReceipt) + '</p>';
-  }
+  const receipt = panel.captureReceipt
+    ? '<p class="ws-notes-receipt" role="status">' + escapeHtml(panel.captureReceipt) + '</p>'
+    : '';
+  if (receipt && !panel.embedded) return receipt;
   const problem = panel.captureProblem
     ? '<p class="ws-notes-problem" role="alert">' + escapeHtml(panel.captureProblem) + '</p>'
     : '';
   return (
+    receipt +
     '<div class="ws-notes-capture"><input type="text" class="ws-notes-capture-input form-control" data-notes-capture ' +
     'aria-label="Quick note for Inbox" placeholder="Quick note…" maxlength="4000" value="' +
     escapeHtml(panel.captureDraft || '') +
@@ -891,9 +893,10 @@ export function notesPanelHTML({
   secondBrain,
   panel = {},
   now = Date.now(),
-  hideChecklist = false
+  hideChecklist = false,
+  embedded = false
 } = {}) {
-  panel = { ...panel, hideChecklist };
+  panel = { ...panel, hideChecklist, embedded };
   const look = panel.look || null;
   const sections = notesSections({
     secondBrain,
@@ -938,7 +941,7 @@ export function notesPanelHTML({
   const notice = panel.message
     ? '<p class="ws-notes-receipt" role="status">' + escapeHtml(panel.message) + '</p>'
     : '';
-  return (
+  const header =
     '<header class="ws-cmd-modal-head"><h3 class="ws-cmd-modal-title">Notes</h3>' +
     '<span class="ws-cmd-modal-count">' +
     escapeHtml(panel.status === 'ready' ? notesPanelCount(sections) : '—') +
@@ -951,7 +954,9 @@ export function notesPanelHTML({
     '<button type="button" class="ws-notes-action modern-btn modern-btn-secondary modern-btn-sm" data-cmd-modal-action="notes-connection">Connection…</button>' +
     '<button type="button" class="ws-cmd-modal-close" data-cmd-modal-action="close" aria-label="Close Notes">×</button>' +
     '</div></header>' +
-    oneLinerHTML(secondBrain) +
+    oneLinerHTML(secondBrain);
+  return (
+    (embedded ? '' : header) +
     (ready ? tabsHTML(tabs, active) : '') +
     '<div class="ws-cmd-modal-body ws-notes-body">' +
     notice +

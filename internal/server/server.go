@@ -468,6 +468,12 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	s.renderAndWritePage(w, "index", data)
 }
 
+func (s *Server) serveMyNotes(w http.ResponseWriter, _ *http.Request) {
+	data := s.prepareBasePageData("my-notes")
+	data.Title = "My Notes - Ori Agent"
+	s.renderAndWritePage(w, "index", data)
+}
+
 func (s *Server) serveAgents(w http.ResponseWriter, r *http.Request) {
 	data := s.prepareBasePageData("agents")
 	// The roster/stage redesign is the Agents page. The classic dashboard has been
