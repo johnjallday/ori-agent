@@ -53,7 +53,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	"github.com/johnjallday/ori-agent/internal/homeupgrade"
-	"github.com/johnjallday/ori-agent/internal/integrationrelease"
 	"github.com/johnjallday/ori-agent/internal/learningmissions"
 	"github.com/johnjallday/ori-agent/internal/linkcontext"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -407,7 +406,7 @@ type ServerBuilder struct {
 	setupJourneyStore        *setupjourney.SQLiteStore
 	// integrationReleases resolves the latest reviewed integration release for
 	// both the guided setup and the Plugins page update check.
-	integrationReleases *integrationrelease.Resolver
+	integrationReleases setupjourney.IntegrationReleaseResolver
 	// Plan previews read the canonical integration prerequisite directly; the
 	// journey Read API can create/reconcile inert runs and is not observational.
 	reviewedIntegrationReader setupjourney.CanonicalReader
