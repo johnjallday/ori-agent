@@ -260,7 +260,17 @@ export function resolveWorkspaceNextAction(input) {
         'Repair setup',
         'attention'
       );
-    if (!janitor.configured || janitor.readiness === 'setup_required')
+    if (!janitor.configured || janitor.readiness === 'setup_required') {
+      if (input.onMap && janitor.linkedFolderName)
+        return {
+          ...consoleDescriptor(
+            'setup',
+            `Prepare a filing preview for ${janitor.linkedFolderName}?`,
+            'See where your files would go before deciding what to move.',
+            'Review folder access'
+          ),
+          filingNote: { name: String(input.leadAgentName || '').trim() || 'Ori' }
+        };
       return consoleDescriptor(
         'setup',
         janitor.linkedFolderName
@@ -271,6 +281,7 @@ export function resolveWorkspaceNextAction(input) {
           : 'Nothing is scanned or moved until you choose one.',
         janitor.linkedFolderName ? 'Review permission' : 'Set up filing'
       );
+    }
     if (janitor.consentRequired)
       return consoleDescriptor(
         'consent',

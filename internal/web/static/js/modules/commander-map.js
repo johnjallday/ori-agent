@@ -13,6 +13,7 @@ import {
   commanderBuildingLine,
   commanderQueue,
   commanderSpeech,
+  commanderWaitingForFiling,
   renderCommanderOneLine
 } from './commander-speech.js';
 import { COMMANDER_ACTIVITY_EVENT } from './commander-tickets.js';
@@ -70,6 +71,7 @@ export function workspaceCommanderMap(
   const adapter = {
     balloon,
     narrow,
+    filingStation: true,
     // The owner is on the Map tab (FR10's "on this map").
     showing: () => doc?.body?.dataset?.workspaceViewMode === 'map',
     // The Map tab is showing and its map is on the page (FR13, FR14).
@@ -679,12 +681,14 @@ export function commanderPresenter(
   let lastHeld = false;
   // Where the report sits in the conversation, when this host can open it there.
   const chatRef = () => (chatLine?.open ? chatRefOf(last?.raw) : null);
+  const filingWait = () =>
+    map.filingStation && map.showing?.() && commanderWaitingForFiling(last?.view);
 
   const queue = () => {
     // The report goes first among equals: a look or a setup run in progress
     // outranks the ticket line the same work produces ("Thinking it through…").
     const items = [];
-    const speech = last ? commanderSpeech(last.view) : null;
+    const speech = last && !filingWait() ? commanderSpeech(last.view) : null;
     if (speech) items.push({ kind: REPORT_KIND[speech.phase] || 'working', report: true, speech });
     // The folder agent's own look ticket is the report's work, narrated by
     // the report itself; its ticket line (often stuck at "On it.") stays out.
@@ -805,6 +809,12 @@ export function commanderPresenter(
     if (!last) {
       hostMode = '';
       return false;
+    }
+    // The command node supplies the quiet permission status even on a narrow
+    // map; don't fall back to a second setup prompt in the report host.
+    if (filingWait()) {
+      pendingOpen = '';
+      return quiet();
     }
     const fresh = report;
     const { view, previous, followed, host, doc } = last;

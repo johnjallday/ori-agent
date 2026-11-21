@@ -249,6 +249,12 @@ export function commanderSpeech(view) {
   return row ? { ...speech, line: `${row.text} · ${row.action}` } : speech;
 }
 
+// The workspace map has a Filing station and its own permission invitation.
+// This is only a replacement for the completed receipt, never another phase.
+export function commanderWaitingForFiling(view) {
+  return Boolean(view?.filingPermissionRequired && commanderSpeech(view)?.phase === 'done');
+}
+
 // Decorative entrance copy belongs to the tile, never the drawer's status.
 export function commanderBuildingLine(workspace) {
   return `Building ${workspace || 'workspace'}…`;
