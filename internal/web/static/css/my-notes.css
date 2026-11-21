@@ -6,7 +6,7 @@
   --ws-ink-faint: var(--text-secondary);
   --ws-faction: var(--primary-color);
   --ws-font-mono: ui-monospace, monospace;
-  width: min(58rem, 100%);
+  width: min(54rem, 100%);
   margin-inline: auto;
   padding: clamp(1rem, 4vw, 3rem);
   color: var(--text-primary);
@@ -154,4 +154,21 @@
 .my-notes .ws-notes-capture-input {
   flex: 1 1 12rem;
   min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .my-notes {
+    padding-block-end: 5.5rem;
+  }
+  /* Keep the assistant available without covering the notebook's controls. */
+  #personalAssistantLauncher {
+    padding: 5px;
+  }
+  #personalAssistantLauncher .personal-assistant-launcher__copy {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
 }

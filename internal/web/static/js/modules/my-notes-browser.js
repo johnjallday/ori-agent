@@ -102,7 +102,9 @@ export class MyNotesBrowser {
             ? 'This folder may have been moved or removed. Go up to keep browsing.'
             : error.status === 409
               ? 'This notes connection changed. Refresh My Notes before browsing again.'
-              : 'Ori could not list this folder. It may be unavailable or unreadable.'
+              : error.status === 403
+                ? 'Ori cannot list this folder. Use Open folder to see it outside Ori.'
+                : 'Ori could not list this folder. It may be unavailable or unreadable.'
       };
     }
     if (request.signal.aborted) return;
