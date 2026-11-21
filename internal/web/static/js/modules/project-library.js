@@ -943,6 +943,7 @@ export class ProjectLibraryPanel {
     this.searchGeneration = 0;
     this.listRead = new ReadEpoch();
     this.restoreRead = new ReadEpoch();
+    this.resumeRead = new ReadEpoch();
     this.browser = new LibraryBrowserState({
       home: this.workspaceId,
       request: (...args) => this.request(...args),
@@ -1212,7 +1213,7 @@ export class ProjectLibraryPanel {
     this.initBrowser();
     await this.restoreBrowserNavigation();
     await this.restoreCollectionContinuation();
-    await this.refresh();
+    await this.refresh({ waitForResume: false });
     await this.resumeFromIntegration();
   }
 
@@ -1554,7 +1555,8 @@ export class ProjectLibraryPanel {
     }
   }
 
-  async refresh() {
+  async refresh({ waitForResume = true } = {}) {
+    const resume = this.resumeRead.begin();
     this.collectionBrowser?.invalidate();
     this.arrangementPlanning?.invalidate();
     this.arrangementHistoryGeneration++;
@@ -1588,7 +1590,6 @@ export class ProjectLibraryPanel {
       this.renderQueueControls();
       await this.loadSummary();
       await this.renderRecent();
-      await this.renderResume();
       await this.renderPendingLinks();
       await this.renderProposals({ loaded: true });
       await this.renderArrangementHistory();
@@ -1619,6 +1620,12 @@ export class ProjectLibraryPanel {
       }
     }
     this.focusArrival();
+    // Even a slow or failed handoff request must not delay the catalog or an
+    // explicit setup/suggestions arrival. A newer refresh supersedes this read.
+    if (this.state?.initialized === true) {
+      const notes = this.renderResume(resume);
+      if (waitForResume) await notes;
+    }
   }
 
   // Arriving from a map badge, an Action Center card, or a new Home lands on the
@@ -2457,21 +2464,27 @@ export class ProjectLibraryPanel {
     }
   }
 
-  async renderResume() {
+  async renderResume(turn = this.resumeRead.begin()) {
+    if (!turn.current()) return;
     const section = document.getElementById('projectLibraryResume');
     const container = document.getElementById('projectLibraryResumeCards');
     if (!section || !container) return;
-    container.replaceChildren();
     let view;
     try {
-      view = await this.request('/resume');
+      view = await this.request('/resume', { signal: turn.signal });
     } catch (_) {
+      if (!turn.current()) return;
       section.hidden = false;
-      container.append(
-        node('p', '', 'Resume is unavailable. Saved project details may still be readable below.')
+      const error = node(
+        'p',
+        '',
+        'Session notes could not be loaded. You can still browse the library below.'
       );
+      container.replaceChildren(error);
       return;
     }
+    if (!turn.current()) return;
+    container.replaceChildren();
     const cards = (view.cards || []).slice(0, 3);
     section.hidden = !cards.length;
     if (cards.length && this.musicHandoff) {
@@ -4266,6 +4279,7 @@ export class ProjectLibraryPanel {
       this.saveBrowserNavigation();
       this.listRead.cancel();
       this.restoreRead.cancel();
+      this.resumeRead.cancel();
       this.browser.detailRead.cancel();
       this.browser.tabRead.cancel();
       if (!event.persisted) this.browser.destroy();
@@ -4604,12 +4618,35 @@ export class ProjectLibraryPanel {
     content.replaceChildren();
     const section = node('section', 'project-library-session-history');
     section.append(node('h4', '', 'Studio sessions'));
+    const connection = {
+      catalog_only: 'Catalog only',
+      connected: 'Connected workspace',
+      needs_review: 'Project link needs review'
+    }[detail.row.connection];
+    if (connection) section.append(node('p', 'project-library-note', connection));
+    let readOnly = sessions.provider_read_only ?? detail.provider_read_only ?? this.readOnly;
+    const providerNote = node(
+      'p',
+      'project-library-note',
+      'Read-only: the Home provider is unavailable.'
+    );
+    providerNote.hidden = !readOnly;
+    section.append(providerNote);
+    const writeActions = [];
+    const addWriteAction = (parent, text, action) => {
+      if (readOnly) return;
+      const button = this.browserButton(text, action);
+      writeActions.push(button);
+      parent.append(button);
+    };
     if (!sessions.total)
       section.append(
         node(
           'p',
           '',
-          'No saved goals yet. Planning a session saves notes, without connecting a project or starting work.'
+          readOnly
+            ? 'No saved goals yet.'
+            : 'No saved goals yet. Planning a session saves notes, without connecting a project or starting work.'
         )
       );
     const list = node('ul');
@@ -4638,21 +4675,16 @@ export class ProjectLibraryPanel {
             this.fullStudioSession(detail, record, button)
           )
         );
-        if (!record.recap && !this.readOnly)
-          item.append(
-            this.browserButton('Wrap up session', button =>
-              this.sessionForm(detail, record, button)
-            )
+        if (!record.recap)
+          addWriteAction(item, 'Wrap up session', button =>
+            this.sessionForm(detail, record, button)
           );
         list.append(item);
       }
     };
     append(sessions.rows);
     section.append(list);
-    if (!this.readOnly)
-      section.append(
-        this.browserButton('Plan a session', button => this.sessionForm(detail, null, button))
-      );
+    addWriteAction(section, 'Plan a session', button => this.sessionForm(detail, null, button));
     let offset = sessions.next_offset;
     if (offset) {
       const more = this.browserButton('Load older sessions', async button => {
@@ -4663,6 +4695,11 @@ export class ProjectLibraryPanel {
             { signal: turn.signal }
           );
           if (!turn.current()) return;
+          if (page.provider_read_only) {
+            readOnly = true;
+            providerNote.hidden = false;
+            for (const write of writeActions.splice(0)) write.remove();
+          }
           append(page.rows);
           offset = page.next_offset;
           button.hidden = !offset;

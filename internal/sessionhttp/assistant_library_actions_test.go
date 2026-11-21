@@ -412,8 +412,9 @@ func TestAssistantLibraryActions_ExactInstalledProviderAndReviewedConsent(t *tes
 	if json.Unmarshal([]byte(reviewedGoal), &goalReview) != nil || code != http.StatusOK || goalReview.Token == "" {
 		t.Fatalf("review goal: %d %s", code, reviewedGoal)
 	}
-	if code, _ := studio(handler.ListAssistantStudioSessions, station.ID, activationEntryID, "", ""); code != http.StatusOK {
-		t.Fatalf("review hid catalog-only sessions: %d", code)
+	if code, body := studio(handler.ListAssistantStudioSessions, station.ID, activationEntryID, "", ""); code != http.StatusOK ||
+		!strings.Contains(body, `"provider_read_only":false`) || !strings.Contains(body, `"total":0`) {
+		t.Fatalf("review must not become accepted history: %d %s", code, body)
 	}
 	commitGoal := `{"if_entry_revision":1,"goal":{"goal":"Listen to Album-3","desired_outcome":"Choose a vocal take","time_minutes":30},"review_token":"` + goalReview.Token + `","idempotency_key":"http-goal","confirm":true}`
 	code, savedGoal := studio(handler.CommitAssistantStudioGoal, station.ID, activationEntryID, "", commitGoal)
@@ -465,6 +466,15 @@ func TestAssistantLibraryActions_ExactInstalledProviderAndReviewedConsent(t *tes
 		!strings.Contains(body, `"recap":"Listened to the chorus"`) || strings.Contains(body, rootPath) {
 		t.Fatalf("bounded Home resume: %d %s", code, body)
 	}
+	handler.SetInstalledPluginLister(assistantInstalledPluginLister{})
+	if code, body := studio(handler.ListAssistantStudioSessions, station.ID, activationEntryID, "", ""); code != http.StatusOK ||
+		!strings.Contains(body, `"provider_read_only":true`) || !strings.Contains(body, `"recap":"Listened to the chorus"`) {
+		t.Fatalf("historical sessions must be readable after provider loss: %d %s", code, body)
+	}
+	if code, body := studio(handler.ReviewAssistantStudioGoal, station.ID, activationEntryID, "", goalBody); code != http.StatusConflict {
+		t.Fatalf("provider loss should still refuse a review: %d %s", code, body)
+	}
+	handler.SetInstalledPluginLister(assistantInstalledPluginLister{installed: []plugin.InstalledPlugin{installed}})
 	fieldRevision := doc.Entries[0].Fields.Revision
 	patch := `{"stage":"mixing","next_action":"Print stems","priority":0}`
 	reviewBody := `{"if_fields_revision":` + strconv.FormatInt(fieldRevision, 10) + `,"patch":` + patch + `}`

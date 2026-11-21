@@ -331,15 +331,41 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   // Save a second entry before Album-3's recap so it is reachable, but not featured.
   await shelf.getByRole('button', { name: 'Inspect Album-0', exact: true }).click();
   await shelf.getByRole('tab', { name: 'Sessions', exact: true }).click();
-  await shelf
-    .locator('#projectLibraryPane')
-    .getByRole('button', { name: 'Plan a session' })
-    .click();
-  const otherGoal = page.getByRole('dialog', { name: 'Plan a studio session' });
-  await otherGoal.getByRole('textbox', { name: 'Session goal' }).fill('Compare two references');
-  await otherGoal.getByRole('button', { name: 'Review session' }).click();
-  await page.getByRole('button', { name: 'Save goal', exact: true }).click();
+  const unplanned = shelf.locator('#projectLibraryPane');
+  await expect(unplanned).toContainText('Catalog only');
+  await expect(unplanned).toContainText('No saved goals yet');
+  const album0ID = projects.rows.find((row: { name: string }) => row.name === 'Album-0').id;
+  const alternateSessions = `${base}/projects/${album0ID}/sessions`;
+  const planAlternate = async () => {
+    await unplanned.getByRole('button', { name: 'Plan a session' }).click();
+    const planner = page.getByRole('dialog', { name: 'Plan a studio session' });
+    await planner.getByRole('textbox', { name: 'Session goal' }).fill('Compare two references');
+    await planner.getByRole('button', { name: 'Review session' }).click();
+  };
+  await planAlternate();
+  const alternateReview = page.getByRole('dialog', { name: 'Save this goal?' });
+  await alternateReview.getByRole('button', { name: 'Cancel' }).click();
+  expect(await json(await request.get(alternateSessions))).toMatchObject({ total: 0 });
+  expect((await json(await request.get(`${base}/resume`))).cards).toEqual([]);
+  await planAlternate();
+  await expect(alternateReview).toContainText('Compare two references');
+  await alternateReview.screenshot({
+    path: join(evidenceDir, '22c1-catalog-song-goal-review.png'),
+    animations: 'disabled'
+  });
+  await alternateReview.getByRole('button', { name: 'Save goal' }).click();
   await expect(shelf.locator('#projectLibraryStatus')).toContainText('Goal saved');
+  await page.reload();
+  const goalOnly = shelf.locator('#projectLibraryResume');
+  await expect(goalOnly).toContainText('Saved goal: Compare two references');
+  await expect(goalOnly).not.toContainText('Saved recap');
+  expect(await json(await request.get(`${base}/projects/${album0ID}`))).toMatchObject({
+    row: { connection: 'catalog_only' }
+  });
+  await goalOnly.screenshot({
+    path: join(evidenceDir, '22c2-goal-only-after-reload.png'),
+    animations: 'disabled'
+  });
   await reviewProject(page, 'Album-3');
   await setup.getByRole('button', { name: 'Plan a session' }).click();
   const planner = page.getByRole('dialog', { name: 'Plan a studio session' });
@@ -510,10 +536,28 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   expect(albumID).toBeTruthy();
   const savedSessions = await json(await request.get(`${base}/projects/${albumID}/sessions`));
   expect(savedSessions.total).toBe(1);
-  const disable = await request.post('/api/plugins/music-project-management/disable', {
-    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-  });
-  expect(disable.ok(), await disable.text()).toBeTruthy();
+  const pausedDetail = page.locator('#projectLibraryPane');
+  const handoffSessions = `**${base}/projects/${albumID}/sessions`;
+  let providerDisabledDuringNavigation = false;
+  // The pane has read metadata, but has not yet received its history. Lose
+  // the provider at this seam; both reads still use the real Home endpoints.
+  await page.route(
+    handoffSessions,
+    async route => {
+      const disable = await request.post('/api/plugins/music-project-management/disable', {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+      });
+      expect(disable.ok(), await disable.text()).toBeTruthy();
+      providerDisabledDuringNavigation = true;
+      await route.continue();
+    },
+    { times: 1 }
+  );
+  await resume.getByRole('button', { name: 'View session notes', exact: true }).click();
+  await expect(pausedDetail).toContainText('Read-only: the Home provider is unavailable.');
+  await expect(pausedDetail).toContainText('User recap: Kept the quieter chorus');
+  await expect(pausedDetail.getByRole('button', { name: 'Plan a session' })).toHaveCount(0);
+  expect(providerDisabledDuringNavigation).toBe(true);
   await page.reload();
   await expect(shelf.locator('#projectLibraryStatus')).toContainText('Saved records are readable');
   await expect(shelf.locator('#projectLibraryResume')).toContainText('Kept the quieter chorus');
@@ -530,7 +574,8 @@ test('the reviewed release resolves a real portfolio offer, then separate review
     .locator('#projectLibraryResume')
     .getByRole('button', { name: 'View session notes', exact: true })
     .click();
-  const pausedDetail = page.locator('#projectLibraryPane');
+  await expect(pausedDetail).toContainText('Catalog only');
+  await expect(pausedDetail).toContainText('Read-only: the Home provider is unavailable.');
   await expect(pausedDetail).toContainText('User recap: Kept the quieter chorus');
   await expect(pausedDetail.getByRole('button', { name: 'Plan a session' })).toHaveCount(0);
   await expect(pausedDetail.getByRole('button', { name: 'Wrap up session' })).toHaveCount(0);

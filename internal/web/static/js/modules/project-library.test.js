@@ -1153,8 +1153,8 @@ function resumeFixture() {
     append(...items) {
       this.children.push(...items);
     },
-    replaceChildren() {
-      this.children = [];
+    replaceChildren(...items) {
+      this.children = items;
     },
     addEventListener(name, callback) {
       this[name] = callback;
@@ -1284,6 +1284,42 @@ test('Music handoff labels a goal without a manager or next step, and unrelated 
     assert.equal(management.next, undefined);
     assert.match(fixtureText(container), /View Song session/);
     assert.doesNotMatch(fixtureText(container), /View session notes/);
+  } finally {
+    restore();
+  }
+});
+
+test('Music handoff distinguishes empty from unavailable and ignores superseded reads', async () => {
+  const { section, container, restore } = resumeFixture();
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home', program: musicProgram });
+    let late;
+    let signal;
+    panel.request = (_path, options) => {
+      signal = options.signal;
+      return new Promise(resolve => {
+        late = resolve;
+      });
+    };
+    const pending = panel.renderResume();
+    panel.request = async () => ({ cards: [] });
+    await panel.renderResume();
+    assert.equal(section.hidden, true);
+    assert.deepEqual(container.children, []);
+    assert.ok(signal.aborted);
+    late({ cards: [{ entry_id: 'old', name: 'Old notes' }] });
+    await pending;
+    assert.equal(section.hidden, true);
+    panel.request = async () => {
+      throw new Error('unavailable');
+    };
+    await panel.renderResume();
+    assert.equal(section.hidden, false);
+    assert.match(fixtureText(container), /Session notes could not be loaded.*still browse/);
+    panel.request = async () => ({ cards: [] });
+    await panel.renderResume();
+    assert.equal(section.hidden, true);
+    assert.deepEqual(container.children, []);
   } finally {
     restore();
   }

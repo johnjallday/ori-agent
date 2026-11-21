@@ -30,7 +30,7 @@ func (h *Handler) GetAssistantStudioResume(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *Handler) ListAssistantStudioSessions(w http.ResponseWriter, r *http.Request) {
-	scope, _, ok := h.assistantLibraryScope(w, r)
+	scope, station, ok := h.assistantLibraryScope(w, r)
 	if !ok || !h.libraryEntryExists(w, scope, r.PathValue("entryID")) {
 		return
 	}
@@ -70,7 +70,12 @@ func (h *Handler) ListAssistantStudioSessions(w http.ResponseWriter, r *http.Req
 		respondLibraryReadError(w, err)
 		return
 	}
-	_ = orihttp.RespondSuccess(w, page)
+	// Recheck as part of the history read: the provider may have disappeared
+	// since the browser read the entry's metadata. History itself needs no provider.
+	_ = orihttp.RespondSuccess(w, struct {
+		projectlibrary.SessionPage
+		ProviderReadOnly bool `json:"provider_read_only"`
+	}{page, !h.assistantLibraryProviderEvidence(scope, station)})
 }
 
 func (h *Handler) GetAssistantStudioSession(w http.ResponseWriter, r *http.Request) {

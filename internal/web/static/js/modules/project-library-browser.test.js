@@ -157,6 +157,33 @@ test('off-page and lost details return to their exact trigger or the heading, ne
   assert.equal(el.projectLibraryTitle.attributes.tabindex, '-1');
 });
 
+test('Sessions evidence wins over an earlier writable detail and a shared note never projects a connection', async t => {
+  const { panel, el, trigger } = handoffBrowser(t);
+  panel.state = { provider_read_only: false };
+  panel.request = async path =>
+    path.endsWith('/sessions')
+      ? {
+          provider_read_only: true,
+          total: 2,
+          rows: [
+            {
+              goal: 'Shared goal',
+              recap: 'Shared recap',
+              shared_from_project: { workspace_id: 'historical-child' }
+            },
+            { goal: 'Unfinished goal' }
+          ]
+        }
+      : { provider_read_only: false, row: { id: 'b', name: 'Song', connection: 'catalog_only' } };
+  await panel.details('b', trigger, 'sessions');
+  const text = element => [element.textContent, ...element.children.map(text)].join(' ');
+  const pane = text(el.projectLibraryTabPanel);
+  assert.match(pane, /Read-only: the Home provider is unavailable/);
+  assert.match(pane, /Catalog only.*User-authored linked-project recap: Shared recap/);
+  assert.match(pane, /Unfinished goal/);
+  assert.doesNotMatch(pane, /Plan a session|Wrap up session|Connected workspace|Open .* workspace/);
+});
+
 test('return and Home changes cancel pending handoff history without late paint or focus', async t => {
   const { panel, el, rows, trigger, ui } = handoffBrowser(t);
   const reads = [];
