@@ -80,14 +80,14 @@ export function notesSourceView(secondBrain) {
   if (!source?.name || secondBrain?.status === 'not_connected') {
     return {
       summary: 'Your notes are not set up.',
-      action: { label: 'Set up your notes', route: '/?quest=second-brain' },
+      action: { label: 'Set up your notes', route: '/my-notes' },
       disconnect: false
     };
   }
   if (secondBrain.status === 'missing') {
     return {
       summary: `Can't find ${source.name}. It may have been moved or renamed.`,
-      action: { label: 'Choose again', route: '/?quest=second-brain' },
+      action: { label: 'Choose again', route: '/my-notes' },
       disconnect: true
     };
   }

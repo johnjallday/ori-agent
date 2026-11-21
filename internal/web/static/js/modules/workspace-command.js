@@ -129,31 +129,8 @@ import {
 // The HQ's Notes station: the user's connected notes folder. Its key is not
 // "notes", which names the workspace's own notes section on the map.
 export const NOTES_STATION = 'second-brain';
-import {
-  LOOK_STILL_READING_LINE,
-  NOTES_ITEM_ACTIONS,
-  defaultNotesTab,
-  isCreatedByOri,
-  nextNotesTab,
-  notesBadge,
-  notesNudge,
-  notesPanelAvailable,
-  notesPanelHTML,
-  notesSections,
-  notesTabs,
-  lookTooSoonLine
-} from './notes-station.js';
-import {
-  LOOK_POLL_LIMIT,
-  LOOK_POLL_MS,
-  SECOND_BRAIN_ENDPOINT,
-  fetchSecondBrainPreview,
-  followUpReceiptLine,
-  openSecondBrainFolder,
-  secondBrainCaptureProblem,
-  secondBrainCaptureReceipt
-} from './personal-assistant-second-brain.js';
-import { notesPost } from './notes-api.js';
+import { notesBadge, notesNudge } from './notes-station.js';
+import { HQQuickCapture, MY_NOTES_URL } from './hq-quick-capture.js';
 import {
   parseWorkspaceURLState,
   sanitizeWorkspaceURLState,
@@ -210,14 +187,12 @@ const HQ_FOCUS_ATTRS = [
   'data-cmd-hq-jump',
   'data-cmd-hq-more-toggle',
   'data-cmd-hq-goal-edit',
+  'data-hq-capture-control',
   'data-cmd-hq-rail',
   'data-cmd-add-task',
   // The first-visit `?` beside a part (hq-part-tips.js); never the part itself.
   'data-hq-tip-mark'
 ];
-// How long a suggestion's ask for the Notes capture box waits for the box to be
-// painted (focusHQNoteCapture); after that a repaint no longer moves focus.
-const HQ_NOTE_CAPTURE_WAIT_MS = 5000;
 // Legacy view preference from the deleted Detailed/Command toggle; cleared on boot.
 const LEGACY_STORAGE_KEY = 'oriWorkspaceDetailView';
 const VIEW_MODE_STORAGE_KEY = 'oriWorkspaceCommandViewMode';
@@ -1249,6 +1224,10 @@ export class WorkspaceCommandView {
     if (!workspace || !workspace.id) return;
     const station = this._bootStation;
     this._bootStation = '';
+    if (station === NOTES_STATION && this.isPersonalHQ()) {
+      window.location.replace(MY_NOTES_URL);
+      return;
+    }
     try {
       const url = new URL(window.location.href);
       if (url.searchParams.has('station')) {
@@ -3560,8 +3539,6 @@ export class WorkspaceCommandView {
         return { title: 'Daily Brief', addLabel: '' };
       case MEMORY_STATION:
         return { title: 'Memory', addLabel: '' };
-      case NOTES_STATION:
-        return { title: 'Notes', addLabel: '' };
       case 'agents':
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
@@ -3846,54 +3823,10 @@ export class WorkspaceCommandView {
         btn.getAttribute('data-cmd-id')
       );
     });
-    // The Notes panel's capture box keeps its draft through a repaint.
-    el.addEventListener('input', event => {
-      if (event.target && event.target.matches && event.target.matches('[data-notes-capture]')) {
-        this.notesPanel().captureDraft = event.target.value;
-      }
-    });
-    // Its handled list stays as the user left it. Toggle does not bubble.
-    el.addEventListener(
-      'toggle',
-      event => {
-        if (event.target && event.target.matches && event.target.matches('.ws-notes-handled')) {
-          this.notesPanel().handledOpen = event.target.open;
-        }
-      },
-      true
-    );
     el.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
         event.stopPropagation();
         this.closeStatModal();
-        return;
-      }
-      if (
-        event.key === 'Enter' &&
-        event.target &&
-        event.target.matches &&
-        event.target.matches('[data-notes-capture]')
-      ) {
-        event.preventDefault();
-        this.captureFromNotesPanel();
-        return;
-      }
-      if (
-        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
-        event.target &&
-        event.target.matches &&
-        event.target.matches('[data-notes-tab]')
-      ) {
-        event.preventDefault();
-        const panel = this.notesPanel();
-        const tabs = notesTabs(this.notesPanelSections(panel));
-        this.setNotesTab(
-          nextNotesTab(
-            tabs,
-            event.target.getAttribute('data-cmd-id'),
-            event.key === 'ArrowRight' ? 1 : -1
-          )
-        );
         return;
       }
       this.trapStatModalFocus(event);
@@ -3928,18 +3861,8 @@ export class WorkspaceCommandView {
       panel.classList.toggle('is-daily-brief', isBrief);
       panel.classList.toggle('is-memory', this.statModalSection === MEMORY_STATION);
     }
-    // The Notes panel repaints on every triage: the list stays where the user
-    // had scrolled it, rather than jumping back to the top.
-    const notesScroll =
-      this.statModalSection === NOTES_STATION
-        ? panel.querySelector('.ws-notes-body')?.scrollTop || 0
-        : 0;
     if (isBrief) this.mountDailyBriefPanel(panel);
     else panel.innerHTML = this.statModalHTML(this.statModalSection);
-    if (notesScroll) {
-      const notesBody = panel.querySelector('.ws-notes-body');
-      if (notesBody) notesBody.scrollTop = notesScroll;
-    }
     this.syncBoardSurface();
     this.syncConfigModalSurface();
     this.syncToolsModalSurface();
@@ -4249,14 +4172,6 @@ export class WorkspaceCommandView {
     if (!meta) return '';
     if (section === 'watchtower') return this.watchtowerPanelHTML();
     if (section === 'calendar-ops') return this.calendarOpsPanelHTML();
-    if (section === NOTES_STATION) {
-      return notesPanelHTML({
-        secondBrain: this.notesState().secondBrain,
-        panel: this.notesPanel(),
-        hideChecklist:
-          this.viewMode === 'details' && this.firstVisit?.view().layout.hideNotesChecklist
-      });
-    }
     // The Tools modal groups every capability provider (MCP, Skills, Plugins) plus the
     // Find Tools discovery flow behind one tabbed surface.
     if (section === 'tools') {
@@ -4672,10 +4587,6 @@ export class WorkspaceCommandView {
     const a = String(action || '');
     if (a === 'close') {
       this.closeStatModal();
-      return;
-    }
-    if (section === NOTES_STATION && a.startsWith('notes-')) {
-      this.handleNotesPanelAction(a, id);
       return;
     }
     if (a === 'refresh-watchtower' && section === 'watchtower') {
@@ -8463,10 +8374,7 @@ export class WorkspaceCommandView {
   // The user's notes folder as an HQ building beside Email. It joins the
   // registry after Memory, so no station the user never dragged moves, and
   // stands by Email through its own default position. Its badge reads the
-  // connection. With a folder connected, activating it opens the Notes panel;
-  // otherwise it opens the connection's card in the assistant drawer
-  // (personal-assistant-second-brain.js), which also asks when nothing is
-  // connected.
+  // connection; activation always goes to the personal notebook.
   notesStation() {
     return {
       key: NOTES_STATION,
@@ -8475,225 +8383,12 @@ export class WorkspaceCommandView {
       defaultX: 0.76,
       defaultY: 0.39,
       state: () => this.notesStationState(),
-      action: trigger => this.activateNotesStation(trigger),
-      onPanelClosed: () => {
-        clearTimeout(this._notesPanelPoll);
-        clearTimeout(this._notesPanelReceiptTimer);
-        this.requestNotesData(true);
-      }
+      action: () => this.openNotesStation()
     };
   }
 
-  // A deep link can arrive before the connection is known, so read it first
-  // rather than sending a connected user to the drawer.
-  activateNotesStation(trigger) {
-    const state = this.notesState();
-    if (state.status === 'ready' && state.secondBrain) {
-      this.openNotesFor(state.secondBrain, trigger);
-      return;
-    }
-    this.fetchNotesStatus().then(
-      secondBrain => this.openNotesFor(secondBrain, trigger),
-      () => this.openNotesStation(trigger)
-    );
-  }
-
-  openNotesFor(secondBrain, trigger) {
-    if (notesPanelAvailable(secondBrain)) this.openNotesPanel(trigger);
-    else this.openNotesStation(trigger);
-  }
-
-  fetchNotesStatus() {
-    return this.stationJSON(SECOND_BRAIN_ENDPOINT, true).then(payload => {
-      const state = this.notesState();
-      state.status = 'ready';
-      state.secondBrain = (payload && payload.second_brain) || null;
-      return state.secondBrain;
-    });
-  }
-
-  // What the open panel holds. A fresh object per opening, so a closed panel's
-  // answers never paint a new one.
-  notesPanel() {
-    if (!this._notesPanel) this._notesPanel = { status: 'idle' };
-    return this._notesPanel;
-  }
-
-  openNotesPanel(trigger) {
-    // On the HQ's Details page the panel is already on screen, second in the
-    // main column: go to it rather than opening a second copy in a dialog.
-    if (this.focusInlineNotesPanel()) return;
-    clearTimeout(this._notesPanelPoll);
-    this._notesPanel = { status: 'loading' };
-    this.openStatModal(NOTES_STATION, this.stationOpener(NOTES_STATION, trigger));
-    this.loadNotesPanel();
-  }
-
-  // The panel is open when it is in the stat modal or mounted in the HQ
-  // Details main column; either one is painted, polled and refreshed.
-  notesPanelOpen() {
-    return this.notesModalOpen() || Boolean(this.notesInlineNode());
-  }
-
-  notesModalOpen() {
-    return (
-      this.statModalSection === NOTES_STATION &&
-      Boolean(this.statModalEl) &&
-      !this.statModalEl.hidden
-    );
-  }
-
-  paintNotesPanel(panel) {
-    if (panel !== this._notesPanel || !this.notesPanelOpen()) return;
-    const inline = this.notesModalOpen() ? null : this.notesInlineNode();
-    if (inline) {
-      this.paintInlineNotes(inline);
-      return;
-    }
-    // A repaint rebuilds the panel's controls: focus stays in the dialog, and in
-    // the capture box when that is where the user was typing.
-    this.captureStatModalFocus();
-    const typing = this._statModalFocus?.el?.hasAttribute?.('data-notes-capture');
-    this.renderStatModalBody();
-    const box = typing ? this.statModalEl.querySelector('[data-notes-capture]') : null;
-    if (box && !box.disabled) box.focus();
-    else this.restoreStatModalFocus();
-  }
-
-  notesPanelSections(panel) {
-    return notesSections({
-      secondBrain: this.notesState().secondBrain,
-      look: panel.look,
-      inbox: panel.inbox,
-      people: panel.people,
-      missions: panel.missions
-    });
-  }
-
-  // Switching views starts the new one at its top, with focus on its tab.
-  setNotesTab(key) {
-    const panel = this.notesPanel();
-    panel.tab = key;
-    const inline = this.notesModalOpen() ? null : this.notesInlineNode();
-    if (inline) this.paintInlineNotes(inline);
-    else this.renderStatModalBody();
-    const root = inline || this.statModalEl;
-    if (!root) return;
-    const body = root.querySelector('.ws-notes-body');
-    if (body) body.scrollTop = 0;
-    const tab = root.querySelector('[data-notes-tab][aria-selected="true"]');
-    if (tab && typeof tab.focus === 'function') tab.focus();
-  }
-
-  async loadNotesPanel() {
-    const panel = this.notesPanel();
-    const created = isCreatedByOri(this.notesState().secondBrain);
-    try {
-      const [look, inbox, people, progression] = await Promise.all([
-        this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look'),
-        created ? this.stationJSON(SECOND_BRAIN_ENDPOINT + '/inbox', true) : null,
-        // People on disk, by file name (Issue 776 FR22); a failure lists none.
-        created
-          ? this.stationJSON(SECOND_BRAIN_ENDPOINT + '/people', true).catch(() => null)
-          : null,
-        // The missions behind the empty Inbox's check marks (Issue 776 FR19).
-        created ? this.stationJSON('/api/progression', true).catch(() => null) : null
-      ]);
-      panel.look = (look && look.look) || { state: 'none' };
-      if (created) panel.inbox = (inbox && inbox.inbox) || { notes: [], total: 0 };
-      if (created) panel.people = (people && people.people) || { people: [] };
-      if (created) panel.missions = (progression && progression.missions) || [];
-      panel.tab = defaultNotesTab(this.notesPanelSections(panel));
-      panel.status = 'ready';
-    } catch {
-      panel.status = 'error';
-    }
-    this.paintNotesPanel(panel);
-    this.revealFocusedFollowUpAfterNotes(panel);
-    this.pollNotesPanelLook(panel);
-  }
-
-  // The short rail no longer reserves space while Notes loads. Its first
-  // result can push a deep-linked follow-up below the viewport. Keep that
-  // arrival visible only if it still owns focus; never refocus on polling or
-  // steal focus from a note draft or any subsequent user action.
-  revealFocusedFollowUpAfterNotes(panel) {
-    if (panel !== this._notesPanel || !this.notesInlineNode()) return;
-    const card = typeof document !== 'undefined' ? document.activeElement : null;
-    if (
-      !card?.matches?.('.workspace-followup-card.is-deep-linked') ||
-      !this.container?.contains?.(card)
-    )
-      return;
-    const bounds = card.getBoundingClientRect?.();
-    const height = typeof window !== 'undefined' ? window.innerHeight : 0;
-    if (bounds && height && (bounds.bottom <= 0 || bounds.top >= height)) {
-      card.scrollIntoView?.({ block: 'center' });
-    }
-  }
-
-  // Another surface changed the connection or the look (the drawer's Look again,
-  // a follow-up added there): an open panel reads the look again in place,
-  // keeping its view, and polls a look that started elsewhere.
-  async refreshOpenNotesPanel() {
-    const panel = this._notesPanel;
-    if (!panel || panel.status !== 'ready' || panel.refreshing || !this.notesPanelOpen()) return;
-    panel.refreshing = true;
-    const before = JSON.stringify(panel.look || null);
-    try {
-      const look = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look', true);
-      if (panel !== this._notesPanel) return;
-      const wasRunning = panel.look?.state === 'running';
-      panel.look = (look && look.look) || panel.look;
-      if (!wasRunning && panel.look?.state === 'running') panel.polls = 0;
-    } catch {
-      return;
-    } finally {
-      panel.refreshing = false;
-    }
-    // The drawer announces every step of its own turn; a look that did not
-    // change is not repainted, so the rows under the user's pointer stay put.
-    if (JSON.stringify(panel.look || null) === before) return;
-    this.paintNotesPanel(panel);
-    // Polling replaces any timer already set, so a look is never read twice.
-    this.pollNotesPanelLook(panel);
-  }
-
-  // A running look is read again until it ends, at the drawer's pace and for
-  // no longer than the drawer waits; closing the panel stops it. A look that
-  // outlasts the poll says so, and opening the panel again reads it afresh.
-  pollNotesPanelLook(panel) {
-    clearTimeout(this._notesPanelPoll);
-    if (panel !== this._notesPanel || panel.look?.state !== 'running') return;
-    if ((panel.polls || 0) >= LOOK_POLL_LIMIT) {
-      panel.lookMessage = LOOK_STILL_READING_LINE;
-      this.paintNotesPanel(panel);
-      return;
-    }
-    this._notesPanelPoll = setTimeout(async () => {
-      if (panel !== this._notesPanel || !this.notesPanelOpen()) return;
-      panel.polls = (panel.polls || 0) + 1;
-      try {
-        const look = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look', true);
-        panel.look = (look && look.look) || panel.look;
-      } catch {
-        panel.look = { state: 'none' };
-      }
-      this.paintNotesPanel(panel);
-      if (panel.look?.state === 'running') this.pollNotesPanelLook(panel);
-      else this.notesChanged();
-    }, LOOK_POLL_MS);
-  }
-
-  // Another surface may be showing this connection: the drawer's own copy and
-  // the badge both read it again.
+  // Refresh the drawer and the capture/badge after a confirmed save.
   notesChanged() {
-    // Triage and "Add as follow-ups" make follow-ups: the panel below shows
-    // them at once rather than after a reload (PRD 766).
-    const followUps = typeof window !== 'undefined' ? window.WorkspaceFollowUps : null;
-    if (followUps && typeof followUps.reload === 'function') {
-      Promise.resolve(followUps.reload()).catch(() => {});
-    }
     const notes = typeof window !== 'undefined' ? window.PersonalAssistantSecondBrain : null;
     if (notes && typeof notes.changed === 'function') {
       void notes.changed();
@@ -8702,193 +8397,6 @@ export class WorkspaceCommandView {
     if (typeof document !== 'undefined' && typeof document.dispatchEvent === 'function') {
       document.dispatchEvent(new CustomEvent('personal-assistant:second-brain'));
     }
-  }
-
-  notesPost(path, body) {
-    return notesPost(path, body);
-  }
-
-  handleNotesPanelAction(action, id) {
-    if (action === 'notes-tab') {
-      this.setNotesTab(id);
-      return;
-    }
-    if (action === 'notes-connection') {
-      const trigger = this.statModalTrigger;
-      this.closeStatModal();
-      this.openNotesStation(trigger);
-      return;
-    }
-    if (action === 'notes-look-again') {
-      void this.lookAgainFromNotesPanel();
-      return;
-    }
-    if (action === 'notes-show-all') {
-      this.notesPanel().showAll = true;
-      this.paintNotesPanel(this.notesPanel());
-      return;
-    }
-    if (action === 'notes-capture') {
-      void this.captureFromNotesPanel();
-      return;
-    }
-    if (action === 'notes-add-suggested') {
-      void this.addSuggestedFromNotesPanel();
-      return;
-    }
-    if (action === 'notes-preview') {
-      void this.previewFromNotesPanel(id);
-      return;
-    }
-    if (action === 'notes-open-folder') {
-      void this.openFolderFromNotesPanel();
-      return;
-    }
-    if (action === 'notes-focus-capture') {
-      const root = this.notesModalOpen() ? this.statModalEl : this.notesInlineNode();
-      root?.querySelector?.('[data-notes-capture]')?.focus?.();
-      return;
-    }
-    const item = action.startsWith('notes-item-') ? action.slice('notes-item-'.length) : '';
-    if (NOTES_ITEM_ACTIONS.includes(item)) void this.triageFromNotesPanel(item, id);
-  }
-
-  // Open on a row expands the note Ori wrote inline; Open again closes it
-  // (Issue 776 FR16). The text is read on request and kept only in the panel.
-  async previewFromNotesPanel(key) {
-    const panel = this.notesPanel();
-    const text = String(key || '');
-    const at = text.indexOf(':');
-    if (at <= 0) return;
-    if (panel.preview?.key === text) {
-      panel.preview = null;
-      this.paintNotesPanel(panel);
-      return;
-    }
-    panel.preview = { key: text, status: 'loading', note: null, message: '' };
-    this.paintNotesPanel(panel);
-    const result = await fetchSecondBrainPreview(text.slice(0, at), text.slice(at + 1));
-    if (panel.preview?.key !== text) return;
-    panel.preview = result.ok
-      ? { key: text, status: 'ready', note: result.preview, message: '' }
-      : { key: text, status: 'error', note: null, message: result.message };
-    this.paintNotesPanel(panel);
-  }
-
-  async openFolderFromNotesPanel() {
-    const panel = this.notesPanel();
-    const result = await openSecondBrainFolder();
-    panel.message = result.ok ? '' : result.message;
-    this.paintNotesPanel(panel);
-  }
-
-  async triageFromNotesPanel(action, itemID) {
-    const panel = this.notesPanel();
-    const lookID = panel.look?.look_id;
-    if (!lookID || !itemID) return;
-    panel.message = '';
-    try {
-      const payload = await this.notesPost(
-        '/look/' + encodeURIComponent(lookID) + '/items/' + encodeURIComponent(itemID),
-        { action }
-      );
-      panel.look = (payload && payload.look) || panel.look;
-    } catch (error) {
-      panel.message = error.message;
-      // The look may have moved on; show the one there is now.
-      if (error.status === 404) {
-        try {
-          const look = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look', true);
-          panel.look = (look && look.look) || panel.look;
-        } catch {
-          /* the sentence above still stands */
-        }
-      }
-    }
-    this.paintNotesPanel(panel);
-    this.notesChanged();
-  }
-
-  async addSuggestedFromNotesPanel() {
-    const panel = this.notesPanel();
-    const lookID = panel.look?.look_id;
-    if (!lookID) return;
-    panel.message = '';
-    try {
-      const payload = await this.notesPost('/look/' + encodeURIComponent(lookID) + '/follow-ups', {
-        items: 'suggested'
-      });
-      panel.message = followUpReceiptLine(payload && payload.follow_ups);
-      const look = await this.stationJSON(SECOND_BRAIN_ENDPOINT + '/look', true);
-      panel.look = (look && look.look) || panel.look;
-    } catch (error) {
-      panel.message = error.message;
-    }
-    this.paintNotesPanel(panel);
-    this.notesChanged();
-  }
-
-  async lookAgainFromNotesPanel() {
-    const panel = this.notesPanel();
-    if (panel.lookBusy) return;
-    panel.lookMessage = '';
-    panel.lookBusy = true;
-    let started = false;
-    try {
-      const payload = await this.notesPost('/look', {});
-      panel.look = (payload && payload.look) || panel.look;
-      panel.polls = 0;
-      started = true;
-    } catch (error) {
-      panel.lookMessage =
-        error.status === 429
-          ? lookTooSoonLine({
-              retryAfterSeconds: error.retryAfterSeconds,
-              lastLookAt: panel.look?.result?.finished_at,
-              now: Date.now()
-            })
-          : error.message;
-    }
-    panel.lookBusy = false;
-    this.paintNotesPanel(panel);
-    this.pollNotesPanelLook(panel);
-    // Today and the drawer show a running look too.
-    if (started) this.notesChanged();
-  }
-
-  async captureFromNotesPanel() {
-    const panel = this.notesPanel();
-    if (panel.captureBusy) return;
-    const text = String(panel.captureDraft || '');
-    panel.captureProblem = secondBrainCaptureProblem(text);
-    if (panel.captureProblem) {
-      this.paintNotesPanel(panel);
-      return;
-    }
-    panel.captureBusy = true;
-    this.paintNotesPanel(panel);
-    try {
-      const payload = await this.notesPost('/capture', { text });
-      panel.captureDraft = '';
-      panel.captureReceipt = secondBrainCaptureReceipt(payload && payload.capture);
-      const [inbox, progression] = await Promise.all([
-        this.stationJSON(SECOND_BRAIN_ENDPOINT + '/inbox', true),
-        // A capture ticks the checklist's first row.
-        this.stationJSON('/api/progression', true).catch(() => null)
-      ]);
-      panel.inbox = (inbox && inbox.inbox) || panel.inbox;
-      if (progression && Array.isArray(progression.missions)) panel.missions = progression.missions;
-      clearTimeout(this._notesPanelReceiptTimer);
-      this._notesPanelReceiptTimer = setTimeout(() => {
-        panel.captureReceipt = '';
-        this.paintNotesPanel(panel);
-      }, 3000);
-    } catch (error) {
-      panel.captureProblem = error.message;
-    }
-    panel.captureBusy = false;
-    this.paintNotesPanel(panel);
-    this.notesChanged();
   }
 
   notesState() {
@@ -8927,7 +8435,6 @@ export class WorkspaceCommandView {
       this.boundNotesChanged = () => {
         this.requestNotesData(true);
         void this.firstVisit?.load();
-        void this.refreshOpenNotesPanel();
       };
       document.addEventListener('personal-assistant:second-brain', this.boundNotesChanged);
     }
@@ -8962,23 +8469,9 @@ export class WorkspaceCommandView {
       });
   }
 
-  // Opens the connection's card in the assistant drawer. Where the drawer
-  // cannot open here, Home opens it from the mission's link.
-  openNotesStation(trigger) {
-    const panel = typeof window !== 'undefined' ? window.PersonalAssistantPanel : null;
-    const notes = typeof window !== 'undefined' ? window.PersonalAssistantSecondBrain : null;
-    if (
-      panel &&
-      typeof panel.open === 'function' &&
-      notes &&
-      typeof notes.openManage === 'function'
-    ) {
-      if (panel.open(trigger || null, { focus: false })) {
-        void notes.openManage();
-        return;
-      }
-    }
-    this.navigateTo('/?quest=second-brain');
+  // A normal navigation entry so Back returns to this HQ view.
+  openNotesStation() {
+    this.navigateTo(MY_NOTES_URL);
   }
 
   // Returns the active HQ workspace id without trusting a stale page-level
@@ -15698,10 +15191,7 @@ export class WorkspaceCommandView {
         ? this.hqTipView().parts.find(part => part.key === NOTES_PART)
         : null;
     if (!tip) return '<div class="ws-hq-panel-host" data-cmd-hq-host="notes"></div>';
-    // The panel is a live node moved into its host after every render, which
-    // empties the host first: the `?` is a sibling of the host, never in it.
-    // The host only triggers a tip through its `?`, not by hover or focus on a
-    // panel full of controls.
+    // Keep the first-visit tip beside the quick capture, never over its input.
     return (
       '<div class="ws-hq-tip-cell">' +
       '<div class="ws-hq-panel-host' +
@@ -15979,8 +15469,7 @@ export class WorkspaceCommandView {
       return;
     }
     if (action.kind === 'notes') {
-      this.focusInlineNotesPanel();
-      if (this.notesPanel().status === 'ready') void this.lookAgainFromNotesPanel();
+      this.navigateTo(MY_NOTES_URL + '?view=loops');
       return;
     }
     if (action.kind === 'mail') {
@@ -16838,36 +16327,12 @@ export class WorkspaceCommandView {
       : null;
   }
 
-  // The Notes panel's live node while it sits in its HQ host, else null.
-  notesInlineNode() {
-    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors['hq-notes'];
-    const host = record && record.node && record.node.parentNode;
-    if (!this.active || !host || typeof host.getAttribute !== 'function') return null;
-    return host.getAttribute('data-cmd-hq-host') === 'notes' ? record.node : null;
-  }
-
-  // Before a rebuild or a mode switch: remember a focused control (and a caret
-  // in the capture box), then put the panel home so the write cannot detach it.
+  // Before a rebuild or a mode switch, remember the focused control and caret.
   parkHQPanels() {
     this.rememberHQFocus();
     this.restoreSharedSurface('hq-github');
     this.restoreSharedSurface('hq-needs-you');
-    const record = this.sharedSurfaceAnchors && this.sharedSurfaceAnchors['hq-notes'];
-    if (!record || !record.node) return;
-    const active = typeof document !== 'undefined' ? document.activeElement : null;
-    if (
-      active &&
-      active !== record.node &&
-      typeof record.node.contains === 'function' &&
-      record.node.contains(active)
-    ) {
-      this.hqNotesFocus = {
-        el: active,
-        start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
-        end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
-      };
-    }
-    this.restoreSharedSurface('hq-notes');
+    this.hqQuickCapture?.mount(null);
   }
 
   // The HQ's string-rendered controls (tiles, strip and Needs you actions,
@@ -16880,7 +16345,13 @@ export class WorkspaceCommandView {
     if (!this.container || typeof this.container.contains !== 'function') return;
     if (!this.container.contains(active)) return;
     const attr = HQ_FOCUS_ATTRS.find(name => active.hasAttribute?.(name));
-    if (attr) this.hqControlFocus = { attr, value: active.getAttribute(attr) || '' };
+    if (attr)
+      this.hqControlFocus = {
+        attr,
+        value: active.getAttribute(attr) || '',
+        start: active.selectionStart,
+        end: active.selectionEnd
+      };
   }
 
   restoreHQFocus() {
@@ -16890,294 +16361,30 @@ export class WorkspaceCommandView {
     const target = Array.from(this.container.querySelectorAll('[' + focus.attr + ']')).find(
       el => (el.getAttribute(focus.attr) || '') === focus.value
     );
-    if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
+    if (target && typeof target.focus === 'function') {
+      target.focus({ preventScroll: true });
+      if (focus.value === 'draft' && typeof focus.start === 'number') {
+        target.setSelectionRange?.(focus.start, focus.end);
+      }
+    }
   }
 
   syncHQPanels() {
-    this.restoreHQFocus();
     this.syncHQNeedsYouSurface();
-    const focus = this.hqNotesFocus || null;
-    this.hqNotesFocus = null;
     const host = this.hqNotesHost();
-    if (!host) {
-      this.restoreSharedSurface('hq-notes');
-      this._hqNotesMounted = false;
-      return;
+    if (host) {
+      host.classList?.add('ws-hq-capture');
+      this.hqQuickCapture ||= new HQQuickCapture(() => this.notesChanged());
+      const state = this.notesState();
+      if (state.status === 'idle') this.requestNotesData();
+      this.hqQuickCapture.mount(host, state.status === 'error' ? null : state.secondBrain);
     }
-    const node = this.mountSharedSurface('hq-notes', '#hqNotesPanelMount', host);
-    if (!node) return;
-    const returning = this._hqNotesMounted === false;
-    this._hqNotesMounted = true;
-    this.bindInlineNotes(node);
-    this.settleInlineNotes(node);
-    const checklist = node.querySelector?.('[data-notes-checklist-host]');
-    if (checklist) checklist.hidden = Boolean(this.firstVisit?.view().layout.hideNotesChecklist);
-    // Back from another mode: a look that ran meanwhile is read again in place.
-    if (returning) void this.refreshOpenNotesPanel();
-    if (focus && focus.el && typeof focus.el.focus === 'function' && node.contains(focus.el)) {
-      focus.el.focus({ preventScroll: true });
-      if (focus.start !== null && typeof focus.el.setSelectionRange === 'function') {
-        try {
-          focus.el.setSelectionRange(focus.start, focus.end);
-        } catch {
-          /* not a text control */
-        }
-      }
-    }
+    this.restoreHQFocus();
   }
 
-  // Paints the panel only when what it shows changed shape: the first mount,
-  // or the connection arriving, failing or changing folder. A re-render with
-  // nothing new leaves the node exactly as the user left it. A connected
-  // folder starts the panel's own look/inbox read, as opening it did.
-  settleInlineNotes(node) {
-    const state = this.notesState();
-    if (state.status === 'idle') this.requestNotesData();
-    // A forced re-read passes through 'loading'; keep showing what was there.
-    if (state.status === 'loading' && this._hqNotesSignature) return;
-    const secondBrain = state.secondBrain;
-    const available = state.status === 'ready' && notesPanelAvailable(secondBrain);
-    const signature = [
-      state.hqWorkspaceID,
-      state.status,
-      secondBrain?.status || '',
-      secondBrain?.source?.name || ''
-    ].join('|');
-    if (signature === this._hqNotesSignature && this._hqNotesPaintedNode === node) {
-      // Same connection: only its badge line may have moved (a nudge, a count).
-      this.paintInlineNotesMeta(node);
-      return;
-    }
-    this._hqNotesSignature = signature;
-    this._hqNotesPaintedNode = node;
-    if (available) {
-      clearTimeout(this._notesPanelPoll);
-      this._notesPanel = { status: 'loading' };
-    }
-    this.paintInlineNotes(node);
-    if (available) void this.loadNotesPanel();
-  }
-
-  inlineNotesHTML() {
-    const state = this.notesState();
-    const head =
-      '<header class="ws-cmd-modal-head"><h3 class="ws-cmd-modal-title">' +
-      escapeHtml(HQ_LABELS.notes) +
-      '</h3></header>';
-    const body = inner => '<div class="ws-cmd-modal-body ws-notes-body">' + inner + '</div>';
-    if (state.status === 'error') {
-      return (
-        head +
-        body(
-          '<p class="ws-notes-problem" role="alert">Ori could not read your notes connection.</p>'
-        )
-      );
-    }
-    if (state.status !== 'ready') {
-      return head + body('<p class="ws-notes-empty">Checking your notes…</p>');
-    }
-    const secondBrain = state.secondBrain;
-    if (!notesPanelAvailable(secondBrain)) {
-      // Nothing connected (or the folder is gone): the connection's card in the
-      // drawer is where that is fixed, as the station's own button does (#765).
-      const badge = notesBadge(secondBrain);
-      return (
-        head +
-        body(
-          '<p class="ws-notes-empty">' +
-            escapeHtml(badge.value + ' · ' + badge.description) +
-            '</p>' +
-            '<button type="button" class="ws-notes-action" data-cmd-modal-action="notes-connection">' +
-            (secondBrain?.source?.name ? 'Connection…' : 'Set up notes…') +
-            '</button>'
-        )
-      );
-    }
-    // The station panel's own markup, with the folder's name and badge under
-    // its header (FR15): the same badge the station shows, stale tone and all.
-    return notesPanelHTML({
-      secondBrain,
-      panel: this.notesPanel(),
-      hideChecklist: this.firstVisit?.view().layout.hideNotesChecklist
-    }).replace(
-      '</header>',
-      '</header><p class="ws-hq-notes-meta" data-cmd-hq-notes-meta>' +
-        this.inlineNotesMetaHTML() +
-        '</p>'
-    );
-  }
-
-  inlineNotesMetaHTML() {
-    const secondBrain = this.notesState().secondBrain;
-    const badge = notesBadge(secondBrain);
-    return (
-      '<span class="ws-hq-notes-vault">' +
-      escapeHtml(String(secondBrain?.source?.name || '')) +
-      '</span>' +
-      '<span class="ws-hq-notes-badge' +
-      (badge.tone === 'attention' ? ' is-attention' : '') +
-      '" title="' +
-      escapeHtml(badge.description || '') +
-      '">' +
-      escapeHtml(badge.value) +
-      '</span>'
-    );
-  }
-
-  paintInlineNotesMeta(node) {
-    const meta = node?.querySelector?.('[data-cmd-hq-notes-meta]');
-    if (!meta) return;
-    const html = this.inlineNotesMetaHTML();
-    if (meta.innerHTML !== html) meta.innerHTML = html;
-  }
-
-  // Repaints the inline panel, keeping its scroll position and the focused
-  // control: the capture box with its caret, or the same button by action.
-  paintInlineNotes(node) {
-    const active = typeof document !== 'undefined' ? document.activeElement : null;
-    let focus = null;
-    if (active && active !== node && typeof node.contains === 'function' && node.contains(active)) {
-      focus = {
-        capture: Boolean(active.hasAttribute?.('data-notes-capture')),
-        action: active.getAttribute?.('data-cmd-modal-action') || '',
-        id: active.getAttribute?.('data-cmd-id') || '',
-        start: typeof active.selectionStart === 'number' ? active.selectionStart : null,
-        end: typeof active.selectionEnd === 'number' ? active.selectionEnd : null
-      };
-    }
-    const scroll = node.querySelector?.('.ws-notes-body')?.scrollTop || 0;
-    node.innerHTML = this.inlineNotesHTML();
-    node.hidden = false;
-    if (scroll) {
-      const body = node.querySelector?.('.ws-notes-body');
-      if (body) body.scrollTop = scroll;
-    }
-    // A suggestion asked for the capture box before it existed
-    // (focusHQNoteCapture): this repaint made it, so it takes the focus. The ask
-    // lapses after a few seconds, so a late repaint never pulls focus back from
-    // wherever the person has gone since.
-    if (this._hqNoteCaptureWantedAt) {
-      const fresh = Date.now() - this._hqNoteCaptureWantedAt < HQ_NOTE_CAPTURE_WAIT_MS;
-      const capture = fresh ? node.querySelector?.('[data-notes-capture]') : null;
-      if (!fresh || capture) this._hqNoteCaptureWantedAt = 0;
-      if (capture && typeof capture.focus === 'function') {
-        capture.focus({ preventScroll: true });
-        return;
-      }
-    }
-    if (!focus) return;
-    let target = null;
-    if (focus.capture) target = node.querySelector?.('[data-notes-capture]');
-    else if (focus.action && typeof node.querySelectorAll === 'function') {
-      target = Array.from(node.querySelectorAll('[data-cmd-modal-action]')).find(
-        el =>
-          el.getAttribute('data-cmd-modal-action') === focus.action &&
-          (el.getAttribute('data-cmd-id') || '') === focus.id
-      );
-    }
-    if (!target || target.disabled || typeof target.focus !== 'function') return;
-    target.focus({ preventScroll: true });
-    if (focus.capture && focus.start !== null && typeof target.setSelectionRange === 'function') {
-      try {
-        target.setSelectionRange(focus.start, focus.end);
-      } catch {
-        /* not a text control */
-      }
-    }
-  }
-
-  // The modal's listeners, on the inline node, bound once per node. Close has
-  // no meaning in the main column, and the connection button opens the drawer
-  // without a dialog to close first.
-  bindInlineNotes(node) {
-    if (!node || this._hqNotesBoundNode === node || typeof node.addEventListener !== 'function')
-      return;
-    this._hqNotesBoundNode = node;
-    node.addEventListener('click', event => {
-      const btn = event.target?.closest?.('[data-cmd-modal-action]');
-      if (!btn) return;
-      const action = String(btn.getAttribute('data-cmd-modal-action') || '');
-      if (action === 'notes-connection') {
-        this.openNotesStation(btn);
-        return;
-      }
-      if (action.startsWith('notes-')) {
-        this.handleNotesPanelAction(action, btn.getAttribute('data-cmd-id'));
-      }
-    });
-    node.addEventListener('input', event => {
-      if (event.target?.matches?.('[data-notes-capture]')) {
-        this.notesPanel().captureDraft = event.target.value;
-      }
-    });
-    node.addEventListener(
-      'toggle',
-      event => {
-        if (event.target?.matches?.('.ws-notes-handled')) {
-          this.notesPanel().handledOpen = event.target.open;
-        }
-      },
-      true
-    );
-    node.addEventListener('keydown', event => {
-      const target = event.target;
-      if (event.key === 'Enter' && target?.matches?.('[data-notes-capture]')) {
-        event.preventDefault();
-        void this.captureFromNotesPanel();
-        return;
-      }
-      if (
-        (event.key === 'ArrowLeft' || event.key === 'ArrowRight') &&
-        target?.matches?.('[data-notes-tab]')
-      ) {
-        event.preventDefault();
-        const tabs = notesTabs(this.notesPanelSections(this.notesPanel()));
-        this.setNotesTab(
-          nextNotesTab(
-            tabs,
-            target.getAttribute('data-cmd-id'),
-            event.key === 'ArrowRight' ? 1 : -1
-          )
-        );
-      }
-    });
-  }
-
-  // Suggestions point at the existing capture, never create a second editor.
-  // Switching to Inbox preserves the panel's draft and existing save owner.
+  // Suggestions point at the quick capture, never create a second editor.
   focusHQNoteCapture(trigger) {
-    const node = this.notesInlineNode();
-    if (!node || !isCreatedByOri(this.notesState().secondBrain)) {
-      this.openNotesStation(trigger);
-      return;
-    }
-    this.setNotesTab('inbox');
-    node.scrollIntoView?.({ block: 'start' });
-    const input = node.querySelector?.('[data-notes-capture]');
-    if (input) {
-      this._hqNoteCaptureWantedAt = 0;
-      input.focus({ preventScroll: true });
-      return;
-    }
-    // The panel has not painted its Inbox yet (the view was just switched to
-    // Details, or its look is still loading): the capture box does not exist.
-    // Bring the panel into focus meanwhile, and let the repaint that creates the
-    // box take it, within a few seconds.
-    this._hqNoteCaptureWantedAt = Date.now();
-    this.focusInlineNotesPanel();
-  }
-
-  // Brings the inline panel into view and focus; false when it is not mounted.
-  focusInlineNotesPanel() {
-    const node = this.notesInlineNode();
-    if (!node) return false;
-    if (typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'start' });
-    const target =
-      node.querySelector?.('[data-notes-tab][aria-selected="true"]') ||
-      node.querySelector?.('[data-notes-capture]') ||
-      node.querySelector?.('[data-cmd-modal-action]');
-    if (target && typeof target.focus === 'function') target.focus({ preventScroll: true });
-    return true;
+    if (!this.hqQuickCapture?.focus()) this.openNotesStation(trigger);
   }
 
   showConfigTab(tab) {

@@ -535,11 +535,7 @@ func (s *SecondBrainService) ConnectionStatus(ctx context.Context, userID string
 	case err != nil:
 		return SecondBrainView{}, err
 	}
-	view := s.connectionView(doc)
-	if view.Status == SecondBrainConnected {
-		view.BrowseRef = browseReference(doc)
-	}
-	return view, nil
+	return s.connectionView(doc), nil
 }
 
 // Inbox lists the notes directly under Inbox in a second brain Ori set up.
@@ -949,6 +945,11 @@ var ErrSecondBrainNotOwned = secondbrain.ErrNotOwned
 // refused for any other connection. A replayed request returns the note the
 // first call wrote; a name already taken gets a number, never an overwrite.
 func (s *SecondBrainService) Capture(ctx context.Context, userID, text, requestID string) (SecondBrainCaptureView, error) {
+	return s.CaptureForSource(ctx, userID, text, requestID, "")
+}
+
+// CaptureForSource makes a UI draft conditional on the connection it was typed for.
+func (s *SecondBrainService) CaptureForSource(ctx context.Context, userID, text, requestID, sourceRef string) (SecondBrainCaptureView, error) {
 	if !secondbrain.ValidRequestID(requestID) {
 		return SecondBrainCaptureView{}, ErrValidation
 	}
@@ -967,6 +968,9 @@ func (s *SecondBrainService) Capture(ctx context.Context, userID, text, requestI
 	source := doc.Connected()
 	if source == nil {
 		return SecondBrainCaptureView{}, ErrSecondBrainNotConnected
+	}
+	if sourceRef != "" && sourceRef != browseReference(doc) {
+		return SecondBrainCaptureView{}, ErrSecondBrainBrowseStale
 	}
 	if receipt, replayed, err := doc.Replay(requestID, secondBrainActionCapture); err != nil || replayed {
 		return captureView(*source, receipt.Note), err
@@ -992,11 +996,14 @@ func (s *SecondBrainService) Capture(ctx context.Context, userID, text, requestI
 	}
 	s.dropInboxCache()
 	s.wrote(ctx, userID, map[string]int{secondbrain.NoteKindCapture: 1})
-	if _, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
-		if _, replayed, err := doc.Replay(requestID, secondBrainActionCapture); err != nil || replayed {
+	if _, err := s.mutate(ctx, userID, func(current *SecondBrainDocument) error {
+		if browseReference(*current) != browseReference(doc) {
+			return ErrSecondBrainBrowseStale
+		}
+		if _, replayed, err := current.Replay(requestID, secondBrainActionCapture); err != nil || replayed {
 			return err
 		}
-		doc.Remember(secondbrain.Receipt{RequestID: requestID, Action: secondBrainActionCapture, At: now, Note: rel})
+		current.Remember(secondbrain.Receipt{RequestID: requestID, Action: secondBrainActionCapture, At: now, Note: rel})
 		return nil
 	}); err != nil {
 		// The note is on disk; a retry with this id writes a second one, so say
@@ -1769,8 +1776,10 @@ func (s *SecondBrainService) connectionView(doc SecondBrainDocument) SecondBrain
 		return view
 	}
 	view.Status = SecondBrainConnected
-	if info, err := os.Stat(connected.Path); err != nil || !info.IsDir() {
+	if info, err := os.Lstat(connected.Path); err != nil || !info.IsDir() {
 		view.Status = SecondBrainMissing
+	} else {
+		view.BrowseRef = browseReference(doc)
 	}
 	view.Source = &SecondBrainSourceView{
 		ID: connected.ID, Kind: connected.Kind, Name: connected.Name, Path: connected.Path, ConnectedAt: connected.ConnectedAt,

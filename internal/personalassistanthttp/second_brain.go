@@ -25,7 +25,7 @@ type SecondBrainService interface {
 	DecideAsk(ctx context.Context, userID, decision, requestID string) (personalassistant.SecondBrainView, error)
 	Connect(ctx context.Context, userID string, input personalassistant.SecondBrainConnectInput) (personalassistant.SecondBrainView, error)
 	Create(ctx context.Context, userID string, input personalassistant.SecondBrainCreateInput) (personalassistant.SecondBrainView, error)
-	Capture(ctx context.Context, userID, text, requestID string) (personalassistant.SecondBrainCaptureView, error)
+	CaptureForSource(ctx context.Context, userID, text, requestID, sourceRef string) (personalassistant.SecondBrainCaptureView, error)
 	Look(ctx context.Context, userID string) (personalassistant.SecondBrainLookView, error)
 	LookAgain(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainLookView, error)
 	AcceptFollowUps(ctx context.Context, userID, lookID string, input personalassistant.SecondBrainAcceptInput) (personalassistant.SecondBrainAcceptView, error)
@@ -410,8 +410,9 @@ func (h *Handler) RetrySecondBrainSetup(w http.ResponseWriter, r *http.Request) 
 }
 
 type secondBrainCaptureRequest struct {
-	Text      string `json:"text"`
-	RequestID string `json:"request_id"`
+	Text      string  `json:"text"`
+	RequestID string  `json:"request_id"`
+	SourceRef *string `json:"source_ref,omitempty"`
 }
 
 // CaptureSecondBrain writes one note to Inbox in a second brain Ori set up,
@@ -426,10 +427,18 @@ func (h *Handler) CaptureSecondBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req secondBrainCaptureRequest
-	if !decodeClosedBody(w, r, maxSecondBrainCaptureBodyBytes, &req, "text", "request_id") {
+	if !decodeClosedBody(w, r, maxSecondBrainCaptureBodyBytes, &req, "text", "request_id", "source_ref") {
 		return
 	}
-	view, err := h.secondBrain.Capture(r.Context(), userID, req.Text, strings.TrimSpace(req.RequestID))
+	var ref string
+	if req.SourceRef != nil {
+		ref = *req.SourceRef
+		if len(ref) != 64 {
+			orihttp.BadRequest(w, "The notes connection reference is invalid")
+			return
+		}
+	}
+	view, err := h.secondBrain.CaptureForSource(r.Context(), userID, req.Text, strings.TrimSpace(req.RequestID), ref)
 	if err != nil {
 		writeSecondBrainError(w, err)
 		return

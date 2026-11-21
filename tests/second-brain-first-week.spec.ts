@@ -412,7 +412,7 @@ test.describe('the first week, in a second brain Ori set up', () => {
     const [recap] = (await rows()).filter(row => row.kind === 'second_brain_week');
     expect(recap?.title).toMatch(/^This week your notes gained .+\.$|^Your notes had a quiet week/);
     expect(recap.actions).toEqual(['dismiss']);
-    expect(recap.route).toContain('station=second-brain');
+    expect(recap.route).toBe('/my-notes?view=inbox');
 
     // Today lives in the assistant drawer; its Done list is behind the "done today" row.
     const showDone = async () => {

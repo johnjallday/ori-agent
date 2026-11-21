@@ -167,13 +167,12 @@ export function forgetFirstAction(storage) {
 /**
  * The result card's first step, from canonical states only.
  * @param {{status: string, writable?: boolean}|null} notes hqNotesOutcome, or null
- * @param {{hqRoute?: string}} options
  * @returns {{lead: string, note: boolean, openNotes: string, setupNotes: boolean,
  *            retry: boolean, folder: boolean, explore: boolean}}
  */
-export function hqFirstActionView(notes, { hqRoute = '' } = {}) {
+export function hqFirstActionView(notes) {
   const status = String(notes?.status || 'none');
-  const notesRoute = hqRoute ? `${hqRoute}?station=second-brain` : '';
+  const notesRoute = '/my-notes';
   const base = {
     note: false,
     openNotes: '',

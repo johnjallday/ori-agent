@@ -28,7 +28,7 @@ test('the Notes row names the connected folder, a missing one, or none', () => {
     source: { name: 'Second Brain', kind: 'obsidian' }
   });
   assert.equal(missing.summary, "Can't find Second Brain. It may have been moved or renamed.");
-  assert.deepEqual(missing.action, { label: 'Choose again', route: '/?quest=second-brain' });
+  assert.deepEqual(missing.action, { label: 'Choose again', route: '/my-notes' });
   assert.equal(missing.disconnect, true);
 
   const created = notesSourceView({

@@ -54,7 +54,7 @@ func TestTodaySecondBrain_AskRowUntilAnswered(t *testing.T) {
 				return
 			}
 			if len(needs) != 1 || needs[0].Kind != "second_brain_ask" || needs[0].Title != tc.title ||
-				needs[0].Route != "/?quest=second-brain" || needs[0].ID != "second-brain-ask" {
+				needs[0].Route != "/my-notes" || needs[0].ID != "second-brain-ask" {
 				t.Fatalf("needs = %+v", needs)
 			}
 		})
@@ -113,7 +113,7 @@ func TestTodaySecondBrain_StaleNotesNudge(t *testing.T) {
 			}
 			got := needs[0]
 			if got.Kind != "second_brain_stale" || got.Title != tc.title || got.ID != "second-brain-stale-look-1" ||
-				got.Route != "/workspaces/my-hq?station=second-brain" || !got.SourceAt.Equal(lookAt) ||
+				got.Route != "/my-notes?view=loops" || !got.SourceAt.Equal(lookAt) ||
 				len(got.Actions) != 1 || got.Actions[0] != "not_now" {
 				t.Fatalf("nudge = %+v", got)
 			}
@@ -165,11 +165,8 @@ func TestTodaySecondBrain_WorkingNeedsAndDone(t *testing.T) {
 		s := &TodayService{secondBrain: fakeTodayNotes{view: view, look: SecondBrainLookView{State: secondbrain.LookFinished, LookID: "look-1"}}}
 		_, needs, done := s.secondBrainItems(context.Background(), "local", "my-hq", true, now)
 		if len(needs) != 1 || needs[0].Kind != "second_brain_result" || needs[0].Detail != view.LastLook.Headline ||
-			needs[0].Route != "/workspaces/my-hq?station=second-brain" {
+			needs[0].Route != "/my-notes?view=loops" {
 			t.Fatalf("needs = %+v", needs)
-		}
-		if got := notesPanelRoute("../elsewhere"); got != "" {
-			t.Fatalf("an unsafe slug made a route: %q", got)
 		}
 		if len(done) != 1 || done[0].Title != "Looked at Second Brain · 12 open items" {
 			t.Fatalf("done = %+v", done)
@@ -194,7 +191,7 @@ func TestTodaySecondBrain_WorkingNeedsAndDone(t *testing.T) {
 		s := &TodayService{secondBrain: wrote}
 		_, _, done := s.secondBrainItems(context.Background(), "local", "my-hq", true, now)
 		if len(done) != 1 || done[0].Kind != "second_brain_written" || done[0].Title != wrote.report.Sentence ||
-			done[0].Route != "/workspaces/my-hq?station=second-brain" || done[0].ID == "" {
+			done[0].Route != "/my-notes?view=inbox" || done[0].ID == "" {
 			t.Fatalf("done = %+v", done)
 		}
 		wrote.found = false

@@ -115,6 +115,78 @@ test('explicit notebook setup is reusable and page entry only reads the connecti
   await expect(page.getByRole('button', { name: 'Save to Inbox' })).toBeVisible();
 });
 
+test('HQ Overview saves to the personal Inbox and its Map station navigates', async ({
+  page,
+  request
+}) => {
+  const status = await request.get('/api/personal-assistant/today');
+  expect(status.ok()).toBeTruthy();
+  const data = await status.json();
+  const slug = data.today?.hq_workspace_slug;
+  expect(slug).toBeTruthy();
+  const base = `/workspaces/${slug}`;
+  const workspaceNotesURL = `/api/workspaces/${data.today.hq_workspace_id}/notes`;
+  const workspaceNotes = async () => {
+    const response = await request.get(workspaceNotesURL);
+    expect(response.ok(), await response.text()).toBeTruthy();
+    return (await response.json()).notes;
+  };
+  const before = await workspaceNotes();
+  await page.goto(base + '?mode=details');
+  const capturePanel = page.locator('.ws-hq-capture');
+  const draft = capturePanel.getByLabel('Save to My Notes → Inbox');
+  await expect(draft).toBeVisible();
+  const text = 'Idea from HQ about next week';
+  await draft.fill(text);
+  // Force a background status refresh/repaint: it must not clear the field.
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('personal-assistant:second-brain'))
+  );
+  await expect(draft).toHaveValue(text);
+  await expect(draft).toBeFocused();
+  await page.route(
+    `**${endpoint}/capture`,
+    route => route.fulfill({ status: 500, json: { error: 'Try the save again.' } }),
+    { times: 1 }
+  );
+  await draft.press('Enter');
+  await expect(capturePanel.getByRole('alert')).toHaveText('Try the save again.');
+  await expect(draft).toHaveValue(text);
+  await draft.press('Enter');
+  await expect(capturePanel.getByRole('status')).toHaveText('Saved to My Notes → Inbox.');
+  expect(await workspaceNotes()).toEqual(before);
+  expect(await capturePanel.getByRole('tab').count()).toBe(0);
+  await capture(page, '08-hq-quick-capture');
+  await capturePanel.getByRole('link', { name: 'Today’s journal' }).click();
+  const journal = page.locator('.hq-journal-editor');
+  await expect(journal).toBeVisible();
+  await journal.fill('Reviewed the field notebook and planned the week.');
+  await capture(page, '09-journal');
+  await page.getByRole('button', { name: 'Save journal' }).click();
+  await expect(page.locator('.hq-journal-launch')).toBeVisible();
+  await expect.poll(workspaceNotes).toHaveLength(before.length + 1);
+  const source = await notes(request);
+  const daily = join(sandbox!, 'Ori Workspaces', 'My Notes', 'Daily');
+  expect(source.source.path).toBe(join(daily, '..'));
+  expect(snapshot(daily).join('\n')).toContain('Reviewed the field notebook and planned the week.');
+  await page.goBack();
+  await capturePanel.getByRole('link', { name: 'Open My Notes' }).click();
+  await page.getByRole('button', { name: 'Inbox', exact: true }).click();
+  await expect(page.locator('[data-notes-section="inbox"]')).toContainText(/idea from hq/i);
+  await capture(page, '10-hq-note-in-personal-inbox');
+  await page.goto(base + '?mode=map');
+  await page
+    .locator('[data-cmd-hq-station="second-brain"]')
+    .filter({ visible: true })
+    .first()
+    .click();
+  await expect(page).toHaveURL(/\/my-notes$/);
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${slug}.*mode=map`));
+  await page.goto(base + '?mode=map&station=second-brain');
+  await expect(page).toHaveURL(/\/my-notes$/);
+});
+
 function snapshot(root: string): string[] {
   return readdirSync(root, { withFileTypes: true })
     .sort((a, b) => a.name.localeCompare(b.name))

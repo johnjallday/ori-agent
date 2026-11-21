@@ -42,6 +42,9 @@ func TestSecondBrainBrowseBindsToCurrentConnectionEvenAfterSameFolderReconnect(t
 	if _, err := s.Preview(ctx, "local", secondbrain.PreviewInbox, "private.md", first.BrowseRef); !errors.Is(err, ErrSecondBrainBrowseStale) {
 		t.Fatalf("stale preview = %v", err)
 	}
+	if _, err := s.CaptureForSource(ctx, "local", "Do not replay this", "stale-draft", first.BrowseRef); !errors.Is(err, ErrSecondBrainBrowseStale) {
+		t.Fatalf("stale capture = %v", err)
+	}
 	current, err := s.ConnectionStatus(ctx, "local")
 	if err != nil || current.BrowseRef == first.BrowseRef || current.Source.ID != first.Source.ID {
 		t.Fatalf("reconnected status = %+v, %v", current, err)

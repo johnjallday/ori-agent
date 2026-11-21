@@ -803,6 +803,10 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 
 	// If just /workspaces/{id}, serve the workspace detail page
 	if len(parts) == 1 {
+		if r.Method == http.MethodGet && r.URL.Query().Get("station") == "second-brain" && s.currentPersonalHQForPage(workspaceID, "") {
+			http.Redirect(w, r, "/my-notes", http.StatusFound)
+			return
+		}
 		s.serveWorkspaceDetail(w, workspaceID, workspaceSlug)
 		return
 	}

@@ -182,7 +182,7 @@ export function hqNeedsYouRows({
       'notes',
       'Notes',
       'Your notes deserve another look: ' + parts.join(', ') + '.',
-      [{ label: 'Look again', kind: 'notes' }]
+      [{ label: 'Review in My Notes', kind: 'notes' }]
     );
     if (row) rows.push(row);
   }

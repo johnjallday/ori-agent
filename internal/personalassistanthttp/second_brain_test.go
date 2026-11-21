@@ -92,7 +92,7 @@ func (f *fakeSecondBrain) Create(_ context.Context, _ string, input personalassi
 	return personalassistant.SecondBrainView{LookID: "look-1"}, f.record("create")
 }
 
-func (f *fakeSecondBrain) Capture(_ context.Context, _ string, text, requestID string) (personalassistant.SecondBrainCaptureView, error) {
+func (f *fakeSecondBrain) CaptureForSource(_ context.Context, _ string, text, requestID string, _ string) (personalassistant.SecondBrainCaptureView, error) {
 	f.capture = [2]string{text, requestID}
 	return personalassistant.SecondBrainCaptureView{Note: "Inbox/20261031-1407-note.md", Name: "20261031-1407-note"}, f.record("capture")
 }

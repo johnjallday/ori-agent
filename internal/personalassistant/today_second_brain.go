@@ -16,8 +16,8 @@ const todaySecondBrainDoneWindow = 7 * 24 * time.Hour
 // on while a look runs, Needs you while a finished result waits for a
 // decision (the drawer card renders it there itself), and Done for a week. A
 // notes folder that cannot be read leaves Today as it was; the Notes slot says
-// so instead. The result row leads to the HQ map with the Notes panel open.
-func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug string, askable bool, now time.Time) (working, needs, done []TodayItem) {
+// so instead. A result or nudge leads to My Notes with its Open loops view.
+func (s *TodayService) secondBrainItems(ctx context.Context, userID, _ string, askable bool, now time.Time) (working, needs, done []TodayItem) {
 	if s.secondBrain == nil {
 		return nil, nil, nil
 	}
@@ -41,7 +41,7 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug stri
 			working = append(working, TodayItem{ID: "second-brain-look-" + look.LookID, Kind: "second_brain_look", Title: "Reading " + name + "…"})
 		case look.State == secondbrain.LookFinished && view.LastLook != nil && !view.LastLook.Acted && look.LookID == view.LastLook.ID:
 			needs = append(needs, TodayItem{ID: view.LastLook.ID, Kind: "second_brain_result",
-				Title: "What's open in " + name, Detail: view.LastLook.Headline, SourceAt: view.LastLook.At, Route: notesPanelRoute(hqSlug)})
+				Title: "What's open in " + name, Detail: view.LastLook.Headline, SourceAt: view.LastLook.At, Route: myNotesLoopsRoute})
 		default:
 			nudgeAllowed = true
 		}
@@ -49,7 +49,7 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug stri
 	if reader, ok := s.secondBrain.(secondBrainNudgeReader); ok && nudgeAllowed {
 		if report, found := reader.Nudge(ctx, userID); found {
 			needs = append(needs, TodayItem{ID: "second-brain-stale-" + report.LookID, Kind: "second_brain_stale",
-				Title: secondBrainNudgeTitle(report), SourceAt: report.LookAt, Route: notesPanelRoute(hqSlug), Actions: []string{"not_now"}})
+				Title: secondBrainNudgeTitle(report), SourceAt: report.LookAt, Route: myNotesLoopsRoute, Actions: []string{"not_now"}})
 		}
 	}
 	if last := view.LastLook; last != nil && !last.At.IsZero() && !last.At.After(now) && now.Sub(last.At) <= todaySecondBrainDoneWindow {
@@ -63,20 +63,23 @@ func (s *TodayService) secondBrainItems(ctx context.Context, userID, hqSlug stri
 	if reporter, ok := s.secondBrain.(secondBrainWrittenReporter); ok {
 		if report, found := reporter.WrittenReport(ctx, userID); found {
 			done = append(done, TodayItem{ID: "second-brain-written-" + report.At.UTC().Format("20060102T150405"), Kind: "second_brain_written",
-				Title: report.Sentence, SourceAt: report.At, Route: notesPanelRoute(hqSlug)})
+				Title: report.Sentence, SourceAt: report.At, Route: myNotesInboxRoute})
 		}
 	}
 	if reporter, ok := s.secondBrain.(secondBrainWeekReporter); ok {
 		if report, found := reporter.WeekReport(ctx, userID); found {
 			done = append(done, TodayItem{ID: report.ID, Kind: "second_brain_week",
-				Title: report.Sentence, SourceAt: report.At, Route: notesPanelRoute(hqSlug), Actions: []string{"dismiss"}})
+				Title: report.Sentence, SourceAt: report.At, Route: myNotesInboxRoute, Actions: []string{"dismiss"}})
 		}
 	}
 	return working, needs, done
 }
 
-// SecondBrainAskRoute opens the drawer on the ask while it is unanswered.
-const SecondBrainAskRoute = "/?quest=second-brain"
+const (
+	SecondBrainAskRoute = "/my-notes"
+	myNotesLoopsRoute   = "/my-notes?view=loops"
+	myNotesInboxRoute   = "/my-notes?view=inbox"
+)
 
 // secondBrainAskItem is the Needs you row for an unanswered ask (Issue 776
 // FR12): while nothing is connected and the ask is pending or shown, or again
@@ -133,13 +136,4 @@ type secondBrainWrittenReporter interface {
 // (first-week FR25).
 type secondBrainWeekReporter interface {
 	WeekReport(ctx context.Context, userID string) (SecondBrainWeekReport, bool)
-}
-
-// notesPanelRoute opens the Notes station's panel on the HQ map, or "" when the
-// slug is not one a route can carry.
-func notesPanelRoute(hqSlug string) string {
-	if !todaySafeSlug.MatchString(hqSlug) {
-		return ""
-	}
-	return "/workspaces/" + hqSlug + "?station=second-brain"
 }

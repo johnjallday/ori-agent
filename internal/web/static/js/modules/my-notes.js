@@ -107,7 +107,7 @@ function connectionKey(view) {
   return [view?.status, view?.source?.id, view?.source?.connected_at].join(':');
 }
 
-class MyNotes {
+export class MyNotes {
   constructor(root) {
     this.root = root;
     this.title = root.querySelector('#my-notes-title');
@@ -126,6 +126,15 @@ class MyNotes {
       }
     });
     root.addEventListener('keydown', event => this.keydown(event));
+    this.tools.addEventListener(
+      'toggle',
+      event => {
+        if (this.panel && event.target.matches('.ws-notes-handled')) {
+          this.panel.handledOpen = event.target.open;
+        }
+      },
+      true
+    );
     document.addEventListener('personal-assistant:second-brain', () => {
       if (!this.suspended) void this.load();
     });
@@ -165,9 +174,13 @@ class MyNotes {
     this.view = view;
     this.paintStatus();
     this.status.removeAttribute('aria-busy');
-    if (this.arrival === 'loops' && myNotesConnection(view).connected) {
+    if (
+      myNotesConnection(view).connected &&
+      (this.arrival === 'loops' || (this.arrival === 'inbox' && isCreatedByOri(view)))
+    ) {
+      const tab = this.arrival;
       this.arrival = null;
-      void this.openTools('loops', { focus: false });
+      void this.openTools(tab, { focus: false });
     }
   }
 
@@ -296,7 +309,7 @@ class MyNotes {
             el.dataset.cmdId === focused.dataset.cmdId
         );
     if (replacement && !replacement.disabled) replacement.focus({ preventScroll: true });
-    else this.focusTab();
+    else this.focusTab({ preventScroll: true });
   }
 
   setTab(tab, focus = true) {
@@ -306,8 +319,8 @@ class MyNotes {
     if (focus) this.focusTab();
   }
 
-  focusTab() {
-    this.tools.querySelector('[data-notes-tab][aria-selected="true"]')?.focus();
+  focusTab(options) {
+    this.tools.querySelector('[data-notes-tab][aria-selected="true"]')?.focus(options);
   }
 
   keydown(event) {
@@ -395,7 +408,13 @@ class MyNotes {
     const pending = { key, status: 'loading' };
     panel.preview = pending;
     this.paintTools(panel);
-    const result = await fetchSecondBrainPreview(key.slice(0, at), key.slice(at + 1));
+    const ref = panel.view?.browse_ref;
+    const result = await fetchSecondBrainPreview(
+      key.slice(0, at),
+      key.slice(at + 1),
+      (path, options) =>
+        fetch(path + '?' + new URLSearchParams({ ref }), { ...options, cache: 'no-store' })
+    );
     if (panel.preview === pending) {
       panel.preview = result.ok
         ? { key, status: 'ready', note: result.preview }
@@ -412,7 +431,11 @@ class MyNotes {
     panel.captureID ||= newRequestID('notes');
     this.paintTools(panel);
     try {
-      const payload = await notesPost('/capture', { text }, panel.captureID);
+      const payload = await notesPost(
+        '/capture',
+        { text, source_ref: panel.view.browse_ref },
+        panel.captureID
+      );
       if (!payload.capture?.note)
         throw new Error('No save receipt was returned. Retry to check the save.');
       panel.captureDraft = '';
@@ -460,13 +483,14 @@ class MyNotes {
         ).look;
       }
     } catch (error) {
-      panel.message =
-        error.status === 429
-          ? lookTooSoonLine({
-              retryAfterSeconds: error.retryAfterSeconds,
-              lastLookAt: panel.look?.result?.finished_at
-            })
-          : error.message;
+      if (error.status === 429) {
+        panel.lookMessage = lookTooSoonLine({
+          retryAfterSeconds: error.retryAfterSeconds,
+          lastLookAt: panel.look?.result?.finished_at
+        });
+      } else {
+        panel.message = error.message;
+      }
     } finally {
       panel.lookBusy = false;
     }
