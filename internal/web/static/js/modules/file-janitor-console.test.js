@@ -370,8 +370,8 @@ test('confirmation waits for the reviewed draft and posts its exact terms only o
   panel.render(setupRequiredStatus);
   panel._setSetupReview(initial);
   const reviewed = { ...initial, monitoring: true, review_revision: 'b'.repeat(64) };
-  const choice = Promise.withResolvers();
-  const preparation = Promise.withResolvers();
+  const choice = deferredReply();
+  const preparation = deferredReply();
   const writes = [];
   globalThis.fetch = async (url, options) => {
     if (options?.method) writes.push([String(url).split('/').pop(), JSON.parse(options.body)]);
@@ -402,7 +402,7 @@ test('confirmation waits for the reviewed draft and posts its exact terms only o
   assert.deepEqual(writes, [
     ['setup-review', { reference_id: initial.reference_id, monitoring: true }]
   ]);
-  choice.resolve({ ok: true, json: async () => ({ review: reviewed }) });
+  choice.reply({ review: reviewed });
   await settle();
   assert.equal(doc.activeElement, doc.getElementById('fileJanitorReviewMonitoring'));
   const original = confirm();
@@ -418,10 +418,7 @@ test('confirmation waits for the reviewed draft and posts its exact terms only o
       }
     ]
   ]);
-  preparation.resolve({
-    ok: false,
-    json: async () => ({ error: { message: 'Permissions changed' } })
-  });
+  preparation.reply({ error: { message: 'Permissions changed' } }, false);
   await settle();
   assert.match(text(doc), /Permissions changed/);
   assert.equal(confirm().disabled, true);
@@ -486,7 +483,7 @@ for (const destination of ['stay', 'dismiss', 'reopen', 'workspace', 'root']) {
       }
     };
     const trigger = doc.register('map-invite');
-    const grant = Promise.withResolvers();
+    const grant = deferredReply();
     const result = {
       privacy_mode: 'metadata_only',
       operation_id: 'accepted:scan',
@@ -534,12 +531,7 @@ for (const destination of ['stay', 'dismiss', 'reopen', 'workspace', 'root']) {
     status.settings.root_id = destination === 'root' ? 'other-root' : 'root-1';
     status.settings.setup_preparation = { operation_id: 'accepted' };
     review = attachedReview({ state: 'prepared', operation_id: 'accepted', result });
-    grant.resolve({
-      ok: true,
-      json: async () => ({
-        preparation: { workspace_id: 'ws-1', operation_id: 'accepted', result }
-      })
-    });
+    grant.reply({ preparation: { workspace_id: 'ws-1', operation_id: 'accepted', result } });
     await settle();
     await settle();
     if (destination === 'stay') {

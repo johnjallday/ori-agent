@@ -5272,6 +5272,7 @@
     const heading = el('div', 'fj-console-heading');
     const title = el('h2', 'fj-console-title', 'Filing');
     title.id = CONSOLE_TITLE_ID;
+    title.setAttribute('tabindex', '-1');
     heading.appendChild(title);
     // The managed folder is shown by its display name, cleaned the same way a
     // filename is: a folder can be named as adversarially as a file.

@@ -1,11 +1,10 @@
 # Workspace next action
 
-Ordinary workspaces show the same **Next action** in Map and Overview (the internal
-`details` key is unchanged). The Map,
-stations, agent controls, Memory, and the ticket board remain available. Group maps,
-Personal HQ and dashboards keep their existing journeys. A next action about work
-opens the ticket; see [One work-item model](architecture/work-item-model.md) for
-what a ticket and a run are.
+Ordinary workspaces share **Next action** priority in Map and Overview (the internal
+`details` key is unchanged). The Map, stations, agent controls, Memory, and the
+ticket board remain available. Group maps, Personal HQ, and dashboards keep their
+existing journeys. A next action about work opens the ticket; see [One work-item
+model](architecture/work-item-model.md) for what a ticket and a run are.
 
 Team and Resources now use compact entries; full agent controls and editors keep
 their existing owners. See [Workspace navigation](workspace-navigation.md) for the
@@ -20,13 +19,14 @@ by their names, hide tasks, or change their completion state.
 
 Priority, highest first:
 
-1. Tasks needing attention.
-2. Filing repair, setup, or consent.
-3. Files awaiting review.
-4. Running tasks, then an active file scan.
-5. Other actionable tasks, then unknown task states.
-6. Confirmed task results or filing receipts.
-7. Known manual, paused, watching, or idle state.
+1. Tickets needing attention.
+2. A folder manager's question, plan, or other decision that needs a person.
+3. Filing repair, setup, or consent.
+4. Files awaiting review.
+5. Running tickets, then an active file scan.
+6. Other actionable tickets, then unknown ticket states.
+7. Confirmed ticket results or filing receipts.
+8. Known manual, paused, watching, or idle state.
 
 Running work stays visible alongside a higher-priority recommendation. Task ties
 use the existing task ordering. Results compare recorded completion times, never
@@ -40,13 +40,20 @@ specialists and empty Memory are not missing-setup conditions.
 
 ## Folder setup asks once
 
-For a reviewed attached folder, Next action names the lead and folder:
-**Let Downloads Manager file Downloads** → **Review permission**. The existing
-consent card says **Allow filing in Downloads**. Hiring never grants access;
-only this explicit confirmation creates/reuses Filed/ and prepares one
-metadata-only review. Every move still needs separate approval.
+On the Map, a reviewed attached folder gets a note from its manager:
+**Prepare a filing preview for Downloads?** → **Review folder access**. The
+manager shows **Waiting for permission** instead of the completed-hire prompt.
+The note and the Filing station open the same permission review. An urgent
+ticket can still take priority, and Tickets stays in workspace navigation.
 
-Before that permission, the completed folder banner says **Downloads Manager is
+In Overview the setup action still reads **Let Downloads Manager file Downloads**
+→ **Review permission**. Both views open **Allow filing in Downloads**. Hiring or
+opening the review never grants access. Explicit confirmation creates or reuses
+Filed/ on disk and scans top-level names, types, sizes, and dates once, without
+opening file contents. Watching and daily scans are optional and off by default.
+Every move or action to Trash still needs separate approval.
+
+Before that permission, Overview's completed folder banner says **Downloads Manager is
 hired. One step left: allow filing.** The never-configured summary is hidden
 while Next action shows this setup ask, so Overview asks once. It stays available
 when an attention ticket outranks setup, or for revoked access and repair. Once
@@ -66,8 +73,14 @@ An unread welcome does not displace completed-result or urgent ticket actions.
 Filing counts come independently from current saved Filing batches and
 permission, even if the lead or conversation is unavailable. **Review files**
 opens current Review; reading chat does not clear pending files, and reviewing
-files does not mark a message seen. **Source details** separates the last saved
-batch, observation, message delivery and seen times. Later scans refresh counts,
+files does not mark a message seen. During the first linked-folder preparation,
+Filing shows **Preparing your preview…**. Once the saved batch and current count
+agree, the Map says **Nothing moved** and **Review preview** opens the real batch.
+**Back to map** leaves it available at the Filing station. Empty or unavailable
+results are not presented as ready batches. The first verified map handoff
+highlights Filing once; reduced motion uses the same text without animation.
+**Source details** separates the last saved batch, observation, message delivery,
+and seen times. Later scans refresh counts,
 not historical welcome prose. Qualified last-known counts are not action authority.
 
 Home Updates groups these two signals per workspace. Map tiles and Tree rows
@@ -97,8 +110,10 @@ and mark its existing map parcels seen.
 
 Keyboard focus returns to the opener's live replacement. If a read temporarily
 removes the primary, focus stays in the Next action region until it settles.
-Escape cannot dismiss a pending confirmation; Back/reopen retains its owner.
-Stable status announcements avoid repeating unchanged recommendations on polls.
+Escape can close the preview preparation panel without canceling accepted work.
+A late result updates Filing without reopening the dismissed panel or taking
+focus. A pending **File** operation retains its existing dismissal guard. Stable
+status announcements avoid repeating unchanged recommendations on polls.
 
 ## Validation and safe reproduction
 
