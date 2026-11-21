@@ -6,6 +6,7 @@ import {
   libraryOpenRoute,
   libraryOpenedMessage,
   libraryRequestError,
+  lowerNoun,
   projectWords,
   readLibraryPayload as payload,
   RECENT_SONGS_QUERY,
@@ -2364,6 +2365,7 @@ export class ProjectLibraryPanel {
       this.details(card.entry_id, trigger, 'sessions')
     );
     if (primary) button.className = 'modern-btn modern-btn-primary';
+    if (this.musicHandoff) button.dataset.librarySessionEntry = card.entry_id;
     return button;
   }
 
@@ -2426,7 +2428,12 @@ export class ProjectLibraryPanel {
       item.append(next);
     }
     const actions = node('div', 'project-library-handoff-actions');
-    actions.append(this.resumeNotesButton(lead, 'View session notes', true));
+    actions.append(
+      this.resumeNotesButton(lead, 'View session notes', true),
+      this.browserButton(`Browse ${lowerNoun(this.summary?.words, { plural: true })}`, () =>
+        this.focusLibraryTarget(document.getElementById('projectLibrarySearch'))
+      )
+    );
     item.append(actions);
     container.append(item);
     if (others.length) {
@@ -2619,6 +2626,7 @@ export class ProjectLibraryPanel {
       if (!restoring) {
         this.restoreRead.cancel();
         this.restoringBrowser = false;
+        this.handoffEntry = '';
         this.clearBrowserSelection('Selection cleared because the result scope changed.');
         this.browser.clear();
       }
@@ -4160,7 +4168,10 @@ export class ProjectLibraryPanel {
         if (!(await this.search(true, { restoring: true }))) return false;
         if (!turn.current()) return;
       }
-      if (intent.selected && this.rows.some(row => row.id === intent.selected)) {
+      if (
+        intent.selected &&
+        (intent.selected === this.handoffEntry || this.rows.some(row => row.id === intent.selected))
+      ) {
         if (metadataOnly) {
           const detailTurn = this.browser.detailRead.begin();
           try {
@@ -4237,16 +4248,9 @@ export class ProjectLibraryPanel {
         this.browser.changeTab(tabs[next].dataset.libraryTab);
       });
     }
-    document.getElementById('projectLibraryBack')?.addEventListener('click', () => {
-      this.paneHidden = true;
-      this.browser.tabRead.cancel();
-      document.getElementById('projectLibraryBrowser')?.classList.remove('is-inspecting');
-      const trigger = [...document.querySelectorAll('[data-library-entry]')].find(
-        button => button.dataset.libraryEntry === this.browser.selected
-      );
-      (trigger || document.getElementById('projectLibraryTitle'))?.focus();
-      this.saveBrowserNavigation();
-    });
+    document
+      .getElementById('projectLibraryBack')
+      ?.addEventListener('click', () => this.backToLibrary());
     document.getElementById('projectLibraryClear')?.addEventListener('click', () => {
       for (const [field, id] of Object.entries(LIBRARY_FILTERS)) {
         if (field === 'sort' || field === 'direction') continue;
@@ -4326,13 +4330,64 @@ export class ProjectLibraryPanel {
     if (clear) clear.hidden = labels.length === 0;
   }
 
+  focusLibraryTarget(target) {
+    if (!target) {
+      target = document.getElementById('projectLibraryTitle');
+      target?.setAttribute('tabindex', '-1');
+    }
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView?.({ block: 'center', behavior: 'instant' });
+  }
+
+  backToLibrary() {
+    const entry = this.browser.selected;
+    const fromHandoff = !!entry && this.handoffEntry === entry;
+    this.paneHidden = true;
+    this.browser.tabRead.cancel();
+    document.getElementById('projectLibraryBrowser')?.classList.remove('is-inspecting');
+    const row = [...document.querySelectorAll('[data-library-entry]')].find(
+      button => button.dataset.libraryEntry === entry
+    );
+    if (fromHandoff) {
+      this.handoffEntry = '';
+      this.restoreRead.cancel();
+      this.restoringBrowser = false;
+      const visibleRow =
+        this.browser.status !== 'error' &&
+        this.rows.some(item => item.id === entry) &&
+        !row?.closest('[hidden]')
+          ? row
+          : null;
+      this.browser.clear(); // Back also cancels a pending detail and its tab reads.
+      if (visibleRow) {
+        visibleRow.classList.add('is-handoff-return');
+        visibleRow.addEventListener(
+          'blur',
+          () => visibleRow.classList.remove('is-handoff-return'),
+          { once: true }
+        );
+        this.focusLibraryTarget(visibleRow);
+      } else {
+        const trigger = [...document.querySelectorAll('[data-library-session-entry]')].find(
+          button => button.dataset.librarySessionEntry === entry && !button.closest('[hidden]')
+        );
+        this.focusLibraryTarget(trigger);
+      }
+    } else {
+      const target = row || document.getElementById('projectLibraryTitle');
+      if (!row) target?.setAttribute('tabindex', '-1');
+      target?.focus();
+    }
+    this.saveBrowserNavigation();
+  }
+
   async details(entryID, trigger, tab = this.browser.tab) {
     this.restoreRead.cancel();
     this.restoringBrowser = false;
     this.paneHidden = false;
-    this.inspectionTrigger = trigger;
+    this.handoffEntry = trigger?.dataset?.librarySessionEntry === entryID ? entryID : '';
     const pending = this.browser.select(entryID, tab);
-    if (globalThis.matchMedia?.('(max-width: 900px)').matches) {
+    if (this.handoffEntry || globalThis.matchMedia?.('(max-width: 900px)').matches) {
       const heading = document.getElementById('projectLibraryPaneTitle');
       heading?.focus({ preventScroll: true });
       // Keep both Back and the focused heading below the fixed, wrapping navbar.

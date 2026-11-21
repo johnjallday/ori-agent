@@ -1148,6 +1148,7 @@ function resumeFixture() {
     tag,
     children: [],
     classList: { add() {} },
+    dataset: {},
     textContent: '',
     append(...items) {
       this.children.push(...items);
@@ -1242,7 +1243,15 @@ test('Music handoff features only the first server entry, with separate bounded 
     assert.equal(fixtureText(workspaceLinks), 'Open <Song Z> workspace');
     lead.children.at(-1).children[0].click();
     otherLinks.children[0].children[0].click();
-    assert.deepEqual(calls, ['/resume', 'z:sessions', 'a:sessions']);
+    const browse = lead.children.at(-1).children[1];
+    assert.equal(browse.textContent, 'Browse projects');
+    panel.focusLibraryTarget = () => calls.push('focus search');
+    panel.loadedPages = 2;
+    panel.selectedProjects.add('m');
+    browse.click();
+    assert.equal(panel.loadedPages, 2);
+    assert.deepEqual([...panel.selectedProjects], ['m']);
+    assert.deepEqual(calls, ['/resume', 'z:sessions', 'a:sessions', 'focus search']);
   } finally {
     restore();
   }
@@ -1280,33 +1289,10 @@ test('Music handoff labels a goal without a manager or next step, and unrelated 
   }
 });
 
-test('resume workspace action refuses navigation after the exact link changes', async () => {
-  const previousDocument = globalThis.document;
-  const makeElement = tag => ({
-    tag,
-    children: [],
-    textContent: '',
-    hidden: false,
-    append(...items) {
-      this.children.push(...items);
-    },
-    replaceChildren() {
-      this.children = [];
-    },
-    addEventListener(name, callback) {
-      this[name] = callback;
-    }
-  });
-  const section = makeElement('section');
-  const container = makeElement('div');
-  globalThis.document = {
-    createElement: makeElement,
-    getElementById(id) {
-      return { projectLibraryResume: section, projectLibraryResumeCards: container }[id];
-    }
-  };
+test('Music handoff workspace action refuses navigation after the exact link changes', async () => {
+  const { container, restore } = resumeFixture();
   try {
-    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home', program: musicProgram });
     panel.run = async (_trigger, _message, work) => work();
     const messages = [];
     panel.status = message => messages.push(message);
@@ -1314,7 +1300,7 @@ test('resume workspace action refuses navigation after the exact link changes', 
     panel.request = async path => {
       requests.push(path);
       if (path.endsWith('/activation'))
-        return { state: 'link_needs_review', workspace_id: 'stale-child' };
+        return { state: 'connected', workspace_id: 'different-child' };
       return {
         cards: [
           {
@@ -1327,14 +1313,14 @@ test('resume workspace action refuses navigation after the exact link changes', 
       };
     };
     await panel.renderResume();
-    const workspace = container.children[0].children.at(-1);
+    const workspace = container.children.at(-1).children[0].children[0];
     assert.equal(workspace.textContent, 'Open Song workspace');
     workspace.click();
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(requests, ['/resume', '/projects/saved-song/activation', '/resume']);
     assert.match(messages.at(-1), /link changed/);
   } finally {
-    globalThis.document = previousDocument;
+    restore();
   }
 });
 

@@ -401,6 +401,51 @@ test('the reviewed release resolves a real portfolio offer, then separate review
   await shot(page, '22e-reviewed-portfolio-saved-session-detail');
   await fullSession.getByRole('button', { name: 'Close' }).click();
 
+  const formerRow = shelf.getByRole('button', { name: 'Inspect Album-3', exact: true });
+  const back = resumed.getByRole('button', { name: 'Back to projects' });
+  await back.click();
+  await expect(formerRow).toBeFocused();
+  await expect(formerRow).toHaveClass(/is-handoff-return/);
+  await expect(formerRow).toHaveCSS('animation-name', 'library-handoff-return');
+  await shot(page, '22d1-handoff-wide-return');
+  const browse = resume.getByRole('button', { name: 'Browse songs', exact: true });
+  const search = shelf.locator('#projectLibrarySearch');
+  await browse.click();
+  await expect(search).toBeFocused();
+  await expect(formerRow).not.toHaveClass(/is-handoff-return/);
+  await expect(shelf.locator('[data-library-entry][aria-pressed="true"]')).toHaveCount(0);
+  await shelf.getByRole('button', { name: 'Inspect Album-1', exact: true }).click();
+  await expect(resumed.locator('#projectLibraryPaneTitle')).toHaveText('Album-1');
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const secondary = resume.getByRole('button', { name: 'View Album-0 session' });
+  await secondary.focus();
+  await page.keyboard.press('Enter');
+  const narrowTitle = resumed.locator('#projectLibraryPaneTitle');
+  await expect(narrowTitle).toHaveText('Album-0');
+  await expect(narrowTitle).toBeFocused();
+  await expect(narrowTitle).toBeInViewport();
+  await expect(resumed).toContainText('Compare two references');
+  await shot(page, '22d2-handoff-narrow-sessions');
+  await page.keyboard.press('Shift+Tab');
+  await expect(back).toBeFocused();
+  await page.keyboard.press('Enter');
+  const secondRow = shelf.getByRole('button', { name: 'Inspect Album-0', exact: true });
+  await expect(secondRow).toBeFocused();
+  await expect(secondRow).toHaveClass(/is-handoff-return/);
+  await expect(secondRow).toHaveCSS('animation-name', 'none');
+  await expect(secondRow).toHaveCSS('outline-width', '2px');
+  await shot(page, '22d3-handoff-narrow-reduced-motion-return');
+  await browse.focus();
+  await page.keyboard.press('Enter');
+  await expect(search).toBeFocused();
+  await shelf.getByRole('button', { name: 'Inspect Album-1', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(narrowTitle).toHaveText('Album-1');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.setViewportSize({ width: 1280, height: 900 });
+
   // Metadata labels are explicit user edits, never inferred from the scan or
   // recap. Verify populated results and the independent stage/status filters.
   await reviewProject(page, 'Album-3');
