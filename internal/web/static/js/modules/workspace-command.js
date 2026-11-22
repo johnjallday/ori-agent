@@ -14972,6 +14972,7 @@ export class WorkspaceCommandView {
       this.renderHQGitHubHost() +
       '<div class="ws-cmd-layout is-hq">' +
       '<main class="ws-cmd-main ws-hq-main">' +
+      (this.firstVisit?.receiptHTML?.() || '') +
       this.hqNeedsYouHTML() +
       (this.firstVisit?.view().layout.notes === false ? '' : this.renderHQNotesHost()) +
       this.renderFollowUpsHost() +
@@ -15833,7 +15834,7 @@ export class WorkspaceCommandView {
     if (!this.hqTipLayer && this.hqTipScope()) {
       this.hqTipLayer = createHqTipLayer({
         root: () => this.container,
-        scope: () => this.hqTipScope(),
+        scope: () => (this.firstVisit?.node ? '' : this.hqTipScope()),
         content: key => this.hqTipContent(key),
         onShown: key => this.hqTipShown(key),
         onHidden: () => this.settleHQTipMarks()

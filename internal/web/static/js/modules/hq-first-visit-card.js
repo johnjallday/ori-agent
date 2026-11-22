@@ -1,9 +1,20 @@
-// On-demand suggestions. The header owns only the door; the persistent overlay
+// One automatic invitation; the header remains a voluntary door. The overlay
 // survives HQ repaints and hands every action to its existing owner.
+import { offerOnEntry, offerKey } from './hq-guided-entry.js';
 import { HQ_LABELS as L } from './hq-labels.js';
 import { firstVisitView, firstVisitResolved } from './hq-first-visit.js';
-import { EXPLORE_FOLDER_URL, DOCUMENTS_FOLDER_URL } from './personal-assistant-panel.js';
-import { beginHQAttempt } from './hq-guided-attempt.js';
+import { reviewNames, saveReviewedTools, toolsReceipt } from './hq-guided-apps.js';
+import { emailNextStep } from './hq-guided-email.js';
+import {
+  beginHQAttempt,
+  bindEmailAttempt,
+  currentHQAttempt,
+  receiptHint,
+  markReturned,
+  guidedReturnURL,
+  handoffURL
+} from './hq-guided-attempt.js';
+import { folderReceipt } from './hq-guided-folder.js';
 import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
 
 const escape = value =>
@@ -13,12 +24,13 @@ const escape = value =>
   );
 const DOOR = '[data-hq-firstvisit-action="open"]';
 const OVERLAY = 'hq-suggestions';
+const guideMark = `<svg class="ws-hq-guide-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="m16.5 7.5-3 6-6 3 3-6z"/></svg>`;
 
 const choices = Object.freeze({
   folder: [
     'Explore Documents',
     'Review a folder with an agent.',
-    'Review Documents or choose another folder. You’ll review the agent, model and workspace before anything is built.'
+    'I’ll show you where to add a folder. Choose Documents or another folder, then review the agent and model. Only Hire & build creates the workspace and starts the first look.'
   ],
   email: [
     'Connect email',
@@ -28,17 +40,9 @@ const choices = Object.freeze({
   apps: [
     'Scan recent apps',
     'Choose tools to keep in your profile.',
-    'Review recent apps from this computer. Only the tools you choose to save belong in your profile.'
+    'Look for app use in the last seven days on this computer, where available. Review the names first. Only tools you select and save are added to Profile.'
   ]
 });
-
-export function offerOnEntry(location) {
-  const params = new URLSearchParams(location.search);
-  return (
-    !location.hash &&
-    [...params].every(([key, value]) => key === 'mode' && ['details', 'map'].includes(value))
-  );
-}
 
 export class HQFirstVisitCard {
   constructor(owner) {
@@ -47,6 +51,7 @@ export class HQFirstVisitCard {
       typeof window !== 'undefined' && window.location && !offerOnEntry(window.location);
     this.state = typeof document === 'undefined' ? '' : document.body?.dataset?.hqFirstVisit || '';
     this.missions = null;
+    this.guidedHQ = typeof document === 'undefined' ? '' : document.body?.dataset?.guidedHq || '';
     this.started = false;
     this.busy = false;
     this.error = '';
@@ -71,17 +76,20 @@ export class HQFirstVisitCard {
         this.id !== this.owner.workspaceId())
     )
       this.close(false);
-    if (this.state !== 'pending' || this.started || !this.owner.isPersonalHQ()) return;
+    if (this.started || !this.owner.isPersonalHQ()) return;
     this.started = true;
     if (typeof window !== 'undefined') {
       window.addEventListener?.('pagehide', () => this.close(false));
       window.addEventListener?.('pageshow', event => {
         if (event.persisted) {
           this.close(false);
+          this.checkedAttempt = null;
+          void this.loadReturn();
           void this.load();
         }
       });
     }
+    if (this.state !== 'pending') return;
     this.owner.requestNotesData();
     void this.load();
   }
@@ -109,13 +117,66 @@ export class HQFirstVisitCard {
     this.owner.notifyHQGreeting?.();
   }
 
+  available() {
+    return Boolean(
+      this.guidedHQ && this.owner.isPersonalHQ() && this.guidedHQ === this.owner.workspaceId()
+    );
+  }
+
   door() {
     return this.owner.container?.querySelector?.(DOOR);
   }
 
+  async loadReturn() {
+    if (!this.available() || typeof window === 'undefined') return;
+    const hint = receiptHint(window.location, this.owner.workspaceId());
+    if (!hint) {
+      this.checkedAttempt = null;
+      if (this.receipt) {
+        this.receipt = null;
+        if (this.owner.active) this.owner.render();
+      }
+      return;
+    }
+    if (this.checkedAttempt === hint.attempt) return;
+    this.checkedAttempt = hint.attempt;
+    const readToken = Symbol();
+    this.returnRead = readToken;
+    let result;
+    try {
+      const read = url => this.owner.stationJSON(url);
+      result =
+        hint.path === 'apps'
+          ? await toolsReceipt(hint, read)
+          : hint.path === 'email'
+            ? await emailNextStep(read, hint)
+            : await folderReceipt(hint, read);
+    } catch (_) {
+      /* unavailable, not completed */
+    }
+    if (
+      this.returnRead !== readToken ||
+      receiptHint(window.location, this.owner.workspaceId())?.attempt !== hint.attempt
+    )
+      return;
+    markReturned(hint);
+    if (result?.href && hint.path === 'email' && result.label !== 'Review email in Email Ops')
+      result = { ...result, href: handoffURL(result.href, hint) };
+    this.receipt = result || {
+      text: 'The result could not be verified. Reload to check again.'
+    };
+    if (this.owner.active) this.owner.render();
+  }
+
+  receiptHTML() {
+    return this.receipt
+      ? `<section class="ws-cmd-card" role="status" data-guided-receipt><strong>From your assistant</strong><p>${escape(this.receipt.text)}</p>${this.receipt.href ? `<a href="${escape(this.receipt.href)}">${escape(this.receipt.label)}</a>` : ''}</section>`
+      : '';
+  }
+
   headerHTML() {
-    if (!this.owner.isPersonalHQ()) return '';
-    return `<button type="button" class="ws-cmd-nav-btn ws-hq-suggestions-trigger" data-hq-firstvisit-action="open" aria-haspopup="dialog" aria-controls="${OVERLAY}" aria-expanded="${Boolean(this.node)}">${escape(L.firstVisitTitle)}</button>`;
+    if (!this.available()) return '';
+    return `<button type="button" class="ws-cmd-nav-btn ws-hq-suggestions-trigger" data-hq-firstvisit-action="open" aria-haspopup="dialog" aria-controls="${OVERLAY}" aria-expanded="${Boolean(this.node)}">${guideMark}${escape(L.firstVisitTitle)}</button>`;
   }
 
   html() {
@@ -123,26 +184,114 @@ export class HQFirstVisitCard {
     const row = (key, [label, hint]) =>
       `<li><button type="button" class="ws-hq-suggestion" data-hq-firstvisit-action="${key}"><span class="ws-hq-suggestion-icon" aria-hidden="true"><i class="bi bi-${{ folder: 'folder2', email: 'envelope', apps: 'grid' }[key]}"></i></span><span><strong>${label}</strong><small>${hint}</small></span><span aria-hidden="true">→</span></button></li>`;
     const link = (url, label) =>
-      `<li><a class="ws-hq-suggestion" data-hq-firstvisit-action="continue" href="${escape(url)}">${label}</a></li>`;
+      `<li><a class="ws-hq-suggestion" data-hq-firstvisit-action="continue" href="${escape(handoffURL(url, this.attempt))}">${label}</a></li>`;
     const steps =
       this.path === 'folder'
-        ? link(DOCUMENTS_FOLDER_URL, 'Review Documents') +
-          link(EXPLORE_FOLDER_URL, 'Choose another folder')
+        ? link('/?panel=today&folder=guide', 'Show me where to start')
         : this.path === 'email'
-          ? link('/?setup=email', 'Review mailbox setup')
+          ? this.email?.setup
+            ? '<li><button type="button" class="ws-hq-suggestion" data-hq-firstvisit-action="setup">Review mailbox setup</button></li>'
+            : this.email?.href
+              ? link(this.email.href, this.email.label)
+              : ''
           : this.path === 'apps'
-            ? link('/profile#personalization', 'Open Profile')
+            ? this.appSteps()
             : Object.entries(choices)
                 .map(([key, value]) => row(key, value))
                 .join('');
     return `<section id="${OVERLAY}" class="ws-hq-suggestions" data-hq-firstvisit role="dialog"${this.sheet ? ' aria-modal="true"' : ''} aria-labelledby="hq-suggestions-title" aria-describedby="hq-suggestions-hint" tabindex="-1">
-      <header><div><small>Your personal assistant</small><h2 id="hq-suggestions-title">${choice ? choice[0] : 'What would you like to do next?'}</h2><p id="hq-suggestions-hint">${choice ? choice[2] : 'Pick one to see how it works. Nothing starts here.'}</p></div><button type="button" data-hq-firstvisit-action="close" aria-label="${escape(L.firstVisitClose)}">×</button></header>
-      <ul>${steps}</ul>
-      <footer><button type="button" data-hq-firstvisit-action="close">Maybe later</button></footer>
+      <header><div><small class="ws-hq-guide-label">${guideMark}Your assistant · ${escape(L.firstVisitTitle)}</small><h2 id="hq-suggestions-title">${choice ? choice[0] : 'What would you like to do next?'}</h2><p id="hq-suggestions-hint">${choice ? choice[2] : 'Pick one to see how it works. Nothing starts here.'}</p></div><button type="button" data-hq-firstvisit-action="close" aria-label="${escape(L.firstVisitClose)}">×</button></header>
+      ${this.path === 'email' ? `<p role="status">${escape(this.email?.text || 'Checking Email Ops…')}</p>` : ''}<ul>${steps}</ul>
+      <footer><p id="hq-suggestions-reopen">Come back anytime: open <strong>${escape(L.firstVisitTitle)}</strong> at the top of Personal HQ.</p><button type="button" data-hq-firstvisit-action="close" aria-describedby="hq-suggestions-reopen">Maybe later</button></footer>
     </section>`;
   }
 
+  appSteps() {
+    const ctl = (action, label, disabled = false) =>
+      `<li><button type="button" class="ws-hq-suggestion" data-hq-firstvisit-action="${action}"${disabled ? ' disabled' : ''}>${label}</button></li>`;
+    const status = this.appMessage ? `<li role="status">${escape(this.appMessage)}</li>` : '';
+    if (!this.names)
+      return (
+        status +
+        ctl('scan', this.appBusy ? 'Checking…' : 'Start scan', this.appBusy || !this.attempt)
+      );
+    return (
+      status +
+      this.names
+        .map(
+          (name, i) =>
+            `<li><label class="ws-hq-suggestion"><input type="checkbox" data-tool-index="${i}"${this.appBusy ? ' disabled' : ''}${this.selected.has(i) ? ' checked' : ''}> ${escape(name)}</label></li>`
+        )
+        .join('') +
+      ctl('save', 'Save selected tools', !this.selected.size || this.appBusy) +
+      ctl('none', 'Save none', this.appBusy)
+    );
+  }
+
+  async appAction(action) {
+    if (this.appBusy || !this.attempt) return;
+    const hint = this.attempt,
+      node = this.node;
+    const active = () => this.node === node && this.attempt === hint;
+    const post = async (url, data) => {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+      if (!response.ok)
+        throw Error(
+          response.status === 503
+            ? 'Recent app evidence is unavailable on this host.'
+            : 'The request failed. Try again or check Profile.'
+        );
+      return response.json();
+    };
+    this.appBusy = true;
+    this.appMessage = '';
+    this.paint();
+    try {
+      if (action === 'scan') {
+        const names = reviewNames(
+          (await post('/api/onboarding/detect?scope=recent-use', {})).names
+        );
+        if (!active()) return;
+        this.names = names;
+        this.selected = new Set();
+        this.appMessage = names.length
+          ? 'Choose tools to add to Profile.'
+          : 'No recently used apps found.';
+      } else {
+        const status = (await this.owner.stationJSON('/api/personal-hq/status'))?.status;
+        const url = guidedReturnURL(hint, status);
+        if (!active()) return;
+        if (!url) throw Error('The starting HQ could not be verified. Reopen the review.');
+        await saveReviewedTools(
+          hint,
+          action === 'none' ? [] : this.names.filter((_, i) => this.selected.has(i)),
+          post
+        );
+        if (!active()) return;
+        this.close();
+        if (this.owner.viewMode !== 'details')
+          this.owner.setCommandViewMode('details', { focus: false });
+        window.history.replaceState(window.history.state, '', url);
+        this.checkedAttempt = null;
+        await this.loadReturn();
+        this.door()?.focus({ preventScroll: true });
+      }
+    } catch (err) {
+      if (active()) this.appMessage = err.message;
+    } finally {
+      if (active()) {
+        this.appBusy = false;
+        this.paint();
+      }
+    }
+  }
+
   bind() {
+    void this.loadReturn();
     this.door()?.addEventListener?.('click', () => (this.node ? this.close() : this.open()));
     this.paint();
     if (!this.door() || this.entryChecked || this.state !== 'pending' || !this.owner.active) return;
@@ -158,9 +307,10 @@ export class HQFirstVisitCard {
     )
       return;
     try {
-      const key = `ori.hq.guidedOffered.${this.owner.workspaceId()}`;
+      const key = offerKey(this.owner.workspaceId());
       if (localStorage.getItem(key)) return;
       localStorage.setItem(key, '1');
+      document.body.dataset.guidedOfferedHere = '1';
     } catch (_) {
       return;
     }
@@ -168,10 +318,11 @@ export class HQFirstVisitCard {
   }
 
   open() {
-    if (this.node || !this.owner.isPersonalHQ()) return;
+    if (this.node || !this.available()) return;
     this.path = '';
     this.id = this.owner.workspaceId();
     this.sheet = window.matchMedia('(max-width: 600px)').matches;
+    this.owner.hqTipLayer?.hide?.('scope');
     this.node = document.createElement('div');
     this.node.className = `ws-cmd ws-hq-suggestions-layer${this.sheet ? ' is-sheet' : ''}`;
     document.body.appendChild(this.node);
@@ -185,6 +336,14 @@ export class HQFirstVisitCard {
         // starts here. The existing Home consent card owns the next action.
         if (!event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) this.close(false);
       } else void this.act(action);
+    });
+    this.node.addEventListener('change', event => {
+      const input = event.target.closest('[data-tool-index]');
+      if (!input || this.appBusy) return;
+      const index = Number(input.dataset.toolIndex);
+      if (input.checked) this.selected.add(index);
+      else this.selected.delete(index);
+      this.node.querySelector('[data-hq-firstvisit-action="save"]').disabled = !this.selected.size;
     });
     this.node.addEventListener('keydown', event => {
       if (event.key === 'Escape') {
@@ -262,14 +421,19 @@ export class HQFirstVisitCard {
       const active = document.activeElement;
       const focused = this.node.contains(active);
       const action = focused && active?.getAttribute('data-hq-firstvisit-action');
+      const index = focused && active?.getAttribute('data-tool-index');
+      const selector =
+        typeof index === 'string' && /^\d+$/.test(index)
+          ? `[data-tool-index="${index}"]`
+          : action
+            ? `[data-hq-firstvisit-action="${action}"]`
+            : '[role="dialog"]';
       this.node.innerHTML = html;
       this.lastHTML = html;
       if (focused)
-        (
-          this.node.querySelector(
-            action ? `[data-hq-firstvisit-action="${action}"]` : '[role="dialog"]'
-          ) || this.node.querySelector('[role="dialog"]')
-        ).focus({ preventScroll: true });
+        (this.node.querySelector(selector) || this.node.querySelector('[role="dialog"]')).focus({
+          preventScroll: true
+        });
     }
     this.position();
   }
@@ -280,6 +444,11 @@ export class HQFirstVisitCard {
     window.removeEventListener('scroll', this.resize, true);
     this.node?.remove();
     this.node = null;
+    this.attempt = null;
+    this.names = null;
+    this.selected = null;
+    this.appMessage = '';
+    this.appBusy = false;
     this.lastHTML = '';
     this.door()?.setAttribute('aria-expanded', 'false');
   }
@@ -293,9 +462,76 @@ export class HQFirstVisitCard {
   async act(action) {
     if (Object.hasOwn(choices, action)) {
       this.path = action;
+      this.email = null;
+      const hadReceipt = Boolean(this.receipt);
+      this.receipt = null;
       this.attempt = beginHQAttempt(this.owner.workspaceId(), action);
+      if (hadReceipt && this.owner.active) this.owner.render();
+      if (!this.attempt)
+        this.appMessage =
+          'Guided return is unavailable. Allow tab storage or use the standalone destination.';
       this.paint();
       this.node?.querySelector('[role="dialog"]')?.focus({ preventScroll: true });
+      if (action === 'email') {
+        const hint = this.attempt;
+        try {
+          const next = await emailNextStep(url => this.owner.stationJSON(url));
+          if (this.attempt !== hint) return;
+          this.email =
+            next.workspace && !bindEmailAttempt(hint, next.workspace, next.account)
+              ? { text: 'Cannot safely resume mailbox setup in this tab.' }
+              : next;
+        } catch (_) {
+          this.email = { text: 'Mailbox readiness could not be verified. Reopen to try again.' };
+        }
+        this.paint();
+      }
+      return;
+    }
+    if (this.path === 'apps' && ['scan', 'save', 'none'].includes(action))
+      return this.appAction(action);
+    if (action === 'setup' && this.path === 'email' && this.email?.setup) {
+      const hint = this.attempt;
+      if (!hint || !window.OriEmailSetup) {
+        this.email = { text: 'Mailbox setup is unavailable in this tab.' };
+        this.paint();
+        return;
+      }
+      const status = (await this.owner.stationJSON('/api/personal-hq/status').catch(() => null))
+        ?.status;
+      const url = guidedReturnURL(hint, status);
+      if (!this.node || this.attempt !== hint) return;
+      if (!url) {
+        this.email = {
+          text: 'The starting HQ could not be verified. Reopen Connect email to try again.'
+        };
+        this.paint();
+        return;
+      }
+      this.close(false);
+      if (this.owner.viewMode !== 'details')
+        this.owner.setCommandViewMode('details', { focus: false });
+      window.history.replaceState(window.history.state, '', url);
+      const resume = result => {
+        if (!currentHQAttempt(hint.hq, 'email', hint.attempt)) return;
+        if (result && !bindEmailAttempt(hint, result.workspace?.id, result.account_id)) {
+          this.checkedAttempt = hint.attempt;
+          this.receipt = {
+            text: 'The mailbox destination changed. Reopen Connect email to verify it.'
+          };
+          this.owner.render();
+        } else {
+          this.checkedAttempt = null;
+          void this.loadReturn();
+        }
+        this.door()?.focus({ preventScroll: true });
+      };
+      window.OriEmailSetup.open({
+        guided: true,
+        onConnected: result => bindEmailAttempt(hint, result.workspace?.id, result.account_id),
+        onDone: resume,
+        onCancel: () => resume(null)
+      });
       return;
     }
     if (action === 'close') return this.close();
