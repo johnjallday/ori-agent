@@ -10,6 +10,7 @@
 
 // Sets window.OriFolderPlanLines, which the plan line exports below come from.
 import './folder-plan-lines.js';
+import { recordFolderWorkspace } from './hq-guided-attempt.js';
 import { folderPickCopy } from './folder-pick-copy.js';
 import './folder-setup-visual.js';
 import { mountPlacementPanel } from './assisted-workspace-placement.js';
@@ -3567,6 +3568,40 @@ async function readJSON(response) {
   }
 }
 
+// The HQ guide only points at controls. The normal chooser and hire handlers
+// remain the sole owners of selection and approval.
+let folderGuide = null;
+function paintFolderGuide() {
+  const banner = document.getElementById('hqFolderGuide');
+  if (!banner) return;
+  const panel = document.getElementById('personalAssistantPanel');
+  const step = folderGuide?.tips ? folderGuide.step : '';
+  banner.hidden = !step;
+  if (!step) {
+    delete panel.dataset.folderGuide;
+    return;
+  }
+  panel.dataset.folderGuide = step;
+  const item = document.getElementById('personalAssistantFolderChip');
+  const hasDocs = panel.querySelector('#personalAssistantFolderChips [data-chip="documents"]');
+  const message =
+    step === 'attach'
+      ? `Open + (Attach) beside the message box, then choose ${item?.getAttribute('aria-label') || 'Add folder'}.`
+      : hasDocs
+        ? 'Select Documents to review the hire, or choose a different folder.'
+        : 'Choose an available folder or enter a folder path to review the hire.';
+  setText(document.getElementById('hqFolderGuideHint'), message);
+}
+function guideFromAttach(hint) {
+  folderGuide = { hint, tips: true, step: 'attach' };
+  paintFolderGuide();
+  document.getElementById('personalAssistantAttachMenu')?.focus();
+}
+function endFolderGuide() {
+  if (!folderGuide) return;
+  folderGuide = null;
+  paintFolderGuide();
+}
 function renderChooser() {
   const els = elements();
   if (!els?.chooser) return;
@@ -3613,6 +3648,7 @@ function renderChooser() {
   }
   setText(els.note, view.note);
   mountTypedFolder(els)?.setDisabled(state.busy);
+  if (folderGuide) paintFolderGuide();
 }
 
 // The typed alternative to the chips, mounted once so what the user typed
@@ -6776,7 +6812,10 @@ function openHQCard() {
 // (one card for every folder, folder-agent-card.js); the receipt and the
 // report follow in the conversation and the status line under it. Offers made
 // before this change keep their own controls until they are decided.
-function openChooser(suggestion = '') {
+function openChooser(suggestion = '', fromAttach = false) {
+  if (!fromAttach) endFolderGuide();
+  if (folderGuide) folderGuide.step = 'choose';
+  state.guidedFolder = folderGuide?.hint || null;
   if (!state.available) {
     openHQCard();
     return;
@@ -6795,13 +6834,18 @@ function openChooser(suggestion = '') {
     return;
   }
   // The first folder, or the typed path when there are none to offer.
-  const first = els?.chips?.querySelector('button') || els?.typedFolder?.querySelector('input');
+  const first =
+    (folderGuide?.tips && els?.chips?.querySelector('[data-chip="documents"]')) ||
+    els?.chips?.querySelector('button') ||
+    els?.typedFolder?.querySelector('input');
   first?.focus?.();
 }
 
 // closeChooser puts the chooser away (Esc) and returns focus to where the
 // folder was asked for.
 function closeChooser() {
+  endFolderGuide();
+  state.guidedFolder = null;
   state.chooserOpen = false;
   showStatus('');
   render();
@@ -7005,6 +7049,7 @@ function renderFolderAgent(els) {
 // folder (dialog, known folder or typed path) and answers with the one card.
 async function chooseForAgent(body) {
   if (state.busy) return;
+  const guidedFolder = state.guidedFolder;
   enterThread({ byUser: !state.inThread });
   if (body.picker) state.chooserOpen = true;
   state.busy = true;
@@ -7034,8 +7079,10 @@ async function chooseForAgent(body) {
       showStatus('');
       return;
     }
+    endFolderGuide();
     stopAgentPoll();
     state.agent = {
+      guidedFolder,
       card: folderAgentCardView(result.card),
       view: null,
       error: '',
@@ -7073,6 +7120,7 @@ function narrowForHiredAgent(workspaceID) {
 
 async function startAgent(brief, button, hire) {
   const card = state.agent.card;
+  const hint = state.agent.guidedFolder;
   if (!card || state.agent.busy) return;
   state.agent.busy = true;
   if (button) button.disabled = true;
@@ -7088,6 +7136,8 @@ async function startAgent(brief, button, hire) {
       if (result.repick) openChooser();
       return;
     }
+    recordFolderWorkspace(hint, result.view?.workspace_id);
+    state.guidedFolder = null;
     state.agent = { card: null, view: result.view, error: '', busy: false, poll: 0 };
     announceAgent(
       `${result.view?.agent_name || 'The agent'} is looking around ${result.view?.folder_name || 'the folder'}.`
@@ -7782,7 +7832,18 @@ function init() {
   document.addEventListener('personal-assistant:conversation-loading', render);
   // The first look is followed only while the drawer is open. Opening it reads
   // the look once, which also resumes the poll when it is still running.
+  document.getElementById('hqFolderGuideHide')?.addEventListener('click', () => {
+    if (!folderGuide) return;
+    folderGuide.tips = false;
+    paintFolderGuide();
+    const target =
+      folderGuide.step === 'choose' &&
+      (els.chips?.querySelector('button') || els.typedFolder?.querySelector('input'));
+    (target || document.getElementById('personalAssistantAttachMenu'))?.focus();
+  });
   document.addEventListener('personal-assistant:closed', () => {
+    endFolderGuide();
+    state.guidedFolder = null;
     runSongs.navigationGeneration++;
     runSongs.opening = '';
     runSongs.message = '';
@@ -7826,6 +7887,9 @@ function init() {
   window.PersonalAssistantFolder = {
     open: openChooser,
     openChooser,
+    openFromAttach: () => openChooser('', true),
+    guideFromAttach,
+    canChoose: () => state.available,
     reload: load,
     showHomeReview,
     current: () => state.offer,

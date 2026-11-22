@@ -103,6 +103,7 @@
     <div id="personalAssistantResize" class="personal-assistant-panel__resize" role="separator"
          aria-orientation="vertical" aria-label="Resize assistant" aria-controls="personalAssistantPanel"
          aria-valuemin="560" aria-valuemax="960" aria-valuenow="640" tabindex="0" hidden></div>
+    <a class="modern-btn modern-btn-secondary" data-guided-return hidden>Back to Personal HQ</a>
     <header class="personal-assistant-panel__header">
       <!-- Who the drawer is talking to. Inside a workspace that is its entry
            agent or the hired assistant; then the name moves into a menu button
@@ -185,6 +186,12 @@
       </button>
     </header>
 
+    <aside id="hqFolderGuide" class="pa-folder-guide" aria-label="Explore Documents guide" hidden>
+      <div><strong><i class="bi bi-compass" aria-hidden="true"></i> Explore Documents</strong>
+        <p id="hqFolderGuideHint" role="status"></p>
+      </div>
+      <button type="button" id="hqFolderGuideHide" class="personal-assistant-conversation__button">Hide tips</button>
+    </aside>
     <div id="personalAssistantWelcome" class="personal-assistant-panel__welcome" hidden>
       <span id="personalAssistantWelcomeLabel" role="status" aria-live="polite"></span>
       <button type="button" id="personalAssistantOpenWelcome">Open message</button>
