@@ -34,7 +34,7 @@ func filingPurchaseFixture(t *testing.T) (*ServerBuilder, http.Handler) {
 }
 
 func postFilingJSON(h http.Handler, path string, body []byte) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+	r := httptest.NewRequest(http.MethodPost, "http://localhost"+path, bytes.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)

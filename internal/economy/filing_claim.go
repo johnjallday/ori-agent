@@ -109,7 +109,7 @@ func requireClaimTransition(result sql.Result) error {
 		return err
 	}
 	if n != 1 {
-		return errors.New("Filing claim state changed")
+		return errors.New("filing claim state changed")
 	}
 	return nil
 }

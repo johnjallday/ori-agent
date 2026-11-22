@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/economy"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -40,9 +42,15 @@ type filingPurchaseResult struct {
 
 const filingPurchaseTimeout = 30 * time.Second
 
+var filingPurchaseOrigin = connectionshttp.NewOriginGuard()
+
 func (b *ServerBuilder) purchaseFiling(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if err := filingPurchaseOrigin.Check(r); err != nil {
+		_ = orihttp.RespondForbidden(w, "Confirm the build from Ori's local page")
 		return
 	}
 	media, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
@@ -151,7 +159,7 @@ func filingCreateRequest(claim *economy.FilingClaim, plan sessionhttp.ReviewedTe
 		Name: "Filing", FolderSlug: "filing-" + claim.WorkspaceID, Plan: plan,
 		Descriptor: sessionhttp.AssistantSetupCreationDescriptor{
 			OwnerUserID: claim.Owner, WorkspaceID: claim.WorkspaceID,
-			RunID: "filing-expansion:" + claim.ID, OperationID: claim.ID,
+			RunID: filejanitor.ExpansionRunPrefix + claim.ID, OperationID: claim.ID,
 			ReviewDigest: plan.BlueprintDigest, ProfileProvenanceID: claim.ID, ConfigDigest: plan.Roles[0].ConfigDigest,
 		},
 	}
@@ -228,7 +236,7 @@ func (b *ServerBuilder) filingClaimDestination(ctx context.Context, claim *econo
 	}
 	p := ws.GetTemplateProvenance()
 	if p == nil || !p.Builtin || p.TemplateID != fileJanitorBlueprintID || p.AssistantSetup == nil ||
-		p.AssistantSetup.RunID != "filing-expansion:"+claim.ID || p.AssistantSetup.OperationID != claim.ID {
+		p.AssistantSetup.RunID != filejanitor.ExpansionRunPrefix+claim.ID || p.AssistantSetup.OperationID != claim.ID {
 		return nil
 	}
 	return &economy.ExpansionDestination{Name: row.Name, Route: "/workspaces/" + row.FolderSlug + "?panel=file-janitor"}

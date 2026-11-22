@@ -24,8 +24,9 @@ func (h *Handler) SetupReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		ReferenceID string `json:"reference_id"`
-		Monitoring  bool   `json:"monitoring"`
+		ReferenceID    string `json:"reference_id"`
+		SelectionToken string `json:"selection_token"`
+		Monitoring     bool   `json:"monitoring"`
 	}
 	if r.Method == http.MethodPost {
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
@@ -34,12 +35,22 @@ func (h *Handler) SetupReview(w http.ResponseWriter, r *http.Request) {
 			_ = orihttp.RespondBadRequest(w, "Choose an attached folder and whether to review monitoring.")
 			return
 		}
-		if err := decoder.Decode(&struct{}{}); err != io.EOF || len(request.ReferenceID) > 128 {
+		if err := decoder.Decode(&struct{}{}); err != io.EOF || len(request.ReferenceID) > 128 ||
+			len(request.SelectionToken) > 256 || (request.ReferenceID != "" && request.SelectionToken != "") {
 			_ = orihttp.RespondBadRequest(w, "Invalid folder review request.")
 			return
 		}
 	}
-	review, err := h.service.ReviewLinkedSetup(workspaceID, owner, request.ReferenceID, request.Monitoring)
+	var review filejanitor.LinkedSetupReview
+	if request.SelectionToken == "" {
+		review, err = h.service.ReviewLinkedSetup(workspaceID, owner, request.ReferenceID, request.Monitoring)
+	} else {
+		path, ok := h.resolveReviewedSelection(w, workspaceID, request.SelectionToken)
+		if !ok {
+			return
+		}
+		review, err = h.service.ReviewSetupSelection(workspaceID, owner, path, request.Monitoring)
+	}
 	if err != nil {
 		respondReviewedSetupError(w, err, "setup_unavailable", "Ori could not read the current folder review. Keep this workspace and try again.")
 		return
@@ -47,6 +58,22 @@ func (h *Handler) SetupReview(w http.ResponseWriter, r *http.Request) {
 	// Owner-only paths must never be cached by a shared intermediary.
 	w.Header().Set("Cache-Control", "no-store")
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "review": review})
+}
+
+func (h *Handler) resolveReviewedSelection(w http.ResponseWriter, workspaceID, token string) (string, bool) {
+	resolver, ok := h.pathSelections.(interface {
+		ResolveFor(token, scope string) (string, error)
+	})
+	if !ok {
+		_ = orihttp.RespondServiceUnavailable(w, "Folder selection is temporarily unavailable.")
+		return "", false
+	}
+	path, err := resolver.ResolveFor(token, workspaceID)
+	if err != nil || path == "" {
+		_ = orihttp.RespondAPIError(w, http.StatusConflict, orihttp.NewAPIError("folder_selection_expired", "Choose the folder again to review its permissions."))
+		return "", false
+	}
+	return path, true
 }
 
 // StopPreparation is an explicit defer action for the exact accepted operation.
@@ -120,6 +147,7 @@ func (h *Handler) PrepareReview(w http.ResponseWriter, r *http.Request) {
 	}
 	var request struct {
 		ReferenceID    string `json:"reference_id"`
+		SelectionToken string `json:"selection_token"`
 		Monitoring     bool   `json:"monitoring"`
 		ReviewRevision string `json:"review_revision"`
 	}
@@ -129,14 +157,22 @@ func (h *Handler) PrepareReview(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondBadRequest(w, "Confirm the current folder review.")
 		return
 	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF || len(request.ReferenceID) > 128 || len(request.ReviewRevision) != 64 {
+	if err := decoder.Decode(&struct{}{}); err != io.EOF || len(request.ReferenceID) > 128 || len(request.SelectionToken) > 256 || len(request.ReviewRevision) != 64 {
 		_ = orihttp.RespondBadRequest(w, "Invalid folder review confirmation.")
 		return
+	}
+	var selectedPath string
+	if request.SelectionToken != "" {
+		var ok bool
+		selectedPath, ok = h.resolveReviewedSelection(w, workspaceID, request.SelectionToken)
+		if !ok {
+			return
+		}
 	}
 	automation, _ := h.automation.(filejanitor.PreparationAutomation)
 	prepared, err := h.service.PrepareLinkedSetup(filejanitor.LinkedPreparationRequest{
 		Context: r.Context(), WorkspaceID: workspaceID, OwnerUserID: owner, ReferenceID: request.ReferenceID,
-		Monitoring: request.Monitoring, ReviewRevision: request.ReviewRevision,
+		SelectedPath: selectedPath, Monitoring: request.Monitoring, ReviewRevision: request.ReviewRevision,
 	}, automation)
 	w.Header().Set("Cache-Control", "no-store")
 	if err != nil {
@@ -154,6 +190,9 @@ func (h *Handler) PrepareReview(w http.ResponseWriter, r *http.Request) {
 			Code: code, Message: message, Details: map[string]any{"preparation": prepared},
 		})
 		return
+	}
+	if prepared.InitialSelectedScan && h.onInitialSelectedScan != nil {
+		h.onInitialSelectedScan(r.Context(), workspaceID)
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "preparation": prepared})
 }

@@ -33,6 +33,7 @@
   let busy = false;
   let lastStatus = null;
   let setupReview = null;
+  let setupSelection = null;
   let setupReviewRequest = 0;
   let setupDraft = null;
   let preparation = null;
@@ -282,6 +283,7 @@
     statusRequest++;
     lastStatus = null;
     setupReview = null;
+    setupSelection = null;
     statusLoadState = 'loading';
     subscribers.clear();
   }
@@ -859,6 +861,10 @@
 
   function renderSetupCard(host, status) {
     const suggestion = status.suggestion || {};
+    if (suggestion.review_selected_folder) {
+      renderExpansionFolderChoice(host, null, suggestion);
+      return;
+    }
     const settings = status.settings || {};
     const label =
       suggestion.label && suggestion.label !== 'Folder to tidy'
@@ -5577,7 +5583,7 @@
     const id = wsId();
     if (!id) return null;
     // A background read must not overwrite the terms the person is reviewing.
-    if (!choice && setupDraft) return setupReview;
+    if (!choice && (setupDraft || setupSelection)) return setupReview;
     const sequence = ++setupReviewRequest;
     try {
       const response = await fetch(
@@ -5822,7 +5828,7 @@
       if (isVisibleFocusTarget(target)) target.focus();
       else host.querySelector('button')?.focus();
     };
-    if ((review.candidates || []).length > 1) {
+    if (!setupSelection && (review.candidates || []).length > 1) {
       const label = el('label', 'fj-label', 'Attached folder');
       const select = el('select', 'fj-input');
       select.id = 'fileJanitorReviewFolder';
@@ -5850,6 +5856,7 @@
     if (selectedFolder) {
       card.appendChild(el('p', 'fj-setup-folder', safeName(selectedFolder.name)));
       const details = el('details', 'fj-setup-details');
+      if (setupSelection) details.open = true;
       details.appendChild(el('summary', '', 'Folder details'));
       details.appendChild(el('p', 'fj-setup-path', selectedFolder.path));
       card.appendChild(details);
@@ -5870,7 +5877,10 @@
     monitor.disabled =
       busy || Boolean(setupDraft) || Boolean(review.operation_id) || !review.reference_id;
     monitor.addEventListener('change', () => {
-      void repaint({ reference_id: review.reference_id, monitoring: monitor.checked }, monitor);
+      const choice = setupSelection
+        ? { selection_token: setupSelection, monitoring: monitor.checked }
+        : { reference_id: review.reference_id, monitoring: monitor.checked };
+      void repaint(choice, monitor);
     });
     monitorLabel.appendChild(monitor);
     monitorLabel.appendChild(el('span', '', 'Also watch new arrivals and run a daily scan'));
@@ -5927,6 +5937,8 @@
               ? ctx.isCurrentOverlay?.()
               : consoleOpen && consoleTab === 'review' && visit === consoleVisit)
         };
+        const token = !review.operation_id ? setupSelection : '';
+        setupSelection = null;
         preparation = intent;
         confirm.disabled = true;
         monitor.disabled = true;
@@ -5940,6 +5952,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               reference_id: review.reference_id,
+              ...(token ? { selection_token: token } : {}),
               monitoring: Boolean(review.monitoring),
               review_revision: review.review_revision
             })
@@ -5996,12 +6009,20 @@
         }
       }
     );
+    confirm.setAttribute('data-filing-permission', 'confirm');
     confirm.disabled =
       busy || Boolean(setupDraft) || !['review', 'preparation_incomplete'].includes(review.state);
     actions.appendChild(confirm);
     const change = button('Choose another folder', 'fj-btn fj-btn-secondary', () => {
       if (busy || setupDraft) return;
-      if (ctx) void chooseFolder(ctx);
+      const suggestion = lastStatus?.suggestion;
+      if (suggestion?.review_selected_folder) {
+        setupSelection = null;
+        setupReview = null;
+        clear(host);
+        renderExpansionFolderChoice(host, ctx, suggestion);
+        host.querySelector('button')?.focus();
+      } else if (ctx) void chooseFolder(ctx);
       else {
         clear(host);
         renderSetupCard(host, lastStatus || {});
@@ -6009,6 +6030,7 @@
     });
     change.disabled = busy || Boolean(setupDraft) || Boolean(review.operation_id);
     actions.appendChild(change);
+    if (setupSelection) actions.appendChild(deferExpansionFolder(ctx));
     if (review.operation_id) {
       const stop = button('Stop here — keep saved setup', 'fj-btn fj-btn-secondary', async () => {
         if (busy) return;
@@ -6541,7 +6563,12 @@
       if (!current()) return;
       // Install the status (and its managed-root reset) before adopting a
       // canonical receipt; otherwise the reset erases an empty initial result.
+      const expansionJustLoaded =
+        status?.suggestion?.review_selected_folder &&
+        !lastStatus?.suggestion?.review_selected_folder;
       render(status);
+      if (expansionJustLoaded)
+        window.SetupWizard?.registerStepRenderer?.('directory', directoryStepRenderer);
       // Creation links only an operation identity, never counts or success
       // flags. The first-result message comes from its canonical receipt.
       const preparationID = new URLSearchParams(window.location?.search || '').get('preparation');
@@ -6907,6 +6934,146 @@
     return SETUP_ADAPTER_IDS.includes(String(step?.adapter || ''));
   }
 
+  function deferExpansionFolder(ctx) {
+    return button('Not now', 'fj-btn fj-btn-secondary', () => {
+      if (setupDraft || preparation) return;
+      setupSelection = null;
+      setupReview = null;
+      if (ctx) void window.SetupWizard?.close?.();
+      else close();
+    });
+  }
+
+  function renderExpansionFolderChoice(host, ctx, suggestion) {
+    const card = el('section', 'fj-setup-review');
+    card.setAttribute('aria-label', 'Choose a folder to review');
+    if (setupDraft?.selectingExpansionFolder) {
+      card.appendChild(el('p', 'fj-sub', 'Loading the permission review…'));
+      host.appendChild(card);
+      return;
+    }
+    card.appendChild(el('h3', 'fj-title', 'Choose a folder for Filing'));
+    card.appendChild(
+      el(
+        'p',
+        'fj-sub',
+        'Craft built this workspace. It did not give Ori access to Downloads or any other folder. Choose one to review its permissions, or come back later.'
+      )
+    );
+    const message = el('p', 'fj-sub');
+    message.setAttribute('role', 'alert');
+    card.appendChild(message);
+    const visit = consoleVisit;
+    const active = () =>
+      ctx
+        ? ctx.isCurrentOverlay?.()
+        : consoleOpen && consoleTab === 'review' && visit === consoleVisit;
+    const preview = async path => {
+      if (setupDraft || preparation) return;
+      const draft = { selectingExpansionFolder: true };
+      setupDraft = draft;
+      const id = wsId();
+      let readyForReview = false;
+      let problem = '';
+      message.textContent = '';
+      ctx?.setBusy?.(true, 'Preparing your permission review…');
+      const controls = card.querySelectorAll('button, input');
+      controls.forEach(node => (node.disabled = true));
+      try {
+        const picked = await fetch('/api/folder-picker/select-path', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workspace_id: id,
+            title: 'Choose the folder to file',
+            ...(path ? { path } : {})
+          })
+        });
+        const selection = await picked.json();
+        if (!picked.ok || !selection.success)
+          throw new Error(selection.error || 'Choose an available folder.');
+        if (!active() || wsId() !== id || setupDraft !== draft) return;
+        if (!selection.selected) {
+          if (selection.reason === 'dialog_off') {
+            problem = 'The folder dialog is off. Paste the folder path instead.';
+          }
+          return;
+        }
+        if (!selection.selection_token)
+          throw new Error('The folder choice could not be verified. Choose it again.');
+        setupSelection = selection.selection_token;
+        const review = await loadSetupReview({
+          selection_token: setupSelection,
+          monitoring: false
+        });
+        if (!active() || setupDraft !== draft) return;
+        if (
+          !review ||
+          !['review', 'folder_unavailable', 'folder_conflict'].includes(review.state)
+        ) {
+          throw new Error(
+            'This workspace already has setup to review. Reopen its current settings.'
+          );
+        }
+        setupDraft = null;
+        readyForReview = review.state === 'review';
+        if (ctx) window.SetupWizard?.registerStepRenderer?.('directory', directoryStepRenderer);
+        else renderConsole();
+      } catch (error) {
+        setupSelection = null;
+        problem = error.message || 'Could not review that folder. Choose it again.';
+      } finally {
+        if (setupDraft === draft) setupDraft = null;
+        controls.forEach(node => (node.disabled = false));
+        if (active()) {
+          ctx?.setBusy?.(false, '');
+          if (!readyForReview && !card.isConnected && ctx) {
+            window.SetupWizard?.registerStepRenderer?.('directory', directoryStepRenderer);
+            if (problem) ctx.setError?.(problem);
+          } else if (problem) message.textContent = problem;
+          const overlay = document.getElementById(ctx ? 'setupWizardDialog' : CONSOLE_HOST_ID);
+          if (readyForReview) overlay?.querySelector('[data-filing-permission="confirm"]')?.focus();
+        }
+      }
+    };
+    const actions = el('div', 'fj-actions');
+    if (suggestion.suggested_path === '~/Downloads') {
+      actions.appendChild(
+        button('Review Downloads', 'fj-btn fj-btn-primary', () => void preview('~/Downloads'))
+      );
+    }
+    actions.appendChild(
+      button('Choose another folder…', 'fj-btn fj-btn-secondary', () => void preview(''))
+    );
+    actions.appendChild(deferExpansionFolder(ctx));
+    card.appendChild(actions);
+    const label = el('label', 'fj-label', 'Or paste a folder path');
+    const input = el('input', 'fj-input');
+    input.type = 'text';
+    input.placeholder = '~/Scans';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    label.appendChild(input);
+    card.appendChild(label);
+    const typed = () => {
+      const value = input.value.trim();
+      if (value) void preview(value);
+      else {
+        message.textContent = 'Type or paste a folder path first.';
+        input.focus();
+      }
+    };
+    input.addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        typed();
+      }
+    });
+    card.appendChild(button('Review this path', 'fj-btn fj-btn-secondary', typed));
+    host.appendChild(card);
+  }
+
   // chooseFolder runs the native picker and confirms the result.
   //
   // The picker is the only way to choose a folder here: there is no editable
@@ -6962,6 +7129,10 @@
       if (renderLinkedSetupReview(container, ctx)) return;
       const root = chosenRoot();
       const suggestion = (lastStatus && lastStatus.suggestion) || {};
+      if (!root && suggestion.review_selected_folder) {
+        renderExpansionFolderChoice(container, ctx, suggestion);
+        return;
+      }
 
       const field = el('div', 'fj-field');
       field.appendChild(el('span', 'fj-label', root ? 'Folder Ori will tidy' : 'Suggested folder'));

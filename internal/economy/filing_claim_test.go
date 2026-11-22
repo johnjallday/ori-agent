@@ -23,7 +23,9 @@ func TestFilingClaimCompetesWithFarmForTheSameCraft(t *testing.T) {
 		farm <- err
 	}()
 	x, y := <-filing, <-farm
-	if !(x == nil && errors.Is(y, ErrInsufficientBalance)) && !(y == nil && errors.Is(x, ErrInsufficientBalance)) {
+	filingWon := x == nil && errors.Is(y, ErrInsufficientBalance)
+	farmWon := y == nil && errors.Is(x, ErrInsufficientBalance)
+	if !filingWon && !farmWon {
 		t.Fatalf("filing: %v; Farm: %v", x, y)
 	}
 	balances, err := s.Balances(ctx)

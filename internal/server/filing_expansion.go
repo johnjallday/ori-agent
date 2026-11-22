@@ -69,7 +69,7 @@ func (b *ServerBuilder) quoteNewFiling(ctx context.Context) economy.ExpansionQuo
 
 func (b *ServerBuilder) filingExpansionDestinations(ctx context.Context, owner string) ([]economy.ExpansionDestination, error) {
 	if b.sessionStore == nil || b.workspaceFileStore == nil || b.fileJanitorService == nil {
-		return nil, errors.New("Filing workspace storage is unavailable")
+		return nil, errors.New("filing workspace storage is unavailable")
 	}
 	rows, err := b.sessionStore.ListWorkspaces(ctx)
 	if err != nil {
@@ -104,7 +104,7 @@ func existingFilingDestinations(rows []session.Workspace, folders starterWorkspa
 		// entry; a missing/contradictory record is not a reason to sell another.
 		live, err := folders.Get(row.ID)
 		if err != nil || !visibleFilingRecord(live, row, owner) || !workspace.IsCanonicalWorkspaceSlug(row.FolderSlug) {
-			return nil, errors.New("Filing workspace route is not available")
+			return nil, errors.New("filing workspace route is not available")
 		}
 		match, err = matchesExistingFiling(live, configured)
 		if err != nil {
