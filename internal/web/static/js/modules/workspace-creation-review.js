@@ -218,15 +218,15 @@ export function workspaceCreationReviewHTML(view = {}) {
   const group = (view.result?.kind || view.subjectKind) === 'group';
   if (view.accepted || view.result) {
     return `<section class="assisted-placement" aria-label="${group ? 'Group' : 'Workspace'} creation result">
-      <h2 id="${escapeReviewText(prefix)}Title" tabindex="-1">${escapeReviewText(view.resultTitle || (view.result ? (group ? 'Group created' : 'Workspace created') : 'Check confirmed creation'))}</h2>
-      <p>${escapeReviewText(view.result?.name || '')}</p>
+      <h2 id="${escapeReviewText(prefix)}Title" tabindex="-1" data-placement-focus="heading">${escapeReviewText(view.resultTitle || (view.result ? (group ? 'Group created' : 'Workspace created') : 'Check confirmed creation'))}</h2>
+      ${view.result?.name && !view.resultTitle ? `<p>${escapeReviewText(view.result.name)}</p>` : ''}
       ${view.result ? `<p>${group ? 'Group · Existing member workspaces are unchanged.' : view.result.parent_id ? `Group: ${escapeReviewText(view.resultParentName || view.result.parent_id)}` : 'Standalone workspace'}</p><p>${view.result.agent_instances?.length ? `Assigned: ${view.result.agent_instances.map(member => escapeReviewText(member.name)).join(', ')}` : 'No agents attached.'}</p>` : ''}
       <p role="status" aria-live="polite" tabindex="-1" data-placement-focus="status">${escapeReviewText(view.message)}</p>
       ${view.result && view.nextSetup ? `<p><strong>Next setup:</strong> ${escapeReviewText(view.nextSetup)}. Open the workspace to continue; setup readiness has not been verified here.</p>` : ''}
-      ${view.accepted && !view.result ? '<p>Work may already exist. Closing is not undo. Reading status never continues creation.</p>' : ''}
+      ${view.accepted && !view.result && !view.definiteRefusal ? '<p>Work may already exist. Closing is not undo. Reading status never continues creation.</p>' : ''}
       <div class="assisted-placement__footer">
-        ${view.accepted && !view.result ? `<button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>` : ''}
-        ${view.canAbandonReview && !view.result ? `<button type="button" data-placement-action="abandon-review"${view.busy ? ' disabled' : ''}>Release unaccepted review</button>` : ''}
+        ${view.accepted && !view.result && !view.definiteRefusal ? `<button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>` : ''}
+        ${view.canAbandonReview && !view.result ? `<button type="button" data-placement-action="abandon-review"${view.busy ? ' disabled' : ''}>${view.definiteRefusal ? 'Return to review' : 'Release unaccepted review'}</button>` : ''}
         ${view.positionFailed && view.result ? `<button type="button" data-placement-action="retry-position"${view.busy ? ' disabled' : ''}>Retry position only</button>` : ''}
         ${view.result ? `<button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>${escapeReviewText(view.openLabel || (group ? 'Open group' : 'Open workspace'))}</button>` : ''}
         ${view.canShowOnMap ? `<button type="button" data-placement-action="show-map"${view.busy ? ' disabled' : ''}>Show on map</button>` : ''}

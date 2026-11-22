@@ -1262,7 +1262,7 @@ func buildDraftStep(session *personalassistant.WorkspaceBuildSession) int {
 
 var buildWhySections = map[string]bool{"blueprint": true, "details": true, "team": true, "placement": true}
 
-func ordinaryBuildExplanation(session *personalassistant.WorkspaceBuildSession) bool {
+func ordinaryUnattachedBuild(session *personalassistant.WorkspaceBuildSession) bool {
 	return session.Folder == nil && session.Link == nil && session.PlacementSource == nil &&
 		session.NeedsHome == nil && !strings.HasPrefix(session.Draft.TemplateID, "plugin:")
 }
@@ -1271,7 +1271,7 @@ func ordinaryBuildExplanation(session *personalassistant.WorkspaceBuildSession) 
 // blueprint choice. Other section text has no field/role witness, and the
 // team's actual effects are described by the roster and final receipt.
 func mergeBuildWhy(session *personalassistant.WorkspaceBuildSession, before personalassistant.BuildDraft, whys []buildReplyWhy) {
-	if ordinaryBuildExplanation(session) {
+	if ordinaryUnattachedBuild(session) {
 		id := session.Draft.TemplateID
 		changed := before.TemplateID != id || before.Blank != session.Draft.Blank
 		if !changed {
@@ -1489,7 +1489,7 @@ func buildSummaryFor(session personalassistant.WorkspaceBuildSession, created pe
 	team := teamDecisionFromDraft(created)
 	stale["team"] = team != ""
 	for _, why := range session.Why {
-		if stale[why.Section] || (ordinaryBuildExplanation(&session) &&
+		if stale[why.Section] || (ordinaryUnattachedBuild(&session) &&
 			(why.Section != "blueprint" || why.BlueprintID == "" || why.BlueprintID != created.TemplateID)) {
 			continue
 		}

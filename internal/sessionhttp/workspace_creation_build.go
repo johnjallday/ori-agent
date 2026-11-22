@@ -159,6 +159,9 @@ func (h *Handler) acceptCreationBuild(ctx context.Context, op *workspaceCreation
 		if err := claim(); err != nil {
 			return err
 		}
+		// Confirmation creates the workspace, not its first goal run. The
+		// separate attachment/setup owners keep their first-work policies.
+		op.deferFirstGoal = ordinaryUnattachedBuild(build) && !strings.HasPrefix(req.TemplateID, "plugin:")
 		build.InvalidateBuildInference(true)
 		build.Touch(h.workspaceBuild.Store.Now())
 		return nil

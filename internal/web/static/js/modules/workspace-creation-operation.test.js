@@ -6,6 +6,7 @@ import {
   releaseCreationReference,
   reviewCreationOperation,
   confirmCreationOperation,
+  creationRecoveryTitle,
   observeCreationOperation,
   abandonCreationOperation
 } from './workspace-creation-operation.js';
@@ -150,6 +151,11 @@ test('malformed/foreign success and a reserved ID cannot unlock retry or become 
     {
       creation_operation: operation('complete'),
       success: true,
+      folder: { ...folder, agent_instances: [null] }
+    },
+    {
+      creation_operation: operation('complete'),
+      success: true,
       folder: { ...folder, agent_instances: 'malformed' }
     }
   ]) {
@@ -195,6 +201,22 @@ test('partial and unreadable outcomes retain recovery identity and never execute
   }, reference);
   assert.equal(observed.state, 'uncertain');
   assert.deepEqual(savedCreationReference(store), reference);
+});
+
+test('acceptance and incomplete receipts never use success wording', async () => {
+  for (const state of ['accepted', 'reconciliation_required', 'refused', 'uncertain'])
+    assert.doesNotMatch(creationRecoveryTitle(state), /workspace created|ready to open/i);
+  const accepted = await observeCreationOperation(
+    async () =>
+      response({
+        operation: operation('accepted'),
+        observed_workspace: folder
+      }),
+    reference
+  );
+  assert.equal(accepted.state, 'accepted');
+  assert.equal(accepted.result, null);
+  assert.match(creationRecoveryTitle(accepted.state), /accepted.*not yet verified/);
 });
 
 test('abandonment requires the exact unaccepted server outcome and is never implicit continuation', async () => {

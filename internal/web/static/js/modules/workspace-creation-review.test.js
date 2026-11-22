@@ -229,6 +229,38 @@ test('ordinary field bounds come from their existing owner and reviewed rows are
   );
 });
 
+test('the verified result names the workspace while acceptance and refusal have no Open action', () => {
+  const complete = workspaceCreationReviewHTML({
+    ...blank,
+    result: { id: 'saved', name: 'Saved Desk', agent_instances: [{ name: 'Editor' }] },
+    resultTitle: 'Saved Desk created',
+    openLabel: 'Open Saved Desk'
+  });
+  assert.match(complete, /Saved Desk created/);
+  assert.match(complete, /Assigned: Editor/);
+  assert.match(complete, /Open Saved Desk/);
+  const accepted = workspaceCreationReviewHTML({
+    ...blank,
+    accepted: true,
+    resultTitle: 'Creation outcome not verified'
+  });
+  assert.match(accepted, /Read saved status/);
+  assert.match(accepted, /Closing is not undo/);
+  assert.doesNotMatch(accepted, /data-placement-action="(?:open|confirm)"/);
+  const refused = workspaceCreationReviewHTML({
+    ...blank,
+    accepted: true,
+    definiteRefusal: true,
+    resultTitle: 'Creation was refused',
+    canAbandonReview: true
+  });
+  assert.match(refused, /Return to review/);
+  assert.doesNotMatch(
+    refused,
+    /Read saved status|Work may already exist|data-placement-action="(?:open|confirm)"/
+  );
+});
+
 test('automatic selection exposes exactly one explicit action and never implies a completed operation', () => {
   const html = workspaceCreationReviewHTML({ ...blank, automatic: true });
   assert.match(html, /data-placement-action="confirm">Create workspace</);

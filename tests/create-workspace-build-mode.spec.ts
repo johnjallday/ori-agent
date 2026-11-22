@@ -743,7 +743,8 @@ function observeCreationTraffic(page: Page) {
     if (path === '/api/workspaces/create-operations') reviews.push(request.postDataJSON());
     else if (/\/create-operations\/[^/]+\/confirm$/.test(path))
       confirmations.push({ path, body: request.postDataJSON() });
-    else if (/^\/api\/workspaces(?:$|\/[^/]+\/runs$)/.test(path)) legacyWrites.push(path);
+    else if (/^\/api\/workspaces(?:$|\/[^/]+\/(?:runs|mission\/first-open)$)/.test(path))
+      legacyWrites.push(path);
   });
   return { reviews, confirmations, observations, legacyWrites };
 }
@@ -853,7 +854,167 @@ test('real newsletter review and map bind only the latest material draft to conf
     id
   ]);
   expect(after.agents.filter((item: string) => !before.agents.includes(item))).toEqual([lead]);
+  await expect(result).toContainText(`${updatedName} created`);
+  await expect(result).toContainText(`Assigned team: ${lead}`);
+  await expect(result).toContainText('Map position saved');
+  await expect(result).toContainText('2 starter tickets saved for later');
   await page.screenshot({ path: testInfo.outputPath('review-created.png') });
+  await result.getByRole('button', { name: `Open ${updatedName}`, exact: true }).click();
+  await expectSavedNewsletter(page, confirmed.result.folder, [lead]);
+  expect(traffic.legacyWrites).toEqual([]);
+});
+
+async function expectSavedNewsletter(page: Page, folder: RequestBody, roster: string[]) {
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${folder.folder_slug}$`));
+  const detail = await (await page.request.get(`/api/workspaces/${folder.id}`)).json();
+  const team = await (await page.request.get(`/api/workspaces/${folder.id}/agents`)).json();
+  const runs = await (await page.request.get(`/api/workspaces/${folder.id}/runs`)).json();
+  expect(detail.name).toBe(folder.name);
+  expect(detail.mission_state.mission_execution_count || 0).toBe(0);
+  expect(team.agents.map((agent: RequestBody) => agent.name).sort()).toEqual([...roster].sort());
+  expect(runs.runs || []).toEqual([]);
+  const mission = await (await page.request.get(`/api/workspaces/${folder.id}/mission`)).json();
+  expect(mission.first_run_pending).not.toBe(true);
+  const provenance = page.locator('.ws-cmd-build-summary');
+  await provenance.locator('summary').click();
+  await expect(provenance).toContainText(NEWSLETTER_PROMPT);
+  await expect(provenance).toContainText(NEWSLETTER_REASON);
+  for (const name of roster) await expect(provenance).toContainText(name);
+}
+
+test('real compact newsletter recovers the exact confirmation after a lost reply and reload', async ({
+  page
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => localStorage.setItem('ori-theme', 'dark'));
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const firstName = 'Weekend Newsletter Desk';
+  const name = 'Sunday Newsletter Desk';
+  const lead = 'Saved Sunday Editor';
+  const copywriter = 'Sunday Copywriter';
+  const saved = await page.request.post('/api/agents', {
+    data: {
+      name: lead,
+      provider: 'lmstudio',
+      model: 'ori-synthetic-model',
+      system_prompt: 'Synthetic publishing lead.'
+    }
+  });
+  expect(saved.ok(), await saved.text()).toBe(true);
+  const traffic = observeCreationTraffic(page);
+  await openRealNewsletterBuild(page, firstName);
+  const before = await domainResources(page);
+  await say(page, NEWSLETTER_PROMPT);
+  staffRealNewsletter([
+    { role_id: 'content-lead', agent_name: lead, mode: 'assign' },
+    { role_id: 'brand-copywriter', agent_name: copywriter }
+  ]);
+  await choose(page, NEWSLETTER_PAIR);
+  const summary = page.locator('#workspaceBuildDraftSummary');
+  await expect(summary).toContainText(`Will assign ${lead} · required`);
+  await expect(summary).toContainText(`Will create ${copywriter}`);
+  await expect(summary).toContainText('Draft · Nothing created yet');
+  await page.screenshot({ path: testInfo.outputPath('compact-team.png') });
+
+  await manual(page);
+  const review = page.locator('#workspaceCreationReviewPanel');
+  await review.getByRole('button', { name: 'Edit details & advanced settings' }).press('Enter');
+  await page.locator('#folderNameInput').fill(name);
+  await page.locator('#workspaceBuildWithBtn').press('Enter');
+  await expect(summary).toContainText('You edited: name');
+  await expect(summary).toContainText('Draft saved.');
+  await page.getByRole('button', { name: 'Close create workspace' }).press('Enter');
+  await expect(pane(page)).toBeHidden();
+  await page.locator('#cockpitCreateWorkspaceBtn').press('Enter');
+  await pane(page).getByRole('button', { name: 'Resume', exact: true }).press('Enter');
+  await expect(composer(page)).toBeFocused();
+  await expect(summary).toContainText(name);
+  await expect(summary).toContainText(`Will assign ${lead}`);
+  await expect(summary).toContainText(NEWSLETTER_REASON);
+  await expect(page.locator('#workspaceBuildDraftChange')).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath('compact-resumed.png') });
+
+  proposeRealNewsletterReview();
+  await say(page, 'create it');
+  await expect(summary).toBeHidden();
+  await expect(review).toContainText(`Review ${name}`);
+  await review.getByRole('button', { name: 'Use automatic placement' }).press('Enter');
+  const confirm = review.getByRole('button', { name: 'Create workspace', exact: true });
+  await expect(confirm).toBeEnabled();
+  expect(await domainResources(page)).toEqual(before);
+  expect(traffic.confirmations).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath('compact-review.png') });
+  let unreadable = true;
+  await page.route(/\/api\/workspaces\/create-operations\/[^/]+$/, route =>
+    unreadable && route.request().method() === 'GET'
+      ? route.fulfill({ contentType: 'application/json', body: '{' })
+      : route.continue()
+  );
+  const lost = gate();
+  await page.route('**/api/workspaces/create-operations/*/confirm', async route => {
+    try {
+      const response = await route.fetch(); // The real creation commits.
+      expect(response.status()).toBe(201);
+    } finally {
+      lost.release();
+      await route.abort('failed'); // Only the response is lost.
+    }
+  });
+  await confirm.dblclick();
+  await lost.promise;
+  await expect(review).toContainText('Creation outcome not verified');
+  await expect(review).toContainText('Work may already exist. Closing is not undo.');
+  await expect(review.getByRole('button', { name: `Open ${name}` })).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath('compact-uncertain.png') });
+  expect(traffic.reviews).toHaveLength(1);
+  expect(traffic.reviews[0].request).toMatchObject({
+    name,
+    template_id: 'content-production',
+    role_staffing: [
+      { role_id: 'content-lead', mode: 'assign', name: lead },
+      { role_id: 'brand-copywriter', mode: 'create', name: copywriter }
+    ]
+  });
+  expect(traffic.confirmations).toHaveLength(1);
+  const operationPath = `/api/workspaces/create-operations/${traffic.reviews[0].id}`;
+  const committed = await (await page.request.get(operationPath)).json();
+  expect(committed.operation.state).toBe('complete');
+  expect(traffic.confirmations[0]).toEqual({
+    path: `${operationPath}/confirm`,
+    body: { review_digest: committed.operation.review_digest }
+  });
+  const after = await domainResources(page);
+  expect(after.workspaces.filter((id: string) => !before.workspaces.includes(id))).toEqual([
+    committed.result.folder.id
+  ]);
+  expect(after.agents.filter((agent: string) => !before.agents.includes(agent))).toEqual([
+    copywriter
+  ]);
+
+  const calls = catalogModel.calls();
+  await page.reload();
+  await page.locator('#cockpitCreateWorkspaceBtn').press('Enter');
+  await expect(review.getByRole('button', { name: 'Read saved status' })).toBeVisible();
+  await expect(pane(page)).toBeHidden();
+  await expect(page.locator('#createFolderBtn')).toBeHidden();
+  await expect(review).not.toContainText(`${name} created`);
+  unreadable = false;
+  await review.getByRole('button', { name: 'Read saved status' }).press('Enter');
+  await expect(review).toContainText(`${name} created`);
+  await expect(review).toContainText('Standalone workspace');
+  await expect(review).toContainText(lead);
+  await expect(review).toContainText(copywriter);
+  expect(catalogModel.calls()).toBe(calls);
+  expect(traffic.observations.length).toBeGreaterThanOrEqual(2);
+  expect([...new Set(traffic.observations)]).toEqual([operationPath]);
+  expect(traffic.confirmations).toHaveLength(1);
+  expect(traffic.reviews).toHaveLength(1);
+  expect(await domainResources(page)).toEqual(after);
+  await page.screenshot({ path: testInfo.outputPath('compact-recovered.png') });
+  await review.getByRole('button', { name: `Open ${name}`, exact: true }).press('Enter');
+  await expectSavedNewsletter(page, committed.result.folder, [lead, copywriter]);
+  expect(traffic.legacyWrites).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath('compact-open.png') });
 });
 
 test('three scripted turns reach review with the effective pair and no creation', async ({

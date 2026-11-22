@@ -1077,7 +1077,8 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		seededStarterTasks = h.seedTemplateStarterTasksLogged(ws.ID, starterTemplate)
 	}
-	h.applyCreateWorkspaceGoal(ws.ID, createWorkspaceGoal(req, kind, resolvedTemplate, templateResolved))
+	op := creationOperationFrom(r.Context())
+	h.applyCreateWorkspaceGoal(ws.ID, createWorkspaceGoal(req, kind, resolvedTemplate, templateResolved), op == nil || !op.deferFirstGoal)
 
 	// Must run after starter-task seeding above — see
 	// persistCreateWorkspaceTemplateProvenance's doc comment for why.

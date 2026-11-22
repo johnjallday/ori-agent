@@ -70,7 +70,11 @@ function operationView(body, reference, confirming = false) {
       !folder.id ||
       typeof folder.name !== 'string' ||
       !folder.name.trim() ||
-      (folder.agent_instances != null && !Array.isArray(folder.agent_instances)) ||
+      (folder.agent_instances != null &&
+        (!Array.isArray(folder.agent_instances) ||
+          folder.agent_instances.some(
+            agent => typeof agent?.name !== 'string' || !agent.name.trim()
+          ))) ||
       folder.shared_data?.workspace_creation_operation_id !== reference.id ||
       folder.shared_data?.workspace_creation_operation_digest !== reference.digest
     )
@@ -91,6 +95,22 @@ function operationView(body, reference, confirming = false) {
             : '',
     observedWorkspace: body.observed_workspace || null
   };
+}
+
+// Labels for the owner's observed states, not guesses based on transport.
+export function creationRecoveryTitle(state) {
+  switch (state) {
+    case 'accepted':
+      return 'Creation accepted · outcome not yet verified';
+    case 'reconciliation_required':
+      return 'Creation needs reconciliation';
+    case 'refused':
+      return 'Creation was refused';
+    case 'abandoned':
+      return 'Creation was not accepted';
+    default:
+      return 'Creation outcome not verified';
+  }
 }
 
 export async function observeCreationOperation(fetcher, reference) {

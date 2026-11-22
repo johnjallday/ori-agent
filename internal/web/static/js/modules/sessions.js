@@ -862,7 +862,7 @@ const sessionManager = {
       delete addFolderModal.dataset.pendingParentLocked;
       // Build with your assistant is decided per open, after the form above
       // is reset; an ineligible open leaves the manual wizard untouched.
-      void this.maybeStartWorkspaceBuild(this.workspaceCreatorContext);
+      void this.openWorkspaceCreatorBuild(this.workspaceCreatorContext);
     });
 
     // A dismissed creator must not leave a fixed selected-member Group or a
@@ -4938,6 +4938,8 @@ const sessionManager = {
         material.later = grouped.later;
       }
       const mapAvailable = this.ordinaryCreationMapAvailable() && (!grouped || grouped.reviewed);
+      const definiteRefusal =
+        review.owner === 'ordinary' && ['refused', 'abandoned'].includes(review.observedState);
       review.panel.update({
         ownerKind: 'ordinary',
         subjectKind: group ? 'group' : 'workspace',
@@ -4989,12 +4991,24 @@ const sessionManager = {
         busy: this.isCreatingFolder || review.reading || review.actionInFlight,
         accepted: review.accepted,
         result: review.result,
+        resultTitle: review.result
+          ? review.buildDraft
+            ? `${review.result.name} created`
+            : ''
+          : review.owner === 'ordinary' && review.accepted
+            ? review.api.creationRecoveryTitle?.(review.observedState)
+            : '',
+        openLabel: review.result && review.buildDraft ? `Open ${review.result.name}` : '',
+        definiteRefusal,
         resultParentName: review.result?.parent_id
           ? this.findFolderById(review.result.parent_id, this.folders || [])?.name || ''
           : '',
         nextSetup: this.ordinaryCreationSetupHint(review.result, review.setupObservation),
         positionFailed: review.positionFailed,
-        canAbandonReview: ['reviewed', 'refused', 'abandoned'].includes(review.observedState),
+        canAbandonReview:
+          definiteRefusal ||
+          (!review.buildDraft &&
+            ['reviewed', 'refused', 'abandoned'].includes(review.observedState)),
         mapHint: mapAvailable
           ? `On the map, click a valid position or press Enter to create this ${group ? 'Group' : 'workspace'}. Moving the preview does nothing. Escape returns here.`
           : grouped && !grouped.reviewed
@@ -5215,7 +5229,9 @@ const sessionManager = {
     const steps = Array.isArray(template?.setup_wizard?.steps) ? template.setup_wizard.steps : [];
     const later = steps.length
       ? `Setup remains separate: ${steps.map(step => step.title || step.id).join(' → ')}. No account or runtime access is granted here.`
-      : 'Add notes, files or work when you choose. Opening the workspace retains its existing goal and first-work flow.';
+      : this.workspaceBuild?.session && this.ordinaryBuildPreviewEligible()
+        ? 'Open the workspace to see what was saved. Start work or run its goal only when you choose.'
+        : 'Add notes, files or work when you choose. Opening the workspace retains its existing goal and first-work flow.';
     const tasks = Array.isArray(template?.starter_tasks) ? template.starter_tasks.length : 0;
     const now = [
       'Create one workspace with the reviewed team.',
@@ -5377,6 +5393,14 @@ const sessionManager = {
       review.operationKey = '';
       review.message =
         'The unaccepted review was released. Review current choices before confirming.';
+      if (review.buildDraft && !this.workspaceBuild) {
+        // A reload retained no editable form. Re-enter the ordinary owner so
+        // Resume restores the saved draft, rather than displaying an empty review.
+        this.wizardStep = 1;
+        this.refreshWizardChrome();
+        await this.maybeStartWorkspaceBuild(context);
+        return;
+      }
       this.syncWorkspaceCreatorPresentation();
       void this.syncOrdinaryCreationReview();
       return;
@@ -5511,20 +5535,35 @@ const sessionManager = {
       }
       const outcome = await review.api.observeCreationOperation(fetch, review.reference);
       if (this.workspaceCreatorContext !== context) return;
-      review.observedState = outcome.state;
+      if (
+        outcome.state !== 'uncertain' ||
+        !['accepted', 'reconciliation_required'].includes(review.observedState)
+      )
+        review.observedState = outcome.state;
+      review.buildDraft ||= outcome.operation?.build_backed === true;
       if (outcome.state === 'complete') {
         review.result = await this.observeOrdinaryCreationResource(context, outcome.result.folder);
         if (this.workspaceCreatorContext !== context) return;
+        review.positionFailed = Boolean(review.candidate && review.result);
         review.message = [
           'The original workspace is verified. Reading status did not create or start work.',
+          review.buildDraft ? 'Workspace creation does not verify operational readiness.' : '',
+          this.ordinaryCreationSeededTickets(outcome.result),
+          review.positionFailed
+            ? 'The original position was not saved. Retry position only if you still want that point.'
+            : '',
           review.resourceObservationWarning
         ]
           .filter(Boolean)
           .join(' ');
+      } else if (['refused', 'abandoned'].includes(outcome.state)) {
+        review.message =
+          outcome.message ||
+          'Nothing was accepted. Return to the draft and review current choices.';
       } else {
         review.message =
           outcome.message ||
-          'The original creation is not complete. Read status; do not create again. Closing is not undo.';
+          'The original creation is not verified. Read saved status; do not create again.';
       }
     } finally {
       review.reading = false;
@@ -5754,18 +5793,50 @@ const sessionManager = {
     };
   },
 
+  ordinaryCreationSeededTickets(result) {
+    const count = Number(result?.seeded_starter_tasks) || 0;
+    return count > 0
+      ? `${count} starter ${count === 1 ? 'ticket' : 'tickets'} saved for later.`
+      : '';
+  },
+
+  ordinaryCreatedWorkspaceFacts(resource) {
+    if (!resource?.id) return '';
+    const parent = resource.parent_id
+      ? this.findFolderById(resource.parent_id, this.folders || [])?.name
+      : '';
+    const roster = (Array.isArray(resource.agent_instances) ? resource.agent_instances : [])
+      .map(member => String(member?.name || '').trim())
+      .filter(Boolean);
+    const where = parent
+      ? `In group ${parent}.`
+      : resource.parent_id
+        ? 'In a saved group.'
+        : 'Standalone workspace.';
+    return `${where} ${roster.length ? `Assigned team: ${roster.join(', ')}.` : 'No agents attached.'}`;
+  },
+
   presentOrdinaryMapOutcome(context, placement, statusFocus) {
     const review = context.ordinaryReview;
     const kind = review.result?.kind === 'group' ? 'Group' : 'Workspace';
     return this.presentMapOutcome(placement, {
       tone: !review.result ? 'warning' : review.positionFailed ? 'warning' : 'success',
       title: review.result
-        ? `${kind} created · ${review.result.name || ''}`.trim()
-        : 'Creation delivery is uncertain',
-      detail: review.message,
+        ? review.buildDraft
+          ? `${review.result.name} created`
+          : `${kind} created · ${review.result.name || ''}`.trim()
+        : review.api?.creationRecoveryTitle?.(review.observedState) ||
+          'Creation delivery is uncertain',
+      detail: [
+        review.buildDraft && this.ordinaryCreatedWorkspaceFacts(review.result),
+        review.message
+      ]
+        .filter(Boolean)
+        .join(' '),
       canOpen: Boolean(review.result?.id),
+      openLabel: review.result && review.buildDraft ? `Open ${review.result.name}` : '',
       canRetry: Boolean(review.result?.id && review.positionFailed),
-      canRead: !review.result,
+      canRead: !review.result && !['refused', 'abandoned'].includes(review.observedState),
       act: async intent => {
         await this.actOnOrdinaryCreationReview(context, intent);
         // The read or retry updated the owner's own record; show what it now says.
@@ -5796,11 +5867,12 @@ const sessionManager = {
     );
     review.message = review.result
       ? [
-          `${review.result.kind === 'group' ? 'Group' : 'Workspace'} created. No run or scan was started by placement.`,
+          review.buildDraft
+            ? 'No ticket was started. Workspace creation does not verify operational readiness.'
+            : `${review.result.kind === 'group' ? 'Group' : 'Workspace'} created. No run or scan was started by placement.`,
           review.owner === 'grouped' ? this.groupedCreationResultLine(result, review.result) : '',
-          Number(result.seeded_starter_tasks) > 0
-            ? `${result.seeded_starter_tasks} starter tickets saved for later.`
-            : '',
+          this.ordinaryCreationSeededTickets(result),
+          review.buildDraft && placementResult?.saved ? 'Map position saved.' : '',
           typeof result.project_warning === 'string' ? result.project_warning : '',
           review.resourceObservationWarning,
           ...(Array.isArray(result.agent_warnings)
@@ -6286,7 +6358,7 @@ const sessionManager = {
   // owner's own; none of them repeats creation.
   presentMapOutcome(
     placement,
-    { tone, title, detail, act, showDetails, dismiss, canOpen, canRetry, canRead }
+    { tone, title, detail, act, showDetails, dismiss, canOpen, openLabel, canRetry, canRead }
   ) {
     const transition = window.OriCreationTransition;
     const handle = placement?.transition;
@@ -6301,7 +6373,8 @@ const sessionManager = {
     };
     this.creationMapOutcome = { handle, end };
     const actions = [];
-    if (canOpen) actions.push({ label: 'Open', primary: true, run: run({ action: 'open' }) });
+    if (canOpen)
+      actions.push({ label: openLabel || 'Open', primary: true, run: run({ action: 'open' }) });
     if (canRetry) actions.push({ label: 'Retry position', run: run({ action: 'retry-position' }) });
     if (canRead) actions.push({ label: 'Read saved status', run: run({ action: 'read-status' }) });
     actions.push({
@@ -14176,6 +14249,53 @@ const sessionManager = {
     };
   },
 
+  async openWorkspaceCreatorBuild(context) {
+    if (
+      context?.mode === 'ordinary' &&
+      !context.fixedKind &&
+      !context.folderOfferId &&
+      !context.onCreated &&
+      !context.postCreateAction
+    ) {
+      const api =
+        window.OriWorkspaceCreationOperation ||
+        (await import('/js/modules/workspace-creation-operation.js').catch(() => null));
+      if (this.workspaceCreatorContext !== context) return;
+      if (api) {
+        let reference, message;
+        try {
+          reference = api.savedCreationReference(window.localStorage);
+        } catch (error) {
+          message = error.message;
+        }
+        if (reference || message) {
+          const review = (context.ordinaryReview ||= { generation: context.generation });
+          Object.assign(review, {
+            owner: 'ordinary',
+            reference,
+            accepted: true,
+            restored: true,
+            message:
+              message || 'Checking the original confirmation. Nothing will be submitted again.'
+          });
+          this.wizardStep = this.wizardStepCount;
+          this.refreshWizardChrome();
+          await this.syncOrdinaryCreationReview();
+          if (this.workspaceCreatorContext !== context) return;
+          if (!review.observedState && reference) await this.readOrdinaryCreationStatus(context);
+          if (
+            this.workspaceCreatorContext === context &&
+            (document.activeElement === document.body ||
+              document.activeElement?.id === 'addFolderModal')
+          )
+            document.getElementById('workspaceCreationReviewTitle')?.focus();
+          return;
+        }
+      }
+    }
+    if (this.workspaceCreatorContext === context) await this.maybeStartWorkspaceBuild(context);
+  },
+
   // maybeStartWorkspaceBuild runs on every open. Build mode is offered only
   // from its openers, and only once the two reads it depends on answer: the
   // assistant's relationship and whether a model is reachable for it. Both are
@@ -20103,6 +20223,7 @@ const sessionManager = {
         )
           return;
         ordinaryReview.observedState = outcome.state;
+        ordinaryReview.buildDraft ||= outcome.operation?.build_backed === true;
         ordinaryReview.message = outcome.message;
         if (outcome.state === 'not_sent') {
           ordinaryReview.accepted = false;

@@ -158,7 +158,7 @@ func TestWorkspaceCreationOperation_OrdinaryBuildEditRequiresANewReview(t *testi
 		build = sessionOf(t, body)
 	}
 	material := func() map[string]any {
-		return map[string]any{"name": build.Draft.Name, "blank": true, "create_template_agents": false,
+		return map[string]any{"name": build.Draft.Name, "mission": "Plan a weekly newsletter", "blank": true, "create_template_agents": false,
 			"build_session_id": build.ID, "build_review_version": build.Version}
 	}
 	saveName("Draft desk")
@@ -178,6 +178,11 @@ func TestWorkspaceCreationOperation_OrdinaryBuildEditRequiresANewReview(t *testi
 		t.Fatalf("exact confirm %d: %s", confirm.Code, confirm.Body)
 	}
 	assertCreationOperationState(t, h, id, "complete")
+	workspaceID := body["folder"].(map[string]any)["id"].(string)
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil || ws.Mission != "Plan a weekly newsletter" || ws.GoalFirstRunPending || ws.MissionExecutionCount != 0 {
+		t.Fatalf("assisted creation must keep the goal unarmed: %+v %v", ws, err)
+	}
 	after, err := h.store.ListWorkspaces(t.Context())
 	if err != nil || len(after) != 1 || f.provider.calls != 0 {
 		t.Fatalf("unexpected creation effects: %+v %v", after, err)
