@@ -2019,7 +2019,7 @@ export class WorkspaceCommandView {
         : '') +
       (tags.length ? '<div class="ws-cmd-tags">' + this.commandTagsHTML(tags) + '</div>' : '') +
       '</div><div class="ws-cmd-header-actions">' +
-      (hqDetails ? this.firstVisit?.headerHTML?.() || '' : '') +
+      (hqDetails || (mapTab && this.isPersonalHQ()) ? this.firstVisit?.headerHTML?.() || '' : '') +
       workspaceSettingsHTML({
         diagnostics: this.workspaceRoute('/diagnostics'),
         workflow: this.workflowHref()
@@ -3153,6 +3153,7 @@ export class WorkspaceCommandView {
     this.bindReadout();
     this.bindMissionPanel();
     if (hqDetails) this.bindHQDetails();
+    if (hqDetails || (this.viewMode === 'map' && this.isPersonalHQ())) this.firstVisit?.bind();
     if (this.viewMode === 'map') {
       this.bindOperationsMap();
       this.paintMapActivity();
@@ -14971,6 +14972,7 @@ export class WorkspaceCommandView {
       this.renderHQGitHubHost() +
       '<div class="ws-cmd-layout is-hq">' +
       '<main class="ws-cmd-main ws-hq-main">' +
+      (this.firstVisit?.receiptHTML?.() || '') +
       this.hqNeedsYouHTML() +
       (this.firstVisit?.view().layout.notes === false ? '' : this.renderHQNotesHost()) +
       this.renderFollowUpsHost() +
@@ -15832,7 +15834,7 @@ export class WorkspaceCommandView {
     if (!this.hqTipLayer && this.hqTipScope()) {
       this.hqTipLayer = createHqTipLayer({
         root: () => this.container,
-        scope: () => this.hqTipScope(),
+        scope: () => (this.firstVisit?.node ? '' : this.hqTipScope()),
         content: key => this.hqTipContent(key),
         onShown: key => this.hqTipShown(key),
         onHidden: () => this.settleHQTipMarks()
@@ -16255,7 +16257,6 @@ export class WorkspaceCommandView {
 
   bindHQDetails() {
     this.watchHQSources();
-    this.firstVisit?.bind();
     const root = this.container;
     if (!root || typeof root.querySelector !== 'function') return;
     const header = root.querySelector('.ws-hq-header');

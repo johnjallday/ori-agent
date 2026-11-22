@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -568,13 +569,32 @@ func (m *Manager) SetSavedProfileObserver(observer func()) {
 
 // SetUserProfile stores an independent snapshot of the inferred profile.
 func (m *Manager) SetUserProfile(profile *types.InferredProfile) error {
+	return m.storeUserProfile(profile, nil, false)
+}
+
+var ErrProfileChanged = errors.New("profile changed; reload before saving")
+
+// ReplaceUserProfile checks that another edit has not landed since the form handler read the profile.
+func (m *Manager) ReplaceUserProfile(profile, previous *types.InferredProfile) error {
+	return m.storeUserProfile(profile, previous, true)
+}
+
+func (m *Manager) storeUserProfile(profile, previous *types.InferredProfile, check bool) error {
 	m.mu.Lock()
+	if check && !reflect.DeepEqual(copyInferredProfile(m.state.UserProfile), previous) {
+		m.mu.Unlock()
+		return ErrProfileChanged
+	}
 	profile = copyInferredProfile(profile)
 	if profile != nil && profile.InferredAt.IsZero() {
 		profile.InferredAt = time.Now()
 	}
+	before := m.state.UserProfile
 	m.state.UserProfile = profile
 	err := m.saveUnlocked()
+	if err != nil {
+		m.state.UserProfile = before
+	}
 	observer := m.savedProfileObserver
 	hasObservation := profile != nil && len(profile.DetectedApps) > 0 && !profile.InferredAt.IsZero()
 	m.mu.Unlock()

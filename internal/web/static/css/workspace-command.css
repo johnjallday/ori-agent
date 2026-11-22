@@ -10005,6 +10005,27 @@ button.ws-cmd-rpg-class-card:focus-visible {
   padding: 18px 8px 8px;
   overflow-wrap: anywhere;
 }
+.ws-cmd .ws-hq-suggestions-trigger {
+  --bs-btn-bg: color-mix(in srgb, var(--ws-faction) 9%, var(--ws-panel));
+  --bs-btn-border-color: color-mix(in srgb, var(--ws-faction) 60%, var(--ws-line));
+  --bs-btn-hover-bg: color-mix(in srgb, var(--ws-faction) 16%, var(--ws-panel));
+  --bs-btn-hover-border-color: var(--ws-faction);
+}
+.ws-hq-suggestions-trigger[aria-expanded="true"],
+.ws-hq-suggestions-trigger:focus {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+.ws-hq-guide-mark {
+  flex: none;
+  color: var(--ws-faction);
+}
+.ws-hq-guide-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
 .ws-hq-suggestions > header {
   display: flex;
   align-items: flex-start;
@@ -10058,6 +10079,29 @@ button.ws-cmd-rpg-class-card:focus-visible {
   font: inherit;
   line-height: 1.45;
 }
+/* Only chooser rows have three columns. The explanation's links, review
+   checkboxes and save actions use the full readable width. */
+.ws-hq-suggestion:not(:has(.ws-hq-suggestion-icon)) {
+  display: flex;
+  align-items: center;
+}
+.ws-hq-suggestions header small,
+.ws-hq-main [data-guided-receipt] strong {
+  color: var(--ws-faction);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ws-hq-main [data-guided-receipt] {
+  padding: 14px 18px;
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-line);
+  border-inline-start: 3px solid var(--ws-faction);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.ws-hq-main [data-guided-receipt] p {
+  margin: 4px 0;
+}
 .ws-hq-suggestion strong {
   display: block;
   font-size: 14px;
@@ -10083,14 +10127,19 @@ button.ws-cmd-rpg-class-card:focus-visible {
 .ws-hq-suggestions > footer {
   display: flex;
   gap: 8px;
+  align-items: center;
   justify-content: space-between;
   border-top: 1px solid var(--ws-line);
-  padding-top: 4px;
+  padding: 10px 8px 4px;
+}
+.ws-hq-suggestions > footer p strong {
+  color: var(--ws-ink);
 }
 .ws-hq-suggestions > footer button {
-  border: 0;
-  background: transparent;
-  color: var(--ws-ink-dim);
+  flex: none;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-panel-2);
+  color: var(--ws-ink);
   font-size: 12px;
   padding: 10px 8px;
   border-radius: 6px;

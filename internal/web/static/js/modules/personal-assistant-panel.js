@@ -45,6 +45,8 @@ import { briefModeView, briefSend } from './personal-assistant-brief-mode.js';
 const panelArrivalSearch = typeof window !== 'undefined' ? window.location?.search || '' : '';
 
 const PANEL_DRAFT_KEY = 'ori.personalAssistant.panelDraft';
+import { chooserOwnsArrival } from './hq-guided-entry.js';
+
 const PANEL_OPEN_KEY = 'ori.personalAssistant.panelOpen';
 export const LEGACY_ASSISTANT_HANDOFF_KEY = 'ori-guide-handoff';
 
@@ -1695,8 +1697,8 @@ function exploreFolder() {
   // Every page's drawer starts an agent on the chosen folder (the one folder
   // card); attaching remains only where the folder module is missing.
   const folder = window.PersonalAssistantFolder;
-  if (folder && typeof folder.open === 'function') {
-    folder.open();
+  if (folder && typeof folder.openFromAttach === 'function') {
+    folder.openFromAttach();
     return;
   }
   if (window.PersonalAssistantFolderContext?.open) {
@@ -2819,13 +2821,22 @@ function init() {
   // Kept after the param leaves the address bar: a module that loads later
   // (the Home manager's offer) still knows this page was arrived at this way.
   state.arrival = intent.consumes;
+  const leaveWelcomeToHQ =
+    !intent.requestedOpen &&
+    chooserOwnsArrival(document.body?.dataset, {
+      search: panelArrivalSearch,
+      hash: window.location.hash
+    });
   void refresh().then(() => {
+    if (leaveWelcomeToHQ) return;
     if (!intent.restoreAllowed || !(intent.requestedOpen || tabValue(PANEL_OPEN_KEY) === '1'))
       return;
     // The link asked for Today's strip, unlike an ordinary opening, which folds
     // it. Home's Today may load after this, so it reads the request from here.
     state.todayRequested = intent.revealToday;
-    if (!open(launcher)) {
+    // A destination such as the folder guide may already have opened this
+    // drawer and focused its control while identity was loading.
+    if (!state.open && !open(launcher)) {
       state.todayRequested = false;
       return;
     }

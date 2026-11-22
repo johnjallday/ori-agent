@@ -4,9 +4,12 @@ package detector
 
 import (
 	"context"
+	"errors"
 	"runtime"
 	"time"
 )
+
+var ErrUsageUnavailable = errors.New("recent usage evidence unavailable")
 
 // DetectedApp represents an application found on the user's system.
 type DetectedApp struct {
@@ -28,6 +31,8 @@ type Detector interface {
 
 // Config holds configuration for app detection.
 type Config struct {
+	// UsageOnly excludes installed or modified apps without evidence of use.
+	UsageOnly bool
 	// RecencyDays is the number of days to look back for app usage.
 	// Apps not used within this window are ignored.
 	RecencyDays int

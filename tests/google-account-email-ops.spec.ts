@@ -433,7 +433,7 @@ test.describe.serial('Email Ops setup wizard', () => {
     });
     expect(res.ok(), await res.text()).toBeTruthy();
     const body = await res.json();
-    return (body.folder?.id || body.workspace?.id) as string;
+    return (body.folder?.folder_slug || body.workspace?.folder_slug) as string;
   }
 
   test('opens on the mailbox step and states the boundary before anything is granted', async ({
@@ -475,6 +475,24 @@ test.describe.serial('Email Ops setup wizard', () => {
 
   test('leaving for Settings records the step to come back to', async ({ page }) => {
     const id = await createEmailOpsWorkspace(page);
+    // A new workspace normally uses the in-page IMAP card. Exercise the
+    // Settings detour with an existing synthetic binding in need of repair.
+    await page.route('**/api/workspaces/*/email/status', r =>
+      r.fulfill({
+        json: {
+          status: {
+            connected: true,
+            account_id: 'fixture-account',
+            setup: {
+              ready: false,
+              action: 'reconnect_gmail',
+              action_label: 'Reconnect Gmail',
+              action_url: '/settings#google-account'
+            }
+          }
+        }
+      })
+    );
     await page.goto(`/workspaces/${id}`);
     await expect(page.locator('#setupWizardDialog')).toBeVisible({ timeout: 15000 });
 

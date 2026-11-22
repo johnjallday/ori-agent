@@ -1,5 +1,6 @@
 // Importing this also registers window.OriEconomy, which is how dashboard.js —
 // a plain script, not a module — reaches the same harvest client.
+import { guidedHint, showHQReturnLinks } from './hq-guided-attempt.js';
 import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 // Importing this also registers window.OriTicketCounts, which is how the classic
 // workspace-map.js reaches the same count line before it renders a tile.
@@ -5955,29 +5956,42 @@ import {
   // launcher, and the Map's empty hint. There is no second chooser here.
   let folderAction = { visible: false, target: '' };
   let primaryAction = cockpitPrimaryActionView(null);
-  function openHomeFolder(invoker = els.primaryActionBtn, suggestion = '') {
+  const guidedFolder = guidedHint(window.location.search);
+  if (guidedFolder?.path === 'folder') void showHQReturnLinks(guidedFolder);
+  function openHomeFolder(invoker = els.primaryActionBtn, suggestion = '', walkThrough = false) {
     if (!folderAction.visible) return false;
     // Module initialization and relationship status may race on a deep link.
     // Do not consume its intent until the actual card/chooser controller is
     // mounted and can receive it.
-    if (folderAction.target === 'folder' && !window.PersonalAssistantFolder?.openChooser)
+    if (
+      folderAction.target === 'folder' &&
+      (!window.PersonalAssistantFolder?.openChooser ||
+        window.PersonalAssistantFolder.canChoose?.() === false)
+    )
       return false;
     if (folderAction.target === 'hq' && !window.PersonalAssistantHQCard?.show) return false;
     const opened = window.PersonalAssistantPanel?.open?.(invoker);
     if (!opened) return false;
     if (folderAction.target === 'hq') window.PersonalAssistantHQCard.show();
+    else if (walkThrough)
+      window.PersonalAssistantFolder.guideFromAttach(
+        guidedFolder?.path === 'folder' ? guidedFolder : null
+      );
     else window.PersonalAssistantFolder.openChooser(suggestion);
     return true;
   }
   let folderDeepLinkRetries = 0;
   function consumeFolderDeepLink() {
-    if (
-      new URLSearchParams(window.location.search).get('folder') !== 'show' ||
-      !folderAction.visible
-    )
-      return;
+    const folder = new URLSearchParams(window.location.search).get('folder');
+    if (!['show', 'guide'].includes(folder) || !folderAction.visible) return;
     const suggestion = folderSuggestion(window.location.search);
-    if (openHomeFolder(els.primaryActionBtn, suggestion)) {
+    if (
+      openHomeFolder(
+        els.primaryActionBtn,
+        suggestion,
+        folder === 'guide' || guidedFolder?.path === 'folder'
+      )
+    ) {
       const url = new URL(window.location.href);
       url.searchParams.delete('folder');
       if (suggestion) url.searchParams.delete('suggest');
@@ -6053,10 +6067,15 @@ import {
   });
   document.addEventListener('personal-assistant:status', event => {
     applyAssistantState(event.detail?.personalAssistant);
-    consumeFolderDeepLink();
+    // The folder owner reads the same event. Wait until its listener has
+    // applied availability before consuming the one-shot Documents hint.
+    queueMicrotask(consumeFolderDeepLink);
   });
   const initialAssistant = window.PersonalAssistantPanel?._state?.personalAssistant;
-  if (initialAssistant) applyAssistantState(initialAssistant);
+  if (initialAssistant) {
+    applyAssistantState(initialAssistant);
+    queueMicrotask(consumeFolderDeepLink);
+  }
   window.addEventListener('load', consumeFolderDeepLink);
 
   // Personal HQ provisioning can complete while Home is open; re-read the

@@ -452,9 +452,9 @@ for (const width of [1280, 400]) {
       await expectWithinViewport(page, width);
       await dialog(page).screenshot({ path: testInfo.outputPath(`link-review-${width}.png`) });
       await review.locator('.setup-journey__review-confirm').click();
-      await expect(page.locator('#specialistSetupJourneyError')).toContainText('Review it again');
-      await expect(review).toBeHidden();
-      await action(page, 'review_mailbox_link').click();
+      // The owner fetches a replacement review, never a replacement commit.
+      await expect(review).toContainText('This review expired, so here it is again.');
+      expect(traffic.commits).toHaveLength(1);
       await review.locator('.setup-journey__review-confirm').click();
 
       // Summary without a model offers model settings, never triage.

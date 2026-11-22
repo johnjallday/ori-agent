@@ -335,6 +335,7 @@
       headers: { 'Content-Type': 'application/json' }
     })
       .then(function (resp) {
+        if (!resp.ok) throw new Error('Detection unavailable');
         return resp.json();
       })
       .then(function (data) {
@@ -390,11 +391,13 @@
       body: JSON.stringify({
         interests: selectedInterests,
         preferred_tools: selectedTools,
+        base_preferred_tools: existingProfile?.preferred_tools || [],
         work_style: selectedWorkStyle,
         description: description
       })
     })
       .then(function (resp) {
+        if (resp.status === 409) throw new Error('Profile changed. Reload before saving.');
         if (!resp.ok) throw new Error('Failed to save');
         return resp.json();
       })
@@ -417,8 +420,12 @@
           }
         }
       })
-      .catch(function () {
-        showToast('Failed to save personalization. Please try again.');
+      .catch(function (error) {
+        showToast(
+          error.message === 'Profile changed. Reload before saving.'
+            ? error.message
+            : 'Failed to save personalization. Please try again.'
+        );
       })
       .finally(function () {
         btn.disabled = false;
