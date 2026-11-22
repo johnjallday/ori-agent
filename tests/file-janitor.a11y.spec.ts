@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 import { existsSync, mkdtempSync, writeFileSync, utimesSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
  * File Janitor console accessibility (PRD task 8.10, FR-118–FR-123).
@@ -748,6 +749,56 @@ test.describe('Filing picture accessibility', () => {
       expect(await axeViolations(page, '#fileJanitorUndone')).toEqual([]);
     });
   }
+
+  test.describe('Possible-copy decision controls', () => {
+    test.use({ hasTouch: true });
+    for (const theme of ['light', 'dark']) {
+      test(`stay reachable with a coarse pointer and zoom-equivalent reflow (${theme})`, async ({ page, request }) => {
+        const names = ['Reader guide.pdf', 'Reader guide (2).pdf', 'photo.png'];
+        await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+        await page.setViewportSize({ width: 390, height: 844 });
+        const root = inbox(`pair-${theme}`, names);
+        const ws = await workspaceWithFolder(request, `FJ Pair ${theme} ${RUN}`, root);
+        await openConsole(page, ws);
+        await page.locator('#fileJanitorScan').click();
+        const picture = page.locator('#fileJanitorPicture');
+        const review = page.locator('#fileJanitorConsole');
+        const jump = review.getByRole('button', { name: '2 need a decision' });
+        await expect(jump).toBeEnabled();
+        expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+        expect((await jump.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        await expect(page.locator('html')).toHaveAttribute('data-bs-theme', theme);
+        await page.addScriptTag({ path: fileURLToPath(new URL('../node_modules/axe-core/axe.min.js', import.meta.url)) });
+        expect(await axeViolations(page, '#fileJanitorPicture')).toEqual([]);
+
+        await jump.focus();
+        await page.keyboard.press('Enter');
+        await expect(review.locator('#fileJanitorLooseTitle')).toBeFocused();
+        const mark = review.getByRole('button', { name: `Mark for Trash: ${names[1]}` });
+        await mark.scrollIntoViewIfNeeded();
+        expect((await mark.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        await mark.focus();
+        await page.keyboard.press('Enter');
+        const choice = review.getByRole('combobox', { name: `Filing choice for ${names[1]}` });
+        await expect(choice).toBeFocused();
+        await expect(review.locator('#fileJanitorApprove')).toBeDisabled();
+        expect(await axeViolations(page, '#fileJanitorPicture')).toEqual([]);
+
+        for (const width of [390, 720]) {
+          await page.setViewportSize({ width, height: width === 390 ? 844 : 450 });
+          await choice.evaluate(node => node.scrollIntoView({ block: 'center' }));
+          await expect(choice).toBeInViewport({ ratio: 1 });
+          const focused = await choice.boundingBox();
+          const footer = await review.locator('.fj-footer').boundingBox();
+          expect(focused!.y + focused!.height).toBeLessThanOrEqual(footer!.y);
+          expect(await picture.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+        }
+        const evidence = 'tasks/evidence-downloads-review-decisions';
+        mkdirSync(evidence, { recursive: true });
+        await page.screenshot({ path: join(evidence, `04-zoom-equivalent-${theme}.png`), mask: [review.locator('.fj-console-folder')], maskColor: '#888' });
+      });
+    }
+  });
 
   test('Tab moves through the picture in reading order and reaches the File button', async ({
     page,

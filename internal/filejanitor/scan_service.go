@@ -358,13 +358,21 @@ func (s *Service) LatestPendingBatch(workspaceID string) (JanitorBatch, []Janito
 	if err != nil {
 		return JanitorBatch{}, nil, false, err
 	}
+	batch, found := latestCandidateBatch(state)
+	if !found {
+		return JanitorBatch{}, nil, false, nil
+	}
+	return batch, state.CandidatesFor(batch.ID), true, nil
+}
+
+func latestCandidateBatch(state ScanState) (JanitorBatch, bool) {
 	for i := len(state.Batches) - 1; i >= 0; i-- {
 		batch := state.Batches[i]
 		if batch.State == BatchPending || batch.State == BatchPartiallyApplied {
-			return batch, state.CandidatesFor(batch.ID), true, nil
+			return batch, true
 		}
 	}
-	return JanitorBatch{}, nil, false, nil
+	return JanitorBatch{}, false
 }
 
 // LatestPendingBatchCandidates returns the candidates of the newest batch still

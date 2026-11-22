@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -358,6 +359,87 @@ func TestReviewPicture_AChangedTickedFileIsDrawnAsChangedNotLeftOut(t *testing.T
 	}
 	if sum != picture.Waiting || picture.Waiting != 3 {
 		t.Fatalf("the sections add up to %d, the scan has %d waiting", sum, picture.Waiting)
+	}
+}
+
+// The review summary reads three independent totals from matching projections.
+// Bounded samples can omit questions and can repeat a placed sibling.
+func TestReviewDecisionCounts_WholeSectionsOfCurrentPlan(t *testing.T) {
+	names := []string{"Guide.pdf", "Guide (2).pdf", "one.png", "two.png", "three.png", "setup.dmg"}
+	for i := 0; i < 52; i++ {
+		names = append(names, fmt.Sprintf("unknown-%02d.zzzz", i))
+	}
+	s, batch, candidates, root := planFixture(t, names...)
+	id := func(name string) string { return candidateNamed(t, candidates, name).ID }
+	edits := func(action, name string, category Category) {
+		t.Helper()
+		editDraft(t, s, batch.ID, action, func(edit *ReviewDraftEdit) {
+			edit.CandidateIDs = []string{id(name)}
+			edit.Category = string(category)
+		})
+	}
+	type totals struct{ moves, trash, undecided int }
+	check := func(want totals) ReviewPicture {
+		t.Helper()
+		picture, err := s.ReadReviewPicture(t.Context(), "local", "ws-1", batch.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan := readPlan(t, s, batch.ID, ReviewPlanQuery{Revision: picture.DraftRevision, GroupRevision: picture.Revision})
+		if plan.BatchID != picture.BatchID || plan.Revision != picture.DraftRevision || plan.GroupRevision != picture.Revision {
+			t.Fatal("the two projections must describe the same review")
+		}
+		got := totals{moves: plan.MoveCount, trash: plan.TrashCount}
+		for _, row := range picture.Loose {
+			got.undecided += row.LooseCount
+		}
+		if got != want {
+			t.Fatalf("move/Trash/decision counts = %+v, want %+v", got, want)
+		}
+		return picture
+	}
+	picture := check(totals{4, 0, 54})
+	unknown := looseRowOf(t, picture, "unresolved")
+	page, err := s.ReadReviewPictureFiles(t.Context(), "local", "ws-1", batch.ID, PictureFilesQuery{
+		Section: PictureLoose, Key: unknown.GroupID, Revision: picture.Revision, DraftRevision: picture.DraftRevision, Limit: 50, Offset: 50,
+	})
+	if err != nil || page.Total != 52 || len(page.Files) != 2 {
+		t.Fatalf("second page: %+v, %v", page, err)
+	}
+
+	edits("exclude_files", "one.png", "")
+	picture = check(totals{3, 0, 54})
+	if picture.LeftOut.Count != 1 || !slices.ContainsFunc(picture.Folders, func(folder PictureFolder) bool {
+		return folder.Category == CategoryImages && folder.GroupState == "partial"
+	}) {
+		t.Fatalf("expected a partially ticked Images folder: %+v", picture.Folders)
+	}
+	for _, folder := range picture.Folders {
+		if folder.Category == CategoryInstallers {
+			editDraft(t, s, batch.ID, "deselect_group", func(edit *ReviewDraftEdit) { edit.GroupID = folder.GroupID })
+		}
+	}
+	check(totals{2, 0, 54})
+	edits("select_files", "Guide.pdf", CategoryDocuments)
+	picture = check(totals{3, 0, 53})
+	pair := looseRowOf(t, picture, "versions").Pairs[0]
+	if pair.Files[0].ID != id("Guide.pdf") || pair.Files[0].Placement != PictureFiled {
+		t.Fatalf("the placed member is still shown in the pair: %+v", pair)
+	}
+	edits("mark_trash", "Guide (2).pdf", "")
+	check(totals{3, 1, 52})
+	edits("unmark_trash", "Guide (2).pdf", "")
+	edits("exclude_files", "Guide.pdf", "")
+	check(totals{2, 0, 54})
+	edits("keep_files", "unknown-00.zzzz", "")
+	check(totals{2, 0, 53})
+
+	if err := os.WriteFile(filepath.Join(root, "two.png"), []byte("replacement with a different size"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	picture = check(totals{1, 0, 53})
+	if picture.Changed != 1 || picture.CouldNotFile.Count != 1 {
+		t.Fatalf("changed file must be accounted for separately: %+v", picture.CouldNotFile)
 	}
 }
 

@@ -33,10 +33,12 @@ test.describe.configure({ mode: 'serial' });
 // care and share one short text; the pair and bundle cases choose sizes and days.
 type Fixture = string | { text: string; mtime?: Date };
 
-function syntheticRoot(names: string[], contents: Record<string, Fixture> = {}) {
+function syntheticRoot(names: string[], contents: Record<string, Fixture> = {}, folderName?: 'Downloads') {
   const temp = realpathSync(tmpdir());
-  const root = realpathSync(mkdtempSync(join(temp, 'ori-group-review-')));
-  if (!root.startsWith(temp) || root === temp) throw new Error('Non-temporary fixture');
+  const parent = realpathSync(mkdtempSync(join(temp, 'ori-group-review-')));
+  if (!parent.startsWith(temp) || parent === temp) throw new Error('Non-temporary fixture');
+  const root = folderName ? join(parent, folderName) : parent;
+  if (folderName) mkdirSync(root, { mode: 0o700 });
   for (const name of names) {
     const chosen = contents[name];
     const text =
@@ -70,10 +72,11 @@ async function manualReview(
   names: string[],
   label?: string,
   useAlias = false,
-  contents: Record<string, Fixture> = {}
+  contents: Record<string, Fixture> = {},
+  folderName?: 'Downloads'
 ) {
   const ws = await workspace(request, label);
-  const root = syntheticRoot(names, contents);
+  const root = syntheticRoot(names, contents, folderName);
   const referencePath = useAlias
     ? join(
         realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'ori-group-alias-'))),
@@ -141,7 +144,7 @@ const filesLabel = (moves: number, trash = 0) => {
   if (moves && trash) return `File ${files(moves)} · ${trash} to Trash`;
   if (moves) return `File ${files(moves)}`;
   if (trash) return `Move ${files(trash)} to Trash`;
-  return 'Nothing to file';
+  return 'No changes selected';
 };
 
 // The destination folders that exist under the Filed root. Setting the review up
@@ -183,8 +186,7 @@ test('agentless real entry draws a 206-file folder ticked, unticks one folder, k
   });
   const console = await openReview(page, ws.slug);
 
-  // The lead line, then the frame: nothing else comes before the first folder.
-  // The folder is named by its own folder name, never a path.
+  // The picture lead and frame use the folder's display name.
   const folderName = basename(ws.root);
   await expect(console.locator('#fileJanitorLead')).toHaveText(
     `This is how ${folderName} will look. Nothing moves until you press File. Ori reads names, types, sizes and dates, never what is inside.`
@@ -227,7 +229,7 @@ test('agentless real entry draws a 206-file folder ticked, unticks one folder, k
 
   // Unticking is one saved edit; the card stays, dashed, and says Not filed.
   await folder(console, 'images').uncheck();
-  await expect(fileButton(console)).toHaveText('Nothing to file');
+  await expect(fileButton(console)).toHaveText(filesLabel(0));
   await expect(console.locator('.fj-folder-card.is-unticked')).toContainText('Not filed');
   await expect(folder(console, 'images')).toHaveAccessibleName('Images, 206 files, not filed');
   await expect(fileButton(console)).toBeDisabled();
@@ -242,7 +244,7 @@ test('agentless real entry draws a 206-file folder ticked, unticks one folder, k
   await page.reload();
   await expect(folder(console, 'images')).not.toBeChecked();
   await expect(console.locator('.fj-folder-card.is-unticked')).toContainText('Not filed');
-  await expect(fileButton(console)).toHaveText('Nothing to file');
+  await expect(fileButton(console)).toHaveText(filesLabel(0));
   await page.screenshot({ path: `${evidence}/01-unticked-after-reload.png`, fullPage: true });
   await folder(console, 'images').check();
   await expect(fileButton(console)).toHaveText(filesLabel(206));
@@ -250,6 +252,230 @@ test('agentless real entry draws a 206-file folder ticked, unticks one folder, k
   for (const name of names) expect(existsSync(join(ws.root, name)), name).toBe(true);
   expect(existsSync(join(ws.root, 'Filed', 'Images'))).toBe(false);
   expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
+});
+
+test('decision counts jump to their sections and unanswered files do not block unrelated moves', async ({ page, request }) => {
+  const ws = await manualReview(request, ['Guide.pdf', 'Guide (2).pdf', 'photo.png', 'setup.dmg']);
+  const writes: string[] = [];
+  page.on('request', req => {
+    if (req.method() !== 'GET' && req.url().includes('/file-janitor')) writes.push(req.url());
+  });
+  const review = await openReview(page, ws.slug);
+  const ready = review.getByRole('button', { name: '2 ready to file', exact: true });
+  const undecided = review.getByRole('button', { name: '2 need a decision', exact: true });
+  await expect(ready).toBeVisible();
+  const folderName = basename(ws.root);
+  await expect(review.getByText(`Unanswered files stay in ${folderName}.`)).toBeVisible();
+  await ready.click();
+  await expect(review.locator('#fileJanitorFiledTitle')).toBeFocused();
+  await undecided.click();
+  await expect(review.locator('#fileJanitorLooseTitle')).toBeFocused();
+  await expect(review.locator('#fileJanitorLooseTitle')).toBeInViewport();
+  expect(writes).toEqual([]);
+  const screenshots = 'tasks/evidence-downloads-review-decisions';
+  mkdirSync(screenshots, { recursive: true });
+  await page.screenshot({ path: `${screenshots}/01-jump-to-decisions.png` });
+
+  await folder(review, 'installers').uncheck();
+  await expect(review.getByRole('button', { name: '1 ready to file', exact: true })).toBeVisible();
+  await expect(undecided).toBeVisible();
+  await expect(fileButton(review)).toHaveText('File 1 file');
+  await expect(fileButton(review)).toBeEnabled();
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toMatch(/\/draft$/);
+  expect(destinations(ws.root)).toEqual([]);
+  await page.screenshot({ path: `${screenshots}/01-one-folder-unticked.png` });
+});
+
+// A valid, blank single-page PDF; the native acceptance check can also use any
+// disposable PDF exported on the Mac. All offsets are byte lengths of ASCII.
+function disposablePDF() {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 144 144] /Resources << >> >>'
+  ];
+  let body = '%PDF-1.4\n';
+  const offsets = objects.map((object, index) => {
+    const offset = body.length;
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    return offset.toString().padStart(10, '0') + ' 00000 n \n';
+  });
+  return body + `xref\n0 4\n0000000000 65535 f \n${offsets.join('')}trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n${body.length}\n%%EOF\n`;
+}
+
+test('from the Filing station, file unrelated items and leave both possible copies in place', async ({
+  page,
+  request
+}) => {
+  const documents = ['Field guide.pdf', 'Field guide (2).pdf'];
+  const otherFiles = ['unrelated-photo.png', 'unrelated-installer.dmg'];
+  const pdf = disposablePDF();
+  const ws = await manualReview(
+    request,
+    [...documents, ...otherFiles],
+    'Independent filing decisions',
+    false,
+    Object.fromEntries(documents.map(name => [name, pdf])),
+    'Downloads'
+  );
+  const initial = await pictureOf(request, ws.base);
+  const batch = `${ws.base}/batches/${initial.batch_id}`;
+  const pair = initial.loose.find((row: { key: string }) => row.key === 'versions').pairs[0];
+  const sent: string[] = [];
+  await page.route('**/api/onboarding/status', route =>
+    route.fulfill({ json: { needs_onboarding: false, completed: true } })
+  );
+  // The browser checks exact dispatch only. The standard server remains in
+  // no-desktop mode; the native boundary has recording-opener handler tests.
+  await page.route(url => url.pathname === `${batch}/picture`, async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...(await response.json()), can_reveal: true } });
+  });
+  await page.route('**/picture/files/*/open?*', route => {
+    const req = route.request();
+    expect(req.method()).toBe('POST');
+    expect(req.headers()['x-ori-filing-action']).toBe('open');
+    sent.push(new URL(req.url()).pathname + new URL(req.url()).search);
+    return route.fulfill({ json: { success: true } });
+  });
+  const drafts = draftPosts(page);
+  const pressBodies: { trash_acknowledged: number }[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && isFileRequest(req.url())) pressBodies.push(req.postDataJSON());
+  });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const nudge = page.locator('#workspace-detail-task-confirm-modal');
+  await page.addLocatorHandler(nudge, () => nudge.getByRole('button', { name: 'Not now', exact: true }).click());
+  await page.goto(`/workspaces/${encodeURIComponent(ws.slug)}?mode=map`);
+  const station = page.locator('.ws-cmd-opmap [data-cmd-hq-station="file-janitor"]');
+  await expect(station).toBeVisible();
+  await station.click();
+  const review = page.locator('#fileJanitorConsole');
+  await expect(review).toBeVisible();
+  const decisions = review.getByRole('button', { name: '2 need a decision', exact: true });
+  await decisions.click();
+  const card = pairCard(review, documents[0]);
+  for (const [index, name] of documents.entries()) {
+    await card.getByRole('button', { name: `Open ${name} in Preview`, exact: true }).click();
+    await expect.poll(() => sent.length).toBe(index + 1);
+    expect(sent[index]).toBe(`${batch}/picture/files/${pair.files[index].id}/open?revision=${initial.revision}`);
+  }
+  expect(drafts).toEqual([]);
+  const evidencePath = 'tasks/evidence-downloads-review-decisions';
+  mkdirSync(evidencePath, { recursive: true });
+  const evidenceOptions = { mask: [review.locator('.fj-console-folder')], maskColor: '#888' };
+  await page.screenshot({ path: `${evidencePath}/04-pair-simulated-inspection.png`, ...evidenceOptions });
+
+  const target = documents[1];
+  await fileChoice(card, target).selectOption('trash');
+  await expect(card.locator('.fj-pair-line').nth(1)).toContainText('Marked for Trash');
+  await expect(card.locator('.fj-pair-line').nth(0)).not.toContainText('Marked for Trash');
+  await expect(fileButton(review)).toHaveText(filesLabel(2, 1));
+  await expect(fileButton(review)).toBeDisabled();
+  await card.getByRole('button', { name: `Undo Trash mark for ${target}`, exact: true }).click();
+  await expect(decisions).toBeVisible();
+  await expect(fileButton(review)).toHaveText(filesLabel(2));
+  await expect(fileButton(review)).toBeEnabled();
+  expect(drafts).toEqual(['mark_trash', 'unmark_trash']);
+  expect(pressBodies).toEqual([]);
+  const trashPath = sandboxTrash();
+  const trashContents = () => trashPath && existsSync(trashPath) ? readdirSync(trashPath).sort() : [];
+  const beforeTrash = trashContents();
+  await fileButton(review).click();
+  const receipt = review.locator('#fileJanitorReceipt');
+  await expect(receipt).toBeVisible();
+  await expect(receipt).toContainText('2 files filed.');
+  await expect(receipt).not.toContainText(/moved to Trash/i);
+  expect(pressBodies).toHaveLength(1);
+  expect(pressBodies[0].trash_acknowledged).toBe(0);
+  expect(trashContents()).toEqual(beforeTrash);
+  expect(readdirSync(ws.root).sort()).toEqual([...documents, 'Filed'].sort());
+  for (const name of documents) expect(readFileSync(join(ws.root, name), 'utf8')).toBe(pdf);
+  expect(readdirSync(join(ws.root, 'Filed', 'Images'))).toEqual([otherFiles[0]]);
+  expect(readdirSync(join(ws.root, 'Filed', 'Installers'))).toEqual([otherFiles[1]]);
+  await page.screenshot({ path: `${evidencePath}/04-receipt.png`, ...evidenceOptions });
+
+  await receipt.getByRole('button', { name: 'Done', exact: true }).click();
+  await review.getByRole('button', { name: 'All files', exact: true }).click();
+  const row = review.getByRole('row').filter({ hasText: target });
+  await expect(row).toBeVisible();
+  // Stage one PDF, then replace its contents after the plan was checked. The
+  // real press from All files must refuse this now-outdated plan and move nothing.
+  await row.getByRole('combobox').selectOption('documents');
+  await row.getByRole('checkbox').check();
+  await expect(fileButton(review)).toHaveText(filesLabel(1));
+  await expect(fileButton(review)).toBeEnabled();
+  writeFileSync(join(ws.root, target), 'Changed disposable file: different byte length');
+  await fileButton(review).click();
+  await expect(review.getByText(/The folder changed since you looked\. Nothing was filed/)).toBeVisible();
+  expect(pressBodies).toHaveLength(2);
+  expect(trashContents()).toEqual(beforeTrash);
+  expect(readdirSync(ws.root).sort()).toEqual([...documents, 'Filed'].sort());
+  expect(destinations(ws.root).sort()).toEqual(['Images', 'Installers']);
+  await page.screenshot({ path: `${evidencePath}/04-changed-refusal.png`, ...evidenceOptions });
+});
+
+test('both review views dispatch the same simulated inspection; a standard demo hides it', async ({ page, request }) => {
+  const ws = await manualReview(request, ['Reference.pdf', 'notes.zzzz']);
+  const picture = await pictureOf(request, ws.base);
+  const base = `${ws.base}/batches/${picture.batch_id}`;
+  const review = await openReview(page, ws.slug, `&batch_id=${picture.batch_id}`);
+  const allFiles = review.getByRole('button', { name: 'All files', exact: true });
+  const open = review.getByRole('button', { name: 'Open Reference.pdf in Preview', exact: true });
+  const finder = review.getByRole('button', { name: 'Show notes.zzzz in Finder', exact: true });
+  const screenshots = 'tasks/evidence-downloads-review-decisions';
+  mkdirSync(screenshots, { recursive: true });
+  await expect(fileButton(review)).toBeEnabled();
+  await allFiles.click();
+  await expect(review.getByRole('row').filter({ hasText: 'Reference.pdf' })).toBeVisible();
+  await expect(open).toHaveCount(0);
+  await expect(finder).toHaveCount(0);
+  const evidenceOptions = { mask: [review.locator('.fj-console-folder')], maskColor: '#888' };
+  await page.screenshot({ path: `${screenshots}/03-no-desktop.png`, ...evidenceOptions });
+
+  // Only the desktop presentation data/dispatch are simulated in Chromium;
+  // the HTTP handler has separate tests using recording openers.
+  await page.route(url => url.pathname === base || url.pathname === `${base}/picture`, async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    if (body.picture) body.can_reveal = true;
+    if (body.candidates) {
+      body.inspection_revision = picture.revision;
+      for (const candidate of body.candidates) {
+        candidate.can_inspect = true;
+        if (candidate.name === 'Reference.pdf') candidate.viewer = 'Preview';
+      }
+    }
+    await route.fulfill({ response, json: body });
+  });
+  const dispatch: string[] = [];
+  await page.route('**/picture/files/*/{open,reveal}?*', async route => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const action = url.pathname.split('/').at(-1);
+    expect(req.headers()['x-ori-filing-action']).toBe(action);
+    expect(req.method()).toBe('POST');
+    dispatch.push(url.pathname + url.search);
+    await route.fulfill({ json: { success: true } });
+  });
+  const edits = draftPosts(page);
+  await page.reload();
+  await expect(open).toBeVisible();
+  await open.click();
+  await expect.poll(() => dispatch.length).toBe(1);
+  await allFiles.click();
+  await expect(finder).toBeVisible();
+  await expect(review.getByRole('button', { name: /^Open notes\.zzzz/ })).toHaveCount(0);
+  await open.click();
+  await expect.poll(() => dispatch.length).toBe(2);
+  expect(dispatch[1]).toBe(dispatch[0]);
+  await finder.click();
+  await expect.poll(() => dispatch.length).toBe(3);
+  expect(dispatch[2]).toMatch(/\/reveal\?revision=/);
+  expect(edits).toEqual([]);
+  expect(destinations(ws.root)).toEqual([]);
+  await page.screenshot({ path: `${screenshots}/03-all-files-simulated.png`, ...evidenceOptions });
 });
 
 test('206 mixed files are each drawn once, question groups are never ticked, and deep links still reach All files', async ({
@@ -308,7 +534,7 @@ test('206 mixed files are each drawn once, question groups are never ticked, and
   // No tick box for a question group (Ori never ticks one); each row has one menu,
   // starting on "Leave here", and the question files stay loose.
   await expect(console.locator('.fj-loose-row input')).toHaveCount(0);
-  const menus = console.locator('.fj-loose-row select');
+  const menus = console.locator('.fj-loose-row > select');
   await expect(menus).toHaveCount(4);
   for (const menu of await menus.all()) await expect(menu).toHaveValue('leave');
   await expect(fileButton(console)).toHaveText(filesLabel(149));
@@ -1247,16 +1473,17 @@ test('pressing twice, or again after a lost answer, files once and reports the f
 
 // ------------------------------------------------ answers on the loose rows
 //
-// Each question row has one menu; any listed file can be selected for a bar that
-// decides that one file. Every choice is a saved edit: nothing moves until File.
+// Each question row has one group menu and each file can be decided in place.
+// Every choice is a saved edit: nothing moves until File.
 
 // The one menu on a question row, by the row's rule word.
 const rowMenu = (console: ReturnType<Page['locator']>, key: string) =>
   console.locator(`#fileJanitorRowMenu-${key}`);
 
-// A listed file, by its name: the button that selects it for the one-file bar.
 const fileNamed = (console: ReturnType<Page['locator']>, name: string) =>
   console.getByRole('button', { name, exact: true });
+const fileChoice = (console: ReturnType<Page['locator']>, name: string) =>
+  console.getByRole('combobox', { name: `Filing choice for ${name}`, exact: true });
 
 const draftPosts = (page: Page) => {
   const edits: string[] = [];
@@ -1436,7 +1663,7 @@ test('"Leave here, stop asking" keeps a row out of the next scan, and Review aga
   for (const name of names) expect(existsSync(join(ws.root, name)), name).toBe(true);
 });
 
-test('one file can be left out of a ticked folder, or sent to Trash and put back, from the one-file bar', async ({
+test('one file can be left out, marked and unmarked from its inline choice', async ({
   page,
   request
 }) => {
@@ -1449,17 +1676,14 @@ test('one file can be left out of a ticked folder, or sent to Trash and put back
   page.on('request', req => {
     if (req.method() === 'POST' && isFileRequest(req.url())) filePosts.push(req.url());
   });
-  const bar = console.locator('#fileJanitorFileBar');
+  const b = fileChoice(console, 'b.png');
   await expect(fileButton(console)).toHaveText(filesLabel(3));
-  await expect(bar).toHaveText('Click any file to move just that one.');
-
-  // Selecting a file names it in the bar and offers one menu for that file only.
+  await expect(b).toHaveCount(0);
   await fileNamed(console, 'b.png').click();
-  await expect(console.locator('#fileJanitorFileBarName')).toHaveText('b.png');
-  await expect(fileNamed(console, 'b.png')).toHaveAttribute('aria-pressed', 'true');
-  await expect(console.locator('#fileJanitorFileMenu')).toBeFocused();
-  await expect(console.locator('#fileJanitorFileMenu option')).toHaveText([
-    'What should happen to this file?',
+  await expect(fileNamed(console, 'b.png')).toHaveAttribute('aria-expanded', 'true');
+  await expect(b).toBeFocused();
+  await expect(b.locator('option')).toHaveText([
+    'Filing choice',
     'Move to Documents',
     'Move to Audio',
     'Move to Video',
@@ -1472,25 +1696,25 @@ test('one file can be left out of a ticked folder, or sent to Trash and put back
     'Move to Trash'
   ]);
   mkdirSync(evidence, { recursive: true });
-  await page.screenshot({ path: `${evidence}/03-e2e-one-file-bar.png`, fullPage: true });
-  // Cancel closes it without asking the server for anything.
-  await console.locator('#fileJanitorFileBarCancel').click();
-  await expect(bar).toHaveText('Click any file to move just that one.');
+  await page.screenshot({ path: `${evidence}/03-e2e-inline-choice.png`, fullPage: true });
+  await console.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(b).toHaveCount(0);
+  await expect(fileNamed(console, 'b.png')).toBeFocused();
   expect(edits).toEqual([]);
 
   // Leave one file out of its ticked folder.
   await fileNamed(console, 'b.png').click();
-  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Leave here' });
+  await b.selectOption({ label: 'Leave here' });
   await expect(console.locator('.fj-loose-label')).toHaveText(['Left out by you · 1']);
   await expect(fileButton(console)).toHaveText(filesLabel(2));
   await expect(folder(console, 'images')).toHaveJSProperty('indeterminate', true);
-  await expect(bar).toHaveText('Click any file to move just that one.');
+  await expect(b).toHaveCount(0);
   expect(edits).toEqual(['exclude_files']);
 
-  // Send one file to Trash from the bar: the Trash box shows it, the button says so
-  // and waits for the Trash tick. Nothing is pressed.
+  // Mark one file in place. File waits for the separate Trash tick.
+  const c = fileChoice(console, 'c.png');
   await fileNamed(console, 'c.png').click();
-  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Move to Trash' });
+  await c.selectOption({ label: 'Move to Trash' });
   await expect(console.locator('.fj-trash')).toContainText('Trash · 1');
   await expect(console.locator('.fj-trash')).toContainText('c.png');
   await expect(fileButton(console)).toHaveText(filesLabel(1, 1));
@@ -1502,10 +1726,8 @@ test('one file can be left out of a ticked folder, or sent to Trash and put back
 
   // A file in Trash is not offered Trash again; "Leave here" puts it back.
   await fileNamed(console, 'c.png').click();
-  await expect(
-    console.locator('#fileJanitorFileMenu option').filter({ hasText: 'Move to Trash' })
-  ).toHaveCount(0);
-  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Leave here' });
+  await expect(c.locator('option').filter({ hasText: 'Move to Trash' })).toHaveCount(0);
+  await c.selectOption({ label: 'Leave here' });
   await expect(console.locator('.fj-trash')).toHaveCount(0);
   await expect(console.locator('#fileJanitorTrashAck')).toHaveCount(0);
   await expect(console.locator('.fj-loose-label')).toHaveText(['Left out by you · 2']);
@@ -1514,7 +1736,7 @@ test('one file can be left out of a ticked folder, or sent to Trash and put back
 
   // Move a single file to another folder: the person's choice, listed first, tagged.
   await fileNamed(console, 'a.png').click();
-  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Move to Archives' });
+  await fileChoice(console, 'a.png').selectOption({ label: 'Move to Archives' });
   const archives = console.locator('[data-fj-folder="archives"]');
   await expect(archives).toContainText('a.png');
   await expect(archives.locator('.fj-tag').filter({ hasText: 'your choice' })).toHaveCount(1);
@@ -1567,30 +1789,17 @@ test('a row menu and a file button work by keyboard, and focus stays in the pict
   await expect(menu).toBeFocused();
   expect(await insideConsole()).toBe(true);
 
-  // Tab to a file, press Enter: the bar opens on that file with focus on its menu.
   const one = fileNamed(console, 'one.png');
   await tabTo(one);
   await page.keyboard.press('Enter');
-  await expect(console.locator('#fileJanitorFileBarName')).toHaveText('one.png');
-  await expect(console.locator('#fileJanitorFileMenu')).toBeFocused();
-  // Decide it from the bar. The bar closes with the choice, so focus must land
-  // somewhere sensible in the picture rather than on the page.
-  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Move to Trash' });
+  const choice = fileChoice(console, 'one.png');
+  await expect(choice).toBeFocused();
+  await choice.selectOption({ label: 'Move to Trash' });
   await expect(console.locator('.fj-trash')).toContainText('one.png');
-  await expect(console.locator('#fileJanitorFileBar')).toHaveText(
-    'Click any file to move just that one.'
-  );
-  const active = await page.evaluate(() => {
-    const node = document.activeElement;
-    return node ? `${node.tagName.toLowerCase()}${node.id ? '#' + node.id : ''}` : 'none';
-  });
-  expect(
-    await insideConsole(),
-    `focus fell out of the picture after the bar closed (on ${active})`
-  ).toBe(true);
+  await expect(fileNamed(console, 'two.png')).toBeFocused();
 });
 
-test('a row menu and the one-file bar fit at 390px with a long file name', async ({
+test('group and inline menus fit at 390px with a long file name', async ({
   page,
   request
 }) => {
@@ -1616,19 +1825,16 @@ test('a row menu and the one-file bar fit at 390px with a long file name', async
   await menu.selectOption({ label: 'Move to Documents' });
   await expect(fileButton(console)).toHaveText(filesLabel(3));
   await fits();
-  // Select the long-named file: the bar names it and shows its menu inside the page.
   await fileNamed(console, long).click();
-  const bar = console.locator('#fileJanitorFileBar');
-  await expect(console.locator('#fileJanitorFileBarName')).toHaveText(long);
+  const choice = fileChoice(console, long);
+  await expect(choice).toBeFocused();
   await fits();
-  const barBox = await bar.boundingBox();
-  expect(barBox!.x).toBeGreaterThanOrEqual(0);
-  expect(barBox!.x + barBox!.width).toBeLessThanOrEqual(391);
-  const fileMenuBox = await console.locator('#fileJanitorFileMenu').boundingBox();
+  const fileMenuBox = await choice.boundingBox();
+  expect(fileMenuBox!.x).toBeGreaterThanOrEqual(0);
   expect(fileMenuBox!.x + fileMenuBox!.width).toBeLessThanOrEqual(391);
   mkdirSync(evidence, { recursive: true });
-  await bar.evaluate(node => node.scrollIntoView({ block: 'center' }));
-  await page.screenshot({ path: `${evidence}/03-e2e-bar-390.png`, fullPage: true });
+  await choice.evaluate(node => node.scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: `${evidence}/03-e2e-inline-390.png`, fullPage: true });
 });
 
 // ------------------------------------------- possible copies and music bundles
@@ -1698,15 +1904,15 @@ test('three kinds of pair: only a copy of the same size with a copy ending has "
   await expect(console.locator('.fj-pair')).toHaveCount(3);
 
   // The file with no ending comes first in every card, then the one with an ending.
-  await expect(pairCard(console, 'Budget.pdf').locator('.fj-pair-line .fj-file-name')).toHaveText([
+  await expect(pairCard(console, 'Budget.pdf').locator('.fj-pair-name')).toHaveText([
     'Budget.pdf',
     'Budget (2).pdf'
   ]);
-  await expect(pairCard(console, 'Plan.pdf').locator('.fj-pair-line .fj-file-name')).toHaveText([
+  await expect(pairCard(console, 'Plan.pdf').locator('.fj-pair-name')).toHaveText([
     'Plan.pdf',
     'Plan copy.pdf'
   ]);
-  await expect(pairCard(console, 'Memo.pdf').locator('.fj-pair-line .fj-file-name')).toHaveText([
+  await expect(pairCard(console, 'Memo.pdf').locator('.fj-pair-name')).toHaveText([
     'Memo.pdf',
     'Memo-v2.pdf'
   ]);
@@ -1729,20 +1935,17 @@ test('three kinds of pair: only a copy of the same size with a copy ending has "
   await expect(console).not.toContainText(/duplicate|identical/i);
 
   // The one button: the bracketed copy of the same size as its original.
-  const trashButtons = console.locator('[id^="fileJanitorTrashCopy-"]');
+  const trashButtons = console.getByRole('button', { name: /^Mark for Trash:/ });
   await expect(trashButtons).toHaveCount(1);
-  await expect(trashButtons).toHaveAttribute('aria-label', 'Trash the copy Budget (2).pdf');
-  await expect(
-    pairCard(console, 'Budget.pdf').locator('[id^="fileJanitorTrashCopy-"]')
-  ).toHaveCount(1);
+  await expect(trashButtons).toHaveAttribute('aria-label', 'Mark for Trash: Budget (2).pdf');
   await expect(pairCard(console, 'Plan.pdf').getByRole('button', { name: /trash/i })).toHaveCount(
     0
   );
   await expect(pairCard(console, 'Memo.pdf').getByRole('button', { name: /trash/i })).toHaveCount(
     0
   );
-  // No Trash for a whole row or a whole pair: no menu offers it.
-  for (const menu of await console.locator('select.fj-row-menu').all())
+  // No Trash for a whole row or a whole pair: individual menus only.
+  for (const menu of await console.locator('select.fj-row-menu:not(.fj-file-choice)').all())
     await expect(menu.locator('option').filter({ hasText: /trash/i })).toHaveCount(0);
 
   mkdirSync(evidence, { recursive: true });
@@ -1753,18 +1956,31 @@ test('three kinds of pair: only a copy of the same size with a copy ending has "
   expect(destinations(ws.root)).toEqual([]);
 });
 
-test('Trash the copy marks that one file, Put the copy back undoes it, and nothing is trashed until File', async ({
+test('pair choices and simulated inspection stay with each file at 390px', async ({
   page,
   request
 }) => {
-  await page.setViewportSize({ width: 1440, height: 1200 });
+  await page.setViewportSize({ width: 390, height: 844 });
   const ws = await manualReview(
     request,
     pairFiles.slice(0, 2),
-    'Trash the copy',
+    'Review a possible copy',
     false,
     pairContents
   );
+  // No real desktop launches: only the availability envelope and dispatch are simulated.
+  await page.route('**/picture', async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ response, json: { ...body, can_reveal: true } });
+  });
+  const inspected: string[] = [];
+  await page.route('**/picture/files/*/open?*', async route => {
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().headers()['x-ori-filing-action']).toBe('open');
+    inspected.push(route.request().url());
+    await route.fulfill({ json: { success: true } });
+  });
   const console = await openReview(page, ws.slug);
   const edits = draftPosts(page);
   const filePosts: string[] = [];
@@ -1772,15 +1988,28 @@ test('Trash the copy marks that one file, Put the copy back undoes it, and nothi
     if (req.method() === 'POST' && isFileRequest(req.url())) filePosts.push(req.url());
   });
   const card = pairCard(console, 'Budget.pdf');
-  const trash = card.getByRole('button', { name: 'Trash the copy Budget (2).pdf', exact: true });
+  const trash = card.getByRole('button', { name: 'Mark for Trash: Budget (2).pdf', exact: true });
+  const undo = card.getByRole('button', { name: 'Undo Trash mark for Budget (2).pdf', exact: true });
   await expect(fileButton(console)).toHaveText(filesLabel(0));
-
+  const picture = await pictureOf(request, ws.base);
+  const [pair] = picture.loose.find((row: { key: string }) => row.key === 'versions').pairs;
+  for (const [index, name] of ['Budget.pdf', 'Budget (2).pdf'].entries()) {
+    const choice = fileChoice(card, name);
+    await expect(choice).toBeEnabled();
+    const open = card.getByRole('button', { name: `Open ${name} in Preview`, exact: true });
+    await open.click();
+    await expect.poll(() => inspected.length).toBe(index + 1);
+    expect(inspected[index]).toContain(`/${pair.files[index].id}/open?revision=${picture.revision}`);
+  }
+  expect(edits).toEqual([]);
+  const screenshots = 'tasks/evidence-downloads-review-decisions';
+  mkdirSync(screenshots, { recursive: true });
+  await trash.evaluate(node => node.scrollIntoView({ block: 'center' }));
+  await page.screenshot({ path: `${screenshots}/02-pair-before-mark.png` });
   await trash.click();
   // The line says so, the Trash box holds the one file, and the button waits for the tick.
-  await expect(card.locator('.fj-pair-line').nth(1)).toContainText('in Trash');
-  await expect(
-    card.getByRole('button', { name: 'Put Budget (2).pdf back', exact: true })
-  ).toBeVisible();
+  await expect(card.locator('.fj-pair-line').nth(1)).toContainText('Marked for Trash');
+  await expect(undo).toBeVisible();
   await expect(console.locator('.fj-trash')).toContainText('Trash · 1');
   await expect(console.locator('.fj-trash')).toContainText('Budget (2).pdf');
   await expect(fileButton(console)).toHaveText(filesLabel(0, 1));
@@ -1788,20 +2017,21 @@ test('Trash the copy marks that one file, Put the copy back undoes it, and nothi
   await expect(console.locator('.fj-trash-ack')).toContainText('Yes, move 1 file to Trash');
   await expect(console.locator('#fileJanitorTrashAck')).not.toBeChecked();
   // Only the copy is marked: the original has no button and is still loose.
-  await expect(card.locator('.fj-pair-line').nth(0)).not.toContainText('in Trash');
-  mkdirSync(evidence, { recursive: true });
-  await page.screenshot({ path: `${evidence}/04-e2e-trash-copy.png`, fullPage: true });
+  await expect(card.locator('.fj-pair-line').nth(0)).not.toContainText('Marked for Trash');
+  const choice = fileChoice(card, 'Budget (2).pdf');
+  await expect(choice).toBeFocused();
+  const choiceBox = (await choice.boundingBox())!;
+  const footerBox = (await console.locator('.fj-footer').boundingBox())!;
+  expect(choiceBox.y + choiceBox.height).toBeLessThanOrEqual(footerBox.y);
+  await page.screenshot({ path: `${screenshots}/02-pair-marked.png` });
 
-  // Put it back: the Trash box goes, the button is back, nothing else changed.
-  await card.getByRole('button', { name: 'Put Budget (2).pdf back', exact: true }).click();
+  await undo.click();
   await expect(console.locator('.fj-trash')).toHaveCount(0);
   await expect(console.locator('#fileJanitorTrashAck')).toHaveCount(0);
   await expect(trash).toBeVisible();
   await expect(fileButton(console)).toHaveText(filesLabel(0));
-  // And mark it again.
-  await trash.click();
-  await expect(console.locator('.fj-trash')).toContainText('Trash · 1');
-  expect(edits).toEqual(['mark_trash', 'unmark_trash', 'mark_trash']);
+  expect(edits).toEqual(['mark_trash', 'unmark_trash']);
+  await page.screenshot({ path: `${screenshots}/02-pair-after-undo.png` });
 
   // A mark is a saved choice, not an action: both files are still in the folder.
   for (const name of ['Budget.pdf', 'Budget (2).pdf'])
@@ -1833,7 +2063,7 @@ test('pressing File with the Trash tick sends the marked copy to the Trash and l
     if (req.method() === 'POST' && isFileRequest(req.url())) filePosts.push(req.url());
   });
   await pairCard(console, 'Budget.pdf')
-    .getByRole('button', { name: 'Trash the copy Budget (2).pdf', exact: true })
+    .getByRole('button', { name: 'Mark for Trash: Budget (2).pdf', exact: true })
     .click();
   await expect(fileButton(console)).toHaveText(filesLabel(0, 1));
   await expect(fileButton(console)).toBeDisabled();
@@ -1975,10 +2205,9 @@ test('a bundle split by single-file choices says how it is split, and its own "L
   await expect(fileButton(console)).toHaveText(filesLabel(1));
   await expect(song.locator('.fj-bundle-note')).toHaveCount(0);
 
-  // One file of the bundle goes to Documents from the one-file bar.
+  // One file of the bundle goes to Documents from its own row.
   await fileNamed(song, 'Song 130.als').click();
-  await expect(console.locator('#fileJanitorFileBarName')).toHaveText('Song 130.als');
-  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Move to Documents' });
+  await fileChoice(song, 'Song 130.als').selectOption({ label: 'Move to Documents' });
   await expect(song.locator('.fj-bundle-note')).toHaveText(
     'Split: 2 stay here, 1 in Filed/Documents'
   );
@@ -2001,7 +2230,7 @@ test('a bundle split by single-file choices says how it is split, and its own "L
   // A file already in Trash is never overwritten by a bundle choice: it is left out
   // of the request, stays in the Trash box, and the card counts it.
   await fileNamed(song, 'Song 130.wav').click();
-  await console.locator('#fileJanitorFileMenu').selectOption({ label: 'Move to Trash' });
+  await fileChoice(song, 'Song 130.wav').selectOption({ label: 'Move to Trash' });
   await expect(console.locator('.fj-trash')).toContainText('Song 130.wav');
   await menu.selectOption({ label: 'Move to Audio' });
   await expect(song.locator('.fj-bundle-note')).toHaveText('Split: 2 in Filed/Audio, 1 in Trash');
@@ -2063,7 +2292,7 @@ test('a bundle menu and "Trash the copy" work by keyboard, and focus stays in th
 
   // Tab to "Trash the copy" and press Enter. The button becomes "Put the copy back",
   // so focus has to land on something sensible in the picture, not on the page.
-  const trash = console.locator('[id^="fileJanitorTrashCopy-"]');
+  const trash = console.getByRole('button', { name: /^Mark for Trash:/ });
   await tabTo(trash);
   await expect(trash).toBeFocused();
   await page.keyboard.press('Enter');
@@ -2110,7 +2339,7 @@ test('a pair card and a bundle card fit at 390px with long file names', async ({
   expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(391);
   expect(menuBox!.height).toBeGreaterThanOrEqual(44);
   // Trash the copy, and place the bundle: still no overflow, and the lines wrap.
-  await console.locator('[id^="fileJanitorTrashCopy-"]').click();
+  await console.getByRole('button', { name: /^Mark for Trash:/ }).click();
   await expect(console.locator('.fj-trash')).toContainText('Trash · 1');
   await menu.selectOption({ label: 'Move to Audio' });
   await expect(console.locator('.fj-bundle-note')).toHaveText('All in Filed/Audio');
@@ -2455,7 +2684,7 @@ test('a file sent to the Trash is counted apart on the receipt, and Undo all bri
   );
   const console = await openReview(page, ws.slug);
   await pairCard(console, 'Budget.pdf')
-    .getByRole('button', { name: 'Trash the copy Budget (2).pdf', exact: true })
+    .getByRole('button', { name: 'Mark for Trash: Budget (2).pdf', exact: true })
     .click();
   await expect(fileButton(console)).toHaveText(filesLabel(0, 1));
   await console.locator('#fileJanitorTrashAck').check();
