@@ -111,7 +111,7 @@ func (l nativeResetLaunch) startWatcher(operation string, port int) (finish func
 	if !l.unchanged() {
 		return nil, errors.New("the macOS app changed since launch")
 	}
-	// #nosec G204 -- fixed helper mode on the verified currently running image; no shell.
+	// #nosec G204 G702 -- exact native app image and a fixed helper mode, without a shell. The operation and port are validated by the child.
 	cmd := exec.Command(l.executable, nativeWatchArg, strconv.Itoa(os.Getpid()), l.bundle, operation, strconv.Itoa(port))
 	cmd.SysProcAttr = &unix.SysProcAttr{Setsid: true}
 	// Keep the launch environment (including the activated root) in the
@@ -213,7 +213,7 @@ func runNativeResetWatcher(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	// #nosec G204 -- absolute OS opener and verified absolute bundle; ID and port have bounded formats.
+	// #nosec G204 G702 -- fixed OS opener and verified absolute bundle. Only a bounded ID and numeric port follow --args.
 	cmd := exec.CommandContext(ctx, "/usr/bin/open", "-g", "-n", "-a", launch.bundle, "--args", nativeBootArg, id, strconv.Itoa(port))
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

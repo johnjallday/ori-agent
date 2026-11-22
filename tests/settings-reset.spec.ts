@@ -1,7 +1,15 @@
 import { test, expect, type APIRequestContext, type Page, type Request } from '@playwright/test';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
@@ -22,6 +30,7 @@ test.describe.serial('Settings reset on an owned installation', () => {
   let origin = '';
   let child: ChildProcess | null = null;
   let output = '';
+  let previousCompletedURL = '';
 
   const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
 
@@ -344,6 +353,7 @@ test.describe.serial('Settings reset on an owned installation', () => {
     const continueSetup = page.getByRole('button', { name: 'Continue setup' });
     await expect(continueSetup).toBeVisible();
     await expect(page).toHaveURL(statusURL);
+    previousCompletedURL = statusURL;
     expect(await page.evaluate(() => localStorage.getItem('ori-theme'))).toBeNull();
     expect(await page.evaluate(() => localStorage.getItem('ori_chat_session_stale'))).toBeNull();
     expect(
@@ -460,6 +470,28 @@ test.describe.serial('Settings reset on an owned installation', () => {
     await expect(page.locator('#confirmResetBtn')).toContainText('Reset reviewed data');
     await page.locator('#confirmResetBtn').click();
     const statusURL = await stagedStatus(page);
+    await page.evaluate(() => localStorage.setItem('unrelated-selective', 'keep'));
+    expect(statusURL).not.toBe(previousCompletedURL);
+    const independent = await page.context().browser()!.newContext();
+    try {
+      const freshTab = await independent.newPage();
+      await freshTab.goto(origin + '/');
+      await expect(freshTab).toHaveURL(statusURL);
+      await expect(freshTab.getByRole('heading', { name: 'Restart required' })).toBeVisible();
+      expect(
+        await freshTab.evaluate(() => localStorage.getItem('ori.reset.operation_id'))
+      ).toBeNull();
+      await freshTab.goto(previousCompletedURL);
+      await expect(
+        freshTab.getByRole('heading', { name: 'Reset status unavailable' })
+      ).toBeVisible();
+      await expect(
+        freshTab.getByRole('button', { name: /Continue setup|Back to Ori/ })
+      ).toHaveCount(0);
+      await expect(freshTab).toHaveURL(previousCompletedURL);
+    } finally {
+      await independent.close();
+    }
     // Nothing is deleted by the accepting process.
     expect(readFileSync(bundledSkill, 'utf8')).toContain('e2e-demo-skill');
 
@@ -472,6 +504,9 @@ test.describe.serial('Settings reset on an owned installation', () => {
     await page.getByText('Reviewed categories and checks').click();
     await expect(page.getByText('e2e-demo-plugin: completed')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Continue setup' })).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Back to Ori' })).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem('unrelated-selective'))).toBe('keep');
     await page.getByRole('button', { name: 'Back to Ori' }).click();
     await expect(page).toHaveURL(origin + '/');
 
@@ -621,5 +656,77 @@ test.describe.serial('Settings reset on an owned installation', () => {
     } finally {
       await new Promise<void>(resolve => unrelated.close(() => resolve()));
     }
+  });
+
+  test('partial recovery keeps completed categories visible and never offers entry', async ({
+    page,
+    request
+  }) => {
+    test.skip(
+      process.getuid?.() === 0,
+      'requires ordinary file permissions for the injected offline removal fault'
+    );
+    await stopServer();
+    await startServer();
+    const name = 'partial-reset-fixture';
+    const source = join(root, 'external', name);
+    mkdirSync(join(source, '.claude-plugin'), { recursive: true, mode: 0o750 });
+    const manifest = join(source, '.claude-plugin', 'plugin.json');
+    writeFileSync(
+      manifest,
+      JSON.stringify({ name, version: '1.0.0', description: 'Retained linked source' }),
+      { mode: 0o600 }
+    );
+    const headers = { 'X-Requested-With': 'XMLHttpRequest' };
+    const installed = await request.post(origin + '/api/plugins/install', {
+      headers,
+      data: { source, format: 'claude', confirm: true }
+    });
+    expect(installed.ok()).toBeTruthy();
+    await openSettings(page, request);
+    await page.locator('#resetInstalledPlugins').check();
+    await page.locator('#resetOnboarding').check();
+    await page.locator('#resetAppBtn').click();
+    await reviewDialogReady(page);
+    await page.locator('#resetConfirmInput').fill('RESET');
+    await page.locator('#confirmResetBtn').click();
+    const statusURL = await stagedStatus(page);
+    const id = new URL(statusURL).searchParams.get('operation');
+    await stopServer();
+
+    // Block one owned plugin removal at the apply boundary, not the preview
+    // or receipt. The other category can still finish and verify normally.
+    const locked = join(dataDir, 'plugins', 'state', name, 'locked');
+    mkdirSync(locked, { recursive: true, mode: 0o750 });
+    writeFileSync(join(locked, 'fixture.txt'), 'offline fault\n', { mode: 0o600 });
+    chmodSync(locked, 0);
+    const hash = digest(manifest);
+    try {
+      startChild();
+      await expect(page.getByRole('heading', { name: 'Reset needs attention' })).toBeVisible({
+        timeout: 20_000
+      });
+      await expect(page).toHaveURL(statusURL);
+      await page.getByText('Reviewed categories and checks').click();
+      await expect(page.getByText('Installed plugins: failed')).toBeVisible();
+      await expect(page.getByText('Setup steps: completed')).toBeVisible();
+      await expect(page.getByRole('button', { name: /Back to Ori|Continue setup/ })).toHaveCount(0);
+      const receipt = await request.get(`${origin}/api/reset/operations/${id}`);
+      expect(receipt.headers()['x-ori-reset-ready']).toBeUndefined();
+      expect(await receipt.json()).toMatchObject({
+        success: false,
+        operation: { id, state: 'partial_failure' }
+      });
+      expect(digest(manifest)).toBe(hash);
+    } finally {
+      chmodSync(locked, 0o750);
+    }
+    await stopServer();
+    await startServer();
+    await expect(page.getByRole('button', { name: 'Back to Ori' })).toBeVisible({
+      timeout: 20_000
+    });
+    await expect(page).toHaveURL(statusURL);
+    expect(digest(manifest)).toBe(hash);
   });
 });

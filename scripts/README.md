@@ -36,6 +36,14 @@ Builds just `bin/ori-agent` for faster iteration.
 Builds the workspace launcher's platform helper; also used by release/smoke
 workflows and Ori's worktree provisioning adapter.
 
+### Opt-in development restart
+
+Use `make run-dev-managed PORT=8765` for a stable local build that restarts after
+an accepted destructive Settings reset. A plain `make run-dev` still needs a
+full manual restart. For an isolated check, use `ORI_DEMO_MANAGED_RESTART=1 wt demo`
+or `./scripts/demo-server.sh --managed-restart`. Keep the same status tab open.
+The supervisor won't stop an unrelated port owner or retry a failed launch.
+
 ## Release
 
 [RELEASE_CHECKLIST.md](../docs/RELEASE_CHECKLIST.md) is authoritative.

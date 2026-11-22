@@ -87,6 +87,19 @@ After installation:
 3. Visit http://localhost:8765
 4. Complete the onboarding wizard
 
+## Restart after a reset
+
+Keep the **Reset & Recovery** status tab open. A supported Ori app opened from
+Applications or Spotlight can quit and reopen itself after a reviewed reset.
+The tab reconnects at the original port before offering **Back to Ori** or
+**Continue setup**.
+
+If Ori requests a manual restart (including for the raw binary and the current
+launch-at-login mode), choose **Quit** from the Ori menu and reopen the same app.
+Choose **Start Server** if it did not start. **Stop Server** followed by
+**Start Server** does not quit the app and cannot finish a reset. Reset does not
+change the saved menubar port or launch-at-login setting.
+
 ## Auto-Start on Login
 
 To have Ori Agent start automatically when you log in:
