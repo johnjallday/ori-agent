@@ -19,6 +19,8 @@
   const COPY = {
     opening:
       'What should this workspace do? Tell me roughly — I’ll set it up and you check it at the end.',
+    draftOpening:
+      'What should this workspace do? Tell me roughly — I’ll suggest a draft for you to review.',
     modelFailure: 'I couldn’t reach my model just now. Set up manually, or try again.',
     draftFailure:
       'Your edits are kept in this dialog, but I couldn’t save the shared draft. Try again before continuing or closing.',
@@ -256,6 +258,7 @@
     localLines = [],
     expanded = false,
     busy = false,
+    draftStatus = false,
     pendingText = ''
   } = {}) {
     const stored = (Array.isArray(session?.transcript) ? session.transcript : [])
@@ -315,9 +318,82 @@
       firstVisible: hiddenCount,
       hiddenCount,
       composerDisabled: Boolean(busy) || running,
-      status: busy ? COPY.busy : latestAssistant >= 0 ? entries[latestAssistant].text : '',
+      status: busy
+        ? draftStatus
+          ? '' // The draft preview owns the single waiting announcement.
+          : COPY.busy
+        : latestAssistant >= 0
+          ? entries[latestAssistant].text
+          : '',
       busy: Boolean(busy)
     };
+  }
+
+  const DRAFT_LABELS = { name: 'name', blueprint: 'blueprint', purpose: 'purpose' };
+
+  // The creator supplies applied form values and its next gate. No model prose,
+  // ready flag, wizard step number or transport reply is a creation fact.
+  function ordinaryDraftView({
+    fields = {},
+    previous = {},
+    lastChange = '',
+    waiting = false,
+    failed = false,
+    paused = false,
+    asking = false,
+    reviewable = false
+  } = {}) {
+    const changed = Object.keys(DRAFT_LABELS).filter(
+      key => text(previous[key]) !== text(fields[key])
+    );
+    const hasProposal = Object.keys(DRAFT_LABELS).some(key => text(fields[key]));
+    const purpose = Array.from(text(fields.purpose));
+    return {
+      title: 'Draft · Nothing created yet',
+      name: text(fields.name) || 'Workspace not named yet',
+      blueprint: text(fields.blueprint) || 'Undecided',
+      purpose:
+        (purpose.length > 180
+          ? `${purpose.slice(0, 179).join('').trimEnd()}…`
+          : purpose.join('')) || 'Undecided',
+      change:
+        changed.length && !paused
+          ? `Draft updated: ${changed.map(key => DRAFT_LABELS[key]).join(', ')}.`
+          : lastChange,
+      next: paused
+        ? 'Resume the saved draft or start over.'
+        : waiting
+          ? hasProposal
+            ? 'Updating the draft…'
+            : 'Preparing a draft…'
+          : failed
+            ? 'Couldn’t get a suggestion. Try again or set up manually.'
+            : asking
+              ? 'Next: answer the assistant’s question.'
+              : reviewable
+                ? 'Next: review or edit the draft before creating.'
+                : hasProposal
+                  ? 'Keep refining here, or review or edit the draft.'
+                  : 'Describe what you want to use this workspace for.'
+    };
+  }
+
+  function renderOrdinaryDraft(view) {
+    for (const [suffix, value] of Object.entries({
+      Title: view.title,
+      Name: view.name,
+      Blueprint: view.blueprint,
+      Purpose: view.purpose,
+      Change: view.change,
+      Next: view.next
+    })) {
+      const field = document.getElementById(`workspaceBuildDraft${suffix}`);
+      if (!field) continue;
+      // Updating only changed nodes keeps repeated renders quiet and leaves
+      // the existing review button and composer focus alone.
+      if (field.textContent !== value) field.textContent = value;
+      if (suffix === 'Change') field.hidden = !value;
+    }
   }
 
   function createElement(tag, className, content) {
@@ -350,6 +426,7 @@
     pendingText: '',
     expanded: false,
     busy: false,
+    draftStatus: false,
     collapsed: false,
     // Add folder: whether the server offers it, whether a pick or removal
     // is in flight, the note under the chip, and whether the sheet is open.
@@ -464,6 +541,7 @@
       localLines: state.localLines,
       expanded: state.expanded,
       busy: state.busy,
+      draftStatus: state.draftStatus,
       pendingText: state.pendingText
     });
     els.log.textContent = '';
@@ -1610,7 +1688,8 @@
     listen(folderEls.linkInput, 'input', () => linkFieldStatus(''));
     listen(state.buildWithButton, 'click', () => emit('workspace-build-expand'));
 
-    if (options.opening !== false) showLine(COPY.opening);
+    if (options.opening !== false)
+      showLine(options.ordinaryDraft ? COPY.draftOpening : COPY.opening);
     root.hidden = false;
     syncBuildWithButton();
     render();
@@ -1997,6 +2076,7 @@
 
   function setBusy(busy, options = {}) {
     state.busy = Boolean(busy);
+    state.draftStatus = Boolean(options.draftStatus);
     state.pendingText = state.busy ? text(options.pendingText) : '';
     render();
     // Focus returns to the composer after a turn, never to a step heading the
@@ -2339,6 +2419,8 @@
     isCollapsed: () => Boolean(state.root && state.collapsed),
     assistantName: () => assistantName(state.assistant),
     paneView,
+    ordinaryDraftView,
+    renderOrdinaryDraft,
     folderChooserView,
     folderRecognitionText,
     linkSummaryText

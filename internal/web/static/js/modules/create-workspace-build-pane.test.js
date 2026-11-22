@@ -291,6 +291,23 @@ test('the assistant pane uses the shared Team projection and emits choices witho
   pane.destroy();
 });
 
+test('ordinary draft distinguishes waiting, an incomplete proposal, and model failure', () => {
+  const { pane } = loadPane();
+  const waiting = pane.ordinaryDraftView({ waiting: true });
+  assert.equal(waiting.next, 'Preparing a draft…');
+  assert.equal(waiting.title, 'Draft · Nothing created yet');
+  assert.equal(waiting.blueprint, 'Undecided');
+  assert.equal(waiting.change, '');
+  assert.equal(pane.paneView({ busy: true, draftStatus: true }).status, '');
+  const partial = pane.ordinaryDraftView({ fields: { name: 'Desk' }, asking: true });
+  assert.equal(partial.name, 'Desk');
+  assert.equal(partial.purpose, 'Undecided');
+  assert.equal(partial.change, 'Draft updated: name.');
+  assert.match(partial.next, /answer the assistant/);
+  const failure = pane.ordinaryDraftView({ asking: true, failed: true });
+  assert.match(failure.next, /Try again or set up manually/);
+});
+
 const assistant = { display_name: 'Luna', appearance: {} };
 
 function entries(root) {

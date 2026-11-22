@@ -14901,7 +14901,12 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
-    pane.mount({ assistant: build.assistant, folders: build.folders, links: build.links });
+    pane.mount({
+      assistant: build.assistant,
+      folders: build.folders,
+      links: build.links,
+      ordinaryDraft: this.ordinaryBuildPreviewEligible()
+    });
     this.syncWorkspaceBuildPresentation();
   },
 
@@ -14956,6 +14961,7 @@ const sessionManager = {
       // A sentence heard in the Ask tab waits for the choice: Start over
       // builds from it, Resume keeps the build that was already open.
       build.pendingFirstMessage = message;
+      this.syncWorkspaceBuildPresentation();
       return;
     }
     // A new session joins the form, including edits made before it was opened.
@@ -15121,7 +15127,11 @@ const sessionManager = {
     const build = this.workspaceBuild;
     if (!build) return;
     build.busy = Boolean(busy);
-    this.workspaceBuildPane()?.setBusy(build.busy, { pendingText: build.busy ? pendingText : '' });
+    if (build.busy) build.turnFailed = false;
+    this.workspaceBuildPane()?.setBusy(build.busy, {
+      pendingText: build.busy ? pendingText : '',
+      draftStatus: this.ordinaryBuildPreviewEligible()
+    });
     this.refreshWizardChrome();
   },
 
@@ -15264,6 +15274,8 @@ const sessionManager = {
     pane.showLine(pane.COPY.modelFailure, {
       chips: [{ id: 'try_again', label: pane.COPY.tryAgain }]
     });
+    this.workspaceBuild.turnFailed = true;
+    this.syncWorkspaceBuildPresentation();
   },
 
   // failWorkspaceBuild ends build mode for this open when the assistant can no
@@ -15426,7 +15438,13 @@ const sessionManager = {
     this.scheduleWorkspaceBuildDraft({ user: false });
     await this.flushWorkspaceBuildDraft({ force: true });
     if (!current()) return;
-    if (session.create_now && !resume && !session.folder && !options.proposal)
+    if (
+      session.create_now &&
+      session.turn_count !== 1 &&
+      !resume &&
+      !session.folder &&
+      !options.proposal
+    )
       await this.createFromWorkspaceBuild({ revision });
   },
 
@@ -16606,6 +16624,76 @@ const sessionManager = {
     }
   },
 
+  ordinaryBuildPreviewEligible(template = window.ProjectTemplateCard?.getSelectedTemplate?.()) {
+    const build = this.workspaceBuild;
+    const session = build?.session;
+    return Boolean(
+      build?.context?.mode === 'ordinary' &&
+      this.isWorkspaceCreator() &&
+      this.ordinaryBuildReviewEligible() &&
+      !session?.folder &&
+      !session?.link &&
+      !session?.needs_home &&
+      !session?.group_prerequisite &&
+      !this.groupRequirementDraft &&
+      !template?.group_requirement &&
+      !template?.assistant_program &&
+      !String(template?.id || '').startsWith('plugin:') &&
+      !this.currentTemplateFolderPath()
+    );
+  },
+
+  ordinaryBuildBlueprintDecided(template) {
+    const build = this.workspaceBuild;
+    return Boolean(
+      template?.id ||
+      (template?.blank &&
+        (build?.session?.draft?.blank ||
+          build?.chosen?.has('blueprint') ||
+          build?.editedFields?.has('blueprint_id')))
+    );
+  },
+
+  syncOrdinaryBuildPreview(template) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!pane?.ordinaryDraftView || !pane?.renderOrdinaryDraft) return;
+    const session = build.session;
+    const read = id => document.getElementById(id)?.value?.trim() || '';
+    const fields = build.resumeLine
+      ? {}
+      : {
+          name: read('folderNameInput'),
+          blueprint: this.ordinaryBuildBlueprintDecided(template)
+            ? template.name || (template.blank ? 'Blank' : '')
+            : '',
+          purpose:
+            read('folderDescriptionInput') ||
+            (document.getElementById('folderGoalInput')?.dataset?.goalEdited
+              ? read('folderGoalInput')
+              : '')
+        };
+    const stable = !build.busy && !this.workspaceBuildApplyDepth && !build.resumeLine;
+    const view = pane.ordinaryDraftView({
+      fields,
+      previous: stable ? build.previewFields : fields,
+      lastChange: build.previewChange,
+      paused: Boolean(build.resumeLine),
+      waiting: build.busy,
+      failed: Boolean(
+        build.turnFailed ||
+        session?.pending_question?.choices?.some(choice => choice.id === 'try_again')
+      ),
+      asking: Boolean(session?.pending_question),
+      reviewable: this.wizardStep === 4
+    });
+    if (stable) {
+      build.previewFields = fields;
+      build.previewChange = view.change;
+    }
+    pane.renderOrdinaryDraft(view);
+  },
+
   syncWorkspaceBuildPresentation() {
     this.scheduleWorkspaceBuildPreparationReview();
     const assisted = this.workspaceBuildAssisted();
@@ -16638,9 +16726,14 @@ const sessionManager = {
       }
     }
     const groupLine = assisted ? this.workspaceBuildGroupLine() : '';
+    const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
+    const preview = document.getElementById('workspaceBuildDraftPreview');
+    const ordinaryDraft = Boolean(
+      preview && assisted && this.ordinaryBuildPreviewEligible(template)
+    );
     const status = document.getElementById('workspaceBuildModeStatus');
     if (status) {
-      status.hidden = !this.workspaceBuild;
+      status.hidden = !this.workspaceBuild || (ordinaryDraft && !this.workspaceBuild.draftError);
       status.textContent = this.workspaceBuild?.draftError
         ? folderReview
           ? 'Draft not saved. Your edits are kept here.'
@@ -16691,20 +16784,24 @@ const sessionManager = {
     if (preparationActions)
       preparationActions.hidden = !folderReview || !this.workspaceBuildPreparationEligible();
     const summary = document.getElementById('workspaceBuildDraftSummary');
-    if (summary)
+    if (summary) {
       summary.hidden =
         !assisted || folderAvailable || Boolean(this.workspaceBuild?.acceptedPreparation);
+      summary.toggleAttribute?.('data-ordinary-draft', ordinaryDraft);
+    }
+    if (preview) preview.hidden = !ordinaryDraft;
     const planReady = assisted && this.workspaceBuildPlanReady();
     const title = document.getElementById('workspaceBuildDraftTitle');
-    if (title) title.textContent = planReady ? 'Plan so far' : 'Draft so far';
+    if (title && !ordinaryDraft) title.textContent = planReady ? 'Plan so far' : 'Draft so far';
     this.syncWorkspaceBuildPlanReview(planReady);
     if (folderReview) this.syncWorkspaceBuildFolderReview();
     this.syncWorkspaceBuildHomeStaffing();
     const text = document.getElementById('workspaceBuildDraftText');
-    if (text && planReady) {
+    if (text) text.hidden = ordinaryDraft;
+    if (ordinaryDraft) this.syncOrdinaryBuildPreview(template);
+    else if (text && planReady) {
       text.textContent = this.workspaceBuildPlanLine();
     } else if (text && assisted) {
-      const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
       const name = document.getElementById('folderNameInput')?.value?.trim();
       const step = ['Blueprint', 'Details', 'Team', 'Review'][this.wizardStep - 1] || 'Blueprint';
       const folder = String(this.workspaceBuild?.session?.folder?.observation?.folder || '').trim();
@@ -17334,6 +17431,15 @@ const sessionManager = {
       if (value === undefined || value === null || value === '') continue;
       draft[key] = value;
     }
+    // The picker's initial Blank is not a decision. Keep it absent from an
+    // undecided assisted draft so a partial answer/resume never promotes it.
+    // A manual create still uses the wizard's complete payload.
+    if (
+      draft.blank &&
+      this.ordinaryBuildPreviewEligible() &&
+      !this.ordinaryBuildBlueprintDecided({ blank: true })
+    )
+      delete draft.blank;
     const teamState = window.CreateWorkspaceTeamDraft?.serialize?.(this.teamDraft) || null;
     const body = { draft, version: Number(this.workspaceBuild?.session?.version) || 0 };
     if (this.workspaceBuild?.session?.placement_source)

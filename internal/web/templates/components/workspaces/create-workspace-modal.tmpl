@@ -21,8 +21,19 @@
         <div>
           <h2 id="workspaceBuildDraftTitle">Draft so far</h2>
           <p id="workspaceBuildDraftText"></p>
+          <div id="workspaceBuildDraftPreview" class="workspace-build-draft-preview" hidden>
+            <p id="workspaceBuildDraftName" class="workspace-build-draft-preview__name"></p>
+            <dl class="workspace-build-draft-preview__facts">
+              <div><dt>Blueprint</dt><dd id="workspaceBuildDraftBlueprint"></dd></div>
+              <div><dt>Purpose</dt><dd id="workspaceBuildDraftPurpose"></dd></div>
+            </dl>
+            <div class="workspace-build-draft-preview__status" role="status" aria-atomic="true">
+              <p id="workspaceBuildDraftChange" hidden></p>
+              <p id="workspaceBuildDraftNext"></p>
+            </div>
+          </div>
         </div>
-        <button type="button" id="workspaceBuildEditDraftBtn" class="modern-btn modern-btn-secondary" aria-controls="workspaceBuildPlanReview">Review or edit draft</button>
+        <button type="button" id="workspaceBuildEditDraftBtn" class="modern-btn modern-btn-secondary">Review or edit draft</button>
       </section>
       <button type="button" id="workspaceBuildReturnToReview" class="workspace-build-return modern-btn modern-btn-secondary" hidden>Return to workspace review</button>
       <!-- One folder review. These inputs delegate to the existing creator

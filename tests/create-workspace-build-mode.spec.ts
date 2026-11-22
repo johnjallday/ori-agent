@@ -589,6 +589,93 @@ test('long effective team wraps in the one narrow folder-review scroller', async
   await page.screenshot({ path: testInfo.outputPath('folder-long-team-dark-640.png') });
 });
 
+test('slow first proposal exposes the applied draft, not a claim of creation', async ({
+  page
+}, testInfo) => {
+  const wait = gate();
+  const fake = await fakeBuildServer(
+    page,
+    [
+      {
+        text: 'I already created Newsletter Desk.',
+        set: {
+          template_id: 'content-production',
+          name: 'Newsletter Desk',
+          description: 'Turn research notes into a weekly newsletter.'
+        },
+        choices: ['Just a Content Lead'],
+        createNow: true
+      }
+    ],
+    { turnGate: () => wait.promise }
+  );
+  const material = async () => {
+    const folders = (await (await page.request.get('/api/workspaces')).json()).folders;
+    const agents = (await (await page.request.get('/api/agents')).json()).agents;
+    return {
+      workspaces: folders.map((w: RequestBody) => w.id).sort(),
+      agents: agents.map((a: RequestBody) => a.name).sort(),
+      runs: await Promise.all(
+        folders.map(async ({ id }: RequestBody) => {
+          const response = await page.request.get(`/api/workspaces/${id}/runs`);
+          expect(response.ok()).toBe(true);
+          return response.json();
+        })
+      )
+    };
+  };
+  const before = await material();
+  const writes: string[] = [];
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname;
+    if (
+      request.method() === 'POST' &&
+      /\/api\/workspaces(?:$|\/create-operations|\/[^/]+\/runs)/.test(path)
+    )
+      writes.push(path);
+  });
+  await openFromHome(page);
+  const preview = page.locator('#workspaceBuildDraftSummary');
+  await expect(preview).toContainText('Undecided');
+  await composer(page).fill('Set up a workspace for my weekly newsletter.');
+  const sent = page.waitForRequest(request => isTurn(request.url()));
+  await pane(page).getByRole('button', { name: 'Send', exact: true }).click();
+  try {
+    await sent;
+    await expect(preview).toContainText('Preparing a draft…');
+    await expect(pane(page)).not.toContainText('Setting up…');
+    await page.screenshot({ path: testInfo.outputPath('first-proposal-wait.png') });
+  } finally {
+    wait.release();
+  }
+  await expect(composer(page)).toBeFocused();
+  await expect(preview).toContainText('Draft · Nothing created yet');
+  await expect(preview).toContainText('Newsletter Desk');
+  await expect(preview).toContainText('Content Production');
+  await expect(preview).toContainText('Turn research notes into a weekly newsletter.');
+  await expect(preview).toContainText('Next: answer the assistant’s question.');
+  await expect(pane(page)).toContainText('I already created Newsletter Desk.');
+  await expect(page.locator('#workspaceCreationReviewPanel')).toBeHidden();
+  expect(fake.turns).toHaveLength(1);
+  expect(writes).toEqual([]);
+  expect(await material()).toEqual(before);
+  await page.screenshot({ path: testInfo.outputPath('first-proposal.png') });
+});
+
+test('a fast partial first proposal leaves missing choices undecided', async ({ page }) => {
+  const fake = await fakeBuildServer(page, [
+    { text: 'What should go in it?', set: { name: 'Notebook' }, choices: ['Research', 'Recipes'] }
+  ]);
+  await openFromHome(page);
+  await say(page, 'A place for notes');
+  const preview = page.locator('#workspaceBuildDraftSummary');
+  await expect(preview).toContainText('Notebook');
+  await expect(page.locator('#workspaceBuildDraftBlueprint')).toHaveText('Undecided');
+  await expect(page.locator('#workspaceBuildDraftPurpose')).toHaveText('Undecided');
+  await expect.poll(() => fake.session?.draft.name).toBe('Notebook');
+  expect(fake.session?.draft.blank).toBeUndefined();
+});
+
 test('golden path: three turns and no form clicks create the workspace the build drafted', async ({
   page
 }, testInfo) => {
@@ -998,6 +1085,7 @@ test('with no model for the assistant the dialog stays manual', async ({ page })
   await openFromHome(page);
   await expect(cardByLabel(page, 'Blank')).toBeVisible();
   await expect(pane(page)).toBeHidden();
+  await expect(page.locator('#workspaceBuildDraftSummary')).toBeHidden();
   expect(fake.creates).toHaveLength(0);
 });
 
@@ -1146,6 +1234,9 @@ test('scripted turn failure offers Retry and preserves the populated shared draf
   options.turnFailures = 1;
   await say(page, 'Continue');
   await expect(pane(page)).toContainText('couldn’t reach my model');
+  await expect(page.locator('#workspaceBuildDraftNext')).toContainText(
+    'Try again or set up manually'
+  );
   await expect(page.locator('#folderNameInput')).toHaveValue('Kept draft');
   await pane(page).getByRole('button', { name: 'Try again' }).click();
   await expect(pane(page)).toContainText('Recovered without losing your draft');

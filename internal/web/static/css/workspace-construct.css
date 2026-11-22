@@ -2540,6 +2540,40 @@
 .workspace-create-modal .workspace-build-draft-summary button {
   flex-shrink: 0;
 }
+.workspace-create-modal .workspace-build-draft-summary[data-ordinary-draft] {
+  align-items: flex-start;
+  flex: 0 0 auto;
+  border-inline-start: 3px solid var(--wc-faction);
+}
+.workspace-create-modal .workspace-build-draft-summary[data-ordinary-draft] h2 {
+  color: var(--wc-ink);
+  font: 600 11px/1.4 var(--wc-font-mono);
+}
+.workspace-create-modal .workspace-build-draft-preview p.workspace-build-draft-preview__name {
+  color: var(--wc-ink-heading);
+  font: 600 20px/1.2 var(--wc-font-display);
+}
+.workspace-build-draft-preview__facts {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0;
+  color: var(--wc-ink);
+  font-size: 13px;
+}
+.workspace-build-draft-preview__facts > div {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+}
+.workspace-build-draft-preview__facts dd {
+  margin: 0;
+}
+.workspace-create-modal .workspace-build-draft-preview__status {
+  display: grid;
+  gap: 2px;
+}
+.workspace-create-modal #workspaceBuildDraftNext {
+  font-weight: 600;
+}
 .workspace-create-modal .workspace-build-pane {
   display: flex;
   flex: 1 1 auto;
@@ -2742,7 +2776,7 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-.workspace-create-modal .workspace-build-pane__status.is-busy {
+.workspace-create-modal .workspace-build-pane__status.is-busy:not(:empty) {
   padding-bottom: 6px;
 }
 .workspace-create-modal .workspace-build-pane__composer {
