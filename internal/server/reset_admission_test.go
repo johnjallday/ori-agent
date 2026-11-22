@@ -65,7 +65,7 @@ func TestResetAdmissionHTTPBusyThenStagedRecoveryStaysReachable(t *testing.T) {
 	h := settingshttp.NewResetHandler(setup, nil, p.DataDir)
 	h.SetPreviewPlanner(planner)
 	h.SetCoordinator(settingsreset.NewCoordinator(lease, planner, life))
-	s := &Server{resetWork: life.WorkGate, Handlers: &HandlerFacade{Reset: h}}
+	s := &Server{resetLease: lease, resetWork: life.WorkGate, Handlers: &HandlerFacade{Reset: h}}
 	started := make(chan context.Context, 1)
 	finish := make(chan struct{})
 	var ordinaryCalls atomic.Int32
@@ -137,6 +137,18 @@ func TestResetAdmissionHTTPBusyThenStagedRecoveryStaysReachable(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete} {
 		request(method, "/ordinary-save", nil, http.StatusServiceUnavailable, nil)
 	}
+	statusURL := settingsreset.ResetStatusPath + "?operation=" + preview.OperationID
+	statusResponse := httptest.NewRecorder()
+	s.resetAdmissionMiddleware(ordinary).ServeHTTP(statusResponse, httptest.NewRequest(http.MethodGet, statusURL, nil))
+	if statusResponse.Code != http.StatusOK || !strings.Contains(statusResponse.Body.String(), "Restart required") ||
+		statusResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("status behind fence = %d %s", statusResponse.Code, statusResponse.Body.String())
+	}
+	fencedEvidence := httptest.NewRecorder()
+	s.resetAdmissionMiddleware(ordinary).ServeHTTP(fencedEvidence, httptest.NewRequest(http.MethodGet, "/api/reset/operations/"+preview.OperationID, nil))
+	if fencedEvidence.Code != http.StatusOK || fencedEvidence.Header().Get(settingsreset.ResetReadyHeader) != "" {
+		t.Fatal("receipt must stay readable without signalling app readiness behind the fence")
+	}
 	var recovered, replay settingshttp.ResetResponse
 	request(http.MethodGet, "/api/reset/operations/"+preview.OperationID, nil, http.StatusOK, &recovered)
 	request(http.MethodPost, "/api/reset", body, http.StatusAccepted, &replay)
@@ -167,6 +179,51 @@ func TestResetAdmissionControlMuxCannotBypassIntoOrdinaryRoutes(t *testing.T) {
 	handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/settings", nil))
 	if w.Header().Get("Cache-Control") != "no-store" || !strings.Contains(w.Body.String(), "reset_pending") {
 		t.Fatal("fence response not explicit/no-store")
+	}
+}
+
+func TestResetAdmissionOnlyHandsOffBrowserDocumentNavigations(t *testing.T) {
+	g := &resetstate.WorkGate{}
+	requireResetNoError(t, g.TryFence(t.Context()))
+	s := &Server{resetWork: g, Handlers: &HandlerFacade{Reset: settingshttp.NewResetHandler(nil, nil, t.TempDir())}}
+	handler := s.resetAdmissionMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("fenced navigation reached ordinary handler") }))
+	for _, tc := range []struct {
+		method, path, mode, dest string
+		want                     int
+	}{
+		{http.MethodGet, "/", "navigate", "document", http.StatusSeeOther},
+		{http.MethodGet, "/settings", "navigate", "document", http.StatusSeeOther},
+		{http.MethodGet, "/settings", "navigate", "iframe", http.StatusServiceUnavailable},
+		{http.MethodGet, "/settings", "same-origin", "empty", http.StatusServiceUnavailable},
+		{http.MethodPost, "/settings", "navigate", "document", http.StatusServiceUnavailable},
+		{http.MethodGet, "/api/settings", "navigate", "document", http.StatusServiceUnavailable},
+		{http.MethodGet, "/health", "navigate", "document", http.StatusServiceUnavailable},
+		{http.MethodGet, "/api/workspaces/ws/events", "navigate", "document", http.StatusServiceUnavailable},
+		{http.MethodGet, "/js/not-the-status-script.js", "no-cors", "script", http.StatusServiceUnavailable},
+		{http.MethodGet, "/reset/assets/status.js", "same-origin", "script", http.StatusOK},
+		{http.MethodPost, "/reset/assets/status.js", "same-origin", "empty", http.StatusServiceUnavailable},
+		{http.MethodGet, "/reset/assets/other.js", "same-origin", "script", http.StatusServiceUnavailable},
+		{http.MethodPost, settingsreset.ResetStatusPath, "navigate", "document", http.StatusMethodNotAllowed},
+		{http.MethodGet, settingsreset.ResetStatusPath + "/extra", "navigate", "document", http.StatusServiceUnavailable},
+	} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(tc.method, tc.path, nil)
+		r.Header.Set("Sec-Fetch-Mode", tc.mode)
+		r.Header.Set("Sec-Fetch-Dest", tc.dest)
+		handler.ServeHTTP(w, r)
+		if w.Code != tc.want || w.Header().Get("Cache-Control") != "no-store" {
+			t.Errorf("%s %s (%s/%s) = %d %v", tc.method, tc.path, tc.mode, tc.dest, w.Code, w.Header())
+		}
+		switch tc.want {
+		case http.StatusSeeOther:
+			if w.Header().Get("Location") != settingsreset.ResetStatusPath {
+				t.Error("navigation did not go to reset status")
+			}
+		case http.StatusServiceUnavailable:
+			if w.Header().Get("Content-Type") != "application/json" || !strings.Contains(w.Body.String(), "reset_pending") {
+				t.Error("non-navigation did not get JSON reset_pending")
+			}
+		}
 	}
 }
 

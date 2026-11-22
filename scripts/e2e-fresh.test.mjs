@@ -29,14 +29,17 @@ function fixture(t) {
   executable(join(bin, 'lsof'), 'exit 1'); // The fake server binds no socket.
   executable(
     join(repo, 'bin/ori-agent'),
-    'trap "exit 0" TERM INT; printf "%s:%s:%s:%s\\n" "$$" "$HOME" "$PWD" "$XDG_CONFIG_HOME" >> "$HOME/runs"; while :; do sleep 0.1; done'
+    'trap "exit 0" TERM INT; printf "%s:%s:%s:%s\\n" "$$" "$HOME" "$PWD" "$XDG_CONFIG_HOME" >> "$HOME/runs"; : > "$HOME/ready-$E2E_TEST_LAUNCH"; while :; do sleep 0.1; done'
   );
   executable(
     join(repo, 'scripts/e2e.sh'),
-    'for arg in "$@"; do case "$arg" in E2E_TEST_TARGET=*) target="${arg#*=}";; esac; done; for i in {1..100}; do [[ -f "$target/runs" ]] && break; sleep 0.01; done; sleep 0.15; echo "  1 passed"'
+    'for arg in "$@"; do case "$arg" in E2E_TEST_TARGET=*) target="${arg#*=}";; esac; done; for i in {1..200}; do [[ -f "$target/ready-$E2E_TEST_LAUNCH" ]] && { echo "  1 passed"; exit 0; }; sleep 0.05; done; echo "fixture server did not signal this launch" >&2; exit 1'
   );
   const owned = mkdtempSync(join(temp, 'ori-e2e.'));
   writeFileSync(join(owned, '.ori-demo-owner'), `worktree=${repo}\n`, { mode: 0o600 });
+  // A reused sandbox still has the old marker; wait for this exact fake
+  // launch instead of sleeping after any historical log appears.
+  let launch = 0;
   const run = (...args) =>
     spawnSync(
       'bash',
@@ -50,6 +53,7 @@ function fixture(t) {
           PATH: `${bin}:${process.env.PATH}`,
           TMPDIR: temp,
           E2E_TEST_REPO: repo,
+          E2E_TEST_LAUNCH: String(++launch),
           XDG_CONFIG_HOME: join(root, 'unrelated-user-config')
         }
       }

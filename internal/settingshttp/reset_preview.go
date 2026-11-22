@@ -47,6 +47,17 @@ func (h *ResetHandler) GetResetPreview(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// Explain preserved host preferences on the response copy. V1 journals
+	// retain the canonical category descriptions used to encode old receipts.
+	for i := range preview.Categories {
+		if preview.Categories[i].ID == settingsreset.CategoryIdentityProgress {
+			preview.Categories[i].Description += " Keep the menubar server port and launch-at-login preference."
+		}
+	}
+	if h.coordinator != nil && h.restart.Available() {
+		preview.Restart.Managed = true
+		preview.Restart.Instructions = "Ori will try to restart automatically after saving the reset. Keep this tab open. If it cannot reconnect, follow the manual restart steps."
+	}
 	orihttp.WriteJSON(w, preview)
 }
 

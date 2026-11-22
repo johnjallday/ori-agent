@@ -14,6 +14,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/settingsreset"
 	"github.com/johnjallday/ori-agent/internal/setupjourneyhttp"
 	"github.com/johnjallday/ori-agent/internal/updatehttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -501,9 +502,20 @@ func registerSettingsRoutes(mux *http.ServeMux, s *Server) {
 // reset fence. Do not add ordinary application handlers or method-based GET
 // exemptions here: several existing GET handlers can write or start work.
 func registerResetRoutes(mux *http.ServeMux, s *Server) {
+	settingsreset.RegisterResetStatusRoutes(mux, s.resetLease)
 	mux.HandleFunc("/api/reset", s.Handlers.Reset.HandleReset)
 	mux.HandleFunc("/api/reset/preview", s.Handlers.Reset.GetResetPreview)
-	mux.HandleFunc("/api/reset/operations/", s.Handlers.Reset.GetOperation)
+	mux.HandleFunc("/api/reset/operations/{id}", func(w http.ResponseWriter, r *http.Request) {
+		// Readiness belongs to the same response as the receipt. A separate
+		// health probe could reach a different listener after a process exits.
+		if r.Method == http.MethodGet && s.resetLease != nil {
+			if release, err := s.resetWork.Enter(); err == nil {
+				defer release()
+				w.Header().Set(settingsreset.ResetReadyHeader, "1")
+			}
+		}
+		s.Handlers.Reset.GetOperation(w, r)
+	})
 }
 
 // registerChatRoutes registers the chat endpoint.

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -42,13 +43,13 @@ func main() {
 		os.Exit(code)
 	}
 
-	// Load .env from the working directory (if present) before anything reads
-	// os.Getenv, so local secrets don't need to be exported in the shell.
-	environ.LoadDotEnv(".")
-
-	// Expand PATH to include common development tool locations
-	// This ensures tools like codex, go, node are available when launched from macOS app bundle
-	environ.ExpandPath()
+	supervisor := resetSupervisorFromEnvironment()
+	if supervisor == nil {
+		// Resolve launch environment once, before entering the canonical data
+		// directory. Managed children must not read a different .env there.
+		environ.LoadDotEnv(".")
+		environ.ExpandPath()
+	}
 
 	// Define command-line flags
 	port := flag.Int("port", 8765, "Port to run server on")
@@ -59,6 +60,7 @@ func main() {
 	versionOverride := flag.String("version", "", "Override version for testing (e.g., v0.0.24)")
 	multiAgentMode := flag.String("multi-agent-mode", "", "Multi-agent default mode: auto, force, off")
 	multiAgentThreshold := flag.Float64("multi-agent-threshold", 0, "Multi-agent complexity threshold (0-10)")
+	managedRestart := flag.Bool("managed-restart", false, "Run under a local supervisor that can relaunch Ori after a reviewed reset")
 	shutdownTimeout := flag.Duration("shutdown-timeout", 30*time.Second, "Graceful shutdown timeout (e.g., 30s, 1m)")
 	flag.Parse()
 
@@ -91,13 +93,47 @@ func main() {
 		log.Fatalf("Failed to setup data directory: %v", err)
 	}
 
-	// This process owns the installation before any persistence constructor or
-	// port takeover. The lease is pinned until process exit; Shutdown does not
-	// join every writer, so do NOT defer an early unlock here.
-	lease, err := startupBeforeStores(context.Background(), os.Getenv("ORI_DATA_DIR"))
+	if (*managedRestart || supervisor != nil) && *allowNetwork {
+		log.Fatal("Managed reset restart is only available on the local listener.")
+	}
+	if *managedRestart && supervisor == nil {
+		if err := runResetSupervisor(*port); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
+
+	addr := standaloneAddress(*port, *allowNetwork)
+	var listener net.Listener
+	if supervisor != nil {
+		// Bind without inspecting or evicting port owners. Reserve the exact
+		// address before recovery so an occupied port cannot apply a reset and
+		// then strand the browser. Serve only after acquiring the installation.
+		var err error
+		listener, err = (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
+		if err != nil {
+			log.Fatalf("Cannot bind managed Ori server: %v. Stop only your Ori process or recover manually.", err)
+		}
+		defer func() { _ = listener.Close() }()
+	}
+
+	// Own the installation before any persistence constructor or port
+	// takeover. The lease is pinned until process exit, not until Shutdown.
+	var lease *resetstate.Lease
+	var err error
+	dataDir := os.Getenv("ORI_DATA_DIR")
+	var expected string
+	if supervisor != nil {
+		expected = os.Getenv(expectedResetEnv)
+	}
+	if expected != "" {
+		lease, err = settingsreset.BeforeStoresForRestart(context.Background(), dataDir, expected)
+	} else {
+		lease, err = startupBeforeStores(context.Background(), dataDir)
+	}
 	if err != nil {
 		if lease != nil && errors.Is(err, settingsreset.ErrRecoveryIncomplete) {
-			if recoveryErr := runResetRecoveryServer(lease, *port, *noBrowser); recoveryErr != nil {
+			if recoveryErr := runResetRecoveryServer(lease, *port, *noBrowser || expected != "", listener); recoveryErr != nil {
 				log.Fatalf("Reset recovery host failed: %v", recoveryErr)
 			}
 			return
@@ -106,8 +142,10 @@ func main() {
 	}
 
 	// Ensure port is safe to take before starting
-	if err := startupPortCheck(*port); err != nil {
-		log.Fatalf("Port %d is unavailable: %v", *port, err)
+	if supervisor == nil {
+		if err := startupPortCheck(*port); err != nil {
+			log.Fatalf("Port %d is unavailable: %v", *port, err)
+		}
 	}
 
 	// Create server with all dependencies
@@ -131,21 +169,21 @@ func main() {
 		}
 	}
 
-	// Start HTTP server with configured port
-	// SECURITY: Bind to localhost only by default to prevent network exposure
-	var addr string
 	if *allowNetwork {
-		addr = fmt.Sprintf(":%d", *port) // 0.0.0.0 - accessible from network
 		logger.Warn("Server bound to all interfaces - accessible from network", logger.Fields{"port": *port})
-	} else {
-		addr = fmt.Sprintf("127.0.0.1:%d", *port) // localhost only
+	}
+	restart := make(chan string, 1)
+	if supervisor != nil {
+		srv.Handlers.Reset.SetRestartHandoff(settingsreset.NewRestartHandoff(supervisor.ready, func(id string) {
+			restart <- id // At most one enqueue; never blocks the confirmation response.
+		}))
 	}
 	url := fmt.Sprintf("http://localhost:%d", *port)
 	logger.Debug("Listening on", logger.Fields{"url": url})
 
 	// Launch browser in background after a short delay (unless disabled)
 	// Skip if --no-browser flag is set or NO_BROWSER env var is set
-	if !*noBrowser && os.Getenv("NO_BROWSER") == "" {
+	if expected == "" && !*noBrowser && os.Getenv("NO_BROWSER") == "" {
 		go func() {
 			time.Sleep(500 * time.Millisecond) // Wait for server to start
 			if err := openBrowser(url); err != nil {
@@ -168,13 +206,23 @@ func main() {
 
 	// Start server in background
 	go func() {
-		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := serveStandalone(httpServer, listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Server error: %v", err)
 		}
 	}()
 
-	// Wait for shutdown signal
-	<-quit
+	var restartID string
+	select {
+	case <-quit:
+	case restartID = <-restart:
+		// Normal response delivery must not wait for this timer; it gives a
+		// same-origin tab time to load the lightweight status page.
+		select {
+		case <-time.After(restartReplyGrace):
+		case <-quit:
+			restartID = "" // Explicit shutdown takes precedence.
+		}
+	}
 	logger.Info("Shutting down server...", nil)
 
 	// Clean up plugins and background services
@@ -186,6 +234,9 @@ func main() {
 	if err := httpServer.Shutdown(ctx); err != nil {
 		// Context deadline exceeded is expected when SSE/streaming connections are active
 		// The server still stops, connections are just closed forcefully
+		if restartID != "" {
+			log.Fatalf("Could not finish managed restart: %v. Relaunch Ori manually.", err)
+		}
 		if err == context.DeadlineExceeded {
 			logger.Warn("HTTP server shutdown timeout (active streaming connections were closed forcefully)", nil)
 		} else {
@@ -194,18 +245,44 @@ func main() {
 	}
 
 	logger.Info("Server stopped", nil)
+	if restartID != "" {
+		select {
+		case <-quit:
+			return
+		default:
+		}
+		if err := supervisor.releaseOperation(restartID); err != nil {
+			log.Fatalf("Managed restart handoff failed: %v. Relaunch Ori manually.", err)
+		}
+	}
 }
 
-func runResetRecoveryServer(lease *resetstate.Lease, port int, noBrowser bool) error {
-	if err := startupPortCheck(port); err != nil {
-		return err
+func standaloneAddress(port int, allowNetwork bool) string {
+	if allowNetwork {
+		return fmt.Sprintf(":%d", port)
+	}
+	return fmt.Sprintf("127.0.0.1:%d", port)
+}
+
+func serveStandalone(server *http.Server, listener net.Listener) error {
+	if listener != nil {
+		return server.Serve(listener)
+	}
+	return server.ListenAndServe()
+}
+
+func runResetRecoveryServer(lease *resetstate.Lease, port int, noBrowser bool, listener net.Listener) error {
+	if listener == nil {
+		if err := startupPortCheck(port); err != nil {
+			return err
+		}
 	}
 	address := fmt.Sprintf("127.0.0.1:%d", port)
 	url := fmt.Sprintf("http://localhost:%d/", port)
 	httpServer := settingsreset.RecoveryHTTPServer(lease, address)
 	serveErr := make(chan error, 1)
 	go func() {
-		err := httpServer.ListenAndServe()
+		err := serveStandalone(httpServer, listener)
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}

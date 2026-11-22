@@ -2,26 +2,118 @@ package settingsreset
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
+	"errors"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/resetstate"
+	"github.com/johnjallday/ori-agent/internal/web"
 )
 
-var recoveryPage = template.Must(template.New("reset-recovery").Parse(`<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ori Reset Recovery</title>
-<style>
-:root{color-scheme:light dark;font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#101418;color:#eef3f7}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 20% 10%,#263d46 0,transparent 35%),#101418}.card{width:min(42rem,calc(100% - 2rem));box-sizing:border-box;padding:2rem;border:1px solid #43545e;border-radius:1rem;background:#182127;box-shadow:0 1rem 4rem #0008}.eyebrow{color:#9dd8c8;font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-size:.75rem}h1{font-size:clamp(1.8rem,6vw,3rem);line-height:1.05;margin:.6rem 0 1rem}p{line-height:1.6;color:#cad5db}.status{margin:1.5rem 0;padding:1rem;border-left:.3rem solid #e7b66b;background:#202c33}.status strong,.id{display:block}.id{font-family:ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere;color:#9fb0ba;margin-top:.4rem}.blockers{padding-left:1.2rem}.blockers li{margin:.8rem 0;line-height:1.5}.blockers strong{display:block;color:#f1c98d}button{font:inherit;font-weight:700;padding:.75rem 1rem;border:0;border-radius:.6rem;background:#9dd8c8;color:#10201d;cursor:pointer}button:focus-visible{outline:.2rem solid #fff;outline-offset:.2rem}@media(prefers-reduced-motion:no-preference){.card{animation:arrive .35s ease-out}@keyframes arrive{from{opacity:0;transform:translateY(.5rem)}}}
-</style>
-</head>
-<body><main class="card"><div class="eyebrow">Reset &amp; Recovery</div><h1>Ori is protecting an unfinished reset.</h1><p>The regular application stayed closed so background services cannot restore or change reviewed data.</p><div class="status" role="status" aria-live="polite"><strong>Current state: {{.State}}</strong><span class="id">Operation {{.ID}}</span></div>{{if .Blockers}}<ul class="blockers" aria-label="Recovery blockers">{{range .Blockers}}<li><strong>{{.Message}}</strong>{{.Recovery}}</li>{{end}}</ul>{{end}}<p>Resolve the reported blocker, then fully quit and relaunch Ori to retry only unresolved categories. Do not delete <code>.ori-reset</code> or start a second installation against this data folder.</p><form method="get" action="/"><button type="submit">Refresh status</button></form></main></body></html>`))
+// ResetStatusPath is the same bookmarkable read-only page on both hosts.
+const ResetStatusPath = "/reset/status"
+
+// ResetReadyHeader is emitted only by the owned, admitted normal application,
+// on the same response as the operation evidence. Recovery never emits it.
+const ResetReadyHeader = "X-Ori-Reset-Ready"
+
+//go:embed reset_status.tmpl
+var statusTemplate string
+
+var recoveryPage = template.Must(template.New("reset-status").Funcs(template.FuncMap{
+	"categoryLabel": func(id CategoryID) string {
+		def, _ := definition(id)
+		return def.Label
+	},
+}).Parse(statusTemplate))
+
+type statusView struct {
+	ID          string
+	Title       string
+	Message     string
+	ShowRestart bool
+	Operation   Operation
+}
+
+func viewResetStatus(id string, op Operation) statusView {
+	view := statusView{ID: id, Operation: op}
+	switch op.State {
+	case StatePreparing:
+		view.Title = "Preparing the reset"
+		view.Message = "Ori accepted your request and is stopping background work. Keep this tab open. Wait for restart instructions before quitting Ori."
+	case StateAwaitingRestart:
+		view.Title = "Restart required"
+		view.Message = "Ori saved the reviewed reset and paused normal work. The reset will apply when a new Ori process starts, before opening your data."
+		view.ShowRestart = true
+	case StateApplying, StateVerifying:
+		view.Title = "Checking the reset on startup"
+		view.Message = "Ori is applying the reviewed changes and checking the result. Keep this tab open."
+	case StateBlocked, StatePartialFailure, StateInterrupted:
+		view.Title = "Reset needs attention"
+		view.Message = "Ori is keeping normal work paused. Follow the recovery guidance below before restarting. Do not submit another reset."
+		view.ShowRestart = true
+	case StateCompleted:
+		view.Title = "Reset receipt found"
+		view.Message = "The stored receipt is complete. Ori still needs to be ready before you return."
+	default:
+		view.Title = "Reset status unavailable"
+		view.Message = "Ori cannot read the awaited reset receipt. The request may still be preparing, or its receipt may be missing or replaced. This does not confirm success or failure. Do not submit the reset again."
+	}
+	return view
+}
+
+// newResetStatusHandler reads only the bounded reset receipt, never app stores.
+// A supplied operation ID is authoritative for the page identity, including
+// when its receipt is absent. The bare path is for fenced navigation without a
+// receipt, not a shortcut to a previous successful operation.
+func newResetStatusHandler(lease *resetstate.Lease) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		setRecoveryHeaders(w)
+		if r.URL.EscapedPath() != ResetStatusPath {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", "GET, HEAD")
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		query, err := url.ParseQuery(r.URL.RawQuery)
+		ids := query["operation"]
+		if err != nil || (r.URL.RawQuery != "" && (len(query) != 1 || len(ids) != 1 || !validID(ids[0]))) {
+			http.Error(w, "Invalid reset operation identity", http.StatusBadRequest)
+			return
+		}
+		var id string
+		var operation Operation
+		if len(ids) == 0 {
+			current, readErr := CurrentRecoveryOperation(r.Context(), lease)
+			if readErr == nil && current.State != StateCompleted {
+				http.Redirect(w, r, ResetStatusPath+"?operation="+url.QueryEscape(current.ID), http.StatusSeeOther)
+				return
+			}
+		} else {
+			id = ids[0]
+			operation, err = NewCoordinator(lease, nil, nil).Status(r.Context(), id)
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if operation.ID == "" {
+			if errors.Is(err, ErrOperationNotFound) {
+				w.WriteHeader(http.StatusNotFound)
+			} else {
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+		}
+		if r.Method == http.MethodGet {
+			_ = recoveryPage.Execute(w, viewResetStatus(id, operation))
+		}
+	}
+}
 
 // CurrentRecoveryOperation reads the one bounded durable result without opening
 // application stores. Absence is never presented as successful completion.
@@ -38,6 +130,33 @@ func CurrentRecoveryOperation(ctx context.Context, lease *resetstate.Lease) (Ope
 		return Operation{}, err
 	}
 	return NewCoordinator(lease, nil, nil).Status(ctx, journal.Operation.ID)
+}
+
+// RegisterResetStatusRoutes mounts only the reset page and two fixed embedded
+// scripts. The recovery host never dispatches into a general static file server.
+func RegisterResetStatusRoutes(mux *http.ServeMux, lease *resetstate.Lease) {
+	mux.HandleFunc(ResetStatusPath, newResetStatusHandler(lease))
+	for route, asset := range map[string]string{
+		"/reset/assets/generation.js": "static/js/modules/reset-generation.js",
+		"/reset/assets/status.js":     "static/js/modules/reset-status.js",
+	} {
+		mux.HandleFunc("GET "+route, func(w http.ResponseWriter, r *http.Request) {
+			setRecoveryHeaders(w)
+			if r.URL.EscapedPath() != route || r.URL.RawQuery != "" {
+				http.NotFound(w, r)
+				return
+			}
+			script, err := web.Static.ReadFile(asset)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			if r.Method == http.MethodGet {
+				_, _ = w.Write(script)
+			}
+		})
+	}
 }
 
 // NewRecoveryHandler exposes only read-only reset evidence. It has no route to
@@ -71,28 +190,20 @@ func NewRecoveryHandler(lease *resetstate.Lease) http.Handler {
 			Operation Operation `json:"operation"`
 		}{Success: operation.VerifiedComplete(), Operation: operation})
 	})
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+	RegisterResetStatusRoutes(mux, lease)
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		setRecoveryHeaders(w)
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		operation, err := CurrentRecoveryOperation(r.Context(), lease)
-		if err != nil {
-			http.Error(w, "Reset recovery evidence is unavailable.", http.StatusServiceUnavailable)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = recoveryPage.Execute(w, operation)
+		http.Redirect(w, r, ResetStatusPath, http.StatusSeeOther)
 	})
 	return mux
 }
 
 func setRecoveryHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 }
 
 func RecoveryHTTPServer(lease *resetstate.Lease, address string) *http.Server {

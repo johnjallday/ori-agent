@@ -8,14 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -45,6 +46,24 @@ func main() {
 		os.Exit(code)
 	}
 
+	args := os.Args[1:]
+	if len(args) != 0 && args[0] == nativeWatchArg {
+		if err := runNativeResetWatcher(args[1:]); err != nil {
+			log.Fatalf("Cannot reopen Ori after reset: %v. Reopen the same app manually.", err)
+		}
+		return
+	}
+	var expectedOperation string
+	var restartPort int
+	if len(args) != 0 && args[0] == nativeBootArg {
+		var err error
+		expectedOperation, restartPort, err = parseNativeResetArgs(args[1:])
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	startOnLaunch := len(args) == 1 && args[0] == "--start-server"
+
 	// Expand PATH to include common development tool locations
 	// This ensures tools like codex, go, node are available when launched from macOS app bundle
 	environ.ExpandPath()
@@ -52,17 +71,40 @@ func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("Starting Ori Agent Menu Bar App (systray)...")
 
-	dataDir, err := activateMenubarDataDirectory()
+	nativeLaunch, launchErr := identifyNativeResetLaunch(runningNativeBundle())
+	var relaunchListener net.Listener
+	if expectedOperation != "" {
+		if launchErr != nil {
+			log.Fatalf("Ori reset expected the original macOS app bundle: %v", launchErr)
+		}
+		var err error
+		relaunchListener, err = reserveNativeResetPort(restartPort)
+		if err != nil {
+			log.Fatalf("Cannot reopen Ori on the original port: %v. Free the port and relaunch manually.", err)
+		}
+	}
+	var dataDir string
+	var err error
+	if expectedOperation != "" {
+		dataDir, err = existingMenubarResetDirectory()
+	} else {
+		dataDir, err = activateMenubarDataDirectory()
+	}
 	if err != nil {
 		log.Fatalf("Failed to activate data directory: %v", err)
 	}
 	// The shell has its own settings writer. Acquire BEFORE constructing it,
 	// not in Controller.StartServer. Stop/Start Server cannot release this lease;
 	// even Shutdown leaves writers alive, so only full process exit may do so.
-	lease, err := menuBeforeStores(context.Background(), dataDir)
+	var lease *resetstate.Lease
+	if expectedOperation != "" {
+		lease, err = settingsreset.BeforeStoresForRestart(context.Background(), dataDir, expectedOperation)
+	} else {
+		lease, err = menuBeforeStores(context.Background(), dataDir)
+	}
 	if err != nil {
 		if lease != nil && errors.Is(err, settingsreset.ErrRecoveryIncomplete) {
-			if recoveryErr := runMenubarResetRecovery(lease); recoveryErr != nil {
+			if recoveryErr := runMenubarResetRecovery(lease, relaunchListener); recoveryErr != nil {
 				log.Fatalf("Reset recovery host failed: %v", recoveryErr)
 			}
 			return
@@ -83,9 +125,29 @@ func main() {
 
 	// Get port from settings (defaults to 8765)
 	port := settingsMgr.GetPort()
+	if restartPort != 0 {
+		port = restartPort
+	}
 	logger.Debug("Using port", logger.Fields{"port": port})
 
 	controller := menubar.NewControllerWithResetLease(port, lease)
+	restart := make(chan string, 1)
+	var restartUnavailable atomic.Bool
+	if launchErr != nil {
+		log.Printf("Automatic reset restart is unavailable: %v", launchErr)
+	} else {
+		controller.SetResetRestartHandoff(settingsreset.NewRestartHandoff(func() bool {
+			return !restartUnavailable.Load() && nativeLaunch.unchanged()
+		}, func(id string) { restart <- id }))
+	}
+	manualQuit := make(chan struct{}, 1)
+	quitOnDemand := func() {
+		select {
+		case manualQuit <- struct{}{}:
+		default:
+		}
+	}
+	finishRestart := make(chan func(bool) error, 1)
 
 	// Initialize LaunchAgent manager
 	launchAgentMgr, err := menubar.NewLaunchAgentManager()
@@ -94,28 +156,26 @@ func main() {
 		log.Println("Auto-start feature will be disabled")
 	}
 
-	// Handle signals in a goroutine
-	go func() {
-		<-sigChan
-		log.Println("Received shutdown signal...")
-
-		// Stop server if running
-		ctx := context.Background()
-		if controller.GetStatus() == menubar.StatusRunning {
-			log.Println("Stopping server...")
-			if err := controller.StopServer(ctx); err != nil {
-				logger.Error("Error stopping server", logger.Fields{"error": err})
-			}
-		}
-
-		log.Println("Quitting systray...")
-		systray.Quit()
-	}()
-
-	// Run systray
+	// Run systray. No ordinary launch changes whether the embedded server
+	// starts by default; the reset handoff (or explicit CLI opt-in) starts it.
 	onReady := func() {
 		log.Println("Systray ready, setting up menu...")
-		setupMenuSystray(controller, settingsMgr, launchAgentMgr)
+		setupMenuSystray(controller, settingsMgr, launchAgentMgr, quitOnDemand)
+		go runMenubarQuitLoop(controller, sigChan, manualQuit, restart, finishRestart, &restartUnavailable, nativeLaunch)
+		if relaunchListener != nil || startOnLaunch {
+			go func() {
+				var err error
+				if relaunchListener != nil {
+					err = controller.StartAfterReset(context.Background(), relaunchListener)
+				} else {
+					// Explicit launch-time start is strict: never prompt for takeover.
+					err = controller.StartServer(context.Background())
+				}
+				if err != nil {
+					logger.Error("Could not start Ori server; check the port or start it from the menu", logger.Fields{"error": err})
+				}
+			}()
+		}
 	}
 
 	onExit := func() {
@@ -126,23 +186,99 @@ func main() {
 			log.Println("Stopping server before exit...")
 			_ = controller.StopServer(ctx) // Best effort stop on exit
 		}
+		// AppKit terminates after applicationWillTerminate: systray.Run does
+		// not return on that path. Release the armed helper here, and it still
+		// waits for the exact kernel-reported exit before opening anything.
+		select {
+		case finish := <-finishRestart:
+			commit := true
+			select {
+			case <-sigChan:
+				commit = false
+			case <-manualQuit:
+				commit = false
+			default:
+			}
+			if err := finish(commit); err != nil {
+				logger.Error("Could not hand off reset restart; reopen Ori manually", logger.Fields{"error": err})
+			}
+		default:
+		}
 	}
 
 	systray.Run(onReady, onExit)
 	log.Println("Systray app exited")
 }
 
-func runMenubarResetRecovery(lease *resetstate.Lease) error {
-	port := 8765
-	if configured, err := strconv.Atoi(strings.TrimSpace(os.Getenv("PORT"))); err == nil && configured > 0 && configured <= 65535 {
-		port = configured
+func runMenubarQuitLoop(controller *menubar.Controller, signals <-chan os.Signal, manual <-chan struct{}, restart <-chan string, finishRestart chan<- func(bool) error, unavailable *atomic.Bool, launch nativeResetLaunch) {
+	for {
+		var id string
+		select {
+		case <-signals:
+		case <-manual:
+		case id = <-restart:
+			select {
+			case <-signals:
+				id = ""
+			case <-manual:
+				id = ""
+			case <-time.After(2 * time.Second):
+			}
+		}
+		if id == "" {
+			if controller.GetStatus() == menubar.StatusRunning {
+				_ = controller.StopServer(context.Background())
+			}
+			systray.Quit()
+			return
+		}
+		finish, err := launch.startWatcher(id, controller.GetPort())
+		if err == nil {
+			err = controller.StopServer(context.Background())
+		}
+		if err != nil {
+			unavailable.Store(true)
+			if finish != nil {
+				_ = finish(false)
+			}
+			logger.Error("Could not restart Ori automatically; quit and reopen the same app", logger.Fields{"error": err})
+			continue
+		}
+		finishRestart <- finish
+		systray.Quit()
+		return
+	}
+}
+
+func runMenubarResetRecovery(lease *resetstate.Lease, listener net.Listener) error {
+	port := menubarRecoveryPort(lease.Path())
+	if tcp, ok := listenerAddr(listener).(*net.TCPAddr); ok {
+		port = tcp.Port
 	}
 	address := fmt.Sprintf("127.0.0.1:%d", port)
 	url := fmt.Sprintf("http://localhost:%d/", port)
 	httpServer := settingsreset.RecoveryHTTPServer(lease, address)
+	if listener != nil {
+		// The pre-bound embedded-server address may be wildcard. Keep the
+		// recovery-only surface local, as on a manual recovery launch.
+		recovery := httpServer.Handler
+		httpServer.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			host, _, err := net.SplitHostPort(r.RemoteAddr)
+			if err != nil || !net.ParseIP(host).IsLoopback() {
+				w.Header().Set("Cache-Control", "no-store")
+				http.Error(w, "Reset recovery is available on this Mac only.", http.StatusForbidden)
+				return
+			}
+			recovery.ServeHTTP(w, r)
+		})
+	}
 	serveErr := make(chan error, 1)
 	go func() {
-		err := httpServer.ListenAndServe()
+		serve := httpServer.ListenAndServe
+		if listener != nil {
+			serve = func() error { return httpServer.Serve(listener) }
+		}
+		err := serve()
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}
@@ -152,14 +288,43 @@ func runMenubarResetRecovery(lease *resetstate.Lease) error {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(quit)
-	select {
-	case err := <-serveErr:
-		return err
-	case <-quit:
-	}
+	result := make(chan error, 1)
+	systray.Run(func() {
+		systray.SetIcon(menubar.GetStoppedIcon())
+		systray.SetTooltip("Ori Agent - Reset recovery")
+		open := systray.AddMenuItem("Open Reset Status", "View the reset recovery result")
+		quitItem := systray.AddMenuItem("Quit", "Quit Ori Agent")
+		go func() {
+			for {
+				select {
+				case <-open.ClickedCh:
+					openBrowser(port)
+					continue
+				case <-quitItem.ClickedCh:
+				case <-quit:
+				case err := <-serveErr:
+					result <- err
+				}
+				systray.Quit()
+				return
+			}
+		}()
+	}, func() {})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return httpServer.Shutdown(ctx)
+	var serveFailure error
+	select {
+	case serveFailure = <-result:
+	default:
+	}
+	return errors.Join(serveFailure, httpServer.Shutdown(ctx))
+}
+
+func listenerAddr(listener net.Listener) net.Addr {
+	if listener == nil {
+		return nil
+	}
+	return listener.Addr()
 }
 
 // Converge shell CWD and server ORI_DATA_DIR, including explicit overrides.
@@ -176,6 +341,22 @@ func activateMenubarDataDirectory() (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return enterMenubarDataDirectory(dataDir)
+}
+
+func existingMenubarResetDirectory() (string, error) {
+	root := os.Getenv("ORI_DATA_DIR")
+	if !filepath.IsAbs(root) {
+		return "", errors.New("original Ori data directory was not preserved by relaunch")
+	}
+	canonical, err := filepath.EvalSymlinks(root)
+	if err != nil || canonical != root {
+		return "", errors.New("original Ori data directory changed during relaunch")
+	}
+	return enterMenubarDataDirectory(root)
+}
+
+func enterMenubarDataDirectory(dataDir string) (string, error) {
 	if err := os.Chdir(dataDir); err != nil {
 		return "", err
 	}
@@ -211,7 +392,7 @@ func startMenuServer(controller *menubar.Controller, settingsMgr *menubar.Settin
 	})
 }
 
-func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.SettingsManager, launchAgentMgr *menubar.LaunchAgentManager) {
+func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.SettingsManager, launchAgentMgr *menubar.LaunchAgentManager, quit func()) {
 	// Set initial icon and tooltip
 	systray.SetIcon(menubar.GetStoppedIcon())
 	systray.SetTooltip("Ori Agent - Server Stopped")
@@ -332,14 +513,7 @@ func setupMenuSystray(controller *menubar.Controller, settingsMgr *menubar.Setti
 			case <-quitItem.ClickedCh:
 				log.Println("Quit clicked")
 
-				// Stop server if running
-				ctx := context.Background()
-				if controller.GetStatus() == menubar.StatusRunning {
-					log.Println("Stopping server before quit...")
-					_ = controller.StopServer(ctx) // Ignore error on exit
-				}
-
-				systray.Quit()
+				quit()
 				return
 			}
 		}

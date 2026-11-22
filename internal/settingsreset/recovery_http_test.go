@@ -37,7 +37,15 @@ func TestRecoveryHandlerServesOnlyDurableReadOnlyStatus(t *testing.T) {
 	}
 
 	handler := NewRecoveryHandler(coordinator.lease)
-	pageRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	statusURL := ResetStatusPath + "?operation=" + preview.OperationID
+	for _, route := range []struct{ from, to string }{{"/", ResetStatusPath}, {ResetStatusPath, statusURL}} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, route.from, nil))
+		if w.Code != http.StatusSeeOther || w.Header().Get("Location") != route.to || w.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("%s did not pin to %s: %d %v", route.from, route.to, w.Code, w.Header())
+		}
+	}
+	pageRequest := httptest.NewRequest(http.MethodGet, statusURL, nil)
 	pageResponse := httptest.NewRecorder()
 	handler.ServeHTTP(pageResponse, pageRequest)
 	if pageResponse.Code != http.StatusOK || !strings.Contains(pageResponse.Body.String(), preview.OperationID) {
@@ -45,6 +53,11 @@ func TestRecoveryHandlerServesOnlyDurableReadOnlyStatus(t *testing.T) {
 	}
 	if strings.Contains(pageResponse.Body.String(), `<script>alert("unsafe")</script>`) {
 		t.Fatal("recovery page rendered private evidence as executable markup")
+	}
+	for _, text := range []string{"Reset needs attention", "Fully relaunch.", "&lt;script&gt;", `role="status"`, "Control+C", "Start Server", `name="operation" value="` + preview.OperationID + `"`} {
+		if !strings.Contains(pageResponse.Body.String(), text) {
+			t.Errorf("recovery page omitted %q", text)
+		}
 	}
 	if pageResponse.Header().Get("Cache-Control") != "no-store" || pageResponse.Header().Get("Content-Security-Policy") == "" {
 		t.Fatal("recovery page omitted private-state response headers")
@@ -64,6 +77,19 @@ func TestRecoveryHandlerServesOnlyDurableReadOnlyStatus(t *testing.T) {
 		t.Fatalf("recovery API = %d %+v", apiResponse.Code, response)
 	}
 
+	opResponse := httptest.NewRecorder()
+	handler.ServeHTTP(opResponse, httptest.NewRequest(http.MethodGet, "/api/reset/operations/"+preview.OperationID, nil))
+	if opResponse.Code != http.StatusOK || opResponse.Header().Get(ResetReadyHeader) != "" {
+		t.Fatal("recovery-only listener must not signal normal-app readiness")
+	}
+	for _, path := range []string{"/reset/assets/generation.js", "/reset/assets/status.js"} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "text/javascript; charset=utf-8" ||
+			w.Header().Get("Cache-Control") != "no-store" || w.Body.Len() == 0 {
+			t.Errorf("allowlisted status script %s = %d %v", path, w.Code, w.Header())
+		}
+	}
 	before, err := coordinator.lease.Read(resetstate.OperationRecord)
 	if err != nil {
 		t.Fatal(err)
@@ -77,5 +103,32 @@ func TestRecoveryHandlerServesOnlyDurableReadOnlyStatus(t *testing.T) {
 	}
 	if postResponse.Code != http.StatusMethodNotAllowed || !bytes.Equal(before, after) {
 		t.Fatal("recovery host accepted mutation")
+	}
+
+	for _, tc := range []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodHead, statusURL, http.StatusOK},
+		{http.MethodPost, statusURL, http.StatusMethodNotAllowed},
+		{http.MethodGet, ResetStatusPath + "/next", http.StatusNotFound},
+		{http.MethodGet, "/reset/%73tatus", http.StatusNotFound},
+		{http.MethodGet, "/reset/assets/unrelated.js", http.StatusNotFound},
+		{http.MethodGet, "/reset/assets/%73tatus.js", http.StatusNotFound},
+		{http.MethodGet, "/reset/assets/status.js?other=1", http.StatusNotFound},
+		{http.MethodGet, "/js/modules/settings-reset.js", http.StatusNotFound},
+		{http.MethodGet, ResetStatusPath + "?operation=" + preview.OperationID + "&operation=other", http.StatusBadRequest},
+		{http.MethodGet, ResetStatusPath + "?operation=%3Cscript%3E", http.StatusBadRequest},
+		{http.MethodGet, ResetStatusPath + "?operation=another-operation", http.StatusNotFound},
+	} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, nil))
+		if w.Code != tc.want || w.Header().Get("Location") != "" || strings.Contains(w.Body.String(), preview.OperationID) {
+			t.Errorf("%s %s = %d %v", tc.method, tc.path, w.Code, w.Header())
+		}
+		if tc.want == http.StatusNotFound && strings.HasSuffix(tc.path, "=another-operation") &&
+			(!strings.Contains(w.Body.String(), "Reset status unavailable") || !strings.Contains(w.Body.String(), "another-operation")) {
+			t.Fatal("unknown explicit ID did not get recoverable unavailable page")
+		}
 	}
 }

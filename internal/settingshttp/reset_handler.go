@@ -38,6 +38,7 @@ type ResetHandler struct {
 	dataDir        string
 	planner        *settingsreset.Planner
 	coordinator    *settingsreset.Coordinator
+	restart        *settingsreset.RestartHandoff
 }
 
 func NewResetHandler(mgr *onboarding.Manager, agents store.Store, dataDir string) *ResetHandler {
@@ -54,3 +55,6 @@ func (h *ResetHandler) SetWorkspaceStore(ws *workspace.FileStore) { h.workspaceS
 // SetCoordinator is initialization-only. Alternate hosts without a complete
 // lifecycle return unavailable, never fall back to legacy live deletion.
 func (h *ResetHandler) SetCoordinator(c *settingsreset.Coordinator) { h.coordinator = c }
+
+// SetRestartHandoff is init-only. Unsupported hosts leave this nil.
+func (h *ResetHandler) SetRestartHandoff(restart *settingsreset.RestartHandoff) { h.restart = restart }

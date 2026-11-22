@@ -11,6 +11,49 @@ inventory, first-run verification, bounded browser cleanup, and an explicit
 attach-existing-vault-package path. Selecting every narrow category never
 implies Start Fresh.
 
+## Browser handoff and process restart
+
+Settings → Reset & Recovery hands staged destructive resets to `/reset/status?operation=<ID>`
+in the same tab. The ID comes from review, before confirmation. If the reply is
+lost, the tab recovers that ID without resubmitting; an explicit pre-admission
+refusal stays in Settings. While fenced, top-level page navigations redirect to
+status, but ordinary APIs and event streams still return JSON `reset_pending`.
+The same read-only page and exact embedded scripts are available before stores
+open, even when recovery blocks the normal app. An explicit unknown or superseded
+ID never inherits another operation's result.
+
+Status polls the same-origin operation endpoint with backoff. It offers entry
+only when that response proves both the exact operation's named category checks
+and normal-app readiness. Connection failure preserves the last confirmed result
+and **Check status** is available throughout. Verified Start Fresh clears only
+the known browser keys, publishes its generation to stale tabs, and offers
+**Continue setup**. A verified selective reset offers **Back to Ori** without
+clearing unrelated browser state. A blocked, partial or unreadable receipt never
+unlocks entry. Replay Setup and Reset Getting Started still run in process.
+
+- **Direct terminal launch:** press Control+C and wait for the process to exit.
+  Rerun the same command with the same environment, installation and port.
+- **Managed development launch:** `make run-dev-managed PORT=8765` or build a
+  stable binary and run `bin/ori-agent -managed-restart`. For a disposable demo,
+  use `ORI_DEMO_MANAGED_RESTART=1 wt demo` or
+  `./scripts/demo-server.sh --managed-restart`. The loopback-only supervisor
+  accepts an operation-specific signal from its exact child only after durable
+  staging and graceful HTTP shutdown. It joins that child before spawning a
+  replacement. An intentional stop, occupied port or failed launch does not
+  cause automatic retries or port takeover.
+- **macOS menubar:** an app bundle launched through LaunchServices can reopen
+  the same verified bundle after the exact old process quits. The new process
+  checks the awaiting receipt before shell/store construction and starts the
+  embedded server or recovery listener at the saved origin. Raw binary and
+  current login-agent launches require manual restart. Choose **Quit**, reopen
+  the same app, then choose **Start Server** if needed. Stop/Start Server alone
+  is not a process restart. The menubar port and launch-at-login preference are
+  preserved, and reset never rewrites login registration.
+
+If an automatic restart cannot finish, keep the status tab open and follow its
+manual guidance. Keep `.ori-reset` and do not start a second process against
+that data folder while the original is still running.
+
 > The numbered “in progress” sections below are retained implementation notes.
 > Their milestone-specific delivery limits are superseded by the current status
 > above and the final validation boundary at the end of this document.

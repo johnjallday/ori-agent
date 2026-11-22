@@ -8,13 +8,14 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
-// ResetFirstRunVerified replaces only the app-state owner's document with its
-// canonical first-run value. Other reset categories own config, agents,
+// ResetFirstRunVerified restores canonical first-run state while retaining the
+// menubar host's port and login registration preference. Other categories own config, agents,
 // relational records and transient state.
 func (m *Manager) ResetFirstRunVerified() error {
 	m.mu.Lock()
 	previous := m.state
 	m.state = newManagerDefaults(m.statePath).state
+	m.state.MenuBar = previous.MenuBar
 	if err := m.saveUnlocked(); err != nil {
 		m.state = previous
 		m.mu.Unlock()
@@ -26,13 +27,13 @@ func (m *Manager) ResetFirstRunVerified() error {
 	if err != nil {
 		return err
 	}
-	if !verified.IsCanonicalFirstRun() {
+	if !verified.IsCanonicalFirstRun() || !reflect.DeepEqual(verified.state.MenuBar, previous.MenuBar) {
 		return errors.New("first-run app state did not verify canonical")
 	}
 	return nil
 }
 
-// IsCanonicalFirstRun compares every app-state field except the creation time
+// IsCanonicalFirstRun ignores host launch preferences and the creation time
 // attached to canonical zero-progress state.
 func (m *Manager) IsCanonicalFirstRun() bool {
 	m.mu.RLock()
@@ -45,6 +46,7 @@ func isCanonicalFirstRun(state *types.AppState, statePath string) bool {
 		return false
 	}
 	candidate := *state
+	candidate.MenuBar = nil
 	expected := *newManagerDefaults(statePath).state
 	if candidate.AssistantProgress != nil {
 		progress := *candidate.AssistantProgress

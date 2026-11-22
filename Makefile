@@ -164,6 +164,10 @@ run-dev: check-env ## Run server in development mode (no build)
 	@echo "$(BLUE)Starting server in dev mode on port $(PORT)...$(NC)"
 	PORT=$(PORT) $(GORUN) ./cmd/server
 
+.PHONY: run-dev-managed
+run-dev-managed: check-env build ## Run a stable local server with opt-in reset restart
+	PORT=$(PORT) ./$(BUILD_DIR)/$(BINARY_NAME) -managed-restart
+
 run-menubar: menubar ## Build and run the menu bar app
 	@echo "$(BLUE)Starting menu bar app...$(NC)"
 	./$(BUILD_DIR)/$(MENUBAR_BINARY_NAME)

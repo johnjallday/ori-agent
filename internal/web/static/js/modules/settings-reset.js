@@ -111,6 +111,21 @@
     runtime_cache: 'Generated runtime state'
   };
   const operationStorageKey = 'ori.reset.operation_id';
+  const operationIDPattern = /^[A-Za-z0-9_-]{1,128}$/;
+  // These responses prove this request was refused before admission. Other
+  // errors (including missing/unparseable replies) cannot rule out staging.
+  const admissionRefusals = new Set([
+    'invalid_request',
+    'preview_required',
+    'preview_expired',
+    'scope_changed',
+    'preview_blocked',
+    'active_work',
+    'agents_folder_confirmation_required',
+    'operation_conflict',
+    'lifecycle_unavailable',
+    'preview_limit'
+  ]);
   const selectAll = byId('selectAllResetBtn');
   const clearSelection = byId('clearAllResetBtn');
   const input = byId('resetConfirmInput');
@@ -127,7 +142,6 @@
   const resultPanel = byId('resetOperationPanel');
   const status = byId('resetOperationStatus');
   const results = byId('resetOperationResults');
-  const openStartFreshSetup = byId('openStartFreshSetupBtn');
   const dismissButtons = [byId('resetCancelBtn'), byId('resetCloseBtn')];
   // A reset that removes the agents from the Workspace Directory needs a second
   // confirmation naming that folder: the user can see it and may sync it to
@@ -189,8 +203,12 @@
         phase === 'submitting'
           ? 'Submitting reset…'
           : reviewed?.intent === 'start_fresh'
-            ? 'Start Fresh after full relaunch'
-            : 'Reset reviewed data';
+            ? reviewed.restart?.managed
+              ? 'Start Fresh and restart Ori'
+              : 'Start Fresh after full relaunch'
+            : reviewed?.restart?.managed
+              ? 'Reset and restart Ori'
+              : 'Reset reviewed data';
       confirmButton.setAttribute('aria-busy', String(phase === 'submitting'));
     }
     dismissButtons.forEach(node => {
@@ -327,160 +345,12 @@
     }
   }
 
-  function operationRows(operation) {
-    const rows = [];
-    for (const result of operation?.results || []) {
-      const name = labels[result.id] || result.id;
-      rows.push(`${name}: ${result.outcome}${result.message ? ` — ${result.message}` : ''}`);
-      for (const check of result.checks || []) {
-        rows.push(
-          `${name} / ${check.name}: ${check.outcome}${check.message ? ` — ${check.message}` : ''}`
-        );
-      }
-      // Per-item outcomes name which plugin is unresolved after a partial
-      // failure, so a retry is not a blind repeat of the whole category.
-      for (const item of result.items || []) {
-        rows.push(
-          `${name} / ${item.name}: ${item.outcome}${item.message ? ` — ${item.message}` : ''}`
-        );
-      }
-      for (const kept of result.retained || [])
-        rows.push(`Kept: ${kept.display_path} — ${kept.reason}`);
-    }
-    for (const blocker of operation?.blockers || []) {
-      rows.push(`Blocked: ${blocker.message}${blocker.recovery ? ` — ${blocker.recovery}` : ''}`);
-    }
-    return rows;
-  }
-
-  function clearFreshBrowserState() {
-    const exactLocal = [
-      'ori-theme',
-      'ori-ui-density',
-      'voiceSettings',
-      'note.openBehavior',
-      'enterToSend',
-      'planBeforeAction',
-      'chatPanelWidth',
-      'sidebarWidth',
-      'sessionFolderCollapsed',
-      'sessionSidebarCollapsed',
-      'sessionSidebarWidth',
-      'oriWorkspaceHubLauncherView',
-      'oriWorkspaceCommandViewMode',
-      'oriWorkspaceDetailView',
-      'canvas-bg-color',
-      'note.leftRail.tab',
-      'note.toc.collapsed',
-      'note.aiAssist.collapsed',
-      'ori_chat_assistant',
-      'activeSessionId',
-      'ori.homeAssistant.recentSessions',
-      'oriWorkspaceSyncDismissed',
-      'note.tabs',
-      'note.search.recent',
-      'ori.roster.selectedAgent',
-      'ori-selected-vault-id',
-      'ori-vault-active-tab',
-      'ori.personalAssistantHireRequestId',
-      'ori.personalAssistantHQRequestId',
-      'ori.homeAssistant.automationMode'
-    ];
-    const exactSession = [
-      'activeSessionId',
-      'ori.homeAssistant.recentSessions',
-      'oriWorkspaceHubOverviewExpanded',
-      'oriWorkspaceHubLauncherTab',
-      'oriWorkspaceHubSelectedId',
-      'currentWorkspaceId',
-      'workspace-detail-task-assist-specialist',
-      'ori.homeAssistant.pendingWorkspacePrompt',
-      'ori-guide-handoff',
-      'ori.homeAssistant.automationMode',
-      'ori-keyboard-nav-persistent'
-    ];
-    const prefixes = [
-      'ori_chat_session_',
-      'ori_chat_assistant_',
-      'activeSessionId_',
-      'note.tabs.workspace.',
-      'ori.evolution.lastStage.',
-      'ori.personalAssistantApplyRequestId.',
-      'workspace-directory-explorer:',
-      'ori-workspace-command-agent:',
-      'oriSetupWizardResume:',
-      'oriProjectOpenNotice:',
-      'workspace-detail-entry-agent-prompt-dismissed:'
-    ];
-    const clear = (storage, exact) => {
-      if (!storage) return;
-      try {
-        exact.forEach(key => storage.removeItem?.(key));
-        if (typeof storage.length !== 'number' || typeof storage.key !== 'function') return;
-        const found = [];
-        for (let index = 0; index < storage.length; index += 1) {
-          const key = storage.key(index);
-          if (typeof key === 'string' && prefixes.some(prefix => key.startsWith(prefix)))
-            found.push(key);
-        }
-        found.forEach(key => storage.removeItem(key));
-      } catch {
-        // Browser storage is best effort and never changes the server's verified outcome.
-      }
-    };
-    clear(window.localStorage, exactLocal);
-    clear(window.sessionStorage, exactSession);
-  }
-
-  function renderOperation(operation) {
-    const state = operation?.state || 'interrupted';
-    phase = state === 'completed' ? 'idle' : state;
-    if (openStartFreshSetup) {
-      openStartFreshSetup.hidden = !(state === 'completed' && operation?.intent === 'start_fresh');
-    }
-    const messages = {
-      preparing:
-        'Reset admission is preparing. Ordinary work remains fenced while recovery is established.',
-      awaiting_restart:
-        'Restart required. Fully quit and relaunch Ori using the same installation; browser reload and menubar Stop/Start are not enough.',
-      applying: 'Reset is applying before application stores open.',
-      verifying: 'Reset was applied and its named postconditions are being verified.',
-      completed: 'Reset completed and its named postconditions were verified.',
-      partial_failure:
-        'Reset partially completed. Keep this result and retry only unresolved categories when offered.',
-      blocked:
-        'Reset is blocked. No unchecked category should be repeated; follow the recovery details below.',
-      interrupted:
-        'Reset outcome is interrupted or unknown. Preserve recovery metadata and do not submit another reset.'
-    };
-    showResult(messages[state] || messages.interrupted, operationRows(operation));
-    if (state === 'completed' && operation?.intent === 'start_fresh') {
-      clearFreshBrowserState();
-      try {
-        window.localStorage?.setItem('ori.reset.generation', operation.id);
-      } catch {
-        // Other tabs may need a manual reload when browser storage is unavailable.
-      }
-    }
-    if (operation?.id) {
-      try {
-        window.localStorage?.setItem(operationStorageKey, operation.id);
-      } catch {
-        // The durable server receipt remains authoritative.
-      }
-    }
-  }
-
   function responseMessage(payload, fallback) {
     if (payload && typeof payload.message === 'string' && payload.message) return payload.message;
     if (Array.isArray(payload?.errors) && typeof payload.errors[0] === 'string')
       return payload.errors[0];
     return fallback;
   }
-
-  openStartFreshSetup?.addEventListener('click', () => {
-    window.location.href = '/';
-  });
 
   async function readJSON(response) {
     try {
@@ -491,6 +361,13 @@
     }
   }
 
+  function openResetStatus(id) {
+    phase = 'handoff';
+    showResult('Opening reset status. Keep this tab open and do not submit another reset.');
+    updateControls();
+    window.location.href = `/reset/status?operation=${encodeURIComponent(id)}`;
+  }
+
   async function recoverOperation() {
     let operationID = '';
     try {
@@ -498,14 +375,16 @@
     } catch {
       return;
     }
-    if (!operationID) return;
+    if (!operationIDPattern.test(operationID)) return;
     try {
       const response = await fetch(`/api/reset/operations/${encodeURIComponent(operationID)}`, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' }
       });
       const payload = await readJSON(response);
-      if (payload?.operation) renderOperation(payload.operation);
-      else if (!response.ok)
+      if (phase !== 'idle') return;
+      if (response.ok && payload?.operation?.id === operationID) {
+        if (payload.operation.state !== 'completed') openResetStatus(operationID);
+      } else if (!response.ok && response.status !== 404)
         showResult(
           'A reset recovery receipt exists, but its current outcome could not be loaded. Do not submit another reset.'
         );
@@ -548,7 +427,6 @@
     reviewFocus = intent === 'start_fresh' ? startFreshButton : reviewButton;
     phase = 'previewing';
     reviewed = null;
-    if (openStartFreshSetup) openStartFreshSetup.hidden = true;
     showResult('Loading the authoritative reset scope. No data is being changed.');
     updateControls();
     try {
@@ -561,7 +439,8 @@
       if (
         !response.ok ||
         !preview?.id ||
-        !preview?.operation_id ||
+        typeof preview?.operation_id !== 'string' ||
+        !operationIDPattern.test(preview.operation_id) ||
         !Array.isArray(preview.categories)
       ) {
         throw new Error(
@@ -615,7 +494,9 @@
     const acceptedPreview = reviewed;
     const resetRequestID = requestID();
     phase = 'submitting';
+    let previousOperationID;
     try {
+      previousOperationID = window.localStorage?.getItem(operationStorageKey);
       window.localStorage?.setItem(operationStorageKey, acceptedPreview.operation_id);
     } catch {
       // Submission still returns and renders the durable operation identity.
@@ -639,25 +520,28 @@
         })
       });
       const payload = await readJSON(response);
-      if (payload?.operation) renderOperation(payload.operation);
-      else if (payload?.code === 'agents_folder_confirmation_required') {
-        // Refused before anything was admitted, so the reset can be reviewed again.
+      if (!response.ok && admissionRefusals.has(payload?.code)) {
+        // The server may include the previous receipt in a refusal; neither
+        // that receipt nor the unused preview ID belongs to this submission.
+        try {
+          const storage = window.localStorage;
+          if (storage?.getItem(operationStorageKey) === acceptedPreview.operation_id) {
+            if (previousOperationID) storage.setItem(operationStorageKey, previousOperationID);
+            else storage.removeItem(operationStorageKey);
+          }
+        } catch {
+          // Storage is optional; don't change the server's refusal result.
+        }
         phase = 'idle';
-        showResult(responseMessage(payload, 'Confirm the agents folder, then reset again.'));
+        reviewed = null;
+        showResult(responseMessage(payload, 'Reset was refused. Review the scope again.'));
       } else {
-        phase = 'unknown';
-        showResult(
-          responseMessage(
-            payload,
-            'Reset did not return a recoverable operation. Keep the recovery identity and do not submit again.'
-          )
-        );
+        openResetStatus(acceptedPreview.operation_id);
       }
     } catch {
-      phase = 'unknown';
-      showResult(
-        'Reset response was lost. This is not proof of success or failure; recover the saved operation after relaunch instead of submitting again.'
-      );
+      // Admission can keep running after disconnect. The preview supplied the
+      // only ID this tab is waiting for, even when storage isn't available.
+      openResetStatus(acceptedPreview.operation_id);
     } finally {
       updateControls();
       bootstrap.Modal.getInstance(modalElement)?.hide();

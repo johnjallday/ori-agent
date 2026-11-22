@@ -5,7 +5,7 @@
 # run it as a tracked background process (see "Smoke Testing" in CLAUDE.md).
 #
 # Usage:
-#   ./scripts/demo-server.sh [--rev REV] [--open] [--native-picker] [port] [sandbox_dir]
+#   ./scripts/demo-server.sh [--rev REV] [--open] [--native-picker] [--managed-restart] [port] [sandbox_dir]
 #
 # --rev REV serves a build of another commit instead of the working tree, so a
 # failing browser test can be checked against its baseline (for example the
@@ -30,6 +30,7 @@ set -euo pipefail
 rev=""
 open_browser="${ORI_DEMO_OPEN:-0}"
 native_picker=0
+managed_restart="${ORI_DEMO_MANAGED_RESTART:-0}"
 while [[ "${1:-}" == --* ]]; do
 	case "$1" in
 	--rev)
@@ -46,6 +47,10 @@ while [[ "${1:-}" == --* ]]; do
 		;;
 	--native-picker)
 		native_picker=1
+		shift
+		;;
+	--managed-restart)
+		managed_restart=1
 		shift
 		;;
 	*)
@@ -105,7 +110,9 @@ echo "URL=http://localhost:$port"
 cd "$sandbox"
 desktop_off=1
 if [[ "$native_picker" == "1" ]]; then desktop_off=0; fi
+reset_launch_args=()
+if [[ "$managed_restart" == "1" ]]; then reset_launch_args=(-managed-restart); fi
 if [[ "$open_browser" == "1" ]]; then
-	exec env -u NO_BROWSER HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/.config" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary"
+	exec env -u NO_BROWSER HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/.config" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary" ${reset_launch_args[@]+"${reset_launch_args[@]}"}
 fi
-exec env HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/.config" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary"
+exec env HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/.config" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary" ${reset_launch_args[@]+"${reset_launch_args[@]}"}
