@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
 // The picture is the review drawn as the folder will look after filing. These
@@ -52,6 +54,7 @@ type PictureFile struct {
 	Category   Category `json:"category,omitempty"`
 	YourChoice bool     `json:"your_choice,omitempty"`
 	Placement  string   `json:"placement"`
+	Viewer     string   `json:"viewer,omitempty"`
 	// FamilyID, Ending and BundleID place a question-row file with its siblings: the
 	// files of one name apart from a copy or version ending (a pair card) or of one
 	// name apart from the extension (a bundle card). Opaque; they name nothing.
@@ -216,6 +219,9 @@ const (
 
 func pictureFileFor(candidate JanitorCandidate, placement string) PictureFile {
 	file := PictureFile{ID: candidate.ID, Name: candidate.Display(), Size: candidate.Size, Placement: placement}
+	if placement != PictureCouldNotFile {
+		file.Viewer = platform.ReviewDocumentViewer(candidate.Name)
+	}
 	if !candidate.ModifiedAt.IsZero() {
 		file.ModifiedAt = candidate.ModifiedAt.UTC().Format("2006-01-02T15:04:05Z07:00")
 	}

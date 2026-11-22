@@ -644,7 +644,7 @@ test('the one main button states what pressing it will do (R35)', () => {
   assert.equal(model(planOf(52, 3)).label, 'File 52 files · 3 to Trash');
   assert.equal(model(planOf(0, 3)).label, 'Move 3 files to Trash');
   assert.equal(model(planOf(0, 1)).label, 'Move 1 file to Trash');
-  assert.equal(model(planOf(0, 0)).label, 'Nothing to file');
+  assert.equal(model(planOf(0, 0)).label, 'No changes selected');
   assert.equal(model(planOf(0, 0)).disabled, true, 'nothing to file is disabled');
   assert.equal(model(planOf(52)).disabled, false);
 });
@@ -909,7 +909,7 @@ test('the one-file bar: a hint when nothing is selected, then the name and one m
   );
   const bar = renderFileBar(doc, pictureFixture(), answerCtx());
   assert.equal(bar.id, 'fileJanitorFileBar');
-  assert.equal(textOf(bar), 'Click any file to move just that one.');
+  assert.equal(textOf(bar), 'Select a filename to choose what happens to it.');
   assert.equal(find(bar, node => node.tagName === 'SELECT').length, 0);
 
   const choices = [];
@@ -1107,6 +1107,18 @@ test('the hint line comes from size and date only (R27)', () => {
     for (const word of PAIR_BANNED_WORDS) assert.doesNotMatch(hint.toLowerCase(), new RegExp(word));
 });
 
+test('pair facts show exact bytes when different files round to the same size', () => {
+  const sizes = [313300, 313320];
+  const files = sizes.map((size, i) =>
+    copyFile('form' + i + '.pdf', i ? 'number' : 'none', { size })
+  );
+  const tree = renderPicture(doc, pairPicture(files), answerCtx());
+  assert.deepEqual(
+    find(tree, n => n.className === 'fj-pair-facts').map(n => textOf(n).split(' · ')[0]),
+    sizes.map(size => size.toLocaleString() + ' bytes')
+  );
+});
+
 test('sizes and days read plainly', () => {
   assert.equal(formatSize(0), '0 B');
   assert.equal(formatSize(1023), '1023 B');
@@ -1146,10 +1158,10 @@ test('a pair card lists the original first with name, size and date, and one hin
   assert.equal(textOf(find(card, node => node.className === 'fj-pair-hint')[0]), 'Different size');
   // Only the bracketed copy of the same size as the original has the button: not the
   // original, and not the higher version (it ends in v2 and has another size).
-  const buttons = find(card, node => node.textContent === 'Trash the copy');
+  const buttons = find(card, node => node.textContent === 'Mark for Trash');
   assert.deepEqual(
     buttons.map(button => button.getAttribute('aria-label')),
-    ['Trash the copy Budget (2).pdf']
+    ['Mark for Trash: Budget (2).pdf']
   );
 });
 
@@ -1162,9 +1174,9 @@ test('"Trash the copy" appears on the one line that passes the rule, marks that 
     pairPicture([original, copy]),
     answerCtx({ onTrashCopy: file => marked.push(file.name) })
   );
-  const trash = find(root, node => node.textContent === 'Trash the copy');
+  const trash = find(root, node => node.textContent === 'Mark for Trash');
   assert.equal(trash.length, 1);
-  assert.equal(trash[0].getAttribute('aria-label'), 'Trash the copy Budget (2).pdf');
+  assert.equal(trash[0].getAttribute('aria-label'), 'Mark for Trash: Budget (2).pdf');
   trash[0].fire('click');
   assert.deepEqual(marked, ['Budget (2).pdf']);
   // After it is marked the line says so and offers the way back; nothing else changes.
@@ -1175,9 +1187,9 @@ test('"Trash the copy" appears on the one line that passes the rule, marks that 
     answerCtx({ onPutBack: file => back.push(file.name) })
   );
   const line = find(after, node => node.className === 'fj-pair-line')[1];
-  assert.match(textOf(line), /in Trash/);
-  assert.equal(find(after, node => node.textContent === 'Trash the copy').length, 0);
-  find(line, node => node.textContent === 'Put the copy back')[0].fire('click');
+  assert.match(textOf(line), /Marked for Trash/);
+  assert.equal(find(after, node => node.textContent === 'Mark for Trash').length, 0);
+  find(line, node => node.textContent === 'Undo mark')[0].fire('click');
   assert.deepEqual(back, ['Budget (2).pdf']);
 });
 
@@ -1205,7 +1217,7 @@ test('there is no Trash action on a row, a pair or a bundle as a whole (R30)', (
     root,
     node => /trash/i.test(textOf(node)) && node.tagName === 'BUTTON'
   ).map(textOf);
-  assert.deepEqual(trashLabels, ['Trash the copy'], 'only the one per-file button');
+  assert.deepEqual(trashLabels, ['Mark for Trash'], 'only the one per-file button');
 });
 
 test('a pair card with more files than it shows opens its own list', () => {

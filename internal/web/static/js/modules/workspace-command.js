@@ -2708,6 +2708,15 @@ export class WorkspaceCommandView {
     // The only work is the look the Commander is narrating on the map: saying
     // "No open work" beside it would contradict it, so the Map says nothing.
     if (onMap && view.narratedElsewhere && view.kind === 'idle') return '';
+    if (onMap && view.reviewStation?.batchId && !view.qualifications.length && !this.workNotice) {
+      const station = this.workspaceStationRegistry().find(entry => entry.key === 'file-janitor');
+      const state = station?.state?.();
+      if (
+        state?.reviewBatchId === view.reviewStation.batchId &&
+        state.reviewCount === view.reviewStation.count
+      )
+        return '';
+    }
     const action = view.action;
     const note = view.filingNote;
     const portrait = note
@@ -9299,7 +9308,10 @@ export class WorkspaceCommandView {
         const location = String(station.location || '').trim();
         const accessibleParts = [String(station.label || '') + ' station'];
         if (location) accessibleParts.push('managed folder ' + location);
-        const value = String(state.value || '');
+        const review = station.key === 'file-janitor' && state.reviewCount > 0;
+        const value = review
+          ? `Review ${state.reviewCount} ${state.reviewCount === 1 ? 'file' : 'files'}`
+          : String(state.value || '');
         const description = String(state.description || '');
         // The value is read unless it says nothing ("—"), only repeats the
         // station's name, or the description already says it ("14 entries,
@@ -9314,6 +9326,7 @@ export class WorkspaceCommandView {
           '<button type="button" class="ws-cmd-map-hq-station' +
           (visualMarkup ? ' has-visual' : '') +
           (location ? ' has-location' : '') +
+          (review ? ' is-review-ready' : '') +
           (state.tone ? ' is-' + escapeHtml(state.tone) : '') +
           '" data-cmd-hq-station="' +
           escapeHtml(station.key) +
@@ -9341,8 +9354,13 @@ export class WorkspaceCommandView {
               '</span>'
             : '') +
           '<span class="ws-cmd-map-hq-station-state">' +
-          escapeHtml(state.value || '') +
-          '</span></button>'
+          escapeHtml(value) +
+          (review ? ' <span aria-hidden="true">→</span>' : '') +
+          '</span>' +
+          (review
+            ? '<span class="ws-cmd-map-review-note">' + escapeHtml(description) + '</span>'
+            : '') +
+          '</button>'
         );
       })
       .join('');

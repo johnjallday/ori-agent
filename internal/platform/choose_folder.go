@@ -48,7 +48,7 @@ func ChooseFolderUnavailableReason() string {
 	if runtime.GOOS != "darwin" {
 		return FolderDialogUnavailablePlatform
 	}
-	if desktopOpenSwitchedOff() {
+	if DesktopOpenDisabled() {
 		return FolderDialogUnavailableDesktopOff
 	}
 	return ""
