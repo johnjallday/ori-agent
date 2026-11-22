@@ -2,8 +2,11 @@ package onboardinghttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -101,6 +104,7 @@ func (h *SmartOnboardingHandler) Detect(w http.ResponseWriter, r *http.Request) 
 
 	// Create detector for current platform
 	cfg := detector.DefaultConfig()
+	cfg.UsageOnly = r.URL.Query().Get("scope") == "recent-use"
 	det, err := detector.New(cfg)
 	if err != nil {
 		logger.Error("Failed to create detector", logger.Fields{"error": err})
@@ -108,20 +112,31 @@ func (h *SmartOnboardingHandler) Detect(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Detect apps
+	if cfg.UsageOnly && det.Platform() != "darwin" && det.Platform() != "linux" && det.Platform() != "windows" {
+		orihttp.ServiceUnavailable(w, "Recent app evidence is unsupported on this platform")
+		return
+	}
 	apps, err := det.DetectApps(ctx)
 	if err != nil {
-		logger.Error("Failed to detect apps", logger.Fields{"error": err})
-		// Return empty list instead of error - fallback to self-description
-		h.sendJSON(w, DetectResponse{
-			Success:  true,
-			Apps:     []detector.DetectedApp{},
-			Platform: det.Platform(),
-			Message:  "No apps detected. Please describe yourself instead.",
-		})
+		if errors.Is(err, detector.ErrUsageUnavailable) || errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+			orihttp.ServiceUnavailable(w, "Recent app evidence is unavailable on this host")
+		} else {
+			orihttp.InternalError(w, "Could not read recent app evidence")
+		}
 		return
 	}
 
+	if cfg.UsageOnly {
+		names := make([]string, 0, len(apps))
+		for _, app := range apps {
+			if app.Name != "" {
+				names = append(names, app.Name)
+			}
+		}
+		sort.Strings(names)
+		h.sendJSON(w, map[string]any{"names": names})
+		return
+	}
 	h.sendJSON(w, DetectResponse{
 		Success:  true,
 		Apps:     apps,
@@ -481,10 +496,11 @@ func preferredModelsForProvider(providerName string) []string {
 
 // PersonalizeRequest represents a personalization save request.
 type PersonalizeRequest struct {
-	Interests      []string `json:"interests"`
-	PreferredTools []string `json:"preferred_tools"`
-	WorkStyle      string   `json:"work_style"`
-	Description    string   `json:"description"`
+	BaseTools      *[]string `json:"base_preferred_tools,omitempty"`
+	Interests      []string  `json:"interests"`
+	PreferredTools []string  `json:"preferred_tools"`
+	WorkStyle      string    `json:"work_style"`
+	Description    string    `json:"description"`
 }
 
 // PersonalizeResponse represents the personalization save response.
@@ -493,6 +509,39 @@ type PersonalizeResponse struct {
 	Profile   *types.InferredProfile `json:"profile"`
 	XPAwarded int64                  `json:"xp_awarded"`
 	Message   string                 `json:"message,omitempty"`
+}
+
+// AddPreferredTools is an additive save, not full Profile personalization.
+func (h *SmartOnboardingHandler) AddPreferredTools(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req struct {
+		Names []string `json:"names"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if len(req.Names) > 256 {
+		orihttp.BadRequest(w, "Too many tools")
+		return
+	}
+	for _, name := range req.Names {
+		if strings.TrimSpace(name) == "" || len(name) > 256 {
+			orihttp.BadRequest(w, "Invalid tool name")
+			return
+		}
+	}
+	if h.onboardingMgr == nil {
+		orihttp.ServiceUnavailable(w, "Profile unavailable")
+		return
+	}
+	tools, err := h.onboardingMgr.AddPreferredTools(req.Names)
+	if err != nil {
+		orihttp.InternalError(w, "Could not save preferred tools")
+		return
+	}
+	h.sendJSON(w, map[string]any{"preferred_tools": tools})
 }
 
 // SavePersonalization saves user personalization data and awards XP on first completion.
@@ -514,9 +563,14 @@ func (h *SmartOnboardingHandler) SavePersonalization(w http.ResponseWriter, r *h
 	}
 
 	// Get existing profile or create a new one
-	profile := h.onboardingMgr.GetUserProfile()
-	if profile == nil {
-		profile = &types.InferredProfile{}
+	previous := h.onboardingMgr.GetUserProfile()
+	profile := &types.InferredProfile{}
+	if previous != nil {
+		*profile = *previous
+	}
+	if req.BaseTools != nil && !slices.Equal(*req.BaseTools, profile.PreferredTools) {
+		orihttp.Conflict(w, onboarding.ErrProfileChanged.Error())
+		return
 	}
 
 	// Merge personalization fields (preserve detection-derived fields)
@@ -532,7 +586,11 @@ func (h *SmartOnboardingHandler) SavePersonalization(w http.ResponseWriter, r *h
 	profile.PersonalizedAt = time.Now()
 
 	// Save updated profile
-	if err := h.onboardingMgr.SetUserProfile(profile); err != nil {
+	if err := h.onboardingMgr.ReplaceUserProfile(profile, previous); err != nil {
+		if errors.Is(err, onboarding.ErrProfileChanged) {
+			orihttp.Conflict(w, err.Error())
+			return
+		}
 		logger.Error("Failed to save personalization", logger.Fields{"error": err})
 		orihttp.InternalError(w, "Failed to save personalization")
 		return

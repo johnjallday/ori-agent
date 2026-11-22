@@ -29,6 +29,16 @@ func (d *DarwinDetector) Platform() string {
 
 // DetectApps uses multiple methods to find recently used applications.
 func (d *DarwinDetector) DetectApps(ctx context.Context) ([]DetectedApp, error) {
+	if d.config.UsageOnly {
+		// mdfind can exit successfully with no rows when indexing is disabled.
+		check := exec.CommandContext(ctx, "mdutil", "-s", "/")
+		check.Env = append(os.Environ(), "LC_ALL=C")
+		output, err := check.Output()
+		if err != nil || !strings.Contains(string(output), "Indexing enabled") {
+			return nil, ErrUsageUnavailable
+		}
+		return d.findRecentlyUsedApps(ctx)
+	}
 	appSet := make(map[string]DetectedApp)
 
 	// Method 1: Get currently running apps (these are definitely "recent")
@@ -41,7 +51,7 @@ func (d *DarwinDetector) DetectApps(ctx context.Context) ([]DetectedApp, error) 
 	}
 
 	// Method 2: Get apps with kMDItemLastUsedDate within recency window
-	recentApps := d.findRecentlyUsedApps(ctx)
+	recentApps, _ := d.findRecentlyUsedApps(ctx)
 	for _, app := range recentApps {
 		if _, exists := appSet[app.Path]; !exists {
 			if !d.config.IncludeSystemApps && isSystemApp(app.Path) {
@@ -111,16 +121,16 @@ func (d *DarwinDetector) getRunningApps(ctx context.Context) []DetectedApp {
 }
 
 // findRecentlyUsedApps finds apps with kMDItemLastUsedDate set recently.
-func (d *DarwinDetector) findRecentlyUsedApps(ctx context.Context) []DetectedApp {
+func (d *DarwinDetector) findRecentlyUsedApps(ctx context.Context) ([]DetectedApp, error) {
 	// Query Spotlight for apps used in the last N days
 	cutoff := time.Now().AddDate(0, 0, -d.config.RecencyDays)
-	dateStr := cutoff.Format("2006-01-02")
+	dateStr := cutoff.UTC().Format(time.RFC3339)
 
 	query := `kMDItemContentType == "com.apple.application-bundle" && kMDItemLastUsedDate >= $time.iso(` + dateStr + `)`
 	cmd := exec.CommandContext(ctx, "mdfind", query)
 	output, err := cmd.Output()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	var apps []DetectedApp
@@ -132,6 +142,12 @@ func (d *DarwinDetector) findRecentlyUsedApps(ctx context.Context) []DetectedApp
 		}
 
 		name := extractAppName(path)
+		if d.config.UsageOnly {
+			if d.config.IncludeSystemApps || !isSystemApp(path) {
+				apps = append(apps, DetectedApp{Name: name})
+			}
+			continue
+		}
 		lastUsed, iconPath := d.getAppMetadata(ctx, path)
 		apps = append(apps, DetectedApp{
 			Name:     name,
@@ -141,7 +157,7 @@ func (d *DarwinDetector) findRecentlyUsedApps(ctx context.Context) []DetectedApp
 		})
 	}
 
-	return apps
+	return apps, scanner.Err()
 }
 
 // findRecentlyModifiedApps finds apps in /Applications modified recently.

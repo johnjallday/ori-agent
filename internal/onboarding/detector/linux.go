@@ -32,6 +32,9 @@ func (d *LinuxDetector) DetectApps(ctx context.Context) ([]DetectedApp, error) {
 
 	// Parse recently-used.xbel for usage data
 	recentApps, err := d.parseRecentlyUsed(ctx)
+	if d.config.UsageOnly {
+		return FilterRecentApps(recentApps, d.config.RecencyDays), err
+	}
 	if err == nil {
 		for _, app := range recentApps {
 			if IsRecentlyUsed(app.LastUsed, d.config.RecencyDays) {
@@ -70,9 +73,10 @@ type xbelBookmark struct {
 		Metadata struct {
 			Applications struct {
 				Application []struct {
-					Name  string `xml:"name,attr"`
-					Exec  string `xml:"exec,attr"`
-					Count int    `xml:"count,attr"`
+					Modified string `xml:"modified,attr"`
+					Name     string `xml:"name,attr"`
+					Exec     string `xml:"exec,attr"`
+					Count    int    `xml:"count,attr"`
 				} `xml:"application"`
 			} `xml:"applications"`
 		} `xml:"metadata"`
@@ -104,6 +108,7 @@ func (d *LinuxDetector) parseRecentlyUsed(ctx context.Context) ([]DetectedApp, e
 	}
 
 	appUsage := make(map[string]time.Time)
+	missingUsage := false
 
 	for _, bookmark := range xbel.Bookmarks {
 		// Parse the modified/visited time
@@ -122,14 +127,25 @@ func (d *LinuxDetector) parseRecentlyUsed(ctx context.Context) ([]DetectedApp, e
 				continue
 			}
 
+			used := lastUsed
+			if d.config.UsageOnly { // A bookmark edited by another app isn't evidence of this app's use.
+				used, _ = time.Parse(time.RFC3339, app.Modified)
+				if used.IsZero() {
+					missingUsage = true
+					continue
+				}
+			}
 			// Track the most recent usage per app
-			if existing, ok := appUsage[appName]; !ok || lastUsed.After(existing) {
-				appUsage[appName] = lastUsed
+			if existing, ok := appUsage[appName]; !ok || used.After(existing) {
+				appUsage[appName] = used
 			}
 		}
 	}
 
 	var apps []DetectedApp
+	if missingUsage && len(appUsage) == 0 {
+		return nil, ErrUsageUnavailable
+	}
 	for name, lastUsed := range appUsage {
 		apps = append(apps, DetectedApp{
 			Name:     formatLinuxAppName(name),

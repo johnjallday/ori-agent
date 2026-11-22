@@ -577,7 +577,8 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 	}
 
 	// Smart onboarding endpoints (AI-powered profile inference)
-	mux.HandleFunc("/api/onboarding/detect", s.Handlers.SmartOnboarding.Detect)
+	localReview := http.NewCrossOriginProtection()
+	mux.Handle("/api/onboarding/detect", localReview.Handler(http.HandlerFunc(s.Handlers.SmartOnboarding.Detect)))
 	mux.HandleFunc("/api/onboarding/specialists", s.Handlers.SmartOnboarding.Specialists)
 	mux.HandleFunc("/api/onboarding/profile", s.Handlers.SmartOnboarding.InferProfile)
 	mux.HandleFunc("/api/onboarding/describe", s.Handlers.SmartOnboarding.Describe)
@@ -585,6 +586,7 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("/api/onboarding/apply-config", s.Handlers.SmartOnboarding.Apply)
 	mux.HandleFunc("/api/onboarding/update-profile", s.Handlers.SmartOnboarding.UpdateProfile)
 	mux.HandleFunc("/api/onboarding/user-profile", s.Handlers.SmartOnboarding.GetStoredProfile)
+	mux.Handle("/api/onboarding/preferred-tools", localReview.Handler(http.HandlerFunc(s.Handlers.SmartOnboarding.AddPreferredTools)))
 	mux.HandleFunc("/api/onboarding/personalize", s.Handlers.SmartOnboarding.SavePersonalization)
 
 	if s.Handlers.User != nil {

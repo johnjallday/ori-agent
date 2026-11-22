@@ -32,6 +32,9 @@ func (d *WindowsDetector) DetectApps(ctx context.Context) ([]DetectedApp, error)
 	if err != nil {
 		// Prefetch may not be accessible without admin rights
 		// Fall back to scanning common app directories
+		if d.config.UsageOnly {
+			return nil, err
+		}
 		return d.scanCommonPaths(ctx)
 	}
 
@@ -62,6 +65,9 @@ func (d *WindowsDetector) DetectApps(ctx context.Context) ([]DetectedApp, error)
 
 		info, err := entry.Info()
 		if err != nil {
+			if d.config.UsageOnly {
+				return nil, err
+			}
 			continue
 		}
 
