@@ -2594,7 +2594,8 @@ a.personal-assistant-today__action {
 }
 
 .quest-log-expansion .quest-log-first-mission-why,
-.quest-log-expansion-price {
+.quest-log-expansion-price,
+.quest-log-expansion-notice {
   display: block;
   margin: 6px 0;
   font-size: 12px;

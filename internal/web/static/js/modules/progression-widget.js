@@ -27,8 +27,13 @@
 // toast-suppression decisions without a DOM.
 
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
-import { filingExpansionView, renderFilingExpansion } from './filing-expansion.js';
-import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
+import {
+  confirmFilingExpansion,
+  filingExpansionView,
+  filingPurchaseNotice,
+  renderFilingExpansion
+} from './filing-expansion.js';
+import { ECONOMY_CHANGED_EVENT, notifyEconomyChanged } from './economy-harvest.js';
 import {
   FOLDER_QUEST_ACTION_URL,
   folderOfferView,
@@ -786,16 +791,85 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
   // The status last rendered, so the folder offer can re-render the card on
   // its own announcements without another fetch.
   let lastStatus = null;
+  let filingBusy = false;
+  let filingUncertain = false;
+  let filingNotice = '';
+
+  function currentExpansionView() {
+    const view = filingExpansionView(lastStatus);
+    if (view.destinations || lastStatus?.filing_expansion?.state === 'destination_unavailable') {
+      filingUncertain = false;
+    }
+    if (view.visible && filingUncertain) {
+      view.action = { label: 'Check purchase status', checkOnly: true };
+    }
+    return view;
+  }
+
+  function renderExpansion() {
+    renderFilingExpansion(
+      el('filing-expansion'),
+      currentExpansionView(),
+      startFirstLook,
+      FIRST_LOOK_ACTION_URL,
+      {
+        onAction: runExpansionAction,
+        busy: filingBusy,
+        notice: filingNotice
+      }
+    );
+  }
+
+  async function runExpansionAction() {
+    if (filingBusy) return;
+    const action = currentExpansionView().action;
+    if (!action) return;
+    filingBusy = true;
+    filingNotice = '';
+    renderExpansion();
+    let result;
+    try {
+      result = await confirmFilingExpansion(action, {
+        ask: message => window.confirm(message),
+        newID: () => window.crypto.randomUUID(),
+        request: async body => {
+          const res = await fetch('/api/economy/filing-expansion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(35000)
+          });
+          const response = await res.json();
+          if (!response.filing_expansion || !response.outcome)
+            throw new Error('Filing result unavailable');
+          return response;
+        }
+      });
+      if (!result) return;
+      statusRevision++;
+      lastStatus = { ...lastStatus, filing_expansion: result.filing_expansion };
+      filingNotice = filingPurchaseNotice(result.outcome);
+      filingUncertain = result.outcome === 'unavailable';
+      if (result.outcome === 'delivered') window.dispatchEvent(new Event('ori:workspaces-changed'));
+      notifyEconomyChanged(result.filing_expansion);
+    } catch (_) {
+      filingUncertain = true;
+      filingNotice = filingPurchaseNotice('unavailable');
+    } finally {
+      filingBusy = false;
+      renderExpansion();
+      if (!el('filing-expansion')?.hidden && !el('expansion-action')?.hidden) {
+        el('expansion-action')?.focus();
+      } else if (result?.outcome === 'delivered') {
+        el('expansion-destinations')?.querySelector('a')?.focus();
+      }
+    }
+  }
 
   function render(status) {
     if (!widget) return;
     lastStatus = status;
-    renderFilingExpansion(
-      el('filing-expansion'),
-      filingExpansionView(status),
-      startFirstLook,
-      FIRST_LOOK_ACTION_URL
-    );
+    renderExpansion();
 
     const current = currentTier(status);
 

@@ -62,7 +62,7 @@ func ResetRecordTables() []string {
 		// first-run backfill grants a fresh starting stock of Craft on the
 		// next start. Omitting either table would append
 		// unclassified_database_domain to every reset inspection.
-		"economy_ledger", "economy_harvest_pending",
+		"economy_ledger", "economy_harvest_pending", "economy_filing_claims",
 		// The task-run show's unopened results are app records too: resetting
 		// them clears every waiting parcel, and nothing else refers to them.
 		"result_parcels",

@@ -680,6 +680,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 
 	b.createDomainFacades() // Phase 25
 	b.initializeResetCoordinator()
+	b.recoverFilingPurchase()
 	if b.assistantSetupRetries != nil {
 		b.assistantSetupRetries.Start(context.Background())
 	}
@@ -824,6 +825,7 @@ func (b *ServerBuilder) createDomainFacades() {
 		DailyBrief:            b.dailyBriefHandler,
 		Characters:            b.characterHandler,
 		Economy:               b.economyHandler,
+		FilingPurchase:        b.purchaseFiling,
 		MapActivity:           b.mapActivityHandler,
 		OriGuide:              b.oriGuideHandler,
 		FileJanitor:           b.fileJanitorHandler,

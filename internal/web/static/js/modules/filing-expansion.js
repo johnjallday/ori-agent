@@ -17,6 +17,23 @@ export function filingExpansionView(status) {
     balance: craftAmount(quote.balance) ? `You have ${quote.balance} Craft.` : '',
     free: { label: 'Show a folder for free', href: FOLDER_QUEST_ACTION_URL }
   };
+  if (quote.state === 'pending') {
+    return {
+      ...view,
+      title: 'Filing purchase needs a check',
+      detail:
+        'Ori could not verify that your workspace is ready. Checking does not build another workspace or charge again.',
+      action: { label: 'Check purchase status', checkOnly: true }
+    };
+  }
+  if (quote.state === 'destination_unavailable') {
+    return {
+      ...view,
+      title: 'Filing workspace unavailable',
+      detail:
+        'The workspace for this purchase cannot be opened. Ori will not rebuild it or charge again.'
+    };
+  }
   if (quote.state === 'already_built') {
     const destinations = (quote.destinations || []).filter(row => FILING_ROUTE.test(row.route));
     if (destinations.length) {
@@ -25,6 +42,12 @@ export function filingExpansionView(status) {
         title:
           destinations.length === 1 ? 'Open your Filing workspace' : 'Choose a Filing workspace',
         detail: 'Filing is already on your map. Open an existing workspace without spending Craft.',
+        ...(craftAmount(quote.charged) && {
+          price:
+            quote.waived > 0
+              ? `${quote.waived} Craft waived in Creative Mode.`
+              : `${quote.charged} Craft spent.`
+        }),
         destinations
       };
     }
@@ -57,12 +80,53 @@ export function filingExpansionView(status) {
       view.earn = { label: 'Earn Craft by running a ticket by hand', href: quote.manual_earn_url };
     }
   }
+  if (quote.state === 'affordable') {
+    view.action = {
+      label: `Build for ${quote.effective_cost} Craft`,
+      cost: quote.effective_cost,
+      creative: quote.creative === true
+    };
+  }
   return view;
 }
 
-export function renderFilingExpansion(box, view, startFirstLook, firstLookURL) {
+export async function confirmFilingExpansion(action, { ask, request, newID }) {
+  if (!action) return null;
+  if (action.checkOnly) return request({ check_only: true });
+  if (
+    !ask(
+      `Build a Filing workspace for ${action.cost} Craft? This does not grant access to Downloads or any other folder.`
+    )
+  ) {
+    return null;
+  }
+  return request({ request_id: newID(), cost: action.cost, creative: action.creative });
+}
+
+export function filingPurchaseNotice(outcome) {
+  switch (outcome) {
+    case 'refunded':
+      return 'The workspace was not built. Any held Craft was returned.';
+    case 'stale_price':
+      return 'The price changed. Review the new price before building.';
+    case 'insufficient':
+      return 'Your balance changed. No new purchase was made.';
+    case 'unavailable':
+      return 'The purchase could not be verified. Check its status before trying again.';
+    default:
+      return '';
+  }
+}
+
+export function renderFilingExpansion(
+  box,
+  view,
+  startFirstLook,
+  firstLookURL,
+  { onAction, busy, notice } = {}
+) {
   if (!box) return;
-  const signature = JSON.stringify(view);
+  const signature = JSON.stringify([view, busy, notice]);
   if (box.dataset.view === signature) return;
   box.dataset.view = signature;
   box.hidden = !view.visible;
@@ -76,6 +140,12 @@ export function renderFilingExpansion(box, view, startFirstLook, firstLookURL) {
   text('expansion-title', view.title);
   text('expansion-detail', view.detail);
   text('expansion-price', [view.price, view.balance, view.message].filter(Boolean).join(' '));
+  text('expansion-notice', notice);
+  const action = el('expansion-action');
+  action.hidden = !view.action;
+  action.disabled = !!busy;
+  action.textContent = busy ? 'Working…' : view.action?.label || '';
+  action.onclick = onAction;
   const earn = el('expansion-earn');
   earn.hidden = !view.earn;
   if (view.earn) {

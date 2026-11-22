@@ -61,6 +61,8 @@ type ReviewedTemplateCreationRequest struct {
 	// Empty preserves setup flows that have not selected a folder yet.
 	AnchorPath string
 	Name       string
+	// FolderSlug is optional server-owned placement, never identity evidence.
+	FolderSlug string
 	Plan       ReviewedTemplateCreationPlan
 	Descriptor AssistantSetupCreationDescriptor
 	// Mission, when set, is the goal the user gave the hire. It is created as
@@ -227,7 +229,7 @@ func (h *Handler) CreateReviewedFileJanitor(ctx context.Context, request Reviewe
 		return ReviewedTemplateCreationResult{}, err
 	}
 	create := createWorkspaceRequest{
-		Name: request.Name, AnchorPath: request.AnchorPath, TemplateID: fresh.BlueprintID, TeamIntent: intent,
+		Name: request.Name, FolderSlug: request.FolderSlug, AnchorPath: request.AnchorPath, TemplateID: fresh.BlueprintID, TeamIntent: intent,
 		teamIntentPresent: true, roleStaffingPresent: true,
 		RoleStaffing: []roleStaffingInput{{RoleID: role.RoleID, Mode: mode, Name: role.Name}},
 	}

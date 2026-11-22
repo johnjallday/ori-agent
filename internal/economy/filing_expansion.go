@@ -11,6 +11,8 @@ const (
 	ExpansionAffordable   ExpansionState = "affordable"
 	ExpansionInsufficient ExpansionState = "insufficient"
 	ExpansionBuilt        ExpansionState = "already_built"
+	ExpansionPending      ExpansionState = "pending"
+	ExpansionRemoved      ExpansionState = "destination_unavailable"
 )
 
 type ExpansionDestination struct {
@@ -29,6 +31,8 @@ type ExpansionQuote struct {
 	Creative      bool                   `json:"creative"`
 	Destinations  []ExpansionDestination `json:"destinations,omitempty"`
 	ManualEarnURL string                 `json:"manual_earn_url,omitempty"`
+	Charged       *int64                 `json:"charged,omitempty"`
+	Waived        *int64                 `json:"waived,omitempty"`
 }
 
 // QuoteFilingExpansion prices one new workspace; the caller resolves HQ and

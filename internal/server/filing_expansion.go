@@ -15,7 +15,22 @@ import (
 )
 
 func (b *ServerBuilder) filingExpansionQuote(ctx context.Context) economy.ExpansionQuote {
-	quote := economy.ExpansionQuote{BaseCost: economy.FilingExpansionCost, State: economy.ExpansionDisabled}
+	if store := b.filingClaimStore(); store != nil {
+		claim, err := store.FindFilingClaim(ctx, userprofile.LocalUserID, "")
+		if err != nil {
+			return emptyFilingQuote(economy.ExpansionUnavailable)
+		}
+		if claim != nil {
+			return b.quoteFilingClaim(ctx, claim)
+		}
+	}
+	return b.quoteNewFiling(ctx)
+}
+
+// quoteNewFiling excludes persisted purchase claims. The caller always checks
+// those first, so a replay can never become a second price check or purchase.
+func (b *ServerBuilder) quoteNewFiling(ctx context.Context) economy.ExpansionQuote {
+	quote := emptyFilingQuote(economy.ExpansionDisabled)
 	if !featureflags.EconomyEnabled() {
 		return quote
 	}
