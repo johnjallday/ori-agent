@@ -636,6 +636,52 @@
   height: clamp(560px, 62vh, 780px);
   clip-path: none;
 }
+.ws-cmd-opmap:has(.music-folder-view) .ws-cmd-map-world,
+.ws-cmd-detachment-slot:has(.music-folder-view) .ws-cmd-detachment-host {
+  visibility: hidden;
+}
+.music-folder-view {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 1rem;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+.music-folder-map__district,
+.music-folder-map details {
+  margin-block: 0.7rem;
+  padding: 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+}
+.music-folder-map ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  list-style: none;
+}
+.music-folder-map li {
+  display: grid;
+  gap: 0.25rem;
+  overflow-wrap: anywhere;
+}
+.music-folder-map button {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.4rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.music-folder-map summary {
+  padding: 0.35rem;
+  font-weight: 600;
+  cursor: pointer;
+}
 .ws-cmd-detachment-slot {
   position: absolute;
   inset: 0;
