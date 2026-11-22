@@ -105,6 +105,7 @@ type StorageSystemFacade struct {
 	// PersonalAssistant is the user-owned relationship/read service.
 	PersonalAssistant       *personalassistant.Service
 	PersonalAssistantMemory *personalassistant.MemoryService
+	PersonalAssistantToday  *personalassistant.TodayService
 	// PersonalAssistantKnowledge is the current, server-bound reviewed HQ context reader.
 	PersonalAssistantKnowledge *personalassistant.KnowledgeContextReader
 	// PersonalAssistantSecondBrain is the notes service the assistant's chat

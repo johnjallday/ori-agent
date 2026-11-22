@@ -185,6 +185,7 @@ type HomeAssistantAskResponse struct {
 	// OperationCapability is set on a panel turn so the drawer can offer or
 	// explain the Watch control.
 	OperationCapability *AssistantOperationCapability `json:"operation_capability,omitempty"`
+	Today               *assistantTodayAnswer         `json:"today,omitempty"`
 }
 
 // HomeActionMutator executes confirmed state-changing actions. The server wires a
@@ -276,6 +277,7 @@ type HomeAssistantAskHandler struct {
 	// the watching tab observed. Nil registers no operation tool and loads no
 	// operating skill.
 	Operations *assistantops.Service
+	Today      AssistantTodayReader
 	UserID     string
 	// WorkspaceBuildAvailable reports whether "Build with your assistant" can
 	// take a create-workspace request; nil keeps the direct create.
@@ -453,6 +455,11 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 				conversation.owner = scope.saveOwner()
 			}
 		}
+	}
+
+	if conversation != nil && refs != nil && refs.Origin == "personal_assistant_panel" &&
+		req.ConfirmedAction == nil && req.Arrangement == nil && req.FolderContext == nil && req.LinkContext == nil && isAssistantTodayQuestion(prompt) {
+		return h.answerAssistantToday(ctx, prompt, refs, workContext, scope, conversation)
 	}
 
 	// This branch advertises only arrangement tools. It precedes path-resolving

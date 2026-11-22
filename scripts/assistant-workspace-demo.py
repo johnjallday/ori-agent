@@ -60,6 +60,8 @@ PLAIN_DEMOS = {
                 "ORI_WORKSPACE_OPERATE_SANDBOX", "operate-ori-navigation.log"),
     "operate_task": ("tests/operate-ori-task.spec.ts",
                      "ORI_WORKSPACE_OPERATETASK_SANDBOX", "operate-ori-task.log"),
+    "assistant_today": ("tests/assistant-today-actions.spec.ts",
+                        "ORI_ASSISTANT_TODAY_SANDBOX", "assistant-today-actions.log"),
     "operate_ticket": ("tests/operate-ori-ticket.spec.ts",
                        "ORI_WORKSPACE_OPERATETICKET_SANDBOX", "operate-ori-ticket.log"),
     "operate_start": ("tests/operate-ori-start.spec.ts",
@@ -874,6 +876,8 @@ def main():
     parser.add_argument("--operate-task", action="store_true",
                         help="wt demo: Operate Ori — a task draft for a non-entry agent in the real task form, "
                              "edited, dismissed, reopened and saved by the user; zero tasks before save")
+    parser.add_argument("--assistant-today", action="store_true",
+                        help="wt demo: the hired assistant reads and acts on synthetic Needs you records")
     parser.add_argument("--operate-ticket", action="store_true",
                         help="wt demo: compare ticket and legacy task requests without saving or starting")
     parser.add_argument("--operate-start", action="store_true",

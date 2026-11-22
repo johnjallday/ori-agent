@@ -1,0 +1,29 @@
+.pa-today-answer {
+  border-inline-start: 2px solid var(--bs-border-color);
+  margin-block: 0.375rem 0.75rem;
+  padding-inline-start: 0.75rem;
+  overflow-wrap: anywhere;
+}
+
+.pa-today-answer ul {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+
+.pa-today-answer li {
+  padding-block: 0.375rem;
+}
+
+.pa-today-answer li + li {
+  border-block-start: 1px solid var(--bs-border-color);
+}
+
+.pa-today-answer small {
+  display: block;
+  color: var(--bs-secondary-color);
+}
+
+.pa-today-answer a {
+  text-underline-offset: 0.2em;
+}

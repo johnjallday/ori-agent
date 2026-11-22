@@ -10615,6 +10615,20 @@
       // Arrangement replies are inert, canonical discussion only. Never feed
       // them into legacy setup suggestions, research or operation execution.
       if (options.arrangement) return data;
+      if (data?.today && conversationRef) {
+        setHomeAssistantRoutingSummary('', '');
+        renderHomeAssistantActions([]);
+        inlineReview = true;
+        window.PersonalAssistantTodayAnswer?.render(assistantRow, data, {
+          isCurrent: function () {
+            return (
+              conversations?.currentId() === data.conversation?.id &&
+              window.PersonalAssistantRecipient?.current()?.kind === 'personal'
+            );
+          }
+        });
+        return data;
+      }
       if (assistantRow && window.PersonalAssistantResearch) {
         var researchRefs = data.research_context || normalizedContext;
         var researchFolder = data.research_folder_context;
