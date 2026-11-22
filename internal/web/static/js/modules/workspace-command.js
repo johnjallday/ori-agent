@@ -14080,8 +14080,8 @@ export class WorkspaceCommandView {
         if (left > 0) window.setTimeout(() => attempt(left - 1), 200);
         return;
       }
-      if (tile) this.openLibrarySetupSheet(chip || tile, tile);
-      else this.openLibrarySetupSheet(chip, zone);
+      if (tile) this.openLibrarySetupSheet(chip || tile, tile, arrival.root);
+      else this.openLibrarySetupSheet(chip, zone, arrival.root);
     };
     window.setTimeout(() => attempt(retries), delayMs);
   }
@@ -14120,13 +14120,14 @@ export class WorkspaceCommandView {
    * FR-6). After a run the members reload, the lot gives way to the new
    * tiles, and the camera frames them.
    */
-  openLibrarySetupSheet(element, beside = null) {
+  openLibrarySetupSheet(element, beside = null, intakeRootID = '') {
     const homeID = this.workspaceId();
     if (!homeID) return false;
     const host = this.ensureDetachmentHost();
     const slug = this.workspaceSlug();
     const sheet = openLibrarySheet({
       homeID,
+      intakeRootID,
       homeName: String(this.page?.workspace?.name || '').trim() || 'this Home',
       anchor: element || null,
       beside: beside || element || null,

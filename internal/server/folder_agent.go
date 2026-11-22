@@ -884,7 +884,7 @@ func (s folderAgentSetups) run(ctx context.Context, rec folderagent.Record, plan
 				made.HomeCreated = receipt.created
 			}
 			made.Hired = append(made.Hired, receipt.hired...)
-			made.PartialListing = receipt.partial
+			made.LibraryRootID, made.PartialListing = receipt.rootID, receipt.partial
 			made.Listed, made.ListedNoun, made.Unreached = receipt.listed, receipt.listedNoun, receipt.unreached
 			var stopped *homeStageStop
 			if errors.As(err, &stopped) {

@@ -505,7 +505,7 @@ func (h *Handler) SearchAssistantLibrary(w http.ResponseWriter, r *http.Request)
 	allowed := map[string]bool{"text": true, "stage": true, "status": true, "format": true,
 		"connection": true, "availability": true, "root_id": true, "priority": true,
 		"sort": true, "direction": true, "page_size": true, "cursor": true,
-		"view": true, "collection_id": true, "collection_revision": true}
+		"view": true, "collection_id": true, "collection_revision": true, "folder_sections": true}
 	for name, values := range values {
 		if !allowed[name] || len(values) != 1 {
 			_ = orihttp.RespondBadRequest(w, "Invalid library search")
@@ -541,7 +541,15 @@ func (h *Handler) SearchAssistantLibrary(w http.ResponseWriter, r *http.Request)
 		}
 		query.PageSize = value
 	}
-	page, err := h.assistantLibraryStore().Query(scope, query)
+	readPage := h.assistantLibraryStore().Query
+	if values.Has("folder_sections") {
+		if values.Get("folder_sections") != "1" {
+			_ = orihttp.RespondBadRequest(w, "Invalid folder sections option")
+			return
+		}
+		readPage = h.assistantLibraryStore().QueryFolderSections
+	}
+	page, err := readPage(scope, query)
 	if err != nil {
 		respondLibraryReadError(w, err)
 		return

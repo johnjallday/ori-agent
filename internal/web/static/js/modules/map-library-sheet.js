@@ -36,7 +36,14 @@ const SHEET_CLASS = 'ws-map-library-sheet';
  */
 export function sheetView(
   rows,
-  { chosen = {}, ticked = new Set(), progress = {}, rowStaffing = {}, repair = new Set() } = {}
+  {
+    chosen = {},
+    ticked = new Set(),
+    progress = {},
+    rowStaffing = {},
+    repair = new Set(),
+    readOnly = false
+  } = {}
 ) {
   // What can be set up as it is comes first, then what needs a file chosen,
   // then what is already on the map, then what needs the dashboard; inside a
@@ -56,10 +63,13 @@ export function sheetView(
           ? chosen[row.id]
           : '';
     const checkable =
-      (kind === SETUP_KINDS.SETUP || kind === SETUP_KINDS.FILE_CHOICE) && !progress[row.id];
+      !readOnly &&
+      (kind === SETUP_KINDS.SETUP || kind === SETUP_KINDS.FILE_CHOICE) &&
+      !progress[row.id];
     const checked = checkable && ticked.has(row.id) && file !== '';
     return {
       id: row.id,
+      ...(row.section ? { section: row.section } : {}),
       name: row.name,
       kind,
       label: setupLabel(kind),
@@ -71,6 +81,7 @@ export function sheetView(
       progress: progress[row.id] || null,
       assistant: kind === SETUP_KINDS.CONNECTED ? assistantState(rowStaffing[row.id]) : null,
       repairChecked:
+        !readOnly &&
         kind === SETUP_KINDS.CONNECTED &&
         repair.has(row.id) &&
         assistantState(rowStaffing[row.id]).repairable &&
@@ -353,6 +364,24 @@ export async function loadConnectedStaffing(client, rows) {
 }
 
 /** The rows ticked by default: single-file projects only (FR-7). */
+export function folderGroups(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const section = item.section,
+      id = section?.id || '';
+    if (!groups.has(id))
+      groups.set(id, {
+        id,
+        label: section ? `${section.root_label} / ${section.label}` : 'Other projects',
+        items: []
+      });
+    groups.get(id).items.push(item);
+  }
+  return [...groups.values()].sort(
+    (a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id)
+  );
+}
+
 export function defaultTicked(rows) {
   return new Set(
     (Array.isArray(rows) ? rows : [])
@@ -443,6 +472,7 @@ function el(doc, tag, className, text) {
 export function openLibrarySheet({
   homeID,
   homeName = 'this Home',
+  intakeRootID = '',
   anchor = null,
   beside = null,
   tokensFrom = null,
@@ -466,6 +496,9 @@ export function openLibrarySheet({
     rows: [],
     chosen: {},
     ticked: new Set(),
+    initialized: false,
+    nextCursor: '',
+    readOnly: false,
     progress: {},
     message: '',
     created: [],
@@ -567,6 +600,36 @@ export function openLibrarySheet({
 
   function renderRows(view) {
     const list = el(doc, 'ul', `${SHEET_CLASS}-rows`);
+    const lists = new Map();
+    if (view.items.some(item => item.section?.id)) {
+      for (const group of folderGroups(view.items)) {
+        const block = el(doc, 'li', `${SHEET_CLASS}-section`);
+        const label = el(doc, 'label', `${SHEET_CLASS}-pick`);
+        const eligible = group.items.filter(item => item.checkable && item.file);
+        const picked = eligible.filter(item => item.checked).length;
+        const box = el(doc, 'input');
+        box.type = 'checkbox';
+        box.disabled = !!state.nextCursor || !eligible.length;
+        box.checked = eligible.length > 0 && picked === eligible.length;
+        box.indeterminate = picked > 0 && !box.checked;
+        box.setAttribute('aria-label', `Select projects with a chosen file in ${group.label}`);
+        box.dataset.folderGroup = group.id;
+        box.addEventListener('change', () => {
+          for (const item of eligible) {
+            if (box.checked) state.ticked.add(item.id);
+            else state.ticked.delete(item.id);
+          }
+          render();
+          root.querySelector(`[data-folder-group="${CSS.escape(group.id)}"]`)?.focus();
+        });
+        label.append(box, el(doc, 'strong', null, `${group.label} · ${group.items.length}`));
+        block.append(label);
+        const children = el(doc, 'ul', `${SHEET_CLASS}-rows`);
+        block.append(children);
+        list.append(block);
+        lists.set(group.id, children);
+      }
+    }
     for (const item of view.items) {
       const row = el(doc, 'li', `${SHEET_CLASS}-row is-${item.kind}`);
       if (item.progress) row.classList.add(`is-${item.progress.status}`);
@@ -633,7 +696,7 @@ export function openLibrarySheet({
           const box = el(doc, 'input');
           box.type = 'checkbox';
           box.checked = item.repairChecked;
-          box.disabled = state.phase === 'running' || !!item.progress;
+          box.disabled = state.readOnly || state.phase === 'running' || !!item.progress;
           box.setAttribute('data-sheet-repair', item.id);
           box.setAttribute('aria-label', `Add the shared assistant to ${item.name}`);
           box.addEventListener('change', () => {
@@ -677,7 +740,9 @@ export function openLibrarySheet({
           row.append(link);
         }
       }
-      list.append(row);
+      if (item.section?.breadcrumb)
+        row.prepend(el(doc, 'span', `${SHEET_CLASS}-hint`, item.section.breadcrumb));
+      (lists.get(item.section?.id || '') || list).append(row);
     }
     return list;
   }
@@ -1019,6 +1084,18 @@ export function openLibrarySheet({
         );
       } else {
         body.append(renderRows(view));
+        if (state.nextCursor) {
+          const more = el(
+            doc,
+            'button',
+            'modern-btn',
+            `Showing ${view.items.length} of ${state.total} · Load more projects`
+          );
+          more.type = 'button';
+          more.disabled = state.phase === 'running';
+          more.addEventListener('click', () => void load(true));
+          body.append(more);
+        }
       }
       const go = el(doc, 'button', 'modern-btn modern-btn-primary', view.buttonLabel);
       go.type = 'button';
@@ -1066,12 +1143,25 @@ export function openLibrarySheet({
     place();
   }
 
-  async function load() {
+  async function load(more = false) {
     state.phase = 'loading';
     render();
     try {
-      const [result, plan] = await Promise.all([loadSetupRows(api), loadStaffingPlan(api)]);
-      state.rows = result.rows;
+      const [result, plan] = await Promise.all([
+        loadSetupRows(api, {
+          sections: true,
+          rootID: intakeRootID,
+          cursor: more ? state.nextCursor : ''
+        }),
+        loadStaffingPlan(api)
+      ]);
+      if (more && result.revision !== state.revision)
+        throw new Error('The shelf changed. Reopen the sheet to review current projects.');
+      state.rows = more ? [...state.rows, ...result.rows] : result.rows;
+      state.nextCursor = result.nextCursor;
+      state.total = result.total;
+      state.revision = result.revision;
+      state.readOnly = result.readOnly;
       state.staffingPlan = plan;
       state.rowStaffing = await loadConnectedStaffing(api, state.rows);
       for (const id of [...state.repair]) {
@@ -1082,7 +1172,14 @@ export function openLibrarySheet({
       }
       // Keep ticks the person already made (a reload after a run); tick the
       // single-file rows the first time.
-      state.ticked = state.ticked.size ? state.ticked : defaultTicked(state.rows);
+      if (
+        !state.initialized &&
+        !intakeRootID &&
+        !state.nextCursor &&
+        !state.rows.some(row => row.section)
+      )
+        state.ticked = defaultTicked(state.rows);
+      state.initialized = true;
       for (const id of [...state.ticked]) {
         if (!state.rows.some(row => row.id === id && row.kind !== SETUP_KINDS.CONNECTED))
           state.ticked.delete(id);

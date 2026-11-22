@@ -36,20 +36,22 @@ type Search struct {
 }
 
 type SearchRow struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Stage          string    `json:"stage"`
-	Status         string    `json:"status"`
-	NextAction     string    `json:"next_action,omitempty"`
-	Priority       *int      `json:"priority,omitempty"`
-	Format         string    `json:"format,omitempty"`
-	Connection     string    `json:"connection"`
-	Availability   string    `json:"last_observed_availability"`
-	Alternatives   int       `json:"alternatives"`
-	FieldsRevision int64     `json:"fields_revision"`
-	ActivityAt     time.Time `json:"sourced_activity_at,omitempty"`
-	ActivitySource string    `json:"activity_source,omitempty"`
-	LastScannedAt  time.Time `json:"last_scanned_at,omitempty"`
+	FolderSection  *FolderSection `json:"folder_section,omitempty"`
+	WorkspaceID    string         `json:"workspace_id,omitempty"`
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	Stage          string         `json:"stage"`
+	Status         string         `json:"status"`
+	NextAction     string         `json:"next_action,omitempty"`
+	Priority       *int           `json:"priority,omitempty"`
+	Format         string         `json:"format,omitempty"`
+	Connection     string         `json:"connection"`
+	Availability   string         `json:"last_observed_availability"`
+	Alternatives   int            `json:"alternatives"`
+	FieldsRevision int64          `json:"fields_revision"`
+	ActivityAt     time.Time      `json:"sourced_activity_at,omitempty"`
+	ActivitySource string         `json:"activity_source,omitempty"`
+	LastScannedAt  time.Time      `json:"last_scanned_at,omitempty"`
 	// LastSavedAt is the newest project-file save time among the sources
 	// that are usable now (available or ambiguous, on an active root). A save
 	// time is not evidence that anyone worked on the song. Nil: no date.
@@ -416,6 +418,16 @@ func decodeCursor(encoded string, revision int64, digest string) (pageCursor, er
 // Availability is explicitly a *last observation*, not a fresh OS/media or
 // live-DAW readiness assertion; the host must project current root state too.
 func (s *Store) Query(scope Scope, query Search) (SearchPage, error) {
+	return s.query(scope, query, false)
+}
+
+// QueryFolderSections is for the authenticated Home owner's setup sheet and map.
+// Agent queries use Query, which never projects source ancestry.
+func (s *Store) QueryFolderSections(scope Scope, query Search) (SearchPage, error) {
+	return s.query(scope, query, true)
+}
+
+func (s *Store) query(scope Scope, query Search, withSections bool) (SearchPage, error) {
 	doc, state, err := s.readSnapshot(scope)
 	if err != nil {
 		return SearchPage{}, err
@@ -424,6 +436,9 @@ func (s *Store) Query(scope Scope, query Search) (SearchPage, error) {
 		return SearchPage{}, err
 	}
 	digest := queryDigest(query)
+	if withSections {
+		digest = "sections:" + digest
+	}
 	var cursor pageCursor
 	if query.Cursor != "" {
 		cursor, err = decodeCursor(query.Cursor, doc.Revision, digest)
@@ -471,6 +486,12 @@ func (s *Store) Query(scope Scope, query Search) (SearchPage, error) {
 		// scan time together. Otherwise a record observed under two roots could
 		// match one root while showing another root's unrelated format.
 		row := s.projectSearchRowInRoot(scope, entry, roots, linked, inactive, query.RootID, factsOn)
+		if withSections {
+			row.FolderSection = observedSection(entry, roots, inactive, query.RootID)
+			if row.Connection == "connected" {
+				row.WorkspaceID = entry.Link.WorkspaceID
+			}
+		}
 		row.applySessionActivity(sessionActivity[entry.ID])
 		row.Moved = moveNote(entry, newest, roots, inactive, query.RootID)
 		if query.matches(row, entry) {

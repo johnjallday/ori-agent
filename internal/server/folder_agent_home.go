@@ -37,6 +37,7 @@ func (r folderAgentRootResolver) PortfolioRoot(_ context.Context, _, _, _ string
 // library lists under the root, and how many folders holding songs no
 // listing reached.
 type homeReceipt struct {
+	rootID     string
 	listed     int
 	listedNoun string
 	partial    bool
@@ -282,6 +283,7 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	// The listings: the root, then the scopes leading to the songs.
 	rec.Facts = plan.ListingFacts(rec.Facts)
 	if plan.BranchLook != "" {
+		receipt.rootID = rootID
 		key += "-" + plan.Digest[:16]
 	}
 	listing, err := listFolderAgentSongs(ctx, b.sessionHandler, rec, owner, homeID, rootID, key,

@@ -150,6 +150,9 @@ func landingOf(rec *Record, plan Plan) *Landing {
 		name = "your Home"
 	}
 	query := url.Values{"mode": {"map"}, SetupProjectsParam: {"1"}}
+	if rootID := rec.Setup.Receipt.LibraryRootID; rootID != "" {
+		query.Set("setup_root", rootID)
+	}
 	if rec.WorkspaceID != "" {
 		query.Set(SetupBesideParam, rec.WorkspaceID)
 	}

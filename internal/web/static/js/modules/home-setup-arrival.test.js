@@ -67,6 +67,6 @@ test('the Home page wires the arrival once, through the chip’s own sheet', () 
   const normalize = source.indexOf('this.viewMode = resolveEffectiveMode(');
   assert.ok(ctor > 0 && ctor < normalize, 'captured in the constructor, before the mode resolves');
   assert.match(source, /const arrival = this\._setupArrival;\s*this\._setupArrival = null;/);
-  assert.match(source, /this\.openLibrarySetupSheet\(chip \|\| tile, tile\)/);
-  assert.match(source, /this\.openLibrarySetupSheet\(chip, zone\)/);
+  assert.match(source, /this\.openLibrarySetupSheet\(chip \|\| tile, tile, arrival\.root\)/);
+  assert.match(source, /this\.openLibrarySetupSheet\(chip, zone, arrival\.root\)/);
 });
