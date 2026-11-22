@@ -543,11 +543,11 @@ func normalizeRoleStaffing(items []roleStaffingInput) (map[string]roleStaffingIn
 // the HTTP layer — such as the Personal HQ setup coordinator — get identical
 // behavior to a user picking the template from the library (PRD FR128).
 func (h *Handler) CreateFromTemplate(ctx context.Context, name, templateID string) (string, error) {
-	return h.createFromTemplate(ctx, name, templateID)
+	return h.createFromTemplate(ctx, createWorkspaceRequest{Name: name, TemplateID: templateID})
 }
 
-func (h *Handler) createFromTemplate(ctx context.Context, name, templateID string) (string, error) {
-	body, err := json.Marshal(createWorkspaceRequest{Name: name, TemplateID: templateID})
+func (h *Handler) createFromTemplate(ctx context.Context, input createWorkspaceRequest) (string, error) {
+	body, err := json.Marshal(input)
 	if err != nil {
 		return "", fmt.Errorf("failed to encode workspace creation request: %w", err)
 	}
@@ -560,6 +560,16 @@ func (h *Handler) createFromTemplate(ctx context.Context, name, templateID strin
 	h.HandleWorkspaces(rec, req)
 
 	if rec.Code != http.StatusCreated {
+		if _, hq := personalAssistantCreationOptions(ctx); hq && rec.Code == http.StatusConflict {
+			var refusal struct {
+				Conflict workspaceCreateConflict `json:"conflict"`
+			}
+			if json.Unmarshal(rec.Body.Bytes(), &refusal) == nil && refusal.Conflict.Type == "folder_slug" {
+				if conflict := hqFolderConflict(refusal.Conflict.RequestedSlug, refusal.Conflict.SuggestedSlug, refusal.Conflict.Location); conflict != nil {
+					return "", conflict
+				}
+			}
+		}
 		return "", fmt.Errorf("workspace creation failed (%d): %s", rec.Code, strings.TrimSpace(rec.Body.String()))
 	}
 	var resp struct {
@@ -987,11 +997,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, session.ErrWorkspaceSlugConflict) {
-			parentDir := ""
-			if h.workspaceStore != nil {
-				parentDir = h.workspaceStore.BasePath()
-			}
-			writeWorkspaceCreateSlugConflict(w, req.Name, h.globalWorkspaceSlugConflict(r.Context(), ws.FolderSlug, "", parentDir))
+			writeWorkspaceCreateSlugConflict(w, req.Name, h.globalWorkspaceSlugConflict(r.Context(), ws.FolderSlug, "", h.createWorkspaceLocation(req.Location)))
 			return
 		}
 		_ = orihttp.RespondInternalError(w, "Failed to create workspace")
@@ -1617,10 +1623,7 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 		folderWS.OwnerUserID = ws.OwnerUserID
 	}
 
-	targetLocation := strings.TrimSpace(req.Location)
-	if targetLocation == "" && h.workspaceRootResolver != nil {
-		targetLocation = strings.TrimSpace(h.workspaceRootResolver())
-	}
+	targetLocation := h.createWorkspaceLocation(req.Location)
 
 	var folderErr error
 	switch {
@@ -1986,6 +1989,22 @@ func newTemplateProvenance(tmpl projecttemplates.Template, snapshot *agentworksp
 		}
 	}
 	return provenance
+}
+
+// createWorkspaceLocation is the effective parent of a new top-level folder.
+func (h *Handler) createWorkspaceLocation(location string) string {
+	if location = strings.TrimSpace(location); location != "" {
+		return location
+	}
+	if h.workspaceRootResolver != nil {
+		if location = strings.TrimSpace(h.workspaceRootResolver()); location != "" {
+			return location
+		}
+	}
+	if h.workspaceStore != nil {
+		return h.workspaceStore.BasePath()
+	}
+	return ""
 }
 
 // isWorkspaceRootLocation reports whether a create's location puts the new

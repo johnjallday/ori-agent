@@ -723,6 +723,9 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 		workspaces = append(workspaces, workspace)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to finish listing workspaces: %w", err)
+	}
 	return workspaces, nil
 }
 

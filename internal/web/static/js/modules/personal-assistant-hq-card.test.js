@@ -115,6 +115,25 @@ test('HQ proposal shows a recoverable paused setup, or its receipt', () => {
   assert.equal(hqCardView(assistant('active'), root, { receipt: [{}] }).visible, true);
 });
 
+test('the paused card may offer only a current server suggestion before any HQ exists', () => {
+  const plan = {
+    folderConflict: {
+      request_id: 'build-1',
+      if_version: 4,
+      review: 'a'.repeat(64),
+      requested_slug: 'my-hq',
+      suggested_slug: 'my-hq-3'
+    }
+  };
+  const paused = { ...assistant('provisioning_hq'), state_version: 4 };
+  const view = hqCardView(paused, root, plan);
+  assert.equal(view.folder.change.folder_slug, 'my-hq-3');
+  assert.equal(view.canBuild, true, 'plain Resume stays available');
+  assert.equal(hqCardView({ ...paused, state_version: 5 }, root, plan).folder, null);
+  assert.equal(hqCardView({ ...paused, hq_workspace_id: 'hq' }, root, plan).folder, null);
+  assert.equal(hqCardView(assistant('active'), root, plan).folder, null);
+});
+
 test('a new build needs the confirmed root; a paused setup can resume without it', () => {
   const missing = hqCardView(assistant('needs_hq'), { workspace_root: '/suggested' });
   assert.equal(missing.canBuild, false);

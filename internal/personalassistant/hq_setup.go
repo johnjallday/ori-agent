@@ -13,7 +13,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
-	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
@@ -173,8 +172,9 @@ type normalizedHQSetupRequest struct {
 	ScheduleDisabled bool `json:"schedule_disabled,omitempty"`
 	// Notes is omitted for a request without a notes choice, so every older
 	// payload keeps its exact bytes and hash and carries no notes effect.
-	Notes *normalizedHQNotes `json:"notes,omitempty"`
-	Hash  string             `json:"-"`
+	Notes        *normalizedHQNotes `json:"notes,omitempty"`
+	FolderChange *HQFolderChange    `json:"folder_change,omitempty"`
+	Hash         string             `json:"-"`
 }
 
 // normalizedHQNotes is the confirmed notes choice as journalled and hashed.
@@ -232,23 +232,30 @@ func (c *HQSetupCoordinator) Setup(ctx context.Context, userID string, request H
 	if err != nil {
 		return nil, err
 	}
-	normalized = canonical
-
 	// Already finished: return the canonical records rather than building again.
 	if state.Status == StatusActive || state.Status == StatusPaused {
-		config, _ := c.briefs.GetConfig(ctx, state.HQWorkspaceID)
-		return &HQSetupResult{
-			State: state.Clone(), BriefConfig: cloneBriefConfig(config), Resumed: true,
-			Notes: c.runNotes(ctx, userID, normalized, request.Notes),
-		}, nil
+		result := c.finishedHQ(ctx, state)
+		result.Notes = c.runNotes(ctx, userID, canonical, request.Notes)
+		return result, nil
 	}
+	return c.finishSetup(ctx, state, canonical, resumed, request.Notes)
+}
 
+func (c *HQSetupCoordinator) finishedHQ(ctx context.Context, state *State) *HQSetupResult {
+	config, _ := c.briefs.GetConfig(ctx, state.HQWorkspaceID)
+	return &HQSetupResult{State: state.Clone(), BriefConfig: cloneBriefConfig(config), Resumed: true}
+}
+
+// finishSetup is called under the same coordinator lock for fresh builds,
+// ordinary resumes, and explicitly confirmed changes of folder target.
+func (c *HQSetupCoordinator) finishSetup(ctx context.Context, state *State, normalized normalizedHQSetupRequest, resumed bool, notesChoice *HQNotesChoice) (*HQSetupResult, error) {
+	userID := state.UserID
 	recordEvent(EventHQSetupStarted, EventData{
 		AssistantID: state.AssistantID, State: string(state.Status),
 	})
 	startedAt := c.now()
 
-	state, err = c.ensureWorkspace(ctx, state, normalized)
+	state, err := c.ensureWorkspace(ctx, state, normalized)
 	if err != nil {
 		return nil, err
 	}
@@ -273,6 +280,9 @@ func (c *HQSetupCoordinator) Setup(ctx context.Context, userID string, request H
 	// Brief config owns the schedule from here on, and keeping a copy would only
 	// be a stale duplicate. normalizeState enforces this too.
 	final.HQPayloadJSON = ""
+	if normalized.FolderChange != nil {
+		final.HQPayloadHash = normalized.FolderChange.receiptHash()
+	}
 	updated, updateErr := c.store.UpdateState(ctx, final, state.StateVersion)
 	if updateErr != nil {
 		return nil, c.partial(ctx, state, RepairFinalization, updateErr)
@@ -284,16 +294,23 @@ func (c *HQSetupCoordinator) Setup(ctx context.Context, userID string, request H
 	})
 	return &HQSetupResult{
 		State: updated.Clone(), BriefConfig: cloneBriefConfig(config), Resumed: resumed,
-		Notes: c.runNotes(ctx, userID, normalized, request.Notes),
+		Notes: c.runNotes(ctx, userID, normalized, notesChoice),
 	}, nil
 }
 
 // Resume continues only the durable, previously confirmed HQ setup for this
 // user. The browser supplies no request identity or setup fields.
 func (c *HQSetupCoordinator) Resume(ctx context.Context, userID string) (*HQSetupResult, error) {
-	if c == nil || c.store == nil {
+	if c == nil || c.store == nil || c.creator == nil || c.hq == nil || c.briefs == nil {
 		return nil, errors.New("personal assistant: hq setup coordinator is not configured")
 	}
+	userID, err := validateOpaqueID("user id", userID, true)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	state, err := c.store.GetState(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -305,16 +322,10 @@ func (c *HQSetupCoordinator) Resume(ctx context.Context, userID string) (*HQSetu
 	if err != nil {
 		return nil, ErrRepairNeeded
 	}
-	scheduleEnabled := !stored.ScheduleDisabled
-	return c.Setup(ctx, userID, HQSetupRequest{
-		ScheduleEnabled: &scheduleEnabled,
-		RequestID:       stored.RequestID, IfVersion: state.StateVersion,
-		HQName: stored.HQName, Timezone: stored.Timezone,
-		ScheduleDays: stored.ScheduleDays, ScheduleTime: stored.ScheduleTime,
-		Scope: stored.Scope, SelectedIDs: stored.SelectedIDs,
-		IncludeFuture: stored.IncludeFuture, NotifyOnReady: stored.NotifyOnReady,
-		Notes: storedNotesChoice(stored.Notes),
-	})
+	if err := c.validateOwnedProfile(state); err != nil {
+		return nil, err
+	}
+	return c.finishSetup(ctx, state, stored, true, storedNotesChoice(stored.Notes))
 }
 
 /*
@@ -554,12 +565,7 @@ func (c *HQSetupCoordinator) ensureWorkspace(
 		return state, nil
 	}
 
-	created, err := c.creator.CreatePersonalAssistantHQ(ctx, request.HQName, personalhq.AssistantCreationOptions{
-		AssistantID: state.AssistantID, RequestID: request.RequestID,
-		DisplayName: state.GlobalAgentProfileName,
-		Appearance:  state.Appearance.Clone(),
-		Role:        types.RoleOrchestrator, SystemPromptFragment: PersonalAssistantPromptFragment,
-	})
+	created, err := c.creator.CreatePersonalAssistantHQ(ctx, request.HQName, hqCreationOptions(state, request))
 	if err != nil {
 		// Nothing canonical came back, so the operation stays claimed and
 		// resumable at the creation step.
@@ -670,6 +676,10 @@ func decodeStoredHQRequest(state *State) (normalizedHQSetupRequest, error) {
 		if err != nil || request.Notes == nil || canonical != state.HQPayloadHash {
 			return normalizedHQSetupRequest{}, errors.New("personal assistant: invalid stored hq operation")
 		}
+	}
+	if request.Version != hqPayloadVersion || (request.FolderChange != nil &&
+		(!request.FolderChange.valid() || request.FolderChange.RequestID != request.RequestID)) {
+		return normalizedHQSetupRequest{}, errors.New("personal assistant: invalid stored hq operation")
 	}
 	request.Hash = state.HQPayloadHash
 	if request.RequestID != state.LastHQRequestID {

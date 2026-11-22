@@ -1416,6 +1416,8 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 		// The confirmed consequence of the guided Map walkthrough. The legacy
 		// POST /api/personal-hq/setup route stays exactly as it was.
 		mux.HandleFunc("POST /api/personal-assistant/hq", s.Handlers.PersonalAssistant.SetupHQ)
+		mux.HandleFunc("GET /api/personal-assistant/hq/folder", s.Handlers.PersonalAssistant.ReviewHQFolder)
+		mux.HandleFunc("POST /api/personal-assistant/hq/folder", s.Handlers.PersonalAssistant.ChangeHQFolder)
 		mux.HandleFunc("GET /api/personal-assistant/first-assignment", s.Handlers.PersonalAssistant.GetFirstAssignment)
 		mux.HandleFunc("POST /api/personal-assistant/first-assignment/preview", s.Handlers.PersonalAssistant.PreviewFirstAssignment)
 		mux.HandleFunc("POST /api/personal-assistant/first-assignment/apply", s.Handlers.PersonalAssistant.ApplyFirstAssignment)

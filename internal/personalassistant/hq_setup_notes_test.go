@@ -6,9 +6,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
 )
 
@@ -123,6 +125,44 @@ func TestHQSetupNotes_BuildsHQAndTheReviewedNotesFolderTogether(t *testing.T) {
 	if f.folders(t) != 1 || f.creator.calls != 1 || f.briefs.updateCalls != 1 || f.notes.connected.Load() != 1 {
 		t.Fatalf("replay duplicated: folders %d creates %d schedules %d connects %d",
 			f.folders(t), f.creator.calls, f.briefs.updateCalls, f.notes.connected.Load())
+	}
+}
+
+type notesFolderReviewCreator struct {
+	*fakeAssistantCreator
+	conflict *personalhq.FolderConflict
+}
+
+func (f notesFolderReviewCreator) ReviewPersonalAssistantHQFolder(context.Context, string, personalhq.AssistantCreationOptions) (*personalhq.FolderConflict, error) {
+	return f.conflict, nil
+}
+
+func TestHQSetupNotes_ChangingOnlyTheFolderKeepsReviewedNotes(t *testing.T) {
+	f := newHQNotesFixture(t)
+	conflict := &personalhq.FolderConflict{
+		RequestedSlug: "command-post", SuggestedSlug: "command-post-2", RootWitness: strings.Repeat("a", 64),
+	}
+	f.creator.err = conflict
+	ctx := t.Context()
+	request := f.withNotes()
+	_, err := f.coordinator.Setup(ctx, "local", request)
+	var paused *PartialHQSetupError
+	if !errors.As(err, &paused) || f.folders(t) != 0 {
+		t.Fatalf("first attempt = %v", err)
+	}
+	f.creator.err = nil
+	restarted := NewHQSetupCoordinator(f.store, notesFolderReviewCreator{f.creator, conflict}, f.hq, f.briefs, f.profiles)
+	restarted.SetNotesSetup(hqGatedNotes{inner: f.notes.service, states: f.store})
+	result, err := restarted.ChangeFolder(ctx, "local", HQFolderChange{
+		RequestID: request.RequestID, IfVersion: paused.State.StateVersion,
+		FolderSlug: conflict.SuggestedSlug, Review: conflict.RootWitness,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.notes.service.Wait()
+	if result.Notes == nil || result.Notes.Status != SecondBrainSetupReady || result.Notes.Path != f.notes.reviewed() || f.folders(t) != 1 {
+		t.Fatalf("confirmed Notes choice was not kept: %+v", result.Notes)
 	}
 }
 

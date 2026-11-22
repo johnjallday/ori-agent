@@ -22,6 +22,18 @@ const PersonalHQTemplateID = "personal-ops"
 // ErrAssistantNameConflict marks a pre-creation global profile collision.
 var ErrAssistantNameConflict = errors.New("personal hq: assistant name conflict")
 
+// FolderConflict carries only canonical workspace folder names across the HQ
+// creation boundary, never a filesystem path or an internal HTTP error body.
+type FolderConflict struct {
+	RequestedSlug string `json:"requested_slug"`
+	SuggestedSlug string `json:"suggested_slug,omitempty"`
+	RootWitness   string `json:"-"`
+}
+
+func (e *FolderConflict) Error() string {
+	return "personal hq: workspace folder name is already in use"
+}
+
 // briefConfigSharedDataKey is where the provisional Daily Brief
 // configuration captured during setup is stored on the HQ workspace's
 // SharedData, until internal/dailybrief (task 5.0) owns durable
@@ -54,6 +66,10 @@ type AssistantCreationOptions struct {
 	Appearance           *types.AgentAppearance
 	Role                 types.AgentRole
 	SystemPromptFragment string
+	// Set only by the HQ coordinator after a separately confirmed collision
+	// review. The slug changes the physical folder, not the workspace name.
+	FolderSlug        string
+	FolderRootWitness string
 }
 
 // AssistantWorkspaceResult identifies the actual canonical records created by

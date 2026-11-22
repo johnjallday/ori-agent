@@ -304,15 +304,16 @@ func (s *FileStore) saveFenced(ws *Workspace, fence *folderFence) error {
 		}
 	}
 	if !exists {
-		// New workspace — check if folder already exists
-		if existsOnDisk, err := pathExists(folderPath); err != nil {
-			return fmt.Errorf("failed to check workspace folder path: %w", err)
-		} else if existsOnDisk {
+		// Reserve the new directory atomically: a user who just placed a file,
+		// directory or link here must get a conflict, not have it adopted.
+		if err := makeNewWorkspaceFolder(folderPath); errors.Is(err, os.ErrExist) {
 			return &FolderSlugConflictError{
 				Slug:          ws.FolderSlug,
 				SuggestedSlug: s.nextAvailableWorkspaceSlugLocked(parentDir, ws.FolderSlug),
 				ParentDir:     parentDir,
 			}
+		} else if err != nil {
+			return err
 		}
 	} else if filepath.Clean(existingFolderPath) != filepath.Clean(folderPath) {
 		// Existing workspace with changed path — check new folder doesn't exist
@@ -425,15 +426,14 @@ func (s *FileStore) SaveAt(ws *Workspace, location string) error {
 		}
 	}
 
-	// Check for conflict
-	if existsOnDisk, err := pathExists(folderPath); err != nil {
-		return fmt.Errorf("failed to check workspace folder path: %w", err)
-	} else if existsOnDisk {
+	if err := makeNewWorkspaceFolder(folderPath); errors.Is(err, os.ErrExist) {
 		return &FolderSlugConflictError{
 			Slug:          ws.FolderSlug,
 			SuggestedSlug: s.nextAvailableWorkspaceSlugLocked(location, ws.FolderSlug),
 			ParentDir:     location,
 		}
+	} else if err != nil {
+		return err
 	}
 
 	if err := ensureWorkspaceContentDirs(folderPath, ws.IsAnchored()); err != nil {
@@ -644,7 +644,7 @@ func atomicWriteFile(path string, data []byte) error {
 // pathExists is called only with paths this package built from a registered
 // parent folder and a slugified or registered folder name.
 func pathExists(path string) (bool, error) {
-	_, err := os.Stat(path) // #nosec G703 -- package-built path; see pathExists
+	_, err := os.Lstat(path) // #nosec G703 -- package-built path; see pathExists
 	if err == nil {
 		return true, nil
 	}

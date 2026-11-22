@@ -21,6 +21,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 const maxHireBodyBytes = 64 << 10
@@ -39,6 +40,14 @@ type HQSetupService interface {
 
 type hqSetupResumer interface {
 	Resume(ctx context.Context, userID string) (*personalassistant.HQSetupResult, error)
+}
+
+type hqFolderReviewer interface {
+	ReviewFolder(ctx context.Context, userID string) (*personalassistant.State, *personalhq.FolderConflict, error)
+}
+
+type hqFolderChanger interface {
+	ChangeFolder(ctx context.Context, userID string, change personalassistant.HQFolderChange) (*personalassistant.HQSetupResult, error)
 }
 
 // HireService is the sole consequential hire boundary used by this package.
@@ -703,11 +712,19 @@ type hqSetupNotesRequest struct {
 }
 
 type hqSetupErrorResponse struct {
-	Error         string                       `json:"error"`
-	Code          string                       `json:"code"`
-	Retryable     bool                         `json:"retryable"`
-	RepairStep    personalassistant.RepairStep `json:"repair_step,omitempty"`
-	DurableResult *hireResponse                `json:"durable_result,omitempty"`
+	Error          string                       `json:"error"`
+	Code           string                       `json:"code"`
+	Retryable      bool                         `json:"retryable"`
+	RepairStep     personalassistant.RepairStep `json:"repair_step,omitempty"`
+	DurableResult  *hireResponse                `json:"durable_result,omitempty"`
+	FolderConflict *hqFolderConflictReview      `json:"folder_conflict,omitempty"`
+}
+
+type hqFolderConflictReview struct {
+	personalhq.FolderConflict
+	RequestID string `json:"request_id,omitempty"`
+	IfVersion int64  `json:"if_version,omitempty"`
+	Review    string `json:"review,omitempty"`
 }
 
 // SetupHQ handles POST /api/personal-assistant/hq: the one confirmed
@@ -756,17 +773,92 @@ func (h *Handler) SetupHQ(w http.ResponseWriter, r *http.Request) {
 			Notes: body.Notes.choice(),
 		})
 	}
+	h.respondHQSetup(w, r, userID, result, err, resumeMode)
+}
+
+// ReviewHQFolder reports a fresh, read-only conflict for a durable paused HQ
+// setup. A reload does not need to retry creation or recover a browser draft.
+func (h *Handler) ReviewHQFolder(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	if h == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "Personal HQ recovery is temporarily unavailable.")
+		return
+	}
+	reviewer, ok := h.hqSetup.(hqFolderReviewer)
+	if !ok {
+		orihttp.ServiceUnavailable(w, "Personal HQ recovery is temporarily unavailable.")
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	state, conflict, err := reviewer.ReviewFolder(r.Context(), userID)
+	if errors.Is(err, personalassistant.ErrHQFolderDirectoryChanged) {
+		writeHQSetupError(w, http.StatusConflict, "hq_folder_directory_changed", "Restore the workspace directory you reviewed before resuming setup.", true, nil)
+		return
+	}
+	if err != nil {
+		orihttp.ServiceUnavailable(w, "Personal HQ folder review is temporarily unavailable.")
+		return
+	}
+	orihttp.Success(w, map[string]any{"folder_conflict": projectHQFolderReview(state, conflict)})
+}
+
+// ChangeHQFolder handles POST /api/personal-assistant/hq/folder. Its request
+// shape does not accept any field from a build or a plain resume.
+func (h *Handler) ChangeHQFolder(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	if h == nil || h.provider == nil {
+		orihttp.ServiceUnavailable(w, "Personal HQ recovery is temporarily unavailable.")
+		return
+	}
+	changer, ok := h.hqSetup.(hqFolderChanger)
+	if !ok {
+		orihttp.ServiceUnavailable(w, "Personal HQ recovery is temporarily unavailable.")
+		return
+	}
+	var body personalassistant.HQFolderChange
+	if err := decodeBoundedRequest(w, r, &body); err != nil {
+		writeHQSetupError(w, http.StatusBadRequest, "invalid_hq_folder_change", "Confirm the suggested workspace folder only.", false, nil)
+		return
+	}
+	userID, ok := h.currentUserID(w, r)
+	if !ok {
+		return
+	}
+	result, err := changer.ChangeFolder(r.Context(), userID, body)
+	if errors.Is(err, personalassistant.ErrValidation) {
+		writeHQSetupError(w, http.StatusBadRequest, "invalid_hq_folder_change", "Confirm the suggested workspace folder only.", false, nil)
+		return
+	}
+	h.respondHQSetup(w, r, userID, result, err, false)
+}
+
+func (h *Handler) respondHQSetup(w http.ResponseWriter, r *http.Request, userID string, result *personalassistant.HQSetupResult, err error, resumeMode bool) {
 	if err != nil {
 		if writeHQNotesError(w, err) {
 			return
 		}
 		var partial *personalassistant.PartialHQSetupError
-		if errors.As(err, &partial) && (errors.Is(err, personalassistant.ErrConflict) || errors.Is(err, personalassistant.ErrRepairNeeded) || errors.Is(err, personalhq.ErrAssistantNameConflict)) {
+		if errors.As(err, &partial) && writeHQFolderConflict(w, partial) {
+			return
+		}
+		if partial != nil && (errors.Is(err, personalassistant.ErrConflict) || errors.Is(err, personalassistant.ErrRepairNeeded) || errors.Is(err, personalhq.ErrAssistantNameConflict)) {
 			writeHQSetupError(w, http.StatusConflict, "hq_setup_resume_blocked",
 				"Your saved Personal HQ setup cannot continue safely. Existing workspace data was left unchanged. Contact your Ori administrator before starting another HQ build.", false, nil)
 			return
 		}
 		switch {
+		case errors.Is(err, personalassistant.ErrHQFolderAvailable):
+			writeHQSetupError(w, http.StatusConflict, "hq_folder_available", "The saved folder name is available again. Resume setup to use it.", true, nil)
+		case errors.Is(err, personalassistant.ErrHQFolderDirectoryChanged):
+			writeHQSetupError(w, http.StatusConflict, "hq_folder_directory_changed", "Restore the workspace directory you reviewed before resuming setup.", true, partial)
 		case errors.Is(err, personalassistant.ErrValidation):
 			writeHQSetupError(w, http.StatusBadRequest, "invalid_hq_setup_request",
 				"Check the Personal HQ name and the daily rhythm.", false, nil)
@@ -861,6 +953,44 @@ func writeHQNotesError(w http.ResponseWriter, err error) bool {
 		return false
 	}
 	return true
+}
+
+func writeHQFolderConflict(w http.ResponseWriter, partial *personalassistant.PartialHQSetupError) bool {
+	var conflict *personalhq.FolderConflict
+	if partial.Step != personalassistant.RepairHQCreation || !errors.As(partial.Err, &conflict) {
+		return false
+	}
+	review := projectHQFolderReview(partial.State, conflict)
+	if review == nil {
+		return false
+	}
+	message := "That workspace folder name is already in use. Existing folders were left untouched. Free the name, then resume setup."
+	if review.Review != "" {
+		message = "That workspace folder name is already in use. Existing folders were left untouched. Confirm the suggested folder or free the saved name and resume."
+	}
+	_ = orihttp.RespondJSON(w, http.StatusConflict, hqSetupErrorResponse{
+		Error: message, Code: "hq_folder_conflict", Retryable: true, RepairStep: partial.Step,
+		DurableResult:  responseFromResult(&personalassistant.HireResult{State: partial.State, Resumed: true}),
+		FolderConflict: review,
+	})
+	return true
+}
+
+func projectHQFolderReview(state *personalassistant.State, conflict *personalhq.FolderConflict) *hqFolderConflictReview {
+	if state == nil || state.Status != personalassistant.StatusProvisioningHQ ||
+		state.HQWorkspaceID != "" || state.HQEntryAgentInstanceID != "" ||
+		conflict == nil || !workspace.IsCanonicalWorkspaceSlug(conflict.RequestedSlug) {
+		return nil
+	}
+	safe := *conflict
+	if !workspace.IsCanonicalWorkspaceSlug(safe.SuggestedSlug) || safe.SuggestedSlug == safe.RequestedSlug || workspace.IsReservedTopLevelSlug(safe.SuggestedSlug) {
+		safe.SuggestedSlug = ""
+	}
+	review := &hqFolderConflictReview{FolderConflict: safe}
+	if safe.SuggestedSlug != "" && safe.RootWitness != "" && state.LastHQRequestID != "" && state.StateVersion > 0 {
+		review.RequestID, review.IfVersion, review.Review = state.LastHQRequestID, state.StateVersion, safe.RootWitness
+	}
+	return review
 }
 
 func writeHQSetupError(
