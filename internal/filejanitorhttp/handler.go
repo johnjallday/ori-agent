@@ -59,6 +59,21 @@ type Handler struct {
 	assistantSetup        AssistantSetupCoordinator
 	protection            filecuratorguidance.ProtectionReader
 	onInitialSelectedScan func(context.Context, string)
+	downloadsRoot         func(owner, workspaceID string) (string, error)
+}
+
+// SetDownloadsRoot wires the Folder Agent’s current, owner-scoped inbox verification.
+func (h *Handler) SetDownloadsRoot(resolve func(owner, workspaceID string) (string, error)) {
+	h.downloadsRoot = resolve
+}
+
+func (h *Handler) verifiedDownloads(owner, workspaceID string) filejanitor.DownloadsRoot {
+	return func() (string, error) {
+		if h.downloadsRoot == nil {
+			return "", filejanitor.ErrManagedRootUnavailable
+		}
+		return h.downloadsRoot(owner, workspaceID)
+	}
 }
 
 // SetOnInitialSelectedScan observes newly prepared expansion setup only.
@@ -132,7 +147,19 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	status, err := h.service.Status(workspaceID)
+	var status filejanitor.Status
+	var err error
+	if r.URL.Query().Get("review") == "downloads" {
+		w.Header().Set("Cache-Control", "no-store")
+		owner, ownerErr := h.currentOwner(r.Context())
+		if ownerErr != nil {
+			_ = orihttp.RespondForbidden(w, "The Downloads workspace is unavailable.")
+			return
+		}
+		status, err = h.service.DownloadsReviewStatus(owner, workspaceID, h.verifiedDownloads(owner, workspaceID))
+	} else {
+		status, err = h.service.Status(workspaceID)
+	}
 	if err != nil {
 		h.respondError(w, err, "Failed to read File Janitor status")
 		return
@@ -178,6 +205,28 @@ func (h *Handler) ConfirmSetup(w http.ResponseWriter, r *http.Request) {
 		Paused *bool `json:"paused,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
+		return
+	}
+	if r.URL.Query().Get("review") == "downloads" {
+		if req.Path != "" || req.SelectionToken != "" || req.AssistantSetupToken != "" ||
+			req.DailyScanLocalTime != "" || req.Timezone != "" || req.Paused != nil {
+			_ = orihttp.RespondBadRequest(w, "Downloads access uses this workspace’s verified inbox, without monitoring.")
+			return
+		}
+		owner, err := h.currentOwner(r.Context())
+		if err != nil {
+			_ = orihttp.RespondForbidden(w, "The Downloads workspace is unavailable.")
+			return
+		}
+		status, err := h.service.ConfirmDownloadsAccess(owner, workspaceID, h.verifiedDownloads(owner, workspaceID))
+		if err != nil {
+			h.respondError(w, err, "Failed to allow access to Downloads")
+			return
+		}
+		h.syncAutomation(workspaceID)
+		// The console re-reads scoped status after the grant instead of
+		// adopting an ordinary Filing response.
+		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "root_id": status.Settings.RootID})
 		return
 	}
 	assisted := strings.TrimSpace(req.SelectionToken) != "" || strings.TrimSpace(req.AssistantSetupToken) != ""

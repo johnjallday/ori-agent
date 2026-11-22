@@ -85,6 +85,30 @@ func (s *Service) rootIdentity(workspaceID string) RootIdentity {
 	return ResolveRootIdentity(root, s.deps.KnownFolderRoot)
 }
 
+// DownloadsReviewRoot derives the inbox from the current owned workspace
+// anchor, including when the report itself is a historical setup receipt.
+func (s *Service) DownloadsReviewRoot(owner, workspaceID string) (string, error) {
+	if s == nil || s.deps.Store == nil || s.deps.Workspaces == nil {
+		return "", ErrUnavailable
+	}
+	rec, err := s.deps.Store.Read(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if rec.OwnerUserID != owner {
+		return "", ErrNotOwner
+	}
+	root, err := s.deps.Workspaces.AnchorRoot(workspaceID)
+	if err != nil {
+		return "", ErrWrongState
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil || ResolveRootIdentity(root, s.deps.KnownFolderRoot).Policy != folderlook.RootDownloads {
+		return "", ErrWrongState
+	}
+	return root, nil
+}
+
 // effectiveRecord is a read-only projection, including legacy pending reports.
 // Historical completed receipts and the underlying evidence are never rewritten.
 func (s *Service) effectiveRecord(rec *Record) *Record {

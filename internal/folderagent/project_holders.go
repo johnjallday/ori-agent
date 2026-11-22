@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
 )
 
@@ -23,7 +24,7 @@ type ProjectHolderView struct {
 }
 
 type ProjectHoldersView struct {
-	ReportKey string              `json:"report_key"`
+	ReportKey string              `json:"report_key,omitempty"`
 	Rows      []ProjectHolderView `json:"rows"`
 	More      int                 `json:"more,omitempty"`
 }
@@ -42,7 +43,10 @@ func projectHoldersView(rec *Record) *ProjectHoldersView {
 	if len(holders) == 0 {
 		return nil
 	}
-	out := &ProjectHoldersView{ReportKey: holderReportKey(rec)}
+	out := &ProjectHoldersView{}
+	if rec.RootPolicy != folderlook.RootDownloads {
+		out.ReportKey = holderReportKey(rec)
+	}
 	for i, holder := range holders {
 		if i >= 3 {
 			out.More++
@@ -66,7 +70,7 @@ func (s *Service) ChooseProjectHolder(ctx context.Context, userID, workspaceID, 
 	if err != nil {
 		return nil, err
 	}
-	if rec.Map == nil || !rec.RootPolicy.IsCatchAll() || completed(rec) || rec.State == StateLooking || rec.State == StateSettingUp || reportKey != holderReportKey(rec) {
+	if rec.Map == nil || !rec.RootPolicy.IsCatchAll() || rec.RootPolicy == folderlook.RootDownloads || completed(rec) || rec.State == StateLooking || rec.State == StateSettingUp || reportKey != holderReportKey(rec) {
 		return nil, ErrWrongState
 	}
 	found := false

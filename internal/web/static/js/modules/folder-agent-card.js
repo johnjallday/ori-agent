@@ -2159,6 +2159,10 @@ function renderProjectHolders(doc, view, fetchImpl) {
   for (const holder of view.projectHolders.rows.slice(0, 3)) {
     const row = el(doc, 'li', 'folder-agent-card__holder-row');
     row.append(el(doc, 'strong', '', String(holder.name)), el(doc, 'p', '', String(holder.kinds)));
+    if (view.rootPolicy === 'downloads_inbox') {
+      list.append(row);
+      continue;
+    }
     const setup = el(
       doc,
       'button',
@@ -2642,7 +2646,21 @@ export function renderFolderAgentReport(
       }
     });
   }
-  if (view.exploreFolder) {
+  const downloadsReview =
+    view.rootPolicy === 'downloads_inbox' &&
+    view.route.startsWith('/workspaces/') &&
+    ['reported', 'set_up'].includes(view.state);
+  if (downloadsReview) {
+    const actions = el(doc, 'div', 'folder-agent-card__actions');
+    const review = el(doc, 'a', 'btn btn-primary btn-sm', 'Review Downloads');
+    const route = new URL(view.route, 'http://ori.local');
+    route.searchParams.set('panel', 'file-janitor');
+    route.searchParams.set('review', 'downloads');
+    review.href = route.pathname + route.search;
+    actions.append(review);
+    card.append(actions);
+  }
+  if (view.exploreFolder && view.rootPolicy !== 'downloads_inbox') {
     // The normal chooser performs a new explicit selection; opening it neither
     // reanchors this workspace nor consents to a look or structural setup.
     const explore = el(
@@ -2677,6 +2695,8 @@ export function renderFolderAgentReport(
         )
       );
     }
+  } else if (downloadsReview) {
+    // The Filing console owns the explicit install and folder-access steps.
   } else if (view.plan && (view.plan.steps.length || view.plan.runnable)) {
     planHost = el(doc, 'div', 'folder-agent-card__plan-host');
     planHost.append(
@@ -2800,6 +2820,7 @@ export function renderFolderAgentReport(
   if (view.actions.length) {
     const actions = el(doc, 'div', 'folder-agent-card__actions');
     view.actions.forEach((action, index) => {
+      if (downloadsReview && !view.setup && action.id === 'set_up') return;
       const button = el(
         doc,
         'button',

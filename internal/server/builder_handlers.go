@@ -945,6 +945,9 @@ func (b *ServerBuilder) wireFileJanitor() {
 	service := filejanitor.NewService(filejanitor.NewStore(b.workspaceFileStore), b.workspaceStore)
 	b.fileJanitorService = service
 	b.fileJanitorHandler = filejanitorhttp.NewHandler(service, b.workspaceStore, b.userProvider)
+	b.fileJanitorHandler.SetDownloadsRoot(func(owner, workspaceID string) (string, error) {
+		return b.folderAgentService.DownloadsReviewRoot(owner, workspaceID)
+	})
 	if b.chatHandler != nil {
 		b.chatHandler.SetFileCuratorWelcomeReader(service)
 	}

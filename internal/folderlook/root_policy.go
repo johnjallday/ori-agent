@@ -23,7 +23,7 @@ func (p RootPolicy) IsCatchAll() bool {
 func PolicyLine(policy RootPolicy) string {
 	switch policy {
 	case RootDownloads:
-		return "Downloads stays an inbox, not a Home or group. Detected projects do not connect tools to the whole folder. Filing needs separate folder access and your approval for every move. Explore a project folder separately."
+		return "Downloads stays an inbox. Projects are listed for reference only. Filing needs separate folder access and your approval for every move."
 	case RootDesktop:
 		return "Desktop stays a workbench, not a Home or group. Project folders inside it can be set up on their own. Filing puts loose files into a Filed folder here; every move needs your approval."
 	case RootDocuments:

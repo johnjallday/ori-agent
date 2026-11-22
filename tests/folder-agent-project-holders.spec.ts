@@ -21,7 +21,7 @@ test('a known folder points at a saved holder without creating anything until it
     );
   });
   await mkdir(evidence, { recursive: true, mode: 0o750 });
-  const root = join(sandbox, 'Downloads');
+  const root = join(sandbox, 'Desktop');
   for (const [kind, count, marker] of [
     ['Software', 7, 'go.mod'],
     ['Songs', 5, 'Song.rpp'],
