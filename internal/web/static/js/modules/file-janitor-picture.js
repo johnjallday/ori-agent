@@ -417,41 +417,22 @@ export function renderPicture(doc, picture, ctx) {
   return root;
 }
 
-// The one-file bar lives beside the File button, not in the picture: it stays in
-// view while a file far down a long list is selected, and clicking a file never
-// scrolls that file away. The console draws it in the footer.
-export function renderFileBar(doc, picture, ctx) {
-  return pictureHasFiles(picture) ? fileBar(builder(doc), ctx) : null;
+// One candidate can appear in its destination, its pair or bundle, and a paged
+// list simultaneously. The rendering location is part of the control identity.
+function fileRow(h, className, file, location, fallback) {
+  const row = h('li', className);
+  row.id = 'fileJanitorFileRow-' + location + '--' + file.id;
+  row.setAttribute('data-fj-file-row', fallback);
+  row.setAttribute('tabindex', '-1');
+  return row;
 }
 
-export function pictureHasFiles(picture) {
-  return (
-    picture.folders.length > 0 ||
-    picture.loose.some(row => row.count > 0) ||
-    picture.left_out.count > 0 ||
-    picture.trash.count > 0
-  );
-}
-
-// R23: the one-file bar, above the File button. With nothing selected it says how
-// to start; with a file selected it names it and offers one menu for that file only.
-function fileBar(h, ctx) {
-  const bar = h('section', 'fj-file-bar');
-  bar.id = 'fileJanitorFileBar';
-  bar.setAttribute('aria-label', 'Choices for one file');
-  const file = ctx.selectedFile;
-  if (!file) {
-    bar.appendChild(h('p', 'fj-sub', FILE_BAR_HINT));
-    return bar;
-  }
-  const name = setName(h, h('p', 'fj-file-bar-name'), file.name);
-  name.id = 'fileJanitorFileBarName';
-  bar.appendChild(name);
-  const select = h('select', 'fj-row-menu');
-  select.id = 'fileJanitorFileMenu';
-  select.setAttribute('aria-labelledby', 'fileJanitorFileBarName');
+function fileChoice(h, row, file, ctx) {
+  const select = h('select', 'fj-row-menu fj-file-choice');
+  select.id = row.id + '-choice';
+  select.setAttribute('aria-label', 'Filing choice for ' + file.name);
   select.disabled = !ctx.editsAvailable;
-  const prompt = h('option', '', 'What should happen to this file?');
+  const prompt = h('option', '', 'Filing choice');
   prompt.value = '';
   prompt.selected = true;
   prompt.disabled = true;
@@ -465,13 +446,7 @@ function fileBar(h, ctx) {
     const choice = parseFileChoice(select.value);
     if (choice) ctx.onFileChoice?.(file, choice);
   });
-  bar.appendChild(select);
-  const cancel = h('button', 'fj-btn', 'Cancel');
-  cancel.type = 'button';
-  cancel.id = 'fileJanitorFileBarCancel';
-  cancel.addEventListener('click', () => ctx.onSelectFile?.(null));
-  bar.appendChild(cancel);
-  return bar;
+  return select;
 }
 
 export function parseFileChoice(value) {
@@ -484,24 +459,34 @@ export function parseFileChoice(value) {
 // destination) is shown under the new name, tagged "renamed" (R7). The plan check
 // is a read of disk, so the names arrive after the picture; until then, and for a
 // file the plan does not cover, the name is the file's own. Any file listed here
-// can be clicked to select it (R23): the console shows what can be done with that
-// one file in the bar above the File button.
-function nameList(h, files, className, ctx, { planned: usePlan = false } = {}) {
+// can be clicked to show the choices beside it, in that rendering only.
+function nameList(h, files, className, ctx, { location, fallback, planned: usePlan = false }) {
   const list = h('ul', className);
   for (const file of files) {
     const planned = usePlan ? ctx?.plan?.items?.[file.id] : undefined;
     const renamed = Boolean(planned?.renamed && planned.final_name);
     const shown = renamed ? planned.final_name : file.name;
     const selectable = Boolean(ctx?.onSelectFile);
-    const item = h('li', 'fj-file');
+    const item = fileRow(h, 'fj-file', file, location, fallback);
     if (!selectable) setName(h, item, shown);
     if (selectable) {
       const control = setName(h, h('button', 'fj-file-name'), shown);
       control.type = 'button';
-      control.id = 'fileJanitorFile-' + file.id;
-      control.setAttribute('aria-pressed', ctx.selectedFile?.id === file.id ? 'true' : 'false');
-      control.addEventListener('click', () => ctx.onSelectFile(file));
+      control.id = item.id + '-name';
+      const expanded = ctx.selectedFile === item.id;
+      control.setAttribute('aria-expanded', String(expanded));
+      control.addEventListener('click', () => ctx.onSelectFile(item.id, !expanded));
       item.appendChild(control);
+      if (expanded) {
+        const choices = h('div', 'fj-inline-choice');
+        choices.appendChild(fileChoice(h, item, file, ctx));
+        const cancel = h('button', 'fj-btn', 'Cancel');
+        cancel.type = 'button';
+        cancel.id = item.id + '-cancel';
+        cancel.addEventListener('click', () => ctx.onSelectFile(item.id, false));
+        choices.appendChild(cancel);
+        item.appendChild(choices);
+      }
     }
     appendInspection(h, item, file, ctx);
     if (renamed) item.appendChild(h('span', 'fj-tag', 'renamed'));
@@ -557,7 +542,13 @@ function folderCard(h, folder, ctx) {
   card.appendChild(h('p', 'fj-folder-destination', folder.destination));
   if (unticked) card.appendChild(h('p', 'fj-not-filed', 'Not filed'));
   if (folder.count > 0) {
-    card.appendChild(nameList(h, folder.files, 'fj-folder-files', ctx, { planned: true }));
+    card.appendChild(
+      nameList(h, folder.files, 'fj-folder-files', ctx, {
+        location: FILED + '-' + folder.category,
+        fallback: 'fileJanitorFiledTitle',
+        planned: true
+      })
+    );
     if (folder.count > folder.files.length)
       card.appendChild(
         moreButton(h, ctx, FILED, folder.category, folder.files.length, folder.count)
@@ -565,7 +556,12 @@ function folderCard(h, folder, ctx) {
   }
   if (folder.unfiled_count > 0) {
     if (folder.count > 0) card.appendChild(h('p', 'fj-not-filed', 'Not filed'));
-    card.appendChild(nameList(h, folder.unfiled_files, 'fj-folder-files', ctx));
+    card.appendChild(
+      nameList(h, folder.unfiled_files, 'fj-folder-files', ctx, {
+        location: UNFILED + '-' + folder.category,
+        fallback: 'fileJanitorFiledTitle'
+      })
+    );
     if (folder.unfiled_count > folder.unfiled_files.length)
       card.appendChild(
         moreButton(
@@ -738,7 +734,6 @@ export function bundleMenuValue(bundle) {
   return 'mixed';
 }
 
-export const FILE_BAR_HINT = 'Select a filename to choose what happens to it.';
 export const KEPT_NOTE = 'Ori will not ask about these again.';
 
 // The menu of a row or a bundle: the same choices, one value in, one choice out.
@@ -779,6 +774,7 @@ function appendInspection(h, line, file, ctx) {
   if (file.viewer) {
     const open = h('button', 'fj-link fj-reveal', 'Open');
     open.type = 'button';
+    if (line.id) open.id = line.id + '-open';
     open.title = 'Open in ' + file.viewer;
     open.setAttribute('aria-label', 'Open ' + file.name + ' in ' + file.viewer);
     open.addEventListener('click', () => ctx.onInspect(file, 'open'));
@@ -786,20 +782,16 @@ function appendInspection(h, line, file, ctx) {
   }
   const reveal = h('button', 'fj-link fj-reveal', 'Show in Finder');
   reveal.type = 'button';
+  if (line.id) reveal.id = line.id + '-reveal';
   reveal.title = 'Select this file in Finder. Press Space there for Quick Look.';
   reveal.setAttribute('aria-label', 'Show ' + file.name + ' in Finder');
   reveal.addEventListener('click', () => ctx.onInspect(file, 'reveal'));
   line.appendChild(reveal);
 }
 
-function pairLine(h, file, files, ctx) {
-  const line = h('li', 'fj-pair-line');
-  const name = setName(h, h('button', 'fj-file-name'), file.name);
-  name.type = 'button';
-  name.id = 'fileJanitorFile-' + file.id;
-  name.setAttribute('aria-pressed', ctx.selectedFile?.id === file.id ? 'true' : 'false');
-  name.addEventListener('click', () => ctx.onSelectFile?.(file));
-  line.appendChild(name);
+function pairLine(h, file, files, ctx, location, fallback) {
+  const line = fileRow(h, 'fj-pair-line', file, location, fallback);
+  line.appendChild(h('span', 'fj-pair-name', file.name));
   const rounded = formatSize(file.size);
   const hidesDifference = files.some(
     other => other.size !== file.size && formatSize(other.size) === rounded
@@ -812,7 +804,8 @@ function pairLine(h, file, files, ctx) {
     line.appendChild(h('span', 'fj-pair-state', 'Marked for Trash'));
     const back = h('button', 'fj-link', 'Undo mark');
     back.type = 'button';
-    back.id = 'fileJanitorPutBack-' + file.id;
+    back.id = line.id + '-undo';
+    back.disabled = !ctx.editsAvailable;
     back.setAttribute('aria-label', 'Undo Trash mark for ' + file.name);
     back.addEventListener('click', () => ctx.onPutBack?.(file));
     line.appendChild(back);
@@ -825,11 +818,13 @@ function pairLine(h, file, files, ctx) {
   } else if (trashCopyAllowed(file, files)) {
     const trash = h('button', 'fj-link', 'Mark for Trash');
     trash.type = 'button';
-    trash.id = 'fileJanitorTrashCopy-' + file.id;
+    trash.id = line.id + '-mark';
+    trash.disabled = !ctx.editsAvailable;
     trash.setAttribute('aria-label', 'Mark for Trash: ' + file.name);
     trash.addEventListener('click', () => ctx.onTrashCopy?.(file));
     line.appendChild(trash);
   }
+  line.appendChild(fileChoice(h, line, file, ctx));
   return line;
 }
 
@@ -841,7 +836,17 @@ function pairCard(h, pair, ctx) {
   const original = pair.files.find(file => file.ending === 'none') || pair.files[0];
   card.setAttribute('aria-label', 'Possible copies of ' + original.name);
   const list = h('ul', 'fj-pair-files');
-  for (const file of pair.files) list.appendChild(pairLine(h, file, pair.files, ctx));
+  for (const file of pair.files)
+    list.appendChild(
+      pairLine(
+        h,
+        file,
+        pair.more ? [] : pair.files,
+        ctx,
+        pair.family_id,
+        'fileJanitorRowMenu-versions'
+      )
+    );
   card.appendChild(list);
   const hint = pairHint(pair.files);
   if (hint) card.appendChild(h('p', 'fj-pair-hint', hint));
@@ -874,7 +879,12 @@ function bundleCard(h, bundle, ctx) {
   );
   const note = bundleNote(bundle, ctx);
   if (note) card.appendChild(h('p', 'fj-row-note fj-bundle-note', note));
-  card.appendChild(nameList(h, bundle.files, 'fj-loose-files', ctx));
+  card.appendChild(
+    nameList(h, bundle.files, 'fj-loose-files', ctx, {
+      location: bundle.bundle_id,
+      fallback: 'fileJanitorBundleMenu-' + bundle.bundle_id
+    })
+  );
   if (bundle.more > 0)
     card.appendChild(
       moreButton(h, ctx, BUNDLE, bundle.bundle_id, bundle.files.length, bundle.count)
@@ -907,7 +917,13 @@ function looseSection(h, picture, title, ctx) {
     box.appendChild(why);
     for (const pair of row.pairs || []) box.appendChild(pairCard(h, pair, ctx));
     for (const bundle of row.bundles || []) box.appendChild(bundleCard(h, bundle, ctx));
-    if (row.singles?.length) box.appendChild(nameList(h, row.singles, 'fj-loose-files', ctx));
+    if (row.singles?.length)
+      box.appendChild(
+        nameList(h, row.singles, 'fj-loose-files', ctx, {
+          location: row.group_id,
+          fallback: 'fileJanitorRowMenu-' + row.key
+        })
+      );
     if (row.more > 0)
       box.appendChild(moreButton(h, ctx, LOOSE, row.group_id, row.singles.length, row.loose_count));
     section.appendChild(box);
@@ -931,7 +947,12 @@ function looseSection(h, picture, title, ctx) {
   if (picture.left_out.count > 0) {
     const box = h('div', 'fj-loose-row');
     box.appendChild(h('h5', 'fj-loose-label', LEFT_OUT_LABEL + ' · ' + picture.left_out.count));
-    box.appendChild(nameList(h, picture.left_out.files, 'fj-loose-files', ctx));
+    box.appendChild(
+      nameList(h, picture.left_out.files, 'fj-loose-files', ctx, {
+        location: LEFT_OUT,
+        fallback: title.id
+      })
+    );
     if (picture.left_out.count > picture.left_out.files.length)
       box.appendChild(
         moreButton(h, ctx, LEFT_OUT, '', picture.left_out.files.length, picture.left_out.count)
@@ -944,7 +965,12 @@ function looseSection(h, picture, title, ctx) {
 function trashBox(h, picture, title, ctx) {
   const box = h('div', 'fj-box fj-trash');
   box.appendChild(title);
-  box.appendChild(nameList(h, picture.trash.files, 'fj-loose-files', ctx));
+  box.appendChild(
+    nameList(h, picture.trash.files, 'fj-loose-files', ctx, {
+      location: TRASH,
+      fallback: title.id
+    })
+  );
   if (picture.trash.count > picture.trash.files.length)
     box.appendChild(moreButton(h, ctx, TRASH, '', picture.trash.files.length, picture.trash.count));
   return box;
@@ -1006,9 +1032,24 @@ function morePanel(h, picture, ctx) {
         'Showing ' + first + '–' + (more.offset + more.files.length) + ' of ' + more.total + '.'
       )
     );
-    panel.appendChild(
-      nameList(h, more.files, 'fj-loose-files', ctx, { planned: more.section === FILED })
-    );
+    const location = 'page-' + more.section + '-' + more.key;
+    const fallback = panel.id;
+    if (more.section === FAMILY) {
+      const list = h('ul', 'fj-pair-files');
+      const complete = more.files.length === more.total ? more.files : [];
+      for (const file of more.files)
+        list.appendChild(pairLine(h, file, complete, ctx, location, fallback));
+      panel.appendChild(list);
+    } else {
+      const choices = more.section === COULD_NOT_FILE ? undefined : ctx;
+      panel.appendChild(
+        nameList(h, more.files, 'fj-loose-files', choices, {
+          location,
+          fallback,
+          planned: more.section === FILED
+        })
+      );
+    }
     const nav = h('nav', 'fj-actions');
     nav.setAttribute('aria-label', 'File list pages');
     for (const [label, offset, disabled] of [
@@ -1049,7 +1090,6 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     folderLabel,
     folderCounts,
     changeAnnouncement,
-    renderFileBar,
     rowMenuValue,
     rowMenuOptions,
     rowNote,

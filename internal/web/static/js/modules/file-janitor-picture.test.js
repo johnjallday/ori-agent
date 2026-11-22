@@ -24,7 +24,6 @@ import {
   trashCopyAllowed,
   fileButtonModel,
   fileMenuOptions,
-  renderFileBar,
   folderAriaLabel,
   folderLabel,
   frameTitle,
@@ -872,72 +871,45 @@ test('row notes say where the files went, in plain words', () => {
   );
 });
 
-test('any listed file is a button that selects it, and the selected one says so', () => {
+test('the selected filename expands one inline editor, with its existing per-file choices', () => {
   const picked = [];
+  const choices = [];
+  const selectedFile = 'fileJanitorFileRow-filed-documents--id-doc-1';
   const picture = pictureFixture();
+  picture.folders[0].files[1].category = 'documents';
   const root = renderPicture(
     doc,
     picture,
     answerCtx({
-      onSelectFile: item => picked.push(item?.name ?? null),
-      selectedFile: picture.folders[0].files[1]
+      selectedFile,
+      onSelectFile: (...args) => picked.push(args),
+      onFileChoice: (item, choice) => choices.push([item.name, choice])
     })
   );
   const buttons = find(root, node => node.className === 'fj-file-name');
   assert.ok(buttons.length >= 20, 'folder cards and loose rows alike');
   assert.equal(
-    buttons.find(node => node.id === 'fileJanitorFile-id-doc-1').getAttribute('aria-pressed'),
+    buttons.find(node => node.id === selectedFile + '-name').getAttribute('aria-expanded'),
     'true'
   );
   assert.equal(
-    buttons.find(node => node.id === 'fileJanitorFile-id-doc-0').getAttribute('aria-pressed'),
+    buttons.find(node => node.id.endsWith('--id-doc-0-name')).getAttribute('aria-expanded'),
     'false'
   );
-  buttons.find(node => node.id === 'fileJanitorFile-id-passport-0').fire('click');
-  assert.deepEqual(picked, ['passport-0']);
-});
-
-test('the one-file bar: a hint when nothing is selected, then the name and one menu (R23)', () => {
-  // The bar is drawn beside the File button, not inside the picture, so it stays in
-  // view; it is only drawn when the picture has a file to select.
-  const idle = renderPicture(doc, pictureFixture(), answerCtx());
-  assert.equal(find(idle, node => node.id === 'fileJanitorFileBar').length, 0);
-  assert.equal(
-    renderFileBar(doc, pictureFixture({ folders: [], loose: [] }), answerCtx()),
-    null,
-    'nothing to select, no bar'
-  );
-  const bar = renderFileBar(doc, pictureFixture(), answerCtx());
-  assert.equal(bar.id, 'fileJanitorFileBar');
-  assert.equal(textOf(bar), 'Select a filename to choose what happens to it.');
-  assert.equal(find(bar, node => node.tagName === 'SELECT').length, 0);
-
-  const choices = [];
-  const unselect = [];
-  const chosen = file('doc-1', { placement: 'filed', category: 'documents' });
-  const open = renderFileBar(
-    doc,
-    pictureFixture(),
-    answerCtx({
-      selectedFile: chosen,
-      onFileChoice: (item, choice) => choices.push([item.name, choice]),
-      onSelectFile: item => unselect.push(item)
-    })
-  );
-  assert.equal(textOf(find(open, node => node.id === 'fileJanitorFileBarName')[0]), 'doc-1');
-  const menu = find(open, node => node.id === 'fileJanitorFileMenu')[0];
-  // Already filed in Documents: no "Move to Documents"; leaving, stopping and Trash are offered.
+  const [menu] = find(root, node => node.id?.endsWith('-choice'));
+  assert.equal(menu.id, selectedFile + '-choice');
+  assert.equal(menu.getAttribute('aria-label'), 'Filing choice for doc-1');
   assert.deepEqual(options(menu), ['', 'move:images', 'move:archives', 'leave', 'stop', 'trash']);
   menu.value = 'trash';
   menu.fire('change');
-  menu.value = 'move:images';
-  menu.fire('change');
-  assert.deepEqual(choices, [
-    ['doc-1', { kind: 'trash' }],
-    ['doc-1', { kind: 'move', category: 'images' }]
+  assert.deepEqual(choices, [['doc-1', { kind: 'trash' }]]);
+  find(root, node => node.id === selectedFile + '-cancel')[0].fire('click');
+  const other = buttons.find(node => node.id.endsWith('--id-passport-0-name'));
+  other.fire('click');
+  assert.deepEqual(picked, [
+    [selectedFile, false],
+    [other.id.slice(0, -5), true]
   ]);
-  find(open, node => node.id === 'fileJanitorFileBarCancel')[0].fire('click');
-  assert.deepEqual(unselect, [null]);
 });
 
 test('what the one-file menu offers follows where the file is now', () => {
@@ -1144,7 +1116,7 @@ test('a pair card lists the original first with name, size and date, and one hin
   assert.equal(card.getAttribute('aria-label'), 'Possible copies of Budget.pdf');
   const lines = find(card, node => node.className === 'fj-pair-line');
   assert.deepEqual(
-    lines.map(line => textOf(find(line, node => node.className === 'fj-file-name')[0])),
+    lines.map(line => textOf(find(line, node => node.className === 'fj-pair-name')[0])),
     ['Budget.pdf', 'Budget (2).pdf', 'Budget-v2.pdf']
   );
   assert.equal(
@@ -1211,8 +1183,14 @@ test('there is no Trash action on a row, a pair or a bundle as a whole (R30)', (
     more: 0
   });
   const root = renderPicture(doc, picture, answerCtx());
-  for (const select of find(root, node => node.tagName === 'SELECT'))
-    assert.ok(!select.children.some(option => /trash/i.test(textOf(option))), select.id);
+  for (const select of find(root, node => node.tagName === 'SELECT')) {
+    const individual = select.id.startsWith('fileJanitorFileRow-');
+    assert.equal(
+      select.children.some(option => /trash/i.test(textOf(option))),
+      individual,
+      select.id
+    );
+  }
   const trashLabels = find(
     root,
     node => /trash/i.test(textOf(node)) && node.tagName === 'BUTTON'

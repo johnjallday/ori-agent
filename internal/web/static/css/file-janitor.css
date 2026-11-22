@@ -423,7 +423,7 @@
   border: 0;
 }
 
-/* The menu on a loose row and the menu in the one-file bar. */
+/* Group, bundle, and individual menus share the same native control. */
 .fj-row-menu {
   min-height: 44px;
   max-width: 100%;
@@ -479,7 +479,17 @@
   font-size: 0.85rem;
 }
 
-.fj-pair-line .fj-file-name {
+.fj-pair-line + .fj-pair-line {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--fj-line);
+}
+
+.fj-pair-name {
+  flex-basis: 100%;
+  min-width: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
   color: var(--text-primary, #e8e8e8);
 }
 
@@ -505,40 +515,34 @@
   overflow-wrap: anywhere;
 }
 
-/* The one-file bar sits above the File button: a hint until a file is selected,
-   then the file's name and its one menu. */
-.fj-file-bar {
+.fj-inline-choice {
   display: flex;
   flex-wrap: wrap;
-  /* A flex item will not shrink below its content, and a shortened name's content
-     is the whole name on one line: let the bar, and the name in it, shrink. */
-  min-width: 0;
   align-items: center;
-  gap: 0.5rem 0.75rem;
-  margin-top: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--fj-line);
-  border-radius: 10px;
-}
-
-.fj-file-bar .fj-sub {
-  margin: 0;
-}
-
-/* In the footer the bar takes a line of its own above the note and the button. */
-.fj-footer .fj-file-bar {
-  flex: 1 1 100%;
-  margin-top: 0;
-}
-
-.fj-file-bar-name {
-  margin: 0;
+  gap: 0.35rem;
+  margin-block: 0.3rem;
   min-width: 0;
-  max-width: 100%;
-  color: var(--text-primary, #e8e8e8);
-  font-size: 0.9rem;
-  font-weight: 600;
-  overflow-wrap: anywhere;
+}
+
+.fj-inline-choice .fj-btn {
+  min-height: 44px;
+}
+
+.fj-file-choice {
+  min-width: 0;
+}
+
+.fj-footer-note {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.85rem;
+}
+
+@media (pointer: coarse) {
+  .fj-pair-line .fj-link {
+    min-height: 44px;
+  }
 }
 
 .fj-more-panel {

@@ -69,6 +69,13 @@ class FakeElement {
     }
     return false;
   }
+  get parentElement() {
+    return this.parent;
+  }
+  closest(selector) {
+    if (selector === '[data-fj-file-row]' && 'data-fj-file-row' in this._attrs) return this;
+    return this.parent?.closest(selector) || null;
+  }
   addEventListener(ev, fn) {
     (this._listeners[ev] ||= []).push(fn);
   }
@@ -5155,7 +5162,7 @@ for (const count of [1, 5, 6, 50, 51, 200, 206, 1000]) {
     assert.ok(card, 'the folder card is drawn and ticked');
     assert.equal(card.checked, true);
     const named = surface(doc).all(
-      node => node.className === 'fj-file-name' && node.id?.startsWith('fileJanitorFile-')
+      node => node.className === 'fj-file-name' && node.id?.startsWith('fileJanitorFileRow-')
     );
     assert.equal(named.length, Math.min(count, 5), 'five names at most');
     if (count > 5) {
@@ -6611,53 +6618,54 @@ test('stopping to ask leaves a file drawn elsewhere (a Trash mark) out of "Revie
   assert.deepEqual(again.candidate_ids.sort(), ['group-member-0', 'group-member-2']);
 });
 
-test('focus stays on a row menu, a file button and the bar when the plan check redraws', async () => {
+function fileControl(doc, index, kind = 'name', location = '') {
+  return (
+    surface(doc).all(
+      node =>
+        node.id?.startsWith('fileJanitorFileRow-' + location) &&
+        node.id.endsWith(`--group-member-${index}-${kind}`)
+    )[0] || null
+  );
+}
+
+function openFileChoice(doc, index, location) {
+  const name = fileControl(doc, index, 'name', location);
+  name.focus();
+  name.click();
+  return fileControl(doc, index, 'choice', location);
+}
+
+test('focus stays on a row menu or an inline editor when the plan check redraws', async () => {
   const { doc } = await questionRowFixture(3);
-  for (const id of ['fileJanitorRowMenu-sensitive', 'fileJanitorFile-group-member-0']) {
-    const before = doc.getElementById(id);
-    before.focus();
+  for (const before of [rowMenu(doc), fileControl(doc, 0)]) {
+    doc.getElementById(before.id).focus();
     await panel._planNow();
-    assert.notEqual(doc.getElementById(id), before, 'the redraw made new elements');
-    assert.equal(doc.activeElement, doc.getElementById(id), id);
+    assert.equal(doc.activeElement, doc.getElementById(before.id));
   }
-  doc.getElementById('fileJanitorFile-group-member-1').click();
-  const menu = doc.getElementById('fileJanitorFileMenu');
+  const menu = openFileChoice(doc, 1);
   assert.equal(doc.activeElement, menu);
   await panel._planNow();
-  assert.equal(doc.activeElement, doc.getElementById('fileJanitorFileMenu'));
+  assert.equal(doc.activeElement, fileControl(doc, 1, 'choice'));
 });
 
-test('after a one-file choice the bar closes and focus lands where the file now is', async () => {
+test('when an inline choice removes a row, focus goes to the next file in that list', async () => {
   const { doc } = await groupedReviewFixture(3);
-  doc.getElementById('fileJanitorFile-group-member-1').click();
-  assert.equal(doc.activeElement, doc.getElementById('fileJanitorFileMenu'));
-  choose(doc.getElementById('fileJanitorFileMenu'), 'trash');
+  choose(openFileChoice(doc, 1), 'trash');
   await planSettled();
-  assert.equal(doc.getElementById('fileJanitorFileMenu'), null, 'the bar closed');
-  // The file is in the Trash box now: focus is on it, not on the page.
-  assert.equal(doc.activeElement, doc.getElementById('fileJanitorFile-group-member-1'));
-  // A file that is not drawn anywhere (more than the list shows) falls back to File.
-  doc.getElementById('fileJanitorFile-group-member-0').click();
-  choose(doc.getElementById('fileJanitorFileMenu'), 'stop');
-  await planSettled();
-  assert.ok(doc.activeElement && doc.activeElement !== doc.body, 'focus is not dropped');
+  assert.equal(fileControl(doc, 1, 'choice'), null);
+  assert.equal(doc.activeElement, fileControl(doc, 2, 'name', 'filed-images'));
 });
 
-test('the bar lives beside the File button, and Cancel returns focus to the file it was about', async () => {
-  const { doc } = await groupedReviewFixture(3);
+test('cancel closes the inline editor without a write and returns focus to its filename', async () => {
+  const { doc, calls } = await groupedReviewFixture(3);
+  const menu = openFileChoice(doc, 2);
+  assert.equal(menu.getAttribute('aria-label'), 'Filing choice for image-2.png');
   const footer = pictureHost(doc).children.find(node => node.className === 'fj-footer');
-  assert.ok(
-    footer.all(node => node.id === 'fileJanitorFileBar').length,
-    'the bar is in the footer'
-  );
-  assert.equal(
-    surface(doc).all(node => node.id === 'fileJanitorFileBar').length,
-    1,
-    'and only there'
-  );
-  doc.getElementById('fileJanitorFile-group-member-2').click();
-  doc.getElementById('fileJanitorFileBarCancel').click();
-  assert.equal(doc.activeElement, doc.getElementById('fileJanitorFile-group-member-2'));
+  assert.equal(footer.all(node => node.tagName === 'SELECT').length, 0);
+  fileControl(doc, 2, 'cancel').click();
+  assert.equal(doc.activeElement, fileControl(doc, 2));
+  assert.equal(fileControl(doc, 2, 'choice'), null);
+  assert.deepEqual(draftEdits(calls), []);
 });
 
 test('after "stop asking" focus is on the note that replaced the menu, and Review again says so beside the button', async () => {
@@ -6770,8 +6778,14 @@ test('Mark for Trash marks one file; Undo mark clears the choice without filing'
     'Same size, same day'
   );
   // The original has no button; the bracketed copy of the same size has one.
-  assert.equal(doc.getElementById('fileJanitorTrashCopy-group-member-0'), null);
-  doc.getElementById('fileJanitorTrashCopy-group-member-1').click();
+  assert.equal(fileControl(doc, 0, 'mark'), null);
+  assert.equal(
+    fileControl(doc, 0, 'choice').getAttribute('aria-label'),
+    'Filing choice for image-0.png'
+  );
+  const markControl = fileControl(doc, 1, 'mark');
+  markControl.focus();
+  markControl.click();
   await planSettled();
   const [mark] = draftEdits(calls);
   assert.deepEqual([mark.action, mark.candidate_ids], ['mark_trash', ['group-member-1']]);
@@ -6784,11 +6798,17 @@ test('Mark for Trash marks one file; Undo mark clears the choice without filing'
     !calls.some(call => /\/file$/.test(call.target)),
     'nothing goes to the Trash until File'
   );
-  doc.getElementById('fileJanitorPutBack-group-member-1').click();
+  const undo = fileControl(doc, 1, 'undo');
+  undo.focus();
+  undo.click();
   await planSettled();
   assert.equal(draftEdits(calls)[1].action, 'unmark_trash');
   assert.doesNotMatch(surface(doc).textContent, /Trash · 1/);
-  assert.ok(doc.getElementById('fileJanitorTrashCopy-group-member-1'), 'the button is back');
+  assert.ok(fileControl(doc, 1, 'mark'), 'the button is back');
+  assert.equal(
+    doc.activeElement.closest('[data-fj-file-row]').id,
+    fileControl(doc, 1, 'choice').parentElement.id
+  );
   assert.equal(pressButton(doc).textContent, 'No changes selected');
 });
 
@@ -6811,7 +6831,7 @@ test('a copy of a different size gets no Trash button', async () => {
     ]
   });
   await panel._reloadBatch();
-  assert.equal(doc.getElementById('fileJanitorTrashCopy-group-member-1'), null);
+  assert.equal(fileControl(doc, 1, 'mark'), null);
   assert.match(surface(doc).textContent, /Different size/);
 });
 
@@ -6894,8 +6914,7 @@ test('a bundle with more files than the card shows still moves all of them', asy
 test('a bundle split by single-file choices says how it is split (R33), and Leave here takes it all back', async () => {
   const { doc, calls, bundleId } = await bundleFixtureOnPage();
   // One of the three goes to Documents by itself, from the one-file bar.
-  doc.getElementById('fileJanitorFile-group-member-0').click();
-  choose(doc.getElementById('fileJanitorFileMenu'), 'move:documents');
+  choose(openFileChoice(doc, 0, 'bun-'), 'move:documents');
   await planSettled();
   const note = surface(doc).all(node => node.className === 'fj-row-note fj-bundle-note')[0];
   assert.equal(note.textContent, 'Split: 2 stay here, 1 in Filed/Documents');
@@ -6938,20 +6957,10 @@ test('a row menu is off while a save is in flight', async () => {
   assert.equal(rowMenu(doc).disabled, true);
 });
 
-test('clicking any file selects it, the bar names it, and its menu is one edit for that file only', async () => {
+test('choosing a new destination beside a filename edits that file only', async () => {
   const { doc, calls } = await groupedReviewFixture(3);
-  assert.equal(
-    doc.getElementById('fileJanitorFileBar').textContent,
-    'Select a filename to choose what happens to it.'
-  );
-  doc.getElementById('fileJanitorFile-group-member-1').click();
-  const bar = doc.getElementById('fileJanitorFileBar');
-  assert.equal(doc.getElementById('fileJanitorFileBarName').textContent, 'image-1.png');
-  assert.equal(
-    doc.getElementById('fileJanitorFile-group-member-1').getAttribute('aria-pressed'),
-    'true'
-  );
-  const menu = doc.getElementById('fileJanitorFileMenu');
+  const menu = openFileChoice(doc, 1);
+  assert.equal(fileControl(doc, 1).getAttribute('aria-expanded'), 'true');
   assert.deepEqual(
     menu.children.map(option => option.value),
     ['', 'move:documents', 'move:archives', 'move:other', 'leave', 'stop', 'trash']
@@ -6964,12 +6973,7 @@ test('clicking any file selects it, the bar names it, and its menu is one edit f
     [edit.action, edit.candidate_ids, edit.category],
     ['select_files', ['group-member-1'], 'documents']
   );
-  assert.equal(bar.textContent.length > 0, true);
-  assert.equal(
-    doc.getElementById('fileJanitorFileBar').textContent,
-    'Select a filename to choose what happens to it.',
-    'the bar closes once the file is decided'
-  );
+  assert.equal(fileControl(doc, 1, 'choice'), null, 'the inline editor closes');
   // The file shows in its new folder, tagged as the person's choice.
   const documents = surface(doc).all(
     node => node.getAttribute('data-fj-folder') === 'documents'
@@ -6978,23 +6982,20 @@ test('clicking any file selects it, the bar names it, and its menu is one edit f
   assert.equal(pressButton(doc).textContent, 'File 3 files');
 });
 
-test('one file can be sent to Trash, put back, or left out of its ticked folder from the bar', async () => {
+test('one file can be marked, unmarked, or left out from its inline choice', async () => {
   const { doc, calls } = await groupedReviewFixture(3);
-  doc.getElementById('fileJanitorFile-group-member-0').click();
-  choose(doc.getElementById('fileJanitorFileMenu'), 'trash');
+  choose(openFileChoice(doc, 0), 'trash');
   await planSettled();
   assert.match(surface(doc).textContent, /Trash · 1/);
   assert.equal(pressButton(doc).textContent, 'File 2 files · 1 to Trash');
   // Putting it back is "Leave here" on a trashed file.
-  doc.getElementById('fileJanitorFile-group-member-0').click();
-  const trashMenu = doc.getElementById('fileJanitorFileMenu');
+  const trashMenu = openFileChoice(doc, 0, 'trash');
   assert.ok(!trashMenu.children.some(option => option.value === 'trash'), 'already in Trash');
   choose(trashMenu, 'leave');
   await planSettled();
   assert.doesNotMatch(surface(doc).textContent, /Trash · /);
   // A file taken out of a ticked folder is listed as left out by the person.
-  doc.getElementById('fileJanitorFile-group-member-2').click();
-  choose(doc.getElementById('fileJanitorFileMenu'), 'leave');
+  choose(openFileChoice(doc, 2), 'leave');
   await planSettled();
   assert.match(surface(doc).textContent, /Left out by you · 2/);
   assert.deepEqual(
@@ -7005,30 +7006,50 @@ test('one file can be sent to Trash, put back, or left out of its ticked folder 
 
 test('"Leave here, stop asking" on one file keeps that file only', async () => {
   const { doc, calls } = await groupedReviewFixture(3);
-  doc.getElementById('fileJanitorFile-group-member-1').click();
-  choose(doc.getElementById('fileJanitorFileMenu'), 'stop');
+  choose(openFileChoice(doc, 1), 'stop');
   await planSettled();
   const [edit] = draftEdits(calls);
   assert.deepEqual([edit.action, edit.candidate_ids], ['keep_files', ['group-member-1']]);
   assert.equal(pressButton(doc).textContent, 'File 2 files');
 });
 
-test('Cancel closes the bar without changing anything, and any other edit closes it too', async () => {
-  const { doc, calls } = await groupedReviewFixture(3);
-  doc.getElementById('fileJanitorFile-group-member-0').click();
-  doc.getElementById('fileJanitorFileBarCancel').click();
-  assert.equal(
-    doc.getElementById('fileJanitorFileBar').textContent,
-    'Select a filename to choose what happens to it.'
-  );
+test('a second-page filename keeps its own editor and stale choices cannot edit a newer revision', async () => {
+  const { doc, calls, state } = await groupedReviewFixture(53);
+  doc.getElementById('fileJanitorMore-filed-images').click();
+  await settle();
+  const page = () => doc.getElementById('fileJanitorMorePanel');
+  const first = openFileChoice(doc, 0, 'page-');
+  assert.notEqual(fileControl(doc, 0, 'name', 'filed').id, fileControl(doc, 0, 'name', 'page-').id);
+  assert.equal(first.parentElement.parentElement.id.endsWith('--group-member-0'), true);
+  assert.equal(fileControl(doc, 0, 'choice', 'filed'), null);
+  buttonNamed(page(), 'Next files').click();
+  await settle();
+  const oldMenu = openFileChoice(doc, 51, 'page-');
+  await panel._planNow();
+  assert.equal(doc.activeElement, fileControl(doc, 51, 'choice', 'page-'));
+  state.generation++;
+  await panel._reloadBatch();
+  choose(oldMenu, 'trash');
+  await settle();
   assert.deepEqual(draftEdits(calls), []);
-  doc.getElementById('fileJanitorFile-group-member-0').click();
-  changeCheckbox(folderCheckbox(doc), false);
+  const currentMenu = fileControl(doc, 51, 'choice', 'page-');
+  currentMenu.focus();
+  choose(currentMenu, 'stop');
   await planSettled();
-  assert.equal(
-    doc.getElementById('fileJanitorFileBar').textContent,
-    'Select a filename to choose what happens to it.'
-  );
+  assert.deepEqual(draftEdits(calls)[0].candidate_ids, ['group-member-51']);
+  assert.equal(doc.activeElement, fileControl(doc, 52, 'name', 'page-'));
+});
+
+test('a failed single-file save leaves its editor and the canonical plan unapplied', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  state.failNextEdit = true;
+  const menu = openFileChoice(doc, 0);
+  choose(menu, 'trash');
+  await settle();
+  assert.equal(fileControl(doc, 0, 'choice').disabled, true);
+  assert.equal(pressButton(doc).disabled, true);
+  assert.equal(state.fileRequests.length, 0);
+  assert.equal(state.choices[0].operation, 'move');
 });
 
 test('a file an earlier attempt could not move offers Try again, and it comes back unticked', async () => {

@@ -1814,13 +1814,13 @@
     };
     const sequence = ++draftRequest;
     const focusID = String(document.activeElement?.id || '');
+    const fileFocus = captureFileFocus();
+    const openChoice = selectedFile;
     discardProtectionApproval();
     // The person is changing the plan: what a refused press said no longer applies.
     changedMarks = new Set();
     pressNotice = '';
     markRemovedSeen();
-    // Whatever one file was being decided is decided now (or refused): close the bar.
-    selectedFile = null;
     draftLoadState = 'saving';
     failedDraftEdit = null;
     // What the picture showed before this change, to say what it did afterwards (R66).
@@ -1853,6 +1853,7 @@
           throw error;
         }
         applyReviewDraft(body.draft);
+        if (selectedFile === openChoice) selectedFile = null;
         // In the picture the answer is said beside the File button, in view and
         // announced, not at the top of the page; the row itself already says "Ori
         // will not ask about these again".
@@ -1912,16 +1913,25 @@
     const finished = () => {
       pendingDecisionWrites.delete(write);
       if (scopeCurrent(scope)) {
+        const active = document.activeElement;
+        const activeFile = captureFileFocus();
         renderBatch();
-        // Back to what the person was on. When that control is gone (the one-file
-        // bar closes once its file is decided), to the file where it now sits, so
-        // they land where the result is; failing that, a control that always exists.
+        if (fileFocus) {
+          if (
+            reviewView === 'groups' &&
+            lastBatch?.id === batchID &&
+            (active === document.body ||
+              activeFile?.row === fileFocus.row ||
+              [fileFocus.section, 'fileJanitorPicture'].includes(active?.id) ||
+              fileFocus.neighbors.includes(activeFile?.row))
+          )
+            restoreFileFocus(fileFocus);
+          return;
+        }
         const target =
           document.getElementById(focusID) ||
           (request.group_id &&
-            document.getElementById('fileJanitorGroup-select-' + request.group_id)) ||
-          (request.candidate_ids?.length &&
-            document.getElementById('fileJanitorFile-' + request.candidate_ids[0]));
+            document.getElementById('fileJanitorGroup-select-' + request.group_id));
         if (target && !target.disabled) target.focus?.();
         else {
           const fallback =
@@ -2327,7 +2337,7 @@
 
   // ------------------------------------------------ answers on the loose rows
   //
-  // A row menu and the one-file bar are the person's answers to what Ori could not
+  // Row menus and per-file choices are the person's answers to what Ori could not
   // decide. Each is one of the existing saved-choice edits, quoting the revisions
   // the picture was drawn from, so a stale control changes nothing. They only record
   // what the person chose: files move when File is pressed.
@@ -2390,17 +2400,54 @@
     };
   }
 
-  function selectFile(file) {
-    const previous = selectedFile;
-    selectedFile = file ? { ...file } : null;
+  function selectFile(rowID, expand) {
+    if (reviewView !== 'groups' || !document.getElementById(rowID)) return;
+    selectedFile = expand ? rowID : null;
     renderBatch();
-    if (selectedFile) document.getElementById('fileJanitorFileMenu')?.focus?.();
-    // Closing the bar returns to the file it was about, not to the page top.
-    else if (previous) {
-      const back = document.getElementById('fileJanitorFile-' + previous.id);
-      if (back) back.focus?.();
-      else focusInPicture();
-    }
+    const target = document.getElementById(rowID + (expand ? '-choice' : '-name'));
+    if (target?.disabled) document.getElementById(rowID)?.focus?.({ preventScroll: true });
+    else target?.focus?.();
+  }
+
+  function captureFileFocus() {
+    const active = document.activeElement;
+    const row = active?.closest?.('[data-fj-file-row]');
+    if (!row) return null;
+    const siblings = Array.from(row.parentElement.children);
+    const index = siblings.indexOf(row);
+    return {
+      id: active.id,
+      row: row.id,
+      neighbors: [...siblings.slice(index + 1), ...siblings.slice(0, index).reverse()].map(
+        item => item.id
+      ),
+      section: row.getAttribute('data-fj-file-row')
+    };
+  }
+
+  function restoreFileFocus(context) {
+    const lookup = id => document.getElementById(id);
+    const control = row =>
+      [lookup(row + '-name'), lookup(row + '-choice')].find(node => node && !node.disabled);
+    const previous = lookup(context.id);
+    const sameRow = lookup(context.row);
+    const target =
+      (previous && !previous.disabled && previous) ||
+      (sameRow && (control(context.row) || sameRow)) ||
+      context.neighbors.map(control).find(Boolean) ||
+      lookup(context.section) ||
+      lookup('fileJanitorPicture');
+    if (!target) return;
+    target.focus({ preventScroll: true });
+    const rect = target.getBoundingClientRect?.();
+    const scroller = lookup('fileJanitorConsoleBody')?.getBoundingClientRect?.();
+    const footer = lookup('fileJanitorApprove')?.closest?.('.fj-footer')?.getBoundingClientRect();
+    if (
+      rect &&
+      scroller &&
+      (rect.top < scroller.top || rect.bottom > Math.min(scroller.bottom, footer?.top ?? Infinity))
+    )
+      target.scrollIntoView?.({ block: 'center' });
   }
 
   // R19, R20, R21, R22: the one menu on a question row.
@@ -2573,7 +2620,6 @@
 
   // R23: what the person chose for the one selected file.
   async function answerFile(file, choice, binding) {
-    selectedFile = null;
     const ids = { candidate_ids: [file.id] };
     if (choice.kind === 'move')
       await submitReviewEdit('select_files', { ...ids, category: choice.category }, null, binding);
@@ -2775,7 +2821,7 @@
         selectedFile,
         keptRows: keptRows.get(lastBatch.id) || [],
         onInspect: inspectionAction(picture),
-        onSelectFile: file => selectFile(file),
+        onSelectFile: selectFile,
         onRowChoice: (row, choice) => void answerRow(row, choice, binding),
         onFileChoice: (file, choice) => void answerFile(file, choice, binding),
         onReviewAgain: kept => void reviewKeptAgain(kept, binding),
@@ -2957,6 +3003,9 @@
     const container = document.getElementById('fileJanitorBatch');
     if (!container) return;
     const focusedReviewControlID = String(document.activeElement?.id || '');
+    const fileFocus = captureFileFocus();
+    const scroller = document.getElementById('fileJanitorConsoleBody');
+    const scrollTop = scroller?.scrollTop;
     clear(container);
     // In the picture, #fileJanitorView-all is the header's button; in All files it
     // is the view switch (the two are never on screen together).
@@ -3044,6 +3093,10 @@
       container.appendChild(renderPictureView());
       if (protection) container.appendChild(protection);
       appendReviewFooter(container, focusedReviewControlID);
+      if (fileFocus) {
+        if (Number.isFinite(scrollTop)) scroller.scrollTop = scrollTop;
+        restoreFileFocus(fileFocus);
+      }
       // The plan names the files this picture draws. Coming back from All files, or
       // a different list opening, means it was asked about other files: ask again.
       if (planLoadState === 'loaded' && planAskedKey !== planFileIDs().join(',')) schedulePlan();
@@ -3095,18 +3148,10 @@
 
   function appendReviewFooter(container, focusedReviewControlID) {
     const footer = el('div', 'fj-footer');
-    // R23: the one-file bar sits right above the File button, so it stays in view
-    // however far down the picture the selected file is.
-    if (reviewView === 'groups' && picture?.batch_id === lastBatch?.id) {
-      const bar = window.FileJanitorPicture?.renderFileBar?.(document, picture, {
-        editsAvailable: reviewEditsAvailable(),
-        destinations: categories,
-        selectedFile,
-        onSelectFile: file => selectFile(file),
-        onFileChoice: (file, choice) => void answerFile(file, choice, reviewEditBinding())
-      });
-      if (bar) footer.appendChild(bar);
-    }
+    if (reviewView === 'groups' && picture?.loose.some(row => row.loose_count > 0))
+      footer.appendChild(
+        el('p', 'fj-footer-note', 'Files without a decision stay where they are.')
+      );
     const selection = el('p', 'fj-selection');
     selection.id = 'fileJanitorSelection';
     selection.setAttribute('role', 'status');
@@ -3160,7 +3205,7 @@
     // whatever they were on: a folder tick, an "and N more" control, the Trash tick
     // or the main button as much as a table control.
     if (
-      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|TrashCopy|PutBack|File|ReviewAgain|Retry)-|Approve$|TrashAck$|ShowEarlier$|FileMenu$|FileBarCancel$|Picture$|Jump(?:Filed|Loose|Trash)$|(?:Filed|Loose|Trash)Title$)/.test(
+      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|ReviewAgain|Retry)-|Approve$|TrashAck$|ShowEarlier$|Picture$|Jump(?:Filed|Loose|Trash)$|(?:Filed|Loose|Trash)Title$)/.test(
         focusedReviewControlID
       )
     ) {
