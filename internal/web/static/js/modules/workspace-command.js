@@ -2019,7 +2019,7 @@ export class WorkspaceCommandView {
         : '') +
       (tags.length ? '<div class="ws-cmd-tags">' + this.commandTagsHTML(tags) + '</div>' : '') +
       '</div><div class="ws-cmd-header-actions">' +
-      (hqDetails ? this.firstVisit?.headerHTML?.() || '' : '') +
+      (hqDetails || (mapTab && this.isPersonalHQ()) ? this.firstVisit?.headerHTML?.() || '' : '') +
       workspaceSettingsHTML({
         diagnostics: this.workspaceRoute('/diagnostics'),
         workflow: this.workflowHref()
@@ -3153,6 +3153,7 @@ export class WorkspaceCommandView {
     this.bindReadout();
     this.bindMissionPanel();
     if (hqDetails) this.bindHQDetails();
+    if (hqDetails || (this.viewMode === 'map' && this.isPersonalHQ())) this.firstVisit?.bind();
     if (this.viewMode === 'map') {
       this.bindOperationsMap();
       this.paintMapActivity();
@@ -16255,7 +16256,6 @@ export class WorkspaceCommandView {
 
   bindHQDetails() {
     this.watchHQSources();
-    this.firstVisit?.bind();
     const root = this.container;
     if (!root || typeof root.querySelector !== 'function') return;
     const header = root.querySelector('.ws-hq-header');

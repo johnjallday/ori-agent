@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { WorkspaceCommandView } from './workspace-command.js';
 import { FIRST_VISIT_MISSIONS } from './hq-first-visit.js';
 import { readNoteDraft, writeNoteDraft } from './hq-first-note.js';
+import { offerOnEntry } from './hq-first-visit-card.js';
 import { HQQuickCapture } from './hq-quick-capture.js';
 
 const missionRows = (note = 'open') =>
@@ -40,6 +41,8 @@ test('the header offers one closed door; no suggestions occupy the main column',
   assert.doesNotMatch(owner.renderHQDetails(), /Things to try|data-hq-firstvisit/);
   assert.match(owner.renderHQDetails(), /data-cmd-hq-host="notes"/);
   card.state = 'done';
+  assert.match(card.headerHTML(), /Things to try/);
+  owner.isPersonalHQ = () => false;
   assert.equal(card.headerHTML(), '');
 });
 
@@ -49,39 +52,40 @@ test('compact choices use real handoffs, with no duplicate editor, quota, avatar
     assert.equal(path, '/api/progression');
     return { missions: missionRows() };
   };
-  assert.match(card.html(), /disabled/);
+  assert.doesNotMatch(card.html(), /disabled/);
   await card.load();
   writeNoteDraft({ text: 'Home draft survives', requestId: 'existing', sourceId: 'notes' });
   const before = readNoteDraft();
   const html = card.html();
   assert.match(html, /role="dialog"/);
-  assert.match(html, /href="\/\?panel=today&folder=show&suggest=documents"/);
-  assert.match(html, /href="\/\?panel=today&folder=show"/);
+  assert.match(html, /Explore Documents/);
+  assert.match(html, /Connect email/);
+  assert.match(html, /Scan recent apps/);
+  assert.doesNotMatch(html, /href=/);
+  await card.act('folder');
+  assert.match(card.html(), /suggest=documents/);
   assert.doesNotMatch(html, /textarea|<input|avatar|Tickets|of 3|aria-modal/);
-  assert.equal((html.match(/role="status"/g) || []).length, 1);
+  assert.match(html, /aria-describedby="hq-suggestions-hint"/);
   card.sheet = true;
   assert.match(card.html(), /aria-modal="true"/);
   assert.deepEqual(readNoteDraft(), before, 'presentation never consumes a Home draft');
 });
 
-test('handoffs close suggestions before opening their owner, using the current header trigger', async () => {
-  const { owner, card } = fixture();
-  const trigger = { id: 'current door' };
-  owner.container.querySelector = () => trigger;
-  const calls = [];
-  card.close = restore => calls.push(['close', restore]);
-  owner.openDailyBriefPanel = value => calls.push(['brief', value]);
-  owner.focusHQNoteCapture = value => calls.push(['note', value]);
-  owner.openNotesStation = value => calls.push(['notes', value]);
-  for (const action of ['brief', 'note', 'notes']) await card.act(action);
-  assert.deepEqual(calls, [
-    ['close', false],
-    ['brief', trigger],
-    ['close', false],
-    ['note', trigger],
-    ['close', false],
-    ['notes', trigger]
-  ]);
+test('an existing dialog retains focus; closing it later does not spring a delayed invitation', () => {
+  const { card } = fixture();
+  const oldWindow = globalThis.window;
+  globalThis.window = { location: { search: '', hash: '' } };
+  try {
+    card.door = () => ({});
+    card.open = () => assert.fail('stole the active surface');
+    document.querySelector = () => ({});
+    card.bind();
+    document.querySelector = () => null;
+    card.bind();
+    assert.equal(card.entryChecked, true);
+  } finally {
+    globalThis.window = oldWindow;
+  }
 });
 
 test('a brief returns focus to the current suggestion door after an HQ repaint', () => {
@@ -120,17 +124,17 @@ test('all resolved on arrival finishes silently; failure leaves a closed usable 
     await card.load();
     assert.equal(card.state, 'pending');
     assert.match(card.headerHTML(), /aria-expanded="false"/);
-    assert.match(card.html(), /could not be dismissed/);
+    assert.match(card.html(), /Maybe later/);
     ok = true;
     await card.finish();
     assert.equal(card.state, 'done');
-    assert.equal(card.headerHTML(), '');
+    assert.match(card.headerHTML(), /Things to try/);
   } finally {
     globalThis.fetch = previous;
   }
 });
 
-test('Hide suggestions persists only dismissal and leaves all missions unchanged', async () => {
+test('finishing the existing visit never writes mission progress', async () => {
   const { card } = fixture();
   card.missions = missionRows();
   const before = structuredClone(card.missions);
@@ -141,7 +145,7 @@ test('Hide suggestions persists only dismissal and leaves all missions unchanged
     return { ok: true };
   };
   try {
-    await card.act('hide');
+    await card.finish();
     assert.equal(card.state, 'done');
     assert.deepEqual(card.missions, before);
     assert.deepEqual(calls, [['/api/personal-hq/first-visit-state', { state: 'done' }]]);
@@ -150,7 +154,7 @@ test('Hide suggestions persists only dismissal and leaves all missions unchanged
   }
 });
 
-test('failed reads leave explicit retry, no invented progress and no auto-opening', async () => {
+test('failed progression reads do not invent progress or block voluntary choices', async () => {
   const { owner, card } = fixture();
   owner.stationJSON = async () => {
     throw Error('offline');
@@ -159,7 +163,7 @@ test('failed reads leave explicit retry, no invented progress and no auto-openin
   assert.equal(card.missions, null);
   assert.equal(card.node, null);
   assert.equal(card.view().count, 0);
-  assert.match(card.html(), /data-hq-firstvisit-action="retry"/);
+  assert.match(card.html(), /Explore Documents/);
 });
 
 test('page departure and BFCache return keep suggestions closed without losing canonical refresh', () => {
@@ -180,12 +184,17 @@ test('page departure and BFCache return keep suggestions closed without losing c
   }
 });
 
-test('switching away from HQ Overview closes any open suggestions without stealing focus', () => {
+test('ticket, station and fragment deep links never auto-offer', () => {
+  for (const suffix of ['?mode=tickets', '?mode=details&station=notes', '?setup=email', '#notes'])
+    assert.equal(offerOnEntry(new URL(suffix, 'https://ori.test')), false);
+});
+
+test('switching away from HQ closes any open suggestions without stealing focus', () => {
   const { owner, card } = fixture();
   card.started = true;
   card.node = {};
   card.id = 'hq';
-  owner.viewMode = 'map';
+  owner.viewMode = 'tickets';
   let closed;
   card.close = restore => {
     closed = restore;

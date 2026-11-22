@@ -3,6 +3,7 @@
 import { HQ_LABELS as L } from './hq-labels.js';
 import { firstVisitView, firstVisitResolved } from './hq-first-visit.js';
 import { EXPLORE_FOLDER_URL, DOCUMENTS_FOLDER_URL } from './personal-assistant-panel.js';
+import { beginHQAttempt } from './hq-guided-attempt.js';
 import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
 
 const escape = value =>
@@ -13,9 +14,37 @@ const escape = value =>
 const DOOR = '[data-hq-firstvisit-action="open"]';
 const OVERLAY = 'hq-suggestions';
 
+const choices = Object.freeze({
+  folder: [
+    'Explore Documents',
+    'Review a folder with an agent.',
+    'Review Documents or choose another folder. You’ll review the agent, model and workspace before anything is built.'
+  ],
+  email: [
+    'Connect email',
+    'Bring your mailbox into Email Ops.',
+    'Email Ops reads and searches a linked mailbox. Setup can create an Email Ops workspace. Nothing is sent.'
+  ],
+  apps: [
+    'Scan recent apps',
+    'Choose tools to keep in your profile.',
+    'Review recent apps from this computer. Only the tools you choose to save belong in your profile.'
+  ]
+});
+
+export function offerOnEntry(location) {
+  const params = new URLSearchParams(location.search);
+  return (
+    !location.hash &&
+    [...params].every(([key, value]) => key === 'mode' && ['details', 'map'].includes(value))
+  );
+}
+
 export class HQFirstVisitCard {
   constructor(owner) {
     this.owner = owner;
+    this.explicitEntry =
+      typeof window !== 'undefined' && window.location && !offerOnEntry(window.location);
     this.state = typeof document === 'undefined' ? '' : document.body?.dataset?.hqFirstVisit || '';
     this.missions = null;
     this.started = false;
@@ -38,7 +67,7 @@ export class HQFirstVisitCard {
     if (
       this.node &&
       (!this.owner.active ||
-        this.owner.viewMode !== 'details' ||
+        !['details', 'map'].includes(this.owner.viewMode) ||
         this.id !== this.owner.workspaceId())
     )
       this.close(false);
@@ -85,47 +114,62 @@ export class HQFirstVisitCard {
   }
 
   headerHTML() {
-    if (this.view().card === 'none') return '';
+    if (!this.owner.isPersonalHQ()) return '';
     return `<button type="button" class="ws-cmd-nav-btn ws-hq-suggestions-trigger" data-hq-firstvisit-action="open" aria-haspopup="dialog" aria-controls="${OVERLAY}" aria-expanded="${Boolean(this.node)}">${escape(L.firstVisitTitle)}</button>`;
   }
 
   html() {
-    const v = this.view();
-    if (v.card === 'none') return '';
-    const row = step => {
-      const icon = { folder: 'folder2', brief: 'sun', note: 'pencil' }[step.key];
-      const mark = step.state === 'completed' ? '✓' : step.state === 'skipped' ? '—' : '';
-      const status = step.resolved
-        ? `<span class="visually-hidden"> — ${escape(step.state === 'skipped' ? L.firstVisitSkipped : L.firstVisitCompleted)}</span>`
-        : '';
-      const body = `<span class="ws-hq-suggestion-icon" aria-hidden="true">${mark || `<i class="bi bi-${icon}"></i>`}</span><span><strong>${escape(step.title)}${status}</strong><small>${escape(step.hint)}</small></span><span aria-hidden="true">→</span>`;
-      const href =
-        step.action === 'folder' ? DOCUMENTS_FOLDER_URL : step.action === 'home' ? '/' : '';
-      const control =
-        href && !step.disabled
-          ? `<a class="ws-hq-suggestion" data-hq-firstvisit-action="${step.action}" href="${href}">${body}</a>`
-          : `<button type="button" class="ws-hq-suggestion" data-hq-firstvisit-action="${step.action}"${step.disabled ? ' disabled' : ''}>${body}</button>`;
-      const alternative =
-        step.action === 'folder' && !step.disabled
-          ? `<a class="ws-hq-suggestion-alternative" data-hq-firstvisit-action="folder" href="${EXPLORE_FOLDER_URL}">${escape(L.firstFolderChoose)}</a>`
-          : '';
-      return `<li${step.resolved ? ' class="is-resolved"' : ''}>${control}${alternative}</li>`;
-    };
+    const choice = choices[this.path];
+    const row = (key, [label, hint]) =>
+      `<li><button type="button" class="ws-hq-suggestion" data-hq-firstvisit-action="${key}"><span class="ws-hq-suggestion-icon" aria-hidden="true"><i class="bi bi-${{ folder: 'folder2', email: 'envelope', apps: 'grid' }[key]}"></i></span><span><strong>${label}</strong><small>${hint}</small></span><span aria-hidden="true">→</span></button></li>`;
+    const link = (url, label) =>
+      `<li><a class="ws-hq-suggestion" data-hq-firstvisit-action="continue" href="${escape(url)}">${label}</a></li>`;
+    const steps =
+      this.path === 'folder'
+        ? link(DOCUMENTS_FOLDER_URL, 'Review Documents') +
+          link(EXPLORE_FOLDER_URL, 'Choose another folder')
+        : this.path === 'email'
+          ? link('/?setup=email', 'Review mailbox setup')
+          : this.path === 'apps'
+            ? link('/profile#personalization', 'Open Profile')
+            : Object.entries(choices)
+                .map(([key, value]) => row(key, value))
+                .join('');
     return `<section id="${OVERLAY}" class="ws-hq-suggestions" data-hq-firstvisit role="dialog"${this.sheet ? ' aria-modal="true"' : ''} aria-labelledby="hq-suggestions-title" aria-describedby="hq-suggestions-hint" tabindex="-1">
-      <header><div><h2 id="hq-suggestions-title">${escape(L.firstVisitTitle)}</h2><p id="hq-suggestions-hint">${escape(L.firstVisitLead)}</p></div><button type="button" data-hq-firstvisit-action="close" aria-label="${escape(L.firstVisitClose)}">×</button></header>
-      <ul>${v.steps.map(row).join('')}</ul>
-      <footer><button type="button" data-hq-firstvisit-action="hide"${this.busy ? ' disabled' : ''}>${escape(L.firstVisitHide)}</button>${this.error === L.firstVisitLoadError ? `<button type="button" data-hq-firstvisit-action="retry">${escape(L.firstVisitRetry)}</button>` : ''}</footer>
-      <p class="ws-hq-suggestions-status${this.error ? '' : ' visually-hidden'}" role="status">${escape(this.error || (v.loading ? L.firstVisitLoading : ''))}</p>
+      <header><div><small>Your personal assistant</small><h2 id="hq-suggestions-title">${choice ? choice[0] : 'What would you like to do next?'}</h2><p id="hq-suggestions-hint">${choice ? choice[2] : 'Pick one to see how it works. Nothing starts here.'}</p></div><button type="button" data-hq-firstvisit-action="close" aria-label="${escape(L.firstVisitClose)}">×</button></header>
+      <ul>${steps}</ul>
+      <footer><button type="button" data-hq-firstvisit-action="close">Maybe later</button></footer>
     </section>`;
   }
 
   bind() {
     this.door()?.addEventListener?.('click', () => (this.node ? this.close() : this.open()));
     this.paint();
+    if (!this.door() || this.entryChecked || this.state !== 'pending' || !this.owner.active) return;
+    this.entryChecked = true;
+    if (
+      this.explicitEntry ||
+      !offerOnEntry(window.location) ||
+      workspaceOverlayCoordinator().openIds().length ||
+      document.querySelector(
+        '.modal.show, dialog[open], .offcanvas.show, #personalAssistantPanel:not([hidden])'
+      ) ||
+      document.activeElement !== document.body
+    )
+      return;
+    try {
+      const key = `ori.hq.guidedOffered.${this.owner.workspaceId()}`;
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(key, '1');
+    } catch (_) {
+      return;
+    }
+    this.open();
   }
 
   open() {
-    if (this.node || this.view().card === 'none') return;
+    if (this.node || !this.owner.isPersonalHQ()) return;
+    this.path = '';
     this.id = this.owner.workspaceId();
     this.sheet = window.matchMedia('(max-width: 600px)').matches;
     this.node = document.createElement('div');
@@ -198,7 +242,6 @@ export class HQFirstVisitCard {
     this.restoreOnClose = true;
     this.door()?.setAttribute('aria-expanded', 'true');
     this.node.querySelector('[role="dialog"]').focus({ preventScroll: true });
-    void this.load();
   }
 
   position() {
@@ -214,10 +257,6 @@ export class HQFirstVisitCard {
 
   paint() {
     if (!this.node) return;
-    if (this.view().card === 'none') {
-      this.close();
-      return;
-    }
     const html = this.html();
     if (html !== this.lastHTML) {
       const active = document.activeElement;
@@ -252,15 +291,14 @@ export class HQFirstVisitCard {
   }
 
   async act(action) {
+    if (Object.hasOwn(choices, action)) {
+      this.path = action;
+      this.attempt = beginHQAttempt(this.owner.workspaceId(), action);
+      this.paint();
+      this.node?.querySelector('[role="dialog"]')?.focus({ preventScroll: true });
+      return;
+    }
     if (action === 'close') return this.close();
-    if (this.busy) return;
-    if (action === 'hide') return this.finish();
-    if (action === 'retry') return this.load();
-    const trigger = this.door();
-    this.close(false);
-    if (action === 'note') this.owner.focusHQNoteCapture(trigger);
-    else if (action === 'notes') this.owner.openNotesStation(trigger);
-    else if (action === 'brief') this.owner.openDailyBriefPanel(trigger);
   }
 
   async briefClosed() {
@@ -284,13 +322,8 @@ export class HQFirstVisitCard {
       this.state = 'done';
       if (typeof document !== 'undefined' && document.body?.dataset)
         delete document.body.dataset.hqFirstVisit;
-      const hadFocus = this.node?.contains(document.activeElement);
-      this.close(false);
+      // Mission completion changes the visit layout, not an open chooser.
       if (this.owner.active) this.owner.render();
-      if (hadFocus)
-        this.owner.container
-          ?.querySelector?.('[data-cmd-view-mode="details"]')
-          ?.focus({ preventScroll: true });
     } catch (_) {
       this.error = L.firstVisitFinishError;
       // A silent finish failure leaves a usable door; never force it open.
