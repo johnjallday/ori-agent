@@ -2076,21 +2076,21 @@ test('tileHTML meta line reflects the agents and the server ticket counts', () =
     col: 0,
     row: 0
   });
-  assert.match(plural, /ws-map-tile-meta">2 agents · 1 in review · 2 in progress · 3 ready</);
+  assert.match(plural, /ws-map-tile-meta"[^>]*>2 agents · 1 in review · 2 in progress · 3 ready</);
 
   const singular = tileHTML({
     ws: { id: 'b', name: 'Solo', agent_count: 1, ticket_counts: { ready: 1 } },
     col: 0,
     row: 0
   });
-  assert.match(singular, /ws-map-tile-meta">1 agent · 1 ready</);
+  assert.match(singular, /ws-map-tile-meta"[^>]*>1 agent · 1 ready</);
 
   const empty = tileHTML({
     ws: { id: 'c', name: 'Quiet', agent_count: 1, ticket_counts: { backlog: 4, done: 2 } },
     col: 0,
     row: 0
   });
-  assert.match(empty, /ws-map-tile-meta">1 agent · No open work</);
+  assert.match(empty, /ws-map-tile-meta"[^>]*>1 agent · No open work</);
 });
 
 test('a linked song tile appends its facts to the meta line; other tiles are unchanged', () => {
@@ -2106,13 +2106,19 @@ test('a linked song tile appends its facts to the meta line; other tiles are unc
     map.tileHTML({ ws: song, col: 0, row: 0 }),
     /ws-map-tile-meta has-song-facts" title="1 agent · 2 ready · 6 tracks · 92 BPM · 2:12">1 agent · 2 ready · 6 tracks · 92 BPM · 2:12</
   );
-  assert.match(map.tileHTML({ ws: plain, col: 0, row: 0 }), /ws-map-tile-meta">1 agent · 2 ready</);
+  assert.match(
+    map.tileHTML({ ws: plain, col: 0, row: 0 }),
+    /ws-map-tile-meta"[^>]*>1 agent · 2 ready</
+  );
   const long = map.tileHTML({ ws: { id: 'long', name: 'Long', agent_count: 0 }, col: 0, row: 0 });
   const meta = /ws-map-tile-meta has-song-facts"[^>]*>([^<]*)</.exec(long)[1];
   assert.ok(meta.endsWith('…') && meta.length <= '0 agents · '.length + 40, meta);
   // A host that passes no snapshot (every surface but Home) draws plain meta.
   map.songFacts.setSnapshot(null);
-  assert.match(map.tileHTML({ ws: song, col: 0, row: 0 }), /ws-map-tile-meta">1 agent · 2 ready</);
+  assert.match(
+    map.tileHTML({ ws: song, col: 0, row: 0 }),
+    /ws-map-tile-meta"[^>]*>1 agent · 2 ready</
+  );
 });
 
 test('a folder agent line takes the tile status slot while it looks; other tiles keep Idle/Working', () => {
@@ -2129,7 +2135,7 @@ test('a folder agent line takes the tile status slot while it looks; other tiles
   });
   assert.match(
     fed,
-    /ws-map-led is-working"><\/span>Looking around · 240 entries · 3 folders left</
+    /ws-map-led is-working"><\/span><span class="ws-map-tile-status">Looking around · 240 entries · 3 folders left</
   );
   assert.equal(map.folderAgentLines.statusText({ id: 'blank', active: false }), 'Idle');
   assert.equal(map.folderAgentLines.statusText({ id: 'other', active: true }), 'Working');
@@ -2189,7 +2195,7 @@ test('the working mark survives an in-place status patch and is outline and glow
     mapCSS,
     /@media \(prefers-reduced-motion: no-preference\) \{\s*\.ws-map-tile\.is-agent-working \{\s*animation: ws-map-tile-working [^;]+;\s*\}\s*\}/
   );
-  // The face badge floats outside the tile and takes no clicks.
+  // The face is decorative and takes no clicks.
   const badge = rule(mapCSS, '.ws-map-tile-face');
   assert.match(badge, /position:\s*absolute/);
   assert.match(badge, /pointer-events:\s*none/);
@@ -2202,7 +2208,7 @@ test('tileHTML never reads open_task_count and leaves unreported counts out', ()
     col: 0,
     row: 0
   });
-  assert.match(html, /ws-map-tile-meta">2 agents</);
+  assert.match(html, /ws-map-tile-meta"[^>]*>2 agents</);
   assert.doesNotMatch(html, /5 tasks|open task/);
 });
 
