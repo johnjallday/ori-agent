@@ -1878,31 +1878,74 @@
   transform: translateY(0);
   transition: transform 0.16s ease;
 }
-/* In-tile labels, not nested controls. The existing tile menu supplies their
-   keyboard actions; labels move with the building during drag/zoom. */
-.ws-map-update-markers {
-  position: absolute;
-  z-index: 7;
-  top: 20px;
-  right: 2px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-  max-width: 146px;
+/* Real tiles share the existing 176 × 170 cell pitch, even when both update
+   labels wrap. The unbuilt HQ survey site keeps its own layout. */
+.ws-map-tile[data-ws-id] {
+  --ws-tile-header: 20px;
+
+  width: 160px;
+  padding-top: var(--ws-tile-header);
+}
+.ws-map-tile[data-ws-id] > .ws-map-struct {
+  width: 92px;
+  height: 66px;
+}
+.ws-map-tile[data-ws-id] > .ws-map-tile-flag {
+  top: 0;
+  right: 4px;
+  left: 40px;
+  height: var(--ws-tile-header);
+}
+.ws-map-tile.is-hq[data-ws-id] > .ws-map-tile-flag {
+  right: 36px;
+}
+.ws-map-tile[data-ws-id] > .ws-map-tile-hq-badge {
+  top: 2px;
+  line-height: 12px;
+}
+.ws-map-tile-flag > .ws-map-led {
+  flex: none;
+}
+.ws-map-tile-status {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
-.ws-map-update-markers .workspace-update-signal {
-  min-height: 24px;
+/* Updates get their own row below the caption; they never cover the artwork
+   or another label. The tile menu still supplies their keyboard actions. */
+[data-workspace-update-markers] {
   max-width: 100%;
-  padding: 2px 5px;
+}
+.ws-map-update-markers {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+.ws-map-update-markers .workspace-update-signal {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 24px;
+  padding: 1px 4px;
   border: 1px solid var(--ws-faction);
   border-radius: 3px;
   background: var(--ws-panel);
   color: var(--ws-ink);
-  font: 11px/1.3 var(--ws-font-mono);
+  font: 10px/12px var(--ws-font-mono);
   white-space: normal;
   overflow-wrap: anywhere;
+}
+.ws-map-update-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .ws-map-update-markers [data-map-update-route] {
@@ -1985,6 +2028,11 @@
   border: 1.5px solid var(--ws-faction);
   border-radius: 50% / 40%;
   box-shadow: 0 0 22px rgba(70, 211, 154, 0.35);
+}
+.ws-map-tile.is-selected[data-ws-id]::before {
+  top: 61px;
+  width: 94px;
+  height: 46px;
 }
 .ws-map-struct {
   display: block;
@@ -2099,13 +2147,9 @@
 }
 /* On a tile it takes the status flag's place (the flag is hidden, so the words
    are not drawn twice). It hangs DOWN over the building art from the tile's top
-   edge, never up: tiles abut (the row pitch equals the tile's height), so the
-   tile above's name, type and meta text run to within a few px of this tile's
-   top, and the art (y 0 to 94) is the only part of a tile with no text in it.
-   Its top edge is y -1: Home's tiles put the line box of that last text line
-   1.5px lower than a group page's, and a mark at y -4 touched it there. Its
-   right edge is x 118, just short of the team avatars that stand at the corner
-   (x 122 and on), and at most 80px wide keeps its left edge at x 38, clear of
+   edge, never up into the tile above. Its top edge is y -1, and its right
+   edge is x 118, short of the badges and the team avatars. At most 80px wide
+   keeps its left edge at x 38, clear of
    the corner checkbox (x 20 to 35). It sits above its tile (5) and an active one
    (7) and below a tile being dragged (9). The words wrap onto up to three lines
    inside that width. */
@@ -2164,7 +2208,7 @@
 }
 .ws-map-tile-crest {
   position: absolute;
-  top: 30px;
+  top: 40px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 4;
@@ -2199,14 +2243,10 @@
   background: rgba(255, 255, 255, 0.85);
 }
 
-/* City Economy badges (city-economy FR36, FR38).
-   They share the HQ badge's slot and its plate treatment, so a tile with a Farm
-   reads like a tile with an HQ rather than like a different kind of object. The
-   Farm badge stacks BELOW HQ so the two never collide on the user's own HQ
-   workspace, which is also the workspace most likely to run routines. */
+/* The left of the scene is for economy badges; the right is for portraits. */
 .ws-map-tile-farm-badge {
   position: absolute;
-  top: 4px;
+  top: var(--ws-tile-header);
   left: 4px;
   z-index: 5;
   padding: 1px 5px;
@@ -2229,7 +2269,7 @@
    neighbours it keeps pointer events and shows a pointer cursor. */
 .ws-map-tile-harvest {
   position: absolute;
-  top: 20px;
+  top: calc(var(--ws-tile-header, 2px) + 18px);
   left: 4px;
   z-index: 6;
   padding: 1px 6px;
@@ -2546,7 +2586,7 @@
    so it doesn't compete with the tile's status flag and crest at rest. */
 .ws-map-tile-check {
   position: absolute;
-  top: -2px;
+  top: 2px;
   left: 20px;
   z-index: 6;
   width: 15px;
@@ -2825,14 +2865,35 @@
   clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
 }
 
-/* A linked song's meta line carries its facts (song-card PRD FR10). Two lines
-   at most, so it never runs under the next tile's status flag. */
-.ws-map-tile-meta.has-song-facts {
+.ws-map-tile[data-ws-id] > .ws-map-tile-name {
+  line-height: 16px;
+}
+.ws-map-tile[data-ws-id] > .ws-map-tile-type {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 12px;
+}
+.ws-map-tile[data-ws-id] > .ws-map-tile-meta {
+  max-width: 100%;
+  margin-top: 2px;
+  padding-block: 0;
+  line-height: 13px;
   display: -webkit-box;
   overflow: hidden;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+}
+/* Leave room for both update labels, including when they wrap. The full
+   metadata remains in the tooltip and the tile's accessible name. */
+.ws-map-canvas:not(.is-activity-far) .ws-map-tile:has(.ws-map-update-markers) > .ws-map-tile-meta {
+  display: block;
+  padding-inline: 4px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* Create pad. Since #367 the only pad rendered anywhere is the true-empty
@@ -3826,6 +3887,14 @@
   }
 }
 
+.ws-map-tile[data-ws-id] .ws-map-activity-glow {
+  top: 65px;
+  width: 110px;
+}
+.ws-map-tile[data-ws-id] .ws-map-activity-lamp {
+  top: 44px;
+}
+
 /* A group map's agent: the glow sits under its plate. */
 .ws-map-unit .ws-map-activity-glow {
   top: 64px;
@@ -4667,39 +4736,43 @@
   margin-top: 2px;
 }
 
-/* Home opts into a compact team at each building's corner, idle or working.
-   Other hosts supply no portrait renderer and keep their existing tiles. */
+/* Home's portraits sit alongside the building, not on top of its status.
+   The renderer limits this column to two slots. */
 .ws-map-tile-team {
   position: absolute;
-  top: -16px;
-  right: -8px;
+  top: var(--ws-tile-header);
+  right: 0;
   z-index: 3;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  display: grid;
   gap: 2px;
-  max-width: 128px;
+  width: 32px;
   pointer-events: none;
 }
 
 .ws-map-tile-team .ws-map-av {
-  flex: 0 0 36px;
-  width: 36px;
+  width: 100%;
   min-width: 0;
-  height: 48px;
+  height: 32px;
+}
+.ws-map-tile-team-more {
+  font: 9px/18px var(--ws-font-mono);
+  color: var(--ws-ink);
+  background: var(--ws-panel);
+  border: 1px solid var(--ws-line-bright);
+  border-radius: 3px;
 }
 
 .ws-map-tile-team .agent-avatar,
 .ws-map-tile-team .home-agent-face-slot {
-  --aa-size: 30px;
+  --aa-size: 22px;
 
-  width: 30px;
-  height: 30px;
+  width: 22px;
+  height: 22px;
 }
 
 .ws-map-tile-team .ws-map-av-figure {
-  width: 28px;
-  height: 33px;
+  width: 19px;
+  height: 22px;
 }
 
 .ws-map-tile-team .ws-map-av-label {
@@ -4715,14 +4788,11 @@
   right: 0;
 }
 
-/* The working agent's face on the tile's corner (visual-hire FR17): the shared
-   renderer's face, so it is the one on the hire card and the Agents page. It
-   floats outside the tile's box and takes no clicks; it exists only while the
-   tile's line is set. */
+/* Without a team renderer the working face uses the same portrait column. */
 .ws-map-tile-face {
   position: absolute;
-  top: -12px;
-  right: -12px;
+  top: var(--ws-tile-header);
+  right: 0;
   z-index: 3;
   display: block;
   width: 32px;

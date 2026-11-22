@@ -808,14 +808,7 @@
   filter: var(--ws-struct-shadow) drop-shadow(0 0 12px rgba(138, 90, 21, 0.28));
 }
 
-/* The status flag and the HQ badge share the tile's top-right corner, and at
-   readable sizes they collide. The flag steps left instead of shrinking: past
-   the badge on the built HQ (the bulk-select box owns the top-left there), and
-   to the left edge on the unbuilt site, which has no bulk-select box. */
-.cockpit-map .ws-map-tile.is-hq .ws-map-tile-flag {
-  right: 42px;
-}
-
+/* The unbuilt site has no bulk-select box, so its flag can sit on the left. */
 .cockpit-map .ws-map-hq-site .ws-map-tile-flag {
   right: auto;
   left: 0;

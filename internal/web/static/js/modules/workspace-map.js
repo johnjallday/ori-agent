@@ -22,10 +22,8 @@
   // background grid identical to the pre-coordinate map — but nothing here reads
   // the container's width, so a resize can never move a building (FR-13).
   var CELL_W = 176;
-  // Tiles measure ~155px tall (status flag, structure, name, ops mode, meta).
-  // CELL_H was 150, so every row's meta line collided with the status flag of
-  // the row below it. Keep a real gutter so each site reads as one unit and its
-  // operational signals are unambiguous (PRD FR30).
+  // Keep the saved layout's cell pitch. The tile's status, art, captions and
+  // updates must fit this footprint, even when two saved anchors abut.
   var CELL_H = 170;
   var PAD = 26;
   // FALLBACK_COLS replaces the old responsive `maxCols`. Automatic placement now
@@ -3561,13 +3559,19 @@
         return true;
       });
     if (!names.length) return '';
+    // Two slots beside the art. For a larger roster, keep its first portrait
+    // (the Commander if assigned) and use the second slot for the rest count.
     return (
       '<span class="ws-map-tile-team" aria-hidden="true">' +
       names
+        .slice(0, names.length > 2 ? 1 : 2)
         .map(function (name) {
           return hostAgentPortraitHTML(name, name === lead, options);
         })
         .join('') +
+      (names.length > 2
+        ? '<span class="ws-map-tile-team-more">+' + (names.length - 1) + '</span>'
+        : '') +
       '</span>'
     );
   }
@@ -3643,11 +3647,13 @@
       // Drawn on Home and on a group page alike: a group's host passes the same
       // bulk callbacks Home does, so its members check the same way.
       '></span>' +
-      '<span class="ws-map-tile-flag"><span class="ws-map-led' +
-      (active ? ' is-working' : '') +
-      '"></span>' +
+      '<span class="ws-map-tile-flag" title="' +
       escapeHtml(statusText) +
-      '</span>' +
+      '"><span class="ws-map-led' +
+      (active ? ' is-working' : '') +
+      '"></span><span class="ws-map-tile-status">' +
+      escapeHtml(statusText) +
+      '</span></span>' +
       // The agent at work wears its face on the tile's corner while its line is
       // set; decorative, the status line says the same in words (FR17).
       (tileTeamHTML(ws, options) ||
@@ -3661,9 +3667,6 @@
       // Same badge slot as HQ, so the economy's badges inherit the tile's own
       // custom properties and render correctly in both themes (FR36).
       economyBadgesHTML(ws.id) +
-      '<span data-workspace-update-markers>' +
-      workspaceUpdateMarkers(ws.id) +
-      '</span>' +
       structure +
       '<span class="ws-map-tile-name">' +
       tileNameHTML(ws) +
@@ -3674,14 +3677,17 @@
       WORK_FOLDER_LABEL +
       '</span>' +
       (mode ? '<span class="ws-map-tile-type">' + escapeHtml(mode) + '</span>' : '') +
-      // A song tile's longer line is held to two lines so it never runs under
-      // the next tile's status flag; the accessible name keeps all of it.
+      // Keep the full caption in the tooltip and accessible name when space
+      // is needed for the update strip.
       '<span class="ws-map-tile-meta' +
       (songFacts[ws.id] ? ' has-song-facts' : '') +
-      '"' +
-      (songFacts[ws.id] ? ' title="' + escapeHtml(meta) + '"' : '') +
-      '>' +
+      '" title="' +
       escapeHtml(meta) +
+      '">' +
+      escapeHtml(meta) +
+      '</span>' +
+      '<span data-workspace-update-markers>' +
+      workspaceUpdateMarkers(ws.id) +
       '</span>' +
       '</button>'
     );
@@ -7694,6 +7700,7 @@
       led.classList.toggle('is-working', working);
       if (flag.lastChild !== led && flag.lastChild.textContent !== statusText) {
         flag.lastChild.textContent = statusText;
+        flag.setAttribute('title', statusText);
       }
     }
     var label = tileAccessibleName(ws, !!selectedId && ws.id === selectedId, activity);
