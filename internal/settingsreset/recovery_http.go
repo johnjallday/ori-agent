@@ -12,10 +12,15 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/resetstate"
+	"github.com/johnjallday/ori-agent/internal/web"
 )
 
 // ResetStatusPath is the same bookmarkable read-only page on both hosts.
 const ResetStatusPath = "/reset/status"
+
+// ResetReadyHeader is emitted only by the owned, admitted normal application,
+// on the same response as the operation evidence. Recovery never emits it.
+const ResetReadyHeader = "X-Ori-Reset-Ready"
 
 //go:embed reset_status.tmpl
 var statusTemplate string
@@ -62,11 +67,11 @@ func viewResetStatus(id string, op Operation) statusView {
 	return view
 }
 
-// NewResetStatusHandler reads only the bounded reset receipt, never app stores.
+// newResetStatusHandler reads only the bounded reset receipt, never app stores.
 // A supplied operation ID is authoritative for the page identity, including
 // when its receipt is absent. The bare path is for fenced navigation without a
 // receipt, not a shortcut to a previous successful operation.
-func NewResetStatusHandler(lease *resetstate.Lease) http.HandlerFunc {
+func newResetStatusHandler(lease *resetstate.Lease) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		setRecoveryHeaders(w)
 		if r.URL.EscapedPath() != ResetStatusPath {
@@ -127,6 +132,33 @@ func CurrentRecoveryOperation(ctx context.Context, lease *resetstate.Lease) (Ope
 	return NewCoordinator(lease, nil, nil).Status(ctx, journal.Operation.ID)
 }
 
+// RegisterResetStatusRoutes mounts only the reset page and two fixed embedded
+// scripts. The recovery host never dispatches into a general static file server.
+func RegisterResetStatusRoutes(mux *http.ServeMux, lease *resetstate.Lease) {
+	mux.HandleFunc(ResetStatusPath, newResetStatusHandler(lease))
+	for route, asset := range map[string]string{
+		"/reset/assets/generation.js": "static/js/modules/reset-generation.js",
+		"/reset/assets/status.js":     "static/js/modules/reset-status.js",
+	} {
+		mux.HandleFunc("GET "+route, func(w http.ResponseWriter, r *http.Request) {
+			setRecoveryHeaders(w)
+			if r.URL.EscapedPath() != route || r.URL.RawQuery != "" {
+				http.NotFound(w, r)
+				return
+			}
+			script, err := web.Static.ReadFile(asset)
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+			if r.Method == http.MethodGet {
+				_, _ = w.Write(script)
+			}
+		})
+	}
+}
+
 // NewRecoveryHandler exposes only read-only reset evidence. It has no route to
 // application stores, credentials, arbitrary files, or reset application.
 func NewRecoveryHandler(lease *resetstate.Lease) http.Handler {
@@ -158,7 +190,7 @@ func NewRecoveryHandler(lease *resetstate.Lease) http.Handler {
 			Operation Operation `json:"operation"`
 		}{Success: operation.VerifiedComplete(), Operation: operation})
 	})
-	mux.HandleFunc(ResetStatusPath, NewResetStatusHandler(lease))
+	RegisterResetStatusRoutes(mux, lease)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		setRecoveryHeaders(w)
 		http.Redirect(w, r, ResetStatusPath, http.StatusSeeOther)
@@ -168,7 +200,7 @@ func NewRecoveryHandler(lease *resetstate.Lease) http.Handler {
 
 func setRecoveryHeaders(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Referrer-Policy", "no-referrer")

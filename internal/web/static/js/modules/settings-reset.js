@@ -142,7 +142,6 @@
   const resultPanel = byId('resetOperationPanel');
   const status = byId('resetOperationStatus');
   const results = byId('resetOperationResults');
-  const openStartFreshSetup = byId('openStartFreshSetupBtn');
   const dismissButtons = [byId('resetCancelBtn'), byId('resetCloseBtn')];
   // A reset that removes the agents from the Workspace Directory needs a second
   // confirmation naming that folder: the user can see it and may sync it to
@@ -342,160 +341,12 @@
     }
   }
 
-  function operationRows(operation) {
-    const rows = [];
-    for (const result of operation?.results || []) {
-      const name = labels[result.id] || result.id;
-      rows.push(`${name}: ${result.outcome}${result.message ? ` — ${result.message}` : ''}`);
-      for (const check of result.checks || []) {
-        rows.push(
-          `${name} / ${check.name}: ${check.outcome}${check.message ? ` — ${check.message}` : ''}`
-        );
-      }
-      // Per-item outcomes name which plugin is unresolved after a partial
-      // failure, so a retry is not a blind repeat of the whole category.
-      for (const item of result.items || []) {
-        rows.push(
-          `${name} / ${item.name}: ${item.outcome}${item.message ? ` — ${item.message}` : ''}`
-        );
-      }
-      for (const kept of result.retained || [])
-        rows.push(`Kept: ${kept.display_path} — ${kept.reason}`);
-    }
-    for (const blocker of operation?.blockers || []) {
-      rows.push(`Blocked: ${blocker.message}${blocker.recovery ? ` — ${blocker.recovery}` : ''}`);
-    }
-    return rows;
-  }
-
-  function clearFreshBrowserState() {
-    const exactLocal = [
-      'ori-theme',
-      'ori-ui-density',
-      'voiceSettings',
-      'note.openBehavior',
-      'enterToSend',
-      'planBeforeAction',
-      'chatPanelWidth',
-      'sidebarWidth',
-      'sessionFolderCollapsed',
-      'sessionSidebarCollapsed',
-      'sessionSidebarWidth',
-      'oriWorkspaceHubLauncherView',
-      'oriWorkspaceCommandViewMode',
-      'oriWorkspaceDetailView',
-      'canvas-bg-color',
-      'note.leftRail.tab',
-      'note.toc.collapsed',
-      'note.aiAssist.collapsed',
-      'ori_chat_assistant',
-      'activeSessionId',
-      'ori.homeAssistant.recentSessions',
-      'oriWorkspaceSyncDismissed',
-      'note.tabs',
-      'note.search.recent',
-      'ori.roster.selectedAgent',
-      'ori-selected-vault-id',
-      'ori-vault-active-tab',
-      'ori.personalAssistantHireRequestId',
-      'ori.personalAssistantHQRequestId',
-      'ori.homeAssistant.automationMode'
-    ];
-    const exactSession = [
-      'activeSessionId',
-      'ori.homeAssistant.recentSessions',
-      'oriWorkspaceHubOverviewExpanded',
-      'oriWorkspaceHubLauncherTab',
-      'oriWorkspaceHubSelectedId',
-      'currentWorkspaceId',
-      'workspace-detail-task-assist-specialist',
-      'ori.homeAssistant.pendingWorkspacePrompt',
-      'ori-guide-handoff',
-      'ori.homeAssistant.automationMode',
-      'ori-keyboard-nav-persistent'
-    ];
-    const prefixes = [
-      'ori_chat_session_',
-      'ori_chat_assistant_',
-      'activeSessionId_',
-      'note.tabs.workspace.',
-      'ori.evolution.lastStage.',
-      'ori.personalAssistantApplyRequestId.',
-      'workspace-directory-explorer:',
-      'ori-workspace-command-agent:',
-      'oriSetupWizardResume:',
-      'oriProjectOpenNotice:',
-      'workspace-detail-entry-agent-prompt-dismissed:'
-    ];
-    const clear = (storage, exact) => {
-      if (!storage) return;
-      try {
-        exact.forEach(key => storage.removeItem?.(key));
-        if (typeof storage.length !== 'number' || typeof storage.key !== 'function') return;
-        const found = [];
-        for (let index = 0; index < storage.length; index += 1) {
-          const key = storage.key(index);
-          if (typeof key === 'string' && prefixes.some(prefix => key.startsWith(prefix)))
-            found.push(key);
-        }
-        found.forEach(key => storage.removeItem(key));
-      } catch {
-        // Browser storage is best effort and never changes the server's verified outcome.
-      }
-    };
-    clear(window.localStorage, exactLocal);
-    clear(window.sessionStorage, exactSession);
-  }
-
-  function renderOperation(operation) {
-    const state = operation?.state || 'interrupted';
-    phase = state === 'completed' ? 'idle' : state;
-    if (openStartFreshSetup) {
-      openStartFreshSetup.hidden = !(state === 'completed' && operation?.intent === 'start_fresh');
-    }
-    const messages = {
-      preparing:
-        'Reset admission is preparing. Ordinary work remains fenced while recovery is established.',
-      awaiting_restart:
-        'Restart required. Fully quit and relaunch Ori using the same installation; browser reload and menubar Stop/Start are not enough.',
-      applying: 'Reset is applying before application stores open.',
-      verifying: 'Reset was applied and its named postconditions are being verified.',
-      completed: 'Reset completed and its named postconditions were verified.',
-      partial_failure:
-        'Reset partially completed. Keep this result and retry only unresolved categories when offered.',
-      blocked:
-        'Reset is blocked. No unchecked category should be repeated; follow the recovery details below.',
-      interrupted:
-        'Reset outcome is interrupted or unknown. Preserve recovery metadata and do not submit another reset.'
-    };
-    showResult(messages[state] || messages.interrupted, operationRows(operation));
-    if (state === 'completed' && operation?.intent === 'start_fresh') {
-      clearFreshBrowserState();
-      try {
-        window.localStorage?.setItem('ori.reset.generation', operation.id);
-      } catch {
-        // Other tabs may need a manual reload when browser storage is unavailable.
-      }
-    }
-    if (operation?.id) {
-      try {
-        window.localStorage?.setItem(operationStorageKey, operation.id);
-      } catch {
-        // The durable server receipt remains authoritative.
-      }
-    }
-  }
-
   function responseMessage(payload, fallback) {
     if (payload && typeof payload.message === 'string' && payload.message) return payload.message;
     if (Array.isArray(payload?.errors) && typeof payload.errors[0] === 'string')
       return payload.errors[0];
     return fallback;
   }
-
-  openStartFreshSetup?.addEventListener('click', () => {
-    window.location.href = '/';
-  });
 
   async function readJSON(response) {
     try {
@@ -528,9 +379,8 @@
       const payload = await readJSON(response);
       if (phase !== 'idle') return;
       if (response.ok && payload?.operation?.id === operationID) {
-        if (payload.operation.state === 'completed') renderOperation(payload.operation);
-        else openResetStatus(operationID);
-      } else if (!response.ok)
+        if (payload.operation.state !== 'completed') openResetStatus(operationID);
+      } else if (!response.ok && response.status !== 404)
         showResult(
           'A reset recovery receipt exists, but its current outcome could not be loaded. Do not submit another reset.'
         );
@@ -573,7 +423,6 @@
     reviewFocus = intent === 'start_fresh' ? startFreshButton : reviewButton;
     phase = 'previewing';
     reviewed = null;
-    if (openStartFreshSetup) openStartFreshSetup.hidden = true;
     showResult('Loading the authoritative reset scope. No data is being changed.');
     updateControls();
     try {

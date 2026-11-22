@@ -77,6 +77,19 @@ func TestRecoveryHandlerServesOnlyDurableReadOnlyStatus(t *testing.T) {
 		t.Fatalf("recovery API = %d %+v", apiResponse.Code, response)
 	}
 
+	opResponse := httptest.NewRecorder()
+	handler.ServeHTTP(opResponse, httptest.NewRequest(http.MethodGet, "/api/reset/operations/"+preview.OperationID, nil))
+	if opResponse.Code != http.StatusOK || opResponse.Header().Get(ResetReadyHeader) != "" {
+		t.Fatal("recovery-only listener must not signal normal-app readiness")
+	}
+	for _, path := range []string{"/reset/assets/generation.js", "/reset/assets/status.js"} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "text/javascript; charset=utf-8" ||
+			w.Header().Get("Cache-Control") != "no-store" || w.Body.Len() == 0 {
+			t.Errorf("allowlisted status script %s = %d %v", path, w.Code, w.Header())
+		}
+	}
 	before, err := coordinator.lease.Read(resetstate.OperationRecord)
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +113,10 @@ func TestRecoveryHandlerServesOnlyDurableReadOnlyStatus(t *testing.T) {
 		{http.MethodPost, statusURL, http.StatusMethodNotAllowed},
 		{http.MethodGet, ResetStatusPath + "/next", http.StatusNotFound},
 		{http.MethodGet, "/reset/%73tatus", http.StatusNotFound},
+		{http.MethodGet, "/reset/assets/unrelated.js", http.StatusNotFound},
+		{http.MethodGet, "/reset/assets/%73tatus.js", http.StatusNotFound},
+		{http.MethodGet, "/reset/assets/status.js?other=1", http.StatusNotFound},
+		{http.MethodGet, "/js/modules/settings-reset.js", http.StatusNotFound},
 		{http.MethodGet, ResetStatusPath + "?operation=" + preview.OperationID + "&operation=other", http.StatusBadRequest},
 		{http.MethodGet, ResetStatusPath + "?operation=%3Cscript%3E", http.StatusBadRequest},
 		{http.MethodGet, ResetStatusPath + "?operation=another-operation", http.StatusNotFound},

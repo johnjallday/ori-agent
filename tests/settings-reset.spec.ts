@@ -166,6 +166,18 @@ test.describe.serial('Settings reset on an owned installation', () => {
     await page.goto(origin + '/settings', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('#startFreshBtn')).toBeVisible();
     await expect(page.locator('#onboardingModal.show')).toHaveCount(0);
+    // Allow initial Settings GETs to finish. They remain ordinary admitted
+    // work; a confirmation must not cancel in-flight requests.
+    await page.waitForLoadState('networkidle');
+  }
+
+  async function stagedStatus(page: Page) {
+    await expect(page.getByRole('heading', { name: 'Restart required' })).toBeVisible();
+    const statusURL = page.url();
+    const operationID = await page.evaluate(() => localStorage.getItem('ori.reset.operation_id'));
+    expect(operationID).toBeTruthy();
+    expect(statusURL).toBe(`${origin}/reset/status?operation=${operationID}`);
+    return statusURL;
   }
 
   test.beforeAll(async () => {
@@ -306,21 +318,23 @@ test.describe.serial('Settings reset on an owned installation', () => {
     // contract is that the post-drain bytes survive the staged application.
     const beforeVault = digest(vaultPath);
     await page.locator('#confirmResetBtn').click();
-    await expect(page.locator('#resetOperationStatus')).toContainText('Restart required');
-    const operationID = await page.evaluate(() => localStorage.getItem('ori.reset.operation_id'));
-    expect(operationID).toBeTruthy();
+    const statusURL = await stagedStatus(page);
+    const operationID = new URL(statusURL).searchParams.get('operation');
     expect(await page.evaluate(() => localStorage.getItem('ori-theme'))).toBe('dark');
 
+    await page.reload();
+    await expect(page).toHaveURL(statusURL);
+    await expect(page.getByRole('heading', { name: 'Restart required' })).toBeVisible();
     await stopServer();
+    await expect(page.getByText('Waiting to reconnect.', { exact: false })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Restart required' })).toBeVisible();
     await startServer();
-    await waitFor(`/api/reset/operations/${operationID}`, async response => {
-      if (!response.ok) return false;
-      const payload = await response.json();
-      return payload?.operation?.state === 'completed';
+    await expect(page.getByRole('heading', { name: 'Reset completed' })).toBeVisible({
+      timeout: 20_000
     });
-    await openSettings(page, request);
-    await expect(page.locator('#resetOperationStatus')).toContainText('Reset completed');
-    await expect(page.locator('#openStartFreshSetupBtn')).toBeVisible();
+    const continueSetup = page.getByRole('button', { name: 'Continue setup' });
+    await expect(continueSetup).toBeVisible();
+    await expect(page).toHaveURL(statusURL);
     expect(await page.evaluate(() => localStorage.getItem('ori-theme'))).toBeNull();
     expect(await page.evaluate(() => localStorage.getItem('ori_chat_session_stale'))).toBeNull();
     expect(
@@ -334,6 +348,9 @@ test.describe.serial('Settings reset on an owned installation', () => {
     expect(digest(vaultPath)).toBe(beforeVault);
     expect(existsSync(join(agentsFolder, 'Reset Scout'))).toBe(false);
     expect(readFileSync(agentsNote, 'utf8')).toBe('kept next to my agents\n');
+    await continueSetup.click();
+    await expect(page).toHaveURL(origin + '/');
+    await expect(page.locator('#onboardingModal')).toBeVisible();
 
     const vaultsAfterReset = await request.get(origin + '/api/vault/vaults');
     expect((await vaultsAfterReset.json()).count).toBe(0);
@@ -433,26 +450,21 @@ test.describe.serial('Settings reset on an owned installation', () => {
     await page.locator('#resetConfirmInput').fill('RESET');
     await expect(page.locator('#confirmResetBtn')).toContainText('Reset reviewed data');
     await page.locator('#confirmResetBtn').click();
-    await expect(page.locator('#resetOperationStatus')).toContainText('Restart required');
-    const operationID = await page.evaluate(() => localStorage.getItem('ori.reset.operation_id'));
-    expect(operationID).toBeTruthy();
+    const statusURL = await stagedStatus(page);
     // Nothing is deleted by the accepting process.
     expect(readFileSync(bundledSkill, 'utf8')).toContain('e2e-demo-skill');
 
     await stopServer();
     await startServer();
-    await waitFor(`/api/reset/operations/${operationID}`, async response => {
-      if (!response.ok) return false;
-      const payload = await response.json();
-      return payload?.operation?.state === 'completed';
+    await expect(page.getByRole('heading', { name: 'Reset completed' })).toBeVisible({
+      timeout: 20_000
     });
-    await openSettings(page, request);
-    await expect(page.locator('#resetOperationStatus')).toContainText('Reset completed');
-    await expect(page.locator('#resetOperationResults')).toContainText(
-      'Installed plugins / e2e-demo-plugin: completed'
-    );
-    // Start Fresh's first-run entry point stays hidden: this was not Start Fresh.
-    await expect(page.locator('#openStartFreshSetupBtn')).toBeHidden();
+    await expect(page).toHaveURL(statusURL);
+    await page.getByText('Reviewed categories and checks').click();
+    await expect(page.getByText('e2e-demo-plugin: completed')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Continue setup' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Back to Ori' }).click();
+    await expect(page).toHaveURL(origin + '/');
 
     expect((await (await request.get(origin + '/api/plugins')).json()).plugins?.length ?? 0).toBe(
       0
@@ -506,10 +518,7 @@ test.describe.serial('Settings reset on an owned installation', () => {
     await expect(page.locator('#confirmResetBtn')).toBeEnabled();
     await page.locator('#confirmResetBtn').click();
 
-    await expect(page.locator('#resetOperationStatus')).toContainText('Restart required');
-    await expect(page.locator('#resetOperationStatus')).not.toContainText(
-      'active or unowned work prevents reset'
-    );
+    await stagedStatus(page);
     await Promise.all(streamEnds);
 
     const fenced = await idlePage.evaluate(async () => {

@@ -144,6 +144,11 @@ func TestResetAdmissionHTTPBusyThenStagedRecoveryStaysReachable(t *testing.T) {
 		statusResponse.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("status behind fence = %d %s", statusResponse.Code, statusResponse.Body.String())
 	}
+	fencedEvidence := httptest.NewRecorder()
+	s.resetAdmissionMiddleware(ordinary).ServeHTTP(fencedEvidence, httptest.NewRequest(http.MethodGet, "/api/reset/operations/"+preview.OperationID, nil))
+	if fencedEvidence.Code != http.StatusOK || fencedEvidence.Header().Get(settingsreset.ResetReadyHeader) != "" {
+		t.Fatal("receipt must stay readable without signalling app readiness behind the fence")
+	}
 	var recovered, replay settingshttp.ResetResponse
 	request(http.MethodGet, "/api/reset/operations/"+preview.OperationID, nil, http.StatusOK, &recovered)
 	request(http.MethodPost, "/api/reset", body, http.StatusAccepted, &replay)
@@ -195,6 +200,9 @@ func TestResetAdmissionOnlyHandsOffBrowserDocumentNavigations(t *testing.T) {
 		{http.MethodGet, "/health", "navigate", "document", http.StatusServiceUnavailable},
 		{http.MethodGet, "/api/workspaces/ws/events", "navigate", "document", http.StatusServiceUnavailable},
 		{http.MethodGet, "/js/not-the-status-script.js", "no-cors", "script", http.StatusServiceUnavailable},
+		{http.MethodGet, "/reset/assets/status.js", "same-origin", "script", http.StatusOK},
+		{http.MethodPost, "/reset/assets/status.js", "same-origin", "empty", http.StatusServiceUnavailable},
+		{http.MethodGet, "/reset/assets/other.js", "same-origin", "script", http.StatusServiceUnavailable},
 		{http.MethodPost, settingsreset.ResetStatusPath, "navigate", "document", http.StatusMethodNotAllowed},
 		{http.MethodGet, settingsreset.ResetStatusPath + "/extra", "navigate", "document", http.StatusServiceUnavailable},
 	} {

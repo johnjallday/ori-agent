@@ -4,6 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Title}} · Ori</title>
+  {{if .ID}}
+  <script defer src="/reset/assets/generation.js"></script>
+  <script defer src="/reset/assets/status.js"></script>
+  {{end}}
   <style>
     :root {
       color-scheme: light dark;
@@ -30,7 +34,8 @@
     .id { font-size: .85rem; color: var(--muted); overflow-wrap: anywhere; }
     .blockers strong { display: block; }
     footer { margin-block-start: 1.5rem; padding-block-start: 1rem; border-block-start: 1px solid var(--line); }
-    button, .action { display: inline-block; color: var(--button-ink); background: var(--accent); font: inherit; font-weight: 700; border: 0; border-radius: .35rem; padding: .65rem 1rem; cursor: pointer; }
+    [hidden] { display: none !important; }
+    button { display: inline-block; color: var(--button-ink); background: var(--accent); font: inherit; font-weight: 700; border: 0; border-radius: .35rem; padding: .65rem 1rem; cursor: pointer; }
     :focus-visible { outline: .2rem solid var(--accent); outline-offset: .25rem; }
   </style>
 </head>
@@ -38,18 +43,16 @@
   <main>
     <header class="eyebrow">Ori / Reset &amp; Recovery</header>
     <div class="status" role="status" aria-live="polite" aria-atomic="true">
-      <h1>{{.Title}}</h1>
-      <p>{{.Message}}</p>
+      <h1 id="reset-state-title">{{.Title}}</h1>
+      <p id="reset-state-message">{{.Message}}</p>
       {{if .ID}}<p class="id">Operation <code>{{.ID}}</code></p>{{end}}
     </div>
-    {{if .Operation.Blockers}}
-    <section aria-labelledby="blockers-heading">
+    <p id="reset-connection" role="status" hidden></p>
+    <section id="reset-blockers" aria-labelledby="blockers-heading" {{if not .Operation.Blockers}}hidden{{end}}>
       <h2 id="blockers-heading">What needs attention</h2>
-      <ul class="blockers">{{range .Operation.Blockers}}<li><strong>{{.Message}}</strong>{{.Recovery}}</li>{{end}}</ul>
+      <ul class="blockers" id="reset-blocker-list">{{range .Operation.Blockers}}<li><strong>{{.Message}}</strong>{{.Recovery}}</li>{{end}}</ul>
     </section>
-    {{end}}
-    {{if .ShowRestart}}
-    <section aria-labelledby="restart-heading">
+    <section id="reset-restart-instructions" aria-labelledby="restart-heading" {{if not .ShowRestart}}hidden{{end}}>
       <h2 id="restart-heading">How to restart Ori</h2>
       <ul>
         <li><strong>Terminal:</strong> Press Control+C in the terminal running Ori. Wait for it to exit, then rerun the same launch command with the same data folder and port.</li>
@@ -57,11 +60,9 @@
       </ul>
       <p>Keep this tab open. Do not delete <code>.ori-reset</code> or start another Ori process against this data folder while the old one is running.</p>
     </section>
-    {{end}}
-    {{if .Operation.Results}}
-    <details>
+    <details id="reset-results" {{if not .Operation.Results}}hidden{{end}}>
       <summary>Reviewed categories and checks</summary>
-      <ul>
+      <ul id="reset-result-list">
         {{range .Operation.Results}}
         <li><strong>{{categoryLabel .ID}}: {{.Outcome}}</strong>{{if .Message}} — {{.Message}}{{end}}
           {{if or .Checks .Items .Retained}}<ul>
@@ -73,11 +74,11 @@
         {{end}}
       </ul>
     </details>
-    {{end}}
     <footer>
-      <form method="get" action="/reset/status">
-        {{if .ID}}<input type="hidden" name="operation" value="{{.ID}}">{{end}}
+      <form id="reset-check" method="get" action="/reset/status">
+        {{if .ID}}<input id="reset-operation-id" type="hidden" name="operation" value="{{.ID}}" data-revision="{{.Operation.Revision}}">{{end}}
         <button type="submit">Check status</button>
+        <button id="reset-enter" type="button" hidden></button>
       </form>
     </footer>
   </main>

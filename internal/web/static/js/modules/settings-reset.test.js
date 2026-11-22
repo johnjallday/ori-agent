@@ -133,7 +133,6 @@ function harness({
       'resetOperationStatus',
       'resetOperationResults',
       'resetOperationPanel',
-      'openStartFreshSetupBtn',
       'resetCancelBtn',
       'resetCloseBtn',
       'replaySetupBtn',
@@ -156,7 +155,6 @@ function harness({
   elements.confirmResetBtn.disabled = true;
   elements.openReplaySetupBtn.hidden = true;
   elements.openGettingStartedBtn.hidden = true;
-  elements.openStartFreshSetupBtn.hidden = true;
   const calls = [],
     timers = [],
     navigation = [];
@@ -695,7 +693,6 @@ test('pending Start Fresh preserves browser data and its recovery receipt', asyn
   assert.equal(h.sessionStorage.get('oriSetupWizardResume:old'), 'old');
   assert.equal(h.storage.get('ori.reset.operation_id'), 'operation-1');
   assert.equal(h.storage.has('ori.reset.generation'), false);
-  assert.equal(h.elements.openStartFreshSetupBtn.hidden, true);
 });
 
 test('saved operation identity recovers durable status after a page load', async () => {
@@ -906,7 +903,7 @@ test('a partial plugin failure goes to the matching recovery identity', async ()
   assert.equal(h.storage.get('ori.reset.operation_id'), 'plugin-operation');
 });
 
-test('a recovered plugin reset reports verified completion per plugin', async () => {
+test('visiting Settings after a completed reset does not hijack a fresh review', async () => {
   const completed = operation('completed', [
     {
       id: 'installed_plugins',
@@ -922,9 +919,8 @@ test('a recovered plugin reset reports verified completion per plugin', async ()
   const h = harness({ storedOperation: 'plugin-operation', executeResult: completed });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.calls[0].url, '/api/reset/operations/plugin-operation');
-  assert.match(h.resultText(), /completed and its named postconditions were verified/i);
-  assert.match(h.resultText(), /Installed plugins \/ demo-linked: completed/);
-  assert.equal(h.elements.openStartFreshSetupBtn.hidden, true);
+  assert.equal(h.context.window.location.href, '/settings');
+  assert.equal(h.elements.startFreshBtn.disabled, false);
 });
 
 test('repeated reviews reuse one dialog instance so Cancel always closes it', async () => {
