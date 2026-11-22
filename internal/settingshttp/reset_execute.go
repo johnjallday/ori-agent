@@ -56,7 +56,9 @@ func (h *ResetHandler) HandleReset(w http.ResponseWriter, r *http.Request) {
 	if op.State == settingsreset.StateBlocked || op.State == settingsreset.StateInterrupted {
 		status = http.StatusConflict
 	}
+	op.Restart.Managed = op.State == settingsreset.StateAwaitingRestart && h.restart.Available()
 	writeResetOperation(w, status, op)
+	h.restart.AfterResponse(op)
 }
 
 // decodeResetRequest rejects duplicate, unknown, case-variant and mixed forms,
@@ -148,6 +150,7 @@ func (h *ResetHandler) GetOperation(w http.ResponseWriter, r *http.Request) {
 		respondResetError(w, err, nil)
 		return
 	}
+	op.Restart.Managed = op.State == settingsreset.StateAwaitingRestart && h.restart.Available()
 	writeResetOperation(w, http.StatusOK, op)
 }
 

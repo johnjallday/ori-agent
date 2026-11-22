@@ -26,6 +26,9 @@ type journal struct {
 	Operation  Operation    `json:"operation"`
 }
 
+// ValidOperationID checks the shared bounded format for operation handoffs.
+func ValidOperationID(id string) bool { return validID(id) }
+
 func validID(id string) bool {
 	if len(id) == 0 || len(id) > 128 {
 		return false

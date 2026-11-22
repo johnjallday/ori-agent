@@ -83,13 +83,20 @@
   }
 
   function report(op, ready) {
-    const key = `${op.revision}:${op.state}:${ready}`;
+    const managed = op.state === 'awaiting_restart' && op.restart?.managed === true;
+    const key = `${op.revision}:${op.state}:${ready}:${managed}`;
     // Don't reset expanded details, scroll position or announcements on every poll.
     if (rendered === key) return;
     rendered = key;
     const [heading, description, showRestart] = ready
       ? ['Reset completed', 'Ori verified the reviewed changes and is ready.']
-      : states[op.state];
+      : managed
+        ? [
+            'Restarting Ori',
+            'Ori saved the reset and will try to restart automatically. Keep this tab open. If it cannot reconnect, use the manual steps below.',
+            true
+          ]
+        : states[op.state];
     setText(title, heading);
     setText(message, description);
     document.title = `${heading} · Ori`;

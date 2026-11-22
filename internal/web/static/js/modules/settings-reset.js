@@ -203,8 +203,12 @@
         phase === 'submitting'
           ? 'Submitting reset…'
           : reviewed?.intent === 'start_fresh'
-            ? 'Start Fresh after full relaunch'
-            : 'Reset reviewed data';
+            ? reviewed.restart?.managed
+              ? 'Start Fresh and restart Ori'
+              : 'Start Fresh after full relaunch'
+            : reviewed?.restart?.managed
+              ? 'Reset and restart Ori'
+              : 'Reset reviewed data';
       confirmButton.setAttribute('aria-busy', String(phase === 'submitting'));
     }
     dismissButtons.forEach(node => {

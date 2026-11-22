@@ -12,6 +12,20 @@ import (
 // consumer, migration, importer, listener, or background service is created.
 // Unsupported hosts retain resetstate's clean-install-only behavior.
 func BeforeStores(ctx context.Context, dataDir string) (*resetstate.Lease, error) {
+	return beforeStores(ctx, dataDir, "")
+}
+
+// BeforeStoresForRestart also checks that this exact operation still awaits a
+// full process restart under the newly acquired lease. A stale launcher may
+// neither apply a different receipt nor open a clean installation by mistake.
+func BeforeStoresForRestart(ctx context.Context, dataDir, expectedOperation string) (*resetstate.Lease, error) {
+	if !ValidOperationID(expectedOperation) || !resetstate.Supported() {
+		return nil, ErrLifecycleUnavailable
+	}
+	return beforeStores(ctx, dataDir, expectedOperation)
+}
+
+func beforeStores(ctx context.Context, dataDir, expectedOperation string) (*resetstate.Lease, error) {
 	if !resetstate.Supported() {
 		return resetstate.BeforeStores(dataDir)
 	}
@@ -25,6 +39,13 @@ func BeforeStores(ctx context.Context, dataDir string) (*resetstate.Lease, error
 			_ = lease.Close()
 		}
 	}()
+	if expectedOperation != "" {
+		j, err := NewCoordinator(lease, nil, nil).load()
+		if err != nil || j == nil || j.Operation.ID != expectedOperation ||
+			j.Operation.State != StateAwaitingRestart || j.AcceptedBy == lease.Identity() {
+			return nil, ErrOperationNotFound
+		}
+	}
 	if err := RecoverBeforeStores(ctx, lease, ProductionRecoveryOptions(dataDir)); err != nil {
 		if !errors.Is(err, ErrRecoveryIncomplete) {
 			return nil, err

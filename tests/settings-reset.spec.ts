@@ -82,7 +82,7 @@ test.describe.serial('Settings reset on an owned installation', () => {
     });
   }
 
-  async function startServer() {
+  function startChild(managed = false) {
     if (child) throw new Error('owned reset server is already running');
     const port = Number(new URL(origin).port);
     const emptyPath = join(root, 'bin');
@@ -103,13 +103,22 @@ test.describe.serial('Settings reset on an owned installation', () => {
       ORI_DISABLE_EXTERNAL_MCP_IMPORT: 'true',
       NO_BROWSER: '1'
     };
-    child = spawn(binary, [], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    child = spawn(binary, managed ? ['-managed-restart'] : [], {
+      cwd: root,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
     const collect = (chunk: Buffer) => {
       output = (output + chunk.toString()).slice(-20_000);
     };
     child.stdout?.on('data', collect);
     child.stderr?.on('data', collect);
-    await waitFor('/', async response => response.status < 500);
+    return child;
+  }
+
+  async function startServer(managed = false) {
+    startChild(managed);
+    await waitFor('/health', async response => response.ok);
   }
 
   async function stopServer() {
@@ -528,5 +537,89 @@ test.describe.serial('Settings reset on an owned installation', () => {
     expect(fenced.status).toBe(503);
     expect(fenced.body).toContain('reset_pending');
     await idlePage.close();
+  });
+
+  test('a lost confirmation reply reconnects to the managed replacement', async ({
+    page,
+    request
+  }) => {
+    await stopServer();
+    await startServer(true);
+    await openSettings(page, request);
+    let stagedID = '';
+    await page.route(origin + '/api/reset', async route => {
+      const response = await route.fetch();
+      const payload = await response.json();
+      expect(response.status()).toBe(202);
+      expect(payload.operation.state).toBe('awaiting_restart');
+      expect(payload.operation.restart.managed).toBe(true);
+      stagedID = payload.operation.id;
+      await route.abort(); // Only the delivery is lost; the real process staged and drained.
+    });
+    await page.locator('#resetOnboarding').check();
+    await page.locator('#resetAppBtn').click();
+    await reviewDialogReady(page);
+    await page.locator('#resetConfirmInput').fill('RESET');
+    await expect(page.locator('#confirmResetBtn')).toHaveText('Reset and restart Ori');
+    await page.locator('#confirmResetBtn').click();
+    await expect(page.getByRole('button', { name: 'Back to Ori' })).toBeVisible({
+      timeout: 20_000
+    });
+    expect(stagedID).toBeTruthy();
+    expect(page.url()).toBe(`${origin}/reset/status?operation=${stagedID}`);
+    expect(await page.evaluate(() => localStorage.getItem('ori.reset.operation_id'))).toBe(
+      stagedID
+    );
+    const ready = await request.get(`${origin}/api/reset/operations/${stagedID}`);
+    expect(ready.headers()['x-ori-reset-ready']).toBe('1');
+    expect((await ready.json()).success).toBe(true);
+  });
+
+  test('an intentional managed stop does not replace the child or consume its staged receipt', async ({
+    request
+  }) => {
+    const query = 'intent=selected_data&category=setup_steps';
+    const preview = await request.get(`${origin}/api/reset/preview?${query}`);
+    expect(preview.ok()).toBeTruthy();
+    const reviewed = await preview.json();
+    expect(reviewed.restart.managed).toBe(true);
+    const staged = await request.post(`${origin}/api/reset`, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      data: { preview_id: reviewed.id, request_id: 'intentional-shutdown', confirmation: 'RESET' }
+    });
+    expect(staged.status()).toBe(202);
+    await stopServer(); // Stop the supervisor while the child is still delivering its reply.
+    await expect(request.get(origin + '/health', { timeout: 1000 })).rejects.toThrow();
+    const journal = JSON.parse(readFileSync(join(dataDir, '.ori-reset', 'operation.json'), 'utf8'));
+    expect(journal.operation).toMatchObject({
+      id: reviewed.operation_id,
+      state: 'awaiting_restart'
+    });
+    await startServer();
+    const recovered = await request.get(`${origin}/api/reset/operations/${reviewed.operation_id}`);
+    expect((await recovered.json()).success).toBe(true);
+  });
+
+  test('managed startup does not evict an unrelated occupied port', async () => {
+    await stopServer();
+    const address = new URL(origin);
+    const unrelated = createServer(socket => {
+      socket.once('data', () =>
+        socket.end('HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\nunrelated')
+      );
+    });
+    await new Promise<void>((resolve, reject) => {
+      unrelated.once('error', reject);
+      unrelated.listen(Number(address.port), address.hostname, resolve);
+    });
+    try {
+      const owned = startChild(true);
+      const code = await new Promise(resolve => owned.once('exit', resolve));
+      expect(code).toBe(1);
+      expect(output).toContain('Cannot bind managed Ori server');
+      expect(await (await fetch(origin + '/health')).text()).toBe('unrelated');
+    } finally {
+      await new Promise<void>(resolve => unrelated.close(() => resolve()));
+    }
   });
 });

@@ -82,11 +82,12 @@ const (
 	RestartProcessRelaunch RestartMode = "process_relaunch"
 )
 
-// No managed-restart mode is exposed until a host can prove safe teardown.
-// In particular, a menubar server stop/start is not a process relaunch.
+// Restart still applies only on a full process relaunch. Managed is a live
+// HTTP capability added to response copies; it is never persisted as authority.
 type RestartInfo struct {
 	Mode         RestartMode `json:"mode"`
 	Instructions string      `json:"instructions,omitempty"`
+	Managed      bool        `json:"managed,omitempty"`
 }
 
 type Preview struct {
