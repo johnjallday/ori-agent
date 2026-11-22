@@ -70,13 +70,13 @@ func superviseResetServer(ctx context.Context, spec managedServerSpec) error {
 			return nil // An intentional stop never launches a replacement.
 		}
 		if err != nil {
-			return fmt.Errorf("Ori server stopped: %w; check the error above and relaunch the same installation manually", err)
+			return fmt.Errorf("server stopped: %w; check the error above and relaunch the same Ori installation manually", err)
 		}
 		if requested == "" {
 			return nil // Ordinary child exit.
 		}
 		if requested == expected {
-			return errors.New("Ori refused a repeated restart for the same reset; relaunch the same installation manually")
+			return errors.New("refused a repeated restart for the same reset; relaunch the same installation manually")
 		}
 		// One replacement per operation. Any failure to start/own the correct
 		// root or address exits the supervisor instead of respawning.

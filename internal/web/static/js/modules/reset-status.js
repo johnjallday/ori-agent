@@ -201,7 +201,7 @@
     } catch {
       if (paused) return;
       showConnection(
-        'Waiting to reconnect. This tab will check again. If Ori stays offline, check the launcher or terminal for startup errors.'
+        'Waiting to reconnect. This tab will check again. If Ori stays offline, check the Ori menu or terminal, then follow the manual restart steps.'
       );
       entry.hidden = true;
     } finally {

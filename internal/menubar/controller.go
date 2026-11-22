@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/server"
+	"github.com/johnjallday/ori-agent/internal/settingsreset"
 )
 
 // ServerStatus represents the current state of the server
@@ -63,6 +64,7 @@ type Controller struct {
 	// Runtime construction is separated from host lifecycle so isolated tests
 	// can exercise real stop/start without native credentials or provider discovery.
 	runtimeFactory func(addr string) (*server.Server, *http.Server, error)
+	resetRestart   *settingsreset.RestartHandoff
 }
 
 // NewController creates a new server controller
@@ -80,6 +82,11 @@ func NewControllerWithResetLease(port int, lease *resetstate.Lease) *Controller 
 			return newServerRuntime(addr, lease)
 		},
 	}
+}
+
+// SetResetRestartHandoff is called before the menu or runtime starts.
+func (c *Controller) SetResetRestartHandoff(handoff *settingsreset.RestartHandoff) {
+	c.resetRestart = handoff
 }
 
 func (c *Controller) enterRuntime() (func(), error) {
@@ -116,6 +123,22 @@ func (c *Controller) StartServerWithPreflight(ctx context.Context, preflight fun
 
 // StartServer starts the ori-agent HTTP server
 func (c *Controller) StartServer(ctx context.Context) error {
+	return c.startServer(ctx, nil)
+}
+
+// StartAfterReset takes an already bound listener from pre-store recovery. The
+// listener is owned by the controller on call, including on construction failure.
+func (c *Controller) StartAfterReset(ctx context.Context, listener net.Listener) error {
+	return c.startServer(ctx, listener)
+}
+
+func (c *Controller) startServer(ctx context.Context, listener net.Listener) error {
+	transferred := false
+	defer func() {
+		if listener != nil && !transferred {
+			_ = listener.Close()
+		}
+	}()
 	c.statusMu.Lock()
 
 	// A timed-out caller is not proof construction stopped. Nor may a failed
@@ -138,7 +161,7 @@ func (c *Controller) StartServer(ctx context.Context) error {
 	}
 
 	// Ownership/fencing must be checked before even inspecting a port.
-	if !c.isPortAvailable() {
+	if listener == nil && !c.isPortAvailable() {
 		release()
 		c.status = StatusError
 		c.errorMsg = fmt.Sprintf("Port %d is already in use", c.port)
@@ -158,7 +181,8 @@ func (c *Controller) StartServer(ctx context.Context) error {
 
 	// Start server in goroutine. Shutdown is driven by httpServer.Shutdown
 	// and server.Shutdown in StopServer, not by context cancellation.
-	go c.runServer(release, generation) // The constructor, not the waiting caller, owns release.
+	transferred = true
+	go c.runServer(release, generation, listener) // The constructor, not the waiting caller, owns release.
 
 	return c.waitForRunning(ctx, generation)
 }
@@ -344,8 +368,11 @@ func newServerRuntime(addr string, lease *resetstate.Lease) (*server.Server, *ht
 }
 
 // runServer runs the HTTP server in a goroutine
-func (c *Controller) runServer(release func(), generation uint64) {
+func (c *Controller) runServer(release func(), generation uint64, listener net.Listener) {
 	defer release()
+	if listener != nil {
+		defer func() { _ = listener.Close() }()
+	}
 	port := c.GetPort()
 	logger.Debug("Starting ori-agent server", logger.Fields{"port": port})
 
@@ -367,6 +394,9 @@ func (c *Controller) runServer(release func(), generation uint64) {
 		return
 	}
 
+	if c.resetRestart != nil {
+		srv.Handlers.Reset.SetRestartHandoff(c.resetRestart)
+	}
 	c.statusMu.Lock()
 	c.server = srv
 	c.httpServer = &server.HTTPServerWrapper{Server: httpServer}
@@ -379,7 +409,11 @@ func (c *Controller) runServer(release func(), generation uint64) {
 	logger.Info("Server running", logger.Fields{"port": port})
 
 	// Start HTTP server (blocks until shutdown)
-	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	serve := httpServer.ListenAndServe
+	if listener != nil {
+		serve = func() error { return httpServer.Serve(listener) }
+	}
+	if err := serve(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		c.statusMu.Lock()
 		if c.generation != generation {
 			c.statusMu.Unlock()

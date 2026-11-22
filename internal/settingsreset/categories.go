@@ -30,7 +30,7 @@ func definition(id CategoryID) (Definition, bool) {
 	case CategoryInstalledPlugins:
 		return Definition{id, "Installed plugins", "Uninstall every plugin this Ori installation has installed: its registry record, namespaced MCP registrations, copied personal skills, Workspace Surface state and sessions, managed clones and downloaded artifacts. Keep marketplace registrations, linked source folders, unrelated personal skills and MCP servers, workspace files/history/plugin bindings, credentials and external authentication. Plugin-backed workspace data stays readable with its provider shown as unavailable.", []string{"installed_plugins_absent", "plugin_components_absent", "unrelated_integrations_preserved"}}, true
 	case CategoryIdentityProgress:
-		return Definition{id, "Identity, setup & progress", "Return Ori's app-state identity, profile, setup, assistant evolution, Getting Started progress and app preferences to canonical first-run values.", []string{"first_run_state_default"}}, true
+		return Definition{id, "Identity, setup & progress", "Return Ori's app-state identity, profile, setup, assistant evolution, Getting Started progress and app preferences to canonical first-run values. Keep the menubar server port and launch-at-login preference.", []string{"first_run_state_default"}}, true
 	case CategoryAppConfiguration:
 		return Definition{id, "Supplemental app configuration", "Remove custom model categories and location zones. Built-in defaults may be recreated after relaunch.", []string{"supplemental_configuration_default"}}, true
 	case CategoryIntegrations:
