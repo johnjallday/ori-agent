@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { WorkspaceCommandView } from './workspace-command.js';
 import { FIRST_VISIT_MISSIONS } from './hq-first-visit.js';
 import { readNoteDraft, writeNoteDraft } from './hq-first-note.js';
-import { offerOnEntry } from './hq-first-visit-card.js';
+import { offerOnEntry } from './hq-guided-entry.js';
 import { HQQuickCapture } from './hq-quick-capture.js';
 
 const missionRows = (note = 'open') =>
@@ -15,7 +15,7 @@ const notes = { status: 'connected', source: { id: 'notes', origin: 'created_by_
 function fixture() {
   globalThis.document = {
     getElementById: () => null,
-    body: { dataset: { hqFirstVisit: 'pending' } }
+    body: { dataset: { hqFirstVisit: 'pending', guidedHq: 'hq' } }
   };
   const owner = new WorkspaceCommandView({ workspaceId: 'hq', workspace: { id: 'hq' }, tasks: [] });
   owner.isPersonalHQ = () => true;
@@ -63,7 +63,8 @@ test('compact choices use real handoffs, with no duplicate editor, quota, avatar
   assert.match(html, /Scan recent apps/);
   assert.doesNotMatch(html, /href=/);
   await card.act('folder');
-  assert.match(card.html(), /suggest=documents/);
+  assert.match(card.html(), /folder=guide/);
+  assert.doesNotMatch(card.html(), /suggest=documents/);
   assert.doesNotMatch(html, /textarea|<input|avatar|Tickets|of 3|aria-modal/);
   assert.match(html, /aria-describedby="hq-suggestions-hint"/);
   card.sheet = true;

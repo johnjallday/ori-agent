@@ -15,10 +15,13 @@ const FINISH = '/api/personal-hq/first-visit-state';
 const AXE_URL = 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js';
 let overviewPath = '';
 let mapPath = '';
+let hqID = '';
 
 test.describe.configure({ mode: 'serial' });
 test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
+  // Tips run independently of the automatic invitation. Visit as a returning browser.
+  await page.addInitScript(id => localStorage.setItem(`ori.hq.guidedOffered.${id}`, '1'), hqID);
 });
 
 async function json(
@@ -92,6 +95,7 @@ test.beforeAll(async ({ request }) => {
   });
   const status = (await json(request, 'get', '/api/personal-hq/status')).status;
   expect(status.first_visit_state).toBe('pending');
+  hqID = status.workspace_id;
   const base = `/workspaces/${encodeURIComponent(status.workspace.folder_slug)}`;
   overviewPath = `${base}?mode=details`;
   mapPath = `${base}?mode=map`;
@@ -182,11 +186,9 @@ test.describe('Overview, desktop', () => {
     // clear of the panel's own header buttons.
     await expect(notes.locator('[data-hq-tip-mark]')).toHaveCount(0);
     const ring = await mark(page, 'notes').boundingBox();
-    const connection = await page
-      .locator('[data-cmd-modal-action="notes-connection"]')
-      .boundingBox();
+    const connection = await page.getByRole('link', { name: 'Open My Notes' }).boundingBox();
     expect(ring!.x).toBeGreaterThanOrEqual(connection!.x + connection!.width);
-    await notes.hover({ position: { x: 40, y: 120 } });
+    await notes.hover({ position: { x: 40, y: 30 } });
     await page.waitForTimeout(600);
     await expect(tip(page)).toBeHidden();
     await mark(page, 'notes').hover();
@@ -472,7 +474,7 @@ test.describe('Map (Flow), narrow', () => {
 
 const panel = (page: Page) => page.locator('#personalAssistantPanel');
 const greeting = (page: Page) => page.locator('#personalAssistantHQGreeting');
-const choice = (page: Page, name: string) => page.locator(`[data-hq-greeting-choice="${name}"]`);
+const choice = (page: Page, name: string) => page.locator(`[data-hq-firstvisit-action="${name}"]`);
 
 // The drawer remembers it was open across a reload in the same tab, and then its
 // launcher is not shown: open it only when it is not open already.
@@ -488,34 +490,19 @@ async function openDrawer(page: Page) {
 test.describe('Drawer greeting', () => {
   test.use({ viewport: { width: 1280, height: 900 } });
 
-  test('arriving with the drawer closed leaves it closed; opening it shows the greeting and touches no focus', async ({
+  test('arriving with the drawer closed leaves it closed; opening it does not add a second welcome', async ({
     page
   }) => {
     await page.goto(overviewPath);
     await expect(page.locator('body')).toHaveAttribute('data-hq-first-visit', 'pending');
     await expect(page.locator('.ws-hq-tip-mark')).toHaveCount(4);
-    // The feature never opens the drawer for its greeting.
+    // The chooser never opens the drawer.
     await expect(panel(page)).toBeHidden();
     expect(
       await page.evaluate(() => sessionStorage.getItem('ori.personalAssistant.panelOpen') || '')
     ).toBe('');
     await openDrawer(page);
-    await expect(greeting(page)).toBeVisible();
-    await expect(greeting(page)).toContainText('Your HQ is ready.');
-    await expect(greeting(page)).toContainText(/Notes.*Daily Brief.* are already running\./);
-    await expect(greeting(page)).toContainText(
-      "Point at one on the page and I'll tell you what it does."
-    );
-    await expect(greeting(page)).toContainText(
-      'Email and Calendar Ops are off until you set them up.'
-    );
-    await expect(greeting(page)).toContainText('Where would you like to start?');
-    await expect(greeting(page)).toContainText('Or just ask me. These stay under Things to try.');
-    // The three existing suggestions, and the existing "choose another folder" link.
-    await expect(choice(page, 'folder')).toContainText('Explore Documents');
-    await expect(choice(page, 'brief')).toContainText('Read your Daily Brief');
-    await expect(choice(page, 'note')).toContainText('Save an idea');
-    await expect(choice(page, 'folder-other')).toHaveText('Choose another folder');
+    await expect(greeting(page)).toBeHidden();
     // It never took focus; and it is a card, not a message in the conversation.
     expect(
       await page.evaluate(() =>
@@ -534,53 +521,31 @@ test.describe('Drawer greeting', () => {
     await expect(page.locator('.ws-hq-tip-mark')).toHaveCount(4);
   });
 
-  test('the choices reach their owners: the folder links, the Daily Brief above the drawer, "Save an idea" in the page', async ({
-    page
-  }) => {
+  test('Daily Brief and note capture keep their normal Overview surfaces', async ({ page }) => {
     await page.goto(overviewPath);
     await expect(page.locator('.ws-hq-tip-mark')).toHaveCount(4);
-    await openDrawer(page);
-    await expect(greeting(page)).toBeVisible();
-    await expect(choice(page, 'folder')).toHaveAttribute(
-      'href',
-      '/?panel=today&folder=show&suggest=documents'
-    );
-    await expect(choice(page, 'folder-other')).toHaveAttribute('href', '/?panel=today&folder=show');
-
-    // The Daily Brief opens above the drawer, which stays; closing it returns to the choice.
-    await choice(page, 'brief').click();
+    await page.getByRole('button', { name: /^Daily Brief:/ }).click();
     const brief = page.locator('.ws-cmd-modal-panel.is-daily-brief');
     await expect(brief).toBeVisible();
-    await expect(panel(page)).toBeVisible();
+    await expect(panel(page)).toBeHidden();
     await page.getByRole('button', { name: 'Close Daily Brief' }).click();
     await expect(brief).toBeHidden();
-    await expect(choice(page, 'brief')).toBeFocused();
-
-    // "Save an idea" is drawn in the page the drawer covers: the drawer closes first.
-    await choice(page, 'note').click();
+    await page.getByRole('textbox', { name: /Save to My Notes/ }).focus();
     await expect(panel(page)).toBeHidden();
-    await expect(page.locator('[data-cmd-hq-host="notes"] [data-notes-capture]')).toBeFocused();
+    await expect(page.getByRole('textbox', { name: /Save to My Notes/ })).toBeFocused();
     expect(
       await page.evaluate(() => sessionStorage.getItem('ori.personalAssistant.panelOpen') || '')
     ).toBe('');
   });
 
-  test('on a short screen the greeting opens at its top, with its author and heading in view', async ({
-    page
-  }) => {
+  test('on a short screen the chooser title and dismissal are in view', async ({ page }) => {
     // The drawer opens pinned to the end of its content; a greeting taller than
     // the pane would lose its top. Reproduced at a 640px-tall window.
     await page.setViewportSize({ width: 1280, height: 640 });
     await page.goto(overviewPath);
-    await openDrawer(page);
-    await expect(greeting(page)).toBeVisible();
-    await expect(greeting(page).locator('.personal-assistant-message__author')).toBeInViewport();
-    await expect(
-      greeting(page).getByRole('heading', { name: 'Your HQ is ready.' })
-    ).toBeInViewport();
-    expect(
-      await page.evaluate(() => document.getElementById('personalAssistantScroll')!.scrollTop)
-    ).toBe(0);
+    await page.getByRole('button', { name: 'Things to try' }).click();
+    await expect(page.locator('#hq-suggestions-title')).toBeInViewport();
+    await expect(page.getByRole('button', { name: 'Maybe later' })).toBeInViewport();
     // It did not take focus by being scrolled to.
     expect(
       await page.evaluate(() =>
@@ -589,33 +554,25 @@ test.describe('Drawer greeting', () => {
     ).toBe(false);
   });
 
-  test('"Save an idea" from the Map goes to the Details page and lands in the capture box', async ({
-    page
-  }) => {
+  test('returning to Overview from Map still offers note capture', async ({ page }) => {
     await page.goto(mapPath);
     await expect(page.locator('.ws-cmd-map-shell.is-flow')).toBeVisible();
-    await openDrawer(page);
-    await expect(greeting(page)).toBeVisible();
-    await choice(page, 'note').click();
+    await page.locator('[data-cmd-view-mode="details"]').click();
     await expect(panel(page)).toBeHidden();
     await expect(page.locator('[data-cmd-view-mode="details"]')).toHaveAttribute(
       'aria-pressed',
       'true'
     );
-    // The Notes panel was not on screen yet: the capture box is made later, and
-    // takes the focus when it is.
-    await expect(page.locator('[data-cmd-hq-host="notes"] [data-notes-capture]')).toBeFocused();
+    await expect(page.getByRole('textbox', { name: /Save to My Notes/ })).toBeVisible();
   });
 
-  test('a message takes the greeting away, and it stays away while that conversation has it', async ({
-    page
-  }) => {
+  test('a conversation does not acquire a second greeting on drawer reopen', async ({ page }) => {
     await page.route('**/api/chat', route =>
       route.fulfill({ json: { response: 'Fixture reply.' } })
     );
     await page.goto(overviewPath);
     await openDrawer(page);
-    await expect(greeting(page)).toBeVisible();
+    await expect(greeting(page)).toBeHidden();
     await page.locator('#personalAssistantInput').fill('What should I do first?');
     await page.locator('#personalAssistantSend').click();
     await expect(greeting(page)).toBeHidden();
@@ -631,23 +588,19 @@ test.describe('Drawer greeting', () => {
     await expect(page.locator('.ws-hq-tip-mark')).toHaveCount(4);
   });
 
-  test('on a phone the choices are tappable and the drawer closes only for "Save an idea"', async ({
-    page
-  }) => {
+  test('on a phone chooser actions fit the sheet and never open the drawer', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(overviewPath);
     await expect(page.locator('.ws-hq-tip-mark')).toHaveCount(4);
-    await openDrawer(page);
-    await expect(greeting(page)).toBeVisible();
+    await page.getByRole('button', { name: 'Things to try' }).click();
     expect(await sideways(page)).toBeLessThanOrEqual(0);
-    for (const name of ['folder', 'brief', 'note']) {
+    for (const name of ['folder', 'email', 'apps']) {
       const box = (await choice(page, name).boundingBox())!;
       expect(box.height, name).toBeGreaterThanOrEqual(44);
       expect(box.x + box.width, name + ' inside the screen').toBeLessThanOrEqual(390);
     }
-    await choice(page, 'note').click();
+    await page.getByRole('button', { name: 'Maybe later' }).click();
     await expect(panel(page)).toBeHidden();
-    await expect(page.locator('[data-cmd-hq-host="notes"] [data-notes-capture]')).toBeFocused();
   });
 
   for (const theme of ['light', 'dark']) {
@@ -657,23 +610,19 @@ test.describe('Drawer greeting', () => {
         value => document.documentElement.setAttribute('data-bs-theme', value),
         theme
       );
-      await openDrawer(page);
-      await expect(greeting(page)).toBeVisible();
-      await accessible(page, ['#personalAssistantHQGreeting']);
+      await page.getByRole('button', { name: 'Things to try' }).click();
+      await accessible(page, ['#hq-suggestions']);
     });
   }
 });
 
-test('Hide suggestions takes the greeting away with the drawer open, and a done HQ never shows it', async ({
+test('completing the mission-driven visit retires tips without opening a second welcome', async ({
   page
 }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(overviewPath);
   await openDrawer(page);
-  await expect(greeting(page)).toBeVisible();
-  // Hide suggestions with the drawer left open. On a desktop the open drawer
-  // covers the header's "Things to try" door, so this calls the very method the
-  // Hide button calls (it finishes the visit on the server, then repaints).
+  await expect(greeting(page)).toBeHidden();
   await page.evaluate(() => (window as any).workspaceCommand.firstVisit.finish());
   await expect(greeting(page)).toBeHidden();
   await expect(panel(page)).toBeVisible();
