@@ -7,14 +7,16 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/johnjallday/ori-agent/internal/economy"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/progression"
 )
 
 // Handler serves the progression API.
 type Handler struct {
-	engine     *progression.Engine
-	afterReset func(context.Context) error
+	engine          *progression.Engine
+	afterReset      func(context.Context) error
+	filingExpansion func(context.Context) economy.ExpansionQuote
 }
 
 // NewHandler creates a progression HTTP handler backed by the given engine.
@@ -29,6 +31,25 @@ func (h *Handler) SetAfterReset(fn func(context.Context) error) {
 	}
 }
 
+// SetFilingExpansion adds the optional read-only HQ offer to the mission board.
+// It is not part of the mission graph and cannot lock or resolve a mission.
+func (h *Handler) SetFilingExpansion(read func(context.Context) economy.ExpansionQuote) {
+	h.filingExpansion = read
+}
+
+func (h *Handler) respondStatus(w http.ResponseWriter, r *http.Request) {
+	view := struct {
+		progression.Status
+		FilingExpansion *economy.ExpansionQuote `json:"filing_expansion,omitempty"`
+	}{Status: h.engine.Status()}
+	if h.filingExpansion != nil {
+		quote := h.filingExpansion(r.Context())
+		view.FilingExpansion = &quote
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	_ = orihttp.RespondSuccess(w, view)
+}
+
 // GetStatus returns the full quest graph with derived status and current tier.
 // GET /api/progression
 func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
@@ -39,7 +60,7 @@ func (h *Handler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondServiceUnavailable(w, "progression is not available")
 		return
 	}
-	_ = orihttp.RespondSuccess(w, h.engine.Status())
+	h.respondStatus(w, r)
 }
 
 // DismissRequest toggles whether the quest-log widget is hidden.
@@ -65,7 +86,7 @@ func (h *Handler) Dismiss(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondInternalError(w, "failed to update progression: "+err.Error())
 		return
 	}
-	_ = orihttp.RespondSuccess(w, h.engine.Status())
+	h.respondStatus(w, r)
 }
 
 // SkipRequest identifies which optional quest to skip.
@@ -96,7 +117,7 @@ func (h *Handler) Skip(w http.ResponseWriter, r *http.Request) {
 	err := h.engine.Skip(req.QuestID)
 	switch {
 	case err == nil:
-		_ = orihttp.RespondSuccess(w, h.engine.Status())
+		h.respondStatus(w, r)
 	case errors.Is(err, progression.ErrQuestNotFound):
 		_ = orihttp.RespondNotFound(w, err.Error())
 	case errors.Is(err, progression.ErrQuestNotOptional):
@@ -126,5 +147,5 @@ func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	_ = orihttp.RespondSuccess(w, h.engine.Status())
+	h.respondStatus(w, r)
 }

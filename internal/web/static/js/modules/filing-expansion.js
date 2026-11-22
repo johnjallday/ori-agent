@@ -1,0 +1,103 @@
+import { FOLDER_QUEST_ACTION_URL } from './personal-assistant-folder.js';
+
+const FILING_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\?panel=file-janitor$/;
+const TICKETS_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\?panel=tasks$/;
+const internalLink = url => typeof url === 'string' && /^\/(?!\/)[^\\\s]*$/.test(url);
+const craftAmount = value => Number.isSafeInteger(value) && value >= 0;
+
+export function filingExpansionView(status) {
+  const quote = status?.filing_expansion;
+  if (!quote || ['disabled', 'needs_hq'].includes(quote.state)) return { visible: false };
+
+  const view = {
+    visible: true,
+    title: 'Build a Filing workspace',
+    detail:
+      'Put Filing on your map. Choose Downloads or another folder later, and approve a review of file names and metadata separately.',
+    balance: craftAmount(quote.balance) ? `You have ${quote.balance} Craft.` : '',
+    free: { label: 'Show a folder for free', href: FOLDER_QUEST_ACTION_URL }
+  };
+  if (quote.state === 'already_built') {
+    const destinations = (quote.destinations || []).filter(row => FILING_ROUTE.test(row.route));
+    if (destinations.length) {
+      return {
+        ...view,
+        title:
+          destinations.length === 1 ? 'Open your Filing workspace' : 'Choose a Filing workspace',
+        detail: 'Filing is already on your map. Open an existing workspace without spending Craft.',
+        destinations
+      };
+    }
+  }
+  if (
+    !['affordable', 'insufficient'].includes(quote.state) ||
+    ![quote.effective_cost, quote.base_cost, quote.balance].every(craftAmount)
+  ) {
+    return {
+      ...view,
+      message: 'A build price is unavailable right now. You can still show a folder for free.'
+    };
+  }
+  view.price = quote.creative
+    ? `0 Craft in Creative Mode (normally ${quote.base_cost}).`
+    : `${quote.effective_cost} Craft to build.`;
+  if (quote.state === 'insufficient') {
+    view.message = `You need ${quote.effective_cost - quote.balance} more Craft.`;
+    const eligible = (status.missions || []).find(
+      mission =>
+        mission.reward_craft > 0 &&
+        !mission.locked &&
+        !mission.in_progress &&
+        !['completed', 'skipped'].includes(mission.status) &&
+        internalLink(mission.action_url)
+    );
+    if (eligible) {
+      view.earn = { label: `Earn Craft: ${eligible.title}`, href: eligible.action_url };
+    } else if (TICKETS_ROUTE.test(quote.manual_earn_url)) {
+      view.earn = { label: 'Earn Craft by running a ticket by hand', href: quote.manual_earn_url };
+    }
+  }
+  return view;
+}
+
+export function renderFilingExpansion(box, view, startFirstLook, firstLookURL) {
+  if (!box) return;
+  const signature = JSON.stringify(view);
+  if (box.dataset.view === signature) return;
+  box.dataset.view = signature;
+  box.hidden = !view.visible;
+  if (box.hidden) return;
+  const el = role => box.querySelector(`[data-role="${role}"]`);
+  const text = (role, value) => {
+    const node = el(role);
+    node.textContent = value || '';
+    node.hidden = !value;
+  };
+  text('expansion-title', view.title);
+  text('expansion-detail', view.detail);
+  text('expansion-price', [view.price, view.balance, view.message].filter(Boolean).join(' '));
+  const earn = el('expansion-earn');
+  earn.hidden = !view.earn;
+  if (view.earn) {
+    earn.href = view.earn.href;
+    earn.textContent = view.earn.label;
+  }
+  earn.onclick = view.earn?.href.startsWith(firstLookURL) ? startFirstLook : null;
+  el('expansion-free').href = view.free.href;
+  const destinations = el('expansion-destinations');
+  const routes = view.destinations || [];
+  if (destinations.dataset.routes !== JSON.stringify(routes)) {
+    destinations.dataset.routes = JSON.stringify(routes);
+    destinations.replaceChildren(
+      ...routes.map(row => {
+        const item = box.ownerDocument.createElement('li');
+        const link = box.ownerDocument.createElement('a');
+        link.href = row.route;
+        link.textContent = `Open ${row.name}`;
+        item.append(link);
+        return item;
+      })
+    );
+  }
+  destinations.hidden = !routes.length;
+}

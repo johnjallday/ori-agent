@@ -90,6 +90,7 @@ func (b *ServerBuilder) initializeProgression() {
 	}
 
 	b.progressionHandler = progressionhttp.NewHandler(engine)
+	b.progressionHandler.SetFilingExpansion(b.filingExpansionQuote)
 }
 
 // starterMissionsReconcileKey names the one-time grandfathering pass for the

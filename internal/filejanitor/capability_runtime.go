@@ -50,13 +50,15 @@ func (r *CapabilityRuntime) HasConfiguredJanitorState(workspaceID string) bool {
 	if r == nil || r.service == nil || r.service.store == nil {
 		return false
 	}
-	settings, err := r.service.store.LoadSettings(workspaceID)
-	if err != nil {
-		// Unreadable state is not evidence either way. Reporting true here would
-		// migrate a workspace on the strength of an I/O error.
-		return false
-	}
-	return settings.IsSetUp()
+	configured, err := r.service.HasConfiguredSetup(workspaceID)
+	return err == nil && configured
+}
+
+// HasConfiguredSetup reads consent records only. It does not probe or list the
+// selected folder, or try to repair readiness for a revoked or missing root.
+func (s *Service) HasConfiguredSetup(workspaceID string) (bool, error) {
+	settings, err := s.store.LoadSettings(workspaceID)
+	return err == nil && settings.IsSetUp(), err
 }
 
 // CapabilityStatus derives the File Janitor station/card status for a workspace.

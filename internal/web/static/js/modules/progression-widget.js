@@ -27,6 +27,8 @@
 // toast-suppression decisions without a DOM.
 
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
+import { filingExpansionView, renderFilingExpansion } from './filing-expansion.js';
+import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 import {
   FOLDER_QUEST_ACTION_URL,
   folderOfferView,
@@ -430,6 +432,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
   let trigger = null; // #cockpitQuestsToggle — the always-available compact entry point.
   let knownCompleted = null; // Set of completed quest IDs; null until first load.
   let knownTierComplete = {}; // tier number -> bool, from the previous render.
+  let statusRevision = 0;
 
   function el(role) {
     return widget ? widget.querySelector(`[data-role="${role}"]`) : null;
@@ -529,6 +532,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
     button.disabled = true;
     try {
       const status = await postJSON('/api/progression/skip', { quest_id: questID });
+      statusRevision++;
       render(status);
     } catch (_) {
       button.disabled = false;
@@ -601,17 +605,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
             openLockedAction(view.lockedAction);
           }
         : view.inPlace
-          ? event => {
-              event.preventDefault();
-              const folder = window.PersonalAssistantFolder;
-              if (folder && typeof folder.startFirstLook === 'function') {
-                void folder
-                  .startFirstLook()
-                  .then(() => lastStatus && renderFirstMission(lastStatus));
-              } else {
-                window.location.assign('/?panel=today');
-              }
-            }
+          ? startFirstLook
           : null;
     }
     if (actionLabel) actionLabel.textContent = view.actionLabel;
@@ -621,6 +615,16 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
     }
     renderFirstMissionOffer(view);
     mission.hidden = false;
+  }
+
+  function startFirstLook(event) {
+    event.preventDefault();
+    const folder = window.PersonalAssistantFolder;
+    if (folder && typeof folder.startFirstLook === 'function') {
+      void folder.startFirstLook().then(() => lastStatus && renderFirstMission(lastStatus));
+    } else {
+      window.location.assign('/?panel=today');
+    }
   }
 
   // The assistant's folder offer, as last announced by personal-assistant-
@@ -786,6 +790,12 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
   function render(status) {
     if (!widget) return;
     lastStatus = status;
+    renderFilingExpansion(
+      el('filing-expansion'),
+      filingExpansionView(status),
+      startFirstLook,
+      FIRST_LOOK_ACTION_URL
+    );
 
     const current = currentTier(status);
 
@@ -856,10 +866,12 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
   }
 
   async function refresh() {
+    const revision = ++statusRevision;
     try {
       const onboardingStatus = await loadOnboardingStatus();
       if (!onboardingGateDecision(onboardingStatus).allowWorkspaceHydration) return;
       const status = await fetchStatus();
+      if (revision !== statusRevision) return;
       announceChanges(status);
       render(status);
     } catch (_) {
@@ -900,6 +912,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
       if (document.visibilityState === 'visible') refresh();
     });
     window.addEventListener('ori:progression-refresh', refresh);
+    window.addEventListener(ECONOMY_CHANGED_EVENT, refresh);
     // The chooser announces every offer it loads or decides; the card
     // follows without a status fetch.
     document.addEventListener('personal-assistant:folder-offer', event => {
