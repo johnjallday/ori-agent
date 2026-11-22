@@ -23,7 +23,8 @@ type Store interface {
 	Get(ctx context.Context, userID, id string) (*FollowUp, error)
 	GetByDedupKey(ctx context.Context, userID, dedupKey string) (*FollowUp, error)
 	List(ctx context.Context, f Filter) ([]*FollowUp, error)
-	Update(ctx context.Context, f *FollowUp) error
+	Update(ctx context.Context, f *FollowUp, expected time.Time) error
+	SnoozeReviewed(ctx context.Context, review ReviewedSnooze, updatedAt time.Time) (*FollowUp, error)
 	Delete(ctx context.Context, userID, id string) error
 }
 
@@ -100,12 +101,13 @@ func (s *Service) Capture(ctx context.Context, in CaptureInput) (*FollowUp, erro
 		existing, err := s.store.GetByDedupKey(ctx, in.UserID, dedupKey)
 		if err == nil && existing != nil {
 			if existing.IsOpen() {
+				revision := existing.UpdatedAt
 				existing.Title = title
 				if d := Truncate(in.Detail, MaxDetailLen); d != "" {
 					existing.Detail = d
 				}
-				existing.UpdatedAt = now
-				if err := s.store.Update(ctx, existing); err != nil {
+				existing.UpdatedAt = nextUpdatedAt(now, revision)
+				if err := s.store.Update(ctx, existing, revision); err != nil {
 					return nil, err
 				}
 				s.notifyChanged(in.UserID)
@@ -183,11 +185,12 @@ func (s *Service) transition(ctx context.Context, userID, id string, fn func(*Fo
 	if err != nil {
 		return nil, err
 	}
+	revision := f.UpdatedAt
 	if err := fn(f); err != nil {
 		return nil, err
 	}
-	f.UpdatedAt = s.now().UTC()
-	if err := s.store.Update(ctx, f); err != nil {
+	f.UpdatedAt = nextUpdatedAt(s.now(), revision)
+	if err := s.store.Update(ctx, f, revision); err != nil {
 		return nil, err
 	}
 	s.notifyChanged(userID)
@@ -283,10 +286,14 @@ func (s *Service) Wake(ctx context.Context) (int, error) {
 	woken := 0
 	for _, f := range items {
 		if f.SnoozedUntil != nil && !f.SnoozedUntil.After(now) && s.admitsAutomatic(ctx, f.WorkspaceID) {
+			revision := f.UpdatedAt
 			f.Status = StatusActive
 			f.SnoozedUntil = nil
-			f.UpdatedAt = now
-			if err := s.store.Update(ctx, f); err != nil {
+			f.UpdatedAt = nextUpdatedAt(now, revision)
+			if err := s.store.Update(ctx, f, revision); err != nil {
+				if errors.Is(err, ErrConflict) {
+					continue // A newer transition wins; the next pass reads it fresh.
+				}
 				return woken, err
 			}
 			woken++

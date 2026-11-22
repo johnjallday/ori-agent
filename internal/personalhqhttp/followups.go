@@ -280,6 +280,8 @@ func respondFollowUpError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, followup.ErrNotFound):
 		orihttp.NotFound(w, "That follow-up was not found")
+	case errors.Is(err, followup.ErrConflict):
+		orihttp.Conflict(w, "That follow-up changed. Open it again before making changes.")
 	default:
 		orihttp.BadRequest(w, err.Error())
 	}

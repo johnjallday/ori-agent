@@ -21,12 +21,12 @@ type snoozeOwner struct {
 }
 
 type snoozeViewRecord struct {
-	id        string
-	expires   time.Time
-	choices   []assistantTodayRow
-	truncated bool
-	sequence  uint64
-	review    *snoozeReviewRecord
+	id         string
+	expires    time.Time
+	choices    []assistantTodayRow
+	incomplete bool
+	sequence   uint64
+	review     *snoozeReviewRecord
 }
 
 type snoozeReviewRecord struct {
@@ -47,7 +47,7 @@ func newTodayReviewCache() *todayReviewCache {
 	return &todayReviewCache{now: time.Now, views: make(map[snoozeOwner]*snoozeViewRecord)}
 }
 
-func (c *todayReviewCache) issue(owner snoozeOwner, choices []assistantTodayRow, truncated bool) string {
+func (c *todayReviewCache) issue(owner snoozeOwner, choices []assistantTodayRow, incomplete bool) string {
 	now := c.now()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -64,7 +64,7 @@ func (c *todayReviewCache) issue(owner snoozeOwner, choices []assistantTodayRow,
 		delete(c.views, oldestOwner)
 	}
 	id := uuid.NewString()
-	c.views[owner] = &snoozeViewRecord{id: id, expires: now.Add(todayViewTTL), choices: choices, truncated: truncated}
+	c.views[owner] = &snoozeViewRecord{id: id, expires: now.Add(todayViewTTL), choices: choices, incomplete: incomplete}
 	return id
 }
 

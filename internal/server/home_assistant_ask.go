@@ -393,6 +393,7 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 		}
 		if s.Storage.PersonalHQFollowUps != nil {
 			handler.SetTodayFollowUps(s.Storage.PersonalHQFollowUps)
+			handler.SetTodaySnoozeWriter(s.Storage.PersonalHQFollowUps, s.resetWork.Enter)
 		}
 		// Notes are read through the canonical session store, narrowed to reads.
 		if s.Storage.SessionStore != nil {

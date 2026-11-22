@@ -113,7 +113,7 @@ func TestRestoreContinuityFollowUpPreservesHistoryButDeniesSourceAuthority(t *te
 		t.Fatal("historical reference change did not dirty owner", err, before, after)
 	}
 	got.Title = "Local edited title"
-	if err := destination.Update(t.Context(), got); err != nil {
+	if err := destination.Update(t.Context(), got, got.UpdatedAt); err != nil {
 		t.Fatal(err)
 	}
 	if inserted, err := restore(); err != nil || inserted {

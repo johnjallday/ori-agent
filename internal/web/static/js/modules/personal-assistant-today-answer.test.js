@@ -134,6 +134,52 @@ test('review shows the exact local instant and cannot submit when stale or disab
   assert.equal(host.children[0].textContent, 'Nothing changed.');
 });
 
+test('confirmation posts the review once and keeps a saved result on refresh failure', async () => {
+  const host = dom();
+  const calls = [];
+  let refreshes = 0;
+  renderSnoozeCard(
+    host,
+    {
+      status: 'review',
+      can_confirm: true,
+      review: 'held-review',
+      title: 'Reply',
+      owner: 'HQ',
+      until: '2026-11-02T09:00:00-05:00',
+      until_label: 'Monday, 2 November at 09:00 EST'
+    },
+    {
+      isCurrent: () => true,
+      send: async body => {
+        calls.push(body);
+        return {
+          status: 'saved',
+          message: 'Snooze saved.',
+          title: 'Reply',
+          owner: 'HQ',
+          href: '/workspaces/hq?follow_up=id',
+          until: '2026-11-02T09:00:00-05:00',
+          until_label: 'Monday, 2 November at 09:00 EST'
+        };
+      },
+      refresh: async () => {
+        refreshes++;
+        throw new Error('Today unavailable');
+      }
+    }
+  );
+  const confirm = host.querySelectorAll('button').at(-1);
+  confirm.events.click();
+  confirm.events.click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, [{ action: 'confirm', review: 'held-review' }]);
+  assert.equal(refreshes, 1);
+  assert.match(host.children[0].textContent, /Snooze saved, but Today couldn’t be refreshed/);
+  assert.equal(host.querySelectorAll('a')[0].href, '/workspaces/hq?follow_up=id');
+  assert.equal(host.querySelectorAll('button').length, 0);
+});
+
 test('record links do not accept external, malformed, or invented controls', () => {
   for (const path of [
     '//evil.test',

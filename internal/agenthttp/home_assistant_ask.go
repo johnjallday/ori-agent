@@ -278,11 +278,13 @@ type HomeAssistantAskHandler struct {
 	// Operations records what the assistant asked Ori to do in the app and what
 	// the watching tab observed. Nil registers no operation tool and loads no
 	// operating skill.
-	Operations   *assistantops.Service
-	Today        AssistantTodayReader
-	snoozeRows   TodayFollowUpReader
-	todayReviews *todayReviewCache
-	UserID       string
+	Operations       *assistantops.Service
+	Today            AssistantTodayReader
+	snoozeRows       TodayFollowUpReader
+	todayReviews     *todayReviewCache
+	snoozeWriter     TodaySnoozeWriter
+	enterSnoozeWrite func() (func(), error)
+	UserID           string
 	// WorkspaceBuildAvailable reports whether "Build with your assistant" can
 	// take a create-workspace request; nil keeps the direct create.
 	WorkspaceBuildAvailable func(ctx context.Context) bool

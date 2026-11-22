@@ -2,6 +2,8 @@ package agenthttp
 
 import (
 	"context"
+	"errors"
+	"mime"
 	"net/http"
 	"regexp"
 	"strings"
@@ -18,6 +20,14 @@ type TodayFollowUpReader interface {
 	Get(context.Context, string, string) (*followup.FollowUp, error)
 }
 
+type TodaySnoozeWriter interface {
+	SnoozeReviewed(context.Context, followup.ReviewedSnooze) (*followup.FollowUp, error)
+}
+
+func (h *HomeAssistantAskHandler) SetTodaySnoozeWriter(writer TodaySnoozeWriter, enter func() (func(), error)) {
+	h.snoozeWriter, h.enterSnoozeWrite = writer, enter
+}
+
 func (h *HomeAssistantAskHandler) SetTodayFollowUps(reader TodayFollowUpReader) {
 	if reader != nil {
 		h.snoozeRows, h.todayReviews = reader, newTodayReviewCache()
@@ -30,19 +40,20 @@ type assistantTodaySelection struct {
 }
 
 type assistantSnoozeView struct {
-	Status    string              `json:"status"`
-	Message   string              `json:"message,omitempty"`
-	Choices   []assistantTodayRow `json:"choices,omitempty"`
-	View      string              `json:"view,omitempty"`
-	Selection string              `json:"selection,omitempty"`
-	When      string              `json:"when,omitempty"`
-	Review    string              `json:"review,omitempty"`
-	Title     string              `json:"title,omitempty"`
-	Owner     string              `json:"owner,omitempty"`
-	Href      string              `json:"href,omitempty"`
-	Until     *time.Time          `json:"until,omitempty"`
-	Label     string              `json:"until_label,omitempty"`
-	Suggested bool                `json:"suggested,omitempty"`
+	Status     string              `json:"status"`
+	Message    string              `json:"message,omitempty"`
+	Choices    []assistantTodayRow `json:"choices,omitempty"`
+	View       string              `json:"view,omitempty"`
+	Selection  string              `json:"selection,omitempty"`
+	When       string              `json:"when,omitempty"`
+	Review     string              `json:"review,omitempty"`
+	Title      string              `json:"title,omitempty"`
+	Owner      string              `json:"owner,omitempty"`
+	Href       string              `json:"href,omitempty"`
+	Until      *time.Time          `json:"until,omitempty"`
+	Label      string              `json:"until_label,omitempty"`
+	Suggested  bool                `json:"suggested,omitempty"`
+	CanConfirm bool                `json:"can_confirm,omitempty"`
 }
 
 func snoozeNotice(status, message string) *assistantSnoozeView {
@@ -90,7 +101,7 @@ func (h *HomeAssistantAskHandler) issueTodaySelections(answer *assistantTodayAns
 			answer.Rows[i].Selection = uuid.NewString()
 		}
 	}
-	answer.View = h.todayReviews.issue(owner, answer.Rows, answer.Truncated)
+	answer.View = h.todayReviews.issue(owner, answer.Rows, answer.Truncated || answer.Health == "partial" || answer.Health == "unavailable")
 }
 
 func (h *HomeAssistantAskHandler) answerAssistantSnooze(ctx context.Context, req HomeAssistantAskRequest, refs *HomeAssistantRouteContext, work *PersonalAssistantWorkContext, scope *assistantWorkspaceTurn, conversation *openConversation) HomeAssistantAskResponse {
@@ -121,7 +132,7 @@ func (h *HomeAssistantAskHandler) prepareAssistantSnooze(ctx context.Context, ow
 	if len(matches) == 0 {
 		return snoozeNotice("clarify", "I couldn't find that item in the current Needs you list. Select a current follow-up or open its workspace.")
 	}
-	if len(matches) != 1 || (selection.Selection == "" && view.truncated) {
+	if len(matches) != 1 || (selection.Selection == "" && view.incomplete) {
 		return &assistantSnoozeView{Status: "choose", Message: "Which follow-up do you mean? Only a current follow-up owned by Personal HQ can be snoozed here.", Choices: matches, When: when, View: view.id}
 	}
 	row := matches[0]
@@ -147,7 +158,7 @@ func (h *HomeAssistantAskHandler) prepareAssistantSnooze(ctx context.Context, ow
 	}
 	return &assistantSnoozeView{Status: "review", Message: "Review this snooze. Nothing has changed yet.",
 		Title: review.title, Owner: review.owner, Href: review.href, Until: &review.until, Label: review.label, Suggested: review.suggested,
-		Review: review.id, View: view.id, Selection: review.selection}
+		Review: review.id, View: view.id, Selection: review.selection, CanConfirm: h.snoozeWriter != nil}
 }
 
 func matchingSnoozeRows(rows []assistantTodayRow, selection, target string) []assistantTodayRow {
@@ -180,11 +191,16 @@ type assistantTodayActionRequest struct {
 // TodayActionHandler handles controls belonging to a live Today reply. These
 // are not new transcript turns and never enter the model or confirmed_action.
 func (h *HomeAssistantAskHandler) TodayActionHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if mediaType != "application/json" {
+		orihttp.BadRequest(w, "Expected a JSON request")
+		return
+	}
 	var req assistantTodayActionRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
-	w.Header().Set("Cache-Control", "no-store")
 	orihttp.WriteJSON(w, h.todayAction(r.Context(), req))
 }
 
@@ -211,6 +227,8 @@ func (h *HomeAssistantAskHandler) todayAction(ctx context.Context, req assistant
 			return snoozeStale()
 		}
 		return h.prepareAssistantSnooze(ctx, owner, assistantTodaySelection{View: req.View, Selection: req.Selection}, "", req.When, work.SnoozeTimezone)
+	case "confirm":
+		return h.confirmAssistantSnooze(ctx, owner, req.Review)
 	case "cancel":
 		if _, ok := h.todayReviews.consume(owner, req.Review); !ok {
 			return snoozeStale()
@@ -219,4 +237,32 @@ func (h *HomeAssistantAskHandler) todayAction(ctx context.Context, req assistant
 	default:
 		return snoozeStale()
 	}
+}
+
+func (h *HomeAssistantAskHandler) confirmAssistantSnooze(ctx context.Context, owner snoozeOwner, reviewID string) *assistantSnoozeView {
+	if h.snoozeWriter == nil {
+		return snoozeStale()
+	}
+	if h.enterSnoozeWrite != nil {
+		release, err := h.enterSnoozeWrite()
+		if err != nil {
+			return snoozeStale()
+		}
+		defer release()
+	}
+	review, ok := h.todayReviews.consume(owner, reviewID)
+	if !ok {
+		return snoozeStale()
+	}
+	item, err := h.snoozeWriter.SnoozeReviewed(ctx, followup.ReviewedSnooze{
+		UserID: owner.user, HQWorkspaceID: owner.hq, AssistantID: owner.assistant, ConversationID: owner.conversation,
+		FollowUpID: review.followUpID, RelationshipVersion: owner.version, ExpectedUpdatedAt: review.revision, Until: review.until,
+	})
+	if errors.Is(err, followup.ErrConflict) {
+		return snoozeNotice("conflict", "This follow-up or its owner changed after review. This confirmation didn’t change it; read Needs you again to review the latest record.")
+	}
+	if err != nil || item == nil || item.Status != followup.StatusSnoozed || item.SnoozedUntil == nil || !item.SnoozedUntil.Equal(review.until) {
+		return snoozeNotice("unknown", "I couldn’t verify whether the snooze was saved. Open the latest record before reviewing another snooze.")
+	}
+	return &assistantSnoozeView{Status: "saved", Message: "Snooze saved.", Title: review.title, Owner: review.owner, Href: review.href, Until: &review.until, Label: review.label}
 }

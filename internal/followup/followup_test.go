@@ -112,7 +112,9 @@ func TestHomeProjectionStaleFirstAndCapped(t *testing.T) {
 	fresh, _ := svc.Capture(ctx, emailInput("u1", "fresh", "new loop"))
 	// Backdate the stale one's updated_at beyond the window.
 	stale.UpdatedAt = base.Add(-StalenessWindow - time.Hour)
-	_ = store.Update(ctx, stale)
+	if err := store.Update(ctx, stale, base); err != nil {
+		t.Fatal(err)
+	}
 
 	proj, err := svc.HomeProjection(ctx, "u1")
 	if err != nil {
@@ -132,7 +134,9 @@ func TestDueForNudgeIsIdempotentPerWindow(t *testing.T) {
 
 	f, _ := svc.Capture(ctx, emailInput("u1", "t9", "stale loop"))
 	f.UpdatedAt = base.Add(-StalenessWindow - time.Hour)
-	_ = store.Update(ctx, f)
+	if err := store.Update(ctx, f, base); err != nil {
+		t.Fatal(err)
+	}
 
 	due, _ := svc.DueForNudge(ctx, "u1")
 	if len(due) != 1 {
@@ -163,6 +167,37 @@ func TestWakeReactivatesElapsedSnooze(t *testing.T) {
 	got, _ := svc.Get(ctx, "u1", f.ID)
 	if got.Status != StatusActive {
 		t.Fatalf("snooze should have elapsed to active, got %v", got.Status)
+	}
+}
+
+func TestWakeDoesNotOverwriteNewerFollowUpState(t *testing.T) {
+	svc, store := newTestService(t)
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	svc.now = func() time.Time { return now }
+	ctx := t.Context()
+	item, err := svc.Capture(ctx, captureIn("local", "hq", "Follow up"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sleeping, err := svc.Snooze(ctx, "local", item.ID, now.Add(time.Minute))
+	if err != nil || !sleeping.UpdatedAt.After(item.UpdatedAt) {
+		t.Fatalf("frozen clock did not advance the revision: %+v %v", sleeping, err)
+	}
+	now = now.Add(time.Hour)
+	wake := NewService(store)
+	wake.now = func() time.Time { return now }
+	wake.SetAutomaticAdmission(func(ctx context.Context, _ string) bool {
+		if _, err := svc.Complete(ctx, "local", item.ID); err != nil {
+			t.Error(err)
+		}
+		return true
+	})
+	if count, err := wake.Wake(ctx); err != nil || count != 0 {
+		t.Fatalf("stale wake wrote over completion: %d %v", count, err)
+	}
+	got, err := svc.Get(ctx, "local", item.ID)
+	if err != nil || got.Status != StatusCompleted {
+		t.Fatalf("expected the concurrent completion: %+v %v", got, err)
 	}
 }
 

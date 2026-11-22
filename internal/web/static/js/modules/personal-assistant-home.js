@@ -1383,12 +1383,13 @@ async function loadToday() {
     const response = await fetch(TODAY_ENDPOINT, { headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`today ${response.status}`);
     const payload = await response.json();
-    if (seq !== state.sequence) return;
+    if (seq !== state.sequence) return false;
     renderToday(payload?.today || { state: 'unavailable' });
+    return Boolean(payload?.today);
   } catch (_) {
-    if (seq !== state.sequence) return;
+    if (seq !== state.sequence) return false;
     const els = elements();
-    if (!els) return;
+    if (!els) return false;
     const retained = state.today;
     renderToday({
       ...retained,
@@ -1405,6 +1406,7 @@ async function loadToday() {
     syncStrip(els);
     shareTodayWithDrawer(state.today);
     renderLauncherCue(els, { state: 'unavailable' });
+    return false;
   }
 }
 

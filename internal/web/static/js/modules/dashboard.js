@@ -10607,6 +10607,15 @@
             isCurrent: function () {
               return assistantRow.isConnected && todayReplyIsCurrent();
             },
+            refresh: async function () {
+              if (window.PersonalAssistantToday?.refresh && location.pathname === '/') {
+                return window.PersonalAssistantToday.refresh();
+              }
+              // HQ has no mounted Home list. Re-read its same projection so a
+              // transport failure still remains separate from the saved write.
+              var read = await API.get('/api/personal-assistant/today');
+              return Boolean(read?.today);
+            },
             send: function (body) {
               return API.post('/api/home-assistant/today/action', {
                 ...body,

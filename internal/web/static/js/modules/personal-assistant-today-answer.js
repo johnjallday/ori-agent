@@ -69,7 +69,8 @@ function control(doc, label, click, primary = false) {
   return button;
 }
 
-export function renderSnoozeCard(host, view, { isCurrent, send, ready = false } = {}) {
+export function renderSnoozeCard(host, view, options = {}) {
+  const { isCurrent, send, refresh } = options;
   if (!host || !view || !isCurrent?.()) return;
   const doc = host.ownerDocument;
   const status = doc.createElement('p');
@@ -83,7 +84,23 @@ export function renderSnoozeCard(host, view, { isCurrent, send, ready = false } 
     for (const button of host.querySelectorAll('button')) button.disabled = true;
     try {
       const next = await send(body);
-      if (isCurrent()) renderSnoozeCard(host, next, { isCurrent, send, ready });
+      if (isCurrent()) renderSnoozeCard(host, next, options);
+      if (next?.status === 'saved') {
+        const refreshed = await Promise.resolve()
+          .then(() => refresh?.())
+          .catch(() => false);
+        if (!refreshed && isCurrent()) {
+          renderSnoozeCard(
+            host,
+            {
+              ...next,
+              message:
+                'Snooze saved, but Today couldn’t be refreshed. Open Needs you to check the latest list.'
+            },
+            options
+          );
+        }
+      }
     } catch (_) {
       if (isCurrent()) {
         status.textContent = 'Could not check that snooze. Reopen Needs you before trying again.';
@@ -159,9 +176,9 @@ export function renderSnoozeCard(host, view, { isCurrent, send, ready = false } 
       },
       true
     );
-    confirm.disabled = !ready;
+    confirm.disabled = !view.can_confirm;
     input.addEventListener('input', () => {
-      confirm.disabled = !ready || Boolean(input.value.trim());
+      confirm.disabled = !view.can_confirm || Boolean(input.value.trim());
     });
     footer.append(
       control(doc, 'Cancel', () => {
@@ -171,7 +188,23 @@ export function renderSnoozeCard(host, view, { isCurrent, send, ready = false } 
     );
     host.append(correction, footer);
   }
-  if (['stale', 'conflict', 'unknown', 'handoff'].includes(view.status)) {
+  if (view.status === 'saved') {
+    const time = doc.createElement('time');
+    time.dateTime = view.until;
+    time.textContent = `Snoozed until ${view.until_label}`;
+    host.append(time);
+    const href = todayAnswerDestination(view.href);
+    if (href) {
+      const open = doc.createElement('a');
+      open.href = href;
+      open.textContent = `Open ${view.title} in ${view.owner}`;
+      host.append(open);
+    }
+  }
+  if (
+    ['stale', 'conflict', 'unknown', 'handoff'].includes(view.status) ||
+    (view.status === 'saved' && view.message !== 'Snooze saved.')
+  ) {
     const home = doc.createElement('a');
     home.href = NEEDS_YOU;
     home.textContent = 'Open Needs you';
@@ -199,6 +232,7 @@ export function createTodayAnswerController() {
         card.append(notice);
         current = {
           id: data.today.view,
+          card,
           notice,
           valid: () => card.isConnected && options.isCurrent()
         };
@@ -215,7 +249,16 @@ export function createTodayAnswerController() {
       host.className = 'pa-today-answer pa-snooze-card';
       host.setAttribute('aria-label', 'Follow-up snooze');
       (row.firstElementChild || row).append(host);
-      renderSnoozeCard(host, view, options);
+      const selection = current;
+      renderSnoozeCard(host, view, {
+        ...options,
+        refresh() {
+          for (const button of selection?.card.querySelectorAll('button') || [])
+            button.disabled = true;
+          if (current === selection) current = null;
+          return options.refresh?.();
+        }
+      });
     }
   };
 }

@@ -14,6 +14,9 @@ import (
 // ErrNotFound is returned when a follow-up does not exist for the requesting user.
 var ErrNotFound = errors.New("followup: not found")
 
+// ErrConflict means a reviewed row changed or its owning scope no longer holds.
+var ErrConflict = errors.New("followup: changed since it was read")
+
 // SQLiteStore persists follow-ups in the shared SQLite database.
 type SQLiteStore struct {
 	db *database.DB
@@ -128,22 +131,28 @@ func (s *SQLiteStore) List(ctx context.Context, f Filter) ([]*FollowUp, error) {
 	return out, rows.Err()
 }
 
-// Update writes all mutable fields of an existing follow-up.
-func (s *SQLiteStore) Update(ctx context.Context, f *FollowUp) error {
+// Update writes all mutable fields only from the revision the caller read.
+// Manual edits, completion, source refresh and Wake cannot overwrite a newer
+// conditional snooze with a stale full-row snapshot (or vice versa).
+func (s *SQLiteStore) Update(ctx context.Context, f *FollowUp, expected time.Time) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE personal_hq_followup SET
 		category=?, direction=?, title=?, detail=?, counterparty=?, provenance=?, confidence=?, status=?,
 		due_at=?, snoozed_until=?, last_nudged_at=?, related_workspace_id=?, related_task_id=?,
 		updated_at=?, completed_at=?, dismissed_at=?
-		WHERE id=? AND user_id=?`,
+		WHERE id=? AND user_id=? AND workspace_id=? AND updated_at=?`,
 		string(f.Category), string(f.Direction), f.Title, f.Detail, f.Counterparty, string(f.Provenance), string(f.Confidence), string(f.Status),
 		nullTime(f.DueAt), nullTime(f.SnoozedUntil), nullTime(f.LastNudgedAt), taskWorkspace(f.RelatedTask), taskID(f.RelatedTask),
 		f.UpdatedAt, nullTime(f.CompletedAt), nullTime(f.DismissedAt),
-		f.ID, f.UserID)
+		f.ID, f.UserID, f.WorkspaceID, expected)
 	if err != nil {
 		return fmt.Errorf("followup update: %w", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return ErrNotFound
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("followup update result: %w", err)
+	}
+	if n != 1 {
+		return ErrConflict
 	}
 	return nil
 }

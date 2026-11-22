@@ -149,4 +149,66 @@ test('wt demo: the Assistant reads the same Needs you records as Home', async ({
   await expect(review.getByRole('status')).toHaveText('Snooze cancelled. Nothing changed.');
   expect(await Promise.all([stored(hqItem.id), stored(mailItem.id)])).toEqual(before);
   await shot('03-cancelled-snooze.png');
+
+  await assistant.send('What needs me today?');
+  await list
+    .last()
+    .getByRole('button', { name: `Select ${title} in My HQ for snooze` })
+    .press('Enter');
+  const checked = await assistant.send('Snooze until Monday');
+  expect(checked.snooze.status).toBe('review');
+  expect((await stored(hqItem.id)).status).toBe('active');
+  const commit = page.waitForResponse(
+    response => new URL(response.url()).pathname === '/api/home-assistant/today/action'
+  );
+  await review.getByRole('button', { name: 'Confirm snooze' }).press('Enter');
+  expect((await (await commit).json()).status).toBe('saved');
+  await expect(review.getByRole('status')).toHaveText('Snooze saved.');
+  await expect(review.locator('time')).toHaveAttribute('datetime', checked.snooze.until);
+  await expect
+    .poll(async () => (await homeRead()).needs_you.items.some((item: any) => item.id === hqItem.id))
+    .toBe(false);
+  const after = await stored(hqItem.id);
+  expect(after).toMatchObject({
+    id: hqItem.id,
+    title,
+    workspace_id: hqItem.workspace_id,
+    status: 'snoozed'
+  });
+  expect(Date.parse(after.snoozed_until)).toBe(Date.parse(checked.snooze.until));
+  expect(await stored(mailItem.id)).toEqual(before[1]);
+  await shot('04-snooze-saved.png');
+  await review.getByRole('link', { name: `Open ${title} in My HQ` }).click();
+  await page.reload();
+  const owner = page.getByRole('article', { name: `Selected follow-up: ${title}` });
+  await expect(owner).toContainText(/Snoozed until/);
+  await shot('04-owning-follow-up.png');
+
+  const otherItem = await capture('Finish the notes');
+  // The manual capture endpoint may use Email Ops once it exists. This
+  // synthetic second-tab conflict deliberately exercises the HQ owner.
+  sql(
+    'UPDATE personal_hq_followup SET workspace_id=? WHERE id=?',
+    hqItem.workspace_id,
+    otherItem.id
+  );
+  await page.goto('/');
+  await assistant.open();
+  await assistant.send('What needs me today?');
+  await list
+    .last()
+    .getByRole('button', { name: 'Select Finish the notes in My HQ for snooze' })
+    .press('Enter');
+  const stale = await assistant.send('Snooze Finish the notes until Monday');
+  expect(stale.snooze.status).toBe('review');
+  const secondTab = await page.context().newPage();
+  await secondTab.goto(`/workspaces/my-hq?follow_up=${otherItem.id}`);
+  const staleRow = secondTab.getByRole('article', { name: 'Selected follow-up: Finish the notes' });
+  await staleRow.getByRole('button', { name: /Done|Complete/ }).click();
+  await expect.poll(async () => (await stored(otherItem.id)).status).toBe('completed');
+  await review.getByRole('button', { name: 'Confirm snooze' }).press('Enter');
+  await expect(review.getByRole('status')).toContainText('changed after review');
+  expect((await stored(otherItem.id)).status).toBe('completed');
+  await shot('04-stale-snooze-refused.png');
+  await secondTab.close();
 });
