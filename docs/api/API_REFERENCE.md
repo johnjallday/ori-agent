@@ -455,6 +455,37 @@ and these response fields:
 - `memory_review`: present when the prompt asked to remember something. `{ "text", "destination", "max_bytes" }` — editable starting text (empty when no fact was stated). Nothing has been written, no model was called, and the request is not stored as a turn.
 - `draft_context`: `{ "ticket_id", "available", "display_number", "version" }` — whether the saved draft named in `draft` could be read for this turn.
 
+**Needs you and snooze (Personal Assistant panel only):** Ask recognizes
+“What needs me today?” on Home or in the designated Personal HQ with no other
+project pinned. A saved reply adds `today` with `health` (`available`,
+`healthy_empty`, `partial`, or `unavailable`), `truncated`, and up to eight
+ordered `rows` (`title`, `kind`, optional `owner` and safe `href`). When
+available, `today.view` identifies that live list, and only eligible HQ rows
+carry an opaque `selection`. History contains readable text, not controls or
+selection references. This read does not call a model, create a brief, or mark
+one seen.
+
+Ask “Snooze until Monday” (or name an item) with
+`today_selection: { "view": "…", "selection": "…" }`; `selection` may be
+omitted to match the current list. Ambiguous matches return `snooze.status:
+choose` and owner-labelled choices. `POST /api/home-assistant/today/action`
+accepts `context` and `conversation` plus one of:
+
+| `action` | Other fields | Effect |
+|---|---|---|
+| `review` | `view`, `selection`, `when` | Resolve the selected HQ follow-up and a future weekday or `YYYY-MM-DD HH:MM` in the saved HQ timezone. Return `review`, `until`, `until_label`, and `can_confirm`; no write. |
+| `cancel` | `review` | Retire the review without changing the follow-up. |
+| `confirm` | `review` | Consume once and apply only the reviewed instant if owner, relationship, conversation and row revision still match. |
+
+Results are `no-store`; inspect `status` (`review`, `choose`, `clarify`,
+`handoff`, `cancelled`, `saved`, `stale`, `conflict`, or `unknown`). Only
+`saved` verifies a write. Never retry `confirm` automatically; reopen the
+owning record if the result is uncertain. Views expire after 15 minutes and
+reviews after at most five. They disappear on restart and cannot be recovered
+from saved replies. This is independent of legacy `confirmed_action` and of
+the manual follow-up endpoints. No new transcript turn, reminder, run, or
+Daily Brief schedule change is made by confirmation.
+
 **Conversations (read only):**
 
 | Endpoint | Returns |

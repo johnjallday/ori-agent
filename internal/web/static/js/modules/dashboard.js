@@ -10468,6 +10468,11 @@
     // server decides who owns the conversation.
     var conversations = window.PersonalAssistantConversation || null;
     var normalizedContext = normalizeHomeRouteContext(routeContext);
+    var todayController = window.PersonalAssistantTodayAnswer;
+    var todayPage = function () {
+      return JSON.stringify(window.PersonalAssistantWorkspaceContext?.current?.());
+    };
+    var todayPageAtSend = todayPage();
     var conversationRef =
       options.conversationRef ||
       (conversations && typeof conversations.request === 'function'
@@ -10506,6 +10511,8 @@
         payload.research_approval = options.researchApproval;
       if (conversationRef) {
         payload.conversation = conversationRef;
+        var todaySelection = todayController?.ref();
+        if (todaySelection && !confirmedAction) payload.today_selection = todaySelection;
         if (options.folderRef && !confirmedAction) payload.folder_context = options.folderRef;
         if (options.linkRef && !confirmedAction) payload.link_context = options.linkRef;
         // The saved draft this conversation is working on, by Ticket ID, so
@@ -10583,6 +10590,43 @@
         window.PersonalAssistantHireOffer
           ? data.confirmation
           : null;
+      var todayReplyIsCurrent = function () {
+        return (
+          Boolean(data.conversation?.id) &&
+          conversations?.currentId() === data.conversation.id &&
+          window.PersonalAssistantRecipient?.current()?.kind === 'personal' &&
+          todayPage() === todayPageAtSend
+        );
+      };
+      if (data?.snooze && conversationRef) {
+        setHomeAssistantRoutingSummary('', '');
+        inlineReview = true;
+        if (todayReplyIsCurrent()) {
+          assistantRow = appendHomeAssistantMessage('assistant', 'Follow-up snooze');
+          todayController?.renderSnooze(assistantRow, data.snooze, {
+            isCurrent: function () {
+              return assistantRow.isConnected && todayReplyIsCurrent();
+            },
+            refresh: async function () {
+              if (window.PersonalAssistantToday?.refresh && location.pathname === '/') {
+                return window.PersonalAssistantToday.refresh();
+              }
+              // HQ has no mounted Home list. Re-read its same projection so a
+              // transport failure still remains separate from the saved write.
+              var read = await API.get('/api/personal-assistant/today');
+              return Boolean(read?.today);
+            },
+            send: function (body) {
+              return API.post('/api/home-assistant/today/action', {
+                ...body,
+                context: normalizedContext,
+                conversation: { id: data.conversation.id }
+              });
+            }
+          });
+        }
+        return data;
+      }
       var responseText = unansweredLine || String((data && data.response) || '').trim();
       if (hireOffer) responseText = window.PersonalAssistantHireOffer.lead(responseText);
       var assistantRow = responseText
@@ -10615,6 +10659,16 @@
       // Arrangement replies are inert, canonical discussion only. Never feed
       // them into legacy setup suggestions, research or operation execution.
       if (options.arrangement) return data;
+      if (data?.today && conversationRef) {
+        setHomeAssistantRoutingSummary('', '');
+        renderHomeAssistantActions([]);
+        inlineReview = true;
+        todayController?.render(assistantRow, data, {
+          isCurrent: todayReplyIsCurrent,
+          focus: focusHomeAssistantInput
+        });
+        return data;
+      }
       if (assistantRow && window.PersonalAssistantResearch) {
         var researchRefs = data.research_context || normalizedContext;
         var researchFolder = data.research_folder_context;

@@ -2,6 +2,7 @@ package agenthttp
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -280,7 +281,7 @@ func matchRoutableWorkspaceInPrompt(store workspace.Store, prompt string) (id, n
 // prompt by removing the workspace mention, the leading "add/create/new/make"
 // verb, and the trailing "to/in [the] backlog" phrase. Returns "" when no
 // description remains. The description sits BETWEEN the verb and "backlog"
-// ("add X to the backlog in Y"), unlike extractTaskDescription's task
+// ("add X to the backlog in Y"), unlike workDescription's ticket
 // phrasing where the description follows the "task" keyword.
 func extractBacklogDescription(prompt, wsName string) string {
 	s := stripWorkspaceMention(prompt, wsName)
@@ -320,43 +321,99 @@ func containsAny(s string, substrings []string) bool {
 // <workspace>"). Both require the named workspace to resolve to real state;
 // start additionally requires the task to resolve.
 func (h *HomeAssistantAskHandler) detectTaskMutationRequest(prompt string) *HomeActionConfirmation {
-	trimmed := strings.TrimSpace(prompt)
-	lower := strings.ToLower(trimmed)
-	if lower == "" || !strings.Contains(lower, "task") {
-		return nil
-	}
+	action, selector, rest := legacyWorkRequest(prompt)
 	store := h.Sources.Workspaces
-	if store == nil {
+	if action == "" || store == nil {
 		return nil
 	}
-
-	createVerb := hasCreateVerb(lower)
-	startVerb := hasStartVerb(lower)
-	if !createVerb && !startVerb {
+	ws, placement := resolveWorkPlacement(store, rest)
+	if ws == nil {
 		return nil
 	}
-
-	wsID, wsName, ok := matchWorkspaceInPrompt(store, prompt)
-	if !ok {
-		return nil
+	remainder := strings.TrimSpace(rest[:placement[0]] + " " + rest[placement[1]:])
+	if action == HomeActionStartTask {
+		if strings.Trim(remainder, " .!") != "" {
+			return nil // The workspace is the entire placement for Start.
+		}
+		return h.buildStartTaskConfirmation(store, ws.ID, ws.Name, selector)
 	}
 
-	// "start" takes precedence: "run" / "start" are unambiguous execution verbs,
-	// whereas "add"/"create" only ever mean creation.
-	if startVerb {
-		return h.buildStartTaskConfirmation(store, wsID, wsName, trimmed)
-	}
-
-	desc := extractTaskDescription(trimmed, wsName)
+	desc := workDescription(remainder)
 	if desc == "" {
 		return nil
 	}
 	return &HomeActionConfirmation{
 		ActionID:   "create-task",
 		ActionType: HomeActionCreateTask,
-		Summary:    fmt.Sprintf("Create a ticket in %q: %q?", wsName, desc),
-		Arguments:  map[string]any{"workspace_id": wsID, "description": desc},
+		Summary:    fmt.Sprintf("Create a ticket in %q: %q?", ws.Name, desc),
+		Arguments:  map[string]any{"workspace_id": ws.ID, "description": desc},
 	}
+}
+
+var startWorkObject = regexp.MustCompile(`(?i)^(?:start|run|execute|begin|kick off|launch)\s+(?:(?:the|a|my)\s+)?(?:(.+?)\s+)?(?:task|ticket)\s+(in\s+.+)$`)
+
+// legacyWorkRequest recognizes the current command, not a work noun anywhere
+// in the prompt. Route uses the same grammar so an explicit Start is not an
+// app launch and a fallback Create can reach its existing confirmation.
+func legacyWorkRequest(prompt string) (action, selector, rest string) {
+	text := strings.TrimSpace(prompt)
+	if strings.HasSuffix(text, "?") {
+		return "", "", ""
+	}
+	if start := startWorkObject.FindStringSubmatch(text); start != nil {
+		return HomeActionStartTask, start[1], start[2]
+	}
+	if hasCreateVerb(strings.ToLower(text)) {
+		_, target, _ := strings.Cut(text, " ")
+		if rest, ok := workObjectRemainder(target); ok {
+			return HomeActionCreateTask, "", rest
+		}
+	}
+	return "", "", ""
+}
+
+// resolveWorkPlacement accepts a named workspace following a placement
+// connector. Ignore quoted instructions and decline competing placements or
+// duplicate names rather than silently picking the first workspace.
+func resolveWorkPlacement(store workspace.Store, text string) (*workspace.Workspace, [2]int) {
+	active, err := store.ListActive()
+	if err != nil {
+		return nil, [2]int{}
+	}
+	quoted := quotedSpan.FindAllStringIndex(text, -1)
+	var selected *workspace.Workspace
+	var placement [2]int
+	ambiguous := false
+	for _, ws := range active {
+		if !isHomeAssistantRoutableWorkspace(ws) || strings.TrimSpace(ws.Name) == "" {
+			continue
+		}
+		name := regexp.QuoteMeta(strings.TrimSpace(ws.Name))
+		pattern := regexp.MustCompile(`(?i)(?:^|\s)((?:in|on|to)\s+(?:the\s+)?` + name + `(?:\s+workspace)?)(?:$|[\s.,!?])`)
+		for _, match := range pattern.FindAllStringSubmatchIndex(text, -1) {
+			insideQuote := false
+			for _, span := range quoted {
+				insideQuote = insideQuote || (match[2] >= span[0] && match[2] < span[1])
+			}
+			if insideQuote {
+				continue
+			}
+			switch {
+			case selected == nil:
+				selected, placement = ws, [2]int{match[2], match[3]}
+			case match[2] != placement[0]:
+				return nil, [2]int{}
+			case match[3] > placement[1]:
+				selected, placement, ambiguous = ws, [2]int{match[2], match[3]}, false
+			case match[3] == placement[1] && ws.ID != selected.ID:
+				ambiguous = true
+			}
+		}
+	}
+	if ambiguous {
+		return nil, [2]int{}
+	}
+	return selected, placement
 }
 
 // buildStartTaskConfirmation resolves which pending task the user wants to start
@@ -398,8 +455,8 @@ func (h *HomeAssistantAskHandler) buildStartTaskConfirmation(store workspace.Sto
 	switch {
 	case bestScore > 0 && !tie:
 		// Confident description match.
-	case len(runnable) == 1:
-		// Only one candidate — "start the task in <workspace>" is unambiguous.
+	case len(runnable) == 1 && strings.TrimSpace(prompt) == "":
+		// Only one candidate and no different ticket was named.
 		bestIdx = 0
 	default:
 		// No signal match, or an ambiguous tie among several tasks.
@@ -434,29 +491,11 @@ func hasCreateVerb(lower string) bool {
 		strings.HasPrefix(lower, "make ")
 }
 
-func hasStartVerb(lower string) bool {
-	return strings.HasPrefix(lower, "start ") ||
-		strings.HasPrefix(lower, "run ") ||
-		strings.HasPrefix(lower, "execute ") ||
-		strings.HasPrefix(lower, "begin ") ||
-		strings.HasPrefix(lower, "kick off ") ||
-		strings.HasPrefix(lower, "launch ")
-}
+// workDescription drops the connector left between the work noun and its
+// description after the workspace placement has been removed.
+func workDescription(rest string) string {
+	rest = strings.TrimSpace(rest)
 
-// extractTaskDescription pulls the free-text task description out of a creation
-// prompt by removing the workspace mention and the leading "create a task …"
-// scaffolding. Returns "" when no description remains.
-func extractTaskDescription(prompt, wsName string) string {
-	s := stripWorkspaceMention(prompt, wsName)
-
-	lower := strings.ToLower(s)
-	idx := strings.Index(lower, "task")
-	if idx < 0 {
-		return ""
-	}
-	rest := strings.TrimSpace(s[idx+len("task"):])
-
-	// Drop a single leading connector that links "task" to its description.
 	for _, connector := range []string{"to ", "that ", "which ", "for ", "of ", "named ", "called ", "titled ", "about "} {
 		if strings.HasPrefix(strings.ToLower(rest), connector) {
 			rest = strings.TrimSpace(rest[len(connector):])

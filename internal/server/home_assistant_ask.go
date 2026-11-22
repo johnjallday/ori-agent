@@ -388,6 +388,13 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 	handler.WorkspaceContext = &agenthttp.AssistantWorkspaceResolver{Source: sources.Workspaces}
 	if s.Storage != nil {
 		handler.CurrentUser = s.Storage.UserProvider
+		if s.Storage.PersonalAssistantToday != nil {
+			handler.Today = s.Storage.PersonalAssistantToday
+		}
+		if s.Storage.PersonalHQFollowUps != nil {
+			handler.SetTodayFollowUps(s.Storage.PersonalHQFollowUps)
+			handler.SetTodaySnoozeWriter(s.Storage.PersonalHQFollowUps, s.resetWork.Enter)
+		}
 		// Notes are read through the canonical session store, narrowed to reads.
 		if s.Storage.SessionStore != nil {
 			notes := personalAssistantNoteAdapter{store: s.Storage.SessionStore}

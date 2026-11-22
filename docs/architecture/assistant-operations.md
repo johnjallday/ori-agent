@@ -202,13 +202,15 @@ the closest names) or `unavailable`. It stages a request; the operation is
 recorded only after the turn that asked for it is stored. A turn that is not
 saved leaves no operation and the reply carries `operation_error`.
 
-### Preparing a task
+### Preparing a ticket
 
 A clause that begins with "prepare", "create", "add", "make", "set up", "draft"
-or "write" and names a task as the thing to make ("create a task for Mixer to
-…", "add a task: …"), or "give/assign <someone> a task …", is a request to
-prepare a task. "Create a task list", "write a task description", "create
-tasks for the album" and "create that task" are not.
+or "write" and names a ticket as the thing to make ("prepare a ticket for Mixer",
+"add a ticket: …"), or "give/assign <someone> a ticket …", is a request to
+prepare a ticket. The older word "task" is accepted in the same position;
+protocol names are unchanged. "Create a ticket list", "write a ticket
+description", "create tickets for the album" and "should I create a ticket?"
+are not requests to prepare one.
 
 `assistant_operate_prepare_task` takes the same workspace reference plus
 `agent_name`, an optional `agent_node_id`, a `title` (required, at most 200
@@ -231,11 +233,11 @@ The recorded operation is `kind: task`, `status: prepared`, with a `draft`
 `draft_prepared` receipt and two commands: `open_workspace` and
 `open_task_draft`. The agent is checked against the roster again when the
 operation is recorded, so an agent who left between the tool call and the saved
-turn gets no draft and no stand-in. **Preparing writes no task and starts no
-run.** One request has one owner: where Ori can prepare a task, "create a task
-in Album to …" is that operation's, not also the legacy one-click create that
-would hand the task to the entry agent unreviewed. Starting work and every
-workspace or agent change keep their own confirmation.
+turn gets no draft and no stand-in. **Preparing saves no ticket and starts no
+run.** One request has one owner: where Ori can prepare a ticket, "create a
+ticket in Album to …" opens the composer instead of also offering the legacy
+create confirmation. "Start the ticket in Album" is a separate request with
+its own confirmation, not an app launch or a draft.
 
 `open_task_draft` is carried out by the page's own task form
 (`TaskModalController.openForCreate`, manual mode, with the draft's title,

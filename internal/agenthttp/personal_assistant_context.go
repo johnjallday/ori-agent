@@ -44,6 +44,8 @@ type PersonalAssistantWorkContext struct {
 	Mandate       string
 	FocusAreas    []string
 	HQWorkspaceID string
+	// SnoozeTimezone comes from the saved HQ configuration, not the prompt.
+	SnoozeTimezone string
 	// ConversationAgent is the hired profile's agent-store key. Together with
 	// HQWorkspaceID it scopes the assistant's conversations to canonical
 	// Sessions. It is a binding key only and is never rendered into a prompt.

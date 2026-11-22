@@ -60,6 +60,10 @@ PLAIN_DEMOS = {
                 "ORI_WORKSPACE_OPERATE_SANDBOX", "operate-ori-navigation.log"),
     "operate_task": ("tests/operate-ori-task.spec.ts",
                      "ORI_WORKSPACE_OPERATETASK_SANDBOX", "operate-ori-task.log"),
+    "assistant_today": ("tests/assistant-today-actions.spec.ts",
+                        "ORI_ASSISTANT_TODAY_SANDBOX", "assistant-today-actions.log"),
+    "operate_ticket": ("tests/operate-ori-ticket.spec.ts",
+                       "ORI_WORKSPACE_OPERATETICKET_SANDBOX", "operate-ori-ticket.log"),
     "operate_start": ("tests/operate-ori-start.spec.ts",
                       "ORI_WORKSPACE_OPERATESTART_SANDBOX", "operate-ori-start.log"),
     "operate_result": ("tests/operate-ori-result.spec.ts",
@@ -166,7 +170,7 @@ OPERATE_OPEN = re.compile(
 OPERATE_SELECT = re.compile(r"^(?:please\s+)?(?:select|pick)\s+(?:the\s+)?(.+?)(?:\s+agent)?[.!]?$", re.I)
 OPERATE_TASK_TOOL = "assistant_operate_prepare_task"
 OPERATE_TASK = re.compile(
-    r"^(?:please\s+)?(?:create|prepare|draft|add|make)\s+a\s+task"
+    r"^(?:please\s+)?(?:create|prepare|draft|add|make)\s+a\s+(?:task|ticket)"
     r"(?:\s+for\s+(?:the\s+)?(?P<agent>.+?))?(?:\s+in\s+(?:the\s+)?(?P<workspace>.+?)\s+workspace)?"
     r"\s+to\s+(?P<what>.+?)[.!]?$", re.I)
 
@@ -872,6 +876,10 @@ def main():
     parser.add_argument("--operate-task", action="store_true",
                         help="wt demo: Operate Ori — a task draft for a non-entry agent in the real task form, "
                              "edited, dismissed, reopened and saved by the user; zero tasks before save")
+    parser.add_argument("--assistant-today", action="store_true",
+                        help="wt demo: the hired assistant reads and acts on synthetic Needs you records")
+    parser.add_argument("--operate-ticket", action="store_true",
+                        help="wt demo: compare ticket and legacy task requests without saving or starting")
     parser.add_argument("--operate-start", action="store_true",
                         help="wt demo: Operate Ori — the reviewed save creates one bound task, the user's Start is "
                              "claimed once, real progress with a deterministic worker, a repeat, a reload and a refusal")
@@ -907,7 +915,7 @@ def main():
     if not 1024 <= args.port <= 65535:
         parser.error("port must be between 1024 and 65535")
     operating = (args.operate or args.operate_task or args.operate_start or args.operate_result or
-                 args.operate_journey)
+                 args.operate_journey or args.operate_ticket)
     evidence = args.evidence_dir or (ROOT / "tasks/evidence/operate-ori" if operating else
                 ROOT / "tasks/evidence/assistant-conversation-first/baseline" if args.conversation_first else
                 ROOT / "tasks/evidence/assistant-folder-response-ux/group-1" if args.folder_response_baseline else

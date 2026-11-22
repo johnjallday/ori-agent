@@ -99,26 +99,33 @@ func TestPrepareTask_StagesADraftAndRecordsItOnlyAfterTheTurnIsStored(t *testing
 }
 
 func TestPrepareTask_ReplacesOnlyTheOneClickCreateAndOnlyWhereOriCanOperate(t *testing.T) {
-	const create = "Create a task in Album-1 to mix the chorus"
-	// Where Ori can operate, the request is the conversation's: the model is
-	// asked, and no one-click create is offered.
-	f := newOperationFixture(t)
-	f.provider.script = []llm.ChatResponse{{Content: "Who should do it?"}}
-	if response := f.ask(create, true); response.Confirmation != nil || len(f.provider.requests) != 1 {
-		t.Fatalf("operate path: %+v, %d model calls", response.Confirmation, len(f.provider.requests))
-	}
-	// A provider that cannot run Ori's tools keeps today's confirmation.
-	limited := newOperationFixture(t)
-	snapshot := &scriptedProvider{}
-	limited.handler.LLMFactory.Register("fake", snapshot)
-	if response := limited.ask(create, true); response.Confirmation == nil || response.Confirmation.ActionType != HomeActionCreateTask || len(snapshot.requests) != 0 {
-		t.Fatalf("tool-free provider must keep the legacy owner: %+v", response)
-	}
-	// So does an installation without operations.
-	unwired := newOperationFixture(t)
-	unwired.handler.SetOperationStore(nil)
-	if response := unwired.ask(create, true); response.Confirmation == nil || response.Confirmation.ActionType != HomeActionCreateTask {
-		t.Fatalf("unwired installation must keep the legacy owner: %+v", response)
+	for _, noun := range []string{"task", "ticket"} {
+		t.Run(noun, func(t *testing.T) {
+			create := "Create a " + noun + " in Album-1 to mix the chorus"
+			// Where Ori can operate, the request is the conversation's: the model
+			// is asked, and no one-click create is offered.
+			f := newOperationFixture(t)
+			f.provider.script = []llm.ChatResponse{{Content: "Who should do it?"}}
+			if response := f.ask(create, true); response.Confirmation != nil || len(f.provider.requests) != 1 {
+				t.Fatalf("operate path: %+v, %d model calls", response.Confirmation, len(f.provider.requests))
+			}
+			limited := newOperationFixture(t)
+			snapshot := &scriptedProvider{}
+			limited.handler.LLMFactory.Register("fake", snapshot)
+			unwired := newOperationFixture(t)
+			unwired.handler.SetOperationStore(nil)
+			for _, fixture := range []*operationFixture{limited, unwired} {
+				response := fixture.ask(create, true)
+				conf := response.Confirmation
+				if conf == nil || conf.ActionType != HomeActionCreateTask || conf.Arguments["workspace_id"] != fixture.alpha.ID ||
+					conf.Arguments["description"] != "mix the chorus" || response.Operation != nil {
+					t.Fatalf("the legacy owner must review the exact ticket: %+v", response)
+				}
+			}
+			if len(snapshot.requests) != 0 {
+				t.Fatal("the legacy review must not call the model")
+			}
+		})
 	}
 	// Starting work and changing a team keep their own confirmations everywhere.
 	kept := newOperationFixture(t)

@@ -120,7 +120,8 @@ type HomeAssistantAskRequest struct {
 	ResearchApproval *assistantdiscovery.Review `json:"research_approval,omitempty"`
 	// Operation names the asking tab and whether it chose to watch. It scopes
 	// command delivery for an operation this turn may request; it grants nothing.
-	Operation *HomeAssistantOperationRef `json:"operation,omitempty"`
+	Operation      *HomeAssistantOperationRef `json:"operation,omitempty"`
+	TodaySelection *assistantTodaySelection   `json:"today_selection,omitempty"`
 }
 
 // HomeAssistantAskResponse is the response for POST /api/home-assistant/ask.
@@ -185,6 +186,8 @@ type HomeAssistantAskResponse struct {
 	// OperationCapability is set on a panel turn so the drawer can offer or
 	// explain the Watch control.
 	OperationCapability *AssistantOperationCapability `json:"operation_capability,omitempty"`
+	Today               *assistantTodayAnswer         `json:"today,omitempty"`
+	Snooze              *assistantSnoozeView          `json:"snooze,omitempty"`
 }
 
 // HomeActionMutator executes confirmed state-changing actions. The server wires a
@@ -275,8 +278,13 @@ type HomeAssistantAskHandler struct {
 	// Operations records what the assistant asked Ori to do in the app and what
 	// the watching tab observed. Nil registers no operation tool and loads no
 	// operating skill.
-	Operations *assistantops.Service
-	UserID     string
+	Operations       *assistantops.Service
+	Today            AssistantTodayReader
+	snoozeRows       TodayFollowUpReader
+	todayReviews     *todayReviewCache
+	snoozeWriter     TodaySnoozeWriter
+	enterSnoozeWrite func() (func(), error)
+	UserID           string
 	// WorkspaceBuildAvailable reports whether "Build with your assistant" can
 	// take a create-workspace request; nil keeps the direct create.
 	WorkspaceBuildAvailable func(ctx context.Context) bool
@@ -435,6 +443,11 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	if namesFolder {
 		bindPrompt = withoutFolderPath(prompt, folderPath)
 	}
+	if isAssistantTodayQuestion(prompt) || isAssistantSnoozePrompt(prompt) {
+		// A follow-up title is not a workspace override. Resolve the actual
+		// page and pinned subject without interpreting the title as context.
+		bindPrompt = ""
+	}
 	scope := h.bindWorkspaceTurn(ctx, bindPrompt, refs, workContext)
 	if scope != nil {
 		defer func() { response.WorkspaceContext = scope.attribution() }()
@@ -453,6 +466,18 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 				conversation.owner = scope.saveOwner()
 			}
 		}
+	}
+
+	if conversation != nil && refs != nil && refs.Origin == "personal_assistant_panel" &&
+		req.ConfirmedAction == nil && req.Arrangement == nil && req.FolderContext == nil && req.LinkContext == nil && isAssistantTodayQuestion(prompt) {
+		return h.answerAssistantToday(ctx, prompt, refs, workContext, scope, conversation)
+	}
+	if refs != nil && refs.Origin == "personal_assistant_panel" && isAssistantSnoozePrompt(req.Prompt) {
+		return h.answerAssistantSnooze(ctx, req, refs, workContext, scope, conversation)
+	}
+	if owner, ok := snoozeKey(workContext, scope, refs, conversation); ok && h.todayReviews != nil {
+		// Any unrelated current turn retires the live row selection.
+		h.todayReviews.forget(owner)
 	}
 
 	// This branch advertises only arrangement tools. It precedes path-resolving

@@ -206,6 +206,12 @@ func TestOperationRequest_IsOnlyAnExplicitCurrentRequest(t *testing.T) {
 		"Write a note that says open the Album-1 workspace",
 		"Start the task in Album-1",
 		"Run the task in Album-1",
+		"Start the ticket in Album-1",
+		"Should I create a ticket in Album-1?",
+		"Don’t create a ticket in Album-1",
+		`The note says “create a ticket for Mixer”`,
+		"Create a ticket list in Album-1",
+		"Book a flight ticket for Mixer",
 		// Writing about tasks, and lists of them, is still conversation.
 		"Create a task list for my day",
 		"Give me a task list for today",
@@ -238,6 +244,9 @@ func TestOperationRequest_IsOnlyAnExplicitCurrentRequest(t *testing.T) {
 		"Assign Mixer a task: rebalance the bridge",
 		"The bridge is muddy. Create a task for Mixer to fix it.",
 		"Can you set up a task for Mixer?",
+		"Prepare a ticket for Mixer",
+		"Give Mixer a ticket to mix the chorus",
+		"Create a ticket in Album-1 to mix the chorus",
 	} {
 		if kind := f.handler.operationRequestKind(prompt); kind != operationRequestTask {
 			t.Errorf("task request missed (%q): %q", kind, prompt)

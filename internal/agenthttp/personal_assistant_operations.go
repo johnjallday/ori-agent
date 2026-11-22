@@ -87,7 +87,7 @@ func (h *HomeAssistantAskHandler) OperationRequestSupported(_ context.Context, p
 }
 
 var (
-	quotedSpan      = regexp.MustCompile("\"[^\"]*\"|“[^”]*”|`[^`]*`|«[^»]*»")
+	quotedSpan      = regexp.MustCompile("\"[^\"]*\"|“[^”]*”|`[^`]*`|«[^»]*»|‘[^’]*’|(?:^|[\\s(:])'[^'\\r\\n]*'")
 	clauseSeparator = regexp.MustCompile(`[.!?;\n]+|,?\s+and then\s+|,\s+then\s+`)
 )
 
@@ -113,8 +113,9 @@ const (
 var (
 	operationTaskLeads       = []string{"prepare ", "create ", "add ", "make ", "set up ", "draft ", "write up ", "write "}
 	operationHandoffLeads    = []string{"give ", "assign "}
+	operationHandoffObject   = regexp.MustCompile(`(?:^| )a (?:task|ticket)\b`)
 	operationTaskDeterminers = []string{"a ", "an ", "the ", "my ", "new ", "one ", "another "}
-	operationTaskFollowers   = []string{"for", "to", "in", "on", "that", "which", "about", "called", "named", "titled", "so"}
+	operationTaskFollowers   = []string{"for", "to", "in", "on", "that", "which", "about", "called", "named", "titled", "so", "of"}
 )
 
 // operationRequest reports whether the user's own current words ask Ori to
@@ -145,29 +146,34 @@ func (h *HomeAssistantAskHandler) operationRequestKind(prompt string) string {
 	return ""
 }
 
-// taskObject reports whether the words after a verb name a task as the thing
-// to make: "a task for Mixer", "task: bounce stems", "a new task".
-func taskObject(target string) bool {
+// workObjectRemainder recognizes the singular work noun in object position,
+// and returns the text following it without rewriting the user's wording.
+func workObjectRemainder(target string) (string, bool) {
+	target = strings.TrimSpace(target)
 	for stripped := true; stripped; {
 		stripped = false
 		for _, determiner := range operationTaskDeterminers {
-			if strings.HasPrefix(target, determiner) {
-				target, stripped = strings.TrimPrefix(target, determiner), true
+			if strings.HasPrefix(strings.ToLower(target), determiner) {
+				target, stripped = strings.TrimSpace(target[len(determiner):]), true
 			}
 		}
 	}
-	rest, found := strings.CutPrefix(target, "task")
-	if !found {
-		return false
+	for _, noun := range []string{"task", "ticket"} {
+		if !strings.HasPrefix(strings.ToLower(target), noun) {
+			continue
+		}
+		rest := target[len(noun):]
+		if rest == "" || strings.HasPrefix(rest, "—") || strings.HasPrefix(rest, "- ") || strings.ContainsAny(rest[:1], ":,") {
+			return rest, true
+		}
+		if strings.HasPrefix(rest, " ") {
+			following := strings.Fields(strings.ToLower(rest))
+			if len(following) == 0 || slices.Contains(operationTaskFollowers, strings.Trim(following[0], ":,")) {
+				return rest, true
+			}
+		}
 	}
-	if rest == "" || strings.ContainsAny(rest[:1], ":,-—") {
-		return true
-	}
-	if !strings.HasPrefix(rest, " ") {
-		return false // "tasks", "taskforce"
-	}
-	following := strings.Fields(rest)
-	return len(following) == 0 || slices.Contains(operationTaskFollowers, strings.Trim(following[0], ":,"))
+	return "", false // e.g. "ticket list", "taskforce"
 }
 
 func (h *HomeAssistantAskHandler) operationClause(clause string, composition bool) string {
@@ -203,16 +209,18 @@ func (h *HomeAssistantAskHandler) operationClause(clause string, composition boo
 		}
 		return true
 	}
-	if target, ok := lead(operationTaskLeads); ok && explicitTarget(target) && taskObject(target) {
-		return operationRequestTask
+	if target, ok := lead(operationTaskLeads); ok && explicitTarget(target) {
+		if _, work := workObjectRemainder(target); work {
+			return operationRequestTask
+		}
 	}
 	if target, ok := lead(operationHandoffLeads); ok && explicitTarget(target) {
-		// "give Mixer a task to…": someone, then a task as the thing given.
-		// "give me a task list" is neither: the user is not an agent, and a
-		// list is not a task.
+		// Someone, then a ticket as the thing given; not "give me a list".
 		forUser := strings.HasPrefix(target, "me ") || strings.HasPrefix(target, "us ")
-		if _, after, found := strings.Cut(" "+target, " a task"); found && !forUser && taskObject("a task"+after) {
-			return operationRequestTask
+		if object := operationHandoffObject.FindStringIndex(target); object != nil && !forUser {
+			if _, work := workObjectRemainder(target[object[0]:]); work {
+				return operationRequestTask
+			}
 		}
 	}
 	if composition {

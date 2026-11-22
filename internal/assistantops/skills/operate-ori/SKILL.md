@@ -22,9 +22,9 @@ covers two operations:
 ## When to use it
 
 Use it only when the user's current message asks for one of those things.
-"Open my Album workspace", "take me to Research and pick the Editor", "create a
-task for Mixer to mix the chorus" and "give the Editor a task to proofread
-chapter two" are requests.
+"Open my Album workspace", "take me to Research and pick the Editor", "prepare a
+ticket for Mixer to mix the chorus" and "give the Editor a ticket to proofread
+chapter two" are requests. Treat legacy wording with "task" the same way.
 
 Do not use it for:
 

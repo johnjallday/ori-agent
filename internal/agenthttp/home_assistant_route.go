@@ -446,13 +446,16 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 		if asksForWorkspaceInOtherWords(prompt) {
 			intent = homeAssistantWorkspaceCreateIntent
 		}
-		if isAssistantWorkspaceReviewRequest(prompt) {
+		if isAssistantTodayQuestion(prompt) || isAssistantSnoozePrompt(prompt) || isAssistantWorkspaceReviewRequest(prompt) {
 			return assistantConversationRoute(workContext), nil
 		}
 		// One owner per request: where Ori can operate, "open the Album
 		// workspace" is the assistant's to carry out, not a navigation answer,
 		// an app launch or a specialist handoff. Elsewhere those keep it.
 		if h.OperationRequest != nil && h.OperationRequest(ctx, prompt) {
+			return assistantConversationRoute(workContext), nil
+		}
+		if action, _, _ := legacyWorkRequest(prompt); action != "" {
 			return assistantConversationRoute(workContext), nil
 		}
 		// "Set up", "install" and "connect" read as execution below, which
