@@ -151,9 +151,10 @@ type SetupReceipt struct {
 	Hired []string `json:"hired,omitempty"`
 	// Listed songs on the Home's shelf, the noun for them, and the folders
 	// holding songs no listing reached.
-	Listed     int    `json:"listed,omitempty"`
-	ListedNoun string `json:"listed_noun,omitempty"`
-	Unreached  int    `json:"unreached,omitempty"`
+	PartialListing bool   `json:"partial_listing,omitempty"`
+	Listed         int    `json:"listed,omitempty"`
+	ListedNoun     string `json:"listed_noun,omitempty"`
+	Unreached      int    `json:"unreached,omitempty"`
 }
 
 // Bounds of a receipt: a run installs a few plugins and hires a few agents;
@@ -197,7 +198,7 @@ func (r *SetupReceipt) Clean() *SetupReceipt {
 		return WorkspaceRef{ID: text(in.ID), Name: name, Route: route}, true
 	}
 	out := &SetupReceipt{Installed: texts(r.Installed), Hired: texts(r.Hired), Group: r.Group,
-		Listed: max(r.Listed, 0), ListedNoun: text(r.ListedNoun), Unreached: max(r.Unreached, 0)}
+		PartialListing: r.PartialListing, Listed: max(r.Listed, 0), ListedNoun: text(r.ListedNoun), Unreached: max(r.Unreached, 0)}
 	if r.Home != nil {
 		if home, ok := ref(*r.Home); ok {
 			out.Home, out.HomeCreated = &home, r.HomeCreated

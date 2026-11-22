@@ -1058,6 +1058,12 @@ func (s *Service) SetUp(ctx context.Context, userID, workspaceID string, req Set
 	preview := *current
 	preview.HireEdits = edits
 	plan := BuildPlan(preview, selected)
+	if plan.BranchLook != "" {
+		root, err := s.deps.Workspaces.AnchorRoot(workspaceID)
+		if err != nil || plan.CheckBranchWitnesses(root, current.Map) != nil {
+			return View{}, personalassistant.ErrFolderPlanChanged
+		}
+	}
 	if plan.Digest != planDigest {
 		return View{}, personalassistant.ErrFolderPlanChanged
 	}

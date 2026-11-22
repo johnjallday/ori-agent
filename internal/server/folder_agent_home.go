@@ -39,6 +39,7 @@ func (r folderAgentRootResolver) PortfolioRoot(_ context.Context, _, _, _ string
 type homeReceipt struct {
 	listed     int
 	listedNoun string
+	partial    bool
 	unreached  int
 	homeID     string
 	homeName   string
@@ -60,7 +61,7 @@ func (s *homeStageStop) Error() string { return s.reason + ": " + s.cause.Error(
 // library itself issued that lead to the folders the walk found holding
 // songs, and finally the workspace placed inside the Home. setLine reports
 // each plan line.
-func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.Record, home folderlook.Candidate,
+func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.Record, home folderlook.Candidate, plan folderagent.Plan,
 	lines []personalassistant.FolderPlanLine, setLine func(name, state, progress string)) (homeReceipt, error) {
 	var receipt homeReceipt
 	stop := func(reason string, cause error) (homeReceipt, error) {
@@ -246,6 +247,10 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 		setLine(rootLine, personalassistant.FolderLineFailed, "")
 		return stop(personalassistant.FolderStopNeedsPick, err)
 	}
+	check := func() error { return plan.CheckBranchWitnesses(folder, rec.Map) }
+	if err := check(); err != nil {
+		return stop(personalassistant.FolderStopPlanChanged, err)
+	}
 	state, err := b.sessionHandler.PortfolioLibraryState(owner, homeID, folder)
 	if err != nil {
 		setLine(rootLine, personalassistant.FolderLineFailed, "")
@@ -275,8 +280,16 @@ func (b *ServerBuilder) runFolderAgentHome(ctx context.Context, rec folderagent.
 	setLine(rootLine, personalassistant.FolderLineDone, "Added "+rec.FolderName+" to your "+homeName)
 
 	// The listings: the root, then the scopes leading to the songs.
+	rec.Facts = plan.ListingFacts(rec.Facts)
+	if plan.BranchLook != "" {
+		key += "-" + plan.Digest[:16]
+	}
 	listing, err := listFolderAgentSongs(ctx, b.sessionHandler, rec, owner, homeID, rootID, key,
-		line(personalassistant.FolderPlanSongs), line(folderagent.FolderPlanScopes), setLine)
+		line(personalassistant.FolderPlanSongs), line(folderagent.FolderPlanScopes), check, setLine)
+	if errors.Is(err, personalassistant.ErrFolderPlanChanged) {
+		return stop(personalassistant.FolderStopPlanChanged, err)
+	}
+	receipt.partial = listing.partial
 	if err != nil {
 		return stop(personalassistant.FolderStopFailed, err)
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/diridentity"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
 
@@ -36,8 +37,10 @@ const (
 // slash-separated, "" for the fed folder itself; the map never holds an
 // absolute path or a file's contents.
 type Folder struct {
-	Path  string `json:"path"`
-	State State  `json:"state"`
+	// Witness binds a reviewed root or first-level branch to the directory opened by the walk.
+	Witness string `json:"witness,omitempty"`
+	Path    string `json:"path"`
+	State   State  `json:"state"`
 	// Files and Subfolders count the folder's direct entries the walk kept
 	// (regular files that are not cloud placeholders; folders that are not
 	// hidden or skipped).
@@ -388,17 +391,17 @@ func (w *walker) list(rel string) (Folder, error) {
 			return Folder{}, ErrNotDirectory
 		}
 	}
-	entries, large, err := readDirBounded(dir, LargeFolderEntries)
+	entries, large, witness, err := readDirBounded(dir, LargeFolderEntries, !strings.Contains(rel, "/"))
 	if err != nil {
 		return Folder{}, err
 	}
 	if large {
-		return Folder{Path: rel, State: StateLarge}, nil
+		return Folder{Path: rel, State: StateLarge, Witness: witness}, nil
 	}
 	w.listed += len(entries)
 	w.m.Entries += len(entries)
 
-	f := Folder{Path: rel, State: StateWalked}
+	f := Folder{Path: rel, State: StateWalked, Witness: witness}
 	bestRank := -1
 	var bestMarker folderdigest.Marker
 	extensions := make(map[string]bool)
@@ -504,19 +507,27 @@ func joinRel(parent, name string) string {
 
 // readDirBounded lists at most limit entries; more than that reports large.
 // Entries come back sorted by name so the walk order is stable.
-func readDirBounded(dir string, limit int) ([]os.DirEntry, bool, error) {
+func readDirBounded(dir string, limit int, identify bool) ([]os.DirEntry, bool, string, error) {
 	f, err := os.Open(dir) // #nosec G304 -- dir is the fed folder or a relative path the walk itself recorded under it, Lstat-checked above
 	if err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
 	defer func() { _ = f.Close() }()
+	var witness string
+	if identify {
+		info, err := f.Stat()
+		if err != nil {
+			return nil, false, "", err
+		}
+		witness = diridentity.Of(info)
+	}
 	entries, err := f.ReadDir(limit + 1)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, false, err
+		return nil, false, "", err
 	}
 	if len(entries) > limit {
-		return nil, true, nil
+		return nil, true, witness, nil
 	}
 	sortEntries(entries)
-	return entries, false, nil
+	return entries, false, witness, nil
 }

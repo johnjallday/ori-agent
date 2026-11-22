@@ -375,7 +375,8 @@ function receiptView(receipt) {
     hired: strings(receipt.hired),
     listed: Math.max(0, Number(receipt.listed) || 0),
     listedNoun: String(receipt.listed_noun || ''),
-    unreached: Math.max(0, Number(receipt.unreached) || 0)
+    unreached: Math.max(0, Number(receipt.unreached) || 0),
+    partialListing: Boolean(receipt.partial_listing)
   };
 }
 
@@ -402,9 +403,10 @@ export function folderAgentReceiptRows(view) {
     receipt.home && receipt.homeCreated ? { text: 'Open', href: receipt.home.route } : null
   );
   row('Hired', receipt.hired.join(' · '), { text: 'Agents', href: '/agents' });
-  if (receipt.listed || receipt.unreached) {
+  if (receipt.listed || receipt.unreached || receipt.partialListing) {
     const noun = receipt.listedNoun || plural(receipt.listed, 'song', 'songs');
     const words = [`${receipt.listed} ${noun} on the shelf`];
+    if (receipt.partialListing) words.push('Partial listing');
     if (receipt.unreached)
       words.push(
         `${receipt.unreached} ${plural(receipt.unreached, 'folder', 'folders')} not reached yet`
@@ -1619,6 +1621,50 @@ function renderPlan(
     )
   );
   section.append(list);
+  if (plan?.branches?.length) {
+    const branches = el(doc, 'fieldset', 'folder-agent-card__branches');
+    branches.append(
+      el(doc, 'legend', '', 'Folders to review'),
+      el(
+        doc,
+        'p',
+        '',
+        'The Home gets access to the fed folder and lists it one level down. These choices limit only the deeper listings in this setup; existing access and shelf entries stay unchanged.'
+      )
+    );
+    for (const branch of plan.branches) {
+      const row = el(doc, 'div', '');
+      const label = el(doc, 'label', '');
+      if (branch.id && phase === 'plan') {
+        const box = doc.createElement('input');
+        box.type = 'checkbox';
+        box.checked = branch.included;
+        box.disabled = !selecting;
+        box.dataset.stepHandle = branch.id;
+        box.addEventListener('change', () => onTick(branch.id, box.checked));
+        label.append(box);
+      }
+      const state = branch.id ? (branch.included ? 'Included' : 'Not selected') : '';
+      label.append(
+        el(
+          doc,
+          'span',
+          '',
+          [
+            branch.name,
+            branch.summary,
+            state,
+            branch.id && branch.partial ? 'Partly inspected' : ''
+          ]
+            .filter(Boolean)
+            .join(' · ')
+        )
+      );
+      row.append(label);
+      branches.append(row);
+    }
+    section.append(branches);
+  }
   // After the plan and before the install block: the other ways in, collapsed.
   if (alternatives.length)
     section.append(renderAlternatives(doc, alternatives, steps, selecting ? onTick : null));
@@ -3281,6 +3327,7 @@ function planView(plan) {
     runnable: Boolean(plan.runnable),
     unavailable: String(plan.unavailable || ''),
     selected: Array.isArray(plan.selected) ? plan.selected.map(String) : [],
+    branches: Array.isArray(plan.branches) ? plan.branches : [],
     lines: (plan.lines || []).map(line => lineView(line)),
     // Who chose the steps: the agent, in its own words, or Ori's default.
     source: String(plan.source || 'default'),
