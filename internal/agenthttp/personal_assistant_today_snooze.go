@@ -145,8 +145,11 @@ func (h *HomeAssistantAskHandler) prepareAssistantSnooze(ctx context.Context, ow
 		return snoozeStale()
 	}
 	until, suggested, err := resolveSnoozeTime(when, zone, h.todayReviews.now())
+	if errors.Is(err, errSnoozeZone) {
+		return snoozeNotice("clarify", "Set a valid timezone in your Personal HQ before reviewing a snooze.")
+	}
 	if err != nil {
-		return snoozeNotice("clarify", err.Error())
+		return snoozeNotice("clarify", "Use a future weekday (for example, Monday at 09:00) or YYYY-MM-DD HH:MM in your HQ timezone. That time must occur exactly once.")
 	}
 	review, ok := h.todayReviews.finishReview(owner, view, snoozeReviewRecord{
 		followUpID: item.ID, revision: item.UpdatedAt, until: until, suggested: suggested,

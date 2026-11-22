@@ -49,8 +49,11 @@ func TestAssistantToday_ProjectsSafeOrderedRowsAndDistinctOwners(t *testing.T) {
 	}
 	projection.NeedsYou.Items = nil
 	projection.NeedsYou.Health.Status = personalassistant.TodaySectionHealthyEmpty
-	if answer := projectAssistantToday(projection, store, "local"); strings.Contains(answer.summary(), "Nothing needs you") {
-		t.Fatal("partial empty read claimed an all-clear")
+	for _, source := range []string{"follow-ups", "folder offers", "workspace builds", "hires"} {
+		projection.UnavailableSources = []string{source}
+		if answer := projectAssistantToday(projection, store, "local"); strings.Contains(answer.summary(), "Nothing needs you") {
+			t.Fatalf("partial empty read claimed an all-clear when %s failed", source)
+		}
 	}
 	projection.UnavailableSources = nil
 	if answer := projectAssistantToday(projection, store, "local"); !strings.Contains(answer.summary(), "Nothing needs you") {

@@ -214,13 +214,21 @@ export function renderSnoozeCard(host, view, options = {}) {
 
 export function createTodayAnswerController() {
   let current;
+  let reviewHost;
+  function retireReview() {
+    for (const button of reviewHost?.querySelectorAll('button') || []) button.disabled = true;
+    reviewHost = null;
+  }
   return {
     render(row, data, options) {
+      retireReview();
+      for (const button of current?.card.querySelectorAll('button') || []) button.disabled = true;
       current = null;
       const card = renderTodayAnswer(row, data, {
         ...options,
         select(item) {
-          if (!current || !current.valid()) return;
+          if (current?.card !== card || !current.valid()) return;
+          if (current.selection !== item.selection) retireReview();
           current.selection = item.selection;
           current.notice.textContent = `Selected ${item.title} in ${item.owner}. Ask when to snooze it.`;
           options.focus?.();
@@ -245,13 +253,16 @@ export function createTodayAnswerController() {
     },
     renderSnooze(row, view, options) {
       if (!row || !options.isCurrent()) return;
+      retireReview();
       const host = row.ownerDocument.createElement('section');
+      reviewHost = host;
       host.className = 'pa-today-answer pa-snooze-card';
       host.setAttribute('aria-label', 'Follow-up snooze');
       (row.firstElementChild || row).append(host);
       const selection = current;
       renderSnoozeCard(host, view, {
         ...options,
+        isCurrent: () => host === reviewHost && options.isCurrent(),
         refresh() {
           for (const button of selection?.card.querySelectorAll('button') || [])
             button.disabled = true;

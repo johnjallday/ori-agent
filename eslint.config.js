@@ -220,6 +220,7 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-assistant-drafts.js',
       'internal/web/static/js/modules/personal-assistant-memory.js',
       'internal/web/static/js/modules/personal-assistant-operations.js',
+      'internal/web/static/js/modules/personal-assistant-today-answer.js',
       'internal/web/static/js/modules/ori-operation-client.js',
       'internal/web/static/js/modules/ori-operation-targets.js',
       'internal/web/static/js/modules/personal-assistant-message-actions.js',

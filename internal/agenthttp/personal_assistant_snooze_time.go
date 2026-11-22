@@ -10,18 +10,21 @@ import (
 
 var snoozeWeekday = regexp.MustCompile(`^(?:next )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?:(?: at)? ([0-9]{1,2}):([0-9]{2}))?$`)
 
-var errSnoozeTime = errors.New("Use a future weekday (for example, Monday at 09:00) or YYYY-MM-DD HH:MM in your HQ timezone. That time must occur exactly once.")
+var (
+	errSnoozeTime = errors.New("invalid snooze time")
+	errSnoozeZone = errors.New("unavailable HQ timezone")
+)
 
 // resolveSnoozeTime resolves one calendar time once. Never infer a timezone
 // from the process or the browser. A weekday is the next occurrence strictly
 // after the current local day. An omitted time proposes 09:00 for review.
 func resolveSnoozeTime(input, zone string, now time.Time) (time.Time, bool, error) {
 	if zone == "" || zone == "Local" {
-		return time.Time{}, false, errors.New("Set a timezone in your Personal HQ before reviewing a snooze.")
+		return time.Time{}, false, errSnoozeZone
 	}
 	loc, err := time.LoadLocation(zone)
 	if err != nil {
-		return time.Time{}, false, errors.New("The saved Personal HQ timezone is unavailable.")
+		return time.Time{}, false, errSnoozeZone
 	}
 	text := strings.TrimRight(strings.Join(strings.Fields(strings.ToLower(input)), " "), ".!")
 	var wall time.Time

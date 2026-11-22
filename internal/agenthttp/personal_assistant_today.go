@@ -115,7 +115,7 @@ func projectAssistantToday(today *personalassistant.TodayProjection, source Assi
 	// source outside the section's health calculation returned no rows.
 	for _, unavailable := range today.UnavailableSources {
 		switch unavailable {
-		case "follow-ups", "folder setups", "Daily Brief", "specialist setup", "Backup & Recovery":
+		case "follow-ups", "folder setups", "folder offers", "workspace builds", "hires", "Daily Brief", "specialist setup", "Backup & Recovery":
 			if answer.Health != "unavailable" {
 				answer.Health = "partial"
 			}
@@ -155,11 +155,11 @@ func assistantTodayKind(kind string) string {
 		return "Follow-up"
 	case "ticket", "input_request":
 		return "Ticket"
-	case "backup":
+	case "backup_coverage", "backup_observation":
 		return "Backup"
 	case "first_look_report", "folder_agent_report":
 		return "Report"
-	case "workspace_build", "hq_setup", "setup_attention":
+	case "workspace_build", "hq_setup", "setup_attention", "folder_offer", "second_brain_ask":
 		return "Setup"
 	default:
 		return "Today item"

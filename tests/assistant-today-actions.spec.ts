@@ -14,14 +14,27 @@ test('wt demo: the Assistant reads the same Needs you records as Home', async ({
   test.skip(!configured || !process.env.ORI_WORKSPACE_PROVIDER_FIXTURE, 'Use --assistant-today');
   const sandbox = await realpath(configured!);
   expect(basename(sandbox)).toMatch(/^ori-demo\./);
-  const evidence = join(process.cwd(), 'tasks/evidence-assistant-today-actions');
+  const marker = (await readFile(join(sandbox, '.ori-demo-owner'), 'utf8')).trim();
+  expect(marker).toBe(`worktree=${await realpath(process.cwd())}`);
+  const database = await realpath(join(sandbox, 'sessions.db'));
+  expect(database).toBe(join(sandbox, 'sessions.db'));
+  const dark = process.env.ORI_ASSISTANT_TODAY_VIEW === 'compact-dark';
+  if (dark) {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => localStorage.setItem('ori-theme', 'dark'));
+  }
+  const evidence = join(
+    process.cwd(),
+    'tasks/evidence-assistant-today-actions',
+    dark ? 'compact-dark' : 'desktop-light'
+  );
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   const shot = (name: string) => page.screenshot({ path: join(evidence, name) });
   const sql = (query: string, ...args: string[]) => {
     execFileSync('python3', [
       '-c',
       'import sqlite3,sys; c=sqlite3.connect(sys.argv[1], uri=True); assert c.execute(sys.argv[2],sys.argv[3:]).rowcount == 1; c.commit()',
-      `file:${join(sandbox, 'sessions.db')}?mode=rw`,
+      `file:${database}?mode=rw`,
       query,
       ...args
     ]);
@@ -68,7 +81,9 @@ test('wt demo: the Assistant reads the same Needs you records as Home', async ({
     )
     .toBe(2);
 
+  if (!dark) await page.addInitScript(() => localStorage.setItem('ori-theme', 'light'));
   await page.goto('/?panel=today');
+  await expect(page.locator('html')).toHaveAttribute('data-bs-theme', dark ? 'dark' : 'light');
   const assistant = drawer(page);
   await assistant.open();
   const home = page.locator('#personalAssistantNeedsYou');
@@ -157,6 +172,24 @@ test('wt demo: the Assistant reads the same Needs you records as Home', async ({
     .press('Enter');
   const checked = await assistant.send('Snooze until Monday');
   expect(checked.snooze.status).toBe('review');
+  await expect(review.locator('time')).toHaveAttribute('datetime', checked.snooze.until);
+  // Choose a future Sunday just before the local week rolls over. The
+  // server's adjustment preview, not the browser's timezone, owns the instant.
+  const monday = checked.snooze.until.slice(0, 10);
+  const localSunday = new Date(Date.parse(`${monday}T00:00:00Z`) + 6 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+  const field = review.getByLabel('Change the date or time');
+  const newTime = page.waitForResponse(
+    response => new URL(response.url()).pathname === '/api/home-assistant/today/action'
+  );
+  await field.fill(`${localSunday} 23:59`);
+  await field.press('Enter');
+  const checkedAgain = await (await newTime).json();
+  expect(checkedAgain.status).toBe('review');
+  expect(checkedAgain.review).not.toBe(checked.snooze.review);
+  expect(checkedAgain.until).not.toBe(checked.snooze.until);
+  await expect(review.locator('time')).toHaveAttribute('datetime', checkedAgain.until);
   expect((await stored(hqItem.id)).status).toBe('active');
   const commit = page.waitForResponse(
     response => new URL(response.url()).pathname === '/api/home-assistant/today/action'
@@ -164,7 +197,7 @@ test('wt demo: the Assistant reads the same Needs you records as Home', async ({
   await review.getByRole('button', { name: 'Confirm snooze' }).press('Enter');
   expect((await (await commit).json()).status).toBe('saved');
   await expect(review.getByRole('status')).toHaveText('Snooze saved.');
-  await expect(review.locator('time')).toHaveAttribute('datetime', checked.snooze.until);
+  await expect(review.locator('time')).toHaveAttribute('datetime', checkedAgain.until);
   await expect
     .poll(async () => (await homeRead()).needs_you.items.some((item: any) => item.id === hqItem.id))
     .toBe(false);
@@ -175,7 +208,7 @@ test('wt demo: the Assistant reads the same Needs you records as Home', async ({
     workspace_id: hqItem.workspace_id,
     status: 'snoozed'
   });
-  expect(Date.parse(after.snoozed_until)).toBe(Date.parse(checked.snooze.until));
+  expect(Date.parse(after.snoozed_until)).toBe(Date.parse(checkedAgain.until));
   expect(await stored(mailItem.id)).toEqual(before[1]);
   await shot('04-snooze-saved.png');
   await review.getByRole('link', { name: `Open ${title} in My HQ` }).click();
@@ -211,4 +244,9 @@ test('wt demo: the Assistant reads the same Needs you records as Home', async ({
   expect((await stored(otherItem.id)).status).toBe('completed');
   await shot('04-stale-snooze-refused.png');
   await secondTab.close();
+  await page.reload();
+  await assistant.open();
+  await expect(page.locator('#homeAssistantConversation')).toContainText('Finish the notes');
+  await expect(list).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Confirm snooze' })).toHaveCount(0);
 });
