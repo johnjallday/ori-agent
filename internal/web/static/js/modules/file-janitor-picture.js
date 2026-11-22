@@ -539,7 +539,8 @@ function folderCard(h, folder, ctx) {
     h('span', 'fj-folder-count', String(folder.count > 0 ? folder.count : folder.unfiled_count))
   );
   card.appendChild(head);
-  card.appendChild(h('p', 'fj-folder-destination', folder.destination));
+  const destination = ctx.filedRoot ? ctx.filedRoot + '/' + name : folder.destination;
+  card.appendChild(h('p', 'fj-folder-destination', destination));
   if (unticked) card.appendChild(h('p', 'fj-not-filed', 'Not filed'));
   if (folder.count > 0) {
     card.appendChild(

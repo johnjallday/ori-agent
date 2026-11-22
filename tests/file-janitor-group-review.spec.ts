@@ -33,10 +33,12 @@ test.describe.configure({ mode: 'serial' });
 // care and share one short text; the pair and bundle cases choose sizes and days.
 type Fixture = string | { text: string; mtime?: Date };
 
-function syntheticRoot(names: string[], contents: Record<string, Fixture> = {}) {
+function syntheticRoot(names: string[], contents: Record<string, Fixture> = {}, folderName?: 'Downloads') {
   const temp = realpathSync(tmpdir());
-  const root = realpathSync(mkdtempSync(join(temp, 'ori-group-review-')));
-  if (!root.startsWith(temp) || root === temp) throw new Error('Non-temporary fixture');
+  const parent = realpathSync(mkdtempSync(join(temp, 'ori-group-review-')));
+  if (!parent.startsWith(temp) || parent === temp) throw new Error('Non-temporary fixture');
+  const root = folderName ? join(parent, folderName) : parent;
+  if (folderName) mkdirSync(root, { mode: 0o700 });
   for (const name of names) {
     const chosen = contents[name];
     const text =
@@ -70,10 +72,11 @@ async function manualReview(
   names: string[],
   label?: string,
   useAlias = false,
-  contents: Record<string, Fixture> = {}
+  contents: Record<string, Fixture> = {},
+  folderName?: 'Downloads'
 ) {
   const ws = await workspace(request, label);
-  const root = syntheticRoot(names, contents);
+  const root = syntheticRoot(names, contents, folderName);
   const referencePath = useAlias
     ? join(
         realpathSync(mkdtempSync(join(realpathSync(tmpdir()), 'ori-group-alias-'))),
@@ -183,8 +186,7 @@ test('agentless real entry draws a 206-file folder ticked, unticks one folder, k
   });
   const console = await openReview(page, ws.slug);
 
-  // The lead line, then the frame: nothing else comes before the first folder.
-  // The folder is named by its own folder name, never a path.
+  // The picture lead and frame use the folder's display name.
   const folderName = basename(ws.root);
   await expect(console.locator('#fileJanitorLead')).toHaveText(
     `This is how ${folderName} will look. Nothing moves until you press File. Ori reads names, types, sizes and dates, never what is inside.`
@@ -283,6 +285,135 @@ test('decision counts jump to their sections and unanswered files do not block u
   expect(writes[0]).toMatch(/\/draft$/);
   expect(destinations(ws.root)).toEqual([]);
   await page.screenshot({ path: `${screenshots}/01-one-folder-unticked.png` });
+});
+
+// A valid, blank single-page PDF; the native acceptance check can also use any
+// disposable PDF exported on the Mac. All offsets are byte lengths of ASCII.
+function disposablePDF() {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 144 144] /Resources << >> >>'
+  ];
+  let body = '%PDF-1.4\n';
+  const offsets = objects.map((object, index) => {
+    const offset = body.length;
+    body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    return offset.toString().padStart(10, '0') + ' 00000 n \n';
+  });
+  return body + `xref\n0 4\n0000000000 65535 f \n${offsets.join('')}trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n${body.length}\n%%EOF\n`;
+}
+
+test('from the Filing station, file unrelated items and leave both possible copies in place', async ({
+  page,
+  request
+}) => {
+  const documents = ['Field guide.pdf', 'Field guide (2).pdf'];
+  const otherFiles = ['unrelated-photo.png', 'unrelated-installer.dmg'];
+  const pdf = disposablePDF();
+  const ws = await manualReview(
+    request,
+    [...documents, ...otherFiles],
+    'Independent filing decisions',
+    false,
+    Object.fromEntries(documents.map(name => [name, pdf])),
+    'Downloads'
+  );
+  const initial = await pictureOf(request, ws.base);
+  const batch = `${ws.base}/batches/${initial.batch_id}`;
+  const pair = initial.loose.find((row: { key: string }) => row.key === 'versions').pairs[0];
+  const sent: string[] = [];
+  await page.route('**/api/onboarding/status', route =>
+    route.fulfill({ json: { needs_onboarding: false, completed: true } })
+  );
+  // The browser checks exact dispatch only. The standard server remains in
+  // no-desktop mode; the native boundary has recording-opener handler tests.
+  await page.route(url => url.pathname === `${batch}/picture`, async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, json: { ...(await response.json()), can_reveal: true } });
+  });
+  await page.route('**/picture/files/*/open?*', route => {
+    const req = route.request();
+    expect(req.method()).toBe('POST');
+    expect(req.headers()['x-ori-filing-action']).toBe('open');
+    sent.push(new URL(req.url()).pathname + new URL(req.url()).search);
+    return route.fulfill({ json: { success: true } });
+  });
+  const drafts = draftPosts(page);
+  const pressBodies: { trash_acknowledged: number }[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && isFileRequest(req.url())) pressBodies.push(req.postDataJSON());
+  });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const nudge = page.locator('#workspace-detail-task-confirm-modal');
+  await page.addLocatorHandler(nudge, () => nudge.getByRole('button', { name: 'Not now', exact: true }).click());
+  await page.goto(`/workspaces/${encodeURIComponent(ws.slug)}?mode=map`);
+  const station = page.locator('.ws-cmd-opmap [data-cmd-hq-station="file-janitor"]');
+  await expect(station).toBeVisible();
+  await station.click();
+  const review = page.locator('#fileJanitorConsole');
+  await expect(review).toBeVisible();
+  const decisions = review.getByRole('button', { name: '2 need a decision', exact: true });
+  await decisions.click();
+  const card = pairCard(review, documents[0]);
+  for (const [index, name] of documents.entries()) {
+    await card.getByRole('button', { name: `Open ${name} in Preview`, exact: true }).click();
+    await expect.poll(() => sent.length).toBe(index + 1);
+    expect(sent[index]).toBe(`${batch}/picture/files/${pair.files[index].id}/open?revision=${initial.revision}`);
+  }
+  expect(drafts).toEqual([]);
+  const evidencePath = 'tasks/evidence-downloads-review-decisions';
+  mkdirSync(evidencePath, { recursive: true });
+  const evidenceOptions = { mask: [review.locator('.fj-console-folder')], maskColor: '#888' };
+  await page.screenshot({ path: `${evidencePath}/04-pair-simulated-inspection.png`, ...evidenceOptions });
+
+  const target = documents[1];
+  await fileChoice(card, target).selectOption('trash');
+  await expect(card.locator('.fj-pair-line').nth(1)).toContainText('Marked for Trash');
+  await expect(card.locator('.fj-pair-line').nth(0)).not.toContainText('Marked for Trash');
+  await expect(fileButton(review)).toHaveText(filesLabel(2, 1));
+  await expect(fileButton(review)).toBeDisabled();
+  await card.getByRole('button', { name: `Undo Trash mark for ${target}`, exact: true }).click();
+  await expect(decisions).toBeVisible();
+  await expect(fileButton(review)).toHaveText(filesLabel(2));
+  await expect(fileButton(review)).toBeEnabled();
+  expect(drafts).toEqual(['mark_trash', 'unmark_trash']);
+  expect(pressBodies).toEqual([]);
+  const trashPath = sandboxTrash();
+  const trashContents = () => trashPath && existsSync(trashPath) ? readdirSync(trashPath).sort() : [];
+  const beforeTrash = trashContents();
+  await fileButton(review).click();
+  const receipt = review.locator('#fileJanitorReceipt');
+  await expect(receipt).toBeVisible();
+  await expect(receipt).toContainText('2 files filed.');
+  await expect(receipt).not.toContainText(/moved to Trash/i);
+  expect(pressBodies).toHaveLength(1);
+  expect(pressBodies[0].trash_acknowledged).toBe(0);
+  expect(trashContents()).toEqual(beforeTrash);
+  expect(readdirSync(ws.root).sort()).toEqual([...documents, 'Filed'].sort());
+  for (const name of documents) expect(readFileSync(join(ws.root, name), 'utf8')).toBe(pdf);
+  expect(readdirSync(join(ws.root, 'Filed', 'Images'))).toEqual([otherFiles[0]]);
+  expect(readdirSync(join(ws.root, 'Filed', 'Installers'))).toEqual([otherFiles[1]]);
+  await page.screenshot({ path: `${evidencePath}/04-receipt.png`, ...evidenceOptions });
+
+  await receipt.getByRole('button', { name: 'Done', exact: true }).click();
+  await review.getByRole('button', { name: 'All files', exact: true }).click();
+  const row = review.getByRole('row').filter({ hasText: target });
+  await expect(row).toBeVisible();
+  // Stage one PDF, then replace its contents after the plan was checked. The
+  // real press from All files must refuse this now-outdated plan and move nothing.
+  await row.getByRole('combobox').selectOption('documents');
+  await row.getByRole('checkbox').check();
+  await expect(fileButton(review)).toHaveText(filesLabel(1));
+  await expect(fileButton(review)).toBeEnabled();
+  writeFileSync(join(ws.root, target), 'Changed disposable file: different byte length');
+  await fileButton(review).click();
+  await expect(review.getByText(/The folder changed since you looked\. Nothing was filed/)).toBeVisible();
+  expect(pressBodies).toHaveLength(2);
+  expect(trashContents()).toEqual(beforeTrash);
+  expect(readdirSync(ws.root).sort()).toEqual([...documents, 'Filed'].sort());
+  expect(destinations(ws.root).sort()).toEqual(['Images', 'Installers']);
+  await page.screenshot({ path: `${evidencePath}/04-changed-refusal.png`, ...evidenceOptions });
 });
 
 test('both review views dispatch the same simulated inspection; a standard demo hides it', async ({ page, request }) => {
@@ -403,7 +534,7 @@ test('206 mixed files are each drawn once, question groups are never ticked, and
   // No tick box for a question group (Ori never ticks one); each row has one menu,
   // starting on "Leave here", and the question files stay loose.
   await expect(console.locator('.fj-loose-row input')).toHaveCount(0);
-  const menus = console.locator('.fj-loose-row select');
+  const menus = console.locator('.fj-loose-row > select');
   await expect(menus).toHaveCount(4);
   for (const menu of await menus.all()) await expect(menu).toHaveValue('leave');
   await expect(fileButton(console)).toHaveText(filesLabel(149));

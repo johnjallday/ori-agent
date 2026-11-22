@@ -1185,6 +1185,8 @@
       lastBatch?.id === batchID &&
       reviewDraft?.revision === revision &&
       reviewDraft?.group_revision === groupRevision;
+    const focusID = document.activeElement?.id;
+    const visit = consoleVisit;
     planLoadState = 'loading';
     renderBatch();
     const ids = planFileIDs();
@@ -1234,7 +1236,16 @@
       planLoadState = 'error';
       trashAcknowledgedFor = 0;
     }
-    if (current()) renderBatch();
+    if (!current()) return;
+    renderBatch();
+    // Rechecking temporarily removes the jump links and disables File. Put the
+    // keyboard back only when that recheck displaced it, not if the user moved.
+    if (
+      visit === consoleVisit &&
+      document.activeElement === document.body &&
+      /^fileJanitor(?:Approve|JumpFiled|JumpLoose|JumpTrash)$/.test(focusID || '')
+    )
+      document.getElementById(focusID)?.focus?.();
   }
 
   function categoryPicker(candidate) {
@@ -2118,8 +2129,9 @@
         pictureMore = null;
         pictureMoreRequest++;
       }
-      // The plan names the files this picture shows, so a new picture asks again.
-      schedulePlan();
+      // A different picture may expose different plan lines. Don't interrupt
+      // keyboard use to recheck the same plan for an identical reread.
+      if (!planMatchesDraft() || planAskedKey !== planFileIDs().join(',')) schedulePlan();
     } catch (_) {
       if (!current()) return;
       picture = null;

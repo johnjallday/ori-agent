@@ -507,6 +507,34 @@ write, the connector contract (`mcp_mover.go`, the `Mover` interface).
   than guessed. Nothing in production sets `content` today, so that wording is
   tested but cannot appear yet.
 
+### Decisions in the picture and inspection in All files
+
+- The picture's decision summary combines only a matching concrete batch,
+  group revision, saved draft revision and validated plan. **Ready to file**
+  is the plan's `move_count`; **Marked for Trash** is its separate `trash_count`.
+  **Need a decision** is the sum of question rows' whole `loose_count`, not a
+  count of samples, sibling cards, or the difference from the scan total.
+  Unticked confident files, exclusions, remembered skips and known exceptions
+  are not questions. Nonzero counts focus their sections without writing.
+  Missing or obsolete counts are not zero. Unanswered files stay in the
+  approved folder without blocking unrelated ready moves.
+- A possible-copy member has a **Filing choice** on its own row alongside its
+  original name, metadata and available inspection actions. The suggested-copy
+  shortcut uses only saved name/size evidence and a complete family; it marks
+  one member, never a pair. Other filenames expand the same choices inline.
+  Controls and focus are keyed by candidate and rendering location, so a member
+  repeated in a destination, pair, or paged list cannot steal focus. The footer
+  is for the plan, its approval, and feedback, not a second editor.
+- A local-desktop `GET .../batches/{id}` can add `inspection_revision` scoped to
+  the same scan snapshot as the candidate page, and `can_inspect` plus optional
+  `viewer` on eligible pending/approved rows. Without a valid scope or local
+  desktop this metadata is absent. The browser uses the concrete ID and
+  revision of that page; a previous page can't retarget a new one. Both views
+  send the same `/picture/files/{id}/open` or `/reveal` POST with the action
+  header. Only the handler authorizes dispatch and resolves the current source;
+  candidate metadata alone is not permission, confirmation that the file is
+  unchanged, or permission to open a format outside the native reader policy.
+
 ### Plan check (task 2.1)
 
 - `GET .../batches/{batchID}/plan?revision=&group_revision=&destination=<category|trash>&limit=50&offset=0`
