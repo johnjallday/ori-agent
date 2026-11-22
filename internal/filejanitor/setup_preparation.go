@@ -16,6 +16,7 @@ type SetupPreparation struct {
 	ID                 string           `json:"id"`
 	OwnerUserID        string           `json:"owner_user_id"`
 	ReferenceID        string           `json:"reference_id"`
+	FromSelection      bool             `json:"from_selection,omitempty"`
 	ReviewRevision     string           `json:"review_revision"`
 	BindingRevision    string           `json:"binding_revision"`
 	CapabilityRevision string           `json:"capability_revision"`
@@ -52,10 +53,13 @@ func requirePreparation(settings JanitorSettings, id string) error {
 }
 
 type LinkedPreparationRequest struct {
-	Context        context.Context
-	WorkspaceID    string
-	OwnerUserID    string
-	ReferenceID    string
+	Context     context.Context
+	WorkspaceID string
+	OwnerUserID string
+	ReferenceID string
+	// SelectedPath is resolved from a trusted token by the HTTP boundary. It
+	// is never a client path and is unnecessary after an acceptance is saved.
+	SelectedPath   string
 	Monitoring     bool
 	ReviewRevision string
 }
@@ -66,6 +70,8 @@ type SetupPreparationResult struct {
 	Stage       string                `json:"stage"`
 	Result      *ScanOperationReceipt `json:"result,omitempty"`
 	Status      *Status               `json:"status,omitempty"`
+	// InitialSelectedScan is a live, newly committed result, not a replay.
+	InitialSelectedScan bool `json:"-"`
 }
 
 // PrepareLinkedSetup accepts one exact owner-reviewed candidate, persists its
@@ -86,7 +92,7 @@ func (s *Service) PrepareLinkedSetup(request LinkedPreparationRequest, automatio
 	}
 	preparation := settings.SetupPreparation
 	if preparation == nil {
-		review, err := s.ReviewLinkedSetup(request.WorkspaceID, request.OwnerUserID, request.ReferenceID, request.Monitoring)
+		review, err := s.reviewLinkedSetup(request.WorkspaceID, request.OwnerUserID, request.ReferenceID, request.SelectedPath, request.Monitoring, false)
 		if err != nil {
 			return result, err
 		}
@@ -96,29 +102,26 @@ func (s *Service) PrepareLinkedSetup(request LinkedPreparationRequest, automatio
 		preparation = &SetupPreparation{
 			ID: uuid.NewString(), OwnerUserID: request.OwnerUserID, ReferenceID: review.SelectedReference,
 			ReviewRevision: review.Revision, BindingRevision: review.bindingRevision, CapabilityRevision: review.capabilityRevision, AccessRevision: review.accessRevision,
-			Monitoring: review.Monitoring, Terms: review.Terms, AcceptedAt: s.clock(),
+			Monitoring: review.Monitoring, Terms: review.Terms, AcceptedAt: s.clock(), FromSelection: request.SelectedPath != "",
 		}
-		if _, err := s.store.UpdateSettings(request.WorkspaceID, func(current *JanitorSettings) error {
-			digest, err := setupDigest(*current)
-			if err != nil {
-				return err
-			}
-			if digest != review.settingsDigest || current.SetupPreparation != nil {
-				return setupErr(CodeFolderChanged, "Folder setup changed before confirmation. Review it again.", RepairRetry, nil)
-			}
-			current.SetupPreparation = preparation
-			return nil
-		}); err != nil {
+		if err := s.acceptLinkedPreparation(request.WorkspaceID, review, preparation); err != nil {
 			return result, err
 		}
 	}
 	if preparation.OwnerUserID != request.OwnerUserID || preparation.ReviewRevision != request.ReviewRevision ||
-		(request.ReferenceID != "" && preparation.ReferenceID != request.ReferenceID) || preparation.Monitoring != request.Monitoring {
+		(request.ReferenceID != "" && preparation.ReferenceID != request.ReferenceID) || preparation.Monitoring != request.Monitoring ||
+		(request.SelectedPath != "" && !preparation.FromSelection) {
 		return result, setupErr(CodeFolderChanged, "Another folder setup was accepted. Open the current workspace settings.", RepairRetry, nil)
 	}
 	review, settings, err := s.validateLinkedPreparation(request.WorkspaceID, *preparation)
 	if err != nil {
 		return result, err
+	}
+	if request.SelectedPath != "" {
+		selected, err := resolveSetupRoot(request.SelectedPath)
+		if err != nil || selected != review.rootPath {
+			return result, setupErr(CodeFolderChanged, "This is not the accepted folder. Open the current Filing setup.", RepairRetry, nil)
+		}
 	}
 	result.OperationID = preparation.ID
 	result.Stage = "folder"
@@ -229,7 +232,38 @@ func (s *Service) PrepareLinkedSetup(request LinkedPreparationRequest, automatio
 		return result, err
 	}
 	result.Status.Settings = acknowledged
+	result.InitialSelectedScan = preparation.FromSelection && freshScanAttempt
 	return result, nil
+}
+
+func (s *Service) acceptLinkedPreparation(workspaceID string, review LinkedSetupReview, preparation *SetupPreparation) error {
+	var pending *PendingFolderGrant
+	if preparation.FromSelection {
+		// There is not yet a directory reference from which to recover the
+		// path. Save the accepted pending grant with its preparation atomically.
+		s.claimMu.Lock()
+		defer s.claimMu.Unlock()
+		if err := s.ensureRootAvailable(workspaceID, review.rootPath); err != nil {
+			return err
+		}
+		pending = &PendingFolderGrant{RunID: preparation.ID, OperationID: preparation.ID + ":folder",
+			RootPath: review.rootPath, RootID: uuid.NewString(), StartedAt: preparation.AcceptedAt}
+	}
+	_, err := s.store.UpdateSettings(workspaceID, func(current *JanitorSettings) error {
+		digest, err := setupDigest(*current)
+		if err != nil {
+			return err
+		}
+		if digest != review.settingsDigest || current.SetupPreparation != nil || (pending != nil && current.PendingFolderGrant != nil) {
+			return setupErr(CodeFolderChanged, "Folder setup changed before confirmation. Review it again.", RepairRetry, nil)
+		}
+		current.SetupPreparation = preparation
+		if pending != nil {
+			current.PendingFolderGrant = pending
+		}
+		return nil
+	})
+	return err
 }
 
 // PreparationFailureSummary exposes stage-specific repair without forwarding
@@ -303,7 +337,8 @@ func validatePreparationWorkspace(ws *workspace.Workspace, preparation *SetupPre
 		return nil
 	}
 	if ws == nil || !linkedSetupOwned(ws, preparation.OwnerUserID) ||
-		(ws.Status != "" && ws.Status != workspace.StatusActive) || strings.EqualFold(ws.Kind, "group") {
+		(ws.Status != "" && ws.Status != workspace.StatusActive) || strings.EqualFold(ws.Kind, "group") ||
+		(preparation.FromSelection && !expansionWorkspace(ws)) {
 		return setupErr(CodeWorkspaceMissing, "This workspace is no longer available for the accepted setup.", "", nil)
 	}
 	install, found := ws.GetInstalledCapability(workspace.CapabilityFileJanitor)
@@ -330,15 +365,26 @@ func (s *Service) validatePreparationBoundary(settings JanitorSettings, id strin
 }
 
 func (s *Service) validateLinkedPreparation(workspaceID string, preparation SetupPreparation) (LinkedSetupReview, JanitorSettings, error) {
-	review, err := s.reviewLinkedSetup(workspaceID, preparation.OwnerUserID, preparation.ReferenceID, preparation.Monitoring, true)
-	if err != nil {
-		return review, JanitorSettings{}, err
-	}
 	settings, err := s.store.LoadSettings(workspaceID)
 	if err != nil {
-		return review, settings, err
+		return LinkedSetupReview{}, settings, err
 	}
 	if err := requirePreparation(settings, preparation.ID); err != nil {
+		return LinkedSetupReview{}, settings, err
+	}
+	var selectedPath string
+	if preparation.FromSelection {
+		if settings.IsSetUp() {
+			selectedPath = settings.RootPath
+		} else if pending := settings.PendingFolderGrant; pending != nil && pending.RunID == preparation.ID && pending.OperationID == preparation.ID+":folder" {
+			selectedPath = pending.RootPath
+		}
+		if selectedPath == "" {
+			return LinkedSetupReview{}, settings, setupErr(CodeFolderChanged, "The selected folder cannot be confirmed. Review current setup.", RepairRetry, nil)
+		}
+	}
+	review, err := s.reviewLinkedSetup(workspaceID, preparation.OwnerUserID, preparation.ReferenceID, selectedPath, preparation.Monitoring, true)
+	if err != nil {
 		return review, settings, err
 	}
 	for _, get := range []func(string) (*workspace.Workspace, error){s.readWorkspace, s.workspaces.Get} {

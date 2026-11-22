@@ -260,10 +260,11 @@ type Status struct {
 // SetupSuggestion is the unresolved folder request recorded on the workspace at
 // creation time, echoed back for the setup card.
 type SetupSuggestion struct {
-	Key              string `json:"key"`
-	Label            string `json:"label,omitempty"`
-	SuggestedPath    string `json:"suggested_path,omitempty"`
-	AccessDisclosure string `json:"access_disclosure,omitempty"`
+	Key                  string `json:"key"`
+	Label                string `json:"label,omitempty"`
+	SuggestedPath        string `json:"suggested_path,omitempty"`
+	AccessDisclosure     string `json:"access_disclosure,omitempty"`
+	ReviewSelectedFolder bool   `json:"review_selected_folder,omitempty"`
 	// FilingRootName is the destination folder name that will be created inside
 	// the chosen root, so the card can state exactly where files will go.
 	FilingRootName string `json:"filing_root_name"`
@@ -393,6 +394,16 @@ func (s *Service) AppliesTo(workspaceID string) bool {
 	return false
 }
 
+// ExpansionRunPrefix identifies the normal creator's HQ Filing operation. It
+// selects the reviewed setup presentation only; it is not proof of payment.
+const ExpansionRunPrefix = "filing-expansion:"
+
+func expansionWorkspace(ws *workspace.Workspace) bool {
+	p := ws.GetTemplateProvenance()
+	return !ws.IsAnchored() && p != nil && p.Builtin && p.TemplateID == "file-janitor" &&
+		p.AssistantSetup != nil && strings.HasPrefix(p.AssistantSetup.RunID, ExpansionRunPrefix)
+}
+
 // LegacyTemplateID is the built-in template a Downloads Janitor workspace was
 // created from, before the blueprint was retired in favor of File Janitor. It
 // persists in every such workspace's TemplateProvenance, so AppliesTo must keep
@@ -431,6 +442,7 @@ func (s *Service) suggestion(workspaceID string, settings JanitorSettings) *Setu
 	if err != nil || ws == nil {
 		return out
 	}
+	out.ReviewSelectedFolder = expansionWorkspace(ws) && settings.AccessRevokedAt.IsZero()
 	for _, req := range ws.PendingDirectoryRequirements() {
 		if !matchesDirectoryRequirementKey(req.Key) && len(ws.PendingDirectoryRequirements()) > 1 {
 			continue
@@ -519,6 +531,15 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 		return Status{}, err
 	}
 	operation := req.Operation
+	if operation == nil && !current.IsSetUp() && current.AccessRevokedAt.IsZero() {
+		ws, err := s.readWorkspace(workspaceID)
+		if err != nil || ws == nil {
+			return Status{}, setupErr(CodeWorkspaceMissing, "This workspace is unavailable.", "", err)
+		}
+		if expansionWorkspace(ws) {
+			return Status{}, setupErr(CodePrivacyReviewRequired, "Review the chosen folder before allowing Filing to prepare its first scan.", RepairChooseFolder, nil)
+		}
+	}
 	if operation != nil {
 		operation.RunID = strings.TrimSpace(operation.RunID)
 		operation.OperationID = strings.TrimSpace(operation.OperationID)
@@ -860,6 +881,15 @@ func (s *Service) ensureWorkspaceAccess(workspaceID, root, selectedReference str
 		var createdReference bool
 		if selectedReference != "" {
 			ref, err := ws.GetDirectoryReference(selectedReference)
+			if err != nil && preparation != nil && preparation.FromSelection && !relinkAnchor &&
+				selectedReference == preparation.ReferenceID && selectedReference == selectedSetupReference(workspaceID, root) {
+				selected := workspace.DirectoryReference{ID: selectedReference, WorkspaceID: workspaceID, Name: filepath.Base(root), Path: root}
+				if err := ws.AddDirectoryReference(selected); err != nil {
+					return err
+				}
+				createdReference = true
+				ref, err = ws.GetDirectoryReference(selectedReference)
+			}
 			if err != nil || ref.Purpose != "" {
 				return setupErr(CodeFolderChanged, "The attached folder changed. Review access again.", RepairChooseFolder, nil)
 			}

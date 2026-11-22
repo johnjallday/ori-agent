@@ -187,6 +187,7 @@ type Handler struct {
 	// Serializes reviewed creation with ordinary creates naming the same build.
 	// Durable claims remain the cross-restart identity; this is only admission.
 	buildPreparationMu sync.Mutex
+	filingCreationMu   sync.Mutex
 
 	// rescanMu serializes disk reconciles so concurrent rescan requests
 	// (e.g. several hub tabs loading at once) don't run overlapping filesystem

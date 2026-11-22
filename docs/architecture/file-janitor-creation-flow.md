@@ -39,6 +39,24 @@ model. Do not describe that conversation as necessarily on-device.
   adapter, including persisted `downloads_janitor` snapshots. The browser never
   marks steps complete or hides unfinished setup to simulate readiness.
 
+## Paid workspace (optional)
+
+The HQ expansion uses the normal reviewed Filing creator with no anchor or
+selected folder. Its local purchase claim reserves the workspace ID and debits
+Craft in the ledger in one transaction. Canonical workspace and team evidence
+settles delivery. Proven non-delivery reverses the debit once; ambiguous
+registration keeps the claim for recovery, and neither deletion nor reopening
+allows a second build from the same offer. A receipt holds no folder grant.
+
+From the saved workspace, **Review Downloads** or an explicit native/typed
+selection opens the existing permission card via a workspace-scoped picker
+token. No link, grant, `Filed/`, scan or watcher is written during preview. At
+confirmation the existing preparation persists the pending grant before linking
+the selected folder, approves only the displayed metadata scope, and runs the
+same operation-aware scan. Monitoring remains a separate, unchecked choice.
+**Not now** dismisses setup; return to the same workspace and continue for free.
+An existing configuration is never replaced by this first-setup route.
+
 ## Review and receipt protocol
 
 ### Existing workspace
@@ -51,10 +69,13 @@ under the retained `downloads-janitor` alias):
   an opaque revision. A details field may show the full path **only to the
   authenticated owner**. No grants, operation claims, `Filed`, watcher or scan.
 - `POST /setup-review`: explicit selection of `reference_id` and `monitoring`
-  returns the current review. It is still read-only; supplying a reference is not
-  consent. Unknown fields/foreign references are refused.
+  returns the current review. An unconfigured expansion workspace can instead
+  send a workspace-scoped `selection_token` and monitoring choice. Both forms
+  are read-only. Raw paths, unknown fields and foreign selections are refused.
 - `POST /prepare-review`: `{reference_id, monitoring, review_revision}` confirms
-  exactly that review.
+  exactly that review. Before acceptance for a provisional picker selection,
+  the confirmation also needs the matching `selection_token`; accepted
+  operations can retry from their existing receipts without the picker token.
   The server claims or replays its stable operation before any domain effect.
 - `POST /stop-preparation`: `{operation_id}` joins any already-started domain
   stage, pauses monitoring and releases only this operation's unfinished claim.

@@ -40,6 +40,9 @@ const (
 	// charged once per task at any cadence tier (FR17, FR18).
 	FarmBuildCost int64 = 25
 
+	// FilingExpansionCost is the one-time Craft price of the first HQ expansion.
+	FilingExpansionCost int64 = 7
+
 	// BackfillGrantCap bounds the one-time Craft grant an existing install
 	// receives so the loop is reachable on day one (FR32).
 	BackfillGrantCap int64 = 200

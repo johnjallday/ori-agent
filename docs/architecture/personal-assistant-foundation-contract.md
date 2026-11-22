@@ -761,6 +761,23 @@ marks Show your assistant a folder complete. A Tidy that was only skipped leaves
 it open. `pa-tidy-downloads` itself stays out of the graph; its ID and action
 URL remain as constants so persisted state that names it still loads.
 
+## First Craft expansion
+
+After a valid HQ is designated, the Home Quests panel offers an optional Filing
+workspace. The offer is not a mission node or a prerequisite: **Show a folder for
+free** still opens the current folder chooser, and ordinary workspace creation
+remains free. Meeting the assistant pays 7 Craft; building HQ pays none. At the
+current tuning, the five paying starter missions award 35 Craft and the first
+Filing expansion costs 7, leaving 28 toward a 25-Craft Farm if nothing else was
+spent. Creative Mode waives the price; disabling the economy hides new offers.
+
+A workspace purchase does not satisfy any folder mission. Show Folder still
+waits for the existing accepted outcomes, including a ready Filing wizard. The
+expansion's newly prepared metadata scan (even a saved empty result) can satisfy
+First Look. Opening Filing, reviewing permissions, and replaying a receipt do
+not satisfy First Look. Folder consent is explained in the
+[Filing creation flow](file-janitor-creation-flow.md#paid-workspace-optional).
+
 ## Show me a folder
 
 `tasks/prd-show-me-a-folder.md`. The assistant's first proactive act: the user

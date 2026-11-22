@@ -2582,6 +2582,57 @@ a.personal-assistant-today__action {
   transition: width 220ms ease;
 }
 
+.quest-log-expansion {
+  margin-top: 11px;
+  padding: 10px 12px;
+  border: 1px dashed var(--hc-line);
+  background: var(--hc-panel-deep);
+}
+
+.quest-log-expansion .quest-log-first-mission-title {
+  margin-top: 5px;
+}
+
+.quest-log-expansion .quest-log-first-mission-why,
+.quest-log-expansion-price,
+.quest-log-expansion-notice {
+  display: block;
+  margin: 6px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-line-clamp: unset;
+}
+
+.quest-log-expansion-price {
+  color: var(--hc-ink);
+  font-weight: 600;
+}
+
+.quest-log-expansion-links {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quest-log-expansion a {
+  display: block;
+  min-height: 24px;
+  padding-block: 4px;
+  color: var(--hc-signal);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  text-decoration: underline;
+}
+
+.quest-log-expansion a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+
+.quest-log-expansion [hidden] {
+  display: none;
+}
+
 .quest-log-first-mission {
   position: relative;
   display: grid;

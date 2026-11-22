@@ -28,6 +28,13 @@
 
 import { loadOnboardingStatus, onboardingGateDecision } from './onboarding-gate.js';
 import {
+  confirmFilingExpansion,
+  filingExpansionView,
+  filingPurchaseNotice,
+  renderFilingExpansion
+} from './filing-expansion.js';
+import { ECONOMY_CHANGED_EVENT, notifyEconomyChanged } from './economy-harvest.js';
+import {
   FOLDER_QUEST_ACTION_URL,
   folderOfferView,
   folderOutcomeNote,
@@ -430,6 +437,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
   let trigger = null; // #cockpitQuestsToggle — the always-available compact entry point.
   let knownCompleted = null; // Set of completed quest IDs; null until first load.
   let knownTierComplete = {}; // tier number -> bool, from the previous render.
+  let statusRevision = 0;
 
   function el(role) {
     return widget ? widget.querySelector(`[data-role="${role}"]`) : null;
@@ -529,6 +537,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
     button.disabled = true;
     try {
       const status = await postJSON('/api/progression/skip', { quest_id: questID });
+      statusRevision++;
       render(status);
     } catch (_) {
       button.disabled = false;
@@ -601,17 +610,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
             openLockedAction(view.lockedAction);
           }
         : view.inPlace
-          ? event => {
-              event.preventDefault();
-              const folder = window.PersonalAssistantFolder;
-              if (folder && typeof folder.startFirstLook === 'function') {
-                void folder
-                  .startFirstLook()
-                  .then(() => lastStatus && renderFirstMission(lastStatus));
-              } else {
-                window.location.assign('/?panel=today');
-              }
-            }
+          ? startFirstLook
           : null;
     }
     if (actionLabel) actionLabel.textContent = view.actionLabel;
@@ -621,6 +620,16 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
     }
     renderFirstMissionOffer(view);
     mission.hidden = false;
+  }
+
+  function startFirstLook(event) {
+    event.preventDefault();
+    const folder = window.PersonalAssistantFolder;
+    if (folder && typeof folder.startFirstLook === 'function') {
+      void folder.startFirstLook().then(() => lastStatus && renderFirstMission(lastStatus));
+    } else {
+      window.location.assign('/?panel=today');
+    }
   }
 
   // The assistant's folder offer, as last announced by personal-assistant-
@@ -782,10 +791,85 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
   // The status last rendered, so the folder offer can re-render the card on
   // its own announcements without another fetch.
   let lastStatus = null;
+  let filingBusy = false;
+  let filingUncertain = false;
+  let filingNotice = '';
+
+  function currentExpansionView() {
+    const view = filingExpansionView(lastStatus);
+    if (view.destinations || lastStatus?.filing_expansion?.state === 'destination_unavailable') {
+      filingUncertain = false;
+    }
+    if (view.visible && filingUncertain) {
+      view.action = { label: 'Check purchase status', checkOnly: true };
+    }
+    return view;
+  }
+
+  function renderExpansion() {
+    renderFilingExpansion(
+      el('filing-expansion'),
+      currentExpansionView(),
+      startFirstLook,
+      FIRST_LOOK_ACTION_URL,
+      {
+        onAction: runExpansionAction,
+        busy: filingBusy,
+        notice: filingNotice
+      }
+    );
+  }
+
+  async function runExpansionAction() {
+    if (filingBusy) return;
+    const action = currentExpansionView().action;
+    if (!action) return;
+    filingBusy = true;
+    filingNotice = '';
+    renderExpansion();
+    let result;
+    try {
+      result = await confirmFilingExpansion(action, {
+        ask: message => window.confirm(message),
+        newID: () => window.crypto.randomUUID(),
+        request: async body => {
+          const res = await fetch('/api/economy/filing-expansion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(35000)
+          });
+          const response = await res.json();
+          if (!response.filing_expansion || !response.outcome)
+            throw new Error('Filing result unavailable');
+          return response;
+        }
+      });
+      if (!result) return;
+      statusRevision++;
+      lastStatus = { ...lastStatus, filing_expansion: result.filing_expansion };
+      filingNotice = filingPurchaseNotice(result.outcome);
+      filingUncertain = result.outcome === 'unavailable';
+      if (result.outcome === 'delivered') window.dispatchEvent(new Event('ori:workspaces-changed'));
+      notifyEconomyChanged(result.filing_expansion);
+    } catch (_) {
+      filingUncertain = true;
+      filingNotice = filingPurchaseNotice('unavailable');
+    } finally {
+      filingBusy = false;
+      renderExpansion();
+      if (!el('filing-expansion')?.hidden && !el('expansion-action')?.hidden) {
+        el('expansion-action')?.focus();
+      } else if (result?.outcome === 'delivered') {
+        el('expansion-destinations')?.querySelector('a')?.focus();
+      }
+    }
+  }
 
   function render(status) {
     if (!widget) return;
     lastStatus = status;
+    renderExpansion();
 
     const current = currentTier(status);
 
@@ -856,14 +940,24 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
   }
 
   async function refresh() {
+    const revision = ++statusRevision;
     try {
       const onboardingStatus = await loadOnboardingStatus();
       if (!onboardingGateDecision(onboardingStatus).allowWorkspaceHydration) return;
       const status = await fetchStatus();
+      if (revision !== statusRevision) return;
       announceChanges(status);
       render(status);
     } catch (_) {
-      // Silent: the widget is optional; never disrupt the home page.
+      // The mission board can keep its last view, but a failed refresh must
+      // not leave a stale balance or an actionable price on the optional offer.
+      if (
+        revision === statusRevision &&
+        ['affordable', 'insufficient'].includes(lastStatus?.filing_expansion?.state)
+      ) {
+        lastStatus = { ...lastStatus, filing_expansion: { state: 'unavailable' } };
+        renderExpansion();
+      }
     }
   }
 
@@ -900,6 +994,7 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
       if (document.visibilityState === 'visible') refresh();
     });
     window.addEventListener('ori:progression-refresh', refresh);
+    window.addEventListener(ECONOMY_CHANGED_EVENT, refresh);
     // The chooser announces every offer it loads or decides; the card
     // follows without a status fetch.
     document.addEventListener('personal-assistant:folder-offer', event => {

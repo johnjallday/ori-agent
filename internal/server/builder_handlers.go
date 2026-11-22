@@ -56,6 +56,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/plugin"
 	"github.com/johnjallday/ori-agent/internal/pluginhttp"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
+	"github.com/johnjallday/ori-agent/internal/progression"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/review"
 	"github.com/johnjallday/ori-agent/internal/reviewhttp"
@@ -1310,6 +1311,17 @@ func (b *ServerBuilder) wireSetupWizard() {
 	// Downloads (tasks/prd-starter-missions.md FR10).
 	onReady = append(onReady, b.completeShowFolderOnWizardReady, b.notifyWorkspaceWelcomeReady)
 	service.SetCompletionHook(composeCompletionHooks(onReady...))
+	if b.fileJanitorHandler != nil {
+		b.fileJanitorHandler.SetOnInitialSelectedScan(func(ctx context.Context, id string) {
+			// Use the real readiness hook for Show Folder and the newly
+			// prepared result for First Look (a real empty result counts too).
+			// Reopening and receipt replay do not pass through this hook.
+			status, err := service.Status(ctx, id)
+			if err == nil && status.Ready() && b.progressionEngine != nil {
+				b.progressionEngine.Complete(progression.FolderFirstLookQuestID)
+			}
+		})
+	}
 	if b.sessionHandler != nil {
 		// This runs only on the user's explicit successful preparation request,
 		// not from update recovery. Preserve the wizard's canonical derivation.

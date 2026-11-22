@@ -1,6 +1,8 @@
 package server
 
 import (
+	"net/http"
+
 	"github.com/johnjallday/ori-agent/internal/actioncenterhttp"
 	"github.com/johnjallday/ori-agent/internal/agent"
 	agenthttp "github.com/johnjallday/ori-agent/internal/agenthttp"
@@ -257,7 +259,8 @@ type HandlerFacade struct {
 	// Economy serves the City Economy: balances, Farms, harvest piles, and the
 	// price of a cadence change. Like WorkspaceMap it belongs to the user rather
 	// than to any one workspace, and it can change no task — it only prices one.
-	Economy *economyhttp.Handler
+	Economy        *economyhttp.Handler
+	FilingPurchase http.HandlerFunc
 	// MapActivity serves the task-run show's live activity feed: what is
 	// running in every workspace right now, and the parcels waiting to be
 	// opened. Like Economy it belongs to the user, not to one workspace.

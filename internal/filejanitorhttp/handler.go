@@ -49,15 +49,21 @@ type AssistantSetupCoordinator interface {
 }
 
 type Handler struct {
-	openDocument   func(string) error
-	revealFile     func(string) error // native desktop boundary; replaceable in tests
-	service        *filejanitor.Service
-	lookup         WorkspaceLookup
-	provider       userprofile.UserProvider
-	automation     Automation
-	pathSelections PathSelectionResolver
-	assistantSetup AssistantSetupCoordinator
-	protection     filecuratorguidance.ProtectionReader
+	openDocument          func(string) error
+	revealFile            func(string) error // native desktop boundary; replaceable in tests
+	service               *filejanitor.Service
+	lookup                WorkspaceLookup
+	provider              userprofile.UserProvider
+	automation            Automation
+	pathSelections        PathSelectionResolver
+	assistantSetup        AssistantSetupCoordinator
+	protection            filecuratorguidance.ProtectionReader
+	onInitialSelectedScan func(context.Context, string)
+}
+
+// SetOnInitialSelectedScan observes newly prepared expansion setup only.
+func (h *Handler) SetOnInitialSelectedScan(fn func(context.Context, string)) {
+	h.onInitialSelectedScan = fn
 }
 
 // SetAutomation wires the watcher lifecycle so setup and pause/resume take

@@ -572,6 +572,9 @@ func registerOnboardingRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/economy/harvest", s.Handlers.Economy.Harvest)
 		mux.HandleFunc("/api/economy/quote", s.Handlers.Economy.Quote)
 	}
+	if s.Handlers.FilingPurchase != nil {
+		mux.HandleFunc("/api/economy/filing-expansion", s.Handlers.FilingPurchase)
+	}
 
 	// Smart onboarding endpoints (AI-powered profile inference)
 	mux.HandleFunc("/api/onboarding/detect", s.Handlers.SmartOnboarding.Detect)

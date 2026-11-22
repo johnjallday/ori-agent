@@ -720,6 +720,12 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if templateResolved && resolvedTemplate.Builtin && isReviewedJanitorBlueprint(resolvedTemplate.ID) {
+		ctx, release := h.LockFilingCreation(r.Context())
+		defer release()
+		r = r.WithContext(ctx)
+	}
+
 	if buildPreparationContextFrom(r.Context()) != nil && (!templateResolved || !resolvedTemplate.Builtin ||
 		!isReviewedJanitorBlueprint(resolvedTemplate.ID) || resolvedTemplate.GroupRequirement != nil) {
 		respondBuildPreparationError(w, "blueprint_changed", "This blueprint no longer supports reviewed Filing creation.", http.StatusConflict, nil)

@@ -2723,6 +2723,33 @@ The three welcome steps read canonical `missions[]` from `GET /api/progression`
 store or alter mission completion. "Show everything" is a browser preference,
 not a server state.
 
+## HQ Filing expansion
+
+`GET /api/progression` includes `filing_expansion` alongside `missions`.
+The expansion is optional and never alters the mission graph. Its projection
+contains `state`, `base_cost`, optional `effective_cost` and live `balance`,
+`creative`, and known `destinations` (`name`, `route`). A missing balance is
+unknown, not zero. An existing Filing workspace or paid receipt is not a new
+quote. A saved receipt can include the original `charged` and `waived` amounts.
+The state is one of `needs_hq`, `disabled`, `unavailable`, `affordable`,
+`insufficient`, `already_built`, `pending`, or `destination_unavailable`.
+
+`POST /api/economy/filing-expansion` accepts local owner confirmation as closed
+JSON (1 KiB): `{request_id, cost, creative}`. `request_id` is a canonical UUID;
+`cost` and `creative` are exactly the displayed terms. No template, workspace,
+folder, user or grant inputs are accepted. The reply is
+`{outcome, filing_expansion}`: `200` for a saved delivery (also on replay, even
+at zero Craft), `202` when it needs recovery, `409` for refused terms or a
+refunded attempt, and `503` if it cannot be verified. A pending purchase can
+be checked with `{"check_only":true}`; this can reconcile a receipt but never
+create another workspace or charge again. If the workspace is removed, the
+receipt remains with no Open destination. All purchase replies are `no-store`.
+
+The separate Filing `/setup-review` and `/prepare-review` routes accept a
+workspace-scoped picker `selection_token` when preparing the first review for
+an unconfigured expansion. The full setup and retry protocol is in the
+[Filing creation flow](../architecture/file-janitor-creation-flow.md).
+
 ## Personal Assistant Second Brain API
 
 Connect your second brain: the user's notes (an Obsidian vault found in Obsidian's own vault list, or a Markdown folder chosen through the folder picker) connected read-only to the Personal HQ. Contract: [docs/architecture/second-brain.md](../architecture/second-brain.md).

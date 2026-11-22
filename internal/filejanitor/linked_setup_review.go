@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -61,7 +62,7 @@ type SetupReviewTerms struct {
 // Status (whose persistence health probe creates a state directory), ConfirmSetup
 // or an automation method. No raw client path can enter this boundary.
 func (s *Service) ReviewLinkedSetup(workspaceID, ownerUserID, referenceID string, monitoring bool) (LinkedSetupReview, error) {
-	review, err := s.reviewLinkedSetup(workspaceID, ownerUserID, referenceID, monitoring, false)
+	review, err := s.reviewLinkedSetup(workspaceID, ownerUserID, referenceID, "", monitoring, false)
 	if err != nil {
 		return review, err
 	}
@@ -97,7 +98,16 @@ func (s *Service) ReviewLinkedSetup(workspaceID, ownerUserID, referenceID string
 	return current, nil
 }
 
-func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID string, monitoring, continuing bool) (LinkedSetupReview, error) {
+// ReviewSetupSelection projects the same terms for a trusted workspace-scoped
+// picker selection. No directory reference or folder authority is written here.
+func (s *Service) ReviewSetupSelection(workspaceID, ownerUserID, selectedPath string, monitoring bool) (LinkedSetupReview, error) {
+	if selectedPath == "" {
+		return LinkedSetupReview{}, setupErr(CodeFolderChanged, "Choose the folder again.", RepairChooseFolder, nil)
+	}
+	return s.reviewLinkedSetup(workspaceID, ownerUserID, "", selectedPath, monitoring, false)
+}
+
+func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID, selectedPath string, monitoring, continuing bool) (LinkedSetupReview, error) {
 	var review LinkedSetupReview
 	ws, err := s.readWorkspace(workspaceID)
 	if err != nil || ws == nil || !linkedSetupOwned(ws, ownerUserID) ||
@@ -188,6 +198,36 @@ func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID string
 			ReferenceID: ref.ID, Name: ref.Name, Path: candidatePath,
 		})
 	}
+	if selectedPath != "" {
+		if !expansionWorkspace(ws) || settings.PendingFolderGrant != nil && !continuing {
+			return LinkedSetupReview{}, setupErr(CodeFolderChanged, "Open this workspace’s current Filing setup.", RepairRetry, nil)
+		}
+		root, err := resolveSetupRoot(selectedPath)
+		if err != nil || isInsideSetupFolder(folder, root) || isInsideSetupFolder(root, folder) {
+			return LinkedSetupReview{}, setupErr(CodeFolderChanged, "Choose an available inbox folder outside the workspace.", RepairChooseFolder, nil)
+		}
+		// Use one stable provisional ID until the exact confirmed operation
+		// creates the scoped link. Its identity joins the normal review digest.
+		candidate := LinkedSetupCandidate{ReferenceID: selectedSetupReference(workspaceID, root), Name: filepath.Base(root), Path: root}
+		for _, attached := range review.Candidates {
+			if attached.ReferenceID == candidate.ReferenceID {
+				if attached.Path != root || attached.Name != candidate.Name {
+					return LinkedSetupReview{}, setupErr(CodeFolderChanged, "The selected folder link changed.", RepairChooseFolder, nil)
+				}
+				break
+			}
+			if attached.Path == root {
+				return LinkedSetupReview{}, setupErr(CodeFolderChanged, "This folder is already linked. Review the attached folder instead.", RepairChooseFolder, nil)
+			}
+		}
+		if _, err := ws.GetDirectoryReference(candidate.ReferenceID); err != nil {
+			review.Candidates = append(review.Candidates, candidate)
+		}
+		if referenceID != "" && referenceID != candidate.ReferenceID {
+			return LinkedSetupReview{}, setupErr(CodeFolderChanged, "This folder selection changed. Review it again.", RepairChooseFolder, nil)
+		}
+		referenceID = candidate.ReferenceID
+	}
 	sort.Slice(review.Candidates, func(i, j int) bool { return review.Candidates[i].ReferenceID < review.Candidates[j].ReferenceID })
 	referenceID = strings.TrimSpace(referenceID)
 	if referenceID == "" {
@@ -271,6 +311,10 @@ func (s *Service) reviewLinkedSetup(workspaceID, ownerUserID, referenceID string
 		return LinkedSetupReview{}, err
 	}
 	return review, nil
+}
+
+func selectedSetupReference(workspaceID, root string) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("ori-filing-selection\x00"+workspaceID+"\x00"+root)).String()
 }
 
 func setupDigest(value any) (string, error) {
