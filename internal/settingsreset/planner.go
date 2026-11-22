@@ -127,8 +127,9 @@ type resolvedEvidence struct {
 	// beside it, are removed under the same second confirmation, and are
 	// skipped by the retained digests the same way. Omitted otherwise, so
 	// older receipts keep their bytes.
-	SkillsFolder string `json:"skills_folder,omitempty"`
-	PluginList   string `json:"plugin_list,omitempty"`
+	SkillsFolder string             `json:"skills_folder,omitempty"`
+	PluginList   string             `json:"plugin_list,omitempty"`
+	HQArchive    *hqArchiveEvidence `json:"hq_archive,omitempty"`
 }
 
 // digestRetained hashes one retained path, leaving out what this reset
@@ -149,12 +150,21 @@ func NewPlanner(owners func() Owners) *Planner {
 	return &Planner{owners: owners, now: time.Now, plans: make(map[string]resolvedPlan)}
 }
 
+type PreviewOptions struct {
+	ArchivePersonalHQ bool
+}
+
 func (p *Planner) Create(ctx context.Context, intent Intent, categories []CategoryID) (Preview, error) {
+	return p.CreateWithOptions(ctx, intent, categories, PreviewOptions{})
+}
+
+func (p *Planner) CreateWithOptions(ctx context.Context, intent Intent, categories []CategoryID, options PreviewOptions) (Preview, error) {
 	selected, err := Selection(intent, categories)
-	if err != nil {
-		return Preview{}, err
+	if err != nil || (options.ArchivePersonalHQ && !archiveSelection(selected)) {
+		return Preview{}, ErrInvalidSelection
 	}
-	plan, err := p.inspect(ctx, intent, selected)
+	operationID := rand.Text()
+	plan, err := p.inspect(ctx, intent, selected, operationID, options)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -170,7 +180,6 @@ func (p *Planner) Create(ctx context.Context, intent Intent, categories []Catego
 		return Preview{}, ErrPreviewLimit
 	}
 	plan.Preview.ID = rand.Text()
-	plan.Preview.OperationID = rand.Text()
 	plan.Preview.ExpiresAt = now.Add(previewLifetime).UTC()
 	encoded, err := json.Marshal(plan)
 	if err != nil || len(encoded) > maxPlanBytes {
@@ -192,7 +201,8 @@ func (p *Planner) Validate(ctx context.Context, id string) (Preview, error) {
 	if expired {
 		return Preview{}, ErrPreviewExpired
 	}
-	current, err := p.inspect(ctx, saved.Preview.Intent, saved.Preview.Selected)
+	options := PreviewOptions{ArchivePersonalHQ: saved.Preview.HQArchive != nil && saved.Preview.HQArchive.Requested}
+	current, err := p.inspect(ctx, saved.Preview.Intent, saved.Preview.Selected, saved.Preview.OperationID, options)
 	if err != nil {
 		return Preview{}, err
 	}
@@ -225,6 +235,10 @@ func (p *Planner) validatedPlan(ctx context.Context, id string) (resolvedPlan, e
 	if !ok {
 		return resolvedPlan{}, ErrPreviewExpired
 	}
+	// An unselected option is disclosure, never durable move authority.
+	if view.HQArchive != nil && !view.HQArchive.Requested {
+		view.HQArchive = nil
+	}
 	saved.Preview = view
 	saved.Targets = slices.Clone(saved.Targets)
 	return saved, nil
@@ -238,7 +252,7 @@ func clonePreview(preview Preview) Preview {
 	return cloned
 }
 
-func (p *Planner) inspect(ctx context.Context, intent Intent, selected []CategoryID) (resolvedPlan, error) {
+func (p *Planner) inspect(ctx context.Context, intent Intent, selected []CategoryID, operationID string, options PreviewOptions) (resolvedPlan, error) {
 	if err := ctx.Err(); err != nil {
 		return resolvedPlan{}, err
 	}
@@ -247,7 +261,7 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 		owners = p.owners()
 	}
 	plan := resolvedPlan{Preview: Preview{
-		SchemaVersion: SchemaVersion, Intent: intent, Selected: slices.Clone(selected),
+		SchemaVersion: SchemaVersion, Intent: intent, Selected: slices.Clone(selected), OperationID: operationID,
 		Dependencies: []CategoryID{}, Categories: []CategoryPreview{}, Blockers: []Blocker{},
 		Restart: RestartInfo{Mode: RestartProcessRelaunch, Instructions: "Fully stop and relaunch Ori using the same installation. In menubar, Quit the application; Stop/Start Server is insufficient."},
 	}}
@@ -427,6 +441,29 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 	if slices.Contains(selected, CategoryAppRecords) && os.Getenv("WORKSPACE_DIR") != "" {
 		block("operator_workspace_root", CategoryAppRecords, "WORKSPACE_DIR would automatically re-adopt detached workspaces.", "Remove the operator-enforced root from the launch configuration and relaunch before reset. Ori will not edit the environment.")
 	}
+	plan.Evidence = resolvedEvidence{
+		ProtectedPaths: slices.Clone(protected), ProtectedDigests: protectedDigests,
+		DatabasePath: databasePath, DatabaseSchema: report.SchemaDigest, DatabaseSchemaVersion: report.Version,
+		WorkspaceRootConfirmed: rootConfirmed, Plugins: plugins,
+		AgentsFolder: agentsFolder, SkillsFolder: skillsFolder, PluginList: pluginList,
+	}
+	if archiveSelection(selected) {
+		review := &HQArchiveReview{Requested: options.ArchivePersonalHQ}
+		view.HQArchive = review
+		archive, err := inspectHQArchive(ctx, owners, plan, operationID)
+		if err != nil {
+			review.UnavailableReason = err.Error()
+			if review.Requested {
+				block("hq_archive_unavailable", CategoryAppRecords, review.UnavailableReason, "Uncheck Archive my old Personal HQ to review a reset that leaves the folder in place.")
+			}
+		} else {
+			review.Source, review.Destination, review.Notice = archive.Source, archive.Destination, archiveNotice
+			if review.Requested {
+				plan.Evidence.HQArchive = archive
+				block("hq_archive_review_only", CategoryAppRecords, "This Personal HQ archive can be reviewed, but moving it is not available yet.", "Review without the archive option to reset records and leave folders where they are.")
+			}
+		}
+	}
 	// Counts and record contents are deliberately excluded. Schema, resolved
 	// targets, protected roots, category semantics and readiness are material.
 	binding := struct {
@@ -451,25 +488,14 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 		AgentsFolder string
 		SkillsFolder string
 		PluginList   string
-	}{SchemaVersion, intent, selected, root, plan.Targets, protectedDigests, report.SchemaDigest, report.Version, databasePath, rootConfirmed, view.Blockers, plugins, agentsFolder, skillsFolder, pluginList}
+		HQArchive    *hqArchiveEvidence `json:",omitempty"`
+	}{SchemaVersion, intent, selected, root, plan.Targets, protectedDigests, report.SchemaDigest, report.Version, databasePath, rootConfirmed, view.Blockers, plugins, agentsFolder, skillsFolder, pluginList, plan.Evidence.HQArchive}
 	data, err := json.Marshal(binding)
 	if err != nil {
 		return resolvedPlan{}, err
 	}
 	if len(data) > maxPlanBytes {
 		return resolvedPlan{}, ErrPreviewLimit
-	}
-	plan.Evidence = resolvedEvidence{
-		ProtectedPaths:         slices.Clone(protected),
-		ProtectedDigests:       slices.Clone(protectedDigests),
-		DatabasePath:           databasePath,
-		DatabaseSchema:         report.SchemaDigest,
-		DatabaseSchemaVersion:  report.Version,
-		WorkspaceRootConfirmed: rootConfirmed,
-		Plugins:                plugins,
-		AgentsFolder:           agentsFolder,
-		SkillsFolder:           skillsFolder,
-		PluginList:             pluginList,
 	}
 	digest := sha256.Sum256(data)
 	view.ScopeDigest = hex.EncodeToString(digest[:])

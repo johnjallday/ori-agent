@@ -2424,6 +2424,14 @@ func (s *FileStore) SetBasePath(newBasePath string) (RootChange, error) {
 	return change, nil
 }
 
+// RegisteredFolderPaths snapshots the live file-store registrations for
+// read-only scope checks. It does not discover or adopt anything from disk.
+func (s *FileStore) RegisteredFolderPaths() map[string]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.folderPathsLocked()
+}
+
 // folderPathsLocked snapshots the absolute folder path of every registered
 // workspace. Callers must hold s.mu.
 func (s *FileStore) folderPathsLocked() map[string]string {

@@ -294,7 +294,24 @@
     }
   }
 
+  function renderArchiveReview(archive) {
+    const section = byId('resetArchiveReview');
+    if (!section) return;
+    section.hidden = !archive;
+    const eligible = Boolean(
+      archive?.source && archive?.destination && !archive.unavailable_reason
+    );
+    byId('resetArchivePaths').hidden = !eligible;
+    byId('resetArchiveSource').textContent = eligible ? archive.source : '';
+    byId('resetArchiveDestination').textContent = eligible ? archive.destination : '';
+    byId('resetArchiveSummary').textContent = archive?.requested
+      ? 'Archive requested for this review.'
+      : 'Personal HQ files stay where they are by default.';
+    byId('resetArchiveNotice').textContent = archive?.unavailable_reason || archive?.notice || '';
+  }
+
   function renderPreview(preview) {
+    renderArchiveReview(preview.hq_archive);
     items?.replaceChildren();
     for (const row of previewRows(preview)) {
       const li = document.createElement('li');

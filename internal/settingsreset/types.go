@@ -108,6 +108,17 @@ type Preview struct {
 	// their Workspace Directory. That folder is visible to the user and may be
 	// synced to other machines, so it needs its own confirmation.
 	AgentsFolder *AgentsFolderReview `json:"agents_folder,omitempty"`
+	HQArchive    *HQArchiveReview    `json:"hq_archive,omitempty"`
+}
+
+// HQArchiveReview is display and consent evidence only. Execution never takes
+// a client path. An eligible candidate remains in place unless Requested.
+type HQArchiveReview struct {
+	Requested         bool   `json:"requested"`
+	Source            string `json:"source,omitempty"`
+	Destination       string `json:"destination,omitempty"`
+	Notice            string `json:"notice,omitempty"`
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
 // AgentsFolderReview describes <root>/Agents in a reset preview. Executing the

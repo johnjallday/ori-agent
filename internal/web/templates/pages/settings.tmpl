@@ -2045,6 +2045,15 @@
                names, which are single unbreakable tokens. Without anywhere-wrap
                they run past the dialog at phone width and the reviewer cannot
                read what is about to be deleted. -->
+          <section id="resetArchiveReview" class="modern-card p-3 mb-3" aria-labelledby="resetArchiveTitle" style="overflow-wrap: anywhere;" hidden>
+            <h6 id="resetArchiveTitle">Personal HQ folder</h6>
+            <p id="resetArchiveSummary" class="mb-2"></p>
+            <dl id="resetArchivePaths" class="mb-2" hidden>
+              <dt>Current folder</dt><dd><code id="resetArchiveSource"></code></dd>
+              <dt>Proposed archive location</dt><dd><code id="resetArchiveDestination"></code></dd>
+            </dl>
+            <p id="resetArchiveNotice" class="mb-0"></p>
+          </section>
           <ul id="resetItemsList" class="mb-3" style="color: var(--text-primary); overflow-wrap: anywhere;"></ul>
           <!-- Second confirmation, shown only when the reset removes the agents
                from the Workspace Directory: that folder is visible to the user

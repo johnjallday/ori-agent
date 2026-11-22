@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -23,7 +24,7 @@ func (h *ResetHandler) GetResetPreview(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
-	intent, categories, err := resetPreviewSelection(r.URL.RawQuery)
+	intent, categories, options, err := resetPreviewSelection(r.URL.RawQuery)
 	if err != nil {
 		_ = orihttp.RespondBadRequest(w, err.Error())
 		return
@@ -34,7 +35,7 @@ func (h *ResetHandler) GetResetPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	preview, err := h.planner.Create(ctx, intent, categories)
+	preview, err := h.planner.CreateWithOptions(ctx, intent, categories, options)
 	if err != nil {
 		if errors.Is(err, settingsreset.ErrPreviewLimit) {
 			// No preview token is evicted early to make room for another tab.
@@ -64,13 +65,14 @@ func (h *ResetHandler) GetResetPreview(w http.ResponseWriter, r *http.Request) {
 // New callers use intent=selected_data&category=agents&category=app_records.
 // Old boolean options normalize only to their original families. Mixing forms,
 // duplicate parameters, unknown keys and arbitrary target paths is rejected.
-func resetPreviewSelection(raw string) (settingsreset.Intent, []settingsreset.CategoryID, error) {
+func resetPreviewSelection(raw string) (settingsreset.Intent, []settingsreset.CategoryID, settingsreset.PreviewOptions, error) {
+	var options settingsreset.PreviewOptions
 	if len(raw) > maxResetRequestSize {
-		return "", nil, settingsreset.ErrInvalidSelection
+		return "", nil, options, settingsreset.ErrInvalidSelection
 	}
 	query, err := url.ParseQuery(raw)
 	if err != nil {
-		return "", nil, settingsreset.ErrInvalidSelection
+		return "", nil, options, settingsreset.ErrInvalidSelection
 	}
 	legacy := map[string]settingsreset.CategoryID{
 		"settings": settingsreset.CategorySettings, "agents": settingsreset.CategoryAgents,
@@ -83,8 +85,13 @@ func resetPreviewSelection(raw string) (settingsreset.Intent, []settingsreset.Ca
 		switch key {
 		case "intent":
 			if len(values) != 1 {
-				return "", nil, settingsreset.ErrInvalidSelection
+				return "", nil, options, settingsreset.ErrInvalidSelection
 			}
+		case "archive_personal_hq":
+			if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
+				return "", nil, options, settingsreset.ErrInvalidSelection
+			}
+			options.ArchivePersonalHQ = values[0] == "true"
 		case "category":
 			for _, value := range values {
 				categories = append(categories, settingsreset.CategoryID(value))
@@ -92,7 +99,7 @@ func resetPreviewSelection(raw string) (settingsreset.Intent, []settingsreset.Ca
 		default:
 			id, ok := legacy[key]
 			if !ok || len(values) != 1 || (values[0] != "true" && values[0] != "false") {
-				return "", nil, settingsreset.ErrInvalidSelection
+				return "", nil, options, settingsreset.ErrInvalidSelection
 			}
 			hasLegacy = true
 			if values[0] == "true" {
@@ -101,18 +108,21 @@ func resetPreviewSelection(raw string) (settingsreset.Intent, []settingsreset.Ca
 		}
 	}
 	if hasLegacy {
-		if query.Has("category") {
-			return "", nil, settingsreset.ErrInvalidSelection
+		if query.Has("category") || query.Has("archive_personal_hq") {
+			return "", nil, options, settingsreset.ErrInvalidSelection
 		}
 		if !query.Has("intent") {
 			intent = settingsreset.IntentSelectedData
 		}
 	}
 	selected, err := settingsreset.Selection(intent, categories)
-	if err == nil && intent == settingsreset.IntentStartFresh {
+	if err != nil || (query.Has("archive_personal_hq") && !slices.Contains(selected, settingsreset.CategoryAppRecords)) {
+		return "", nil, options, settingsreset.ErrInvalidSelection
+	}
+	if intent == settingsreset.IntentStartFresh {
 		// The planner expands this server-owned intent. Passing the canonical list
 		// back as if it came from the client would intentionally be rejected.
-		return intent, nil, nil
+		return intent, nil, options, nil
 	}
-	return intent, selected, err
+	return intent, selected, options, nil
 }
