@@ -26,10 +26,13 @@
             <dl class="workspace-build-draft-preview__facts">
               <div><dt>Blueprint</dt><dd id="workspaceBuildDraftBlueprint"></dd></div>
               <div><dt>Purpose</dt><dd id="workspaceBuildDraftPurpose"></dd></div>
+              <div id="workspaceBuildDraftTeamRow" hidden><dt>Team</dt><dd id="workspaceBuildDraftTeam"></dd></div>
             </dl>
-            <div class="workspace-build-draft-preview__status" role="status" aria-atomic="true">
+            <p id="workspaceBuildDraftWhy" hidden><strong>Why this suggestion?</strong> <span id="workspaceBuildDraftReason"></span></p>
+            <div class="workspace-build-draft-preview__status" aria-live="polite">
               <p id="workspaceBuildDraftChange" hidden></p>
               <p id="workspaceBuildDraftNext"></p>
+              <p id="workspaceBuildDraftSaveState" hidden></p>
             </div>
           </div>
         </div>

@@ -9093,6 +9093,26 @@ test('an obsolete session cannot roll a completed draft sync back', async () => 
   assert.equal(nameInput.value, 'Latest');
 });
 
+test('ordinary draft reasons require exactly one host witness matching the effective blueprint', () => {
+  const { manager } = prepareModeWizard();
+  const template = { id: 'content-production' };
+  const fields = { blueprint: 'Content Production' };
+  const session = manager.workspaceBuild.session;
+  session.draft = { template_id: template.id };
+  const why = { section: 'blueprint', text: 'Fits a weekly publishing workflow.' };
+  const reason = (selected = template, edited = []) =>
+    manager.ordinaryBuildBlueprintReason(selected, fields, edited);
+  session.why = [why];
+  assert.equal(reason(), '', 'legacy unbound reason');
+  session.why = [{ ...why, blueprint_id: template.id }];
+  assert.equal(reason(), why.text);
+  assert.equal(reason({ id: 'research-project' }), '');
+  assert.equal(reason(template, ['blueprint']), '');
+  assert.equal(reason(template, ['purpose']), '');
+  session.why.push(session.why[0]);
+  assert.equal(reason(), '', 'ambiguous reasons');
+});
+
 test('a blueprint that lives in a group names the group apart from the workspace', () => {
   const elements = new Map([
     ['addFolderModal', { dataset: {}, classList: { toggle() {} } }],

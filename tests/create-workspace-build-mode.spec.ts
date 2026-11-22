@@ -39,6 +39,7 @@ type Reply = {
   team?: Record<string, unknown>;
   choices?: string[];
   createNow?: boolean;
+  why?: Session['why'];
 };
 
 type Session = {
@@ -56,6 +57,8 @@ type Session = {
   create_now: boolean;
   furthest_step: number;
   turn_count: number;
+  why?: { section: string; text: string; blueprint_id?: string }[];
+  edited_fields?: Record<string, number>;
   folder?: { observation: Record<string, unknown> } | null;
   link?: { observation: Record<string, unknown> } | null;
 };
@@ -175,6 +178,7 @@ async function fakeBuildServer(
     });
     session.pending_question = choices.length ? { question: next.text, choices } : null;
     session.applied = applied;
+    if (next.why) session.why = next.why;
     session.create_now = Boolean(next.createNow);
     session.version += 1;
   };
@@ -338,6 +342,10 @@ async function fakeBuildServer(
       session.transcript.push({ role: 'form', text: `You switched the blueprint to ${after}` });
     }
     session.applied = [];
+    for (const field of body.edited_fields || []) {
+      session.edited_fields ||= {};
+      session.edited_fields[field] = session.version + 1;
+    }
     session.create_now = false;
     session.version += 1;
     return respond(route, 200, {
@@ -416,7 +424,12 @@ async function currentStep(page: Page) {
 async function manual(page: Page) {
   await pane(page).getByRole('button', { name: 'Set up manually' }).click();
   await expect(pane(page)).toBeHidden();
-  await expect(page.locator(`#wizardStep${await currentStep(page)}Title`)).toBeFocused();
+  const reviewTitle = page.locator('#workspaceCreationReviewTitle');
+  await expect(
+    (await currentStep(page)) === 4 && (await reviewTitle.isVisible())
+      ? reviewTitle
+      : page.locator(`#wizardStep${await currentStep(page)}Title`)
+  ).toBeFocused();
 }
 
 async function assisted(page: Page) {
@@ -691,7 +704,7 @@ test('golden path: three turns and no form clicks create the workspace the build
       choices: ['A Content Lead and a Brand Copywriter', 'Just a Content Lead']
     },
     {
-      text: 'Done — a new Content Lead and a new Brand Copywriter. Check the review, or say “create it”.',
+      text: 'I already assigned a Content Editor. Check the review, or say “create it”.',
       team: {
         mode: 'staffed',
         roles: [
@@ -732,8 +745,13 @@ test('golden path: three turns and no form clicks create the workspace the build
   await expect(page.locator('[data-build-chosen="name"]')).toHaveText('Chosen by Atlas');
   await expect(composer(page)).toBeFocused();
 
+  const draftTeam = page.locator('#workspaceBuildDraftTeam');
+  await expect(draftTeam).toContainText('Content Lead: Required · choose an agent');
   await choose(page, 'A Content Lead and a Brand Copywriter');
-  await expect(pane(page)).toContainText('a new Content Lead and a new Brand Copywriter');
+  await expect(draftTeam).toContainText('Content Lead · required');
+  await expect(draftTeam).toContainText('Brand Copywriter');
+  await expect(draftTeam).not.toContainText('Content Editor');
+  await expect(draftTeam).toContainText('2 optional roles left empty.');
 
   await say(page, 'create it');
   expect(created).toHaveLength(0, 'the model proposal is not final consent');
@@ -978,7 +996,14 @@ test('a blueprint switched on the form is said back and the assistant re-staffs'
   const fake = await fakeBuildServer(page, [
     {
       text: `I picked Content Production and named it ${name}.`,
-      set: { template_id: 'content-production', name, description: 'Weekly field notes.' }
+      set: { template_id: 'content-production', name, description: 'Weekly field notes.' },
+      why: [
+        {
+          section: 'blueprint',
+          blueprint_id: 'content-production',
+          text: 'A repeatable editorial workflow.'
+        }
+      ]
     },
     { text: 'You switched to Research Project — I’ll staff it for research instead.' }
   ]);
@@ -986,6 +1011,9 @@ test('a blueprint switched on the form is said back and the assistant re-staffs'
   await openFromHome(page);
   await say(page, 'A place for my weekly field notes');
   await expect(page.locator('#folderNameInput')).toHaveValue(name);
+  await expect(page.locator('#workspaceBuildDraftWhy')).toContainText(
+    'A repeatable editorial workflow.'
+  );
 
   // The user deliberately reveals the shared form, then picks another card.
   await manual(page);
@@ -1013,6 +1041,52 @@ test('a blueprint switched on the form is said back and the assistant re-staffs'
   );
   await expect(pane(page)).toContainText('I’ll staff it for research instead');
   await expect(cardByLabel(page, 'Content Production')).not.toContainText('Chosen by Atlas');
+  await expect(page.locator('#workspaceBuildDraftBlueprint')).toHaveText('Research Project');
+  await expect(page.locator('#workspaceBuildDraftWhy')).toBeHidden();
+});
+
+test('clearing a proposed role updates the draft and survives Resume', async ({ page }) => {
+  const fake = await fakeBuildServer(page, [
+    {
+      text: 'A proposed editorial team.',
+      set: {
+        template_id: 'content-production',
+        name: 'Clearable Desk',
+        description: 'Plan the newsletter.'
+      },
+      team: {
+        mode: 'staffed',
+        roles: [{ role_id: 'content-lead', mode: 'create', agent_name: 'Proposed Lead' }]
+      }
+    }
+  ]);
+  await openFromHome(page);
+  await say(page, 'An editorial workspace with a lead');
+  const team = page.locator('#workspaceBuildDraftTeam');
+  await expect(team).toContainText('Will create Proposed Lead');
+  await manual(page);
+  if ((await currentStep(page)) === 4)
+    await page
+      .locator('#workspaceCreationReviewPanel')
+      .getByRole('button', { name: 'Edit team', exact: true })
+      .first()
+      .click();
+  await page
+    .locator('#workspaceRoleRoster')
+    .getByRole('button', { name: 'Clear Content Lead', exact: true })
+    .click();
+  await assisted(page);
+  await expect(team).toContainText('Content Lead: Required · choose an agent');
+  await expect(team).not.toContainText('Proposed Lead');
+  await expect(page.locator('#workspaceBuildDraftSaveState')).toHaveText('Draft saved.');
+  expect(fake.session?.draft.role_staffing).toEqual([]);
+  await page.getByRole('button', { name: 'Close create workspace' }).click();
+  await expect(pane(page)).toBeHidden();
+  await page.locator('#cockpitCreateWorkspaceBtn').click();
+  await pane(page).getByRole('button', { name: 'Resume', exact: true }).click();
+  await expect(team).toContainText('Content Lead: Required · choose an agent');
+  await expect(team).not.toContainText('Proposed Lead');
+  await expect(page.locator('#workspaceBuildDraftChange')).toBeHidden();
 });
 
 test('closing mid-build and reopening offers Resume, which restores the form and the step', async ({
@@ -1047,6 +1121,7 @@ test('closing mid-build and reopening offers Resume, which restores the form and
   await expect(page.locator(`#wizardStep${step}`)).toBeHidden();
   await expect.poll(() => currentStep(page)).toBe(step);
   await expect(pane(page)).toContainText('Notes for my course');
+  await expect(page.locator('#workspaceBuildDraftChange')).toBeHidden();
   await expect(pane(page).getByRole('button', { name: 'Create a Research Lead' })).toBeEnabled();
   await expect(composer(page)).toBeFocused();
 });
@@ -1213,6 +1288,8 @@ test('late scripted turn keeps newer manual values and cannot create or reopen a
   expect(creates).toBe(0);
   await assisted(page);
   await expect(pane(page)).toContainText('Your manual draft was kept');
+  await expect(page.locator('#workspaceBuildDraftName')).toHaveText('Newer manual name');
+  await expect(page.locator('#workspaceBuildDraftChange')).toContainText('You edited: name');
   await expect(page.locator('#folderNameInput')).toHaveValue('Newer manual name');
   expect(fake.abandons).toHaveLength(0);
 });
@@ -1257,7 +1334,12 @@ test('failed draft sync stays local, blocks new turns, and recovers through Retr
   await expect(page.locator('#workspaceBuildModeStatus')).toContainText('Draft not saved');
   expect(fake.turns).toHaveLength(0);
   await assisted(page);
-  await expect(page.locator('#workspaceBuildModeStatus')).not.toContainText('Draft not saved');
+  await expect(page.locator('#workspaceBuildDraftSaveState')).toContainText(
+    'Not saved. Your edits are kept here'
+  );
+  await expect(page.locator('#workspaceBuildDraftName')).toHaveText('Unsaved shared draft');
+  await pane(page).getByRole('button', { name: 'Try again' }).click();
+  await expect(page.locator('#workspaceBuildDraftSaveState')).toHaveText('Draft saved.');
   await expect.poll(() => fake.session?.draft.name).toBe('Unsaved shared draft');
   await expect(page.locator('#folderNameInput')).toHaveValue('Unsaved shared draft');
   expect(fake.turns).toHaveLength(0);

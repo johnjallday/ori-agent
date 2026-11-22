@@ -305,6 +305,55 @@ test('loading is its own state and is never reported as a confirmed empty team (
   );
 });
 
+test('creation effects count selections, not recommended or optional vacancies', () => {
+  const draft = withSavedRoster(
+    readyDraft([planAgent('Content Lead'), planAgent('Brand Copywriter')]),
+    [{ name: 'Saved Lead', provider: 'openai', model: 'gpt-5' }]
+  );
+  const effects = () => Draft.creationTeamEffects(Draft.derive(draft)).lines;
+  assert.deepEqual(effects(), [
+    'Content Lead: Required · choose an agent',
+    '1 optional role left empty.'
+  ]);
+  assert.equal(
+    Draft.setRoleFill(draft, 'content-lead', { mode: 'assign', name: 'Saved Lead' }),
+    true
+  );
+  assert.equal(
+    Draft.setRoleFill(draft, 'brand-copywriter', { mode: 'create', name: 'Brand Copywriter' }),
+    true
+  );
+  assert.deepEqual(effects(), [
+    'Content Lead: Will assign Saved Lead · required',
+    'Will create Brand Copywriter'
+  ]);
+  Draft.clearRoleFill(draft, 'content-lead');
+  assert.deepEqual(effects(), [
+    'Content Lead: Required · choose an agent',
+    'Will create Brand Copywriter'
+  ]);
+});
+
+test('creation effects expose automatic required staffing with the blueprint default label', () => {
+  const result = Draft.creationTeamEffects({
+    planStatus: 'ready',
+    roleRoster: {
+      roles: [
+        {
+          role_id: 'lead',
+          label: 'Lead',
+          required: true,
+          state: 'filled',
+          auto: true,
+          source: 'auto',
+          agent: { name: 'Lead' }
+        }
+      ]
+    }
+  });
+  assert.deepEqual(result.lines, ['Will create Lead (blueprint default) · required']);
+});
+
 test('a ready blueprint with no agents is a confirmed empty state (FR19)', () => {
   const draft = readyDraft([]);
   const view = Draft.derive(draft);

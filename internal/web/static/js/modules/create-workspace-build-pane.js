@@ -329,7 +329,7 @@
     };
   }
 
-  const DRAFT_LABELS = { name: 'name', blueprint: 'blueprint', purpose: 'purpose' };
+  const DRAFT_LABELS = { name: 'name', blueprint: 'blueprint', purpose: 'purpose', team: 'team' };
 
   // The creator supplies applied form values and its next gate. No model prose,
   // ready flag, wizard step number or transport reply is a creation fact.
@@ -341,13 +341,26 @@
     failed = false,
     paused = false,
     asking = false,
-    reviewable = false
+    reviewable = false,
+    teamProblem = '',
+    userEdits = [],
+    reason = '',
+    saveState = ''
   } = {}) {
     const changed = Object.keys(DRAFT_LABELS).filter(
       key => text(previous[key]) !== text(fields[key])
     );
-    const hasProposal = Object.keys(DRAFT_LABELS).some(key => text(fields[key]));
+    const hasProposal = Boolean(fields.name || fields.blueprint || fields.purpose);
     const purpose = Array.from(text(fields.purpose));
+    const changes = [];
+    for (const [owned, prefix] of [
+      [true, 'You edited'],
+      [false, 'Draft updated']
+    ]) {
+      const labels = changed.filter(key => userEdits.includes(key) === owned);
+      if (labels.length)
+        changes.push(`${prefix}: ${labels.map(key => DRAFT_LABELS[key]).join(', ')}.`);
+    }
     return {
       title: 'Draft · Nothing created yet',
       name: text(fields.name) || 'Workspace not named yet',
@@ -356,10 +369,10 @@
         (purpose.length > 180
           ? `${purpose.slice(0, 179).join('').trimEnd()}…`
           : purpose.join('')) || 'Undecided',
-      change:
-        changed.length && !paused
-          ? `Draft updated: ${changed.map(key => DRAFT_LABELS[key]).join(', ')}.`
-          : lastChange,
+      team: text(fields.team),
+      reason,
+      saveState,
+      change: paused ? '' : changes.join(' ') || lastChange,
       next: paused
         ? 'Resume the saved draft or start over.'
         : waiting
@@ -370,11 +383,13 @@
             ? 'Couldn’t get a suggestion. Try again or set up manually.'
             : asking
               ? 'Next: answer the assistant’s question.'
-              : reviewable
-                ? 'Next: review or edit the draft before creating.'
-                : hasProposal
-                  ? 'Keep refining here, or review or edit the draft.'
-                  : 'Describe what you want to use this workspace for.'
+              : teamProblem
+                ? `Next: ${teamProblem}`
+                : reviewable
+                  ? 'Next: review or edit the draft before creating.'
+                  : hasProposal
+                    ? 'Keep refining here, or review or edit the draft.'
+                    : 'Describe what you want to use this workspace for.'
     };
   }
 
@@ -384,6 +399,9 @@
       Name: view.name,
       Blueprint: view.blueprint,
       Purpose: view.purpose,
+      Team: view.team,
+      Reason: view.reason,
+      SaveState: view.saveState,
       Change: view.change,
       Next: view.next
     })) {
@@ -392,7 +410,14 @@
       // Updating only changed nodes keeps repeated renders quiet and leaves
       // the existing review button and composer focus alone.
       if (field.textContent !== value) field.textContent = value;
-      if (suffix === 'Change') field.hidden = !value;
+      if (suffix === 'Change' || suffix === 'SaveState') field.hidden = !value;
+    }
+    for (const [id, hidden] of [
+      ['workspaceBuildDraftTeamRow', !view.team],
+      ['workspaceBuildDraftWhy', !view.reason]
+    ]) {
+      const field = document.getElementById(id);
+      if (field) field.hidden = hidden;
     }
   }
 

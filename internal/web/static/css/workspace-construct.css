@@ -2567,6 +2567,12 @@
 .workspace-build-draft-preview__facts dd {
   margin: 0;
 }
+.workspace-create-modal #workspaceBuildDraftTeam {
+  white-space: pre-line;
+}
+.workspace-create-modal #workspaceBuildDraftWhy {
+  margin: 6px 0;
+}
 .workspace-create-modal .workspace-build-draft-preview__status {
   display: grid;
   gap: 2px;

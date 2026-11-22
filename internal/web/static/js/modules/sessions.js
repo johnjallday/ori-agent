@@ -15287,10 +15287,22 @@ const sessionManager = {
     this.collapseWorkspaceBuild({ withdraw: true });
   },
 
-  // applyWorkspaceBuildSession shows the session and does its work on the
-  // form. A resumed build restores the whole draft; an ordinary turn applies
-  // only the fields the turn reports it set.
+  // Restoring an existing draft is not a new choice or announcement.
   async applyWorkspaceBuildSession(session, options = {}) {
+    const build = this.workspaceBuild;
+    if (!build || !options.resume || !this.ordinaryBuildPreviewEligible())
+      return this.applyWorkspaceBuildSessionToForm(session, options);
+    build.restoringPreview = true;
+    try {
+      return await this.applyWorkspaceBuildSessionToForm(session, options);
+    } finally {
+      if (this.workspaceBuild === build) this.syncWorkspaceBuildPresentation();
+      build.restoringPreview = false;
+    }
+  },
+
+  // An ordinary turn applies only the fields the host reports it set.
+  async applyWorkspaceBuildSessionToForm(session, options) {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     const api = window.WorkspaceCreatorState;
@@ -15430,6 +15442,15 @@ const sessionManager = {
       });
     }
     if (!current()) return;
+    if (resume && this.ordinaryBuildPreviewEligible()) {
+      const ownership = session.edited_fields || {};
+      for (const key of build.chosen?.keys() || []) {
+        const field = key === 'blueprint' ? 'blueprint_id' : key === 'parent' ? 'parent_id' : key;
+        if (ownership[field] || (ownership.team && key.startsWith('role:')))
+          this.clearWorkspaceBuildChosen(key);
+      }
+      if (ownership.team) build.chosenRoles?.clear();
+    }
     this.syncWorkspaceStaffingAdvice(session);
     this.advanceWorkspaceBuildWizard(session, { resume });
     // The session learns what applying the turn did to the form (the team
@@ -15459,7 +15480,14 @@ const sessionManager = {
     pane.collapse({ withdraw });
     if (withdraw) build.withdrawn = true;
     this.refreshWizardChrome();
-    if (focus) document.getElementById(`wizardStep${this.wizardStep}Title`)?.focus();
+    if (focus) {
+      const heading =
+        this.isFinalWizardStep() && this.usesUnifiedOrdinaryReview()
+          ? document.getElementById('workspaceCreationReviewTitle') ||
+            document.getElementById('workspaceCreationReviewPanel')
+          : document.getElementById(`wizardStep${this.wizardStep}Title`);
+      heading?.focus();
+    }
   },
 
   async expandWorkspaceBuild() {
@@ -15478,8 +15506,8 @@ const sessionManager = {
       document.getElementById('workspaceBuildPlanReviewTitle')?.focus();
     } else document.getElementById('workspaceBuildComposerInput')?.focus();
     if (!build.session && !build.busy) await this.openWorkspaceBuildSession();
-    else if (!build.resumeLine) {
-      this.scheduleWorkspaceBuildDraft({ user: true });
+    else if (!build.resumeLine && !(build.draftError && this.ordinaryBuildPreviewEligible())) {
+      if (!this.ordinaryBuildPreviewEligible()) this.scheduleWorkspaceBuildDraft({ user: true });
       await this.flushWorkspaceBuildDraft();
       if (build.restaffPending) await this.sendWorkspaceBuildRestaff(build);
     }
@@ -16660,13 +16688,17 @@ const sessionManager = {
     if (!pane?.ordinaryDraftView || !pane?.renderOrdinaryDraft) return;
     const session = build.session;
     const read = id => document.getElementById(id)?.value?.trim() || '';
+    const hasBlueprint = this.ordinaryBuildBlueprintDecided(template);
+    const team = hasBlueprint && !build.resumeLine ? this.teamView() : null;
+    const teamEffects = team ? window.CreateWorkspaceTeamDraft?.creationTeamEffects?.(team) : null;
+    const edited = field =>
+      Boolean(build.editedFields?.has(field) || session?.edited_fields?.[field]);
     const fields = build.resumeLine
       ? {}
       : {
           name: read('folderNameInput'),
-          blueprint: this.ordinaryBuildBlueprintDecided(template)
-            ? template.name || (template.blank ? 'Blank' : '')
-            : '',
+          blueprint: hasBlueprint ? template.name || (template.blank ? 'Blank' : '') : '',
+          team: teamEffects?.lines.join('\n') || '',
           purpose:
             read('folderDescriptionInput') ||
             (document.getElementById('folderGoalInput')?.dataset?.goalEdited
@@ -16674,10 +16706,33 @@ const sessionManager = {
               : '')
         };
     const stable = !build.busy && !this.workspaceBuildApplyDepth && !build.resumeLine;
+    const userEdits = Object.entries({
+      name: edited('name'),
+      blueprint: edited('blueprint_id'),
+      purpose: edited('description') || edited('goal'),
+      team: edited('team')
+    })
+      .filter(([, value]) => value)
+      .map(([key]) => key);
+    const reason = this.ordinaryBuildBlueprintReason(template, fields, userEdits);
+    const saveState = build.draftError
+      ? build.draftConflict
+        ? 'Not saved. Review your edits and choose “Save my draft”.'
+        : 'Not saved. Your edits are kept here; choose “Try again”.'
+      : session && (fields.name || fields.blueprint || fields.purpose)
+        ? build.draftUser !== undefined || build.draftInFlight || build.busy
+          ? build.draftUser === true
+            ? 'Local edits · not saved yet'
+            : ''
+          : 'Draft saved.'
+        : '';
     const view = pane.ordinaryDraftView({
       fields,
-      previous: stable ? build.previewFields : fields,
+      previous: stable && !build.restoringPreview ? build.previewFields : fields,
       lastChange: build.previewChange,
+      userEdits,
+      reason,
+      saveState,
       paused: Boolean(build.resumeLine),
       waiting: build.busy,
       failed: Boolean(
@@ -16685,13 +16740,30 @@ const sessionManager = {
         session?.pending_question?.choices?.some(choice => choice.id === 'try_again')
       ),
       asking: Boolean(session?.pending_question),
-      reviewable: this.wizardStep === 4
+      teamProblem: team?.blockingIssues?.[0]?.message || '',
+      reviewable: this.wizardStep === 4 && Boolean(team?.canContinueFromTeam)
     });
     if (stable) {
       build.previewFields = fields;
       build.previewChange = view.change;
     }
     pane.renderOrdinaryDraft(view);
+  },
+
+  ordinaryBuildBlueprintReason(template, fields, userEdits) {
+    const session = this.workspaceBuild?.session;
+    if (
+      !template?.id ||
+      !fields.blueprint ||
+      session?.draft?.template_id !== template.id ||
+      userEdits.includes('blueprint') ||
+      userEdits.includes('purpose')
+    )
+      return '';
+    const reasons = (session.why || []).filter(
+      why => why.section === 'blueprint' && why.blueprint_id === template.id && why.text?.trim()
+    );
+    return reasons.length === 1 ? reasons[0].text : '';
   },
 
   syncWorkspaceBuildPresentation() {
@@ -16733,7 +16805,7 @@ const sessionManager = {
     );
     const status = document.getElementById('workspaceBuildModeStatus');
     if (status) {
-      status.hidden = !this.workspaceBuild || (ordinaryDraft && !this.workspaceBuild.draftError);
+      status.hidden = !this.workspaceBuild || ordinaryDraft;
       status.textContent = this.workspaceBuild?.draftError
         ? folderReview
           ? 'Draft not saved. Your edits are kept here.'
@@ -17358,6 +17430,7 @@ const sessionManager = {
     if (build.chosenRoles.delete(String(roleId || ''))) {
       this.clearWorkspaceBuildChosen(`role:${roleId}`);
     }
+    this.noteWorkspaceBuildIntent();
     this.markWorkspaceBuildEdited('team');
     this.scheduleWorkspaceBuildDraft?.();
   },
@@ -17469,6 +17542,9 @@ const sessionManager = {
     // build's form, and nothing on it may overwrite the paused draft.
     if (build.resumeLine) return;
     build.draftUser = Boolean(build.draftUser || options.user !== false);
+    const preview = document.getElementById('workspaceBuildDraftPreview');
+    if (preview && !preview.hidden && this.ordinaryBuildPreviewEligible())
+      this.syncOrdinaryBuildPreview(window.ProjectTemplateCard?.getSelectedTemplate?.());
     if (this.workspaceBuildTimer) clearTimeout(this.workspaceBuildTimer);
     this.workspaceBuildTimer = setTimeout(() => {
       this.workspaceBuildTimer = null;
@@ -17483,7 +17559,9 @@ const sessionManager = {
     build.draftConflict = true;
     build.draftError = true;
     if (build.placement) build.placement.message = '';
-    this.workspaceBuildPane()?.showLine(
+    const pane = this.workspaceBuildPane();
+    pane?.removeLine?.(build.draftErrorLine);
+    build.draftErrorLine = pane?.showLine(
       'This draft changed in another tab. Your edits are kept here. Review them before saving your draft over the newer version.',
       { chips: [{ id: 'sync_again', label: 'Save my draft' }] }
     );
@@ -17528,7 +17606,7 @@ const sessionManager = {
       build.draftUser = Boolean(user || build.draftUser);
       if (!build.draftError) {
         const pane = this.workspaceBuildPane();
-        pane?.showLine(pane.COPY.draftFailure, {
+        build.draftErrorLine = pane?.showLine(pane.COPY.draftFailure, {
           chips: [{ id: 'sync_again', label: pane.COPY.tryAgain }]
         });
       }
@@ -17568,6 +17646,8 @@ const sessionManager = {
       }
       if (Number(session.version) < Number(build.session.version)) return;
       build.draftError = false;
+      if (build.draftErrorLine) this.workspaceBuildPane()?.removeLine?.(build.draftErrorLine);
+      build.draftErrorLine = '';
       build.session = session;
       build.lastDraftKey = key;
       this.syncWorkspaceStaffingAdvice(session);

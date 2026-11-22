@@ -20,7 +20,7 @@ export function creationReviewHeaderHTML({
   return `<header class="assisted-placement__header">
     ${art ? `<div class="assisted-placement__art" aria-hidden="true">${svg}</div>` : ''}
     <div><p class="assisted-placement__eyebrow">${prototype ? 'Prototype · ' : ''}1 · Review setup</p>
-      <h2${titleId ? ` id="${escapeReviewText(titleId)}" tabindex="-1"` : ''}>${escapeReviewText(title)}</h2><p>${escapeReviewText(note)}</p></div>
+      <h2${titleId ? ` id="${escapeReviewText(titleId)}" tabindex="-1" data-placement-focus="heading"` : ''}>${escapeReviewText(title)}</h2><p>${escapeReviewText(note)}</p></div>
     </header><p class="assisted-placement__location">${escapeReviewText(destination)}</p>`;
 }
 

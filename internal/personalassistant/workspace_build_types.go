@@ -104,6 +104,9 @@ type BuildQuestion struct {
 type BuildWhy struct {
 	Section string `json:"section"`
 	Text    string `json:"text"`
+	// BlueprintID is a host witness, not model output: this exact choice
+	// passed validation in the turn that supplied the explanation.
+	BlueprintID string `json:"blueprint_id,omitempty"`
 }
 
 // BuildAlternative is a blueprint the assistant considered instead.
@@ -657,7 +660,7 @@ func validateBuildSession(session WorkspaceBuildSession) error {
 		return fmt.Errorf("%w: lists", ErrWorkspaceBuildInvalid)
 	}
 	for _, why := range session.Why {
-		if !boundedText(why.Section, 32) || !boundedText(why.Text, workspaceBuildMaxShort) {
+		if !boundedText(why.Section, 32) || !boundedText(why.Text, workspaceBuildMaxShort) || !boundedText(why.BlueprintID, 256) {
 			return fmt.Errorf("%w: why", ErrWorkspaceBuildInvalid)
 		}
 	}

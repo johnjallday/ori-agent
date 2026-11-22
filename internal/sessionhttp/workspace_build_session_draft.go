@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -137,6 +138,18 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 			blueprintChanged = before.Blank != draft.Blank || before.TemplateID != draft.TemplateID
 			dropOverriddenWhy(session, before, draft)
 		}
+		session.Why = slices.DeleteFunc(session.Why, func(why personalassistant.BuildWhy) bool {
+			if why.BlueprintID == "" {
+				return false // Legacy/specialized reasons keep their existing contract.
+			}
+			// A sync may report that the browser couldn't apply the choice.
+			// Explicit edits also cover switch-away-and-back and clear-to-empty.
+			return draft.Blank || draft.TemplateID != why.BlueprintID ||
+				slices.Contains(req.EditedFields, buildFieldBlueprint) ||
+				before.Description != draft.Description ||
+				(!req.Sync && (before.Mission != draft.Mission ||
+					slices.Contains(req.EditedFields, buildFieldDescription) || slices.Contains(req.EditedFields, buildFieldGoal)))
+		})
 		session.Draft = draft
 		if len(req.TeamState) > 0 {
 			session.TeamState = append(json.RawMessage(nil), req.TeamState...)
@@ -185,7 +198,7 @@ func dropOverriddenWhy(session *personalassistant.WorkspaceBuildSession, before,
 		"details":   before.Name != after.Name || before.Description != after.Description,
 		"placement": before.ParentID != after.ParentID,
 		// A new blueprint changes what the team can be.
-		"team": blueprint || !bytes.Equal(before.RoleStaffing, after.RoleStaffing),
+		"team": blueprint || !sameBuildTeamJSON(before.RoleStaffing, after.RoleStaffing),
 	}
 	kept := session.Why[:0]
 	for _, why := range session.Why {
@@ -317,7 +330,7 @@ func staffingNames(raw json.RawMessage) map[string]string {
 // describeTeamEdit names people added or removed from the team, falling back
 // to "You changed the team".
 func describeTeamEdit(before, after personalassistant.BuildDraft) []string {
-	if bytes.Equal(before.RoleStaffing, after.RoleStaffing) &&
+	if sameBuildTeamJSON(before.RoleStaffing, after.RoleStaffing) &&
 		strings.Join(before.ExistingAgentNames, "\x00") == strings.Join(after.ExistingAgentNames, "\x00") {
 		return nil
 	}
@@ -355,6 +368,16 @@ func describeTeamEdit(before, after personalassistant.BuildDraft) []string {
 		lines = append(lines, "You changed the team")
 	}
 	return lines
+}
+
+// A persisted RawMessage can be re-indented without changing who fills a
+// role or how. Compare intent, not JSON whitespace or property order.
+func sameBuildTeamJSON(a, b json.RawMessage) bool {
+	if bytes.Equal(a, b) {
+		return true
+	}
+	var left, right any
+	return json.Unmarshal(a, &left) == nil && json.Unmarshal(b, &right) == nil && reflect.DeepEqual(left, right)
 }
 
 func sameRawMap(a, b map[string]json.RawMessage) bool {

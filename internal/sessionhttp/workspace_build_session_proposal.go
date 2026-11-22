@@ -2,6 +2,7 @@ package sessionhttp
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"reflect"
 	"strings"
@@ -158,7 +159,7 @@ func withoutOwnedBuildFields(outcome buildOutcome, before, after personalassista
 	return outcome
 }
 
-func changedBuildFields(before, after personalassistant.BuildDraft, beforeTeam, afterTeam any) []string {
+func changedBuildFields(before, after personalassistant.BuildDraft, beforeTeam, afterTeam json.RawMessage) []string {
 	changed := map[string]bool{
 		buildFieldBlueprint:   before.Blank != after.Blank || before.TemplateID != after.TemplateID,
 		buildFieldName:        before.Name != after.Name,
@@ -168,9 +169,13 @@ func changedBuildFields(before, after personalassistant.BuildDraft, beforeTeam, 
 		buildFieldParent:      before.ParentID != after.ParentID,
 		buildFieldTags:        !reflect.DeepEqual(before.Tags, after.Tags),
 		buildFieldColor:       before.Color != after.Color,
-		buildFieldTeam: !reflect.DeepEqual(beforeTeam, afterTeam) || !reflect.DeepEqual(
-			[]any{before.TeamIntent, before.RoleStaffing, before.TemplateAgentOverrides, before.TemplateAgentReview, before.ExistingAgentNames, before.EntryAgentName, before.CreateTemplateAgents},
-			[]any{after.TeamIntent, after.RoleStaffing, after.TemplateAgentOverrides, after.TemplateAgentReview, after.ExistingAgentNames, after.EntryAgentName, after.CreateTemplateAgents}),
+		buildFieldTeam: !sameBuildTeamJSON(beforeTeam, afterTeam) ||
+			!sameBuildTeamJSON(before.TeamIntent, after.TeamIntent) ||
+			!sameBuildTeamJSON(before.RoleStaffing, after.RoleStaffing) ||
+			!sameBuildTeamJSON(before.TemplateAgentOverrides, after.TemplateAgentOverrides) ||
+			!sameBuildTeamJSON(before.TemplateAgentReview, after.TemplateAgentReview) ||
+			!reflect.DeepEqual(before.ExistingAgentNames, after.ExistingAgentNames) ||
+			before.EntryAgentName != after.EntryAgentName || !reflect.DeepEqual(before.CreateTemplateAgents, after.CreateTemplateAgents),
 	}
 	fields := []string{}
 	for field, yes := range changed {
