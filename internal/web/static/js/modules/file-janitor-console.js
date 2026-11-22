@@ -1081,7 +1081,7 @@
       picture &&
       pictureLoadState === 'loaded' &&
       picture.batch_id === lastBatch?.id &&
-      reviewDraft &&
+      reviewDraft?.batch_id === lastBatch?.id &&
       picture.draft_revision === reviewDraft.revision &&
       picture.revision === reviewDraft.group_revision
     );
@@ -1104,10 +1104,14 @@
       plan &&
       planLoadState === 'loaded' &&
       plan.batch_id === lastBatch?.id &&
-      reviewDraft &&
+      reviewDraft?.batch_id === lastBatch?.id &&
       plan.revision === reviewDraft.revision &&
       plan.group_revision === reviewDraft.group_revision
     );
+  }
+
+  function currentReviewPlan() {
+    return batchActionsAvailable() && draftChoicesResolved() && planMatchesDraft() ? plan : null;
   }
 
   function resetPlan() {
@@ -1146,11 +1150,13 @@
       value.revision.length === 64 &&
       typeof value.group_revision === 'string' &&
       value.group_revision.length === 64 &&
-      typeof value.plan_digest === 'string' &&
+      (value.over_limit === true
+        ? value.plan_digest === ''
+        : value.over_limit === false && /^[0-9a-f]{64}$/.test(value.plan_digest)) &&
       count(value.move_count) &&
       count(value.trash_count) &&
       count(value.total) &&
-      typeof value.over_limit === 'boolean' &&
+      value.total === value.move_count + value.trash_count &&
       value.changed &&
       count(value.changed.total) &&
       Array.isArray(value.changed.items) &&
@@ -1176,8 +1182,10 @@
       scopeCurrent(scope) &&
       sequence === planRequest &&
       lastBatch?.id === batchID &&
-      reviewDraft?.revision === revision;
+      reviewDraft?.revision === revision &&
+      reviewDraft?.group_revision === groupRevision;
     planLoadState = 'loading';
+    renderBatch();
     const ids = planFileIDs();
     planAskedKey = ids.join(',');
     try {
@@ -1195,12 +1203,16 @@
       // An answer that arrives after a newer question, or after the saved choices
       // moved on, is dropped: only the latest plan for the choices on screen counts.
       if (!current()) return;
-      if (response.status === 409) {
-        // The choices moved on between asking and answering; a reload is under way.
-        planLoadState = 'idle';
-        return;
-      }
-      if (!response.ok || !validPlan(body.plan, batchID)) throw new Error('plan unavailable');
+      if (
+        !response.ok ||
+        !validPlan(body.plan, batchID) ||
+        body.plan.revision !== revision ||
+        body.plan.group_revision !== groupRevision
+      )
+        throw new Error('plan unavailable');
+      // A fresh plan may change with the same choices (for example a new clash).
+      // An acknowledgement never transfers to a different digest.
+      if (body.plan.plan_digest !== plan?.plan_digest) trashAcknowledgedFor = 0;
       plan = body.plan;
       planLoadState = 'loaded';
       planItems = Object.create(null);
@@ -1215,9 +1227,6 @@
             changedMarks.add(item.candidate_id);
         lookedNames = null;
       }
-      // The Trash tick belongs to one count; a different count clears it.
-      if (trashAcknowledgedFor && trashAcknowledgedFor !== plan.trash_count)
-        trashAcknowledgedFor = 0;
     } catch (_) {
       if (!current()) return;
       plan = null;
@@ -2749,6 +2758,7 @@
       return section;
     }
     const binding = reviewEditBinding();
+    const currentPlan = currentReviewPlan();
     section.appendChild(
       drawing.renderPicture(document, picture, {
         folderName: compactFolderName(lastStatus?.settings?.root_path),
@@ -2756,7 +2766,7 @@
         more: pictureMore,
         // The plan check names the final file names (R7) and, after a refused
         // press, the files that changed since the person looked (R36).
-        plan: planMatchesDraft() ? { items: planItems } : undefined,
+        plan: currentPlan ? { ...currentPlan, items: planItems } : undefined,
         changedIds: changedMarks,
         // Answers on the loose rows and for one file (R19 to R25). Every one is an
         // existing saved-choice edit; nothing here moves a file.
@@ -2900,11 +2910,10 @@
             ? 'unavailable'
             : '';
     if (!drawing) return { label: 'Nothing to file', note: '', disabled: true, moves: 0, trash: 0 };
+    const currentPlan = currentReviewPlan();
     return drawing.fileButtonModel({
-      // While the next plan is being worked out the last one still words the
-      // button (disabled, "Checking…"), so it does not flicker to "Nothing to file".
-      plan: plan && plan.batch_id === lastBatch?.id ? plan : null,
-      planCurrent: planMatchesDraft(),
+      plan: currentPlan,
+      planCurrent: Boolean(currentPlan),
       saveState,
       trashAcknowledged: Boolean(plan) && trashAcknowledgedFor === plan.trash_count,
       editsAvailable:
@@ -3030,9 +3039,8 @@
 
     const protection = protectionStrip();
     if (reviewView === 'groups') {
-      // Before the first folder card there is only the lead line and the frame
-      // title (R56): no progress, summary, saved-review picker or view switch.
-      // All files stays reachable from the header, and holds the picker.
+      // The picture owns the decision summary. All files stays reachable from
+      // the header and owns the progress, picker and filters.
       container.appendChild(renderPictureView());
       if (protection) container.appendChild(protection);
       appendReviewFooter(container, focusedReviewControlID);
@@ -3132,17 +3140,12 @@
     }
     // More than one press can file (R39). Unticking a folder is the way out; when
     // no single folder brings it under the limit, starting from nothing is.
-    if (draftEnabled && planMatchesDraft() && plan.over_limit)
+    if (draftEnabled && currentReviewPlan()?.over_limit)
       footer.appendChild(
         button('Untick everything', 'fj-btn fj-btn-secondary', reviewEditCallback('clear_all'))
       );
     if (planLoadState === 'error')
-      footer.appendChild(
-        button('Check again', 'fj-btn fj-btn-secondary', () => {
-          planLoadState = 'idle';
-          void loadReviewPlan();
-        })
-      );
+      footer.appendChild(button('Check again', 'fj-btn fj-btn-secondary', () => void loadBatch()));
     const approve = button(
       model.label,
       'fj-btn fj-btn-primary' + (model.trash > 0 ? ' fj-btn-destructive' : ''),
@@ -3157,7 +3160,7 @@
     // whatever they were on: a folder tick, an "and N more" control, the Trash tick
     // or the main button as much as a table control.
     if (
-      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|TrashCopy|PutBack|File|ReviewAgain|Retry)-|Approve$|TrashAck$|ShowEarlier$|FileMenu$|FileBarCancel$|Picture$)/.test(
+      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|TrashCopy|PutBack|File|ReviewAgain|Retry)-|Approve$|TrashAck$|ShowEarlier$|FileMenu$|FileBarCancel$|Picture$|Jump(?:Filed|Loose|Trash)$|(?:Filed|Loose|Trash)Title$)/.test(
         focusedReviewControlID
       )
     ) {
@@ -5338,9 +5341,7 @@
       statusLine.setAttribute('role', 'status');
       statusLine.setAttribute('aria-live', 'polite');
     }
-    const pending = pendingCount();
-    statusLine.textContent =
-      activity.label + (pending > 0 ? ' · ' + reviewCountLabel(pending) : '');
+    statusLine.textContent = consoleActivityLabel(activity);
     heading.appendChild(statusLine);
     header.appendChild(heading);
 
@@ -5385,6 +5386,19 @@
     return header;
   }
 
+  function showingDecisionReview() {
+    return consoleTab === 'review' && reviewView === 'groups' && !currentPreview();
+  }
+
+  function consoleActivityLabel(activity) {
+    const pending = pendingCount();
+    return (
+      activity.label +
+      (pending > 0 && !showingDecisionReview() ? ' · ' + reviewCountLabel(pending) : '') +
+      (pending > 0 && scanning ? ' · Scanning…' : '')
+    );
+  }
+
   function reviewCountLabel(count) {
     return count + (count === 1 ? ' file ready for review' : ' files ready for review');
   }
@@ -5410,7 +5424,7 @@
         const pending = pendingCount();
         const count = el('span', 'fj-console-tab-count', pending > 0 ? String(pending) : '');
         count.id = 'fileJanitorReviewCount';
-        count.hidden = pending <= 0;
+        count.hidden = pending <= 0 || showingDecisionReview();
         control.appendChild(count);
       }
       list.appendChild(control);
@@ -5558,16 +5572,13 @@
     const count = document.getElementById('fileJanitorReviewCount');
     const pending = pendingCount();
     if (statusLine) {
-      const label =
-        activityState(lastStatus).label +
-        (pending > 0 ? ' · ' + reviewCountLabel(pending) : '') +
-        (pending > 0 && scanning ? ' · Scanning…' : '');
+      const label = consoleActivityLabel(activityState(lastStatus));
       if (statusLine.textContent !== label) statusLine.textContent = label;
     }
     if (count) {
       const label = pending > 0 ? String(pending) : '';
       if (count.textContent !== label) count.textContent = label;
-      count.hidden = pending <= 0;
+      count.hidden = pending <= 0 || showingDecisionReview();
     }
     const notice = document.getElementById('fileJanitorReadStatus');
     if (notice) {

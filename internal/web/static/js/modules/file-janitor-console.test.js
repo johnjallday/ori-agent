@@ -4313,7 +4313,7 @@ async function groupedReviewFixture(count = 206) {
       batch_id: state.batch.id,
       revision: draft.revision,
       group_revision: draft.group_revision,
-      plan_digest: 'd'.repeat(60) + (draft.revision.slice(-4) || '0000'),
+      plan_digest: state.overLimit ? '' : 'd'.repeat(60) + draft.revision.slice(-4),
       move_count: moves.length,
       trash_count: trash.length,
       total: moves.length + trash.length,
@@ -4969,8 +4969,7 @@ function buttonNamed(root, label) {
 test('the picture is the default view: lead line, frame title, a ticked folder, five names', async () => {
   const { doc, calls } = await groupedReviewFixture();
   const batch = pictureHost(doc);
-  // Before the first folder card there is only the picture host, its lead line and
-  // the frame title: no summary, progress, picker, view switch or counting line.
+  // No separate progress, picker or view switch interrupts the picture.
   assert.deepEqual(
     batch.children.filter(node => node.className !== 'fj-footer').map(node => node.className),
     ['fj-picture-host']
@@ -4979,13 +4978,15 @@ test('the picture is the default view: lead line, frame title, a ticked folder, 
   assert.equal(picture.id, 'fileJanitorPicture');
   assert.deepEqual(
     picture.children.map(node => node.className),
-    ['fj-lead', 'fj-frame']
+    ['fj-lead', 'fj-decision-summary', 'fj-frame']
   );
   assert.equal(
     picture.children[0].textContent,
     'This is how Inbox will look. Nothing moves until you press File. Ori reads names, types, sizes and dates, never what is inside.'
   );
-  assert.equal(picture.children[1].children[0].textContent, 'Inbox, after filing');
+  assert.equal(picture.children[2].children[0].textContent, 'Inbox, after filing');
+  assert.equal(doc.getElementById('fileJanitorJumpFiled').textContent, '206 ready to file');
+  assert.match(picture.children[1].textContent, /0 need a decision/);
   const images = folderCheckbox(doc);
   assert.equal(images.checked, true);
   assert.equal(images.getAttribute('aria-label'), 'Images, 206 files, will be filed');
@@ -6054,6 +6055,8 @@ test('a plan answer that arrives after a newer one is ignored', async () => {
     'No changes selected',
     'the late answer was about choices that are gone'
   );
+  assert.equal(doc.getElementById('fileJanitorJumpFiled'), null);
+  assert.match(pictureHost(doc).textContent, /0 ready to file · 0 need a decision/);
   assert.equal(pressButton(doc).disabled, true);
 });
 
@@ -6065,7 +6068,8 @@ test('while the plan is being checked the button waits instead of claiming there
   const checking = panel._planNow();
   await settle();
   assert.equal(pressButton(doc).disabled, true);
-  assert.notEqual(pressButton(doc).textContent, 'No changes selected');
+  assert.equal(surface(doc).all(node => node.className === 'fj-decision-counts').length, 0);
+  assert.equal(pressButton(doc).textContent, 'File');
   assert.equal(doc.getElementById('fileJanitorSelection').textContent, 'Checking…');
   void checking;
 });
@@ -6077,11 +6081,36 @@ test('a plan that cannot be read leaves the button off and offers another look',
   assert.equal(pressButton(doc).disabled, true);
   const retry = buttonNamed(surface(doc), 'Check again');
   assert.ok(retry, 'expected a way to check again');
+  assert.equal(doc.getElementById('fileJanitorJumpFiled'), null);
   state.failPlan = false;
   retry.click();
-  await settle();
+  await planSettled();
   assert.equal(pressButton(doc).textContent, 'File 3 files');
   assert.equal(pressButton(doc).disabled, false);
+});
+
+test('a successful response without counts or with an old group revision cannot authorize File', async () => {
+  const { doc, state } = await groupedReviewFixture(3);
+  const fixtureFetch = globalThis.fetch;
+  for (const tamper of [
+    plan => delete plan.move_count,
+    plan => (plan.group_revision = '0'.repeat(64))
+  ]) {
+    globalThis.fetch = async (url, options) => {
+      const result = await fixtureFetch(url, options);
+      if (!url.includes('/plan?')) return result;
+      const body = await result.json();
+      tamper(body.plan);
+      return { ok: true, json: async () => body };
+    };
+    await panel._planNow();
+    assert.equal(pressButton(doc).textContent, 'File');
+    assert.equal(pressButton(doc).disabled, true);
+    assert.equal(doc.getElementById('fileJanitorJumpFiled'), null);
+    pressButton(doc).click();
+    await settle();
+    assert.equal(state.fileRequests.length, 0);
+  }
 });
 
 test('a file that will get a new name is shown under it, tagged renamed', async () => {
@@ -6257,6 +6286,8 @@ test('Trash needs its own tick, naming the count; it is never pre-ticked and cle
     'Yes, move 1 file to Trash'
   );
   assert.equal(pressButton(doc).textContent, 'File 2 files · 1 to Trash');
+  assert.equal(doc.getElementById('fileJanitorJumpFiled').textContent, '2 ready to file');
+  assert.equal(doc.getElementById('fileJanitorJumpTrash').textContent, '1 marked for Trash');
   assert.equal(pressButton(doc).disabled, true, 'the button waits for the tick');
   changeCheckbox(tick, true);
   assert.equal(pressButton(doc).disabled, false);
@@ -6473,6 +6504,17 @@ async function questionRowFixture(count = 3) {
   await panel._planNow();
   return fixture;
 }
+
+test('an all-undecided review names the whole question count without offering File', async () => {
+  const { doc, calls } = await questionRowFixture(53);
+  const jump = doc.getElementById('fileJanitorJumpLoose');
+  assert.equal(jump.textContent, '53 need a decision');
+  assert.equal(doc.getElementById('fileJanitorJumpFiled'), null);
+  jump.click();
+  assert.equal(doc.activeElement.id, 'fileJanitorLooseTitle');
+  assert.equal(pressButton(doc).disabled, true);
+  assert.equal(draftEdits(calls).length, 0);
+});
 
 const rowMenu = doc => doc.getElementById('fileJanitorRowMenu-sensitive');
 const draftEdits = calls =>

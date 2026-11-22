@@ -177,10 +177,12 @@ export function fileButtonModel({
   trashAcknowledged = false,
   editsAvailable = true
 } = {}) {
+  // A plan from another revision is not a forecast for the choices on screen.
+  if (!planCurrent || saveState) plan = null;
   const moves = plan?.move_count || 0;
   const trash = plan?.trash_count || 0;
-  // Before the first plan there is nothing to state yet: the button says File and
-  // waits ("Checking…"), rather than claiming there is nothing to file.
+  // Until a matching plan is available, the button says File and waits rather
+  // than claiming there is nothing to file.
   let label = plan ? 'No changes selected' : 'File';
   if (moves > 0 && trash > 0) label = 'File ' + filesWord(moves) + ' · ' + trash + ' to Trash';
   else if (moves > 0) label = 'File ' + filesWord(moves);
@@ -287,6 +289,51 @@ function builder(doc) {
   };
 }
 
+// These are whole-section counts, not samples. A placed sibling may be drawn
+// both in its destination and on its pair card, but is no longer a question.
+function decisionSummary(h, picture, plan, folderName, sections) {
+  const { move_count: moves, trash_count: trash } = plan;
+  const undecided = picture.loose.reduce((total, row) => total + row.loose_count, 0);
+  const summary = h('div', 'fj-decision-summary');
+  const counts = h('p', 'fj-decision-counts');
+  const add = (count, label, id, target) => {
+    if (counts.children.length) {
+      const separator = h('span', '', '·');
+      separator.setAttribute('aria-hidden', 'true');
+      counts.appendChild(separator);
+    }
+    const actionable = count > 0 && target;
+    const node = h(actionable ? 'button' : 'span', actionable ? 'fj-link' : '', count + label);
+    if (actionable) {
+      node.type = 'button';
+      node.id = id;
+      node.addEventListener('click', () => {
+        target.scrollIntoView?.({ block: 'center' });
+        target.focus({ preventScroll: true });
+      });
+    }
+    counts.appendChild(node);
+  };
+  add(moves, ' ready to file', 'fileJanitorJumpFiled', sections.filed);
+  add(
+    undecided,
+    undecided === 1 ? ' needs a decision' : ' need a decision',
+    'fileJanitorJumpLoose',
+    sections.loose
+  );
+  if (trash > 0) add(trash, ' marked for Trash', 'fileJanitorJumpTrash', sections.trash);
+  summary.appendChild(counts);
+  if (undecided > 0)
+    summary.appendChild(h('p', 'fj-sub', 'Unanswered files stay in ' + folderName + '.'));
+  return summary;
+}
+
+function sectionTitle(h, text) {
+  const title = h('h4', 'fj-box-title', text);
+  title.setAttribute('tabindex', '-1');
+  return title;
+}
+
 // renderPicture draws the first screenful. ctx supplies the folder's display
 // name, whether edits are possible right now, the open "and N more" list, and
 // the callbacks. Draws no control that the server did not describe.
@@ -311,7 +358,9 @@ export function renderPicture(doc, picture, ctx) {
   frame.appendChild(title);
 
   const filed = h('div', 'fj-box fj-filed');
-  filed.appendChild(h('h4', 'fj-box-title', 'Filed'));
+  const filedTitle = sectionTitle(h, 'Filed');
+  filedTitle.id = 'fileJanitorFiledTitle';
+  filed.appendChild(filedTitle);
   if (!picture.folders.length) {
     filed.appendChild(
       h(
@@ -334,8 +383,23 @@ export function renderPicture(doc, picture, ctx) {
   // the choice can be changed back (R20); so does a row Ori was told to stop asking
   // about (R22).
   const rows = picture.loose.some(row => row.count > 0) || (ctx.keptRows || []).length > 0;
-  if (loose > 0 || rows) frame.appendChild(looseSection(h, picture, folderName, loose, ctx));
-  if (picture.trash.count > 0) frame.appendChild(trashBox(h, picture, ctx));
+  const looseTitle = sectionTitle(
+    h,
+    'Still loose in ' + folderName + (loose > 0 ? ' · ' + loose : '')
+  );
+  looseTitle.id = 'fileJanitorLooseTitle';
+  if (loose > 0 || rows) frame.appendChild(looseSection(h, picture, looseTitle, ctx));
+  const trashTitle = sectionTitle(h, 'Trash · ' + picture.trash.count);
+  trashTitle.id = 'fileJanitorTrashTitle';
+  if (picture.trash.count > 0) frame.appendChild(trashBox(h, picture, trashTitle, ctx));
+  if (ctx.plan && !ctx.plan.over_limit && Number.isSafeInteger(ctx.plan.move_count))
+    root.appendChild(
+      decisionSummary(h, picture, ctx.plan, folderName, {
+        filed: filedTitle,
+        loose: looseTitle,
+        trash: trashTitle
+      })
+    );
   if (picture.could_not_file.count > 0) frame.appendChild(couldNotFile(h, picture, ctx));
   if (ctx.more) frame.appendChild(morePanel(h, picture, ctx));
   root.appendChild(frame);
@@ -490,6 +554,7 @@ function folderCard(h, folder, ctx) {
     h('span', 'fj-folder-count', String(folder.count > 0 ? folder.count : folder.unfiled_count))
   );
   card.appendChild(head);
+  card.appendChild(h('p', 'fj-folder-destination', folder.destination));
   if (unticked) card.appendChild(h('p', 'fj-not-filed', 'Not filed'));
   if (folder.count > 0) {
     card.appendChild(nameList(h, folder.files, 'fj-folder-files', ctx, { planned: true }));
@@ -817,11 +882,9 @@ function bundleCard(h, bundle, ctx) {
   return card;
 }
 
-function looseSection(h, picture, folderName, total, ctx) {
+function looseSection(h, picture, title, ctx) {
   const section = h('div', 'fj-box fj-loose');
-  section.appendChild(
-    h('h4', 'fj-box-title', 'Still loose in ' + folderName + (total > 0 ? ' · ' + total : ''))
-  );
+  section.appendChild(title);
   for (const row of picture.loose) {
     if (!row.count) continue;
     const box = h('div', 'fj-loose-row');
@@ -878,9 +941,9 @@ function looseSection(h, picture, folderName, total, ctx) {
   return section;
 }
 
-function trashBox(h, picture, ctx) {
+function trashBox(h, picture, title, ctx) {
   const box = h('div', 'fj-box fj-trash');
-  box.appendChild(h('h4', 'fj-box-title', 'Trash · ' + picture.trash.count));
+  box.appendChild(title);
   box.appendChild(nameList(h, picture.trash.files, 'fj-loose-files', ctx));
   if (picture.trash.count > picture.trash.files.length)
     box.appendChild(moreButton(h, ctx, TRASH, '', picture.trash.files.length, picture.trash.count));

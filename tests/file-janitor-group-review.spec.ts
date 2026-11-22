@@ -252,6 +252,39 @@ test('agentless real entry draws a 206-file folder ticked, unticks one folder, k
   expect((await (await request.get(`${ws.base}/history`)).json()).total).toBe(0);
 });
 
+test('decision counts jump to their sections and unanswered files do not block unrelated moves', async ({ page, request }) => {
+  const ws = await manualReview(request, ['Guide.pdf', 'Guide (2).pdf', 'photo.png', 'setup.dmg']);
+  const writes: string[] = [];
+  page.on('request', req => {
+    if (req.method() !== 'GET' && req.url().includes('/file-janitor')) writes.push(req.url());
+  });
+  const review = await openReview(page, ws.slug);
+  const ready = review.getByRole('button', { name: '2 ready to file', exact: true });
+  const undecided = review.getByRole('button', { name: '2 need a decision', exact: true });
+  await expect(ready).toBeVisible();
+  const folderName = basename(ws.root);
+  await expect(review.getByText(`Unanswered files stay in ${folderName}.`)).toBeVisible();
+  await ready.click();
+  await expect(review.locator('#fileJanitorFiledTitle')).toBeFocused();
+  await undecided.click();
+  await expect(review.locator('#fileJanitorLooseTitle')).toBeFocused();
+  await expect(review.locator('#fileJanitorLooseTitle')).toBeInViewport();
+  expect(writes).toEqual([]);
+  const screenshots = 'tasks/evidence-downloads-review-decisions';
+  mkdirSync(screenshots, { recursive: true });
+  await page.screenshot({ path: `${screenshots}/01-jump-to-decisions.png` });
+
+  await folder(review, 'installers').uncheck();
+  await expect(review.getByRole('button', { name: '1 ready to file', exact: true })).toBeVisible();
+  await expect(undecided).toBeVisible();
+  await expect(fileButton(review)).toHaveText('File 1 file');
+  await expect(fileButton(review)).toBeEnabled();
+  expect(writes).toHaveLength(1);
+  expect(writes[0]).toMatch(/\/draft$/);
+  expect(destinations(ws.root)).toEqual([]);
+  await page.screenshot({ path: `${screenshots}/01-one-folder-unticked.png` });
+});
+
 test('206 mixed files are each drawn once, question groups are never ticked, and deep links still reach All files', async ({
   page,
   request
