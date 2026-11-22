@@ -165,12 +165,22 @@ class GitFixture(unittest.TestCase):
 
 
 class LifecycleTests(GitFixture):
-    def test_threshold_evaluates_without_changing_refs(self):
-        before = self.refs()
-        rc.evaluate(rc.Repository())
-        self.assertEqual(self.outputs()["ready"], "true")
-        self.assertEqual(self.outputs()["sha"], self.source)
-        self.assertEqual(before, self.refs())
+    def test_default_threshold_holds_at_11_and_is_ready_at_12_without_changing_refs(self):
+        with patch.dict(os.environ):
+            os.environ.pop("RELEASE_MIN_PRS", None)
+            for count, ready in ((11, "false"), (12, "true")):
+                with self.subTest(count=count):
+                    sha = self.commit(f"feat: change (#{count})")
+                    rc.git("push", "--quiet", "origin", "dev")
+                    before = self.refs()
+                    self.clear_outputs()
+                    rc.evaluate(rc.Repository())
+                    self.assertEqual(self.outputs()["ready"], ready)
+                    if ready == "true":
+                        self.assertEqual(self.outputs()["sha"], sha)
+                    report = self.status()
+                    self.assertEqual((report["dev"]["unreleased_prs"], report["dev"]["minimum_prs"]), (count, 12))
+                    self.assertEqual(before, self.refs())
 
     def wait_for_ci(self, runs_after_each_sleep, candidate=""):
         """Run await_ci; each fake sleep swaps in the next CI state. Returns the sleeps taken."""

@@ -24,6 +24,7 @@ RC = re.compile(r"(v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))-rc\
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 HOLD = {"1", "true", "yes", "on"}
 PENDING = {"requested", "queued", "waiting", "pending", "in_progress"}
+DEFAULT_MIN_PRS = 12
 # The repair branch for a squashed merge-back: a zero-diff merge commit that restores release ancestry on dev.
 MERGE_BACK = "release-merge-back"
 
@@ -318,7 +319,7 @@ def evaluate(repo, candidate=""):
             hold_for_merge_back(repo, latest)
             return
         subjects, prs = landed(repo.tags[latest], sha)
-        minimum = int(os.environ.get("RELEASE_MIN_PRS", "10"))
+        minimum = int(os.environ.get("RELEASE_MIN_PRS", DEFAULT_MIN_PRS))
         if minimum < 1:
             raise Refusal("RELEASE_MIN_PRS must be positive")
         if not subjects or (len(prs) < minimum and os.environ.get("FORCE_RELEASE") != "true"):
@@ -856,7 +857,7 @@ def status(repo):
             "sha": dev,
             "ci": repo.workflow_state("ci.yml", dev, "dev"),
             "unreleased_prs": len(prs),
-            "minimum_prs": int(os.environ.get("RELEASE_MIN_PRS", "10")),
+            "minimum_prs": int(os.environ.get("RELEASE_MIN_PRS", DEFAULT_MIN_PRS)),
             "merged_back": repo.ancestor(repo.tags[latest], dev) and repo.ancestor(repo.branches["main"], dev),
         },
         "merge_back_pr": None,
