@@ -949,7 +949,15 @@ export function diffAnnouncements(status, knownCompleted, knownTierComplete, qui
       announceChanges(status);
       render(status);
     } catch (_) {
-      // Silent: the widget is optional; never disrupt the home page.
+      // The mission board can keep its last view, but a failed refresh must
+      // not leave a stale balance or an actionable price on the optional offer.
+      if (
+        revision === statusRevision &&
+        ['affordable', 'insufficient'].includes(lastStatus?.filing_expansion?.state)
+      ) {
+        lastStatus = { ...lastStatus, filing_expansion: { state: 'unavailable' } };
+        renderExpansion();
+      }
     }
   }
 

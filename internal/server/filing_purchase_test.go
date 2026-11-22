@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/economy"
@@ -139,6 +140,39 @@ func TestFilingPurchaseAtExactPriceReplaysAfterLostResponse(t *testing.T) {
 		t.Fatalf("removed destination was resold: %+v", removed)
 	}
 	assertFilingLedgerRows(t, b, 1, 0)
+}
+
+func TestFilingPurchaseDoesNotBypassDisabledEconomyOrSpendMissingCraft(t *testing.T) {
+	b, h := filingPurchaseFixture(t)
+	confirm := filingConfirmBody(t, 7, false)
+	foreign := httptest.NewRequest(http.MethodPost, "http://localhost"+filingPurchasePath, bytes.NewReader(confirm))
+	foreign.Header.Set("Content-Type", "application/json")
+	foreign.Header.Set("Origin", "https://outside.example")
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, foreign)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("foreign origin: %d %s", response.Code, response.Body.String())
+	}
+	t.Setenv("ORI_ECONOMY_ENABLED", "false")
+	decodeFilingResult(t, postFilingJSON(h, filingPurchasePath, confirm), http.StatusConflict, string(economy.ExpansionDisabled))
+	_, missions := readFilingExpansion(t, h)
+	assertFreeFolderMission(t, missions)
+	t.Setenv("ORI_ECONOMY_ENABLED", "true")
+	if _, err := b.filingClaimStore().Debit(t.Context(), economy.Entry{Resource: economy.ResourceCraft, Amount: 5,
+		Reason: economy.ReasonBuild, RefKind: economy.RefKindBuild, RefID: "fixture-spend"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	q := decodeFilingResult(t, postFilingJSON(h, filingPurchasePath, confirm), http.StatusConflict, string(economy.ExpansionInsufficient))
+	if q.Missing != 5 || q.Balance == nil || *q.Balance != 2 || q.ManualEarnURL == "" {
+		t.Fatalf("short balance: %+v", q)
+	}
+	if _, err := b.sessionHandler.CreateFromTemplate(t.Context(), "Free Filing", fileJanitorBlueprintID); err != nil {
+		t.Fatal(err)
+	}
+	if craftBalance(t, b) != 2 {
+		t.Fatal("normal creation was priced")
+	}
+	assertFilingLedgerRows(t, b, 0, 0)
 }
 
 func TestFilingPurchaseCreativeAndStalePrice(t *testing.T) {

@@ -118,6 +118,20 @@ test('the same card updates as HQ and the ledger change, without replacing uncha
   assert.equal(list.children[0], first);
 });
 
+test('same-named Filing destinations still identify separate places to open', () => {
+  const box = offerBox();
+  const destinations = [
+    { name: 'Inbox', route: '/workspaces/inbox?panel=file-janitor' },
+    { name: 'Inbox', route: '/workspaces/another-inbox?panel=file-janitor' }
+  ];
+  renderFilingExpansion(box, viewOf({ state: 'already_built', destinations }), () => {}, '');
+  const list = box.querySelector('[data-role="expansion-destinations"]');
+  assert.deepEqual(
+    list.children.map(item => item.children[0].textContent),
+    ['Open Inbox (inbox)', 'Open Inbox (another-inbox)']
+  );
+});
+
 test('an explicit confirmation sends only the displayed price; decline and short balance do not submit', async () => {
   const requests = [];
   let prompt = '';

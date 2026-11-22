@@ -80,7 +80,10 @@ test('earn Craft, build HQ, buy Filing and separately approve its first review',
   await expect
     .poll(async () => (await get('/api/personal-assistant')).personal_assistant.state)
     .toBe('active');
-  await expect(page.locator('#personalHQResultHost')).toContainText('Your HQ is ready');
+  const welcome = page.locator('#personalHQResultHost');
+  await expect(welcome).toContainText('Your HQ is ready');
+  await welcome.getByRole('button', { name: 'Dismiss HQ welcome' }).click();
+  await expect(welcome).toBeHidden();
   await page.locator('#cockpitQuestsToggle').click();
   const offer = page.locator('[data-role="filing-expansion"]');
   await expect(offer).toContainText('7 Craft to build. You have 7 Craft.');
@@ -89,7 +92,27 @@ test('earn Craft, build HQ, buy Filing and separately approve its first review',
     '/?quest=show-folder'
   );
   await checkAccessibility(page, '[data-role="filing-expansion"]');
+  await offer.scrollIntoViewIfNeeded();
   await capture('#cockpitQuestsFlyout', 'hq-filing-offer');
+  // Losing the live projection must disable a previously quoted build. Only
+  // the test simulates timing out this read; every quote and write below is real.
+  const projectionRoute = '**/api/progression';
+  await page.route(projectionRoute, route => route.abort('failed'));
+  await page.evaluate(() => window.dispatchEvent(new Event('ori:economy-changed')));
+  await expect(offer.getByRole('button', { name: 'Build for 7 Craft' })).toBeHidden();
+  await expect(offer).toContainText('A build price is unavailable');
+  await page.unroute(projectionRoute);
+  await page.evaluate(() => window.dispatchEvent(new Event('ori:economy-changed')));
+  await expect(offer.getByRole('button', { name: 'Build for 7 Craft' })).toBeEnabled();
+  // Prove the free route is usable, not merely present. It opens the
+  // assistant chooser without authorizing a folder or making a purchase.
+  await offer.getByRole('link', { name: 'Show a folder for free' }).click();
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+  await expect(page.locator('#personalAssistantFolderChooser')).toBeVisible();
+  expect((await get('/api/economy')).craft).toBe(7);
+  await page.locator('#personalAssistantClose').click();
+  await page.locator('#cockpitQuestsToggle').click();
+  await expect(offer.getByRole('button', { name: 'Build for 7 Craft' })).toBeEnabled();
   page.once('dialog', async dialog => {
     expect(dialog.message()).toContain('does not grant access');
     await dialog.accept();
@@ -150,6 +173,7 @@ test('earn Craft, build HQ, buy Filing and separately approve its first review',
   const allow = wizard.getByRole('button', { name: 'Allow filing in Sandbox Inbox' });
   await expect(allow).toBeFocused();
   await checkAccessibility(page, '#setupWizardDialog .fj-setup-review');
+  await wizard.locator('.fj-setup-path').scrollIntoViewIfNeeded();
   await capture('#setupWizardDialog', 'folder-permission');
   await allow.press('Enter');
   await expect(wizard).not.toBeVisible();

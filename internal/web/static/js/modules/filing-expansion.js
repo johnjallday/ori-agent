@@ -158,12 +158,16 @@ export function renderFilingExpansion(
   const routes = view.destinations || [];
   if (destinations.dataset.routes !== JSON.stringify(routes)) {
     destinations.dataset.routes = JSON.stringify(routes);
+    const counts = new Map();
+    for (const row of routes) counts.set(row.name, (counts.get(row.name) || 0) + 1);
     destinations.replaceChildren(
       ...routes.map(row => {
         const item = box.ownerDocument.createElement('li');
         const link = box.ownerDocument.createElement('a');
         link.href = row.route;
-        link.textContent = `Open ${row.name}`;
+        const slug = row.route.split('/')[2].split('?')[0];
+        link.textContent =
+          counts.get(row.name) > 1 ? `Open ${row.name} (${slug})` : `Open ${row.name}`;
         item.append(link);
         return item;
       })
