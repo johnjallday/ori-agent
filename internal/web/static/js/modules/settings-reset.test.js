@@ -98,6 +98,7 @@ function harness({
   previewResult = preview,
   executeResult = operation(),
   storedOperation = '',
+  storageUnavailable = false,
   onboardingResult = {
     needs_onboarding: true,
     completed: false,
@@ -210,7 +211,10 @@ function harness({
       addEventListener() {},
       confirm: () => true,
       crypto: { randomUUID: () => 'request-1' },
-      localStorage: storageAPI(storage),
+      get localStorage() {
+        if (storageUnavailable) throw new Error('Storage unavailable');
+        return storageAPI(storage);
+      },
       sessionStorage: storageAPI(sessionStorage)
     },
     bootstrap: {
@@ -383,31 +387,58 @@ test('blockers are listed beside the locked confirm box, not buried in the scope
   assert.equal(clean.elements.resetConfirmInput.placeholder, 'Type RESET to confirm');
 });
 
-test('restart-required remains pending, visible, and never substitutes a timed reload', async () => {
+test('staged reset goes to the same-tab operation status without a timed reload', async () => {
   const h = harness();
   await h.review();
   await h.elements.confirmResetBtn.click();
   assert.equal(h.timers.length, 0);
-  assert.match(h.resultText(), /restart|required|relaunch/i);
+  assert.match(h.resultText(), /Opening reset status/);
+  assert.equal(h.context.window.location.href, '/reset/status?operation=operation-1');
   assert.equal(h.storage.get('ori.reset.operation_id'), 'operation-1');
 });
 
-test('a real mixed operation keeps completed and failed categories visible', async () => {
-  const h = harness({
-    executeResult: operation('partial_failure', [
-      { id: 'settings', outcome: 'completed', checks: [] },
-      { id: 'agents', outcome: 'failed', message: '<img src=x onerror=alert(1)>', checks: [] }
-    ])
-  });
-  await h.review(['resetSettings', 'resetAgents']);
+test('a durable blocked reply still goes to the same operation status', async () => {
+  const h = harness({ executeResult: { httpStatus: 409, body: operation('blocked') } });
+  await h.review();
   await h.elements.confirmResetBtn.click();
-  assert.match(h.resultText(), /Settings & API keys: completed/);
-  assert.match(h.resultText(), /Agents: failed/);
-  const failed = h.elements.resetOperationResults.children.find(node =>
-    node.textContent.includes('<img')
-  );
-  assert.ok(failed);
-  assert.equal(failed.innerHTML, '');
+  assert.equal(h.context.window.location.href, '/reset/status?operation=operation-1');
+});
+
+for (const code of ['active_work', 'scope_changed']) {
+  test(`${code} refusal stays in Settings even if the reply includes an older receipt`, async () => {
+    const previous = operation('completed');
+    previous.operation.id = 'previous-operation';
+    const h = harness({
+      executeResult: { httpStatus: 409, body: { ...previous, code, message: 'Review again.' } }
+    });
+    await h.review();
+    await h.elements.confirmResetBtn.click();
+    assert.equal(h.context.window.location.href, '/settings');
+    assert.match(h.resultText(), /Review again/);
+    assert.equal(h.elements.resetAppBtn.disabled, false);
+    assert.equal(h.storage.has('ori.reset.operation_id'), false);
+  });
+}
+
+test('a lost POST reply retains the preview ID even when storage is unavailable', async () => {
+  const h = harness({ storageUnavailable: true });
+  const fetch = h.context.fetch;
+  h.context.fetch = (url, options) => {
+    if (url === '/api/reset') throw new Error('Connection lost');
+    return fetch(url, options);
+  };
+  await h.review();
+  await h.elements.confirmResetBtn.click();
+  assert.equal(h.context.window.location.href, '/reset/status?operation=operation-1');
+});
+
+test('an ambiguous POST reply does not substitute an unrelated operation', async () => {
+  const other = operation();
+  other.operation.id = 'unrelated';
+  const h = harness({ executeResult: other });
+  await h.review();
+  await h.elements.confirmResetBtn.click();
+  assert.equal(h.context.window.location.href, '/reset/status?operation=operation-1');
 });
 
 test('editing confirmation cannot re-enable an in-flight destructive button', async () => {
@@ -596,7 +627,7 @@ test('canceling review does not submit and restores focus and selection controls
   assert.equal(h.elements.confirmResetBtn.disabled, true);
 });
 
-test('Start Fresh is a distinct reviewed intent and clears only enumerated browser state after verified completion', async () => {
+test('Start Fresh review hands off to its own status without clearing browser state', async () => {
   const freshPreview = {
     ...preview,
     id: 'fresh-preview',
@@ -634,14 +665,11 @@ test('Start Fresh is a distinct reviewed intent and clears only enumerated brows
   await h.elements.resetConfirmInput.emit('input');
   await h.elements.confirmResetBtn.click();
 
-  assert.equal(h.storage.has('ori-theme'), false);
-  assert.equal(h.storage.has('ori_chat_session_old'), false);
-  assert.equal(h.sessionStorage.has('oriSetupWizardResume:old'), false);
   assert.equal(h.storage.get('ori.reset.operation_id'), 'fresh-operation');
-  assert.equal(h.storage.get('ori.reset.generation'), 'fresh-operation');
-  assert.equal(h.elements.openStartFreshSetupBtn.hidden, false);
-  await h.elements.openStartFreshSetupBtn.click();
-  assert.equal(h.context.window.location.href, '/');
+  assert.equal(h.storage.get('ori-theme'), 'dark');
+  assert.equal(h.sessionStorage.has('oriSetupWizardResume:old'), true);
+  assert.equal(h.storage.has('ori.reset.generation'), false);
+  assert.equal(h.context.window.location.href, '/reset/status?operation=fresh-operation');
   assert.equal(h.storage.get('oriTabId'), 'keep-tab');
   assert.equal(h.sessionStorage.get('oriTabId'), 'keep-tab');
   assert.equal(h.storage.get('unrelated-app-key'), 'keep');
@@ -679,7 +707,7 @@ test('saved operation identity recovers durable status after a page load', async
   });
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.calls[0].url, '/api/reset/operations/operation-1');
-  assert.match(h.resultText(), /partial|retry later/i);
+  assert.equal(h.context.window.location.href, '/reset/status?operation=operation-1');
 });
 
 // --- Installed plugins ------------------------------------------------------
@@ -852,7 +880,7 @@ test('unsafe plugin ownership blocks confirmation with the server message', asyn
   assert.match(h.blockerText(), /Uninstall one of them manually/);
 });
 
-test('a partial plugin failure names the unresolved plugin and keeps the recovery identity', async () => {
+test('a partial plugin failure goes to the matching recovery identity', async () => {
   const partial = operation('partial_failure', [
     {
       id: 'installed_plugins',
@@ -874,11 +902,7 @@ test('a partial plugin failure names the unresolved plugin and keeps the recover
   const h = harness({ previewResult: pluginPreview, executeResult: partial });
   await h.review(['resetInstalledPlugins']);
   await h.elements.confirmResetBtn.click();
-  assert.match(h.resultText(), /Installed plugins: failed/);
-  assert.match(h.resultText(), /Installed plugins \/ demo-managed: completed/);
-  assert.match(h.resultText(), /Installed plugins \/ demo-linked: failed/);
-  assert.match(h.resultText(), /partially completed|retry only unresolved/i);
-  assert.equal(/rolled back|nothing was deleted/i.test(h.resultText()), false);
+  assert.equal(h.context.window.location.href, '/reset/status?operation=plugin-operation');
   assert.equal(h.storage.get('ori.reset.operation_id'), 'plugin-operation');
 });
 

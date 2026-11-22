@@ -111,6 +111,21 @@
     runtime_cache: 'Generated runtime state'
   };
   const operationStorageKey = 'ori.reset.operation_id';
+  const operationIDPattern = /^[A-Za-z0-9_-]{1,128}$/;
+  // These responses prove this request was refused before admission. Other
+  // errors (including missing/unparseable replies) cannot rule out staging.
+  const admissionRefusals = new Set([
+    'invalid_request',
+    'preview_required',
+    'preview_expired',
+    'scope_changed',
+    'preview_blocked',
+    'active_work',
+    'agents_folder_confirmation_required',
+    'operation_conflict',
+    'lifecycle_unavailable',
+    'preview_limit'
+  ]);
   const selectAll = byId('selectAllResetBtn');
   const clearSelection = byId('clearAllResetBtn');
   const input = byId('resetConfirmInput');
@@ -491,6 +506,13 @@
     }
   }
 
+  function openResetStatus(id) {
+    phase = 'handoff';
+    showResult('Opening reset status. Keep this tab open and do not submit another reset.');
+    updateControls();
+    window.location.href = `/reset/status?operation=${encodeURIComponent(id)}`;
+  }
+
   async function recoverOperation() {
     let operationID = '';
     try {
@@ -498,14 +520,17 @@
     } catch {
       return;
     }
-    if (!operationID) return;
+    if (!operationIDPattern.test(operationID)) return;
     try {
       const response = await fetch(`/api/reset/operations/${encodeURIComponent(operationID)}`, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' }
       });
       const payload = await readJSON(response);
-      if (payload?.operation) renderOperation(payload.operation);
-      else if (!response.ok)
+      if (phase !== 'idle') return;
+      if (response.ok && payload?.operation?.id === operationID) {
+        if (payload.operation.state === 'completed') renderOperation(payload.operation);
+        else openResetStatus(operationID);
+      } else if (!response.ok)
         showResult(
           'A reset recovery receipt exists, but its current outcome could not be loaded. Do not submit another reset.'
         );
@@ -561,7 +586,8 @@
       if (
         !response.ok ||
         !preview?.id ||
-        !preview?.operation_id ||
+        typeof preview?.operation_id !== 'string' ||
+        !operationIDPattern.test(preview.operation_id) ||
         !Array.isArray(preview.categories)
       ) {
         throw new Error(
@@ -615,7 +641,9 @@
     const acceptedPreview = reviewed;
     const resetRequestID = requestID();
     phase = 'submitting';
+    let previousOperationID;
     try {
+      previousOperationID = window.localStorage?.getItem(operationStorageKey);
       window.localStorage?.setItem(operationStorageKey, acceptedPreview.operation_id);
     } catch {
       // Submission still returns and renders the durable operation identity.
@@ -639,25 +667,28 @@
         })
       });
       const payload = await readJSON(response);
-      if (payload?.operation) renderOperation(payload.operation);
-      else if (payload?.code === 'agents_folder_confirmation_required') {
-        // Refused before anything was admitted, so the reset can be reviewed again.
+      if (!response.ok && admissionRefusals.has(payload?.code)) {
+        // The server may include the previous receipt in a refusal; neither
+        // that receipt nor the unused preview ID belongs to this submission.
+        try {
+          const storage = window.localStorage;
+          if (storage?.getItem(operationStorageKey) === acceptedPreview.operation_id) {
+            if (previousOperationID) storage.setItem(operationStorageKey, previousOperationID);
+            else storage.removeItem(operationStorageKey);
+          }
+        } catch {
+          // Storage is optional; don't change the server's refusal result.
+        }
         phase = 'idle';
-        showResult(responseMessage(payload, 'Confirm the agents folder, then reset again.'));
+        reviewed = null;
+        showResult(responseMessage(payload, 'Reset was refused. Review the scope again.'));
       } else {
-        phase = 'unknown';
-        showResult(
-          responseMessage(
-            payload,
-            'Reset did not return a recoverable operation. Keep the recovery identity and do not submit again.'
-          )
-        );
+        openResetStatus(acceptedPreview.operation_id);
       }
     } catch {
-      phase = 'unknown';
-      showResult(
-        'Reset response was lost. This is not proof of success or failure; recover the saved operation after relaunch instead of submitting again.'
-      );
+      // Admission can keep running after disconnect. The preview supplied the
+      // only ID this tab is waiting for, even when storage isn't available.
+      openResetStatus(acceptedPreview.operation_id);
     } finally {
       updateControls();
       bootstrap.Modal.getInstance(modalElement)?.hide();

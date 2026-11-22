@@ -14,6 +14,7 @@ import (
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/settingsreset"
 	"github.com/johnjallday/ori-agent/internal/setupjourneyhttp"
 	"github.com/johnjallday/ori-agent/internal/updatehttp"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -501,6 +502,7 @@ func registerSettingsRoutes(mux *http.ServeMux, s *Server) {
 // reset fence. Do not add ordinary application handlers or method-based GET
 // exemptions here: several existing GET handlers can write or start work.
 func registerResetRoutes(mux *http.ServeMux, s *Server) {
+	mux.HandleFunc(settingsreset.ResetStatusPath, settingsreset.NewResetStatusHandler(s.resetLease))
 	mux.HandleFunc("/api/reset", s.Handlers.Reset.HandleReset)
 	mux.HandleFunc("/api/reset/preview", s.Handlers.Reset.GetResetPreview)
 	mux.HandleFunc("/api/reset/operations/", s.Handlers.Reset.GetOperation)

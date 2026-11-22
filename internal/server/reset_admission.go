@@ -3,8 +3,10 @@ package server
 import (
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/resetstate"
+	"github.com/johnjallday/ori-agent/internal/settingsreset"
 )
 
 func enterResetRuntime(lease *resetstate.Lease, gate *resetstate.WorkGate) (func(), error) {
@@ -47,6 +49,23 @@ func writeResetPending(w http.ResponseWriter) {
 	_, _ = w.Write([]byte(`{"error":"reset_pending","message":"Ordinary work is paused. Recover the reset operation and fully relaunch Ori when instructed."}`))
 }
 
+// Only top-level browser navigations get an HTML handoff. In particular, an
+// API URL remains an API even when opened from the address bar.
+func isResetPageNavigation(r *http.Request) bool {
+	if r.Method != http.MethodGet || r.Header.Get("Sec-Fetch-Mode") != "navigate" || r.Header.Get("Sec-Fetch-Dest") != "document" {
+		return false
+	}
+	for _, namespace := range []string{
+		"/api", "/health", "/ws", "/reset", "/js", "/css", "/icons", "/fonts", "/characters", "/avatars",
+		"/styles.css", "/favicon.svg", "/favicon.ico", "/chat-area.html",
+	} {
+		if r.URL.Path == namespace || strings.HasPrefix(r.URL.Path, namespace+"/") {
+			return false
+		}
+	}
+	return true
+}
+
 // resetAdmissionMiddleware counts ordinary HTTP operations through their last
 // handler write. It leaves the reset control mux outside admission so executing
 // a reset doesn't count itself as active work and recovery remains readable.
@@ -56,8 +75,8 @@ func writeResetPending(w http.ResponseWriter) {
 //
 // This is deliberately NOT a lifecycle capability. Background timers, event
 // callbacks, shell writers and external processes require independent coverage.
-// A dedicated recovery page must be provided before enabling production reset;
-// while fenced, even ordinary GET/page handlers are refused, not assumed inert.
+// While fenced, ordinary page handlers also stay closed. Navigations can only
+// redirect to the dedicated, read-only status page.
 func (s *Server) resetAdmissionMiddleware(next http.Handler) http.Handler {
 	control := http.NewServeMux()
 	if s.Handlers != nil && s.Handlers.Reset != nil {
@@ -85,7 +104,12 @@ func (s *Server) resetAdmissionMiddleware(next http.Handler) http.Handler {
 		}
 		release, err := s.resetWork.Enter()
 		if err != nil {
-			writeResetPending(w)
+			if s.Handlers != nil && s.Handlers.Reset != nil && isResetPageNavigation(r) {
+				w.Header().Set("Cache-Control", "no-store")
+				http.Redirect(w, r, settingsreset.ResetStatusPath, http.StatusSeeOther)
+			} else {
+				writeResetPending(w)
+			}
 			return
 		}
 		defer release()
