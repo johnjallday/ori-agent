@@ -200,6 +200,11 @@
   line-height: 1.5;
 }
 
+.fj-file .fj-reveal {
+  margin-inline-start: 0.6rem;
+  min-height: 32px;
+}
+
 .fj-file-reason {
   display: block;
   font-size: 0.8rem;

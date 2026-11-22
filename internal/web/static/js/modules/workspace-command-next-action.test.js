@@ -208,6 +208,24 @@ function updateData(batch = 'current') {
   };
 }
 
+test('only the matching review-ready station replaces the routine Map card', () => {
+  const command = view([], { janitorState: reviewState() });
+  command.updatesView = () => ({ state: 'ready', data: updateData('batch') });
+  command.viewMode = 'map';
+  const state = { reviewBatchId: 'batch', reviewCount: 10, description: 'Nothing moved.' };
+  command.workspaceStationRegistry = () => [
+    { key: 'file-janitor', label: 'Filing', state: () => state }
+  ];
+  command.mapStationRegistry = command.workspaceStationRegistry;
+  assert.equal(command.renderWorkFirst(), '');
+  assert.match(command.renderMapHQStations(), /Review 10 files/);
+  state.reviewBatchId = 'older';
+  assert.match(command.renderWorkFirst(), /Next action/);
+  state.reviewBatchId = 'batch';
+  command.viewMode = 'details';
+  assert.match(command.renderWorkFirst(), /Next action/);
+});
+
 test('shared projection renders one primary, actual-lead Ask and escaped Source details', () => {
   const command = view([], { janitorState: reviewState() });
   command.updatesView = () => ({ state: 'ready', data: updateData() });

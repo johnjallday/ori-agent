@@ -2071,7 +2071,7 @@
       if (!current()) return;
       if (!response.ok || !validPicture(body.picture, batchID))
         throw new Error('The picture is unavailable');
-      picture = body.picture;
+      picture = { ...body.picture, canReveal: body.can_reveal === true };
       pictureLoadState = 'loaded';
       // An open list is pinned to the scan and choices it was read from. When a
       // save changes them, loadBatch reads the same page again against the new
@@ -2332,6 +2332,53 @@
       ROW_KEYS.map(key => document.getElementById('fileJanitorRowMenu-' + key)).find(Boolean) ||
       document.getElementById('fileJanitorPicture');
     target?.focus?.();
+  }
+
+  // Inspection doesn't select the row, submit a draft, or redraw the list.
+  function inspectionAction(displayed) {
+    if (!displayed?.canReveal) return undefined;
+    const scope = requestScope();
+    const current = () =>
+      consoleOpen && consoleTab === 'review' && scopeCurrent(scope) && picture === displayed;
+    return async (file, action) => {
+      if (!current() || !['open', 'reveal'].includes(action)) return;
+      const failure =
+        action === 'open'
+          ? 'The file could not be opened. Your choices are unchanged.'
+          : 'Finder could not show this file. Your choices are unchanged.';
+      const path =
+        apiBase(scope.id) +
+        '/batches/' +
+        encodeURIComponent(displayed.batch_id) +
+        '/picture/files/' +
+        encodeURIComponent(file.id) +
+        '/' +
+        action +
+        '?revision=' +
+        encodeURIComponent(displayed.revision);
+      try {
+        const response = await fetch(path, {
+          method: 'POST',
+          headers: { 'X-Ori-Filing-Action': action }
+        });
+        if (!current()) return;
+        if (!response.ok) {
+          showError(
+            response.status === 409
+              ? 'This file or its review changed. Scan again before inspecting it.'
+              : failure
+          );
+          return;
+        }
+        announce(
+          action === 'open'
+            ? 'Open request sent to ' + file.viewer + '.'
+            : 'Selected in Finder. Press Space there for Quick Look.'
+        );
+      } catch (_) {
+        if (current()) showError(failure);
+      }
+    };
   }
 
   function selectFile(file) {
@@ -2717,6 +2764,7 @@
         filedRoot: lastStatus?.settings?.filing_root_name || 'Filed',
         selectedFile,
         keptRows: keptRows.get(lastBatch.id) || [],
+        onInspect: inspectionAction(picture),
         onSelectFile: file => selectFile(file),
         onRowChoice: (row, choice) => void answerRow(row, choice, binding),
         onFileChoice: (file, choice) => void answerFile(file, choice, binding),
@@ -6790,6 +6838,9 @@
       return {
         applies: true,
         value: preview.count ? reviewCountLabel(preview.count) : 'No eligible files',
+        reviewCount: preview.count,
+        reviewBatchId: preview.batchId,
+        actionTab: 'review',
         description: 'Nothing moved.',
         tone: preview.count ? 'attention' : 'idle'
       };
@@ -6838,7 +6889,10 @@
       return {
         applies: true,
         value: reviewCountLabel(pending),
-        description: 'files are waiting for your decision',
+        reviewCount: pending,
+        reviewBatchId: lastBatch?.id,
+        actionTab: 'review',
+        description: 'Nothing moves until you file.',
         tone: 'attention'
       };
     }

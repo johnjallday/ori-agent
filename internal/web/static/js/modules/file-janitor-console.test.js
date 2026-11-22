@@ -4642,7 +4642,8 @@ async function groupedReviewFixture(count = 206) {
     if (target.endsWith('/picture'))
       return state.failPicture
         ? { ok: false, json: async () => ({}) }
-        : reply({ picture: pictureView() });
+        : reply({ picture: pictureView(), can_reveal: Boolean(state.canReveal) });
+    if (target.includes('/reveal?') || target.includes('/open?')) return reply({ success: true });
     if (target.endsWith('/draft')) {
       if (options?.method !== 'POST') return reply({ draft: draftView() });
       if (state.editGate) await state.editGate;
@@ -5191,7 +5192,7 @@ test('a folder with nothing in it is tidy and offers a scan, not an empty frame 
   await settle();
   await planSettled();
   assert.match(doc.getElementById('fileJanitorPicture').textContent, /Nothing to file\./);
-  assert.equal(pressButton(doc).textContent, 'Nothing to file');
+  assert.equal(pressButton(doc).textContent, 'No changes selected');
 });
 
 test('a change is said to a screen reader from what the picture now shows (R66)', async () => {
@@ -5231,7 +5232,7 @@ test('nothing waiting says the folder is tidy with a Scan now button, only for a
   const picturePanel = doc.getElementById('fileJanitorPicture');
   assert.ok(picturePanel, 'the tidy state stands where the picture was');
   assert.match(picturePanel.textContent, /Nothing to file\. Inbox is tidy\./);
-  assert.equal(pressButton(doc).textContent, 'Nothing to file');
+  assert.equal(pressButton(doc).textContent, 'No changes selected');
   assert.equal(pressButton(doc).disabled, true);
   assert.equal(folderCheckbox(doc), null, 'no folder card is drawn');
   // Its one button asks for a scan, and nothing else.
@@ -6013,7 +6014,7 @@ test('the one main button states what pressing it will do and follows each saved
   assert.equal(pressButton(doc).disabled, false);
   changeCheckbox(folderCheckbox(doc), false);
   await planSettled();
-  assert.equal(pressButton(doc).textContent, 'Nothing to file');
+  assert.equal(pressButton(doc).textContent, 'No changes selected');
   assert.equal(pressButton(doc).disabled, true);
   changeCheckbox(folderCheckbox(doc), true);
   await planSettled();
@@ -6044,13 +6045,13 @@ test('a plan answer that arrives after a newer one is ignored', async () => {
   await settle();
   await panel._planNow();
   await settle();
-  assert.equal(pressButton(doc).textContent, 'Nothing to file');
+  assert.equal(pressButton(doc).textContent, 'No changes selected');
   release();
   await slow;
   await settle();
   assert.equal(
     pressButton(doc).textContent,
-    'Nothing to file',
+    'No changes selected',
     'the late answer was about choices that are gone'
   );
   assert.equal(pressButton(doc).disabled, true);
@@ -6064,7 +6065,7 @@ test('while the plan is being checked the button waits instead of claiming there
   const checking = panel._planNow();
   await settle();
   assert.equal(pressButton(doc).disabled, true);
-  assert.notEqual(pressButton(doc).textContent, 'Nothing to file');
+  assert.notEqual(pressButton(doc).textContent, 'No changes selected');
   assert.equal(doc.getElementById('fileJanitorSelection').textContent, 'Checking…');
   void checking;
 });
@@ -6393,7 +6394,7 @@ test('a scan with more confident files than one press can file is drawn, and say
   buttonNamed(surface(doc), 'Untick everything').click();
   await planSettled();
   assert.deepEqual(panel._selected(), []);
-  assert.equal(pressButton(doc).textContent, 'Nothing to file');
+  assert.equal(pressButton(doc).textContent, 'No changes selected');
 });
 
 test('a folder that cannot be ticked because a file changed says so and is not a failed save', async () => {
@@ -6485,7 +6486,7 @@ function choose(select, value) {
 
 test('a question row is placed with one menu choice and the row says where its files went', async () => {
   const { doc, calls } = await questionRowFixture(3);
-  assert.equal(pressButton(doc).textContent, 'Nothing to file');
+  assert.equal(pressButton(doc).textContent, 'No changes selected');
   assert.deepEqual(panel._selected(), [], 'Ori never ticks a question group');
   assert.deepEqual(
     rowMenu(doc).children.map(option => option.value),
@@ -6522,7 +6523,7 @@ test('"Leave here" takes a placed row back, and does nothing for a row that was 
     ['select_group', 'clear_group']
   );
   assert.deepEqual(panel._selected(), []);
-  assert.equal(pressButton(doc).textContent, 'Nothing to file');
+  assert.equal(pressButton(doc).textContent, 'No changes selected');
 });
 
 test('"Leave here, stop asking" keeps the row\'s files, says so, and Review again brings them back', async () => {
@@ -6667,8 +6668,8 @@ async function copiesFixture() {
         count: 2,
         more: 0,
         files: [
-          cardFile(state, candidates, 0, { ending: 'none', family_id: family }),
-          cardFile(state, candidates, 1, { ending: 'number', family_id: family })
+          cardFile(state, candidates, 0, { ending: 'none', family_id: family, viewer: 'Preview' }),
+          cardFile(state, candidates, 1, { ending: 'number', family_id: family, viewer: 'Preview' })
         ]
       }
     ]
@@ -6678,7 +6679,48 @@ async function copiesFixture() {
   return fixture;
 }
 
-test('Trash the copy marks that one file, the line says so, Put the copy back undoes it, nothing is filed (R28, R29)', async () => {
+test('Finder on either member of a pair reveals only that file, without redrawing or recording a choice', async () => {
+  const { doc, state, calls, candidates } = await copiesFixture();
+  const buttons = () =>
+    surface(doc).all(node => node.textContent === 'Show in Finder' && node.tagName === 'BUTTON');
+  assert.equal(buttons().length, 0, 'not offered without a local desktop');
+  state.canReveal = true;
+  await panel._reloadBatch();
+  await panel._planNow();
+  const rows = buttons();
+  assert.equal(rows.length, 2);
+  calls.length = 0;
+  for (const button of rows) {
+    button.click();
+    await settle();
+  }
+  assert.deepEqual(
+    calls.map(({ target, options }) => [
+      target.split('/picture/files/')[1],
+      options.method,
+      options.headers['X-Ori-Filing-Action']
+    ]),
+    candidates
+      .slice(0, 2)
+      .map(c => [c.id + '/reveal?revision=' + state.review.revision, 'POST', 'reveal'])
+  );
+  const open = surface(doc).all(
+    node =>
+      node.textContent === 'Open' && node.tagName === 'BUTTON' && node.title === 'Open in Preview'
+  );
+  assert.equal(open.length, 2);
+  calls.length = 0;
+  open[1].click();
+  await settle();
+  assert.equal(calls.length, 1, 'open is not a draft edit, File press, or Finder reveal');
+  assert.ok(
+    calls[0].target.endsWith('/' + candidates[1].id + '/open?revision=' + state.review.revision)
+  );
+  assert.equal(calls[0].options.headers['X-Ori-Filing-Action'], 'open');
+  assert.equal(rows[0], buttons()[0], 'preserves the list and its scroll position');
+});
+
+test('Mark for Trash marks one file; Undo mark clears the choice without filing', async () => {
   const { doc, calls } = await copiesFixture();
   const card = surface(doc).all(node => String(node.className) === 'fj-pair')[0];
   assert.equal(
@@ -6693,7 +6735,7 @@ test('Trash the copy marks that one file, the line says so, Put the copy back un
   assert.deepEqual([mark.action, mark.candidate_ids], ['mark_trash', ['group-member-1']]);
   assert.equal(mark.group_id, undefined, 'one file, never a row or a pair');
   const line = surface(doc).all(node => node.className === 'fj-pair-line')[1];
-  assert.match(line.textContent, /in Trash/);
+  assert.match(line.textContent, /Marked for Trash/);
   assert.match(surface(doc).textContent, /Trash · 1/);
   assert.equal(pressButton(doc).textContent, 'Move 1 file to Trash');
   assert.ok(
@@ -6705,7 +6747,7 @@ test('Trash the copy marks that one file, the line says so, Put the copy back un
   assert.equal(draftEdits(calls)[1].action, 'unmark_trash');
   assert.doesNotMatch(surface(doc).textContent, /Trash · 1/);
   assert.ok(doc.getElementById('fileJanitorTrashCopy-group-member-1'), 'the button is back');
-  assert.equal(pressButton(doc).textContent, 'Nothing to file');
+  assert.equal(pressButton(doc).textContent, 'No changes selected');
 });
 
 test('a copy of a different size gets no Trash button', async () => {
@@ -6858,7 +6900,7 @@ test('clicking any file selects it, the bar names it, and its menu is one edit f
   const { doc, calls } = await groupedReviewFixture(3);
   assert.equal(
     doc.getElementById('fileJanitorFileBar').textContent,
-    'Click any file to move just that one.'
+    'Select a filename to choose what happens to it.'
   );
   doc.getElementById('fileJanitorFile-group-member-1').click();
   const bar = doc.getElementById('fileJanitorFileBar');
@@ -6883,7 +6925,7 @@ test('clicking any file selects it, the bar names it, and its menu is one edit f
   assert.equal(bar.textContent.length > 0, true);
   assert.equal(
     doc.getElementById('fileJanitorFileBar').textContent,
-    'Click any file to move just that one.',
+    'Select a filename to choose what happens to it.',
     'the bar closes once the file is decided'
   );
   // The file shows in its new folder, tagged as the person's choice.
@@ -6935,7 +6977,7 @@ test('Cancel closes the bar without changing anything, and any other edit closes
   doc.getElementById('fileJanitorFileBarCancel').click();
   assert.equal(
     doc.getElementById('fileJanitorFileBar').textContent,
-    'Click any file to move just that one.'
+    'Select a filename to choose what happens to it.'
   );
   assert.deepEqual(draftEdits(calls), []);
   doc.getElementById('fileJanitorFile-group-member-0').click();
@@ -6943,7 +6985,7 @@ test('Cancel closes the bar without changing anything, and any other edit closes
   await planSettled();
   assert.equal(
     doc.getElementById('fileJanitorFileBar').textContent,
-    'Click any file to move just that one.'
+    'Select a filename to choose what happens to it.'
   );
 });
 
