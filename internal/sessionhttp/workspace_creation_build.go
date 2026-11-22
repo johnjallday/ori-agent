@@ -16,7 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 )
 
-var errCreationBuildChanged = errors.New("attached-source build changed or is unavailable; reopen its current review before confirming")
+var errCreationBuildChanged = errors.New("the saved draft changed or is unavailable; reopen its current review before confirming")
 var errCreationBuildReviewRequired = errors.New("review this attached-source build before creating; no creation has been accepted")
 
 // The build retains its draft and source selections. The existing ordinary
@@ -27,7 +27,6 @@ func ordinaryCreationBuildMatches(build *personalassistant.WorkspaceBuildSession
 		build.Version == req.BuildReviewVersion && build.Setup == nil && build.Preparation == nil && build.PlacementSource == nil &&
 		build.FolderRequestID == "" && build.LinkRequestID == "" && build.InferenceID == "" &&
 		(build.Proposal == nil || (build.Proposal.Status != "pending" && build.Proposal.Status != "running")) &&
-		(build.Folder != nil || build.Link != nil || build.SelectedStaffing != nil) &&
 		(build.Folder == nil || (!build.Folder.Recognition.Recognized() && !isReviewedJanitorBlueprint(req.TemplateID)))
 }
 

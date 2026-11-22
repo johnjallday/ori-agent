@@ -13,20 +13,21 @@ export function creationReviewHeaderHTML({
   note,
   destination,
   prototype,
+  buildDraft,
   art = ''
 } = {}) {
   // art is an internal building variant, never caller-supplied SVG/HTML.
   const svg = globalThis.OriWorkspaceBuildingArt?.svgForVariant?.(art, { context: 'map' }) || '';
   return `<header class="assisted-placement__header">
     ${art ? `<div class="assisted-placement__art" aria-hidden="true">${svg}</div>` : ''}
-    <div><p class="assisted-placement__eyebrow">${prototype ? 'Prototype · ' : ''}1 · Review setup</p>
+    <div><p class="assisted-placement__eyebrow">${buildDraft ? 'Review · Nothing created yet' : `${prototype ? 'Prototype · ' : ''}1 · Review setup`}</p>
       <h2${titleId ? ` id="${escapeReviewText(titleId)}" tabindex="-1" data-placement-focus="heading"` : ''}>${escapeReviewText(title)}</h2><p>${escapeReviewText(note)}</p></div>
     </header><p class="assisted-placement__location">${escapeReviewText(destination)}</p>`;
 }
 
 // Consume the existing roster component's normalized rows. This projection
 // neither invents role fills nor changes the team's payload or saved profiles.
-export function creationTeamReviewRows(view = {}, roleRows = []) {
+export function creationTeamReviewRows(view = {}, roleRows = [], effects = null) {
   if (view.agentless)
     return [
       {
@@ -43,16 +44,18 @@ export function creationTeamReviewRows(view = {}, roleRows = []) {
     return [
       ...scoped.map(row => ({
         label: row.label,
-        value: [
-          ...new Set(
-            [
-              row.state === 'empty' ? 'No agent assigned' : '',
-              row.tag?.label,
-              row.sourceLabel,
-              row.required ? 'Required' : 'Optional'
-            ].filter(Boolean)
-          )
-        ].join(' · '),
+        value:
+          effects?.roles.find(role => role.id === row.roleId)?.value ||
+          [
+            ...new Set(
+              [
+                row.state === 'empty' ? 'No agent assigned' : '',
+                row.tag?.label,
+                row.sourceLabel,
+                row.required ? 'Required' : 'Optional'
+              ].filter(Boolean)
+            )
+          ].join(' · '),
         detail: [
           row.state === 'filled'
             ? [row.agent?.model, row.agent?.provider].filter(Boolean).join(' · ')
@@ -68,7 +71,7 @@ export function creationTeamReviewRows(view = {}, roleRows = []) {
       })),
       ...(view.roleRoster?.unassigned || []).map(agent => ({
         label: 'Also in this workspace',
-        value: `${agent.name} · saved agent`,
+        value: effects ? `Will assign ${agent.name}` : `${agent.name} · saved agent`,
         action: 'team',
         actionLabel: 'Edit team'
       }))
@@ -231,8 +234,8 @@ export function workspaceCreationReviewHTML(view = {}) {
         <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>Close</button>
       </div></section>`;
   }
-  return `<section class="assisted-placement" aria-label="Review proposed ${group ? 'group' : 'workspace'}">
-    ${creationReviewHeaderHTML({ title: view.title || `Make room for ${view.name || 'your workspace'}`, titleId: `${prefix}Title`, note: view.note || 'Nothing is created until you confirm.', destination: view.destination, art: view.art })}
+  return `<section class="assisted-placement${view.buildDraft ? ' assisted-placement--build-draft' : ''}" aria-label="Review proposed ${group ? 'group' : 'workspace'}">
+    ${creationReviewHeaderHTML({ title: view.title || `Make room for ${view.name || 'your workspace'}`, titleId: `${prefix}Title`, note: view.note || 'Nothing is created until you confirm.', destination: view.destination, art: view.art, buildDraft: view.buildDraft })}
     <div class="assisted-placement__fields">
       <div><label for="${escapeReviewText(prefix)}Name">${group ? 'Group name' : 'Workspace name'}</label><input id="${escapeReviewText(prefix)}Name" name="${escapeReviewText(prefix)}Name" autocomplete="off" data-placement-field="name"${reviewMaxLength(view.nameMaxLength)} value="${escapeReviewText(view.name)}"${view.canEditName === false ? ' readonly' : ''}${disabled}></div>
       ${view.showGoal === false ? '' : `<div><label for="${escapeReviewText(prefix)}Goal">${escapeReviewText(view.goalLabel || (group ? 'Purpose' : 'Goal'))}</label><textarea id="${escapeReviewText(prefix)}Goal" name="${escapeReviewText(prefix)}Goal" autocomplete="off" data-placement-field="mission" rows="2"${reviewMaxLength(view.goalMaxLength)}${view.canEditGoal === false ? ' readonly' : ''}${disabled}>${escapeReviewText(view.goal)}</textarea></div>`}

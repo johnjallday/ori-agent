@@ -4806,6 +4806,20 @@ const sessionManager = {
     );
   },
 
+  ordinaryCreationDestination(context = this.workspaceCreatorContext) {
+    const parent = document.getElementById('folderParentSelect');
+    const id = this.lockedParentId() || parent?.value || '';
+    const name = id
+      ? String(
+          this.findFolderById(id, this.folders || [])?.name ||
+            parent?.selectedOptions?.[0]?.textContent ||
+            context?.parentName ||
+            ''
+        ).trim()
+      : '';
+    return { id, name };
+  },
+
   async syncOrdinaryCreationReview(view = this.teamView()) {
     const context = this.workspaceCreatorContext;
     const host = document.getElementById('workspaceCreationReviewPanel');
@@ -4895,12 +4909,18 @@ const sessionManager = {
       const group = this.isGroupCreator();
       const goal =
         document.getElementById(group ? 'folderDescriptionInput' : 'folderGoalInput')?.value || '';
-      const parent = document.getElementById('folderParentSelect');
-      const parentID = this.lockedParentId() || parent?.value || '';
-      const parentName = parentID
-        ? String(parent?.selectedOptions?.[0]?.textContent || context.parentName || parentID)
-        : '';
+      const { id: parentID, name: parent } = this.ordinaryCreationDestination(context);
+      const parentName = parent || parentID;
+      if (!review.accepted && !review.result)
+        review.buildDraft = Boolean(
+          this.workspaceBuild?.session &&
+          !this.workspaceBuild.resumeLine &&
+          this.ordinaryBuildPreviewEligible()
+        );
       const roleRows = window.WorkspaceRoleRoster?.rowsFrom(current?.roleRoster) || [];
+      const teamEffects = review.buildDraft
+        ? window.CreateWorkspaceTeamDraft?.creationTeamEffects?.(current)
+        : null;
       const material = this.ordinaryCreationMaterialReview();
       const identityProblem = review.accepted ? '' : this.workspaceIdentityProblem();
       const blocked =
@@ -4921,6 +4941,11 @@ const sessionManager = {
       review.panel.update({
         ownerKind: 'ordinary',
         subjectKind: group ? 'group' : 'workspace',
+        buildDraft: review.buildDraft,
+        title: review.buildDraft && name.trim() ? `Review ${name.trim()}` : '',
+        note: review.buildDraft
+          ? 'Confirm to create one workspace with the team and destination shown below.'
+          : '',
         name,
         goal,
         destination: grouped
@@ -4935,15 +4960,19 @@ const sessionManager = {
         nameMaxLength: document.getElementById('folderNameInput')?.maxLength,
         goalMaxLength: document.getElementById(group ? 'folderDescriptionInput' : 'folderGoalInput')
           ?.maxLength,
-        rows: [...ui.creationTeamReviewRows(current || {}, roleRows), ...material.rows],
+        rows: [
+          ...ui.creationTeamReviewRows(current || {}, roleRows, teamEffects),
+          ...material.rows
+        ],
         facts: [
           { label: 'Blueprint', value: material.blueprint },
           {
             label: 'Purpose',
-            value:
-              document.getElementById('folderDescriptionInput')?.value ||
-              goal ||
-              'A workspace you can shape later.'
+            value: review.buildDraft
+              ? this.ordinaryDraftPurpose() || 'Undecided'
+              : document.getElementById('folderDescriptionInput')?.value ||
+                goal ||
+                'A workspace you can shape later.'
           },
           ...(current?.roleSummary ? [{ label: 'Team', value: current.roleSummary }] : []),
           ...material.facts,
@@ -16682,6 +16711,12 @@ const sessionManager = {
     );
   },
 
+  ordinaryDraftPurpose() {
+    const description = document.getElementById('folderDescriptionInput')?.value?.trim();
+    const goal = document.getElementById('folderGoalInput');
+    return description || (goal?.dataset?.goalEdited ? goal.value?.trim() : '') || '';
+  },
+
   syncOrdinaryBuildPreview(template) {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
@@ -16691,6 +16726,7 @@ const sessionManager = {
     const hasBlueprint = this.ordinaryBuildBlueprintDecided(template);
     const team = hasBlueprint && !build.resumeLine ? this.teamView() : null;
     const teamEffects = team ? window.CreateWorkspaceTeamDraft?.creationTeamEffects?.(team) : null;
+    const destination = this.ordinaryCreationDestination();
     const edited = field =>
       Boolean(build.editedFields?.has(field) || session?.edited_fields?.[field]);
     const fields = build.resumeLine
@@ -16699,18 +16735,20 @@ const sessionManager = {
           name: read('folderNameInput'),
           blueprint: hasBlueprint ? template.name || (template.blank ? 'Blank' : '') : '',
           team: teamEffects?.lines.join('\n') || '',
-          purpose:
-            read('folderDescriptionInput') ||
-            (document.getElementById('folderGoalInput')?.dataset?.goalEdited
-              ? read('folderGoalInput')
-              : '')
+          destination: destination.id
+            ? `In group ${destination.name || 'selected on the form'}`
+            : hasBlueprint
+              ? 'Standalone workspace'
+              : '',
+          purpose: this.ordinaryDraftPurpose()
         };
     const stable = !build.busy && !this.workspaceBuildApplyDepth && !build.resumeLine;
     const userEdits = Object.entries({
       name: edited('name'),
       blueprint: edited('blueprint_id'),
       purpose: edited('description') || edited('goal'),
-      team: edited('team')
+      team: edited('team'),
+      destination: edited('parent_id')
     })
       .filter(([, value]) => value)
       .map(([key]) => key);
@@ -16805,7 +16843,15 @@ const sessionManager = {
     );
     const status = document.getElementById('workspaceBuildModeStatus');
     if (status) {
-      status.hidden = !this.workspaceBuild || ordinaryDraft;
+      status.hidden =
+        !this.workspaceBuild ||
+        ordinaryDraft ||
+        Boolean(
+          !assisted &&
+          this.isFinalWizardStep() &&
+          this.ordinaryBuildPreviewEligible(template) &&
+          !this.workspaceBuild.draftError
+        );
       status.textContent = this.workspaceBuild?.draftError
         ? folderReview
           ? 'Draft not saved. Your edits are kept here.'
@@ -18945,6 +18991,8 @@ const sessionManager = {
     }
     await this.flushWorkspaceBuildDraft({ force: true });
     if (!this.workspaceBuildCanApply(build, revision)) return;
+    const ordinaryDraft = this.ordinaryBuildPreviewEligible();
+    if (ordinaryDraft && (build.draftError || build.draftConflict)) return;
     const steps = this.creatorWizardSteps();
     const review = steps[steps.length - 1];
     if (this.wizardStep !== review) this.goToWizardStep(review, { focus: false });
@@ -18954,6 +19002,12 @@ const sessionManager = {
       this.collapseWorkspaceBuild({ focus: false });
       await this.syncOrdinaryCreationReview();
       document.getElementById('workspaceCreationReviewTitle')?.focus();
+      return;
+    }
+    // An ordinary draft must never fall through to the legacy create path
+    // if its reviewed owner is unavailable. A turn is not confirmation.
+    if (ordinaryDraft) {
+      pane.showLine('Review is unavailable. Nothing was created; your draft is kept.');
       return;
     }
     await this.createFolder();
@@ -19686,7 +19740,8 @@ const sessionManager = {
         const build = this.workspaceBuild?.session;
         if (
           build?.id === buildSessionID &&
-          (build.folder ||
+          (this.ordinaryBuildPreviewEligible() ||
+            build.folder ||
             build.link ||
             payload.role_staffing?.some(fill => fill.recommendation)) &&
           this.ordinaryBuildReviewEligible()

@@ -3,19 +3,16 @@ import { mockHiredAssistant, mockUnhiredAssistant } from './helpers/hired-assist
 import { installLocalCdn } from './helpers/offline-cdn';
 import { checkNextActionReflow } from './helpers/next-action-reflow';
 import { startJanitorBuildModel } from './helpers/janitor-build-model';
-import { prepareFolderCreationRuntime } from './helpers/folder-first-runtime';
+import { abandonOpenBuild, prepareFolderCreationRuntime } from './helpers/folder-first-runtime';
 
 /**
  * E2E for "Build with your assistant" (tasks/prd-build-with-your-assistant.md):
  * Create Workspace with one active surface and one shared draft.
  *
- * The build-session endpoints are answered by a scripted fake in this file, so
- * no live model runs. A loopback fixture supplies model metadata and any
- * retained first-work calls after explicit workspace navigation. Everything
- * else — Home, the wizard and its setters, the team plan, map placement, and
- * the final Create — is the real server. The fake
- * keeps the server's contract: one open build, versions, server chip ids, form
- * edits said back, and a blueprint switch reported as `blueprint_changed`.
+ * Presentation cases intercept the build session for precise UI timing and
+ * failures. The newsletter placement and recovery cases use the real build,
+ * team, and creation endpoints. Only the model is scripted on loopback. No
+ * credentials or live inference are required.
  *
  * Run against a fresh sandbox (a demoed one taints slug uniqueness):
  *   LM_STUDIO_BASE_URL=http://127.0.0.1:8940/v1 ORI_DEMO_NO_CODEX=1 \
@@ -396,15 +393,10 @@ async function choose(page: Page, label: string) {
   await settle(page, turn);
 }
 
-// Home's create ends on the map. A sandbox that already holds workspaces may
-// put the first candidate on occupied ground, so nudge until it is open.
-async function placeOnMap(page: Page) {
-  const review = page.locator('#workspaceCreationReviewPanel');
-  if (!(await review.isVisible())) await page.locator('#workspaceBuildEditDraftBtn').click();
-  await expect(review).toBeVisible();
-  await review.getByRole('button', { name: 'Place & create on map', exact: true }).click();
+// A sandbox that already holds workspaces may put the first candidate on
+// occupied ground. Nudge from the keyboard so the candidate stays put on Enter.
+async function confirmMapPosition(page: Page) {
   const preview = page.locator('[data-ws-map-placement-preview]');
-  await expect(preview).toBeVisible();
   const occupied = async () => /\bis-invalid\b/.test((await preview.getAttribute('class')) || '');
   await page.locator('[data-ws-map-viewport]').focus();
   for (let nudge = 0; nudge < 60 && (await occupied()); nudge += 1) {
@@ -689,9 +681,184 @@ test('a fast partial first proposal leaves missing choices undecided', async ({ 
   expect(fake.session?.draft.blank).toBeUndefined();
 });
 
-test('golden path: three turns and no form clicks create the workspace the build drafted', async ({
+const NEWSLETTER_PROMPT = 'Set up a workspace for my weekly newsletter.';
+const NEWSLETTER_PURPOSE = 'Turn research notes into a weekly newsletter.';
+const NEWSLETTER_REASON = 'Content Production fits a weekly editorial workflow.';
+const NEWSLETTER_SOLO = 'Just a Content Lead';
+const NEWSLETTER_PAIR = 'A Content Lead and a Brand Copywriter';
+
+async function openRealNewsletterBuild(page: Page, name: string) {
+  await page.unroute(/\/api\/personal-assistant$/);
+  await abandonOpenBuild(page.request);
+  catalogModel.scenario({
+    reply: {
+      say: `I picked Content Production and named it ${name}.`,
+      ask: {
+        question: 'Who should staff it?',
+        choices: [{ label: NEWSLETTER_PAIR }, { label: NEWSLETTER_SOLO }]
+      },
+      patch: {
+        set: ['blueprint_id', 'name', 'description'],
+        blueprint_id: 'content-production',
+        name,
+        description: NEWSLETTER_PURPOSE
+      },
+      why: [{ section: 'blueprint', text: NEWSLETTER_REASON }],
+      ready: true,
+      create_now: true // Even these flags cannot confirm the first turn.
+    }
+  });
+  await openFromHome(page);
+}
+
+function staffRealNewsletter(roles: { role_id: string; mode?: string; agent_name: string }[]) {
+  catalogModel.scenario({
+    reply: {
+      say: 'Review the proposed team, or say “create it”.',
+      patch: {
+        set: ['team'],
+        team: { mode: 'staffed', roles: roles.map(role => ({ mode: 'create', ...role })) }
+      },
+      ready: true
+    }
+  });
+}
+
+function proposeRealNewsletterReview() {
+  catalogModel.scenario({
+    reply: { say: 'Ready for you to review.', create_now: true, ready: true }
+  });
+}
+
+function observeCreationTraffic(page: Page) {
+  const reviews: RequestBody[] = [];
+  const confirmations: { path: string; body: RequestBody }[] = [];
+  const observations: string[] = [];
+  const legacyWrites: string[] = [];
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'GET' && /\/create-operations\/[^/]+$/.test(path))
+      observations.push(path);
+    if (request.method() !== 'POST') return;
+    if (path === '/api/workspaces/create-operations') reviews.push(request.postDataJSON());
+    else if (/\/create-operations\/[^/]+\/confirm$/.test(path))
+      confirmations.push({ path, body: request.postDataJSON() });
+    else if (/^\/api\/workspaces(?:$|\/[^/]+\/runs$)/.test(path)) legacyWrites.push(path);
+  });
+  return { reviews, confirmations, observations, legacyWrites };
+}
+
+async function domainResources(page: Page) {
+  const get = async (endpoint: string) => {
+    const response = await page.request.get(endpoint);
+    expect(response.ok(), `${endpoint} should be readable`).toBe(true);
+    return response.json();
+  };
+  return {
+    workspaces: (await get('/api/workspaces')).folders.map((item: RequestBody) => item.id).sort(),
+    agents: (await get('/api/agents')).agents.map((item: RequestBody) => item.name).sort()
+  };
+}
+
+test('real newsletter review and map bind only the latest material draft to confirmation', async ({
   page
 }, testInfo) => {
+  const firstName = 'Newsletter Desk';
+  const updatedName = 'Friday Newsletter Desk';
+  const lead = 'Friday Content Lead';
+  const traffic = observeCreationTraffic(page);
+  await openRealNewsletterBuild(page, firstName);
+  const before = await domainResources(page);
+  await say(page, NEWSLETTER_PROMPT);
+  const summary = page.locator('#workspaceBuildDraftSummary');
+  const review = page.locator('#workspaceCreationReviewPanel');
+  await expect(summary).toContainText(NEWSLETTER_REASON);
+  await expect(summary).toContainText('Standalone workspace');
+  await expect(review).toBeHidden();
+  staffRealNewsletter([{ role_id: 'content-lead', agent_name: lead }]);
+  await choose(page, NEWSLETTER_SOLO);
+  await expect(summary).toContainText(`Will create ${lead} · required`);
+  await expect(review).toBeHidden();
+  await test.step('reach review without confirming', async () => {
+    proposeRealNewsletterReview();
+    await say(page, 'create it');
+    await expect(summary).toBeHidden();
+    await expect(review).toContainText(`Review ${firstName}`);
+    await expect(review).toContainText('Review · Nothing created yet');
+    await expect(review).toContainText(NEWSLETTER_PURPOSE);
+    await expect(review).toContainText('Standalone workspace');
+    await expect(review).toContainText(`Will create ${lead} · required`);
+    await expect(page.locator('#createFolderBtn')).toBeHidden();
+    expect(traffic.reviews).toHaveLength(0);
+    expect(traffic.confirmations).toHaveLength(0);
+    await review.getByRole('button', { name: 'Use automatic placement' }).click();
+    await expect(
+      review.getByRole('button', { name: 'Create workspace', exact: true })
+    ).toBeEnabled();
+    expect(await domainResources(page)).toEqual(before);
+    expect(traffic.confirmations).toHaveLength(0);
+  });
+  const place = review.getByRole('button', { name: 'Place & create on map', exact: true });
+  await place.click();
+  const mapDraft = page.locator('[data-ws-map-placement-preview]');
+  await expect(mapDraft).toBeVisible();
+  expect(traffic.reviews).toHaveLength(1);
+  expect(await domainResources(page)).toEqual(before);
+  await page.locator('[data-ws-map-viewport]').focus();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#workspaceCreationReviewTitle')).toBeFocused();
+  await expect(mapDraft).toBeHidden();
+  expect(traffic.confirmations).toHaveLength(0);
+  expect(await domainResources(page)).toEqual(before);
+  await page.screenshot({ path: testInfo.outputPath('review-returned.png') });
+
+  const name = review.getByLabel('Workspace name', { exact: true });
+  await name.fill(updatedName);
+  await name.press('Tab');
+  await expect(review).toContainText(`Review ${updatedName}`);
+  await page.screenshot({ path: testInfo.outputPath('review-edited.png') });
+  await place.click();
+  await expect(mapDraft).toBeVisible();
+  expect(traffic.reviews).toHaveLength(2);
+  const material = traffic.reviews[1];
+  expect(material.id).not.toBe(traffic.reviews[0].id);
+  expect(material.request).toMatchObject({
+    name: updatedName,
+    template_id: 'content-production',
+    description: NEWSLETTER_PURPOSE,
+    build_session_id: expect.any(String),
+    build_review_version: expect.any(Number),
+    role_staffing: [{ role_id: 'content-lead', mode: 'create', name: lead }]
+  });
+  expect(material.request.parent_id || '').toBe('');
+  const operationPath = `/api/workspaces/create-operations/${material.id}`;
+  const reviewed = await (await page.request.get(operationPath)).json();
+  const retired = await (
+    await page.request.get(`/api/workspaces/create-operations/${traffic.reviews[0].id}`)
+  ).json();
+  expect(reviewed.operation.state).toBe('reviewed');
+  expect(retired.operation.state).toBe('abandoned');
+  expect(await domainResources(page)).toEqual(before);
+  await confirmMapPosition(page);
+  const result = page.getByRole('region', { name: 'Workspace setup status' });
+  await expect(result).toContainText(updatedName);
+  expect(traffic.legacyWrites).toEqual([]);
+  expect(traffic.confirmations).toEqual([
+    { path: `${operationPath}/confirm`, body: { review_digest: reviewed.operation.review_digest } }
+  ]);
+  const confirmed = await (await page.request.get(operationPath)).json();
+  const id = confirmed.result.folder.id;
+  const after = await domainResources(page);
+  expect(after.workspaces.filter((item: string) => !before.workspaces.includes(item))).toEqual([
+    id
+  ]);
+  expect(after.agents.filter((item: string) => !before.agents.includes(item))).toEqual([lead]);
+  await page.screenshot({ path: testInfo.outputPath('review-created.png') });
+});
+
+test('three scripted turns reach review with the effective pair and no creation', async ({
+  page
+}) => {
   const name = `Newsletter Desk ${Date.now().toString(36)}`;
   const fake = await fakeBuildServer(page, [
     {
@@ -715,21 +882,7 @@ test('golden path: three turns and no form clicks create the workspace the build
     },
     { text: 'Creating it now.', createNow: true }
   ]);
-  const created: RequestBody[] = [];
-  const reviewed = new Map<string, RequestBody>();
-  page.on('request', request => {
-    if (request.method() !== 'POST') return;
-    const path = new URL(request.url()).pathname;
-    if (path === '/api/workspaces/create-operations') {
-      const body = request.postDataJSON();
-      reviewed.set(body.id, body.request);
-    } else if (/\/create-operations\/[^/]+\/confirm$/.test(path)) {
-      const id = path.split('/').at(-2)!;
-      const material = reviewed.get(id);
-      expect(material).toBeTruthy();
-      created.push(material!);
-    }
-  });
+  const traffic = observeCreationTraffic(page);
 
   await openFromHome(page);
   await expect(pane(page)).toBeVisible();
@@ -754,69 +907,14 @@ test('golden path: three turns and no form clicks create the workspace the build
   await expect(draftTeam).toContainText('2 optional roles left empty.');
 
   await say(page, 'create it');
-  expect(created).toHaveLength(0, 'the model proposal is not final consent');
-  await placeOnMap(page);
-  await expect.poll(() => created.length).toBe(1);
-
+  const review = page.locator('#workspaceCreationReviewPanel');
+  await expect(review).toContainText(`Review ${name}`);
+  await expect(review).toContainText('Will create Content Lead');
+  await expect(review).toContainText('Will create Brand Copywriter');
   expect(fake.turns).toHaveLength(3);
-  const payload = created[0];
-  expect(payload.build_session_id).toBe(fake.session?.id);
-  expect(payload.template_id).toBe('content-production');
-  expect(payload.name).toBe(name);
-  // A fresh sandbox creates both agents; one that already holds agents by
-  // these names assigns them instead (the team draft never duplicates one).
-  const staffing = (payload.role_staffing || []).map((role: RequestBody) => [
-    role.role_id,
-    role.name
-  ]);
-  expect(staffing).toEqual(
-    expect.arrayContaining([
-      ['content-lead', 'Content Lead'],
-      ['brand-copywriter', 'Brand Copywriter']
-    ])
-  );
-  for (const role of payload.role_staffing || []) {
-    expect(['create', 'assign']).toContain(role.mode);
-  }
-
-  // The real server created it from that request.
-  await expect
-    .poll(async () => {
-      const response = await page.request.get('/api/workspaces');
-      const body = await response.json();
-      const list = Array.isArray(body) ? body : body.workspaces || body.folders || [];
-      return list.some((workspace: RequestBody) => workspace.name === name);
-    })
-    .toBe(true);
-  const collection = await (await page.request.get('/api/workspaces')).json();
-  const workspace = (collection.workspaces || collection.folders).find(
-    (item: RequestBody) => item.name === name
-  );
-  const canonical = await (await page.request.get(`/api/workspaces/${workspace.id}`)).json();
-  expect(canonical.mission_state.mission_execution_count || 0).toBe(0);
-  const team = await (await page.request.get(`/api/workspaces/${workspace.id}/agents`)).json();
-  expect(team.agents.map((agent: RequestBody) => agent.name)).toEqual(
-    expect.arrayContaining(['Content Lead', 'Brand Copywriter'])
-  );
-  await page.goto(`/agents?agent=${encodeURIComponent('Content Lead')}`);
-  await expect(page.locator('#stageName')).toHaveText('Content Lead');
-  const work = page.locator('#stageNextStep');
-  const choice = work.locator('summary');
-  if (await choice.isVisible()) await choice.click();
-  const owner = work.getByRole('link', { name: `Open ${name} ↗`, exact: true });
-  await expect(owner).toHaveAttribute(
-    'href',
-    `/workspaces/${workspace.folder_slug}?agent=content%20lead`
-  );
-  await page.screenshot({
-    path: testInfo.outputPath('creation-agent-workspace.png'),
-    fullPage: true
-  });
-  await owner.click();
-  await expect(page).toHaveURL(
-    new RegExp(`/workspaces/${workspace.folder_slug}\\?agent=content%20lead`)
-  );
-  await expect(page.getByRole('region', { name: 'Next action', exact: true })).toBeVisible();
+  expect(traffic.reviews).toEqual([]);
+  expect(traffic.confirmations).toEqual([]);
+  expect(traffic.legacyWrites).toEqual([]);
 });
 
 test('a folder attached in the pane shows on the chip, the draft line, the turn, and Review', async ({

@@ -329,7 +329,13 @@
     };
   }
 
-  const DRAFT_LABELS = { name: 'name', blueprint: 'blueprint', purpose: 'purpose', team: 'team' };
+  const DRAFT_LABELS = {
+    name: 'name',
+    blueprint: 'blueprint',
+    purpose: 'purpose',
+    team: 'team',
+    destination: 'destination'
+  };
 
   // The creator supplies applied form values and its next gate. No model prose,
   // ready flag, wizard step number or transport reply is a creation fact.
@@ -370,6 +376,7 @@
           ? `${purpose.slice(0, 179).join('').trimEnd()}…`
           : purpose.join('')) || 'Undecided',
       team: text(fields.team),
+      destination: text(fields.destination),
       reason,
       saveState,
       change: paused ? '' : changes.join(' ') || lastChange,
@@ -400,6 +407,7 @@
       Blueprint: view.blueprint,
       Purpose: view.purpose,
       Team: view.team,
+      Destination: view.destination,
       Reason: view.reason,
       SaveState: view.saveState,
       Change: view.change,
@@ -414,6 +422,7 @@
     }
     for (const [id, hidden] of [
       ['workspaceBuildDraftTeamRow', !view.team],
+      ['workspaceBuildDraftDestinationRow', !view.destination],
       ['workspaceBuildDraftWhy', !view.reason]
     ]) {
       const field = document.getElementById(id);

@@ -370,7 +370,7 @@ type createWorkspaceRequest struct {
 	// the workspace exists the session is marked created and its summary is
 	// recorded on the workspace.
 	BuildSessionID string `json:"build_session_id,omitempty"`
-	// BuildReviewVersion binds an attached ordinary source to the current
+	// BuildReviewVersion binds an ordinary assisted draft and any source to the current
 	// canonical draft. Recognized setup and File Janitor use their own claims.
 	BuildReviewVersion int64 `json:"build_review_version,omitempty"`
 	// Mission is the workspace goal typed in the create modal. When present,

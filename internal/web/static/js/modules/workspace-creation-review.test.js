@@ -183,6 +183,32 @@ test('Blank uses the same review language without Janitor permissions, slots or 
   assert.equal(html, workspaceCreationReviewHTML(blank));
 });
 
+test('the assisted review displays the projected staffing and destination, not consent', () => {
+  const rows = creationTeamReviewRows(
+    {},
+    normalizedRoleRows([
+      {
+        role_id: 'lead',
+        label: 'Lead',
+        state: 'filled',
+        source: 'assigned',
+        agent: { name: 'Saved lead' }
+      }
+    ]),
+    { roles: [{ id: 'lead', value: 'Will assign Saved lead · required' }] }
+  );
+  const html = workspaceCreationReviewHTML({
+    ...blank,
+    buildDraft: true,
+    destination: 'In group Editorial · Position does not change membership.',
+    rows
+  });
+  assert.match(html, /Review · Nothing created yet/);
+  assert.match(html, /In group Editorial/);
+  assert.match(html, /Will assign Saved lead · required/);
+  assert.doesNotMatch(html, /data-placement-action="confirm"/);
+});
+
 test('ordinary field bounds come from their existing owner and reviewed rows are never silently dropped', () => {
   const html = workspaceCreationReviewHTML({
     ...blank,
