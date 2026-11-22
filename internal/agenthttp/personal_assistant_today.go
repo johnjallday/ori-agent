@@ -22,18 +22,21 @@ type AssistantTodayReader interface {
 }
 
 type assistantTodayRow struct {
-	Title string `json:"title"`
-	Kind  string `json:"kind"`
-	Owner string `json:"owner,omitempty"`
-	Href  string `json:"href,omitempty"`
-	ref   dailybrief.SourceRef
-	state string
+	Title      string `json:"title"`
+	Kind       string `json:"kind"`
+	Owner      string `json:"owner,omitempty"`
+	Href       string `json:"href,omitempty"`
+	Selection  string `json:"selection,omitempty"`
+	ref        dailybrief.SourceRef
+	state      string
+	sourceKind string
 }
 
 type assistantTodayAnswer struct {
 	Health    string              `json:"health"`
 	Truncated bool                `json:"truncated,omitempty"`
 	Rows      []assistantTodayRow `json:"rows"`
+	View      string              `json:"view,omitempty"`
 }
 
 func isAssistantTodayQuestion(prompt string) bool {
@@ -92,6 +95,7 @@ func (h *HomeAssistantAskHandler) answerAssistantToday(ctx context.Context, prom
 		reply.Actions = []HomeAction{needsYouAction()}
 		return reply
 	}
+	h.issueTodaySelections(answer, work, scope, refs, conversation)
 	reply.Today = answer
 	return reply
 }
@@ -118,7 +122,7 @@ func projectAssistantToday(today *personalassistant.TodayProjection, source Assi
 		}
 	}
 	for _, item := range section.Items[:min(len(section.Items), assistantTodayLimit)] {
-		row := assistantTodayRow{Title: workspaceContextText(item.Title, 160), Kind: assistantTodayKind(item.Kind)}
+		row := assistantTodayRow{Title: workspaceContextText(item.Title, 160), Kind: assistantTodayKind(item.Kind), sourceKind: item.Kind}
 		if row.Title == "" {
 			row.Title = row.Kind
 		}

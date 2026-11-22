@@ -53,6 +53,9 @@ func (a personalAssistantContextAdapter) ResolvePersonalAssistantRelationship(ct
 	out.DisplayName = projection.DisplayName
 	out.AssistantID = projection.AssistantID
 	out.HQWorkspaceID = projection.HQWorkspaceID
+	if projection.DailyBrief != nil {
+		out.SnoozeTimezone = projection.DailyBrief.Timezone
+	}
 	out.ConversationAgent = projection.GlobalAgentProfile
 	out.Mandate = projection.Mandate
 	out.FocusAreas = make([]string, 0, len(projection.FocusAreas))

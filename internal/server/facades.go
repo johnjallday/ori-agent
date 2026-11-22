@@ -30,6 +30,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filejanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/folderagenthttp"
+	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/gateway"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -106,6 +107,7 @@ type StorageSystemFacade struct {
 	PersonalAssistant       *personalassistant.Service
 	PersonalAssistantMemory *personalassistant.MemoryService
 	PersonalAssistantToday  *personalassistant.TodayService
+	PersonalHQFollowUps     *followup.Service
 	// PersonalAssistantKnowledge is the current, server-bound reviewed HQ context reader.
 	PersonalAssistantKnowledge *personalassistant.KnowledgeContextReader
 	// PersonalAssistantSecondBrain is the notes service the assistant's chat

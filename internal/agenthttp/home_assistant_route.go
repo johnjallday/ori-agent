@@ -446,7 +446,7 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 		if asksForWorkspaceInOtherWords(prompt) {
 			intent = homeAssistantWorkspaceCreateIntent
 		}
-		if isAssistantTodayQuestion(prompt) || isAssistantWorkspaceReviewRequest(prompt) {
+		if isAssistantTodayQuestion(prompt) || isAssistantSnoozePrompt(prompt) || isAssistantWorkspaceReviewRequest(prompt) {
 			return assistantConversationRoute(workContext), nil
 		}
 		// One owner per request: where Ori can operate, "open the Album

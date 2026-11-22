@@ -14,7 +14,7 @@ export function todayAnswerDestination(value) {
   }
 }
 
-export function renderTodayAnswer(row, data, { isCurrent = () => false } = {}) {
+export function renderTodayAnswer(row, data, { isCurrent = () => false, select } = {}) {
   if (!row || !data?.conversation?.stored || !data.today || !isCurrent()) return null;
   const doc = row.ownerDocument;
   const card = doc.createElement('section');
@@ -33,6 +33,16 @@ export function renderTodayAnswer(row, data, { isCurrent = () => false } = {}) {
       const meta = doc.createElement('small');
       meta.textContent = [item.kind, item.owner].filter(Boolean).join(' · ');
       li.append(meta);
+      if (item.selection && select) {
+        const button = control(doc, 'Select for snooze', () => {
+          if (isCurrent()) select(item);
+        });
+        button.setAttribute(
+          'aria-label',
+          `Select ${label.textContent} in ${item.owner} for snooze`
+        );
+        li.append(button);
+      }
       list.append(li);
     }
     card.append(list);
@@ -50,4 +60,165 @@ export function renderTodayAnswer(row, data, { isCurrent = () => false } = {}) {
   return card;
 }
 
-if (typeof window !== 'undefined') window.PersonalAssistantTodayAnswer = { render: renderTodayAnswer };
+function control(doc, label, click, primary = false) {
+  const button = doc.createElement('button');
+  button.type = 'button';
+  button.className = primary ? 'btn btn-sm btn-primary' : 'btn btn-sm btn-outline-secondary';
+  button.textContent = label;
+  button.addEventListener('click', click);
+  return button;
+}
+
+export function renderSnoozeCard(host, view, { isCurrent, send, ready = false } = {}) {
+  if (!host || !view || !isCurrent?.()) return;
+  const doc = host.ownerDocument;
+  const status = doc.createElement('p');
+  status.setAttribute('role', 'status');
+  status.textContent = view.message || '';
+  host.replaceChildren(status);
+  let busy = false;
+  const action = async body => {
+    if (busy || !isCurrent()) return;
+    busy = true;
+    for (const button of host.querySelectorAll('button')) button.disabled = true;
+    try {
+      const next = await send(body);
+      if (isCurrent()) renderSnoozeCard(host, next, { isCurrent, send, ready });
+    } catch (_) {
+      if (isCurrent()) {
+        status.textContent = 'Could not check that snooze. Reopen Needs you before trying again.';
+      }
+    }
+  };
+  if (Array.isArray(view.choices)) {
+    const list = doc.createElement('ul');
+    for (const choice of view.choices) {
+      const item = doc.createElement('li');
+      item.textContent = [choice.title, choice.owner].filter(Boolean).join(' · ');
+      const href = todayAnswerDestination(choice.href);
+      if (href) {
+        const open = doc.createElement('a');
+        open.href = href;
+        open.textContent = `Open ${choice.title} in ${choice.owner || 'its workspace'}`;
+        item.append(open);
+      }
+      if (choice.selection && view.status === 'choose') {
+        item.append(
+          control(doc, `Choose ${choice.owner}: ${choice.title}`, () => {
+            void action({
+              action: 'review',
+              view: view.view,
+              selection: choice.selection,
+              when: view.when
+            });
+          })
+        );
+      }
+      list.append(item);
+    }
+    host.append(list);
+  }
+  if (view.status === 'review') {
+    const heading = doc.createElement('h3');
+    heading.textContent = 'Review snooze';
+    const details = doc.createElement('p');
+    details.textContent = `${view.title} · ${view.owner}`;
+    const time = doc.createElement('time');
+    time.dateTime = view.until;
+    time.textContent = (view.suggested ? 'Suggested: ' : '') + view.until_label;
+    host.append(heading, details, time);
+    const correction = doc.createElement('form');
+    const label = doc.createElement('label');
+    label.textContent = 'Change the date or time';
+    const input = doc.createElement('input');
+    input.type = 'text';
+    input.required = true;
+    input.maxLength = 40;
+    input.placeholder = 'YYYY-MM-DD HH:MM';
+    input.className = 'form-control form-control-sm';
+    label.append(input);
+    const apply = control(doc, 'Review new time', () => {});
+    apply.type = 'submit';
+    correction.append(label, apply);
+    correction.addEventListener('submit', event => {
+      event.preventDefault();
+      void action({
+        action: 'review',
+        view: view.view,
+        selection: view.selection,
+        when: input.value
+      });
+    });
+    const footer = doc.createElement('div');
+    footer.className = 'pa-snooze-controls';
+    const confirm = control(
+      doc,
+      'Confirm snooze',
+      () => {
+        void action({ action: 'confirm', review: view.review });
+      },
+      true
+    );
+    confirm.disabled = !ready;
+    input.addEventListener('input', () => {
+      confirm.disabled = !ready || Boolean(input.value.trim());
+    });
+    footer.append(
+      control(doc, 'Cancel', () => {
+        void action({ action: 'cancel', review: view.review });
+      }),
+      confirm
+    );
+    host.append(correction, footer);
+  }
+  if (['stale', 'conflict', 'unknown', 'handoff'].includes(view.status)) {
+    const home = doc.createElement('a');
+    home.href = NEEDS_YOU;
+    home.textContent = 'Open Needs you';
+    host.append(home);
+  }
+}
+
+export function createTodayAnswerController() {
+  let current;
+  return {
+    render(row, data, options) {
+      current = null;
+      const card = renderTodayAnswer(row, data, {
+        ...options,
+        select(item) {
+          if (!current || !current.valid()) return;
+          current.selection = item.selection;
+          current.notice.textContent = `Selected ${item.title} in ${item.owner}. Ask when to snooze it.`;
+          options.focus?.();
+        }
+      });
+      if (card && data.today.view) {
+        const notice = card.ownerDocument.createElement('small');
+        notice.setAttribute('role', 'status');
+        card.append(notice);
+        current = {
+          id: data.today.view,
+          notice,
+          valid: () => card.isConnected && options.isCurrent()
+        };
+      }
+      return card;
+    },
+    ref() {
+      if (!current?.valid()) return null;
+      return { view: current.id, selection: current.selection };
+    },
+    renderSnooze(row, view, options) {
+      if (!row || !options.isCurrent()) return;
+      const host = row.ownerDocument.createElement('section');
+      host.className = 'pa-today-answer pa-snooze-card';
+      host.setAttribute('aria-label', 'Follow-up snooze');
+      (row.firstElementChild || row).append(host);
+      renderSnoozeCard(host, view, options);
+    }
+  };
+}
+
+if (typeof window !== 'undefined')
+  window.PersonalAssistantTodayAnswer = createTodayAnswerController();

@@ -727,6 +727,7 @@ func (b *ServerBuilder) createDomainFacades() {
 	b.server.Storage.AgentMapPositions = b.agentMapStore
 	b.server.Storage.PersonalAssistantKnowledge = b.personalAssistantKnowledge
 	b.server.Storage.PersonalAssistantToday = b.personalAssistantToday
+	b.server.Storage.PersonalHQFollowUps = b.followUpService
 	b.server.Storage.PersonalAssistantSecondBrain = b.personalAssistantSecondBrain
 	b.server.Storage.AssistantOperations = b.assistantOperationStore()
 	if b.personalAssistantFolderDigest != nil {

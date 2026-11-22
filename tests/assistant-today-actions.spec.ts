@@ -94,11 +94,12 @@ test('wt demo: the Assistant reads the same Needs you records as Home', async ({
   page.on('request', event => {
     if (new URL(event.url()).pathname === '/api/home-assistant/ask') personalAsks++;
   });
+  const commander = page.waitForRequest(
+    event => new URL(event.url()).pathname === '/api/chat' && event.method() === 'POST'
+  );
   await page.locator('#personalAssistantInput').fill('What needs me today?');
   await page.locator('#personalAssistantSend').click();
-  await expect(
-    page.locator('#homeAssistantConversation [data-message-author="Postmaster"]')
-  ).not.toHaveCount(0);
+  expect((await commander).postDataJSON()).toMatchObject({ agent_name: 'Postmaster' });
   expect(personalAsks).toBe(0);
   await expect(list).toHaveCount(0);
 
@@ -118,4 +119,34 @@ test('wt demo: the Assistant reads the same Needs you records as Home', async ({
   );
   await shot('02-partial-needs-you.png');
   sql('UPDATE personal_hq_followup SET due_at=NULL WHERE id=?', mailItem.id);
+
+  const stored = async (id: string) => {
+    const response = await request.get(`/api/personal-hq/followups/item?id=${id}`);
+    expect(response.ok()).toBeTruthy();
+    return (await response.json()).followup;
+  };
+  const before = await Promise.all([stored(hqItem.id), stored(mailItem.id)]);
+  await assistant.send('What needs me today?');
+  const latest = list.last();
+  await expect(
+    latest.getByRole('button', { name: `Select ${title} in My HQ for snooze` })
+  ).toHaveCount(1);
+  await expect(latest.getByRole('button', { name: /Email Ops/ })).toHaveCount(0);
+  const pending = await assistant.send('Snooze until Monday');
+  expect(pending.snooze.status).toBe('choose');
+  const review = page.getByRole('region', { name: 'Follow-up snooze' }).last();
+  const choose = review.getByRole('button', { name: `Choose My HQ: ${title}` });
+  await expect(review.getByRole('link', { name: `Open ${title} in Email Ops` })).toBeVisible();
+  await expect(review.getByRole('button', { name: /Choose Email Ops/ })).toHaveCount(0);
+  await shot('03-snooze-choices.png');
+  await choose.press('Enter');
+  await expect(review.getByRole('heading', { name: 'Review snooze' })).toBeVisible();
+  await expect(review.locator('time')).toHaveText(
+    /Suggested: Monday, \d+ \w+ \d{4} at 09:00 E[DS]T \(UTC-0[45]:00\) · America\/New_York/
+  );
+  await shot('03-review-snooze.png');
+  await review.getByRole('button', { name: 'Cancel' }).press('Enter');
+  await expect(review.getByRole('status')).toHaveText('Snooze cancelled. Nothing changed.');
+  expect(await Promise.all([stored(hqItem.id), stored(mailItem.id)])).toEqual(before);
+  await shot('03-cancelled-snooze.png');
 });
