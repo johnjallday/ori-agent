@@ -254,7 +254,8 @@ type Status struct {
 	// Suggestion describes the folder the workspace's template asked for. It is
 	// present before setup so the UI can pre-fill the picker; it is never a
 	// resolved path and never implies access.
-	Suggestion *SetupSuggestion `json:"suggestion,omitempty"`
+	Suggestion      *SetupSuggestion `json:"suggestion,omitempty"`
+	DownloadsReview string           `json:"downloads_review,omitempty"`
 }
 
 // SetupSuggestion is the unresolved folder request recorded on the workspace at
@@ -416,6 +417,10 @@ func (s *Service) Status(workspaceID string) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
+	return s.statusWithSettings(workspaceID, settings), nil
+}
+
+func (s *Service) statusWithSettings(workspaceID string, settings JanitorSettings) Status {
 	status := Status{
 		Guidance:  s.CuratorGuidance(workspaceID),
 		Settings:  settings,
@@ -426,7 +431,7 @@ func (s *Service) Status(workspaceID string) (Status, error) {
 	if !settings.IsSetUp() {
 		status.Suggestion = s.suggestion(workspaceID, settings)
 	}
-	return status, nil
+	return status
 }
 
 // suggestion reads the unresolved directory requirement recorded on the
@@ -511,14 +516,22 @@ type FolderGrantOperation struct {
 // record is written, so a failed setup never leaves a workspace that looks
 // configured (FR-14, FR-17, FR-19).
 func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
+	return s.confirmSetup(req, "", nil)
+}
+
+func (s *Service) confirmSetup(req SetupRequest, downloadOwner string, verifyDownloads DownloadsRoot) (Status, error) {
 	workspaceID := strings.TrimSpace(req.WorkspaceID)
 	if workspaceID == "" {
 		return Status{}, setupErr(CodeWorkspaceMissing, "This workspace is unavailable.", "", nil)
 	}
 
-	root, err := resolveSetupRoot(req.Path)
-	if err != nil {
-		return Status{}, err
+	var root string
+	var err error
+	if verifyDownloads == nil {
+		root, err = resolveSetupRoot(req.Path)
+		if err != nil {
+			return Status{}, err
+		}
 	}
 
 	// Hold the claim lock across conflict detection, the durable pending marker,
@@ -529,6 +542,39 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 	current, err := s.store.LoadSettings(workspaceID)
 	if err != nil {
 		return Status{}, err
+	}
+	if verifyDownloads != nil {
+		root, err = resolveDownloadsRoot(verifyDownloads)
+		if err == nil {
+			err = requireDownloadsSettings(current, root)
+		}
+		if err != nil {
+			return Status{}, err
+		}
+		ws, readErr := s.readWorkspace(workspaceID)
+		if readErr != nil || ws == nil || !ws.HasInstalledCapability(workspace.CapabilityFileJanitor) {
+			return Status{}, setupErr(CodeWorkspaceMissing, "Install Filing before allowing access to Downloads.", "", readErr)
+		}
+		if managed, err := s.StoredManagedRoot(downloadOwner, workspaceID); err == nil &&
+			managed.Path == root && s.checkDirectoryAccess(current).Status != ComponentFailed {
+			return s.statusWithSettings(workspaceID, current), nil
+		}
+		if current.ContentMode != ContentModeMetadataOnly {
+			return Status{}, setupErr(CodePrivacyReviewRequired, "Review the workspace’s Filing privacy settings before allowing Downloads access.", "", nil)
+		}
+		for _, binding := range ws.MCPBindings {
+			if !strings.EqualFold(strings.TrimSpace(binding.Alias), LegacyBindingAlias) {
+				continue
+			}
+			if !preparationAccessMatches(ws, &SetupPreparation{ReferenceID: current.DirectoryReferenceID}, root) {
+				return Status{}, setupErr(CodeFolderChanged, "Existing Filing access needs repair in workspace settings. Downloads was not relinked.", "", nil)
+			}
+			break
+		}
+		req.DirectoryReferenceID = ws.AnchorDirectoryReferenceID()
+		if req.DirectoryReferenceID == "" {
+			return Status{}, setupErr(CodeFolderChanged, "The Downloads anchor is unavailable.", "", nil)
+		}
 	}
 	operation := req.Operation
 	if operation == nil && !current.IsSetUp() && current.AccessRevokedAt.IsZero() {
@@ -708,6 +754,9 @@ func (s *Service) ConfirmSetup(req SetupRequest) (Status, error) {
 			settings.Paused = *req.Paused
 		}
 		settings.AccessRevokedAt = time.Time{}
+		if verifyDownloads != nil && rootChanged {
+			settings.SetupDecision = &SetupDecision{Mode: SetupModeManual, RootID: rootID, DecidedAt: completedAt}
+		}
 		if settings.SetupCompletedAt.IsZero() {
 			settings.SetupCompletedAt = completedAt
 		}

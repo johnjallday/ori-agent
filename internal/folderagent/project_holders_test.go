@@ -21,11 +21,34 @@ func TestProjectHoldersViewCapsRowsAndCountsRemainder(t *testing.T) {
 	}
 }
 
+func TestDownloadsReopenedReportKeepsHoldersWithoutOfferingSetup(t *testing.T) {
+	root := build(t, "ori-rc/Songs/Song.rpp", "loose.pdf")
+	h := downloadsHarness(t, root)
+	started := h.start(t, "")
+	reopened := NewService(h.svc.deps)
+	view, err := reopened.View(t.Context(), "u1", started.WorkspaceID)
+	if err != nil || view.FactsLine == "" || view.ExploreFolder || view.ProjectHolders == nil || len(view.ProjectHolders.Rows) != 1 {
+		t.Fatal("missing inventory or unexpected project chooser", view, err)
+	}
+	row := view.ProjectHolders.Rows[0]
+	if row.Name != "ori-rc" || row.Count != 1 || view.ProjectHolders.ReportKey != "" {
+		t.Fatal("incorrect inventory", view.ProjectHolders)
+	}
+	record, err := reopened.Record("u1", started.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if card, err := reopened.ChooseProjectHolder(t.Context(), "u1", started.WorkspaceID, holderReportKey(record), row.Index); !errors.Is(err, ErrWrongState) || card != nil {
+		t.Fatal("Downloads allowed inline setup from a saved holder", card, err)
+	}
+}
+
 func TestChooseProjectHolderAcceptsOnlyTheSavedOwnedWalk(t *testing.T) {
 	for _, mode := range []string{"valid", "other owner", "stale", "absent index", "root index", "vanished", "symlink", "unrecorded folder"} {
 		t.Run(mode, func(t *testing.T) {
 			root := build(t, "Projects/One/go.mod", "Projects/Two/Song.rpp")
-			h := downloadsHarness(t, root)
+			h := newHarness(t, root)
+			h.svc.deps.KnownFolderRoot = knownOnly("desktop", root)
 			v := h.start(t, "")
 			view, _ := h.svc.View(t.Context(), "u1", v.WorkspaceID)
 			if view.ProjectHolders == nil {
@@ -83,7 +106,8 @@ func TestChooseProjectHolderAcceptsOnlyTheSavedOwnedWalk(t *testing.T) {
 
 func TestProjectHolderCardRefusesMapChangedSinceDisplay(t *testing.T) {
 	root := build(t, "Projects/A/go.mod")
-	h := downloadsHarness(t, root)
+	h := newHarness(t, root)
+	h.svc.deps.KnownFolderRoot = knownOnly("documents", root)
 	v := h.start(t, "")
 	view, _ := h.svc.View(t.Context(), "u1", v.WorkspaceID)
 	_, err := h.svc.deps.Store.Update(v.WorkspaceID, func(r *Record) error {

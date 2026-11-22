@@ -806,7 +806,7 @@
   function activityState(status) {
     const readiness = (status && status.readiness) || {};
     const settings = (status && status.settings) || {};
-    if (readiness.state === 'setup_required') {
+    if (readiness.state === 'setup_required' || status?.downloads_review === 'access') {
       return { id: 'setup_required', label: 'Setup required' };
     }
     if (readiness.state === 'needs_attention') {
@@ -4662,11 +4662,13 @@
         'fj-card-sub',
         configured
           ? 'Sort proposed destinations, then decide what moves.'
-          : settings.access_revoked_at && !settings.access_revoked_at.startsWith('0001-')
-            ? 'Folder access was revoked. Choose a folder again to grant fresh permission; nothing is scanned or moved.'
-            : linkedFolder
-              ? `Filing is not allowed in ${linkedFolder} yet. Nothing is scanned or moved.`
-              : 'No folder chosen yet. Nothing is scanned or moved until you choose one.'
+          : status.downloads_review === 'access'
+            ? 'Filing needs separate access to Downloads. Nothing is scanned or moved.'
+            : settings.access_revoked_at && !settings.access_revoked_at.startsWith('0001-')
+              ? 'Folder access was revoked. Choose a folder again to grant fresh permission; nothing is scanned or moved.'
+              : linkedFolder
+                ? `Filing is not allowed in ${linkedFolder} yet. Nothing is scanned or moved.`
+                : 'No folder chosen yet. Nothing is scanned or moved until you choose one.'
       )
     );
     head.appendChild(heading);
@@ -4866,6 +4868,27 @@
   // the inline panel already had: they address their hosts by id, so moving
   // those hosts into the console moves the surfaces with them.
   function renderConsoleBody(host, status) {
+    if (downloadsReviewRequested() && status?.downloads_review !== 'ready') {
+      const state = status?.downloads_review;
+      const message =
+        state === 'install'
+          ? 'Install Filing to review loose files in Downloads. Installing does not grant folder access.'
+          : state === 'access'
+            ? 'Allow Filing to read file names, sizes, types and dates in Downloads and prepare its Filed folder. Nothing is scanned or moved by this step. Monitoring stays off.'
+            : status?.downloads_review_error || 'Checking access to Downloads…';
+      host.appendChild(el('p', 'fj-sub', message));
+      if (state === 'install' || state === 'access') {
+        const control = button(
+          state === 'install' ? 'Install Filing' : 'Allow access to Downloads',
+          'fj-btn fj-btn-primary',
+          () => void prepareDownloadsReview(state, control)
+        );
+        control.disabled = busy;
+        host.appendChild(control);
+        host.appendChild(errorRegion());
+      }
+      return;
+    }
     if (preparation && consoleTab === 'review') {
       const progress = el('p', 'fj-sub', 'Preparing your preview…');
       progress.setAttribute('role', 'status');
@@ -4933,7 +4956,7 @@
     } else {
       host.appendChild(readinessRows(status));
     }
-    const repair = repairAction(status);
+    const repair = !downloadsReviewRequested() && repairAction(status);
     if (repair) host.appendChild(repair);
     const batchHost = el('div', 'fj-batch');
     batchHost.id = 'fileJanitorBatch';
@@ -5022,6 +5045,43 @@
   const CONSOLE_TITLE_ID = 'fileJanitorConsoleTitle';
   const CONSOLE_TABS = ['review', 'history', 'settings'];
   const CONSOLE_PANEL_PARAM = 'file-janitor';
+  const DOWNLOADS_REVIEW_QUERY = '?review=downloads';
+
+  function downloadsReviewRequested() {
+    const params = new URLSearchParams(window.location?.search || '');
+    return params.get('panel') === CONSOLE_PANEL_PARAM && params.get('review') === 'downloads';
+  }
+
+  async function prepareDownloadsReview(state, control) {
+    const scope = requestScope();
+    if (!scope.id || busy || !downloadsReviewRequested()) return;
+    busy = true;
+    control.disabled = true;
+    showError('');
+    try {
+      if (state === 'install') {
+        const result = await window.WorkspaceCapabilities?.install('file-janitor');
+        if (!result?.ok) throw new Error(result?.error || 'Filing could not be installed.');
+      } else {
+        const response = await fetch(apiBase(scope.id) + '/setup' + DOWNLOADS_REVIEW_QUERY, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}'
+        });
+        if (!response.ok) {
+          const result = await response.json().catch(() => ({}));
+          throw new Error(result.error?.message || 'Ori could not get access to Downloads.');
+        }
+      }
+      busy = false;
+      if (scopeCurrent(scope) && downloadsReviewRequested()) await refresh();
+    } catch (error) {
+      if (scopeCurrent(scope) && downloadsReviewRequested()) showError(error.message);
+    } finally {
+      if (scopeCurrent(scope)) busy = false;
+      control.disabled = false;
+    }
+  }
 
   let consoleOpen = false;
   let consoleVisit = 0;
@@ -5097,7 +5157,7 @@
     // The check is against a status we have actually read: on a cold load
     // lastStatus is still null, and refusing then would make the first press
     // of a station do nothing (FR-93).
-    if (lastStatus && !lastStatus.applies) return false;
+    if (lastStatus && !lastStatus.applies && !downloadsReviewRequested()) return false;
     const host = consoleHost();
     if (!host) return false;
 
@@ -5144,7 +5204,7 @@
     // disable it behind a redundant loading state on that handoff.
     if (!['folder-preparation', 'protection-return'].includes(options.source)) void refresh();
     notifySubscribers();
-    openJanitorParcels(id);
+    if (!downloadsReviewRequested()) openJanitorParcels(id);
     return true;
   }
 
@@ -5212,7 +5272,9 @@
     // only this module knows how to find the control's live replacement.
     restoreConsoleFocus();
     consoleOverlayId = '';
+    const wasDownloads = Boolean(lastStatus?.downloads_review);
     if (!options.keepUrl) syncUrl();
+    if (wasDownloads && !downloadsReviewRequested()) void refresh();
     notifySubscribers();
     return true;
   }
@@ -5314,7 +5376,13 @@
   function renderConsole() {
     const host = consoleHost();
     if (!host) return;
-    const status = lastStatus;
+    const status =
+      downloadsReviewRequested() && lastStatus?.downloads_review !== 'ready'
+        ? {
+            downloads_review: lastStatus?.downloads_review,
+            downloads_review_error: lastStatus?.downloads_review_error
+          }
+        : lastStatus;
     const focused = activeElement();
     let ancestor = focused;
     while (ancestor && ancestor !== host) ancestor = ancestor.parentElement || ancestor.parent;
@@ -5414,24 +5482,25 @@
     title.id = CONSOLE_TITLE_ID;
     title.setAttribute('tabindex', '-1');
     heading.appendChild(title);
-    // The managed folder is shown by its display name, cleaned the same way a
-    // filename is: a folder can be named as adversarially as a file.
-    const folder = settings.root_path ? safeName(settings.root_path) : '';
-    if (folder) heading.appendChild(el('p', 'fj-console-folder', folder));
-    const privacy = compactPrivacy(status);
-    heading.appendChild(
-      el('p', 'fj-console-privacy', privacy.value + (privacy.note ? ' · ' + privacy.note : ''))
-    );
-    const activity = activityState(status);
-    const statusLine = el('p', 'fj-console-status');
-    statusLine.id = 'fileJanitorConsoleStatus';
-    // The preview progress/result has its own status in the Review body.
-    if (!preparation && !(consoleTab === 'review' && currentPreview())) {
-      statusLine.setAttribute('role', 'status');
-      statusLine.setAttribute('aria-live', 'polite');
+    if (!downloadsReviewRequested() || status?.downloads_review === 'ready') {
+      // The managed folder is shown by its display name, cleaned the same way a
+      // filename is: a folder can be named as adversarially as a file.
+      const folder = settings.root_path ? safeName(settings.root_path) : '';
+      if (folder) heading.appendChild(el('p', 'fj-console-folder', folder));
+      const privacy = compactPrivacy(status);
+      heading.appendChild(
+        el('p', 'fj-console-privacy', privacy.value + (privacy.note ? ' · ' + privacy.note : ''))
+      );
+      const statusLine = el('p', 'fj-console-status');
+      statusLine.id = 'fileJanitorConsoleStatus';
+      // The preview progress/result has its own status in the Review body.
+      if (!preparation && !(consoleTab === 'review' && currentPreview())) {
+        statusLine.setAttribute('role', 'status');
+        statusLine.setAttribute('aria-live', 'polite');
+      }
+      statusLine.textContent = consoleActivityLabel(activityState(status));
+      heading.appendChild(statusLine);
     }
-    statusLine.textContent = consoleActivityLabel(activity);
-    heading.appendChild(statusLine);
     header.appendChild(heading);
 
     const actions = el('div', 'fj-console-actions');
@@ -5586,6 +5655,7 @@
       url.searchParams.delete('panel');
       url.searchParams.delete('tab');
       url.searchParams.delete('item');
+      if (url.searchParams.get('review') === 'downloads') url.searchParams.delete('review');
     }
     if (url.search === before) return;
     const method = options.replace ? 'replaceState' : 'pushState';
@@ -5618,6 +5688,11 @@
       if (consoleOpen) void loadBatch();
     }
     if (consoleOpen) {
+      if (downloadsReviewRequested() !== Boolean(lastStatus?.downloads_review)) {
+        invalidateFolderState();
+        lastStatus = null;
+        void refresh();
+      }
       // The URL is authoritative here, and an absent `tab` means Review — that
       // is exactly how Review is encoded (it is the default, so it is omitted).
       // Keeping the current tab instead made Back from Settings appear to do
@@ -6545,6 +6620,7 @@
   // disclosure state survive a same-batch reload; a new batch clears both, and
   // candidates that became ineligible are dropped individually below.
   async function loadBatch({ syncRoute = true } = {}) {
+    if (downloadsReviewRequested() && lastStatus?.downloads_review !== 'ready') return;
     const scope = requestScope();
     const id = scope.id;
     if (!id || disposed) return;
@@ -6576,6 +6652,15 @@
       if (!response.ok) throw new Error('batch failed');
       const body = await response.json();
       if (!current()) return;
+      // An ordinary batch read can race a relink in another window. A saved
+      // batch without the verified Downloads generation is not this inbox.
+      if (
+        downloadsReviewRequested() &&
+        body.batch &&
+        (!body.batch.root_id || body.batch.root_id !== lastStatus?.settings?.root_id)
+      ) {
+        throw new Error('batch belongs to another folder generation');
+      }
       lastBatch = body.batch || null;
       if (lastBatch && emptyReviewState === 'no_proposals') reviewStatusMessage = '';
       emptyReviewState = lastBatch ? 'active' : previousBatchID ? 'completed' : emptyReviewState;
@@ -6694,17 +6779,34 @@
     const id = scope.id;
     if (!id || disposed) return;
     const sequence = ++statusRequest;
-    const current = () => scopeCurrent(scope) && sequence === statusRequest;
+    const downloads = downloadsReviewRequested();
+    const current = () =>
+      scopeCurrent(scope) && sequence === statusRequest && downloads === downloadsReviewRequested();
     statusLoadState = 'loading';
     notifySubscribers();
     try {
-      const response = await fetch(apiBase(id));
-      if (!response.ok) throw new Error('status failed');
+      const response = await fetch(apiBase(id) + (downloads ? DOWNLOADS_REVIEW_QUERY : ''));
       const body = await response.json();
+      if (!response.ok) {
+        if (!downloads) throw new Error('status failed');
+        if (current())
+          render({
+            applies: false,
+            downloads_review: 'blocked',
+            downloads_review_error: body.error?.message
+          });
+        return;
+      }
       const status = body.status;
       if (!current()) return;
       if (typeof status?.applies !== 'boolean') throw new Error('invalid status');
-      if (status?.applies && (!isConfigured(status) || status.settings?.setup_preparation)) {
+      if (downloads && !['install', 'access', 'ready'].includes(status.downloads_review))
+        throw new Error('invalid review status');
+      if (
+        !downloads &&
+        status?.applies &&
+        (!isConfigured(status) || status.settings?.setup_preparation)
+      ) {
         await loadSetupReview();
       } else {
         setupReview = null;
@@ -6750,6 +6852,15 @@
       return;
     } catch (_) {
       if (!current()) return;
+      if (downloads) {
+        render({
+          applies: false,
+          downloads_review: 'blocked',
+          downloads_review_error:
+            'Filing could not verify Downloads. Close and reopen the review to try again.'
+        });
+        return;
+      }
       statusLoadState = 'unavailable';
       const host = mount();
       if (host && !lastStatus) host.hidden = true;

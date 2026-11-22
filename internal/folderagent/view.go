@@ -263,7 +263,7 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	v.ProjectHolders = projectHoldersView(rec)
 	v.RootPolicy = rec.RootPolicy
 	v.PolicyNote = folderlook.PolicyLine(rec.RootPolicy)
-	v.ExploreFolder = rec.RootPolicy.IsCatchAll()
+	v.ExploreFolder = rec.RootPolicy.IsCatchAll() && rec.RootPolicy != folderlook.RootDownloads
 	if rec.RootPolicy == folderlook.RootDocuments {
 		v.StageLine = "Documents stays a folder with its agent."
 	}

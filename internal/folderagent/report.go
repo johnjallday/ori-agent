@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/folderlook"
 )
 
 // Report is a look that ended with something for the owner (a plan, a
@@ -220,6 +222,9 @@ func ReportText(v View) string {
 		return strings.Join(append(parts, "Answer it in the card below."), "\n\n")
 	}
 	parts := []string{ReportOpening(v)}
+	if v.RootPolicy == folderlook.RootDownloads {
+		return strings.Join(append(parts, "Choose Review Downloads to open Filing. Nothing is scanned or moved just by opening the review."), "\n\n")
+	}
 	// The card under the message says why the agent could not look itself
 	// (ModelSentence) and lists the steps with their details; the message keeps
 	// to what it found and what it suggests, so the two do not say it twice.

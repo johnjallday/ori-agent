@@ -86,7 +86,7 @@ func assertInbox(t *testing.T, report View) {
 	if report.Plan == nil || !report.Plan.Runnable || len(report.Plan.Steps) != 1 || report.Plan.Steps[0].Kind != folderlook.StepFileCurator || !report.Plan.Steps[0].Chosen {
 		t.Fatalf("plan=%+v", report.Plan)
 	}
-	if !strings.Contains(report.PolicyNote, "Downloads stays an inbox") || !report.ExploreFolder {
+	if !strings.Contains(report.PolicyNote, "Downloads stays an inbox") || report.ExploreFolder {
 		t.Fatalf("policy=%+v", report)
 	}
 	if len(report.Candidates) != 1 || report.Candidates[0].ID != "file-curator" || report.Candidates[0].Name != "Filing" {

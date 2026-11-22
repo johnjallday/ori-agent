@@ -2941,24 +2941,74 @@ test('Needs you follows a Set it up in place until it ends, then opens the place
   assert.deepEqual(stayed, ['/workspaces/ori-music-demo']);
 });
 
-test('Downloads shows factual counts beside model words and a normal keyboard-accessible chooser link', () => {
-  const view = folderAgentReportView(
-    reported({
-      policy_note: 'Downloads stays an inbox. Confirm folder access separately.',
-      explore_folder: true,
-      what_it_is: 'The agent found projects here.',
-      plan: { digest: 'fresh', runnable: true, selected: ['file-curator'], steps: [], lines: [] }
-    })
-  );
-  const card = renderFolderAgentReport(view, stubDocument());
-  assert.equal(text(card, '.folder-agent-card__facts'), view.facts);
-  assert.equal(text(card, '.folder-agent-card__note'), view.policyNote);
-  const link = card
-    .querySelectorAll('a')
-    .find(node => node.textContent === 'Explore a project folder…');
-  assert.equal(link.href, '/?panel=today&folder=show');
-  assert.equal(link.attributes.tabindex, undefined);
-  assert.deepEqual(link.listeners, {}); // Navigation only: no mutation or automatic selection.
+test('Downloads keeps factual counts and saved project holders but not project setup', () => {
+  for (const project_holders of [
+    undefined,
+    { report_key: 'old-key', rows: [{ index: 2, name: 'ori-rc', count: 2, kinds: '2 songs' }] }
+  ]) {
+    const view = folderAgentReportView(
+      JSON.parse(
+        JSON.stringify(
+          reported({
+            root_policy: 'downloads_inbox',
+            folder_name: 'Inbox alias',
+            explore_folder: true, // An older report can still carry the old flag.
+            policy_note: 'Downloads stays an inbox.',
+            what_it_is: 'Set up the project folders.',
+            project_holders
+          })
+        )
+      )
+    );
+    const card = renderFolderAgentReport(view, stubDocument());
+    assert.equal(text(card, '.folder-agent-card__facts'), view.facts);
+    assert.equal(
+      card.querySelectorAll('a').some(node => node.textContent === 'Explore a project folder…'),
+      false
+    );
+    assert.equal(
+      card.querySelectorAll('button').some(node => node.textContent === 'Set up ori-rc'),
+      false
+    );
+    assert.equal(
+      card.querySelectorAll('.folder-agent-card__holder-row').length,
+      project_holders ? 1 : 0
+    );
+    if (project_holders) {
+      const row = card.querySelector('.folder-agent-card__holder-row');
+      assert.equal(text(row, 'strong'), 'ori-rc');
+      assert.equal(text(row, 'p'), '2 songs');
+    }
+  }
+});
+
+test('Desktop and Documents keep their chooser even with Downloads as a display name', () => {
+  for (const root_policy of ['desktop_inbox', 'documents_inbox']) {
+    const view = folderAgentReportView(
+      reported({
+        root_policy,
+        folder_name: 'Downloads',
+        policy_note: 'Confirm folder access separately.',
+        explore_folder: true,
+        project_holders: {
+          report_key: 'key',
+          rows: [{ index: 2, name: 'ori-rc', kinds: '2 songs' }]
+        },
+        what_it_is: 'The agent found projects here.',
+        plan: { digest: 'fresh', runnable: true, selected: ['file-curator'], steps: [], lines: [] }
+      })
+    );
+    const card = renderFolderAgentReport(view, stubDocument());
+    assert.equal(text(card, '.folder-agent-card__facts'), view.facts);
+    assert.equal(text(card, '.folder-agent-card__note'), view.policyNote);
+    const link = card
+      .querySelectorAll('a')
+      .find(node => node.textContent === 'Explore a project folder…');
+    assert.equal(link.href, '/?panel=today&folder=show');
+    assert.equal(link.attributes.tabindex, undefined);
+    assert.deepEqual(link.listeners, {}); // Navigation only: no mutation or automatic selection.
+    assert.ok(card.querySelectorAll('button').some(node => node.textContent === 'Set up ori-rc'));
+  }
 });
 
 test('ordinary reports do not acquire an inbox policy or project-folder action', () => {

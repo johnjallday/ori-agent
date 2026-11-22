@@ -1,13 +1,14 @@
 import { expect, test } from '@playwright/test';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Real sandbox HOME/Downloads, chooser, walk, report and built-in install.
 // No model/provider or production policy bypass is used.
 // ./scripts/e2e-fresh.sh --sandbox-env ORI_DOWNLOADS_SANDBOX tests/folder-agent-downloads-inbox.spec.ts
 const sandbox = process.env.ORI_DOWNLOADS_SANDBOX || '';
 const endpoint = '/api/personal-assistant/folder-agent';
-const evidence = resolve('tasks/evidence-downloads-inbox-exception');
+const evidence = resolve('tasks/evidence-downloads-inbox-cleanup');
 
 // Agent/CLI roster arrays come from maps; compare all values, not map order.
 function stable(value: any): any {
@@ -28,7 +29,7 @@ async function files(root: string): Promise<string[]> {
   return out.sort();
 }
 
-test('Downloads keeps project evidence, offers only Janitor and explores a separately chosen folder', async ({
+test('Downloads keeps project evidence and opens Filing without granting or scanning', async ({
   page,
   request
 }) => {
@@ -40,7 +41,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
     await mkdir(join(path, '..'), { recursive: true, mode: 0o750 });
     await writeFile(path, content, { mode: 0o600 });
   }
-  for (let n = 1; n <= 7; n++) await seed(`Software/Project-${n}/package.json`, '{}');
+  for (let n = 1; n <= 7; n++) await seed(`ori-rc/Project-${n}/package.json`, '{}');
   for (let n = 1; n <= 5; n++) await seed(`Music/Song-${n}/Song.rpp`, '<REAPER_PROJECT\n>\n');
   for (let n = 1; n <= 3; n++) await seed(`Writing/Draft-${n}/outline.md`);
   const kinds = ['pdf', 'png', 'zip', 'dmg', 'csv', 'txt'];
@@ -92,8 +93,11 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
     .locator('.folder-agent-card--report')
     .filter({ hasText: 'Downloads stays an inbox' });
   await expect(report).toBeVisible({ timeout: 30_000 });
-  await expect(report.locator('[data-step]')).toHaveCount(1);
-  await expect(report).toContainText('Organize loose files in Downloads (you approve every move)');
+  await expect(report.locator('[data-step]')).toHaveCount(0);
+  await expect(report.getByRole('link', { name: 'Review Downloads' })).toBeVisible();
+  await expect(report.getByRole('link', { name: 'Explore a project folder…' })).toHaveCount(0);
+  await expect(report.getByRole('button', { name: /^Set up/ })).toHaveCount(0);
+  await expect(report.locator('.folder-agent-card__holder-list')).toContainText('ori-rc');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('7 software projects');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('5 REAPER songs');
   await expect(report.locator('.folder-agent-card__facts')).toContainText('3 manuscripts');
@@ -137,16 +141,18 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   expect(await (await request.get('/api/workspaces')).json()).toEqual(workspacesBefore);
   expect(stable(await (await request.get('/api/agents')).json())).toEqual(stable(agentNamesBefore));
 
-  // Keyboard-native link uses the existing chooser. Escape creates nothing.
-  const explore = report.getByRole('link', { name: 'Explore a project folder…' });
-  await explore.focus();
-  await expect(explore).toBeFocused();
+  // Keyboard-native review link opens the existing Filing console without installing it.
+  const reviewLink = report.getByRole('link', { name: 'Review Downloads' });
+  await reviewLink.focus();
+  await expect(reviewLink).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(entry).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect
-    .poll(() => page.evaluate(() => document.activeElement?.id))
-    .toMatch(/^(personalAssistant(AttachMenu|Input|Launcher)|cockpitPrimaryActionBtn)$/);
+  await expect(page.getByRole('button', { name: 'Install Filing', exact: true })).toBeVisible();
+  await page.screenshot({ path: join(evidence, 'downloads-install.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Close Filing', exact: true }).click();
+  const janitorURL = `/api/workspaces/${id}/file-janitor`;
+  expect(
+    (await (await request.get(`${janitorURL}?review=downloads`)).json()).status.downloads_review
+  ).toBe('install');
   expect((await (await request.get(endpoint)).json()).folder_agents).toHaveLength(1);
   // Explicit selection is a second onboarding run, not reanchoring Downloads.
   await page.goto('/?panel=today&folder=show');
@@ -230,9 +236,11 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   await expect(report).toBeVisible();
   await expect(report).not.toContainText('Release all songs');
   await page.screenshot({ path: join(evidence, 'legacy-refreshed.png'), fullPage: true });
-  await page.addScriptTag({ url: 'https://cdn.jsdelivr.net/npm/axe-core@4.10.3/axe.min.js' });
-  // Changed-surface layout/theme/reflow and semantic checks, not a claim of
-  // native dialog or screen-reader certification.
+  await page.addScriptTag({
+    path: fileURLToPath(new URL('../node_modules/axe-core/axe.min.js', import.meta.url))
+  });
+  // Layout/theme/reflow, keyboard and automated accessibility checks, not a
+  // claim of native dialog or screen-reader certification.
   for (const [theme, width, zoom] of [
     ['light', 1280, 1],
     ['dark', 1280, 1],
@@ -248,24 +256,14 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
       },
       { theme, zoom }
     );
-    await expect(report.getByRole('link', { name: 'Explore a project folder…' })).toBeVisible();
+    await expect(reviewLink).toBeVisible();
     expect(await report.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
-    expect(await report.getByRole('checkbox').count()).toBe(1);
-    await report.getByRole('checkbox').focus();
-    await expect(report.getByRole('checkbox')).toBeFocused();
-    await page.keyboard.press('Space');
-    await expect(report.getByRole('button', { name: 'Set it up', exact: true })).toBeDisabled();
-    await expect(report.getByRole('checkbox')).toBeFocused();
-    await page.keyboard.press('Space');
-    await expect(report.getByRole('button', { name: 'Set it up', exact: true })).toBeEnabled();
-    await expect(report.getByRole('checkbox')).toBeFocused();
+    await reviewLink.focus();
+    await expect(reviewLink).toBeFocused();
     const violations = await page.evaluate(async () => {
-      const result = await (window as any).axe.run(
-        { include: [['.folder-agent-card__explore']] },
-        {
-          runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] }
-        }
-      );
+      const result = await (window as any).axe.run('.folder-agent-card__actions .btn-primary', {
+        runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] }
+      });
       return result.violations.map((v: { id: string }) => v.id);
     });
     expect(violations).toEqual([]);
@@ -279,7 +277,7 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   });
   await page.setViewportSize({ width: 1280, height: 900 });
 
-  // Confirm only the allowed Downloads setup through the same API the card uses.
+  // Install from the existing capability catalog API via the Filing console.
   const structure = (data: any) =>
     stable(
       data.folders.map((w: any) => ({
@@ -290,16 +288,12 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
       }))
     );
   const structureBefore = structure(await (await request.get('/api/workspaces')).json());
-  const install = await request.post(`${endpoint}/${id}/setup`, {
-    data: { plan_digest: view.plan.digest, selected: ['file-curator'] }
-  });
-  expect(install.ok(), await install.text()).toBeTruthy();
-  await expect.poll(async () => (await get()).setup?.status).toBe('done');
-  const done = await get();
-  expect(done.setup.receipt?.home).toBeUndefined();
-  expect(done.setup.receipt?.group).not.toBe(true);
-  expect(done.goal_offer).toBeUndefined();
-  expect(done.next_ticket).toBeUndefined();
+  const reviewHref = await reviewLink.getAttribute('href');
+  expect(reviewHref).toBeTruthy();
+  await reviewLink.click();
+  await page.getByRole('button', { name: 'Install Filing', exact: true }).click();
+  const allow = page.getByRole('button', { name: 'Allow access to Downloads', exact: true });
+  await expect(allow).toBeVisible();
   const janitor = await request.get(`/api/workspaces/${id}/file-janitor`);
   expect(janitor.ok(), await janitor.text()).toBeTruthy();
   const state = await janitor.json();
@@ -309,30 +303,23 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   ).json();
   expect(protection.state).toBe('unavailable'); // install is not a folder grant
   expect(structure(await (await request.get('/api/workspaces')).json())).toEqual(structureBefore);
-  await page.goto(`${view.route}?view=details`);
-  if (await closeAssistant.isVisible()) await closeAssistant.click();
-  await page.locator('#workspaceNextAction').click();
-  const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
-  await expect(permissions).toContainText('Allow filing in Downloads');
-  await expect(permissions).toContainText('No file contents are opened');
-  await expect(permissions).toContainText(
-    'Every move into Filed/ or action to Trash needs your separate approval'
-  );
-  await expect(permissions.getByRole('checkbox')).not.toBeChecked();
+  const filing = page.getByRole('dialog', { name: 'Filing' });
+  await expect(filing).toContainText('Nothing is scanned or moved by this step');
+  await expect(filing).not.toContainText('Watching');
   await page.screenshot({ path: join(evidence, 'janitor-needs-grant.png'), fullPage: true });
   await page.getByRole('button', { name: 'Close Filing', exact: true }).click();
-  await page.locator('#workspaceNextAction').click();
-  await expect(permissions.getByRole('checkbox')).not.toBeChecked();
+  await page.goto(reviewHref!);
+  await expect(allow).toBeVisible();
   expect(
     (await (await request.get(`/api/workspaces/${id}/file-janitor/protection`)).json()).state
   ).toBe('unavailable');
   expect(
     mutations.filter(url => /file-janitor\/(scan|preview|apply|setup|prepare-review)/.test(url))
   ).toEqual([]);
-  // This separate explicit confirmation discloses Filed/ creation and one
-  // metadata-only scan. It still grants no moves, Trash or monitoring.
-  await permissions.getByRole('button', { name: 'Allow filing in Downloads', exact: true }).click();
-  await expect(permissions).toBeHidden();
+  // The explicit grant prepares the existing Filed folder but does not scan.
+  await allow.click();
+  await expect(filing.getByRole('button', { name: 'Scan now', exact: true })).toBeVisible();
+  await page.screenshot({ path: join(evidence, 'downloads-ready-to-scan.png'), fullPage: true });
   const configured = (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json())
     .status;
   expect(configured.settings.setup_decision.mode).toBe('manual');
@@ -342,7 +329,10 @@ test('Downloads keeps project evidence, offers only Janitor and explores a separ
   expect(granted.state).toBe('not_covered');
   expect(granted.last_completed_at).toBeUndefined();
   expect(mutations.filter(url => /file-janitor\/(apply|preview)/.test(url))).toEqual([]);
-  expect(mutations.filter(url => /file-janitor\/prepare-review/.test(url))).toHaveLength(1);
+  expect(mutations.filter(url => /file-janitor\/setup\?review=downloads/.test(url))).toHaveLength(
+    1
+  );
+  expect(mutations.filter(url => /file-janitor\/(scan|prepare-review)/.test(url))).toEqual([]);
   expect(await files(root)).toEqual(beforeFiles);
   expect(await Promise.all(beforeFiles.map(path => readFile(path, 'utf8')))).toEqual(
     beforeContents

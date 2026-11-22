@@ -87,7 +87,7 @@ func TestKnownFolders_ChooseDefaultsAndReportPlans(t *testing.T) {
 			}
 			h.svc.Wait()
 			view, _ := h.svc.View(t.Context(), "u1", v.WorkspaceID)
-			if view.Brief != "Custom brief" || view.Premise != nil || !view.ExploreFolder || len(view.Plan.Steps) != 1 {
+			if view.Brief != "Custom brief" || view.Premise != nil || view.ExploreFolder != (id != "downloads") || len(view.Plan.Steps) != 1 {
 				t.Fatal("catch-all report lost role or got a premise", view)
 			}
 			if view.Plan.Runnable != (id != "documents") || view.Plan.Steps[0].Chosen != (id != "documents") {

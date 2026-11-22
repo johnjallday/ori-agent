@@ -2458,6 +2458,37 @@ function clearLocation() {
   delete globalThis.window.history;
 }
 
+test('a Downloads review refuses another grant without loading its batch', async () => {
+  const doc = setup();
+  const route = withLocation('?panel=file-janitor&review=downloads');
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push([String(url), options?.method || 'GET']);
+    if (String(url).endsWith('?review=downloads'))
+      return {
+        ok: false,
+        json: async () => ({
+          error: { message: 'Filing in this workspace uses a different folder.' }
+        })
+      };
+    return { ok: true, json: async () => ({ status: { applies: false } }) };
+  };
+  try {
+    panel._applyUrlState();
+    await settle();
+    assert.match(surface(doc).textContent, /uses a different folder/);
+    assert.equal(doc.getElementById('fileJanitorScan'), null);
+    assert.deepEqual(calls, [['/api/workspaces/ws-1/file-janitor?review=downloads', 'GET']]);
+    panel.close();
+    assert.equal(route.search(), '');
+    await settle();
+    assert.ok(calls.every(([, method]) => method === 'GET'));
+  } finally {
+    panel.close();
+    clearLocation();
+  }
+});
+
 test('an unconfigured install opens straight into setup, with no empty tabs', () => {
   const doc = setup();
   openConsole(setupRequiredStatus);
