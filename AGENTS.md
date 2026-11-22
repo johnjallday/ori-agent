@@ -178,7 +178,7 @@ alone never authorizes live setup, native-agent launch, root changes or migratio
 
 ## Release Candidates
 
-`docs/RELEASE_CHECKLIST.md` is authoritative. Scheduled cadence (at least ten
+`docs/RELEASE_CHECKLIST.md` is authoritative. Scheduled cadence (at least 12
 PRs plus green CI) prepares a frozen `release/vX.Y.Z` and `vX.Y.Z-rc.N` prerelease;
 it never publishes stable automatically. Feature PRs target `dev`. Stable
 promotion needs approval of the exact tested RC and successful candidate

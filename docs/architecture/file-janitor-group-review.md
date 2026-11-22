@@ -462,7 +462,7 @@ write, the connector contract (`mcp_mover.go`, the `Mover` interface).
   placed_category, trash_count}` cards, music row). `singles` are then only the
   loose files with no sibling, and `more` counts the loose files beyond everything
   drawn. A card lists every member wherever it is now (`placement` loose, filed or
-  trash), the file with no `ending` first, so a copy sent to Trash reads "in Trash"
+  trash), the file with no `ending` first, so a proposed Trash choice reads "Marked for Trash"
   on its own line; a card is drawn while any member is loose or placed and is
   left to the Trash box when every member is in Trash. `name` is the first file's
   name without its extension, display text only. The picture also has
@@ -472,6 +472,19 @@ write, the connector contract (`mcp_mover.go`, the `Mover` interface).
   `can_retry` for a file that could not be filed: no path, fingerprint, token or
   choice list. `ReviewGroup` gains `key`, the fixed rule word behind its opaque
   ID; the picture's labels and "Why?" sentences are browser copy keyed by it.
+- The picture response advertises `can_reveal` separately from classification consent.
+  **Show in Finder** sends `POST .../batches/{batchID}/picture/files/{candidateID}/reveal?revision=…`
+  from the local macOS window. It selects the current source in Finder for the person
+  to inspect with Quick Look. It does not open contents in Ori, edit the draft, or
+  execute the plan. The server derives the path from the approved folder and the
+  unchanged saved candidate, never from browser-supplied path text. Remote clients
+  and sessions with desktop launches disabled do not offer the control.
+  **Open** posts to the sibling `/open` route with the same review binding and
+  its own `open` action header. An optional per-file `viewer` names the Mac app:
+  Preview for PDFs and supported images, TextEdit for supported documents, or
+  QuickTime Player for supported media. The server chooses the reader from the
+  verified source name, not the browser. Unknown formats remain Finder-only;
+  opening never asks the OS to execute the source itself.
 - One pure `placeReviewFiles` puts each waiting member in exactly one place:
   Trash choice, else move choice (its category's folder; `your_choice` for a
   question-group or hand-changed file), else a filing member goes to its folder's

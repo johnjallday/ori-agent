@@ -344,6 +344,10 @@ export function resolveWorkspaceNextAction(input) {
     );
     if (updateView)
       descriptor.action.key = `review:${workspaceId}:${review.installed_at}:${review.root_id}:${review.batch_id}`;
+    descriptor.reviewStation = {
+      count: pending,
+      batchId: updateView ? review.batch_id : janitor.batchId
+    };
     if (exactPreview) descriptor.filingPreview = preview;
     return descriptor;
   }

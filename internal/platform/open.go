@@ -22,9 +22,8 @@ import (
 // using on every later launch.
 const NoDesktopOpenEnv = "ORI_NO_DESKTOP_OPEN"
 
-// desktopOpenSwitchedOff reads the switch without logging, for callers that
-// only ask whether a launch would be possible.
-func desktopOpenSwitchedOff() bool {
+// DesktopOpenDisabled reports the sandbox launch switch without logging a target.
+func DesktopOpenDisabled() bool {
 	disabled, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(NoDesktopOpenEnv)))
 	return err == nil && disabled
 }
@@ -32,7 +31,7 @@ func desktopOpenSwitchedOff() bool {
 // desktopOpenDisabled reports whether desktop launches are switched off, and
 // logs the launch that was skipped so the intent is still visible.
 func desktopOpenDisabled(action, target string) bool {
-	if !desktopOpenSwitchedOff() {
+	if !DesktopOpenDisabled() {
 		return false
 	}
 	logger.Info("Skipped desktop launch", logger.Fields{"action": action, "target": target, "env": NoDesktopOpenEnv})

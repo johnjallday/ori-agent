@@ -1718,6 +1718,19 @@ body:has(.ws-map-canvas.is-placement-active) .ws-cmd-map-group-bar {
 .ws-cmd-map-hq-station.is-attention .ws-cmd-map-hq-station-state {
   color: var(--ws-waiting);
 }
+.ws-cmd-map-hq-station.is-review-ready {
+  border-color: var(--ws-waiting);
+  border-inline-start-width: 4px;
+}
+.ws-cmd-map-review-note {
+  display: none;
+  grid-column: 1 / -1;
+  color: var(--ws-ink);
+  font-size: 0.75rem;
+}
+.ws-cmd-map-hq-station:is(:hover, :focus-visible) .ws-cmd-map-review-note {
+  display: block;
+}
 .ws-cmd-map-hq-station.is-clear .ws-cmd-map-hq-station-state {
   color: var(--ws-done);
 }

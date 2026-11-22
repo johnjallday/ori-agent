@@ -19,6 +19,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -48,6 +49,8 @@ type AssistantSetupCoordinator interface {
 }
 
 type Handler struct {
+	openDocument          func(string) error
+	revealFile            func(string) error // native desktop boundary; replaceable in tests
 	service               *filejanitor.Service
 	lookup                WorkspaceLookup
 	provider              userprofile.UserProvider
@@ -120,7 +123,7 @@ func NewHandler(service *filejanitor.Service, lookup WorkspaceLookup, provider u
 	if provider == nil {
 		provider = userprofile.LocalUserProvider{}
 	}
-	return &Handler{service: service, lookup: lookup, provider: provider}
+	return &Handler{service: service, lookup: lookup, provider: provider, revealFile: platform.RevealInFileManager, openDocument: platform.OpenReviewDocument}
 }
 
 // GetStatus handles GET /api/workspaces/{workspaceID}/downloads-janitor.

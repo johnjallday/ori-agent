@@ -181,7 +181,7 @@ export function fileButtonModel({
   const trash = plan?.trash_count || 0;
   // Before the first plan there is nothing to state yet: the button says File and
   // waits ("Checking…"), rather than claiming there is nothing to file.
-  let label = plan ? 'Nothing to file' : 'File';
+  let label = plan ? 'No changes selected' : 'File';
   if (moves > 0 && trash > 0) label = 'File ' + filesWord(moves) + ' · ' + trash + ' to Trash';
   else if (moves > 0) label = 'File ' + filesWord(moves);
   else if (trash > 0) label = 'Move ' + filesWord(trash) + ' to Trash';
@@ -374,7 +374,7 @@ export function pictureHasFiles(picture) {
 function fileBar(h, ctx) {
   const bar = h('section', 'fj-file-bar');
   bar.id = 'fileJanitorFileBar';
-  bar.setAttribute('aria-label', 'Move one file');
+  bar.setAttribute('aria-label', 'Choices for one file');
   const file = ctx.selectedFile;
   if (!file) {
     bar.appendChild(h('p', 'fj-sub', FILE_BAR_HINT));
@@ -439,6 +439,7 @@ function nameList(h, files, className, ctx, { planned: usePlan = false } = {}) {
       control.addEventListener('click', () => ctx.onSelectFile(file));
       item.appendChild(control);
     }
+    appendInspection(h, item, file, ctx);
     if (renamed) item.appendChild(h('span', 'fj-tag', 'renamed'));
     if (file.your_choice) item.appendChild(h('span', 'fj-tag', 'your choice'));
     // R36: a press that found the plan had changed moved nothing; the files whose
@@ -630,7 +631,7 @@ export function pairHint(files) {
   return sameDay ? 'Same size, same day' : 'Same size, different day';
 }
 
-// R28: "Trash the copy" is offered next to a file only when its name ends in a number
+// R28: a per-file Trash mark is offered next to a file only when its name ends in a number
 // in brackets or in "copy" (not "v2" or "version 2": the higher version may be the
 // one to keep), the card has exactly one file with no ending, and the two files are
 // the same size in bytes. A file that is not loose has no such button: it already
@@ -672,7 +673,7 @@ export function bundleMenuValue(bundle) {
   return 'mixed';
 }
 
-export const FILE_BAR_HINT = 'Click any file to move just that one.';
+export const FILE_BAR_HINT = 'Select a filename to choose what happens to it.';
 export const KEPT_NOTE = 'Ori will not ask about these again.';
 
 // The menu of a row or a bundle: the same choices, one value in, one choice out.
@@ -706,10 +707,26 @@ function rowMenu(h, row, ctx) {
   });
 }
 
-// One line of a pair card: the file's name (a button, like every listed file), its
-// size and the day it last changed, and where it is now when it is not loose (R26,
-// R29). The one button on a line is "Trash the copy" or, for a copy already marked,
-// "Put the copy back".
+// The native inspection control is independent of selecting the filename or
+// changing its planned destination. It is absent without a local Finder.
+function appendInspection(h, line, file, ctx) {
+  if (!ctx?.onInspect) return;
+  if (file.viewer) {
+    const open = h('button', 'fj-link fj-reveal', 'Open');
+    open.type = 'button';
+    open.title = 'Open in ' + file.viewer;
+    open.setAttribute('aria-label', 'Open ' + file.name + ' in ' + file.viewer);
+    open.addEventListener('click', () => ctx.onInspect(file, 'open'));
+    line.appendChild(open);
+  }
+  const reveal = h('button', 'fj-link fj-reveal', 'Show in Finder');
+  reveal.type = 'button';
+  reveal.title = 'Select this file in Finder. Press Space there for Quick Look.';
+  reveal.setAttribute('aria-label', 'Show ' + file.name + ' in Finder');
+  reveal.addEventListener('click', () => ctx.onInspect(file, 'reveal'));
+  line.appendChild(reveal);
+}
+
 function pairLine(h, file, files, ctx) {
   const line = h('li', 'fj-pair-line');
   const name = setName(h, h('button', 'fj-file-name'), file.name);
@@ -718,14 +735,20 @@ function pairLine(h, file, files, ctx) {
   name.setAttribute('aria-pressed', ctx.selectedFile?.id === file.id ? 'true' : 'false');
   name.addEventListener('click', () => ctx.onSelectFile?.(file));
   line.appendChild(name);
-  const facts = [formatSize(file.size), formatDay(file.modified_at)].filter(Boolean);
+  const rounded = formatSize(file.size);
+  const hidesDifference = files.some(
+    other => other.size !== file.size && formatSize(other.size) === rounded
+  );
+  const size = hidesDifference ? file.size.toLocaleString() + ' bytes' : rounded;
+  const facts = [size, formatDay(file.modified_at)].filter(Boolean);
   if (facts.length) line.appendChild(h('span', 'fj-pair-facts', facts.join(' · ')));
+  appendInspection(h, line, file, ctx);
   if (file.placement === TRASH) {
-    line.appendChild(h('span', 'fj-pair-state', 'in Trash'));
-    const back = h('button', 'fj-link', 'Put the copy back');
+    line.appendChild(h('span', 'fj-pair-state', 'Marked for Trash'));
+    const back = h('button', 'fj-link', 'Undo mark');
     back.type = 'button';
     back.id = 'fileJanitorPutBack-' + file.id;
-    back.setAttribute('aria-label', 'Put ' + file.name + ' back');
+    back.setAttribute('aria-label', 'Undo Trash mark for ' + file.name);
     back.addEventListener('click', () => ctx.onPutBack?.(file));
     line.appendChild(back);
   } else if (file.placement === FILED) {
@@ -735,10 +758,10 @@ function pairLine(h, file, files, ctx) {
       : 'a folder';
     line.appendChild(h('span', 'fj-pair-state', 'in ' + where));
   } else if (trashCopyAllowed(file, files)) {
-    const trash = h('button', 'fj-link', 'Trash the copy');
+    const trash = h('button', 'fj-link', 'Mark for Trash');
     trash.type = 'button';
     trash.id = 'fileJanitorTrashCopy-' + file.id;
-    trash.setAttribute('aria-label', 'Trash the copy ' + file.name);
+    trash.setAttribute('aria-label', 'Mark for Trash: ' + file.name);
     trash.addEventListener('click', () => ctx.onTrashCopy?.(file));
     line.appendChild(trash);
   }

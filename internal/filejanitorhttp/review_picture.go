@@ -28,7 +28,7 @@ func (h *Handler) GetReviewPicture(w http.ResponseWriter, r *http.Request) {
 		h.respondPictureError(w, err)
 		return
 	}
-	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "picture": picture})
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "picture": picture, "can_reveal": localFinderAvailable(r)})
 }
 
 // GetReviewPictureFiles pages one list of the picture: "and N more" on a folder
