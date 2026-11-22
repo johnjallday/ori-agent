@@ -408,11 +408,11 @@ export function createEmailSetupCard(deps = {}) {
     }
     form.append(list);
     const row = el('div', { className: 'email-setup__actions' });
-    const route = safeRoute(result.workspace?.route);
+    const route = state.guided ? '' : safeRoute(result.workspace?.route);
     const done = el(
       'button',
       { type: 'button', className: route ? 'btn btn-outline-secondary' : 'btn btn-primary' },
-      'Done'
+      state.guided ? 'Back to Personal HQ' : 'Done'
     );
     done.addEventListener('click', () => bootstrapModal()?.hide());
     row.append(done);
@@ -491,6 +491,7 @@ export function createEmailSetupCard(deps = {}) {
       }
       state.result = body.result || {};
       state.phase = 'done';
+      state.onConnected?.(state.result);
       globalThis.window?.dispatchEvent?.(
         new CustomEvent('ori:email-setup-connected', { detail: state.result })
       );
@@ -537,12 +538,18 @@ export function createEmailSetupCard(deps = {}) {
 
   root.addEventListener('hidden.bs.modal', () => {
     const connected = state.phase === 'done';
-    const { onDone, result } = state;
+    const { onDone, onCancel, result } = state;
     state.onDone = null;
+    state.onCancel = null;
+    state.onConnected = null;
+    state.guided = false;
     reset();
     // The password must not outlive the card.
     form.textContent = '';
-    if (!connected) return;
+    if (!connected) {
+      onCancel?.();
+      return;
+    }
     if (typeof onDone === 'function') onDone(result);
     else if (deps.reload !== false) globalThis.location?.reload?.();
   });
@@ -551,6 +558,9 @@ export function createEmailSetupCard(deps = {}) {
     mount();
     reset();
     state.onDone = typeof options.onDone === 'function' ? options.onDone : null;
+    state.onCancel = typeof options.onCancel === 'function' ? options.onCancel : null;
+    state.onConnected = typeof options.onConnected === 'function' ? options.onConnected : null;
+    state.guided = options.guided === true;
     render();
     whenModalReady(instance => {
       if (instance) {
@@ -577,6 +587,14 @@ function initialize() {
   const doc = globalThis.document;
   if (!doc?.body || globalThis.window?.OriEmailSetup) return;
   const card = createEmailSetupCard();
+  // Settings, vault repair and Email Ops retain navigation only. Returning
+  // never repeats a link/connect request; HQ verifies workspace readiness.
+  const query = new URLSearchParams(globalThis.location?.search);
+  if (query.get('guided') === 'email' && query.has('hq')) {
+    void import('./hq-guided-attempt.js').then(({ guidedHint, showHQReturnLinks }) =>
+      showHQReturnLinks(guidedHint(query))
+    );
+  }
   globalThis.window.OriEmailSetup = { open: options => card.open(options) };
 
   // Any link to /?setup=email opens the card where the user is.

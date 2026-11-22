@@ -11,6 +11,7 @@
 // pure view-model helpers are imported from personal-hq-onboarding.js so the
 // state logic has one source of truth.
 
+import { guidedHint, handoffURL } from './hq-guided-attempt.js';
 import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
 
 (function () {
@@ -34,6 +35,17 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
 
   function currentWorkspaceId() {
     return String(window.currentWorkspaceId || document.body?.dataset?.workspaceId || '');
+  }
+
+  function repairRoute(url) {
+    const hint = guidedHint(window.location.search);
+    if (
+      hint?.path !== 'email' ||
+      hint.workspace !== currentWorkspaceId() ||
+      !['/settings#google-account', '/vaults'].includes(url)
+    )
+      return url;
+    return handoffURL(url, hint);
   }
 
   // scope is set by resolveScope() to the endpoints for whichever email-capable
@@ -175,7 +187,7 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
     if (!(conn && conn.subject && gmail && gmail.health === 'healthy')) {
       if (openEmailSetupCard(() => renderBody())) return;
       toast('Connect Google and enable Gmail in Settings → Google Account first.', 'danger');
-      window.open('/settings#google-account', '_blank');
+      window.open(repairRoute('/settings#google-account'), '_blank');
       return;
     }
     try {
@@ -199,7 +211,7 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
             'Your Gmail credential is no longer in the vault. Re-enable Gmail to reconnect it.',
           'danger'
         );
-        window.open('/settings#google-account', '_blank');
+        window.open(repairRoute('/settings#google-account'), '_blank');
         renderBody();
         return;
       }
@@ -256,7 +268,7 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
     action.addEventListener('click', async () => {
       if (view.action === 'settings') {
         if (isEmailSetupUrl(view.actionUrl) && openEmailSetupCard(() => renderBody())) return;
-        window.location.href = view.actionUrl || '/settings#google-account';
+        window.location.href = repairRoute(view.actionUrl || '/settings#google-account');
         return;
       }
       if (view.action === 'disconnect') {
@@ -444,7 +456,7 @@ import { emailSetupView, chipStateLabel } from './personal-hq-onboarding.js';
       if (usesSetupCard && openEmailSetupCard(() => ctx.refresh())) return;
       if (needsSettings || usesSetupCard) {
         ctx.rememberReturn();
-        window.location.href = setup.action_url || '/settings#google-account';
+        window.location.href = repairRoute(setup.action_url || '/settings#google-account');
         return;
       }
       ctx.setError('');
