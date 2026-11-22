@@ -106,6 +106,21 @@ html:has(#projectLibraryPanel) {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+/* A handoff return is tied to the focused row, not to a timer or a selection. */
+.project-library-name.is-handoff-return:focus {
+  outline: 2px solid var(--assistant-amber-deep);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .project-library-name.is-handoff-return:focus {
+    animation: library-handoff-return 900ms ease-out;
+  }
+  @keyframes library-handoff-return {
+    from {
+      background-color: color-mix(in srgb, var(--assistant-amber) 30%, var(--assistant-panel));
+    }
+  }
+}
 .project-library-pick {
   display: inline-flex;
   align-items: center;

@@ -1132,33 +1132,203 @@ test('Home resume renders only bounded saved-user cards with trusted detail navi
   }
 });
 
-test('resume workspace action refuses navigation after the exact link changes', async () => {
-  const previousDocument = globalThis.document;
-  const makeElement = tag => ({
+const musicProgram = {
+  is_station: true,
+  home_provider_id: 'music-project-management',
+  declaration: {
+    id: 'music-producer-assistant',
+    station_name: 'Studio Home',
+    roles: [{ scope: 'home', primary: true, label: 'Studio Manager' }]
+  }
+};
+
+function resumeFixture() {
+  const original = globalThis.document;
+  const make = tag => ({
     tag,
     children: [],
+    classList: { add() {} },
+    dataset: {},
     textContent: '',
-    hidden: false,
     append(...items) {
       this.children.push(...items);
     },
-    replaceChildren() {
-      this.children = [];
+    replaceChildren(...items) {
+      this.children = items;
     },
     addEventListener(name, callback) {
       this[name] = callback;
     }
   });
-  const section = makeElement('section');
-  const container = makeElement('div');
-  globalThis.document = {
-    createElement: makeElement,
-    getElementById(id) {
-      return { projectLibraryResume: section, projectLibraryResumeCards: container }[id];
+  const section = make('section');
+  const container = make('div');
+  const management = {
+    open: false,
+    after(element) {
+      this.next = element;
     }
   };
+  globalThis.document = {
+    createElement: make,
+    getElementById: id =>
+      ({
+        projectLibraryResume: section,
+        projectLibraryResumeCards: container,
+        projectLibraryManagement: management
+      })[id]
+  };
+  return {
+    section,
+    container,
+    management,
+    restore: () => {
+      globalThis.document = original;
+    }
+  };
+}
+
+function fixtureText(element) {
+  return [element.textContent, ...element.children.map(fixtureText)].join('');
+}
+
+test('Music handoff features only the first server entry, with separate bounded notes and workspace actions', async () => {
+  const { section, container, management, restore } = resumeFixture();
   try {
-    const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home', program: musicProgram });
+    const saved = { goal: 'Plan the set', updated_at: '2026-09-27T12:00:00Z' };
+    const calls = [];
+    const cards = [
+      {
+        entry_id: 'z',
+        name: '<Song Z>',
+        workspace_id: 'child',
+        project_next_action: 'Current project step',
+        session: {
+          ...saved,
+          recap: '<strong>Shared recap</strong>',
+          shared_from_project: {},
+          next_action: 'Historical step'
+        }
+      },
+      ...['a', 'm', 'off-page'].map(id => ({ entry_id: id, name: `Song ${id}`, session: saved }))
+    ];
+    panel.request = async path => {
+      calls.push(path);
+      return { cards };
+    };
+    panel.details = (id, _trigger, tab) => calls.push(`${id}:${tab}`);
+    panel.placeResume();
+    await panel.renderResume();
+    assert.equal(management.open, false);
+    assert.equal(management.next, section);
+    assert.equal(section.hidden, false);
+    const [lead, otherHeading, otherLinks, workspaceHeading, workspaceLinks] = container.children;
+    assert.equal(lead.tag, 'article');
+    assert.match(
+      fixtureText(lead),
+      /Studio Manager · Studio Home<Song Z>User-authored linked-project recap · saved /
+    );
+    assert.ok(
+      lead.children.some(child => child.children.some(time => time.dateTime === saved.updated_at))
+    );
+    assert.match(fixtureText(lead), /Saved recap: <strong>Shared recap<\/strong>/);
+    assert.match(fixtureText(lead), /Current saved project next action: Current project step/);
+    assert.doesNotMatch(fixtureText(lead), /Historical step|Plan the set/);
+    assert.equal(otherHeading.textContent, 'Other saved sessions');
+    assert.deepEqual(otherLinks.children.map(fixtureText), [
+      'View Song a session',
+      'View Song m session'
+    ]);
+    assert.equal(workspaceHeading.textContent, 'Workspace shortcuts');
+    assert.equal(fixtureText(workspaceLinks), 'Open <Song Z> workspace');
+    lead.children.at(-1).children[0].click();
+    otherLinks.children[0].children[0].click();
+    const browse = lead.children.at(-1).children[1];
+    assert.equal(browse.textContent, 'Browse projects');
+    panel.focusLibraryTarget = () => calls.push('focus search');
+    panel.loadedPages = 2;
+    panel.selectedProjects.add('m');
+    browse.click();
+    assert.equal(panel.loadedPages, 2);
+    assert.deepEqual([...panel.selectedProjects], ['m']);
+    assert.deepEqual(calls, ['/resume', 'z:sessions', 'a:sessions', 'focus search']);
+  } finally {
+    restore();
+  }
+});
+
+test('Music handoff labels a goal without a manager or next step, and unrelated Homes keep the original section', async () => {
+  const { container, management, restore } = resumeFixture();
+  try {
+    const program = { ...musicProgram, declaration: { id: musicProgram.declaration.id } };
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home', program });
+    const session = { goal: 'Listen', updated_at: '2026-09-27T12:00:00Z' };
+    const read = async () => ({ cards: [{ entry_id: 'solo', name: 'Song', session }] });
+    panel.request = read;
+    await panel.renderResume();
+    assert.match(fixtureText(container), /User-authored note.*Saved goal: Listen/);
+    assert.doesNotMatch(fixtureText(container), /next action|recap|manager/i);
+    session.next_action = 'A step saved with this session';
+    await panel.renderResume();
+    assert.match(
+      fixtureText(container),
+      /Session’s saved next action: A step saved with this session/
+    );
+    const unrelated = new ProjectLibraryPanel({
+      workspaceId: 'home',
+      program: { ...musicProgram, home_provider_id: 'different-provider' }
+    });
+    unrelated.request = read;
+    unrelated.placeResume();
+    await unrelated.renderResume();
+    assert.equal(management.next, undefined);
+    assert.match(fixtureText(container), /View Song session/);
+    assert.doesNotMatch(fixtureText(container), /View session notes/);
+  } finally {
+    restore();
+  }
+});
+
+test('Music handoff distinguishes empty from unavailable and ignores superseded reads', async () => {
+  const { section, container, restore } = resumeFixture();
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home', program: musicProgram });
+    let late;
+    let signal;
+    panel.request = (_path, options) => {
+      signal = options.signal;
+      return new Promise(resolve => {
+        late = resolve;
+      });
+    };
+    const pending = panel.renderResume();
+    panel.request = async () => ({ cards: [] });
+    await panel.renderResume();
+    assert.equal(section.hidden, true);
+    assert.deepEqual(container.children, []);
+    assert.ok(signal.aborted);
+    late({ cards: [{ entry_id: 'old', name: 'Old notes' }] });
+    await pending;
+    assert.equal(section.hidden, true);
+    panel.request = async () => {
+      throw new Error('unavailable');
+    };
+    await panel.renderResume();
+    assert.equal(section.hidden, false);
+    assert.match(fixtureText(container), /Session notes could not be loaded.*still browse/);
+    panel.request = async () => ({ cards: [] });
+    await panel.renderResume();
+    assert.equal(section.hidden, true);
+    assert.deepEqual(container.children, []);
+  } finally {
+    restore();
+  }
+});
+
+test('Music handoff workspace action refuses navigation after the exact link changes', async () => {
+  const { container, restore } = resumeFixture();
+  try {
+    const panel = new ProjectLibraryPanel({ workspaceId: 'home', program: musicProgram });
     panel.run = async (_trigger, _message, work) => work();
     const messages = [];
     panel.status = message => messages.push(message);
@@ -1166,7 +1336,7 @@ test('resume workspace action refuses navigation after the exact link changes', 
     panel.request = async path => {
       requests.push(path);
       if (path.endsWith('/activation'))
-        return { state: 'link_needs_review', workspace_id: 'stale-child' };
+        return { state: 'connected', workspace_id: 'different-child' };
       return {
         cards: [
           {
@@ -1179,14 +1349,14 @@ test('resume workspace action refuses navigation after the exact link changes', 
       };
     };
     await panel.renderResume();
-    const workspace = container.children[0].children.at(-1);
+    const workspace = container.children.at(-1).children[0].children[0];
     assert.equal(workspace.textContent, 'Open Song workspace');
     workspace.click();
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(requests, ['/resume', '/projects/saved-song/activation', '/resume']);
     assert.match(messages.at(-1), /link changed/);
   } finally {
-    globalThis.document = previousDocument;
+    restore();
   }
 });
 

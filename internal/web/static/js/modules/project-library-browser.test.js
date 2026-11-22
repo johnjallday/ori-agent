@@ -52,6 +52,164 @@ test('narrow inspection scrolls its focused heading below the navbar and honors 
   ]);
 });
 
+function handoffBrowser(t) {
+  const prior = globalThis.document;
+  t.after(() => {
+    globalThis.document = prior;
+  });
+  const ui = { focused: null, scrolls: [] };
+  const make = (tag, dataset = {}) => ({
+    tag,
+    dataset,
+    children: [],
+    attributes: {},
+    listeners: {},
+    classList: new Set(),
+    setAttribute(name, value) {
+      this.attributes[name] = value;
+    },
+    append(...items) {
+      this.children.push(...items);
+    },
+    replaceChildren(...items) {
+      this.children = items;
+    },
+    addEventListener(name, listener) {
+      this.listeners[name] = listener;
+    },
+    focus() {
+      ui.focused = this;
+    },
+    scrollIntoView() {
+      ui.scrolls.push(this);
+    },
+    closest() {
+      return null;
+    }
+  });
+  const el = {};
+  for (const suffix of ['PaneTitle', 'Back', 'Title', 'Tabs', 'Browser', 'TabPanel', 'Search'])
+    el[`projectLibrary${suffix}`] = make(suffix);
+  el.projectLibraryBrowser.classList.toggle = () => {};
+  el.projectLibraryBrowser.classList.remove = () => {};
+  const rows = [make('button', { libraryEntry: 'a' }), make('button', { libraryEntry: 'b' })];
+  for (const row of rows) row.classList.remove = key => row.classList.delete(key);
+  const trigger = make('button', { librarySessionEntry: 'b' });
+  const triggers = [trigger];
+  globalThis.document = {
+    createElement: make,
+    getElementById: id => el[id],
+    querySelectorAll: selector =>
+      ({
+        '[data-library-entry]': rows,
+        '[data-library-session-entry]': triggers
+      })[selector] || []
+  };
+  const panel = new ProjectLibraryPanel({ workspaceId: 'home' });
+  panel.rows = rows.map(row => ({ id: row.dataset.libraryEntry, name: 'Same song name' }));
+  return { panel, el, rows, trigger, triggers, ui };
+}
+
+test('handoff requests only exact metadata and Sessions, then focuses the matching loaded row once', async t => {
+  const { panel, el, rows, trigger, ui } = handoffBrowser(t);
+  const requests = [];
+  panel.request = async (path, options) => {
+    assert.equal(options.method, undefined);
+    requests.push(path);
+    if (path === '/projects/b') return { row: panel.rows[1] };
+    if (path === '/projects/b/sessions') return { total: 0 };
+    assert.fail(`Unexpected request: ${path}`);
+  };
+  panel.selectedProjects.add('a');
+  await panel.details('b', trigger, 'sessions');
+  assert.equal(ui.focused, el.projectLibraryPaneTitle);
+  assert.equal(el.projectLibraryPaneTitle.textContent, 'Same song name');
+  assert.equal(panel.browser.tab, 'sessions');
+  assert.deepEqual(requests, ['/projects/b', '/projects/b/sessions']);
+  panel.backToLibrary();
+  assert.equal(ui.focused, rows[1]);
+  assert.equal(rows[0].classList.has('is-handoff-return'), false);
+  assert.equal(rows[1].classList.has('is-handoff-return'), true);
+  assert.deepEqual([...panel.selectedProjects], ['a']);
+  assert.equal(panel.browser.selected, '');
+  rows[1].listeners.blur();
+  assert.equal(rows[1].classList.has('is-handoff-return'), false);
+});
+
+test('off-page and lost details return to their exact trigger or the heading, never a namesake', async t => {
+  const { panel, el, rows, trigger, triggers, ui } = handoffBrowser(t);
+  rows.pop();
+  panel.rows.pop();
+  panel.request = async path =>
+    path.endsWith('/sessions') ? { total: 0 } : { row: { id: 'b', name: 'Same song name' } };
+  await panel.details('b', trigger, 'sessions');
+  panel.backToLibrary();
+  assert.equal(ui.focused, trigger);
+  assert.equal(rows[0].classList.has('is-handoff-return'), false);
+  panel.request = async () => {
+    throw new Error('Gone');
+  };
+  await panel.details('b', trigger, 'sessions');
+  assert.equal(el.projectLibraryPaneTitle.textContent, 'Project unavailable');
+  triggers.pop();
+  panel.backToLibrary();
+  assert.equal(ui.focused, el.projectLibraryTitle);
+  assert.equal(el.projectLibraryTitle.attributes.tabindex, '-1');
+});
+
+test('Sessions evidence wins over an earlier writable detail and a shared note never projects a connection', async t => {
+  const { panel, el, trigger } = handoffBrowser(t);
+  panel.state = { provider_read_only: false };
+  panel.request = async path =>
+    path.endsWith('/sessions')
+      ? {
+          provider_read_only: true,
+          total: 2,
+          rows: [
+            {
+              goal: 'Shared goal',
+              recap: 'Shared recap',
+              shared_from_project: { workspace_id: 'historical-child' }
+            },
+            { goal: 'Unfinished goal' }
+          ]
+        }
+      : { provider_read_only: false, row: { id: 'b', name: 'Song', connection: 'catalog_only' } };
+  await panel.details('b', trigger, 'sessions');
+  const text = element => [element.textContent, ...element.children.map(text)].join(' ');
+  const pane = text(el.projectLibraryTabPanel);
+  assert.match(pane, /Read-only: the Home provider is unavailable/);
+  assert.match(pane, /Catalog only.*User-authored linked-project recap: Shared recap/);
+  assert.match(pane, /Unfinished goal/);
+  assert.doesNotMatch(pane, /Plan a session|Wrap up session|Connected workspace|Open .* workspace/);
+});
+
+test('return and Home changes cancel pending handoff history without late paint or focus', async t => {
+  const { panel, el, rows, trigger, ui } = handoffBrowser(t);
+  const reads = [];
+  panel.request = (path, options) => {
+    if (path === '/projects/b') return Promise.resolve({ row: panel.rows[1] });
+    assert.equal(path, '/projects/b/sessions');
+    const wait = deferred();
+    reads.push({ ...wait, signal: options.signal });
+    return wait.promise;
+  };
+  await panel.details('b', trigger, 'sessions');
+  panel.backToLibrary();
+  assert.equal(reads[0].signal.aborted, true);
+  reads[0].resolve({ total: 1, rows: [{ goal: 'Old history' }] });
+  await Promise.resolve();
+  assert.equal(ui.focused, rows[1]);
+  await panel.details('b', trigger, 'sessions');
+  panel.browser.setHome('another');
+  const afterSwitch = el.projectLibraryTabPanel.children;
+  assert.equal(reads[1].signal.aborted, true);
+  reads[1].resolve({ total: 1, rows: [{ goal: 'Wrong Home' }] });
+  await Promise.resolve();
+  assert.equal(el.projectLibraryTabPanel.children, afterSwitch);
+  assert.equal(ui.scrolls.length, 3); // Two explicit inspections and one Back only.
+});
+
 test('rapid selection cancels A; a late A cannot overwrite B or invoke mutations', async () => {
   const pending = [],
     changes = [];

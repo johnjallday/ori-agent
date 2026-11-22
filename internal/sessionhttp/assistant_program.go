@@ -99,6 +99,8 @@ type assistantProgramSummary struct {
 	// Home itself and only when its installed package declares one, so a page
 	// that is not the Home's own can still point at the card by its name.
 	HomeProfileTitle string `json:"home_profile_title,omitempty"`
+	// HomeProviderID is the Home's saved package identity, even when disabled.
+	HomeProviderID string `json:"home_provider_id,omitempty"`
 }
 
 type assistantProgramRoleProfile struct {
@@ -235,6 +237,8 @@ func (h *Handler) buildAssistantProgramSummary(station, project *workspace.Works
 	}
 	if project != nil {
 		summary.ResourceWorkspace = workspace.AssistantProjectLinkIsResource(project.GetAssistantProjectLink())
+	} else if state.HomeProvider != nil {
+		summary.HomeProviderID = state.HomeProvider.PluginID
 	}
 	if project != nil {
 		if link := project.GetAssistantProjectLink(); link != nil && len(link.ProjectRoles) > 0 {

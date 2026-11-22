@@ -1318,6 +1318,56 @@ html:has(.assistant-program-body) {
   margin-bottom: 0.75rem;
   color: var(--assistant-muted);
 }
+/* The returning note reads like a margin note, not another catalog grid. */
+.project-library-handoff .project-library-resume-cards {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.project-library-handoff-note {
+  max-width: 72ch;
+}
+.project-library-handoff-note h4 {
+  margin: 0 0 var(--space-1);
+  font-family: var(--font-display);
+}
+.project-library-handoff-desk,
+.project-library-handoff-provenance {
+  color: var(--assistant-muted);
+}
+.project-library-handoff-desk {
+  margin-bottom: var(--space-2);
+}
+.project-library-handoff-provenance {
+  display: block;
+  margin-bottom: var(--space-4);
+}
+.project-library-handoff-copy span {
+  white-space: pre-wrap;
+}
+.project-library-handoff-actions,
+.project-library-handoff-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.project-library-handoff .modern-btn {
+  max-width: 100%;
+  white-space: normal;
+}
+.project-library-handoff-label {
+  margin: var(--space-4) 0 var(--space-2);
+  font: inherit;
+  font-weight: 600;
+}
+.project-library-handoff-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.project-library-handoff-links li {
+  min-width: 0;
+  max-width: 100%;
+}
 /* Recently saved: compact song cards, the name and save time beside Open. */
 .project-library-recent-cards {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));

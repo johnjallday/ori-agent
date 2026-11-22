@@ -6,6 +6,7 @@ import {
   libraryOpenRoute,
   libraryOpenedMessage,
   libraryRequestError,
+  lowerNoun,
   projectWords,
   readLibraryPayload as payload,
   RECENT_SONGS_QUERY,
@@ -942,6 +943,7 @@ export class ProjectLibraryPanel {
     this.searchGeneration = 0;
     this.listRead = new ReadEpoch();
     this.restoreRead = new ReadEpoch();
+    this.resumeRead = new ReadEpoch();
     this.browser = new LibraryBrowserState({
       home: this.workspaceId,
       request: (...args) => this.request(...args),
@@ -1118,6 +1120,7 @@ export class ProjectLibraryPanel {
 
   async init() {
     if (!this.workspaceId || !this.panel || !this.program?.is_station) return;
+    this.placeResume();
     this.panel.hidden = false;
     const jump = document.getElementById('projectLibraryJump');
     if (jump) jump.hidden = false;
@@ -1210,7 +1213,7 @@ export class ProjectLibraryPanel {
     this.initBrowser();
     await this.restoreBrowserNavigation();
     await this.restoreCollectionContinuation();
-    await this.refresh();
+    await this.refresh({ waitForResume: false });
     await this.resumeFromIntegration();
   }
 
@@ -1552,7 +1555,8 @@ export class ProjectLibraryPanel {
     }
   }
 
-  async refresh() {
+  async refresh({ waitForResume = true } = {}) {
+    const resume = this.resumeRead.begin();
     this.collectionBrowser?.invalidate();
     this.arrangementPlanning?.invalidate();
     this.arrangementHistoryGeneration++;
@@ -1586,7 +1590,6 @@ export class ProjectLibraryPanel {
       this.renderQueueControls();
       await this.loadSummary();
       await this.renderRecent();
-      await this.renderResume();
       await this.renderPendingLinks();
       await this.renderProposals({ loaded: true });
       await this.renderArrangementHistory();
@@ -1617,6 +1620,12 @@ export class ProjectLibraryPanel {
       }
     }
     this.focusArrival();
+    // Even a slow or failed handoff request must not delay the catalog or an
+    // explicit setup/suggestions arrival. A newer refresh supersedes this read.
+    if (this.state?.initialized === true) {
+      const notes = this.renderResume(resume);
+      if (waitForResume) await notes;
+    }
   }
 
   // Arriving from a map badge, an Action Center card, or a new Home lands on the
@@ -2340,23 +2349,149 @@ export class ProjectLibraryPanel {
     }
   }
 
-  async renderResume() {
+  get musicHandoff() {
+    return (
+      this.program.is_station === true &&
+      this.program.home_provider_id === 'music-project-management' &&
+      this.program.declaration?.id === 'music-producer-assistant'
+    );
+  }
+
+  placeResume() {
+    if (!this.musicHandoff) return;
+    const section = document.getElementById('projectLibraryResume');
+    const management = document.getElementById('projectLibraryManagement');
+    if (section && management) {
+      section.classList.add('project-library-handoff');
+      management.after(section);
+    }
+  }
+
+  resumeNotesButton(card, text, primary = false) {
+    const button = this.browserButton(text, trigger =>
+      this.details(card.entry_id, trigger, 'sessions')
+    );
+    if (primary) button.className = 'modern-btn modern-btn-primary';
+    if (this.musicHandoff) button.dataset.librarySessionEntry = card.entry_id;
+    return button;
+  }
+
+  resumeWorkspaceButton(card) {
+    return this.browserButton(`Open ${card.name} workspace`, workspace =>
+      this.run(workspace, 'Checking the saved project link…', async () => {
+        // The card is a hint. Never navigate from a stale or foreign link.
+        const current = await this.request(
+          `/projects/${encodeURIComponent(card.entry_id)}/activation`
+        );
+        if (current.state !== 'connected' || current.workspace_id !== card.workspace_id) {
+          this.status('That saved link changed. Reopen project details to review it.');
+          await this.renderResume();
+          return;
+        }
+        const route = await this.workspaceRoute(current.workspace_id);
+        if (!route) {
+          this.status('That workspace page could not be found right now. Nothing was changed.');
+          return;
+        }
+        globalThis.location.assign(route);
+      })
+    );
+  }
+
+  renderMusicHandoff(container, [lead, ...others]) {
+    const session = lead.session;
+    const item = node('article', 'project-library-handoff-note');
+    const declaration = this.program.declaration;
+    const manager = declaration.roles?.find(role => role.scope === 'home' && role.primary);
+    const desk = [manager?.label, declaration.station_name].filter(Boolean).join(' · ');
+    if (desk) item.append(node('p', 'project-library-handoff-desk', desk));
+    item.append(node('h4', '', lead.name));
+    const provenance = session.shared_from_project
+      ? 'User-authored linked-project recap'
+      : 'User-authored note';
+    const date = node('small', 'project-library-handoff-provenance', `${provenance} · saved `);
+    const saved = node('time', '', new Date(session.updated_at).toLocaleDateString());
+    saved.dateTime = session.updated_at;
+    date.append(saved);
+    item.append(date);
+    const note = node('p', 'project-library-handoff-copy');
+    note.append(
+      node('strong', '', session.recap ? 'Saved recap: ' : 'Saved goal: '),
+      node('span', '', session.recap || session.goal)
+    );
+    item.append(note);
+    if (lead.project_next_action || session.next_action) {
+      const next = node('p', 'project-library-handoff-copy');
+      next.append(
+        node(
+          'strong',
+          '',
+          lead.project_next_action
+            ? 'Current saved project next action: '
+            : 'Session’s saved next action: '
+        ),
+        node('span', '', lead.project_next_action || session.next_action)
+      );
+      item.append(next);
+    }
+    const actions = node('div', 'project-library-handoff-actions');
+    actions.append(
+      this.resumeNotesButton(lead, 'View session notes', true),
+      this.browserButton(`Browse ${lowerNoun(this.summary?.words, { plural: true })}`, () =>
+        this.focusLibraryTarget(document.getElementById('projectLibrarySearch'))
+      )
+    );
+    item.append(actions);
+    container.append(item);
+    if (others.length) {
+      const list = node('ul', 'project-library-handoff-links');
+      for (const card of others) {
+        const item = node('li');
+        item.append(this.resumeNotesButton(card, `View ${card.name} session`));
+        list.append(item);
+      }
+      container.append(node('h4', 'project-library-handoff-label', 'Other saved sessions'), list);
+    }
+    const linked = [lead, ...others].filter(card => card.workspace_id);
+    if (linked.length) {
+      const links = node('ul', 'project-library-handoff-links');
+      for (const card of linked) {
+        const item = node('li');
+        item.append(this.resumeWorkspaceButton(card));
+        links.append(item);
+      }
+      container.append(node('h4', 'project-library-handoff-label', 'Workspace shortcuts'), links);
+    }
+  }
+
+  async renderResume(turn = this.resumeRead.begin()) {
+    if (!turn.current()) return;
     const section = document.getElementById('projectLibraryResume');
     const container = document.getElementById('projectLibraryResumeCards');
     if (!section || !container) return;
-    container.replaceChildren();
     let view;
     try {
-      view = await this.request('/resume');
+      view = await this.request('/resume', { signal: turn.signal });
     } catch (_) {
+      if (!turn.current()) return;
       section.hidden = false;
-      container.append(
-        node('p', '', 'Resume is unavailable. Saved project details may still be readable below.')
+      const error = node(
+        'p',
+        '',
+        'Session notes could not be loaded. You can still browse the library below.'
       );
+      container.replaceChildren(error);
       return;
     }
-    section.hidden = !view.cards?.length;
-    for (const card of (view.cards || []).slice(0, 3)) {
+    if (!turn.current()) return;
+    container.replaceChildren();
+    const cards = (view.cards || []).slice(0, 3);
+    section.hidden = !cards.length;
+    if (cards.length && this.musicHandoff) {
+      this.renderMusicHandoff(container, cards);
+      return;
+    }
+    for (const card of cards) {
       const item = node('article', 'project-library-resume-card');
       const heading = node('h4', '', card.name);
       const session = card.session;
@@ -2379,42 +2514,8 @@ export class ProjectLibraryPanel {
           `${session.shared_from_project ? 'User-authored linked-project recap' : 'User-authored note'} · saved ${new Date(session.updated_at).toLocaleDateString()}`
         )
       );
-      const open = node('button', 'modern-btn modern-btn-secondary', `View ${card.name} session`);
-      open.type = 'button';
-      open.addEventListener('click', () => void this.details(card.entry_id, open, 'sessions'));
-      item.append(open);
-      if (card.workspace_id) {
-        const workspace = node(
-          'button',
-          'modern-btn modern-btn-secondary',
-          `Open ${card.name} workspace`
-        );
-        workspace.type = 'button';
-        workspace.addEventListener(
-          'click',
-          () =>
-            void this.run(workspace, 'Checking the saved project link…', async () => {
-              // The card is a hint. Never navigate from a stale or foreign link.
-              const current = await this.request(
-                `/projects/${encodeURIComponent(card.entry_id)}/activation`
-              );
-              if (current.state !== 'connected' || current.workspace_id !== card.workspace_id) {
-                this.status('That saved link changed. Reopen project details to review it.');
-                await this.renderResume();
-                return;
-              }
-              const route = await this.workspaceRoute(current.workspace_id);
-              if (!route) {
-                this.status(
-                  'That workspace page could not be found right now. Nothing was changed.'
-                );
-                return;
-              }
-              globalThis.location.assign(route);
-            })
-        );
-        item.append(workspace);
-      }
+      item.append(this.resumeNotesButton(card, `View ${card.name} session`));
+      if (card.workspace_id) item.append(this.resumeWorkspaceButton(card));
       container.append(item);
     }
   }
@@ -2538,6 +2639,7 @@ export class ProjectLibraryPanel {
       if (!restoring) {
         this.restoreRead.cancel();
         this.restoringBrowser = false;
+        this.handoffEntry = '';
         this.clearBrowserSelection('Selection cleared because the result scope changed.');
         this.browser.clear();
       }
@@ -4079,7 +4181,10 @@ export class ProjectLibraryPanel {
         if (!(await this.search(true, { restoring: true }))) return false;
         if (!turn.current()) return;
       }
-      if (intent.selected && this.rows.some(row => row.id === intent.selected)) {
+      if (
+        intent.selected &&
+        (intent.selected === this.handoffEntry || this.rows.some(row => row.id === intent.selected))
+      ) {
         if (metadataOnly) {
           const detailTurn = this.browser.detailRead.begin();
           try {
@@ -4156,16 +4261,9 @@ export class ProjectLibraryPanel {
         this.browser.changeTab(tabs[next].dataset.libraryTab);
       });
     }
-    document.getElementById('projectLibraryBack')?.addEventListener('click', () => {
-      this.paneHidden = true;
-      this.browser.tabRead.cancel();
-      document.getElementById('projectLibraryBrowser')?.classList.remove('is-inspecting');
-      const trigger = [...document.querySelectorAll('[data-library-entry]')].find(
-        button => button.dataset.libraryEntry === this.browser.selected
-      );
-      (trigger || document.getElementById('projectLibraryTitle'))?.focus();
-      this.saveBrowserNavigation();
-    });
+    document
+      .getElementById('projectLibraryBack')
+      ?.addEventListener('click', () => this.backToLibrary());
     document.getElementById('projectLibraryClear')?.addEventListener('click', () => {
       for (const [field, id] of Object.entries(LIBRARY_FILTERS)) {
         if (field === 'sort' || field === 'direction') continue;
@@ -4181,6 +4279,7 @@ export class ProjectLibraryPanel {
       this.saveBrowserNavigation();
       this.listRead.cancel();
       this.restoreRead.cancel();
+      this.resumeRead.cancel();
       this.browser.detailRead.cancel();
       this.browser.tabRead.cancel();
       if (!event.persisted) this.browser.destroy();
@@ -4245,13 +4344,64 @@ export class ProjectLibraryPanel {
     if (clear) clear.hidden = labels.length === 0;
   }
 
+  focusLibraryTarget(target) {
+    if (!target) {
+      target = document.getElementById('projectLibraryTitle');
+      target?.setAttribute('tabindex', '-1');
+    }
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView?.({ block: 'center', behavior: 'instant' });
+  }
+
+  backToLibrary() {
+    const entry = this.browser.selected;
+    const fromHandoff = !!entry && this.handoffEntry === entry;
+    this.paneHidden = true;
+    this.browser.tabRead.cancel();
+    document.getElementById('projectLibraryBrowser')?.classList.remove('is-inspecting');
+    const row = [...document.querySelectorAll('[data-library-entry]')].find(
+      button => button.dataset.libraryEntry === entry
+    );
+    if (fromHandoff) {
+      this.handoffEntry = '';
+      this.restoreRead.cancel();
+      this.restoringBrowser = false;
+      const visibleRow =
+        this.browser.status !== 'error' &&
+        this.rows.some(item => item.id === entry) &&
+        !row?.closest('[hidden]')
+          ? row
+          : null;
+      this.browser.clear(); // Back also cancels a pending detail and its tab reads.
+      if (visibleRow) {
+        visibleRow.classList.add('is-handoff-return');
+        visibleRow.addEventListener(
+          'blur',
+          () => visibleRow.classList.remove('is-handoff-return'),
+          { once: true }
+        );
+        this.focusLibraryTarget(visibleRow);
+      } else {
+        const trigger = [...document.querySelectorAll('[data-library-session-entry]')].find(
+          button => button.dataset.librarySessionEntry === entry && !button.closest('[hidden]')
+        );
+        this.focusLibraryTarget(trigger);
+      }
+    } else {
+      const target = row || document.getElementById('projectLibraryTitle');
+      if (!row) target?.setAttribute('tabindex', '-1');
+      target?.focus();
+    }
+    this.saveBrowserNavigation();
+  }
+
   async details(entryID, trigger, tab = this.browser.tab) {
     this.restoreRead.cancel();
     this.restoringBrowser = false;
     this.paneHidden = false;
-    this.inspectionTrigger = trigger;
+    this.handoffEntry = trigger?.dataset?.librarySessionEntry === entryID ? entryID : '';
     const pending = this.browser.select(entryID, tab);
-    if (globalThis.matchMedia?.('(max-width: 900px)').matches) {
+    if (this.handoffEntry || globalThis.matchMedia?.('(max-width: 900px)').matches) {
       const heading = document.getElementById('projectLibraryPaneTitle');
       heading?.focus({ preventScroll: true });
       // Keep both Back and the focused heading below the fixed, wrapping navbar.
@@ -4468,12 +4618,35 @@ export class ProjectLibraryPanel {
     content.replaceChildren();
     const section = node('section', 'project-library-session-history');
     section.append(node('h4', '', 'Studio sessions'));
+    const connection = {
+      catalog_only: 'Catalog only',
+      connected: 'Connected workspace',
+      needs_review: 'Project link needs review'
+    }[detail.row.connection];
+    if (connection) section.append(node('p', 'project-library-note', connection));
+    let readOnly = sessions.provider_read_only ?? detail.provider_read_only ?? this.readOnly;
+    const providerNote = node(
+      'p',
+      'project-library-note',
+      'Read-only: the Home provider is unavailable.'
+    );
+    providerNote.hidden = !readOnly;
+    section.append(providerNote);
+    const writeActions = [];
+    const addWriteAction = (parent, text, action) => {
+      if (readOnly) return;
+      const button = this.browserButton(text, action);
+      writeActions.push(button);
+      parent.append(button);
+    };
     if (!sessions.total)
       section.append(
         node(
           'p',
           '',
-          'No saved goals yet. Planning a session saves notes, without connecting a project or starting work.'
+          readOnly
+            ? 'No saved goals yet.'
+            : 'No saved goals yet. Planning a session saves notes, without connecting a project or starting work.'
         )
       );
     const list = node('ul');
@@ -4502,21 +4675,16 @@ export class ProjectLibraryPanel {
             this.fullStudioSession(detail, record, button)
           )
         );
-        if (!record.recap && !this.readOnly)
-          item.append(
-            this.browserButton('Wrap up session', button =>
-              this.sessionForm(detail, record, button)
-            )
+        if (!record.recap)
+          addWriteAction(item, 'Wrap up session', button =>
+            this.sessionForm(detail, record, button)
           );
         list.append(item);
       }
     };
     append(sessions.rows);
     section.append(list);
-    if (!this.readOnly)
-      section.append(
-        this.browserButton('Plan a session', button => this.sessionForm(detail, null, button))
-      );
+    addWriteAction(section, 'Plan a session', button => this.sessionForm(detail, null, button));
     let offset = sessions.next_offset;
     if (offset) {
       const more = this.browserButton('Load older sessions', async button => {
@@ -4527,6 +4695,11 @@ export class ProjectLibraryPanel {
             { signal: turn.signal }
           );
           if (!turn.current()) return;
+          if (page.provider_read_only) {
+            readOnly = true;
+            providerNote.hidden = false;
+            for (const write of writeActions.splice(0)) write.remove();
+          }
           append(page.rows);
           offset = page.next_offset;
           button.hidden = !offset;
