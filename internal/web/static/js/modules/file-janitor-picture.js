@@ -767,26 +767,37 @@ function rowMenu(h, row, ctx) {
   });
 }
 
-// The native inspection control is independent of selecting the filename or
-// changing its planned destination. It is absent without a local Finder.
+// The same native controls are used beside picture and All files rows. Viewer
+// and permission are supplied by the server, never inferred from filenames.
+export function renderInspectionControls(doc, file, onInspect, idPrefix) {
+  return inspectionControls(builder(doc), file, onInspect, idPrefix);
+}
+
 function appendInspection(h, line, file, ctx) {
-  if (!ctx?.onInspect) return;
+  for (const control of inspectionControls(h, file, ctx?.onInspect, line.id))
+    line.appendChild(control);
+}
+
+function inspectionControls(h, file, onInspect, idPrefix) {
+  if (!onInspect) return [];
+  const controls = [];
   if (file.viewer) {
     const open = h('button', 'fj-link fj-reveal', 'Open');
     open.type = 'button';
-    if (line.id) open.id = line.id + '-open';
+    if (idPrefix) open.id = idPrefix + '-open';
     open.title = 'Open in ' + file.viewer;
     open.setAttribute('aria-label', 'Open ' + file.name + ' in ' + file.viewer);
-    open.addEventListener('click', () => ctx.onInspect(file, 'open'));
-    line.appendChild(open);
+    open.addEventListener('click', () => onInspect(file, 'open'));
+    controls.push(open);
   }
   const reveal = h('button', 'fj-link fj-reveal', 'Show in Finder');
   reveal.type = 'button';
-  if (line.id) reveal.id = line.id + '-reveal';
+  if (idPrefix) reveal.id = idPrefix + '-reveal';
   reveal.title = 'Select this file in Finder. Press Space there for Quick Look.';
   reveal.setAttribute('aria-label', 'Show ' + file.name + ' in Finder');
-  reveal.addEventListener('click', () => ctx.onInspect(file, 'reveal'));
-  line.appendChild(reveal);
+  reveal.addEventListener('click', () => onInspect(file, 'reveal'));
+  controls.push(reveal);
+  return controls;
 }
 
 function pairLine(h, file, files, ctx, location, fallback) {
@@ -1082,6 +1093,7 @@ function morePanel(h, picture, ctx) {
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.FileJanitorPicture = {
     renderPicture,
+    renderInspectionControls,
     leadSentences,
     frameTitle,
     looseTotal,

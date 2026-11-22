@@ -1,6 +1,7 @@
 package filejanitorhttp
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -39,9 +40,9 @@ func TestReviewInspectionSelectsOnlyTheUnchangedApprovedFile(t *testing.T) {
 	var reveals, opened []string
 	h.openDocument = func(p string) error { opened = append(opened, p); return nil }
 	h.revealFile = func(p string) error { reveals = append(reveals, p); return nil }
-	request := func(route, origin, peer, action, id string, want int) {
+	inspect := func(workspace, batch, revision, route, origin, peer, action, id string, want int) {
 		t.Helper()
-		r := httptest.NewRequest("POST", "http://localhost"+pathFor("file-janitor", "ws-1", "/batches/"+picture.BatchID+"/picture/files/"+id+"/"+route+"?revision="+picture.Revision), nil)
+		r := httptest.NewRequest("POST", "http://localhost"+pathFor("file-janitor", workspace, "/batches/"+batch+"/picture/files/"+id+"/"+route+"?revision="+revision), nil)
 		r.RemoteAddr = peer
 		r.Header.Set("Origin", origin)
 		r.Header.Set("X-Ori-Filing-Action", action)
@@ -52,6 +53,60 @@ func TestReviewInspectionSelectsOnlyTheUnchangedApprovedFile(t *testing.T) {
 		}
 	}
 	const local = "127.0.0.1:18000"
+	request := func(route, origin, peer, action, id string, want int) {
+		t.Helper()
+		inspect("ws-1", picture.BatchID, picture.Revision, route, origin, peer, action, id, want)
+	}
+	readPage := func(batch, peer string, offset string, forwarded bool) (string, []candidateDTO) {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, "http://localhost"+pathFor("file-janitor", "ws-1", "/batches/"+batch+"?limit=1&offset="+offset), nil)
+		r.RemoteAddr = peer
+		if forwarded {
+			r.Header.Set("X-Forwarded-For", local)
+		}
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, r)
+		if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("page status %d: %s", rec.Code, rec.Body)
+		}
+		var body struct {
+			Revision   string         `json:"inspection_revision"`
+			Candidates []candidateDTO `json:"candidates"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || len(body.Candidates) != 1 {
+			t.Fatalf("page: %s (%v)", rec.Body, err)
+		}
+		return body.Revision, body.Candidates
+	}
+	viewers := map[string]string{}
+	for offset, batch := range map[string]string{"0": "latest", "1": picture.BatchID} {
+		revision, page := readPage(batch, local, offset, false)
+		if revision != picture.Revision || !page[0].CanInspect {
+			t.Fatalf("unbound page %s: %q %+v", offset, revision, page[0])
+		}
+		viewers[page[0].ID] = page[0].Viewer
+	}
+	if viewer, found := viewers[ids["notes.zip"]]; !found || viewer != "" || viewers[id] != "Preview" {
+		t.Fatalf("expected Preview and one Finder-only file: %+v", viewers)
+	}
+	for _, mode := range []struct {
+		peer      string
+		forwarded bool
+	}{
+		{"192.0.2.1:1234", false}, {local, true},
+	} {
+		revision, page := readPage(picture.BatchID, mode.peer, "0", mode.forwarded)
+		if revision != "" || page[0].CanInspect || page[0].Viewer != "" {
+			t.Fatalf("nonlocal client received inspection metadata: %q %+v", revision, page[0])
+		}
+	}
+	t.Setenv(platform.NoDesktopOpenEnv, "1")
+	revision, page := readPage(picture.BatchID, local, "0", false)
+	if revision != "" || page[0].CanInspect || page[0].Viewer != "" {
+		t.Fatalf("desktop disabled but inspection advertised: %q %+v", revision, page[0])
+	}
+	t.Setenv(platform.NoDesktopOpenEnv, "0")
+
 	for _, action := range []string{"open", "reveal"} {
 		request(action, "http://localhost", local, action, id, 200)
 		request(action, "http://localhost:9001", local, action, id, 403)
@@ -62,6 +117,9 @@ func TestReviewInspectionSelectsOnlyTheUnchangedApprovedFile(t *testing.T) {
 	}
 	request("open", "http://localhost", local, "reveal", id, 403)
 	request("open", "http://localhost", local, "open", ids["notes.zip"], 400)
+	inspect("ws-1", picture.BatchID, "older-revision", "open", "http://localhost", local, "open", id, 409)
+	inspect("ws-1", "latest", picture.Revision, "open", "http://localhost", local, "open", id, 404)
+	inspect("other-workspace", picture.BatchID, picture.Revision, "open", "http://localhost", local, "open", id, 404)
 	path := filepath.Join(root, "one.png")
 	if err := os.WriteFile(path, []byte("a changed file"), 0600); err != nil {
 		t.Fatal(err)

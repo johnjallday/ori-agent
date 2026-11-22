@@ -157,6 +157,7 @@
   let lastFilingRequest = 0;
   // The file selected for the bar above the File button (R23); one at a time.
   let selectedFile = null;
+  let candidateInspection = null;
   // Rows the person asked Ori to stop asking about, kept only for this page so the
   // row can say so and offer "Review again" (R22). Keyed by scan.
   const keptRows = new Map();
@@ -1338,7 +1339,7 @@
     return wrap;
   }
 
-  function candidateRow(candidate) {
+  function candidateRow(candidate, inspect) {
     const editBinding = reviewEditBinding();
     const token = candidateDOMToken(candidate.id);
     const row = el(
@@ -1464,6 +1465,15 @@
     const actionCell = el('td', 'fj-cell fj-cell-actions');
     actionCell.setAttribute('role', 'cell');
     actionCell.appendChild(el('span', 'fj-cell-mobile-label', 'Actions'));
+    if (inspect && candidate.can_inspect === true) {
+      const controls = window.FileJanitorPicture?.renderInspectionControls(
+        document,
+        { id: candidate.id, name: displayName(candidate), viewer: candidate.viewer },
+        inspect,
+        'fileJanitorInspect-' + token
+      );
+      for (const control of controls || []) actionCell.appendChild(control);
+    }
     if (candidate.state === 'pending' || candidate.state === 'approved') {
       // Trash is a per-file choice with its own toggle. It is never part of the
       // move selection, so a bulk selection cannot become a removal (FR-66).
@@ -2354,11 +2364,26 @@
   }
 
   // Inspection doesn't select the row, submit a draft, or redraw the list.
-  function inspectionAction(displayed) {
+  function inspectionAction(displayed, view) {
     if (!displayed?.canReveal) return undefined;
     const scope = requestScope();
+    const visit = consoleVisit;
     const current = () =>
-      consoleOpen && consoleTab === 'review' && scopeCurrent(scope) && picture === displayed;
+      consoleOpen &&
+      visit === consoleVisit &&
+      consoleTab === 'review' &&
+      reviewView === view &&
+      scopeCurrent(scope) &&
+      batchLoadState === 'loaded' &&
+      lastBatch?.id === displayed.batch_id &&
+      (view === 'groups'
+        ? picture === displayed && pictureLoadState === 'loaded'
+        : candidateInspection === displayed) &&
+      // If a later read observed different membership, do not offer the old
+      // row against it. Never borrow a revision from another response.
+      (reviewDraft?.batch_id !== displayed.batch_id ||
+        reviewDraft.group_revision === displayed.revision);
+    if (!current()) return undefined;
     return async (file, action) => {
       if (!current() || !['open', 'reveal'].includes(action)) return;
       const failure =
@@ -2820,7 +2845,7 @@
         filedRoot: lastStatus?.settings?.filing_root_name || 'Filed',
         selectedFile,
         keptRows: keptRows.get(lastBatch.id) || [],
-        onInspect: inspectionAction(picture),
+        onInspect: inspectionAction(picture, 'groups'),
         onSelectFile: selectFile,
         onRowChoice: (row, choice) => void answerRow(row, choice, binding),
         onFileChoice: (file, choice) => void answerFile(file, choice, binding),
@@ -2909,7 +2934,8 @@
     const body = document.createElement('tbody');
     body.className = 'fj-tbody';
     body.setAttribute('role', 'rowgroup');
-    candidates.forEach(candidate => body.appendChild(candidateRow(candidate)));
+    const inspect = inspectionAction(candidateInspection, 'all');
+    candidates.forEach(candidate => body.appendChild(candidateRow(candidate, inspect)));
     table.appendChild(body);
     return table;
   }
@@ -3205,7 +3231,7 @@
     // whatever they were on: a folder tick, an "and N more" control, the Trash tick
     // or the main button as much as a table control.
     if (
-      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|ReviewAgain|Retry)-|Approve$|TrashAck$|ShowEarlier$|Picture$|Jump(?:Filed|Loose|Trash)$|(?:Filed|Loose|Trash)Title$)/.test(
+      /^fileJanitor(?:(?:Select|Category|FileDetailsToggle|Trash|Skip|Group|Folder|More|RowMenu|BundleMenu|ReviewAgain|Retry|Inspect)-|Approve$|TrashAck$|ShowEarlier$|Picture$|Jump(?:Filed|Loose|Trash)$|(?:Filed|Loose|Trash)Title$)/.test(
         focusedReviewControlID
       )
     ) {
@@ -6491,6 +6517,7 @@
     const sequence = ++batchRequest;
     const current = () => scopeCurrent(scope) && sequence === batchRequest;
     const previousBatchID = lastBatch && lastBatch.id;
+    candidateInspection = null;
     batchLoadState = 'loading';
     notifySubscribers();
     renderBatch();
@@ -6519,6 +6546,12 @@
       if (lastBatch && emptyReviewState === 'no_proposals') reviewStatusMessage = '';
       emptyReviewState = lastBatch ? 'active' : previousBatchID ? 'completed' : emptyReviewState;
       lastCandidates = Array.isArray(body.candidates) ? body.candidates : [];
+      if (lastBatch?.id && /^[0-9a-f]{64}$/.test(body.inspection_revision))
+        candidateInspection = {
+          batch_id: lastBatch.id,
+          revision: body.inspection_revision,
+          canReveal: true
+        };
       batchTotal = Number(body.total) || 0;
       filteredTotal = Number(body.filtered_total) || 0;
       filterCounts = body.counts || {};

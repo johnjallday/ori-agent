@@ -6,8 +6,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
 // The picture is the review drawn as the folder will look after filing. These
@@ -220,7 +218,7 @@ const (
 func pictureFileFor(candidate JanitorCandidate, placement string) PictureFile {
 	file := PictureFile{ID: candidate.ID, Name: candidate.Display(), Size: candidate.Size, Placement: placement}
 	if placement != PictureCouldNotFile {
-		file.Viewer = platform.ReviewDocumentViewer(candidate.Name)
+		file.Viewer, _ = ReviewInspectionViewer(candidate)
 	}
 	if !candidate.ModifiedAt.IsZero() {
 		file.ModifiedAt = candidate.ModifiedAt.UTC().Format("2006-01-02T15:04:05Z07:00")

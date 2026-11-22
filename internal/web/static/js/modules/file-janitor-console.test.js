@@ -4844,13 +4844,16 @@ async function groupedReviewFixture(count = 206) {
     if (isBatchDetailRequest(target)) {
       if (state.failBatchRead) return { ok: false, json: async () => ({}) };
       if (state.emptied) return reply({ batch: null, candidates: [] });
-      const filter = new URLSearchParams(target.split('?')[1]).get('filter');
+      const query = new URLSearchParams(target.split('?')[1]);
+      const filter = query.get('filter');
+      const offset = Number(query.get('offset'));
       const matching = filter
         ? candidates.filter(candidate => candidate.state === filter)
         : candidates;
       return reply({
         batch: state.batch,
-        candidates: matching.slice(0, 50),
+        inspection_revision: state.inspectionRevision,
+        candidates: matching.slice(offset, offset + 50),
         total: count,
         filtered_total: matching.length,
         counts: {
@@ -6768,6 +6771,71 @@ test('Finder on either member of a pair reveals only that file, without redrawin
   );
   assert.equal(calls[0].options.headers['X-Ori-Filing-Action'], 'open');
   assert.equal(rows[0], buttons()[0], 'preserves the list and its scroll position');
+});
+
+test('All files inspection uses its own page binding, does not write a choice, and ignores stale actions', async () => {
+  const { doc, state, calls, candidates } = await groupedReviewFixture(53);
+  Object.assign(candidates[50], { can_inspect: true, viewer: 'Preview' });
+  Object.assign(candidates[51], { can_inspect: true });
+  Object.assign(candidates[52], { can_inspect: true, viewer: 'TextEdit' });
+  state.failPicture = true; // All files does not need a successful picture read.
+  panel.close();
+  panel.open({ source: 'folder-preparation', tab: 'review', item: candidates[0].id });
+  await panel._reloadBatch();
+  const controls = name =>
+    surface(doc).all(node => node.tagName === 'BUTTON' && node.textContent === name);
+  assert.equal(controls('Open').length, 0);
+  state.inspectionRevision = state.review.revision;
+  doc.getElementById('fileJanitorPageNext').click();
+  await planSettled();
+  assert.match(doc.getElementById('fileJanitorPagerStatus').textContent, /Showing 51–53/);
+  assert.equal(controls('Open').length, 2);
+  assert.equal(controls('Show in Finder').length, 3);
+  const open = controls('Open')[0];
+  const finder = controls('Show in Finder')[1];
+  calls.length = 0;
+  open.click();
+  finder.click();
+  await settle();
+  assert.deepEqual(
+    calls.map(({ target, options }) => [
+      target.split('/picture/files/')[1],
+      options.method,
+      options.headers['X-Ori-Filing-Action']
+    ]),
+    [
+      [`${candidates[50].id}/open?revision=${state.review.revision}`, 'POST', 'open'],
+      [`${candidates[51].id}/reveal?revision=${state.review.revision}`, 'POST', 'reveal']
+    ]
+  );
+  assert.equal(controls('Open')[0], open, 'inspection keeps page and row controls');
+
+  const original = globalThis.fetch;
+  let finish;
+  globalThis.fetch = async (url, options) => {
+    if (url.includes('/open?')) {
+      return new Promise(resolve => {
+        finish = () => resolve({ ok: false, status: 409 });
+      });
+    }
+    return original(url, options);
+  };
+  open.click();
+  doc.getElementById('fileJanitorPagePrev').click();
+  await planSettled();
+  finish();
+  await settle();
+  assert.doesNotMatch(surface(doc).textContent, /changed\. Scan again before inspecting/);
+  globalThis.fetch = original;
+  calls.length = 0;
+  finder.click();
+  await settle();
+  assert.equal(calls.length, 0);
+
+  state.inspectionRevision = 'b'.repeat(64);
+  doc.getElementById('fileJanitorPageNext').click();
+  await planSettled();
+  assert.equal(controls('Open').length, 0, 'different membership from the draft');
 });
 
 test('Mark for Trash marks one file; Undo mark clears the choice without filing', async () => {

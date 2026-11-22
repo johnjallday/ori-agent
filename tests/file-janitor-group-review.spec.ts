@@ -285,6 +285,68 @@ test('decision counts jump to their sections and unanswered files do not block u
   await page.screenshot({ path: `${screenshots}/01-one-folder-unticked.png` });
 });
 
+test('both review views dispatch the same simulated inspection; a standard demo hides it', async ({ page, request }) => {
+  const ws = await manualReview(request, ['Reference.pdf', 'notes.zzzz']);
+  const picture = await pictureOf(request, ws.base);
+  const base = `${ws.base}/batches/${picture.batch_id}`;
+  const review = await openReview(page, ws.slug, `&batch_id=${picture.batch_id}`);
+  const allFiles = review.getByRole('button', { name: 'All files', exact: true });
+  const open = review.getByRole('button', { name: 'Open Reference.pdf in Preview', exact: true });
+  const finder = review.getByRole('button', { name: 'Show notes.zzzz in Finder', exact: true });
+  const screenshots = 'tasks/evidence-downloads-review-decisions';
+  mkdirSync(screenshots, { recursive: true });
+  await expect(fileButton(review)).toBeEnabled();
+  await allFiles.click();
+  await expect(review.getByRole('row').filter({ hasText: 'Reference.pdf' })).toBeVisible();
+  await expect(open).toHaveCount(0);
+  await expect(finder).toHaveCount(0);
+  const evidenceOptions = { mask: [review.locator('.fj-console-folder')], maskColor: '#888' };
+  await page.screenshot({ path: `${screenshots}/03-no-desktop.png`, ...evidenceOptions });
+
+  // Only the desktop presentation data/dispatch are simulated in Chromium;
+  // the HTTP handler has separate tests using recording openers.
+  await page.route(url => url.pathname === base || url.pathname === `${base}/picture`, async route => {
+    const response = await route.fetch();
+    const body = await response.json();
+    if (body.picture) body.can_reveal = true;
+    if (body.candidates) {
+      body.inspection_revision = picture.revision;
+      for (const candidate of body.candidates) {
+        candidate.can_inspect = true;
+        if (candidate.name === 'Reference.pdf') candidate.viewer = 'Preview';
+      }
+    }
+    await route.fulfill({ response, json: body });
+  });
+  const dispatch: string[] = [];
+  await page.route('**/picture/files/*/{open,reveal}?*', async route => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const action = url.pathname.split('/').at(-1);
+    expect(req.headers()['x-ori-filing-action']).toBe(action);
+    expect(req.method()).toBe('POST');
+    dispatch.push(url.pathname + url.search);
+    await route.fulfill({ json: { success: true } });
+  });
+  const edits = draftPosts(page);
+  await page.reload();
+  await expect(open).toBeVisible();
+  await open.click();
+  await expect.poll(() => dispatch.length).toBe(1);
+  await allFiles.click();
+  await expect(finder).toBeVisible();
+  await expect(review.getByRole('button', { name: /^Open notes\.zzzz/ })).toHaveCount(0);
+  await open.click();
+  await expect.poll(() => dispatch.length).toBe(2);
+  expect(dispatch[1]).toBe(dispatch[0]);
+  await finder.click();
+  await expect.poll(() => dispatch.length).toBe(3);
+  expect(dispatch[2]).toMatch(/\/reveal\?revision=/);
+  expect(edits).toEqual([]);
+  expect(destinations(ws.root)).toEqual([]);
+  await page.screenshot({ path: `${screenshots}/03-all-files-simulated.png`, ...evidenceOptions });
+});
+
 test('206 mixed files are each drawn once, question groups are never ticked, and deep links still reach All files', async ({
   page,
   request

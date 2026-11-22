@@ -46,6 +46,8 @@ type candidateDTO struct {
 	DecisionCategory  string `json:"decision_category,omitempty"`
 	DecisionFromGroup bool   `json:"decision_from_group,omitempty"`
 	SkipRemembered    *bool  `json:"skip_remembered,omitempty"`
+	CanInspect        bool   `json:"can_inspect,omitempty"`
+	Viewer            string `json:"viewer,omitempty"`
 }
 
 func toCandidateDTO(candidate filejanitor.JanitorCandidate, filingRootName string) candidateDTO {
@@ -166,44 +168,35 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	batchID := strings.TrimSpace(r.PathValue("batchID"))
-	var (
-		batch      filejanitor.JanitorBatch
-		candidates []filejanitor.JanitorCandidate
-	)
-	if batchID == "latest" {
-		var found bool
-		batch, candidates, found, err = h.service.LatestPendingBatch(workspaceID)
-		if err != nil {
-			h.respondError(w, err, "Failed to read the File Janitor batch")
+	var inspectionOwner string
+	if localFinderAvailable(r) {
+		if owner, ownerErr := h.currentOwner(r.Context()); ownerErr == nil {
+			inspectionOwner = owner
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	batch, candidates, inspectionRevision, err := h.service.ReadBatchReview(r.Context(), inspectionOwner, workspaceID, strings.TrimSpace(r.PathValue("batchID")))
+	if err != nil {
+		if errors.Is(err, filejanitor.ErrBatchNotFound) {
+			_ = orihttp.RespondNotFound(w, "batch not found")
 			return
 		}
-		if !found {
-			// No pending work is a normal, empty state — not an error. The
-			// counts are still reported so a client never has to distinguish
-			// "empty batch" from "field missing".
-			_ = orihttp.RespondSuccess(w, map[string]any{
-				"success":        true,
-				"batch":          nil,
-				"candidates":     []candidateDTO{},
-				"total":          0,
-				"filtered_total": 0,
-				"counts":         candidateCounts(nil),
-				"limit":          defaultCandidateLimit,
-				"offset":         0,
-			})
-			return
-		}
-	} else {
-		batch, candidates, err = h.service.BatchDetail(workspaceID, batchID)
-		if err != nil {
-			if errors.Is(err, filejanitor.ErrBatchNotFound) {
-				_ = orihttp.RespondNotFound(w, "batch not found")
-				return
-			}
-			h.respondError(w, err, "Failed to read the File Janitor batch")
-			return
-		}
+		h.respondError(w, err, "Failed to read the File Janitor batch")
+		return
+	}
+	if batch.ID == "" {
+		// A known empty scan is not an error, and never advertises inspection.
+		_ = orihttp.RespondSuccess(w, map[string]any{
+			"success":        true,
+			"batch":          nil,
+			"candidates":     []candidateDTO{},
+			"total":          0,
+			"filtered_total": 0,
+			"counts":         candidateCounts(nil),
+			"limit":          defaultCandidateLimit,
+			"offset":         0,
+		})
+		return
 	}
 
 	filter, ok := candidateFilterFrom(r)
@@ -241,6 +234,11 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 	page := matching[offset:end]
 
 	dtos := candidateDTOs(page, settings.Settings.FilingRootName)
+	if inspectionRevision != "" {
+		for i, candidate := range page {
+			dtos[i].Viewer, dtos[i].CanInspect = filejanitor.ReviewInspectionViewer(candidate)
+		}
+	}
 	if counts["skipped"] > 0 {
 		skips, err := h.service.ListSkipped(workspaceID)
 		if err != nil {
@@ -258,7 +256,7 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	_ = orihttp.RespondSuccess(w, map[string]any{
+	result := map[string]any{
 		"success":    true,
 		"batch":      batch,
 		"candidates": dtos,
@@ -272,7 +270,11 @@ func (h *Handler) GetBatch(w http.ResponseWriter, r *http.Request) {
 		"filter":                 filter,
 		"limit":                  limit,
 		"offset":                 offset,
-	})
+	}
+	if inspectionRevision != "" {
+		result["inspection_revision"] = inspectionRevision
+	}
+	_ = orihttp.RespondSuccess(w, result)
 }
 
 // Candidate paging bounds. A batch can hold hundreds of files; the page size is
