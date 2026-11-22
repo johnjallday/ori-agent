@@ -153,6 +153,14 @@ func TestDetectMutation_QuestionFallsThrough(t *testing.T) {
 		"how many tasks are in Operations",
 		"what is the deploy task status in Operations",
 		"summarize my activity",
+		"Should I create a ticket in Operations to deploy?",
+		"don’t create a ticket in Operations to deploy",
+		`"Create a ticket in Operations to deploy"`,
+		`Create a ticket to quote "start the ticket in Operations"`,
+		"create a ticket list in Operations",
+		"book a flight ticket in Operations",
+		"start the ticket list in Operations",
+		"start the unknown ticket in Operations",
 	} {
 		if conf := h.detectHomeMutationRequest(prompt); conf != nil {
 			t.Errorf("prompt %q should not trigger a mutation, got %+v", prompt, conf)
@@ -171,11 +179,37 @@ func TestExtractTaskDescription(t *testing.T) {
 		{"new task that reviews the backlog in the Roadmap workspace", "Roadmap", "reviews the backlog"},
 		{"make a task for onboarding docs in Docs", "Docs", "onboarding docs"},
 		{"create a task in Ops", "Ops", ""},
+		{"Create a ticket in Album to Mix Ticket 2", "Album", "Mix Ticket 2"},
+		{"Add a ticket: Task ticket in Album", "Album", "Task ticket"},
 	}
 	for _, c := range cases {
-		if got := extractTaskDescription(c.prompt, c.wsName); got != c.want {
-			t.Errorf("extractTaskDescription(%q, %q) = %q, want %q", c.prompt, c.wsName, got, c.want)
+		store := workspace.NewInMemoryStore()
+		makeTestWorkspace(t, store, "ws", c.wsName, nil)
+		conf := newTaskMutationHandler(t, store).detectTaskMutationRequest(c.prompt)
+		var got string
+		if conf != nil {
+			got, _ = conf.Arguments["description"].(string)
 		}
+		if got != c.want {
+			t.Errorf("description for %q = %q, want %q", c.prompt, got, c.want)
+		}
+	}
+}
+
+func TestDetectMutation_DeclinesCompetingWorkspacePlacements(t *testing.T) {
+	store := workspace.NewInMemoryStore()
+	makeTestWorkspace(t, store, "ws-1", "Album", nil)
+	makeTestWorkspace(t, store, "ws-2", "Demos", nil)
+	h := newTaskMutationHandler(t, store)
+	if conf := h.detectTaskMutationRequest("Create a ticket to mix stems in Album or in Demos"); conf != nil {
+		t.Fatalf("competing placements: %+v", conf)
+	}
+	makeTestWorkspace(t, store, "ws-3", "Alternate Album", nil)
+	if err := store.Update("ws-3", func(ws *workspace.Workspace) error { ws.Name = "Album"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if conf := h.detectTaskMutationRequest("Create a ticket in Album to mix stems"); conf != nil {
+		t.Fatalf("duplicate workspace name: %+v", conf)
 	}
 }
 

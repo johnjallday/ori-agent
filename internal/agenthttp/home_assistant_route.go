@@ -455,6 +455,9 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 		if h.OperationRequest != nil && h.OperationRequest(ctx, prompt) {
 			return assistantConversationRoute(workContext), nil
 		}
+		if action, _, _ := legacyWorkRequest(prompt); action != "" {
+			return assistantConversationRoute(workContext), nil
+		}
 		// "Set up", "install" and "connect" read as execution below, which
 		// would hand "can you set up the <integration> integration?" to a
 		// specialist or the workspace's own chat. While its guided setup is

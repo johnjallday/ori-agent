@@ -124,6 +124,79 @@ func TestAssistantOperations_RealHostPrepareTaskWritesNoTaskOrRun(t *testing.T) 
 	}
 }
 
+func TestAssistantOperations_RealHostTicketAndTaskRouteToTheSameReview(t *testing.T) {
+	f := newOperationHostFixture(t)
+	before := f.taskCount(t)
+	for _, noun := range []string{"task", "ticket"} {
+		for _, tc := range []struct{ prompt, title string }{
+			{"Prepare a " + noun + " for Mixer", "Review the mix"},
+			{"Give Mixer a " + noun + " to bounce the stems", "Bounce the stems"},
+			{"Create a " + noun + " in " + f.project.Name + " to mix the chorus", "Mix the chorus"},
+			{"Start the " + noun + " in " + f.project.Name, ""},
+		} {
+			t.Run(tc.prompt, func(t *testing.T) {
+				refs := placementContext(f.project)
+				status, route := f.call(t, http.MethodPost, "/api/home-assistant/route", map[string]any{"prompt": tc.prompt, "context": refs})
+				if status != http.StatusOK || route["intent"] != "assistant_conversation" || route["route_mode"] != "home_inline" {
+					t.Fatalf("route: %d %v", status, route)
+				}
+				calls := len(f.provider.requests)
+				if tc.title != "" {
+					f.prepareScript("Mixer", tc.title)
+				}
+				reply := f.operate(t, "", tc.prompt)
+				if tc.title == "" {
+					conf, _ := reply["confirmation"].(map[string]any)
+					args, _ := conf["arguments"].(map[string]any)
+					if conf["action_type"] != "start_task" || args["workspace_id"] != f.project.ID || args["task_id"] != f.taskID || reply["operation"] != nil || len(f.provider.requests) != calls {
+						t.Fatalf("expected only the existing start confirmation: %v", reply)
+					}
+					return
+				}
+				op := operationOf(t, reply)
+				draft, _ := op["draft"].(map[string]any)
+				context, _ := op["context"].(map[string]any)
+				if op["kind"] != "task" || op["status"] != "prepared" || context["workspace_id"] != f.project.ID ||
+					draft["title"] != tc.title || draft["agent_name"] != "Mixer" || draft["agent_node_id"] == "" || reply["confirmation"] != nil || op["task"] != nil {
+					t.Fatalf("expected only an assigned draft: %v", reply)
+				}
+				for _, request := range f.provider.requests[calls:] {
+					assertOperatingTurnAuthority(t, request)
+				}
+			})
+		}
+	}
+	if after := f.taskCount(t); before != after {
+		t.Fatalf("drafts and confirmations changed the ticket count: %d -> %d", before, after)
+	}
+	var runs int
+	if err := f.builder.sessionStore.DB().QueryRowContext(t.Context(), `SELECT COUNT(*) FROM workspace_runs`).Scan(&runs); err != nil || runs != 0 {
+		t.Fatal("a review started a run", runs, err)
+	}
+}
+
+func TestAssistantOperations_RealHostTicketNeedsAnUnambiguousTarget(t *testing.T) {
+	f := newOperationHostFixture(t)
+	if err := f.builder.workspaceStore.Update(f.project.ID, func(ws *workspace.Workspace) error {
+		ws.AgentInstances = append(ws.AgentInstances, workspace.AgentInstance{Name: "Mixer", NodeID: "another-mixer", InstanceNumber: 2})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.prepareScript("Mixer", "Bounce stems")
+	reply := f.operate(t, "", "Give Mixer a ticket to bounce stems")
+	if reply["operation"] != nil || reply["confirmation"] != nil {
+		t.Fatalf("ambiguous target proposed a write: %v", reply)
+	}
+	request := f.provider.requests[len(f.provider.requests)-1]
+	if result := request.Messages[len(request.Messages)-1].Content; !strings.Contains(result, "several_agents_match") {
+		t.Errorf("tool did not ask for clarification: %s", result)
+	}
+	if f.rows(t, "") != 0 {
+		t.Fatal("ambiguous requests recorded an operation")
+	}
+}
+
 // An agent the workspace does not have gets no draft and no stand-in.
 func TestAssistantOperations_RealHostPrepareTaskNeverSubstitutesAnAgent(t *testing.T) {
 	f := newOperationHostFixture(t)
