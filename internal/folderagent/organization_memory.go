@@ -40,7 +40,7 @@ func (s *Service) convention(id, marker string) (DocumentsConvention, workspace.
 		if e.Entry.Provenance != marker && !strings.HasPrefix(e.Entry.Provenance, marker+"/") {
 			continue
 		}
-		if target.LineHash != "" || !conventionTextOK(e.Entry.Text) {
+		if target.LineHash != "" || e.Entry.Type != workspace.MemoryTypeFeedback || !conventionTextOK(e.Entry.Text) {
 			c.Conflict = true
 			c.Text = ""
 			break

@@ -39,10 +39,26 @@ func trimReviewText(s string) ReviewExcerpt {
 	return e
 }
 
+// SupportsReviewFile defines the same allowlist for the consent preview and
+// extraction. ExtractText's general unknown-extension fallback is not consent.
+func SupportsReviewFile(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".pdf", ".docx", ".txt", ".md", ".csv":
+		return true
+	}
+	return false
+}
+
 // Each PDF runs outside the server: even a tiny compressed PDF can consume
 // far more parser memory or CPU than its on-disk size suggests. The worker
 // only gets approved bytes, never a user's filename, keys or server settings.
 func ExtractReviewExcerpt(ctx context.Context, name string, data []byte) (ReviewExcerpt, error) {
+	if !SupportsReviewFile(name) {
+		return ReviewExcerpt{}, ErrNotText
+	}
+	if err := ctx.Err(); err != nil {
+		return ReviewExcerpt{}, err
+	}
 	if len(data) > ReviewFileBytes {
 		return ReviewExcerpt{}, ErrExpandedTooLarge
 	}

@@ -3,6 +3,7 @@ import { mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join, resolve } from 'node:path';
+import { checkReviewLayout } from './documents-review-layout';
 import { installLocalCdn } from './offline-cdn';
 
 // Revisit only a disposable, already-hired examples sandbox owned by this
@@ -105,6 +106,7 @@ export async function verifyOrganizingLearning(
   await expect(latest.getByText(/one.txt → Maple Street/).first()).toBeVisible();
   await expect(latest.getByText(/two.txt → Oak Avenue/).first()).toBeVisible();
   await latest.screenshot({ path: join(evidence, 'supporting-decisions.png') });
+  await checkReviewLayout(page, scope, 'placement-receipts');
   await latest.getByText('Organizing history', { exact: true }).click();
   await latest.getByRole('button', { name: 'This was an exception' }).click();
   await expect(scope).not.toContainText('Suggested for three.txt:');

@@ -23,6 +23,7 @@ export function documentsOrganizationOffer(doc, base, fetchImpl, route = '') {
   const panel = node('div');
   const status = node('p', null, 'folder-agent-card__note');
   status.setAttribute('role', 'status');
+  status.tabIndex = -1;
   const open = button(
     'Read documents and suggest groups',
     () => (expanded ? close() : showHistory()),
@@ -42,8 +43,10 @@ export function documentsOrganizationOffer(doc, base, fetchImpl, route = '') {
   const start = message => {
     expanded = true;
     open.setAttribute('aria-expanded', 'true');
+    const restoreFocus = panel.contains?.(doc.activeElement);
     panel.replaceChildren();
     status.textContent = message;
+    if (restoreFocus) status.focus();
     return ++generation;
   };
   const read = async (path, options = {}) => {

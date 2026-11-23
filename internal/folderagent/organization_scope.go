@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/fileparser"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
@@ -58,13 +58,6 @@ type organizationScope struct {
 	root, rootID, authority string
 }
 
-func reviewFormat(name string) bool {
-	switch strings.ToLower(filepath.Ext(name)) {
-	case ".pdf", ".docx", ".txt", ".md", ".csv":
-		return true
-	}
-	return false
-}
 func scopeHash(v any) string { b, _ := json.Marshal(v); return documentsRef(string(b)) }
 
 func (s *Service) reviewScope(ctx context.Context, owner string, rec *Record, sel ReviewSelection) (organizationScope, error) {
@@ -113,7 +106,7 @@ func (s *Service) reviewScope(ctx context.Context, owner string, rec *Record, se
 	collect := func(list workspace.DirectoryListing, example bool) []ReviewSource {
 		var rows []ReviewSource
 		for _, e := range list.Entries {
-			if e.Kind != "file" || !reviewFormat(e.Name) || !secondbrain.ValidFolderName(e.Name) || !allowed(e.RelativePath) || sensitive.ContainsSecretLikeText(e.Name) {
+			if e.Kind != "file" || !fileparser.SupportsReviewFile(e.Name) || !secondbrain.ValidFolderName(e.Name) || !allowed(e.RelativePath) || sensitive.ContainsSecretLikeText(e.Name) {
 				continue
 			}
 			src := ReviewSource{Path: e.RelativePath, Version: e.Version, Example: example}

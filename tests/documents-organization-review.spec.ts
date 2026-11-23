@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { checkReviewLayout } from './helpers/documents-review-layout';
 import { verifyOrganizingLearning } from './helpers/documents-organizing-learning';
 import { imageOnlyDocument } from './helpers/image-only-document';
 import { installLocalCdn } from './helpers/offline-cdn';
@@ -16,9 +17,11 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
     await verifyOrganizingLearning(page, request, sandbox!);
     return;
   }
-  const root = test.info().outputPath('Documents');
+  const ordinary = process.env.ORI_DOCUMENT_REVIEW_ORDINARY === '1';
+  const root = test.info().outputPath(...(ordinary ? ['ordinary', 'Documents'] : ['Documents']));
   await mkdir(root, { recursive: true, mode: 0o750 });
-  await symlink(root, join(sandbox!, 'Documents'), 'dir');
+  if (ordinary) await mkdir(join(sandbox!, 'Documents'), { mode: 0o750 });
+  else await symlink(root, join(sandbox!, 'Documents'), 'dir');
   const liveModel = process.env.ORI_DOCUMENT_REVIEW_LIVE_MODEL;
   if (liveModel) test.setTimeout(180_000);
   const exampleMode = process.env.ORI_DOCUMENT_REVIEW_EXAMPLES === '1';
@@ -81,7 +84,8 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
   await picker.locator('input').fill(root);
   await picker.getByRole('button').click();
   const card = page.locator('#personalAssistantFolderAgent');
-  await expect(card).toContainText('Documents is where you keep things.');
+  if (ordinary) await expect(card).toContainText('Hire an agent for Documents');
+  else await expect(card).toContainText('Documents is where you keep things.');
   await card.locator('[data-folder-agent-action="start"]').click();
   const view = async () =>
     (await (await request.get('/api/personal-assistant/folder-agent')).json()).folder_agents.find(
@@ -90,11 +94,26 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
   await expect
     .poll(async () => (await view())?.state, { timeout: liveModel ? 90_000 : 10_000 })
     .toBe('reported');
+  if (ordinary) {
+    const result = await view();
+    expect(result.organization_review).toBeFalsy();
+    const refused = await request.get(
+      `/api/personal-assistant/folder-agent/${result.workspace_id}/organization-preview`
+    );
+    expect(refused.status()).toBe(409);
+  }
   await page.goto((await view()).route);
   const close = page.getByRole('button', { name: 'Close personal assistant', exact: true });
   if (await close.isVisible()) await close.click();
   await page.getByRole('button', { name: 'Open in chat', exact: true }).click();
   const report = page.locator('.folder-agent-card--report:visible');
+  if (ordinary) {
+    await expect(report).toBeVisible();
+    await expect(
+      report.getByRole('button', { name: 'Read documents and suggest groups' })
+    ).toHaveCount(0);
+    return;
+  }
   await expect(report).toContainText('Documents stays a folder with its agent');
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   await report.screenshot({ path: join(evidence, 'direct-return.png') });
@@ -110,6 +129,7 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
   await other.uncheck();
   await expect(scope).toContainText('Scope preview · 4 files');
   await scope.screenshot({ path: join(evidence, 'narrowed-preview.png') });
+  await checkReviewLayout(page, scope, 'consent');
   if (liveModel) {
     await expect(scope).toContainText(`Anthropic (api.anthropic.com) using ${liveModel}`);
     await other.check();
@@ -126,7 +146,17 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
     await expect(scope).toContainText(expectedCoverage, { timeout: 65_000 });
     await expect(scope).toContainText('scan-0010.pdf — no readable text');
     await expect(scope.getByRole('heading', { name: /kitchen remodel/i })).toBeVisible();
+    const members = scope
+      .getByRole('listitem')
+      .filter({ has: page.getByRole('button', { name: 'Open original' }) });
+    await expect(members).toHaveCount(3);
+    expect((await members.allTextContents()).map(text => text.split(' — ')[0]).sort()).toEqual([
+      'estimate.txt',
+      'packing-slip.txt',
+      'scan-0008.txt'
+    ]);
     await scope.screenshot({ path: join(evidence, 'live-model-result.png') });
+    await checkReviewLayout(page, scope, 'groups');
     await scope.getByRole('button', { name: 'Open original' }).first().click();
     await expect(scope).toContainText(
       process.env.ORI_DOCUMENT_REVIEW_NATIVE === '1'
@@ -141,6 +171,7 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
     await scope.getByRole('checkbox', { name: 'estimate.txt', exact: true }).check();
     await check.click();
     await expect(scope).toContainText('review the Filing installation');
+    await checkReviewLayout(page, scope, 'filing-selection');
     await expect(scope.getByRole('link', { name: 'Open workspace in a new tab' })).toHaveAttribute(
       'href',
       (await view()).route

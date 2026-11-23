@@ -4908,6 +4908,43 @@ button.folder-agent-card__hire-face:focus-visible {
 }
 
 /* Secondary actions read in the card's own ink in both themes. */
+/* A review lives inside the narrow lead-chat drawer, not a full workspace pane. */
+.folder-agent-card__organization {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.folder-agent-card__organization fieldset,
+.folder-agent-card__organization details {
+  min-width: 0;
+  margin-block: 0.65rem;
+}
+.folder-agent-card__organization legend {
+  margin-bottom: 0.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.folder-agent-card__organization label {
+  padding-block: 0.15rem;
+}
+.folder-agent-card__organization input[type="checkbox"] {
+  margin-inline-end: 0.5rem;
+  accent-color: var(--primary-color);
+}
+.folder-agent-card__organization input:not([type="checkbox"]),
+.folder-agent-card__organization textarea {
+  max-width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+}
+.folder-agent-card__organization button {
+  margin: 0.15rem 0.3rem 0.15rem 0;
+}
+.folder-agent-card__organization li + li {
+  margin-top: 0.45rem;
+}
 .folder-agent-card__secondary {
   border: 1px solid var(--hc-line-bright, var(--cozy-line-strong));
   background: transparent;
