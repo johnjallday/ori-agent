@@ -411,6 +411,7 @@ func (s *Server) prepareBasePageData(pageName string) web.TemplateData {
 	data.Theme = s.Storage.OnboardingMgr.GetTheme()
 
 	caps := s.privateCapabilitiesSnapshot()
+	data.Extra["FileSearchAvailable"] = s.fileSearch != nil
 	data.Extra["Web3Enabled"] = caps.Web3Wallet
 	data.Extra["MarketplacePaymentsEnabled"] = caps.MarketplacePayments
 	data.Extra["TokenPayoutsEnabled"] = caps.TokenPayouts

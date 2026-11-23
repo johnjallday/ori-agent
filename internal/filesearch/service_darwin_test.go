@@ -39,7 +39,7 @@ func setup(t *testing.T) *fixture {
 		return Policy{Home: f.home, Protected: []string{f.data, filepath.Join(f.home, "Workspaces")}}
 	}, Pick: func(context.Context) (string, bool, error) { return f.pick, f.pick != "", nil }})
 	must(t, err)
-	t.Cleanup(func() { f.Service.Close() })
+	t.Cleanup(func() { f.Close() })
 	return f
 }
 func must(t *testing.T, err error) {

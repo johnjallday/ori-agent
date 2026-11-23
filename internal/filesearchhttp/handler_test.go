@@ -16,7 +16,7 @@ func TestOnlyLocalBrowserCanStartSearchChoice(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	s, e := filesearch.New(t.Context(), filesearch.Options{DB: db.DB, Policy: func() filesearch.Policy { return filesearch.Policy{} }, Pick: func(context.Context) (string, bool, error) { t.Fatal("unexpected picker"); return "", false, nil }})
 	if e != nil {
 		t.Fatal(e)

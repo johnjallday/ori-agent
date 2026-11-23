@@ -27,7 +27,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	peer, _, e := net.SplitHostPort(r.RemoteAddr)
 	site := r.Header.Get("Sec-Fetch-Site")
 	if e != nil || !net.ParseIP(peer).IsLoopback() || (site != "" && site != "same-origin") || r.URL.RawQuery != "" {
-		http.Error(w, "Local search only.", 403)
+		http.Error(w, "Local search only.", http.StatusForbidden)
 		return
 	}
 	op := strings.TrimPrefix(r.URL.Path, Prefix)
@@ -38,18 +38,18 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	owner, e := learningmissionshttp.LocalOwner(r, h.Users, !read)
 	if e != nil || (read && r.Header.Get("X-Ori-Search") != "1") {
-		http.Error(w, "Local search only.", 403)
+		http.Error(w, "Local search only.", http.StatusForbidden)
 		return
 	}
 	if h.Service == nil {
-		http.Error(w, "Folder search is unavailable.", 503)
+		http.Error(w, "Folder search is unavailable.", http.StatusServiceUnavailable)
 		return
 	}
 	decode := func(v any) bool {
 		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048))
 		d.DisallowUnknownFields()
 		if d.Decode(v) != nil || d.Decode(new(any)) != io.EOF {
-			http.Error(w, "Invalid request.", 400)
+			http.Error(w, "Invalid request.", http.StatusBadRequest)
 			return false
 		}
 		return true
@@ -94,6 +94,15 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		e = h.Service.Remove(r.Context(), owner, in.ID)
+	case "open", "reveal":
+		var in struct {
+			ID         string `json:"id"`
+			Generation int    `json:"generation"`
+		}
+		if !decode(&in) {
+			return
+		}
+		e = h.Service.Act(r.Context(), owner, in.ID, in.Generation, op == "reveal")
 	case "refresh":
 		var in struct {
 			ID         string `json:"id"`
@@ -115,7 +124,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(e, filesearch.ErrUnavailable):
 			status = 503
 		}
-		http.Error(w, e.Error(), status)
+		message := e.Error()
+		http.Error(w, strings.ToUpper(message[:1])+message[1:]+".", status)
 		return
 	}
 	_ = json.NewEncoder(w).Encode(out)

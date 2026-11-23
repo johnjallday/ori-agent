@@ -26,8 +26,8 @@ export function scopeNames(sources) {
     ])
   );
 }
-function init() {
-  const $ = id => document.getElementById(id),
+export function mountFileSearch(root, compact = false) {
+  const $ = id => root.querySelector(compact ? `[data-file-role="${id}"]` : `#${id}`),
     term = $('term'),
     notice = $('notice');
   let version = 0,
@@ -76,7 +76,7 @@ function init() {
   function invalidate() {
     clear();
     sources = [];
-    $('sources').replaceChildren();
+    $('sources')?.replaceChildren();
     $('coverage').textContent = 'Checking current sources…';
     void query();
   }
@@ -104,7 +104,7 @@ function init() {
   function map(ss) {
     const same = JSON.stringify(sources) === JSON.stringify(ss);
     sources = ss;
-    if (same && ss.length) return;
+    if (compact || (same && ss.length)) return;
     const names = scopeNames(ss);
     $('emptyMap').textContent = ss.length ? '' : 'No folders mapped yet.';
     $('sources').replaceChildren(
@@ -167,6 +167,7 @@ function init() {
   }
   async function query(append = false) {
     clearTimeout(timer);
+    if (compact && root.closest('[hidden]')) return;
     const stamp = ++version,
       value = term.value;
     try {
@@ -197,13 +198,13 @@ function init() {
       if (stamp !== version) return;
       clear();
       sources = [];
-      $('sources').replaceChildren();
-      $('emptyMap').textContent = 'Map unavailable.';
+      $('sources')?.replaceChildren();
+      if (!compact) $('emptyMap').textContent = 'Map unavailable.';
       $('coverage').textContent = e.message;
       notice.textContent = 'Could not load current results. Retry the search.';
     }
   }
-  $('choices').addEventListener('click', event => {
+  $('choices')?.addEventListener('click', event => {
     const b = event.target.closest('[data-kind]');
     if (b) void run(() => choose(b.dataset.kind, b), b);
   });
@@ -234,14 +235,15 @@ function init() {
     }
   });
   $('more').addEventListener('click', () => query(true));
-  window.addEventListener('keydown', e => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault();
-      term.focus();
-    }
-  });
+  if (!compact)
+    window.addEventListener('keydown', e => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        term.focus();
+      }
+    });
   channel?.addEventListener('message', e => {
-    if (e.data === 'landing') {
+    if (!compact && e.data === 'landing') {
       location.reload();
       return;
     }
@@ -250,7 +252,19 @@ function init() {
   window.addEventListener('pageshow', () => invalidate());
   window.addEventListener('focus', () => query());
   window.addEventListener('pagehide', () => clear());
-  if (document.body.dataset.landing === 'search') term.focus();
+  if (!compact && document.body.dataset.landing === 'search') term.focus();
   void query();
+  return {
+    show() {
+      invalidate();
+      term.focus();
+    },
+    hide() {
+      term.value = '';
+      clear();
+      notice.textContent = '';
+    }
+  };
 }
-if (typeof document !== 'undefined' && document.getElementById('desk')) init();
+if (typeof document !== 'undefined' && document.getElementById('desk'))
+  mountFileSearch(document.getElementById('desk'));

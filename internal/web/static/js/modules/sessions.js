@@ -1016,7 +1016,7 @@ const sessionManager = {
       }
 
       // Ctrl/Cmd + K - Focus search
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k' && !document.getElementById('searchPalette')) {
         e.preventDefault();
         this.focusSearch();
       }

@@ -7,7 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -33,7 +35,7 @@ func (s *Service) publish(ctx context.Context, v Source, batch []entry) error {
 	if err != nil {
 		return ErrUnavailable
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 	for _, r := range batch {
 		res, e := stmt.ExecContext(ctx, rand.Text(), r.relative, r.name, folded(r.name), r.modified, r.witness, r.chain, v.ID, v.Generation)
 		if e != nil {
@@ -49,7 +51,21 @@ func (s *Service) publish(ctx context.Context, v Source, batch []entry) error {
 	return nil
 }
 
+// The saved mode only informs the affordance; dispatch always checks the current object.
+func indexedReader(name, witness string) string {
+	parts := strings.Split(witness, ":")
+	if len(parts) != 6 {
+		return ""
+	}
+	mode, err := strconv.ParseUint(parts[4], 10, 16)
+	if err != nil || mode&0111 != 0 {
+		return ""
+	}
+	return platform.ReviewDocumentViewer(name)
+}
+
 type Hit struct {
+	Reader     string    `json:"reader,omitempty"`
 	ID         string    `json:"id"`
 	Source     string    `json:"source"`
 	Generation int       `json:"generation"`
@@ -100,22 +116,23 @@ func (s *Service) Query(ctx context.Context, owner, term, cursor string, limit i
 		}
 		after = id
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT e.id,e.source,e.generation,e.relative,e.basename,e.modified FROM filename_entries e JOIN filename_sources g ON g.id=e.source AND g.generation=e.generation WHERE g.owner=? AND e.source IN (SELECT value FROM json_each(?)) AND instr(e.folded,?)>0 AND (?='' OR (-e.modified,e.id)>(SELECT -modified,id FROM filename_entries WHERE id=? AND source IN (SELECT value FROM json_each(?)))) ORDER BY e.modified DESC,e.id LIMIT ?`, owner, string(scope), term, after, after, string(scope), limit+1)
+	rows, err := s.DB.QueryContext(ctx, `SELECT e.id,e.source,e.generation,e.relative,e.basename,e.modified,e.witness FROM filename_entries e JOIN filename_sources g ON g.id=e.source AND g.generation=e.generation WHERE g.owner=? AND e.source IN (SELECT value FROM json_each(?)) AND instr(e.folded,?)>0 AND (?='' OR (-e.modified,e.id)>(SELECT -modified,id FROM filename_entries WHERE id=? AND source IN (SELECT value FROM json_each(?)))) ORDER BY e.modified DESC,e.id LIMIT ?`, owner, string(scope), term, after, after, string(scope), limit+1)
 	if err != nil {
 		return Page{}, ErrUnavailable
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var h Hit
-		var rel string
+		var rel, witness string
 		var ts int64
-		if err := rows.Scan(&h.ID, &h.Source, &h.Generation, &rel, &h.Name, &ts); err != nil {
+		if err := rows.Scan(&h.ID, &h.Source, &h.Generation, &rel, &h.Name, &ts, &witness); err != nil {
 			return Page{}, ErrUnavailable
 		}
 		if len(page.Hits) == limit {
 			page.Next = stamp + "." + page.Hits[limit-1].ID
 			break
 		}
+		h.Reader = indexedReader(h.Name, witness)
 		h.Parent = filepath.Dir(rel)
 		if h.Parent == "." {
 			h.Parent = ""

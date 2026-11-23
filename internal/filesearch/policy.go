@@ -14,13 +14,13 @@ import (
 )
 
 var (
-	ErrUnavailable = errors.New("Folder search is unavailable.")
-	ErrRoot        = errors.New("Choose a local folder outside system folders, workspaces and Ori data.")
-	ErrOverlap     = errors.New("This folder overlaps an existing search folder.")
-	ErrLimit       = errors.New("Remove a search folder before adding another.")
-	ErrChoice      = errors.New("This choice expired. Choose the folder again.")
-	ErrMissing     = errors.New("This search source has changed or was removed.")
-	ErrRequest     = errors.New("Invalid search request.")
+	ErrUnavailable = errors.New("folder search is unavailable")
+	ErrRoot        = errors.New("choose a local folder outside system folders, workspaces and Ori data")
+	ErrOverlap     = errors.New("this folder overlaps an existing search folder")
+	ErrLimit       = errors.New("remove a search folder before adding another")
+	ErrChoice      = errors.New("this choice expired; choose the folder again")
+	ErrMissing     = errors.New("this search source has changed or was removed")
+	ErrRequest     = errors.New("invalid search request")
 )
 
 type Policy struct {

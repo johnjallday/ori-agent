@@ -66,7 +66,7 @@ func readLanding(root string) string {
 	if err != nil {
 		return SearchUnknown
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	b, err := io.ReadAll(io.LimitReader(f, 33))
 	if err != nil {
 		return SearchUnknown
@@ -82,7 +82,7 @@ func writeLanding(root, value string) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	_, err = f.WriteString(value)
 	if err == nil {
 		err = f.Sync()

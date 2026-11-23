@@ -42,7 +42,7 @@ func rootWitness(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var fs unix.Statfs_t
 	if unix.Fstatfs(int(f.Fd()), &fs) != nil || fs.Flags&unix.MNT_LOCAL == 0 || strings.TrimRight(string(fs.Fstypename[:]), "\x00") != "apfs" {
 		return "", ErrUnavailable
@@ -104,7 +104,7 @@ func walk(ctx context.Context, v Source, publish func([]entry) error) error {
 		}
 		// Inspect pinned directory entries only. ReadDir batches bound memory in a flat directory.
 		err = func() error {
-			defer dir.Close()
+			defer func() { _ = dir.Close() }()
 			if witness(&st) != lastWitness(d.chain) {
 				return ErrMissing
 			}

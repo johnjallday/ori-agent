@@ -46,7 +46,8 @@ type Service struct {
 	life         context.Context
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
-	afterPublish func(context.Context) // deterministic test barrier, set before starting work
+	dispatch     func(context.Context, string, string) error // nil uses the fixed native document adapter
+	afterPublish func(context.Context)                       // deterministic test barrier, set before starting work
 }
 
 func New(ctx context.Context, o Options) (*Service, error) {
@@ -183,7 +184,7 @@ func (s *Service) sourcesLocked(ctx context.Context, owner string, verify bool) 
 	if err != nil {
 		return nil, ErrUnavailable
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []Source{}
 	for rows.Next() {
 		var v Source

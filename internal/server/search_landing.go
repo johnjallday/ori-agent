@@ -61,12 +61,12 @@ func (s *Server) searchPage(w http.ResponseWriter, r *http.Request, state string
 func (s *Server) searchPreference(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if s.fileSearch == nil || !localSearchPage(r) || r.URL.RawQuery != "" {
-		http.Error(w, "Search unavailable.", 403)
+		http.Error(w, "Search unavailable.", http.StatusForbidden)
 		return
 	}
 	_, err := learningmissionshttp.LocalOwner(r, s.Storage.UserProvider, true)
 	if err != nil {
-		http.Error(w, "Local browser required.", 403)
+		http.Error(w, "Local browser required.", http.StatusForbidden)
 		return
 	}
 	var req struct {
@@ -76,11 +76,11 @@ func (s *Server) searchPreference(w http.ResponseWriter, r *http.Request) {
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256))
 	d.DisallowUnknownFields()
 	if d.Decode(&req) != nil || d.Decode(new(any)) != io.EOF {
-		http.Error(w, "Invalid decision.", 400)
+		http.Error(w, "Invalid decision.", http.StatusBadRequest)
 		return
 	}
 	if onboarding.DecideSearchLanding(config.DefaultDataDir(), req.Expected, req.Next) != nil {
-		http.Error(w, "Decision changed or unavailable. Reload to check.", 409)
+		http.Error(w, "Decision changed or unavailable. Reload to check.", http.StatusConflict)
 		return
 	}
 	w.WriteHeader(204)

@@ -12,7 +12,7 @@ func TestSearchIndexIsDeviceLocalAppRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	before, err := InspectReset(ctx, db.DB)
 	if err != nil || len(before.Problems) > 0 {
 		t.Fatalf("preflight: %v %v", before.Problems, err)
