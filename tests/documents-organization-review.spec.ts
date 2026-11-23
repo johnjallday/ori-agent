@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { mkdir, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { imageOnlyDocument } from './helpers/image-only-document';
 import { installLocalCdn } from './helpers/offline-cdn';
@@ -14,6 +14,21 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
   await mkdir(root, { recursive: true, mode: 0o750 });
   await symlink(root, join(sandbox!, 'Documents'), 'dir');
   const liveModel = process.env.ORI_DOCUMENT_REVIEW_LIVE_MODEL;
+  if (liveModel) test.setTimeout(180_000);
+  const exampleMode = process.env.ORI_DOCUMENT_REVIEW_EXAMPLES === '1';
+  if (exampleMode) {
+    for (const [folder, key] of [
+      ['Maple Street', 'PO-4387'],
+      ['Oak Avenue', 'AC-5580']
+    ]) {
+      await mkdir(join(root, folder));
+      await writeFile(
+        join(root, folder, 'example.txt'),
+        `Property ${folder}. Purchase order ${key}.`,
+        { mode: 0o600 }
+      );
+    }
+  }
   await writeFile(join(root, 'scan-0010.pdf'), imageOnlyDocument(), { mode: 0o600 });
   const fixtures = {
     'estimate.txt': 'Kitchen remodel. Estimate for Maple Street. Cabinet order PO-4387.',
@@ -66,7 +81,9 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
     (await (await request.get('/api/personal-assistant/folder-agent')).json()).folder_agents.find(
       (v: { folder_name: string }) => v.folder_name === 'Documents'
     );
-  await expect.poll(async () => (await view())?.state).toBe('reported');
+  await expect
+    .poll(async () => (await view())?.state, { timeout: liveModel ? 90_000 : 10_000 })
+    .toBe('reported');
   await page.goto((await view()).route);
   const close = page.getByRole('button', { name: 'Close personal assistant', exact: true });
   if (await close.isVisible()) await close.click();
@@ -88,21 +105,32 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
   await expect(scope).toContainText('Scope preview · 4 files');
   await scope.screenshot({ path: join(evidence, 'narrowed-preview.png') });
   if (liveModel) {
-    test.setTimeout(120_000);
     await expect(scope).toContainText(`Anthropic (api.anthropic.com) using ${liveModel}`);
     await other.check();
     await expect(scope).toContainText('Scope preview · 5 files');
+    if (exampleMode) {
+      await scope.getByRole('checkbox', { name: 'Maple Street', exact: true }).check();
+      await expect(scope).toContainText('Maple Street/example.txt');
+      await scope.getByRole('checkbox', { name: 'Oak Avenue', exact: true }).check();
+      await expect(scope).toContainText('Oak Avenue/example.txt');
+      await scope.screenshot({ path: join(evidence, 'examples-preview.png') });
+    }
+    const expectedCoverage = `${exampleMode ? 6 : 4} readable · 1 skipped`;
     await scope.getByRole('button', { name: 'Approve this read' }).click();
-    await expect(scope).toContainText('4 readable · 1 skipped', { timeout: 65_000 });
+    await expect(scope).toContainText(expectedCoverage, { timeout: 65_000 });
     await expect(scope).toContainText('scan-0010.pdf — no readable text');
     await expect(scope.getByRole('heading', { name: /kitchen remodel/i })).toBeVisible();
     await scope.screenshot({ path: join(evidence, 'live-model-result.png') });
-    await scope.getByRole('button', { name: 'Keep as a view' }).click();
+    await scope.getByRole('button', { name: 'Open original' }).first().click();
+    await expect(scope).toContainText(/opened in the system viewer|desktop viewer is unavailable/i);
+    await scope.getByRole('button', { name: 'Keep as a view' }).first().click();
     await expect(scope).toContainText('Saved view · no files moved');
     await page.reload();
     // Direct reload restores the drawer that was already open.
     await expect(report).toBeVisible();
     await report.getByRole('button', { name: 'Read documents and suggest groups' }).click();
-    await expect(report).toContainText('4 readable · 1 skipped');
+    await expect(report).toContainText(expectedCoverage);
+    for (const [name, body] of Object.entries(fixtures))
+      expect(await readFile(join(root, name), 'utf8')).toBe(body);
   }
 });

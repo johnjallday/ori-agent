@@ -30,13 +30,15 @@ var (
 
 // SourceVersion is metadata from the verified directory handle, not a digest of file contents.
 type SourceVersion struct {
-	Identity        string
-	Bytes, Modified int64
-	Placeholder     bool
+	Identity                 string
+	Bytes, Modified, Changed int64
+	Links                    uint64
+	Placeholder              bool
 }
 
 func sourceVersion(info os.FileInfo) SourceVersion {
-	return SourceVersion{directoryid.Witness(info), info.Size(), info.ModTime().UnixNano(), folderdigest.IsDataless(info)}
+	changed, links := sourceChange(info)
+	return SourceVersion{Identity: directoryid.Witness(info), Bytes: info.Size(), Modified: info.ModTime().UnixNano(), Changed: changed, Links: links, Placeholder: folderdigest.IsDataless(info)}
 }
 
 // ContainedFile is one regular file read from inside an approved folder.
@@ -179,7 +181,7 @@ func ReadContainedFile(root, relativePath string, maxBytes int64) (ContainedFile
 
 // ReadVersionedFile checks the exact approved root and file on the handles used for reading.
 func ReadVersionedFile(root, relativePath string, maxBytes int64, rootID string, version SourceVersion) (ContainedFile, error) {
-	if rootID == "" || version.Identity == "" || version.Placeholder {
+	if rootID == "" || version.Identity == "" || version.Placeholder || version.Links != 1 {
 		return ContainedFile{}, ErrSourceUnreadable
 	}
 	return readContainedFile(root, relativePath, maxBytes, rootID, &version)
@@ -256,7 +258,7 @@ func readContainedFile(root, relativePath string, maxBytes int64, rootID string,
 		return ContainedFile{}, ErrSourceTooLarge
 	}
 	after, err := file.Stat()
-	if err != nil || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) || int64(len(data)) != info.Size() {
+	if err != nil || (version != nil && sourceVersion(after) != *version) || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) || int64(len(data)) != info.Size() {
 		return ContainedFile{}, ErrSourceChanged
 	}
 	if current, err := os.Lstat(root); err != nil || !os.SameFile(rootInfo, current) { // #nosec G304 G703 -- same canonical folder as above
