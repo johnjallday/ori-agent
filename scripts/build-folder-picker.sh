@@ -91,6 +91,14 @@ if [ -n "${WAILS_PLATFORM:-}" ]; then
     WAILS_PLATFORM_FLAG="--platform ${WAILS_PLATFORM}"
 fi
 
+# Wails v2 defaults both compile and link flags to macOS 10.13 unless
+# explicitly overridden. Go 1.27's Darwin objects require Ventura.
+if [[ "$WAILS_PLATFORM_FLAG" == "--platform darwin"* ]]; then
+    macos_min_flag="-mmacosx-version-min=13.0"
+    export CGO_CFLAGS="${CGO_CFLAGS:+$CGO_CFLAGS }$macos_min_flag"
+    export CGO_LDFLAGS="${CGO_LDFLAGS:+$CGO_LDFLAGS }$macos_min_flag"
+fi
+
 wails build -clean $WAILS_PLATFORM_FLAG $WAILS_TAGS_FLAG
 
 echo ""

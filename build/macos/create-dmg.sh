@@ -101,7 +101,7 @@ cat >"${APP_PATH}/Contents/Info.plist" <<PLIST
     <key>CFBundleVersion</key>
     <string>${BUNDLE_VERSION}</string>
     <key>LSMinimumSystemVersion</key>
-    <string>10.15</string>
+    <string>13.0</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>LSUIElement</key>

@@ -102,6 +102,12 @@ build/
 !build/macos/
 !build/linux/
 !build/windows/
+# Track the Wails packaging template, not generated icons or binaries.
+!/cmd/folder-picker/build/
+/cmd/folder-picker/build/*
+!/cmd/folder-picker/build/darwin/
+/cmd/folder-picker/build/darwin/*
+!/cmd/folder-picker/build/darwin/Info.plist
 build-dmg/
 release/
 releases/
