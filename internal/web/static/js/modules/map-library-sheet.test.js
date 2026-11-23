@@ -29,13 +29,11 @@ const rows = [
 ];
 
 test('equal project labels keep independent entry and root selections', () => {
-  const source = rows
-    .slice(0, 3)
-    .map((r, i) => ({
-      ...r,
-      name: 'Song',
-      section: { id: i === 2 ? 'other' : 'selected', root_label: 'Music', label: 'Collection' }
-    }));
+  const source = rows.slice(0, 3).map((r, i) => ({
+    ...r,
+    name: 'Song',
+    section: { id: i === 2 ? 'other' : 'selected', root_label: 'Music', label: 'Collection' }
+  }));
   const view = sheetView(source, { ticked: new Set(['e2', 'e3']) });
   assert.deepEqual(
     view.selected.map(i => i.id),

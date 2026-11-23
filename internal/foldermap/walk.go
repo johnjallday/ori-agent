@@ -39,8 +39,10 @@ const (
 type Folder struct {
 	// Witness binds a reviewed root or first-level branch to the directory opened by the walk.
 	Witness string `json:"witness,omitempty"`
-	Path    string `json:"path"`
-	State   State  `json:"state"`
+	// Empty means the opened directory returned no entries, not merely no kept entries.
+	Empty bool   `json:"empty,omitempty"`
+	Path  string `json:"path"`
+	State State  `json:"state"`
 	// Files and Subfolders count the folder's direct entries the walk kept
 	// (regular files that are not cloud placeholders; folders that are not
 	// hidden or skipped).
@@ -401,7 +403,7 @@ func (w *walker) list(rel string) (Folder, error) {
 	w.listed += len(entries)
 	w.m.Entries += len(entries)
 
-	f := Folder{Path: rel, State: StateWalked, Witness: witness}
+	f := Folder{Path: rel, State: StateWalked, Witness: witness, Empty: len(entries) == 0}
 	bestRank := -1
 	var bestMarker folderdigest.Marker
 	extensions := make(map[string]bool)

@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 import { join } from 'node:path';
 import { musicHomeSnapshot } from './helpers/music-home-placement';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { verifyMusicFolderViews } from './helpers/music-folder-matrix';
 
 const evidence = 'tasks/evidence-music-folder-hierarchy';
 const mode = process.env.ORI_MUSIC_FOLDER_MAP;
@@ -42,7 +43,10 @@ test('choose two tracks for placement and review remaining songs separately', as
     await sheet.getByRole('button', { name: `Put ${n} on the map`, exact: true }).click();
     const placement = sheet.locator('[data-sheet-staffing-choice="placement"]');
     if (await placement.count()) await placement.check();
-    await sheet.screenshot({ path: join(evidence, `confirm-${label}.png`) });
+    await sheet.locator('.ws-map-library-sheet-confirm').scrollIntoViewIfNeeded();
+    await sheet
+      .locator('.ws-map-library-sheet-confirm')
+      .screenshot({ path: join(evidence, `confirm-${label}.png`) });
     await sheet.getByRole('button', { name: 'Put on the map', exact: true }).click();
     await expect(sheet.locator('[data-sheet-results]')).toBeVisible({ timeout: 60000 });
     if (label === 'tracks') {
@@ -94,7 +98,29 @@ test('choose two tracks for placement and review remaining songs separately', as
   expect(rows.filter((r: any) => r.connection === 'connected')).toHaveLength(7);
   const album = rows.find((r: any) => r.name === 'Album-5');
   const child = await (await request.get(`/api/workspaces/${album.workspace_id}`)).json();
-  expect(JSON.stringify(child)).toContain('Alternate.rpp');
+  expect(child.shared_data.project_entry.relative_path).toBe('Alternate.rpp');
+  const base = `/api/workspaces/${home.id}/assistant-program/library`;
+  expect((await (await request.get(`${base}/roots`)).json()).total_roots).toBe(1);
+  expect((await (await request.get(`${base}/collections`)).json()).total).toBe(0);
+  const populated = await musicHomeSnapshot(request);
+  expect(
+    populated.workspaces.filter(
+      (w: any) => w.group_template?.plugin_id === 'music-project-management'
+    )
+  ).toHaveLength(1);
+  const fed = populated.workspaces.filter((w: any) => w.parent_id === home.id);
+  expect(fed.map((w: any) => w.name)).toEqual(['Ori Music Demo']);
+  expect(
+    populated.workspaces
+      .filter((w: any) => w.parent_id === fed[0].id)
+      .map((w: any) => w.id)
+      .sort()
+  ).toEqual(
+    rows
+      .filter((r: any) => r.workspace_id)
+      .map((r: any) => r.workspace_id)
+      .sort()
+  );
   // Fixture preparation, before the read-only map journey/restart. Interleave
   // the two branches explicitly rather than relying on renderer seed positions.
   const positions = Object.fromEntries(
@@ -143,6 +169,7 @@ test('the populated map groups seven existing tiles without a layout or staffing
   await button.click();
   await page.getByRole('button', { name: 'Saved layout' }).click();
   await expect(map).toHaveCount(0);
+  await verifyMusicFolderViews(page, `/workspaces/${home.folder_slug}?mode=map`, 'map');
   const after = await musicHomeSnapshot(request);
   expect(after.positions).toEqual(before.positions);
   const ids = (s: any) => s.workspaces.map((w: any) => [w.id, w.parent_id, w.agents]);

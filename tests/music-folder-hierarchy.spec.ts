@@ -1,8 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { realpathSync, mkdirSync, writeFileSync } from 'node:fs';
+import { realpathSync, mkdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installLocalCdn } from './helpers/offline-cdn';
+
+import { verifyMusicFolderViews } from './helpers/music-folder-matrix';
 
 const sandbox = process.env.ORI_MUSIC_HIERARCHY_SANDBOX;
 const evidence = 'tasks/evidence-music-folder-hierarchy';
@@ -19,9 +21,7 @@ test(
     expect(relative(realpathSync(tmpdir()), root)).toMatch(/^ori-music-hierarchy\.[^/]+$/);
     mkdirSync(evidence, { recursive: true });
     // A branch over the walk's per-directory budget is unknown, not empty.
-    const partial = join(root, 'fixture', 'Ori Music Demo', 'Uninspected', 'Too large');
-    mkdirSync(partial, { mode: 0o750, recursive: true });
-    for (let i = 0; i <= 5000; i++) writeFileSync(join(partial, String(i)), '', { mode: 0o600 });
+    // Prepared by scripts/music-folder-hierarchy-demo.sh before the source manifest.
     await installLocalCdn(page);
     await page.goto('/?panel=today&folder=show');
     await page
@@ -115,6 +115,7 @@ test(
     const after = await request.get(
       `/api/workspaces/${receipt.home.id}/assistant-program/library/projects?page_size=50`
     );
+    await verifyMusicFolderViews(page, landing, 'sheet');
     expect((await after.json()).rows.filter((r: any) => r.connection === 'connected')).toHaveLength(
       0
     );

@@ -104,7 +104,7 @@ func bindHomeBranches(rec Record, plan *Plan, selected []string) foldermap.Facts
 			}
 		} else if b.Partial {
 			b.Summary = "Not fully inspected"
-		} else if f.State == foldermap.StateWalked && f.Files == 0 && f.Subfolders == 0 {
+		} else if f.State == foldermap.StateWalked && f.Empty {
 			b.Summary = "Empty in the look"
 		} else {
 			continue
@@ -130,7 +130,7 @@ func (p Plan) ListingFacts(f foldermap.Facts) foldermap.Facts {
 	f.Members = nil
 	for _, m := range members {
 		s, _ := foldermap.ProjectSection(m.Path)
-		if s == "" || included[s] {
+		if m.Depth < 2 || (s != "" && included[s]) {
 			f.Members = append(f.Members, m)
 		}
 	}

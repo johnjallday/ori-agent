@@ -392,7 +392,7 @@ export async function loadConnectedStaffing(client, rows) {
   return Object.fromEntries(entries.filter(([, status]) => status));
 }
 
-/** The rows ticked by default: single-file projects only (FR-7). */
+/** Group by the server's root-specific identity; equal display labels are not identities. */
 export function folderGroups(items) {
   const groups = new Map();
   for (const item of items) {
@@ -411,6 +411,7 @@ export function folderGroups(items) {
   );
 }
 
+/** Flat, complete listings keep their single-file defaults. */
 export function defaultTicked(rows) {
   return new Set(
     (Array.isArray(rows) ? rows : [])
@@ -678,6 +679,7 @@ export function openLibrarySheet({
             status.textContent = `Choose the project file for ${item.name} first.`;
           }
           render();
+          root.querySelector(`[data-sheet-row="${CSS.escape(item.id)}"]`)?.focus();
         });
         const name = el(doc, 'span', `${SHEET_CLASS}-name`, item.name);
         label.append(box, name);
@@ -1146,7 +1148,14 @@ export function openLibrarySheet({
       subtitle.textContent = view.subtitle;
       if (!view.items.length) {
         body.append(
-          el(doc, 'p', `${SHEET_CLASS}-empty`, 'The last scan found no projects to set up.')
+          el(
+            doc,
+            'p',
+            `${SHEET_CLASS}-empty`,
+            state.loadFailed
+              ? 'The current shelf could not be read. Close and reopen to try again.'
+              : 'The last scan found no projects to set up.'
+          )
         );
       } else {
         body.append(renderRows(view));
@@ -1212,6 +1221,7 @@ export function openLibrarySheet({
 
   async function load(more = false) {
     state.phase = 'loading';
+    state.loadFailed = false;
     render();
     try {
       const [result, plan] = await Promise.all([
@@ -1230,7 +1240,8 @@ export function openLibrarySheet({
       state.revision = result.revision;
       state.readOnly = result.readOnly;
       state.staffingPlan = plan;
-      state.rowStaffing = await loadConnectedStaffing(api, state.rows);
+      const pageStaffing = await loadConnectedStaffing(api, result.rows);
+      state.rowStaffing = more ? { ...state.rowStaffing, ...pageStaffing } : pageStaffing;
       for (const id of [...state.repair]) {
         if (!assistantState(state.rowStaffing[id]).repairable) state.repair.delete(id);
       }
@@ -1254,6 +1265,8 @@ export function openLibrarySheet({
       state.phase = 'list';
     } catch (error) {
       state.rows = [];
+      state.nextCursor = '';
+      state.loadFailed = true;
       state.phase = 'list';
       state.message = error?.message || 'The library could not be read.';
     }
