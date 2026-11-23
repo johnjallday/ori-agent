@@ -637,6 +637,41 @@ function commandWithFolderAgent(tasks = []) {
   return command;
 }
 
+test('launcher question follows the addressed report phase, not its unread bit or wording', () => {
+  const command = commandWithFolderAgent();
+  const question = (id = 'w', agent = 'Albums Manager') => command.folderAgentQuestion(id, agent);
+  command.setFolderAgent('w', folderEntry());
+  const premise = question();
+  assert.equal(premise.status, 'Has a question for you');
+  assert.ok(premise.key);
+  assert.equal(question('other'), null);
+  assert.equal(question('w', 'Someone else'), null);
+  command.setFolderAgent(
+    'w',
+    folderEntry({ chat: { session_id: 'thread-1', message_id: 'question-1', unread: false } })
+  );
+  assert.deepEqual(question(), premise);
+  for (const raw of [
+    { premise: { state: 'confirmed', sentence: 'Answered' } },
+    { state: 'looking' },
+    { state: 'set_up', goal_offer: { goal: 'Suggested' } },
+    { state: 'set_up' }
+  ]) {
+    command.setFolderAgent('w', folderEntry(raw));
+    assert.equal(question(), null);
+  }
+  command.setFolderAgent(
+    'w',
+    folderEntry({ state: 'set_up', songs_offer: { ask: 'Learn them?' } })
+  );
+  assert.equal(question().status, premise.status);
+  assert.notEqual(question().key, premise.key);
+  command.setFolderAgent('w', folderEntry({ chat: null }));
+  assert.deepEqual(question(), { status: premise.status, key: '' });
+  command.setFolderAgent('w', null);
+  assert.equal(question(), null);
+});
+
 test('the strip names the waiting question and redraws only when what it waits on changes', () => {
   const command = commandWithFolderAgent();
   command.setFolderAgent('w', folderEntry());

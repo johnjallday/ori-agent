@@ -16,6 +16,7 @@ import {
   recipientMenuRows,
   switchLockMessage
 } from './personal-assistant-recipient.js';
+import { firstQuestionPresentation } from './commander-question-memory.js';
 import { createLeadWelcome } from './personal-assistant-lead-welcome.js';
 import { workspaceUpdates, exposedWelcomeMessages } from './workspace-updates.js';
 import {
@@ -1286,6 +1287,13 @@ async function openFolderReport(workspaceId, ref, trigger) {
   const hydrated = changing
     ? await hydrateEntryConversation({ force: true, exact: true })
     : await syncFolderReportThread(workspaceId, target);
+  const shown = recipients()?.current?.();
+  if (
+    routeContext().workspace_id !== workspaceId ||
+    shown?.workspaceId !== workspaceId ||
+    shown.kind !== RECIPIENT_WORKSPACE_ENTRY
+  )
+    return false;
   open(trigger, { preserveConversation: true });
   if (!hydrated && changing) {
     setStatus('This saved conversation is unavailable. Try again from the map.');
@@ -1611,6 +1619,30 @@ function identity() {
   return recipientIdentityView(state.view, recipients()?.resolution?.() || null);
 }
 
+function launcherQuestion() {
+  const recipient = recipients()?.current?.();
+  if (recipient?.kind !== RECIPIENT_WORKSPACE_ENTRY || !recipient.available) return null;
+  if (recipient.workspaceId !== routeContext().workspace_id) return null;
+  return window.workspaceCommand?.folderAgentQuestion?.(recipient.workspaceId, recipient.name);
+}
+
+let launcherInView = false;
+function refreshQuestionCue() {
+  const els = state.els;
+  if (!els?.launcherRole) return;
+  const question = launcherQuestion();
+  els.launcherAvatar.toggleAttribute('data-question', Boolean(question));
+  const text = question?.status || identity().role;
+  if (els.launcherRole.textContent !== text) els.launcherRole.textContent = text;
+  if (!question) els.launcherAvatar.classList.remove('question-bob');
+  if (!question?.key || !launcherInView || document.hidden || state.open || els.launcher.hidden)
+    return;
+  if (!firstQuestionPresentation(question.key, () => window.sessionStorage)) return;
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    els.launcherAvatar.classList.add('question-bob');
+  }
+}
+
 function renderIdentity() {
   const { els, view, personalAssistant } = state;
   if (!els) return;
@@ -1618,7 +1650,7 @@ function renderIdentity() {
   renderWelcomeIndicator();
   els.launcher.hidden = !who.launcherVisible;
   els.launcherName.textContent = who.name;
-  if (els.launcherRole) els.launcherRole.textContent = who.role;
+  refreshQuestionCue();
   const title = state.workActivityOnly && !who.openable ? 'Work activity' : who.name;
   if (els.name) els.name.textContent = title;
   else els.title.textContent = title;
@@ -2579,8 +2611,21 @@ function init() {
       interview: document.getElementById('personalAssistantTodayInterview')
     }
   };
+  // Only consume a presentation when the fixed launcher is on screen (not
+  // while the drawer is open or another workspace is publishing a report).
+  if (typeof IntersectionObserver !== 'undefined') {
+    new IntersectionObserver(([entry]) => {
+      launcherInView = entry.isIntersecting && entry.intersectionRatio > 0;
+      refreshQuestionCue();
+    }).observe(launcher);
+  }
+  document.addEventListener('visibilitychange', refreshQuestionCue);
+  const stopBob = () => state.els.launcherAvatar.classList.remove('question-bob');
+  state.els.launcherAvatar.addEventListener('animationend', stopBob);
+  state.els.launcherAvatar.addEventListener('animationcancel', stopBob);
   launcher.addEventListener('click', () => {
     if (state.open) close();
+    else if (launcherQuestion()) window.workspaceCommand.openFolderAgent(launcher);
     else if (waitingFolderReport() || currentWelcome()?.unread_count > 0) openUnread(launcher);
     else open(launcher);
   });
@@ -2851,6 +2896,7 @@ function init() {
 const api = {
   init,
   open,
+  refreshQuestionCue,
   openWelcome,
   openWorkspaceWelcome,
   // The folder agent's report in the Commander's thread (workspace chat sync).

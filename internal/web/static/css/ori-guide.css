@@ -536,6 +536,43 @@
   cursor: pointer;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .personal-assistant-launcher__avatar.question-bob {
+    animation: commander-question-bob 340ms ease-in-out 2;
+  }
+}
+
+@keyframes commander-question-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+.personal-assistant-launcher__avatar[data-question] {
+  position: relative;
+}
+
+.personal-assistant-launcher__avatar[data-question]::after {
+  position: absolute;
+  inset: -2px -3px auto auto;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid var(--ori-accent-text);
+  border-radius: 50%;
+  background: var(--ori-surface);
+  color: var(--ori-accent-text);
+  content: "?";
+  font:
+    800 13px/1 system-ui,
+    sans-serif;
+}
+
 .personal-assistant-launcher__unread {
   flex: none;
   width: 10px;

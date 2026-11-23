@@ -2475,6 +2475,7 @@ export class WorkspaceCommandView {
     const before = this.folderAgentWordsKey();
     this._folderAgent = entry?.view ? { ...entry, workspaceId: id } : null;
     if (before !== this.folderAgentWordsKey()) this.refreshNextAction(id);
+    if (typeof window !== 'undefined') window.PersonalAssistantPanel?.refreshQuestionCue?.();
   }
 
   // folderAgentView is the folder agent's view for the workspace shown, or null.
@@ -2508,6 +2509,19 @@ export class WorkspaceCommandView {
     )
       return null;
     return folderAgentWaiting(view, this.workspaceId());
+  }
+
+  // Opening/seeing a message doesn't answer its card. The same message can
+  // hold the premise, then a plan, then a separate songs question.
+  folderAgentQuestion(workspaceId, agentName) {
+    if (!workspaceId || this.workspaceId() !== workspaceId) return null;
+    const words = this.folderAgentWaitingFor(agentName);
+    if (words?.phase !== 'premise' && words?.phase !== 'songs') return null;
+    const ref = chatRefOf(this._folderAgent.raw);
+    return {
+      status: words.status,
+      key: ref ? JSON.stringify([workspaceId, ref.sessionID, ref.messageID, words.phase]) : ''
+    };
   }
 
   // openFolderAgent is the Next action strip's button while the Commander waits
