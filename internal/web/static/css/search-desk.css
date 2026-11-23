@@ -102,6 +102,16 @@ nav a,
   text-decoration: underline;
   padding: 0.35rem;
 }
+#folderConsent {
+  width: min(28rem, calc(100% - 2rem));
+  padding: 1.5rem;
+  background: var(--page);
+  color: var(--ink);
+  border: 1px solid var(--accent);
+}
+#folderConsent::backdrop {
+  background: rgb(10 24 17 / 55%);
+}
 .decision,
 .muted {
   color: var(--muted);

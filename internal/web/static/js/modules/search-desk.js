@@ -88,6 +88,19 @@ export function mountFileSearch(root, compact = false) {
     location.replace(target === 'search' ? '/search' : '/?home=1');
   }
   async function choose(kind, button) {
+    if (kind === 'documents' || kind === 'downloads') {
+      const dialog = $('folderConsent');
+      $('consentTitle').textContent =
+        `Allow Ori to search ${kind === 'documents' ? 'Documents' : 'Downloads'}?`;
+      // Escape leaves returnValue unchanged, including after an earlier approval.
+      dialog.returnValue = '';
+      dialog.showModal();
+      await new Promise(resolve => dialog.addEventListener('close', resolve, { once: true }));
+      if (dialog.returnValue !== 'allow') {
+        button.focus();
+        return;
+      }
+    }
     const { intent } = await request('begin', { kind });
     let source;
     try {

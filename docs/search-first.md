@@ -1,6 +1,6 @@
 # Search one folder on this Mac
 
-On a new local Mac installation, open Ori in the browser. Choose **Documents**, **Downloads**, or **Choose another folder…** to make a folder searchable. Choosing your first folder also makes Search your starting page. **Not now** goes to Home without confirming a workspace directory or completing Welcome. Canceling a folder dialog makes no choice at all.
+On a new local Mac installation, open Ori in the browser. Choose **Documents**, **Downloads**, or **Choose another folder…** to make a folder searchable. For Documents or Downloads, Ori asks for confirmation by folder name before indexing. Choose **Allow search** to continue, or **Cancel** to leave your sources unchanged. This is separate from macOS privacy permissions: macOS may also ask for access, but won’t necessarily prompt if access was already decided. Choosing your first folder also makes Search your starting page. **Not now** goes to Home without confirming a workspace directory or completing Welcome. Canceling a folder dialog makes no choice at all.
 
 If you've already set up Ori, use **Search local files** on Home. Visiting Search does not change your starting page. The desk offers an explicit starting-page preference, and **Home** takes you back without changing it. Search doesn't need a provider key, model, assistant, or Personal HQ.
 

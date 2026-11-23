@@ -34,6 +34,17 @@
           <button data-kind="documents">Documents</button><button data-kind="downloads">Downloads</button
           ><button data-kind="custom">Choose another folder…</button>
         </div>
+        <dialog id="folderConsent" aria-labelledby="consentTitle" aria-describedby="consentScope">
+          <small>ORI / LOCAL FILE SEARCH</small>
+          <h2 id="consentTitle"></h2>
+          <p id="consentScope">
+            Ori will index filenames, locations and dates in this folder on your Mac. It won’t read file contents or
+            give agents access.
+          </p>
+          <form method="dialog" class="actions">
+            <button value="cancel" autofocus>Cancel</button><button value="allow">Allow search</button>
+          </form>
+        </dialog>
         {{if .First}}
         <p class="decision">
           Choosing a folder makes Search your starting page. <button id="skip" class="link">Not now</button>

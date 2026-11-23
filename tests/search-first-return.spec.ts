@@ -28,7 +28,10 @@ test('manual refresh, two-tab removal, empty desk after return', async ({
   await expect(page.locator('#hits')).toContainText('Added after scan');
   const otherFile = join(fixture!, 'home/Downloads/Harbor.txt');
   writeFileSync(otherFile, 'Synthetic', { flag: 'wx' });
-  await page.getByRole('button', { name: 'Downloads', exact: true }).click();
+  const downloads = page.getByRole('button', { name: 'Downloads', exact: true });
+  await downloads.click();
+  const consent = page.getByRole('dialog', { name: 'Allow Ori to search Downloads?' });
+  await consent.getByRole('button', { name: 'Allow search' }).click();
   await term.fill('Harbor');
   await expect(page.locator('#hits li')).toHaveCount(3);
   const other = await context.newPage();

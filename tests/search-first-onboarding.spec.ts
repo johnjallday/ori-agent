@@ -58,8 +58,23 @@ test('search before workspace setup', async ({ page, baseURL }) => {
     await expect(page.getByText('No folder chosen.')).toBeVisible();
     await expect(custom).toBeFocused();
     await shot('cancel-adapter');
+    const documents = page.getByRole('button', { name: 'Documents', exact: true });
+    const consent = page.getByRole('dialog', { name: 'Allow Ori to search Documents?' });
+    const grantCalls = () => calls.filter(p => /\/(begin|select)$/.test(p));
+    const before = grantCalls();
+    for (const dismiss of ['Cancel', 'Escape']) {
+      await documents.click();
+      await expect(consent.getByRole('button', { name: 'Cancel' })).toBeFocused();
+      if (dismiss === 'Cancel') await consent.getByRole('button', { name: 'Cancel' }).click();
+      else await page.keyboard.press('Escape');
+      await expect(consent).not.toBeVisible();
+      await expect(documents).toBeFocused();
+      await expect(page.getByText('No folders mapped yet.')).toBeVisible();
+      expect(grantCalls()).toEqual(before);
+    }
+    await documents.click();
     const start = performance.now();
-    await page.getByRole('button', { name: 'Documents', exact: true }).click();
+    await consent.getByRole('button', { name: 'Allow search' }).click();
     await page.locator('#hits li').first().waitFor();
     console.log(
       'First visible filename (ms):',

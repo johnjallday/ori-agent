@@ -27,6 +27,7 @@ test('Files and Notes keep separate inputs, requests and history on established 
     await page.screenshot({ path: join(process.env.ORI_SEARCH_EVIDENCE, 'established-home.png') });
   await page.getByRole('link', { name: 'Search local files' }).click();
   await page.getByRole('button', { name: 'Documents', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Allow search' }).click();
   await expect(page.locator('#hits li').first()).toBeVisible();
   await page.goto('/');
   await expect(page.locator('.home-command-bridge')).toBeVisible();
