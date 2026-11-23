@@ -47,6 +47,7 @@ if [[ "${1:-}" == "version" ]]; then
     printf 'If Wails is useful to you, please consider sponsoring the project\n'
     exit 0
 fi
+printf '%s\n' "${CGO_CFLAGS:-}" "${CGO_LDFLAGS:-}" > "$HOME/cgo-flags"
 find frontend/wailsjs -type f -exec chmod 0755 {} +
 exit "${FAKE_WAILS_EXIT:-0}"
 FAKE_WAILS
@@ -155,4 +156,14 @@ set -e
 [[ "$status" -eq 23 ]] || fail "failed Wails build returned $status, want 23"
 assert_bindings_are_regular_files "$fixture"
 
-printf 'Folder picker build keeps the Wails CLI on the go.mod version and normalizes binding modes\n'
+# The target, not the host, determines whether Ventura flags are appended.
+fixture="$temporary_root/flags"
+make_fixture "$fixture" v2.17.0 v2.17.0
+for target in darwin/universal linux/amd64; do
+    run_build "$fixture" WAILS_PLATFORM="$target" CGO_CFLAGS=-g CGO_LDFLAGS=-s
+    suffix=""
+    [[ "$target" != darwin/* ]] || suffix=" -mmacosx-version-min=13.0"
+    printf '%s\n' "-g$suffix" "-s$suffix" | diff -u - "$fixture/home/cgo-flags"
+done
+
+printf 'Folder picker build checks passed\n'
