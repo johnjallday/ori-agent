@@ -55,8 +55,11 @@ if [[ "$scenario" == both ]]; then
  scripts/demo-server.sh "$port" "$sandbox" >"$sandbox/restart.log" 2>&1 & server=$!
  wait_ready 'URL=' "$sandbox/restart.log"
  scripts/e2e.sh --port "$port" --env ORI_MUSIC_FOLDER_MAP=existing tests/music-folder-map.spec.ts -- --workers=1 -g 'populated map' --output "$sandbox/evidence/restart"
- scripts/e2e.sh --port "$port" --env ORI_MUSIC_FOLDER_MAP=existing tests/music-workspace-folders.spec.ts -- --workers=1 --output "$sandbox/evidence/workspace-context-restart"
+ scripts/e2e.sh --port "$port" --env ORI_MUSIC_FOLDER_MAP=existing --env ORI_MUSIC_COMPARE_RESTART=1 tests/music-workspace-folders.spec.ts -- --workers=1 --output "$sandbox/evidence/workspace-context-restart"
 fi
 manifest >"$sandbox/source-after"
 cmp "$sandbox/source-before" "$sandbox/source-after"
+if [[ "$scenario" == both ]]; then
+ shasum -a 256 "$sandbox/source-before" "$sandbox/source-after" | awk '{print $1, (NR == 1 ? "before" : "after")}' >tasks/evidence-music-workspace-folder-context/source-manifest-sha256.txt
+fi
 echo 'Source listing and SHA-256 hashes unchanged.'

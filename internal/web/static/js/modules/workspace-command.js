@@ -13548,9 +13548,11 @@ export class WorkspaceCommandView {
       '">' +
       (count === null ? '—' : count) +
       '</span>' +
-      (this.canBrowseMusicFolders()
-        ? `<button type="button" class="ws-cmd-nav-btn" data-cmd-by-folder aria-pressed="${!!this.musicFolders}">By folder</button>`
-        : '') +
+      '<span data-cmd-folder-toggle-slot' +
+      (this.canBrowseMusicFolders() ? '' : ' hidden') +
+      '>' +
+      this.musicFolderToggleHTML() +
+      '</span>' +
       // Projects on the Home's shelf not on the map yet: set up from here.
       // Its own slot, refreshed in place when the count arrives.
       '<span class="ws-cmd-map-setup-slot" data-cmd-setup-projects-slot>' +
@@ -14266,25 +14268,21 @@ export class WorkspaceCommandView {
     return this.memberCommanders;
   }
 
-  /**
-   * Keep the mounted map and the freshly rendered zone in step.
-   *
-   * PRD §9 Q1: the host node is owned by this view and re-attached after every
-   * render , so a Command re-render never re-mounts
-   * the map. The map re-mounts only when the member snapshot changes.
-   */
   syncSourceFolders(owner) {
     if (!owner || owner !== this.page?.membersPanel || owner.workspaceId !== this.workspaceId())
       return;
     // Don't keep disclosures drawn from a superseded membership snapshot.
     if (this.musicFolders && !owner.sourceFoldersRead) this.closeMusicFolders();
-    if (
-      this.active &&
-      this.detachmentMapEl?.parentNode &&
-      this.canBrowseMusicFolders() &&
-      !this.container?.querySelector('[data-cmd-by-folder]')
-    )
-      this.render();
+    // Update only the toggle slot, not the whole toolbar: a late read must
+    // not detach a focused tile or re-render the camera and selection.
+    const slot = this.container?.querySelector('[data-cmd-folder-toggle-slot]');
+    if (slot) {
+      const enabled = this.canBrowseMusicFolders();
+      if (slot.hidden === enabled) {
+        slot.innerHTML = this.musicFolderToggleHTML();
+        slot.hidden = !enabled;
+      }
+    }
     window.OriWorkspaceMap?.updateSourceFolders?.(
       this.detachmentMapEl,
       owner.workspaceId,
@@ -14292,6 +14290,8 @@ export class WorkspaceCommandView {
     );
   }
 
+  // Reattach the owned map host after a command render. Re-mount only when
+  // the member snapshot changes, preserving the camera and selection.
   syncDetachmentMap() {
     const slot =
       this.container && typeof this.container.querySelector === 'function'
@@ -14356,7 +14356,10 @@ export class WorkspaceCommandView {
       selectedId,
       units,
       scopeGroupId: this.workspaceId(),
-      sourceFolders: this.page?.membersPanel?.sourceFolders,
+      sourceFolders:
+        this.page?.membersPanel?.workspaceId === this.workspaceId()
+          ? this.page.membersPanel.sourceFolders
+          : null,
       // A Home with projects on its shelf says so on its empty lot
       // (folder-to-map-handoff FR-6).
       libraryEmptyState: this.libraryEmptyState || null,
@@ -14420,6 +14423,12 @@ export class WorkspaceCommandView {
         fromMount: true
       });
     }
+  }
+
+  musicFolderToggleHTML() {
+    return this.canBrowseMusicFolders()
+      ? `<button type="button" class="ws-cmd-nav-btn" data-cmd-by-folder aria-pressed="${!!this.musicFolders}">${this.musicFolders ? 'Saved layout' : 'By folder'}</button>`
+      : '';
   }
 
   canBrowseMusicFolders() {
