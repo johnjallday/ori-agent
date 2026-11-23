@@ -16,6 +16,7 @@ import {
   recipientMenuRows,
   switchLockMessage
 } from './personal-assistant-recipient.js';
+import { firstQuestionPresentation } from './commander-question-memory.js';
 import { createLeadWelcome } from './personal-assistant-lead-welcome.js';
 import { workspaceUpdates, exposedWelcomeMessages } from './workspace-updates.js';
 import {
@@ -1618,6 +1619,7 @@ function launcherQuestion() {
   return window.workspaceCommand?.folderAgentQuestion?.(recipient.workspaceId, recipient.name);
 }
 
+let launcherInView = false;
 function refreshQuestionCue() {
   const els = state.els;
   if (!els?.launcherRole) return;
@@ -1625,6 +1627,13 @@ function refreshQuestionCue() {
   els.launcherAvatar.toggleAttribute('data-question', Boolean(question));
   const text = question?.status || identity().role;
   if (els.launcherRole.textContent !== text) els.launcherRole.textContent = text;
+  if (!question) els.launcherAvatar.classList.remove('question-bob');
+  if (!question?.key || !launcherInView || document.hidden || state.open || els.launcher.hidden)
+    return;
+  if (!firstQuestionPresentation(question.key, () => window.sessionStorage)) return;
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    els.launcherAvatar.classList.add('question-bob');
+  }
 }
 
 function renderIdentity() {
@@ -2595,6 +2604,18 @@ function init() {
       interview: document.getElementById('personalAssistantTodayInterview')
     }
   };
+  // Only consume a presentation when the fixed launcher is on screen (not
+  // while the drawer is open or another workspace is publishing a report).
+  if (typeof IntersectionObserver !== 'undefined') {
+    new IntersectionObserver(([entry]) => {
+      launcherInView = entry.isIntersecting && entry.intersectionRatio > 0;
+      refreshQuestionCue();
+    }).observe(launcher);
+  }
+  document.addEventListener('visibilitychange', refreshQuestionCue);
+  const stopBob = () => state.els.launcherAvatar.classList.remove('question-bob');
+  state.els.launcherAvatar.addEventListener('animationend', stopBob);
+  state.els.launcherAvatar.addEventListener('animationcancel', stopBob);
   launcher.addEventListener('click', () => {
     if (state.open) close();
     else if (waitingFolderReport() || currentWelcome()?.unread_count > 0) openUnread(launcher);
