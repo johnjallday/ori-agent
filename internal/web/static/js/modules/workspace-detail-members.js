@@ -466,6 +466,7 @@ export class WorkspaceMembersPanel {
     if (!isCurrent()) return;
     this.sourceFolders = null;
     this.sourceFoldersRead = null;
+    this.onSourceFoldersChanged?.();
     this.paintSourceFolders();
     try {
       const res = await fetch('/api/workspaces?tree=true', { signal });
@@ -503,6 +504,7 @@ export class WorkspaceMembersPanel {
     const labels = await readWorkspaceSourceFolders(this.workspaceId, { signal }).catch(() => null);
     if (!isCurrent()) return null;
     this.sourceFolders = labels;
+    this.onSourceFoldersChanged?.();
     this.paintSourceFolders();
     return labels;
   }

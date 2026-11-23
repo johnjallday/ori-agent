@@ -47,3 +47,56 @@ test('group Overview keeps source folders with their real member rows', async ({
   ).toEqual(rows(tree.workspaces || tree.folders).map((r: any) => r.id));
   await region.screenshot({ path: join(evidence, 'group-overview.png') });
 });
+
+test('saved map tiles show scoped source folders without a layout write', async ({ page }) => {
+  const { snapshot, group, home } = await groupFixture(page);
+  const track = snapshot.workspaces.find(w => w.parent_id === group.id && w.name === 'Track-1');
+  const writes: string[] = [];
+  page.on('request', req => {
+    if (req.method() !== 'GET' && req.url().includes('/api/workspace-map/layout'))
+      writes.push(req.method());
+  });
+  for (const scope of [home, group]) {
+    await page.goto(`/workspaces/${scope.folder_slug}?mode=map`);
+    const tile = page.locator(`.ws-map-tile[data-ws-id="${track.id}"]`);
+    await expect(tile).toHaveAccessibleName(/Track-1.*Source folder: Picker Songs/);
+    await expect(tile.locator('[data-source-folder]')).toHaveText('Picker Songs');
+    // The whole district opens framed to fit. Inspect the actual caption at
+    // reading size, as when zooming in on a building.
+    const zoom = page.locator('.ws-cmd-detachment-host [data-map-zoom-in]');
+    for (let i = 0; i < 14 && (await tile.boundingBox())!.width < 180; i++)
+      await zoom.evaluate(e => (e as HTMLButtonElement).click());
+    await tile.focus();
+    await tile.screenshot({
+      path: join(evidence, `${scope === home ? 'home' : 'group'}-saved-tile.png`)
+    });
+    await tile.press('Enter');
+    await expect(page).toHaveURL(new RegExp(`/workspaces/${track.folder_slug}`));
+  }
+  expect(writes).toEqual([]);
+  expect((await musicHomeSnapshot(page.request)).positions).toEqual(snapshot.positions);
+});
+
+test('an intentional tile move still saves on the group map', async ({ page }) => {
+  test.skip(process.env.ORI_MUSIC_FOLDER_MAP !== 'move', 'explicit move demo only');
+  const { snapshot, group } = await groupFixture(page);
+  const song = snapshot.workspaces.find(w => w.parent_id === group.id && w.name === 'Track-1');
+  await page.goto(`/workspaces/${group.folder_slug}?mode=map`);
+  const tile = page.locator(`.ws-map-tile[data-ws-id="${song.id}"]`);
+  await expect(tile).toHaveAccessibleName(/Source folder: Picker Songs/);
+  await tile.focus();
+  await tile.press('Space');
+  await page.locator('.ws-cmd-detachment-host [data-map-drag]').evaluate(e => {
+    if (e.getAttribute('aria-pressed') !== 'true') (e as HTMLElement).click();
+  });
+  const canvas = page.locator('.ws-cmd-detachment-host .ws-map-canvas');
+  await canvas.press('ArrowRight');
+  await canvas.press('Enter');
+  await expect
+    .poll(async () => (await musicHomeSnapshot(page.request)).positions[song.id])
+    .not.toEqual(snapshot.positions[song.id]);
+  await page.reload();
+  await expect(tile).toHaveAccessibleName(/Source folder: Picker Songs/);
+  await tile.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/workspaces/${song.folder_slug}`));
+});

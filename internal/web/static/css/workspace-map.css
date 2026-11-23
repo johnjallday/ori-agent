@@ -2767,6 +2767,20 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Trade a little artwork height for one caption, not a larger grid cell. */
+.ws-map-tile[data-ws-id]:has(.ws-map-source-folder:not([hidden])) > .ws-map-struct {
+  height: 52px;
+}
+.ws-map-source-folder {
+  max-width: 100%;
+  line-height: 14px;
+  font-size: 11px;
+  color: var(--ws-ink);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
 /* Read-only folder facts shared by Home's context and the group dock. */
 .ws-map-folder-details {
   margin-block: 12px;

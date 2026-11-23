@@ -14273,6 +14273,16 @@ export class WorkspaceCommandView {
    * render , so a Command re-render never re-mounts
    * the map. The map re-mounts only when the member snapshot changes.
    */
+  syncSourceFolders(owner) {
+    if (!owner || owner !== this.page?.membersPanel || owner.workspaceId !== this.workspaceId())
+      return;
+    window.OriWorkspaceMap?.updateSourceFolders?.(
+      this.detachmentMapEl,
+      owner.workspaceId,
+      owner.sourceFolders
+    );
+  }
+
   syncDetachmentMap() {
     const slot =
       this.container && typeof this.container.querySelector === 'function'
@@ -14337,6 +14347,7 @@ export class WorkspaceCommandView {
       selectedId,
       units,
       scopeGroupId: this.workspaceId(),
+      sourceFolders: this.page?.membersPanel?.sourceFolders,
       // A Home with projects on its shelf says so on its empty lot
       // (folder-to-map-handoff FR-6).
       libraryEmptyState: this.libraryEmptyState || null,

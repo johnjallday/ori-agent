@@ -717,6 +717,7 @@
   // and worded by the host with the shelf's songFactsLabel (song-card PRD
   // FR10). Appended to that tile's meta line; every other tile is unchanged.
   var songFacts = Object.create(null);
+  var sourceFolders = null; // Group-scoped display snapshot; never part of layout.
   var SONG_FACTS_MAX = 40;
   // A folder agent's live line ("Looking around · 240 entries · 3 folders
   // left"), keyed by workspace id and worded by the server. It takes the
@@ -3449,6 +3450,29 @@
     return true;
   }
 
+  function sourceFolderLabel(ws) {
+    return ws && ws.kind !== 'group' && sourceFolders ? sourceFolders.get(ws.id)?.label || '' : '';
+  }
+
+  // Change text on existing buttons. Don't call mount, recalculate placement,
+  // replace the focused node or touch the layout writer.
+  function updateSourceFolders(container, groupId, labels) {
+    if (!lastMount || lastMount.container !== container || !groupId || groupId !== scopeGroupId)
+      return;
+    if (sourceFolders === labels) return;
+    sourceFolders = labels;
+    lastMount.state = Object.assign({}, lastMount.state, { sourceFolders: labels });
+    container.querySelectorAll('.ws-map-tile[data-ws-id]').forEach(function (tile) {
+      var line = tile.querySelector('[data-source-folder]');
+      if (!line) return;
+      var id = tile.getAttribute('data-ws-id');
+      var label = labels?.get(id)?.label || '';
+      line.textContent = label;
+      line.hidden = !label;
+      patchTileStatus(tile, id, aggregateActivity({ key: 'ws:' + id, kind: 'tile', id: id }), true);
+    });
+  }
+
   function tileMeta(ws) {
     var agents = Number(ws.agent_count || 0);
     var agentsText = agents + (agents === 1 ? ' agent' : ' agents');
@@ -3523,6 +3547,7 @@
       (hasKeeper ? ', entry agent ' + ws.entry_agent_name : '') +
       (isHQ ? ', Personal HQ' : '') +
       (usesExistingWorkFolder(ws) ? ', ' + WORK_FOLDER_LABEL : '') +
+      (sourceFolderLabel(ws) ? ', Source folder: ' + sourceFolderLabel(ws) : '') +
       economyLabel +
       actionHint +
       workspaceUpdateLabel(ws.id)
@@ -3671,6 +3696,13 @@
       '<span class="ws-map-tile-name">' +
       tileNameHTML(ws) +
       '</span>' +
+      (scopeGroupId && ws.kind !== 'group'
+        ? '<span class="ws-map-source-folder" data-source-folder' +
+          (sourceFolderLabel(ws) ? '' : ' hidden') +
+          '>' +
+          escapeHtml(sourceFolderLabel(ws)) +
+          '</span>'
+        : '') +
       '<span class="ws-map-work-folder-hint" aria-hidden="true"' +
       (usesExistingWorkFolder(ws) ? '' : ' hidden') +
       '>' +
@@ -12769,6 +12801,7 @@
     setLibraryBadges(state && state.libraryBadges);
     // A host that passes none (every surface but Home) draws plain meta lines.
     setSongFacts(state && state.songFacts);
+    sourceFolders = state?.scopeGroupId ? state.sourceFolders || null : null;
     setFolderAgentLines(state && state.folderAgentLines);
     setFolderAgentFaces(state && state.folderAgentFaces);
     // A host that passes none (a plain workspace page) draws no wait mark.
@@ -13255,6 +13288,7 @@
      * then, because a new agent needs a place to stand.
      */
     updateFolderShapes: updateFolderShapes,
+    updateSourceFolders: updateSourceFolders,
     usesExistingWorkFolder: usesExistingWorkFolder,
     updateUnits: function (container, units) {
       if (!container || !scopeGroupId || !lastMount || lastMount.container !== container) {

@@ -126,7 +126,9 @@ test('choose two tracks for placement and review remaining songs separately', as
   const positions = Object.fromEntries(
     ['Album-1', 'Track-1', 'Album-2', 'Track-2', 'Album-3', 'Album-4', 'Album-5'].map((name, i) => [
       rows.find((r: any) => r.name === name).workspace_id,
-      { x: (i % 3) * 3 + 1, y: Math.floor(i / 3) * 3 + 1 }
+      // Layout coordinates are world pixels, not grid indices. Separate
+      // the interleaved buildings by more than one tile footprint.
+      { x: (i % 3) * 228 + 38, y: Math.floor(i / 3) * 190 + 38 }
     ])
   );
   const saved = await request.patch('/api/workspace-map/layout', {
