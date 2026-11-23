@@ -17,27 +17,43 @@ trap cleanup_fixture EXIT
 
 temp_root="$fixture_root/temp"
 go_cache="$fixture_root/go-cache"
-mkdir -p "$temp_root/ori-test-old" "$temp_root/ori-test-recent" "$go_cache"
+# go clean -cache removes the hex shard directories, not arbitrary files at
+# the cache root. Seed a representative entry without compiling anything.
+seed="$go_cache/00/$(printf '%064d' 0)-a"
+mkdir -p "$temp_root/ori-test-old" "$temp_root/ori-test-recent" "${seed%/*}"
 touch -t 202001010000 "$temp_root/ori-test-old"
-printf 'cache seed\n' >"$go_cache/seed"
+printf 'cache seed\n%8192s\n' '' >"$seed"
 
-dry_output="$(GOCACHE="$go_cache" "$prune_script" --dry-run --temp-dir "$temp_root" --older-than-hours 24 --max-go-cache-kib 1)"
+# Always pass the owned absolute cache to the real Go cleaner, regardless of
+# the caller's cache, Go settings, or pruning overrides.
+export GOCACHE="$go_cache" TMPDIR="$temp_root" GOENV=off GOWORK=off GOFLAGS= GOTOOLCHAIN=local
+unset GOCACHEPROG
+export ORI_GO_BIN=go ORI_SKIP_CACHE_PRUNE=0 ORI_GO_CACHE_MAX_KIB=1 ORI_STALE_ARTIFACT_HOURS=24
+
+dry_output="$("$prune_script" --dry-run)"
 [[ "$dry_output" == *"Dry run: found 1 Ori test artifact(s)"* ]]
 [[ "$dry_output" == *"Would prune Go build cache"* ]]
 [[ -d "$temp_root/ori-test-old" ]]
-[[ -f "$go_cache/seed" ]]
+[[ -f "$seed" ]]
 
-GOCACHE="$go_cache" "$prune_script" --temp-dir "$temp_root" --older-than-hours 24 --max-go-cache-kib 1
+# A higher CLI limit overrides the 1 KiB environment limit, so explicit
+# maintenance still removes stale artifacts while leaving the cache alone.
+"$prune_script" --max-go-cache-kib 1048576
 [[ ! -e "$temp_root/ori-test-old" ]]
 [[ -d "$temp_root/ori-test-recent" ]]
-[[ ! -e "$go_cache/seed" ]]
+[[ -f "$seed" ]]
+
+"$prune_script"
+[[ -d "$temp_root/ori-test-recent" ]]
+[[ ! -e "$seed" ]]
 
 mkdir -p "$temp_root/ori-test-skip"
 touch -t 202001010000 "$temp_root/ori-test-skip"
-printf 'keep cache\n' >"$go_cache/keep"
-skip_output="$(ORI_SKIP_CACHE_PRUNE=1 GOCACHE="$go_cache" "$prune_script" --temp-dir "$temp_root" --max-go-cache-kib 1)"
+mkdir -p "${seed%/*}"
+printf 'keep cache\n%8192s\n' '' >"$seed"
+skip_output="$(ORI_SKIP_CACHE_PRUNE=1 "$prune_script")"
 [[ "$skip_output" == *"Cache pruning skipped"* ]]
 [[ -d "$temp_root/ori-test-skip" ]]
-[[ -f "$go_cache/keep" ]]
+[[ -f "$seed" ]]
 
 printf 'prune-test-cache tests passed\n'
