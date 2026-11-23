@@ -6,8 +6,13 @@ usage() {
 	cat <<'EOF'
 Usage: ./scripts/prune-test-cache.sh [options]
 
-Prune stale Ori-owned temporary artifacts and conditionally clear the shared
-Go build cache when it exceeds the configured size limit.
+Explicitly prune stale Ori-owned temporary artifacts and clear the selected
+Go build cache if it exceeds the configured size limit. Ordinary test exits
+only clean stale artifacts; they never invoke this command.
+
+Use --dry-run (make cache-report) for a read-only preview. Before pruning,
+verify that no build or test in any worktree is using the selected cache.
+This command does not check or enforce cache idleness.
 
 Options:
   --dry-run                 Report what would be pruned without deleting it.

@@ -102,10 +102,19 @@ The supervisor won't stop an unrelated port owner or retry a failed launch.
 - `test-with-ollama.sh`: provider-backed suite, opt-in.
 - `diagnose-test-failures.sh`: summarize failing Go tests.
 - `run-test-command.sh`: run-owned temp sandbox for Go/Node/Playwright, removed
-  on success/failure/interruption. `ORI_KEEP_TEST_SANDBOX=1` preserves it.
-- `prune-test-cache.sh`: remove stale Ori-owned temp artifacts older than 24
-  hours; clear only the Go build cache above 20 GiB, not module/browser caches.
-  `ORI_SKIP_CACHE_PRUNE=1` opts out; `make cache-report` previews.
+  on success/failure/interruption. `ORI_KEEP_TEST_SANDBOX=1` preserves it. On
+  exit the wrapper cleans stale Ori-owned temp artifacts older than 24 hours
+  (`ORI_STALE_ARTIFACT_HOURS` overrides the age), not the Go build cache.
+  `ORI_SKIP_CACHE_PRUNE=1` skips the stale scan, not run-owned sandbox cleanup.
+- `make cache-report` (`prune-test-cache.sh --dry-run`): preview stale artifact
+  cleanup and report whether the selected Go build cache exceeds the limit,
+  without deleting anything.
+- `make prune-test-cache`: explicitly remove stale Ori-owned temp artifacts and
+  clear the selected Go build cache only above 60 GiB (`ORI_GO_CACHE_MAX_KIB`
+  or the helper's `--max-go-cache-kib` overrides the limit). Before running it,
+  verify no build or test in any worktree is using that cache; the command does
+  not enforce machine-wide idleness. It leaves module/browser caches alone.
+  `ORI_SKIP_CACHE_PRUNE=1` also skips explicit maintenance.
 - `clean-test-artifacts.sh`: dry-run by default; `--delete` or
   `make clean-test-artifacts` cleans known Ori-owned prefixes. Manual cleanup
   has no age guard unless `--older-than-hours` is set.
