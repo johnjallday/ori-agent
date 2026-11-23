@@ -32,9 +32,9 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 	}
 	// The Email Ops spin-off (v5) dropped the in-HQ Inbox specialist; v6
 	// clarifies that HQ projects authorized Email Ops follow-ups without owning
-	// them; v9 retires the Journal specialist.
-	if tpl.BuiltinVersion < 9 {
-		t.Fatalf("personal-ops builtin_version = %d, want at least 9", tpl.BuiltinVersion)
+	// them; v9 retires the Journal specialist; v10 removes all starter tickets.
+	if tpl.BuiltinVersion < 10 {
+		t.Fatalf("personal-ops builtin_version = %d, want at least 10", tpl.BuiltinVersion)
 	}
 
 	// Display metadata now presents this as Personal HQ.
@@ -95,31 +95,9 @@ func TestPersonalOpsStarterEvolvedToPersonalHQ(t *testing.T) {
 	if strings.Contains(strings.ToLower(prompt), "journal specialist") {
 		t.Errorf("Chief prompt must not delegate to the retired Journal specialist: %s", prompt)
 	}
-	for _, task := range tpl.StarterTasks {
-		if strings.Contains(strings.ToLower(task.Details), "journal specialist") {
-			t.Errorf("starter task %q must not mention the retired Journal specialist: %s", task.Description, task.Details)
-		}
-	}
 
-	// Starter tasks: a small set, at most one (here exactly one) marked
-	// setup:true, and it must be first.
-	if len(tpl.StarterTasks) != 3 {
-		t.Fatalf("expected 3 starter tasks (1 setup + 2 recurring), got %d: %+v", len(tpl.StarterTasks), tpl.StarterTasks)
-	}
-	setupCount := 0
-	for i, task := range tpl.StarterTasks {
-		if task.Setup {
-			setupCount++
-			if i != 0 {
-				t.Errorf("setup task must be first in the list, found at index %d", i)
-			}
-		}
-	}
-	if setupCount != 1 {
-		t.Fatalf("expected exactly one setup:true starter task, got %d", setupCount)
-	}
-	if tpl.StarterTasks[1].Description != "Morning briefing" || tpl.StarterTasks[2].Description != "End-of-day journal" {
-		t.Fatalf("expected the pre-existing Morning briefing / End-of-day journal tasks preserved, got %+v", tpl.StarterTasks)
+	if len(tpl.StarterTasks) != 0 {
+		t.Fatalf("Personal HQ should start without template tickets, got %+v", tpl.StarterTasks)
 	}
 
 	if len(tpl.Warnings) != 0 {
