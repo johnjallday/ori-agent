@@ -26,6 +26,11 @@ func TestResetPreviewValidatesOptionsBeforeReadingRuntime(t *testing.T) {
 		"intent=selected_data&category=agents&category=agents", "agents=true&agents=false",
 		"intent=selected_data&intent=start_fresh&category=agents", "settings=true&category=agents",
 		"settings=true&target=/outside", "settings=true&data_dir=/outside", "settings=true&%invalid",
+		"sessions=true&archive_personal_hq=true", "intent=replay_setup&archive_personal_hq=true",
+		"intent=selected_data&category=agents&archive_personal_hq=false",
+		"intent=start_fresh&archive_personal_hq=true&archive_personal_hq=true",
+		"intent=start_fresh&archive_personal_hq=1", "intent=start_fresh&archive_source=/outside",
+		"intent=start_fresh&archive_destination=/outside",
 		"settings=true&unused=" + strings.Repeat("x", maxResetRequestSize),
 	} {
 		t.Run(query[:min(65, len(query))], func(t *testing.T) {
@@ -50,7 +55,7 @@ func TestResetPreviewValidatesOptionsBeforeReadingRuntime(t *testing.T) {
 }
 
 func TestResetPreviewParsesStartFreshWithoutClientCategories(t *testing.T) {
-	intent, selected, err := resetPreviewSelection("intent=start_fresh")
+	intent, selected, _, err := resetPreviewSelection("intent=start_fresh")
 	if err != nil || intent != settingsreset.IntentStartFresh || len(selected) != 0 {
 		t.Fatalf("Start Fresh client selection = %q %v, %v", intent, selected, err)
 	}
@@ -117,8 +122,40 @@ func TestResetPreviewRealHTTPReportsCountsAndBlockersWithoutMutation(t *testing.
 	f.AssertPreserved(t)
 }
 
+func TestResetPreviewArchiveIntentIsExplicitAndScoped(t *testing.T) {
+	h := NewResetHandler(nil, nil, "")
+	h.SetPreviewPlanner(settingsreset.NewPlanner(func() settingsreset.Owners { return settingsreset.Owners{} }))
+	for _, intent := range []string{"start_fresh", "selected_data&category=app_records"} {
+		for _, option := range []string{"", "&archive_personal_hq=false", "&archive_personal_hq=true"} {
+			w := httptest.NewRecorder()
+			h.GetResetPreview(w, httptest.NewRequest(http.MethodGet, "/api/reset/preview?intent="+intent+option, nil))
+			var preview settingsreset.Preview
+			if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &preview) != nil || preview.HQArchive == nil ||
+				preview.HQArchive.Requested != (option == "&archive_personal_hq=true") || preview.HQArchive.Source != "" || preview.HQArchive.UnavailableReason == "" {
+				t.Fatalf("preview = %d %s", w.Code, w.Body.String())
+			}
+		}
+	}
+}
+
+func TestArchiveExecuteAcceptsOnlyTheScopeWitness(t *testing.T) {
+	base := `{"preview_id":"p","request_id":"r","confirmation":"RESET"`
+	witness := strings.Repeat("a", 64)
+	req, legacy, err := decodeResetRequest(strings.NewReader(base + `,"confirm_hq_archive":"` + witness + `"}`))
+	if err != nil || legacy || req.ConfirmHQArchive != witness {
+		t.Fatalf("reviewed confirmation = %+v, legacy %t, err %v", req, legacy, err)
+	}
+	for _, extra := range []string{`"archive_personal_hq":true`, `"source":"/a"`, `"destination":"/b"`,
+		`"confirm_hq_archive":true`, `"confirm_hq_archive":"/path"`, `"confirm_hq_archive":null`,
+		`"confirm_hq_archive":"` + witness + `","confirm_hq_archive":"` + witness + `"`} {
+		if _, _, err := decodeResetRequest(strings.NewReader(base + "," + extra + "}")); err == nil {
+			t.Fatalf("confirmed request accepted extraneous or invalid field %s", extra)
+		}
+	}
+}
+
 func TestResetPreviewLegacyAllOptionsDoNotBecomeStartFresh(t *testing.T) {
-	intent, categories, err := resetPreviewSelection("settings=true&agents=true&sessions=true&onboarding=true")
+	intent, categories, _, err := resetPreviewSelection("settings=true&agents=true&sessions=true&onboarding=true")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,12 +170,12 @@ func TestResetPreviewLegacyAllOptionsDoNotBecomeStartFresh(t *testing.T) {
 }
 
 func TestResetPreviewAcceptsInstalledPluginsThroughTheHeldPreviewAPI(t *testing.T) {
-	intent, categories, err := resetPreviewSelection("intent=selected_data&category=installed_plugins")
+	intent, categories, _, err := resetPreviewSelection("intent=selected_data&category=installed_plugins")
 	if err != nil || intent != settingsreset.IntentSelectedData ||
 		!slices.Equal(categories, []settingsreset.CategoryID{settingsreset.CategoryInstalledPlugins}) {
 		t.Fatalf("plugin-only selection = %q %v, %v", intent, categories, err)
 	}
-	_, five, err := resetPreviewSelection(
+	_, five, _, err := resetPreviewSelection(
 		"intent=selected_data&category=settings&category=agents&category=app_records&category=setup_steps&category=installed_plugins")
 	if err != nil || len(five) != 5 {
 		t.Fatalf("five-category selection = %v, %v", five, err)

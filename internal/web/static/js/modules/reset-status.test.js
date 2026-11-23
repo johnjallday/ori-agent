@@ -14,6 +14,7 @@ function response({
   revision = 3,
   verified = true,
   blockers = [],
+  archive,
   status = 200,
   mime = 'application/json'
 } = {}) {
@@ -29,6 +30,7 @@ function response({
         revision,
         schema_version: 1,
         blockers,
+        hq_archive: archive,
         results: [
           {
             id: 'setup_steps',
@@ -173,6 +175,42 @@ test('only verified Start Fresh invokes browser cleanup and offers Continue setu
   await h.enter();
   assert.equal(h.element('reset-enter').hidden, true);
   assert.equal(h.window.location.href, `/reset/status?operation=${id}`);
+});
+
+test('archive outcome is independent of reset readiness and shows the exact reviewed path', async () => {
+  const destination = '/archive/my-hq<literal>';
+  const h = harness([
+    response({
+      state: 'blocked',
+      archive: { outcome: 'failed', destination, message: 'Keep both locations.' }
+    }),
+    response({
+      state: 'partial_failure',
+      revision: 4,
+      archive: {
+        outcome: 'completed',
+        destination,
+        message: 'Review the folder with Import Folder.'
+      }
+    }),
+    response({
+      revision: 5,
+      archive: { outcome: 'pending', destination, message: 'Not verified.' }
+    }),
+    response({ revision: 6, archive: { outcome: 'completed', destination, message: 'Intact.' } })
+  ]);
+  await h.idle();
+  assert.equal(h.element('reset-hq-archive-label').textContent, 'Reviewed destination:');
+  assert.equal(h.element('reset-hq-archive-path').textContent, destination);
+  assert.equal(h.element('reset-hq-archive-message').textContent, 'Keep both locations.');
+  await h.tick();
+  assert.equal(h.element('reset-hq-archive-label').textContent, 'Archived at:');
+  assert.match(h.element('reset-hq-archive-message').textContent, /Import Folder/);
+  assert.equal(h.element('reset-enter').hidden, true, 'archive success is not reset success');
+  await h.tick();
+  assert.equal(h.element('reset-enter').hidden, true, 'unverified archive cannot claim readiness');
+  await h.tick();
+  assert.equal(h.element('reset-enter').hidden, false);
 });
 
 test('durable partial failure surfaces its blocker literally and does not offer entry', async () => {

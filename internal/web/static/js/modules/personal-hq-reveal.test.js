@@ -148,6 +148,20 @@ test('uncertainty is not ready or a returnable refusal', () => {
   assert.ok(!f.events.some(e => e[0] === 'frame'));
 });
 
+test('dismiss leaves the saved target unchanged and invalidates the confirmation action', () => {
+  const f = fixture();
+  const intent = f.begin();
+  let confirmed = 0;
+  f.flow.unresolved(intent, { confirm: () => ++confirmed, retry: () => {} });
+  const states = f.events.at(-1)[1].actions;
+  assert.equal(states[0].label, 'Build in suggested folder');
+  assert.equal(confirmed, 0, 'rendering the decision must not submit it');
+  states.find(action => action.label === 'Dismiss').run();
+  states[0].run();
+  assert.equal(confirmed, 0);
+  assert.equal(f.flow.current(intent), false);
+});
+
 test('ready frames only the canonical ID and commits HQ-specific folded preference', () => {
   const f = fixture();
   const intent = f.begin();

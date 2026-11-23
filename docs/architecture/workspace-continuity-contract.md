@@ -965,6 +965,15 @@ workspace/private-data deletion and Forget instead invalidate/purge current
 managed payloads and must not be treated as a restore request. Reset review must
 say that private portable history remains in retained folders.
 
+A separately confirmed [Personal HQ archive](settings-reset.md#optional-personal-hq-archive)
+may move the one verified folder outside workspace discovery before clearing the
+local records. It keeps the portable generation already present; reset is not
+checkpoint preparation. A later **Import Folder** review has the same conflict,
+paused-assistant and routines-off rules as any other copied workspace. Even
+without a `users` record after reset, explicit workspace creation or reviewed
+import can create a blank local relational owner in the registration transaction;
+it never reseeds the previous app profile or loosens startup suppression.
+
 ## Legacy and presentation contract
 
 No `.ori/continuity/current.json` or generation evidence is supported legacy

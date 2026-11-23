@@ -19,11 +19,12 @@ var ErrJournalInvalid = errors.New("reset receipt is invalid or unsupported; pre
 // Only admission states are enabled here; adding apply states requires their real
 // recovery/verification implementation, not merely another accepted enum value.
 type journal struct {
-	Version    int          `json:"version"`
-	AcceptedBy string       `json:"accepted_by"`
-	RequestID  string       `json:"request_id"`
-	Plan       resolvedPlan `json:"plan"`
-	Operation  Operation    `json:"operation"`
+	Version    int             `json:"version"`
+	AcceptedBy string          `json:"accepted_by"`
+	RequestID  string          `json:"request_id"`
+	Plan       resolvedPlan    `json:"plan"`
+	Operation  Operation       `json:"operation"`
+	Archive    *archiveJournal `json:"hq_archive,omitempty"`
 }
 
 // ValidOperationID checks the shared bounded format for operation handoffs.
@@ -122,6 +123,9 @@ func validateJournal(j *journal) error {
 		if _, err := hex.DecodeString(fingerprint.Digest); err != nil {
 			return ErrJournalInvalid
 		}
+	}
+	if err := validateArchiveJournal(j); err != nil {
+		return err
 	}
 	// Plugin ownership carries its own narrower boundary rather than relaxing the
 	// generic target rules above. It is required exactly when the reviewed scope
@@ -246,7 +250,8 @@ func validateJournal(j *journal) error {
 		}
 	case StateBlocked:
 		if !allPending || len(op.Blockers) != 1 ||
-			!slices.Contains([]string{"drain_failed", "scope_changed_after_fence", "retained_evidence_unavailable", "recovery_scope_changed", "recovery_unavailable"}, op.Blockers[0].Code) {
+			!slices.Contains([]string{"drain_failed", "scope_changed_after_fence", "retained_evidence_unavailable", "recovery_scope_changed", "recovery_unavailable", "hq_archive_recovery"}, op.Blockers[0].Code) ||
+			(op.Blockers[0].Code == "hq_archive_recovery" && j.Archive == nil) {
 			return ErrJournalInvalid
 		}
 	default:

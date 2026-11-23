@@ -18,6 +18,9 @@ func (op Operation) VerifiedComplete() bool {
 	if op.SchemaVersion != SchemaVersion || op.State != StateCompleted || len(op.Blockers) != 0 || len(op.Results) == 0 {
 		return false
 	}
+	if op.HQArchive != nil && (op.HQArchive.Outcome != OutcomeCompleted || op.HQArchive.Destination == "") {
+		return false
+	}
 	resultIDs := make([]CategoryID, 0, len(op.Results))
 	for _, result := range op.Results {
 		if !verifiedCategory(result) {

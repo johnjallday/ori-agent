@@ -1716,6 +1716,11 @@
     padding: 1rem;
   }
 
+  /* Let the last reset action scroll clear of the fixed assistant launcher. */
+  #reset-application {
+    margin-bottom: calc(4rem + env(safe-area-inset-bottom));
+  }
+
   .settings-section-header {
     flex-wrap: wrap;
   }

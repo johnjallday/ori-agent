@@ -275,7 +275,9 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 		workspace.OrderIndex = nextIndex
 	}
 
-	return insertWorkspace(ctx, s.db, workspace)
+	return s.db.InTransaction(ctx, func(tx *sql.Tx) error {
+		return insertWorkspace(ctx, tx, workspace)
+	})
 }
 
 // insertWorkspace preserves the caller's IDs, dates, order and version. Ordinary
@@ -284,6 +286,17 @@ func (s *SQLiteStore) CreateWorkspace(ctx context.Context, workspace *Workspace)
 func insertWorkspace(ctx context.Context, exec interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }, workspace *Workspace) error {
+	owner := normalizeOwnerUserID(workspace.OwnerUserID)
+	if owner == "local" {
+		// App-record reset clears users and deliberately suppresses automatic
+		// profile seeding. A new registration needs the local FK owner, not
+		// the old profile. Create only the empty identity in this write; never
+		// overwrite existing preferences or grant a foreign owner.
+		if _, err := exec.ExecContext(ctx, `INSERT INTO users (id,created_at,updated_at)
+			VALUES ('local',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(id) DO NOTHING`); err != nil {
+			return fmt.Errorf("establish local workspace owner: %w", err)
+		}
+	}
 	f := serializeWorkspaceFields(workspace)
 	_, err := exec.ExecContext(ctx, `
 		INSERT INTO workspaces (id, name, folder_slug, kind, description, owner_user_id, parent_id, order_index, color, session_count, created_at, updated_at,
@@ -292,7 +305,7 @@ func insertWorkspace(ctx context.Context, exec interface {
 			mcp_bindings_json, agent_mcp_access_json, skill_bindings_json, agent_skill_access_json, opportunities_json, installed_capabilities_json, toolbox_state_json, mission_state_json, assistant_program_json,
 			ticket_migration_version, ticket_sequence, version, allow_native_mcp_cli)
 		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, workspace.ID, workspace.Name, workspace.FolderSlug, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, normalizeOwnerUserID(workspace.OwnerUserID), workspace.ParentID, workspace.OrderIndex, workspace.Color,
+	`, workspace.ID, workspace.Name, workspace.FolderSlug, NormalizeWorkspaceKind(string(workspace.Kind)), workspace.Description, owner, workspace.ParentID, workspace.OrderIndex, workspace.Color,
 		workspace.SessionCount, workspace.CreatedAt, workspace.UpdatedAt,
 		string(f.agentInstances), string(f.tags), string(f.sharedData), string(f.status), f.layout,
 		string(f.messages), string(f.tasks), string(f.attachments), string(f.folders), string(f.scheduledTasks), string(f.storeNodes), string(f.workflows), string(f.directoryReferences),
@@ -723,6 +736,9 @@ func (s *SQLiteStore) ListWorkspaces(ctx context.Context) ([]Workspace, error) {
 		workspaces = append(workspaces, workspace)
 	}
 
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to finish listing workspaces: %w", err)
+	}
 	return workspaces, nil
 }
 

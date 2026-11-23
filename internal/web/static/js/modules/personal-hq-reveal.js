@@ -106,6 +106,7 @@ export function createHQPresentation({
         detail = 'The response could not be confirmed. Check setup status before trying again.',
         check,
         retry,
+        confirm,
         retryLabel = 'Retry same request'
       } = {}
     ) {
@@ -114,9 +115,19 @@ export function createHQPresentation({
       // This closes the editable-return path; it is NOT evidence of acceptance.
       transition.accept(intent.handle);
       return show(intent, {
+        tone: confirm ? 'warning' : 'progress',
         title,
         detail,
         actions: [
+          ...(confirm
+            ? [
+                {
+                  label: 'Build in suggested folder',
+                  primary: true,
+                  run: () => current(intent) && confirm()
+                }
+              ]
+            : []),
           ...(check ? [{ label: 'Check setup status', run: check }] : []),
           ...(retry ? [{ label: retryLabel, run: retry }] : []),
           { label: 'Dismiss', run: () => yieldIntent(intent) }
