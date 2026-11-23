@@ -4,25 +4,10 @@
   "icon": "🗓",
   "behavior_profile": "general",
   "builtin": true,
-  "builtin_version": 9,
+  "builtin_version": 10,
   "goal": "Keep priorities and follow-ups visible through a daily overview of authorized workspace information, without duplicating its ownership.",
   "tags": [
     "personal"
-  ],
-  "starter_tasks": [
-    {
-      "description": "Set up your Personal HQ",
-      "details": "Ask the user what they want tracked here: their direct HQ follow-ups, recurring commitments, and which authorized workspace-owned items they'd like surfaced in their daily rhythm. If they want email triage, reply drafting, or to manage email follow-ups, point them to the Email Ops workspace, which owns that work — HQ may surface what needs attention in the brief but does not take ownership or do the triage itself. Note whether they prefer a morning briefing, an end-of-day journal, or both, so the recurring rhythm matches how they actually work. Keep it to a few quick questions — this is a one-time setup, not an interview.",
-      "setup": true
-    },
-    {
-      "description": "Morning briefing",
-      "details": "Customize with the channels you care about (email, urgent threads, direct HQ follow-ups, and authorized Email Ops follow-ups). This feeds the app's Daily Brief on Home as an overview — do not build a second brief or move the source records here."
-    },
-    {
-      "description": "End-of-day journal",
-      "details": "Write a short reflection on what shipped today and what carries over. Ori pre-fills it with the follow-ups you closed today; you review and save it as a dated note."
-    }
   ],
   "agents": [
     {

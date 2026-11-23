@@ -29,8 +29,8 @@ func TestCreateWorkspaceFromPersonalHQTemplate(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	if got, _ := resp["seeded_starter_tasks"].(float64); got != 3 {
-		t.Fatalf("seeded_starter_tasks = %v, want 3", resp["seeded_starter_tasks"])
+	if got, ok := resp["seeded_starter_tasks"]; ok {
+		t.Fatalf("seeded_starter_tasks = %v, want field omitted for an empty board", got)
 	}
 
 	if _, ok := handler.agentStore.GetAgent("Personal Chief of Staff"); !ok {
@@ -55,8 +55,8 @@ func TestCreateWorkspaceFromPersonalHQTemplate(t *testing.T) {
 	}
 
 	tasks := workspaceTasksFromStore(t, handler, wsID)
-	if len(tasks) != 3 {
-		t.Fatalf("expected 3 seeded tasks, got %d: %+v", len(tasks), tasks)
+	if len(tasks) != 0 {
+		t.Fatalf("expected no seeded tickets, got %d: %+v", len(tasks), tasks)
 	}
 
 	diskWS, err := handler.workspaceStore.Get(wsID)
@@ -148,8 +148,8 @@ func TestCreateFromTemplateReusesTheProductionCreationPath(t *testing.T) {
 	if got := currentWorkspaceEntryAgentName(sessWS); got != "Personal Chief of Staff" {
 		t.Fatalf("entry agent = %q, want Personal Chief of Staff", got)
 	}
-	if tasks := workspaceTasksFromStore(t, handler, wsID); len(tasks) != 3 {
-		t.Fatalf("expected 3 seeded starter tasks, got %d", len(tasks))
+	if tasks := workspaceTasksFromStore(t, handler, wsID); len(tasks) != 0 {
+		t.Fatalf("expected no seeded tickets, got %d", len(tasks))
 	}
 }
 

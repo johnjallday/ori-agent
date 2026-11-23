@@ -94,6 +94,12 @@ func TestSavedAppObservationBeforeHQIsReconciledAfterActivation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Give Today an existing next action without relying on template tickets.
+	if _, err := workspace.NewTicketService(builder.workspaceStore).Create(workspace.TicketCreateInput{
+		WorkspaceID: currentState.HQWorkspaceID, State: workspace.TicketStateReady, Title: "Review portfolio draft",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	body, err = json.Marshal(map[string]any{"state_version": currentState.StateVersion,
 		"request_id": "user-explicit-1", "category": "projects", "text": "Finish the portfolio"})
 	if err != nil {
