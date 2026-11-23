@@ -336,6 +336,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-folder-shape.js',
       'internal/web/static/js/modules/workspace-map-folder-details.js',
       'internal/web/static/js/modules/workspace-delete-dialog.js',
+      'internal/web/static/js/modules/settings-personal-hq-trash.js',
       'internal/web/static/js/modules/workspace-plan.js',
       'internal/web/static/js/modules/workspace-plan-detail.js',
       'internal/web/static/js/modules/workspace-plan-editor.js',

@@ -408,7 +408,10 @@ func (h *Handler) trashWorkspaceWithGroupReview(ctx context.Context, ws *session
 	if err != nil {
 		return err
 	}
+	return h.recordWorkspaceTrash(ctx, ws, originalPath, trashedPath)
+}
 
+func (h *Handler) recordWorkspaceTrash(ctx context.Context, ws *session.Workspace, originalPath, trashedPath string) error {
 	if ws.SharedData == nil {
 		ws.SharedData = map[string]any{}
 	}

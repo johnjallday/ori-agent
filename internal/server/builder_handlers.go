@@ -238,6 +238,13 @@ func (b *ServerBuilder) initializeHandlers() {
 		// projection alone is not a designation (Issue #290). Only Designate
 		// is exposed, so an import never replaces an existing HQ.
 		b.sessionHandler.SetPersonalHQDesignator(b.personalHQService)
+		b.sessionHandler.SetPersonalHQTrashLookup(func(ctx context.Context) (*personalhq.Status, error) {
+			userID, err := b.userProvider.CurrentUserID(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return b.personalHQService.Status(ctx, userID)
+		})
 		// The workspace stores are constructed in a later phase. Passing the
 		// method value keeps Watchtower reads live once those stores are ready.
 		b.personalHQHandler.SetWatchtowerSources(b.watchtowerSnapshotSources)

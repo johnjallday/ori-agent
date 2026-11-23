@@ -2003,6 +2003,19 @@
             </section>
 
             <div class="settings-field mt-4 pt-4" style="border-top: 1px solid var(--danger-color);">
+              <h3 class="h6 mb-2">Personal HQ folder</h3>
+              <p class="settings-section-description">
+                Move your current Ori-managed Personal HQ folder and everything inside it to the system Trash.
+                On macOS and Linux, do this before starting a reset if you also want the HQ files removed.
+                Linked folders outside your HQ stay where they are.
+              </p>
+              <button id="reviewPersonalHQTrashBtn" class="btn btn-outline-danger" type="button">
+                Review moving Personal HQ to Trash
+              </button>
+              <p id="personalHQTrashStatus" class="settings-section-description mt-2 mb-0" role="status" aria-live="polite"></p>
+            </div>
+
+            <div class="settings-field mt-4 pt-4" style="border-top: 1px solid var(--danger-color);">
               <h3 class="h6 mb-2 ui-status-danger">Start Fresh</h3>
               <p class="settings-section-description">
                 Return this Ori installation to verified first-run state. This clears app identity, setup and
@@ -2311,6 +2324,7 @@
   <script defer src="/js/modules/settings-navigation.js"></script>
   <script defer src="/js/modules/settings-page.js"></script>
   <script defer src="/js/modules/settings-reset.js"></script>
+  <script type="module" src="/js/modules/settings-personal-hq-trash.js"></script>
   <script defer src="/js/modules/plugin-lifecycle.js"></script>
   <script defer src="/js/modules/plugin-recovery-client.js"></script>
   <script defer src="/js/modules/blueprint-readiness.js"></script>
