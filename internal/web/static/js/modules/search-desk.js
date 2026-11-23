@@ -362,5 +362,13 @@ export function mountFileSearch(root, compact = false) {
     }
   };
 }
-if (typeof document !== 'undefined' && document.getElementById('desk'))
+if (typeof document !== 'undefined' && document.getElementById('desk')) {
+  const picker = document.getElementById('destinationPicker');
+  picker?.addEventListener('change', () => {
+    if (picker.value === '/?view=map') location.assign('/?view=map');
+  });
+  window.addEventListener('pageshow', () => {
+    if (picker) picker.selectedIndex = 0;
+  });
   mountFileSearch(document.getElementById('desk'));
+}

@@ -1,6 +1,12 @@
 <!-- Ori Dashboard — Command Bridge -->
 <div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
-  {{if .Extra.ShowFileSearch}}<a class="modern-btn modern-btn-secondary" href="/search">Search local files</a>{{end}}
+  {{if .Extra.ShowFileSearch}}
+  <nav class="cockpit-destinations" aria-label="Destination">
+    <a class="modern-btn modern-btn-secondary" href="/search">Files</a>
+    <span hidden aria-current="page" data-map-destination>Map</span>
+    <select hidden aria-label="Destination" data-map-picker><option selected>Map</option><option value="/search">Files</option></select>
+  </nav>
+  {{end}}
   <!-- Only the HQ-owned result moves here; conversation and Today stay in the drawer. -->
   <aside id="personalHQResultHost" class="pa-hq-result" aria-label="Personal HQ setup result" hidden></aside>
   <!--

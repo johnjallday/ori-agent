@@ -2354,6 +2354,15 @@ import {
     return variant;
   }
 
+  const mapDestination = document.querySelector('[data-map-destination]');
+  const destinationPicker = document.querySelector('[data-map-picker]');
+  destinationPicker?.addEventListener('change', () => {
+    if (destinationPicker.value === '/search') window.location.assign('/search');
+  });
+  window.addEventListener('pageshow', () => {
+    if (destinationPicker) destinationPicker.selectedIndex = 0;
+  });
+
   function renderAreaStatus() {
     const status = currentAreaState();
     if (els.areaStatus) {
@@ -2379,7 +2388,10 @@ import {
     // An authoritative empty list is truthful map state: render the canvas,
     // while every pending, failed, or malformed state continues to fail closed.
     const mapRenderable = status.state === 'ready' || status.state === 'empty-map';
-    if (els.map) els.map.hidden = state.view !== VIEW_MAP || !mapRenderable;
+    const onMap = state.view === VIEW_MAP && mapRenderable;
+    if (els.map) els.map.hidden = !onMap;
+    if (mapDestination) mapDestination.hidden = !onMap;
+    if (destinationPicker) destinationPicker.hidden = !onMap;
     if (els.filters) els.filters.hidden = status.state !== 'ready' || state.view !== VIEW_MAP;
     currentInvitation();
     renderWelcome(status);

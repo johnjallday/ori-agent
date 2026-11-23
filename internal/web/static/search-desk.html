@@ -14,7 +14,10 @@
   <body data-landing="{{.State}}">
     <header>
       <span class="brand">ORI</span><span class="edition">ON DEVICE / LOCAL EDITION</span>
-      <nav>{{if .Home}}<a href="/search">Files</a>{{else}}<a href="/?home=1">Home</a>{{end}}</nav>
+      <nav aria-label="Destination" class="desk-destinations">{{if .Home}}<a href="/search">Files</a>{{else if .MapEligible}}
+        <span aria-current="page">Files</span><a href="/?view=map">Map</a>
+        <select aria-label="Destination" id="destinationPicker"><option selected>Files</option><option value="/?view=map">Map</option></select>
+        {{else}}<span aria-current="page">Files</span><a href="/?home=1">Home</a>{{end}}</nav>
     </header>
     {{if .Home}}
     <main class="arrival">
@@ -38,6 +41,7 @@
           <p id="consentScope">Ori will index filenames, locations and dates in this folder on your Mac. It won’t read file contents or give agents access.</p>
           <form method="dialog" class="actions"><button value="cancel" autofocus>Cancel</button><button value="allow">Allow search</button></form>
         </dialog>
+        {{if not .MapEligible}}<a class="link" href="/?setup=1">Start or resume workspace setup</a>{{end}}
         <p id="notice" role="status" aria-live="polite"></p>
       </section>
       <div class="worktop">

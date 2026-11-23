@@ -55,6 +55,22 @@ small {
 nav {
   margin-left: auto;
 }
+.desk-destinations {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+.desk-destinations [aria-current] {
+  border-bottom: 2px solid var(--accent);
+  font-weight: 700;
+}
+.desk-destinations select {
+  display: none;
+}
+@media (max-width: 44rem) {
+  .desk-destinations:has(select) > :not(select) { display: none; }
+  .desk-destinations select { display: block; padding: 0.4rem; font: inherit; }
+}
 .arrival {
   padding: clamp(2rem, 6vw, 5rem) 0 1rem;
 }

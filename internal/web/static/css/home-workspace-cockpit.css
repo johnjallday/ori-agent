@@ -8,6 +8,18 @@
  * than introducing a second visual language.
  */
 
+.cockpit-destinations {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+.cockpit-destinations [aria-current] { font-weight: 700; border-bottom: 2px solid currentColor; }
+.cockpit-destinations select { display: none; }
+@media (max-width: 44rem) {
+  .cockpit-destinations:has(select:not([hidden])) > :not(select) { display: none; }
+  .cockpit-destinations select:not([hidden]) { display: block; padding: 0.4rem; }
+}
+
 /* The container must be an ANCESTOR of what it styles — an element cannot
    query its own size — so the query container is the bridge that wraps the
    cockpit. Its inline size is the cockpit's available width, which is what

@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync, mkdirSync, writeFileSync, utimesSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { seedQuestionFolder } from './helpers/commander-question-fixture';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 const fixture = process.env.ORI_SEARCH_FIRST_FIXTURE;
 const evidence = 'tasks/evidence-files-map-navigation';
@@ -10,6 +12,7 @@ test.skip(
 );
 test('distinguish duplicate copies by location and date before acting', async ({
   page,
+  request,
   baseURL
 }) => {
   expect(new URL(baseURL!).hostname).toBe('localhost');
@@ -63,4 +66,58 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await expect(rows).toHaveCount(0);
   await expect(page.locator('#selectedFile')).toBeHidden();
   expect(existsSync(original)).toBeTruthy();
+  await expect(page.getByRole('link', { name: 'Map', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Start or resume workspace setup' })).toBeVisible();
+
+  await installLocalCdn(page);
+  const music = await seedQuestionFolder(request, join(fixture!, 'home'), 'Map Albums', true);
+  const other = await seedQuestionFolder(request, join(fixture!, 'home'), 'Other Albums', true);
+  const read = async (id: string) =>
+    (await (await request.get(`/api/personal-assistant/folder-agent/${id}`)).json()).folder_agent;
+  // Seed a pending-question record, not a simulated answer or a live model turn.
+  // Only this marked, newly minted split profile is writable here. With a
+  // degraded turn the real launcher correctly leads with the failure instead.
+  for (const slug of ['map-albums', 'other-albums']) {
+    const path = join(fixture!, 'data/workspace-staging', slug, '.ori/folder-agent-v1.json');
+    const record = JSON.parse(readFileSync(path, 'utf8'));
+    delete record.turn;
+    writeFileSync(path, JSON.stringify(record));
+  }
+  await page.goto('/search');
+  const mutations: string[] = [];
+  page.on('request', r => {
+    if (r.method() === 'POST') mutations.push(new URL(r.url()).pathname);
+  });
+  await page.getByRole('link', { name: 'Map', exact: true }).click();
+  await expect(page.locator('[data-map-destination]')).toBeVisible();
+  const tile = page
+    .locator(
+      `.ws-map-tile[data-ws-id="${music.workspace_id}"], .ws-map-district-tag[data-ws-id="${music.workspace_id}"]`
+    )
+    .first();
+  await tile.click();
+  const open = page.locator(`[data-cockpit-rail-open][data-workspace-id="${music.workspace_id}"]`);
+  await expect(open).toBeVisible();
+  await page.screenshot({ path: join(evidence, 'workspace-selected.png') });
+  await open.click();
+  const launcher = page.locator('#personalAssistantLauncher');
+  await expect(launcher.locator('[data-question]')).toBeVisible();
+  expect(
+    mutations.filter(p =>
+      /\/file-search\/(begin|select|open|reveal|refresh|remove|preference)$|\/premise$/.test(p)
+    )
+  ).toEqual([]);
+  await launcher.press('Enter');
+  const answer = page.locator(
+    `[data-folder-agent-chat-card][data-message-id="${music.chat.message_id}"] [data-folder-agent-action="premise_confirm"]`
+  );
+  await expect(answer).toBeVisible();
+  await page.screenshot({ path: join(evidence, 'commander-question.png') });
+  await answer.click();
+  await expect(answer).toHaveCount(0);
+  await expect(launcher.locator('[data-question]')).toHaveCount(0);
+  expect((await read(other.workspace_id)).premise.state).toBe(other.premise.state);
+  await page.goBack();
+  await page.getByRole('link', { name: 'Files', exact: true }).click();
+  await expect(term).toBeVisible();
 });
