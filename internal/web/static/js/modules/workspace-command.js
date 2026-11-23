@@ -73,8 +73,8 @@ import {
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 import { openLibrarySheet } from './map-library-sheet.js';
-import { createLibraryClient } from './library-setup.js';
-import { readFolderMap, folderMapTree, drawFolderMap } from './music-folder-map.js';
+import { folderMapTree, drawFolderMap } from './music-folder-map.js';
+import { readWorkspaceSourceFolders } from './workspace-source-folders.js';
 import {
   addSharedAssistant,
   loadProjectStaffing,
@@ -13548,7 +13548,7 @@ export class WorkspaceCommandView {
       '">' +
       (count === null ? '—' : count) +
       '</span>' +
-      (this.groupTemplateStatus?.provider?.plugin_id === 'music-project-management'
+      (this.canBrowseMusicFolders()
         ? `<button type="button" class="ws-cmd-nav-btn" data-cmd-by-folder aria-pressed="${!!this.musicFolders}">By folder</button>`
         : '') +
       // Projects on the Home's shelf not on the map yet: set up from here.
@@ -14276,6 +14276,15 @@ export class WorkspaceCommandView {
   syncSourceFolders(owner) {
     if (!owner || owner !== this.page?.membersPanel || owner.workspaceId !== this.workspaceId())
       return;
+    // Don't keep disclosures drawn from a superseded membership snapshot.
+    if (this.musicFolders && !owner.sourceFoldersRead) this.closeMusicFolders();
+    if (
+      this.active &&
+      this.detachmentMapEl?.parentNode &&
+      this.canBrowseMusicFolders() &&
+      !this.container?.querySelector('[data-cmd-by-folder]')
+    )
+      this.render();
     window.OriWorkspaceMap?.updateSourceFolders?.(
       this.detachmentMapEl,
       owner.workspaceId,
@@ -14413,18 +14422,26 @@ export class WorkspaceCommandView {
     }
   }
 
+  canBrowseMusicFolders() {
+    const owner = this.page?.membersPanel;
+    return (
+      !!this.musicFolders ||
+      this.groupTemplateStatus?.provider?.plugin_id === 'music-project-management' ||
+      (owner?.workspaceId === this.workspaceId() && !!owner?.sourceFolders)
+    );
+  }
+
   async toggleMusicFolders() {
     const host = this.detachmentMapEl,
       slot = host?.parentElement;
-    if (!slot || this.groupTemplateStatus?.provider?.plugin_id !== 'music-project-management')
-      return;
+    if (!slot || !this.canBrowseMusicFolders()) return;
     const button = this.container.querySelector('[data-cmd-by-folder]');
+    if (!button) return;
     if (this.musicFolders) {
       this.closeMusicFolders();
       button?.focus();
       return;
     }
-    const home = this.workspaceId();
     const panel = document.createElement('div');
     panel.className = 'music-folder-view';
     panel.textContent = 'Loading folder sections…';
@@ -14432,14 +14449,31 @@ export class WorkspaceCommandView {
     button?.setAttribute('aria-pressed', 'true');
     button.textContent = 'Saved layout';
     this.attachMusicFolders(slot);
+    await this.drawMusicFolders(panel);
+  }
+
+  async drawMusicFolders(panel) {
+    const group = this.workspaceId();
+    const owner = this.page?.membersPanel;
+    const currentTree = owner?.tree;
+    const current = () =>
+      this.musicFolders === panel && group === this.workspaceId() && owner?.tree === currentTree;
     try {
-      const catalog = await readFolderMap(createLibraryClient(home));
-      if (this.musicFolders !== panel || home !== this.workspaceId()) return;
+      // Opening is an explicit read: a revoked grant or moved project may
+      // postdate the map's captions. Retry on every opening after failure.
+      const labels = await readWorkspaceSourceFolders(group);
+      if (!current()) return;
+      if (!labels || owner?.readFailed) throw new Error('Folder view unavailable');
       const { workspaces } = this.detachmentSnapshot();
-      const tree = folderMapTree(home, workspaces, catalog);
+      if (!workspaces.some(row => row.id === group)) throw new Error('Membership unavailable');
+      const tree = folderMapTree(group, workspaces, labels);
+      if (!tree.sections.length && !tree.children.length) {
+        panel.textContent = 'No workspaces to display by folder. Return to the saved layout.';
+        return;
+      }
       panel.replaceChildren(drawFolderMap(document, tree, id => this.openDetachmentMember(id)));
     } catch {
-      if (this.musicFolders === panel)
+      if (current())
         panel.textContent =
           'Folder sections could not be loaded. Return to the saved layout and try again.';
     }

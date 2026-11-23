@@ -77,6 +77,63 @@ test('saved map tiles show scoped source folders without a layout write', async 
   expect((await musicHomeSnapshot(page.request)).positions).toEqual(snapshot.positions);
 });
 
+test('child By folder opens only member tiles and returns to the same saved layout', async ({
+  page
+}) => {
+  const { snapshot, group } = await groupFixture(page);
+  const route = `/workspaces/${group.folder_slug}?mode=map`;
+  const members = snapshot.workspaces.filter(w => w.parent_id === group.id);
+  const writes: string[] = [];
+  page.on('request', r => {
+    if (
+      r.method() !== 'GET' &&
+      /workspace-map\/layout|activation\/commit|staffing\/commit/.test(new URL(r.url()).pathname)
+    )
+      writes.push(r.url());
+  });
+  await page.goto(route);
+  const toggle = page.locator('[data-cmd-by-folder]');
+  await toggle.focus();
+  await toggle.press('Enter');
+  const folders = page.getByRole('region', { name: 'Workspaces by folder' });
+  await expect(folders.locator('summary')).toHaveText(['Albums · 5', 'Picker Songs · 2']);
+  expect(
+    (
+      await folders
+        .locator('[data-folder-workspace]')
+        .evaluateAll(els => els.map(e => e.getAttribute('data-folder-workspace')))
+    ).sort()
+  ).toEqual(members.map(w => w.id).sort());
+  await folders.screenshot({ path: join(evidence, 'child-by-folder.png') });
+  await folders.locator('summary').first().press('Space');
+  await expect(folders.getByRole('button', { name: 'Album-1', exact: true })).toBeHidden();
+  await folders.getByRole('button', { name: 'Track-1', exact: true }).press('Enter');
+  await expect(page).toHaveURL(
+    new RegExp(`/workspaces/${members.find(w => w.name === 'Track-1').folder_slug}`)
+  );
+  await page.goto(route);
+  await toggle.press('Enter');
+  await expect(folders).toBeVisible();
+  await toggle.press('Space');
+  await expect(toggle).toBeFocused();
+  await expect(folders).toHaveCount(0);
+  await page
+    .locator('.ws-cmd-detachment-host')
+    .screenshot({ path: join(evidence, 'restored-layout.png') });
+  // A failed read is not an empty inventory, and never traps the keyboard.
+  await page.route('**/source-folders', r => r.fulfill({ status: 409, json: {} }));
+  await toggle.press('Enter');
+  await expect(page.locator('.music-folder-view')).toContainText('could not be loaded');
+  await toggle.press('Enter');
+  await expect(toggle).toBeFocused();
+  expect(writes).toEqual([]);
+  const after = await musicHomeSnapshot(page.request);
+  expect(after.positions).toEqual(snapshot.positions);
+  expect(after.workspaces.map(w => [w.id, w.parent_id, w.agents])).toEqual(
+    snapshot.workspaces.map(w => [w.id, w.parent_id, w.agents])
+  );
+});
+
 test('an intentional tile move still saves on the group map', async ({ page }) => {
   test.skip(process.env.ORI_MUSIC_FOLDER_MAP !== 'move', 'explicit move demo only');
   const { snapshot, group } = await groupFixture(page);
