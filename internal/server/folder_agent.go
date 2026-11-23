@@ -62,6 +62,7 @@ func (b *ServerBuilder) wireFolderAgent() {
 		Reports:                newFolderAgentReports(b.sessionStore),
 		OnReported:             b.completeFolderAgentMissions,
 		ReviewActionIdentities: b.documentsActionIdentities,
+		MatchFiling:            b.fileJanitorService.MatchDocumentsSelection,
 		DocumentsAccess:        b.documentsOrganizationAccess,
 		ReviewOpen:             platform.OpenReviewDocument,
 		OrganizationMemory:     workspace.NewMemoryStore(b.workspaceFileStore),

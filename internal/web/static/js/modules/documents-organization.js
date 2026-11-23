@@ -1,6 +1,8 @@
+import { documentsFilingCheck } from './documents-filing-check.js';
+
 // Review is deliberately separate from chat submission and from Filing. A
 // redraw/revisit may load receipts, but only the approval button can send a POST.
-export function documentsOrganizationOffer(doc, base, fetchImpl) {
+export function documentsOrganizationOffer(doc, base, fetchImpl, route = '') {
   const node = (tag, text, cls) => {
     const n = doc.createElement(tag);
     if (text) n.textContent = text;
@@ -190,6 +192,10 @@ export function documentsOrganizationOffer(doc, base, fetchImpl) {
           list.append(row);
         }
         details.append(list);
+        if (group.kept && group.members.length)
+          details.append(
+            documentsFilingCheck({ node, button, group, review: r, sources, route, post })
+          );
         if (group.example_folder)
           details.append(node('p', `Example folder: ${group.example_folder}`));
       }

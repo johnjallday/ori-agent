@@ -225,6 +225,7 @@ type Deps struct {
 	DocumentsAccess        func(owner, workspaceID string) (DocumentsAccess, error)
 	DocumentsProtected     func() []string
 	OrganizationMemory     ReviewMemory
+	MatchFiling            MatchDocumentsFiling
 	ReviewActionIdentities func(owner, id, root string, since time.Time) (map[string]bool, error)
 	ReviewOpen             func(string) error
 	ReviewRead             func(string, string, int64, string, workspace.SourceVersion) (workspace.ContainedFile, error)

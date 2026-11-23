@@ -89,7 +89,7 @@ func groundedGroups(excerpts []reviewExcerpt, sources []ReviewSource, raw string
 				return nil, false
 			}
 			knownLabel := strings.EqualFold(l.Key, g.Title) || strings.EqualFold(l.Key, ea.ExampleFolder) || strings.EqualFold(l.Key, eb.ExampleFolder)
-			if !strings.ContainsAny(l.Key, "0123456789") && !(knownLabel && len(strings.Fields(l.Key)) >= 2) {
+			if !strings.ContainsAny(l.Key, "0123456789") && (!knownLabel || len(strings.Fields(l.Key)) < 2) {
 				return nil, false
 			}
 			for _, pair := range [][2]string{{l.A, l.B}, {l.B, l.A}} {

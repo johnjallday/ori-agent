@@ -18,7 +18,7 @@ func (s *Service) organizationAccess(owner string, rec *Record) (DocumentsAccess
 	if owner == "" || owner != rec.OwnerUserID {
 		return DocumentsAccess{}, ErrNotOwner
 	}
-	if rec.Map == nil || !(rec.State == StateReported || rec.State == StateKept || completed(rec)) || s.deps.DocumentsAccess == nil {
+	if rec.Map == nil || (rec.State != StateReported && rec.State != StateKept && !completed(rec)) || s.deps.DocumentsAccess == nil {
 		return DocumentsAccess{}, ErrWrongState
 	}
 	a, err := s.deps.DocumentsAccess(owner, rec.WorkspaceID)

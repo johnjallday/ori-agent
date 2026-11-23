@@ -135,6 +135,16 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
     );
     await scope.getByRole('button', { name: 'Keep as a view' }).first().click();
     await expect(scope).toContainText('Saved view · no files moved');
+    await scope.getByText('Review filing', { exact: true }).click();
+    const check = scope.getByRole('button', { name: 'Check selected files' });
+    await expect(check).toBeDisabled();
+    await scope.getByRole('checkbox', { name: 'estimate.txt', exact: true }).check();
+    await check.click();
+    await expect(scope).toContainText('review the Filing installation');
+    await expect(scope.getByRole('link', { name: 'Open workspace in a new tab' })).toHaveAttribute(
+      'href',
+      (await view()).route
+    );
     await page.reload();
     // Direct reload restores the drawer that was already open.
     await expect(report).toBeVisible();

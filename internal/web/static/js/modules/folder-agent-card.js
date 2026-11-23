@@ -2679,7 +2679,8 @@ export function renderFolderAgentReport(
       documentsOrganizationOffer(
         doc,
         `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(view.workspaceID)}`,
-        fetchImpl
+        fetchImpl,
+        workspaceRoute(view.route)
       )
     );
   if (view.policyNote) card.append(el(doc, 'p', 'folder-agent-card__note', view.policyNote));

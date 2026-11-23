@@ -34,6 +34,23 @@ func (h *Handler) OrganizationConvention(w http.ResponseWriter, r *http.Request)
 	}
 	orihttp.Success(w, map[string]any{"convention": c})
 }
+func (h *Handler) OrganizationFiling(w http.ResponseWriter, r *http.Request) {
+	owner, ok := h.organizationUser(w, r)
+	if !ok {
+		return
+	}
+	var req folderagent.FilingSelection
+	if !decode(w, r, &req) {
+		return
+	}
+	projection, err := h.service.CheckOrganizationFiling(r.Context(), owner, r.PathValue("workspaceID"), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"selection": projection})
+}
+
 func (h *Handler) OrganizationSource(w http.ResponseWriter, r *http.Request) {
 	owner, ok := h.organizationUser(w, r)
 	if !ok {

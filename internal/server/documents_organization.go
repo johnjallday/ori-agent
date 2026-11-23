@@ -34,7 +34,7 @@ func (b *ServerBuilder) documentsReviewModel(id, lead string) (folderagent.Revie
 	}
 	s := local.Settings
 	out.Model = strings.TrimSpace(s.Model)
-	if out.Model == "" || !(strings.EqualFold(s.Provider, "anthropic") || strings.EqualFold(s.Provider, "claude")) {
+	if out.Model == "" || (!strings.EqualFold(s.Provider, "anthropic") && !strings.EqualFold(s.Provider, "claude")) {
 		return out, nil
 	}
 	p, err := b.llmFactory.GetProvider("claude")
@@ -72,7 +72,7 @@ func (b *ServerBuilder) documentsOrganizationAccess(owner, id string) (folderage
 	}
 	access, restricted := ws.GetAgentMCPAccess(lead.ID)
 	for _, grant := range ws.GetMCPBindings() {
-		if !grant.Enabled || grant.ID == "" || grant.ServerName != "filesystem" || !grant.ToolAllowed("list_directory") || !(grant.ToolAllowed("read_file") || grant.ToolAllowed("read_text_file")) || (restricted && !slices.Contains(access.EnabledBindingIDs, grant.ID)) {
+		if !grant.Enabled || grant.ID == "" || grant.ServerName != "filesystem" || !grant.ToolAllowed("list_directory") || (!grant.ToolAllowed("read_file") && !grant.ToolAllowed("read_text_file")) || (restricted && !slices.Contains(access.EnabledBindingIDs, grant.ID)) {
 			continue
 		}
 		var root string

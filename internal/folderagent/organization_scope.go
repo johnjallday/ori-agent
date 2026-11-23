@@ -69,6 +69,9 @@ func scopeHash(v any) string { b, _ := json.Marshal(v); return documentsRef(stri
 
 func (s *Service) reviewScope(ctx context.Context, owner string, rec *Record, sel ReviewSelection) (organizationScope, error) {
 	var out organizationScope
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
 	a, err := s.organizationAccess(owner, rec)
 	if err != nil {
 		return out, err
@@ -193,7 +196,7 @@ func (s *Service) reviewScope(ctx context.Context, owner string, rec *Record, se
 		return out, ErrWrongState
 	}
 	current, err := s.organizationAccess(owner, rec)
-	if err != nil || current != a {
+	if err != nil || current != a || ctx.Err() != nil {
 		return out, ErrWrongState
 	}
 	if len(out.sources) > 0 && out.Processor.Pin != "" {
