@@ -49,6 +49,10 @@ type Folder struct {
 	Newest time.Time `json:"newest,omitzero"`
 	// Marker is the name of the highest-precedence project marker directly
 	// inside ("*.logicx", "go.mod"), and MarkerFiles how many entries matched it.
+	// Witness identifies the listed project directory when the caller needs
+	// to resolve this member later. It contains no name or file body.
+	Witness     string             `json:"witness,omitempty"`
+	HasVault    bool               `json:"has_vault,omitempty"`
 	Marker      string             `json:"marker,omitempty"`
 	MarkerFiles int                `json:"marker_files,omitempty"`
 	Shape       folderdigest.Shape `json:"shape,omitempty"`
@@ -192,8 +196,9 @@ func CleanRel(rel string) (string, error) {
 
 // Options tunes one walk. Zero values take the constants.
 type Options struct {
-	MaxEntries int
-	Budget     time.Duration
+	MemberWitness func(os.FileInfo) string
+	MaxEntries    int
+	Budget        time.Duration
 	// Now supplies the clock, for tests that exercise the time budget.
 	Now func() time.Time
 	// Progress, when set, is told after each folder what the walk has done
@@ -379,6 +384,7 @@ func (w *walker) budgetReason() string {
 // children are not queued or recorded.
 func (w *walker) list(rel string) (Folder, error) {
 	dir := w.abs(rel)
+	var before os.FileInfo
 	if rel != "" {
 		info, err := os.Lstat(dir)
 		if err != nil {
@@ -387,6 +393,7 @@ func (w *walker) list(rel string) (Folder, error) {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return Folder{}, ErrNotDirectory
 		}
+		before = info
 	}
 	entries, large, err := readDirBounded(dir, LargeFolderEntries)
 	if err != nil {
@@ -410,6 +417,9 @@ func (w *walker) list(rel string) (Folder, error) {
 		// Hidden entries (.git, .obsidian) still count as markers, as in the
 		// digest; links never do.
 		if !isLink {
+			if name == ".obsidian" && isDir && w.opts.MemberWitness != nil {
+				f.HasVault = true
+			}
 			if marker, ok := folderdigest.MatchMarker(name, isDir); ok {
 				rank := w.rank(marker)
 				if bestRank < 0 || rank < bestRank {
@@ -451,6 +461,11 @@ func (w *walker) list(rel string) (Folder, error) {
 	}
 	f.Kinds = len(extensions)
 	if bestRank >= 0 {
+		if before != nil && w.opts.MemberWitness != nil {
+			if after, err := os.Lstat(dir); err == nil && os.SameFile(before, after) {
+				f.Witness = w.opts.MemberWitness(before)
+			}
+		}
 		f.State = StateClosed
 		f.Marker = bestMarker.Name
 		f.Shape = bestMarker.Shape

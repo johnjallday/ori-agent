@@ -118,6 +118,15 @@
 /api/orchestration/workspace
 /api/orchestration/workspace/activate
 /api/orchestration/workspace/agents
+/api/personal-assistant/folder-agent/x/documents-draft/dismiss
+/api/personal-assistant/folder-agent/x/documents-draft/open
+/api/personal-assistant/folder-agent/x/documents-draft/recover
+/api/personal-assistant/folder-agent/x/documents-draft/review
+/api/personal-assistant/folder-agent/x/documents-draft/save
+/api/personal-assistant/folder-agent/x/documents-draft/setup
+/api/personal-assistant/folder-agent/x/documents-draft/setup-review
+/api/personal-assistant/folder-agent/x/documents-draft/vault
+/api/personal-assistant/folder-agent/x/documents-offer
 /api/personal-assistant/folder-digest
 /api/personal-assistant/folder-digest/forget
 /api/personal-assistant/folder-digest/offers/00000000-0000-0000-0000-000000000001/decide

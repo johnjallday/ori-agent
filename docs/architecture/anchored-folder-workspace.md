@@ -176,6 +176,12 @@ an ordinary-folder hire to a project holder (**Switch to**) is **not implemented
 existing profile/sidecar rename primitives cannot guarantee an unchanged original
 on every partial failure. No switch prompt or in-place reanchor is offered.
 
+### Returning to HQ from Documents
+
+The tab's guided attempt locates a receipt; it does not authorize a folder or Notes write. On a guided hire, the chooser binds the signed-in owner, active HQ and attempt to the new workspace record. A successful Documents walk records the physical root and marked-member identities with its map. No migration infers this information from a folder name, current anchor, project-holder row or assistant prose. Historical or unverifiable returns keep their ordinary workspace link.
+
+The HQ action looks up that exact report and ranks individual walked projects by vacancy, newest direct-file modification and relative path. It probes metadata for at most 64 candidates and displays at most four, excluding links, unsafe labels, state/notebook trees and vaults. A detected vault has a separate, explicitly confirmed read-only Notes review. No receipt view walks Documents again or opens a source file. See [Notes publication](second-brain.md#documents-project-notes) for what a confirmed draft writes.
+
 ## Lifecycle and recovery
 
 - Rename and group nesting move only the sidecar. Anchor IDs, paths and bindings

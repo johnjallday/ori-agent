@@ -31,6 +31,12 @@ func (b *ServerBuilder) wireSecondBrain(knowledge *personalassistant.KnowledgeSt
 		Vaults:         secondbrain.NewDetector(guards.HomeDir, guards),
 		ProjectTickets: secondBrainProjectTickets{b: b},
 		// The store may be created by a later phase; look it up at call time.
+		ResolveDocumentsVault: func(ctx context.Context, owner, token string) (string, error) {
+			if b.folderAgentService == nil {
+				return "", pathselection.ErrUnavailable
+			}
+			return b.folderAgentService.ResolveDocumentsVault(ctx, owner, token)
+		},
 		ResolveSelection: func(token string) (string, error) {
 			if b.pathSelectionStore == nil {
 				return "", pathselection.ErrUnavailable

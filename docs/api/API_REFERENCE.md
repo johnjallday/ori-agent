@@ -2300,6 +2300,20 @@ A new agent is created with the role orchestrator, the chosen model, the mandate
 
 An expired token answers `410` with `repair: "choose_folder"`. A folder already inside a workspace's anchor is refused with `duplicate: { "name": "…" }`, so the card can point at that workspace instead.
 
+### Guided Documents return
+
+`/folder-agent/choose` optionally accepts `guided_hq` and `guided_attempt`. The host binds matching navigation context to the confirmed hire; neither field grants access. Under `/api/personal-assistant/folder-agent/{workspaceID}` the following local-origin, current-user operations use **only** the specified workspace. Responses use `Cache-Control: no-store`.
+
+| Method and suffix | Input | Result |
+|---|---|---|
+| `GET /documents-offer` | `hq`, `attempt` query | `offer: null` or opaque `report`, `projects`/`vaults` with `ref`, `name`, `location`, `kind`, `evidence`; optional writable/setup flags or decision (`dismissed`, `pending`, `saved`, `unverified`). No file text. |
+| `POST /documents-draft/review` | `{hq, attempt, report, candidate, name, answer}` | `draft: {name, body, rel, notebook, review}`. No write. |
+| `POST /documents-draft/save` | same fields plus `review`, `request_id` | generation- and payload-bound create-only result; conflict rather than retarget or overwrite. |
+| `POST /documents-draft/setup-review` and `/documents-draft/setup` | review fields; setup additionally requires the returned `review` | reviewed default `setup_path`; explicit setup alone returns a `generation` for a new draft review. Does not save the project. |
+| `POST /documents-draft/vault` | `{hq, attempt, report, candidate}` | temporary Notes-only `selection_token`; `/second-brain/connect` revalidates the member on read-only confirmation. Replacement is not allowed. |
+| `POST /documents-draft/dismiss` | `{hq, attempt, report, candidate}` | narrow dismissal, not a Notes setup decision. |
+| `POST /documents-draft/recover` and `/documents-draft/open` | `{hq, attempt, request_id}` | recover verifies publication to complete its receipt, never writes a note. Open returns the proven note text, not a directory link. |
+
 ### The Report (view)
 
 **Endpoints:** `GET /api/personal-assistant/folder-agent` (every folder agent, `{ "folder_agents": [<view>…] }`, for the map's tile lines) and `GET /api/personal-assistant/folder-agent/{workspaceID}` (`{ "folder_agent": <view> }`). A workspace that was not started from a folder answers `{ "folder_agent": null }`.

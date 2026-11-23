@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/connectionshttp"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
@@ -71,6 +72,8 @@ type chooseRequest struct {
 	// FromWorkspaceID names the workspace page the folder is fed from; the
 	// server decides whether it is one of the owner's Homes.
 	FromWorkspaceID string `json:"from_workspace_id"`
+	GuidedHQ        string `json:"guided_hq"`
+	GuidedAttempt   string `json:"guided_attempt"`
 }
 
 // Choose resolves the folder and returns the card ({chip}, {picker:true} or
@@ -88,9 +91,9 @@ func (h *Handler) Choose(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "Choose a folder")
 		return
 	}
-	chosen, err := h.service.ChooseFrom(r.Context(), userID, personalassistant.FolderChoice{
+	chosen, err := h.service.ChooseForReturn(r.Context(), userID, personalassistant.FolderChoice{
 		Chip: req.Chip, Picker: req.Picker, SelectionToken: req.SelectionToken,
-	}, req.FromWorkspaceID)
+	}, req.FromWorkspaceID, req.GuidedHQ, req.GuidedAttempt)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -202,6 +205,26 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orihttp.Success(w, map[string]any{"folder_agent": view})
+}
+
+// DocumentsOffer returns only the eligible member labels and opaque references.
+func (h *Handler) DocumentsOffer(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if connectionshttp.NewOriginGuard().Check(r) != nil {
+		fail(w, http.StatusForbidden, "Local access required")
+		return
+	}
+	owner, ok := h.user(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	offer, err := h.service.DocumentsOffer(r.Context(), owner, q.Get("hq"), q.Get("attempt"), r.PathValue("workspaceID"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"offer": offer})
 }
 
 // Keep puts the report aside.

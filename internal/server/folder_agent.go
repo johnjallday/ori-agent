@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/charactercatalog"
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderagenthttp"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -23,6 +24,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
+	"github.com/johnjallday/ori-agent/internal/secondbrain"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -58,6 +60,34 @@ func (b *ServerBuilder) wireFolderAgent() {
 		Songs:      newFolderAgentSongs(b),
 		Reports:    newFolderAgentReports(b.sessionStore),
 		OnReported: b.completeFolderAgentMissions,
+		DocumentsNotebook: func(ctx context.Context, owner, hq string, fn func(secondbrain.Source, string) error) error {
+			return b.personalAssistantSecondBrain.WithDocumentsNotebook(ctx, owner, hq, fn)
+		},
+		DocumentsSetup: func(ctx context.Context, owner, hq, root, proposal, ref string, confirm bool) (personalassistant.DocumentsSetupView, error) {
+			return b.personalAssistantSecondBrain.DocumentsSetup(ctx, owner, hq, root, proposal, ref, confirm)
+		},
+		DocumentsScope: func(ctx context.Context, owner string) (folderagent.DocumentsScope, error) {
+			scope := folderagent.DocumentsScope{Protected: []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)}}
+			source, connected, setup, err := b.personalAssistantSecondBrain.DocumentsNotesState(ctx, owner)
+			scope.Setup = setup
+			if connected {
+				scope.Notebook = source.Path
+				if writer, err := secondbrain.NewWriter(&source); err == nil && source.FillIn.Allowed() {
+					_, _, err = writer.ReviewProject("Review")
+					scope.Writable = err == nil
+				}
+			}
+			return scope, err
+		},
+		ActiveHQ: func(ctx context.Context, owner string) string {
+			if b.personalAssistantService != nil {
+				p, err := b.personalAssistantService.Get(ctx, owner)
+				if err == nil && p != nil && p.State == personalassistant.APIStateActive && p.Availability.PersonalHQ.Available && p.Availability.AgentInstance.Available {
+					return p.HQWorkspaceID
+				}
+			}
+			return ""
+		},
 		FilingPermission: func(workspaceID string) (bool, error) {
 			if b.fileJanitorService == nil {
 				return false, folderagent.ErrUnavailable

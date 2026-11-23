@@ -7066,7 +7066,11 @@ async function chooseForAgent(body) {
     } catch (_) {
       from = '';
     }
-    const result = await chooseFolder(from ? { ...body, from_workspace_id: from } : body);
+    const result = await chooseFolder({
+      ...body,
+      ...(from ? { from_workspace_id: from } : {}),
+      ...(guidedFolder ? { guided_hq: guidedFolder.hq, guided_attempt: guidedFolder.attempt } : {})
+    });
     if (result.error) {
       showStatus(
         body.chip === 'documents'
