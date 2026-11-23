@@ -25,6 +25,28 @@ export async function folderReceipt(hint, read) {
     };
   if (raw.state === 'looking')
     return { text: `An agent is exploring ${name}. The report is not ready yet.`, ...link };
+  if (['reported', 'kept', 'set_up'].includes(raw.state)) {
+    // This optional read must not replace the ordinary receipt on failure.
+    const query = new URLSearchParams({ hq: hint.hq, attempt: hint.attempt });
+    let offer;
+    try {
+      ({ offer } = await read(
+        `/api/personal-assistant/folder-agent/${encodeURIComponent(current.workspace)}/documents-offer?${query}`
+      ));
+    } catch (_) {
+      /* The report still has its own workspace. */
+    }
+    if (currentHQAttempt(hint.hq, 'folder', hint.attempt)?.workspace !== current.workspace)
+      return null;
+    if (offer?.projects?.length) {
+      const first = offer.projects[0];
+      return {
+        text: `I found a ${first.kind} in ${first.location}.`,
+        offer,
+        ...link
+      };
+    }
+  }
   if (['reported', 'kept', 'setting_up', 'set_up'].includes(raw.state))
     return { text: `The first look at ${name} is ready.`, ...link };
   return null;

@@ -200,6 +200,9 @@ type Deps struct {
 	Tickets    Tickets
 	Setups     Setups
 	Homes      Homes
+	// ActiveHQ resolves the signed-in owner's current active assistant relationship.
+	ActiveHQ       func(context.Context, string) string
+	DocumentsScope func(context.Context, string) (DocumentsScope, error)
 	// FilingPermission reads only the stored grant, never a health probe.
 	// A missing reader or read error is unknown, not a missing permission.
 	FilingPermission func(workspaceID string) (bool, error)
@@ -239,7 +242,8 @@ type choice struct {
 	expires time.Time
 	// fedFromHome is the Home provider key of the Home the folder was chosen
 	// from inside, resolved on the server; empty otherwise.
-	fedFromHome string
+	fedFromHome  string
+	guidedReturn string
 	// policy supplies editable defaults only, never mutation authority.
 	policy folderlook.RootPolicy
 }
@@ -291,6 +295,11 @@ func (s *Service) Choose(ctx context.Context, userID string, c personalassistant
 // premise is not asked for the kind that Home holds (PRD FR8). The page names
 // the workspace; the server decides whether it is a Home.
 func (s *Service) ChooseFrom(ctx context.Context, userID string, c personalassistant.FolderChoice, fromWorkspaceID string) (*Chosen, error) {
+	return s.ChooseForReturn(ctx, userID, c, fromWorkspaceID, "", "")
+}
+
+// ChooseForReturn attaches optional HQ navigation context to this hire, not a grant.
+func (s *Service) ChooseForReturn(ctx context.Context, userID string, c personalassistant.FolderChoice, fromWorkspaceID, hq, attempt string) (*Chosen, error) {
 	if s == nil || s.deps.Folders == nil {
 		return nil, ErrUnavailable
 	}
@@ -302,12 +311,12 @@ func (s *Service) ChooseFrom(ctx context.Context, userID string, c personalassis
 	if from := strings.TrimSpace(fromWorkspaceID); from != "" && s.deps.Homes != nil {
 		fedFromHome = s.deps.Homes.HomeProviderOf(ctx, userID, from)
 	}
-	return s.choosePath(ctx, userID, path, fedFromHome), nil
+	return s.choosePath(ctx, userID, path, fedFromHome, s.returnBinding(ctx, userID, hq, attempt)), nil
 }
 
 // choosePath issues a volatile hire card for an already host-validated path.
 // Only chooser resolution and recorded project-holder resolution call it.
-func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome string) *Chosen {
+func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome, guidedReturn string) *Chosen {
 	identity := ResolveRootIdentity(path, s.deps.KnownFolderRoot)
 	purpose, brief := knownFolderHire(identity.Policy)
 	token := newToken()
@@ -318,7 +327,7 @@ func (s *Service) choosePath(ctx context.Context, userID, path, fedFromHome stri
 			delete(s.choices, key)
 		}
 	}
-	s.choices[token] = choice{userID: userID, path: path, expires: now.Add(choiceTTL), fedFromHome: fedFromHome, policy: identity.Policy}
+	s.choices[token] = choice{userID: userID, path: path, expires: now.Add(choiceTTL), fedFromHome: fedFromHome, guidedReturn: guidedReturn, policy: identity.Policy}
 	s.mu.Unlock()
 	name := filepath.Base(path)
 	hire := s.hireOptions(ctx, userID, name)
@@ -409,7 +418,7 @@ func (s *Service) Start(ctx context.Context, userID, token, brief string, hire H
 	rec := &Record{
 		WorkspaceID: created.ID, OwnerUserID: userID, FolderName: folder, WorkspaceName: created.Name,
 		AgentName: created.AgentName, TicketID: ticketID, Brief: brief, State: StateLooking,
-		AsksPremise: true, FedFromHome: held.fedFromHome,
+		AsksPremise: true, FedFromHome: held.fedFromHome, GuidedReturn: held.guidedReturn,
 	}
 	err = s.deps.Store.Create(rec)
 	endStarting() // only now: the record is written (or never will be)
@@ -555,6 +564,15 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 		}
 	}
 	m := rec.Map
+	witness := s.documentsWitness(rec, root)
+	if witness != "" {
+		opts.MemberWitness = directoryWitness
+	}
+	// An explicit new look on Documents must not inherit evidence from an
+	// unbound historical walk or a different directory at the same path.
+	if witness != "" && rec.MapWitness != witness {
+		m = nil
+	}
 	if m == nil {
 		m, err = foldermap.Walk(root, opts)
 	} else {
@@ -619,6 +637,11 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 		askFolders = folderlook.AskFolders(facts)
 	}
 	updated, err := s.deps.Store.Update(workspaceID, func(r *Record) error {
+		if witness != "" && witness == s.documentsWitness(rec, root) {
+			r.MapWitness = witness
+		} else {
+			r.MapWitness = ""
+		}
 		r.Map, r.Facts, r.Stage, r.Candidates, r.Turn = m, facts, stage, candidates, turn
 		r.Sections, r.AskFolders, r.Hint = sections, askFolders, ""
 		r.ExistingMembers = existing

@@ -169,8 +169,15 @@ export class HQFirstVisitCard {
   }
 
   receiptHTML() {
+    const projects = this.receipt?.offer?.projects || [];
+    const evidence = projects
+      .map(
+        p =>
+          `<details><summary>Review ${escape(p.location)}</summary><p>The folder report found ${escape(p.evidence)} here. No file text was used.</p></details>`
+      )
+      .join('');
     return this.receipt
-      ? `<section class="ws-cmd-card" role="status" data-guided-receipt><strong>From your assistant</strong><p>${escape(this.receipt.text)}</p>${this.receipt.href ? `<a href="${escape(this.receipt.href)}">${escape(this.receipt.label)}</a>` : ''}</section>`
+      ? `<section class="ws-cmd-card" role="status" data-guided-receipt><strong>From your assistant</strong><p>${escape(this.receipt.text)}</p>${evidence}${this.receipt.href ? `<a href="${escape(this.receipt.href)}">${escape(this.receipt.label)}</a>` : ''}</section>`
       : '';
   }
 

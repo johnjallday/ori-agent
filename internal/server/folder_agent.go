@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/charactercatalog"
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderagenthttp"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -58,6 +59,23 @@ func (b *ServerBuilder) wireFolderAgent() {
 		Songs:      newFolderAgentSongs(b),
 		Reports:    newFolderAgentReports(b.sessionStore),
 		OnReported: b.completeFolderAgentMissions,
+		DocumentsScope: func(ctx context.Context, owner string) (folderagent.DocumentsScope, error) {
+			scope := folderagent.DocumentsScope{Protected: []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)}}
+			source, connected, err := b.personalAssistantSecondBrain.ConnectedSource(ctx, owner)
+			if connected {
+				scope.Notebook, scope.Writable = source.Path, source.CreatedByOri() && source.FillIn.Allowed()
+			}
+			return scope, err
+		},
+		ActiveHQ: func(ctx context.Context, owner string) string {
+			if b.personalAssistantService != nil {
+				p, err := b.personalAssistantService.Get(ctx, owner)
+				if err == nil && p != nil && p.State == personalassistant.APIStateActive && p.Availability.PersonalHQ.Available && p.Availability.AgentInstance.Available {
+					return p.HQWorkspaceID
+				}
+			}
+			return ""
+		},
 		FilingPermission: func(workspaceID string) (bool, error) {
 			if b.fileJanitorService == nil {
 				return false, folderagent.ErrUnavailable

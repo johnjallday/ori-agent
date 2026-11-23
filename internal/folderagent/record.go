@@ -244,12 +244,16 @@ type Record struct {
 	Brief         string                `json:"brief"`
 	State         State                 `json:"state"`
 
-	Map        *foldermap.Map         `json:"map,omitempty"`
-	Facts      foldermap.Facts        `json:"facts"`
-	Stage      foldermap.Stage        `json:"stage,omitempty"`
-	Candidates []folderlook.Candidate `json:"candidates,omitempty"`
-	Progress   Progress               `json:"progress"`
-	Turn       *TurnReceipt           `json:"turn,omitempty"`
+	// GuidedReturn binds the confirmed hire to its owner's HQ attempt. MapWitness
+	// identifies the Documents directory at walk time. Neither grants access.
+	GuidedReturn string                 `json:"guided_return,omitempty"`
+	MapWitness   string                 `json:"map_witness,omitempty"`
+	Map          *foldermap.Map         `json:"map,omitempty"`
+	Facts        foldermap.Facts        `json:"facts"`
+	Stage        foldermap.Stage        `json:"stage,omitempty"`
+	Candidates   []folderlook.Candidate `json:"candidates,omitempty"`
+	Progress     Progress               `json:"progress"`
+	Turn         *TurnReceipt           `json:"turn,omitempty"`
 	// Sections are the agent's words that survived the host's parser, with
 	// the turn's provenance; nil when no turn produced any.
 	Sections *folderlook.Sections `json:"sections,omitempty"`
