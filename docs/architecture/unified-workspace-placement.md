@@ -142,8 +142,9 @@ Storage: SQLite migration **85 → 86** adds ordinary-create operation records
 (identity, owner, material/source digest/request, frozen workspace ID, state and
 outcome). Canonical workspace SharedData carries the operation ID/digest; a
 reserved UUID, name or copied response without that provenance is not proof.
-Existing workspaces/builds receive no inferred claims or consent. Build schema 5,
-folder digest schema 2 and companion protocols/blueprint versions are unchanged.
+Existing workspaces/builds receive no inferred claims or consent. The ordinary
+journal does not change build or folder digest schemas, companion protocols, or
+blueprint versions.
 Legacy create calls do not gain replay identity merely by supplying a group key.
 Policy-aware group/Home and reviewed setup requests stay on their own protocols;
 the wrapper refuses them rather than double-claim their effects.
@@ -153,12 +154,13 @@ An incomplete accepted operation exposes reconciliation rather than promising to
 finish arbitrary partly executed effects. Browser recovery retains the operation
 reference and reads it; it never retries ordinary creation on a lost reply.
 
-### Attached ordinary build sources
+### Ordinary assisted drafts and attached sources
 
-An ordinary draft with a generic held folder or observed link retains its build
-and existing create/link completion owners. Its operation request includes
-`build_session_id` and exact `build_review_version`. The journal additionally
-binds the canonical path-free source witness. Review and final validation require
+The ordinary assisted draft carries `build_session_id` and exact
+`build_review_version`, even when no folder or link was attached. The ordinary
+journal binds that open version, and the material request remains immutable. A
+generic held folder or observed link keeps its existing completion owner; the
+journal additionally binds the canonical path-free source witness. Review and final validation require
 an open current build with no setup/preparation claim, pending observer/inference
 or recognized-plan authority; a missing/expired hold never becomes Blank.
 

@@ -1548,6 +1548,9 @@
     root.textContent = '';
     root.appendChild(renderHeader());
     const transcript = createElement('div', 'workspace-build-pane__transcript');
+    transcript.tabIndex = 0;
+    transcript.setAttribute('role', 'region');
+    transcript.setAttribute('aria-label', 'Assistant conversation');
     const showEarlier = createElement('button', 'workspace-build-pane__earlier', COPY.showEarlier);
     showEarlier.type = 'button';
     showEarlier.dataset.buildControl = 'show-earlier';

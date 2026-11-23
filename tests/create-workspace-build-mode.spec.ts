@@ -1,9 +1,12 @@
-import { test, expect, Page, Route } from '@playwright/test';
+import { test, expect, type Locator, type Page, type Route } from '@playwright/test';
 import { mockHiredAssistant, mockUnhiredAssistant } from './helpers/hired-assistant';
 import { installLocalCdn } from './helpers/offline-cdn';
 import { checkNextActionReflow } from './helpers/next-action-reflow';
 import { startJanitorBuildModel } from './helpers/janitor-build-model';
 import { abandonOpenBuild, prepareFolderCreationRuntime } from './helpers/folder-first-runtime';
+import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { tmpdir } from 'node:os';
 
 /**
  * E2E for "Build with your assistant" (tasks/prd-build-with-your-assistant.md):
@@ -16,8 +19,9 @@ import { abandonOpenBuild, prepareFolderCreationRuntime } from './helpers/folder
  *
  * Run against a fresh sandbox (a demoed one taints slug uniqueness):
  *   LM_STUDIO_BASE_URL=http://127.0.0.1:8940/v1 ORI_DEMO_NO_CODEX=1 \
- *     ./scripts/demo-server.sh 8931 "$TMPDIR/ori-e2e.<n>"
- *   ./scripts/e2e.sh tests/create-workspace-build-mode.spec.ts -- --workers=1
+ *     zsh -c 'source scripts/wt.sh && wt demo'
+ *   ./scripts/e2e.sh --env ORI_BUILD_DEMO_SANDBOX='<printed demo sandbox>' \
+ *     tests/create-workspace-build-mode.spec.ts -- --workers=1
  */
 
 type Choice = { id: string; label: string };
@@ -68,7 +72,6 @@ type FakeBuild = {
   turns: RequestBody[];
   drafts: RequestBody[];
   abandons: RequestBody[];
-  folders: RequestBody[];
   links: RequestBody[];
 };
 
@@ -140,7 +143,6 @@ async function fakeBuildServer(
     turns: [],
     drafts: [],
     abandons: [],
-    folders: [],
     links: []
   };
   let sequence = 0;
@@ -232,9 +234,7 @@ async function fakeBuildServer(
       if (body.first_message) runTurn(session, String(body.first_message));
       return respond(route, 201, { session });
     }
-    const match = path.match(
-      /^\/([^/]+)\/(turns|draft|abandon|folder|folder\/detach|link|link\/detach)$/
-    );
+    const match = path.match(/^\/([^/]+)\/(turns|draft|abandon|link|link\/detach)$/);
     const session = fake.session;
     if (!match || !session || decodeURIComponent(match[1]) !== session.id) {
       return respond(route, 404, { error: 'Build session not found.', code: 'not_found' });
@@ -249,27 +249,6 @@ async function fakeBuildServer(
         error: 'The build changed since you last saw it.',
         code: 'version'
       });
-    }
-    // Add folder: the server's observation is kept on the session and said
-    // as the user's own act; the browser only ever named a chip.
-    if (match[2] === 'folder') {
-      fake.folders.push(body);
-      session.folder = { observation: { ...FAKE_OBSERVATION } };
-      session.transcript.push({
-        role: 'form',
-        text: 'You attached the folder “Elite School”. It will be linked to the workspace when you create it.'
-      });
-      session.applied = [];
-      session.version += 1;
-      return respond(route, 200, { session });
-    }
-    if (match[2] === 'folder/detach') {
-      if (session.folder) {
-        session.folder = null;
-        session.transcript.push({ role: 'form', text: 'You removed the attached folder.' });
-        session.version += 1;
-      }
-      return respond(route, 200, { session });
     }
     // Add link: one address, refused in the user's words when it is not
     // public; a refusal changes nothing on the build.
@@ -366,10 +345,13 @@ function cardByLabel(page: Page, label: string) {
   });
 }
 
-async function openFromHome(page: Page) {
+async function openFromHome(
+  page: Page,
+  open = () => page.locator('#cockpitCreateWorkspaceBtn').click()
+) {
   await page.request.post('/api/onboarding/skip').catch(() => {});
   await page.goto('/');
-  await page.locator('#cockpitCreateWorkspaceBtn').click();
+  await open();
   await expect(page.locator('#addFolderModal')).toBeVisible();
 }
 
@@ -387,10 +369,28 @@ async function say(page: Page, text: string) {
   await settle(page, turn);
 }
 
-async function choose(page: Page, label: string) {
+async function choose(page: Page, label: string, keyboard = false) {
   const turn = page.waitForResponse(response => isTurn(response.url()));
-  await pane(page).getByRole('button', { name: label }).click();
+  const button = pane(page).getByRole('button', { name: label });
+  if (keyboard) await activateByTab(page, button);
+  else await button.click();
   await settle(page, turn);
+}
+
+async function tabTo(page: Page, button: Locator) {
+  for (
+    let n = 0;
+    n < 80 && !(await button.evaluate(node => node === document.activeElement));
+    n++
+  ) {
+    await page.keyboard.press('Tab');
+  }
+  await expect(button).toBeFocused();
+}
+
+async function activateByTab(page: Page, button: Locator) {
+  await tabTo(page, button);
+  await page.keyboard.press('Enter');
 }
 
 // A sandbox that already holds workspaces may put the first candidate on
@@ -413,8 +413,10 @@ async function currentStep(page: Page) {
   return page.evaluate(() => (window as any).sessionManager.wizardStep);
 }
 
-async function manual(page: Page) {
-  await pane(page).getByRole('button', { name: 'Set up manually' }).click();
+async function manual(page: Page, keyboard = false) {
+  const button = pane(page).getByRole('button', { name: 'Set up manually' });
+  if (keyboard) await activateByTab(page, button);
+  else await button.click();
   await expect(pane(page)).toBeHidden();
   const reviewTitle = page.locator('#workspaceCreationReviewTitle');
   await expect(
@@ -453,7 +455,24 @@ test.beforeEach(async ({ page }) => {
   await mockHiredAssistant(page);
 });
 
-test('folder review is one shared editable surface with optional conversation', async ({
+// Older builds can still hold an observation on Resume. Fresh picks now
+// belong to the folder hiring card, exercised against the host below.
+async function resumeRetainedFolderReview(page: Page, fake: FakeBuild) {
+  await expect(page.locator('#workspaceBuildDraftSaveState')).toHaveText('Draft saved.');
+  await page.getByRole('button', { name: 'Close create workspace' }).click();
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  fake.session!.folder = { observation: { ...FAKE_OBSERVATION } };
+  await page.locator('#cockpitCreateWorkspaceBtn').click();
+  await pane(page).getByRole('button', { name: 'Resume', exact: true }).click();
+  const returned = page.locator('#workspaceBuildReturnToReview');
+  const review = page.locator('#workspaceBuildFolderReview');
+  await expect(
+    returned.filter({ visible: true }).or(review.filter({ visible: true }))
+  ).toBeVisible();
+  if (!(await review.isVisible())) await returned.click();
+}
+
+test('retained folder review is one shared editable surface with optional conversation', async ({
   page
 }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -476,9 +495,7 @@ test('folder review is one shared editable surface with optional conversation', 
   });
   await openFromHome(page);
   await say(page, 'Make a research notebook with no agents.');
-  await composer(page).fill('Refine my purpose, but leave my name.');
-  await pane(page).getByRole('button', { name: 'Add folder', exact: true }).click();
-  await pane(page).getByRole('button', { name: 'Documents', exact: true }).click();
+  await resumeRetainedFolderReview(page, fake);
   const review = page.locator('#workspaceBuildFolderReview');
   await expect(review).toBeVisible();
   await expect(pane(page)).toBeHidden();
@@ -498,7 +515,7 @@ test('folder review is one shared editable surface with optional conversation', 
   await expect(review).toBeVisible();
   await expect(page.locator('#workspaceBuildPlanName')).toHaveValue('My edited workspace');
   await page.getByRole('button', { name: 'Refine with assistant', exact: true }).click();
-  await expect(composer(page)).toHaveValue('Refine my purpose, but leave my name.');
+  await composer(page).fill('Refine my purpose, but leave my name.');
   await pane(page).getByRole('button', { name: 'Add link', exact: true }).click();
   await page.locator('#workspaceBuildLinkInput').fill(FAKE_LINK.url);
   await page.locator('#workspaceBuildLinkInput').press('Enter');
@@ -549,7 +566,7 @@ test('long effective team wraps in the one narrow folder-review scroller', async
     'Editorial planning and source verification lead for the synthetic project',
     'Publication copywriting and accessibility reviewer for the synthetic project'
   ];
-  await fakeBuildServer(page, [
+  const fake = await fakeBuildServer(page, [
     {
       text: 'A draft with the requested team.',
       set: {
@@ -568,8 +585,7 @@ test('long effective team wraps in the one narrow folder-review scroller', async
   ]);
   await openFromHome(page);
   await say(page, 'Draft a content workspace with this team.');
-  await pane(page).getByRole('button', { name: 'Add folder', exact: true }).click();
-  await pane(page).getByRole('button', { name: 'Documents', exact: true }).click();
+  await resumeRetainedFolderReview(page, fake);
   const team = page.locator('#workspaceBuildFolderTeam');
   for (const name of names) await expect(team).toContainText(name);
   await page.getByRole('button', { name: 'Edit team', exact: true }).focus();
@@ -687,7 +703,7 @@ const NEWSLETTER_REASON = 'Content Production fits a weekly editorial workflow.'
 const NEWSLETTER_SOLO = 'Just a Content Lead';
 const NEWSLETTER_PAIR = 'A Content Lead and a Brand Copywriter';
 
-async function openRealNewsletterBuild(page: Page, name: string) {
+async function openRealNewsletterBuild(page: Page, name: string, keyboard = false) {
   await page.unroute(/\/api\/personal-assistant$/);
   await abandonOpenBuild(page.request);
   catalogModel.scenario({
@@ -708,7 +724,10 @@ async function openRealNewsletterBuild(page: Page, name: string) {
       create_now: true // Even these flags cannot confirm the first turn.
     }
   });
-  await openFromHome(page);
+  await openFromHome(
+    page,
+    keyboard ? () => activateByTab(page, page.locator('#cockpitCreateWorkspaceBtn')) : undefined
+  );
 }
 
 function staffRealNewsletter(roles: { role_id: string; mode?: string; agent_name: string }[]) {
@@ -768,18 +787,37 @@ test('real newsletter review and map bind only the latest material draft to conf
   const updatedName = 'Friday Newsletter Desk';
   const lead = 'Friday Content Lead';
   const traffic = observeCreationTraffic(page);
+  await page.addInitScript(() => localStorage.setItem('ori-theme', 'light'));
   await openRealNewsletterBuild(page, firstName);
   const before = await domainResources(page);
-  await say(page, NEWSLETTER_PROMPT);
   const summary = page.locator('#workspaceBuildDraftSummary');
   const review = page.locator('#workspaceCreationReviewPanel');
+  const held = catalogModel.hold();
+  await composer(page).fill(NEWSLETTER_PROMPT);
+  const proposed = page.waitForResponse(response => isTurn(response.url()));
+  await composer(page).press('Enter');
+  try {
+    await held.started;
+    await expect(summary).toContainText('Preparing a draft…');
+    await expect(summary).toContainText('Nothing created yet');
+    await page.screenshot({ path: testInfo.outputPath('desktop-waiting.png') });
+    expect(await domainResources(page)).toEqual(before);
+  } finally {
+    held.release();
+  }
+  await settle(page, proposed);
   await expect(summary).toContainText(NEWSLETTER_REASON);
   await expect(summary).toContainText('Standalone workspace');
+  await expect(summary).toContainText('Content Lead: Required · choose an agent');
+  await expect(summary).toContainText('Next: answer the assistant’s question.');
   await expect(review).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath('desktop-proposal.png') });
   staffRealNewsletter([{ role_id: 'content-lead', agent_name: lead }]);
   await choose(page, NEWSLETTER_SOLO);
   await expect(summary).toContainText(`Will create ${lead} · required`);
+  await expect(summary).toContainText('3 optional roles left empty.');
   await expect(review).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath('desktop-team.png') });
   await test.step('reach review without confirming', async () => {
     proposeRealNewsletterReview();
     await say(page, 'create it');
@@ -862,13 +900,17 @@ test('real newsletter review and map bind only the latest material draft to conf
   await result.getByRole('button', { name: `Open ${updatedName}`, exact: true }).click();
   await expectSavedNewsletter(page, confirmed.result.folder, [lead]);
   expect(traffic.legacyWrites).toEqual([]);
+  await page.screenshot({ path: testInfo.outputPath('desktop-open.png') });
 });
 
 async function expectSavedNewsletter(page: Page, folder: RequestBody, roster: string[]) {
   await expect(page).toHaveURL(new RegExp(`/workspaces/${folder.folder_slug}$`));
   const detail = await (await page.request.get(`/api/workspaces/${folder.id}`)).json();
   const team = await (await page.request.get(`/api/workspaces/${folder.id}/agents`)).json();
-  const runs = await (await page.request.get(`/api/workspaces/${folder.id}/runs`)).json();
+  const response = await page.request.get(`/api/workspaces/${folder.id}/runs`);
+  expect(response.ok()).toBe(true);
+  const runs = await response.json();
+  expect('runs' in runs).toBe(true);
   expect(detail.name).toBe(folder.name);
   expect(detail.mission_state.mission_execution_count || 0).toBe(0);
   expect(team.agents.map((agent: RequestBody) => agent.name).sort()).toEqual([...roster].sort());
@@ -876,146 +918,205 @@ async function expectSavedNewsletter(page: Page, folder: RequestBody, roster: st
   const mission = await (await page.request.get(`/api/workspaces/${folder.id}/mission`)).json();
   expect(mission.first_run_pending).not.toBe(true);
   const provenance = page.locator('.ws-cmd-build-summary');
-  await provenance.locator('summary').click();
+  await activateByTab(page, provenance.locator('summary'));
   await expect(provenance).toContainText(NEWSLETTER_PROMPT);
   await expect(provenance).toContainText(NEWSLETTER_REASON);
   for (const name of roster) await expect(provenance).toContainText(name);
 }
 
-test('real compact newsletter recovers the exact confirmation after a lost reply and reload', async ({
-  page
-}, testInfo) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.addInitScript(() => localStorage.setItem('ori-theme', 'dark'));
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  const firstName = 'Weekend Newsletter Desk';
-  const name = 'Sunday Newsletter Desk';
-  const lead = 'Saved Sunday Editor';
-  const copywriter = 'Sunday Copywriter';
-  const saved = await page.request.post('/api/agents', {
-    data: {
-      name: lead,
-      provider: 'lmstudio',
-      model: 'ori-synthetic-model',
-      system_prompt: 'Synthetic publishing lead.'
+for (const interrupted of [false, true]) {
+  test(`real compact newsletter: ${interrupted ? 'double activation and read-only recovery' : 'keyboard-only confirmation'}`, async ({
+    page
+  }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => localStorage.setItem('ori-theme', 'dark'));
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const day = interrupted ? 'Sunday' : 'Saturday';
+    const firstName = `Weekend Newsletter Desk (${day})`;
+    const name = `${day} Newsletter Desk`;
+    const lead = `Saved ${day} Editor`;
+    const copywriter = `${day} Copywriter`;
+    const saved = await page.request.post('/api/agents', {
+      data: {
+        name: lead,
+        provider: 'lmstudio',
+        model: 'ori-synthetic-model',
+        system_prompt: 'Synthetic publishing lead.'
+      }
+    });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    const traffic = observeCreationTraffic(page);
+    await openRealNewsletterBuild(page, firstName, true);
+    const before = await domainResources(page);
+    await say(page, NEWSLETTER_PROMPT);
+    const choicesVisible = await pane(page)
+      .getByRole('button', { name: NEWSLETTER_PAIR })
+      .evaluate(pair => {
+        const scroller = pair.closest('.workspace-build-pane__transcript')!.getBoundingClientRect();
+        const choices = Array.from(pair.parentElement!.querySelectorAll('button'));
+        return choices.every(button => {
+          const rect = button.getBoundingClientRect();
+          return rect.top >= scroller.top - 1 && rect.bottom <= scroller.bottom + 1;
+        });
+      });
+    expect(choicesVisible, 'both staffing choices fit in the visible transcript').toBe(true);
+    await page.screenshot({ path: testInfo.outputPath('compact-proposal.png') });
+    staffRealNewsletter([
+      { role_id: 'content-lead', agent_name: lead, mode: 'assign' },
+      { role_id: 'brand-copywriter', agent_name: copywriter }
+    ]);
+    await choose(page, NEWSLETTER_PAIR, true);
+    const summary = page.locator('#workspaceBuildDraftSummary');
+    await expect(summary).toContainText(`Will assign ${lead} · required`);
+    await expect(summary).toContainText(`Will create ${copywriter}`);
+    await expect(summary).toContainText('Draft · Nothing created yet');
+    const layout = await summary.evaluate(root => ({
+      overflow: root.scrollWidth - root.clientWidth,
+      bottom: root.getBoundingClientRect().bottom,
+      height: innerHeight,
+      animation: getComputedStyle(root).animationName
+    }));
+    expect(layout.overflow).toBeLessThanOrEqual(1);
+    expect(layout.bottom).toBeLessThanOrEqual(layout.height);
+    expect(layout.animation).toBe('none');
+    // An inert re-render cannot re-announce the same applied changes or move focus.
+    await expect(composer(page)).toBeFocused();
+    const repeated = await summary.evaluate(root => {
+      const observer = new MutationObserver(() => {});
+      observer.observe(root.querySelector('[aria-live="polite"]')!, {
+        subtree: true,
+        childList: true,
+        characterData: true
+      });
+      (window as any).sessionManager.syncWorkspaceBuildPresentation();
+      const count = observer.takeRecords().length;
+      observer.disconnect();
+      return count;
+    });
+    expect(repeated).toBe(0);
+    await expect(composer(page)).toBeFocused();
+    await page.screenshot({ path: testInfo.outputPath('compact-team.png') });
+
+    await manual(page, true);
+    const review = page.locator('#workspaceCreationReviewPanel');
+    await activateByTab(
+      page,
+      review.getByRole('button', { name: 'Edit details & advanced settings' })
+    );
+    await tabTo(page, page.locator('#folderNameInput'));
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.insertText(name);
+    await activateByTab(page, page.locator('#workspaceBuildWithBtn'));
+    await expect(summary).toContainText('You edited: name');
+    await expect(summary).toContainText('Draft saved.');
+    await activateByTab(page, page.getByRole('button', { name: 'Close create workspace' }));
+    await expect(pane(page)).toBeHidden();
+    await activateByTab(page, page.locator('#cockpitCreateWorkspaceBtn'));
+    await activateByTab(page, pane(page).getByRole('button', { name: 'Resume', exact: true }));
+    await expect(composer(page)).toBeFocused();
+    await expect(summary).toContainText(name);
+    await expect(summary).toContainText(`Will assign ${lead}`);
+    await expect(summary).toContainText(NEWSLETTER_REASON);
+    await expect(page.locator('#workspaceBuildDraftChange')).toBeHidden();
+    await page.screenshot({ path: testInfo.outputPath('compact-resumed.png') });
+
+    proposeRealNewsletterReview();
+    await say(page, 'create it');
+    await expect(summary).toBeHidden();
+    await expect(review).toContainText(`Review ${name}`);
+    await activateByTab(page, review.getByRole('button', { name: 'Use automatic placement' }));
+    const confirm = review.getByRole('button', { name: 'Create workspace', exact: true });
+    await expect(confirm).toBeEnabled();
+    expect(await domainResources(page)).toEqual(before);
+    expect(traffic.confirmations).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath('compact-review.png') });
+    if (!interrupted) {
+      await activateByTab(page, confirm);
+      await expect(review).toContainText(`${name} created`);
+      expect(traffic.confirmations).toHaveLength(1);
+      expect(traffic.reviews).toHaveLength(1);
+      const verified = await (
+        await page.request.get(`/api/workspaces/create-operations/${traffic.reviews[0].id}`)
+      ).json();
+      await activateByTab(page, review.getByRole('button', { name: `Open ${name}`, exact: true }));
+      await expectSavedNewsletter(page, verified.result.folder, [lead, copywriter]);
+      expect(traffic.legacyWrites).toEqual([]);
+      return;
     }
-  });
-  expect(saved.ok(), await saved.text()).toBe(true);
-  const traffic = observeCreationTraffic(page);
-  await openRealNewsletterBuild(page, firstName);
-  const before = await domainResources(page);
-  await say(page, NEWSLETTER_PROMPT);
-  staffRealNewsletter([
-    { role_id: 'content-lead', agent_name: lead, mode: 'assign' },
-    { role_id: 'brand-copywriter', agent_name: copywriter }
-  ]);
-  await choose(page, NEWSLETTER_PAIR);
-  const summary = page.locator('#workspaceBuildDraftSummary');
-  await expect(summary).toContainText(`Will assign ${lead} · required`);
-  await expect(summary).toContainText(`Will create ${copywriter}`);
-  await expect(summary).toContainText('Draft · Nothing created yet');
-  await page.screenshot({ path: testInfo.outputPath('compact-team.png') });
+    let unreadable = true;
+    await page.route(/\/api\/workspaces\/create-operations\/[^/]+$/, route =>
+      unreadable && route.request().method() === 'GET'
+        ? route.fulfill({ contentType: 'application/json', body: '{' })
+        : route.continue()
+    );
+    const lost = gate();
+    await page.route('**/api/workspaces/create-operations/*/confirm', async route => {
+      try {
+        const response = await route.fetch(); // The real creation commits.
+        expect(response.status()).toBe(201);
+      } finally {
+        lost.release();
+        await route.abort('failed'); // Only the response is lost.
+      }
+    });
+    await confirm.dblclick();
+    await lost.promise;
+    await expect(review).toContainText('Creation outcome not verified');
+    await expect(review).toContainText('Work may already exist. Closing is not undo.');
+    await expect(page.locator('#workspaceBuildWithBtn')).toBeHidden();
+    await expect(review.getByRole('button', { name: `Open ${name}` })).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath('compact-uncertain.png') });
+    expect(traffic.reviews).toHaveLength(1);
+    expect(traffic.reviews[0].request).toMatchObject({
+      name,
+      template_id: 'content-production',
+      role_staffing: [
+        { role_id: 'content-lead', mode: 'assign', name: lead },
+        { role_id: 'brand-copywriter', mode: 'create', name: copywriter }
+      ]
+    });
+    expect(traffic.confirmations).toHaveLength(1);
+    const operationPath = `/api/workspaces/create-operations/${traffic.reviews[0].id}`;
+    const committed = await (await page.request.get(operationPath)).json();
+    expect(committed.operation.state).toBe('complete');
+    expect(traffic.confirmations[0]).toEqual({
+      path: `${operationPath}/confirm`,
+      body: { review_digest: committed.operation.review_digest }
+    });
+    const after = await domainResources(page);
+    expect(after.workspaces.filter((id: string) => !before.workspaces.includes(id))).toEqual([
+      committed.result.folder.id
+    ]);
+    expect(after.agents.filter((agent: string) => !before.agents.includes(agent))).toEqual([
+      copywriter
+    ]);
 
-  await manual(page);
-  const review = page.locator('#workspaceCreationReviewPanel');
-  await review.getByRole('button', { name: 'Edit details & advanced settings' }).press('Enter');
-  await page.locator('#folderNameInput').fill(name);
-  await page.locator('#workspaceBuildWithBtn').press('Enter');
-  await expect(summary).toContainText('You edited: name');
-  await expect(summary).toContainText('Draft saved.');
-  await page.getByRole('button', { name: 'Close create workspace' }).press('Enter');
-  await expect(pane(page)).toBeHidden();
-  await page.locator('#cockpitCreateWorkspaceBtn').press('Enter');
-  await pane(page).getByRole('button', { name: 'Resume', exact: true }).press('Enter');
-  await expect(composer(page)).toBeFocused();
-  await expect(summary).toContainText(name);
-  await expect(summary).toContainText(`Will assign ${lead}`);
-  await expect(summary).toContainText(NEWSLETTER_REASON);
-  await expect(page.locator('#workspaceBuildDraftChange')).toBeHidden();
-  await page.screenshot({ path: testInfo.outputPath('compact-resumed.png') });
-
-  proposeRealNewsletterReview();
-  await say(page, 'create it');
-  await expect(summary).toBeHidden();
-  await expect(review).toContainText(`Review ${name}`);
-  await review.getByRole('button', { name: 'Use automatic placement' }).press('Enter');
-  const confirm = review.getByRole('button', { name: 'Create workspace', exact: true });
-  await expect(confirm).toBeEnabled();
-  expect(await domainResources(page)).toEqual(before);
-  expect(traffic.confirmations).toEqual([]);
-  await page.screenshot({ path: testInfo.outputPath('compact-review.png') });
-  let unreadable = true;
-  await page.route(/\/api\/workspaces\/create-operations\/[^/]+$/, route =>
-    unreadable && route.request().method() === 'GET'
-      ? route.fulfill({ contentType: 'application/json', body: '{' })
-      : route.continue()
-  );
-  const lost = gate();
-  await page.route('**/api/workspaces/create-operations/*/confirm', async route => {
-    try {
-      const response = await route.fetch(); // The real creation commits.
-      expect(response.status()).toBe(201);
-    } finally {
-      lost.release();
-      await route.abort('failed'); // Only the response is lost.
-    }
+    const calls = catalogModel.calls();
+    await page.reload();
+    await activateByTab(page, page.locator('#cockpitCreateWorkspaceBtn'));
+    await expect(review.getByRole('button', { name: 'Read saved status' })).toBeVisible();
+    await expect(pane(page)).toBeHidden();
+    await expect(page.locator('#createFolderBtn')).toBeHidden();
+    await expect(review).not.toContainText(`${name} created`);
+    unreadable = false;
+    await activateByTab(page, review.getByRole('button', { name: 'Read saved status' }));
+    await expect(review).toContainText(`${name} created`);
+    await expect(review).toContainText('Standalone workspace');
+    await expect(review).toContainText(lead);
+    await expect(review).toContainText(copywriter);
+    expect(catalogModel.calls()).toBe(calls);
+    expect(traffic.observations.length).toBeGreaterThanOrEqual(2);
+    expect([...new Set(traffic.observations)]).toEqual([operationPath]);
+    expect(traffic.confirmations).toHaveLength(1);
+    expect(traffic.reviews).toHaveLength(1);
+    expect(await domainResources(page)).toEqual(after);
+    await page.screenshot({ path: testInfo.outputPath('compact-recovered.png') });
+    await activateByTab(page, review.getByRole('button', { name: `Open ${name}`, exact: true }));
+    await expectSavedNewsletter(page, committed.result.folder, [lead, copywriter]);
+    expect(traffic.legacyWrites).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath('compact-open.png') });
   });
-  await confirm.dblclick();
-  await lost.promise;
-  await expect(review).toContainText('Creation outcome not verified');
-  await expect(review).toContainText('Work may already exist. Closing is not undo.');
-  await expect(review.getByRole('button', { name: `Open ${name}` })).toHaveCount(0);
-  await page.screenshot({ path: testInfo.outputPath('compact-uncertain.png') });
-  expect(traffic.reviews).toHaveLength(1);
-  expect(traffic.reviews[0].request).toMatchObject({
-    name,
-    template_id: 'content-production',
-    role_staffing: [
-      { role_id: 'content-lead', mode: 'assign', name: lead },
-      { role_id: 'brand-copywriter', mode: 'create', name: copywriter }
-    ]
-  });
-  expect(traffic.confirmations).toHaveLength(1);
-  const operationPath = `/api/workspaces/create-operations/${traffic.reviews[0].id}`;
-  const committed = await (await page.request.get(operationPath)).json();
-  expect(committed.operation.state).toBe('complete');
-  expect(traffic.confirmations[0]).toEqual({
-    path: `${operationPath}/confirm`,
-    body: { review_digest: committed.operation.review_digest }
-  });
-  const after = await domainResources(page);
-  expect(after.workspaces.filter((id: string) => !before.workspaces.includes(id))).toEqual([
-    committed.result.folder.id
-  ]);
-  expect(after.agents.filter((agent: string) => !before.agents.includes(agent))).toEqual([
-    copywriter
-  ]);
-
-  const calls = catalogModel.calls();
-  await page.reload();
-  await page.locator('#cockpitCreateWorkspaceBtn').press('Enter');
-  await expect(review.getByRole('button', { name: 'Read saved status' })).toBeVisible();
-  await expect(pane(page)).toBeHidden();
-  await expect(page.locator('#createFolderBtn')).toBeHidden();
-  await expect(review).not.toContainText(`${name} created`);
-  unreadable = false;
-  await review.getByRole('button', { name: 'Read saved status' }).press('Enter');
-  await expect(review).toContainText(`${name} created`);
-  await expect(review).toContainText('Standalone workspace');
-  await expect(review).toContainText(lead);
-  await expect(review).toContainText(copywriter);
-  expect(catalogModel.calls()).toBe(calls);
-  expect(traffic.observations.length).toBeGreaterThanOrEqual(2);
-  expect([...new Set(traffic.observations)]).toEqual([operationPath]);
-  expect(traffic.confirmations).toHaveLength(1);
-  expect(traffic.reviews).toHaveLength(1);
-  expect(await domainResources(page)).toEqual(after);
-  await page.screenshot({ path: testInfo.outputPath('compact-recovered.png') });
-  await review.getByRole('button', { name: `Open ${name}`, exact: true }).press('Enter');
-  await expectSavedNewsletter(page, committed.result.folder, [lead, copywriter]);
-  expect(traffic.legacyWrites).toEqual([]);
-  await page.screenshot({ path: testInfo.outputPath('compact-open.png') });
-});
+}
 
 test('three scripted turns reach review with the effective pair and no creation', async ({
   page
@@ -1044,6 +1145,12 @@ test('three scripted turns reach review with the effective pair and no creation'
     { text: 'Creating it now.', createNow: true }
   ]);
   const traffic = observeCreationTraffic(page);
+  const teamPlan = gate();
+  await page.route('**/api/workspaces/template-agent-plan', async route => {
+    if (route.request().postDataJSON()?.template_id === 'content-production')
+      await teamPlan.promise;
+    await route.continue();
+  });
 
   await openFromHome(page);
   await expect(pane(page)).toBeVisible();
@@ -1060,6 +1167,11 @@ test('three scripted turns reach review with the effective pair and no creation'
   await expect(composer(page)).toBeFocused();
 
   const draftTeam = page.locator('#workspaceBuildDraftTeam');
+  try {
+    await expect(draftTeam).toHaveText('Checking team options…');
+  } finally {
+    teamPlan.release();
+  }
   await expect(draftTeam).toContainText('Content Lead: Required · choose an agent');
   await choose(page, 'A Content Lead and a Brand Copywriter');
   await expect(draftTeam).toContainText('Content Lead · required');
@@ -1078,83 +1190,52 @@ test('three scripted turns reach review with the effective pair and no creation'
   expect(traffic.legacyWrites).toEqual([]);
 });
 
-test('a folder attached in the pane shows on the chip, the draft line, the turn, and Review', async ({
+test('a folder pick keeps the existing hire review and no ordinary draft preview', async ({
   page
-}) => {
-  const fake = await fakeBuildServer(page, [
-    {
-      text: 'I can see a Python project. I picked Code Project and named it Elite School.',
-      set: {
-        template_id: 'code-project',
-        name: 'Elite School',
-        description: 'The elite_school repository, linked in place.'
-      }
-    }
-  ]);
-  await openFromHome(page);
-  await expect(pane(page)).toBeVisible();
-  await expect(page.locator('#workspaceBuildFolder')).toBeHidden();
+}, testInfo) => {
+  // Seed only the launched demo's recognized project, never an arbitrary root.
+  const configured = process.env.ORI_BUILD_DEMO_SANDBOX;
+  test.skip(
+    !configured,
+    'Set ORI_BUILD_DEMO_SANDBOX to the printed wt demo sandbox for the real folder check.'
+  );
+  const sandbox = realpathSync(configured!);
+  expect(relative(realpathSync(tmpdir()), sandbox)).toMatch(/^ori-demo\.[^/]+$/);
+  const response = await page.request.get('/api/settings/workspace-root');
+  expect(response.ok()).toBe(true);
+  const workspaceRoot = await response.json();
+  // An unconfirmed demo uses its sandbox's staging directory until setup.
+  const root = workspaceRoot.effective_workspace_root || workspaceRoot.default_workspace_root;
+  expect(relative(sandbox, root)).not.toMatch(/^\.\.(?:\/|$)/);
+  const project = mkdtempSync(join(sandbox, 'Synthetic Widget '));
+  writeFileSync(join(project, 'go.mod'), 'module example.invalid/widget\n', { mode: 0o600 });
+  writeFileSync(join(project, 'main.go'), 'package main\n\nfunc main() {}\n', { mode: 0o600 });
 
-  await pane(page).getByRole('button', { name: 'Add folder' }).click();
+  await page.unroute(/\/api\/personal-assistant$/);
+  await abandonOpenBuild(page.request);
+  const before = await domainResources(page);
+  const calls = catalogModel.calls();
+  await openFromHome(page);
+  const add = pane(page).getByRole('button', { name: 'Add folder', exact: true });
+  await add.click();
   const chooser = page.locator('#workspaceBuildFolderChooser');
-  await expect(chooser).toBeVisible();
   await expect(chooser).toContainText('File contents are not read');
-  await expect(chooser).toContainText('Pick a folder from the list for now.');
-  // Escape closes only the sheet: the dialog stays, and focus returns to Add folder.
   await page.keyboard.press('Escape');
   await expect(chooser).toBeHidden();
-  await expect(page.locator('#addFolderModal')).toBeVisible();
-  await expect(pane(page).getByRole('button', { name: 'Add folder' })).toBeFocused();
-  await pane(page).getByRole('button', { name: 'Add folder' }).click();
-  await expect(chooser).toBeVisible();
-  const attached = page.waitForResponse(response =>
-    /\/api\/workspaces\/build-sessions\/[^/]+\/folder$/.test(new URL(response.url()).pathname)
-  );
-  await chooser.getByRole('button', { name: 'Documents' }).click();
-  await attached;
-  await expect(chooser).toBeHidden();
-  await expect(page.locator('#workspaceBuildFolderName')).toHaveText('Elite School');
-  await expect(page.locator('#workspaceBuildFolderSummary')).toContainText('42 files observed');
-  await expect(page.locator('#workspaceBuildFolderSummary')).toContainText('contents not read');
-  await expect(page.locator('#workspaceBuildDraftText')).toContainText('Folder: Elite School');
-  await expect(page.locator('#workspaceBuildFolderReview')).toBeVisible();
-  await expect(page.locator('#workspaceBuildFolderIdentity')).toContainText('Elite School');
-  expect(fake.folders).toHaveLength(1);
-  expect(fake.folders[0]).toMatchObject({ mode: 'chip', chip: 'documents' });
-  expect(fake.folders[0].path).toBeUndefined();
-
-  // This UI fake has no proposal operation; real automatic inference is
-  // covered by file-janitor-creation-flow. Empty Send is never a user turn.
-  await page.getByRole('button', { name: 'Refine with assistant', exact: true }).click();
-  await expect(composer(page)).toBeEnabled();
-  await composer(page).press('Enter');
-  expect(fake.turns).toHaveLength(0);
-  await say(page, 'Review the attached Python project.');
-  expect(fake.turns.at(-1)?.text).toBe('Review the attached Python project.');
-  await expect(page.locator('#folderNameInput')).toHaveValue('Elite School');
-
-  // Review names the folder Create will link, whichever surface is active.
-  await expect(page.locator('[data-build-folder-receipt]')).toHaveCount(1);
-  await expect(page.locator('[data-build-folder-receipt]')).toContainText(
-    'Elite School · 42 files observed'
-  );
-  await manual(page);
-  await expect(page.locator('[data-build-folder-receipt]')).toHaveCount(1);
-  await assisted(page);
-  await page.getByRole('button', { name: 'Refine with assistant', exact: true }).click();
-
-  const detached = page.waitForResponse(response =>
-    /\/folder\/detach$/.test(new URL(response.url()).pathname)
-  );
-  await page
-    .locator('#workspaceBuildFolder')
-    .getByRole('button', { name: 'Remove folder' })
-    .click();
-  await detached;
-  await expect(page.locator('#workspaceBuildFolder')).toBeHidden();
-  await expect(page.locator('#workspaceBuildDraftText')).not.toContainText('Folder:');
-  await expect(page.locator('[data-build-folder-receipt]')).toHaveCount(0);
-  await expect(composer(page)).toBeFocused();
+  await expect(add).toBeFocused();
+  await add.click();
+  await chooser.getByPlaceholder('~/Projects/my-app').fill(project);
+  await chooser.getByRole('button', { name: 'Use this path', exact: true }).click();
+  const card = page.locator('#workspaceBuildFolderAgent');
+  await expect(card).toContainText('Synthetic Widget');
+  await expect(card).toContainText('Nothing is built until you hire.');
+  await expect(card.getByRole('button', { name: 'Hire & build', exact: true })).toBeVisible();
+  await expect(page.locator('#workspaceBuildFolderReview')).toBeHidden();
+  await expect(page.locator('#workspaceBuildDraftSummary')).toBeHidden();
+  await expect(pane(page)).toBeHidden();
+  expect(await domainResources(page)).toEqual(before);
+  expect(catalogModel.calls()).toBe(calls);
+  await page.screenshot({ path: testInfo.outputPath('recognized-folder-review.png') });
 });
 
 test('a link attached in the pane shows on the chip, the draft line, the turn, the goal, and Review', async ({
@@ -1244,7 +1325,11 @@ test('a link attached in the pane shows on the chip, the draft line, the turn, t
     .click();
   await detached;
   await expect(page.locator('#workspaceBuildLink')).toBeHidden();
-  await expect(page.locator('#workspaceBuildDraftText')).not.toContainText('Link:');
+  await expect(page.locator('#workspaceBuildDraftText')).toBeHidden();
+  await expect(page.locator('#workspaceBuildDraftPreview')).toBeVisible();
+  await expect(page.locator('#workspaceBuildDraftPreview')).not.toContainText(
+    'Attention Is All You Need'
+  );
   await expect(page.locator('[data-build-link-receipt]')).toHaveCount(0);
 });
 

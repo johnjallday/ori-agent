@@ -6876,6 +6876,15 @@ const sessionManager = {
       );
       console.error('Failed to load template agent plan:', error);
       this.renderTemplateAgentPlanError('Could not load blueprint agents.');
+    } finally {
+      // A plan may settle after the assistant's turn and final draft sync.
+      // Project the Team owner's result, even while the wizard stays hidden.
+      if (
+        requestId === this.templateAgentPlanRequestId &&
+        this.workspaceBuildAssisted() &&
+        this.ordinaryBuildPreviewEligible()
+      )
+        this.syncOrdinaryBuildPreview(window.ProjectTemplateCard?.getSelectedTemplate?.());
     }
   },
 
@@ -11668,7 +11677,9 @@ const sessionManager = {
     }
     if (onFinalStep) this.refreshWorkspaceReview();
     const unifiedReview =
-      onFinalStep && (this.usesUnifiedOrdinaryReview() || this.usesManagedGroupTemplate());
+      onFinalStep &&
+      !(this.workspaceBuildAssisted() && this.ordinaryBuildPreviewEligible()) &&
+      (this.usesUnifiedOrdinaryReview() || this.usesManagedGroupTemplate());
     document
       .getElementById('addFolderModal')
       ?.classList?.toggle?.('workspace-create-modal--unified-review', unifiedReview);
@@ -15642,7 +15653,14 @@ const sessionManager = {
   async expandWorkspaceBuild() {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
-    if (!build || !pane || build.withdrawn || build.kindHidden) return;
+    if (
+      !build ||
+      !pane ||
+      build.withdrawn ||
+      build.kindHidden ||
+      this.workspaceCreatorContext?.ordinaryReview?.accepted
+    )
+      return;
     if (build.pausePromise) await build.pausePromise;
     if (this.workspaceBuild !== build) return;
     build.collapsed = false;
@@ -16878,11 +16896,11 @@ const sessionManager = {
         ? 'Not saved. Review your edits and choose “Save my draft”.'
         : 'Not saved. Your edits are kept here; choose “Try again”.'
       : session && (fields.name || fields.blueprint || fields.purpose)
-        ? build.draftUser !== undefined || build.draftInFlight || build.busy
-          ? build.draftUser === true
-            ? 'Local edits · not saved yet'
-            : ''
-          : 'Draft saved.'
+        ? build.draftUser === true || build.draftSavingUser
+          ? 'Local edits · not saved yet'
+          : build.draftUser === false || build.draftInFlight || build.busy
+            ? ''
+            : 'Draft saved.'
         : '';
     const view = pane.ordinaryDraftView({
       fields,
@@ -16956,6 +16974,8 @@ const sessionManager = {
       }
     }
     const groupLine = assisted ? this.workspaceBuildGroupLine() : '';
+    const recovering = this.workspaceCreatorContext?.ordinaryReview?.accepted;
+    modal?.classList?.toggle?.('workspace-create-modal--creation-outcome', Boolean(recovering));
     const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
     const preview = document.getElementById('workspaceBuildDraftPreview');
     const ordinaryDraft = Boolean(
@@ -16965,6 +16985,7 @@ const sessionManager = {
     if (status) {
       status.hidden =
         !this.workspaceBuild ||
+        recovering ||
         ordinaryDraft ||
         Boolean(
           !assisted &&
@@ -17833,12 +17854,14 @@ const sessionManager = {
         else void this.sendWorkspaceBuildRestaff(build);
       }
     };
+    build.draftSavingUser = user;
     build.draftInFlight = send();
     try {
       await build.draftInFlight;
     } finally {
       if (this.workspaceBuild === build) {
         build.draftInFlight = null;
+        build.draftSavingUser = false;
         this.syncWorkspaceBuildPresentation();
         if (this.usesUnifiedOrdinaryReview()) void this.syncOrdinaryCreationReview();
       }

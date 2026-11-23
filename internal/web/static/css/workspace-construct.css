@@ -2617,6 +2617,7 @@
   border-top: 0;
 }
 .workspace-create-modal .workspace-build-pane button:focus-visible,
+.workspace-create-modal .workspace-build-pane__transcript:focus-visible,
 .workspace-create-modal .workspace-build-with-btn:focus-visible,
 .workspace-create-modal .workspace-build-draft-summary button:focus-visible {
   outline: 2px solid var(--wc-faction);
@@ -2632,6 +2633,9 @@
   font-family: var(--wc-font-display);
   font-size: 12px;
   font-weight: 700;
+}
+.workspace-create-modal--creation-outcome .workspace-build-with-btn {
+  display: none;
 }
 .workspace-create-modal .workspace-build-with-btn:hover,
 .workspace-create-modal .workspace-build-with-btn:focus-visible {
@@ -3554,6 +3558,15 @@
     flex-direction: column;
     gap: 8px;
   }
+  .workspace-create-modal .workspace-build-draft-summary[data-ordinary-draft] {
+    /* Leave room for the composer and transcript when the roster or purpose
+       wraps. The existing draft slot, not a new surface, handles long content. */
+    max-height: 46dvh;
+    overflow-y: auto;
+  }
+  .workspace-create-modal .workspace-build-draft-preview__facts > div {
+    grid-template-columns: 5.35rem minmax(0, 1fr);
+  }
   .workspace-create-modal .workspace-build-pane__head {
     padding: 8px 12px;
   }
@@ -3562,6 +3575,18 @@
   }
   .workspace-create-modal .workspace-build-pane__composer {
     padding: 8px 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  /* Close remains in the header. The duplicate footer and decorative label
+     would take the space where the active question and its choices sit. */
+  .workspace-create-modal:has([data-ordinary-draft]:not([hidden])) .modal-title::after,
+  .workspace-create-modal--unified-review .modal-title::after {
+    content: none;
+  }
+  .workspace-create-modal:has([data-ordinary-draft]:not([hidden])) .modal-content > .modal-footer {
+    display: none;
   }
 }
 
