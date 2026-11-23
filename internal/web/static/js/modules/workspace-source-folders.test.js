@@ -53,6 +53,9 @@ test('read one scoped snapshot; reject partial, duplicate or failed reads', asyn
     });
   const labels = await read({ revision: 1, rows: [row('a', 'Albums'), row('b', 'Picker Songs')] });
   assert.deepEqual([...labels.keys()], ['a', 'b']);
+  assert.notEqual(labels.get('a').hue, labels.get('b').hue);
+  const subset = await read({ revision: 2, rows: [row('other-song', 'Picker Songs')] });
+  assert.equal(labels.get('b').hue, subset.get('other-song').hue);
   for (const body of [
     { rows: [] },
     { revision: 1, rows: [row('a', 'A'), row('a', 'B')] },
@@ -72,6 +75,10 @@ test('member reload preserves the controls and ignores a late label read', async
       lines = [...html.matchAll(/data-member-id="([^"]+)"/g)].map(([, id]) => ({
         id: `member-source-${id}`,
         hidden: true,
+        badge: { style: { setProperty() {}, removeProperty() {} } },
+        querySelector() {
+          return this.badge;
+        },
         parentElement: { dataset: { memberId: id }, setAttribute() {}, removeAttribute() {} }
       }));
     },
@@ -99,8 +106,8 @@ test('member reload preserves the controls and ignores a late label read', async
   await late;
   assert.equal(lines, first);
   assert.deepEqual(
-    lines.map(x => x.textContent),
-    ['Source folder: <Picker Songs>', 'Source folder: Albums']
+    lines.map(x => x.badge.textContent),
+    ['<Picker Songs>', 'Albums']
   );
   assert.match(html, /data-member-up="b"[^>]+disabled/);
   assert.match(html, /data-member-remove="a"/);

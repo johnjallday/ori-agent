@@ -20,7 +20,7 @@ export function folderMapTree(groupID, members, linked) {
       const s = linked.get(row.id);
       const key = s?.id || '';
       if (!groups.has(key))
-        groups.set(key, { id: key, label: s?.label || 'Other workspaces', tiles: [] });
+        groups.set(key, { id: key, label: s?.label || 'Other workspaces', hue: s?.hue, tiles: [] });
       groups.get(key).tiles.push({ id: row.id, row, crumb: s?.breadcrumb || '' });
     }
     node.sections = [...groups.values()].sort(
@@ -59,7 +59,13 @@ export function drawFolderMap(doc, tree, open) {
     for (const section of node.sections) {
       const details = el('details');
       details.open = true;
-      const title = el('summary', `${section.label} · ${section.tiles.length}`);
+      const title = el('summary');
+      const label = el('span', section.label);
+      if (section.id) {
+        label.className = 'music-source-tag';
+        label.style.setProperty('--folder-hue', section.hue);
+      }
+      title.append(label, ` · ${section.tiles.length}`);
       details.append(title);
       const tiles = el('ul');
       for (const t of section.tiles) {

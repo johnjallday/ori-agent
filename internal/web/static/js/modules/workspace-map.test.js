@@ -13842,7 +13842,7 @@ test('Music source captions follow visible project IDs and refresh on the same t
   const map = loadMapForMount();
   const { container, site } = createMapHarness({ tiles: ['album-1'] });
   const labels = new Map([
-    ['album-1', { label: 'Long <folder> '.repeat(12) }],
+    ['album-1', { label: 'Long <folder> '.repeat(12), hue: 273 }],
     ['albums', { label: 'not a project' }]
   ]);
   for (const scopeGroupId of ['home', 'albums']) {
@@ -13855,8 +13855,18 @@ test('Music source captions follow visible project IDs and refresh on the same t
     });
     assert.match(container.innerHTML, /Source folder: Long &lt;folder&gt;/);
     assert.doesNotMatch(container.innerHTML, /not a project/);
+    assert.match(container.innerHTML, /data-source-folder style="--folder-hue:273"/);
     const tile = site('album-1');
-    const line = {};
+    const line = {
+      style: {
+        setProperty(k, v) {
+          this[k] = v;
+        },
+        removeProperty(k) {
+          delete this[k];
+        }
+      }
+    };
     tile.querySelector = selector => (selector === '[data-source-folder]' ? line : null);
     map.updateSourceFolders(container, 'wrong-group', null);
     assert.equal(line.hidden, undefined);
@@ -13864,6 +13874,7 @@ test('Music source captions follow visible project IDs and refresh on the same t
     assert.equal(line.hidden, true);
     assert.doesNotMatch(tile.attrs['aria-label'], /Source folder/);
     map.updateSourceFolders(container, scopeGroupId, labels);
+    assert.equal(line.style['--folder-hue'], 273);
     assert.equal(line.textContent, labels.get('album-1').label);
     assert.match(tile.attrs['aria-label'], /Source folder: Long <folder>/);
     assert.equal(site('album-1'), tile);

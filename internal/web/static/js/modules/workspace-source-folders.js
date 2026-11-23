@@ -16,6 +16,20 @@ export function hasMusicFolderContext(tree, groupID) {
   return false;
 }
 
+// Presentation only: the same verified section gets the same hue on its own
+// group map and on the Home map. Never allocate by visible order or use the
+// hue as identity. Labels pick a color family; the opaque ID varies its shade.
+function hashText(text) {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+  return hash >>> 0;
+}
+
+const folderHues = [30, 276, 210, 340, 82, 173];
+function sourceHue(section) {
+  return folderHues[hashText(section.label) % folderHues.length] + (hashText(section.id) % 25) - 12;
+}
+
 export async function readWorkspaceSourceFolders(id, { signal, fetchImpl = fetch } = {}) {
   const res = await fetchImpl(`/api/workspaces/${encodeURIComponent(id)}/source-folders`, {
     headers: { Accept: 'application/json' },
@@ -44,7 +58,7 @@ export async function readWorkspaceSourceFolders(id, { signal, fetchImpl = fetch
     ) {
       throw new Error('Workspace source folders incomplete');
     }
-    labels.set(workspaceID, section);
+    labels.set(workspaceID, { ...section, hue: sourceHue(section) });
   }
   return labels;
 }

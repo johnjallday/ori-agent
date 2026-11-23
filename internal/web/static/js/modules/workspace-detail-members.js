@@ -512,9 +512,13 @@ export class WorkspaceMembersPanel {
   paintSourceFolders() {
     this.els.list?.querySelectorAll('[data-member-folder]').forEach(line => {
       const button = line.parentElement;
-      const label = this.sourceFolders?.get(button.dataset.memberId)?.label;
+      const section = this.sourceFolders?.get(button.dataset.memberId);
+      const label = section?.label;
+      const badge = line.querySelector('.music-source-tag');
+      badge.textContent = label || '';
+      if (label) badge.style.setProperty('--folder-hue', section.hue);
+      else badge.style.removeProperty('--folder-hue');
       line.hidden = !label;
-      line.textContent = label ? `Source folder: ${label}` : '';
       if (label) button.setAttribute('aria-describedby', line.id);
       else button.removeAttribute('aria-describedby');
     });
@@ -651,7 +655,7 @@ export class WorkspaceMembersPanel {
         <button type="button" class="group-member-open" data-member-id="${safeId}" data-member-slug="${safeSlug}" aria-label="${openLabel}">
           <span class="group-member-kind">${kindLabel}</span>
           <span class="group-member-name">${safeName}</span>
-          ${showSources && !isGroup ? `<span class="group-member-source-folder" data-member-folder id="member-source-${safeId}" hidden></span>` : ''}
+          ${showSources && !isGroup ? `<span class="group-member-source-folder" data-member-folder id="member-source-${safeId}" hidden>Source folder: <span class="music-source-tag"></span></span>` : ''}
           ${agents ? `<span class="group-member-agents">${agents}</span>` : ''}
           ${desc ? `<span class="group-member-desc">${escapeHtml(desc)}</span>` : ''}
           ${meta ? `<span class="group-member-meta">${escapeHtml(meta)}</span>` : ''}

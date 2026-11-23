@@ -3466,7 +3466,10 @@
       var line = tile.querySelector('[data-source-folder]');
       if (!line) return;
       var id = tile.getAttribute('data-ws-id');
-      var label = labels?.get(id)?.label || '';
+      var section = labels?.get(id);
+      var label = section?.label || '';
+      if (Number.isInteger(section?.hue)) line.style.setProperty('--folder-hue', section.hue);
+      else line.style.removeProperty('--folder-hue');
       line.textContent = label;
       line.hidden = !label;
       patchTileStatus(tile, id, aggregateActivity({ key: 'ws:' + id, kind: 'tile', id: id }), true);
@@ -3630,6 +3633,7 @@
     var left = Number(tile.left) || 0;
     var top = Number(tile.top) || 0;
     var meta = tileMeta(ws);
+    var folder = scopeGroupId && ws.kind !== 'group' ? sourceFolders?.get(ws.id) : null;
 
     return (
       '<button type="button" class="ws-map-tile' +
@@ -3697,10 +3701,11 @@
       tileNameHTML(ws) +
       '</span>' +
       (scopeGroupId && ws.kind !== 'group'
-        ? '<span class="ws-map-source-folder" data-source-folder' +
-          (sourceFolderLabel(ws) ? '' : ' hidden') +
+        ? '<span class="ws-map-source-folder music-source-tag" data-source-folder' +
+          (Number.isInteger(folder?.hue) ? ' style="--folder-hue:' + folder.hue + '"' : '') +
+          (folder?.label ? '' : ' hidden') +
           '>' +
-          escapeHtml(sourceFolderLabel(ws)) +
+          escapeHtml(folder?.label || '') +
           '</span>'
         : '') +
       '<span class="ws-map-work-folder-hint" aria-hidden="true"' +

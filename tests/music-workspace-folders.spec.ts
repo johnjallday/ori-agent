@@ -180,6 +180,15 @@ test('group folder text and controls at narrow width and actual 200 percent zoom
     await expect(p.locator('html')).toHaveAttribute('data-bs-theme', theme);
     const row = p.locator(`[data-member-id="${track.id}"]`);
     await expect(row).toHaveAccessibleDescription('Source folder: Picker Songs');
+    const region = p.getByRole('region', { name: 'Linked workspaces' });
+    const badgeTone = async (label: string) => {
+      const tag = region.locator('.music-source-tag').filter({ hasText: label }).first();
+      await expect(tag).toBeVisible();
+      return tag.evaluate(el => getComputedStyle(el).backgroundColor);
+    };
+    const albumsTone = await badgeTone('Albums');
+    const pickerTone = await badgeTone('Picker Songs');
+    expect(albumsTone).not.toBe(pickerTone);
     await row.focus();
     await expect(row).toBeFocused();
     await row.evaluate(el => el.scrollIntoView({ block: 'center', behavior: 'instant' }));
@@ -187,6 +196,14 @@ test('group folder text and controls at narrow width and actual 200 percent zoom
     await p.goto(`/workspaces/${group.folder_slug}?mode=map`);
     const tile = p.locator(`.ws-map-tile[data-ws-id="${track.id}"]`);
     await expect(tile).toHaveAccessibleName(/Source folder: Picker Songs/);
+    const tags = p.locator('.ws-map-tile [data-source-folder]:visible');
+    await expect(tags).toHaveCount(7);
+    for (const tag of await tags.all()) {
+      await expect(tag).toHaveCSS(
+        'background-color',
+        (await tag.textContent()) === 'Albums' ? albumsTone : pickerTone
+      );
+    }
     const zoom = p.locator('.ws-cmd-detachment-host [data-map-zoom-in]');
     for (let i = 0; i < 14 && (await tile.boundingBox())!.width < 180; i++)
       await zoom.evaluate(el => (el as HTMLElement).click());
@@ -200,6 +217,14 @@ test('group folder text and controls at narrow width and actual 200 percent zoom
     await toggle.press('Enter');
     const headings = p.locator('.music-folder-view summary');
     await expect(headings).toHaveText(['Albums · 5', 'Picker Songs · 2']);
+    await expect(headings.first().locator('.music-source-tag')).toHaveCSS(
+      'background-color',
+      albumsTone
+    );
+    await expect(headings.last().locator('.music-source-tag')).toHaveCSS(
+      'background-color',
+      pickerTone
+    );
     await headings.first().focus();
     await p.keyboard.press('Space');
     await expect(headings.first()).toBeFocused();
