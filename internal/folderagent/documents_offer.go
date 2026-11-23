@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/directoryid"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
@@ -30,6 +31,7 @@ type DocumentsCandidate struct {
 	Evidence string `json:"evidence"`
 }
 type DocumentsOffer struct {
+	Writable bool                 `json:"writable,omitempty"`
 	Report   string               `json:"report"`
 	Projects []DocumentsCandidate `json:"projects"`
 }
@@ -45,7 +47,12 @@ func safeMember(f foldermap.Folder) bool {
 			return false
 		}
 	}
-	return true
+	for _, marker := range folderdigest.Markers {
+		if marker.Name == f.Marker && marker.Shape == f.Shape && marker.Name != ".obsidian" {
+			return true
+		}
+	}
+	return false
 }
 
 // explicitMember checks only the components named by the report. Never list a
@@ -62,7 +69,7 @@ func explicitMember(root string, m *foldermap.Map, f foldermap.Folder) bool {
 		}
 		parent += segment
 		info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(parent))) // #nosec G304 G703 -- relative path components validated from the saved walk
-		if err != nil || !info.IsDir() || (parent == f.Path && f.Witness != directoryWitness(info)) {
+		if err != nil || !info.IsDir() || (parent == f.Path && f.Witness != directoryid.Witness(info)) {
 			return false
 		}
 	}
@@ -121,7 +128,7 @@ func (s *Service) DocumentsOffer(ctx context.Context, owner, hq, attempt, id str
 		return a.Path < b.Path
 	})
 	report := documentsRef(rec.MapWitness, holderReportKey(rec))
-	out := &DocumentsOffer{Report: report}
+	out := &DocumentsOffer{Report: report, Writable: scope.Writable && !filejanitor.RootsOverlap(root, scope.Notebook)}
 	var taken []DocumentsCandidate
 	// Cap live metadata probes even on an unusually large or badly stale map.
 	for i, f := range folders {

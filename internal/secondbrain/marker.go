@@ -15,16 +15,17 @@ const (
 	NoteKindCapture = "capture"
 	NoteKindSeed    = "seed"
 	// The fill-in's kinds: the facts note, a person, a project and a follow-up.
-	NoteKindFacts    = "facts"
-	NoteKindPerson   = "person"
-	NoteKindProject  = "project"
-	NoteKindFollowUp = "follow_up"
+	NoteKindFacts     = "facts"
+	NoteKindPerson    = "person"
+	NoteKindProject   = "project"
+	NoteKindFollowUp  = "follow_up"
+	NoteKindDocuments = "documents_project"
 )
 
 // noteKinds is the one list of kinds. The marker's patterns are built from it,
 // so a new kind cannot be written and then read back as the user's.
 var noteKinds = []string{
-	NoteKindJournal, NoteKindCapture, NoteKindSeed, NoteKindFacts, NoteKindPerson, NoteKindProject, NoteKindFollowUp,
+	NoteKindJournal, NoteKindCapture, NoteKindSeed, NoteKindFacts, NoteKindPerson, NoteKindProject, NoteKindFollowUp, NoteKindDocuments,
 }
 
 const (
@@ -72,8 +73,14 @@ func ReadMark(content []byte) NoteMark {
 	if !found {
 		return notOri
 	}
+	// Documents notes add a publication witness. Their marker cannot be
+	// manufactured by the generic replace-or-create writer.
+	if m := documentsMark.FindSubmatch(front); m != nil {
+		owned := string(m[1]) == bodyHash(body)
+		return NoteMark{Kind: NoteKindDocuments, Hash: string(m[1]), OwnedByOri: owned, UserModified: !owned}
+	}
 	kind, hash, ok := parseMarker(front)
-	if !ok {
+	if !ok || kind == NoteKindDocuments {
 		return markInFrontmatter(front)
 	}
 	if hash != bodyHash(body)[:len(hash)] {

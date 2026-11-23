@@ -24,6 +24,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
+	"github.com/johnjallday/ori-agent/internal/secondbrain"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
@@ -59,6 +60,9 @@ func (b *ServerBuilder) wireFolderAgent() {
 		Songs:      newFolderAgentSongs(b),
 		Reports:    newFolderAgentReports(b.sessionStore),
 		OnReported: b.completeFolderAgentMissions,
+		DocumentsNotebook: func(ctx context.Context, owner, hq string, fn func(secondbrain.Source, string) error) error {
+			return b.personalAssistantSecondBrain.WithDocumentsNotebook(ctx, owner, hq, fn)
+		},
 		DocumentsScope: func(ctx context.Context, owner string) (folderagent.DocumentsScope, error) {
 			scope := folderagent.DocumentsScope{Protected: []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)}}
 			source, connected, err := b.personalAssistantSecondBrain.ConnectedSource(ctx, owner)

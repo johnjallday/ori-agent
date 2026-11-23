@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/johnjallday/ori-agent/internal/directoryid"
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -201,8 +202,9 @@ type Deps struct {
 	Setups     Setups
 	Homes      Homes
 	// ActiveHQ resolves the signed-in owner's current active assistant relationship.
-	ActiveHQ       func(context.Context, string) string
-	DocumentsScope func(context.Context, string) (DocumentsScope, error)
+	ActiveHQ          func(context.Context, string) string
+	DocumentsScope    func(context.Context, string) (DocumentsScope, error)
+	DocumentsNotebook DocumentsNotebook
 	// FilingPermission reads only the stored grant, never a health probe.
 	// A missing reader or read error is unknown, not a missing permission.
 	FilingPermission func(workspaceID string) (bool, error)
@@ -566,7 +568,7 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	m := rec.Map
 	witness := s.documentsWitness(rec, root)
 	if witness != "" {
-		opts.MemberWitness = directoryWitness
+		opts.MemberWitness = directoryid.Witness
 	}
 	// An explicit new look on Documents must not inherit evidence from an
 	// unbound historical walk or a different directory at the same path.

@@ -170,10 +170,14 @@ export class HQFirstVisitCard {
 
   receiptHTML() {
     const projects = this.receipt?.offer?.projects || [];
+    const draft = p =>
+      this.receipt.offer.writable
+        ? `<button type="button" class="ws-cmd-nav-btn" data-documents-draft="${escape(p.ref)}">Draft ${escape(p.name)} note</button>`
+        : '';
     const evidence = projects
       .map(
-        p =>
-          `<details><summary>Review ${escape(p.location)}</summary><p>The folder report found ${escape(p.evidence)} here. No file text was used.</p></details>`
+        (p, i) =>
+          `${i === 0 ? draft(p) : ''}<details><summary>Review ${escape(p.location)}</summary><p>The folder report found ${escape(p.evidence)} here. No file text was used.</p>${i > 0 ? draft(p) : ''}</details>`
       )
       .join('');
     return this.receipt
@@ -299,6 +303,20 @@ export class HQFirstVisitCard {
 
   bind() {
     void this.loadReturn();
+    for (const button of this.owner.container?.querySelectorAll?.('[data-documents-draft]') || []) {
+      button.onclick = () => {
+        const hint = receiptHint(window.location, this.owner.workspaceId());
+        const offer = this.receipt?.offer;
+        const project = offer?.projects?.find(p => p.ref === button.dataset.documentsDraft);
+        if (!hint?.workspace || !project || !this.available()) return;
+        void window.PersonalAssistantSecondBrain?.openDocumentsDraft?.({
+          hint,
+          offer,
+          project,
+          trigger: button
+        });
+      };
+    }
     this.door()?.addEventListener?.('click', () => (this.node ? this.close() : this.open()));
     this.paint();
     if (!this.door() || this.entryChecked || this.state !== 'pending' || !this.owner.active) return;

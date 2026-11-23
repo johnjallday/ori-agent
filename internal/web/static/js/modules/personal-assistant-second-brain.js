@@ -3409,6 +3409,10 @@ function init() {
   if (panelState?.personalAssistant) onStatus(panelState.personalAssistant);
   window.PersonalAssistantSecondBrain = {
     reload: load,
+    openDocumentsDraft: guarded(async options => {
+      const { openDocumentsDraft } = await import('./hq-documents-draft.js');
+      if (ensurePersonalRecipient()) openDocumentsDraft(options);
+    }),
     // The Notes slot and the mission card open the chooser in place.
     openChooser: guarded(async () => {
       if (!state.secondBrain) await load();

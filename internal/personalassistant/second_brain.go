@@ -720,6 +720,7 @@ func (s *SecondBrainService) Connect(ctx context.Context, userID string, input S
 
 	var started *secondbrain.Look
 	var lookID string
+	s.createMu.Lock()
 	doc, err := s.mutate(ctx, userID, func(doc *SecondBrainDocument) error {
 		started, lookID = nil, ""
 		if receipt, replayed, err := doc.Replay(input.RequestID, secondBrainActionConnect); err != nil || replayed {
@@ -740,6 +741,7 @@ func (s *SecondBrainService) Connect(ctx context.Context, userID string, input S
 		doc.Remember(secondbrain.Receipt{RequestID: input.RequestID, Action: secondBrainActionConnect, At: s.deps.Now(), LookID: lookID})
 		return nil
 	})
+	s.createMu.Unlock()
 	if err != nil {
 		return SecondBrainView{}, err
 	}
@@ -1507,6 +1509,7 @@ func (s *SecondBrainService) Disconnect(ctx context.Context, userID, requestID s
 		return s.view(current), err
 	}
 	var removed secondbrain.Source
+	s.createMu.Lock()
 	doc, err := s.store.Update(ctx, userID, ifVersion, func(doc *SecondBrainDocument) error {
 		if connected := doc.Connected(); connected != nil {
 			removed = *connected
@@ -1520,6 +1523,7 @@ func (s *SecondBrainService) Disconnect(ctx context.Context, userID, requestID s
 		doc.Remember(secondbrain.Receipt{RequestID: requestID, Action: secondBrainActionDisconnect, At: s.deps.Now()})
 		return nil
 	})
+	s.createMu.Unlock()
 	if err != nil {
 		return SecondBrainView{}, err
 	}

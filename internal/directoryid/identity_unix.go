@@ -1,6 +1,6 @@
 //go:build unix
 
-package folderagent
+package directoryid
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-func directoryWitness(info os.FileInfo) string {
+func Witness(info os.FileInfo) string {
 	st, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || st == nil || st.Ino == 0 {
 		return ""

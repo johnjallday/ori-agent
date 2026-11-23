@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { lstat, mkdir, realpath, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { installLocalCdn } from './helpers/offline-cdn';
@@ -51,6 +51,9 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
     include_future_workspaces: true,
     notes: { include: false }
   });
+  if (!empty)
+    await post('/api/personal-assistant/second-brain/create', { request_id: 'documents-notes' });
+  const original = empty ? null : await lstat(join(docs, 'Thesis', 'main.tex'));
   const { status } = await (await request.get('/api/personal-hq/status')).json();
   await installLocalCdn(page);
   await page.goto(`/workspaces/${encodeURIComponent(status.workspace.folder_slug)}?mode=details`);
@@ -86,5 +89,30 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
   await expect(receipt.getByText(/LaTeX manuscript/)).toBeVisible();
   await expect(receipt.getByRole('link', { name: 'Open folder workspace' })).toBeVisible();
   await page.screenshot({ path: info.outputPath('documents-offer.png'), animations: 'disabled' });
-  await expect(lstat(join(root, 'My Notes'))).rejects.toMatchObject({ code: 'ENOENT' });
+  const rel = 'Projects/Thesis/README.md';
+  const destination = join(root, 'My Notes', rel);
+  await expect(lstat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
+  await receipt.getByRole('button', { name: 'Draft Thesis note' }).click();
+  const dialog = page.locator('[data-documents-review]');
+  const answer = 'Send the methods chapter to my advisor';
+  await dialog.getByLabel('What are you trying to finish?').fill(answer);
+  await dialog.getByRole('button', { name: 'Review note' }).click();
+  await expect(dialog).toContainText('My Notes/' + rel);
+  const body = await dialog.locator('pre').textContent();
+  expect(body).toContain(answer);
+  expect(body).toContain('Source: Documents/Thesis');
+  await page.screenshot({ path: info.outputPath('documents-review.png') });
+  const sent = page.waitForRequest(r => r.url().endsWith('/documents-draft/save'));
+  await dialog.getByRole('button', { name: 'Save to My Notes' }).click();
+  await dialog.getByRole('button', { name: 'Open Thesis note' }).click();
+  await expect(dialog.locator('pre')).toHaveText(body!);
+  await page.screenshot({ path: info.outputPath('documents-open.png') });
+  expect(await readFile(destination, 'utf8')).toMatch(/ori: documents_project/);
+  expect((await readFile(destination, 'utf8')).endsWith(body!)).toBeTruthy();
+  const save = await sent;
+  expect((await post(save.url(), save.postDataJSON())).draft.saved).toBeTruthy();
+  expect(await readdir(join(root, 'My Notes', 'Projects', 'Thesis'))).toEqual(['README.md']);
+  const after = await lstat(join(docs, 'Thesis', 'main.tex'));
+  expect([after.mode, after.mtimeMs]).toEqual([original!.mode, original!.mtimeMs]);
+  expect(await readFile(join(docs, 'Thesis', 'main.tex'), 'utf8')).toBe('fixture manuscript\n');
 });

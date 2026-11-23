@@ -1,8 +1,8 @@
 //go:build !unix
 
-package folderagent
+package directoryid
 
 import "os"
 
 // Never substitute a pathname or timestamp for unavailable physical identity.
-func directoryWitness(os.FileInfo) string { return "" }
+func Witness(os.FileInfo) string { return "" }

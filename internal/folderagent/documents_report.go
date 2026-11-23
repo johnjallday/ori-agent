@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/directoryid"
 	"github.com/johnjallday/ori-agent/internal/folderlook"
 )
 
@@ -35,7 +36,7 @@ func (s *Service) documentsWitness(rec *Record, root string) string {
 	if err != nil || !info.IsDir() {
 		return ""
 	}
-	id := directoryWitness(info)
+	id := directoryid.Witness(info)
 	if id == "" {
 		return ""
 	}

@@ -446,7 +446,7 @@ func (r *reconcileRun) checkDisk(mirror *Mirror) {
 		r.fail(err)
 		return
 	}
-	if !status.Owned {
+	if !status.Owned || status.Kind == NoteKindDocuments {
 		mirror.State = MirrorUserOwned
 	}
 }
@@ -581,6 +581,9 @@ func (r *reconcileRun) place(note PlannedNote, rel string) bool {
 	}
 	hash := mirrorHash(note.Body)
 	switch {
+	case status.Kind == NoteKindDocuments:
+		r.track(note, rel, hash, MirrorUserOwned)
+		return true
 	case status.Owned && (status.Kind == NoteKindSeed || status.Hash[:mirrorHashLength] == hash):
 		r.track(note, rel, hash, MirrorCurrent)
 		return true
