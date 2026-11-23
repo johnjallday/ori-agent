@@ -1,17 +1,12 @@
 // A read-only view of this Home's real workspace tree. A section is only a
 // disclosure; it has no coordinates, drag targets, or synthetic workspace ID.
-export function folderMapTree(homeID, members, catalog) {
-  const linked = new Map();
-  for (const row of catalog) {
-    if (row.connection !== 'connected' || !row.workspace_id) continue;
-    linked.set(row.workspace_id, linked.has(row.workspace_id) ? null : row.folder_section);
-  }
+export function folderMapTree(groupID, members, linked) {
   const byParent = new Map();
   for (const row of members) {
     if (!byParent.has(row.parent_id)) byParent.set(row.parent_id, []);
     byParent.get(row.parent_id).push(row);
   }
-  const seen = new Set([homeID]);
+  const seen = new Set([groupID]);
   function visit(id) {
     const node = { id, children: [], sections: [] };
     const groups = new Map();
@@ -25,7 +20,7 @@ export function folderMapTree(homeID, members, catalog) {
       const s = linked.get(row.id);
       const key = s?.id || '';
       if (!groups.has(key))
-        groups.set(key, { id: key, label: s?.label || 'Other workspaces', tiles: [] });
+        groups.set(key, { id: key, label: s?.label || 'Other workspaces', hue: s?.hue, tiles: [] });
       groups.get(key).tiles.push({ id: row.id, row, crumb: s?.breadcrumb || '' });
     }
     node.sections = [...groups.values()].sort(
@@ -33,29 +28,7 @@ export function folderMapTree(homeID, members, catalog) {
     );
     return node;
   }
-  return visit(homeID);
-}
-
-// Only reads project metadata, never activation eligibility or project files.
-export async function readFolderMap(client) {
-  let cursor = '';
-  const rows = [];
-  const seen = new Set();
-  do {
-    const query = new URLSearchParams({
-      folder_sections: '1',
-      page_size: '50',
-      connection: 'connected'
-    });
-    if (cursor) query.set('cursor', cursor);
-    const page = await client.request(`/projects?${query}`);
-    rows.push(...page.rows);
-    cursor = page.next_cursor || '';
-    if (cursor && (seen.has(cursor) || rows.length >= 5000))
-      throw new Error('Folder listing incomplete');
-    seen.add(cursor);
-  } while (cursor);
-  return rows;
+  return visit(groupID);
 }
 
 export function drawFolderMap(doc, tree, open) {
@@ -86,7 +59,13 @@ export function drawFolderMap(doc, tree, open) {
     for (const section of node.sections) {
       const details = el('details');
       details.open = true;
-      const title = el('summary', `${section.label} · ${section.tiles.length}`);
+      const title = el('summary');
+      const label = el('span', section.label);
+      if (section.id) {
+        label.className = 'music-source-tag';
+        label.style.setProperty('--folder-hue', section.hue);
+      }
+      title.append(label, ` · ${section.tiles.length}`);
       details.append(title);
       const tiles = el('ul');
       for (const t of section.tiles) {

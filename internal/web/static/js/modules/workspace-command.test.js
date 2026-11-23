@@ -8582,6 +8582,31 @@ test('initial group framing reserves installed upper stations without moving the
   assert.deepEqual(c.detachmentFrameInsets(), { top: 172, left: 0 });
 });
 
+test('a child folder view needs verified context and drops a read after leaving the group', async t => {
+  const c = detachmentCommandView('group');
+  const owner = c.page.membersPanel;
+  owner.workspaceId = c.workspaceId();
+  assert.doesNotMatch(c.renderDetachmentToolbar(), /data-cmd-by-folder/);
+  owner.sourceFolders = new Map();
+  assert.match(c.renderDetachmentToolbar(), /data-cmd-by-folder/);
+  let finish;
+  const prior = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = prior;
+  });
+  globalThis.fetch = () =>
+    new Promise(resolve => {
+      finish = resolve;
+    });
+  const panel = { textContent: 'Loading', replaceChildren: () => assert.fail('old page painted') };
+  c.musicFolders = panel;
+  const pending = c.drawMusicFolders(panel);
+  c.workspaceId = () => 'other';
+  finish({ ok: false });
+  await pending;
+  assert.equal(panel.textContent, 'Loading');
+});
+
 test('an unreadable group tree is unavailable, not a zero-member map', () => {
   const c = detachmentCommandView('group');
   c.page.membersPanel.tree = [];

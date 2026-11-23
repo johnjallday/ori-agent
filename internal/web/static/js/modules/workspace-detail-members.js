@@ -17,6 +17,7 @@
 import { openLibrarySheet } from './map-library-sheet.js';
 import { renderRoster, rosterURL, rosterView } from './home-song-roster.js';
 import { nodeAgentNames, rowAgentsLine } from './linked-agents.js';
+import { hasMusicFolderContext, readWorkspaceSourceFolders } from './workspace-source-folders.js';
 
 // --- Pure helpers (exported for unit testing) ----------------------------------
 
@@ -463,6 +464,10 @@ export class WorkspaceMembersPanel {
       !signal.aborted &&
       (!options.isCurrent || options.isCurrent());
     if (!isCurrent()) return;
+    this.sourceFolders = null;
+    this.sourceFoldersRead = null;
+    this.onSourceFoldersChanged?.();
+    this.paintSourceFolders();
     try {
       const res = await fetch('/api/workspaces?tree=true', { signal });
       if (!res.ok) throw new Error(`tree fetch failed: ${res.status}`);
@@ -479,6 +484,9 @@ export class WorkspaceMembersPanel {
       if (!isCurrent()) return;
       this.library = library;
       this.renderMembers();
+      if (hasMusicFolderContext(this.tree, this.workspaceId)) {
+        this.sourceFoldersRead = this.loadSourceFolders(signal, isCurrent);
+      }
       void this.loadSongRoster(signal, isCurrent);
       this.applyHeaderIdentity();
       if (this.rollupsLoaded) {
@@ -490,6 +498,30 @@ export class WorkspaceMembersPanel {
       this.readFailed = true;
       this.showError('Failed to load members.');
     }
+  }
+
+  async loadSourceFolders(signal, isCurrent) {
+    const labels = await readWorkspaceSourceFolders(this.workspaceId, { signal }).catch(() => null);
+    if (!isCurrent()) return null;
+    this.sourceFolders = labels;
+    this.onSourceFoldersChanged?.();
+    this.paintSourceFolders();
+    return labels;
+  }
+
+  paintSourceFolders() {
+    this.els.list?.querySelectorAll('[data-member-folder]').forEach(line => {
+      const button = line.parentElement;
+      const section = this.sourceFolders?.get(button.dataset.memberId);
+      const label = section?.label;
+      const badge = line.querySelector('.music-source-tag');
+      badge.textContent = label || '';
+      if (label) badge.style.setProperty('--folder-hue', section.hue);
+      else badge.style.removeProperty('--folder-hue');
+      line.hidden = !label;
+      if (label) button.setAttribute('aria-describedby', line.id);
+      else button.removeAttribute('aria-describedby');
+    });
   }
 
   applyHeaderIdentity() {
@@ -589,11 +621,13 @@ export class WorkspaceMembersPanel {
       return;
     }
 
-    container.innerHTML = `<div class="group-member-list" role="list">${members.map((member, index) => this.memberRowHtml(member, index, members.length)).join('')}</div>`;
+    const showSources = hasMusicFolderContext(this.tree, this.workspaceId);
+    container.innerHTML = `<div class="group-member-list" role="list">${members.map((member, index) => this.memberRowHtml(member, index, members.length, showSources)).join('')}</div>`;
+    if (showSources) this.paintSourceFolders();
     this.bindMemberActions();
   }
 
-  memberRowHtml(member, index, total) {
+  memberRowHtml(member, index, total, showSources = false) {
     const isGroup = isGroupNode(member);
     const name = member.name || (isGroup ? 'Untitled Group' : 'Untitled Workspace');
     const kindLabel = isGroup ? 'Group' : 'Workspace';
@@ -621,6 +655,7 @@ export class WorkspaceMembersPanel {
         <button type="button" class="group-member-open" data-member-id="${safeId}" data-member-slug="${safeSlug}" aria-label="${openLabel}">
           <span class="group-member-kind">${kindLabel}</span>
           <span class="group-member-name">${safeName}</span>
+          ${showSources && !isGroup ? `<span class="group-member-source-folder" data-member-folder id="member-source-${safeId}" hidden>Source folder: <span class="music-source-tag"></span></span>` : ''}
           ${agents ? `<span class="group-member-agents">${agents}</span>` : ''}
           ${desc ? `<span class="group-member-desc">${escapeHtml(desc)}</span>` : ''}
           ${meta ? `<span class="group-member-meta">${escapeHtml(meta)}</span>` : ''}

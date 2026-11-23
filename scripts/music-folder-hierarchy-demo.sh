@@ -49,12 +49,17 @@ both=0; [[ "$scenario" == picker ]] || both=1
 scripts/e2e.sh --port "$port" --env "ORI_MUSIC_HIERARCHY_SANDBOX=$sandbox" --env "ORI_MUSIC_HIERARCHY_BOTH=$both" tests/music-folder-hierarchy.spec.ts -- --workers=1 --output "$sandbox/evidence/intake"
 if [[ "$scenario" == both ]]; then
  scripts/e2e.sh --port "$port" --env ORI_MUSIC_FOLDER_MAP=setup tests/music-folder-map.spec.ts -- --workers=1 -g 'choose two' --output "$sandbox/evidence/setup"
+ scripts/e2e.sh --port "$port" --env ORI_MUSIC_FOLDER_MAP=setup tests/music-workspace-folders.spec.ts -- --workers=1 --output "$sandbox/evidence/workspace-context"
  stop
  export ORI_REVIEWED_INTEGRATION_DEV_SOURCE="$sandbox/plugin-source/reaper-plugin" ORI_REVIEWED_HOME_PROVIDER_DEV_SOURCE="$sandbox/plugin-source/music-project-management"
  scripts/demo-server.sh "$port" "$sandbox" >"$sandbox/restart.log" 2>&1 & server=$!
  wait_ready 'URL=' "$sandbox/restart.log"
  scripts/e2e.sh --port "$port" --env ORI_MUSIC_FOLDER_MAP=existing tests/music-folder-map.spec.ts -- --workers=1 -g 'populated map' --output "$sandbox/evidence/restart"
+ scripts/e2e.sh --port "$port" --env ORI_MUSIC_FOLDER_MAP=existing --env ORI_MUSIC_COMPARE_RESTART=1 tests/music-workspace-folders.spec.ts -- --workers=1 --output "$sandbox/evidence/workspace-context-restart"
 fi
 manifest >"$sandbox/source-after"
 cmp "$sandbox/source-before" "$sandbox/source-after"
+if [[ "$scenario" == both ]]; then
+ shasum -a 256 "$sandbox/source-before" "$sandbox/source-after" | awk '{print $1, (NR == 1 ? "before" : "after")}' >tasks/evidence-music-workspace-folder-context/source-manifest-sha256.txt
+fi
 echo 'Source listing and SHA-256 hashes unchanged.'
