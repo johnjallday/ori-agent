@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync, mkdirSync, writeFileSync, utimesSync, existsSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, utimesSync, existsSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { seedQuestionFolder } from './helpers/commander-question-fixture';
 import { installLocalCdn } from './helpers/offline-cdn';
 
 const fixture = process.env.ORI_SEARCH_FIRST_FIXTURE;
-const evidence = 'tasks/evidence-files-map-navigation';
+const evidenceRoot = 'tasks/evidence-files-map-navigation';
 test.skip(
   !fixture || process.env.ORI_SEARCH_FIRST_SCENARIO !== 'navigation',
   'requires a marked disposable profile'
@@ -14,8 +14,10 @@ test('distinguish duplicate copies by location and date before acting', async ({
   page,
   context,
   request,
-  baseURL
+  baseURL,
+  browserName
 }) => {
+  const evidence = join(evidenceRoot, browserName);
   expect(new URL(baseURL!).hostname).toBe('localhost');
   expect(readFileSync(join(fixture!, '.search-first-fixture'), 'utf8')).toBe('synthetic-v1\n');
   expect(readFileSync(join(fixture!, '.search-first-test-url'), 'utf8').trim()).toBe(baseURL);
@@ -82,8 +84,15 @@ test('distinguish duplicate copies by location and date before acting', async ({
   page.on('request', r => {
     if (r.method() === 'POST') mutations.push(new URL(r.url()).pathname);
   });
-  const toMap = () => page.getByRole('link', { name: 'Map', exact: true }).click();
-  const toFiles = () => page.getByRole('link', { name: 'Files', exact: true }).click();
+  const toMap = async () => {
+    await page.getByRole('link', { name: 'Map', exact: true }).press('Enter');
+    await expect(page).toHaveURL(/\/\?view=map$/);
+  };
+  const toFiles = async () => {
+    await page.getByRole('link', { name: 'Files', exact: true }).press('Enter');
+    await expect(page).toHaveURL(/\/search$/);
+    await expect(page.locator('#coverage')).not.toHaveText('');
+  };
   await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', last!);
   await toMap();
   await toFiles();
@@ -107,6 +116,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await expect(page.locator('[data-map-destination]')).toBeVisible();
   const camera = () => page.evaluate(() => (window as any).OriWorkspaceMap.getCamera());
   const viewport = page.locator('[data-ws-map-viewport]').first();
+  const initialCamera = await camera();
   await viewport.press('ArrowRight');
   await viewport.press('+');
   const tile = page
@@ -114,12 +124,13 @@ test('distinguish duplicate copies by location and date before acting', async ({
       `.ws-map-tile[data-ws-id="${music.workspace_id}"], .ws-map-district-tag[data-ws-id="${music.workspace_id}"]`
     )
     .first();
-  await tile.click();
+  await tile.press('Space');
   const open = page.locator(`[data-cockpit-rail-open][data-workspace-id="${music.workspace_id}"]`);
   await expect(open).toBeVisible();
   await page.screenshot({ path: join(evidence, 'workspace-selected.png') });
   const panned = await camera();
-  await open.click();
+  expect(panned).not.toEqual(initialCamera);
+  await open.press('Enter');
   const launcher = page.locator('#personalAssistantLauncher');
   await expect(launcher.locator('[data-question]')).toBeVisible();
   expect(
@@ -133,7 +144,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   );
   await expect(answer).toBeVisible();
   await page.screenshot({ path: join(evidence, 'commander-question.png') });
-  await answer.click();
+  await answer.press('Enter');
   await expect(answer).toHaveCount(0);
   await expect(launcher.locator('[data-question]')).toHaveCount(0);
   expect((await read(other.workspace_id)).premise.state).toBe(other.premise.state);
@@ -184,13 +195,24 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await toMap();
   const refresher = await context.newPage();
   await refresher.goto('/search');
+  const refreshed = refresher.waitForResponse(r => r.url().endsWith('/api/file-search/refresh'));
   await refresher.locator('#sources li').getByRole('button', { name: 'Refresh' }).click();
+  expect((await refreshed).ok()).toBeTruthy();
   await expect(refresher.locator('#sources')).toContainText('ready');
   await refresher.close();
   await toFiles();
   await expect(rows).toHaveCount(1);
   await expect(page.locator('#selectedFile')).toBeHidden();
   await expect(page.locator('#notice')).toContainText('no longer');
+  // Home-origin traversal is not always the explicit ?view=map link.
+  await page.goto('/?home=1');
+  await tile.press('Space');
+  await expect(open).toBeVisible();
+  await page.keyboard.press('Escape');
+  await toFiles();
+  await page.goBack();
+  await expect(tile).toHaveClass(/is-selected/);
+  await toFiles();
   const deleted = await request.delete(
     `/api/workspaces/${music.workspace_id}?confirm=true&delete_sessions=true`
   );
@@ -230,4 +252,39 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await expect(page.locator('#selectedFile')).toBeHidden();
   await page.locator('#retry').click();
   await expect(rows).toHaveCount(1);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await term.focus();
+  await expect(rows).toHaveCount(1);
+  await term.press('ArrowDown');
+  await expect(page.locator('#selectedFile')).toContainText('Documents / Final');
+  await expect(page.getByRole('combobox', { name: 'Destination' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: join(evidence, 'narrow.png') });
+  await page.getByRole('combobox', { name: 'Destination' }).selectOption('/?view=map');
+  await expect(page.locator('[data-map-picker]')).toBeVisible();
+  await page.locator('[data-map-picker]').selectOption('/search');
+  await expect(page.locator('#selectedFile')).toContainText('Documents / Final');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => (document.documentElement.style.zoom = '200%'));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: join(evidence, 'zoom.png') });
+  const locked = join(fixture!, 'home/Documents/Locked');
+  mkdirSync(locked, { mode: 0o700 });
+  try {
+    chmodSync(locked, 0);
+    await page.locator('#sources').getByRole('button', { name: 'Refresh' }).click();
+    await expect(page.locator('#sources')).toContainText('partial');
+    await expect(page.locator('#coverage')).toContainText('Coverage incomplete');
+  } finally {
+    chmodSync(locked, 0o700);
+  }
+  await page.getByRole('button', { name: 'Start on Home instead' }).click();
+  await page.waitForURL('**/?home=1');
+  await page.goto('/');
+  await expect(page.locator('.home-command-bridge')).toBeVisible();
+  await page.goto('/search');
+  await page.getByRole('button', { name: 'Make Files my starting page' }).click();
+  await expect(page.getByRole('button', { name: 'Start on Home instead' })).toBeVisible();
+  await page.goto('/');
+  await expect(page.locator('#title')).toHaveText('Files');
 });

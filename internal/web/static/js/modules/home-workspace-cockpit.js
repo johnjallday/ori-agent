@@ -2358,9 +2358,13 @@ import {
   const mapDestination = document.querySelector('[data-map-destination]');
   const destinationPicker = document.querySelector('[data-map-picker]');
   const place = destinationPicker ? destinationPlace('map') : null;
-  // Only explicit destination entries restore. Deep links and ordinary Home
-  // retain their own intent. Never replay a modal, a question or a layout.
-  let returnMap = window.location.search === '?view=map' ? place?.read() : null;
+  // A clean Home is also a Map entry on history traversal. A deliberate
+  // Home launch or a deep link keeps its own intent, not an old selection.
+  const query = window.location.search;
+  const traversingHome =
+    (query === '' || query === '?home=1') &&
+    window.performance?.getEntriesByType?.('navigation')[0]?.type === 'back_forward';
+  let returnMap = query === '?view=map' || traversingHome ? place?.read() : null;
   window.addEventListener('pagehide', () => {
     if (!place || mapDestination.hidden || !els.map) return;
     const camera = window.OriWorkspaceMap?.getCamera?.();

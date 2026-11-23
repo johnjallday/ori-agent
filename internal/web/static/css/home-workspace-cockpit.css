@@ -13,11 +13,21 @@
   align-items: center;
   gap: 0.85rem;
 }
-.cockpit-destinations [aria-current] { font-weight: 700; border-bottom: 2px solid currentColor; }
-.cockpit-destinations select { display: none; }
+.cockpit-destinations [aria-current] {
+  font-weight: 700;
+  border-bottom: 2px solid currentColor;
+}
+.cockpit-destinations select {
+  display: none;
+}
 @media (max-width: 44rem) {
-  .cockpit-destinations:has(select:not([hidden])) > :not(select) { display: none; }
-  .cockpit-destinations select:not([hidden]) { display: block; padding: 0.4rem; }
+  .cockpit-destinations:has(select:not([hidden])) > :not(select) {
+    display: none;
+  }
+  .cockpit-destinations select:not([hidden]) {
+    display: block;
+    padding: 0.4rem;
+  }
 }
 
 /* The container must be an ANCESTOR of what it styles — an element cannot

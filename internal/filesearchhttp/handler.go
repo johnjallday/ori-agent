@@ -103,15 +103,21 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case "query":
 		var in struct {
-			Term   string `json:"term"`
-			Source string `json:"source"`
-			Cursor string `json:"cursor"`
-			Limit  int    `json:"limit"`
+			Term   string          `json:"term"`
+			Source json.RawMessage `json:"source"`
+			Cursor string          `json:"cursor"`
+			Limit  int             `json:"limit"`
 		}
 		if !decode(&in) {
 			return
 		}
-		out, e = h.Service.QueryLocation(r.Context(), owner, in.Term, in.Source, in.Cursor, in.Limit)
+		// Only omission means all grants. A malformed picker value must never widen a query.
+		var source string
+		if in.Source != nil && (json.Unmarshal(in.Source, &source) != nil || source == "") {
+			http.Error(w, "Invalid source.", http.StatusBadRequest)
+			return
+		}
+		out, e = h.Service.QueryLocation(r.Context(), owner, in.Term, source, in.Cursor, in.Limit)
 	case "remove":
 		var in struct {
 			ID string `json:"id"`

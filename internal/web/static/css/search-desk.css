@@ -68,8 +68,14 @@ nav {
   display: none;
 }
 @media (max-width: 44rem) {
-  .desk-destinations:has(select) > :not(select) { display: none; }
-  .desk-destinations select { display: block; padding: 0.4rem; font: inherit; }
+  .desk-destinations:has(select) > :not(select) {
+    display: none;
+  }
+  .desk-destinations select {
+    display: block;
+    padding: 0.4rem;
+    font: inherit;
+  }
 }
 .arrival {
   padding: clamp(2rem, 6vw, 5rem) 0 1rem;
