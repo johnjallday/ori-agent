@@ -86,13 +86,14 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "query":
 		var in struct {
 			Term   string `json:"term"`
+			Source string `json:"source"`
 			Cursor string `json:"cursor"`
 			Limit  int    `json:"limit"`
 		}
 		if !decode(&in) {
 			return
 		}
-		out, e = h.Service.Query(r.Context(), owner, in.Term, in.Cursor, in.Limit)
+		out, e = h.Service.QueryLocation(r.Context(), owner, in.Term, in.Source, in.Cursor, in.Limit)
 	case "remove":
 		var in struct {
 			ID string `json:"id"`

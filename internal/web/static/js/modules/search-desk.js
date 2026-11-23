@@ -38,6 +38,7 @@ export function mountFileSearch(root, compact = false) {
     hits = [],
     sources = [],
     selected = '',
+    scope = '',
     visibleTerm = '',
     busy = false;
   const channel =
@@ -74,6 +75,10 @@ export function mountFileSearch(root, compact = false) {
     next = '';
     $('more').hidden = true;
     $('hits').replaceChildren();
+    if ($('selectedFile')) {
+      $('selectedFile').replaceChildren();
+      $('selectedFile').hidden = true;
+    }
   }
   function invalidate() {
     clear();
@@ -132,6 +137,13 @@ export function mountFileSearch(root, compact = false) {
     sources = ss;
     if (compact || (same && ss.length)) return;
     const names = scopeNames(ss);
+    $('scope').replaceChildren(
+      new Option('All locations', ''),
+      ...ss.map(s => new Option(names.get(s.id), s.id))
+    );
+    if (scope && !names.has(scope))
+      $('scope').add(new Option('Location no longer available', scope));
+    $('scope').value = scope;
     $('emptyMap').textContent = ss.length ? '' : 'No folders mapped yet.';
     $('sources').replaceChildren(
       ...ss.map(s => {
@@ -177,19 +189,51 @@ export function mountFileSearch(root, compact = false) {
         const li = element('li', '');
         li.dataset.id = h.id;
         li.classList.toggle('current', h.id === selected);
+        const title = element('strong', h.name);
+        if (!compact) {
+          const pick = act('', () => {
+            select(h);
+            term.focus();
+          });
+          pick.className = 'hit-name';
+          pick.setAttribute('aria-pressed', String(h.id === selected));
+          pick.append(title);
+          li.append(pick);
+        } else li.append(title);
         li.append(
-          element('strong', h.name),
           element(
             'span',
             `${names.get(h.source)}${h.parent ? ' / ' + h.parent : ''} · ${new Date(h.modified).toLocaleString()}`
           )
         );
-        if (h.reader) li.append(act(`Open in ${h.reader}`, () => dispatch(h, 'open')));
-        li.append(act('Reveal in Finder', () => dispatch(h, 'reveal')));
+        if (compact) addActions(li, h);
         return li;
       })
     );
     $('more').hidden = !next;
+    if (!compact) {
+      const hit = hits.find(h => h.id === selected),
+        panel = $('selectedFile');
+      panel.hidden = !hit;
+      panel.replaceChildren();
+      if (hit) {
+        panel.append(
+          element('small', 'SELECTED FILE'),
+          element('h2', hit.name),
+          element('p', [names.get(hit.source), hit.parent].filter(Boolean).join(' / '))
+        );
+        addActions(panel, hit);
+      }
+    }
+  }
+  function addActions(host, hit) {
+    if (hit.reader) host.append(act(`Open in ${hit.reader}`, () => dispatch(hit, 'open')));
+    host.append(act('Reveal in Finder', () => dispatch(hit, 'reveal')));
+  }
+  function select(hit) {
+    selected = hit.id;
+    render();
+    notice.textContent = `Selected ${hit.name}, ${[scopeNames(sources).get(hit.source), hit.parent].filter(Boolean).join(' / ')}`;
   }
   async function query(append = false) {
     clearTimeout(timer);
@@ -197,7 +241,12 @@ export function mountFileSearch(root, compact = false) {
     const stamp = ++version,
       value = term.value;
     try {
-      const p = await request('query', { term: value, cursor: append ? next : '', limit: 25 });
+      const p = await request('query', {
+        term: value,
+        ...(scope ? { source: scope } : {}),
+        cursor: append ? next : '',
+        limit: 25
+      });
       if (stamp !== version) return;
       const updated = append ? [...hits, ...p.hits] : p.hits;
       const changed = JSON.stringify(updated) !== JSON.stringify(hits) || next !== (p.next || '');
@@ -207,8 +256,11 @@ export function mountFileSearch(root, compact = false) {
       map(p.sources);
       if (!hits.some(h => h.id === selected)) selected = '';
       if (changed) render();
-      const names = [...scopeNames(sources).values()].join(', ');
-      const partial = sources.some(s => s.state !== 'ready');
+      if ($('retry')) $('retry').hidden = true;
+      const included = sources.filter(s => !scope || s.id === scope);
+      const labels = scopeNames(sources);
+      const names = included.map(s => labels.get(s.id)).join(', ');
+      const partial = included.some(s => s.state !== 'ready');
       $('coverage').textContent =
         (hits.length
           ? `${hits.length} shown`
@@ -225,7 +277,19 @@ export function mountFileSearch(root, compact = false) {
       clear();
       sources = [];
       $('sources')?.replaceChildren();
-      if (!compact) $('emptyMap').textContent = 'Map unavailable.';
+      if (!compact) {
+        $('retry').hidden = false;
+        $('emptyMap').textContent = 'Locations unavailable.';
+        if (scope && e.status === 409) {
+          try {
+            const current = await request('sources');
+            if (version !== stamp + 1) return;
+            map(current);
+          } catch {
+            /* Results remain unavailable; never widen the scope. */
+          }
+        }
+      }
       $('coverage').textContent = e.message;
       notice.textContent = 'Could not load current results. Retry the search.';
     }
@@ -252,15 +316,20 @@ export function mountFileSearch(root, compact = false) {
     if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && hits.length) {
       e.preventDefault();
       i = Math.min(hits.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)));
-      selected = hits[i].id;
-      render();
-      notice.textContent = `Selected ${hits[i].name}, ${hits[i].parent || 'source folder'}`;
+      select(hits[i]);
     }
     if (e.key === 'Enter' && i >= 0) {
       e.preventDefault();
       void run(() => dispatch(hits[i], e.shiftKey || !hits[i].reader ? 'reveal' : 'open'), term);
     }
   });
+  $('scope')?.addEventListener('change', () => {
+    scope = $('scope').value;
+    clear();
+    notice.textContent = '';
+    void query();
+  });
+  $('retry')?.addEventListener('click', () => query());
   $('more').addEventListener('click', () => query(true));
   if (!compact)
     window.addEventListener('keydown', e => {

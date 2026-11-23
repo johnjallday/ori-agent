@@ -98,4 +98,6 @@ if __name__=='__main__':
         with serve(root) as url:spec(root,url,scenario,'search-first-onboarding')
         if scenario=='fresh':
             with serve(root) as url:spec(root,url,'return','search-first-return')
+    root=fixture()
+    with serve(root) as url:spec(root,url,'navigation','files-map-navigation')
     if args.upgrades:upgrades()
