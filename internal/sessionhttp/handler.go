@@ -165,7 +165,8 @@ type Handler struct {
 	// workspace's Personal HQ marker with the authoritative service. Injected
 	// by the server; nil in minimal handlers, where import simply skips
 	// designation. See PersonalHQDesignator.
-	personalHQDesignator PersonalHQDesignator
+	personalHQDesignator  PersonalHQDesignator
+	personalHQTrashLookup func(context.Context) (*personalhq.Status, error)
 
 	// continuity holds the reviewed modern import's dependencies; nil keeps
 	// modern folders reviewable but not importable.

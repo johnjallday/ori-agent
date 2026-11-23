@@ -1213,16 +1213,16 @@ func (s *FileStore) deleteWorkspaceFolder(id, reviewedOperationDigest string) er
 // deleted (the same safety rule as Delete): they are only unregistered, and
 // trashedPath is returned empty.
 func (s *FileStore) Trash(id string) (originalPath string, trashedPath string, err error) {
-	return s.trashWorkspaceFolder(id, "")
+	return s.trashWorkspaceFolder(id, "", "")
 }
 
 // TrashReviewedGroupRequirement moves a detached Required project to Trash
 // only after the host consumed a review bound to this exact contract digest.
 func (s *FileStore) TrashReviewedGroupRequirement(id, operationDigest string) (originalPath string, trashedPath string, err error) {
-	return s.trashWorkspaceFolder(id, operationDigest)
+	return s.trashWorkspaceFolder(id, operationDigest, "")
 }
 
-func (s *FileStore) trashWorkspaceFolder(id, reviewedOperationDigest string) (originalPath string, trashedPath string, err error) {
+func (s *FileStore) trashWorkspaceFolder(id, reviewedOperationDigest, reviewedManagedPath string) (originalPath string, trashedPath string, err error) {
 	release, workErr := s.enterContinuityWork()
 	if workErr != nil {
 		return "", "", workErr
@@ -1244,9 +1244,16 @@ func (s *FileStore) trashWorkspaceFolder(id, reviewedOperationDigest string) (or
 	}
 
 	folderPath := s.resolveFolder(relPath)
+	movePath := folderPath
+	if reviewedManagedPath != "" {
+		movePath, err = s.managedTrashPathLocked(id)
+		if err != nil || movePath != reviewedManagedPath {
+			return "", "", ErrManagedTrashUnavailable
+		}
+	}
 
-	if s.isInsideRoot(folderPath) {
-		trashedPath, err = platform.MoveToTrash(folderPath)
+	if reviewedManagedPath != "" || s.isInsideRoot(folderPath) {
+		trashedPath, err = platform.MoveToTrash(movePath)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to move workspace folder to trash: %w", err)
 		}

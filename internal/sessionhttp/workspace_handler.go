@@ -2329,6 +2329,11 @@ func (h *Handler) deleteWorkspace(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 
+	if r.URL.Query().Get("trash_personal_hq") == "true" {
+		h.trashPersonalHQ(w, r, ws)
+		return
+	}
+
 	// Review assistant topology before confirmations or any session, folder, or
 	// group mutation. Folder-only guards cannot see DB-only or divergent Homes.
 	if !h.allowWorkspaceRemoval(w, r, ws) {
