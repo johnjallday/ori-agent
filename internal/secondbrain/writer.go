@@ -86,7 +86,7 @@ func (w *Writer) Create(rel, kind string, body []byte) (WriteResult, error) {
 }
 
 func (w *Writer) write(rel, kind string, body []byte, create bool) (WriteResult, error) {
-	if !validNoteKind(kind) {
+	if !validNoteKind(kind) || kind == NoteKindDocuments {
 		return WriteResult{}, ErrInvalidNote
 	}
 	content := RenderNote(kind, body)
@@ -383,7 +383,7 @@ func checkReplaceable(dir *os.Root, name string) (exists bool, err error) {
 	if !status.Exists {
 		return false, nil
 	}
-	if !status.Owned {
+	if !status.Owned || status.Kind == NoteKindDocuments {
 		return true, ErrUserModified
 	}
 	return true, nil

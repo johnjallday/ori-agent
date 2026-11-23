@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -189,6 +190,83 @@ func TestHandlerSetupHQ_PinsStatusCodesWithoutLeakingCauses(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestHandlerSetupHQ_ReportsOnlyTheBoundedFolderConflict(t *testing.T) {
+	for _, tc := range []struct {
+		name, suggestion, workspaceID, wantCode, wantSuggestion string
+		status                                                  int
+	}{
+		{"folder", "my-hq-3", "", "hq_folder_conflict", "my-hq-3", http.StatusConflict},
+		{"internal path", "/private/path", "", "hq_folder_conflict", "", http.StatusConflict},
+		{"already exists", "my-hq-3", "hq-1", "hq_setup_partial", "", http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			partial := &personalassistant.PartialHQSetupError{
+				Step: personalassistant.RepairHQCreation,
+				State: &personalassistant.State{
+					Status: personalassistant.StatusProvisioningHQ, HQWorkspaceID: tc.workspaceID,
+					AssistantID: "assistant-1", GlobalAgentProfileName: "Atlas", StateVersion: 3, LastHQRequestID: "hq-request-1",
+				},
+				Err: fmt.Errorf("internal /private/path: %w", &personalhq.FolderConflict{
+					RequestedSlug: "my-hq", SuggestedSlug: tc.suggestion, RootWitness: strings.Repeat("a", 64),
+				}),
+			}
+			r := postHQ(t, hqHandler(t, &fakeHQSetupService{err: partial}), `{"request_id":"hq-request-1","if_version":1}`)
+			var response hqSetupErrorResponse
+			if err := json.Unmarshal(r.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if r.Code != tc.status || response.Code != tc.wantCode || !response.Retryable ||
+				response.DurableResult == nil || response.DurableResult.State != personalassistant.APIStateProvisioningHQ ||
+				strings.Contains(r.Body.String(), "/private/path") {
+				t.Fatalf("response = %d %s", r.Code, r.Body.String())
+			}
+			if tc.workspaceID == "" {
+				c := response.FolderConflict
+				if c == nil || c.RequestedSlug != "my-hq" || c.SuggestedSlug != tc.wantSuggestion {
+					t.Fatalf("folder conflict = %+v", c)
+				}
+				if tc.wantSuggestion != "" && (c.RequestID != "hq-request-1" || c.IfVersion != 3 || c.Review != strings.Repeat("a", 64)) {
+					t.Fatalf("review is not bound to the durable operation: %+v", c)
+				}
+			} else if response.FolderConflict != nil {
+				t.Fatal("an existing workspace must not offer a different folder")
+			}
+		})
+	}
+}
+
+type fakeHQFolderService struct {
+	fakeHQSetupService
+	change personalassistant.HQFolderChange
+}
+
+func (s *fakeHQFolderService) ChangeFolder(_ context.Context, userID string, change personalassistant.HQFolderChange) (*personalassistant.HQSetupResult, error) {
+	s.calls++
+	s.userID, s.change = userID, change
+	return s.result, s.err
+}
+
+func TestHandlerChangeHQFolder_AcceptsOnlyOperationVersionAndFolderReview(t *testing.T) {
+	service := &fakeHQFolderService{fakeHQSetupService: fakeHQSetupService{result: activeHQResult()}}
+	handler := hqHandler(t, &service.fakeHQSetupService)
+	handler.SetHQSetupService(service)
+	post := func(body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		handler.ChangeHQFolder(w, httptest.NewRequest(http.MethodPost, "/api/personal-assistant/hq/folder", strings.NewReader(body)))
+		return w
+	}
+	base := `{"request_id":"hq-1","if_version":3,"folder_slug":"my-hq-2","review":"proof"`
+	for _, extra := range []string{`"notes":null`, `"name":""`, `"schedule_enabled":false`, `"path":"/anywhere"`, `"assistant_id":"someone"`} {
+		if w := post(base + "," + extra + "}"); w.Code != http.StatusBadRequest || service.calls != 0 {
+			t.Fatalf("accepted an extra field %q: %d %s", extra, w.Code, w.Body.String())
+		}
+	}
+	if w := post(base + "}"); w.Code != http.StatusCreated || service.calls != 1 || service.userID == "" ||
+		service.change != (personalassistant.HQFolderChange{RequestID: "hq-1", IfVersion: 3, FolderSlug: "my-hq-2", Review: "proof"}) {
+		t.Fatalf("confirmation = %d %s, %+v", w.Code, w.Body.String(), service)
 	}
 }
 

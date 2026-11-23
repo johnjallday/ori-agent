@@ -39,6 +39,22 @@ func TestProjectHolder_RefusesPathsAndMissingWalkPosition(t *testing.T) {
 	}
 }
 
+func TestDocumentsOfferDoesNotDiscloseReportAcrossOrigins(t *testing.T) {
+	for _, tc := range []struct {
+		origin string
+		status int
+	}{{"http://localhost", http.StatusOK}, {"https://other.example", http.StatusForbidden}} {
+		req := httptest.NewRequest(http.MethodGet, "http://localhost/folder-agent/ws/documents-offer?hq=hq&attempt=unknown", nil)
+		req.SetPathValue("workspaceID", "ws")
+		req.Header.Set("Origin", tc.origin)
+		w := httptest.NewRecorder()
+		handler().DocumentsOffer(w, req)
+		if w.Code != tc.status || (w.Code == 200 && !strings.Contains(w.Body.String(), `"offer":null`)) {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestStart_RefusesAPathField(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler().Start(rec, httptest.NewRequest(http.MethodPost, "/start", strings.NewReader(`{"choice_token":"x","path":"/tmp"}`)))

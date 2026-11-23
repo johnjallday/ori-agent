@@ -37,8 +37,8 @@ const (
 // slash-separated, "" for the fed folder itself; the map never holds an
 // absolute path or a file's contents.
 type Folder struct {
-	// Witness binds a reviewed root or first-level branch to the directory opened by the walk.
-	Witness string `json:"witness,omitempty"`
+	// BranchWitness binds Music Home review to the root or first-level directory opened by the walk.
+	BranchWitness string `json:"branch_witness,omitempty"`
 	// Empty means the opened directory returned no entries, not merely no kept entries.
 	Empty bool   `json:"empty,omitempty"`
 	Path  string `json:"path"`
@@ -54,6 +54,10 @@ type Folder struct {
 	Newest time.Time `json:"newest,omitzero"`
 	// Marker is the name of the highest-precedence project marker directly
 	// inside ("*.logicx", "go.mod"), and MarkerFiles how many entries matched it.
+	// Witness identifies the listed project directory when the caller needs
+	// to resolve this member later. It contains no name or file body.
+	Witness     string             `json:"witness,omitempty"`
+	HasVault    bool               `json:"has_vault,omitempty"`
 	Marker      string             `json:"marker,omitempty"`
 	MarkerFiles int                `json:"marker_files,omitempty"`
 	Shape       folderdigest.Shape `json:"shape,omitempty"`
@@ -197,8 +201,9 @@ func CleanRel(rel string) (string, error) {
 
 // Options tunes one walk. Zero values take the constants.
 type Options struct {
-	MaxEntries int
-	Budget     time.Duration
+	MemberWitness func(os.FileInfo) string
+	MaxEntries    int
+	Budget        time.Duration
 	// Now supplies the clock, for tests that exercise the time budget.
 	Now func() time.Time
 	// Progress, when set, is told after each folder what the walk has done
@@ -384,6 +389,7 @@ func (w *walker) budgetReason() string {
 // children are not queued or recorded.
 func (w *walker) list(rel string) (Folder, error) {
 	dir := w.abs(rel)
+	var before os.FileInfo
 	if rel != "" {
 		info, err := os.Lstat(dir)
 		if err != nil {
@@ -392,18 +398,19 @@ func (w *walker) list(rel string) (Folder, error) {
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 			return Folder{}, ErrNotDirectory
 		}
+		before = info
 	}
 	entries, large, witness, err := readDirBounded(dir, LargeFolderEntries, !strings.Contains(rel, "/"))
 	if err != nil {
 		return Folder{}, err
 	}
 	if large {
-		return Folder{Path: rel, State: StateLarge, Witness: witness}, nil
+		return Folder{Path: rel, State: StateLarge, BranchWitness: witness}, nil
 	}
 	w.listed += len(entries)
 	w.m.Entries += len(entries)
 
-	f := Folder{Path: rel, State: StateWalked, Witness: witness, Empty: len(entries) == 0}
+	f := Folder{Path: rel, State: StateWalked, BranchWitness: witness, Empty: len(entries) == 0}
 	bestRank := -1
 	var bestMarker folderdigest.Marker
 	extensions := make(map[string]bool)
@@ -415,6 +422,9 @@ func (w *walker) list(rel string) (Folder, error) {
 		// Hidden entries (.git, .obsidian) still count as markers, as in the
 		// digest; links never do.
 		if !isLink {
+			if name == ".obsidian" && isDir && w.opts.MemberWitness != nil {
+				f.HasVault = true
+			}
 			if marker, ok := folderdigest.MatchMarker(name, isDir); ok {
 				rank := w.rank(marker)
 				if bestRank < 0 || rank < bestRank {
@@ -456,6 +466,11 @@ func (w *walker) list(rel string) (Folder, error) {
 	}
 	f.Kinds = len(extensions)
 	if bestRank >= 0 {
+		if before != nil && w.opts.MemberWitness != nil {
+			if after, err := os.Lstat(dir); err == nil && os.SameFile(before, after) {
+				f.Witness = w.opts.MemberWitness(before)
+			}
+		}
 		f.State = StateClosed
 		f.Marker = bestMarker.Name
 		f.Shape = bestMarker.Shape

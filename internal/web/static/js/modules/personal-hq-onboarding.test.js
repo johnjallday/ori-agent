@@ -18,6 +18,9 @@ import {
   hqRequestOutcome,
   hqRequestID,
   clearHQRequestID,
+  checkHQSetup,
+  hqFolderConflictView,
+  submitHQFolderChange,
   submitReviewedHQ
 } from './personal-hq-onboarding.js';
 
@@ -106,6 +109,68 @@ test('lost responses reconcile canonical HQ and an uncertain retry keeps exact r
     globalThis.window = previousWindow;
     globalThis.fetch = previousFetch;
     globalThis.CustomEvent = previousEvent;
+  }
+});
+
+test('reload reads the saved conflict; each new suggestion needs its own confirmation', async () => {
+  const previous = { window: globalThis.window, fetch: globalThis.fetch };
+  const relationship = { state: 'provisioning_hq', state_version: 3 };
+  const initial = {
+    requested_slug: 'my-hq',
+    suggested_slug: 'my-hq-3',
+    request_id: 'server-owned',
+    if_version: 3,
+    review: 'a'.repeat(64)
+  };
+  const posts = [];
+  globalThis.window = { location: { pathname: '/', search: '' }, dispatchEvent() {} };
+  globalThis.fetch = async (url, options) => {
+    if (options.method === 'POST') {
+      assert.equal(url, '/api/personal-assistant/hq/folder');
+      posts.push(JSON.parse(options.body));
+      if (posts.length === 1)
+        return {
+          ok: false,
+          json: async () => ({
+            code: 'hq_folder_conflict',
+            durable_result: relationship,
+            folder_conflict: { ...initial, suggested_slug: 'my-hq-4' }
+          })
+        };
+      return {
+        ok: true,
+        json: async () => ({
+          personal_assistant: { state: 'active', hq_workspace_id: 'hq-1' }
+        })
+      };
+    }
+    return {
+      ok: true,
+      json: async () =>
+        url === '/api/personal-assistant/hq/folder'
+          ? { folder_conflict: initial }
+          : url === '/api/personal-assistant'
+            ? { personal_assistant: relationship }
+            : { status: { valid: true, workspace: { id: 'hq-1', folder_slug: 'my-hq-4' } } }
+    };
+  };
+  try {
+    const loaded = await checkHQSetup();
+    const view = hqFolderConflictView(loaded.personal_assistant, loaded.folder_conflict);
+    assert.match(view.detail, /my-hq-3.*Daily Brief and Notes/);
+    assert.equal(posts.length, 0, 'a reload must not mutate the saved setup');
+    const collided = await submitHQFolderChange(view.change);
+    assert.deepEqual(posts, [
+      { request_id: 'server-owned', if_version: 3, folder_slug: 'my-hq-3', review: initial.review }
+    ]);
+    const next = hqFolderConflictView(collided.personal_assistant, collided.folder_conflict);
+    assert.equal(next.change.folder_slug, 'my-hq-4');
+    assert.equal(posts.length, 1, 'showing the new suggestion is not confirmation');
+    const finished = await submitHQFolderChange(next.change);
+    assert.equal(finished.outcome, 'ready');
+    assert.equal(finished.hq.workspace.folder_slug, 'my-hq-4');
+  } finally {
+    Object.assign(globalThis, previous);
   }
 });
 

@@ -149,6 +149,17 @@ func digestProtectedPath(ctx context.Context, root string, skips ...string) (str
 // recorded size on some file systems, so that folder's size is left out
 // too; with no skipped files the digest is exactly digestProtectedPath's.
 func digestProtectedTree(ctx context.Context, root string, skipDirs, skipFiles []string) (string, error) {
+	return inspectProtectedTree(ctx, root, skipDirs, skipFiles, treeInspection{})
+}
+
+type treeInspection struct {
+	// Only an authorized move changes the intrinsic size of this directory.
+	sizelessDir string
+	observe     func(path string, info os.FileInfo) error
+	open        func(path string, info os.FileInfo) (*os.File, error)
+}
+
+func inspectProtectedTree(ctx context.Context, root string, skipDirs, skipFiles []string, inspection treeInspection) (string, error) {
 	skips := append(slices.Clone(skipDirs), skipFiles...)
 	sizeless := map[string]bool{}
 	for _, file := range skipFiles {
@@ -182,7 +193,12 @@ func digestProtectedTree(ctx context.Context, root string, skipDirs, skipFiles [
 			return errors.New("protected tree contains non-local entry")
 		}
 		record := protectedDigestEntry{Path: filepath.ToSlash(rel), Mode: uint32(entryInfo.Mode()), Size: entryInfo.Size()}
-		if entryInfo.IsDir() && sizeless[path] {
+		if inspection.observe != nil {
+			if err := inspection.observe(path, entryInfo); err != nil {
+				return err
+			}
+		}
+		if entryInfo.IsDir() && (sizeless[path] || path == inspection.sizelessDir) {
 			record.Size = 0
 		}
 		if entryInfo.Mode()&os.ModeSymlink != 0 {
@@ -204,7 +220,12 @@ func digestProtectedTree(ctx context.Context, root string, skipDirs, skipFiles [
 		if totalBytes > maxProtectedHashBytes {
 			return errors.New("protected tree exceeds content hashing limit")
 		}
-		file, err := os.Open(path) // #nosec G304 -- canonical retained evidence is read-only and never client supplied.
+		var file *os.File
+		if inspection.open != nil {
+			file, err = inspection.open(path, entryInfo)
+		} else {
+			file, err = os.Open(path) // #nosec G304 -- canonical retained evidence is read-only and never client supplied.
+		}
 		if err != nil {
 			return err
 		}

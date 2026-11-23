@@ -925,9 +925,14 @@ func (h *Handler) registeredWorkspaceSlugOwner(ctx context.Context, slug, exclud
 
 func (h *Handler) globalWorkspaceSlugConflict(ctx context.Context, requestedSlug, excludeID, parentDir string) *agentworkspace.FolderSlugConflictError {
 	base := agentworkspace.Slugify(requestedSlug)
-	occupied := h.occupiedWorkspaceSlugs(ctx, excludeID)
+	return &agentworkspace.FolderSlugConflictError{
+		Slug:          base,
+		SuggestedSlug: availableWorkspaceSlug(base, parentDir, h.occupiedWorkspaceSlugs(ctx, excludeID)),
+		ParentDir:     parentDir,
+	}
+}
 
-	suggested := ""
+func availableWorkspaceSlug(base, parentDir string, occupied map[string]string) string {
 	for suffix := 2; suffix < 1002; suffix++ {
 		candidate := agentworkspace.WorkspaceSlugWithSuffix(base, suffix)
 		if _, used := occupied[strings.ToLower(candidate)]; used {
@@ -937,18 +942,13 @@ func (h *Handler) globalWorkspaceSlugConflict(ctx context.Context, requestedSlug
 			// #nosec G304 G703 -- candidate is Slugify/WorkspaceSlugWithSuffix output
 			// (charset restricted to [a-z0-9-]), and parentDir is a server-resolved
 			// workspace directory, not raw user input.
-			if _, err := os.Stat(filepath.Join(parentDir, candidate)); err == nil || !os.IsNotExist(err) {
+			if _, err := os.Lstat(filepath.Join(parentDir, candidate)); err == nil || !os.IsNotExist(err) {
 				continue
 			}
 		}
-		suggested = candidate
-		break
+		return candidate
 	}
-	return &agentworkspace.FolderSlugConflictError{
-		Slug:          base,
-		SuggestedSlug: suggested,
-		ParentDir:     parentDir,
-	}
+	return ""
 }
 
 // occupiedWorkspaceSlugs maps every live workspace folder slug (lowercased) to
@@ -956,16 +956,19 @@ func (h *Handler) globalWorkspaceSlugConflict(ctx context.Context, requestedSlug
 // create path's folder_slug conflict and the assistant's name pre-check read
 // the same set.
 func (h *Handler) occupiedWorkspaceSlugs(ctx context.Context, excludeID string) map[string]string {
+	rows, _ := h.store.ListWorkspaces(ctx)
+	return h.workspaceSlugOwners(rows, excludeID)
+}
+
+func (h *Handler) workspaceSlugOwners(rows []session.Workspace, excludeID string) map[string]string {
 	occupied := make(map[string]string)
-	if rows, err := h.store.ListWorkspaces(ctx); err == nil {
-		for i := range rows {
-			ws := &rows[i]
-			if ws.ID == excludeID || ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
-				continue
-			}
-			if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
-				occupied[strings.ToLower(ws.FolderSlug)] = ws.ID
-			}
+	for i := range rows {
+		ws := &rows[i]
+		if ws.ID == excludeID || ws.Status == session.WorkspaceStatusTrashed || ws.Status == session.WorkspaceStatusMissing {
+			continue
+		}
+		if agentworkspace.IsCanonicalWorkspaceSlug(ws.FolderSlug) {
+			occupied[strings.ToLower(ws.FolderSlug)] = ws.ID
 		}
 	}
 	if h.workspaceStore != nil {

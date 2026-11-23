@@ -84,7 +84,7 @@ func previewTargetFor(kind, name string) (previewTarget, error) {
 		}
 		return previewTarget{folders: []string{FolderDaily}, file: name, kinds: []string{NoteKindJournal}}, nil
 	case PreviewProject:
-		return previewTarget{folders: []string{FolderProjects, name}, file: projectNoteName, kinds: []string{NoteKindProject}}, nil
+		return previewTarget{folders: []string{FolderProjects, name}, file: projectNoteName, kinds: []string{NoteKindProject, NoteKindDocuments}}, nil
 	default:
 		return previewTarget{}, ErrPreviewInvalid
 	}
@@ -144,7 +144,7 @@ func ProjectNotesByOri(root string, names []string) map[string]bool {
 			continue
 		}
 		if info, err := dir.Lstat(projectNoteName); err == nil && info.Mode().IsRegular() {
-			if _, kind, ok := markedNote(dir, projectNoteName); ok && kind == NoteKindProject {
+			if _, kind, ok := markedNote(dir, projectNoteName); ok && (kind == NoteKindProject || kind == NoteKindDocuments) {
 				out[name] = true
 			}
 		}

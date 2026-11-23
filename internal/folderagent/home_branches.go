@@ -38,7 +38,7 @@ func bindHomeBranches(rec Record, plan *Plan, selected []string) foldermap.Facts
 		return rec.Facts
 	}
 	root, ok := m.Folder("")
-	if !ok || root.Witness == "" {
+	if !ok || root.BranchWitness == "" {
 		return rec.Facts
 	} // legacy look
 	counts := map[string]map[string]int{}
@@ -59,7 +59,7 @@ func bindHomeBranches(rec Record, plan *Plan, selected []string) foldermap.Facts
 	if len(counts) == 0 {
 		return rec.Facts
 	}
-	plan.BranchLook = branchHandle(rec.OwnerUserID, rec.WorkspaceID, root.Witness, m.Updated.UTC().String(), fmt.Sprint(m.Walks))
+	plan.BranchLook = branchHandle(rec.OwnerUserID, rec.WorkspaceID, root.BranchWitness, m.Updated.UTC().String(), fmt.Sprint(m.Walks))
 	plan.Selected = append(plan.Selected, plan.BranchLook)
 	requested := map[string]bool{}
 	explicit := false
@@ -84,7 +84,7 @@ func bindHomeBranches(rec Record, plan *Plan, selected []string) foldermap.Facts
 		if f.Depth() != 1 || f.IsProject() {
 			continue
 		}
-		b := HomeBranch{Name: f.Path, Partial: partial[f.Path], witness: f.Witness}
+		b := HomeBranch{Name: f.Path, Partial: partial[f.Path], witness: f.BranchWitness}
 		if formats := counts[f.Path]; len(formats) > 0 {
 			var summaries []string
 			for format, n := range formats {
@@ -92,8 +92,8 @@ func bindHomeBranches(rec Record, plan *Plan, selected []string) foldermap.Facts
 			}
 			sort.Strings(summaries)
 			b.Summary = strings.Join(summaries, ", ")
-			if f.Witness != "" {
-				b.ID = branchHandle(plan.BranchLook, f.Path, f.Witness)
+			if f.BranchWitness != "" {
+				b.ID = branchHandle(plan.BranchLook, f.Path, f.BranchWitness)
 				b.Included = !explicit || requested[b.ID]
 				delete(requested, b.ID)
 				if b.Included {
@@ -161,7 +161,7 @@ func (p Plan) CheckBranchWitnesses(root string, m *foldermap.Map) error {
 		return err == nil && want != "" && diridentity.Of(info) == want
 	}
 	r, ok := m.Folder("")
-	if !ok || !matches(root, r.Witness) {
+	if !ok || !matches(root, r.BranchWitness) {
 		return personalassistant.ErrFolderPlanChanged
 	}
 	for _, b := range p.Branches {

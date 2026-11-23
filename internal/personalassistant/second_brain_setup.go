@@ -146,7 +146,13 @@ func (s *SecondBrainService) RunSetup(ctx context.Context, userID, operationID s
 	}
 	s.createMu.Lock()
 	defer s.createMu.Unlock()
+	if strings.HasPrefix(operationID, "documents-setup-") {
+		return SecondBrainSetupResult{}, ErrSecondBrainDestinationChanged
+	}
+	return s.runReviewedSetup(ctx, userID, operationID, "")
+}
 
+func (s *SecondBrainService) runReviewedSetup(ctx context.Context, userID, operationID, parentWitness string) (SecondBrainSetupResult, error) {
 	doc, err := s.read(ctx, userID)
 	if err != nil {
 		return SecondBrainSetupResult{}, err
@@ -181,11 +187,12 @@ func (s *SecondBrainService) RunSetup(ctx context.Context, userID, operationID s
 			"The folder your notes were going into isn't there anymore. Put it back, or choose another location.")
 	}
 
-	creation, err := secondbrain.Creator{Provenance: operationID}.Create(op.Parent, op.Name, s.readSeeds(ctx, userID))
+	creator := secondbrain.Creator{Provenance: operationID, ParentWitness: parentWitness}
+	creation, err := creator.Create(op.Parent, op.Name, s.readSeeds(ctx, userID))
 	fresh := err == nil
 	if errors.Is(err, secondbrain.ErrTargetNotEmpty) {
 		// Occupied: only this operation's own half-made folder is finished.
-		creation, err = secondbrain.Creator{}.Recover(op.Parent, op.Name, operationID)
+		creation, err = creator.Recover(op.Parent, op.Name, operationID)
 		if errors.Is(err, secondbrain.ErrNotOwnSetup) {
 			return s.stopSetup(ctx, userID, operationID, secondbrain.SetupFailed, secondbrain.SetupReasonOccupied,
 				"A folder named \""+op.Name+"\" is already there, so Ori left it alone. Move or rename it, then retry. To use another place, set up notes from Notes instead.")

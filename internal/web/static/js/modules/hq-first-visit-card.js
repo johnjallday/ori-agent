@@ -132,6 +132,7 @@ export class HQFirstVisitCard {
     const hint = receiptHint(window.location, this.owner.workspaceId());
     if (!hint) {
       this.checkedAttempt = null;
+      this.returnRead = null;
       if (this.receipt) {
         this.receipt = null;
         if (this.owner.active) this.owner.render();
@@ -169,8 +170,46 @@ export class HQFirstVisitCard {
   }
 
   receiptHTML() {
+    const projects = this.receipt?.offer?.projects || [];
+    const draft = p =>
+      this.receipt.offer.writable || this.receipt.offer.setup
+        ? `<button type="button" class="ws-cmd-nav-btn" data-documents-draft="${escape(p.ref)}">Draft ${escape(p.name)} note</button>`
+        : '';
+    const decision = this.receipt?.offer?.decision;
+    const action = (id, label) =>
+      `<button type="button" class="ws-cmd-nav-btn" data-documents-action="${id}">${escape(label)}</button>`;
+    let evidence = projects
+      .map(
+        (p, i) =>
+          `${i === 0 ? draft(p) : ''}<details><summary>Review ${escape(p.location)}</summary><p>The folder report found ${escape(p.evidence)} here. No file text was used.</p>${i > 0 ? draft(p) : ''}</details>`
+      )
+      .join('');
+    if (decision?.state === 'dismissed')
+      evidence = `<details><summary>Review project choices</summary>${evidence}</details>`;
+    else if (decision)
+      evidence =
+        decision.state === 'saved'
+          ? action('open', `Open ${decision.name} note`)
+          : decision.state === 'pending'
+            ? action('recover', 'Check save confirmation')
+            : '';
+    else if (projects.length && (this.receipt.offer.writable || this.receipt.offer.setup))
+      evidence += action('dismiss', 'Not now');
+    if (this.receipt?.checkAgain) evidence += action('check', 'Check again');
+    const vaults = (this.receipt?.offer?.vaults || [])
+      .map(
+        v =>
+          `<button type="button" class="ws-cmd-nav-btn" data-documents-vault="${escape(v.ref)}">Connect ${escape(v.location)} read-only</button>`
+      )
+      .join('');
+    const notes =
+      this.receipt?.offer &&
+      (decision?.state === 'unverified' ||
+        (!this.receipt.offer.writable && !this.receipt.offer.setup))
+        ? '<a href="/my-notes">Open Notes</a> '
+        : '';
     return this.receipt
-      ? `<section class="ws-cmd-card" role="status" data-guided-receipt><strong>From your assistant</strong><p>${escape(this.receipt.text)}</p>${this.receipt.href ? `<a href="${escape(this.receipt.href)}">${escape(this.receipt.label)}</a>` : ''}</section>`
+      ? `<section class="ws-cmd-card" role="status" data-guided-receipt><strong>From your assistant</strong><p>${escape(this.receipt.text)}</p>${evidence}${vaults}${notes}${this.receipt.href ? `<a href="${escape(this.receipt.href)}">${escape(this.receipt.label)}</a>` : ''}</section>`
       : '';
   }
 
@@ -292,6 +331,128 @@ export class HQFirstVisitCard {
 
   bind() {
     void this.loadReturn();
+    const refresh = () => {
+      this.checkedAttempt = null;
+      return this.loadReturn();
+    };
+    const returnFocus = async hint => {
+      if (receiptHint(window.location, this.owner.workspaceId())?.attempt !== hint.attempt) return;
+      await refresh();
+      if (
+        receiptHint(window.location, this.owner.workspaceId())?.attempt !== hint.attempt ||
+        !this.owner.active
+      )
+        return;
+      const controls =
+        this.owner.container?.querySelectorAll?.(
+          '[data-guided-receipt] button,[data-guided-receipt] summary,[data-guided-receipt] a'
+        ) || [];
+      [...controls].find(el => el.getClientRects().length)?.focus({ preventScroll: true });
+    };
+    for (const b of this.owner.container?.querySelectorAll?.('[data-documents-action]') || []) {
+      b.onclick = async () => {
+        const hint = receiptHint(window.location, this.owner.workspaceId());
+        if (!hint?.workspace || !this.available()) return;
+        const offer = this.receipt?.offer;
+        const action = b.dataset.documentsAction;
+        if (action === 'check') {
+          await refresh();
+          return;
+        }
+        if (action === 'open') {
+          await window.PersonalAssistantSecondBrain?.openDocumentsDraft?.({
+            hint,
+            offer,
+            trigger: b,
+            result: offer.decision,
+            onClose: () => returnFocus(hint)
+          });
+          return;
+        }
+        const payload =
+          action === 'dismiss'
+            ? { report: offer.report, candidate: offer.projects[0].ref }
+            : { request_id: offer.decision.request_id };
+        try {
+          const r = await fetch(
+            `/api/personal-assistant/folder-agent/${encodeURIComponent(hint.workspace)}/documents-draft/${action}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ hq: hint.hq, attempt: hint.attempt, ...payload })
+            }
+          );
+          if (!r.ok) throw Error();
+        } catch (_) {
+          if (receiptHint(window.location, this.owner.workspaceId())?.attempt !== hint.attempt)
+            return;
+          this.receipt = {
+            ...this.receipt,
+            checkAgain: true,
+            text: 'That decision could not be confirmed. Check again.'
+          };
+          this.owner.render();
+          return;
+        }
+        await refresh();
+      };
+    }
+    for (const button of this.owner.container?.querySelectorAll?.('[data-documents-draft]') || []) {
+      button.onclick = () => {
+        const hint = receiptHint(window.location, this.owner.workspaceId());
+        const offer = this.receipt?.offer;
+        const project = offer?.projects?.find(p => p.ref === button.dataset.documentsDraft);
+        if (!hint?.workspace || !project || !this.available()) return;
+        void window.PersonalAssistantSecondBrain?.openDocumentsDraft?.({
+          hint,
+          offer,
+          project,
+          trigger: button,
+          onClose: () => returnFocus(hint)
+        });
+      };
+    }
+    for (const b of this.owner.container?.querySelectorAll?.('[data-documents-vault]') || []) {
+      b.onclick = async () => {
+        const hint = receiptHint(window.location, this.owner.workspaceId());
+        const offer = this.receipt?.offer;
+        const v = offer?.vaults?.find(row => row.ref === b.dataset.documentsVault);
+        if (!hint?.workspace || !v) return;
+        try {
+          const r = await fetch(
+            `/api/personal-assistant/folder-agent/${encodeURIComponent(hint.workspace)}/documents-draft/vault`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                hq: hint.hq,
+                attempt: hint.attempt,
+                report: offer.report,
+                candidate: v.ref
+              })
+            }
+          );
+          const value = await r.json();
+          if (!r.ok || !value.selection_token) throw Error();
+          if (receiptHint(window.location, this.owner.workspaceId())?.attempt !== hint.attempt)
+            return;
+          await window.PersonalAssistantSecondBrain.connectSelection({
+            selectionToken: value.selection_token,
+            name: v.name,
+            path: v.location
+          });
+          window.PersonalAssistantPanel?.open?.();
+        } catch (_) {
+          if (receiptHint(window.location, this.owner.workspaceId())?.attempt !== hint.attempt)
+            return;
+          this.receipt = {
+            ...this.receipt,
+            text: 'The vault could not be verified. Open Notes to check your connection.'
+          };
+          this.owner.render();
+        }
+      };
+    }
     this.door()?.addEventListener?.('click', () => (this.node ? this.close() : this.open()));
     this.paint();
     if (!this.door() || this.entryChecked || this.state !== 'pending' || !this.owner.active) return;

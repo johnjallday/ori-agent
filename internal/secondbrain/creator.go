@@ -172,6 +172,8 @@ type Creator struct {
 	// making the folder and recording the connection can recognize the folder as
 	// its own — and only its own (assistant-hq-onboarding 3.3).
 	Provenance string
+	// ParentWitness, when set, must match the pinned parent even on recovery.
+	ParentWitness string
 	// beforeWrite sees every path about to be written, so tests can fail one.
 	beforeWrite func(rel string) error
 }
@@ -231,6 +233,9 @@ func (c Creator) Recover(parent, name, operationID string) (Creation, error) {
 		return Creation{}, err
 	}
 	defer func() { _ = parentRoot.Close() }()
+	if !c.parentMatches(parentRoot) {
+		return Creation{}, ErrNotOwnSetup
+	}
 	info, err := parentRoot.Lstat(name)
 	if err != nil {
 		return Creation{}, err
@@ -286,6 +291,9 @@ func (c Creator) Create(parent, name string, seeds Seeds) (Creation, error) {
 	}
 	defer func() { _ = parentRoot.Close() }()
 
+	if !c.parentMatches(parentRoot) {
+		return Creation{}, ErrNotOwnSetup
+	}
 	madeTarget, err := prepareTarget(parentRoot, name)
 	if err != nil {
 		return Creation{}, err

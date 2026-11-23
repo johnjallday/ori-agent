@@ -5,6 +5,9 @@ import {
   defaultHQTimezone,
   hqBuildTarget,
   submitReviewedHQ,
+  submitHQFolderChange,
+  hqFolderConflictView,
+  loadHQFolderConflict,
   checkHQSetup,
   hasPendingHQRequest,
   currentHQIntent,
@@ -49,6 +52,7 @@ export function hqCardView(relationship, rootState, plan = {}) {
     name: String(relationship?.display_name || '').trim() || 'Your assistant',
     root,
     canBuild: visible && !receipt && !collapsed && !building && (paused || root.confirmed),
+    folder: !collapsed && !receipt ? hqFolderConflictView(relationship, plan.folderConflict) : null,
     status: building
       ? 'Resuming setup…'
       : paused
@@ -130,6 +134,7 @@ const plan = {
   collapsed: false,
   reviewOpened: false,
   failed: false,
+  folderConflict: null,
   receipt: [],
   receiptWorkspaceID: '',
   // The notes choice in this review: included by default, or a folder chosen
@@ -545,7 +550,17 @@ function render() {
   el('Change').disabled = state.busy || view.building;
   el('Adjust').disabled = state.busy || view.building;
   el('NotNow').disabled = state.busy || view.building;
-  el('Status').textContent = view.status;
+  const folder = el('FolderConflict');
+  const confirm = el('FolderConfirm');
+  if (folder && confirm) {
+    folder.hidden = !view.folder;
+    folder.textContent = view.folder?.detail || '';
+    confirm.hidden = !view.folder?.change;
+    confirm.disabled = state.busy;
+    el('Build').classList.toggle('btn-primary', !view.folder?.change);
+    el('Build').classList.toggle('btn-outline-secondary', !!view.folder?.change);
+  }
+  el('Status').textContent = view.folder && !state.busy ? '' : view.status;
   document.dispatchEvent(new CustomEvent('personal-assistant:hq-receipt'));
   if (plan.compact && adoptingResult) {
     // One reframe after the compact surface has its real dimensions. Neither
@@ -574,7 +589,10 @@ async function load(relationship = null) {
   try {
     const current =
       relationship || (await readJSON('/api/personal-assistant')).personal_assistant || null;
-    const root = await loadHQWorkspaceRoot();
+    const [root, folderConflict] = await Promise.all([
+      loadHQWorkspaceRoot(),
+      loadHQFolderConflict(current)
+    ]);
     if (!plan.timezone) plan.timezone = await defaultHQTimezone();
     const hq = await readJSON('/api/personal-hq/status');
     // The notes status is read for the review, never the notes themselves. A
@@ -582,6 +600,7 @@ async function load(relationship = null) {
     const notes = await readNotesStatus();
     if (seq !== state.sequence) return;
     state.relationship = current;
+    plan.folderConflict = folderConflict;
     state.root = root;
     state.notes = notes;
     // The notes half from the record alone: an unfinished setup, else the
@@ -623,9 +642,31 @@ async function load(relationship = null) {
     // Never enable a build if its root or relationship cannot be confirmed.
     if (seq !== state.sequence) return;
     state.root = null;
+    plan.folderConflict = null;
     render();
     if (state.relationship?.state === 'needs_hq')
       error('Could not verify the workspace directory. Retry.');
+  }
+}
+
+async function confirmFolder() {
+  if (state.busy) return;
+  const folder = hqCardView(state.relationship, state.root, plan).folder;
+  if (!folder?.change) return;
+  const focusOwned = el('Card').contains(document.activeElement);
+  state.busy = true;
+  error('');
+  render();
+  try {
+    const result = await submitHQFolderChange(folder.change, { focusOwned, reopen: true });
+    await load(result.personal_assistant);
+    if (!result.presentation && result.outcome !== 'ready' && !result.folder_conflict)
+      error(result.error || 'Check your saved setup before trying again.');
+  } catch (cause) {
+    error(cause?.message || 'Check your saved setup before trying again.');
+  } finally {
+    state.busy = false;
+    render();
   }
 }
 
@@ -710,11 +751,15 @@ async function build() {
         ...hqReviewDraft(plan),
         notes: hqNotesPayload(current)
       },
-      { root: hqWorkspaceRootView(root).path, focusOwned }
+      { root: hqWorkspaceRootView(root).path, focusOwned, reopen: true }
     );
     const relationship = result.personal_assistant;
     if (relationship) state.relationship = relationship;
     if (result.outcome !== 'ready') {
+      if (result.folder_conflict) {
+        plan.folderConflict = result.folder_conflict;
+        return;
+      }
       error(
         result.outcome === 'stale'
           ? 'HQ was built; refresh the view. Do not build again.'
@@ -923,6 +968,7 @@ async function adjust() {
 function init() {
   if (!el('Card')) return;
   el('Build').addEventListener('click', build);
+  el('FolderConfirm')?.addEventListener('click', confirmFolder);
   el('Change').addEventListener('click', changeRoot);
   el('Adjust').addEventListener('click', adjust);
   el('NotNow').addEventListener('click', notNow);

@@ -683,6 +683,14 @@ a setup from before), then the project question.
    waits for the next load instead of showing a wrong number. It is only for a
    second brain Ori set up.
 
+### Documents project notes
+
+A guided Documents receipt can start a note without answering the assistant's project interview. Review shows the user's answer and a relative `Source: Documents/…` line. With no notebook, the default **My Notes** setup has its own review, parent-identity check and confirmation. Setting it up never saves the draft. Deferred setup stays deferred; existing read-only connections aren't replaced. Vault selection starts the ordinary read-only look only after its own confirmation.
+
+**Save to My Notes** rechecks the authenticated HQ and report, the source member and the reviewed writable Notes generation and physical destination. It publishes a complete `Projects/<reviewed name>/README.md` using exclusive directory rename (macOS/Linux); lack of support is a refusal, not permission to overwrite. This note has kind `documents_project`, a full body digest and an operation marker. Neither ordinary project writes nor refresh may replace it. The legacy interview note retains its original sync behavior.
+
+The folder-agent sidecar keeps at most 64 decisions, not another copy of the draft text. Save binds a request ID to its normalized payload, destination and private operation ID before publication. Retries and explicit Open require proof of the expected file in the same Notes generation. A pending receipt can be completed when the file proves the publication; absence is not a reason to recreate it. Not now dismisses only the proposal and leaves the folder link and voluntary review available.
+
 ### The note marker
 
 Every note Ori writes opens with exactly this frontmatter:

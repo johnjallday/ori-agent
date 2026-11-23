@@ -2,14 +2,19 @@ package sessionhttp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
+	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 const (
@@ -36,6 +41,65 @@ func personalAssistantCreationOptions(ctx context.Context) (personalhq.Assistant
 		options.Appearance = options.Appearance.Clone()
 	}
 	return options, ok
+}
+
+func hqFolderConflict(requested, suggested, root string) *personalhq.FolderConflict {
+	if !agentworkspace.IsCanonicalWorkspaceSlug(requested) {
+		return nil
+	}
+	if !agentworkspace.IsCanonicalWorkspaceSlug(suggested) || suggested == requested || agentworkspace.IsReservedTopLevelSlug(suggested) {
+		suggested = ""
+	}
+	conflict := &personalhq.FolderConflict{RequestedSlug: requested, SuggestedSlug: suggested}
+	if canonical, err := canonicalHQFolderRoot(root); err == nil {
+		conflict.RootWitness = personalassistant.PayloadHash([]byte(canonical))
+	}
+	return conflict
+}
+
+func canonicalHQFolderRoot(root string) (string, error) {
+	if !filepath.IsAbs(root) {
+		return "", errors.New("personal hq: workspace directory is unavailable")
+	}
+	return filepath.EvalSymlinks(root)
+}
+
+// ReviewPersonalAssistantHQFolder observes a fresh conflict without creating
+// anything. If the operation already owns a workspace (even when its IDs were
+// not checkpointed), a different folder is never available for review.
+func (h *Handler) ReviewPersonalAssistantHQFolder(ctx context.Context, workspaceName string, options personalhq.AssistantCreationOptions) (*personalhq.FolderConflict, error) {
+	if _, found, err := h.findPersonalAssistantHQ(ctx, options, options.DisplayName); err != nil {
+		return nil, err
+	} else if found {
+		return nil, personalassistant.ErrConflict
+	}
+	root, err := canonicalHQFolderRoot(h.createWorkspaceLocation(""))
+	if err != nil {
+		return nil, err
+	}
+	slug := options.FolderSlug
+	if slug == "" {
+		slug = agentworkspace.Slugify(workspaceName)
+	} else if options.FolderRootWitness != personalassistant.PayloadHash([]byte(root)) {
+		return nil, personalassistant.ErrHQFolderDirectoryChanged
+	}
+	if !agentworkspace.IsCanonicalWorkspaceSlug(slug) || agentworkspace.IsReservedTopLevelSlug(slug) {
+		return nil, personalassistant.ErrConflict
+	}
+	_, diskErr := os.Lstat(filepath.Join(root, slug)) // #nosec G703 -- server workspace root and validated canonical slug, no client path.
+	if diskErr != nil && !errors.Is(diskErr, os.ErrNotExist) {
+		return nil, diskErr
+	}
+	rows, err := h.store.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	occupied := h.workspaceSlugOwners(rows, "")
+	if _, exists := occupied[slug]; diskErr != nil && !exists {
+		return nil, nil
+	}
+	suggested := availableWorkspaceSlug(slug, root, occupied)
+	return hqFolderConflict(slug, suggested, root), nil
 }
 
 // CreatePersonalAssistantHQ applies trusted PAF options to a private template
@@ -79,11 +143,18 @@ func (h *Handler) CreatePersonalAssistantHQ(ctx context.Context, workspaceName s
 		}
 	}
 
-	workspaceID, err := h.createFromTemplate(
-		withPersonalAssistantCreationOptions(ctx, options),
-		workspaceName,
-		personalhq.PersonalHQTemplateID,
-	)
+	input := createWorkspaceRequest{Name: workspaceName, TemplateID: personalhq.PersonalHQTemplateID}
+	if options.FolderSlug != "" {
+		root, rootErr := canonicalHQFolderRoot(h.createWorkspaceLocation(""))
+		if rootErr != nil || options.FolderRootWitness != personalassistant.PayloadHash([]byte(root)) {
+			return nil, personalassistant.ErrHQFolderDirectoryChanged
+		}
+		if !agentworkspace.IsCanonicalWorkspaceSlug(options.FolderSlug) || agentworkspace.IsReservedTopLevelSlug(options.FolderSlug) {
+			return nil, personalassistant.ErrValidation
+		}
+		input.FolderSlug, input.Location = options.FolderSlug, root
+	}
+	workspaceID, err := h.createFromTemplate(withPersonalAssistantCreationOptions(ctx, options), input)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +181,7 @@ func (h *Handler) findPersonalAssistantHQ(ctx context.Context, options personalh
 	for i := range listed {
 		workspace, getErr := h.store.GetWorkspace(ctx, listed[i].ID)
 		if getErr != nil {
-			continue
+			return nil, false, getErr
 		}
 		metadata, ok := workspace.SharedData[personalAssistantSupportSharedDataKey].(map[string]any)
 		if !ok || strings.TrimSpace(fmt.Sprint(metadata["assistant_id"])) != options.AssistantID ||

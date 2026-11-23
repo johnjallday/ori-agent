@@ -480,8 +480,56 @@ async function hqRead(url) {
   return response.json();
 }
 
-async function projectHQResult(result = {}, code = '') {
+const HQ_FOLDER_ENDPOINT = '/api/personal-assistant/hq/folder';
+
+// The only editable field is the exact alternate the server just reviewed.
+// Never infer a folder from a local draft, error string, or a workspace name.
+export function hqFolderConflictView(relationship, conflict) {
+  if (
+    relationship?.state !== 'provisioning_hq' ||
+    relationship.hq_workspace_id ||
+    relationship.hq_entry_agent_instance_id
+  )
+    return null;
+  const validSlug = slug =>
+    typeof slug === 'string' && slug.length <= 64 && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug);
+  if (!validSlug(conflict?.requested_slug)) return null;
+  if (conflict.if_version && conflict.if_version !== relationship.state_version) return null;
+  const { request_id, if_version, review, suggested_slug, requested_slug } = conflict;
+  const change =
+    validSlug(suggested_slug) &&
+    suggested_slug !== requested_slug &&
+    typeof request_id === 'string' &&
+    request_id &&
+    Number.isSafeInteger(if_version) &&
+    if_version > 0 &&
+    if_version === relationship.state_version &&
+    typeof review === 'string' &&
+    /^[a-f0-9]{64}$/.test(review)
+      ? { request_id, if_version, folder_slug: suggested_slug, review }
+      : null;
+  const kept = `The folder “${requested_slug}” is already in use. Existing folders stay untouched.`;
+  return {
+    detail: change
+      ? `${kept} Use “${suggested_slug}” instead? Your HQ name, Daily Brief and Notes choices stay the same.`
+      : `${kept} Free that name, then resume setup.`,
+    change
+  };
+}
+
+export async function loadHQFolderConflict(relationship) {
+  if (relationship?.state !== 'provisioning_hq' || relationship.hq_workspace_id) return null;
+  try {
+    return (await hqRead(HQ_FOLDER_ENDPOINT)).folder_conflict || null;
+  } catch (_) {
+    // Plain Resume remains possible, but never guess a different folder.
+    return null;
+  }
+}
+
+async function projectHQResult(result = {}, code = '', checkFolder = false) {
   let relationship = result.personal_assistant;
+  if (!relationship && code === 'hq_folder_conflict') relationship = result.durable_result;
   let status = null;
   if (!relationship) {
     try {
@@ -544,17 +592,26 @@ async function projectHQResult(result = {}, code = '') {
     pendingHQ(null);
     flow?.refused(intent);
   } else {
+    if (checkFolder && outcome === 'paused')
+      result.folder_conflict = await loadHQFolderConflict(relationship);
+    const folder = hqFolderConflictView(relationship, result.folder_conflict);
+    const rootChanged = ['root_changed', 'hq_folder_directory_changed'].includes(code);
     flow?.unresolved(intent, {
-      title:
-        code === 'root_changed'
+      title: folder
+        ? 'Choose where to build your HQ'
+        : rootChanged
           ? 'The workspace directory changed'
           : outcome === 'paused'
             ? 'Your confirmed HQ setup is paused'
             : 'Setup needs checking',
       detail:
-        code === 'root_changed'
-          ? 'The saved request has not changed. Restore its reviewed workspace directory before retrying, or check for a saved setup to resume.'
-          : undefined,
+        folder?.detail ||
+        (rootChanged
+          ? 'The saved request has not changed. Restore the reviewed workspace directory before resuming setup.'
+          : code === 'hq_folder_available' || code === 'hq_setup_conflict'
+            ? result.error
+            : undefined),
+      confirm: folder?.change ? () => submitHQFolderChange(folder.change) : null,
       check: () => checkHQSetup(),
       retry:
         outcome === 'paused'
@@ -576,24 +633,37 @@ export async function checkHQSetup() {
     });
     if (foregroundHQIntent) foregroundHQIntent.eligible = false;
   }
-  return projectHQResult();
+  return projectHQResult({}, '', true);
 }
 
-export function submitReviewedHQ(target, form, { root = '', focusOwned = false } = {}) {
+export function submitHQFolderChange(change, options) {
+  return submitReviewedHQ({ paf: true, resuming: true }, {}, { ...options, folderChange: change });
+}
+
+export function submitReviewedHQ(
+  target,
+  form,
+  { root = '', focusOwned = false, folderChange = null, reopen = false } = {}
+) {
   if (hqFlight) return hqFlight;
   if (!target?.paf) throw new Error('This action requires a Personal Assistant setup.');
   const retrying = hasPendingHQRequest();
   if (!retrying) pendingHQRoot = root;
-  const body = target.resuming
-    ? { mode: 'resume' }
-    : hasPendingHQRequest()
-      ? pendingHQBody
-      : hqBuildRequestPayload(target, form, hqRequestID(hqStorage()));
-  pendingHQ(body);
+  const body =
+    folderChange ||
+    (target.resuming
+      ? { mode: 'resume' }
+      : hasPendingHQRequest()
+        ? pendingHQBody
+        : hqBuildRequestPayload(target, form, hqRequestID(hqStorage())));
+  // The browser never replays a change of folder as an uncertain build. A lost
+  // response is resolved by the server's paused review or the canonical HQ.
+  if (!folderChange) pendingHQ(body);
   // Only an explicit new action gets a presentation lifetime. A retry keeps its
   // old yielded token so late work cannot reclaim a conversation or camera.
-  if (!foregroundHQIntent)
-    foregroundHQIntent = hqPresentation()?.begin({
+  const flow = hqPresentation();
+  if (!foregroundHQIntent || (reopen && !flow?.current(foregroundHQIntent)))
+    foregroundHQIntent = flow?.begin({
       token: body.request_id || `resume-${Date.now()}`,
       resume: !!target.resuming,
       focusOwned,
@@ -609,11 +679,14 @@ export function submitReviewedHQ(target, form, { root = '', focusOwned = false }
           return projectHQResult({}, 'root_changed');
         }
       }
-      const response = await fetch('/api/personal-assistant/hq', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(body)
-      });
+      const response = await fetch(
+        folderChange ? HQ_FOLDER_ENDPOINT : '/api/personal-assistant/hq',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify(body)
+        }
+      );
       result = await response.json();
       if (!response.ok) code = result.code || 'unknown';
     } catch (_) {
@@ -809,7 +882,7 @@ export function followUpView(f) {
     const target = await refreshBuildTarget();
     if (!target.paf || !target.resuming)
       throw new Error('There is no paused Personal HQ setup to resume.');
-    const result = await submitReviewedHQ(target, {}, { focusOwned });
+    const result = await submitReviewedHQ(target, {}, { focusOwned, reopen: true });
     const relationship = result && result.personal_assistant;
     if (relationship?.state === 'active') emitHQQuestSignal('setup-succeeded');
     if (!result.presentation && relationship?.state === 'active')
@@ -1144,7 +1217,8 @@ export function followUpView(f) {
           bootstrapModal('hqBuildModal')?.hide();
           const observed = await submitReviewedHQ(target, form, {
             root: document.getElementById('hqBuildWorkspaceRoot').value,
-            focusOwned
+            focusOwned,
+            reopen: true
           });
           if (observed.personal_assistant?.state === 'active') emitHQQuestSignal('setup-succeeded');
           if (!observed.presentation && observed.personal_assistant?.state === 'active')

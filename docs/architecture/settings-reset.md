@@ -224,7 +224,7 @@ boundary, never while a handle or writer is live.
 | Legacy global agents — `C/agents/` (nested settings or flat JSON), CWD `agents.json` projection | `migrateLegacyAgentStore` copies CWD agents when destination empty; `writeAgentsJSON` writes CWD | F classifies both active and discovered legacy targets; block ownership ambiguity. A must include or suppress restoration from reviewed legacy sources | Legacy copy exists; migration/import warning | Emptying destination cannot cause legacy re-adoption |
 | Shared SQLite — actual `session.HybridStore.DB().Path()`, usually `D/sessions.db` plus WAL/SHM | LRU session cache, periodic flush/cleanup, many domain writers | R/F removes confirmed app records, not “chat database only.” Catalog removal detaches vaults; legacy DB-only vault content is a blocker. No unlink with live DB handles | Domain counts, collateral identity/HQ/notes/plans/jobs; unknown domains block | Reopen same DB path, verify domain postconditions and retained-vault reopen |
 | Workspace registrations/index — shared DB workspace rows; `W/index.db` — composed SyncStore, folder FileStore | FileStore metadata/index handle; bidirectional reconciliation, AgentSnapshotStore | R/F detach app registrations, do not delete W or mutate retained folder contents. W index is colocated cache: preserve with W while detached, do not treat it as authoritative consent | Registered and retained folder counts/paths; cached references; root approval | New runtime uses inert/staging root; no automatic DB/index re-adoption |
-| Retained workspace/project folders — `workspace.json`, `agents/*/config.json`, tasks/schedules/MCP/skills/toolbox/shared data, files/notes/output, memory and backlog Markdown | SyncStore writes; task/step/scheduler, directory sync, Markdown sync, reflection; migration/backfill | **Preserve** bytes for all intents, including F. Remove only app registrations/allowances; stop writers before detach. Explicit import/root selection is required for reattachment | Exact protected folders; archived jobs/integration settings remain in retained files but are inactive | File-tree hashes unchanged through reset/relaunch; no old jobs run or agents reappear |
+| Retained workspace/project folders — `workspace.json`, `agents/*/config.json`, tasks/schedules/MCP/skills/toolbox/shared data, files/notes/output, memory and backlog Markdown | SyncStore writes; task/step/scheduler, directory sync, Markdown sync, reflection; migration/backfill | **Preserve** bytes for all intents, including F; leave in place unless the reviewed Personal HQ archive is explicitly selected. Remove app registrations/allowances and stop writers before detach. Explicit import/root selection is required for reattachment | Exact protected folders; if opted in, the single authorized archive location | File-tree hashes unchanged at retained locations or the verified archive; no old jobs run or agents reappear |
 | Workspace sidecars — `triggers.json`; `.ori/assistant-program-learnings-v1.json`; `downloads-janitor/settings.json` and `scan-state.json`; custom dashboards; setup wizard state in workspace data | Trigger cron/filewatch service, capability/setup handlers, janitor and reflection | Preserve with retained folders; F detaches and deactivates, never run “uninstall” hooks that change retained content | Sidecar presence and active automation counts, no content scan of user documents | Sidecars unchanged; runtime has no active registrations/jobs until explicit reattachment |
 | Workspace allowlist — `D/workspace_allowlist.json` | Cached allowlist and startup `BackfillLocalWorkspacesIntoAllowlist` | F clears Ori import permission; R detach invalidates affected entries. Deleting it alone is insufficient: startup backfill must not recreate it | Approved imports, physical root/adoption policy | Same-root relaunch leaves detached snapshots unhydrated |
 | Session uploads — `C/session_files/<session>/manifest.json` and uploads; permission audit logs when configured there | Sessionfiles store + filewatcher, upload endpoints | R/F remove enumerated app-owned uploads after watcher/requests stop; linked external documents stay preserved | File/session counts, bytes if available, retained references and overlap blockers | Files absent; watcher closed; no repopulation; external/nested sentinels unchanged |
@@ -584,6 +584,50 @@ facts only.
   owned/shared wake or external child which cannot be safely scoped is an
   explicit preflight blocker with manual recovery. A default path is not proof
   of exclusive ownership of shared HOME usage or legacy stores.
+
+## Optional Personal HQ archive
+
+This is an opt-in within **Conversation & app records**, also available in
+**Start Fresh**. It is not a category and never broadens the category selection.
+The default (also `archive_personal_hq=false`) does not move any files. Preview
+accepts an explicit `archive_personal_hq=true`, never a source or destination.
+The reviewed plan includes the exact pair, native workspace ID, directory/file
+identities and archive digest. The confirmation repeats the current preview’s
+scope digest as `confirm_hq_archive` in addition to `RESET`. Changing the option
+invalidates the UI’s confirmation; a default plan cannot accept an archive witness.
+
+Only the unique local Personal HQ designation and active, native, top-level
+registration can authorize the move. The active FileStore path and the owned
+`workspace.json` must corroborate it. The source must be a real direct child
+of the confirmed Workspace Directory. Linked/imported/anchored or detached
+folders, overlaps with workspace/agent/vault/other protected owners, links in
+the source path and nested mounts fail closed. Links *inside* the tree are kept
+as links, never dereferenced. The destination is a direct, unused child of the
+installation data directory: `hq-archive-<operation-id>-<slug>`. It must be
+outside all current and fallback workspace discovery and removal scopes.
+
+After the exclusive fence and writer drain, record the normal complete
+preservation fingerprints and the Workspace Directory’s remainder fingerprint.
+Pre-start recovery independently re-reads the designation, effective root,
+layout and identity before settings or app records can clear that evidence.
+It persists move intent, then uses a descriptor-relative, same-volume,
+no-replace rename (`RENAME_EXCL` on local APFS, `RENAME_NOREPLACE` on local
+Linux ext4/XFS/Btrfs with stable birth identity and mount IDs). Anything else
+fails without a copy/delete fallback. The installation lease excludes
+cooperating Ori processes; do not edit either location while recovery runs.
+
+A restart after intent can continue only from the unchanged source with an
+absent destination, or prove the exact original directory and contents at the
+destination with the source absent. Recovery verifies both parent directories
+and syncs them before recording success. Only with that proof can it use the
+reviewed remainder fingerprint (removing exactly the approved tree and
+normalizing its parent’s directory size); all other protection checks still
+apply. Once verified, the archive result stays separate from category results
+and survives a later category failure. Earlier canonical v1 receipts omit all
+of these fields and gain no move authority.
+
+See [Moving a workspace](../features/moving-workspaces.md#after-resetting-ori)
+for explicit import and the limits of file-only preservation.
 
 ## Read-only preview implementation (2.3)
 

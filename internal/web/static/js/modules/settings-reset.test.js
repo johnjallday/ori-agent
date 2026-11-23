@@ -147,10 +147,19 @@ function harness({
       'resetAgentsFolderCheck',
       'resetAgentsFolderAlso',
       'resetAgentsFolderAlsoList',
-      'resetAgentsFolderCheckLabel'
+      'resetAgentsFolderCheckLabel',
+      'resetArchiveCheck',
+      'resetArchiveOption',
+      'resetArchiveReview',
+      'resetArchivePaths',
+      'resetArchiveSource',
+      'resetArchiveDestination',
+      'resetArchiveSummary',
+      'resetArchiveNotice'
     ].map(id => [id, element()])
   );
   elements.resetAgentsFolderConfirm.hidden = true;
+  elements.resetArchiveOption.hidden = true;
   elements.resetBlockers.hidden = true;
   elements.confirmResetBtn.disabled = true;
   elements.openReplaySetupBtn.hidden = true;
@@ -236,7 +245,10 @@ function harness({
     clearTimeout() {},
     fetch: async (url, options = {}) => {
       calls.push({ url, options });
-      if (url.startsWith('/api/reset/preview?')) return makeResponse(previewResult);
+      if (url.startsWith('/api/reset/preview?'))
+        return makeResponse(
+          typeof previewResult === 'function' ? previewResult(url) : previewResult
+        );
       if (url === '/api/reset') return makeResponse(executeResult, 202);
       if (url.startsWith('/api/reset/operations/')) return makeResponse(executeResult);
       if (url === '/api/onboarding/reset') return makeResponse(onboardingResult);
@@ -317,6 +329,79 @@ test('Getting Started refuses an unverified response without a success toast or 
   assert.match(h.elements.resetGettingStartedStatus.textContent, /did not verify|try again/i);
   assert.equal(h.elements.openGettingStartedBtn.hidden, true);
   assert.equal(h.navigation.length, 0);
+});
+
+const archiveReview = requested => ({
+  requested,
+  source: '/owned/workspaces/my-hq',
+  destination: `/owned/archive-${requested ? 'checked' : 'candidate'}`,
+  notice: 'Keep existing portable checkpoint files intact.'
+});
+
+test('archive is off by default; toggling either way invalidates the typed confirmation', async () => {
+  for (const intent of ['selected_data', 'start_fresh']) {
+    let version = 0;
+    const h = harness({
+      previewResult(url) {
+        const params = new URL(url, 'http://local').searchParams;
+        const requested = params.get('archive_personal_hq') === 'true';
+        assert.equal(params.get('intent'), intent);
+        assert.deepEqual(
+          params.getAll('category'),
+          intent === 'selected_data' ? ['app_records'] : []
+        );
+        return {
+          ...preview,
+          intent,
+          id: `preview-${++version}`,
+          scope_digest: (requested ? 'a' : 'b').repeat(64),
+          hq_archive: archiveReview(requested)
+        };
+      }
+    });
+    const e = h.elements;
+    if (intent === 'start_fresh') await e.startFreshBtn.click();
+    else await h.review(['resetSessions']);
+    assert.equal(e.resetArchiveCheck.checked, false);
+    assert.equal(e.resetArchiveOption.hidden, false);
+    assert.equal(e.resetArchiveSource.textContent, '/owned/workspaces/my-hq');
+    for (const requested of [true, false, true]) {
+      e.resetConfirmInput.value = 'RESET';
+      await e.resetConfirmInput.emit('input');
+      e.resetArchiveCheck.checked = requested;
+      await e.resetArchiveCheck.emit('change');
+      assert.equal(e.resetConfirmInput.value, '');
+      assert.equal(e.confirmResetBtn.disabled, true);
+      assert.equal(e.resetArchiveCheck.checked, requested);
+      assert.equal(e.resetArchiveDestination.textContent, archiveReview(requested).destination);
+    }
+    e.resetConfirmInput.value = 'RESET';
+    await e.resetConfirmInput.emit('input');
+    await e.confirmResetBtn.click();
+    const body = JSON.parse(h.calls.find(call => call.url === '/api/reset').options.body);
+    assert.deepEqual(body, {
+      preview_id: 'preview-4',
+      request_id: 'request-1',
+      confirmation: 'RESET',
+      confirm_hq_archive: 'a'.repeat(64)
+    });
+  }
+});
+
+test('an unavailable candidate reports the reason without requiring archive to reset records', async () => {
+  const h = harness({
+    previewResult: {
+      ...preview,
+      hq_archive: { requested: false, unavailable_reason: 'Linked folder' }
+    }
+  });
+  await h.review(['resetSessions']);
+  assert.equal(h.elements.resetArchiveNotice.textContent, 'Linked folder');
+  assert.equal(h.elements.resetArchiveOption.hidden, true);
+  assert.equal(h.elements.confirmResetBtn.disabled, false);
+  await h.elements.confirmResetBtn.click();
+  const body = JSON.parse(h.calls.find(call => call.url === '/api/reset').options.body);
+  assert.equal('confirm_hq_archive' in body, false);
 });
 
 test('review loads and renders authoritative counts, unknowns, removed and retained scope before submission', async () => {

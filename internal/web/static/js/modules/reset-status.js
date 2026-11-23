@@ -82,6 +82,20 @@
     return element;
   }
 
+  function renderArchive(archive) {
+    const section = byID('reset-hq-archive');
+    if (!section) return;
+    section.hidden = !archive;
+    const path = archive?.destination || '';
+    byID('reset-hq-archive-location').hidden = !path;
+    setText(
+      byID('reset-hq-archive-label'),
+      archive?.outcome === 'completed' ? 'Archived at:' : 'Reviewed destination:'
+    );
+    setText(byID('reset-hq-archive-path'), path);
+    setText(byID('reset-hq-archive-message'), archive?.message || '');
+  }
+
   function report(op, ready) {
     const managed = op.state === 'awaiting_restart' && op.restart?.managed === true;
     const key = `${op.revision}:${op.state}:${ready}:${managed}`;
@@ -101,6 +115,7 @@
     setText(message, description);
     document.title = `${heading} · Ori`;
     restart.hidden = !showRestart;
+    renderArchive(op.hq_archive);
     const newBlockers = (op.blockers || []).map(blocker => {
       const item = row(blocker.recovery || '');
       const label = document.createElement('strong');
@@ -136,6 +151,7 @@
       op.state === 'completed' &&
       !op.blockers?.length &&
       op.results.length > 0 &&
+      (!op.hq_archive || (op.hq_archive.outcome === 'completed' && op.hq_archive.destination)) &&
       op.results.every(
         result =>
           ['completed', 'preserved'].includes(result.outcome) &&

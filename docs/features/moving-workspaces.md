@@ -35,7 +35,7 @@ private history.
 
 ## 3. Import it on the other computer
 
-1. On the Home map choose **Import Folder** and enter the copied folder's path.
+1. On Home, switch to **Tree** and choose **Import Folder**. Enter the copied folder's path.
 2. Ori reviews the folder without changing anything and shows what it holds
    and when it was saved.
 3. Choose:
@@ -72,9 +72,35 @@ Personal HQ here.
 
 ## After resetting Ori
 
-Resetting **Conversation & app records** keeps your workspace folders, and each
-kept folder still holds its private copy. Nothing comes back on its own: import
-a kept folder to restore it, or delete the folder to erase that copy.
+**Reset Selected Data** with **Conversation & app records** selected, and
+**Start Fresh**, leave workspace folders in place by default. Ori does not
+restore retained checkpoints automatically. Use **Import Folder** to review
+and restore one explicitly.
+
+If your current Personal HQ is eligible, you can check **Archive my old
+Personal HQ** in the reset review. Ori shows the source and the proposed
+archive location before you confirm. On full relaunch, Ori moves just that
+folder, intact, outside the Workspace Directory. The reset result gives its
+exact location under Ori’s data directory (`hq-archive-<operation-id>-<folder>`).
+It does not move other workspaces or vault files.
+
+The archive option is for a directly managed, designated Personal HQ on a
+supported local filesystem. Detached folders, linked or external workspaces,
+unsafe paths, and cross-volume moves are not eligible. If Ori cannot verify
+that it can make the approved move without overwriting anything, the reset
+stops and displays recovery guidance.
+
+The archive preserves files that were already there, including any portable
+checkpoint. It does not save changes that existed only in Ori’s database. If
+you need the latest work, **Prepare now** and wait for **Ready to move** before
+resetting. Review an archived folder with **Import Folder** just like a copied
+workspace. Nothing is reconnected by default; restoring the assistant is an
+explicit choice and it starts paused. An existing assistant is not replaced.
+
+If a retained folder blocks **Build my HQ**, you can confirm the suggested
+folder name without re-hiring or changing the HQ name, Daily Brief or Notes.
+You can dismiss the choice and return to the saved setup later. **Resume setup**
+tries the already approved folder; it never accepts a suggestion for you.
 
 ## Older folders
 
