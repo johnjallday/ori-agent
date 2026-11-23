@@ -690,6 +690,7 @@ func (b *ServerBuilder) Build() (*Server, error) {
 		logger.Info("Server initialized successfully", logger.Fields{})
 	}
 
+	b.initializeFileSearch()
 	constructed = true
 	return b.server, nil
 }

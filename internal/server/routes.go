@@ -24,6 +24,7 @@ import (
 // one registration function per domain. Each helper owns exactly the routes
 // (and any locally-constructed handlers) for its domain.
 func registerRoutes(mux *http.ServeMux, s *Server) {
+	s.registerFileSearch(mux)
 	registerHealthRoutes(mux, s)
 	registerPageRoutes(mux, s)
 	registerStaticAssetRoutes(mux, s)

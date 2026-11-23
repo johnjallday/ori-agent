@@ -22,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/externalmemory"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/filesearch"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
@@ -49,6 +50,7 @@ type Server struct {
 	Handlers    *HandlerFacade
 
 	desktopOpener platform.DesktopOpener
+	fileSearch    *filesearch.Service
 
 	// Hosted instances share the lease's process-lifetime gate. Remaining
 	// writers, child ownership and pre-start apply still block a Lifecycle.
@@ -231,6 +233,9 @@ func (s *Server) Shutdown() {
 }
 
 func (s *Server) shutdownBackground(ctx context.Context) error {
+	if s.fileSearch != nil {
+		s.fileSearch.Close()
+	}
 	// Join update bookkeeping before closing any store. A timed-out stop stays
 	// retryable and keeps its lifetime permit; reset cannot mistake it for idle.
 	if s.workspaceUpdates != nil {

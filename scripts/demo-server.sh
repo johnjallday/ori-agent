@@ -108,11 +108,22 @@ echo "BRANCH=$label"
 echo "URL=http://localhost:$port"
 
 cd "$sandbox"
+# A search-first demo needs HOME and app records in different physical roots:
+# never make the search validator special-case a folder inside ORI_DATA_DIR.
+# Leave WORKSPACE_DIR unset in this mode (it is explicit setup consent).
+demo_home="$sandbox"
+demo_data="$sandbox"
+if [[ "${ORI_DEMO_SPLIT_PROFILE:-0}" == 1 ]]; then
+	[[ -z "${WORKSPACE_DIR:-}" && ! -L home && ! -L data ]] || { echo 'split profile requires isolated home/data and no WORKSPACE_DIR' >&2; exit 2; }
+	demo_home="$(pwd -P)/home"
+	demo_data="$(pwd -P)/data"
+	mkdir -m 700 -p "$demo_home"
+fi
 desktop_off=1
 if [[ "$native_picker" == "1" ]]; then desktop_off=0; fi
 reset_launch_args=()
 if [[ "$managed_restart" == "1" ]]; then reset_launch_args=(-managed-restart); fi
 if [[ "$open_browser" == "1" ]]; then
-	exec env -u NO_BROWSER HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/.config" ORI_DATA_DIR="$sandbox" PORT="$port" ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary" ${reset_launch_args[@]+"${reset_launch_args[@]}"}
+	exec env -u NO_BROWSER HOME="$demo_home" XDG_CONFIG_HOME="$demo_home/.config" ORI_DATA_DIR="$demo_data" PORT="$port" ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary" ${reset_launch_args[@]+"${reset_launch_args[@]}"}
 fi
-exec env HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/.config" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary" ${reset_launch_args[@]+"${reset_launch_args[@]}"}
+exec env HOME="$demo_home" XDG_CONFIG_HOME="$demo_home/.config" ORI_DATA_DIR="$demo_data" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN="$desktop_off" "$binary" ${reset_launch_args[@]+"${reset_launch_args[@]}"}
