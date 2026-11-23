@@ -142,6 +142,8 @@ This directory contains detailed documentation for Ori Agent.
 
 #### Setup & onboarding
 
+- [Search one folder on this Mac](./search-first.md) — optional first launch, filename search permissions, and removal.
+
 - [Specialist Setup Journey Contract](./architecture/specialist-setup-journey-contract.md) - Host
   contracts for generic specialist setup journeys, with REAPER as the v1 declaration
 - [Host-owned Setup Quests](./architecture/host-setup-quests.md) - Contract for host-owned setup

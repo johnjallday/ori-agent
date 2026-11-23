@@ -24,6 +24,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/fileparser"
 	"github.com/johnjallday/ori-agent/internal/gateway/channels/console"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/onboarding"
 	portutil "github.com/johnjallday/ori-agent/internal/port"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 	"github.com/johnjallday/ori-agent/internal/server"
@@ -401,15 +402,9 @@ func activateDataDirectory(dataDir string) error {
 		return fmt.Errorf("resolve data directory %q: %w", dataDir, err)
 	}
 
-	createdDataDir := false
-	if _, err := os.Stat(absoluteDir); err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("inspect data directory %q: %w", absoluteDir, err)
-		}
-		if err := os.MkdirAll(absoluteDir, 0o750); err != nil {
-			return fmt.Errorf("create data directory %q: %w", absoluteDir, err)
-		}
-		createdDataDir = true
+	createdDataDir, err := onboarding.CreateInstallRoot(absoluteDir)
+	if err != nil {
+		return fmt.Errorf("prepare data directory: %w", err)
 	}
 	physicalDir, err := filepath.EvalSymlinks(absoluteDir)
 	if err != nil {

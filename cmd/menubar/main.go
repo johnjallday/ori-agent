@@ -338,7 +338,7 @@ func activateMenubarDataDirectory() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(dataDir, 0o750); err != nil {
+	if _, err := onboarding.CreateInstallRoot(dataDir); err != nil {
 		return "", err
 	}
 	dataDir, err = filepath.EvalSymlinks(dataDir)

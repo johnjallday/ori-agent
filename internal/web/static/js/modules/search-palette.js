@@ -9,7 +9,28 @@
 // Selection of a Note result routes through sessionManager.openNote(id) when
 // available so the user's note-opening preference applies.
 
+import { mountFileSearch } from './search-desk.js';
 import { notePath } from './note-routes.js';
+
+let fileController;
+function setScope(files) {
+  const panel = $('searchPaletteFiles');
+  if (!panel) return;
+  panel.hidden = !files;
+  $('searchPaletteNotes').hidden = files;
+  $('searchPalette')
+    .querySelectorAll('[data-scope]')
+    .forEach(b => b.setAttribute('aria-pressed', String((b.dataset.scope === 'files') === files)));
+  if (files) {
+    clearTimeout(state.debounceTimer);
+    state.inFlightAbort?.abort();
+    fileController ??= mountFileSearch(panel, true);
+    fileController.show();
+  } else {
+    fileController?.hide();
+    $('searchPaletteInput')?.focus();
+  }
+}
 
 const RECENT_KEY = 'note.search.recent';
 const RECENT_MAX = 5;
@@ -69,6 +90,7 @@ function close() {
   const palette = $('searchPalette');
   if (!palette || !state.open) return;
   state.open = false;
+  setScope(false);
   palette.hidden = true;
   if (state.inFlightAbort) {
     state.inFlightAbort.abort();
@@ -404,12 +426,24 @@ function mount() {
   palette.querySelector('[data-role="overlay"]')?.addEventListener('click', () => close());
 
   // Focus trap — keep tab within the palette while it's open.
+  palette
+    .querySelectorAll('[data-scope]')
+    .forEach(b => b.addEventListener('click', () => setScope(b.dataset.scope === 'files')));
   palette.addEventListener('keydown', e => {
     if (!state.open) return;
-    if (e.key === 'Tab') {
-      // Only one focusable element (input); just keep it focused.
+    if (e.key === 'Escape') {
       e.preventDefault();
-      input?.focus();
+      close();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+    const controls = [...palette.querySelectorAll('button,input,a[href]')].filter(
+      n => !n.disabled && !n.closest('[hidden]')
+    );
+    const boundary = e.shiftKey ? controls[0] : controls.at(-1);
+    if (document.activeElement === boundary) {
+      e.preventDefault();
+      (e.shiftKey ? controls.at(-1) : controls[0])?.focus();
     }
   });
 

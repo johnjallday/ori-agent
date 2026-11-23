@@ -264,6 +264,7 @@ export default defineConfig([
       'internal/web/static/js/modules/learning-missions.js',
       'internal/web/static/js/modules/learning-mission-review.js',
       'internal/web/static/js/modules/search-palette.js',
+      'internal/web/static/js/modules/search-desk.js',
       'internal/web/static/js/modules/setup-journey.js',
       'internal/web/static/js/modules/setup-journey-account-steps.js',
       'internal/web/static/js/modules/email-setup-quest-card.js',

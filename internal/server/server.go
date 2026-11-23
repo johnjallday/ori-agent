@@ -22,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/externalmemory"
 	"github.com/johnjallday/ori-agent/internal/featureflags"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/filesearch"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/platform"
@@ -49,6 +50,7 @@ type Server struct {
 	Handlers    *HandlerFacade
 
 	desktopOpener platform.DesktopOpener
+	fileSearch    *filesearch.Service
 
 	// Hosted instances share the lease's process-lifetime gate. Remaining
 	// writers, child ownership and pre-start apply still block a Lifecycle.
@@ -231,6 +233,9 @@ func (s *Server) Shutdown() {
 }
 
 func (s *Server) shutdownBackground(ctx context.Context) error {
+	if s.fileSearch != nil {
+		s.fileSearch.Close()
+	}
 	// Join update bookkeeping before closing any store. A timed-out stop stays
 	// retryable and keeps its lifetime permit; reset cannot mistake it for idle.
 	if s.workspaceUpdates != nil {
@@ -406,6 +411,7 @@ func (s *Server) prepareBasePageData(pageName string) web.TemplateData {
 	data.Theme = s.Storage.OnboardingMgr.GetTheme()
 
 	caps := s.privateCapabilitiesSnapshot()
+	data.Extra["FileSearchAvailable"] = s.fileSearch != nil
 	data.Extra["Web3Enabled"] = caps.Web3Wallet
 	data.Extra["MarketplacePaymentsEnabled"] = caps.MarketplacePayments
 	data.Extra["TokenPayoutsEnabled"] = caps.TokenPayouts
@@ -440,7 +446,10 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A brand-new profile lands on Home and is free to explore — first-run
+	if s.maybeSearchLanding(w, r) {
+		return
+	}
+	// Without a search-first decision the profile lands on Home — first-run
 	// onboarding is a pull invitation (the Mission 01 quest-log card), not a
 	// forced detour. Starting the mission opens the workspace Map with the
 	// unbuilt Personal HQ landmark selected.
@@ -464,6 +473,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	data.Extra["IsFirstRun"] = workspaceCount == 0
 	// Keep the command bridge as the home surface under the shared top bar.
 	data.Extra["HomeCommandBridge"] = true
+	data.Extra["ShowFileSearch"] = s.fileSearch != nil && localSearchPage(r)
 
 	s.renderAndWritePage(w, "index", data)
 }

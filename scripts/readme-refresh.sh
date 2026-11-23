@@ -163,6 +163,10 @@ capture() {
   trap finish_capture EXIT
   trap 'exit 130' INT TERM
 
+  # These scenes depict an established HQ, not the first launch chooser. Stage
+  # an existing installation root before the host records new-install eligibility.
+  mkdir -m 700 "${SANDBOX}/ori-data"
+
   printf 'Building README capture server for run %s...\n' "${RUN_ID}"
   if [[ -n "${README_CAPTURE_TEST_SERVER_BINARY:-}" ]]; then
     [[ "${README_CAPTURE_TEST_MODE:-}" == "1" ]] || fail "test server override requires README_CAPTURE_TEST_MODE=1"

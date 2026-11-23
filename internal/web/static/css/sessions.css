@@ -6918,6 +6918,42 @@ html:has(.note-page) {
   overflow: hidden;
 }
 
+#searchPaletteNotes:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+#searchPaletteFiles {
+  overflow: auto;
+  padding: 1rem;
+}
+#searchPaletteFiles ul {
+  list-style: none;
+  padding: 0;
+}
+#searchPaletteFiles li {
+  padding: 0.5rem;
+  border-block-end: 1px solid var(--border-color);
+  overflow-wrap: anywhere;
+}
+#searchPaletteFiles li strong,
+#searchPaletteFiles li span {
+  display: block;
+}
+#searchPaletteFiles li.current {
+  border-inline-start: 3px solid currentColor;
+  background: var(--bg-secondary);
+}
+#searchPalette nav {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+}
+#searchPalette nav [aria-pressed="true"] {
+  font-weight: bold;
+  text-decoration: underline;
+}
+
 .search-palette-input-wrap {
   display: flex;
   align-items: center;

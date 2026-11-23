@@ -75,6 +75,8 @@ func ResetRecordTables() []string {
 		// Local learning consent and evidence never travel with workspaces.
 		// Reverse deletion clears children before their owner epoch.
 		"learning_owners", "learning_sources", "learning_instances", "learning_operations", "learning_reviews", "learning_evidence",
+		// Search consent and derived names are local app records, not workspace data.
+		"filename_sources", "filename_entries",
 		"vaults",
 	}
 }
