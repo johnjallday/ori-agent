@@ -10,14 +10,14 @@ Run one test command inside an owned temporary sandbox: the lowest free
 ori-test-run.N slot under TMPDIR. A run that is alone on the machine always
 gets slot 0, so tests see the same TMPDIR and GOTMPDIR from run to run and Go's
 test cache can serve packages whose inputs did not change. The sandbox is
-removed on success, failure, or interruption, then normal cache maintenance
-runs.
+removed on success, failure, or interruption, then stale Ori temporary
+artifacts are cleaned. Test exits do not prune the Go build cache.
 
 Environment:
   ORI_KEEP_TEST_SANDBOX=1  Preserve the sandbox and print its path. It keeps
                            its slot until removed (clean-test-artifacts.sh
                            --delete), so later runs use the next slot.
-  ORI_SKIP_CACHE_PRUNE=1   Skip stale-artifact and shared Go-cache pruning.
+  ORI_SKIP_CACHE_PRUNE=1   Skip automatic stale-artifact cleanup.
   PWTEST_CACHE_DIR=DIR     Override Playwright's reusable transform cache.
 EOF
 }
@@ -35,7 +35,7 @@ if [[ $# -eq 0 ]]; then
 fi
 
 script_dir="$(cd "$(dirname "$0")" && pwd -P)"
-prune_script="$script_dir/prune-test-cache.sh"
+cleanup_script="$script_dir/clean-test-artifacts.sh"
 requested_temp_parent="${TMPDIR:-/tmp}"
 if ! temp_parent="$(cd "$requested_temp_parent" 2>/dev/null && pwd -P)"; then
 	printf 'Error: cannot resolve temporary directory: %s\n' "$requested_temp_parent" >&2
@@ -128,12 +128,21 @@ finish_test_run() {
 	fi
 
 	# The run-owned TMPDIR and GOTMPDIR may have just been removed. Restore a
-	# valid temporary parent before invoking shared-cache maintenance.
+	# valid temporary parent for the stale-artifact scan. Do not invoke the Go
+	# cache maintenance helper here: other worktrees may be using that cache.
 	export TMPDIR="$temp_parent"
 	unset GOTMPDIR
 
-	if ! "$prune_script" --temp-dir "$temp_parent"; then
-		printf 'Warning: automatic cache pruning failed.\n' >&2
+	local cleanup_output
+	if is_true "${ORI_SKIP_CACHE_PRUNE:-}"; then
+		printf 'Stale artifact cleanup skipped (ORI_SKIP_CACHE_PRUNE=1).\n'
+	elif cleanup_output="$("$cleanup_script" --delete --quiet --temp-dir "$temp_parent" \
+		--older-than-hours "${ORI_STALE_ARTIFACT_HOURS:-24}")"; then
+		if [[ "$cleanup_output" != *"Removed 0 of 0 Ori test artifact(s)"* ]]; then
+			printf '%s\n' "$cleanup_output"
+		fi
+	else
+		printf 'Warning: automatic stale-artifact cleanup failed.\n' >&2
 	fi
 
 	if [[ "$status" -eq 0 && "$cleanup_failed" -ne 0 ]]; then

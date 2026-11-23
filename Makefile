@@ -116,10 +116,10 @@ clean: ## Clean build artifacts
 clean-test-artifacts: ## Delete Ori test artifacts from the system temp directory
 	@./scripts/clean-test-artifacts.sh --delete
 
-prune-test-cache: ## Prune stale Ori artifacts and an oversized Go build cache
+prune-test-cache: ## Explicitly prune stale Ori artifacts and an oversized Go build cache; verify the cache is idle first
 	@./scripts/prune-test-cache.sh
 
-cache-report: ## Preview automatic test artifact and Go cache pruning
+cache-report: ## Report stale Ori artifacts and Go build cache size without deleting anything
 	@./scripts/prune-test-cache.sh --dry-run
 
 reset-dev: ## Archive, recreate, and launch a fresh development profile
@@ -325,7 +325,7 @@ test-js: ## Run JS unit tests (Node 18+ built-in test runner; no npm install nee
 test-clean-test-artifacts: ## Test the temp artifact cleanup script in an isolated directory
 	@./scripts/clean-test-artifacts.test.sh
 
-test-prune-test-cache: ## Test automatic cache pruning in isolated fixtures
+test-prune-test-cache: ## Test explicit Go cache maintenance in isolated fixtures
 	@./scripts/prune-test-cache.test.sh
 
 test-run-test-command: ## Test run-owned sandbox cleanup and opt-outs
