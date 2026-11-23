@@ -314,7 +314,6 @@ func TestDocumentsPreview_RefusesDestinationsThatAreNotAllowed(t *testing.T) {
 		"a missing folder":          {Folder: "Nowhere"},
 		"a parent segment":          {Folder: "../Taxes"},
 		"a new name that exists":    {Folder: "", New: "Taxes"},
-		"a new name in other case":  {Folder: "", New: "taxes"},
 		"a new name of a file":      {Folder: "Taxes", New: "note.txt"},
 		"a new folder too deep":     {Folder: "Taxes/2024", New: "2025"},
 		"a link":                    {Folder: "Linked"},
@@ -331,6 +330,28 @@ func TestDocumentsPreview_RefusesDestinationsThatAreNotAllowed(t *testing.T) {
 				t.Fatal("a refused preview changed the folder")
 			}
 		})
+	}
+}
+
+// Whether two names that differ only in case collide is the filesystem's call:
+// APFS says yes, most Linux disks say no. Ori asks the filesystem and never folds
+// names itself, so the preview must agree with whichever disk it is on.
+func TestDocumentsPreview_ANewNameThatDiffersOnlyInCaseFollowsTheFilesystem(t *testing.T) {
+	f := newDocsFixture(t, "estimate.pdf")
+	f.mkdir("Taxes")
+	caseInsensitive := f.exists("taxes")
+	before := f.tree()
+
+	p := f.preview(DocumentsDestination{Folder: "", New: "taxes"}, "estimate.pdf")
+	if caseInsensitive {
+		if p.State != documentsPreviewDestination || p.Digest != "" {
+			t.Fatalf("this disk treats Taxes and taxes as one name, so the new folder must be refused: %+v", p)
+		}
+	} else if p.State != documentsPreviewReady || len(p.Create) != 1 || p.Create[0] != "taxes" || p.Folder != "taxes" {
+		t.Fatalf("this disk keeps Taxes and taxes apart, so a new folder named taxes is allowed: %+v", p)
+	}
+	if !reflect.DeepEqual(f.tree(), before) {
+		t.Fatal("a preview changed the folder")
 	}
 }
 

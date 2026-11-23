@@ -244,7 +244,17 @@ func TestConditionalMove_NamesTheFilesystemTreatsAsEqualAreOccupied(t *testing.T
 			taxes := f.mkdir("Taxes")
 			f.write("Taxes/"+tc.occupant, "occupant")
 			if !f.exists("Taxes/" + tc.wanted) {
-				t.Skipf("this volume treats %q and %q as different names, so there is no collision to refuse", tc.occupant, tc.wanted)
+				// This disk keeps the two names apart (most Linux disks), so there is
+				// no collision to refuse. The mover must not fold names itself: the
+				// move goes ahead and neither file is touched.
+				expect := f.write("source.pdf", "reviewed")
+				if _, err := f.move(f.request(f.dir(""), taxes, "source.pdf", tc.wanted, expect)); err != nil {
+					t.Fatalf("names this disk treats as different must not collide: %v", err)
+				}
+				if f.read("Taxes/"+tc.wanted) != "reviewed" || f.read("Taxes/"+tc.occupant) != "occupant" {
+					t.Fatal("a file was replaced")
+				}
+				return
 			}
 			expect := f.write("source.pdf", "reviewed")
 
