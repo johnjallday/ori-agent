@@ -27,11 +27,13 @@ var (
 
 // DirectoryEntry is one entry of a linked directory listing.
 type DirectoryEntry struct {
-	Name         string    `json:"name"`
-	RelativePath string    `json:"path"`
-	Kind         string    `json:"kind"` // file | folder | link
-	Size         int64     `json:"size,omitempty"`
-	ModTime      time.Time `json:"modified"`
+	// Version is populated by the contained reader only. Never expose device/inode values through listing APIs.
+	Version      SourceVersion `json:"-"`
+	Name         string        `json:"name"`
+	RelativePath string        `json:"path"`
+	Kind         string        `json:"kind"` // file | folder | link
+	Size         int64         `json:"size,omitempty"`
+	ModTime      time.Time     `json:"modified"`
 }
 
 // DirectoryListing is a bounded listing.

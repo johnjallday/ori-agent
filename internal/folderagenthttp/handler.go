@@ -207,6 +207,26 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"folder_agent": view})
 }
 
+// OrganizationPreview is a direct workspace visit, not an HQ-guided return.
+func (h *Handler) OrganizationPreview(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if connectionshttp.NewOriginGuard().Check(r) != nil {
+		fail(w, http.StatusForbidden, "Local access required")
+		return
+	}
+	owner, ok := h.user(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	p, err := h.service.PreviewOrganization(r.Context(), owner, r.PathValue("workspaceID"), folderagent.ReviewSelection{Examples: q["example"], Exclude: q["exclude"]})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"preview": p})
+}
+
 // DocumentsOffer returns only the eligible member labels and opaque references.
 func (h *Handler) DocumentsOffer(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")

@@ -10,6 +10,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/directoryid"
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
 
 // Reasons a contained read is refused. None carries a filesystem path, so a
@@ -24,6 +27,19 @@ var (
 	ErrSourceChanged    = errors.New("source changed while it was being read")
 	ErrSourceUnreadable = errors.New("source could not be read")
 )
+
+// SourceVersion is metadata from the verified directory handle, not a digest of file contents.
+type SourceVersion struct {
+	Identity                 string
+	Bytes, Modified, Changed int64
+	Links                    uint64
+	Placeholder              bool
+}
+
+func sourceVersion(info os.FileInfo) SourceVersion {
+	changed, links := sourceChange(info)
+	return SourceVersion{Identity: directoryid.Witness(info), Bytes: info.Size(), Modified: info.ModTime().UnixNano(), Changed: changed, Links: links, Placeholder: folderdigest.IsDataless(info)}
+}
 
 // ContainedFile is one regular file read from inside an approved folder.
 type ContainedFile struct {
@@ -160,6 +176,18 @@ func containedParent(folder *os.Root, rel string) (dir *os.Root, name string, re
 // and the folder are checked again afterwards. A file or folder replaced along
 // the way is reported as changed; a substitute is never read in its place.
 func ReadContainedFile(root, relativePath string, maxBytes int64) (ContainedFile, error) {
+	return readContainedFile(root, relativePath, maxBytes, "", nil)
+}
+
+// ReadVersionedFile checks the exact approved root and file on the handles used for reading.
+func ReadVersionedFile(root, relativePath string, maxBytes int64, rootID string, version SourceVersion) (ContainedFile, error) {
+	if rootID == "" || version.Identity == "" || version.Placeholder || version.Links != 1 {
+		return ContainedFile{}, ErrSourceUnreadable
+	}
+	return readContainedFile(root, relativePath, maxBytes, rootID, &version)
+}
+
+func readContainedFile(root, relativePath string, maxBytes int64, rootID string, version *SourceVersion) (ContainedFile, error) {
 	rel, err := ContainedRelativePath(relativePath)
 	if err != nil {
 		return ContainedFile{}, err
@@ -183,6 +211,9 @@ func ReadContainedFile(root, relativePath string, maxBytes int64) (ContainedFile
 	if opened, err := folder.Stat("."); err != nil || !os.SameFile(rootInfo, opened) {
 		return ContainedFile{}, ErrSourceChanged
 	}
+	if version != nil && directoryid.Witness(rootInfo) != rootID {
+		return ContainedFile{}, ErrSourceChanged
+	}
 	dir, name, release, err := containedParent(folder, rel)
 	if err != nil {
 		return ContainedFile{}, err
@@ -201,6 +232,9 @@ func ReadContainedFile(root, relativePath string, maxBytes int64) (ContainedFile
 	if !before.Mode().IsRegular() {
 		return ContainedFile{}, ErrSourceNotRegular
 	}
+	if version != nil && sourceVersion(before) != *version {
+		return ContainedFile{}, ErrSourceChanged
+	}
 	if before.Size() > maxBytes {
 		return ContainedFile{}, ErrSourceTooLarge
 	}
@@ -213,7 +247,7 @@ func ReadContainedFile(root, relativePath string, maxBytes int64) (ContainedFile
 	if err != nil {
 		return ContainedFile{}, ErrSourceUnreadable
 	}
-	if !info.Mode().IsRegular() || !os.SameFile(before, info) {
+	if !info.Mode().IsRegular() || !os.SameFile(before, info) || (version != nil && sourceVersion(info) != *version) {
 		return ContainedFile{}, ErrSourceChanged
 	}
 	data, err := io.ReadAll(io.LimitReader(file, maxBytes+1))
@@ -224,7 +258,7 @@ func ReadContainedFile(root, relativePath string, maxBytes int64) (ContainedFile
 		return ContainedFile{}, ErrSourceTooLarge
 	}
 	after, err := file.Stat()
-	if err != nil || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) || int64(len(data)) != info.Size() {
+	if err != nil || (version != nil && sourceVersion(after) != *version) || after.Size() != info.Size() || !after.ModTime().Equal(info.ModTime()) || int64(len(data)) != info.Size() {
 		return ContainedFile{}, ErrSourceChanged
 	}
 	if current, err := os.Lstat(root); err != nil || !os.SameFile(rootInfo, current) { // #nosec G304 G703 -- same canonical folder as above
@@ -318,6 +352,7 @@ func ListContainedEntries(root, relativePath string, depth int) (DirectoryListin
 			// that re-resolves the folder's path, so a folder swapped for a link
 			// in between would describe an excluded entry under a visible name.
 			if info, err := current.Lstat(name); err == nil {
+				item.Version = sourceVersion(info)
 				item.ModTime = info.ModTime()
 				if item.Kind == "file" {
 					item.Size = info.Size()

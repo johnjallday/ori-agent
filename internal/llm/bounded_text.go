@@ -39,10 +39,6 @@ func openAITextConfiguration() string {
 	return textConfiguration("openai", os.Getenv("OPENAI_BASE_URL"), os.Getenv("OPENAI_ORG_ID"), os.Getenv("OPENAI_PROJECT_ID"))
 }
 
-func claudeTextConfiguration(workspaceID string) string {
-	return textConfiguration("claude", os.Getenv("ANTHROPIC_BASE_URL"), workspaceID)
-}
-
 func (p *OpenAIProvider) BoundedTextConfiguration() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

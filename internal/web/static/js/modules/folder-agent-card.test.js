@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { documentsOrganizationOffer } from './documents-organization.js';
 
 import {
   chooseFolder,
@@ -99,6 +100,59 @@ function stubDocument() {
 
 const text = (node, selector) => node.querySelector(selector)?.textContent ?? null;
 const plain = value => JSON.parse(JSON.stringify(value));
+
+test('moving between saved Documents views uses both revisions and still opens the original review source', async () => {
+  const group = title => ({ id: title, title, kept: true, members: [], reasons: {} });
+  const review = (id, title) => ({
+    id,
+    revision: 2,
+    created: '2026-01-01',
+    files: [],
+    groups: [group(title)],
+    processor: {},
+    status: 'reviewed'
+  });
+  const a = review('first', 'Bids'),
+    b = review('later', 'Contracts');
+  const file = { source: { ref: 'ref', path: 'quote.txt' }, status: 'read' };
+  a.files.push(file);
+  a.groups[0].members.push('ref');
+  const calls = [];
+  const fetch = async (path, opts) => {
+    if (opts.method === 'POST') {
+      const body = JSON.parse(opts.body);
+      calls.push(body);
+      if (body.action === 'move_member') {
+        a.groups[0].members = [];
+        b.groups[0].members = ['ref'];
+        b.groups[0].reasons.ref = 'Included by you.';
+      }
+    }
+    return { ok: true, json: async () => ({ reviews: [a, b] }) };
+  };
+  const section = documentsOrganizationOffer(stubDocument(), '/workspace', fetch);
+  const click = label =>
+    section
+      .all()
+      .find(x => x.textContent === label)
+      .listeners.click();
+  await click('Read documents and suggest groups');
+  await click('Move to view: Contracts');
+  await click('Open original');
+  assert.deepEqual(calls, [
+    {
+      review: 'first',
+      revision: 2,
+      group: 'Bids',
+      action: 'move_member',
+      source: 'ref',
+      to: 'Contracts',
+      to_review: 'later',
+      to_revision: 2
+    },
+    { review: 'first', source: 'ref' }
+  ]);
+});
 
 const reported = (overrides = {}) => ({
   workspace_id: 'ws-1',

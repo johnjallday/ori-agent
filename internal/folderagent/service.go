@@ -18,6 +18,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/foldermap"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // DefaultBrief prefills the card's "What should it do?" field (PRD FR1).
@@ -220,7 +221,15 @@ type Deps struct {
 	OnReported func(ctx context.Context, userID, workspaceID string)
 	Now        func() time.Time
 	// KnownFolderRoot shares the chooser's trusted configured-home resolver.
-	KnownFolderRoot func(string) (string, error)
+	KnownFolderRoot        func(string) (string, error)
+	DocumentsAccess        func(owner, workspaceID string) (DocumentsAccess, error)
+	DocumentsProtected     func() []string
+	OrganizationMemory     ReviewMemory
+	MatchFiling            MatchDocumentsFiling
+	ReviewActionIdentities func(owner, id, root string, since time.Time) (map[string]bool, error)
+	ReviewOpen             func(string) error
+	ReviewRead             func(string, string, int64, string, workspace.SourceVersion) (workspace.ContainedFile, error)
+	ReviewModel            func(workspaceID, lead string) (ReviewProcessor, ReviewChat)
 	// Walk overrides the walk options (tests).
 	Walk foldermap.Options
 }
@@ -1373,12 +1382,19 @@ func (s *Service) SweepInterrupted() int {
 	closed := 0
 	for _, id := range ids {
 		rec, err := s.deps.Store.Read(id)
-		if err != nil || (rec.State != StateLooking && rec.State != StateSettingUp && !learningRunning(rec)) {
+		if err != nil || (rec.State != StateLooking && rec.State != StateSettingUp && !learningRunning(rec) && !hasRunningReview(rec)) {
 			continue
 		}
 		swept, err := s.deps.Store.Update(id, func(r *Record) error {
 			// A reading of the songs a previous process left running is over;
 			// whatever it read is kept, and the goal offer is no longer held.
+			for i := range r.OrganizationRuns {
+				run := &r.OrganizationRuns[i]
+				if run.Result.Status == reviewRunning {
+					run.Result.Status = "interrupted"
+					run.Result.Skipped = len(run.Result.Files)
+				}
+			}
 			if learningRunning(r) {
 				r.Learning.Status, r.Learning.Song, r.Learning.FinishedAt = LearningStopped, "", s.deps.Now().UTC()
 				r.Learning.Reason = LearningReasonRestarted

@@ -22,6 +22,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
+	"github.com/johnjallday/ori-agent/internal/platform"
 	"github.com/johnjallday/ori-agent/internal/pluginworkspace"
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
@@ -46,20 +47,27 @@ func (b *ServerBuilder) wireFolderAgent() {
 	// workspace updates service when called; none yet is fine).
 	store.OnWelcomeRelease(func(string) { b.notifyWorkspaceWelcomeReady(context.Background(), "") })
 	service := folderagent.NewService(folderagent.Deps{
-		Store:      store,
-		Folders:    b.personalAssistantFolderDigest,
-		Workspaces: folderAgentWorkspaces{builder: b},
-		Tickets:    folderAgentTickets{store: b.workspaceStore},
-		Pins:       folderAgentPins{store: b.workspaceStore},
-		Turns:      folderAgentTurns{builder: b},
-		Matches:    folderAgentMatches{builder: b},
-		Memory:     folderAgentMemory{store: workspace.NewMemoryStore(b.workspaceFileStore)},
-		Setups:     folderAgentSetups{builder: b},
-		Hiring:     folderAgentHiring{builder: b},
-		Homes:      folderAgentHomes{builder: b},
-		Songs:      newFolderAgentSongs(b),
-		Reports:    newFolderAgentReports(b.sessionStore),
-		OnReported: b.completeFolderAgentMissions,
+		Store:                  store,
+		Folders:                b.personalAssistantFolderDigest,
+		Workspaces:             folderAgentWorkspaces{builder: b},
+		Tickets:                folderAgentTickets{store: b.workspaceStore},
+		Pins:                   folderAgentPins{store: b.workspaceStore},
+		Turns:                  folderAgentTurns{builder: b},
+		Matches:                folderAgentMatches{builder: b},
+		Memory:                 folderAgentMemory{store: workspace.NewMemoryStore(b.workspaceFileStore)},
+		Setups:                 folderAgentSetups{builder: b},
+		Hiring:                 folderAgentHiring{builder: b},
+		Homes:                  folderAgentHomes{builder: b},
+		Songs:                  newFolderAgentSongs(b),
+		Reports:                newFolderAgentReports(b.sessionStore),
+		OnReported:             b.completeFolderAgentMissions,
+		ReviewActionIdentities: b.documentsActionIdentities,
+		MatchFiling:            b.fileJanitorService.MatchDocumentsSelection,
+		DocumentsAccess:        b.documentsOrganizationAccess,
+		ReviewOpen:             platform.OpenReviewDocument,
+		OrganizationMemory:     workspace.NewMemoryStore(b.workspaceFileStore),
+		DocumentsProtected:     func() []string { return []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)} },
+		ReviewModel:            b.documentsReviewModel,
 		DocumentsNotebook: func(ctx context.Context, owner, hq string, fn func(secondbrain.Source, string) error) error {
 			return b.personalAssistantSecondBrain.WithDocumentsNotebook(ctx, owner, hq, fn)
 		},

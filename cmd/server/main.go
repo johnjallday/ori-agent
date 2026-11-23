@@ -21,6 +21,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/backuprecovery"
 	"github.com/johnjallday/ori-agent/internal/environ"
+	"github.com/johnjallday/ori-agent/internal/fileparser"
 	"github.com/johnjallday/ori-agent/internal/gateway/channels/console"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	portutil "github.com/johnjallday/ori-agent/internal/port"
@@ -39,6 +40,9 @@ var startupServer = server.NewWithResetLease
 func main() {
 	// Private metadata children must never initialize dotenv, application
 	// persistence, native secret discovery, HTTP ports or browser launching.
+	if handled, code := fileparser.RunReviewPDFWorker(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	if handled, code := backuprecovery.RunHelperProcess(os.Args[1:]); handled {
 		os.Exit(code)
 	}
