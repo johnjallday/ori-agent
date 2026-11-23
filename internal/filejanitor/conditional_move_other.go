@@ -13,6 +13,14 @@ func newPlatformConditionalMover() ConditionalMover { return unsupportedConditio
 
 func (unsupportedConditionalMover) Supported(string, string) error { return ErrMoveUnsupported }
 
+func (unsupportedConditionalMover) Folder(string, string, string) (DirRef, error) {
+	return DirRef{}, ErrMoveUnsupported
+}
+
+func (unsupportedConditionalMover) MakeFolder(context.Context, string, string, DirRef, string) (DirRef, error) {
+	return DirRef{}, ErrMoveUnsupported
+}
+
 func (unsupportedConditionalMover) MoveIfUnchanged(context.Context, ConditionalMove) (Fingerprint, error) {
 	return Fingerprint{}, ErrMoveUnsupported
 }

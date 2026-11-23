@@ -16,6 +16,12 @@ type DocumentsSelection struct {
 	Names        []string `json:"names,omitempty"`
 	Batch        string   `json:"-"`
 	CandidateIDs []string `json:"-"`
+	// RootDirID is the managed folder's identity as the caller bound it to the
+	// review; the conditional mover compares it with the disk at every move.
+	RootDirID string `json:"-"`
+	// Key is opaque to this package: the caller (the Documents review) sets it to
+	// bind a preview to its view revision, kept group and chosen sources.
+	Key string `json:"-"`
 }
 type ReviewedLooseFile struct {
 	Name    string
@@ -85,7 +91,7 @@ func (s *Service) MatchDocumentsSelection(ctx context.Context, owner, id, docume
 			versions[e.Name] = e.Version
 		}
 	}
-	result := DocumentsSelection{State: "matched", Batch: batch.ID}
+	result := DocumentsSelection{State: "matched", Batch: batch.ID, RootDirID: witness}
 	seen := map[string]bool{}
 	candidates := state.CandidatesFor(batch.ID)
 	for _, f := range files {

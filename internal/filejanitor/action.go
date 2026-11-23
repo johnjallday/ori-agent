@@ -63,6 +63,9 @@ type FileAction struct {
 	// "Filed/Documents/report (2).pdf", relative to the configured folder.
 	// Absolute paths are derived at execution time and never stored (FR-110).
 	DestinationRelative string `json:"destination_relative,omitempty"`
+	// Place is set only on an OperationPlace action. Additive: an older build
+	// drops it on rewrite and then refuses to validate the action.
+	Place *PlacedInto `json:"place,omitempty"`
 
 	// BeforeFingerprint is the file state the user approved. It is rechecked
 	// immediately before the mutation; a mismatch makes the action stale.
@@ -106,11 +109,32 @@ const (
 	// OperationTrash sends a candidate to the recoverable system Trash. It is
 	// only ever set from an explicit per-file user decision.
 	OperationTrash Operation = "trash"
+	// OperationPlace files a reviewed document into a folder the person chose,
+	// through the conditional mover. It is deliberately not OperationMove: the
+	// legacy Undo paths dispatch on "move" and would hand it to the filesystem
+	// connector, which cannot promise not to replace a file. An older build that
+	// reads one of these refuses to validate it, so it never widens what may move.
+	OperationPlace Operation = "place"
 )
 
-// ValidOperations is the complete set. There is no permanent-delete operation,
-// and adding one would be a product decision, not an implementation detail.
+// ValidOperations is the complete set a client may ask for. There is no
+// permanent-delete operation, and adding one would be a product decision, not an
+// implementation detail. OperationPlace is not in it: a client can never request
+// one directly, only the Documents filing path creates it.
 var ValidOperations = []Operation{OperationMove, OperationTrash}
+
+// PlacedInto is what an OperationPlace action recorded about the folders it
+// verified, so Undo can later check the very same folders. Identities are
+// "device:inode"; nothing here is an absolute path.
+type PlacedInto struct {
+	// RootDirID is the managed folder's identity when the file was placed.
+	RootDirID string `json:"root_dir_id"`
+	// FolderID is the destination folder's identity when the file was placed.
+	FolderID string `json:"folder_id"`
+	// LeftAt is set when a placement went wrong and the entry could not be moved
+	// back: where it is now, relative to the managed folder.
+	LeftAt string `json:"left_at,omitempty"`
+}
 
 // ActionResult is the verified outcome of an attempt.
 type ActionResult string
@@ -213,9 +237,12 @@ func (a FileAction) Validate() error {
 		return fmt.Errorf("%w: candidate id is required", ErrInvalidAction)
 	}
 	switch a.Operation {
-	case OperationMove, OperationTrash:
+	case OperationMove, OperationTrash, OperationPlace:
 	default:
 		return fmt.Errorf("%w: unknown operation %q", ErrInvalidAction, a.Operation)
+	}
+	if (a.Operation == OperationPlace) != (a.Place != nil) {
+		return fmt.Errorf("%w: only a placement records the folders it verified", ErrInvalidAction)
 	}
 	if err := ValidateFileName(a.SourceName); err != nil {
 		return fmt.Errorf("%w: source name is not a top-level file name", ErrInvalidAction)
@@ -241,6 +268,17 @@ func (a FileAction) Validate() error {
 	if a.Operation == OperationMove {
 		if !ValidCategory(a.DestinationCategory) {
 			return fmt.Errorf("%w: %q is not a version 1 category", ErrInvalidAction, a.DestinationCategory)
+		}
+		if err := validateDestinationRelative(a.DestinationRelative); err != nil {
+			return err
+		}
+	}
+	if a.Operation == OperationPlace {
+		// A named destination is not a category. It must still name a folder and a
+		// file, and the file's identity is what Undo will compare.
+		if a.DestinationCategory != "" || strings.TrimSpace(a.Place.RootDirID) == "" || strings.TrimSpace(a.Place.FolderID) == "" ||
+			a.BeforeFingerprint.FileID == "" {
+			return fmt.Errorf("%w: a placement needs a named destination and the identities it verified", ErrInvalidAction)
 		}
 		if err := validateDestinationRelative(a.DestinationRelative); err != nil {
 			return err
@@ -317,6 +355,12 @@ func (a FileAction) BelongsToRoot(currentRootID string) bool {
 // the original path may be occupied or the Trash item gone.
 func (a FileAction) Undoable() bool {
 	if a.Result != ResultApplied {
+		return false
+	}
+	// Task 3.0 teaches Undo to reverse a placement through the conditional mover.
+	// Until then this one line keeps every Undo entry point, the receipt and the
+	// outcome's undoable flag closed for it.
+	if a.Operation == OperationPlace {
 		return false
 	}
 	switch a.Undo {

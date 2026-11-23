@@ -73,7 +73,9 @@ func dirOpenError(err error) error {
 	if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) {
 		return ErrMoveOutsideRoot
 	}
-	return fmt.Errorf("%w: %v", ErrMoveParentChanged, err)
+	// Both are wrapped: callers match the sentinel, and errors.Is(err,
+	// fs.ErrNotExist) tells "that folder is not there" from "it changed".
+	return fmt.Errorf("%w: %w", ErrMoveParentChanged, err)
 }
 
 // openRoot opens the managed folder by path. Its ancestors may be links (macOS
@@ -121,18 +123,6 @@ func openRel(rootfd int, rootDev uint64, rel string) (heldDir, error) {
 		}
 	}
 	return last, nil
-}
-
-func splitRel(rel string) []string {
-	var parts []string
-	start := 0
-	for i := 0; i <= len(rel); i++ {
-		if i == len(rel) || rel[i] == '/' {
-			parts = append(parts, rel[start:i])
-			start = i + 1
-		}
-	}
-	return parts
 }
 
 // lookup stats one name in a held folder without following a link.
@@ -255,6 +245,100 @@ func (p *platformMover) Supported(root, rootID string) error {
 		return ErrMoveParentChanged
 	}
 	return cachedVerdict(rootID, held.fd)
+}
+
+// ---------------------------------------------------------------- folders
+
+// openVerifiedRoot opens the root by path and checks its identity and filesystem.
+func openVerifiedRoot(root, rootID string) (heldDir, uint64, error) {
+	if root == "" || root[0] != '/' || path.Clean(root) != root || rootID == "" {
+		return heldDir{}, 0, fmt.Errorf("%w: the managed folder is not known", ErrMoveInvalid)
+	}
+	held, err := openRoot(root)
+	if err != nil {
+		return heldDir{}, 0, err
+	}
+	if statID(&held.st) != rootID {
+		held.close()
+		return heldDir{}, 0, ErrMoveParentChanged
+	}
+	if err := cachedVerdict(rootID, held.fd); err != nil {
+		held.close()
+		return heldDir{}, 0, err
+	}
+	return held, uint64(held.st.Dev), nil // #nosec G115 -- device numbers compare as numbers
+}
+
+// Folder implements ConditionalMover. It only observes.
+func (p *platformMover) Folder(root, rootID, rel string) (DirRef, error) {
+	if !validRelPath(rel) {
+		return DirRef{}, fmt.Errorf("%w: a folder path is not a plain path inside the managed folder", ErrMoveInvalid)
+	}
+	held, rootDev, err := openVerifiedRoot(root, rootID)
+	if err != nil {
+		return DirRef{}, err
+	}
+	defer held.close()
+	dir, err := openRel(held.fd, rootDev, rel)
+	if err != nil {
+		return DirRef{}, err
+	}
+	defer dir.close()
+	id := statID(&dir.st)
+	if id == "" {
+		return DirRef{}, ErrMoveParentChanged
+	}
+	return DirRef{Rel: rel, ID: id}, nil
+}
+
+// MakeFolder implements ConditionalMover.
+func (p *platformMover) MakeFolder(ctx context.Context, root, rootID string, parent DirRef, name string) (DirRef, error) {
+	if ValidateFileName(name) != nil || !validRelPath(parent.Rel) || parent.ID == "" {
+		return DirRef{}, fmt.Errorf("%w: a folder name or path is not plain", ErrMoveInvalid)
+	}
+	if err := ctx.Err(); err != nil {
+		return DirRef{}, err
+	}
+	held, rootDev, err := openVerifiedRoot(root, rootID)
+	if err != nil {
+		return DirRef{}, err
+	}
+	defer held.close()
+	dir, err := openRel(held.fd, rootDev, parent.Rel)
+	if err != nil {
+		return DirRef{}, err
+	}
+	defer dir.close()
+	if statID(&dir.st) != parent.ID {
+		return DirRef{}, ErrMoveParentChanged
+	}
+	if err := unix.Mkdirat(dir.fd, name, 0o750); err != nil {
+		if errors.Is(err, unix.EEXIST) {
+			return DirRef{}, ErrMoveDestinationOccupied
+		}
+		return DirRef{}, fmt.Errorf("%w: %v", ErrMoveFolderNotCreated, err)
+	}
+	fd, err := unix.Openat(dir.fd, name, dirOpenFlags, 0)
+	if err != nil {
+		return DirRef{}, fmt.Errorf("%w: %v", ErrMoveFolderNotCreated, err)
+	}
+	made := heldDir{fd: fd}
+	defer made.close()
+	if err := unix.Fstat(fd, &made.st); err != nil || made.st.Mode&unix.S_IFMT != unix.S_IFDIR || uint64(made.st.Dev) != rootDev { // #nosec G115 -- device numbers compare as numbers
+		return DirRef{}, ErrMoveFolderNotCreated
+	}
+	// The parent must still be where it was reviewed, or the folder was made inside
+	// a folder that has since moved away. It is reported, never removed.
+	again, err := openRel(held.fd, rootDev, parent.Rel)
+	if err != nil {
+		return DirRef{}, ErrMoveParentChanged
+	}
+	parentUnchanged := statID(&again.st) == parent.ID
+	again.close()
+	if !parentUnchanged {
+		return DirRef{}, ErrMoveParentChanged
+	}
+	return DirRef{Rel: path.Join(parent.Rel, name), ID: statID(&made.st)}, nil
 }
 
 // ---------------------------------------------------------------- the move

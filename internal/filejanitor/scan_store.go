@@ -133,7 +133,11 @@ type ScanState struct {
 	// authority and no path; the per-file facts stay in Actions, where the filing
 	// ID is the actions' IdempotencyKey. An older build that rewrites this file
 	// drops the field, which only loses the receipt and Undo all, never widens
-	// what may move.
+	// what may move. The same holds for the additive named-destination data: a
+	// FilingRecord's destination and decision_id, and an action's "place" operation
+	// and place block. An older build that drops them cannot validate a "place"
+	// action, so it can neither undo nor repeat one. The schema version stays 3
+	// because raising it would make an older build refuse the whole state.
 	Filings []FilingRecord `json:"filings,omitempty"`
 	// ScanOperations are bounded operation-specific acknowledgments written in
 	// the same atomic record as their batch/candidates/settling observations.

@@ -541,6 +541,92 @@ func TestConditionalMove_ARequestThatIsNotPlainIsRefusedBeforeTouchingTheDisk(t 
 	}
 }
 
+func TestFolder_ObservesIdentityWithoutWriting(t *testing.T) {
+	f := newMoveFixture(t)
+	taxes := f.mkdir("Taxes/2024")
+	before := f.dir("Taxes")
+
+	got, err := f.mover.Folder(f.root, f.rootID, "Taxes/2024")
+	if err != nil || got != taxes {
+		t.Fatalf("want %+v, got %+v %v", taxes, got, err)
+	}
+	if _, err := f.mover.Folder(f.root, f.rootID, "Taxes/2025"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a missing folder must match ErrNotExist, got %v", err)
+	}
+	if f.exists("Taxes/2025") || f.dir("Taxes") != before {
+		t.Fatal("observing a folder wrote something")
+	}
+	if root, err := f.mover.Folder(f.root, f.rootID, ""); err != nil || root.ID != f.rootID {
+		t.Fatalf("the root itself: %+v %v", root, err)
+	}
+	if _, err := f.mover.Folder(f.root, "1:1", "Taxes"); !errors.Is(err, ErrMoveParentChanged) {
+		t.Fatalf("a different root identity must be refused, got %v", err)
+	}
+	if err := os.Symlink("Taxes", f.abs("Linked")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.mover.Folder(f.root, f.rootID, "Linked"); !errors.Is(err, ErrMoveOutsideRoot) {
+		t.Fatalf("a link is outside the root, got %v", err)
+	}
+	if _, err := f.mover.Folder(f.root, f.rootID, "../Taxes"); !errors.Is(err, ErrMoveInvalid) {
+		t.Fatalf("a parent segment is invalid, got %v", err)
+	}
+}
+
+func TestMakeFolder_CreatesExactlyOneFolderAndNeverAdoptsOne(t *testing.T) {
+	f := newMoveFixture(t)
+	taxes := f.mkdir("Taxes")
+
+	made, err := f.mover.MakeFolder(context.Background(), f.root, f.rootID, taxes, "2025")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if made.Rel != "Taxes/2025" || made != f.dir("Taxes/2025") {
+		t.Fatalf("the returned identity must be the new folder's: %+v", made)
+	}
+	if info, err := os.Lstat(f.abs("Taxes/2025")); err != nil || !info.IsDir() || info.Mode().Perm()&0o027 != 0 {
+		t.Fatalf("the folder must not be group-writable or open to others: %v %v", info, err)
+	}
+
+	// A name that exists is refused, never adopted: it may hold someone's files.
+	f.write("Taxes/2025/keep.txt", "mine")
+	if _, err := f.mover.MakeFolder(context.Background(), f.root, f.rootID, taxes, "2025"); !errors.Is(err, ErrMoveDestinationOccupied) {
+		t.Fatalf("an existing folder is occupied, got %v", err)
+	}
+	f.write("Taxes/note.txt", "a file")
+	if _, err := f.mover.MakeFolder(context.Background(), f.root, f.rootID, taxes, "note.txt"); !errors.Is(err, ErrMoveDestinationOccupied) {
+		t.Fatalf("an existing file is occupied, got %v", err)
+	}
+	if f.read("Taxes/2025/keep.txt") != "mine" {
+		t.Fatal("a file changed")
+	}
+
+	t.Run("parent replaced", func(t *testing.T) {
+		g := newMoveFixture(t)
+		parent := g.mkdir("Taxes")
+		g.swapDir("Taxes", "Taxes.old")
+		if _, err := g.mover.MakeFolder(context.Background(), g.root, g.rootID, parent, "2025"); !errors.Is(err, ErrMoveParentChanged) {
+			t.Fatalf("want parent changed, got %v", err)
+		}
+		g.mustBeAbsent("Taxes/2025")
+	})
+	t.Run("invalid names", func(t *testing.T) {
+		for _, name := range []string{"", "..", "a/b"} {
+			if _, err := f.mover.MakeFolder(context.Background(), f.root, f.rootID, taxes, name); !errors.Is(err, ErrMoveInvalid) {
+				t.Fatalf("%q: want invalid, got %v", name, err)
+			}
+		}
+	})
+	t.Run("cancelled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := f.mover.MakeFolder(ctx, f.root, f.rootID, taxes, "2026"); !errors.Is(err, context.Canceled) {
+			t.Fatalf("want cancelled, got %v", err)
+		}
+		f.mustBeAbsent("Taxes/2026")
+	})
+}
+
 func TestConditionalMove_ACancelledRequestDoesNothing(t *testing.T) {
 	f := newMoveFixture(t)
 	taxes := f.mkdir("Taxes")
@@ -621,6 +707,12 @@ func TestService_ConditionalMoveIsOnlyAvailableWhenTheMoverSaysSo(t *testing.T) 
 type refusingMover struct{}
 
 func (refusingMover) Supported(string, string) error { return ErrMoveUnsupported }
+func (refusingMover) Folder(string, string, string) (DirRef, error) {
+	return DirRef{}, ErrMoveUnsupported
+}
+func (refusingMover) MakeFolder(context.Context, string, string, DirRef, string) (DirRef, error) {
+	return DirRef{}, ErrMoveUnsupported
+}
 func (refusingMover) MoveIfUnchanged(context.Context, ConditionalMove) (Fingerprint, error) {
 	return Fingerprint{}, ErrMoveUnsupported
 }

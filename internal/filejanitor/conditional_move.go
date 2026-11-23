@@ -59,6 +59,14 @@ type ConditionalMover interface {
 	// name atomically; otherwise an error wrapping ErrMoveUnsupported (or another
 	// refusal that says why). It writes nothing into the folder.
 	Supported(root, rootID string) error
+	// Folder reports the identity of an existing folder inside the root, without
+	// writing anything. The error matches fs.ErrNotExist when the last component
+	// is missing, and wraps a refusal when a component is a link or off the disk.
+	Folder(root, rootID, rel string) (DirRef, error)
+	// MakeFolder creates exactly one new folder named name inside parent and
+	// returns its identity. It never adopts an existing folder: an occupied name
+	// is ErrMoveDestinationOccupied.
+	MakeFolder(ctx context.Context, root, rootID string, parent DirRef, name string) (DirRef, error)
 	// MoveIfUnchanged moves the file and returns what it looks like at its new
 	// name. Every error means the file is not at ToName, except a *MoveRaceError
 	// whose LeftAt names where a file that could not be moved back now is.
@@ -81,6 +89,9 @@ var (
 	ErrMoveSourceChanged = errors.New("the file changed since it was reviewed")
 	// ErrMoveDestinationOccupied means something already has the destination name.
 	ErrMoveDestinationOccupied = errors.New("something already has that name")
+	// ErrMoveFolderNotCreated means a new folder could not be made. Nothing was
+	// adopted or replaced.
+	ErrMoveFolderNotCreated = errors.New("the folder could not be created")
 )
 
 // MoveRaceError reports a move that was started and then found to be wrong, so it
@@ -119,6 +130,10 @@ const (
 	// stageBeforeRollback is after the rename was found wrong, before moving back.
 	stageBeforeRollback
 )
+
+// splitRel splits a slash path into its components ("" has none to split: callers
+// check for it first).
+func splitRel(rel string) []string { return strings.Split(rel, "/") }
 
 // validRelPath reports whether rel is "" (the root) or slash-separated single
 // names, none empty, ".", ".." or containing NUL.

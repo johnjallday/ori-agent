@@ -51,7 +51,17 @@ export function documentsOrganizationOffer(doc, base, fetchImpl, route = '') {
   };
   const read = async (path, options = {}) => {
     const r = await fetchImpl(`${base}/${path}`, { cache: 'no-store', ...options });
-    if (!r.ok) throw new Error();
+    if (!r.ok) {
+      // The status and answer travel with the error: a refused filing carries a
+      // code and a fresh preview the page acts on. Callers that ignore them are
+      // unaffected.
+      const error = new Error('request failed');
+      error.status = r.status;
+      error.body = await Promise.resolve()
+        .then(() => r.json())
+        .catch(() => null);
+      throw error;
+    }
     return r.json();
   };
   const post = (path, body) =>
@@ -197,7 +207,16 @@ export function documentsOrganizationOffer(doc, base, fetchImpl, route = '') {
         details.append(list);
         if (group.kept && group.members.length)
           details.append(
-            documentsFilingCheck({ node, button, group, review: r, sources, route, post })
+            documentsFilingCheck({
+              node,
+              button,
+              group,
+              review: r,
+              sources,
+              route,
+              post,
+              refresh: showHistory
+            })
           );
         if (group.example_folder)
           details.append(node('p', `Example folder: ${group.example_folder}`));
