@@ -3,11 +3,13 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -187,20 +189,46 @@ func TestPersonalHQRoutesRegistered(t *testing.T) {
 // the pull invitation and routes into the normal workspace Map rather than a
 // forced setup page.
 func TestBrandNewProfileLandsOnHome(t *testing.T) {
-	// A freshly built handler runs against an empty temp-HOME profile: it is
-	// brand-new by construction (this is exactly the profile that previously
-	// once produced a 303 to the workspace launcher). Asserting a 200 Home
-	// render with no redirect proves the forced first-run detour is gone.
 	handler := newRoutesTestHandler(t)
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected a brand-new profile to land on Home (200), got %d body=%s", rec.Code, rec.Body.String())
+	page := func(path, peer string) string {
+		t.Helper()
+		req := httptest.NewRequest("GET", "http://localhost"+path, nil)
+		req.RemoteAddr = peer
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != 200 {
+			t.Fatal(rec.Code)
+		}
+		return rec.Body.String()
 	}
-	if loc := rec.Header().Get("Location"); loc != "" {
-		t.Fatalf("expected no redirect for a brand-new profile, got Location %q", loc)
+	local := "127.0.0.1:43210"
+	if !strings.Contains(page("/", local), "home-command-bridge") {
+		t.Fatal("unmarked installation lost Home")
+	}
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	if err := onboarding.ResetSearchLanding(os.Getenv("ORI_DATA_DIR")); err != nil {
+		t.Fatal(err)
+	}
+	fresh := page("/", local)
+	if !strings.Contains(fresh, "Start with one folder.") || strings.Contains(fresh, "onboardingModal") || strings.Contains(fresh, "home-command-bridge") {
+		t.Fatal("new Mac install did not render isolated search page")
+	}
+	for _, path := range []string{"/?hire=1", "/?quest=build-hq"} {
+		if !strings.Contains(page(path, local), "home-command-bridge") {
+			t.Fatal("overrode explicit entry", path)
+		}
+	}
+	if strings.Contains(page("/", "192.0.2.5:1010"), "id=\"desk\"") {
+		t.Fatal("nonlocal search desk")
+	}
+	if err := onboarding.DecideSearchLanding(os.Getenv("ORI_DATA_DIR"), onboarding.SearchFirst, onboarding.SearchLater); err != nil {
+		t.Fatal(err)
+	}
+	home := page("/", local)
+	if !strings.Contains(home, "Start or resume workspace setup") || strings.Contains(home, "onboardingModal") {
+		t.Fatal("deferred setup forced on Home")
 	}
 }
 

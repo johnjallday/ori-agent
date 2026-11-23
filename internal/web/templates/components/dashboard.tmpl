@@ -1,5 +1,6 @@
 <!-- Ori Dashboard — Command Bridge -->
 <div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
+  {{if .Extra.ShowFileSearch}}<a class="modern-btn modern-btn-secondary" href="/search">Search local files</a>{{end}}
   <!-- Only the HQ-owned result moves here; conversation and Today stay in the drawer. -->
   <aside id="personalHQResultHost" class="pa-hq-result" aria-label="Personal HQ setup result" hidden></aside>
   <!--

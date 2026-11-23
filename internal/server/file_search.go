@@ -10,6 +10,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/filesearch"
 	"github.com/johnjallday/ori-agent/internal/filesearchhttp"
+	"github.com/johnjallday/ori-agent/internal/onboarding"
 	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
@@ -37,6 +38,10 @@ func (b *ServerBuilder) initializeFileSearch() {
 }
 func (s *Server) registerFileSearch(mux *http.ServeMux) {
 	if runtime.GOOS == "darwin" && s.Storage != nil {
+		mux.HandleFunc("GET /search", func(w http.ResponseWriter, r *http.Request) {
+			s.searchPage(w, r, onboarding.SearchLanding(config.DefaultDataDir()), false)
+		})
+		mux.HandleFunc("POST /api/file-search/preference", s.searchPreference)
 		mux.Handle(filesearchhttp.Prefix, filesearchhttp.Handler{Service: s.fileSearch, Users: s.Storage.UserProvider})
 	}
 }

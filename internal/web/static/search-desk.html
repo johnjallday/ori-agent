@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{if .Home}}Home{{else}}File search{{end}} · Ori</title>
+    <link rel="stylesheet" href="/css/search-desk.css" />
+  </head>
+  <body data-landing="{{.State}}">
+    <header>
+      <span class="brand">ORI</span><span class="edition">ON DEVICE / LOCAL EDITION</span>
+      <nav>{{if .Home}}<a href="/search">File search</a>{{else}}<a href="/?home=1">Home</a>{{end}}</nav>
+    </header>
+    {{if .Home}}
+    <main class="arrival">
+      <small>YOUR DESK / HOME</small>
+      <h1>Welcome to Ori.</h1>
+      <p>Find files on this Mac, or set up your workspace when you’re ready.</p>
+      <div class="actions">
+        <a class="primary" href="/search">Search local files</a><a href="/?setup=1">Start or resume workspace setup</a
+        ><a href="/settings">Explore settings</a>
+      </div>
+    </main>
+    {{else}}
+    <main id="desk">
+      <section class="arrival">
+        <small>01 / LOCAL FILE SEARCH</small>
+        <h1 id="title">{{if .First}}Start with one folder.{{else}}Your search desk.{{end}}</h1>
+        <p>
+          Only the folder you choose. Names, locations and dates stay on this device. No file contents, uploads or
+          changes.
+        </p>
+        <div class="actions" id="choices">
+          <button data-kind="documents">Documents</button><button data-kind="downloads">Downloads</button
+          ><button data-kind="custom">Choose another folder…</button>
+        </div>
+        {{if .First}}
+        <p class="decision">
+          Choosing a folder makes Search your starting page. <button id="skip" class="link">Not now</button>
+        </p>
+        {{else if eq .State "search"}}<button id="homeDefault" class="link">Start on Home instead</button>{{else if ne
+        .State "unavailable"}}<button id="searchDefault" class="link">Make Search my starting page</button>{{end}}
+        <p id="notice" role="status" aria-live="polite"></p>
+      </section>
+      <div class="worktop">
+        <aside>
+          <small>02 / FOLDER MAP</small>
+          <h2>Search sources</h2>
+          <p class="muted">Folders, not workspaces.</p>
+          <div class="map">
+            <ul id="sources" aria-label="Mapped folders"></ul>
+            <p id="emptyMap">Checking your map…</p>
+          </div>
+        </aside>
+        <section class="catalog">
+          <small>03 / FILENAME INDEX</small>
+          <h2><label for="term">Find a file</label></h2>
+          <input
+            id="term"
+            type="search"
+            maxlength="128"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="Search by filename"
+          />
+          <p class="muted" id="coverage" role="status"></p>
+          <ul id="hits" aria-label="Matching files"></ul>
+          <button id="more" hidden>More results</button>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="/js/modules/search-desk.js"></script>
+    {{end}}
+  </body>
+</html>

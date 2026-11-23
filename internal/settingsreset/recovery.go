@@ -543,7 +543,7 @@ func applyRecoveryCategory(ctx context.Context, result CategoryResult, selected 
 		result = applyPluginRecovery(ctx, result, evidence.Plugins, pluginPaths)
 	case CategoryIdentityProgress:
 		setup, err := onboarding.OpenForReset(targets["first_run_state"])
-		if err != nil || setup.ResetFirstRunVerified() != nil {
+		if err != nil || setup.ResetFirstRunVerified() != nil || onboarding.ResetSearchLanding(installationRoot) != nil {
 			return result
 		}
 		completeResultCheck(&result, "first_run_state_default")
