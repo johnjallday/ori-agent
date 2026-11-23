@@ -22,7 +22,7 @@ func TestOnlyLocalBrowserCanStartSearchChoice(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer s.Close()
-	h := Handler{s, userprofile.LocalUserProvider{}}
+	h := Handler{Service: s, Users: userprofile.LocalUserProvider{}}
 	const peer = "127.0.0.1:12345"
 	const host = "localhost:8765"
 	const origin = "http://localhost:8765"

@@ -19,6 +19,8 @@ const Prefix = "/api/file-search/"
 type Handler struct {
 	Service *filesearch.Service
 	Users   userprofile.UserProvider
+	// Accepted records first-open landing only, never on cancel or a failed grant.
+	Accepted func() error
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +77,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !decode(&in) {
 			return
 		}
-		out, e = h.Service.Select(r.Context(), owner, in.Intent)
+		source, err := h.Service.Select(r.Context(), owner, in.Intent)
+		out, e = source, err
+		if err == nil && source != nil && h.Accepted != nil && h.Accepted() != nil {
+			http.Error(w, "Folder added, but the starting page could not be saved. Reload to check.", http.StatusConflict)
+			return
+		}
 	case "query":
 		var in struct {
 			Term   string `json:"term"`

@@ -33,7 +33,15 @@ func (s *Server) maybeSearchLanding(w http.ResponseWriter, r *http.Request) bool
 		return false
 	}
 	switch state {
-	case onboarding.SearchFirst, onboarding.SearchDesk:
+	case onboarding.SearchFirst:
+		// A user may have followed a setup deep link before the first ordinary
+		// visit. Preserve their progress rather than competing with Welcome.
+		setup := s.Storage.OnboardingMgr.GetState()
+		if setup.Completed || !setup.SkippedAt.IsZero() || setup.CurrentStep != 0 || len(setup.StepsCompleted) != 0 || s.Core.ConfigManager.IsWorkspaceRootConfirmed() {
+			return false
+		}
+		fallthrough
+	case onboarding.SearchDesk:
 		s.searchPage(w, r, state, false)
 		return true
 	case onboarding.SearchLater:

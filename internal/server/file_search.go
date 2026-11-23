@@ -42,6 +42,6 @@ func (s *Server) registerFileSearch(mux *http.ServeMux) {
 			s.searchPage(w, r, onboarding.SearchLanding(config.DefaultDataDir()), false)
 		})
 		mux.HandleFunc("POST /api/file-search/preference", s.searchPreference)
-		mux.Handle(filesearchhttp.Prefix, filesearchhttp.Handler{Service: s.fileSearch, Users: s.Storage.UserProvider})
+		mux.Handle(filesearchhttp.Prefix, filesearchhttp.Handler{Service: s.fileSearch, Users: s.Storage.UserProvider, Accepted: func() error { return onboarding.AcceptSearchFolder(config.DefaultDataDir()) }})
 	}
 }

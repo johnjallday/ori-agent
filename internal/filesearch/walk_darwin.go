@@ -43,6 +43,11 @@ func rootWitness(path string) (string, error) {
 		return "", err
 	}
 	defer func() { _ = f.Close() }()
+	// A volume can be mounted below a user folder as well as /Volumes.
+	var parent unix.Stat_t
+	if unix.Stat(filepath.Dir(path), &parent) != nil || parent.Dev != st.Dev {
+		return "", ErrRoot
+	}
 	var fs unix.Statfs_t
 	if unix.Fstatfs(int(f.Fd()), &fs) != nil || fs.Flags&unix.MNT_LOCAL == 0 || strings.TrimRight(string(fs.Fstypename[:]), "\x00") != "apfs" {
 		return "", ErrUnavailable

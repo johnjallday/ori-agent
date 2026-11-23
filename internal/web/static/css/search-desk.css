@@ -159,6 +159,11 @@ li {
   border-radius: 0;
   padding: 0.75rem 0.2rem;
 }
+li.current {
+  background: var(--wash);
+  border-inline-start: 3px solid var(--accent);
+  padding-inline-start: 0.65rem;
+}
 li strong,
 li span {
   display: block;

@@ -194,7 +194,7 @@ func (s *Service) sourcesLocked(ctx context.Context, owner string, verify bool) 
 		v.Label = filepath.Base(v.root)
 		if verify && !s.current(v) {
 			v.State = "unavailable"
-			v.Reason = "Select the original folder again, or remove it."
+			v.Reason = "Reconnect the original folder and refresh, or remove it and choose another."
 			v.Count = 0
 		}
 		out = append(out, v)
@@ -245,7 +245,7 @@ func (s *Service) Remove(ctx context.Context, owner, id string) error {
 func (s *Service) Refresh(ctx context.Context, owner, id string, gen int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ss, err := s.sourcesLocked(ctx, owner, true)
+	ss, err := s.sourcesLocked(ctx, owner, false)
 	if err != nil {
 		return err
 	}
@@ -253,7 +253,8 @@ func (s *Service) Refresh(ctx context.Context, owner, id string, gen int) error 
 		if v.ID != id || v.Generation != gen {
 			continue
 		}
-		if v.State == "unavailable" || s.jobs[id] != nil {
+		// A prior failed read is retryable only on the same physical root.
+		if !s.current(v) || s.jobs[id] != nil {
 			return ErrUnavailable
 		}
 		release, e := s.Gate.Enter()

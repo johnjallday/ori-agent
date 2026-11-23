@@ -40,7 +40,10 @@ func dispatch(ctx context.Context, v Source, r entry, reveal bool, send func(con
 	}
 	defer func() { _ = unix.Close(fd) }()
 	var st unix.Stat_t
-	if unix.Fstat(fd, &st) != nil || !eligible(&st) || st.Mode&unix.S_IFMT != unix.S_IFREG || st.Nlink != 1 || fmt.Sprintf("%s:%d:%d", witness(&st), st.Mode, st.Size) != r.witness || st.Mtim.Nano() != r.modified {
+	matches := func(observed *unix.Stat_t) bool {
+		return eligible(observed) && observed.Mode&unix.S_IFMT == unix.S_IFREG && observed.Nlink == 1 && fmt.Sprintf("%s:%d:%d", witness(observed), observed.Mode, observed.Size) == r.witness && observed.Mtim.Nano() == r.modified
+	}
+	if unix.Fstat(fd, &st) != nil || !matches(&st) {
 		return ErrMissing
 	}
 	viewer := ""
@@ -57,7 +60,7 @@ func dispatch(ctx context.Context, v Source, r entry, reveal bool, send func(con
 	}
 	pin := fmt.Sprintf("/.vol/%d/%d", st.Dev, st.Ino)
 	var pinned, latest unix.Stat_t
-	if unix.Stat(pin, &pinned) != nil || witness(&pinned) != witness(&st) || unix.Lstat(path, &latest) != nil || witness(&latest) != witness(&st) || !verifyChain(v, d) || ctx.Err() != nil {
+	if unix.Stat(pin, &pinned) != nil || witness(&pinned) != witness(&st) || unix.Lstat(path, &latest) != nil || !matches(&latest) || !verifyChain(v, d) || ctx.Err() != nil {
 		return ErrMissing
 	}
 	if send == nil {
@@ -74,6 +77,7 @@ func sendDocument(ctx context.Context, viewer, pin string) error {
 	args := []string{"-R", pin}
 	if viewer != "" {
 		args = []string{"-a", "/System/Applications/" + viewer + ".app", pin}
-	} // #nosec G204 G702 -- fixed system reader or reveal, only a verified kernel file reference as document argument.
+	}
+	// #nosec G204 G702 -- fixed system reader or reveal, only a verified kernel file reference as document argument.
 	return exec.CommandContext(ctx, "/usr/bin/open", args...).Run()
 }

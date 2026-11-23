@@ -24,6 +24,15 @@ var landingMu sync.Mutex
 // CreateInstallRoot records new-install eligibility only for the process that
 // creates the final directory. No directory enumeration or user folder lookup.
 func CreateInstallRoot(root string) (bool, error) {
+	// Preserve the read-only startup path for an already existing installation.
+	if st, err := os.Stat(root); err == nil {
+		if !st.IsDir() {
+			return false, errors.New("installation root is not a directory")
+		}
+		return false, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
 	if err := os.MkdirAll(filepath.Dir(root), 0750); err != nil {
 		return false, err
 	}
@@ -62,6 +71,7 @@ func readLanding(root string) string {
 	if err != nil || !info.Mode().IsRegular() || info.Size() > 32 {
 		return SearchUnknown
 	}
+	// #nosec G304 G703 -- host-owned installation root and a fixed receipt filename; only a bounded enum is decoded.
 	f, err := os.Open(path)
 	if err != nil {
 		return SearchUnknown
@@ -107,6 +117,17 @@ func DecideSearchLanding(root, expected, next string) error {
 		return errors.New("landing decision changed")
 	}
 	return writeLanding(root, next)
+}
+
+// AcceptSearchFolder runs on the server after an actual accepted selection,
+// even if the browser disconnects. An independently chosen Home wins over it.
+func AcceptSearchFolder(root string) error {
+	landingMu.Lock()
+	defer landingMu.Unlock()
+	if readLanding(root) != SearchFirst {
+		return nil
+	}
+	return writeLanding(root, SearchDesk)
 }
 
 // Called only by pre-store recovery's Start Fresh identity category, not by

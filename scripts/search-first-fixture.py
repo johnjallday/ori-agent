@@ -8,7 +8,7 @@ import tempfile
 
 def build(parent: Path, large: bool) -> Path:
     sandbox = Path(tempfile.mkdtemp(prefix="ori-search-demo-", dir=parent)).resolve()
-    for name in ("Documents/Rough", "Documents/Final", "Downloads", "Music", "Empty", "Unseen"):
+    for name in ("Documents/Rough", "Documents/Final", "Downloads", "Music", "Empty", "Partial/Locked", "Moved", "Unseen"):
         (sandbox / "home" / name).mkdir(parents=True, mode=0o700)
     home = sandbox / "home"
     for folder, stamp in (("Documents/Rough", 1704067200), ("Documents/Final", 1735689600)):
@@ -17,6 +17,10 @@ def build(parent: Path, large: bool) -> Path:
         os.utime(doc, (stamp, stamp))
     (home / "Documents" / "Welcome.txt").touch()
     (home / "Music" / "Harbor recording.txt").touch()
+    (home / "Partial" / "Visible.txt").touch()
+    (home / "Partial" / "Locked" / "Not readable.txt").touch()
+    (home / "Partial" / "Locked").chmod(0)
+    (home / "Moved" / "Move after mapping.txt").write_text("Synthetic stale selection.\n")
     (home / "Unseen" / "Decoy.txt").touch()
     (home / "Documents" / "outside-link").symlink_to(home / "Unseen", target_is_directory=True)
     if large:

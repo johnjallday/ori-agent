@@ -94,7 +94,8 @@ export function mountFileSearch(root, compact = false) {
       return;
     }
     if (document.body.dataset.landing === 'first') {
-      await preference('search');
+      channel?.postMessage('landing');
+      location.replace('/');
       return;
     }
     channel?.postMessage('changed');
@@ -216,6 +217,7 @@ export function mountFileSearch(root, compact = false) {
     $(id)?.addEventListener('click', () => run(() => preference(target), $(id)));
   term.addEventListener('input', () => {
     clear();
+    notice.textContent = '';
     $('coverage').textContent = 'Searching…';
     timer = setTimeout(() => query(), 60);
   });
