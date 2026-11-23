@@ -32,12 +32,13 @@ type DocumentsCandidate struct {
 	Evidence string `json:"evidence"`
 }
 type DocumentsOffer struct {
-	NotesOnly bool                 `json:"notes_only,omitempty"`
-	Vaults    []DocumentsCandidate `json:"vaults,omitempty"`
-	Setup     bool                 `json:"setup,omitempty"`
-	Writable  bool                 `json:"writable,omitempty"`
-	Report    string               `json:"report"`
-	Projects  []DocumentsCandidate `json:"projects"`
+	Decision  *DocumentsDisposition `json:"decision,omitempty"`
+	NotesOnly bool                  `json:"notes_only,omitempty"`
+	Vaults    []DocumentsCandidate  `json:"vaults,omitempty"`
+	Setup     bool                  `json:"setup,omitempty"`
+	Writable  bool                  `json:"writable,omitempty"`
+	Report    string                `json:"report"`
+	Projects  []DocumentsCandidate  `json:"projects"`
 }
 
 var projectLabel = regexp.MustCompile(`^[\pL\pN][\pL\pN _.()-]*$`)
@@ -184,7 +185,10 @@ func (s *Service) DocumentsOffer(ctx context.Context, owner, hq, attempt, id str
 		// connection or a pitch to write into an existing vault.
 		out.NotesOnly = len(documentsVaults(rec, root, report, guards[1:])) > 0
 	}
-	if len(out.Projects) == 0 && len(out.Vaults) == 0 && !out.NotesOnly {
+	if len(rec.DocumentsDecisions) > 0 {
+		out.Decision = s.documentsDisposition(ctx, owner, hq, rec)
+	}
+	if len(out.Projects) == 0 && len(out.Vaults) == 0 && !out.NotesOnly && out.Decision == nil {
 		return nil, nil
 	}
 	return out, nil

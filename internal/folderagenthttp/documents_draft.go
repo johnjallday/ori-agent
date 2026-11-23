@@ -92,7 +92,25 @@ func (h *Handler) ChooseDocumentsVault(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"selection_token": token})
 }
 
+func (h *Handler) DismissDocuments(w http.ResponseWriter, r *http.Request) {
+	var in folderagent.DocumentsDraftInput
+	owner, ok := h.draftRequest(w, r, &in)
+	if !ok {
+		return
+	}
+	if err := h.service.DismissDocuments(r.Context(), owner, r.PathValue("workspaceID"), in); err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"dismissed": true})
+}
 func (h *Handler) OpenDocumentsDraft(w http.ResponseWriter, r *http.Request) {
+	h.documentsResult(w, r, false)
+}
+func (h *Handler) RecoverDocumentsResult(w http.ResponseWriter, r *http.Request) {
+	h.documentsResult(w, r, true)
+}
+func (h *Handler) documentsResult(w http.ResponseWriter, r *http.Request, recover bool) {
 	var in struct {
 		HQ      string `json:"hq"`
 		Attempt string `json:"attempt"`
@@ -102,6 +120,10 @@ func (h *Handler) OpenDocumentsDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	v, err := h.service.OpenDocumentsDraft(r.Context(), owner, r.PathValue("workspaceID"), in.HQ, in.Attempt, in.Request)
+	result := h.service.OpenDocumentsDraft
+	if recover {
+		result = h.service.RecoverDocumentsResult
+	}
+	v, err := result(r.Context(), owner, r.PathValue("workspaceID"), in.HQ, in.Attempt, in.Request)
 	draftResult(w, v, err)
 }

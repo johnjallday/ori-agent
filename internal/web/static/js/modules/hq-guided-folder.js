@@ -12,7 +12,10 @@ export async function folderReceipt(hint, read) {
   const raw = (
     await read(`/api/personal-assistant/folder-agent/${encodeURIComponent(current.workspace)}`)
   )?.folder_agent;
-  if (raw?.workspace_id !== current.workspace || !currentHQAttempt(hint.hq, 'folder', hint.attempt))
+  if (
+    raw?.workspace_id !== current.workspace ||
+    currentHQAttempt(hint.hq, 'folder', hint.attempt)?.workspace !== current.workspace
+  )
     return null;
   const name = raw.folder_name || 'the approved folder';
   const link = /^\/workspaces\/[a-z\d_-]+$/i.test(raw.route)
@@ -24,7 +27,11 @@ export async function folderReceipt(hint, read) {
       ...link
     };
   if (raw.state === 'looking')
-    return { text: `An agent is exploring ${name}. The report is not ready yet.`, ...link };
+    return {
+      text: `An agent is exploring ${name}. The report is not ready yet.`,
+      checkAgain: true,
+      ...link
+    };
   if (['reported', 'kept', 'set_up'].includes(raw.state)) {
     // This optional read must not replace the ordinary receipt on failure.
     const query = new URLSearchParams({ hq: hint.hq, attempt: hint.attempt });
@@ -38,6 +45,17 @@ export async function folderReceipt(hint, read) {
     }
     if (currentHQAttempt(hint.hq, 'folder', hint.attempt)?.workspace !== current.workspace)
       return null;
+    if (offer?.decision) {
+      const d = offer.decision;
+      const text = {
+        dismissed: `The first look at ${name} is ready.`,
+        saved: `Saved ${d.name} note.`,
+        pending: 'The note was written, but its save confirmation is incomplete.',
+        unverified:
+          'The earlier note could not be verified. It may have been edited, removed, or saved in a different notebook.'
+      }[d.state];
+      if (text) return { text, offer, ...link };
+    }
     if (offer?.notes_only)
       return { text: 'Your read-only Notes connection is unchanged.', offer, ...link };
     if (!offer?.projects?.length && offer?.vaults?.length) {

@@ -1342,6 +1342,8 @@ func registerPersonalAssistantRoutes(mux *http.ServeMux, s *Server) {
 			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/documents-draft/vault", s.Handlers.FolderAgent.ChooseDocumentsVault)
 			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/documents-draft/review", s.Handlers.FolderAgent.ReviewDocumentsDraft)
 			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/documents-draft/save", s.Handlers.FolderAgent.SaveDocumentsDraft)
+			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/documents-draft/dismiss", s.Handlers.FolderAgent.DismissDocuments)
+			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/documents-draft/recover", s.Handlers.FolderAgent.RecoverDocumentsResult)
 			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/documents-draft/open", s.Handlers.FolderAgent.OpenDocumentsDraft)
 			mux.HandleFunc("GET "+folderAgent+"/{workspaceID}/documents-offer", s.Handlers.FolderAgent.DocumentsOffer)
 			mux.HandleFunc("POST "+folderAgent+"/{workspaceID}/keep", s.Handlers.FolderAgent.Keep)

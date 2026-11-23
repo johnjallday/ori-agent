@@ -119,6 +119,15 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
   const rel = 'Projects/Thesis/README.md';
   const destination = join(root, 'My Notes', rel);
   await expect(lstat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
+  if (mode === 'writable') {
+    await receipt.getByRole('button', { name: 'Not now' }).click();
+    await expect(receipt.getByText('Review project choices')).toBeVisible();
+    await page.reload();
+    await expect(receipt).not.toContainText('Start a project note?');
+    await expect(receipt.getByRole('button', { name: 'Draft Thesis note' })).toBeHidden();
+    await page.screenshot({ path: info.outputPath('documents-dismissed.png') });
+    await receipt.getByText('Review project choices').click();
+  }
   await receipt.getByRole('button', { name: 'Draft Thesis note' }).click();
   const dialog = page.locator('[data-documents-review]');
   const answer = 'Send the methods chapter to my advisor';
@@ -147,8 +156,23 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
   expect(body).toContain('Source: Documents/Thesis');
   await page.screenshot({ path: info.outputPath('documents-review.png') });
   const sent = page.waitForRequest(r => r.url().endsWith('/documents-draft/save'));
+  if (mode === 'writable')
+    await page.route(
+      '**/documents-draft/save',
+      async route => {
+        const saved = await route.fetch();
+        expect(saved.ok()).toBeTruthy();
+        await route.abort('failed');
+      },
+      { times: 1 }
+    );
   await dialog.getByRole('button', { name: 'Save to My Notes' }).click();
-  await dialog.getByRole('button', { name: 'Open Thesis note' }).click();
+  if (mode === 'writable') {
+    await expect(dialog.getByRole('link', { name: 'Open Notes' })).toBeVisible();
+    await page.reload();
+    await expect(receipt.getByRole('button', { name: 'Draft Thesis note' })).toHaveCount(0);
+    await receipt.getByRole('button', { name: 'Open Thesis note' }).click();
+  } else await dialog.getByRole('button', { name: 'Open Thesis note' }).click();
   await expect(dialog.locator('pre')).toHaveText(body!);
   await page.screenshot({ path: info.outputPath('documents-open.png') });
   expect(await readFile(destination, 'utf8')).toMatch(/ori: documents_project/);
@@ -159,4 +183,17 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
   const after = await lstat(join(docs, 'Thesis', 'main.tex'));
   expect([after.mode, after.mtimeMs]).toEqual([original!.mode, original!.mtimeMs]);
   expect(await readFile(join(docs, 'Thesis', 'main.tex'), 'utf8')).toBe('fixture manuscript\n');
+  if (mode === 'writable') {
+    const { second_brain: state } = await (
+      await request.get('/api/personal-assistant/second-brain')
+    ).json();
+    await post('/api/personal-assistant/second-brain/disconnect', {
+      if_version: state.version,
+      request_id: 'test-disconnect'
+    });
+    await page.reload();
+    await expect(receipt).toContainText('could not be verified');
+    await expect(receipt.getByRole('button', { name: 'Open Thesis note' })).toHaveCount(0);
+    await page.screenshot({ path: info.outputPath('documents-disconnected.png') });
+  }
 });

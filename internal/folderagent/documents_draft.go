@@ -230,6 +230,15 @@ func (s *Service) DocumentsDraft(ctx context.Context, owner, id string, in Docum
 }
 
 func (s *Service) OpenDocumentsDraft(ctx context.Context, owner, id, hq, attempt, request string) (DocumentsDraftView, error) {
+	return s.readDocumentsResult(ctx, owner, id, hq, attempt, request, false)
+}
+
+// RecoverDocumentsResult only completes the receipt of a proven publication;
+// it never publishes, opens the note for display, or needs the draft body.
+func (s *Service) RecoverDocumentsResult(ctx context.Context, owner, id, hq, attempt, request string) (DocumentsDraftView, error) {
+	return s.readDocumentsResult(ctx, owner, id, hq, attempt, request, true)
+}
+func (s *Service) readDocumentsResult(ctx context.Context, owner, id, hq, attempt, request string, recoverReceipt bool) (DocumentsDraftView, error) {
 	var out DocumentsDraftView
 	if s.deps.DocumentsNotebook == nil {
 		return out, ErrUnavailable
@@ -240,7 +249,7 @@ func (s *Service) OpenDocumentsDraft(ctx context.Context, owner, id, hq, attempt
 			return err
 		}
 		for _, d := range rec.DocumentsDecisions {
-			if d.RequestID != request || d.State != "saved" || d.Generation != generation {
+			if d.RequestID != request || !(d.State == "saved" || (recoverReceipt && d.State == "pending")) || d.Generation != generation {
 				continue
 			}
 			w, err := secondbrain.NewWriter(&source)
@@ -250,6 +259,23 @@ func (s *Service) OpenDocumentsDraft(ctx context.Context, owner, id, hq, attempt
 			body, err := w.ProvenProject(d.Name, d.Directory, d.Operation, d.BodyHash)
 			if err != nil {
 				return documentsConflict("The note is missing or has been edited. Nothing was changed.")
+			}
+			if recoverReceipt {
+				body = ""
+				if d.State == "pending" {
+					_, err = s.deps.Store.Update(id, func(r *Record) error {
+						for i, stored := range r.DocumentsDecisions {
+							if stored == d {
+								r.DocumentsDecisions[i].State = "saved"
+								return nil
+							}
+						}
+						return ErrWrongState
+					})
+					if err != nil {
+						return err
+					}
+				}
 			}
 			out = DocumentsDraftView{Name: d.Name, Rel: d.Rel, Notebook: source.Name, Body: body, Saved: true}
 			return nil

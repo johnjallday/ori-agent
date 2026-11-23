@@ -3,7 +3,7 @@ import { receiptHint } from './hq-guided-attempt.js';
 // One explicit, assistant-owned review. The answer lives only in this dialog;
 // neither the tab return hint nor a URL holds draft text. A failed save keeps
 // exactly the confirmation the user reviewed, including its request id.
-export function openDocumentsDraft({ hint, offer, project, trigger }) {
+export function openDocumentsDraft({ hint, offer, project, trigger, result, onClose }) {
   if (document.querySelector('dialog[data-documents-review]')) return;
   const dialog = document.createElement('dialog');
   dialog.dataset.documentsReview = '';
@@ -30,7 +30,7 @@ export function openDocumentsDraft({ hint, offer, project, trigger }) {
     review,
     busy = false;
   const name = node('input');
-  name.value = project.name;
+  name.value = project?.name || '';
   name.maxLength = 100;
   const answer = node('textarea');
   answer.maxLength = 500;
@@ -40,6 +40,7 @@ export function openDocumentsDraft({ hint, offer, project, trigger }) {
     dialog.remove();
     window.removeEventListener('pagehide', close);
     if (trigger?.isConnected) trigger.focus();
+    if (receiptHint(window.location, hint.hq)?.attempt === hint.attempt) void onClose?.();
   };
   dialog.addEventListener('close', cleanup, { once: true });
   window.addEventListener('pagehide', close, { once: true });
@@ -163,24 +164,30 @@ export function openDocumentsDraft({ hint, offer, project, trigger }) {
       title.textContent = 'Project note saved';
       content.replaceChildren(node('p', `${saved.notebook}/${saved.rel}`));
       actions.replaceChildren();
-      button(`Open ${saved.name} note`, async () => {
-        const actual = await send('open', {
-          hq: hint.hq,
-          attempt: hint.attempt,
-          request_id: confirmed.request_id
-        });
-        title.textContent = actual.name;
-        content.replaceChildren(
-          node('p', `${actual.notebook}/${actual.rel}`),
-          node('pre', actual.body)
-        );
-        actions.replaceChildren();
-        button('Close', close).focus();
-      }).focus();
+      button(`Open ${saved.name} note`, () => openResult(confirmed.request_id)).focus();
       button('Close', close);
     }).focus();
     button('Cancel', close);
   };
+  const openResult = async id => {
+    const actual = await send('open', { hq: hint.hq, attempt: hint.attempt, request_id: id });
+    title.textContent = actual.name;
+    content.replaceChildren(
+      node('p', `${actual.notebook}/${actual.rel}`),
+      node('pre', actual.body)
+    );
+    actions.replaceChildren();
+    button('Close', close).focus();
+  };
   dialog.showModal();
-  edit();
+  if (result) {
+    title.textContent = 'Checking saved note';
+    button('Close', close);
+    void openResult(result.request_id).catch(err => {
+      if (current()) {
+        title.textContent = 'Cannot open this note';
+        message.textContent = err.message;
+      }
+    });
+  } else edit();
 }

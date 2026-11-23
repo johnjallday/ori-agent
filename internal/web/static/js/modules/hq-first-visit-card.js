@@ -132,6 +132,7 @@ export class HQFirstVisitCard {
     const hint = receiptHint(window.location, this.owner.workspaceId());
     if (!hint) {
       this.checkedAttempt = null;
+      this.returnRead = null;
       if (this.receipt) {
         this.receipt = null;
         if (this.owner.active) this.owner.render();
@@ -174,12 +175,27 @@ export class HQFirstVisitCard {
       this.receipt.offer.writable || this.receipt.offer.setup
         ? `<button type="button" class="ws-cmd-nav-btn" data-documents-draft="${escape(p.ref)}">Draft ${escape(p.name)} note</button>`
         : '';
-    const evidence = projects
+    const decision = this.receipt?.offer?.decision;
+    const action = (id, label) =>
+      `<button type="button" class="ws-cmd-nav-btn" data-documents-action="${id}">${escape(label)}</button>`;
+    let evidence = projects
       .map(
         (p, i) =>
           `${i === 0 ? draft(p) : ''}<details><summary>Review ${escape(p.location)}</summary><p>The folder report found ${escape(p.evidence)} here. No file text was used.</p>${i > 0 ? draft(p) : ''}</details>`
       )
       .join('');
+    if (decision?.state === 'dismissed')
+      evidence = `<details><summary>Review project choices</summary>${evidence}</details>`;
+    else if (decision)
+      evidence =
+        decision.state === 'saved'
+          ? action('open', `Open ${decision.name} note`)
+          : decision.state === 'pending'
+            ? action('recover', 'Check save confirmation')
+            : '';
+    else if (projects.length && (this.receipt.offer.writable || this.receipt.offer.setup))
+      evidence += action('dismiss', 'Not now');
+    if (this.receipt?.checkAgain) evidence += action('check', 'Check again');
     const vaults = (this.receipt?.offer?.vaults || [])
       .map(
         v =>
@@ -187,7 +203,9 @@ export class HQFirstVisitCard {
       )
       .join('');
     const notes =
-      this.receipt?.offer && !this.receipt.offer.writable && !this.receipt.offer.setup
+      this.receipt?.offer &&
+      (decision?.state === 'unverified' ||
+        (!this.receipt.offer.writable && !this.receipt.offer.setup))
         ? '<a href="/my-notes">Open Notes</a> '
         : '';
     return this.receipt
@@ -313,6 +331,58 @@ export class HQFirstVisitCard {
 
   bind() {
     void this.loadReturn();
+    const refresh = () => {
+      this.checkedAttempt = null;
+      return this.loadReturn();
+    };
+    for (const b of this.owner.container?.querySelectorAll?.('[data-documents-action]') || []) {
+      b.onclick = async () => {
+        const hint = receiptHint(window.location, this.owner.workspaceId());
+        if (!hint?.workspace || !this.available()) return;
+        const offer = this.receipt?.offer;
+        const action = b.dataset.documentsAction;
+        if (action === 'check') {
+          await refresh();
+          return;
+        }
+        if (action === 'open') {
+          await window.PersonalAssistantSecondBrain?.openDocumentsDraft?.({
+            hint,
+            offer,
+            trigger: b,
+            result: offer.decision,
+            onClose: refresh
+          });
+          return;
+        }
+        const payload =
+          action === 'dismiss'
+            ? { report: offer.report, candidate: offer.projects[0].ref }
+            : { request_id: offer.decision.request_id };
+        try {
+          const r = await fetch(
+            `/api/personal-assistant/folder-agent/${encodeURIComponent(hint.workspace)}/documents-draft/${action}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ hq: hint.hq, attempt: hint.attempt, ...payload })
+            }
+          );
+          if (!r.ok) throw Error();
+        } catch (_) {
+          if (receiptHint(window.location, this.owner.workspaceId())?.attempt !== hint.attempt)
+            return;
+          this.receipt = {
+            ...this.receipt,
+            checkAgain: true,
+            text: 'That decision could not be confirmed. Check again.'
+          };
+          this.owner.render();
+          return;
+        }
+        await refresh();
+      };
+    }
     for (const button of this.owner.container?.querySelectorAll?.('[data-documents-draft]') || []) {
       button.onclick = () => {
         const hint = receiptHint(window.location, this.owner.workspaceId());
@@ -323,7 +393,8 @@ export class HQFirstVisitCard {
           hint,
           offer,
           project,
-          trigger: button
+          trigger: button,
+          onClose: refresh
         });
       };
     }
@@ -358,6 +429,8 @@ export class HQFirstVisitCard {
           });
           window.PersonalAssistantPanel?.open?.();
         } catch (_) {
+          if (receiptHint(window.location, this.owner.workspaceId())?.attempt !== hint.attempt)
+            return;
           this.receipt = {
             ...this.receipt,
             text: 'The vault could not be verified. Open Notes to check your connection.'
