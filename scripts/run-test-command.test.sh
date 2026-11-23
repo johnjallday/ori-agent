@@ -81,6 +81,105 @@ for candidate in "${remaining[@]}"; do
 	}
 done
 
+# Two checkout-shaped working directories, one cache. The writer exits while
+# the reader is between two reads of the same seed. The fake Go cleaner lets
+# this reproduce the old failure without ever clearing an actual build cache.
+test_shared_cache() (
+	local overlap="$fixture_root/overlap" reader_pid="" writer_pid="" status=0
+	mkdir -p "$overlap/reader" "$overlap/writer" "$overlap/bin" "$overlap/build-cache" \
+		"$overlap/temp/ori-test-old" "$overlap/temp/ori-test-recent"
+	trap 'touch "$overlap/release"; [[ -z "$writer_pid" ]] || wait "$writer_pid" || true;
+		[[ -z "$reader_pid" ]] || wait "$reader_pid" || true' EXIT
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+
+	export TMPDIR="$overlap/temp" GOCACHE="$overlap/build-cache" FIXTURE_CACHE="$overlap/build-cache"
+	export ORI_GO_BIN="$overlap/bin/go" CACHE_OPERATIONS="$overlap/cache-operations"
+	export ORI_KEEP_TEST_SANDBOX=0 ORI_SKIP_CACHE_PRUNE=0 ORI_GO_CACHE_MAX_KIB=1 ORI_STALE_ARTIFACT_HOURS=24
+	export PATH="$overlap/bin:$PATH"
+	touch -t 202001010000 "$TMPDIR/ori-test-old"
+	printf 'cache seed\n%8192s\n' '' > "$GOCACHE/seed"
+
+	cat > "$ORI_GO_BIN" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'go %s\n' "$*" >> "$CACHE_OPERATIONS"
+if [[ $# != 2 || "$1" != clean || "$2" != -cache || "${GOCACHE:-}" != "$FIXTURE_CACHE" || -L "$GOCACHE" ]]; then
+	printf 'Refusing unexpected fake Go call or cache path\n' >&2
+	exit 2
+fi
+rm -f -- "$GOCACHE/seed"
+SH
+	cat > "$overlap/bin/du" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'du %s\n' "$*" >> "$CACHE_OPERATIONS"
+[[ $# == 2 && "$1" == -sk && "$2" == "$FIXTURE_CACHE" && ! -L "$2" ]] || exit 2
+exec /usr/bin/du "$@"
+SH
+	chmod +x "$ORI_GO_BIN" "$overlap/bin/du"
+
+	(
+		cd "$overlap/reader"
+		exec "$runner" bash -c '
+			set -euo pipefail
+			IFS= read -r seed < "$GOCACHE/seed"
+			[[ "$seed" == "cache seed" ]]
+			: > "$1/ready"
+			deadline=$((SECONDS + 15))
+			until [[ -f "$1/release" ]]; do
+				if ((SECONDS >= deadline)); then
+					printf "Timed out waiting to release the cache reader.\n" >&2
+					exit 2
+				fi
+				sleep 0.05
+			done
+			if [[ ! -r "$GOCACHE/seed" ]]; then
+				printf "Shared cache seed disappeared after peer wrapper exited.\n" >&2
+				exit 23
+			fi
+			IFS= read -r seed < "$GOCACHE/seed"
+			[[ "$seed" == "cache seed" ]]
+		' bash "$overlap"
+	) &
+	reader_pid=$!
+	local deadline=$((SECONDS + 15))
+	until [[ -f "$overlap/ready" ]]; do
+		if ((SECONDS >= deadline)) || ! kill -0 "$reader_pid" 2>/dev/null; then
+			printf 'Cache reader failed to signal readiness.\n' >&2
+			exit 1
+		fi
+		sleep 0.05
+	done
+	(cd "$overlap/writer" && exec "$runner" /bin/sh -c ':') &
+	writer_pid=$!
+	wait "$writer_pid"
+	writer_pid=""
+	: > "$overlap/release"
+	wait "$reader_pid" || status=$?
+	reader_pid=""
+	[[ "$status" == 0 ]] || exit "$status"
+	[[ -f "$GOCACHE/seed" ]]
+	[[ ! -e "$TMPDIR/ori-test-old" && -d "$TMPDIR/ori-test-recent" ]]
+
+	mkdir "$TMPDIR/ori-test-failed-run"
+	touch -t 202001010000 "$TMPDIR/ori-test-failed-run"
+	status=0
+	"$runner" /bin/sh -c 'exit 17' || status=$?
+	[[ "$status" == 17 && -f "$GOCACHE/seed" && ! -e "$TMPDIR/ori-test-failed-run" ]]
+
+	mkdir "$TMPDIR/ori-test-opt-out"
+	touch -t 202001010000 "$TMPDIR/ori-test-opt-out"
+	ORI_SKIP_CACHE_PRUNE=1 "$runner" /bin/sh -c ':'
+	[[ -d "$TMPDIR/ori-test-opt-out" && -f "$GOCACHE/seed" ]]
+	if [[ -e "$CACHE_OPERATIONS" ]]; then
+		printf 'Test wrapper unexpectedly accessed Go cache tooling:\n' >&2
+		cat "$CACHE_OPERATIONS" >&2
+		exit 1
+	fi
+)
+test_shared_cache
+
 # The wrapper nests TMPDIR under its own per-run directory
 # (ori-test-run.N/tmp), which can push a Unix-domain socket fixture
 # past macOS's short sockaddr_un.sun_path limit. Reproduce a deliberately
