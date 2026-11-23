@@ -30,6 +30,7 @@ type workspaceCreationOperation struct {
 	ID             string `json:"id"`
 	State          string `json:"state"`
 	Digest         string `json:"review_digest"`
+	BuildBacked    bool   `json:"build_backed,omitempty"`
 	SourceDigest   string `json:"-"`
 	WorkspaceID    string `json:"-"` // reserved identity is not creation proof
 	Owner          string `json:"-"`
@@ -37,6 +38,7 @@ type workspaceCreationOperation struct {
 	ResponseStatus int    `json:"-"`
 	Response       string `json:"-"`
 	claimed        bool
+	deferFirstGoal bool
 }
 
 type creationOperationContextKey struct{}
@@ -409,6 +411,14 @@ func (h *Handler) finishWorkspaceCreationOperation(ctx context.Context, op *work
 
 func (h *Handler) respondWorkspaceCreationOperation(w http.ResponseWriter, r *http.Request, op *workspaceCreationOperation, confirm bool) {
 	view := *op
+	// The presentation may distinguish an assisted result after a reload,
+	// without exposing its draft, sources or profile configuration.
+	var source struct {
+		BuildReviewVersion int64 `json:"build_review_version"`
+	}
+	if json.Unmarshal([]byte(op.Request), &source) == nil {
+		view.BuildBacked = source.BuildReviewVersion > 0
+	}
 	var result map[string]any
 	if op.State == "complete" && !h.provesWorkspaceCreationOperation(r.Context(), op, []byte(op.Response)) {
 		view.State = "reconciliation_required"

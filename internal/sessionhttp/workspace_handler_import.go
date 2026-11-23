@@ -420,7 +420,7 @@ func (h *Handler) handleWorkspaceImport(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	h.applyCreateWorkspaceGoal(workspace.ID, req.importGoal())
+	h.applyCreateWorkspaceGoal(workspace.ID, req.importGoal(), true)
 
 	// A supplied entry agent owns any tasks the imported folder carried that were
 	// created before a coordinator existed. No-op when none was supplied/resolved.

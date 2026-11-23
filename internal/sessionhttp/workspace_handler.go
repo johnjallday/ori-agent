@@ -370,7 +370,7 @@ type createWorkspaceRequest struct {
 	// the workspace exists the session is marked created and its summary is
 	// recorded on the workspace.
 	BuildSessionID string `json:"build_session_id,omitempty"`
-	// BuildReviewVersion binds an attached ordinary source to the current
+	// BuildReviewVersion binds an ordinary assisted draft and any source to the current
 	// canonical draft. Recognized setup and File Janitor use their own claims.
 	BuildReviewVersion int64 `json:"build_review_version,omitempty"`
 	// Mission is the workspace goal typed in the create modal. When present,
@@ -1083,7 +1083,8 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		seededStarterTasks = h.seedTemplateStarterTasksLogged(ws.ID, starterTemplate)
 	}
-	h.applyCreateWorkspaceGoal(ws.ID, createWorkspaceGoal(req, kind, resolvedTemplate, templateResolved))
+	op := creationOperationFrom(r.Context())
+	h.applyCreateWorkspaceGoal(ws.ID, createWorkspaceGoal(req, kind, resolvedTemplate, templateResolved), op == nil || !op.deferFirstGoal)
 
 	// Must run after starter-task seeding above — see
 	// persistCreateWorkspaceTemplateProvenance's doc comment for why.

@@ -141,6 +141,54 @@ func TestWorkspaceCreationBuild_ChangedExpiredBusyOrRecognizedSourcesRefuseBefor
 	}
 }
 
+func TestWorkspaceCreationOperation_OrdinaryBuildEditRequiresANewReview(t *testing.T) {
+	h, _, _, cleanup := templateTestEnv(t)
+	t.Cleanup(cleanup)
+	f := newBuildFixtureOn(t, h, false)
+	build := f.start(t)
+	saveName := func(name string) {
+		t.Helper()
+		status, body := f.do(t, http.MethodPatch, "/api/workspaces/build-sessions/"+build.ID+"/draft", patchBuildDraftRequest{
+			Version: build.Version,
+			Draft:   personalassistant.BuildDraft{Name: name, Blank: true},
+		})
+		if status != http.StatusOK {
+			t.Fatalf("edit draft %d: %v", status, body)
+		}
+		build = sessionOf(t, body)
+	}
+	material := func() map[string]any {
+		return map[string]any{"name": build.Draft.Name, "mission": "Plan a weekly newsletter", "blank": true, "create_template_agents": false,
+			"build_session_id": build.ID, "build_review_version": build.Version}
+	}
+	saveName("Draft desk")
+	oldID, oldDigest := reviewCreationOperation(t, h, material())
+	saveName("Reviewed desk")
+	stale, _ := creationOperationRequest(t, h, http.MethodPost, "/"+oldID+"/confirm", map[string]any{"review_digest": oldDigest})
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("stale confirmation %d: %s", stale.Code, stale.Body)
+	}
+	id, digest := reviewCreationOperation(t, h, material())
+	before, err := h.store.ListWorkspaces(t.Context())
+	if err != nil || len(before) != 0 || f.provider.calls != 0 {
+		t.Fatalf("editing, reviewing or refusing produced effects: %+v %v", before, err)
+	}
+	confirm, body := creationOperationRequest(t, h, http.MethodPost, "/"+id+"/confirm", map[string]any{"review_digest": digest})
+	if confirm.Code != http.StatusCreated || body["folder"].(map[string]any)["name"] != "Reviewed desk" {
+		t.Fatalf("exact confirm %d: %s", confirm.Code, confirm.Body)
+	}
+	assertCreationOperationState(t, h, id, "complete")
+	workspaceID := body["folder"].(map[string]any)["id"].(string)
+	ws, err := h.workspaceStore.Get(workspaceID)
+	if err != nil || ws.Mission != "Plan a weekly newsletter" || ws.GoalFirstRunPending || ws.MissionExecutionCount != 0 {
+		t.Fatalf("assisted creation must keep the goal unarmed: %+v %v", ws, err)
+	}
+	after, err := h.store.ListWorkspaces(t.Context())
+	if err != nil || len(after) != 1 || f.provider.calls != 0 {
+		t.Fatalf("unexpected creation effects: %+v %v", after, err)
+	}
+}
+
 func TestWorkspaceCreationBuild_TwoOperationsAndLegacyCreateCannotClaimOneBuildTwice(t *testing.T) {
 	f, material, _ := attachedCreationFixture(t, false)
 	first, digest := reviewCreationOperation(t, f.handler, material)

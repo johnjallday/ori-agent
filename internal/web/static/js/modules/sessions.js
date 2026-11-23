@@ -862,7 +862,7 @@ const sessionManager = {
       delete addFolderModal.dataset.pendingParentLocked;
       // Build with your assistant is decided per open, after the form above
       // is reset; an ineligible open leaves the manual wizard untouched.
-      void this.maybeStartWorkspaceBuild(this.workspaceCreatorContext);
+      void this.openWorkspaceCreatorBuild(this.workspaceCreatorContext);
     });
 
     // A dismissed creator must not leave a fixed selected-member Group or a
@@ -4806,6 +4806,20 @@ const sessionManager = {
     );
   },
 
+  ordinaryCreationDestination(context = this.workspaceCreatorContext) {
+    const parent = document.getElementById('folderParentSelect');
+    const id = this.lockedParentId() || parent?.value || '';
+    const name = id
+      ? String(
+          this.findFolderById(id, this.folders || [])?.name ||
+            parent?.selectedOptions?.[0]?.textContent ||
+            context?.parentName ||
+            ''
+        ).trim()
+      : '';
+    return { id, name };
+  },
+
   async syncOrdinaryCreationReview(view = this.teamView()) {
     const context = this.workspaceCreatorContext;
     const host = document.getElementById('workspaceCreationReviewPanel');
@@ -4895,12 +4909,18 @@ const sessionManager = {
       const group = this.isGroupCreator();
       const goal =
         document.getElementById(group ? 'folderDescriptionInput' : 'folderGoalInput')?.value || '';
-      const parent = document.getElementById('folderParentSelect');
-      const parentID = this.lockedParentId() || parent?.value || '';
-      const parentName = parentID
-        ? String(parent?.selectedOptions?.[0]?.textContent || context.parentName || parentID)
-        : '';
+      const { id: parentID, name: parent } = this.ordinaryCreationDestination(context);
+      const parentName = parent || parentID;
+      if (!review.accepted && !review.result)
+        review.buildDraft = Boolean(
+          this.workspaceBuild?.session &&
+          !this.workspaceBuild.resumeLine &&
+          this.ordinaryBuildPreviewEligible()
+        );
       const roleRows = window.WorkspaceRoleRoster?.rowsFrom(current?.roleRoster) || [];
+      const teamEffects = review.buildDraft
+        ? window.CreateWorkspaceTeamDraft?.creationTeamEffects?.(current)
+        : null;
       const material = this.ordinaryCreationMaterialReview();
       const identityProblem = review.accepted ? '' : this.workspaceIdentityProblem();
       const blocked =
@@ -4918,9 +4938,16 @@ const sessionManager = {
         material.later = grouped.later;
       }
       const mapAvailable = this.ordinaryCreationMapAvailable() && (!grouped || grouped.reviewed);
+      const definiteRefusal =
+        review.owner === 'ordinary' && ['refused', 'abandoned'].includes(review.observedState);
       review.panel.update({
         ownerKind: 'ordinary',
         subjectKind: group ? 'group' : 'workspace',
+        buildDraft: review.buildDraft,
+        title: review.buildDraft && name.trim() ? `Review ${name.trim()}` : '',
+        note: review.buildDraft
+          ? 'Confirm to create one workspace with the team and destination shown below.'
+          : '',
         name,
         goal,
         destination: grouped
@@ -4935,15 +4962,19 @@ const sessionManager = {
         nameMaxLength: document.getElementById('folderNameInput')?.maxLength,
         goalMaxLength: document.getElementById(group ? 'folderDescriptionInput' : 'folderGoalInput')
           ?.maxLength,
-        rows: [...ui.creationTeamReviewRows(current || {}, roleRows), ...material.rows],
+        rows: [
+          ...ui.creationTeamReviewRows(current || {}, roleRows, teamEffects),
+          ...material.rows
+        ],
         facts: [
           { label: 'Blueprint', value: material.blueprint },
           {
             label: 'Purpose',
-            value:
-              document.getElementById('folderDescriptionInput')?.value ||
-              goal ||
-              'A workspace you can shape later.'
+            value: review.buildDraft
+              ? this.ordinaryDraftPurpose() || 'Undecided'
+              : document.getElementById('folderDescriptionInput')?.value ||
+                goal ||
+                'A workspace you can shape later.'
           },
           ...(current?.roleSummary ? [{ label: 'Team', value: current.roleSummary }] : []),
           ...material.facts,
@@ -4960,12 +4991,24 @@ const sessionManager = {
         busy: this.isCreatingFolder || review.reading || review.actionInFlight,
         accepted: review.accepted,
         result: review.result,
+        resultTitle: review.result
+          ? review.buildDraft
+            ? `${review.result.name} created`
+            : ''
+          : review.owner === 'ordinary' && review.accepted
+            ? review.api.creationRecoveryTitle?.(review.observedState)
+            : '',
+        openLabel: review.result && review.buildDraft ? `Open ${review.result.name}` : '',
+        definiteRefusal,
         resultParentName: review.result?.parent_id
           ? this.findFolderById(review.result.parent_id, this.folders || [])?.name || ''
           : '',
         nextSetup: this.ordinaryCreationSetupHint(review.result, review.setupObservation),
         positionFailed: review.positionFailed,
-        canAbandonReview: ['reviewed', 'refused', 'abandoned'].includes(review.observedState),
+        canAbandonReview:
+          definiteRefusal ||
+          (!review.buildDraft &&
+            ['reviewed', 'refused', 'abandoned'].includes(review.observedState)),
         mapHint: mapAvailable
           ? `On the map, click a valid position or press Enter to create this ${group ? 'Group' : 'workspace'}. Moving the preview does nothing. Escape returns here.`
           : grouped && !grouped.reviewed
@@ -5186,7 +5229,9 @@ const sessionManager = {
     const steps = Array.isArray(template?.setup_wizard?.steps) ? template.setup_wizard.steps : [];
     const later = steps.length
       ? `Setup remains separate: ${steps.map(step => step.title || step.id).join(' → ')}. No account or runtime access is granted here.`
-      : 'Add notes, files or work when you choose. Opening the workspace retains its existing goal and first-work flow.';
+      : this.workspaceBuild?.session && this.ordinaryBuildPreviewEligible()
+        ? 'Open the workspace to see what was saved. Start work or run its goal only when you choose.'
+        : 'Add notes, files or work when you choose. Opening the workspace retains its existing goal and first-work flow.';
     const tasks = Array.isArray(template?.starter_tasks) ? template.starter_tasks.length : 0;
     const now = [
       'Create one workspace with the reviewed team.',
@@ -5348,6 +5393,14 @@ const sessionManager = {
       review.operationKey = '';
       review.message =
         'The unaccepted review was released. Review current choices before confirming.';
+      if (review.buildDraft && !this.workspaceBuild) {
+        // A reload retained no editable form. Re-enter the ordinary owner so
+        // Resume restores the saved draft, rather than displaying an empty review.
+        this.wizardStep = 1;
+        this.refreshWizardChrome();
+        await this.maybeStartWorkspaceBuild(context);
+        return;
+      }
       this.syncWorkspaceCreatorPresentation();
       void this.syncOrdinaryCreationReview();
       return;
@@ -5482,20 +5535,35 @@ const sessionManager = {
       }
       const outcome = await review.api.observeCreationOperation(fetch, review.reference);
       if (this.workspaceCreatorContext !== context) return;
-      review.observedState = outcome.state;
+      if (
+        outcome.state !== 'uncertain' ||
+        !['accepted', 'reconciliation_required'].includes(review.observedState)
+      )
+        review.observedState = outcome.state;
+      review.buildDraft ||= outcome.operation?.build_backed === true;
       if (outcome.state === 'complete') {
         review.result = await this.observeOrdinaryCreationResource(context, outcome.result.folder);
         if (this.workspaceCreatorContext !== context) return;
+        review.positionFailed = Boolean(review.candidate && review.result);
         review.message = [
           'The original workspace is verified. Reading status did not create or start work.',
+          review.buildDraft ? 'Workspace creation does not verify operational readiness.' : '',
+          this.ordinaryCreationSeededTickets(outcome.result),
+          review.positionFailed
+            ? 'The original position was not saved. Retry position only if you still want that point.'
+            : '',
           review.resourceObservationWarning
         ]
           .filter(Boolean)
           .join(' ');
+      } else if (['refused', 'abandoned'].includes(outcome.state)) {
+        review.message =
+          outcome.message ||
+          'Nothing was accepted. Return to the draft and review current choices.';
       } else {
         review.message =
           outcome.message ||
-          'The original creation is not complete. Read status; do not create again. Closing is not undo.';
+          'The original creation is not verified. Read saved status; do not create again.';
       }
     } finally {
       review.reading = false;
@@ -5725,18 +5793,50 @@ const sessionManager = {
     };
   },
 
+  ordinaryCreationSeededTickets(result) {
+    const count = Number(result?.seeded_starter_tasks) || 0;
+    return count > 0
+      ? `${count} starter ${count === 1 ? 'ticket' : 'tickets'} saved for later.`
+      : '';
+  },
+
+  ordinaryCreatedWorkspaceFacts(resource) {
+    if (!resource?.id) return '';
+    const parent = resource.parent_id
+      ? this.findFolderById(resource.parent_id, this.folders || [])?.name
+      : '';
+    const roster = (Array.isArray(resource.agent_instances) ? resource.agent_instances : [])
+      .map(member => String(member?.name || '').trim())
+      .filter(Boolean);
+    const where = parent
+      ? `In group ${parent}.`
+      : resource.parent_id
+        ? 'In a saved group.'
+        : 'Standalone workspace.';
+    return `${where} ${roster.length ? `Assigned team: ${roster.join(', ')}.` : 'No agents attached.'}`;
+  },
+
   presentOrdinaryMapOutcome(context, placement, statusFocus) {
     const review = context.ordinaryReview;
     const kind = review.result?.kind === 'group' ? 'Group' : 'Workspace';
     return this.presentMapOutcome(placement, {
       tone: !review.result ? 'warning' : review.positionFailed ? 'warning' : 'success',
       title: review.result
-        ? `${kind} created · ${review.result.name || ''}`.trim()
-        : 'Creation delivery is uncertain',
-      detail: review.message,
+        ? review.buildDraft
+          ? `${review.result.name} created`
+          : `${kind} created · ${review.result.name || ''}`.trim()
+        : review.api?.creationRecoveryTitle?.(review.observedState) ||
+          'Creation delivery is uncertain',
+      detail: [
+        review.buildDraft && this.ordinaryCreatedWorkspaceFacts(review.result),
+        review.message
+      ]
+        .filter(Boolean)
+        .join(' '),
       canOpen: Boolean(review.result?.id),
+      openLabel: review.result && review.buildDraft ? `Open ${review.result.name}` : '',
       canRetry: Boolean(review.result?.id && review.positionFailed),
-      canRead: !review.result,
+      canRead: !review.result && !['refused', 'abandoned'].includes(review.observedState),
       act: async intent => {
         await this.actOnOrdinaryCreationReview(context, intent);
         // The read or retry updated the owner's own record; show what it now says.
@@ -5767,11 +5867,12 @@ const sessionManager = {
     );
     review.message = review.result
       ? [
-          `${review.result.kind === 'group' ? 'Group' : 'Workspace'} created. No run or scan was started by placement.`,
+          review.buildDraft
+            ? 'No ticket was started. Workspace creation does not verify operational readiness.'
+            : `${review.result.kind === 'group' ? 'Group' : 'Workspace'} created. No run or scan was started by placement.`,
           review.owner === 'grouped' ? this.groupedCreationResultLine(result, review.result) : '',
-          Number(result.seeded_starter_tasks) > 0
-            ? `${result.seeded_starter_tasks} starter tickets saved for later.`
-            : '',
+          this.ordinaryCreationSeededTickets(result),
+          review.buildDraft && placementResult?.saved ? 'Map position saved.' : '',
           typeof result.project_warning === 'string' ? result.project_warning : '',
           review.resourceObservationWarning,
           ...(Array.isArray(result.agent_warnings)
@@ -6257,7 +6358,7 @@ const sessionManager = {
   // owner's own; none of them repeats creation.
   presentMapOutcome(
     placement,
-    { tone, title, detail, act, showDetails, dismiss, canOpen, canRetry, canRead }
+    { tone, title, detail, act, showDetails, dismiss, canOpen, openLabel, canRetry, canRead }
   ) {
     const transition = window.OriCreationTransition;
     const handle = placement?.transition;
@@ -6272,7 +6373,8 @@ const sessionManager = {
     };
     this.creationMapOutcome = { handle, end };
     const actions = [];
-    if (canOpen) actions.push({ label: 'Open', primary: true, run: run({ action: 'open' }) });
+    if (canOpen)
+      actions.push({ label: openLabel || 'Open', primary: true, run: run({ action: 'open' }) });
     if (canRetry) actions.push({ label: 'Retry position', run: run({ action: 'retry-position' }) });
     if (canRead) actions.push({ label: 'Read saved status', run: run({ action: 'read-status' }) });
     actions.push({
@@ -6774,6 +6876,15 @@ const sessionManager = {
       );
       console.error('Failed to load template agent plan:', error);
       this.renderTemplateAgentPlanError('Could not load blueprint agents.');
+    } finally {
+      // A plan may settle after the assistant's turn and final draft sync.
+      // Project the Team owner's result, even while the wizard stays hidden.
+      if (
+        requestId === this.templateAgentPlanRequestId &&
+        this.workspaceBuildAssisted() &&
+        this.ordinaryBuildPreviewEligible()
+      )
+        this.syncOrdinaryBuildPreview(window.ProjectTemplateCard?.getSelectedTemplate?.());
     }
   },
 
@@ -11566,7 +11677,9 @@ const sessionManager = {
     }
     if (onFinalStep) this.refreshWorkspaceReview();
     const unifiedReview =
-      onFinalStep && (this.usesUnifiedOrdinaryReview() || this.usesManagedGroupTemplate());
+      onFinalStep &&
+      !(this.workspaceBuildAssisted() && this.ordinaryBuildPreviewEligible()) &&
+      (this.usesUnifiedOrdinaryReview() || this.usesManagedGroupTemplate());
     document
       .getElementById('addFolderModal')
       ?.classList?.toggle?.('workspace-create-modal--unified-review', unifiedReview);
@@ -14147,6 +14260,53 @@ const sessionManager = {
     };
   },
 
+  async openWorkspaceCreatorBuild(context) {
+    if (
+      context?.mode === 'ordinary' &&
+      !context.fixedKind &&
+      !context.folderOfferId &&
+      !context.onCreated &&
+      !context.postCreateAction
+    ) {
+      const api =
+        window.OriWorkspaceCreationOperation ||
+        (await import('/js/modules/workspace-creation-operation.js').catch(() => null));
+      if (this.workspaceCreatorContext !== context) return;
+      if (api) {
+        let reference, message;
+        try {
+          reference = api.savedCreationReference(window.localStorage);
+        } catch (error) {
+          message = error.message;
+        }
+        if (reference || message) {
+          const review = (context.ordinaryReview ||= { generation: context.generation });
+          Object.assign(review, {
+            owner: 'ordinary',
+            reference,
+            accepted: true,
+            restored: true,
+            message:
+              message || 'Checking the original confirmation. Nothing will be submitted again.'
+          });
+          this.wizardStep = this.wizardStepCount;
+          this.refreshWizardChrome();
+          await this.syncOrdinaryCreationReview();
+          if (this.workspaceCreatorContext !== context) return;
+          if (!review.observedState && reference) await this.readOrdinaryCreationStatus(context);
+          if (
+            this.workspaceCreatorContext === context &&
+            (document.activeElement === document.body ||
+              document.activeElement?.id === 'addFolderModal')
+          )
+            document.getElementById('workspaceCreationReviewTitle')?.focus();
+          return;
+        }
+      }
+    }
+    if (this.workspaceCreatorContext === context) await this.maybeStartWorkspaceBuild(context);
+  },
+
   // maybeStartWorkspaceBuild runs on every open. Build mode is offered only
   // from its openers, and only once the two reads it depends on answer: the
   // assistant's relationship and whether a model is reachable for it. Both are
@@ -14901,7 +15061,12 @@ const sessionManager = {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     if (!build || !pane) return;
-    pane.mount({ assistant: build.assistant, folders: build.folders, links: build.links });
+    pane.mount({
+      assistant: build.assistant,
+      folders: build.folders,
+      links: build.links,
+      ordinaryDraft: this.ordinaryBuildPreviewEligible()
+    });
     this.syncWorkspaceBuildPresentation();
   },
 
@@ -14956,6 +15121,7 @@ const sessionManager = {
       // A sentence heard in the Ask tab waits for the choice: Start over
       // builds from it, Resume keeps the build that was already open.
       build.pendingFirstMessage = message;
+      this.syncWorkspaceBuildPresentation();
       return;
     }
     // A new session joins the form, including edits made before it was opened.
@@ -15121,7 +15287,11 @@ const sessionManager = {
     const build = this.workspaceBuild;
     if (!build) return;
     build.busy = Boolean(busy);
-    this.workspaceBuildPane()?.setBusy(build.busy, { pendingText: build.busy ? pendingText : '' });
+    if (build.busy) build.turnFailed = false;
+    this.workspaceBuildPane()?.setBusy(build.busy, {
+      pendingText: build.busy ? pendingText : '',
+      draftStatus: this.ordinaryBuildPreviewEligible()
+    });
     this.refreshWizardChrome();
   },
 
@@ -15264,6 +15434,8 @@ const sessionManager = {
     pane.showLine(pane.COPY.modelFailure, {
       chips: [{ id: 'try_again', label: pane.COPY.tryAgain }]
     });
+    this.workspaceBuild.turnFailed = true;
+    this.syncWorkspaceBuildPresentation();
   },
 
   // failWorkspaceBuild ends build mode for this open when the assistant can no
@@ -15275,10 +15447,22 @@ const sessionManager = {
     this.collapseWorkspaceBuild({ withdraw: true });
   },
 
-  // applyWorkspaceBuildSession shows the session and does its work on the
-  // form. A resumed build restores the whole draft; an ordinary turn applies
-  // only the fields the turn reports it set.
+  // Restoring an existing draft is not a new choice or announcement.
   async applyWorkspaceBuildSession(session, options = {}) {
+    const build = this.workspaceBuild;
+    if (!build || !options.resume || !this.ordinaryBuildPreviewEligible())
+      return this.applyWorkspaceBuildSessionToForm(session, options);
+    build.restoringPreview = true;
+    try {
+      return await this.applyWorkspaceBuildSessionToForm(session, options);
+    } finally {
+      if (this.workspaceBuild === build) this.syncWorkspaceBuildPresentation();
+      build.restoringPreview = false;
+    }
+  },
+
+  // An ordinary turn applies only the fields the host reports it set.
+  async applyWorkspaceBuildSessionToForm(session, options) {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
     const api = window.WorkspaceCreatorState;
@@ -15418,6 +15602,15 @@ const sessionManager = {
       });
     }
     if (!current()) return;
+    if (resume && this.ordinaryBuildPreviewEligible()) {
+      const ownership = session.edited_fields || {};
+      for (const key of build.chosen?.keys() || []) {
+        const field = key === 'blueprint' ? 'blueprint_id' : key === 'parent' ? 'parent_id' : key;
+        if (ownership[field] || (ownership.team && key.startsWith('role:')))
+          this.clearWorkspaceBuildChosen(key);
+      }
+      if (ownership.team) build.chosenRoles?.clear();
+    }
     this.syncWorkspaceStaffingAdvice(session);
     this.advanceWorkspaceBuildWizard(session, { resume });
     // The session learns what applying the turn did to the form (the team
@@ -15426,7 +15619,13 @@ const sessionManager = {
     this.scheduleWorkspaceBuildDraft({ user: false });
     await this.flushWorkspaceBuildDraft({ force: true });
     if (!current()) return;
-    if (session.create_now && !resume && !session.folder && !options.proposal)
+    if (
+      session.create_now &&
+      session.turn_count !== 1 &&
+      !resume &&
+      !session.folder &&
+      !options.proposal
+    )
       await this.createFromWorkspaceBuild({ revision });
   },
 
@@ -15441,13 +15640,27 @@ const sessionManager = {
     pane.collapse({ withdraw });
     if (withdraw) build.withdrawn = true;
     this.refreshWizardChrome();
-    if (focus) document.getElementById(`wizardStep${this.wizardStep}Title`)?.focus();
+    if (focus) {
+      const heading =
+        this.isFinalWizardStep() && this.usesUnifiedOrdinaryReview()
+          ? document.getElementById('workspaceCreationReviewTitle') ||
+            document.getElementById('workspaceCreationReviewPanel')
+          : document.getElementById(`wizardStep${this.wizardStep}Title`);
+      heading?.focus();
+    }
   },
 
   async expandWorkspaceBuild() {
     const build = this.workspaceBuild;
     const pane = this.workspaceBuildPane();
-    if (!build || !pane || build.withdrawn || build.kindHidden) return;
+    if (
+      !build ||
+      !pane ||
+      build.withdrawn ||
+      build.kindHidden ||
+      this.workspaceCreatorContext?.ordinaryReview?.accepted
+    )
+      return;
     if (build.pausePromise) await build.pausePromise;
     if (this.workspaceBuild !== build) return;
     build.collapsed = false;
@@ -15460,8 +15673,8 @@ const sessionManager = {
       document.getElementById('workspaceBuildPlanReviewTitle')?.focus();
     } else document.getElementById('workspaceBuildComposerInput')?.focus();
     if (!build.session && !build.busy) await this.openWorkspaceBuildSession();
-    else if (!build.resumeLine) {
-      this.scheduleWorkspaceBuildDraft({ user: true });
+    else if (!build.resumeLine && !(build.draftError && this.ordinaryBuildPreviewEligible())) {
+      if (!this.ordinaryBuildPreviewEligible()) this.scheduleWorkspaceBuildDraft({ user: true });
       await this.flushWorkspaceBuildDraft();
       if (build.restaffPending) await this.sendWorkspaceBuildRestaff(build);
     }
@@ -16606,6 +16819,129 @@ const sessionManager = {
     }
   },
 
+  ordinaryBuildPreviewEligible(template = window.ProjectTemplateCard?.getSelectedTemplate?.()) {
+    const build = this.workspaceBuild;
+    const session = build?.session;
+    return Boolean(
+      build?.context?.mode === 'ordinary' &&
+      this.isWorkspaceCreator() &&
+      this.ordinaryBuildReviewEligible() &&
+      !session?.folder &&
+      !session?.link &&
+      !session?.needs_home &&
+      !session?.group_prerequisite &&
+      !this.groupRequirementDraft &&
+      !template?.group_requirement &&
+      !template?.assistant_program &&
+      !String(template?.id || '').startsWith('plugin:') &&
+      !this.currentTemplateFolderPath()
+    );
+  },
+
+  ordinaryBuildBlueprintDecided(template) {
+    const build = this.workspaceBuild;
+    return Boolean(
+      template?.id ||
+      (template?.blank &&
+        (build?.session?.draft?.blank ||
+          build?.chosen?.has('blueprint') ||
+          build?.editedFields?.has('blueprint_id')))
+    );
+  },
+
+  ordinaryDraftPurpose() {
+    const description = document.getElementById('folderDescriptionInput')?.value?.trim();
+    const goal = document.getElementById('folderGoalInput');
+    return description || (goal?.dataset?.goalEdited ? goal.value?.trim() : '') || '';
+  },
+
+  syncOrdinaryBuildPreview(template) {
+    const build = this.workspaceBuild;
+    const pane = this.workspaceBuildPane();
+    if (!pane?.ordinaryDraftView || !pane?.renderOrdinaryDraft) return;
+    const session = build.session;
+    const read = id => document.getElementById(id)?.value?.trim() || '';
+    const hasBlueprint = this.ordinaryBuildBlueprintDecided(template);
+    const team = hasBlueprint && !build.resumeLine ? this.teamView() : null;
+    const teamEffects = team ? window.CreateWorkspaceTeamDraft?.creationTeamEffects?.(team) : null;
+    const destination = this.ordinaryCreationDestination();
+    const edited = field =>
+      Boolean(build.editedFields?.has(field) || session?.edited_fields?.[field]);
+    const fields = build.resumeLine
+      ? {}
+      : {
+          name: read('folderNameInput'),
+          blueprint: hasBlueprint ? template.name || (template.blank ? 'Blank' : '') : '',
+          team: teamEffects?.lines.join('\n') || '',
+          destination: destination.id
+            ? `In group ${destination.name || 'selected on the form'}`
+            : hasBlueprint
+              ? 'Standalone workspace'
+              : '',
+          purpose: this.ordinaryDraftPurpose()
+        };
+    const stable = !build.busy && !this.workspaceBuildApplyDepth && !build.resumeLine;
+    const userEdits = Object.entries({
+      name: edited('name'),
+      blueprint: edited('blueprint_id'),
+      purpose: edited('description') || edited('goal'),
+      team: edited('team'),
+      destination: edited('parent_id')
+    })
+      .filter(([, value]) => value)
+      .map(([key]) => key);
+    const reason = this.ordinaryBuildBlueprintReason(template, fields, userEdits);
+    const saveState = build.draftError
+      ? build.draftConflict
+        ? 'Not saved. Review your edits and choose “Save my draft”.'
+        : 'Not saved. Your edits are kept here; choose “Try again”.'
+      : session && (fields.name || fields.blueprint || fields.purpose)
+        ? build.draftUser === true || build.draftSavingUser
+          ? 'Local edits · not saved yet'
+          : build.draftUser === false || build.draftInFlight || build.busy
+            ? ''
+            : 'Draft saved.'
+        : '';
+    const view = pane.ordinaryDraftView({
+      fields,
+      previous: stable && !build.restoringPreview ? build.previewFields : fields,
+      lastChange: build.previewChange,
+      userEdits,
+      reason,
+      saveState,
+      paused: Boolean(build.resumeLine),
+      waiting: build.busy,
+      failed: Boolean(
+        build.turnFailed ||
+        session?.pending_question?.choices?.some(choice => choice.id === 'try_again')
+      ),
+      asking: Boolean(session?.pending_question),
+      teamProblem: team?.blockingIssues?.[0]?.message || '',
+      reviewable: this.wizardStep === 4 && Boolean(team?.canContinueFromTeam)
+    });
+    if (stable) {
+      build.previewFields = fields;
+      build.previewChange = view.change;
+    }
+    pane.renderOrdinaryDraft(view);
+  },
+
+  ordinaryBuildBlueprintReason(template, fields, userEdits) {
+    const session = this.workspaceBuild?.session;
+    if (
+      !template?.id ||
+      !fields.blueprint ||
+      session?.draft?.template_id !== template.id ||
+      userEdits.includes('blueprint') ||
+      userEdits.includes('purpose')
+    )
+      return '';
+    const reasons = (session.why || []).filter(
+      why => why.section === 'blueprint' && why.blueprint_id === template.id && why.text?.trim()
+    );
+    return reasons.length === 1 ? reasons[0].text : '';
+  },
+
   syncWorkspaceBuildPresentation() {
     this.scheduleWorkspaceBuildPreparationReview();
     const assisted = this.workspaceBuildAssisted();
@@ -16638,9 +16974,25 @@ const sessionManager = {
       }
     }
     const groupLine = assisted ? this.workspaceBuildGroupLine() : '';
+    const recovering = this.workspaceCreatorContext?.ordinaryReview?.accepted;
+    modal?.classList?.toggle?.('workspace-create-modal--creation-outcome', Boolean(recovering));
+    const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
+    const preview = document.getElementById('workspaceBuildDraftPreview');
+    const ordinaryDraft = Boolean(
+      preview && assisted && this.ordinaryBuildPreviewEligible(template)
+    );
     const status = document.getElementById('workspaceBuildModeStatus');
     if (status) {
-      status.hidden = !this.workspaceBuild;
+      status.hidden =
+        !this.workspaceBuild ||
+        recovering ||
+        ordinaryDraft ||
+        Boolean(
+          !assisted &&
+          this.isFinalWizardStep() &&
+          this.ordinaryBuildPreviewEligible(template) &&
+          !this.workspaceBuild.draftError
+        );
       status.textContent = this.workspaceBuild?.draftError
         ? folderReview
           ? 'Draft not saved. Your edits are kept here.'
@@ -16691,20 +17043,24 @@ const sessionManager = {
     if (preparationActions)
       preparationActions.hidden = !folderReview || !this.workspaceBuildPreparationEligible();
     const summary = document.getElementById('workspaceBuildDraftSummary');
-    if (summary)
+    if (summary) {
       summary.hidden =
         !assisted || folderAvailable || Boolean(this.workspaceBuild?.acceptedPreparation);
+      summary.toggleAttribute?.('data-ordinary-draft', ordinaryDraft);
+    }
+    if (preview) preview.hidden = !ordinaryDraft;
     const planReady = assisted && this.workspaceBuildPlanReady();
     const title = document.getElementById('workspaceBuildDraftTitle');
-    if (title) title.textContent = planReady ? 'Plan so far' : 'Draft so far';
+    if (title && !ordinaryDraft) title.textContent = planReady ? 'Plan so far' : 'Draft so far';
     this.syncWorkspaceBuildPlanReview(planReady);
     if (folderReview) this.syncWorkspaceBuildFolderReview();
     this.syncWorkspaceBuildHomeStaffing();
     const text = document.getElementById('workspaceBuildDraftText');
-    if (text && planReady) {
+    if (text) text.hidden = ordinaryDraft;
+    if (ordinaryDraft) this.syncOrdinaryBuildPreview(template);
+    else if (text && planReady) {
       text.textContent = this.workspaceBuildPlanLine();
     } else if (text && assisted) {
-      const template = window.ProjectTemplateCard?.getSelectedTemplate?.();
       const name = document.getElementById('folderNameInput')?.value?.trim();
       const step = ['Blueprint', 'Details', 'Team', 'Review'][this.wizardStep - 1] || 'Blueprint';
       const folder = String(this.workspaceBuild?.session?.folder?.observation?.folder || '').trim();
@@ -17261,6 +17617,7 @@ const sessionManager = {
     if (build.chosenRoles.delete(String(roleId || ''))) {
       this.clearWorkspaceBuildChosen(`role:${roleId}`);
     }
+    this.noteWorkspaceBuildIntent();
     this.markWorkspaceBuildEdited('team');
     this.scheduleWorkspaceBuildDraft?.();
   },
@@ -17334,6 +17691,15 @@ const sessionManager = {
       if (value === undefined || value === null || value === '') continue;
       draft[key] = value;
     }
+    // The picker's initial Blank is not a decision. Keep it absent from an
+    // undecided assisted draft so a partial answer/resume never promotes it.
+    // A manual create still uses the wizard's complete payload.
+    if (
+      draft.blank &&
+      this.ordinaryBuildPreviewEligible() &&
+      !this.ordinaryBuildBlueprintDecided({ blank: true })
+    )
+      delete draft.blank;
     const teamState = window.CreateWorkspaceTeamDraft?.serialize?.(this.teamDraft) || null;
     const body = { draft, version: Number(this.workspaceBuild?.session?.version) || 0 };
     if (this.workspaceBuild?.session?.placement_source)
@@ -17363,6 +17729,9 @@ const sessionManager = {
     // build's form, and nothing on it may overwrite the paused draft.
     if (build.resumeLine) return;
     build.draftUser = Boolean(build.draftUser || options.user !== false);
+    const preview = document.getElementById('workspaceBuildDraftPreview');
+    if (preview && !preview.hidden && this.ordinaryBuildPreviewEligible())
+      this.syncOrdinaryBuildPreview(window.ProjectTemplateCard?.getSelectedTemplate?.());
     if (this.workspaceBuildTimer) clearTimeout(this.workspaceBuildTimer);
     this.workspaceBuildTimer = setTimeout(() => {
       this.workspaceBuildTimer = null;
@@ -17377,7 +17746,9 @@ const sessionManager = {
     build.draftConflict = true;
     build.draftError = true;
     if (build.placement) build.placement.message = '';
-    this.workspaceBuildPane()?.showLine(
+    const pane = this.workspaceBuildPane();
+    pane?.removeLine?.(build.draftErrorLine);
+    build.draftErrorLine = pane?.showLine(
       'This draft changed in another tab. Your edits are kept here. Review them before saving your draft over the newer version.',
       { chips: [{ id: 'sync_again', label: 'Save my draft' }] }
     );
@@ -17422,7 +17793,7 @@ const sessionManager = {
       build.draftUser = Boolean(user || build.draftUser);
       if (!build.draftError) {
         const pane = this.workspaceBuildPane();
-        pane?.showLine(pane.COPY.draftFailure, {
+        build.draftErrorLine = pane?.showLine(pane.COPY.draftFailure, {
           chips: [{ id: 'sync_again', label: pane.COPY.tryAgain }]
         });
       }
@@ -17462,6 +17833,8 @@ const sessionManager = {
       }
       if (Number(session.version) < Number(build.session.version)) return;
       build.draftError = false;
+      if (build.draftErrorLine) this.workspaceBuildPane()?.removeLine?.(build.draftErrorLine);
+      build.draftErrorLine = '';
       build.session = session;
       build.lastDraftKey = key;
       this.syncWorkspaceStaffingAdvice(session);
@@ -17481,12 +17854,14 @@ const sessionManager = {
         else void this.sendWorkspaceBuildRestaff(build);
       }
     };
+    build.draftSavingUser = user;
     build.draftInFlight = send();
     try {
       await build.draftInFlight;
     } finally {
       if (this.workspaceBuild === build) {
         build.draftInFlight = null;
+        build.draftSavingUser = false;
         this.syncWorkspaceBuildPresentation();
         if (this.usesUnifiedOrdinaryReview()) void this.syncOrdinaryCreationReview();
       }
@@ -18759,6 +19134,8 @@ const sessionManager = {
     }
     await this.flushWorkspaceBuildDraft({ force: true });
     if (!this.workspaceBuildCanApply(build, revision)) return;
+    const ordinaryDraft = this.ordinaryBuildPreviewEligible();
+    if (ordinaryDraft && (build.draftError || build.draftConflict)) return;
     const steps = this.creatorWizardSteps();
     const review = steps[steps.length - 1];
     if (this.wizardStep !== review) this.goToWizardStep(review, { focus: false });
@@ -18768,6 +19145,12 @@ const sessionManager = {
       this.collapseWorkspaceBuild({ focus: false });
       await this.syncOrdinaryCreationReview();
       document.getElementById('workspaceCreationReviewTitle')?.focus();
+      return;
+    }
+    // An ordinary draft must never fall through to the legacy create path
+    // if its reviewed owner is unavailable. A turn is not confirmation.
+    if (ordinaryDraft) {
+      pane.showLine('Review is unavailable. Nothing was created; your draft is kept.');
       return;
     }
     await this.createFolder();
@@ -19500,7 +19883,8 @@ const sessionManager = {
         const build = this.workspaceBuild?.session;
         if (
           build?.id === buildSessionID &&
-          (build.folder ||
+          (this.ordinaryBuildPreviewEligible() ||
+            build.folder ||
             build.link ||
             payload.role_staffing?.some(fill => fill.recommendation)) &&
           this.ordinaryBuildReviewEligible()
@@ -19862,6 +20246,7 @@ const sessionManager = {
         )
           return;
         ordinaryReview.observedState = outcome.state;
+        ordinaryReview.buildDraft ||= outcome.operation?.build_backed === true;
         ordinaryReview.message = outcome.message;
         if (outcome.state === 'not_sent') {
           ordinaryReview.accepted = false;

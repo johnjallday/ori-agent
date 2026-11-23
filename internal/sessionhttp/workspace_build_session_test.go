@@ -338,7 +338,7 @@ func TestWorkspaceBuild_ATurnFillsBlueprintNameAndDescription(t *testing.T) {
 	if got.TurnCount != 1 || got.FirstRequest != "a newsletter from my research notes every monday" || got.FurthestStep != 3 {
 		t.Fatalf("counters %d %q %d", got.TurnCount, got.FirstRequest, got.FurthestStep)
 	}
-	if len(got.Why) != 1 || len(got.Alternatives) != 1 || got.Alternatives[0].Label != "Research Project" {
+	if len(got.Why) != 1 || got.Why[0].BlueprintID != got.Draft.TemplateID || len(got.Alternatives) != 1 || got.Alternatives[0].Label != "Research Project" {
 		t.Fatalf("why/alternatives %+v %+v", got.Why, got.Alternatives)
 	}
 	// The model saw the catalog and the user's words, never a path, and never
@@ -350,6 +350,61 @@ func TestWorkspaceBuild_ATurnFillsBlueprintNameAndDescription(t *testing.T) {
 	}
 	if last := f.provider.messages[0]; last[len(last)-1].Content != "a newsletter from my research notes every monday" {
 		t.Fatalf("messages %+v", last)
+	}
+}
+
+func TestWorkspaceBuild_OrdinaryExplanationFollowsOnlyAnAppliedChoice(t *testing.T) {
+	refused := strings.ReplaceAll(describeReply, `"content-production"`, `"blocked-blueprint"`)
+	unchanged := strings.Replace(describeReply, "It already has a drafting flow.", "Do not replace the saved reason.", 1)
+	f := newBuildFixture(t, true, refused, describeReply, unchanged)
+	build := f.start(t)
+	path := "/api/workspaces/build-sessions/" + build.ID + "/draft"
+	_, response := f.do(t, http.MethodPatch, path, patchBuildDraftRequest{
+		Draft: personalassistant.BuildDraft{Blank: true}, Version: build.Version,
+	})
+	// An existing Blank choice makes the refused field observable in the
+	// reply rather than triggering the first-answer retry for essentials.
+	_, response = f.turn(t, sessionOf(t, response), map[string]any{"text": "weekly newsletter"})
+	build = sessionOf(t, response)
+	if len(build.Why) != 0 || len(build.Rejections) == 0 {
+		t.Fatalf("refused proposal got an explanation: %+v", build.Why)
+	}
+	_, response = f.turn(t, build, map[string]any{"text": "try another"})
+	build = sessionOf(t, response)
+	_, response = f.turn(t, build, map[string]any{"text": "keep the same draft"})
+	build = sessionOf(t, response)
+	if len(build.Why) != 1 || build.Why[0].Text != "It already has a drafting flow." {
+		t.Fatalf("unchanged proposal replaced the original explanation: %+v", build.Why)
+	}
+	status, response := f.do(t, http.MethodPatch, path, patchBuildDraftRequest{
+		Draft: build.Draft, Version: build.Version, EditedFields: []string{"blueprint_id"},
+	})
+	if status != http.StatusOK || len(sessionOf(t, response).Why) != 0 {
+		t.Fatalf("an explicit edit back to the same blueprint kept its old reason: %d", status)
+	}
+}
+
+func TestWorkspaceBuild_RenamingDoesNotAnnounceAnUnchangedTeam(t *testing.T) {
+	before := personalassistant.BuildDraft{Name: "Original", RoleStaffing: json.RawMessage(`[
+		{"role_id":"content-lead", "name":"Content Lead", "mode":"create"}
+	]`)}
+	after := personalassistant.BuildDraft{Name: "Renamed", RoleStaffing: json.RawMessage(`[{"role_id":"content-lead","mode":"create","name":"Content Lead"}]`)}
+	if lines := describeFormEdit(before, after, buildValidation{}); len(lines) != 1 || lines[0] != "You renamed it to Renamed" {
+		t.Fatalf("form edits %v", lines)
+	}
+	if fields := changedBuildFields(before, after, nil, nil); len(fields) != 1 || fields[0] != buildFieldName {
+		t.Fatalf("edited fields %v", fields)
+	}
+}
+
+func TestWorkspaceBuild_AnAmbiguousReasonIsNotAnExplanation(t *testing.T) {
+	two := strings.Replace(describeReply, `"text":"It already has a drafting flow."}`,
+		`"text":"It already has a drafting flow."},{"section":"blueprint","text":"Another reason"}`, 1)
+	f := newBuildFixture(t, true, two)
+	_, response := f.turn(t, f.start(t), map[string]any{"text": "weekly newsletter"})
+	build := sessionOf(t, response)
+	if build.Draft.TemplateID != "content-production" || len(build.Why) != 0 {
+		t.Fatalf("the accepted blueprint must not carry ambiguous reasons: %+v", build.Why)
 	}
 }
 
@@ -913,8 +968,8 @@ func TestWorkspaceBuild_AnAutomaticTurnIsNotTheUsersRequest(t *testing.T) {
 	build := f.start(t)
 	_, body := f.turn(t, build, map[string]any{"text": "(I changed the blueprint)", "auto": true})
 	build = sessionOf(t, body)
-	if build.FirstRequest != "" {
-		t.Fatalf("first request %q", build.FirstRequest)
+	if build.FirstRequest != "" || build.Draft.HasBlueprint() || build.Draft.Name != "" || len(build.Why) != 0 {
+		t.Fatalf("automatic restaff changed the proposal: request=%q draft=%+v why=%+v", build.FirstRequest, build.Draft, build.Why)
 	}
 	_, body = f.turn(t, build, map[string]any{"text": "a newsletter from my notes"})
 	if got := sessionOf(t, body).FirstRequest; got != "a newsletter from my notes" {

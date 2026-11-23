@@ -4,6 +4,8 @@ type Scenario = {
   mode?: 'success' | 'failure' | 'ambiguous' | 'ordinary';
   createNow?: boolean;
   name?: string;
+  // Override the synthetic model reply, not the build session or wizard.
+  reply?: Record<string, unknown>;
 };
 
 // The only synthetic integration: a local OpenAI-compatible model endpoint.
@@ -111,7 +113,7 @@ export async function startJanitorBuildModel(
                   : selected.mode === 'failure'
                     ? 'not valid JSON'
                     : JSON.stringify(
-                        !isBuild && options.nonBuildReply ? options.nonBuildReply : reply
+                        isBuild ? selected.reply || reply : options.nonBuildReply || reply
                       )
             },
             finish_reason: 'stop'

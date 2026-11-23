@@ -1479,6 +1479,44 @@
     return parts.join(' · ') + '.';
   }
 
+  // The compact effects shared by the assisted draft and its creation review.
+  // Only filled roles with an effective holder and added saved agents count;
+  // the advisory candidate lists are deliberately not an input to this view.
+  function creationTeamEffects(view = {}) {
+    if (view.planStatus === PLAN_LOADING) return { lines: ['Checking team options…'], roles: [] };
+    if (view.planStatus !== PLAN_READY) return { lines: ['Undecided'], roles: [] };
+    if (view.agentless) return { lines: ['No agents will be created or attached.'], roles: [] };
+    const roster = view.roleRoster || {};
+    const roles = (roster.roles || [])
+      .filter(role => !role.read_only)
+      .map(role => {
+        const name = text(role.agent?.name);
+        const vacant = role.state !== 'filled' || !name;
+        const value = vacant
+          ? role.required
+            ? 'Required · choose an agent'
+            : 'Optional · left empty'
+          : role.needs_clear
+            ? `${name} · review this choice`
+            : `${role.source === SOURCE_AUTO_WIRE || role.source === SOURCE_CREATED_WIRE ? 'Will create' : 'Will assign'} ${name}${role.auto ? ' (blueprint default)' : ''}${role.required ? ' · required' : ''}`;
+        return {
+          id: role.role_id,
+          label: role.label,
+          name,
+          vacant,
+          required: role.required,
+          value
+        };
+      });
+    const lines = roles
+      .filter(role => !role.vacant || role.required)
+      .map(role => (role.name === role.label ? role.value : `${role.label}: ${role.value}`));
+    for (const agent of roster.unassigned || []) lines.push(`Will assign ${agent.name}`);
+    const empty = roles.filter(role => role.vacant && !role.required).length;
+    if (empty) lines.push(`${empty} optional ${empty === 1 ? 'role' : 'roles'} left empty.`);
+    return { lines: lines.length ? lines : ['No agents selected.'], roles };
+  }
+
   // Pure projection of the draft. Everything the wizard renders — Blueprint
   // chips, the Team roster, the Review receipt, and the create request — comes
   // from here, so no two surfaces can describe different teams.
@@ -2145,6 +2183,7 @@
     derive,
     toCreatePayload,
     applyTeamPatch,
+    creationTeamEffects,
     serialize,
     restore
   };

@@ -488,7 +488,7 @@ func (h *Handler) finishWorkspaceBuildSetup(ctx context.Context, userID, session
 	// A hire's brief was the workspace's goal from the moment it was created;
 	// the draft's goal is given only to a run that carried none.
 	if offer.Setup == nil || strings.TrimSpace(offer.Setup.Brief) == "" {
-		h.applyCreateWorkspaceGoal(workspaceID, finished.Draft.Mission)
+		h.applyCreateWorkspaceGoal(workspaceID, finished.Draft.Mission, true)
 	}
 	store := h.taskMutationStore()
 	if store == nil {

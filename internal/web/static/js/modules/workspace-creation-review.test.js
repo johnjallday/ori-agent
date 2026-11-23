@@ -183,6 +183,32 @@ test('Blank uses the same review language without Janitor permissions, slots or 
   assert.equal(html, workspaceCreationReviewHTML(blank));
 });
 
+test('the assisted review displays the projected staffing and destination, not consent', () => {
+  const rows = creationTeamReviewRows(
+    {},
+    normalizedRoleRows([
+      {
+        role_id: 'lead',
+        label: 'Lead',
+        state: 'filled',
+        source: 'assigned',
+        agent: { name: 'Saved lead' }
+      }
+    ]),
+    { roles: [{ id: 'lead', value: 'Will assign Saved lead · required' }] }
+  );
+  const html = workspaceCreationReviewHTML({
+    ...blank,
+    buildDraft: true,
+    destination: 'In group Editorial · Position does not change membership.',
+    rows
+  });
+  assert.match(html, /Review · Nothing created yet/);
+  assert.match(html, /In group Editorial/);
+  assert.match(html, /Will assign Saved lead · required/);
+  assert.doesNotMatch(html, /data-placement-action="confirm"/);
+});
+
 test('ordinary field bounds come from their existing owner and reviewed rows are never silently dropped', () => {
   const html = workspaceCreationReviewHTML({
     ...blank,
@@ -200,6 +226,38 @@ test('ordinary field bounds come from their existing owner and reviewed rows are
     workspaceCreationReviewHTML(blank),
     /maxlength=/,
     'do not impose File Janitor bounds on another owner'
+  );
+});
+
+test('the verified result names the workspace while acceptance and refusal have no Open action', () => {
+  const complete = workspaceCreationReviewHTML({
+    ...blank,
+    result: { id: 'saved', name: 'Saved Desk', agent_instances: [{ name: 'Editor' }] },
+    resultTitle: 'Saved Desk created',
+    openLabel: 'Open Saved Desk'
+  });
+  assert.match(complete, /Saved Desk created/);
+  assert.match(complete, /Assigned: Editor/);
+  assert.match(complete, /Open Saved Desk/);
+  const accepted = workspaceCreationReviewHTML({
+    ...blank,
+    accepted: true,
+    resultTitle: 'Creation outcome not verified'
+  });
+  assert.match(accepted, /Read saved status/);
+  assert.match(accepted, /Closing is not undo/);
+  assert.doesNotMatch(accepted, /data-placement-action="(?:open|confirm)"/);
+  const refused = workspaceCreationReviewHTML({
+    ...blank,
+    accepted: true,
+    definiteRefusal: true,
+    resultTitle: 'Creation was refused',
+    canAbandonReview: true
+  });
+  assert.match(refused, /Return to review/);
+  assert.doesNotMatch(
+    refused,
+    /Read saved status|Work may already exist|data-placement-action="(?:open|confirm)"/
   );
 });
 

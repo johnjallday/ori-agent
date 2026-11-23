@@ -1,17 +1,18 @@
 # Workspace build sessions ("Build with your assistant")
 
 The Personal Assistant builds a workspace **with** the user: Create Workspace opens with
-a conversation pane beside the wizard, the assistant fills the form as the user talks, and
-the user confirms with ordinary Create or, for an attached File Janitor folder,
-the separately disclosed **Create & prepare review** action. PRD: `tasks/prd-build-with-your-assistant.md`.
+a conversation pane with a read-only preview of the same draft the wizard edits. The
+assistant suggests values; the user reviews them and confirms creation from the
+existing placement flow. An attached File Janitor folder keeps its separate reviewed
+preparation action. PRD: `tasks/prd-build-with-your-assistant.md`.
 HTTP contract: [API reference](../api/API_REFERENCE.md#workspace-build-sessions-api).
 
 ## The one rule: the draft is the create request
 
-A build session holds a draft that is exactly the body `POST /api/workspaces` will send
-(`personalassistant.BuildDraft`: blueprint, name, description, inputs, placement, color,
-tags, bootstrap, project connection, team keys). There is no second model of "what the
-workspace will be":
+A build session holds the wizard's material draft (`personalassistant.BuildDraft`:
+blueprint, name, description, inputs, placement, color, tags, bootstrap, project
+connection and team keys). The preview is a projection of the applied form and
+Team view, not a second draft or an interpretation of the transcript:
 
 ```
 user types ─► POST …/turns ─► model proposes a patch ─► host validates each field
@@ -21,7 +22,10 @@ user types ─► POST …/turns ─► model proposes a patch ─► host valid
                    │
 user edits form ─► PATCH …/draft (said back in the transcript, seen on the next turn)
                    │
-user: "create it" / clicks Create ─► POST /api/workspaces { …draft, build_session_id }
+"create it" / Review or edit draft ─► existing review and placement
+                                          │
+                                          ├─ POST …/create-operations { id, request }
+            final Map click/Enter or Create workspace ─► POST …/{id}/confirm { review_digest }
 ```
 
 - The **model proposes**; it never writes the draft directly and never creates anything.
@@ -29,13 +33,18 @@ user: "create it" / clicks Create ─► POST /api/workspaces { …draft, build_
 - The **wizard renders** the accepted fields through its existing setters (card click,
   input events, the team draft's mutators), so every downstream gate and prefill runs as if
   the user had done it.
-- The **user confirms** with ordinary Create. For attached File Janitor setup,
-  `create_now` opens the current host review instead of supplying folder/monitoring
-  consent; see [the reviewed preparation contract](file-janitor-creation-flow.md).
-  `ready` means **Ready to create**, not operational readiness. For other builds,
-  `create_now` just triggers the ordinary submit, and a closed gate is reported in the
-  pane ("Not yet — …") instead of submitting. The host never honours `create_now` on the
-  first turn: the user always sees a filled form before anything is created.
+- The **user confirms** once, with a valid Map position or the **Create workspace**
+  button after selecting automatic placement. `ready` is not operational readiness
+  or consent. In an ordinary build, `create_now` may open review but cannot confirm;
+  the host ignores it on the first turn. A blocked gate is shown instead of submitting.
+  For attached File Janitor setup see the [reviewed preparation contract](file-janitor-creation-flow.md).
+- The ordinary journal binds the exact material, blueprint and build version. Entering
+  review or choosing placement makes no workspace or agent. Escape returns to review;
+  material changes require an updated review. A lost confirmation response is recovered
+  with a read of the original operation ID and digest, never a second confirm or a
+  lookup by name. **Open ‹name›** navigates to the verified workspace. For ordinary
+  unattached assisted builds the goal is saved but its first-open run is not armed;
+  starter tickets, if any, are saved, not started.
 
 The folder-led build shares the inert [visual folder setup renderer](visual-folder-setup.md)
 with Home and the drawer. It does not share their state owner or confirmation controls;
@@ -113,10 +122,14 @@ The model's words are not trusted to describe the form:
   says "Assigned Luna" while proposing a new agent is corrected in the same bubble.
 - **Saved agents**: a "create" whose name is already a saved agent is recorded as an
   assignment of that agent — what the form does — so the receipt never claims a new one.
-- **Provenance**: "How this was set up" is written from the create request itself. The
-  team line comes from its `role_staffing`, not from the model's explanation. The
-  assistant's reason for a section the user later changed on the form is dropped. The
-  automatic re-staff turn is never recorded as the user's request.
+- **Provenance**: "How this was set up" is stored on the confirmed workspace. The
+  team line comes from the create request, not the model's explanation. For the ordinary
+  unattached draft, a blueprint explanation must come from the turn that changed that
+  exact validated blueprint. A reason with no host witness, ambiguous reasons and
+  explanations superseded by a blueprint or purpose edit are omitted. Staffing advice
+  is not a choice, and the preview uses the effective Team fills, blueprint defaults
+  and missing required roles. The automatic re-staff turn is never recorded as the
+  user's request.
 - **Edits during a turn**: fields the user changed on the form while the model was
   working keep the user's value; the rest of the reply applies.
 
@@ -316,7 +329,9 @@ an unconfirmed reservation ID. Full request/recovery details live in the
 
 ### Storage
 
-Schema **3** retains the filename `workspace-build-v1.json`. Genuine v1 and v2 data
+Schema **7** retains the filename `workspace-build-v1.json`. The optional
+blueprint explanation witness does not add creation authority; older reasons
+without it are not shown in the ordinary preview. Genuine v1 and v2 data
 load without inventing preparation consent; v1 carrying v2 authority, a v1 or v2 file
 carrying a folder recognition, a setup claim, a Home id or a setup receipt, and unknown
 schemas are refused conservatively. One sidecar file per HQ: `<HQ folder>/.ori/workspace-build-v1.json`, written through the
@@ -386,7 +401,13 @@ and cannot be bypassed through ordinary create.
   the two reads (`GET /api/personal-assistant`, `GET …/availability`). A build that becomes
   unavailable mid-session says "I can’t help right now — the form still works." and
   collapses, keeping the form.
-- **Accessibility**: assistant messages are announced through a polite status line; chips
+- **Preview**: ordinary assisted builds show **Draft · Nothing created yet**, applied
+  name, blueprint, purpose, team and destination, with the latest material change and
+  the next choice. Waiting for a model, waiting for an answer and an unavailable model
+  are distinct. Unsaved edits stay on the existing form; **Try again** retries the draft
+  save, not creation. Resuming does not announce old changes as if they happened again.
+  The preview steps aside for the normal editor, placement review and result.
+- **Accessibility**: assistant messages and changed draft status use polite announcements; chips
   are buttons in a `group` labelled by the question; focus starts in the composer, returns
   there after each turn and pane action, and never leaves a form field the user is in;
   the pane follows the wizard footer in document order; `prefers-reduced-motion` turns off
@@ -416,9 +437,11 @@ counts, and field or section names, never message text, draft values, or folder 
 - JS: `create-workspace-build-pane.test.js`, `sessions.test.js`,
   `workspace-creator-state.test.js`, `create-workspace-team-draft.test.js`,
   `personal-assistant-home.test.js`, `workspace-command.test.js`.
-- Playwright: `tests/create-workspace-build-mode.spec.ts` with a scripted fake of the
-  build endpoints (golden path, form-edit acknowledgement, resume, manual fallbacks, the
-  `build_workspace` hand-off). Run it against a fresh sandbox.
+- Playwright: `tests/create-workspace-build-mode.spec.ts` on a fresh isolated demo
+  with a loopback scripted model. The newsletter placement, exact creation result,
+  keyboard-only automatic placement and lost-response recovery use real build and
+  creation endpoints. Other cases stub build endpoints to test presentation and
+  fallback timing. Neither path requires or proves live model behavior.
   `tests/narrated-folder-setup.spec.ts` fakes nothing and sends no model turn: both entries on
   a song folder, through Hire and build, the automatic Map placement and its Move link, against
   `scripts/narrated-folder-demo.sh` (its header has the commands).

@@ -1,7 +1,6 @@
 package sessionhttp
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -760,6 +760,15 @@ func (h *Handler) runWorkspaceBuildTurn(ctx context.Context, userID, id string, 
 		}
 		// Explicit edits, including empty/back-to-original values, win.
 		filtered := withoutOwnedBuildFields(withoutFormEdits(outcome, staged.Draft, session.Draft), staged, *session, automatic)
+		// The automatic follow-up to a manual blueprint switch re-staffs
+		// only. It is not permission to replace the user's blueprint or brief.
+		if staged.Retry != nil && staged.Retry.Auto && filtered.kind == "reply" {
+			set := "none"
+			if filtered.reply.Patch.sets(buildFieldTeam) {
+				set = buildFieldTeam
+			}
+			filtered.reply.Patch.Set = []string{set}
+		}
 		finishBuildTurn(session, filtered, validation, deps.Store.Now())
 		session.InferenceID = ""
 		if automatic {
@@ -855,7 +864,7 @@ func withoutFormEdits(outcome buildOutcome, before, after personalassistant.Buil
 		buildFieldParent:      before.ParentID != after.ParentID,
 		buildFieldTags:        !reflect.DeepEqual(before.Tags, after.Tags),
 		buildFieldColor:       before.Color != after.Color,
-		buildFieldTeam: !bytes.Equal(before.RoleStaffing, after.RoleStaffing) ||
+		buildFieldTeam: !sameBuildTeamJSON(before.RoleStaffing, after.RoleStaffing) ||
 			!reflect.DeepEqual(before.ExistingAgentNames, after.ExistingAgentNames),
 	}
 	patch := outcome.reply.Patch
@@ -1071,6 +1080,7 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 	}
 
 	reply := outcome.reply
+	before := session.Draft
 	result := applyBuildReply(session, reply.Patch, validation)
 	session.Rejections = result.rejections
 	session.Applied = result.applied
@@ -1085,7 +1095,7 @@ func finishBuildTurn(session *personalassistant.WorkspaceBuildSession, outcome b
 		result.teamPatch = session.TeamPatch
 	}
 	session.Retry = nil
-	mergeBuildWhy(session, reply.Why)
+	mergeBuildWhy(session, before, reply.Why)
 	session.Alternatives = buildAlternatives(reply.Alternatives, validation, session.Draft.TemplateID)
 
 	question := strings.TrimSpace(reply.Ask.Question)
@@ -1252,8 +1262,46 @@ func buildDraftStep(session *personalassistant.WorkspaceBuildSession) int {
 
 var buildWhySections = map[string]bool{"blueprint": true, "details": true, "team": true, "placement": true}
 
-// mergeBuildWhy replaces the reasons for each section the reply explains.
-func mergeBuildWhy(session *personalassistant.WorkspaceBuildSession, whys []buildReplyWhy) {
+func ordinaryUnattachedBuild(session *personalassistant.WorkspaceBuildSession) bool {
+	return session.Folder == nil && session.Link == nil && session.PlacementSource == nil &&
+		session.NeedsHome == nil && !strings.HasPrefix(session.Draft.TemplateID, "plugin:")
+}
+
+// Ordinary preview explanations are bound to one unambiguous accepted
+// blueprint choice. Other section text has no field/role witness, and the
+// team's actual effects are described by the roster and final receipt.
+func mergeBuildWhy(session *personalassistant.WorkspaceBuildSession, before personalassistant.BuildDraft, whys []buildReplyWhy) {
+	if ordinaryUnattachedBuild(session) {
+		id := session.Draft.TemplateID
+		changed := before.TemplateID != id || before.Blank != session.Draft.Blank
+		if !changed {
+			session.Why = slices.DeleteFunc(session.Why, func(why personalassistant.BuildWhy) bool {
+				return why.BlueprintID == "" || why.BlueprintID != id ||
+					before.Description != session.Draft.Description || before.Mission != session.Draft.Mission
+			})
+			return
+		}
+		session.Why = nil
+		if id == "" || session.Draft.Blank || utf8.RuneCountInString(id) > 256 || !slices.Contains(session.Applied, "blueprint") {
+			return
+		}
+		var reason string
+		seen := false
+		for _, why := range whys {
+			if !strings.EqualFold(strings.TrimSpace(why.Section), "blueprint") {
+				continue
+			}
+			if seen {
+				return // Multiple explanations do not identify a single choice.
+			}
+			seen, reason = true, truncateRunes(why.Text, 300)
+		}
+		if reason != "" {
+			session.Why = []personalassistant.BuildWhy{{Section: "blueprint", Text: reason, BlueprintID: id}}
+		}
+		return
+	}
+	// Leave the attachment and group owners' existing explanation behavior.
 	replaced := map[string]bool{}
 	incoming := []personalassistant.BuildWhy{}
 	for _, why := range whys {
@@ -1441,7 +1489,8 @@ func buildSummaryFor(session personalassistant.WorkspaceBuildSession, created pe
 	team := teamDecisionFromDraft(created)
 	stale["team"] = team != ""
 	for _, why := range session.Why {
-		if stale[why.Section] {
+		if stale[why.Section] || (ordinaryUnattachedBuild(&session) &&
+			(why.Section != "blueprint" || why.BlueprintID == "" || why.BlueprintID != created.TemplateID)) {
 			continue
 		}
 		summary.Decisions = append(summary.Decisions, agentworkspace.BuildDecision{Section: why.Section, Text: why.Text})

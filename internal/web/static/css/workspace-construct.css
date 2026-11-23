@@ -2540,6 +2540,50 @@
 .workspace-create-modal .workspace-build-draft-summary button {
   flex-shrink: 0;
 }
+.workspace-create-modal .workspace-build-draft-summary[data-ordinary-draft] {
+  align-items: flex-start;
+  flex: 0 0 auto;
+  border-inline-start: 3px solid var(--wc-faction);
+}
+.workspace-create-modal .assisted-placement--build-draft .assisted-placement__header {
+  border-inline-start: 3px solid var(--wc-faction);
+  padding-inline-start: 12px;
+}
+.workspace-create-modal .workspace-build-draft-summary[data-ordinary-draft] h2 {
+  color: var(--wc-ink);
+  font: 600 11px/1.4 var(--wc-font-mono);
+}
+.workspace-create-modal .workspace-build-draft-preview p.workspace-build-draft-preview__name {
+  color: var(--wc-ink-heading);
+  font: 600 20px/1.2 var(--wc-font-display);
+}
+.workspace-build-draft-preview__facts {
+  display: grid;
+  gap: 2px;
+  margin: 6px 0;
+  color: var(--wc-ink);
+  font-size: 13px;
+}
+.workspace-build-draft-preview__facts > div {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+}
+.workspace-build-draft-preview__facts dd {
+  margin: 0;
+}
+.workspace-create-modal #workspaceBuildDraftTeam {
+  white-space: pre-line;
+}
+.workspace-create-modal #workspaceBuildDraftWhy {
+  margin: 6px 0;
+}
+.workspace-create-modal .workspace-build-draft-preview__status {
+  display: grid;
+  gap: 2px;
+}
+.workspace-create-modal #workspaceBuildDraftNext {
+  font-weight: 600;
+}
 .workspace-create-modal .workspace-build-pane {
   display: flex;
   flex: 1 1 auto;
@@ -2573,6 +2617,7 @@
   border-top: 0;
 }
 .workspace-create-modal .workspace-build-pane button:focus-visible,
+.workspace-create-modal .workspace-build-pane__transcript:focus-visible,
 .workspace-create-modal .workspace-build-with-btn:focus-visible,
 .workspace-create-modal .workspace-build-draft-summary button:focus-visible {
   outline: 2px solid var(--wc-faction);
@@ -2588,6 +2633,9 @@
   font-family: var(--wc-font-display);
   font-size: 12px;
   font-weight: 700;
+}
+.workspace-create-modal--creation-outcome .workspace-build-with-btn {
+  display: none;
 }
 .workspace-create-modal .workspace-build-with-btn:hover,
 .workspace-create-modal .workspace-build-with-btn:focus-visible {
@@ -2742,7 +2790,7 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-.workspace-create-modal .workspace-build-pane__status.is-busy {
+.workspace-create-modal .workspace-build-pane__status.is-busy:not(:empty) {
   padding-bottom: 6px;
 }
 .workspace-create-modal .workspace-build-pane__composer {
@@ -3510,6 +3558,15 @@
     flex-direction: column;
     gap: 8px;
   }
+  .workspace-create-modal .workspace-build-draft-summary[data-ordinary-draft] {
+    /* Leave room for the composer and transcript when the roster or purpose
+       wraps. The existing draft slot, not a new surface, handles long content. */
+    max-height: 46dvh;
+    overflow-y: auto;
+  }
+  .workspace-create-modal .workspace-build-draft-preview__facts > div {
+    grid-template-columns: 5.35rem minmax(0, 1fr);
+  }
   .workspace-create-modal .workspace-build-pane__head {
     padding: 8px 12px;
   }
@@ -3518,6 +3575,18 @@
   }
   .workspace-create-modal .workspace-build-pane__composer {
     padding: 8px 12px;
+  }
+}
+
+@media (max-width: 600px) {
+  /* Close remains in the header. The duplicate footer and decorative label
+     would take the space where the active question and its choices sit. */
+  .workspace-create-modal:has([data-ordinary-draft]:not([hidden])) .modal-title::after,
+  .workspace-create-modal--unified-review .modal-title::after {
+    content: none;
+  }
+  .workspace-create-modal:has([data-ordinary-draft]:not([hidden])) .modal-content > .modal-footer {
+    display: none;
   }
 }
 
