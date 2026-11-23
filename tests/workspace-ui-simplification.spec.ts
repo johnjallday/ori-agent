@@ -591,6 +591,7 @@ test('overview: groups expose the real ordered member owner and one inert Add wo
   await open(page, group.folder_slug);
   const section = page.getByRole('region', { name: 'Linked workspaces', exact: true });
   await expect(section.locator('.group-member-name')).toContainText('Linked member');
+  await expect(section.locator('[data-member-folder]')).toHaveCount(0);
   await expect(section.locator('[data-member-remove]')).toBeVisible();
   await capture(page, 'work-group-overview');
   const treeReads: string[] = [];
@@ -616,6 +617,11 @@ test('overview: groups expose the real ordered member owner and one inert Add wo
   await expect(picker).toHaveValue(selected);
   await expect(picker).toBeFocused();
   await expect(section.locator('[data-cmd-add-workspace]')).not.toHaveAttribute('open', '');
+  await page.goto(`/workspaces/${group.folder_slug}?mode=map`);
+  await expect(page.locator(`.ws-map-tile[data-ws-id="${member.id}"]`)).toBeVisible();
+  await expect(
+    page.locator('[data-cmd-by-folder], .ws-map-source-folder:not([hidden])')
+  ).toHaveCount(0);
 });
 
 test('overview: attention keeps ongoing work visible and Team offers every actual agent', async ({

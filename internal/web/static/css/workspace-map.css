@@ -2767,6 +2767,37 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* One source tag across Linked workspaces, saved tiles and disclosures.
+   Only the text tag wears this tint; building and status colors keep their meaning. */
+.music-source-tag {
+  --folder-hue: 210;
+  border-radius: 3px;
+  padding-inline: 0.45em;
+  border-inline-start: 3px solid hsl(var(--folder-hue) 55% 43%);
+  background: hsl(var(--folder-hue) 44% 91%);
+  color: hsl(var(--folder-hue) 52% 23%);
+  font-weight: 600;
+  box-decoration-break: clone;
+}
+[data-bs-theme="dark"] .music-source-tag {
+  border-color: hsl(var(--folder-hue) 52% 67%);
+  background: hsl(var(--folder-hue) 30% 22%);
+  color: hsl(var(--folder-hue) 63% 88%);
+}
+/* Trade a little artwork height for one caption, not a larger grid cell. */
+.ws-map-tile[data-ws-id]:has(.ws-map-source-folder:not([hidden])) > .ws-map-struct {
+  height: 52px;
+}
+.ws-map-source-folder {
+  max-width: 100%;
+  line-height: 14px;
+  font-size: 11px;
+  box-sizing: border-box;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
 /* Read-only folder facts shared by Home's context and the group dock. */
 .ws-map-folder-details {
   margin-block: 12px;
