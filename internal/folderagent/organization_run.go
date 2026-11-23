@@ -81,7 +81,7 @@ func (s *Service) OrganizationResults(owner, id string) ([]ReviewResult, error) 
 	out := []ReviewResult{}
 	for _, run := range rec.OrganizationRuns {
 		if run.Authority == auth {
-			v := run.Result
+			v := s.withFilingStanding(owner, id, run.Result)
 			for i := range v.Files {
 				v.Files[i].Placement = placementFor(rec, auth, v.Files[i], convention)
 			}

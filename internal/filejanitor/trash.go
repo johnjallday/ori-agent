@@ -213,6 +213,12 @@ func (s *Service) Undo(ctx context.Context, workspaceID, actionID, userID string
 	if err != nil {
 		return UndoResult{}, err
 	}
+	// A placement whose undo was cut short is settled from the disk first, so a
+	// stuck "already running" never blocks putting the file back. The lock is held
+	// only around this, never while claiming or running the undo itself.
+	unlockSettle := lockRoot(root)
+	s.settlePlacementUndos(workspaceID, root)
+	unlockSettle()
 
 	// Claim the undo inside one atomic write, so two clicks cannot both start
 	// one. The loser is told it is already running or already done.
@@ -254,12 +260,16 @@ func (s *Service) Undo(ctx context.Context, workspaceID, actionID, userID string
 		return UndoResult{}, err
 	}
 
+	runningUndos.Store(action.ID, struct{}{})
+	defer runningUndos.Delete(action.ID)
 	unlock := lockRoot(root)
 	defer unlock()
 
 	switch action.Operation {
 	case OperationMove:
 		return s.undoMove(ctx, settings, root, action, userID)
+	case OperationPlace:
+		return s.undoPlacement(ctx, settings, root, action)
 	case OperationTrash:
 		return s.restoreFromTrash(settings, root, action, userID)
 	default:
@@ -401,7 +411,11 @@ func (s *Service) finishUndo(workspaceID string, action FileAction, state UndoSt
 	result := UndoResult{ActionID: action.ID, Name: DisplayFileName(action.SourceName), Message: message}
 	if state == UndoDone {
 		result.Result = "undone"
-		s.notifyReviewedKnowledge(workspaceID, action.ID, true)
+		// A placement is not a category move: nothing in the assistant's category
+		// knowledge cites it, so there is no evidence to notify about.
+		if action.Operation != OperationPlace {
+			s.notifyReviewedKnowledge(workspaceID, action.ID, true)
+		}
 	} else {
 		result.Result = "failed"
 	}

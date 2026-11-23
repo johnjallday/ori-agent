@@ -36,6 +36,10 @@ var (
 	// result is reported and nothing is written.
 	errFilingReplay = errors.New("this press was already admitted")
 
+	// ErrFilingKeyReused means a retry key was already used for a different filing.
+	// Nothing was done.
+	ErrFilingKeyReused = errors.New("that retry key was already used for a different filing")
+
 	// runningFilings holds the filings this process is executing right now, so a
 	// record with no completion time is told apart: still running, or interrupted
 	// by a crash.
@@ -69,6 +73,28 @@ type FilingRecord struct {
 	UndoClaimedAt   time.Time `json:"undo_claimed_at,omitzero"`
 	UndoClaimedBy   string    `json:"undo_claimed_by,omitempty"`
 	UndoCompletedAt time.Time `json:"undo_completed_at,omitzero"`
+
+	// Destination and DecisionID are set only on a filing into a folder the person
+	// chose (the Documents path). Additive: an older build drops them on rewrite and
+	// then cannot treat the filing as one of its own category filings.
+	Destination *FilingDestination `json:"destination,omitempty"`
+	// DecisionID is the one organizing decision this filing belongs to, fixed at
+	// admission so the decision can be written after the move and backfilled.
+	DecisionID string `json:"decision_id,omitempty"`
+}
+
+// FilingDestination is the folder a named filing put files into, with the
+// identities that were verified. Folder is relative to the managed folder.
+type FilingDestination struct {
+	Folder    string `json:"folder"`
+	RootDirID string `json:"root_dir_id"`
+	// FolderID is the destination folder's identity. When Create is set it is empty
+	// until the folder exists, and CreatedAt is zero until it is recorded.
+	FolderID string `json:"folder_id,omitempty"`
+	// ParentID is the identity of the folder the new folder is made in (Create only).
+	ParentID  string    `json:"parent_id,omitempty"`
+	Create    bool      `json:"create,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitzero"`
 }
 
 func (f FilingRecord) validate() error {
@@ -77,6 +103,18 @@ func (f FilingRecord) validate() error {
 		!clientKeyPattern.MatchString(f.ClientKey) || f.AdmittedAt.IsZero() ||
 		f.PlannedMoves < 0 || f.PlannedTrash < 0 || f.PlannedMoves+f.PlannedTrash > PlanMaxOperations {
 		return fmt.Errorf("%w: invalid filing record", ErrInvalidCandidate)
+	}
+	if (f.Destination == nil) != (f.DecisionID == "") {
+		return fmt.Errorf("%w: invalid filing record", ErrInvalidCandidate)
+	}
+	if f.Destination != nil {
+		d := f.Destination
+		validFolder := d.Folder != "" && validRelPath(d.Folder)
+		created := d.Create && d.ParentID != "" && (d.FolderID == "") == d.CreatedAt.IsZero()
+		existing := !d.Create && d.FolderID != "" && d.ParentID == ""
+		if !managedRootGeneration.MatchString(f.DecisionID) || f.PlannedTrash != 0 || !validFolder || d.RootDirID == "" || (!created && !existing) {
+			return fmt.Errorf("%w: invalid filing record", ErrInvalidCandidate)
+		}
 	}
 	return nil
 }
@@ -155,7 +193,7 @@ func (s *Service) FileReviewPlan(ctx context.Context, owner, workspaceID, batchI
 	_, err = s.store.UpdateScanState(workspaceID, func(state *ScanState) error {
 		for _, existing := range state.Filings {
 			if existing.ClientKey == req.ClientKey {
-				if existing.Owner != owner || existing.BatchID != batchID {
+				if existing.Owner != owner || existing.BatchID != batchID || existing.Destination != nil {
 					return ErrReviewConflict
 				}
 				admitted.record = existing

@@ -1,7 +1,9 @@
 package folderagenthttp
 
 import (
+	"errors"
 	"github.com/johnjallday/ori-agent/internal/connectionshttp"
+	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"net/http"
@@ -49,6 +51,97 @@ func (h *Handler) OrganizationFiling(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orihttp.Success(w, map[string]any{"selection": projection})
+}
+
+// OrganizationFilingPreview shows what filing the chosen files into a folder
+// would do. It moves nothing and writes nothing.
+func (h *Handler) OrganizationFilingPreview(w http.ResponseWriter, r *http.Request) {
+	owner, ok := h.organizationUser(w, r)
+	if !ok {
+		return
+	}
+	var req folderagent.FilingPreviewRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	preview, err := h.service.PreviewOrganizationFiling(r.Context(), owner, r.PathValue("workspaceID"), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"preview": preview})
+}
+
+// OrganizationFile files the previewed selection on a fresh, explicit press. A
+// press whose plan changed, or whose key was used for something else, is a 409
+// with a code the page can act on; nothing has moved in either case.
+func (h *Handler) OrganizationFile(w http.ResponseWriter, r *http.Request) {
+	owner, ok := h.organizationUser(w, r)
+	if !ok {
+		return
+	}
+	var req folderagent.FilingRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	result, err := h.service.FileOrganizationSelection(r.Context(), owner, r.PathValue("workspaceID"), req)
+	respondFiling(w, result, err)
+}
+
+// OrganizationFilingUndo puts a named filing's files back: all of them, or one when
+// the request names its journal entry. Nothing is ever overwritten.
+func (h *Handler) OrganizationFilingUndo(w http.ResponseWriter, r *http.Request) {
+	owner, ok := h.organizationUser(w, r)
+	if !ok {
+		return
+	}
+	var req folderagent.FilingUndoRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	result, err := h.service.UndoOrganizationFiling(r.Context(), owner, r.PathValue("workspaceID"), req)
+	respondUndo(w, result, err)
+}
+
+// respondUndo turns an Undo outcome into the answer the page acts on. The engine's
+// reason for refusing stays in the journal; the page gets one plain sentence.
+func respondUndo(w http.ResponseWriter, result filejanitor.FilingUndoResult, err error) {
+	switch {
+	case errors.Is(err, filejanitor.ErrUndoUnavailable):
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "These files cannot be put back from here. Nothing was moved.",
+			"code":  "undo_unavailable",
+		})
+	case err != nil:
+		writeError(w, err)
+	default:
+		orihttp.Success(w, map[string]any{"undo": result})
+	}
+}
+
+// respondFiling turns a press's outcome into the answer the page acts on.
+func respondFiling(w http.ResponseWriter, result folderagent.FilingResult, err error) {
+	switch {
+	case errors.Is(err, filejanitor.ErrReviewPlanChanged):
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "These files or the folder changed since you looked. Nothing was moved. Check the new plan.",
+			"code":  "filing_changed", "preview": result.Preview,
+		})
+	case errors.Is(err, filejanitor.ErrFilingKeyReused):
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "That press was already used for a different filing. Nothing was moved. Preview it again.",
+			"code":  "filing_key_reused",
+		})
+	case errors.Is(err, filejanitor.ErrMoveUnsupported):
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "Ori cannot file into this folder safely on this computer. Nothing was moved.",
+			"code":  "filing_unsupported",
+		})
+	case err != nil:
+		writeError(w, err)
+	default:
+		orihttp.Success(w, map[string]any{"filing": result})
+	}
 }
 
 func (h *Handler) OrganizationSource(w http.ResponseWriter, r *http.Request) {

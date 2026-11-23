@@ -160,6 +160,10 @@ func (s *Service) UndoFiling(ctx context.Context, owner, workspaceID, filingID s
 	unlock := lockRoot(root)
 	defer unlock()
 
+	// A placement whose undo was cut short is settled from the disk before this
+	// run decides what is left to put back.
+	s.settlePlacementUndos(workspaceID, root)
+
 	var claimed FilingRecord
 	var targets []FileAction
 	_, err = s.store.UpdateScanState(workspaceID, func(state *ScanState) error {
@@ -216,6 +220,14 @@ func (s *Service) UndoFiling(ctx context.Context, owner, workspaceID, filingID s
 	// Put the files back in reverse order of filing, each through the engine's own
 	// per-file undo (which journals every attempt, including the ones that fail).
 	// The folder is checked again before each file: a relink mid-run stops the rest.
+	for _, target := range targets {
+		runningUndos.Store(target.ID, struct{}{})
+	}
+	defer func() {
+		for _, target := range targets {
+			runningUndos.Delete(target.ID)
+		}
+	}()
 	for i := len(targets) - 1; i >= 0; i-- {
 		action := targets[i]
 		if current, loadErr := s.store.LoadSettings(workspaceID); loadErr != nil || current.RootID != claimed.RootID {
@@ -225,6 +237,8 @@ func (s *Service) UndoFiling(ctx context.Context, owner, workspaceID, filingID s
 		switch action.Operation {
 		case OperationMove:
 			_, _ = s.undoMove(ctx, settings, root, action, owner)
+		case OperationPlace:
+			_, _ = s.undoPlacement(ctx, settings, root, action)
 		case OperationTrash:
 			_, _ = s.restoreFromTrash(settings, root, action, owner)
 		default:

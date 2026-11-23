@@ -47,6 +47,11 @@ func validExecutionCandidate(candidate JanitorCandidate, item PlanItem, approval
 			return false
 		}
 	}
+	// A placement has no category: the person chose the folder. A file the review
+	// marked for the Trash, or whose type question is unanswered, is never placed.
+	if item.Operation == OperationPlace && (approval.ReviewRevision == "" || !moveAnswered(candidate) || candidate.Decision == DecisionTrash) {
+		return false
+	}
 	return true
 }
 

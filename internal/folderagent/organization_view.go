@@ -25,6 +25,13 @@ type OrganizingDecision struct {
 	Choice      string    `json:"choice"`
 	Outcome     string    `json:"outcome"`
 	Exception   bool      `json:"exception,omitempty"`
+	// Filing is the File Janitor filing this decision belongs to (Kind "file").
+	// One filing has exactly one decision; the journal, not this field, is the
+	// evidence of what moved.
+	Filing string `json:"filing,omitempty"`
+	// FilingState is computed from File Janitor's journal when results are read, for
+	// display only. It is never stored, so history cannot drift from the disk.
+	FilingState *filejanitor.DocumentsFilingStanding `json:"filing_state,omitempty"`
 }
 type ViewChange struct {
 	ToReview   string `json:"to_review,omitempty"`
