@@ -13,25 +13,30 @@ import (
 
 // A saved view and its decisions live in the sidecar, not the physical root.
 type OrganizingDecision struct {
-	ID        string    `json:"id"`
-	Kind      string    `json:"kind"`
-	Time      time.Time `json:"time"`
-	Group     string    `json:"group,omitempty"`
-	Sources   []string  `json:"sources"`
-	Proposed  string    `json:"proposed,omitempty"`
-	Choice    string    `json:"choice"`
-	Outcome   string    `json:"outcome"`
-	Exception bool      `json:"exception,omitempty"`
+	Property    string    `json:"property,omitempty"`
+	FileKey     string    `json:"file_key,omitempty"`
+	Intentional bool      `json:"intentional,omitempty"`
+	ID          string    `json:"id"`
+	Kind        string    `json:"kind"`
+	Time        time.Time `json:"time"`
+	Group       string    `json:"group,omitempty"`
+	Sources     []string  `json:"sources"`
+	Proposed    string    `json:"proposed,omitempty"`
+	Choice      string    `json:"choice"`
+	Outcome     string    `json:"outcome"`
+	Exception   bool      `json:"exception,omitempty"`
 }
 type ViewChange struct {
-	Review   string `json:"review"`
-	Revision int    `json:"revision"`
-	Action   string `json:"action"`
-	Group    string `json:"group"`
-	Source   string `json:"source,omitempty"`
-	To       string `json:"to,omitempty"`
-	Name     string `json:"name,omitempty"`
-	Decision string `json:"decision,omitempty"`
+	ToReview   string `json:"to_review,omitempty"`
+	ToRevision int    `json:"to_revision,omitempty"`
+	Review     string `json:"review"`
+	Revision   int    `json:"revision"`
+	Action     string `json:"action"`
+	Group      string `json:"group"`
+	Source     string `json:"source,omitempty"`
+	To         string `json:"to,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Decision   string `json:"decision,omitempty"`
 }
 
 // Inspect opens an original only on a fresh press, after matching the opaque
@@ -118,18 +123,49 @@ func (s *Service) ChangeOrganizationView(owner, id string, c ViewChange) (Review
 					return errReviewReplay
 				}
 			}
-			if v.Status != "reviewed" || v.Revision != c.Revision || len(v.Decisions) >= 256 {
+			if v.Status == reviewRunning || v.Status == "scope changed" || v.Revision != c.Revision {
+				return ErrWrongState
+			}
+			if c.Action == "confirm_observation" || c.Action == "exception" {
+				for j := range v.Decisions {
+					d := &v.Decisions[j]
+					if d.ID != c.Decision {
+						continue
+					}
+					if c.Action == "confirm_observation" {
+						if d.Kind != "observed" || d.Intentional {
+							return ErrWrongState
+						}
+						d.Intentional = true
+						d.Outcome = "Observed on disk · confirmed as your placement"
+					} else {
+						if d.Exception {
+							return ErrWrongState
+						}
+						d.Exception = true
+					}
+					v.Revision++
+					out = *v
+					return nil
+				}
 				return ErrWrongState
 			}
 			idx := slices.IndexFunc(v.Groups, func(g DocumentGroup) bool { return g.ID == c.Group })
-			if idx < 0 {
+			if idx < 0 || v.Status != "reviewed" || len(v.Decisions) >= 256 {
 				return ErrWrongState
 			}
 			g := &v.Groups[idx]
 			d := OrganizingDecision{ID: key, Kind: c.Action, Time: s.deps.Now().UTC(), Group: g.ID, Sources: slices.Clone(g.Members), Proposed: g.Title, Choice: g.Title, Outcome: "View saved. No files moved."}
 			switch c.Action {
+			case "not_now":
+				if g.Kept || g.Dismissed {
+					return ErrWrongState
+				}
+				g.Dismissed = true
+				d.Choice = "Not now"
+				d.Outcome = "Suggestion dismissed. No files moved."
 			case "keep":
-				if g.Kept {
+				if g.Kept || g.Dismissed {
 					return ErrWrongState
 				}
 				g.Kept = true
@@ -149,11 +185,27 @@ func (s *Service) ChangeOrganizationView(owner, id string, c ViewChange) (Review
 				d.Sources = []string{c.Source}
 				d.Choice = "Leave loose"
 				if c.Action == "move_member" {
-					to := slices.IndexFunc(v.Groups, func(dest DocumentGroup) bool { return dest.Kept && dest.ID == c.To && dest.ID != g.ID })
+					target := v
+					if c.ToReview != "" && c.ToReview != v.ID {
+						other := slices.IndexFunc(r.OrganizationRuns, func(other OrganizationRun) bool {
+							return other.Authority == auth && other.Result.ID == c.ToReview && other.Result.Status == "reviewed"
+						})
+						if other < 0 {
+							return ErrWrongState
+						}
+						target = &r.OrganizationRuns[other].Result
+						if target.Revision != c.ToRevision {
+							return ErrWrongState
+						}
+						target.Revision++
+					}
+					to := slices.IndexFunc(target.Groups, func(dest DocumentGroup) bool {
+						return dest.Kept && dest.ID == c.To && (target != v || dest.ID != g.ID) && !slices.Contains(dest.Members, c.Source) && len(dest.Members) < 64
+					})
 					if to < 0 {
 						return ErrWrongState
 					}
-					dest := &v.Groups[to]
+					dest := &target.Groups[to]
 					dest.Members = append(dest.Members, c.Source)
 					dest.Reasons[c.Source] = "Included by you."
 					d.Choice = dest.Title

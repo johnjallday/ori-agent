@@ -42,16 +42,18 @@ type ReviewSource struct {
 	Example bool                    `json:"example,omitempty"`
 }
 type OrganizationPreview struct {
-	Files     []string        `json:"files"`
-	Options   []ReviewOption  `json:"options"`
-	Folders   []ReviewOption  `json:"folders"`
-	Remaining int             `json:"remaining"`
-	Partial   bool            `json:"partial"`
-	Processor ReviewProcessor `json:"processor"`
-	Approval  string          `json:"approval,omitempty"`
+	Files      []string            `json:"files"`
+	Options    []ReviewOption      `json:"options"`
+	Folders    []ReviewOption      `json:"folders"`
+	Remaining  int                 `json:"remaining"`
+	Partial    bool                `json:"partial"`
+	Processor  ReviewProcessor     `json:"processor"`
+	Convention DocumentsConvention `json:"convention"`
+	Approval   string              `json:"approval,omitempty"`
 }
 type organizationScope struct {
 	OrganizationPreview
+	coverage                ReviewCoverage
 	sources                 []ReviewSource
 	root, rootID, authority string
 }
@@ -78,6 +80,10 @@ func (s *Service) reviewScope(ctx context.Context, owner string, rec *Record, se
 	out.rootID = rootFolder.BranchWitness
 	out.root = a.Root
 	out.authority = documentsRef(owner, rec.WorkspaceID, a.Root, out.rootID, a.Lead, a.Binding)
+	out.Convention, _, err = s.convention(rec.WorkspaceID, conventionMarker(owner, rec.WorkspaceID, out.rootID))
+	if err != nil {
+		return out, ErrWrongState
+	}
 	var protected []string
 	if s.deps.DocumentsProtected != nil {
 		protected = s.deps.DocumentsProtected()
@@ -124,7 +130,10 @@ func (s *Service) reviewScope(ctx context.Context, owner string, rec *Record, se
 			}
 		}
 	}
-	loose = slices.DeleteFunc(collect(listing, false), func(src ReviewSource) bool { return seen[src.Ref] })
+	out.coverage = ReviewCoverage{Authority: out.authority, Directories: map[string]string{}, Reviewed: map[string]bool{}}
+	loose = collect(listing, false)
+	out.coverage.add(".", out.rootID, listing, loose)
+	loose = slices.DeleteFunc(slices.Clone(loose), func(src ReviewSource) bool { return seen[src.Ref] })
 	for _, dir := range listing.Entries {
 		if dir.Kind != "folder" || !secondbrain.ValidFolderName(dir.Name) || folderdigest.IsSkippedFolder(dir.Name) || !allowed(dir.Name) || sensitive.ContainsSecretLikeText(dir.Name) {
 			continue
@@ -142,6 +151,21 @@ func (s *Service) reviewScope(ctx context.Context, owner string, rec *Record, se
 		}
 		out.Partial = out.Partial || ls.Truncated
 		rows := collect(ls, true)
+		out.coverage.add(dir.Name, dir.Version.Identity, ls, rows)
+		// The preview names the actual reference file, including an Invoices subfolder if present.
+		for _, sub := range ls.Entries {
+			if sub.Kind != "folder" || sub.Name != "Invoices" || !allowed(sub.RelativePath) {
+				continue
+			}
+			nested, err := workspace.ListContainedEntries(a.Root, sub.RelativePath, 1)
+			if err != nil {
+				return out, ErrWrongState
+			}
+			out.Partial = out.Partial || nested.Truncated
+			children := collect(nested, true)
+			out.coverage.add(sub.RelativePath, sub.Version.Identity, nested, children)
+			rows = append(rows, children...)
+		}
 		if len(rows) > 0 {
 			examples = append(examples, rows[0])
 		}
@@ -173,7 +197,7 @@ func (s *Service) reviewScope(ctx context.Context, owner string, rec *Record, se
 		return out, ErrWrongState
 	}
 	if len(out.sources) > 0 && out.Processor.Pin != "" {
-		out.Approval = scopeHash([]any{"organization-v1", out.authority, out.Processor, out.Processor.Pin, out.sources, out.Folders, out.Partial, out.Remaining, rec.Revision})
+		out.Approval = scopeHash([]any{"organization-v1", out.authority, out.Processor, out.Processor.Pin, out.sources, out.Folders, out.coverage, out.Convention, out.Partial, out.Remaining, rec.Revision})
 	}
 	return out, nil
 }

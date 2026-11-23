@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import { verifyOrganizingLearning } from './helpers/documents-organizing-learning';
 import { imageOnlyDocument } from './helpers/image-only-document';
 import { installLocalCdn } from './helpers/offline-cdn';
 
@@ -10,6 +11,11 @@ const evidence = resolve('tasks/evidence-documents-organization-review');
 
 test('return directly to the Documents lead after a normal hire', async ({ page, request }) => {
   test.skip(!sandbox, 'requires fresh isolated server HOME');
+  if (process.env.ORI_DOCUMENT_REVIEW_REVISIT === '1') {
+    test.setTimeout(240_000);
+    await verifyOrganizingLearning(page, request, sandbox!);
+    return;
+  }
   const root = test.info().outputPath('Documents');
   await mkdir(root, { recursive: true, mode: 0o750 });
   await symlink(root, join(sandbox!, 'Documents'), 'dir');
@@ -122,7 +128,11 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
     await expect(scope.getByRole('heading', { name: /kitchen remodel/i })).toBeVisible();
     await scope.screenshot({ path: join(evidence, 'live-model-result.png') });
     await scope.getByRole('button', { name: 'Open original' }).first().click();
-    await expect(scope).toContainText(/opened in the system viewer|desktop viewer is unavailable/i);
+    await expect(scope).toContainText(
+      process.env.ORI_DOCUMENT_REVIEW_NATIVE === '1'
+        ? /Opened in the system viewer\./
+        : /opened in the system viewer|desktop viewer is unavailable/i
+    );
     await scope.getByRole('button', { name: 'Keep as a view' }).first().click();
     await expect(scope).toContainText('Saved view · no files moved');
     await page.reload();
@@ -132,5 +142,9 @@ test('return directly to the Documents lead after a normal hire', async ({ page,
     await expect(report).toContainText(expectedCoverage);
     for (const [name, body] of Object.entries(fixtures))
       expect(await readFile(join(root, name), 'utf8')).toBe(body);
+    if (process.env.ORI_DOCUMENT_REVIEW_LEARNING === '1') {
+      test.setTimeout(260_000);
+      await verifyOrganizingLearning(page, request, sandbox!);
+    }
   }
 });

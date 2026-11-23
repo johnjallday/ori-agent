@@ -15,6 +15,25 @@ func (h *Handler) organizationUser(w http.ResponseWriter, r *http.Request) (stri
 	}
 	return h.user(w, r)
 }
+func (h *Handler) OrganizationConvention(w http.ResponseWriter, r *http.Request) {
+	owner, ok := h.organizationUser(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		Revision string `json:"revision"`
+		Text     string `json:"text"`
+	}
+	if !decode(w, r, &req) {
+		return
+	}
+	c, err := h.service.SaveConvention(owner, r.PathValue("workspaceID"), req.Revision, req.Text)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"convention": c})
+}
 func (h *Handler) OrganizationSource(w http.ResponseWriter, r *http.Request) {
 	owner, ok := h.organizationUser(w, r)
 	if !ok {

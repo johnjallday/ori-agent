@@ -441,6 +441,24 @@ func (s *Service) updateAction(workspaceID string, action FileAction, candidateS
 	return err
 }
 
+// ObservedActionFiles excludes known Ori mutations from subsequent on-disk
+// learning. Never interpret a corrupt journal as an empty history.
+func (s *Service) ObservedActionFiles(workspaceID string, since time.Time) (map[string]bool, error) {
+	state, err := s.store.loadScanState(workspaceID, true)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for _, a := range state.Actions {
+		if a.CompletedAt.Before(since) && a.UndoneAt.Before(since) && a.ApprovedAt.Before(since) {
+			continue
+		}
+		out[a.BeforeFingerprint.FileID] = true
+		out[a.AfterFingerprint.FileID] = true
+	}
+	return out, nil
+}
+
 // ListActions returns the workspace's journal, newest first.
 func (s *Service) ListActions(workspaceID string) ([]FileAction, error) {
 	state, err := s.store.LoadScanState(workspaceID)

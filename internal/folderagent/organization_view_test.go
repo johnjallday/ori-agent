@@ -78,4 +78,63 @@ func TestSavedReviewKeepsSourcesAndDecisionsWithoutAdditionalCalls(t *testing.T)
 	if calls != 1 {
 		t.Fatal("view operations resent content")
 	}
+	// Create a second saved view from a later approved batch. Edits must
+	// compare both revisions and publish both memberships in one update.
+	if err := os.Remove(filepath.Join(root, src.Path)); err != nil {
+		t.Fatal(err)
+	}
+	nextGroup := func(prefix string) ReviewResult {
+		t.Helper()
+		for _, suffix := range []string{"-one.txt", "-two.txt"} {
+			if err := os.WriteFile(filepath.Join(root, prefix+suffix), []byte("Atrium remodel · AB-1931"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		p, err := h.svc.OrganizationPreview("u1", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := h.svc.ApproveOrganization(t.Context(), "u1", id, p.Approval, ReviewSelection{})
+		if err != nil || len(r.Groups) != 1 {
+			t.Fatal(r, err)
+		}
+		return r
+	}
+	later := nextGroup("second")
+	later, err = h.svc.ChangeOrganizationView("u1", id, ViewChange{Review: later.ID, Group: later.Groups[0].ID, Action: "keep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	move := ViewChange{Review: v.ID, Revision: v.Revision, Group: g.ID, Action: "move_member", Source: g.Members[1], ToReview: later.ID, To: later.Groups[0].ID}
+	if _, err = h.svc.ChangeOrganizationView("u1", id, move); err == nil {
+		t.Fatal("stale destination accepted")
+	}
+	move.ToRevision = later.Revision
+	for range 2 {
+		v, err = h.svc.ChangeOrganizationView("u1", id, move)
+		if err != nil || len(v.Groups[0].Members) != 1 {
+			t.Fatal(v, err)
+		}
+	}
+	reviews, err := h.svc.OrganizationResults("u1", id)
+	if err != nil || len(reviews[1].Groups[0].Members) != 3 || reviews[1].Revision != later.Revision+1 {
+		t.Fatal(reviews, err)
+	}
+	later = reviews[1]
+	later, err = h.svc.ChangeOrganizationView("u1", id, ViewChange{Review: later.ID, Revision: later.Revision, Group: later.Groups[0].ID, Action: "loose", Source: move.Source})
+	if err != nil || len(later.Groups[0].Members) != 2 {
+		t.Fatal(later, err)
+	}
+	third := nextGroup("third")
+	third, err = h.svc.ChangeOrganizationView("u1", id, ViewChange{Review: third.ID, Group: third.Groups[0].ID, Action: "not_now"})
+	if err != nil || !third.Groups[0].Dismissed {
+		t.Fatal(third, err)
+	}
+	if _, err = h.svc.ChangeOrganizationView("u1", id, ViewChange{Review: third.ID, Revision: third.Revision, Group: third.Groups[0].ID, Action: "keep"}); err == nil {
+		t.Fatal("dismissed suggestion was actionable")
+	}
+	if calls != 3 {
+		t.Fatal("view edit triggered another review")
+	}
+
 }

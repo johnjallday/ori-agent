@@ -221,12 +221,14 @@ type Deps struct {
 	OnReported func(ctx context.Context, userID, workspaceID string)
 	Now        func() time.Time
 	// KnownFolderRoot shares the chooser's trusted configured-home resolver.
-	KnownFolderRoot    func(string) (string, error)
-	DocumentsAccess    func(owner, workspaceID string) (DocumentsAccess, error)
-	DocumentsProtected func() []string
-	ReviewOpen         func(string) error
-	ReviewRead         func(string, string, int64, string, workspace.SourceVersion) (workspace.ContainedFile, error)
-	ReviewModel        func(workspaceID, lead string) (ReviewProcessor, ReviewChat)
+	KnownFolderRoot        func(string) (string, error)
+	DocumentsAccess        func(owner, workspaceID string) (DocumentsAccess, error)
+	DocumentsProtected     func() []string
+	OrganizationMemory     ReviewMemory
+	ReviewActionIdentities func(owner, id, root string, since time.Time) (map[string]bool, error)
+	ReviewOpen             func(string) error
+	ReviewRead             func(string, string, int64, string, workspace.SourceVersion) (workspace.ContainedFile, error)
+	ReviewModel            func(workspaceID, lead string) (ReviewProcessor, ReviewChat)
 	// Walk overrides the walk options (tests).
 	Walk foldermap.Options
 }

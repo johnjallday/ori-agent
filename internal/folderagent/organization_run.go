@@ -18,9 +18,12 @@ const reviewRunning = "reading"
 const maxReviews = 128
 
 type ReviewedDocument struct {
-	Source    ReviewSource `json:"source"`
-	Status    string       `json:"status"`
-	Truncated bool         `json:"truncated,omitempty"`
+	ConventionPin string               `json:"convention_pin,omitempty"`
+	Property      string               `json:"property,omitempty"`
+	Placement     *PlacementSuggestion `json:"placement,omitempty"`
+	Source        ReviewSource         `json:"source"`
+	Status        string               `json:"status"`
+	Truncated     bool                 `json:"truncated,omitempty"`
 }
 type ReviewResult struct {
 	Revision  int                  `json:"revision"`
@@ -70,10 +73,19 @@ func (s *Service) OrganizationResults(owner, id string) ([]ReviewResult, error) 
 	if err != nil {
 		return nil, err
 	}
+	root, _ := rec.Map.Folder("")
+	convention, _, err := s.convention(id, conventionMarker(owner, id, root.BranchWitness))
+	if err != nil {
+		return nil, err
+	}
 	out := []ReviewResult{}
 	for _, run := range rec.OrganizationRuns {
 		if run.Authority == auth {
-			out = append(out, run.Result)
+			v := run.Result
+			for i := range v.Files {
+				v.Files[i].Placement = placementFor(rec, auth, v.Files[i], convention)
+			}
+			out = append(out, v)
 		}
 	}
 	return out, nil
@@ -180,6 +192,9 @@ func (s *Service) ApproveOrganization(ctx context.Context, owner, id, digest str
 			continue
 		}
 		item.Status = "read"
+		if !source.Example {
+			item.Property = invoiceProperty(e.Text)
+		}
 		item.Truncated = e.Truncated
 		result.Read++
 		ex := reviewExcerpt{Ref: fmt.Sprintf("s%d", i+1), Text: e.Text}
@@ -189,9 +204,20 @@ func (s *Service) ApproveOrganization(ctx context.Context, owner, id, digest str
 		excerpts = append(excerpts, ex)
 	}
 	result.Skipped = len(result.Files) - result.Read
-	if len(excerpts) > 0 && result.Status == "reviewed" {
+	// A group needs two readable loose documents. With one loose source and
+	// no convention to apply, save its coverage without transmitting excerpts.
+	loose := 0
+	for _, ex := range excerpts {
+		if ex.ExampleFolder == "" {
+			loose++
+		}
+	}
+	if (loose >= 2 || (loose == 1 && scope.Convention.Text != "")) && result.Status == "reviewed" {
 		model, chat := s.deps.ReviewModel(id, rec.AgentName)
-		raw, _ := json.Marshal(excerpts)
+		raw, _ := json.Marshal(struct {
+			Sources    []reviewExcerpt `json:"sources"`
+			Convention string          `json:"organizing_convention,omitempty"`
+		}{excerpts, scope.Convention.Text})
 		if model != scope.Processor || chat == nil || !verify() {
 			result.Status = "scope changed"
 		} else if len(raw)+len(reviewPrompt) > 16<<10 {
@@ -206,6 +232,7 @@ func (s *Service) ApproveOrganization(ctx context.Context, owner, id, digest str
 					result.Status = "could not verify suggestions"
 				} else {
 					result.Groups = groups
+					bindConventionPlacements(reply.Content, result.Files, scope.Convention)
 				}
 			}
 		}
@@ -220,6 +247,39 @@ func (s *Service) ApproveOrganization(ctx context.Context, owner, id, digest str
 		})
 		if index < 0 {
 			return ErrWrongState
+		}
+		// Location evidence comes from the approved metadata snapshot, not
+		// from the model's ability to return a well-formed group.
+		if result.Status != "scope changed" && result.Read > 0 {
+			scope.coverage.At = s.deps.Now().UTC()
+			scope.coverage.Properties = map[string]string{}
+			for _, item := range result.Files {
+				if item.Status == "read" {
+					scope.coverage.Reviewed[item.Source.Ref] = true
+					if item.Property != "" {
+						scope.coverage.Properties[item.Source.Ref] = item.Property
+					}
+				}
+			}
+			before := r.ReviewBaseline
+			var known map[string]bool
+			if before != nil && s.deps.ReviewActionIdentities != nil {
+				if identities, err := s.deps.ReviewActionIdentities(owner, id, scope.root, before.At); err == nil {
+					known = identities
+				}
+			}
+			result.Decisions = observationChoices(before, &scope.coverage, digest, known)
+			if before != nil && before.Authority == auth {
+				for _, f := range scope.coverage.Files {
+					if before.Reviewed[f.Ref] {
+						scope.coverage.Reviewed[f.Ref] = true
+						if before.Properties[f.Ref] != "" {
+							scope.coverage.Properties[f.Ref] = before.Properties[f.Ref]
+						}
+					}
+				}
+			}
+			r.ReviewBaseline = &scope.coverage
 		}
 		r.OrganizationRuns[index].Result = result
 		return nil

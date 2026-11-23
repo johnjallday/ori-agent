@@ -4,11 +4,22 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// Observe only changes outside Ori's own Filing journal. Unavailable history
+// cannot prove a manual placement. Old root generations may only suppress an
+// observation; they never contribute to a learned preference.
+func (b *ServerBuilder) documentsActionIdentities(owner, id, root string, since time.Time) (map[string]bool, error) {
+	if b.fileJanitorService == nil {
+		return nil, folderagent.ErrUnavailable
+	}
+	return b.fileJanitorService.ObservedActionFiles(id, since)
+}
 
 // Resolve only a named model on the lead's explicit Claude API route. No
 // model discovery, fallback, or CLI/agent tools participate in the review.

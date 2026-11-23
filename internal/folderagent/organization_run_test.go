@@ -21,7 +21,7 @@ func (f reviewChatFunc) Chat(ctx context.Context, r llm.ChatRequest) (*llm.ChatR
 	return f(ctx, r)
 }
 func TestReviewRevocationDuringModelDiscardsResult(t *testing.T) {
-	root := build(t, "budget.txt")
+	root := build(t, "budget.txt", "proposal.txt")
 	h := newHarness(t, root)
 	h.svc.deps.KnownFolderRoot = knownOnly("documents", root)
 	id := h.start(t, "").WorkspaceID
