@@ -73,6 +73,8 @@ import {
 import { workspacePageURL, workspaceRootURL } from './workspace-routes.js';
 import { fetchWorkspaceProtection, protectionFactView } from './workspace-protection.js';
 import { openLibrarySheet } from './map-library-sheet.js';
+import { createLibraryClient } from './library-setup.js';
+import { readFolderMap, folderMapTree, drawFolderMap } from './music-folder-map.js';
 import {
   addSharedAssistant,
   loadProjectStaffing,
@@ -12492,6 +12494,10 @@ export class WorkspaceCommandView {
         this.openWorkspacePanel('resources', resources);
         return;
       }
+      if (event.target.closest('[data-cmd-by-folder]')) {
+        void this.toggleMusicFolders();
+        return;
+      }
       const setupProjects = event.target.closest('[data-cmd-setup-projects]');
       if (setupProjects) {
         const menu = setupProjects.closest('details');
@@ -13542,6 +13548,9 @@ export class WorkspaceCommandView {
       '">' +
       (count === null ? '—' : count) +
       '</span>' +
+      (this.groupTemplateStatus?.provider?.plugin_id === 'music-project-management'
+        ? `<button type="button" class="ws-cmd-nav-btn" data-cmd-by-folder aria-pressed="${!!this.musicFolders}">By folder</button>`
+        : '') +
       // Projects on the Home's shelf not on the map yet: set up from here.
       // Its own slot, refreshed in place when the count arrives.
       '<span class="ws-cmd-map-setup-slot" data-cmd-setup-projects-slot>' +
@@ -14080,8 +14089,8 @@ export class WorkspaceCommandView {
         if (left > 0) window.setTimeout(() => attempt(left - 1), 200);
         return;
       }
-      if (tile) this.openLibrarySetupSheet(chip || tile, tile);
-      else this.openLibrarySetupSheet(chip, zone);
+      if (tile) this.openLibrarySetupSheet(chip || tile, tile, arrival.root);
+      else this.openLibrarySetupSheet(chip, zone, arrival.root);
     };
     window.setTimeout(() => attempt(retries), delayMs);
   }
@@ -14120,13 +14129,14 @@ export class WorkspaceCommandView {
    * FR-6). After a run the members reload, the lot gives way to the new
    * tiles, and the camera frames them.
    */
-  openLibrarySetupSheet(element, beside = null) {
+  openLibrarySetupSheet(element, beside = null, intakeRootID = '') {
     const homeID = this.workspaceId();
     if (!homeID) return false;
     const host = this.ensureDetachmentHost();
     const slug = this.workspaceSlug();
     const sheet = openLibrarySheet({
       homeID,
+      intakeRootID,
       homeName: String(this.page?.workspace?.name || '').trim() || 'this Home',
       anchor: element || null,
       beside: beside || element || null,
@@ -14275,6 +14285,7 @@ export class WorkspaceCommandView {
     const host = this.ensureDetachmentHost();
     if (!host) return;
     if (host.parentNode !== slot) slot.appendChild(host);
+    this.attachMusicFolders(slot);
     // The dock was rebuilt with the rest of the view; the selected song's card
     // comes back from the last read, without a fetch.
     this.paintDetachmentSongCard();
@@ -14388,6 +14399,68 @@ export class WorkspaceCommandView {
       this.selectDetachmentMember(kept, workspaces.find(row => row && row.id === kept) || null, {
         fromMount: true
       });
+    }
+  }
+
+  async toggleMusicFolders() {
+    const host = this.detachmentMapEl,
+      slot = host?.parentElement;
+    if (!slot || this.groupTemplateStatus?.provider?.plugin_id !== 'music-project-management')
+      return;
+    const button = this.container.querySelector('[data-cmd-by-folder]');
+    if (this.musicFolders) {
+      this.closeMusicFolders();
+      button?.focus();
+      return;
+    }
+    const home = this.workspaceId();
+    const panel = document.createElement('div');
+    panel.className = 'music-folder-view';
+    panel.textContent = 'Loading folder sections…';
+    this.musicFolders = panel;
+    button?.setAttribute('aria-pressed', 'true');
+    button.textContent = 'Saved layout';
+    this.attachMusicFolders(slot);
+    try {
+      const catalog = await readFolderMap(createLibraryClient(home));
+      if (this.musicFolders !== panel || home !== this.workspaceId()) return;
+      const { workspaces } = this.detachmentSnapshot();
+      const tree = folderMapTree(home, workspaces, catalog);
+      panel.replaceChildren(drawFolderMap(document, tree, id => this.openDetachmentMember(id)));
+    } catch {
+      if (this.musicFolders === panel)
+        panel.textContent =
+          'Folder sections could not be loaded. Return to the saved layout and try again.';
+    }
+  }
+
+  attachMusicFolders(slot) {
+    const panel = this.musicFolders;
+    if (!panel) return;
+    if (panel.parentElement !== slot) slot.append(panel);
+    this.detachmentMapEl.inert = true;
+    const overlay = slot.parentElement?.querySelector('[data-map-zone="agents"]');
+    if (overlay) overlay.inert = true;
+    const button = this.container.querySelector('[data-cmd-by-folder]');
+    if (button) {
+      button.textContent = 'Saved layout';
+      button.setAttribute('aria-pressed', 'true');
+    }
+  }
+
+  closeMusicFolders() {
+    if (!this.musicFolders) return;
+    const overlay = this.musicFolders.parentElement?.parentElement?.querySelector(
+      '[data-map-zone="agents"]'
+    );
+    if (overlay) overlay.inert = false;
+    this.musicFolders.remove();
+    this.musicFolders = null;
+    if (this.detachmentMapEl) this.detachmentMapEl.inert = false;
+    const button = this.container?.querySelector('[data-cmd-by-folder]');
+    if (button) {
+      button.textContent = 'By folder';
+      button.setAttribute('aria-pressed', 'false');
     }
   }
 
@@ -14524,6 +14597,7 @@ export class WorkspaceCommandView {
   }
 
   unmountDetachmentMap() {
+    this.closeMusicFolders();
     const map = typeof window === 'undefined' ? null : window.OriWorkspaceMap;
     if (this.detachmentMapEl && map && typeof map.unmount === 'function') {
       map.unmount(this.detachmentMapEl, { preservePresentation: true });

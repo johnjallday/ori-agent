@@ -191,6 +191,12 @@ func (s *Service) CheckPlan(workspaceID string, plan Plan) error {
 	copy := *rec
 	copy.State = StateReported
 	current := BuildPlan(*s.effectiveRecord(&copy), plan.Selected)
+	if current.BranchLook != "" {
+		root, err := s.deps.Workspaces.AnchorRoot(workspaceID)
+		if err != nil || current.CheckBranchWitnesses(root, copy.Map) != nil {
+			return personalassistant.ErrFolderPlanChanged
+		}
+	}
 	if !current.Runnable || !reflect.DeepEqual(withoutHireFaces(current), withoutHireFaces(plan)) {
 		return personalassistant.ErrFolderPlanChanged
 	}

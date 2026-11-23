@@ -907,13 +907,14 @@ func (s folderAgentSetups) run(ctx context.Context, rec folderagent.Record, plan
 			setLine(line, personalassistant.FolderLineDone, "")
 			continue
 		case folderlook.KindHomeProvider:
-			receipt, err := b.runFolderAgentHome(ctx, rec, candidate, lines, setLine)
+			receipt, err := b.runFolderAgentHome(ctx, rec, candidate, plan, lines, setLine)
 			if receipt.homeID != "" {
 				made.Home = &folderagent.WorkspaceRef{ID: receipt.homeID, Name: receipt.homeName,
 					Route: folderAgentWorkspaces{builder: b}.Route(receipt.homeID)}
 				made.HomeCreated = receipt.created
 			}
 			made.Hired = append(made.Hired, receipt.hired...)
+			made.LibraryRootID, made.PartialListing = receipt.rootID, receipt.partial
 			made.Listed, made.ListedNoun, made.Unreached = receipt.listed, receipt.listedNoun, receipt.unreached
 			var stopped *homeStageStop
 			if errors.As(err, &stopped) {

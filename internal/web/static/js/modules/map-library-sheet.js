@@ -36,7 +36,14 @@ const SHEET_CLASS = 'ws-map-library-sheet';
  */
 export function sheetView(
   rows,
-  { chosen = {}, ticked = new Set(), progress = {}, rowStaffing = {}, repair = new Set() } = {}
+  {
+    chosen = {},
+    ticked = new Set(),
+    progress = {},
+    rowStaffing = {},
+    repair = new Set(),
+    readOnly = false
+  } = {}
 ) {
   // What can be set up as it is comes first, then what needs a file chosen,
   // then what is already on the map, then what needs the dashboard; inside a
@@ -56,10 +63,13 @@ export function sheetView(
           ? chosen[row.id]
           : '';
     const checkable =
-      (kind === SETUP_KINDS.SETUP || kind === SETUP_KINDS.FILE_CHOICE) && !progress[row.id];
+      !readOnly &&
+      (kind === SETUP_KINDS.SETUP || kind === SETUP_KINDS.FILE_CHOICE) &&
+      !progress[row.id];
     const checked = checkable && ticked.has(row.id) && file !== '';
     return {
       id: row.id,
+      ...(row.section ? { section: row.section } : {}),
       name: row.name,
       kind,
       label: setupLabel(kind),
@@ -71,13 +81,16 @@ export function sheetView(
       progress: progress[row.id] || null,
       assistant: kind === SETUP_KINDS.CONNECTED ? assistantState(rowStaffing[row.id]) : null,
       repairChecked:
+        !readOnly &&
         kind === SETUP_KINDS.CONNECTED &&
         repair.has(row.id) &&
         assistantState(rowStaffing[row.id]).repairable &&
         !progress[row.id]
     };
   });
-  const selected = items.filter(item => item.checked);
+  const selected = (
+    items.some(item => item.section) ? folderGroups(items).flatMap(group => group.items) : items
+  ).filter(item => item.checked);
   const repairing = items.filter(item => item.repairChecked);
   return {
     items,
@@ -122,8 +135,30 @@ export function assistantState(status) {
 }
 
 /** The confirmation's lines: each ticked project with its exact file (FR-11). */
+export function excludedSummary(items, total) {
+  const counts = new Map();
+  for (const item of items) {
+    if (item.checked) continue;
+    const reason =
+      item.kind === SETUP_KINDS.DASHBOARD
+        ? 'library only'
+        : item.kind === SETUP_KINDS.CONNECTED
+          ? 'already on the map'
+          : item.kind === SETUP_KINDS.FILE_CHOICE && !item.file
+            ? 'need a file choice'
+            : 'not selected';
+    counts.set(reason, (counts.get(reason) || 0) + 1);
+  }
+  if (total > items.length) counts.set('not loaded', total - items.length);
+  return counts.size
+    ? 'Outside this setup: ' + [...counts].map(([reason, n]) => `${n} ${reason}`).join(' · ')
+    : '';
+}
+
 export function confirmLines(selected) {
-  return (Array.isArray(selected) ? selected : []).map(item => `${item.name} — ${item.file}`);
+  return (Array.isArray(selected) ? selected : []).map(
+    item => `${[item.section?.breadcrumb, item.name].filter(Boolean).join(' / ')} — ${item.file}`
+  );
 }
 
 /**
@@ -248,6 +283,9 @@ export function resultRows(run) {
     const row = {
       id: item.id,
       name: item.name,
+      ...(item.section ? { section: item.section } : {}),
+      file: item.file || '',
+      placementNote: '',
       workspaceId: '',
       connection: '',
       assistant: '',
@@ -256,6 +294,7 @@ export function resultRows(run) {
     };
     const finished = done.get(item.id);
     if (finished) {
+      row.placementNote = finished.placementNote || '';
       row.workspaceId = finished.workspaceId || '';
       row.connection = finished.created ? 'Put on the map' : 'Already on the map';
       row.assistant = staffingResultLabel(finished.staffing);
@@ -267,6 +306,7 @@ export function resultRows(run) {
     }
     if (failed && failed.id === item.id) {
       if (failed.stage === 'staffing') {
+        row.placementNote = failed.placementNote || '';
         row.workspaceId = failed.workspaceId || '';
         row.connection = failed.created ? 'Put on the map' : 'On the map';
         row.assistant = `assistant not added: ${failed.message || 'it could not be added'}`;
@@ -352,7 +392,26 @@ export async function loadConnectedStaffing(client, rows) {
   return Object.fromEntries(entries.filter(([, status]) => status));
 }
 
-/** The rows ticked by default: single-file projects only (FR-7). */
+/** Group by the server's root-specific identity; equal display labels are not identities. */
+export function folderGroups(items) {
+  const groups = new Map();
+  for (const item of items) {
+    const section = item.section,
+      id = section?.id || '';
+    if (!groups.has(id))
+      groups.set(id, {
+        id,
+        label: section ? `${section.root_label} / ${section.label}` : 'Other projects',
+        items: []
+      });
+    groups.get(id).items.push(item);
+  }
+  return [...groups.values()].sort(
+    (a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id)
+  );
+}
+
+/** Flat, complete listings keep their single-file defaults. */
 export function defaultTicked(rows) {
   return new Set(
     (Array.isArray(rows) ? rows : [])
@@ -443,6 +502,7 @@ function el(doc, tag, className, text) {
 export function openLibrarySheet({
   homeID,
   homeName = 'this Home',
+  intakeRootID = '',
   anchor = null,
   beside = null,
   tokensFrom = null,
@@ -466,6 +526,9 @@ export function openLibrarySheet({
     rows: [],
     chosen: {},
     ticked: new Set(),
+    initialized: false,
+    nextCursor: '',
+    readOnly: false,
     progress: {},
     message: '',
     created: [],
@@ -567,6 +630,36 @@ export function openLibrarySheet({
 
   function renderRows(view) {
     const list = el(doc, 'ul', `${SHEET_CLASS}-rows`);
+    const lists = new Map();
+    if (view.items.some(item => item.section?.id)) {
+      for (const group of folderGroups(view.items)) {
+        const block = el(doc, 'li', `${SHEET_CLASS}-section`);
+        const label = el(doc, 'label', `${SHEET_CLASS}-pick`);
+        const eligible = group.items.filter(item => item.checkable && item.file);
+        const picked = eligible.filter(item => item.checked).length;
+        const box = el(doc, 'input');
+        box.type = 'checkbox';
+        box.disabled = !!state.nextCursor || !eligible.length;
+        box.checked = eligible.length > 0 && picked === eligible.length;
+        box.indeterminate = picked > 0 && !box.checked;
+        box.setAttribute('aria-label', `Select projects with a chosen file in ${group.label}`);
+        box.dataset.folderGroup = group.id;
+        box.addEventListener('change', () => {
+          for (const item of eligible) {
+            if (box.checked) state.ticked.add(item.id);
+            else state.ticked.delete(item.id);
+          }
+          render();
+          root.querySelector(`[data-folder-group="${CSS.escape(group.id)}"]`)?.focus();
+        });
+        label.append(box, el(doc, 'strong', null, `${group.label} · ${group.items.length}`));
+        block.append(label);
+        const children = el(doc, 'ul', `${SHEET_CLASS}-rows`);
+        block.append(children);
+        list.append(block);
+        lists.set(group.id, children);
+      }
+    }
     for (const item of view.items) {
       const row = el(doc, 'li', `${SHEET_CLASS}-row is-${item.kind}`);
       if (item.progress) row.classList.add(`is-${item.progress.status}`);
@@ -586,6 +679,7 @@ export function openLibrarySheet({
             status.textContent = `Choose the project file for ${item.name} first.`;
           }
           render();
+          root.querySelector(`[data-sheet-row="${CSS.escape(item.id)}"]`)?.focus();
         });
         const name = el(doc, 'span', `${SHEET_CLASS}-name`, item.name);
         label.append(box, name);
@@ -633,7 +727,7 @@ export function openLibrarySheet({
           const box = el(doc, 'input');
           box.type = 'checkbox';
           box.checked = item.repairChecked;
-          box.disabled = state.phase === 'running' || !!item.progress;
+          box.disabled = state.readOnly || state.phase === 'running' || !!item.progress;
           box.setAttribute('data-sheet-repair', item.id);
           box.setAttribute('aria-label', `Add the shared assistant to ${item.name}`);
           box.addEventListener('change', () => {
@@ -677,7 +771,9 @@ export function openLibrarySheet({
           row.append(link);
         }
       }
-      list.append(row);
+      if (item.section?.breadcrumb)
+        row.prepend(el(doc, 'span', `${SHEET_CLASS}-hint`, item.section.breadcrumb));
+      (lists.get(item.section?.id || '') || list).append(row);
     }
     return list;
   }
@@ -846,7 +942,14 @@ export function openLibrarySheet({
       row.setAttribute('data-sheet-result', result.id);
       if (result.complete) row.classList.add('is-complete');
       const head = el(doc, 'div', `${SHEET_CLASS}-result-head`);
-      head.append(el(doc, 'span', `${SHEET_CLASS}-name`, result.name));
+      head.append(
+        el(
+          doc,
+          'span',
+          `${SHEET_CLASS}-name`,
+          [result.section?.breadcrumb, result.name].filter(Boolean).join(' / ')
+        )
+      );
       const route = result.workspaceId ? state.routes[result.workspaceId] : '';
       if (route) {
         const open = el(doc, 'a', `${SHEET_CLASS}-link`, 'Open');
@@ -855,6 +958,9 @@ export function openLibrarySheet({
         head.append(open);
       }
       row.append(head, el(doc, 'span', `${SHEET_CLASS}-hint`, result.connection));
+      if (result.file) row.append(el(doc, 'small', `${SHEET_CLASS}-file`, result.file));
+      if (result.placementNote)
+        row.append(el(doc, 'small', `${SHEET_CLASS}-hint`, result.placementNote));
       if (result.assistant) row.append(el(doc, 'span', `${SHEET_CLASS}-hint`, result.assistant));
       if (result.recovery) {
         const href = recoveryHref(result.recovery.kind);
@@ -873,6 +979,20 @@ export function openLibrarySheet({
         }
       }
       list.append(row);
+    }
+    if (rows.some(row => row.section)) {
+      const nodes = new Map(
+        Array.from(list.children, n => [n.getAttribute('data-sheet-result'), n])
+      );
+      list.replaceChildren();
+      for (const group of folderGroups(rows)) {
+        const block = el(doc, 'li', `${SHEET_CLASS}-section`);
+        block.append(el(doc, 'strong', null, group.label));
+        const items = el(doc, 'ul', `${SHEET_CLASS}-rows`);
+        items.append(...group.items.map(item => nodes.get(item.id)));
+        block.append(items);
+        list.append(block);
+      }
     }
     return list;
   }
@@ -919,13 +1039,24 @@ export function openLibrarySheet({
         }${view.selected.length === 1 ? ' as its own workspace' : ', each as its own workspace'} in ${homeName}:`
       );
       const lines = el(doc, 'ul', `${SHEET_CLASS}-confirm`);
-      for (const line of confirmLines(view.selected)) lines.append(el(doc, 'li', null, line));
+      if (view.selected.some(item => item.section)) {
+        for (const group of folderGroups(view.selected)) {
+          const b = el(doc, 'li', null);
+          b.append(el(doc, 'strong', null, group.label));
+          const songs = el(doc, 'ul', null);
+          for (const line of confirmLines(group.items)) songs.append(el(doc, 'li', null, line));
+          b.append(songs);
+          lines.append(b);
+        }
+      } else
+        for (const line of confirmLines(view.selected)) lines.append(el(doc, 'li', null, line));
       body.append(intro, lines);
       const staffing = confirmStaffing(
         state.staffingPlan,
         view.selected.length,
         state.staffingChoice
       );
+      if (state.outside) body.append(el(doc, 'p', `${SHEET_CLASS}-hint`, state.outside));
       body.append(renderStaffingChoice(staffing));
       const go = el(doc, 'button', 'modern-btn modern-btn-primary', staffing.buttonLabel);
       go.type = 'button';
@@ -941,6 +1072,8 @@ export function openLibrarySheet({
     } else if (state.phase === 'results' && state.lastRun) {
       subtitle.textContent = 'What setup did';
       body.append(renderResults(resultRows(state.lastRun)));
+      if (state.lastRun.kind === 'setup' && state.outside)
+        body.append(el(doc, 'p', `${SHEET_CLASS}-hint`, state.outside));
       const failed = state.lastRun.result.failed;
       const recovery =
         failed && failed.stage === 'staffing'
@@ -1015,15 +1148,35 @@ export function openLibrarySheet({
       subtitle.textContent = view.subtitle;
       if (!view.items.length) {
         body.append(
-          el(doc, 'p', `${SHEET_CLASS}-empty`, 'The last scan found no projects to set up.')
+          el(
+            doc,
+            'p',
+            `${SHEET_CLASS}-empty`,
+            state.loadFailed
+              ? 'The current shelf could not be read. Close and reopen to try again.'
+              : 'The last scan found no projects to set up.'
+          )
         );
       } else {
         body.append(renderRows(view));
+        if (state.nextCursor) {
+          const more = el(
+            doc,
+            'button',
+            'modern-btn',
+            `Showing ${view.items.length} of ${state.total} · Load more projects`
+          );
+          more.type = 'button';
+          more.disabled = state.phase === 'running';
+          more.addEventListener('click', () => void load(true));
+          body.append(more);
+        }
       }
       const go = el(doc, 'button', 'modern-btn modern-btn-primary', view.buttonLabel);
       go.type = 'button';
       go.disabled = view.buttonDisabled || state.phase === 'running';
       go.addEventListener('click', () => {
+        state.outside = excludedSummary(view.items, state.total);
         state.phase = 'confirm';
         // The last run's status line is about that run, not this confirmation.
         state.message = '';
@@ -1066,14 +1219,29 @@ export function openLibrarySheet({
     place();
   }
 
-  async function load() {
+  async function load(more = false) {
     state.phase = 'loading';
+    state.loadFailed = false;
     render();
     try {
-      const [result, plan] = await Promise.all([loadSetupRows(api), loadStaffingPlan(api)]);
-      state.rows = result.rows;
+      const [result, plan] = await Promise.all([
+        loadSetupRows(api, {
+          sections: true,
+          rootID: intakeRootID,
+          cursor: more ? state.nextCursor : ''
+        }),
+        loadStaffingPlan(api)
+      ]);
+      if (more && result.revision !== state.revision)
+        throw new Error('The shelf changed. Reopen the sheet to review current projects.');
+      state.rows = more ? [...state.rows, ...result.rows] : result.rows;
+      state.nextCursor = result.nextCursor;
+      state.total = result.total;
+      state.revision = result.revision;
+      state.readOnly = result.readOnly;
       state.staffingPlan = plan;
-      state.rowStaffing = await loadConnectedStaffing(api, state.rows);
+      const pageStaffing = await loadConnectedStaffing(api, result.rows);
+      state.rowStaffing = more ? { ...state.rowStaffing, ...pageStaffing } : pageStaffing;
       for (const id of [...state.repair]) {
         if (!assistantState(state.rowStaffing[id]).repairable) state.repair.delete(id);
       }
@@ -1082,7 +1250,14 @@ export function openLibrarySheet({
       }
       // Keep ticks the person already made (a reload after a run); tick the
       // single-file rows the first time.
-      state.ticked = state.ticked.size ? state.ticked : defaultTicked(state.rows);
+      if (
+        !state.initialized &&
+        !intakeRootID &&
+        !state.nextCursor &&
+        !state.rows.some(row => row.section)
+      )
+        state.ticked = defaultTicked(state.rows);
+      state.initialized = true;
       for (const id of [...state.ticked]) {
         if (!state.rows.some(row => row.id === id && row.kind !== SETUP_KINDS.CONNECTED))
           state.ticked.delete(id);
@@ -1090,6 +1265,8 @@ export function openLibrarySheet({
       state.phase = 'list';
     } catch (error) {
       state.rows = [];
+      state.nextCursor = '';
+      state.loadFailed = true;
       state.phase = 'list';
       state.message = error?.message || 'The library could not be read.';
     }
@@ -1100,7 +1277,12 @@ export function openLibrarySheet({
   async function run(selected, staffing = null) {
     state.lastRun = null;
     await execute(
-      selected.map(item => ({ id: item.id, name: item.name, file: item.file })),
+      selected.map(item => ({
+        id: item.id,
+        name: item.name,
+        file: item.file,
+        ...(item.section ? { section: { ...item.section } } : {})
+      })),
       staffing,
       'setup'
     );

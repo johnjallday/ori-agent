@@ -150,6 +150,9 @@ func landingOf(rec *Record, plan Plan) *Landing {
 		name = "your Home"
 	}
 	query := url.Values{"mode": {"map"}, SetupProjectsParam: {"1"}}
+	if rootID := rec.Setup.Receipt.LibraryRootID; rootID != "" {
+		query.Set("setup_root", rootID)
+	}
 	if rec.WorkspaceID != "" {
 		query.Set(SetupBesideParam, rec.WorkspaceID)
 	}
@@ -168,6 +171,7 @@ const ActionStartNext = "start_next"
 
 // PlanView is the one-consent plan card's content.
 type PlanView struct {
+	Branches []HomeBranch                       `json:"branches,omitempty"`
 	Stage    foldermap.Stage                    `json:"stage"`
 	Lines    []personalassistant.FolderPlanLine `json:"lines"`
 	Digest   string                             `json:"digest"`
@@ -227,7 +231,7 @@ func planViewOf(plan Plan) *PlanView {
 	if alternatives == nil {
 		alternatives = []Alternative{}
 	}
-	return &PlanView{Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable,
+	return &PlanView{Branches: plan.Branches, Stage: plan.Stage, Lines: plan.Lines, Digest: plan.Digest, Runnable: plan.Runnable,
 		Unavailable: plan.Unavailable, Selected: plan.Selected, Source: plan.Source, Words: plan.Words,
 		WordsRaw: plan.WordsRaw, Steps: steps, Excluded: plan.Excluded, DefaultReason: plan.DefaultReason,
 		ReorderNote: plan.ReorderNote, Installs: installs, Hires: hires, HiresNote: plan.HiresNote, Assurance: plan.Assurance,
@@ -486,6 +490,9 @@ const (
 // Plan is a Set it up plan: the steps in effect, in order, and the host's
 // lines for them.
 type Plan struct {
+	Branches      []HomeBranch
+	BranchLook    string
+	branchStale   bool
 	Stage         foldermap.Stage
 	PolicyBinding string
 	Lines         []personalassistant.FolderPlanLine
@@ -839,7 +846,11 @@ func BuildPlan(rec Record, selected []string) Plan {
 				Detail: rec.AgentName + " can use them in this workspace.",
 			})
 		case folderlook.KindHomeProvider:
-			lines := homeLines(rec, c)
+			listing := rec
+			if c.HomeProviderKey == "music_project_management" && rec.RootPolicy == folderlook.RootOrdinary {
+				listing.Facts = bindHomeBranches(rec, &plan, selected)
+			}
+			lines := homeLines(listing, c)
 			// The Home's songs get their team from the app plugin: without it the
 			// Home cannot name, hire or open with its shared assistant. When the
 			// plan does not run the tools step, the Home step installs it, after
@@ -920,6 +931,10 @@ func BuildPlan(rec Record, selected []string) Plan {
 				plan.Unavailable = "The plan changed. Reopen the report and confirm the current choices."
 			}
 		}
+	}
+	if plan.branchStale {
+		plan.Runnable = false
+		plan.Unavailable = "The reviewed folders changed. Look again before setup."
 	}
 	plan.Assurance = folderAssurance(rec, plan.Candidates) + "."
 	plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: personalassistant.FolderPlanFolder,

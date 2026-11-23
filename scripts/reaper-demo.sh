@@ -259,8 +259,10 @@ git -C "$plugin_root" rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
 	fail "REAPER source is not a Git worktree"
 [[ -z "$(git -C "$plugin_root" status --porcelain --untracked-files=all)" ]] || \
 	fail "REAPER source must be clean so its exact commit can be staged"
-reaper_revision="$(git -C "$plugin_root" rev-parse HEAD)"
-reaper_tree="$(git -C "$plugin_root" rev-parse HEAD^{tree})"
+# ORI_REAPER_PLUGIN_REF optionally stages a released fixture without checking
+# out its tag in a shared source; HEAD remains the default for candidate runs.
+reaper_revision="$(git -C "$plugin_root" rev-parse --verify --end-of-options "${ORI_REAPER_PLUGIN_REF:-HEAD}^{commit}")" || fail "REAPER ref does not resolve to a commit"
+reaper_tree="$(git -C "$plugin_root" rev-parse "${reaper_revision}^{tree}")"
 
 music_root=""
 music_revision=""

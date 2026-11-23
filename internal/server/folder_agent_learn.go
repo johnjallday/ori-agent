@@ -160,7 +160,7 @@ func (f folderAgentSongs) Learn(ctx context.Context, rec folderagent.Record, hom
 	// read in one turn by the Home's assistant, so one press makes one turn. The
 	// scans' events are held until that read ends.
 	ctx, collector := projectlibrary.WithDeferredFactsRead(ctx)
-	listing, err := listFolderAgentSongs(ctx, library, rec, rec.OwnerUserID, homeID, state.RootID, key, "", "", func(string, string, string) {})
+	listing, err := listFolderAgentSongs(ctx, library, rec, rec.OwnerUserID, homeID, state.RootID, key, "", "", nil, func(string, string, string) {})
 	if err != nil {
 		logger.Warn("Folder agent could not list the songs to read them", logger.Fields{"workspace_id": rec.WorkspaceID, "error": err.Error()})
 	}
@@ -177,7 +177,7 @@ func (f folderAgentSongs) Learn(ctx context.Context, rec folderagent.Record, hom
 	if err == nil && listing.unreached > 0 {
 		logger.Warn("Folder agent could not reach every folder of songs to read them", logger.Fields{"workspace_id": rec.WorkspaceID, "folders": listing.unreached})
 	}
-	return progress.final(err == nil && listing.unreached == 0)
+	return progress.final(err == nil && listing.unreached == 0 && !listing.partial)
 }
 
 // Facts is this folder's songs with what was learned from each, for the folder's

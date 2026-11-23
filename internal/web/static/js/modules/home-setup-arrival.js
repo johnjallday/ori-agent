@@ -22,7 +22,11 @@ export function setupArrivalFromSearch(search) {
   const params = new URLSearchParams(String(search || ''));
   if (params.get(SETUP_PROJECTS_PARAM) !== '1') return null;
   const beside = String(params.get(SETUP_BESIDE_PARAM) || '').trim();
-  return { beside: WORKSPACE_ID.test(beside) ? beside : '' };
+  const root = params.get('setup_root') || '';
+  return {
+    beside: WORKSPACE_ID.test(beside) ? beside : '',
+    ...(WORKSPACE_ID.test(root) ? { root } : {})
+  };
 }
 
 /**
@@ -33,6 +37,7 @@ export function searchWithoutSetupArrival(search) {
   const params = new URLSearchParams(String(search || ''));
   params.delete(SETUP_PROJECTS_PARAM);
   params.delete(SETUP_BESIDE_PARAM);
+  params.delete('setup_root');
   const rest = params.toString();
   return rest ? `?${rest}` : '';
 }

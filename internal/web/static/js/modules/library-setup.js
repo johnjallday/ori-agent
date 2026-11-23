@@ -133,8 +133,12 @@ function entryPath(id) {
  * eligibility read fails goes to the dashboard bucket with that error as its
  * reason rather than being dropped, so the totals stay honest (FR-6).
  */
-export async function loadSetupRows(client) {
-  const page = await client.request(`/projects?${RECENT_SONGS_QUERY}`);
+export async function loadSetupRows(client, { sections = false, rootID = '', cursor = '' } = {}) {
+  const query = new URLSearchParams(RECENT_SONGS_QUERY);
+  if (sections) query.set('folder_sections', '1');
+  if (rootID) query.set('root_id', rootID);
+  if (cursor) query.set('cursor', cursor);
+  const page = await client.request(`/projects?${query}`);
   const rows = (Array.isArray(page?.rows) ? page.rows : []).filter(
     row => row && typeof row.id === 'string' && row.id !== ''
   );
@@ -157,11 +161,19 @@ export async function loadSetupRows(client) {
           integration: null
         };
       }
-      return { id: row.id, name, ...bucket };
+      return {
+        id: row.id,
+        name,
+        ...(sections && row.folder_section ? { section: row.folder_section } : {}),
+        ...bucket
+      };
     })
   );
   return {
     rows: result,
+    nextCursor: String(page?.next_cursor || ''),
+    revision: page?.revision,
+    total: Number(page?.total ?? result.length),
     readOnly: page?.provider_read_only !== false,
     totals: setupTotals(result)
   };
@@ -345,7 +357,7 @@ export async function runSetup({
     let placementNote = '';
     try {
       const detail = await client.request(path);
-      workspaceId = String(detail?.row?.workspace_id || '');
+      workspaceId = String(detail?.workspace_id || detail?.row?.workspace_id || '');
       if (detail?.row?.connection !== 'connected') {
         const eligibility = await client.request(`${path}/activation`);
         const ok =
@@ -396,6 +408,7 @@ export async function runSetup({
         ...item,
         stage,
         reason: String(error?.reason || ''),
+        ...(placementNote ? { placementNote } : {}),
         workspaceId: stage === 'staffing' ? workspaceId : '',
         created,
         staffing:

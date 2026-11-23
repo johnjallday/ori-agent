@@ -174,7 +174,14 @@ func TestTurn_ThePlanInTheAgentsWordsNamesTheStepsOriRuns(t *testing.T) {
 		!strings.Contains(plan.WordsRaw, "[music-production-home]") {
 		t.Fatalf("words=%q raw=%q", plan.Words, plan.WordsRaw)
 	}
-	if strings.Join(plan.Selected, ",") != "music-production-home,reaper-tools" {
+	// The host's folder choices travel alongside (not as) model-named steps.
+	var selectedSteps []string
+	for _, handle := range plan.Selected {
+		if !strings.HasPrefix(handle, "branch:") {
+			selectedSteps = append(selectedSteps, handle)
+		}
+	}
+	if strings.Join(selectedSteps, ",") != "music-production-home,reaper-tools" {
 		t.Fatalf("selected = %v", plan.Selected)
 	}
 	// The group was offered (eight projects below), not chosen.

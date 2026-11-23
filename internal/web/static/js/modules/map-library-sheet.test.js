@@ -7,6 +7,7 @@ import {
   confirmLines,
   confirmStaffing,
   defaultTicked,
+  folderGroups,
   openLibrarySheet,
   progressLine,
   sheetPosition,
@@ -26,6 +27,27 @@ const rows = [
   { id: 'e4', name: 'Album-4', kind: 'connected', files: [], workspaceId: 'ws-4' },
   { id: 'e6', name: 'Demo', kind: 'dashboard', files: [], reason: 'Needs a project integration' }
 ];
+
+test('equal project labels keep independent entry and root selections', () => {
+  const source = rows.slice(0, 3).map((r, i) => ({
+    ...r,
+    name: 'Song',
+    section: { id: i === 2 ? 'other' : 'selected', root_label: 'Music', label: 'Collection' }
+  }));
+  const view = sheetView(source, { ticked: new Set(['e2', 'e3']) });
+  assert.deepEqual(
+    view.selected.map(i => i.id),
+    ['e2']
+  );
+  assert.deepEqual(
+    folderGroups(view.items).map(g => g.items.map(i => i.id)),
+    [['e3'], ['e1', 'e2']]
+  );
+  assert.equal(
+    sheetView(source, { readOnly: true, ticked: new Set(['e1', 'e2']) }).selected.length,
+    0
+  );
+});
 
 test('single-file rows are ticked by default; a file-choice row needs a file first', () => {
   const ticked = defaultTicked(rows);

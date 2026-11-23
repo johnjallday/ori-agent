@@ -63,6 +63,16 @@ Bulk controls appear only after checkbox selection. **Select loaded projects** i
 
 The automated real-host fixtures use owned disposable storage and either an absent historical provider or a generated inert generic provider installed through normal host APIs. These prove host boundaries, not a published provider release, native picker, screen reader, DAW, or model integration. Performance/side-effect receipts and manual acceptance observations belong in the feature findings and delivery evidence, not assertions of cross-platform guarantees here.
 
+## Folder sections in a Music Home
+
+A folder section is the first directory **above** a project below a fed root. For `2025/Artist A/Disc 1/Song One`, it is `2025`; `Artist A / Disc 1` is a breadcrumb. A direct member needs no section. These labels describe ancestry, not musical types. A section is neither a workspace nor a `LogicalCollection` (a user-managed set of entries).
+
+During ordinary Music Home intake the owner can limit **deeper listings** to branches evidenced by the bounded look. The fed folder is still the grant and the shallow root scan still inspects its direct children. Selecting none requests no follow-up scans. Selecting a subset does not remove old entries or change the Home's existing song-details consent. Shelf totals include earlier observations; a partial or unreached branch is not known empty.
+
+The owner projects endpoint accepts `folder_sections=1` and an optional `root_id`. Its revision-bound pages use saved observations from a unique usable source (or the requested root), without a directory walk. Link-only, inactive and ambiguous-source entries do not acquire ancestry. The projection returns an opaque grouping ID and relative labels; workspace navigation requires a separately verified reciprocal link. The Manager's query does not opt in. A section checkbox changes only a set of eligible entry IDs. Loading another page never confirms it or chooses an alternate file. Each confirmed setup still uses the normal file, revision, placement and separate assistant checks.
+
+On the scoped Music Home Map, **By folder** shows sections inside the existing placements. Its headings aren't draggable, stored coordinates or targets for a workspace action. **Saved layout** returns to the original map.
+
 ## Historical implementation record
 
 The following sections retain the original Music Library implementation evidence and subsequent feature notes. Their source revisions, task status and candidate paths are historical.

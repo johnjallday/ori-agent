@@ -4561,6 +4561,18 @@ button.folder-agent-card__who-face:focus-visible {
   gap: 0 8px;
 }
 
+.folder-agent-card__branches {
+  min-width: 0;
+  margin-block: 0.75rem;
+}
+.folder-agent-card__branches label {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding-block: 0.25rem;
+  overflow-wrap: anywhere;
+}
+
 .folder-agent-card__hires-head .folder-agent-card__heading {
   margin: 0;
 }

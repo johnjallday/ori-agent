@@ -29,6 +29,7 @@ type folderAgentListing struct {
 	listed    int
 	noun      string
 	unreached int
+	partial   bool
 }
 
 // listFolderAgentSongs lists the folder's songs in the Home's library: the whole
@@ -42,13 +43,18 @@ type folderAgentListing struct {
 // name that is empty, or that the plan lacks, is ignored). An error is the
 // failure of the root listing, the one the run cannot go on without.
 func listFolderAgentSongs(ctx context.Context, library folderAgentLibrary, rec folderagent.Record, owner, homeID, rootID, key,
-	songsLine, scopesLine string, setLine func(name, state, progress string)) (folderAgentListing, error) {
+	songsLine, scopesLine string, check func() error, setLine func(name, state, progress string)) (folderAgentListing, error) {
 	shape := folderdigest.Shape("")
 	if rec.Facts.Portfolio != nil {
 		shape = rec.Facts.Portfolio.Shape
 	}
 	setLine(songsLine, personalassistant.FolderLineWorking, "Listing "+foldermap.ShapeNoun(shape, 2))
-	listed, _, err := library.ScanFolderAgentRoot(ctx, owner, homeID, rootID, key+"-scan")
+	if check != nil {
+		if err := check(); err != nil {
+			return folderAgentListing{}, err
+		}
+	}
+	listed, partial, err := library.ScanFolderAgentRoot(ctx, owner, homeID, rootID, key+"-scan")
 	if err != nil {
 		setLine(songsLine, personalassistant.FolderLineFailed, "")
 		return folderAgentListing{}, err
@@ -59,7 +65,7 @@ func listFolderAgentSongs(ctx context.Context, library folderAgentLibrary, rec f
 	if len(needed) > 0 {
 		setLine(scopesLine, personalassistant.FolderLineWorking, "")
 	}
-	for scans < folderagent.MaxScopedScans {
+	for len(needed) > 0 && scans < folderagent.MaxScopedScans {
 		issued, err := library.FolderAgentScopes(owner, homeID, rootID)
 		if err != nil {
 			// The folders still needed stay unreached (and say so); it is logged
@@ -89,7 +95,12 @@ func listFolderAgentSongs(ctx context.Context, library folderAgentLibrary, rec f
 			// The folder's own name, never its path.
 			setLine(scopesLine, personalassistant.FolderLineWorking, "Looking into "+path.Base(s.RelativeFolder))
 			scans++
-			count, _, err := library.ScanFolderAgentScope(ctx, owner, homeID, rootID, s.ID, fmt.Sprintf("%s-scope-%d", key, scans))
+			if check != nil {
+				if err := check(); err != nil {
+					return folderAgentListing{}, err
+				}
+			}
+			count, incomplete, err := library.ScanFolderAgentScope(ctx, owner, homeID, rootID, s.ID, fmt.Sprintf("%s-scope-%d", key, scans))
 			if err != nil {
 				// Tried again in the next round; twice failed counts as not
 				// reached.
@@ -102,6 +113,7 @@ func listFolderAgentSongs(ctx context.Context, library folderAgentLibrary, rec f
 			}
 			scanned[s.RelativeFolder] = true
 			listed = count
+			partial = partial || incomplete
 		}
 	}
 	unreached := folderagent.Unreached(needed, scanned)
@@ -117,6 +129,10 @@ func listFolderAgentSongs(ctx context.Context, library folderAgentLibrary, rec f
 		setLine(scopesLine, state, words)
 	}
 	noun := foldermap.ShapeNoun(shape, listed)
-	setLine(songsLine, personalassistant.FolderLineDone, fmt.Sprintf("Listed %d %s on the shelf", listed, noun))
-	return folderAgentListing{listed: listed, noun: noun, unreached: len(unreached)}, nil
+	progress := fmt.Sprintf("%d %s now on the shelf", listed, noun)
+	if partial {
+		progress += " · partial listing"
+	}
+	setLine(songsLine, personalassistant.FolderLineDone, progress)
+	return folderAgentListing{listed: listed, noun: noun, partial: partial, unreached: len(unreached)}, nil
 }

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/diridentity"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 )
 
@@ -72,6 +73,30 @@ func walk(t *testing.T, root string) (*Map, Facts) {
 		t.Fatal(err)
 	}
 	return m, FactsFrom(m)
+}
+
+// A first-level project can carry both the opened directory identity for Music
+// Home and an opt-in Documents member witness. Neither may overwrite the other.
+func TestWalk_IndependentBranchAndMemberWitnesses(t *testing.T) {
+	root := build(t, "Song/Session.rpp")
+	info, err := os.Stat(filepath.Join(root, "Song"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, member := range []string{"", "reviewed-member"} {
+		opts := Options{}
+		if member != "" {
+			opts.MemberWitness = func(os.FileInfo) string { return member }
+		}
+		m, err := Walk(root, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		f, ok := m.Folder("Song")
+		if !ok || f.BranchWitness != diridentity.Of(info) || f.Witness != member {
+			t.Fatalf("member=%q: branch witness=%q, member witness=%q, found=%t", member, f.BranchWitness, f.Witness, ok)
+		}
+	}
 }
 
 func TestWalk_ProgressNamesEachListedFolderAndCountsOpened(t *testing.T) {
