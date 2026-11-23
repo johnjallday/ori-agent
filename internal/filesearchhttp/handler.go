@@ -58,6 +58,24 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var out any
 	switch op {
+	case "desk-place":
+		var in struct {
+			Tab   string                `json:"tab"`
+			Place *filesearch.DeskPlace `json:"place"`
+		}
+		if !decode(&in) {
+			return
+		}
+		out, e = h.Service.DeskPlace(owner, in.Tab, in.Place)
+	case "map-place":
+		var in struct {
+			Tab   string               `json:"tab"`
+			Place *filesearch.MapPlace `json:"place"`
+		}
+		if !decode(&in) {
+			return
+		}
+		out, e = h.Service.MapPlace(owner, in.Tab, in.Place)
 	case "sources":
 		out, e = h.Service.Sources(r.Context(), owner)
 	case "begin":

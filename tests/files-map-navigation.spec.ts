@@ -12,6 +12,7 @@ test.skip(
 );
 test('distinguish duplicate copies by location and date before acting', async ({
   page,
+  context,
   request,
   baseURL
 }) => {
@@ -58,14 +59,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await expect(page.locator('#selectedFile button')).toHaveText('Reveal in Finder');
   await page.locator('#selectedFile').scrollIntoViewIfNeeded();
   await page.screenshot({ path: join(evidence, 'scoped-last-page.png') });
-  await page
-    .locator('#sources li')
-    .filter({ hasText: 'Downloads' })
-    .getByRole('button', { name: 'Remove from search' })
-    .click();
-  await expect(rows).toHaveCount(0);
-  await expect(page.locator('#selectedFile')).toBeHidden();
-  expect(existsSync(original)).toBeTruthy();
+  const last = await rows.last().getAttribute('data-id');
   await expect(page.getByRole('link', { name: 'Map', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Start or resume workspace setup' })).toBeVisible();
 
@@ -88,8 +82,33 @@ test('distinguish duplicate copies by location and date before acting', async ({
   page.on('request', r => {
     if (r.method() === 'POST') mutations.push(new URL(r.url()).pathname);
   });
-  await page.getByRole('link', { name: 'Map', exact: true }).click();
+  const toMap = () => page.getByRole('link', { name: 'Map', exact: true }).click();
+  const toFiles = () => page.getByRole('link', { name: 'Files', exact: true }).click();
+  await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', last!);
+  await toMap();
+  await toFiles();
+  await expect(term).toHaveValue('sample-');
+  await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', last!);
+  await page.locator('#scope').selectOption('');
+  await expect(rows).toHaveCount(25);
+  await page.locator('#more').click();
+  await expect(rows).toHaveCount(27);
+  await rows.last().getByRole('button').click();
+  await toMap();
+  await page.goBack();
+  await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', last!);
+  await page.goForward();
+  await toFiles();
+  await term.fill('proposal.pdf');
+  await expect(rows).toHaveCount(2);
+  await rows.first().getByRole('button').click();
+  const proposal = await rows.first().getAttribute('data-id');
+  await toMap();
   await expect(page.locator('[data-map-destination]')).toBeVisible();
+  const camera = () => page.evaluate(() => (window as any).OriWorkspaceMap.getCamera());
+  const viewport = page.locator('[data-ws-map-viewport]').first();
+  await viewport.press('ArrowRight');
+  await viewport.press('+');
   const tile = page
     .locator(
       `.ws-map-tile[data-ws-id="${music.workspace_id}"], .ws-map-district-tag[data-ws-id="${music.workspace_id}"]`
@@ -99,6 +118,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   const open = page.locator(`[data-cockpit-rail-open][data-workspace-id="${music.workspace_id}"]`);
   await expect(open).toBeVisible();
   await page.screenshot({ path: join(evidence, 'workspace-selected.png') });
+  const panned = await camera();
   await open.click();
   const launcher = page.locator('#personalAssistantLauncher');
   await expect(launcher.locator('[data-question]')).toBeVisible();
@@ -117,7 +137,97 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await expect(answer).toHaveCount(0);
   await expect(launcher.locator('[data-question]')).toHaveCount(0);
   expect((await read(other.workspace_id)).premise.state).toBe(other.premise.state);
+  await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
   await page.goBack();
-  await page.getByRole('link', { name: 'Files', exact: true }).click();
-  await expect(term).toBeVisible();
+  if (await page.locator('#cockpitContextModal').isVisible()) await page.keyboard.press('Escape');
+  await toFiles();
+  await expect(term).toHaveValue('proposal.pdf');
+  await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', proposal!);
+  await expect(term).toBeFocused();
+  const disk = await page.evaluate(() =>
+    JSON.stringify([localStorage, sessionStorage, history.state, location.href, window.name])
+  );
+  expect(disk).not.toContain('proposal.pdf');
+  await page.screenshot({ path: join(evidence, 'restored-copy.png') });
+  await toMap();
+  await expect(tile).toHaveClass(/is-selected/);
+  await expect.poll(camera).toEqual(panned);
+  const second = await context.newPage();
+  await second.goto('/search');
+  await expect(second.locator('#term')).toHaveValue('');
+  await second
+    .locator('#sources li')
+    .filter({ hasText: 'Downloads' })
+    .getByRole('button', { name: 'Remove from search' })
+    .click();
+  await expect(second.locator('#sources')).not.toContainText('Downloads');
+  await second.close();
+  await toFiles();
+  await expect(rows).toHaveCount(1);
+  await expect(page.locator('#selectedFile')).toBeHidden();
+  await expect(page.locator('#notice')).toContainText('no longer');
+  expect(existsSync(original)).toBeTruthy();
+  await page.screenshot({ path: join(evidence, 'revoked-copy.png') });
+  // Return to the same workspace, not a cached cue or reply.
+  await toMap();
+  await tile.press('Enter');
+  await expect(page).toHaveURL(new RegExp('/workspaces/map-albums'));
+  if (await page.locator('#personalAssistantPanel').isVisible())
+    await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
+  await expect(launcher).toBeVisible();
+  await expect(launcher.locator('[data-question]')).toHaveCount(0);
+  expect((await read(music.workspace_id)).premise.state).not.toBe('asked');
+  await page.goBack();
+  await toFiles();
+  await expect(rows).toHaveCount(1);
+  await rows.first().getByRole('button').click();
+  await toMap();
+  const refresher = await context.newPage();
+  await refresher.goto('/search');
+  await refresher.locator('#sources li').getByRole('button', { name: 'Refresh' }).click();
+  await expect(refresher.locator('#sources')).toContainText('ready');
+  await refresher.close();
+  await toFiles();
+  await expect(rows).toHaveCount(1);
+  await expect(page.locator('#selectedFile')).toBeHidden();
+  await expect(page.locator('#notice')).toContainText('no longer');
+  const deleted = await request.delete(
+    `/api/workspaces/${music.workspace_id}?confirm=true&delete_sessions=true`
+  );
+  expect(deleted.ok()).toBe(true);
+  await toMap();
+  await expect(page.locator('[data-map-destination]')).toBeVisible();
+  await expect(tile).toHaveCount(0);
+  await expect(page.locator('.ws-map-tile.is-selected')).toHaveCount(0);
+  await toFiles();
+  // Deliberately deliver an obsolete successful read after a newer one.
+  let release!: () => void;
+  const wait = new Promise<void>(resolve => (release = resolve));
+  let started!: () => void;
+  const captured = new Promise<void>(resolve => (started = resolve));
+  await page.route('**/api/file-search/query', async route => {
+    if (route.request().postDataJSON().term !== 'Harbor') return route.continue();
+    const response = await route.fetch();
+    started();
+    await wait;
+    await route.fulfill({ response });
+  });
+  await term.fill('Harbor');
+  await captured;
+  await term.fill('Welcome');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('Welcome');
+  release();
+  await expect(rows.first()).toContainText('Welcome');
+  await page.route(
+    '**/api/file-search/query',
+    route => route.fulfill({ status: 503, body: 'Search unavailable.' }),
+    { times: 1 }
+  );
+  await term.fill('proposal');
+  await expect(page.locator('#retry')).toBeVisible();
+  await expect(rows).toHaveCount(0);
+  await expect(page.locator('#selectedFile')).toBeHidden();
+  await page.locator('#retry').click();
+  await expect(rows).toHaveCount(1);
 });

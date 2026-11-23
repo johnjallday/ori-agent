@@ -41,7 +41,8 @@ type choice struct {
 }
 type Service struct {
 	Options
-	mu           sync.Mutex // serializes grant changes, publication, and snapshots
+	mu           sync.Mutex           // serializes grant changes, publication, and snapshots
+	places       map[tabKey]*tabPlace // ephemeral view descriptors, never written to the index
 	intents      map[string]choice
 	jobs         map[string]context.CancelFunc
 	serial       chan struct{}
@@ -61,9 +62,19 @@ func New(ctx context.Context, o Options) (*Service, error) {
 		return nil, ErrUnavailable
 	}
 	life, cancel := context.WithCancel(context.Background())
-	return &Service{Options: o, intents: map[string]choice{}, jobs: map[string]context.CancelFunc{}, serial: make(chan struct{}, 1), life: life, cancel: cancel}, nil
+	return &Service{Options: o, places: make(map[tabKey]*tabPlace), intents: map[string]choice{}, jobs: map[string]context.CancelFunc{}, serial: make(chan struct{}, 1), life: life, cancel: cancel}, nil
 }
-func (s *Service) Close() { s.mu.Lock(); s.cancel(); clear(s.intents); s.mu.Unlock(); s.wg.Wait() }
+func (s *Service) Close() {
+	s.mu.Lock()
+	s.cancel()
+	clear(s.intents)
+	for _, v := range s.places {
+		v.expires.Stop()
+	}
+	clear(s.places)
+	s.mu.Unlock()
+	s.wg.Wait()
+}
 
 // Begin is a mutation, not a status read. At most one short-lived choice per local owner.
 func (s *Service) Begin(owner, kind string) (string, error) {

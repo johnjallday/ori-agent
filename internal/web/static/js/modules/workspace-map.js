@@ -13411,6 +13411,19 @@
       clampCamera: clampCamera,
       limits: { min: MIN_ZOOM, max: MAX_ZOOM, step: ZOOM_STEP }
     },
+    // Returning to this tab's Map changes only the viewport, never layout.
+    restoreCamera: function (container, saved) {
+      if (
+        !lastMount ||
+        lastMount.container !== container ||
+        !Number.isFinite(saved.centerX) ||
+        !Number.isFinite(saved.centerY) ||
+        !Number.isFinite(saved.zoom)
+      )
+        return;
+      cameraReady = true;
+      setCamera(saved, container, { persist: false });
+    },
     getCamera: function () {
       return { centerX: camera.centerX, centerY: camera.centerY, zoom: camera.zoom };
     },

@@ -1,3 +1,5 @@
+import { destinationPlace } from './destination-place.js';
+
 const base = '/api/file-search/';
 export async function request(op, body) {
   const res = await fetch(base + op, {
@@ -41,6 +43,33 @@ export function mountFileSearch(root, compact = false) {
     scope = '',
     visibleTerm = '',
     busy = false;
+  const place = compact ? null : destinationPlace('desk');
+  let restoring = false,
+    leaving = false,
+    pending = null;
+  function snapshot() {
+    if (pending && pending.term === term.value && pending.source === scope) return pending;
+    const hit = hits.find(h => h.id === selected);
+    return {
+      term: term.value,
+      source: scope,
+      selected: hit?.id || '',
+      generation: hit?.generation || 0,
+      pages: Math.max(1, Math.ceil(hits.length / 25))
+    };
+  }
+  // A browser may discard its unload request. Checkpoint the last settled
+  // descriptor while the document is live; never send hits or path strings.
+  let lastCheckpoint = '';
+  function checkpoint() {
+    if (!place || leaving) return;
+    const descriptor = snapshot(),
+      key = JSON.stringify(descriptor);
+    if (lastCheckpoint !== key) {
+      lastCheckpoint = key;
+      void place.save(descriptor);
+    }
+  }
   const channel =
     typeof BroadcastChannel === 'function' ? new BroadcastChannel('ori-file-search-v1') : null;
   function element(tag, text) {
@@ -68,6 +97,7 @@ export function mountFileSearch(root, compact = false) {
     }
   }
   function clear() {
+    pending = null;
     version++;
     clearTimeout(timer);
     hits = [];
@@ -80,12 +110,12 @@ export function mountFileSearch(root, compact = false) {
       $('selectedFile').hidden = true;
     }
   }
-  function invalidate() {
+  function invalidate(saved = snapshot()) {
     clear();
     sources = [];
     $('sources')?.replaceChildren();
     $('coverage').textContent = 'Checking current sources…';
-    void query();
+    void query(false, saved);
   }
   async function preference(target) {
     await request('preference', { expected: document.body.dataset.landing, next: target });
@@ -232,30 +262,48 @@ export function mountFileSearch(root, compact = false) {
   }
   function select(hit) {
     selected = hit.id;
+    checkpoint();
     render();
     notice.textContent = `Selected ${hit.name}, ${[scopeNames(sources).get(hit.source), hit.parent].filter(Boolean).join(' / ')}`;
   }
-  async function query(append = false) {
+  async function query(append = false, saved = null) {
     clearTimeout(timer);
     if (compact && root.closest('[hidden]')) return;
+    pending = saved;
     const stamp = ++version,
       value = term.value;
     try {
-      const p = await request('query', {
-        term: value,
-        ...(scope ? { source: scope } : {}),
-        cursor: append ? next : '',
-        limit: 25
-      });
-      if (stamp !== version) return;
-      const updated = append ? [...hits, ...p.hits] : p.hits;
+      const updated = append ? [...hits] : [];
+      let cursor = append ? next : '',
+        p;
+      const pages = saved?.pages || 1;
+      for (let i = 0; i < pages; i++) {
+        p = await request('query', {
+          term: value,
+          ...(scope ? { source: scope } : {}),
+          cursor,
+          limit: 25
+        });
+        if (stamp !== version) return;
+        updated.push(...p.hits);
+        cursor = p.next;
+        if (!cursor) break;
+      }
       const changed = JSON.stringify(updated) !== JSON.stringify(hits) || next !== (p.next || '');
+      pending = null;
       hits = updated;
       next = p.next || '';
       visibleTerm = value;
       map(p.sources);
-      if (!hits.some(h => h.id === selected)) selected = '';
-      if (changed) render();
+      if (saved?.selected) {
+        selected =
+          hits.find(h => h.id === saved.selected && h.generation === saved.generation)?.id || '';
+        notice.textContent = selected
+          ? 'Selection restored.'
+          : 'The selected file is no longer in these results.';
+      } else if (!hits.some(h => h.id === selected)) selected = '';
+      if (changed || saved) render();
+      checkpoint();
       if ($('retry')) $('retry').hidden = true;
       const included = sources.filter(s => !scope || s.id === scope);
       const labels = scopeNames(sources);
@@ -271,7 +319,7 @@ export function mountFileSearch(root, compact = false) {
             : 'Choose a folder to search its filenames.') +
         (partial ? ' · Coverage incomplete.' : '');
       if (sources.some(s => ['mapping', 'queued'].includes(s.state)) && !append)
-        timer = setTimeout(() => query(), 250);
+        timer = setTimeout(() => query(false, snapshot()), 250);
     } catch (e) {
       if (stamp !== version) return;
       clear();
@@ -291,7 +339,10 @@ export function mountFileSearch(root, compact = false) {
         }
       }
       $('coverage').textContent = e.message;
-      notice.textContent = 'Could not load current results. Retry the search.';
+      notice.textContent =
+        scope && e.status === 409
+          ? 'This location changed. Select another location to search.'
+          : 'Could not load current results. Retry the search.';
     }
   }
   $('choices')?.addEventListener('click', event => {
@@ -345,11 +396,33 @@ export function mountFileSearch(root, compact = false) {
     }
     invalidate();
   });
-  window.addEventListener('pageshow', () => invalidate());
-  window.addEventListener('focus', () => query());
-  window.addEventListener('pagehide', () => clear());
-  if (!compact && document.body.dataset.landing === 'search') term.focus();
-  void query();
+  async function arrive() {
+    leaving = false;
+    restoring = true;
+    clear();
+    const stamp = version;
+    const saved = await place?.read();
+    restoring = false;
+    if (version !== stamp || leaving) return;
+    if (saved) {
+      term.value = saved.term;
+      scope = saved.source;
+    }
+    await query(false, saved);
+  }
+  window.addEventListener('pageshow', e => {
+    if (e.persisted) void arrive();
+  });
+  window.addEventListener('focus', () => {
+    if (!leaving && !restoring) invalidate();
+  });
+  window.addEventListener('pagehide', () => {
+    if (!restoring && !leaving) void place?.save(snapshot());
+    leaving = true;
+    clear();
+  });
+  if (!compact && document.body.dataset.landing !== 'first') term.focus();
+  void arrive();
   return {
     show() {
       invalidate();

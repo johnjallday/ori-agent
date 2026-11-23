@@ -1,5 +1,6 @@
 // Importing this also registers window.OriEconomy, which is how dashboard.js —
 // a plain script, not a module — reaches the same harvest client.
+import { destinationPlace } from './destination-place.js';
 import { guidedHint, showHQReturnLinks } from './hq-guided-attempt.js';
 import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 // Importing this also registers window.OriTicketCounts, which is how the classic
@@ -2356,6 +2357,15 @@ import {
 
   const mapDestination = document.querySelector('[data-map-destination]');
   const destinationPicker = document.querySelector('[data-map-picker]');
+  const place = destinationPicker ? destinationPlace('map') : null;
+  // Only explicit destination entries restore. Deep links and ordinary Home
+  // retain their own intent. Never replay a modal, a question or a layout.
+  let returnMap = window.location.search === '?view=map' ? place?.read() : null;
+  window.addEventListener('pagehide', () => {
+    if (!place || mapDestination.hidden || !els.map) return;
+    const camera = window.OriWorkspaceMap?.getCamera?.();
+    if (camera) void place.save({ selected: state.selectedId, ...camera });
+  });
   destinationPicker?.addEventListener('change', () => {
     if (destinationPicker.value === '/search') window.location.assign('/search');
   });
@@ -5864,7 +5874,10 @@ import {
   window.addEventListener('pagehide', () => noteController.keepalive());
   window.addEventListener('beforeunload', () => noteController.keepalive());
   window.addEventListener('pageshow', event => {
-    if (event.persisted) void refreshLibraryBadges({ force: true });
+    if (event.persisted) {
+      void refreshLibraryBadges({ force: true });
+      if (place && canHydrateWorkspaceData() && state.view === VIEW_MAP) void refreshQuietly();
+    }
   });
 
   // District tags may be reconciled after the Map's initial shell binding when
@@ -6270,7 +6283,15 @@ import {
 
     void refreshWorkspaceRoot();
     void refreshHQStatus();
+    const pending = returnMap;
+    returnMap = null;
     await refresh();
+    const prior = pending && (await pending);
+    if (prior && !state.selectedId && !mapDestination.hidden && state.view === VIEW_MAP) {
+      if (findWorkspace(state.flattened, prior.selected))
+        selectItem(prior.selected, { openModal: false, announceChange: false });
+      window.OriWorkspaceMap?.restoreCamera?.(els.map, prior);
+    }
     consumeMoveDeepLink();
     return state.onboardingGate;
   }
