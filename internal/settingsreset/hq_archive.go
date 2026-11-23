@@ -20,13 +20,31 @@ import (
 const archiveNotice = "Move only this Personal HQ folder, intact. Other workspace folders and vaults stay where they are. This keeps files and any existing portable checkpoint, not app records that only exist in Ori’s database. Nothing is imported automatically."
 
 var (
-	errArchiveRegistration = errors.New("No single eligible Personal HQ is registered. Detached, linked and external workspaces cannot be archived by reset.")
-	errArchiveWorkspace    = errors.New("The current Personal HQ does not have a verified folder directly inside the active Workspace Directory.")
-	errArchiveOverlap      = errors.New("Moving this folder would also affect another workspace or protected location. Reset can leave it in place instead.")
-	errArchiveVolume       = errors.New("This layout cannot be archived safely. The HQ and archive must be on the same supported local filesystem, in directories owned by you.")
-	errArchiveDestination  = errors.New("The proposed archive location is not safe or is already occupied. Nothing will be overwritten.")
-	errArchiveContents     = errors.New("The HQ folder or its contents could not be verified for an intact move.")
+	errArchiveRegistration = errors.New("no eligible personal hq registration")
+	errArchiveWorkspace    = errors.New("personal hq folder is unverified")
+	errArchiveOverlap      = errors.New("personal hq archive overlaps a protected owner")
+	errArchiveVolume       = errors.New("personal hq archive filesystem unsupported")
+	errArchiveDestination  = errors.New("personal hq archive destination unsafe or occupied")
+	errArchiveContents     = errors.New("personal hq archive contents are unverified")
 )
+
+// Public copy contains no path, backend detail, or file contents from errors.
+func archiveReviewReason(err error) string {
+	switch {
+	case errors.Is(err, errArchiveRegistration):
+		return "No single eligible Personal HQ is registered. Detached, linked and external workspaces cannot be archived by reset."
+	case errors.Is(err, errArchiveWorkspace):
+		return "The current Personal HQ does not have a verified folder directly inside the active Workspace Directory."
+	case errors.Is(err, errArchiveOverlap):
+		return "Moving this folder would also affect another workspace or protected location. Reset can leave it in place instead."
+	case errors.Is(err, errArchiveVolume):
+		return "The HQ and archive must be on the same supported local filesystem, in directories owned by you."
+	case errors.Is(err, errArchiveDestination):
+		return "The proposed archive location is not safe or is already occupied. Nothing will be overwritten."
+	default:
+		return "The HQ folder or its contents could not be verified for an intact move."
+	}
+}
 
 type archiveIdentity struct {
 	Device   uint64 `json:"device"`
@@ -66,7 +84,7 @@ func hqArchiveDestination(installation, operationID, slug string) string {
 
 // inspectHQArchive joins the single authoritative designation to the live
 // folder registration. The remainder is shared with pre-start inspection.
-func inspectHQArchive(ctx context.Context, owners Owners, plan resolvedPlan, operationID string) (*hqArchiveEvidence, error) {
+func inspectHQArchive(ctx context.Context, owners Owners, plan resolvedPlan, operationID string, vaultPaths []string) (*hqArchiveEvidence, error) {
 	if owners.Config == nil || owners.Workspaces == nil || owners.Database == nil || owners.Vaults == nil ||
 		plan.Installation == "" {
 		return nil, errArchiveWorkspace
@@ -97,6 +115,9 @@ func inspectHQArchive(ctx context.Context, owners Owners, plan resolvedPlan, ope
 	}
 	agents := locations.ResetLocations()
 	otherRoots := []string{owners.Vaults.ManagedRoot(), owners.Config.GetVaultRoot(), agents.Index, agents.Profiles, agents.Projection, agents.State, agents.RootAgents}
+	for _, path := range vaultPaths {
+		otherRoots = append(otherRoots, owners.Vaults.RetainedPath(path))
+	}
 	for _, target := range owners.FreshTargets {
 		otherRoots = append(otherRoots, target.Path)
 	}
@@ -114,17 +135,17 @@ func configuredArchiveWorkspaceRoot(cfg *config.Manager) (string, error) {
 	return root, nil
 }
 
-func verifyHQArchiveScope(ctx context.Context, plan resolvedPlan, root, operationID string, record database.ResetHQRecord, otherRoots []string) (*hqArchiveEvidence, error) {
+func archiveScopePaths(ctx context.Context, plan resolvedPlan, root, operationID string, record database.ResetHQRecord, otherRoots []string) (string, string, error) {
 	if !validID(operationID) || !workspacecontinuity.ValidID(record.ID) ||
 		!workspace.IsCanonicalWorkspaceSlug(record.Slug) || workspace.IsReservedTopLevelSlug(record.Slug) ||
 		!slices.Contains(plan.Evidence.ProtectedPaths, root) {
-		return nil, errArchiveWorkspace
+		return "", "", errArchiveWorkspace
 	}
 	source := filepath.Join(root, record.Slug)
 	destination := hqArchiveDestination(plan.Installation, operationID, record.Slug)
 	if len(source) > 4096 || len(destination) > 4096 || pathsOverlap(root, destination) ||
 		containsPath(source, plan.Installation) {
-		return nil, errArchiveOverlap
+		return "", "", errArchiveOverlap
 	}
 	// The root necessarily contains the HQ; every other protected location,
 	// registration and owner must be disjoint. The fallback roots also reserve
@@ -142,7 +163,7 @@ func verifyHQArchiveScope(ctx context.Context, plan resolvedPlan, root, operatio
 	for _, fallback := range []string{config.DefaultWorkspaceRoot(), filepath.Join(plan.Installation, "workspace-staging")} {
 		resolved, err := resolvePath(fallback)
 		if err != nil || pathsOverlap(resolved, destination) {
-			return nil, errArchiveOverlap
+			return "", "", errArchiveOverlap
 		}
 	}
 	for _, path := range otherRoots {
@@ -150,12 +171,20 @@ func verifyHQArchiveScope(ctx context.Context, plan resolvedPlan, root, operatio
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			return nil, errArchiveContents
+			return "", "", errArchiveContents
 		}
 		p, err := resolvePath(path)
 		if err != nil || pathsOverlap(source, p) || pathsOverlap(destination, p) {
-			return nil, errArchiveOverlap
+			return "", "", errArchiveOverlap
 		}
+	}
+	return source, destination, nil
+}
+
+func verifyHQArchiveScope(ctx context.Context, plan resolvedPlan, root, operationID string, record database.ResetHQRecord, otherRoots []string) (*hqArchiveEvidence, error) {
+	source, destination, err := archiveScopePaths(ctx, plan, root, operationID, record, otherRoots)
+	if err != nil {
+		return nil, err
 	}
 	parents, err := openArchiveParents(root, plan.Installation)
 	if err != nil {

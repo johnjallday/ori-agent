@@ -2052,7 +2052,11 @@
               <dt>Current folder</dt><dd><code id="resetArchiveSource"></code></dd>
               <dt>Proposed archive location</dt><dd><code id="resetArchiveDestination"></code></dd>
             </dl>
-            <p id="resetArchiveNotice" class="mb-0"></p>
+            <p id="resetArchiveNotice" class="mb-2"></p>
+            <div id="resetArchiveOption" class="form-check" hidden>
+              <input id="resetArchiveCheck" class="form-check-input" type="checkbox" aria-describedby="resetArchiveSummary resetArchiveNotice" disabled>
+              <label for="resetArchiveCheck" class="form-check-label fw-semibold">Archive my old Personal HQ</label>
+            </div>
           </section>
           <ul id="resetItemsList" class="mb-3" style="color: var(--text-primary); overflow-wrap: anywhere;"></ul>
           <!-- Second confirmation, shown only when the reset removes the agents

@@ -19,6 +19,7 @@ var (
 	// ErrAgentsFolderUnconfirmed rejects a reset that removes the agents
 	// folder without the second confirmation naming that folder.
 	ErrAgentsFolderUnconfirmed = errors.New("this reset removes the agents in your Workspace Directory; confirm that folder too, then reset again")
+	ErrHQArchiveUnconfirmed    = errors.New("confirm the Personal HQ archive in the current review, or review the reset without it")
 )
 
 // Lifecycle is supplied by runtime construction, never by HTTP. TryFence must
@@ -46,7 +47,8 @@ func NewCoordinator(lease *resetstate.Lease, planner *Planner, lifecycle Lifecyc
 }
 
 func ValidateExecuteRequest(req ExecuteRequest) error {
-	if req.Confirmation != "RESET" || !validID(req.PreviewID) || !validID(req.RequestID) || len(req.ConfirmAgentsFolder) > 4096 {
+	if req.Confirmation != "RESET" || !validID(req.PreviewID) || !validID(req.RequestID) || len(req.ConfirmAgentsFolder) > 4096 ||
+		(req.ConfirmHQArchive != "" && !validArchiveDigest(req.ConfirmHQArchive)) {
 		return ErrInvalidRequest
 	}
 	return nil
@@ -69,6 +71,9 @@ func (c *Coordinator) Stage(ctx context.Context, req ExecuteRequest) (Operation,
 		if existing != nil {
 			operation = c.publicOperation(existing)
 			if existing.Plan.Preview.ID == req.PreviewID && existing.RequestID == req.RequestID {
+				if !confirmedHQArchive(existing.Plan, req.ConfirmHQArchive) {
+					return ErrHQArchiveUnconfirmed
+				}
 				if c.lease.Uncertain() {
 					return ErrAdmissionUncertain
 				}
@@ -106,6 +111,9 @@ func (c *Coordinator) Stage(ctx context.Context, req ExecuteRequest) (Operation,
 		// Directory's agents.
 		if folder := plan.Evidence.AgentsFolder; folder != "" && req.ConfirmAgentsFolder != folder {
 			return ErrAgentsFolderUnconfirmed
+		}
+		if !confirmedHQArchive(plan, req.ConfirmHQArchive) {
+			return ErrHQArchiveUnconfirmed
 		}
 		j := newJournal(plan, req.RequestID, c.lease.Identity(), c.now().UTC())
 		// Include room for a bounded failure result before freezing the runtime.
@@ -150,7 +158,7 @@ func (c *Coordinator) Stage(ctx context.Context, req ExecuteRequest) (Operation,
 		}
 		if err := c.lifecycle.Drain(ctx); err != nil || ctx.Err() != nil {
 			blockAdmission(j, "drain_failed")
-		} else if err := refreshProtectedDigests(ctx, &j.Plan.Evidence); err != nil {
+		} else if err := capturePostDrainEvidence(ctx, j); err != nil {
 			blockAdmission(j, "retained_evidence_unavailable")
 		} else {
 			// Drain may legitimately flush a retained workspace index. The
@@ -164,6 +172,33 @@ func (c *Coordinator) Stage(ctx context.Context, req ExecuteRequest) (Operation,
 		return err
 	})
 	return operation, err
+}
+
+func confirmedHQArchive(plan resolvedPlan, supplied string) bool {
+	if plan.Evidence.HQArchive == nil {
+		return supplied == ""
+	}
+	return supplied == plan.Preview.ScopeDigest
+}
+
+func capturePostDrainEvidence(ctx context.Context, j *journal) error {
+	if err := refreshProtectedDigests(ctx, &j.Plan.Evidence); err != nil {
+		return err
+	}
+	if j.Archive == nil {
+		return nil
+	}
+	moved, err := observeArchiveFiles(ctx, j)
+	if err != nil || moved {
+		return ErrScopeChanged
+	}
+	digest, err := j.Plan.Evidence.digestArchiveRemainder(ctx)
+	if err != nil {
+		return err
+	}
+	j.Archive.Remainder = digest
+	j.Archive.Baseline = archiveBaseline(j)
+	return nil
 }
 
 func (c *Coordinator) persistResult(j *journal, operation *Operation) error {
@@ -193,6 +228,10 @@ func newJournal(plan resolvedPlan, requestID, identity string, now time.Time) *j
 	j := &journal{Version: SchemaVersion, AcceptedBy: identity, RequestID: requestID, Plan: plan,
 		Operation: Operation{SchemaVersion: SchemaVersion, ID: plan.Preview.OperationID, Intent: plan.Preview.Intent,
 			State: StatePreparing, Revision: 1, Results: []CategoryResult{}, Blockers: []Blocker{}, Restart: plan.Preview.Restart, CreatedAt: now, UpdatedAt: now}}
+	if plan.Evidence.HQArchive != nil {
+		j.Archive = &archiveJournal{Stage: archivePending, Consent: archiveConsent(j)}
+		j.Operation.HQArchive = publicArchiveResult(j, OutcomePending)
+	}
 	for _, category := range plan.Preview.Categories {
 		def, _ := definition(category.ID)
 		result := CategoryResult{ID: category.ID, Outcome: OutcomePending, Retained: category.Retained, Checks: []CheckResult{}}
@@ -205,12 +244,19 @@ func newJournal(plan resolvedPlan, requestID, identity string, now time.Time) *j
 }
 
 func blockAdmission(j *journal, code string) {
+	if j.Archive != nil {
+		j.Operation.HQArchive = publicArchiveResult(j, OutcomeFailed)
+	}
 	j.Operation.State = StateBlocked
 	j.Operation.Revision++
 	j.Operation.Blockers = []Blocker{{Code: code, Message: "Reset could not finish safe admission; no selected data was deleted.", Recovery: "Keep ordinary work stopped. Fully quit and relaunch into recovery; do not delete reset metadata or blindly repeat the request."}}
 }
 
 func uncertainOperation(op Operation) Operation {
+	if op.HQArchive != nil && op.HQArchive.Outcome != OutcomeCompleted {
+		op.HQArchive = &HQArchiveResult{Outcome: OutcomeUnknown, Destination: op.HQArchive.Destination,
+			Message: "Ori has not verified the archive outcome. Keep both locations and the reset receipt for recovery."}
+	}
 	op.State = StateInterrupted
 	op.Blockers = []Blocker{{Code: "admission_uncertain", Message: "Durable admission or writer draining could not be established. Completion is unknown.", Recovery: "Fully quit and relaunch into recovery. Preserve the installation and reset metadata."}}
 	return op

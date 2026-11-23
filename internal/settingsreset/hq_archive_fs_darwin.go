@@ -6,6 +6,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func renameArchiveNoReplace(source *os.File, from string, destination *os.File, to string) error {
+	return unix.RenameatxNp(int(source.Fd()), from, int(destination.Fd()), to, unix.RENAME_EXCL)
+}
+
 func archiveLocalVolume(dir *os.File) bool {
 	var stat unix.Statfs_t
 	return unix.Fstatfs(int(dir.Fd()), &stat) == nil && stat.Flags&unix.MNT_LOCAL != 0 &&

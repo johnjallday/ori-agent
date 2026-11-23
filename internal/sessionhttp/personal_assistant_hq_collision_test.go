@@ -265,6 +265,27 @@ func TestPersonalAssistantHQConfirmsOnlyTheCurrentSuggestedFolder(t *testing.T) 
 	f.assertRetained(t, "my-hq", "my-hq-2", "my-hq-3")
 }
 
+func TestPersonalAssistantHQCanBuildAfterResetClearedTheLocalUserProfile(t *testing.T) {
+	f := newHQCollisionFixture(t)
+	ctx := t.Context()
+	if _, err := f.db.ExecContext(ctx, `DELETE FROM users WHERE id='local'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(f.root, "my-hq"), filepath.Join(t.TempDir(), "archived")); err != nil {
+		t.Fatal(err)
+	}
+	result, err := f.coordinator().Setup(ctx, "local", f.buildRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.assertReady(t, result, "my-hq")
+	profile, err := userprofile.NewSQLiteStore(f.db).Get(ctx, "local")
+	if err != nil || profile.DisplayName != "" || profile.Email != "" || len(profile.Preferences) != 0 {
+		t.Fatalf("the explicit build re-seeded a user profile instead of a blank owner: %+v, %v", profile, err)
+	}
+	f.assertRetained(t, "my-hq-2")
+}
+
 type hqStateWriteHook struct {
 	personalassistant.Store
 	update func(context.Context, *personalassistant.State, int64) (*personalassistant.State, error)

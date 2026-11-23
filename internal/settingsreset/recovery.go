@@ -33,6 +33,7 @@ type RecoveryOptions struct {
 	SecretStore     vault.SecretStore
 	OpenSecretStore func() (vault.SecretStore, error)
 	Now             func() time.Time
+	archiveHooks    archiveMoveHooks
 }
 
 // ProductionRecoveryOptions resolves and migrates the canonical Settings
@@ -88,12 +89,19 @@ func RecoverBeforeStores(ctx context.Context, lease *resetstate.Lease, options R
 		return ErrJournalInvalid
 	}
 	lease.ExpectOperation()
+	if j.Archive != nil && j.AcceptedBy == lease.Identity() {
+		return ErrRecoveryIncomplete // Never move a folder in the accepting process.
+	}
 
 	switch j.Operation.State {
 	case StateCompleted:
 		return lease.AuthorizeRecoveredRuntime()
 	case StateBlocked:
-		return ErrRecoveryIncomplete
+		if j.Archive == nil || j.Operation.Blockers[0].Code != "hq_archive_recovery" {
+			return ErrRecoveryIncomplete
+		}
+		// A clean new launch may recheck the same archive. This is not a
+		// new scope, and a blocked destination must never be overwritten.
 	case StatePreparing:
 		blockRecovery(j, "recovery_unavailable", options.Now(), "Reset admission was interrupted before writer drain completed; no category was applied.")
 		return finishRecovery(lease, j)
@@ -106,7 +114,9 @@ func RecoverBeforeStores(ctx context.Context, lease *resetstate.Lease, options R
 
 	targets, configManager, pluginPaths, err := validateRecoveryScope(ctx, lease, j, options)
 	if err != nil {
-		if allResultsPending(j.Operation.Results) {
+		if j.Archive != nil && j.Archive.Stage != archiveVerified && allResultsPending(j.Operation.Results) {
+			blockArchiveRecovery(j, options.Now())
+		} else if allResultsPending(j.Operation.Results) {
 			blockRecovery(j, "recovery_scope_changed", options.Now(), "Reset scope changed before pre-start application; no pending category was applied.")
 		} else {
 			markPendingUnknown(j, "Scope changed while recovering this operation.")
@@ -139,10 +149,21 @@ func RecoverBeforeStores(ctx context.Context, lease *resetstate.Lease, options R
 	}
 
 	j.Operation.State = StateApplying
+	j.Operation.Blockers = []Blocker{}
+	if j.Archive != nil && j.Archive.Stage != archiveVerified {
+		j.Operation.HQArchive = publicArchiveResult(j, OutcomePending)
+	}
 	j.Operation.Revision++
 	j.Operation.UpdatedAt = options.Now().UTC()
 	if err := persistRecoveryJournal(lease, j); err != nil {
 		return err
+	}
+	if err := applyHQArchive(ctx, lease, j, options.Now, options.archiveHooks); err != nil {
+		if errors.Is(err, ErrAdmissionUncertain) {
+			return err
+		}
+		blockArchiveRecovery(j, options.Now())
+		return finishRecovery(lease, j)
 	}
 	for i := range j.Operation.Results {
 		if !resultUnresolved(j.Operation.Results[i]) {
@@ -192,9 +213,6 @@ func validateRecoveryScope(ctx context.Context, lease *resetstate.Lease, j *jour
 		return nil, nil, noPlugins, err
 	}
 	root := lease.Path()
-	if !protectedDigestsUnchanged(ctx, j.Plan.Evidence) {
-		return nil, nil, noPlugins, ErrScopeChanged
-	}
 	expected, err := independentlyResolvedTargets(root)
 	if err != nil {
 		return nil, nil, noPlugins, err
@@ -232,6 +250,12 @@ func validateRecoveryScope(ctx context.Context, lease *resetstate.Lease, j *jour
 	}
 	report, err := database.InspectResetFile(ctx, resolvedDatabase)
 	if err != nil || len(report.Problems) != 0 || report.SchemaDigest != j.Plan.Evidence.DatabaseSchema || report.Version != j.Plan.Evidence.DatabaseSchemaVersion {
+		return nil, nil, noPlugins, ErrScopeChanged
+	}
+	if err := validateArchiveRecoveryScope(ctx, j, expected, report); err != nil {
+		return nil, nil, noPlugins, err
+	}
+	if !protectedDigestsUnchanged(ctx, j.Plan.Evidence) {
 		return nil, nil, noPlugins, ErrScopeChanged
 	}
 	pluginPaths, err := validatePluginRecoveryScope(root, j, options)
@@ -276,7 +300,7 @@ func validatePluginRecoveryScope(root string, j *journal, options RecoveryOption
 	if err != nil {
 		return plugin.ResetPaths{}, err
 	}
-	if j.Operation.State == StateAwaitingRestart && allResultsPending(j.Operation.Results) {
+	if (j.Operation.State == StateAwaitingRestart || (j.Archive != nil && j.Archive.Stage != archiveVerified)) && allResultsPending(j.Operation.Results) {
 		inventory, problems := plugin.InspectReset(paths)
 		if len(problems) != 0 || inventory.RegistryDigest != evidence.RegistryDigest {
 			return plugin.ResetPaths{}, ErrScopeChanged
@@ -627,6 +651,22 @@ func protectedDigestsUnchanged(ctx context.Context, evidence resolvedEvidence) b
 		if err != nil || resolved != fingerprint.Path {
 			return false
 		}
+		if archive := evidence.HQArchive; evidence.archiveRemainder != "" && archive != nil && fingerprint.Path == archive.Root {
+			digest, err := evidence.digestArchiveRemainder(ctx)
+			if err != nil || digest != evidence.archiveRemainder {
+				return false
+			}
+			parents, err := archive.openParents()
+			if err != nil {
+				return false
+			}
+			err = verifyArchiveContent(ctx, parents, archive, true)
+			parents.close()
+			if err != nil {
+				return false
+			}
+			continue
+		}
 		digest, err := evidence.digestRetained(ctx, fingerprint.Path)
 		if err != nil || digest != fingerprint.Digest {
 			return false
@@ -700,7 +740,15 @@ func markPendingUnknown(j *journal, message string) {
 	}
 }
 
+func blockArchiveRecovery(j *journal, now time.Time) {
+	blockRecovery(j, "hq_archive_recovery", now, "The reviewed Personal HQ archive could not be verified; no reset category was applied.")
+	j.Operation.Blockers[0].Recovery = "Keep both locations intact. If a different folder occupies the destination, move that folder to a separate safe location; never replace the old HQ or its archive. Restore the reviewed directory if it changed, then fully relaunch to recheck this same operation. If ownership is unclear, preserve the receipt and ask for help."
+}
+
 func blockRecovery(j *journal, code string, now time.Time, message string) {
+	if j.Archive != nil && j.Archive.Stage != archiveVerified {
+		j.Operation.HQArchive = publicArchiveResult(j, OutcomeFailed)
+	}
 	j.Operation.State = StateBlocked
 	j.Operation.Revision++
 	j.Operation.UpdatedAt = now.UTC()

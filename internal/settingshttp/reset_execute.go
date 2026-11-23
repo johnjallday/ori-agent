@@ -88,7 +88,7 @@ func decodeResetRequest(body io.Reader) (settingsreset.ExecuteRequest, bool, err
 			return req, false, invalid
 		}
 		switch key {
-		case "confirmation", "preview_id", "request_id", "confirm_agents_folder":
+		case "confirmation", "preview_id", "request_id", "confirm_agents_folder", "confirm_hq_archive":
 			var value string
 			if err := json.Unmarshal(raw, &value); err != nil || value == "" {
 				return req, false, invalid
@@ -102,6 +102,8 @@ func decodeResetRequest(body io.Reader) (settingsreset.ExecuteRequest, bool, err
 				req.RequestID = value
 			case "confirm_agents_folder":
 				req.ConfirmAgentsFolder = value
+			case "confirm_hq_archive":
+				req.ConfirmHQArchive = value
 			}
 		case "settings", "agents", "sessions", "onboarding":
 			if string(raw) != "true" && string(raw) != "false" {
@@ -121,7 +123,7 @@ func decodeResetRequest(body io.Reader) (settingsreset.ExecuteRequest, bool, err
 		return req, false, invalid
 	}
 	if legacy {
-		if !selected || seen["preview_id"] || seen["request_id"] || seen["confirm_agents_folder"] {
+		if !selected || seen["preview_id"] || seen["request_id"] || seen["confirm_agents_folder"] || seen["confirm_hq_archive"] {
 			return req, false, invalid
 		}
 	} else if !seen["preview_id"] || !seen["request_id"] || settingsreset.ValidateExecuteRequest(req) != nil {
@@ -213,6 +215,8 @@ func respondResetError(w http.ResponseWriter, err error, op *settingsreset.Opera
 		status, code, message = http.StatusConflict, "active_work", settingsreset.ErrActiveWork.Error()
 	case errors.Is(err, settingsreset.ErrAgentsFolderUnconfirmed):
 		status, code, message = http.StatusConflict, "agents_folder_confirmation_required", settingsreset.ErrAgentsFolderUnconfirmed.Error()
+	case errors.Is(err, settingsreset.ErrHQArchiveUnconfirmed):
+		status, code, message = http.StatusConflict, "hq_archive_confirmation_required", settingsreset.ErrHQArchiveUnconfirmed.Error()
 	case errors.Is(err, settingsreset.ErrLifecycleUnavailable):
 		code, message = "lifecycle_unavailable", settingsreset.ErrLifecycleUnavailable.Error()
 	case errors.Is(err, settingsreset.ErrAdmissionUncertain):

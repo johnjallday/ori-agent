@@ -52,6 +52,14 @@
       <h2 id="blockers-heading">What needs attention</h2>
       <ul class="blockers" id="reset-blocker-list">{{range .Operation.Blockers}}<li><strong>{{.Message}}</strong>{{.Recovery}}</li>{{end}}</ul>
     </section>
+    <section id="reset-hq-archive" aria-labelledby="archive-heading" {{if not .Operation.HQArchive}}hidden{{end}}>
+      <h2 id="archive-heading">Personal HQ archive</h2>
+      <p id="reset-hq-archive-message">{{with .Operation.HQArchive}}{{.Message}}{{end}}</p>
+      <p class="id" id="reset-hq-archive-location" {{if not .Operation.HQArchive}}hidden{{end}}>
+        <span id="reset-hq-archive-label">{{if .Operation.HQArchive}}{{if eq .Operation.HQArchive.Outcome "completed"}}Archived at:{{else}}Reviewed destination:{{end}}{{end}}</span>
+        <code id="reset-hq-archive-path">{{with .Operation.HQArchive}}{{.Destination}}{{end}}</code>
+      </p>
+    </section>
     <section id="reset-restart-instructions" aria-labelledby="restart-heading" {{if not .ShowRestart}}hidden{{end}}>
       <h2 id="restart-heading">How to restart Ori</h2>
       <ul>

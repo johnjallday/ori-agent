@@ -149,6 +149,9 @@ type ExecuteRequest struct {
 	// ConfirmAgentsFolder is the second confirmation a reset that removes the
 	// agents folder needs: the reviewed Preview.AgentsFolder.Path, repeated.
 	ConfirmAgentsFolder string `json:"confirm_agents_folder,omitempty"`
+	// ConfirmHQArchive is the reviewed scope digest, repeated only when the
+	// person explicitly opts in. It cannot provide a path or expand scope.
+	ConfirmHQArchive string `json:"confirm_hq_archive,omitempty"`
 }
 
 type OperationState string
@@ -216,4 +219,13 @@ type Operation struct {
 	Restart       RestartInfo      `json:"restart"`
 	CreatedAt     time.Time        `json:"created_at"`
 	UpdatedAt     time.Time        `json:"updated_at"`
+	HQArchive     *HQArchiveResult `json:"hq_archive,omitempty"`
+}
+
+// HQArchiveResult is independent of the database reset outcome. A verified
+// archive remains at this location even if a later reset category fails.
+type HQArchiveResult struct {
+	Outcome     Outcome `json:"outcome"`
+	Destination string  `json:"destination"`
+	Message     string  `json:"message"`
 }

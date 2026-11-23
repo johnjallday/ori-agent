@@ -138,6 +138,22 @@ func TestResetPreviewArchiveIntentIsExplicitAndScoped(t *testing.T) {
 	}
 }
 
+func TestArchiveExecuteAcceptsOnlyTheScopeWitness(t *testing.T) {
+	base := `{"preview_id":"p","request_id":"r","confirmation":"RESET"`
+	witness := strings.Repeat("a", 64)
+	req, legacy, err := decodeResetRequest(strings.NewReader(base + `,"confirm_hq_archive":"` + witness + `"}`))
+	if err != nil || legacy || req.ConfirmHQArchive != witness {
+		t.Fatalf("reviewed confirmation = %+v, legacy %t, err %v", req, legacy, err)
+	}
+	for _, extra := range []string{`"archive_personal_hq":true`, `"source":"/a"`, `"destination":"/b"`,
+		`"confirm_hq_archive":true`, `"confirm_hq_archive":"/path"`, `"confirm_hq_archive":null`,
+		`"confirm_hq_archive":"` + witness + `","confirm_hq_archive":"` + witness + `"`} {
+		if _, _, err := decodeResetRequest(strings.NewReader(base + "," + extra + "}")); err == nil {
+			t.Fatalf("confirmed request accepted extraneous or invalid field %s", extra)
+		}
+	}
+}
+
 func TestResetPreviewLegacyAllOptionsDoNotBecomeStartFresh(t *testing.T) {
 	intent, categories, _, err := resetPreviewSelection("settings=true&agents=true&sessions=true&onboarding=true")
 	if err != nil {

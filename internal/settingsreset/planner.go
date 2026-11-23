@@ -130,6 +130,9 @@ type resolvedEvidence struct {
 	SkillsFolder string             `json:"skills_folder,omitempty"`
 	PluginList   string             `json:"plugin_list,omitempty"`
 	HQArchive    *hqArchiveEvidence `json:"hq_archive,omitempty"`
+	// Only pre-start verification may switch the protected-root check from
+	// the entire tree to the separately bound post-move fingerprint.
+	archiveRemainder string
 }
 
 // digestRetained hashes one retained path, leaving out what this reset
@@ -450,9 +453,9 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 	if archiveSelection(selected) {
 		review := &HQArchiveReview{Requested: options.ArchivePersonalHQ}
 		view.HQArchive = review
-		archive, err := inspectHQArchive(ctx, owners, plan, operationID)
+		archive, err := inspectHQArchive(ctx, owners, plan, operationID, report.VaultPaths)
 		if err != nil {
-			review.UnavailableReason = err.Error()
+			review.UnavailableReason = archiveReviewReason(err)
 			if review.Requested {
 				block("hq_archive_unavailable", CategoryAppRecords, review.UnavailableReason, "Uncheck Archive my old Personal HQ to review a reset that leaves the folder in place.")
 			}
@@ -460,7 +463,7 @@ func (p *Planner) inspect(ctx context.Context, intent Intent, selected []Categor
 			review.Source, review.Destination, review.Notice = archive.Source, archive.Destination, archiveNotice
 			if review.Requested {
 				plan.Evidence.HQArchive = archive
-				block("hq_archive_review_only", CategoryAppRecords, "This Personal HQ archive can be reviewed, but moving it is not available yet.", "Review without the archive option to reset records and leave folders where they are.")
+
 			}
 		}
 	}

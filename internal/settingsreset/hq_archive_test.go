@@ -81,8 +81,11 @@ func TestArchivePreviewBindsTheExactDesignatedFolderOnlyWhenRequested(t *testing
 		off.ScopeDigest != unchecked.ScopeDigest || on.ScopeDigest == off.ScopeDigest {
 		t.Fatal("omitted/false changed default; or the archive opt-in did not change scope")
 	}
-	if _, err := planner.validatedPlan(ctx, on.ID); !errors.Is(err, ErrPreviewBlocked) {
-		t.Fatalf("archive review-only plan could be accepted: %v", err)
+	approved, err := planner.validatedPlan(ctx, on.ID)
+	mustPreview(t, err)
+	if approved.Evidence.HQArchive == nil || !confirmedHQArchive(approved, on.ScopeDigest) ||
+		confirmedHQArchive(approved, off.ScopeDigest) || confirmedHQArchive(approved, "") {
+		t.Fatal("the archive is not bound to the exact opt-in review")
 	}
 	plan, err := planner.validatedPlan(ctx, off.ID)
 	mustPreview(t, err)

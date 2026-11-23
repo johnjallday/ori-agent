@@ -122,6 +122,7 @@
     'preview_blocked',
     'active_work',
     'agents_folder_confirmation_required',
+    'hq_archive_confirmation_required',
     'operation_conflict',
     'lifecycle_unavailable',
     'preview_limit'
@@ -155,12 +156,19 @@
   const agentsFolderAlso = byId('resetAgentsFolderAlso');
   const agentsFolderAlsoList = byId('resetAgentsFolderAlsoList');
   const agentsFolderCheckLabel = byId('resetAgentsFolderCheckLabel');
+  const archiveCheck = byId('resetArchiveCheck');
+  const archiveOption = byId('resetArchiveOption');
+  let refreshArchive = false;
   let phase = 'idle';
   let reviewed = null;
   let reviewFocus = reviewButton;
 
   function agentsFolderUnconfirmed() {
     return Boolean(reviewed?.agents_folder?.confirmation_required) && !agentsFolderCheck?.checked;
+  }
+
+  function archiveChoiceChanged() {
+    return Boolean(archiveCheck?.checked) !== Boolean(reviewed?.hq_archive?.requested);
   }
 
   function clearAgentsFolder() {
@@ -192,13 +200,15 @@
     if (agentsFolderCheck) {
       agentsFolderCheck.disabled = phase !== 'review' || Boolean(reviewed?.blockers?.length);
     }
+    if (archiveCheck) archiveCheck.disabled = phase !== 'review' || !!archiveOption?.hidden;
     if (confirmButton) {
       confirmButton.disabled =
         phase !== 'review' ||
         input?.value !== 'RESET' ||
         !reviewed ||
         Boolean(reviewed.blockers?.length) ||
-        agentsFolderUnconfirmed();
+        agentsFolderUnconfirmed() ||
+        archiveChoiceChanged();
       confirmButton.textContent =
         phase === 'submitting'
           ? 'Submitting reset…'
@@ -212,7 +222,7 @@
       confirmButton.setAttribute('aria-busy', String(phase === 'submitting'));
     }
     dismissButtons.forEach(node => {
-      if (node) node.disabled = phase === 'submitting';
+      if (node) node.disabled = phase === 'submitting' || refreshArchive;
     });
   }
 
@@ -305,9 +315,13 @@
     byId('resetArchiveSource').textContent = eligible ? archive.source : '';
     byId('resetArchiveDestination').textContent = eligible ? archive.destination : '';
     byId('resetArchiveSummary').textContent = archive?.requested
-      ? 'Archive requested for this review.'
+      ? eligible
+        ? 'Archive selected. Ori will recheck the reviewed folder on relaunch.'
+        : 'The selected archive cannot proceed.'
       : 'Personal HQ files stay where they are by default.';
     byId('resetArchiveNotice').textContent = archive?.unavailable_reason || archive?.notice || '';
+    if (archiveCheck) archiveCheck.checked = archive?.requested === true;
+    if (archiveOption) archiveOption.hidden = !eligible && !archive?.requested;
   }
 
   function renderPreview(preview) {
@@ -439,16 +453,28 @@
     });
   }
 
-  async function reviewReset(intent, categories) {
-    if (phase !== 'idle' || (intent === 'selected_data' && !categories.length)) return;
+  async function reviewReset(intent, categories, archive = false, updating = false) {
+    if (
+      phase !== (updating ? 'review' : 'idle') ||
+      (intent === 'selected_data' && !categories.length)
+    )
+      return;
     reviewFocus = intent === 'start_fresh' ? startFreshButton : reviewButton;
     phase = 'previewing';
+    refreshArchive = updating;
     reviewed = null;
-    showResult('Loading the authoritative reset scope. No data is being changed.');
+    if (input) input.value = '';
+    if (updating) {
+      clearAgentsFolder();
+      showError('Checking the updated Personal HQ choice…');
+    } else {
+      showResult('Loading the authoritative reset scope. No data is being changed.');
+    }
     updateControls();
     try {
       const query = new URLSearchParams({ intent });
       categories.forEach(category => query.append('category', category));
+      if (archive) query.set('archive_personal_hq', 'true');
       const response = await fetch(`/api/reset/preview?${query.toString()}`, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' }
       });
@@ -458,7 +484,9 @@
         !preview?.id ||
         typeof preview?.operation_id !== 'string' ||
         !operationIDPattern.test(preview.operation_id) ||
-        !Array.isArray(preview.categories)
+        !Array.isArray(preview.categories) ||
+        Boolean(preview.hq_archive?.requested) !== archive ||
+        (archive && !/^[a-f0-9]{64}$/.test(preview.scope_digest || ''))
       ) {
         throw new Error(
           responseMessage(preview, 'Reset preview is unavailable; no data was deleted.')
@@ -466,24 +494,43 @@
       }
       reviewed = preview;
       phase = 'review';
-      if (input) input.value = '';
+      refreshArchive = false;
       renderPreview(preview);
       updateControls();
       // getOrCreateInstance, not a fresh Modal: constructing a second instance
       // for the same element replaces the stored one while the first keeps its
       // listeners, and the competing pair can leave a reviewed dialog stuck open
       // after Cancel — with the destructive controls still behind it.
-      bootstrap.Modal.getOrCreateInstance(modalElement).show();
+      if (!updating) bootstrap.Modal.getOrCreateInstance(modalElement).show();
+      else archiveCheck?.focus();
     } catch (requestError) {
-      phase = 'idle';
-      showResult(requestError?.message || 'Reset preview is unavailable; no data was deleted.');
+      refreshArchive = false;
+      const message = requestError?.message || 'Reset preview is unavailable; no data was deleted.';
+      if (updating) {
+        // The old preview is no longer usable even if the network is down.
+        phase = 'review';
+        showError(`${message} Close the dialog and start a new review.`);
+      } else {
+        phase = 'idle';
+        showResult(message);
+        status?.focus();
+      }
       updateControls();
-      status?.focus();
     }
   }
 
   reviewButton.addEventListener('click', () => reviewReset('selected_data', selectedCategories()));
   startFreshButton?.addEventListener('click', () => reviewReset('start_fresh', []));
+  archiveCheck?.addEventListener('change', () => {
+    if (phase !== 'review' || !reviewed?.hq_archive) return;
+    const intent = reviewed.intent;
+    return reviewReset(
+      intent,
+      intent === 'start_fresh' ? [] : selectedCategories(),
+      archiveCheck.checked,
+      true
+    );
+  });
 
   input?.addEventListener('input', () => {
     if (phase !== 'review' || reviewed?.blockers?.length) return;
@@ -505,7 +552,8 @@
       !reviewed ||
       reviewed.blockers?.length ||
       input?.value !== 'RESET' ||
-      agentsFolderUnconfirmed()
+      agentsFolderUnconfirmed() ||
+      archiveChoiceChanged()
     )
       return;
     const acceptedPreview = reviewed;
@@ -533,6 +581,9 @@
           // The reviewed folder, repeated: the server checks it is the same one.
           ...(acceptedPreview.agents_folder
             ? { confirm_agents_folder: acceptedPreview.agents_folder.path }
+            : {}),
+          ...(acceptedPreview.hq_archive?.requested
+            ? { confirm_hq_archive: acceptedPreview.scope_digest }
             : {})
         })
       });
@@ -567,11 +618,12 @@
   });
 
   modalElement?.addEventListener('shown.bs.modal', () => {
-    if (phase === 'review' && !reviewed?.blockers?.length) input?.focus();
+    if (phase === 'review' && archiveOption && !archiveOption.hidden) archiveCheck?.focus();
+    else if (phase === 'review' && !reviewed?.blockers?.length) input?.focus();
     else error?.focus?.();
   });
   modalElement?.addEventListener('hide.bs.modal', event => {
-    if (phase === 'submitting') event.preventDefault();
+    if (phase === 'submitting' || refreshArchive) event.preventDefault();
   });
   modalElement?.addEventListener('hidden.bs.modal', () => {
     if (phase !== 'review') return;
@@ -579,6 +631,7 @@
     reviewed = null;
     if (input) input.value = '';
     clearAgentsFolder();
+    renderArchiveReview(null);
     showError('');
     updateControls();
     reviewFocus?.focus();
