@@ -215,12 +215,19 @@ func TestBrandNewProfileLandsOnHome(t *testing.T) {
 	if !strings.Contains(fresh, "Start with one folder.") || strings.Contains(fresh, "onboardingModal") || strings.Contains(fresh, "home-command-bridge") {
 		t.Fatal("new Mac install did not render isolated search page")
 	}
-	for _, path := range []string{"/?hire=1", "/?quest=build-hq"} {
+	for _, path := range []string{"/?hire=1", "/?quest=build-hq", "/?setup=1", "/?view=map", "/?ticket=synthetic"} {
 		if !strings.Contains(page(path, local), "home-command-bridge") {
 			t.Fatal("overrode explicit entry", path)
 		}
 	}
-	if strings.Contains(page("/", "192.0.2.5:1010"), "id=\"desk\"") {
+	step := httptest.NewRequest(http.MethodPost, "http://localhost/api/onboarding/step", strings.NewReader(`{"step_name":"names"}`))
+	step.RemoteAddr = local
+	stepRec := httptest.NewRecorder()
+	handler.ServeHTTP(stepRec, step)
+	if stepRec.Code != 200 || !strings.Contains(page("/", local), "home-command-bridge") || !strings.Contains(page("/?home=1", local), "Start or resume workspace setup") {
+		t.Fatalf("partial setup must keep its continuation (step status %d)", stepRec.Code)
+	}
+	if remote := page("/", "192.0.2.5:1010"); strings.Contains(remote, `id="desk"`) || strings.Contains(remote, `href="/search"`) {
 		t.Fatal("nonlocal search desk")
 	}
 	if err := onboarding.DecideSearchLanding(os.Getenv("ORI_DATA_DIR"), onboarding.SearchFirst, onboarding.SearchLater); err != nil {
@@ -229,6 +236,16 @@ func TestBrandNewProfileLandsOnHome(t *testing.T) {
 	home := page("/", local)
 	if !strings.Contains(home, "Start or resume workspace setup") || strings.Contains(home, "onboardingModal") {
 		t.Fatal("deferred setup forced on Home")
+	}
+	if !strings.Contains(page("/search", local), "Make Files my starting page") || onboarding.SearchLanding(os.Getenv("ORI_DATA_DIR")) != onboarding.SearchLater {
+		t.Fatal("visiting Files changed the deferred Home preference")
+	}
+	req := httptest.NewRequest("GET", "http://localhost/search", nil)
+	req.RemoteAddr = local
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Referrer-Policy") != "no-referrer" || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+		t.Fatal("Files document lost response guards")
 	}
 }
 

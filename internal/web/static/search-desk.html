@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>{{if .Home}}Home{{else}}File search{{end}} · Ori</title>
+    <title>{{if .Home}}Home{{else}}Files{{end}} · Ori</title>
     <link rel="stylesheet" href="/css/search-desk.css" />
   </head>
   <body data-landing="{{.State}}">
@@ -25,10 +25,10 @@
     <main id="desk">
       <section class="arrival">
         <small>01 / LOCAL FILE SEARCH</small>
-        <h1 id="title">{{if .First}}Start with one folder.{{else}}Your search desk.{{end}}</h1>
+        <h1 id="title">{{if .First}}Start with one folder.{{else}}Files{{end}}</h1>
         <p>
-          Only the folder you choose. Names, locations and dates stay on this device. No file contents, uploads or
-          changes.
+          {{if .First}}Choose a folder to search by filename. You don’t need a workspace or an assistant.{{else}}Find the right copy by its folder and date.{{end}}
+          Names, locations and dates stay on this Mac. No file contents, uploads or changes.
         </p>
         <div class="actions" id="choices">
           <button data-kind="documents">Documents</button><button data-kind="downloads">Downloads</button
@@ -47,10 +47,10 @@
         </dialog>
         {{if .First}}
         <p class="decision">
-          Choosing a folder makes Search your starting page. <button id="skip" class="link">Not now</button>
+          Choosing your first folder makes Files your starting page. <button id="skip" class="link">Not now</button>
         </p>
         {{else if eq .State "search"}}<button id="homeDefault" class="link">Start on Home instead</button>{{else if ne
-        .State "unavailable"}}<button id="searchDefault" class="link">Make Search my starting page</button>{{end}}
+        .State "unavailable"}}<button id="searchDefault" class="link">Make Files my starting page</button>{{end}}
         <p id="notice" role="status" aria-live="polite"></p>
       </section>
       <div class="worktop">

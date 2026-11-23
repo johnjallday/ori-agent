@@ -45,6 +45,22 @@ func TestSearchLandingOnlyStartsOnNewInstallAndReopensIndependently(t *testing.T
 		t.Fatal("incomplete write mistaken for decision")
 	}
 }
+func TestAcceptedFolderCannotOverrideExplicitHomeDecision(t *testing.T) {
+	root := t.TempDir()
+	if err := writeLanding(root, SearchFirst); err != nil {
+		t.Fatal(err)
+	}
+	if err := DecideSearchLanding(root, SearchFirst, SearchLater); err != nil {
+		t.Fatal(err)
+	}
+	if err := AcceptSearchFolder(root); err != nil {
+		t.Fatal(err)
+	}
+	if got := SearchLanding(root); got != SearchLater {
+		t.Fatalf("late folder acceptance changed preference to %s", got)
+	}
+}
+
 func TestExistingOrConfiguredRootIsNotANewSearchInstall(t *testing.T) {
 	for _, configured := range []bool{false, true} {
 		base := t.TempDir()
