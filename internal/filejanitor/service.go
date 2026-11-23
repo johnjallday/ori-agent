@@ -169,9 +169,12 @@ type Service struct {
 	workspaces WorkspaceStore
 	scanner    *Scanner
 	mover      Mover
-	trash      TrashRemover
-	notifier   Notifier
-	provider   ClassificationProvider
+	// conditionalMover files reviewed documents into chosen folders and puts them
+	// back; the legacy category path keeps using mover.
+	conditionalMover ConditionalMover
+	trash            TrashRemover
+	notifier         Notifier
+	provider         ClassificationProvider
 	// The host receives only durable applied/undone action IDs. Learning may
 	// fail independently; it never changes the user's file-action result.
 	reviewedKnowledge ReviewedKnowledgeObserver
