@@ -11,4 +11,4 @@ func archiveFileAt(*os.Root, string) (*os.File, error)      { return nil, errArc
 func archiveEntryPath(string) (archiveEntry, error)         { return archiveEntry{}, errArchiveVolume }
 func archiveInodeAt(*os.File, string) (archiveEntry, error) { return archiveEntry{}, errArchiveVolume }
 func archiveLocalVolume(*os.File) bool                      { return false }
-func archiveOwner() uint32                                  { return 0 }
+func archiveOwner() int64                                   { return 0 }

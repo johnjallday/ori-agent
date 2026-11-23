@@ -28,4 +28,4 @@ func archiveInodeAt(dir *os.File, name string) (archiveEntry, error) {
 	return archiveEntryAt(int(dir.Fd()), name)
 }
 
-func archiveOwner() uint32 { return uint32(os.Geteuid()) }
+func archiveOwner() int64 { return int64(os.Geteuid()) }

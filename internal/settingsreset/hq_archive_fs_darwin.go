@@ -21,9 +21,10 @@ func archiveEntryAt(fd int, path string) (archiveEntry, error) {
 	if err := unix.Fstatat(fd, path, &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return archiveEntry{}, err
 	}
+	device := uint64(uint32(stat.Dev)) // #nosec G115 -- macOS dev_t is signed; the opaque device identity uses all 32 bits, not its sign.
 	return archiveEntry{
-		Identity: archiveIdentity{Device: uint64(uint32(stat.Dev)), Inode: stat.Ino, BirthSec: stat.Btim.Sec, BirthNS: uint32(stat.Btim.Nsec)},
-		Mount:    uint64(uint32(stat.Dev)), Owner: stat.Uid, Directory: stat.Mode&unix.S_IFMT == unix.S_IFDIR,
+		Identity: archiveIdentity{Device: device, Inode: stat.Ino, BirthSec: stat.Btim.Sec, BirthNS: stat.Btim.Nsec},
+		Mount:    device, Owner: int64(stat.Uid), Directory: stat.Mode&unix.S_IFMT == unix.S_IFDIR,
 		UnsafeParent: stat.Mode&0o022 != 0,
 	}, nil
 }

@@ -50,15 +50,17 @@ type archiveIdentity struct {
 	Device   uint64 `json:"device"`
 	Inode    uint64 `json:"inode"`
 	BirthSec int64  `json:"birth_sec"`
-	BirthNS  uint32 `json:"birth_ns"`
+	BirthNS  int64  `json:"birth_ns"`
 }
 
-func (i archiveIdentity) valid() bool { return i.Inode != 0 && i.BirthSec > 0 && i.BirthNS < 1e9 }
+func (i archiveIdentity) valid() bool {
+	return i.Inode != 0 && i.BirthSec > 0 && i.BirthNS >= 0 && i.BirthNS < 1e9
+}
 
 type archiveEntry struct {
 	Identity                archiveIdentity
 	Mount                   uint64
-	Owner                   uint32
+	Owner                   int64
 	Directory, UnsafeParent bool
 }
 

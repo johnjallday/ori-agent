@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync
 } from 'node:fs';
@@ -728,5 +729,109 @@ test.describe.serial('Settings reset on an owned installation', () => {
     });
     await expect(page).toHaveURL(statusURL);
     expect(digest(manifest)).toBe(hash);
+  });
+
+  test('archives only the reviewed Personal HQ and frees its original folder', async ({
+    page,
+    request
+  }) => {
+    const post = async (endpoint: string, data: unknown) => {
+      const response = await request.post(origin + endpoint, { data });
+      expect(response.ok(), `${endpoint}: ${await response.text()}`).toBeTruthy();
+      return response.json();
+    };
+    const assistant = async () =>
+      (await (await request.get(origin + '/api/personal-assistant')).json()).personal_assistant;
+    const projects = join(realpathSync(root), 'archive-test-projects');
+    mkdirSync(projects, { mode: 0o750 });
+    await post('/api/settings/workspace-root', { workspace_root: projects });
+    const hire = async (name: string) =>
+      post('/api/personal-assistant/hire', {
+        request_id: `hire-${name}`,
+        if_version: (await assistant()).state_version || 0,
+        display_name: name,
+        mandate: 'Track my fixtures.'
+      });
+    const build = async (name: string) =>
+      post('/api/personal-assistant/hq', {
+        request_id: `build-${name}`,
+        if_version: (await assistant()).state_version,
+        name: 'My HQ',
+        schedule_enabled: false,
+        notes: { include: false }
+      });
+    await hire('Atlas');
+    const built = await build('Atlas');
+    const id = built.personal_assistant.hq_workspace_id;
+    const source = join(projects, 'my-hq');
+    const detached = join(projects, 'my-hq-2');
+    mkdirSync(detached, { mode: 0o750 });
+    writeFileSync(join(source, 'kept.txt'), 'old HQ\n', { mode: 0o600 });
+    writeFileSync(join(detached, 'kept.txt'), 'detached HQ\n', { mode: 0o600 });
+    await post(`/api/workspaces/${id}/continuity/prepare`, {});
+    await expect
+      .poll(
+        async () =>
+          (await (await request.get(`${origin}/api/workspaces/${id}/continuity`)).json()).continuity
+            .state
+      )
+      .toBe('ready');
+    const preview = (
+      await (
+        await request.get(origin + '/api/reset/preview?intent=selected_data&category=app_records')
+      ).json()
+    ).hq_archive;
+    test.skip(
+      preview?.unavailable_reason?.includes('supported local filesystem'),
+      'archive requires supported local filesystem'
+    );
+    expect(preview.source).toBe(source);
+    const checkpoint = join('.ori', 'continuity', 'current.json');
+    const saved = digest(join(source, checkpoint));
+    await openSettings(page, request);
+    await page.locator('#resetSessions').check();
+    await page.locator('#resetAppBtn').click();
+    const option = page.getByRole('checkbox', { name: 'Archive my old Personal HQ' });
+    await expect(option).toBeFocused();
+    await expect(option).not.toBeChecked();
+    const confirmation = page.locator('#resetConfirmInput');
+    await confirmation.fill('RESET');
+    await option.check();
+    await expect(page.locator('#resetArchiveSummary')).toContainText('Archive selected');
+    await expect(confirmation).toHaveValue('');
+    const destination = (await page.locator('#resetArchiveDestination').textContent()) || '';
+    expect(destination.startsWith(join(realpathSync(dataDir), 'hq-archive-'))).toBeTruthy();
+    await confirmation.fill('RESET');
+    await page.locator('#confirmResetBtn').click();
+    const statusURL = await stagedStatus(page);
+    expect(existsSync(source)).toBe(true);
+    await stopServer();
+    await startServer();
+    await expect(page).toHaveURL(statusURL);
+    await expect(page.getByRole('heading', { name: 'Reset completed' })).toBeVisible({
+      timeout: 20_000
+    });
+    await expect(page.locator('#reset-hq-archive-path')).toHaveText(destination);
+    expect(existsSync(source)).toBe(false);
+    expect(digest(join(destination, checkpoint))).toBe(saved);
+    expect(readFileSync(join(destination, 'kept.txt'), 'utf8')).toBe('old HQ\n');
+    expect(readFileSync(join(detached, 'kept.txt'), 'utf8')).toBe('detached HQ\n');
+    expect((await assistant()).state).toBe('needs_hire');
+
+    // Fresh explicit build creates its empty relational owner, not an old
+    // user profile. The preserved assistant is now import-review only.
+    await post('/api/settings/workspace-root', { workspace_root: projects });
+    await hire('Bea');
+    expect((await build('Bea')).personal_assistant.hq_workspace_id).not.toBe(id);
+    expect(existsSync(source)).toBe(true);
+    expect(digest(join(destination, checkpoint))).toBe(saved);
+    const review = await request.get(
+      `${origin}/api/workspaces/import/check?path=${encodeURIComponent(destination)}`
+    );
+    expect((await review.json()).continuity).toMatchObject({
+      recommended_action: 'workspace_only',
+      adoption_blocked: 'existing_assistant'
+    });
+    expect((await assistant()).display_name).toBe('Bea');
   });
 });

@@ -34,8 +34,8 @@ func archiveEntryAt(fd int, path string) (archiveEntry, error) {
 	}
 	return archiveEntry{
 		Identity: archiveIdentity{Device: uint64(stat.Dev_major)<<32 | uint64(stat.Dev_minor), Inode: stat.Ino,
-			BirthSec: stat.Btime.Sec, BirthNS: stat.Btime.Nsec},
-		Mount: stat.Mnt_id, Owner: stat.Uid, Directory: stat.Mode&unix.S_IFMT == unix.S_IFDIR,
+			BirthSec: stat.Btime.Sec, BirthNS: int64(stat.Btime.Nsec)},
+		Mount: stat.Mnt_id, Owner: int64(stat.Uid), Directory: stat.Mode&unix.S_IFMT == unix.S_IFDIR,
 		UnsafeParent: stat.Mode&0o022 != 0,
 	}, nil
 }
