@@ -122,7 +122,7 @@ export function openDocumentsDraft({ hint, offer, project, trigger, result, onCl
       node('p', `Set up My Notes at ${review.setup_path}.`),
       node(
         'p',
-        'Ori creates the standard notebook and seeds it with follow-ups and people already in HQ. Ori keeps Inbox, Daily, People, project notes and what it knows about you up to date. Notes you edit stay yours.'
+        'Ori creates the standard notebook with follow-ups, people, facts and working preferences already in HQ. Ori keeps Inbox, Daily, People, project notes and what it knows about you up to date. Notes you edit stay yours.'
       ),
       node(
         'p',

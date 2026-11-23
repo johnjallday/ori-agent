@@ -9999,10 +9999,23 @@ button.ws-cmd-rpg-class-card:focus-visible {
   background: var(--bs-body-bg);
   color: var(--bs-body-color);
 }
-.ws-documents-review::backdrop { background: rgb(12 20 26 / 42%); }
-.ws-documents-review label { display: grid; gap: .25rem; margin-block: .75rem; }
-.ws-documents-review footer { display: flex; flex-wrap: wrap; gap: .5rem; }
-.ws-documents-review pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ws-documents-review::backdrop {
+  background: rgb(12 20 26 / 42%);
+}
+.ws-documents-review label {
+  display: grid;
+  gap: 0.25rem;
+  margin-block: 0.75rem;
+}
+.ws-documents-review footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.ws-documents-review pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .ws-hq-suggestions {
   position: absolute;
   width: min(360px, calc(100vw - 24px));

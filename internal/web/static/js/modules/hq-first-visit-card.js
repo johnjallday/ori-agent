@@ -335,6 +335,20 @@ export class HQFirstVisitCard {
       this.checkedAttempt = null;
       return this.loadReturn();
     };
+    const returnFocus = async hint => {
+      if (receiptHint(window.location, this.owner.workspaceId())?.attempt !== hint.attempt) return;
+      await refresh();
+      if (
+        receiptHint(window.location, this.owner.workspaceId())?.attempt !== hint.attempt ||
+        !this.owner.active
+      )
+        return;
+      const controls =
+        this.owner.container?.querySelectorAll?.(
+          '[data-guided-receipt] button,[data-guided-receipt] summary,[data-guided-receipt] a'
+        ) || [];
+      [...controls].find(el => el.getClientRects().length)?.focus({ preventScroll: true });
+    };
     for (const b of this.owner.container?.querySelectorAll?.('[data-documents-action]') || []) {
       b.onclick = async () => {
         const hint = receiptHint(window.location, this.owner.workspaceId());
@@ -351,7 +365,7 @@ export class HQFirstVisitCard {
             offer,
             trigger: b,
             result: offer.decision,
-            onClose: refresh
+            onClose: () => returnFocus(hint)
           });
           return;
         }
@@ -394,7 +408,7 @@ export class HQFirstVisitCard {
           offer,
           project,
           trigger: button,
-          onClose: refresh
+          onClose: () => returnFocus(hint)
         });
       };
     }

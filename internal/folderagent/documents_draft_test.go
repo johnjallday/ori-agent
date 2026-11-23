@@ -16,6 +16,13 @@ import (
 
 func TestDocumentsDraftRecoversOnlyProvenPublication(t *testing.T) {
 	root := build(t, "Work/Thesis/main.tex")
+	marker := filepath.Join(root, "Work/Thesis/main.tex")
+	if err := os.WriteFile(marker, []byte("private source text must never appear in the draft"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(marker, 0); err != nil {
+		t.Fatal(err)
+	} // unreadable body; stat and directory listing still work
 	h, id := guidedLook(t, root)
 	notes := t.TempDir()
 	if err := os.Mkdir(filepath.Join(notes, "Projects"), 0750); err != nil {
@@ -41,6 +48,9 @@ func TestDocumentsDraftRecoversOnlyProvenPublication(t *testing.T) {
 	review, err := h.svc.DocumentsDraft(ctx, "u1", id, in, false)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if review.Body != "# Thesis\n\nSend the methods chapter to my advisor\n\nSource: Documents/Work/Thesis\n" {
+		t.Fatal("draft was not solely the reviewed metadata and answer")
 	}
 	in.Review, in.RequestID = review.Review, "save-thesis"
 	path := filepath.Join(notes, review.Rel)

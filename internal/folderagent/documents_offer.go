@@ -186,7 +186,7 @@ func (s *Service) DocumentsOffer(ctx context.Context, owner, hq, attempt, id str
 		out.NotesOnly = len(documentsVaults(rec, root, report, guards[1:])) > 0
 	}
 	if len(rec.DocumentsDecisions) > 0 {
-		out.Decision = s.documentsDisposition(ctx, owner, hq, rec)
+		out.Decision = s.documentsDisposition(ctx, owner, hq, root, rec)
 	}
 	if len(out.Projects) == 0 && len(out.Vaults) == 0 && !out.NotesOnly && out.Decision == nil {
 		return nil, nil

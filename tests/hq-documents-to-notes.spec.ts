@@ -61,6 +61,11 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
   const original = empty ? null : await lstat(join(docs, 'Thesis', 'main.tex'));
   const { status } = await (await request.get('/api/personal-hq/status')).json();
   await installLocalCdn(page);
+  if (mode === 'setup') {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' });
+    await page.addInitScript(() => localStorage.setItem('ori-theme', 'dark'));
+  }
   await page.goto(`/workspaces/${encodeURIComponent(status.workspace.folder_slug)}?mode=details`);
   const card = page.locator('[data-hq-firstvisit]');
   await card.getByRole('button', { name: /Explore Documents/ }).click();
@@ -116,6 +121,13 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
   await expect(receipt.getByText(/LaTeX manuscript/)).toBeVisible();
   await expect(receipt.getByRole('link', { name: 'Open folder workspace' })).toBeVisible();
   await page.screenshot({ path: info.outputPath('documents-offer.png'), animations: 'disabled' });
+  const interviewState = async () => {
+    const res = await request.get('/api/personal-assistant/knowledge/interview');
+    expect(res.ok()).toBeTruthy();
+    const { status, state_version, profile, remembered_project } = await res.json();
+    return { status, state_version, profile, remembered_project };
+  };
+  const beforeInterview = await interviewState();
   const rel = 'Projects/Thesis/README.md';
   const destination = join(root, 'My Notes', rel);
   await expect(lstat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
@@ -131,6 +143,14 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
   await receipt.getByRole('button', { name: 'Draft Thesis note' }).click();
   const dialog = page.locator('[data-documents-review]');
   const answer = 'Send the methods chapter to my advisor';
+  await expect(dialog.getByLabel('What are you trying to finish?')).toBeFocused();
+  if (mode === 'setup') {
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(receipt.getByRole('button', { name: 'Draft Thesis note' })).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('html')).toHaveAttribute('data-bs-theme', 'dark');
+  }
   await dialog.getByLabel('What are you trying to finish?').fill(answer);
   await dialog.getByRole('button', { name: 'Review note' }).click();
   if (mode === 'setup' || mode === 'changed') {
@@ -151,6 +171,9 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
     await expect(lstat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
   }
   await expect(dialog).toContainText('My Notes/' + rel);
+  const bounds = await dialog.boundingBox();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width + 1);
   const body = await dialog.locator('pre').textContent();
   expect(body).toContain(answer);
   expect(body).toContain('Source: Documents/Thesis');
@@ -180,6 +203,10 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
   const save = await sent;
   expect((await post(save.url(), save.postDataJSON())).draft.saved).toBeTruthy();
   expect(await readdir(join(root, 'My Notes', 'Projects', 'Thesis'))).toEqual(['README.md']);
+  expect(await interviewState()).toEqual(beforeInterview);
+  const facts = await request.get('/api/personal-assistant/knowledge');
+  expect(facts.ok()).toBeTruthy();
+  expect(await facts.text()).not.toContain(answer);
   const after = await lstat(join(docs, 'Thesis', 'main.tex'));
   expect([after.mode, after.mtimeMs]).toEqual([original!.mode, original!.mtimeMs]);
   expect(await readFile(join(docs, 'Thesis', 'main.tex'), 'utf8')).toBe('fixture manuscript\n');

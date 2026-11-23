@@ -139,8 +139,7 @@ func (s *Service) DocumentsDraft(ctx context.Context, owner, id string, in Docum
 		if !source.CreatedByOri() || !source.FillIn.Allowed() {
 			return ErrWrongState
 		}
-		notebook, err := filepath.EvalSymlinks(source.Path)
-		if err != nil || filejanitor.RootsOverlap(notebook, root) {
+		if !disjointNotebook(root, source.Path) {
 			return documentsConflict("Choose Notes outside Documents before saving a project.")
 		}
 		name := strings.TrimSpace(in.Name)
@@ -229,6 +228,12 @@ func (s *Service) DocumentsDraft(ctx context.Context, owner, id string, in Docum
 	return out, nil
 }
 
+func disjointNotebook(root, notebook string) bool {
+	src, e1 := filepath.EvalSymlinks(root)
+	dst, e2 := filepath.EvalSymlinks(notebook)
+	return e1 == nil && e2 == nil && !filejanitor.RootsOverlap(src, dst)
+}
+
 func (s *Service) OpenDocumentsDraft(ctx context.Context, owner, id, hq, attempt, request string) (DocumentsDraftView, error) {
 	return s.readDocumentsResult(ctx, owner, id, hq, attempt, request, false)
 }
@@ -244,12 +249,16 @@ func (s *Service) readDocumentsResult(ctx context.Context, owner, id, hq, attemp
 		return out, ErrUnavailable
 	}
 	err := s.deps.DocumentsNotebook(ctx, owner, hq, func(source secondbrain.Source, generation string) error {
-		rec, _, err := s.documentsReport(ctx, owner, hq, attempt, id)
+		rec, root, err := s.documentsReport(ctx, owner, hq, attempt, id)
 		if err != nil {
 			return err
 		}
+		if !disjointNotebook(root, source.Path) {
+			return ErrWrongState
+		}
 		for _, d := range rec.DocumentsDecisions {
-			if d.RequestID != request || !(d.State == "saved" || (recoverReceipt && d.State == "pending")) || d.Generation != generation {
+			eligible := d.State == "saved" || (recoverReceipt && d.State == "pending")
+			if d.RequestID != request || !eligible || d.Generation != generation {
 				continue
 			}
 			w, err := secondbrain.NewWriter(&source)

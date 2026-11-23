@@ -1999,9 +1999,13 @@ test('Home Explore opens its own chooser, whose choice starts an agent on the fo
   assert.match(scan, /if \(!body\.file\) \{\s*await chooseForAgent\(body\);\s*return;/);
   // The choice names the workspace page it is made from (a Home's own page
   // skips that Home's premise); never a path.
+  const choice = source.match(/const result = await chooseFolder\(\{([\s\S]*?)\}\);/)?.[1];
+  assert.ok(choice);
+  assert.match(choice, /\.\.\.body,/);
+  assert.match(choice, /from \? \{ from_workspace_id: from \} : \{\}/);
   assert.match(
-    source,
-    /const result = await chooseFolder\(from \? \{ \.\.\.body, from_workspace_id: from \} : body\);/
+    choice,
+    /guidedFolder \? \{ guided_hq: guidedFolder.hq, guided_attempt: guidedFolder.attempt \} : \{\}/
   );
 });
 

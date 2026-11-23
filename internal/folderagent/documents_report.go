@@ -57,7 +57,8 @@ func (s *Service) documentsReport(ctx context.Context, owner, hq, attempt, works
 	if owner != rec.OwnerUserID {
 		return nil, "", ErrNotOwner
 	}
-	if binding != rec.GuidedReturn || rec.Map == nil || rec.MapWitness == "" || !(rec.State == StateReported || rec.State == StateKept || completed(rec)) {
+	finished := rec.State == StateReported || rec.State == StateKept || completed(rec)
+	if binding != rec.GuidedReturn || rec.Map == nil || rec.MapWitness == "" || !finished {
 		return nil, "", ErrWrongState
 	}
 	root, err := s.deps.Workspaces.AnchorRoot(workspaceID)

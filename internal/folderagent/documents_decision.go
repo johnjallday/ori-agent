@@ -37,7 +37,7 @@ func (s *Service) DismissDocuments(ctx context.Context, owner, id string, in Doc
 // A return reads a durable decision, never claims success from a filename.
 // Nothing here repairs a receipt or returns note text. The explicit Open
 // reads and proves the exact file again, under the same connection lock.
-func (s *Service) documentsDisposition(ctx context.Context, owner, hq string, rec *Record) *DocumentsDisposition {
+func (s *Service) documentsDisposition(ctx context.Context, owner, hq, root string, rec *Record) *DocumentsDisposition {
 	members := map[string]bool{}
 	for _, f := range rec.Map.Folders {
 		if safeMember(f) {
@@ -58,7 +58,7 @@ func (s *Service) documentsDisposition(ctx context.Context, owner, hq string, re
 		result := &DocumentsDisposition{State: "unverified", Name: d.Name}
 		if s.deps.DocumentsNotebook != nil {
 			err := s.deps.DocumentsNotebook(ctx, owner, hq, func(source secondbrain.Source, generation string) error {
-				if generation != d.Generation {
+				if generation != d.Generation || !disjointNotebook(root, source.Path) {
 					return ErrWrongState
 				}
 				w, err := secondbrain.NewWriter(&source)
