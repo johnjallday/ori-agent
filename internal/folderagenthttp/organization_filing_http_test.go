@@ -67,10 +67,50 @@ func TestRespondFiling_ActionableRefusalsAreConflictsWithACode(t *testing.T) {
 	})
 }
 
+func TestRespondUndo_ARefusalIsOnePlainSentenceAndAnAnswerCarriesEveryFile(t *testing.T) {
+	rec := httptest.NewRecorder()
+	respondUndo(rec, filejanitor.FilingUndoResult{}, errors.Join(errors.New("internal reason with /Users/me/Documents/secret.pdf"), filejanitor.ErrUndoUnavailable))
+	var refused map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &refused); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusConflict || refused["code"] != "undo_unavailable" || strings.Contains(rec.Body.String(), "secret.pdf") || strings.Contains(rec.Body.String(), "internal reason") {
+		t.Fatalf("the engine's reason and any path must stay out of the answer: %d %s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	respondUndo(rec, filejanitor.FilingUndoResult{
+		FilingID: "filing-1", Back: 1, NotBack: 1,
+		Outcomes: []filejanitor.FilingUndoOutcome{
+			{Name: "one.pdf", Result: filejanitor.UndoOutcomeUndone},
+			{Name: "two.pdf", Result: filejanitor.UndoOutcomeFailed, Message: "Something else is already using the original name, so Ori did not overwrite it.", Location: filejanitor.LocationFiled, Destination: "Taxes/two.pdf"},
+		},
+	}, nil)
+	var body struct {
+		Undo struct {
+			Back     int `json:"back"`
+			NotBack  int `json:"not_back"`
+			Outcomes []struct {
+				Name        string `json:"name"`
+				Result      string `json:"result"`
+				Location    string `json:"location"`
+				Destination string `json:"destination"`
+			} `json:"outcomes"`
+		} `json:"undo"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || body.Undo.Back != 1 || body.Undo.NotBack != 1 || len(body.Undo.Outcomes) != 2 || body.Undo.Outcomes[1].Location != "filed" || body.Undo.Outcomes[1].Destination != "Taxes/two.pdf" {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestOrganizationFiling_NewRoutesAreLocalOnlyAndStrict(t *testing.T) {
 	routes := map[string]func(*Handler) http.HandlerFunc{
 		"preview": func(h *Handler) http.HandlerFunc { return h.OrganizationFilingPreview },
 		"file":    func(h *Handler) http.HandlerFunc { return h.OrganizationFile },
+		"undo":    func(h *Handler) http.HandlerFunc { return h.OrganizationFilingUndo },
 	}
 	valid := `{"review":"r","group":"g","revision":1,"sources":["a"],"destination":{"folder":"Taxes"},"digest":"` + strings.Repeat("a", 64) + `","client_key":"key-aaaaaaaaaaaaaaaa"}`
 	for name, route := range routes {

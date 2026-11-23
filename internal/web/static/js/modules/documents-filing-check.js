@@ -35,6 +35,22 @@ function newKey() {
   return out.slice(0, 32);
 }
 
+// undoSummary says what putting files back did, in plain words: how many are back,
+// and for each file that is not, why and where it is.
+export function undoSummary(undo) {
+  const back = undo?.back || 0;
+  const parts = [
+    back ? `Put back ${back} ${back === 1 ? 'file' : 'files'}.` : 'Nothing was put back.'
+  ];
+  for (const item of (undo?.outcomes || []).filter(
+    o => o.result === 'failed' || o.result === 'interrupted'
+  ))
+    parts.push(
+      `${item.name}: ${item.message || 'not put back'}${item.destination ? ` It is in ${item.destination}.` : ''}`
+    );
+  return parts.join(' ');
+}
+
 // parseFolder reads the typed folder. It only shapes the text; the server decides
 // whether the folder is allowed.
 export function parseFolder(text) {
@@ -293,8 +309,35 @@ export function documentsFilingCheck({
       lines.push(
         node('p', 'The files were filed, but Ori could not add a note to this saved view.')
       );
+    // Each filed file can be put back, one at a time or all together. Putting back
+    // never overwrites: if the original name is taken, the file stays where it is
+    // and the answer says so.
+    const filedItems = (filing.outcomes || []).filter(item => item.result === 'applied');
+    const undoStatus = node('div');
+    undoStatus.setAttribute('role', 'status');
+    if (filing.filing_id && filedItems.length) {
+      const list = node('ul');
+      for (const item of filedItems) {
+        const row = node('li', `${item.name} → ${item.destination}`);
+        if (item.undoable && item.action_id) {
+          const putBack = button('Put back', () =>
+            undo({ filing: filing.filing_id, action: item.action_id }, undoStatus, [putBack])
+          );
+          row.append(putBack);
+        }
+        list.append(row);
+      }
+      lines.push(node('p', 'Filed:'), list);
+      if (filedItems.filter(item => item.undoable).length > 1) {
+        const all = button('Put all back', () =>
+          undo({ filing: filing.filing_id }, undoStatus, [all])
+        );
+        lines.push(all);
+      }
+      lines.push(undoStatus);
+    }
     lines.push(
-      node('p', 'Nothing was replaced or deleted. Undo is not available for this filing yet.'),
+      node('p', 'Nothing was replaced or deleted. You can put these back.'),
       button('Reload this view', () => refresh?.())
     );
     for (const input of choices.querySelectorAll?.('input') ?? []) input.disabled = true;
@@ -302,6 +345,22 @@ export function documentsFilingCheck({
     say('');
     flow.replaceChildren(...lines);
     heading.focus?.();
+  }
+
+  async function undo(request, target, buttons) {
+    for (const b of buttons) b.disabled = true;
+    target.textContent = 'Putting back…';
+    try {
+      const { undo: result } = await post('organization-filing-undo', request);
+      target.textContent = undoSummary(result);
+      // A file that stayed put can be tried again later from the history.
+    } catch (error) {
+      for (const b of buttons) b.disabled = false;
+      target.textContent =
+        error?.body?.code === 'undo_unavailable'
+          ? 'These files cannot be put back from here. Nothing was moved.'
+          : 'The answer did not arrive. Reload this view to see where the files are.';
+    }
   }
 
   // ------------------------------------------------------------------ the files

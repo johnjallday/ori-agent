@@ -59,6 +59,61 @@ type FilingResult struct {
 	DecisionRecorded bool `json:"decision_recorded"`
 }
 
+// UndoDocumentsFiling puts every file of a named filing back that can still be put
+// back, and UndoDocumentsFile puts one back.
+type UndoDocumentsFiling func(ctx context.Context, owner, id, filingID string) (filejanitor.FilingUndoResult, error)
+type UndoDocumentsFile func(ctx context.Context, owner, id, filingID, actionID string) (filejanitor.FilingUndoResult, error)
+
+// DocumentsFilingStanding says how many of a filing's files are still filed and how
+// many were put back, from File Janitor's journal.
+type DocumentsFilingStanding func(owner, id, filingID string) (filejanitor.DocumentsFilingStanding, error)
+
+// FilingUndoRequest puts back a whole named filing, or one file of it when Action
+// names the file's journal entry.
+type FilingUndoRequest struct {
+	Filing string `json:"filing"`
+	Action string `json:"action,omitempty"`
+}
+
+// UndoOrganizationFiling puts a named filing's files back. File Janitor checks the
+// filing belongs to this workspace and owner, and that the file belongs to the
+// filing, before anything moves; the original name is never overwritten.
+func (s *Service) UndoOrganizationFiling(ctx context.Context, owner, id string, req FilingUndoRequest) (filejanitor.FilingUndoResult, error) {
+	if s.deps.UndoFiling == nil || s.deps.UndoFilingFile == nil {
+		return filejanitor.FilingUndoResult{}, ErrUnavailable
+	}
+	if _, _, err := s.latestReview(owner, id); err != nil {
+		return filejanitor.FilingUndoResult{}, err
+	}
+	if req.Filing == "" {
+		return filejanitor.FilingUndoResult{}, ErrWrongState
+	}
+	if req.Action != "" {
+		return s.deps.UndoFilingFile(ctx, owner, id, req.Filing, req.Action)
+	}
+	return s.deps.UndoFiling(ctx, owner, id, req.Filing)
+}
+
+// withFilingStanding fills in, for display only, where each filing decision stands
+// now. It works on a copy and never stores anything: the decision is a record of
+// what the person chose, and what happened to the files comes from the journal.
+func (s *Service) withFilingStanding(owner, id string, v ReviewResult) ReviewResult {
+	if s.deps.FilingStanding == nil || len(v.Decisions) == 0 {
+		return v
+	}
+	v.Decisions = slices.Clone(v.Decisions)
+	for i := range v.Decisions {
+		d := &v.Decisions[i]
+		if d.Kind != "file" || d.Filing == "" {
+			continue
+		}
+		if standing, err := s.deps.FilingStanding(owner, id, d.Filing); err == nil {
+			d.FilingState = &standing
+		}
+	}
+	return v
+}
+
 // matchedFiling is a selection re-derived from the current review.
 type matchedFiling struct {
 	selection filejanitor.DocumentsSelection

@@ -1,4 +1,4 @@
-import { documentsFilingCheck } from './documents-filing-check.js';
+import { documentsFilingCheck, undoSummary } from './documents-filing-check.js';
 
 // Review is deliberately separate from chat submission and from Filing. A
 // redraw/revisit may load receipts, but only the approval button can send a POST.
@@ -226,13 +226,43 @@ export function documentsOrganizationOffer(doc, base, fetchImpl, route = '') {
         log.append(node('summary', 'Organizing history'));
         for (const d of r.decisions) {
           const observed = d.kind === 'observed';
+          const filed = d.kind === 'file';
           const row = node('div');
+          const what = observed
+            ? `${d.proposed} → ${d.choice}`
+            : filed
+              ? `You filed these into ${d.choice}`
+              : `You chose ${d.choice} (was ${d.proposed})`;
           row.append(
             node(
               'p',
-              `${new Date(d.time).toLocaleString()} · ${observed ? `${d.proposed} → ${d.choice}` : `You chose ${d.choice} (was ${d.proposed})`}. ${d.outcome}${d.exception ? ' · Excluded from suggestions' : ''}`
+              `${new Date(d.time).toLocaleString()} · ${what}. ${d.outcome}${d.exception ? ' · Excluded from suggestions' : ''}`
             )
           );
+          if (filed && d.filing_state) {
+            // Where the files are now comes from the journal at read time; the
+            // decision itself is never edited when a file is put back.
+            row.append(
+              node(
+                'p',
+                `Now: ${d.filing_state.filed} still filed · ${d.filing_state.back} put back`
+              )
+            );
+            if (d.filing_state.undo_available)
+              row.append(
+                button('Put back', async () => {
+                  const n = start('Putting files back…');
+                  try {
+                    const { undo } = await post('organization-filing-undo', { filing: d.filing });
+                    if (n !== generation) return;
+                    await showHistory();
+                    status.textContent = undoSummary(undo);
+                  } catch {
+                    failed(n);
+                  }
+                })
+              );
+          }
           if (!observed) {
             const names = d.sources.map(ref => sources.get(ref)?.file.source.path).filter(Boolean);
             if (names.length) row.append(node('p', `Documents: ${names.join(', ')}`));

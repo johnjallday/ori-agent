@@ -88,6 +88,37 @@ func (h *Handler) OrganizationFile(w http.ResponseWriter, r *http.Request) {
 	respondFiling(w, result, err)
 }
 
+// OrganizationFilingUndo puts a named filing's files back: all of them, or one when
+// the request names its journal entry. Nothing is ever overwritten.
+func (h *Handler) OrganizationFilingUndo(w http.ResponseWriter, r *http.Request) {
+	owner, ok := h.organizationUser(w, r)
+	if !ok {
+		return
+	}
+	var req folderagent.FilingUndoRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	result, err := h.service.UndoOrganizationFiling(r.Context(), owner, r.PathValue("workspaceID"), req)
+	respondUndo(w, result, err)
+}
+
+// respondUndo turns an Undo outcome into the answer the page acts on. The engine's
+// reason for refusing stays in the journal; the page gets one plain sentence.
+func respondUndo(w http.ResponseWriter, result filejanitor.FilingUndoResult, err error) {
+	switch {
+	case errors.Is(err, filejanitor.ErrUndoUnavailable):
+		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
+			"error": "These files cannot be put back from here. Nothing was moved.",
+			"code":  "undo_unavailable",
+		})
+	case err != nil:
+		writeError(w, err)
+	default:
+		orihttp.Success(w, map[string]any{"undo": result})
+	}
+}
+
 // respondFiling turns a press's outcome into the answer the page acts on.
 func respondFiling(w http.ResponseWriter, result folderagent.FilingResult, err error) {
 	switch {

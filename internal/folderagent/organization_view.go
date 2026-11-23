@@ -29,6 +29,9 @@ type OrganizingDecision struct {
 	// One filing has exactly one decision; the journal, not this field, is the
 	// evidence of what moved.
 	Filing string `json:"filing,omitempty"`
+	// FilingState is computed from File Janitor's journal when results are read, for
+	// display only. It is never stored, so history cannot drift from the disk.
+	FilingState *filejanitor.DocumentsFilingStanding `json:"filing_state,omitempty"`
 }
 type ViewChange struct {
 	ToReview   string `json:"to_review,omitempty"`

@@ -357,10 +357,11 @@ func (a FileAction) Undoable() bool {
 	if a.Result != ResultApplied {
 		return false
 	}
-	// Task 3.0 teaches Undo to reverse a placement through the conditional mover.
-	// Until then this one line keeps every Undo entry point, the receipt and the
-	// outcome's undoable flag closed for it.
-	if a.Operation == OperationPlace {
+	// A placement is reversed through the conditional mover, which needs the
+	// folders it verified and the file's identity after the move. Without both
+	// (an older build dropped them, or the move was never verified) there is
+	// nothing safe to reverse, and every Undo entry point stays closed.
+	if a.Operation == OperationPlace && (a.Place == nil || a.AfterFingerprint.FileID == "") {
 		return false
 	}
 	switch a.Undo {

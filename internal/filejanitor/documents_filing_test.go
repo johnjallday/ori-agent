@@ -371,21 +371,18 @@ func TestDocumentsFiling_FilesIntoExistingNewAndNestedFolders(t *testing.T) {
 				}
 			}
 			for _, outcome := range result.Outcomes {
-				if outcome.Operation != OperationPlace || outcome.Result != ResultApplied || outcome.Undoable {
+				if outcome.Operation != OperationPlace || outcome.Result != ResultApplied || !outcome.Undoable {
 					t.Fatalf("outcome: %+v", outcome)
 				}
 			}
 
-			// The receipt groups by the chosen folder and offers no Undo yet.
+			// The receipt groups by the chosen folder and offers Undo.
 			receipt, err := f.s.ReadFiling(t.Context(), "local", "ws-1", result.FilingID, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(receipt.ByDestination) != 1 || receipt.ByDestination[0].Destination != tc.folder || receipt.ByDestination[0].Count != 2 || receipt.UndoAvailable {
+			if len(receipt.ByDestination) != 1 || receipt.ByDestination[0].Destination != tc.folder || receipt.ByDestination[0].Count != 2 || !receipt.UndoAvailable {
 				t.Fatalf("receipt: %+v", receipt)
-			}
-			if _, err := f.s.UndoFiling(t.Context(), "local", "ws-1", result.FilingID); !errors.Is(err, ErrUndoUnavailable) {
-				t.Fatalf("Undo must stay closed until it can use the conditional mover, got %v", err)
 			}
 		})
 	}
@@ -843,7 +840,7 @@ func TestPlacementRecords_AreAdditiveAndAnOlderBuildNeverWidensThem(t *testing.T
 		t.Fatalf("state: %v %+v", err, state)
 	}
 	action, filing := state.Actions[0], state.Filings[0]
-	if action.Operation != OperationPlace || action.Place == nil || action.DestinationCategory != "" || action.DestinationRelative != "Taxes/estimate.pdf" || action.Undoable() {
+	if action.Operation != OperationPlace || action.Place == nil || action.DestinationCategory != "" || action.DestinationRelative != "Taxes/estimate.pdf" || !action.Undoable() {
 		t.Fatalf("action: %+v", action)
 	}
 	if action.Place.FolderID == "" || action.Place.RootDirID != f.rootID || action.AfterFingerprint.FileID != action.BeforeFingerprint.FileID {
@@ -939,7 +936,16 @@ func TestPlacementValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if good.Undoable() {
-		t.Fatal("a placement is not undoable until 3.0")
+		t.Fatal("a placement that has not been applied cannot be undone")
+	}
+	applied := good.MarkApplied(Fingerprint{Name: "x.pdf", Size: 1, ModTime: time.Unix(1, 0), FileID: "1:2"}, time.Unix(6, 0))
+	if !applied.Undoable() {
+		t.Fatal("an applied placement with its verified identities can be undone")
+	}
+	noIdentity := applied
+	noIdentity.AfterFingerprint.FileID = ""
+	if noIdentity.Undoable() {
+		t.Fatal("without the file's identity after the move there is nothing safe to reverse")
 	}
 	for name, mutate := range map[string]func(*FileAction){
 		"a category":        func(a *FileAction) { a.DestinationCategory = CategoryDocuments },

@@ -282,6 +282,82 @@ func TestFileOrganizationSelection_NothingIsRecordedWhenFileJanitorRefuses(t *te
 	}
 }
 
+func TestUndoOrganizationFiling_AsksForTheWholeFilingOrOneFileAndRefusesTheRest(t *testing.T) {
+	f := newFilingHarness(t)
+	var bulk, single []string
+	f.h.svc.deps.UndoFiling = func(_ context.Context, owner, id, filingID string) (filejanitor.FilingUndoResult, error) {
+		bulk = append(bulk, owner+"|"+id+"|"+filingID)
+		return filejanitor.FilingUndoResult{FilingID: filingID, Back: 2}, nil
+	}
+	f.h.svc.deps.UndoFilingFile = func(_ context.Context, owner, id, filingID, actionID string) (filejanitor.FilingUndoResult, error) {
+		single = append(single, owner+"|"+id+"|"+filingID+"|"+actionID)
+		return filejanitor.FilingUndoResult{FilingID: filingID, Back: 1}, nil
+	}
+
+	all, err := f.h.svc.UndoOrganizationFiling(t.Context(), "u1", f.id, FilingUndoRequest{Filing: "filing-1"})
+	if err != nil || all.Back != 2 || len(bulk) != 1 || bulk[0] != "u1|"+f.id+"|filing-1" || len(single) != 0 {
+		t.Fatalf("all: %+v %v %v %v", all, err, bulk, single)
+	}
+	one, err := f.h.svc.UndoOrganizationFiling(t.Context(), "u1", f.id, FilingUndoRequest{Filing: "filing-1", Action: "action-9"})
+	if err != nil || one.Back != 1 || len(single) != 1 || single[0] != "u1|"+f.id+"|filing-1|action-9" || len(bulk) != 1 {
+		t.Fatalf("one: %+v %v %v %v", one, err, bulk, single)
+	}
+	if _, err := f.h.svc.UndoOrganizationFiling(t.Context(), "u1", f.id, FilingUndoRequest{}); !errors.Is(err, ErrWrongState) {
+		t.Fatalf("a request that names no filing must be refused, got %v", err)
+	}
+	if _, err := f.h.svc.UndoOrganizationFiling(t.Context(), "u1", "no-such-workspace", FilingUndoRequest{Filing: "filing-1"}); err == nil {
+		t.Fatal("a workspace that is not this owner's was asked to undo")
+	}
+	if len(bulk) != 1 || len(single) != 1 {
+		t.Fatal("a refused request reached File Janitor")
+	}
+	f.h.svc.deps.UndoFiling = nil
+	if _, err := f.h.svc.UndoOrganizationFiling(t.Context(), "u1", f.id, FilingUndoRequest{Filing: "filing-1"}); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("want unavailable, got %v", err)
+	}
+}
+
+func TestOrganizationResults_ShowWhereAFilingStandsWithoutStoringIt(t *testing.T) {
+	f := newFilingHarness(t)
+	if _, err := f.h.svc.deps.Store.Update(f.id, func(r *Record) error {
+		v := &r.OrganizationRuns[0].Result
+		v.Decisions = []OrganizingDecision{
+			{ID: "d1", Kind: "file", Filing: "filing-1", Choice: "Taxes", Outcome: "Filed 2 into Taxes"},
+			{ID: "d2", Kind: "keep", Choice: "Tax papers"},
+			{ID: "d3", Kind: "file", Filing: "filing-gone", Choice: "Taxes"},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.h.svc.deps.FilingStanding = func(owner, id, filingID string) (filejanitor.DocumentsFilingStanding, error) {
+		if filingID == "filing-1" {
+			return filejanitor.DocumentsFilingStanding{Filed: 1, Back: 1, UndoAvailable: true}, nil
+		}
+		return filejanitor.DocumentsFilingStanding{}, errors.New("no such filing")
+	}
+
+	reviews, err := f.h.svc.OrganizationResults("u1", f.id)
+	if err != nil || len(reviews) != 1 {
+		t.Fatalf("results: %+v %v", reviews, err)
+	}
+	d := reviews[0].Decisions
+	if d[0].FilingState == nil || d[0].FilingState.Filed != 1 || d[0].FilingState.Back != 1 || !d[0].FilingState.UndoAvailable {
+		t.Fatalf("a filing decision shows where it stands now: %+v", d[0])
+	}
+	if d[1].FilingState != nil || d[2].FilingState != nil {
+		t.Fatalf("other decisions, and a filing the journal no longer knows, show nothing: %+v", d)
+	}
+	if d[0].Outcome != "Filed 2 into Taxes" {
+		t.Fatal("the decision's own words must not be rewritten")
+	}
+	for _, stored := range f.view().Decisions {
+		if stored.FilingState != nil {
+			t.Fatal("standing is computed for display and must never be stored")
+		}
+	}
+}
+
 func TestFileOrganizationSelection_RefusesBadRequestsBeforeFileJanitor(t *testing.T) {
 	f := newFilingHarness(t)
 	f.h.svc.deps.FileFiling = func(context.Context, string, string, filejanitor.DocumentsFileRequest, func(context.Context) (filejanitor.DocumentsSelection, error)) (filejanitor.DocumentsFilingResult, error) {

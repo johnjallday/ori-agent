@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { documentsFilingCheck, parseFolder } from './documents-filing-check.js';
+import { documentsFilingCheck, parseFolder, undoSummary } from './documents-filing-check.js';
 
 // A tiny DOM: enough to drive the module the way a person would.
 function el(tag) {
@@ -169,7 +169,7 @@ test('nothing is posted to the filing route until the explicit press', async () 
   assert.match(press.body.client_key, /^[A-Za-z0-9_-]{16,128}$/);
   assert.deepEqual(press.body.destination, { folder: 'Taxes' });
   assert.match(textOf(f.box), /Filed 2 into Taxes\./);
-  assert.match(textOf(f.box), /Undo is not available for this filing yet/);
+  assert.match(textOf(f.box), /Nothing was replaced or deleted\. You can put these back\./);
   assert.ok(
     f.checkboxes.every(c => c.disabled),
     'the chosen files cannot be changed after filing'
@@ -292,4 +292,117 @@ test('every check state still reaches the person in plain words', async () => {
     assert.match(textOf(f.box), pattern, state);
     assert.equal(f.calls.length, 1, `${state} must not go on to preview`);
   }
+});
+
+const FILED_TWO = {
+  filing: {
+    filing_id: 'filing-1',
+    filed: 2,
+    folder: 'Taxes',
+    decision_recorded: true,
+    outcomes: [
+      {
+        name: 'one.pdf',
+        result: 'applied',
+        destination: 'Taxes/one.pdf',
+        action_id: 'a1',
+        undoable: true
+      },
+      {
+        name: 'two.pdf',
+        result: 'applied',
+        destination: 'Taxes/two.pdf',
+        action_id: 'a2',
+        undoable: true
+      }
+    ]
+  }
+};
+
+async function filedFixture(undoResponses) {
+  const f = fixture({
+    exampleFolder: 'Taxes',
+    responses: {
+      'organization-filing-selection': [
+        { ok: { selection: { state: 'matched', names: ['one.pdf', 'two.pdf'] } } }
+      ],
+      'organization-filing-preview': [{ ok: { preview: READY } }],
+      'organization-filing': [{ ok: FILED_TWO }],
+      'organization-filing-undo': undoResponses
+    }
+  });
+  await f.tick(0, 1);
+  await click(buttonNamed(f.box, 'Check selected files'));
+  await click(buttonNamed(f.box, 'Preview filing'));
+  await click(buttonNamed(f.box, 'File 2 documents'));
+  return f;
+}
+
+test('each filed file can be put back on its own, or all together', async () => {
+  const f = await filedFixture([
+    { ok: { undo: { back: 1, not_back: 0, outcomes: [{ name: 'one.pdf', result: 'undone' }] } } },
+    { ok: { undo: { back: 1, not_back: 0, outcomes: [{ name: 'two.pdf', result: 'undone' }] } } }
+  ]);
+  assert.match(textOf(f.box), /one\.pdf → Taxes\/one\.pdf/);
+  const [first] = all(f.box).filter(n => n.tag === 'button' && n.textContent === 'Put back');
+  await click(first);
+  assert.deepEqual(f.calls.at(-1), {
+    path: 'organization-filing-undo',
+    body: { filing: 'filing-1', action: 'a1' }
+  });
+  assert.match(textOf(f.box), /Put back 1 file\./);
+  assert.ok(first.disabled, 'a file already put back cannot be put back twice');
+
+  await click(buttonNamed(f.box, 'Put all back'));
+  assert.deepEqual(f.calls.at(-1).body, { filing: 'filing-1' });
+});
+
+test('a file that could not be put back says why and where it is', async () => {
+  const f = await filedFixture([
+    {
+      ok: {
+        undo: {
+          back: 1,
+          not_back: 1,
+          outcomes: [
+            { name: 'one.pdf', result: 'undone' },
+            {
+              name: 'two.pdf',
+              result: 'failed',
+              message:
+                'Something else is already using the original name, so Ori did not overwrite it.',
+              destination: 'Taxes/two.pdf'
+            }
+          ]
+        }
+      }
+    }
+  ]);
+  await click(buttonNamed(f.box, 'Put all back'));
+  const shown = textOf(f.box);
+  assert.match(shown, /Put back 1 file\./);
+  assert.match(
+    shown,
+    /two\.pdf: Something else is already using the original name, so Ori did not overwrite it\. It is in Taxes\/two\.pdf\./
+  );
+});
+
+test('an unavailable undo is one plain sentence and the buttons stay usable', async () => {
+  const f = await filedFixture([{ fail: { code: 'undo_unavailable' } }]);
+  const all1 = buttonNamed(f.box, 'Put all back');
+  await click(all1);
+  assert.match(textOf(f.box), /cannot be put back from here\. Nothing was moved\./);
+  assert.equal(all1.disabled, false);
+});
+
+test('undoSummary reports what is back and what is not', () => {
+  assert.equal(undoSummary({ back: 0, outcomes: [] }), 'Nothing was put back.');
+  assert.equal(undoSummary({ back: 2, outcomes: [] }), 'Put back 2 files.');
+  assert.equal(
+    undoSummary({
+      back: 1,
+      outcomes: [{ name: 'a.pdf', result: 'interrupted', message: 'Ori stopped.' }]
+    }),
+    'Put back 1 file. a.pdf: Ori stopped.'
+  );
 });
