@@ -188,6 +188,7 @@ export default defineConfig([
       'internal/web/static/js/modules/folder-agent-chat.js',
       'internal/web/static/js/modules/folder-agent-chat-flow.js',
       'internal/web/static/js/modules/commander-balloon.js',
+      'internal/web/static/js/modules/commander-question-memory.js',
       'internal/web/static/js/modules/commander-speech.js',
       'internal/web/static/js/modules/commander-map.js',
       'internal/web/static/js/modules/commander-tickets.js',

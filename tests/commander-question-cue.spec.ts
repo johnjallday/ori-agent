@@ -9,6 +9,8 @@ const sandbox = process.env.ORI_QUESTION_SANDBOX;
 const api = '/api/personal-assistant/folder-agent';
 const evidence = 'tasks/evidence-commander-question-cue';
 
+test.describe.configure({ mode: 'serial' });
+
 async function seed(request: APIRequestContext, folder: string, music: boolean) {
   const post = async (url: string, data: object) => {
     const r = await request.post(url, { data });
@@ -35,10 +37,6 @@ async function seed(request: APIRequestContext, folder: string, music: boolean) 
       name: 'My HQ',
       timezone: 'UTC'
     });
-  const existing = (await (await request.get(api)).json()).folder_agents.find(
-    (v: { folder_name: string }) => v.folder_name === folder
-  );
-  if (existing) return existing;
   const root = join(sandbox!, folder);
   for (let n = 0; n < 5; n++) {
     const dir = join(root, `Project-${n}`);
@@ -108,7 +106,13 @@ test('pending question on the workspace launcher', async ({ page, request }) => 
   await page.goto(other.route);
   await expect(launcher).toHaveAccessibleName(/Cue Research Manager/i);
   await expect(badge).toHaveCount(0);
+  await expect(launcher.locator('#personalAssistantUnread')).toBeVisible();
   await page.screenshot({ path: join(evidence, '02-no-question.png') });
+  await launcher.press('Space');
+  await expect(
+    page.locator(`#homeAssistantConversation [data-message-id="${other.chat.message_id}"]`)
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
   await page.goto(music.route);
   await expect(badge).toBeVisible();
   expect(await trace()).toBe('');
@@ -189,4 +193,73 @@ test('pending question on the workspace launcher', async ({ page, request }) => 
   await page.screenshot({ path: join(evidence, '05-answered.png') });
   await launcher.press('Space');
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
+});
+
+test('non-music premise, refused answer, normal unread and Home', async ({ page, request }) => {
+  test.skip(!sandbox, 'requires disposable demo HOME');
+  await installLocalCdn(page);
+  const other = await seed(request, 'Field Notes and Research Reference Library', false);
+  // There is no non-music Home provider in the current recognition table.
+  // Project the same host state onto an ordinary notes workspace; don't add
+  // a provider or teach the launcher to infer questions from folder content.
+  const question = {
+    ...other,
+    model_sentence: '',
+    premise: {
+      state: 'asked',
+      sentence: 'This looks like a research folder.',
+      confirm: 'Yes, show me the plan',
+      other: 'Something else'
+    }
+  };
+  let pending = true;
+  await page.route(`**${api}/${other.workspace_id}`, route =>
+    route.fulfill({ json: { folder_agent: pending ? question : other } })
+  );
+  await page.route(`**${api}/${other.workspace_id}/premise`, route =>
+    route.fulfill({ status: 409, json: { folder_agent: question, error: 'Please try again.' } })
+  );
+  await page.goto(other.route);
+  const launcher = page.locator('#personalAssistantLauncher');
+  const badge = launcher.locator('[data-question]');
+  await expect(launcher).toHaveAccessibleName(
+    new RegExp(`${other.agent_name}.*Has a question`, 'i')
+  );
+  await expect(badge).toBeVisible();
+  for (const [width, theme] of [
+    [1280, 'light'],
+    [390, 'dark']
+  ] as const) {
+    await page.setViewportSize({ width, height: 850 });
+    await page.evaluate(theme => {
+      document.documentElement.dataset.bsTheme = theme;
+      document.documentElement.dataset.theme = theme;
+    }, theme);
+    await page.keyboard.press('Tab');
+    await launcher.focus();
+    await expect(launcher).toBeFocused();
+    expect(
+      await launcher.evaluate(
+        el =>
+          el.matches(':focus-visible') &&
+          el.getBoundingClientRect().right <= innerWidth &&
+          el.getBoundingClientRect().left >= 0
+      )
+    ).toBe(true);
+    await page.screenshot({ path: join(evidence, `06-long-name-${width}-${theme}.png`) });
+  }
+  await launcher.press('Enter');
+  const report = page.locator('#homeAssistantConversation [data-folder-agent-chat-card]');
+  await report.getByRole('button', { name: question.premise.confirm }).click();
+  await expect(report).toContainText('Please try again.');
+  await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
+  await expect(badge).toBeVisible();
+  pending = false;
+  await page.reload();
+  await expect(launcher).toContainText('Commander');
+  await expect(badge).toHaveCount(0);
+  await page.goto('/');
+  await expect(launcher).toContainText('Atlas');
+  await expect(badge).toHaveCount(0);
+  await expect(launcher.locator('#personalAssistantLauncherRole')).toHaveText('Personal Assistant');
 });
