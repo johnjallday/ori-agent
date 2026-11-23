@@ -625,19 +625,7 @@ func (s *Store) projectSearchRowInRoot(scope Scope, entry Entry, roots map[strin
 		return row
 	}
 	child, err := s.workspaces.Get(entry.Link.WorkspaceID)
-	if err != nil || child == nil || child.Status == workspace.StatusTrashed || child.Status == workspace.StatusMissing ||
-		child.OwnerUserID != scope.OwnerUserID {
-		row.Connection = "needs_review"
-		return row
-	}
-	key := workspace.AssistantProgramKey{OwnerUserID: scope.OwnerUserID, PluginID: scope.ProviderID, ProgramID: scope.ProgramID}
-	link := child.GetAssistantProjectLink()
-	if link == nil || link.ID != entry.Link.LinkID || link.StationWorkspaceID != scope.HomeID ||
-		link.Key.Normalize() != key.Normalize() || link.StateRevision != entry.Link.Revision {
-		row.Connection = "needs_review"
-		return row
-	}
-	if !workspace.AssistantProjectLinkMirrorsAgree(s.workspaces, child) {
+	if err != nil || !s.matchesCatalogProject(scope, child, *entry.Link) {
 		row.Connection = "needs_review"
 		return row
 	}
@@ -646,6 +634,18 @@ func (s *Store) projectSearchRowInRoot(scope Scope, entry Entry, roots map[strin
 		row.Name = child.Name // exact verified link, not a name-based match
 	}
 	return row
+}
+
+// matchesCatalogProject checks the reciprocal side of a Home-listed catalog link.
+func (s *Store) matchesCatalogProject(scope Scope, child *workspace.Workspace, exact ExactLink) bool {
+	if !ownedVisibleWorkspace(child, exact.WorkspaceID, scope.OwnerUserID) {
+		return false
+	}
+	key := workspace.AssistantProgramKey{OwnerUserID: scope.OwnerUserID, PluginID: scope.ProviderID, ProgramID: scope.ProgramID}
+	link := child.GetAssistantProjectLink()
+	return link != nil && link.ID == exact.LinkID && link.StationWorkspaceID == scope.HomeID &&
+		link.Key.Normalize() == key.Normalize() && link.StateRevision == exact.Revision &&
+		workspace.AssistantProjectLinkMirrorsAgree(s.workspaces, child)
 }
 
 func (q Search) matches(row SearchRow, entry Entry) bool {

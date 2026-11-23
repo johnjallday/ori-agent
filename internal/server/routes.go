@@ -915,6 +915,7 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("/api/workspaces/{workspaceID}/updates/seen", s.Handlers.Session.AcknowledgeWorkspaceUpdate)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program", s.Handlers.Session.GetAssistantProgram)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/group-template", s.Handlers.Session.GetGroupTemplateStatus)
+		mux.HandleFunc("GET /api/workspaces/{workspaceID}/source-folders", s.Handlers.Session.GetWorkspaceSourceFolders)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/activate", s.Handlers.Session.ActivateAssistantProgram)
 		mux.HandleFunc("POST /api/workspaces/{workspaceID}/assistant-program/hire", s.Handlers.Session.HireAssistantProgram)
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/assistant-program/provider-upgrade", s.Handlers.Session.GetAssistantProviderUpgrade)
