@@ -79,12 +79,14 @@ test('pending question on the workspace launcher', async ({ page, request }) => 
   const trace = () => page.evaluate(() => document.documentElement.dataset.bobs || '');
   const doubleBob = 'animationstart:0;animationiteration:0.34;animationend:0.68;';
   let songs = false;
+  let noChat = false;
   // A credential-free look reports its cause first. Exercise the successful
   // look's host phase deterministically; all chat refs and actions remain real.
   await page.route(`**${api}/${music.workspace_id}`, async route => {
     const response = await route.fetch();
     const body = await response.json();
     body.folder_agent.model_sentence = '';
+    if (noChat) delete body.folder_agent.chat;
     if (songs)
       Object.assign(body.folder_agent, {
         state: 'set_up',
@@ -129,4 +131,62 @@ test('pending question on the workspace launcher', async ({ page, request }) => 
   await page.reload();
   await expect(badge).toBeVisible();
   expect(await trace()).toBe('');
+
+  songs = false;
+  noChat = true;
+  await page.reload();
+  await expect(badge).toBeVisible();
+  await launcher.press('Enter');
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await expect(page.getByRole('button', { name: music.premise.confirm }).first()).toBeVisible();
+
+  noChat = false;
+  await page.reload();
+  await expect(badge).toBeVisible();
+  const draft = await request.post('/api/sessions', {
+    data: { title: 'Draft', folder_id: music.workspace_id, agent_name: music.agent_name }
+  });
+  expect(draft.ok()).toBe(true);
+  await page.evaluate(
+    ({ workspace, session }) => {
+      (window as any).PersonalAssistantRecipient.rememberSession(workspace, { id: session });
+      const input = document.querySelector<HTMLTextAreaElement>('#personalAssistantInput')!;
+      input.value = 'Keep this draft';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    },
+    { workspace: music.workspace_id, session: (await draft.json()).id }
+  );
+  await launcher.press('Enter');
+  await expect(page.locator('#personalAssistantPanelStatus')).toContainText(
+    'Your draft has been kept'
+  );
+  await expect(page.locator('#personalAssistantInput')).toHaveValue('Keep this draft');
+  await page.locator('#personalAssistantInput').fill('');
+  const close = page.getByRole('button', { name: 'Close personal assistant', exact: true });
+  await close.click();
+  await launcher.press('Enter');
+  const answer = page.locator(
+    `[data-folder-agent-chat-card][data-message-id="${music.chat.message_id}"] [data-folder-agent-action="premise_confirm"]`
+  );
+  await expect(answer).toBeVisible();
+  await page.screenshot({ path: join(evidence, '04-open-question.png') });
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`${api}/${music.workspace_id}`)).json()).folder_agent.chat.unread
+    )
+    .toBe(false);
+  await close.click();
+  await expect(badge).toBeVisible();
+  await expect(launcher).toBeFocused();
+  await launcher.press('Enter');
+  await expect(answer).toBeVisible();
+  await answer.click();
+  await expect(answer).toHaveCount(0);
+  await close.click();
+  await expect(badge).toHaveCount(0);
+  await expect(launcher).toHaveAccessibleName(/Cue Albums Manager Commander/i);
+  await page.screenshot({ path: join(evidence, '05-answered.png') });
+  await launcher.press('Space');
+  await expect(page.locator('#personalAssistantPanel')).toBeVisible();
 });

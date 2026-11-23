@@ -1287,6 +1287,13 @@ async function openFolderReport(workspaceId, ref, trigger) {
   const hydrated = changing
     ? await hydrateEntryConversation({ force: true, exact: true })
     : await syncFolderReportThread(workspaceId, target);
+  const shown = recipients()?.current?.();
+  if (
+    routeContext().workspace_id !== workspaceId ||
+    shown?.workspaceId !== workspaceId ||
+    shown.kind !== RECIPIENT_WORKSPACE_ENTRY
+  )
+    return false;
   open(trigger, { preserveConversation: true });
   if (!hydrated && changing) {
     setStatus('This saved conversation is unavailable. Try again from the map.');
@@ -2618,6 +2625,7 @@ function init() {
   state.els.launcherAvatar.addEventListener('animationcancel', stopBob);
   launcher.addEventListener('click', () => {
     if (state.open) close();
+    else if (launcherQuestion()) window.workspaceCommand.openFolderAgent(launcher);
     else if (waitingFolderReport() || currentWelcome()?.unread_count > 0) openUnread(launcher);
     else open(launcher);
   });
