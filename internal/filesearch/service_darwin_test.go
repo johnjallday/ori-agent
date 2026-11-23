@@ -228,6 +228,32 @@ func TestScanStaysWithinScopeAndReopensWithoutCatchUp(t *testing.T) {
 		t.Fatal("replaced root leaked hits", lost)
 	}
 }
+func TestSourceCapacityDoesNotBlockReselectingExistingRoot(t *testing.T) {
+	f := setup(t)
+	var first string
+	for i := range maxSources + 1 {
+		f.pick = filepath.Join(f.home, fmt.Sprintf("Folder-%d", i))
+		must(t, os.Mkdir(f.pick, 0700))
+		v, e := f.choose(t, "custom")
+		if i == maxSources {
+			if e != ErrLimit || v != nil {
+				t.Fatal("source limit not enforced")
+			}
+			break
+		}
+		must(t, e)
+		if i == 0 {
+			first = v.ID
+		}
+	}
+	f.pick = filepath.Join(f.home, "Folder-0")
+	v, e := f.choose(t, "custom")
+	must(t, e)
+	if v.ID != first {
+		t.Fatal("reselection created another source")
+	}
+}
+
 func TestDeniedFolderAndTraversalLimit(t *testing.T) {
 	f := setup(t)
 	dir := filepath.Join(f.docs, "inaccessible")

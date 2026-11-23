@@ -11,7 +11,7 @@ import (
 func (s *Service) Act(ctx context.Context, owner, id string, gen int, reveal bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.life.Err() != nil || owner == "" || len(id) != 26 {
+	if s.life.Err() != nil || owner == "" || id == "" || len(id) > 64 {
 		return ErrMissing
 	}
 	var v Source

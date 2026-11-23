@@ -84,7 +84,7 @@ func verifyChain(v Source, d directory) bool {
 func walk(ctx context.Context, v Source, publish func([]entry) error) error {
 	q := []directory{{chain: v.witness}}
 	seen, dirs, files, bytes := 0, 1, 0, 0
-	partial := false
+	var incomplete error
 	first := true
 	for len(q) > 0 {
 		if err := ctx.Err(); err != nil {
@@ -96,7 +96,7 @@ func walk(ctx context.Context, v Source, publish func([]entry) error) error {
 			if d.depth == 0 {
 				return ErrUnavailable
 			}
-			partial = true
+			incomplete = ErrMissing
 			continue
 		}
 		dir, st, err := openDirectory(filepath.Join(v.root, d.rel))
@@ -104,7 +104,7 @@ func walk(ctx context.Context, v Source, publish func([]entry) error) error {
 			if d.depth == 0 {
 				return ErrUnavailable
 			}
-			partial = true
+			incomplete = errUnreadable
 			continue
 		}
 		// Inspect pinned directory entries only. ReadDir batches bound memory in a flat directory.
@@ -147,17 +147,17 @@ func walk(ctx context.Context, v Source, publish func([]entry) error) error {
 						continue
 					}
 					if !goodName(name) || len(name) > 255 {
-						partial = true
+						incomplete = ErrLimit
 						continue
 					}
 					rel := filepath.Join(d.rel, name)
 					if len(rel) > 4096 {
-						partial = true
+						incomplete = ErrLimit
 						continue
 					}
 					var child unix.Stat_t
 					if unix.Fstatat(int(dir.Fd()), name, &child, unix.AT_SYMLINK_NOFOLLOW) != nil {
-						partial = true
+						incomplete = errUnreadable
 						continue
 					}
 					if child.Dev != st.Dev || !eligible(&child) {
@@ -169,7 +169,7 @@ func walk(ctx context.Context, v Source, publish func([]entry) error) error {
 							continue
 						}
 						if d.depth >= 32 || dirs >= 4096 {
-							partial = true
+							incomplete = ErrLimit
 							continue
 						}
 						dirs++
@@ -197,23 +197,20 @@ func walk(ctx context.Context, v Source, publish func([]entry) error) error {
 						if d.depth == 0 {
 							return ErrUnavailable
 						}
-						partial = true
+						incomplete = errUnreadable
 					}
 					return flush()
 				}
 			}
 		}()
 		if errors.Is(err, ErrMissing) {
-			partial = true
+			incomplete = ErrMissing
 			continue
 		}
 		if err != nil {
 			return err
 		}
 	}
-	if partial {
-		return ErrLimit
-	}
-	return nil
+	return incomplete
 }
 func lastWitness(s string) string { return s[strings.LastIndex(s, "/")+1:] }

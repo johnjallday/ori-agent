@@ -8,11 +8,13 @@ export async function request(op, body) {
   });
   if (!res.ok) {
     const text = (await res.text()).trim();
-    throw new Error(
+    const error = new Error(
       text.length < 140 && !text.includes('<') && text
         ? text
         : 'Search is unavailable. Please try again.'
     );
+    error.status = res.status;
+    throw error;
   }
   return res.status === 204 ? null : res.json();
 }
@@ -87,7 +89,17 @@ export function mountFileSearch(root, compact = false) {
   }
   async function choose(kind, button) {
     const { intent } = await request('begin', { kind });
-    const source = await request('select', { intent });
+    let source;
+    try {
+      source = await request('select', { intent });
+    } catch (error) {
+      if (error.status !== 503) throw error;
+      throw new Error(
+        kind === 'custom'
+          ? 'The folder chooser or selected folder is unavailable. Try Documents or Downloads.'
+          : 'That folder is missing or Ori cannot access it. Try Choose another folder.'
+      );
+    }
     if (!source) {
       notice.textContent = 'No folder chosen.';
       button.focus();

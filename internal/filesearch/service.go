@@ -15,6 +15,8 @@ import (
 
 const maxSources = 8
 
+var errUnreadable = errors.New("unreadable search entry")
+
 type Source struct {
 	ID            string `json:"id"`
 	Label         string `json:"label"`
@@ -334,8 +336,12 @@ func (s *Service) scan(ctx context.Context, v Source) {
 	switch {
 	case errors.Is(err, ErrUnavailable) || !s.current(v):
 		state, reason = "unavailable", "Cannot read this folder."
+	case errors.Is(err, errUnreadable):
+		state, reason = "partial", "Some folders or filenames could not be read."
+	case errors.Is(err, ErrMissing):
+		state, reason = "partial", "A folder changed or could not be checked during mapping."
 	case err != nil:
-		state, reason = "partial", "Some entries could not be mapped within the search limits."
+		state, reason = "partial", "Not every entry fit within the search limits."
 	}
 	_ = update(state, reason, state == "ready" || state == "partial")
 }

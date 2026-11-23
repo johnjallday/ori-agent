@@ -111,7 +111,7 @@ func (s *Service) Query(ctx context.Context, owner, term, cursor string, limit i
 	var after string
 	if cursor != "" {
 		prefix, id, ok := strings.Cut(cursor, ".")
-		if !ok || prefix != stamp || len(id) != 26 {
+		if !ok || prefix != stamp || id == "" || len(id) > 64 {
 			return Page{}, ErrMissing
 		}
 		after = id

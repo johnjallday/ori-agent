@@ -245,6 +245,8 @@ boundary, never while a handle or writer is live.
 
 ### Shared database domains
 
+`filename_sources` and `filename_entries` (migration 93) are device-local app records. App-record deletion clears both in the existing reset transaction. Neither is a retained workspace domain. Search workers hold a finite work permit through their last publication; reset refuses active scans. Ordinary Welcome replay does not change these records or `D/search_landing.v1`. The Start Fresh identity category sets that versioned landing decision back to first launch before the recovery host admits ordinary requests.
+
 `database.Open` migrates after its retained-vault safety guard allows startup;
 preview must still use the read-only inspector, not that constructor. The
 migration inventory includes:

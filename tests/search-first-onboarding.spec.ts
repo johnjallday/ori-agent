@@ -58,7 +58,15 @@ test('search before workspace setup', async ({ page, baseURL }) => {
     await expect(page.getByText('No folder chosen.')).toBeVisible();
     await expect(custom).toBeFocused();
     await shot('cancel-adapter');
+    const start = performance.now();
     await page.getByRole('button', { name: 'Documents', exact: true }).click();
+    await page.locator('#hits li').first().waitFor();
+    console.log(
+      'First visible filename (ms):',
+      Math.round(performance.now() - start),
+      'source:',
+      await page.locator('#sources li span').first().textContent()
+    );
     const input = page.getByRole('searchbox');
     await expect(input).toBeFocused();
     await input.fill('Harbor');
@@ -67,6 +75,50 @@ test('search before workspace setup', async ({ page, baseURL }) => {
     await input.press('ArrowDown');
     await expect(page.locator('#hits li.current')).toContainText('Final');
     await shot('mapped');
+    const intended = await page.locator('#hits li.current').getAttribute('data-id');
+    let action: unknown;
+    await page.route(
+      '**/api/file-search/open',
+      r => {
+        action = r.request().postDataJSON();
+        return r.fulfill({ status: 503, body: 'Document opening is unavailable.' });
+      },
+      { times: 1 }
+    );
+    await input.press('Enter');
+    await expect(page.locator('#notice')).toHaveText('Document opening is unavailable.');
+    expect(action).toEqual({ id: intended, generation: 1 });
+    await shot('desktop-unavailable-adapter');
+    await input.fill('Harbo');
+    await expect(page.locator('#hits li')).toHaveCount(2);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+    await shot('narrow-dark');
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+    ).toBeTruthy();
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.evaluate(() => (document.documentElement.style.zoom = '200%'));
+    await shot('zoom-200');
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+    ).toBeTruthy();
+    const timings: number[] = [];
+    for (let i = 0; i < 10; i++) {
+      const hit = i % 2 === 0 ? 'Welcome' : 'Harbor';
+      const ts = performance.now();
+      await input.fill(hit);
+      await page.waitForFunction(
+        q => document.querySelector('#hits strong')?.textContent?.includes(q),
+        hit,
+        { polling: 'raf' }
+      );
+      timings.push(performance.now() - ts);
+    }
+    console.log(
+      'Keypress-to-visible sample p95 (ms, ten fills):',
+      Math.round(timings.sort((a, b) => a - b)[9])
+    );
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Your search desk.' })).toBeVisible();
     await expect(page.locator('#sources')).toContainText('Documents');

@@ -72,8 +72,10 @@ func (g Policy) allows(path string) bool {
 	}
 	// A custom selection may also be a shared user folder or a directory on a local external disk.
 	switch {
-	case inside(path, home) && !inside(home, path):
-	case inside(path, "/Users/Shared") && !inside("/Users/Shared", path):
+	// Be conservative on case-sensitive APFS: a differently cased sibling
+	// isn't authority under the user's physical home. Fold only for denials.
+	case strings.HasPrefix(path, home+"/"):
+	case strings.HasPrefix(path, "/Users/Shared/"):
 	case strings.HasPrefix(path, "/Volumes/") && strings.Count(path, "/") >= 3:
 	default:
 		return false
