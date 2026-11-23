@@ -1611,6 +1611,22 @@ function identity() {
   return recipientIdentityView(state.view, recipients()?.resolution?.() || null);
 }
 
+function launcherQuestion() {
+  const recipient = recipients()?.current?.();
+  if (recipient?.kind !== RECIPIENT_WORKSPACE_ENTRY || !recipient.available) return null;
+  if (recipient.workspaceId !== routeContext().workspace_id) return null;
+  return window.workspaceCommand?.folderAgentQuestion?.(recipient.workspaceId, recipient.name);
+}
+
+function refreshQuestionCue() {
+  const els = state.els;
+  if (!els?.launcherRole) return;
+  const question = launcherQuestion();
+  els.launcherAvatar.toggleAttribute('data-question', Boolean(question));
+  const text = question?.status || identity().role;
+  if (els.launcherRole.textContent !== text) els.launcherRole.textContent = text;
+}
+
 function renderIdentity() {
   const { els, view, personalAssistant } = state;
   if (!els) return;
@@ -1618,7 +1634,7 @@ function renderIdentity() {
   renderWelcomeIndicator();
   els.launcher.hidden = !who.launcherVisible;
   els.launcherName.textContent = who.name;
-  if (els.launcherRole) els.launcherRole.textContent = who.role;
+  refreshQuestionCue();
   const title = state.workActivityOnly && !who.openable ? 'Work activity' : who.name;
   if (els.name) els.name.textContent = title;
   else els.title.textContent = title;
@@ -2851,6 +2867,7 @@ function init() {
 const api = {
   init,
   open,
+  refreshQuestionCue,
   openWelcome,
   openWorkspaceWelcome,
   // The folder agent's report in the Commander's thread (workspace chat sync).
