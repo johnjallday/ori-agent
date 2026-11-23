@@ -205,6 +205,7 @@ type Deps struct {
 	ActiveHQ          func(context.Context, string) string
 	DocumentsScope    func(context.Context, string) (DocumentsScope, error)
 	DocumentsNotebook DocumentsNotebook
+	DocumentsSetup    func(context.Context, string, string, string, string, string, bool) (personalassistant.DocumentsSetupView, error)
 	// FilingPermission reads only the stored grant, never a health probe.
 	// A missing reader or read error is unknown, not a missing permission.
 	FilingPermission func(workspaceID string) (bool, error)
@@ -228,10 +229,11 @@ type Deps struct {
 type Service struct {
 	deps Deps
 
-	mu      sync.Mutex
-	choices map[string]choice
-	running map[string]bool
-	wg      sync.WaitGroup
+	mu           sync.Mutex
+	vaultChoices map[string]vaultChoice
+	choices      map[string]choice
+	running      map[string]bool
+	wg           sync.WaitGroup
 	// starting counts Start calls between "about to create the workspace" and
 	// "the record is written". In that span the workspace exists (its welcome is
 	// enrolled and its worker woken) and the record does not; see FolderWelcome.

@@ -32,23 +32,26 @@ type DocumentsDecision struct {
 }
 
 type DocumentsDraftInput struct {
-	HQ        string `json:"hq"`
-	Attempt   string `json:"attempt"`
-	Report    string `json:"report"`
-	Candidate string `json:"candidate"`
-	Name      string `json:"name"`
-	Answer    string `json:"answer"`
-	Review    string `json:"review,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
+	Generation string `json:"generation,omitempty"`
+	HQ         string `json:"hq"`
+	Attempt    string `json:"attempt"`
+	Report     string `json:"report"`
+	Candidate  string `json:"candidate"`
+	Name       string `json:"name"`
+	Answer     string `json:"answer"`
+	Review     string `json:"review,omitempty"`
+	RequestID  string `json:"request_id,omitempty"`
 }
 
 type DocumentsDraftView struct {
-	Name     string `json:"name"`
-	Body     string `json:"body,omitempty"`
-	Rel      string `json:"rel"`
-	Notebook string `json:"notebook"`
-	Review   string `json:"review,omitempty"`
-	Saved    bool   `json:"saved,omitempty"`
+	Name       string `json:"name"`
+	Body       string `json:"body,omitempty"`
+	Rel        string `json:"rel"`
+	Notebook   string `json:"notebook"`
+	Review     string `json:"review,omitempty"`
+	SetupPath  string `json:"setup_path,omitempty"`
+	Generation string `json:"generation,omitempty"`
+	Saved      bool   `json:"saved,omitempty"`
 }
 
 func documentsConflict(message string) error {
@@ -129,6 +132,9 @@ func (s *Service) DocumentsDraft(ctx context.Context, owner, id string, in Docum
 		rec, root, location, proposal, err := s.resolveDraft(ctx, owner, id, in)
 		if err != nil {
 			return err
+		}
+		if in.Generation != "" && generation != in.Generation {
+			return documentsConflict("The connected notebook changed. Review the destination again.")
 		}
 		if !source.CreatedByOri() || !source.FillIn.Allowed() {
 			return ErrWrongState

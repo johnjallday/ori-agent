@@ -109,7 +109,8 @@ type SecondBrainVaults interface {
 type SecondBrainDeps struct {
 	Vaults SecondBrainVaults
 	// ResolveSelection turns a folder-picker selection token into its path.
-	ResolveSelection func(token string) (string, error)
+	ResolveSelection      func(token string) (string, error)
+	ResolveDocumentsVault func(context.Context, string, string) (string, error)
 	// CheckFolder applies the typed-path rules (folderpath.Check).
 	CheckFolder func(path string) (folderpath.Checked, error)
 	// DefaultParent is the folder "Set one up for me" uses when the user picks
@@ -713,7 +714,11 @@ func (s *SecondBrainService) Connect(ctx context.Context, userID string, input S
 		view.LookID = receipt.LookID
 		return view, nil
 	}
-	source, err := s.chosenSource(input)
+	guidedVault := strings.HasPrefix(input.SelectionToken, "documents-vault-")
+	if guidedVault && (input.Replace || current.Connected() != nil) {
+		return SecondBrainView{}, ErrSecondBrainAlreadyConnected
+	}
+	source, err := s.chosenSource(ctx, userID, input)
 	if err != nil {
 		return SecondBrainView{}, err
 	}
@@ -726,6 +731,9 @@ func (s *SecondBrainService) Connect(ctx context.Context, userID string, input S
 		if receipt, replayed, err := doc.Replay(input.RequestID, secondBrainActionConnect); err != nil || replayed {
 			lookID = receipt.LookID
 			return err
+		}
+		if guidedVault && doc.Connected() != nil {
+			return ErrSecondBrainAlreadyConnected
 		}
 		connected, err := doc.Connect(source, input.Replace)
 		if err != nil {
@@ -1144,7 +1152,7 @@ func (s *SecondBrainService) checkedFolder(token string) (folderpath.Checked, er
 
 // chosenSource resolves the folder a connect names and applies the folder
 // rules (FR2, FR13).
-func (s *SecondBrainService) chosenSource(input SecondBrainConnectInput) (secondbrain.Source, error) {
+func (s *SecondBrainService) chosenSource(ctx context.Context, userID string, input SecondBrainConnectInput) (secondbrain.Source, error) {
 	var raw string
 	switch {
 	case input.DetectedID != "":
@@ -1156,6 +1164,15 @@ func (s *SecondBrainService) chosenSource(input SecondBrainConnectInput) (second
 			return secondbrain.Source{}, ErrSecondBrainUnknownVault
 		}
 		raw = vault.Path
+	case strings.HasPrefix(input.SelectionToken, "documents-vault-"):
+		if s.deps.ResolveDocumentsVault == nil {
+			return secondbrain.Source{}, ErrSecondBrainSelection
+		}
+		path, err := s.deps.ResolveDocumentsVault(ctx, userID, input.SelectionToken)
+		if err != nil {
+			return secondbrain.Source{}, ErrSecondBrainSelection
+		}
+		raw = path
 	default:
 		if s.deps.ResolveSelection == nil {
 			return secondbrain.Source{}, ErrSecondBrainSelection
@@ -1176,7 +1193,7 @@ func (s *SecondBrainService) chosenSource(input SecondBrainConnectInput) (second
 	kind := secondbrain.KindMarkdown
 	if secondbrain.IsObsidianVault(checked.Path) {
 		kind = secondbrain.KindObsidian
-	} else if input.DetectedID != "" {
+	} else if input.DetectedID != "" || strings.HasPrefix(input.SelectionToken, "documents-vault-") {
 		return secondbrain.Source{}, ErrSecondBrainUnknownVault
 	}
 	if !secondbrain.HasNotes(checked.Path) {

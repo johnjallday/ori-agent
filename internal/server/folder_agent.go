@@ -63,11 +63,19 @@ func (b *ServerBuilder) wireFolderAgent() {
 		DocumentsNotebook: func(ctx context.Context, owner, hq string, fn func(secondbrain.Source, string) error) error {
 			return b.personalAssistantSecondBrain.WithDocumentsNotebook(ctx, owner, hq, fn)
 		},
+		DocumentsSetup: func(ctx context.Context, owner, hq, root, proposal, ref string, confirm bool) (personalassistant.DocumentsSetupView, error) {
+			return b.personalAssistantSecondBrain.DocumentsSetup(ctx, owner, hq, root, proposal, ref, confirm)
+		},
 		DocumentsScope: func(ctx context.Context, owner string) (folderagent.DocumentsScope, error) {
 			scope := folderagent.DocumentsScope{Protected: []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)}}
-			source, connected, err := b.personalAssistantSecondBrain.ConnectedSource(ctx, owner)
+			source, connected, setup, err := b.personalAssistantSecondBrain.DocumentsNotesState(ctx, owner)
+			scope.Setup = setup
 			if connected {
-				scope.Notebook, scope.Writable = source.Path, source.CreatedByOri() && source.FillIn.Allowed()
+				scope.Notebook = source.Path
+				if writer, err := secondbrain.NewWriter(&source); err == nil && source.FillIn.Allowed() {
+					_, _, err = writer.ReviewProject("Review")
+					scope.Writable = err == nil
+				}
 			}
 			return scope, err
 		},

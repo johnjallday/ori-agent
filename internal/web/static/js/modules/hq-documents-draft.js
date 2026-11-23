@@ -55,8 +55,12 @@ export function openDocumentsDraft({ hint, offer, project, trigger }) {
       try {
         await fn();
       } catch (err) {
-        if (current())
-          message.textContent = err.message || 'Could not verify the result. Try again.';
+        if (current()) {
+          message.textContent = (err.message || 'Could not verify the result. Try again.') + ' ';
+          const repair = node('a', 'Open Notes');
+          repair.href = '/my-notes';
+          message.append(repair);
+        }
       } finally {
         busy = false;
         for (const el of actions.children) el.disabled = false;
@@ -103,12 +107,47 @@ export function openDocumentsDraft({ hint, offer, project, trigger }) {
         name: name.value,
         answer: answer.value
       };
-      review = await send('review', input);
+      review = await send(offer.setup ? 'setup-review' : 'review', input);
       confirmed = { ...input, review: review.review, request_id: crypto.randomUUID() };
-      preview();
+      if (review.setup_path) setup();
+      else preview();
     });
     button('Cancel', close);
     answer.focus();
+  };
+  const setup = () => {
+    title.textContent = 'Review My Notes setup';
+    content.replaceChildren(
+      node('p', `Set up My Notes at ${review.setup_path}.`),
+      node(
+        'p',
+        'Ori creates the standard notebook and seeds it with follow-ups and people already in HQ. Ori keeps Inbox, Daily, People, project notes and what it knows about you up to date. Notes you edit stay yours.'
+      ),
+      node(
+        'p',
+        `Proposed first project note: ${review.rel}. Setting up the notebook does not save this draft.`
+      ),
+      node('pre', review.body)
+    );
+    actions.replaceChildren();
+    button('Back to edit', edit);
+    button('Set up My Notes', async () => {
+      const result = await send('setup', confirmed);
+      if (!result.generation) throw Error('Setup was not confirmed. Open Notes to check it.');
+      const input = { ...confirmed, generation: result.generation };
+      delete input.review;
+      delete input.request_id;
+      actions.replaceChildren();
+      content.replaceChildren(
+        node('p', 'My Notes was set up. The project note has not been saved.')
+      );
+      button('Close', close);
+      review = await send('review', input);
+      confirmed = { ...input, review: review.review, request_id: crypto.randomUUID() };
+      preview();
+      message.textContent = 'My Notes is ready. Review the note before saving.';
+    }).focus();
+    button('Cancel', close);
   };
   const preview = () => {
     title.textContent = 'Review your note';

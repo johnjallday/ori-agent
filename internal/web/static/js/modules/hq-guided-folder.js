@@ -38,10 +38,15 @@ export async function folderReceipt(hint, read) {
     }
     if (currentHQAttempt(hint.hq, 'folder', hint.attempt)?.workspace !== current.workspace)
       return null;
+    if (offer?.notes_only)
+      return { text: 'Your read-only Notes connection is unchanged.', offer, ...link };
+    if (!offer?.projects?.length && offer?.vaults?.length) {
+      return { text: 'The Documents report found a Notes vault.', offer, ...link };
+    }
     if (offer?.projects?.length) {
       const first = offer.projects[0];
       return {
-        text: `I found a ${first.kind} in ${first.location}.`,
+        text: `I found a ${first.kind} in ${first.location}.${offer.writable || offer.setup ? ' Start a project note?' : ''}`,
         offer,
         ...link
       };

@@ -171,7 +171,7 @@ export class HQFirstVisitCard {
   receiptHTML() {
     const projects = this.receipt?.offer?.projects || [];
     const draft = p =>
-      this.receipt.offer.writable
+      this.receipt.offer.writable || this.receipt.offer.setup
         ? `<button type="button" class="ws-cmd-nav-btn" data-documents-draft="${escape(p.ref)}">Draft ${escape(p.name)} note</button>`
         : '';
     const evidence = projects
@@ -180,8 +180,18 @@ export class HQFirstVisitCard {
           `${i === 0 ? draft(p) : ''}<details><summary>Review ${escape(p.location)}</summary><p>The folder report found ${escape(p.evidence)} here. No file text was used.</p>${i > 0 ? draft(p) : ''}</details>`
       )
       .join('');
+    const vaults = (this.receipt?.offer?.vaults || [])
+      .map(
+        v =>
+          `<button type="button" class="ws-cmd-nav-btn" data-documents-vault="${escape(v.ref)}">Connect ${escape(v.location)} read-only</button>`
+      )
+      .join('');
+    const notes =
+      this.receipt?.offer && !this.receipt.offer.writable && !this.receipt.offer.setup
+        ? '<a href="/my-notes">Open Notes</a> '
+        : '';
     return this.receipt
-      ? `<section class="ws-cmd-card" role="status" data-guided-receipt><strong>From your assistant</strong><p>${escape(this.receipt.text)}</p>${evidence}${this.receipt.href ? `<a href="${escape(this.receipt.href)}">${escape(this.receipt.label)}</a>` : ''}</section>`
+      ? `<section class="ws-cmd-card" role="status" data-guided-receipt><strong>From your assistant</strong><p>${escape(this.receipt.text)}</p>${evidence}${vaults}${notes}${this.receipt.href ? `<a href="${escape(this.receipt.href)}">${escape(this.receipt.label)}</a>` : ''}</section>`
       : '';
   }
 
@@ -315,6 +325,45 @@ export class HQFirstVisitCard {
           project,
           trigger: button
         });
+      };
+    }
+    for (const b of this.owner.container?.querySelectorAll?.('[data-documents-vault]') || []) {
+      b.onclick = async () => {
+        const hint = receiptHint(window.location, this.owner.workspaceId());
+        const offer = this.receipt?.offer;
+        const v = offer?.vaults?.find(row => row.ref === b.dataset.documentsVault);
+        if (!hint?.workspace || !v) return;
+        try {
+          const r = await fetch(
+            `/api/personal-assistant/folder-agent/${encodeURIComponent(hint.workspace)}/documents-draft/vault`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                hq: hint.hq,
+                attempt: hint.attempt,
+                report: offer.report,
+                candidate: v.ref
+              })
+            }
+          );
+          const value = await r.json();
+          if (!r.ok || !value.selection_token) throw Error();
+          if (receiptHint(window.location, this.owner.workspaceId())?.attempt !== hint.attempt)
+            return;
+          await window.PersonalAssistantSecondBrain.connectSelection({
+            selectionToken: value.selection_token,
+            name: v.name,
+            path: v.location
+          });
+          window.PersonalAssistantPanel?.open?.();
+        } catch (_) {
+          this.receipt = {
+            ...this.receipt,
+            text: 'The vault could not be verified. Open Notes to check your connection.'
+          };
+          this.owner.render();
+        }
       };
     }
     this.door()?.addEventListener?.('click', () => (this.node ? this.close() : this.open()));

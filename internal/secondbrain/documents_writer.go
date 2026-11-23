@@ -14,6 +14,14 @@ import (
 var documentsOperation = regexp.MustCompile(`^[a-f0-9]{32}$`)
 var documentsMark = regexp.MustCompile(`\Aori: documents_project\nori_hash: ([a-f0-9]{64})\nori_operation: ([a-f0-9]{32})\n\z`)
 
+func (c Creator) parentMatches(root *os.Root) bool {
+	if c.ParentWitness == "" {
+		return true
+	}
+	info, err := root.Stat(".")
+	return err == nil && directoryid.Witness(info) == c.ParentWitness
+}
+
 // projectDirectory pins both levels; no directory is implicitly repaired.
 func (w *Writer) projectDirectory() (*os.Root, string, error) {
 	root, err := pinFolder(w.root)

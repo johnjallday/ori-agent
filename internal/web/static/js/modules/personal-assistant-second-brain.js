@@ -2579,7 +2579,10 @@ function renderConsent(body) {
   body.append(
     actionRow(view.actions, action => {
       if (action.id === 'connect') void connect();
-      else if (action.id === 'back') back();
+      else if (state.chosen?.selectionToken?.startsWith('documents-vault-')) {
+        state.chosen = null;
+        setPhase('idle');
+      } else if (action.id === 'back') back();
       else void decide('later');
     })
   );
@@ -3033,7 +3036,7 @@ async function connect() {
   }));
   state.busy = false;
   if (!ok) {
-    if (payload.needs_confirm) {
+    if (payload.needs_confirm && !state.chosen.selectionToken?.startsWith('documents-vault-')) {
       state.replace = true;
       render();
       return;

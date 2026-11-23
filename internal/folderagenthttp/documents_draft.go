@@ -32,7 +32,12 @@ func (h *Handler) draftRequest(w http.ResponseWriter, r *http.Request, body any)
 }
 func draftResult(w http.ResponseWriter, v folderagent.DocumentsDraftView, err error) {
 	if err != nil {
+		var folderErr *personalassistant.SecondBrainFolderError
 		switch {
+		case errors.As(err, &folderErr):
+			fail(w, 409, folderErr.Message)
+		case errors.Is(err, personalassistant.ErrSecondBrainDestinationChanged):
+			fail(w, 409, "The Notes location or setup decision changed. Open Notes to check it before continuing.")
 		case errors.Is(err, personalassistant.ErrSecondBrainNotConnected), errors.Is(err, personalassistant.ErrSecondBrainFillInNotAllowed):
 			fail(w, 409, "Writable Notes are not connected. Open Notes to check the connection.")
 		default:
@@ -58,6 +63,35 @@ func (h *Handler) documentsDraft(w http.ResponseWriter, r *http.Request, save bo
 	v, err := h.service.DocumentsDraft(r.Context(), owner, r.PathValue("workspaceID"), in, save)
 	draftResult(w, v, err)
 }
+func (h *Handler) ReviewDocumentsSetup(w http.ResponseWriter, r *http.Request) {
+	h.documentsSetup(w, r, false)
+}
+func (h *Handler) SetupDocumentsDraft(w http.ResponseWriter, r *http.Request) {
+	h.documentsSetup(w, r, true)
+}
+func (h *Handler) documentsSetup(w http.ResponseWriter, r *http.Request, confirm bool) {
+	var in folderagent.DocumentsDraftInput
+	owner, ok := h.draftRequest(w, r, &in)
+	if !ok {
+		return
+	}
+	v, err := h.service.SetupDocumentsDraft(r.Context(), owner, r.PathValue("workspaceID"), in, confirm)
+	draftResult(w, v, err)
+}
+func (h *Handler) ChooseDocumentsVault(w http.ResponseWriter, r *http.Request) {
+	var in folderagent.DocumentsDraftInput
+	owner, ok := h.draftRequest(w, r, &in)
+	if !ok {
+		return
+	}
+	token, err := h.service.ChooseDocumentsVault(r.Context(), owner, r.PathValue("workspaceID"), in)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"selection_token": token})
+}
+
 func (h *Handler) OpenDocumentsDraft(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		HQ      string `json:"hq"`

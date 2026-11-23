@@ -18,6 +18,11 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
   const docs = info.outputPath('Documents');
   await mkdir(join(docs, 'Thesis'), { recursive: true });
   const empty = process.env.ORI_DOCUMENTS_EMPTY === '1';
+  const mode = process.env.ORI_DOCUMENTS_MODE || 'writable';
+  if (mode === 'vault') {
+    await mkdir(join(docs, 'Research', '.obsidian'), { recursive: true });
+    await writeFile(join(docs, 'Research', 'Ideas.md'), 'Read only fixture.\n');
+  }
   if (!empty)
     await writeFile(join(docs, 'Thesis', 'main.tex'), 'fixture manuscript\n', { mode: 0o600 });
   await symlink(docs, join(home, 'Documents'), 'dir');
@@ -51,7 +56,7 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
     include_future_workspaces: true,
     notes: { include: false }
   });
-  if (!empty)
+  if (!empty && mode === 'writable')
     await post('/api/personal-assistant/second-brain/create', { request_id: 'documents-notes' });
   const original = empty ? null : await lstat(join(docs, 'Thesis', 'main.tex'));
   const { status } = await (await request.get('/api/personal-hq/status')).json();
@@ -84,6 +89,28 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
     await expect(lstat(join(root, 'My Notes'))).rejects.toMatchObject({ code: 'ENOENT' });
     return;
   }
+  if (mode === 'vault') {
+    await receipt.getByRole('button', { name: 'Connect Documents/Research read-only' }).click();
+    const consent = page.locator('#personalAssistantPanel');
+    await expect(consent).toContainText('Read Research?');
+    await expect(
+      consent.getByText('Read-only. Nothing is moved, edited, or deleted.')
+    ).toBeVisible();
+    await page.screenshot({ path: info.outputPath('documents-vault.png') });
+    await consent.getByRole('button', { name: 'Connect and look' }).click();
+    await expect
+      .poll(
+        async () =>
+          (await (await request.get('/api/personal-assistant/second-brain')).json()).second_brain
+            ?.source?.name
+      )
+      .toBe('Research');
+    await page.reload();
+    await expect(receipt.getByRole('link', { name: 'Open Notes' })).toBeVisible();
+    await expect(receipt.getByRole('button', { name: /Draft|Connect/ })).toHaveCount(0);
+    expect(await readdir(join(docs, 'Research'))).toEqual(['.obsidian', 'Ideas.md']);
+    return;
+  }
   await expect(receipt).toContainText('I found a manuscript in Documents/Thesis');
   await receipt.getByText('Review Documents/Thesis').click();
   await expect(receipt.getByText(/LaTeX manuscript/)).toBeVisible();
@@ -97,6 +124,23 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
   const answer = 'Send the methods chapter to my advisor';
   await dialog.getByLabel('What are you trying to finish?').fill(answer);
   await dialog.getByRole('button', { name: 'Review note' }).click();
+  if (mode === 'setup' || mode === 'changed') {
+    const setup = dialog.getByRole('button', { name: 'Set up My Notes' });
+    await expect(setup).toBeVisible();
+    await expect(dialog).toContainText(join(root, 'My Notes'));
+    await page.screenshot({ path: info.outputPath('documents-setup.png') });
+    if (mode === 'changed') {
+      await post('/api/personal-assistant/second-brain/create', { request_id: 'other-setup' });
+      await setup.click();
+      await expect(dialog).toContainText('changed');
+      await page.screenshot({ path: info.outputPath('documents-refused.png') });
+      await expect(lstat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
+      return;
+    }
+    await setup.click();
+    await expect(dialog.getByRole('button', { name: 'Save to My Notes' })).toBeVisible();
+    await expect(lstat(destination)).rejects.toMatchObject({ code: 'ENOENT' });
+  }
   await expect(dialog).toContainText('My Notes/' + rel);
   const body = await dialog.locator('pre').textContent();
   expect(body).toContain(answer);

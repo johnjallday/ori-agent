@@ -22,6 +22,7 @@ type DocumentsScope struct {
 	Protected []string
 	Notebook  string
 	Writable  bool
+	Setup     bool
 }
 type DocumentsCandidate struct {
 	Ref      string `json:"ref"`
@@ -31,21 +32,19 @@ type DocumentsCandidate struct {
 	Evidence string `json:"evidence"`
 }
 type DocumentsOffer struct {
-	Writable bool                 `json:"writable,omitempty"`
-	Report   string               `json:"report"`
-	Projects []DocumentsCandidate `json:"projects"`
+	NotesOnly bool                 `json:"notes_only,omitempty"`
+	Vaults    []DocumentsCandidate `json:"vaults,omitempty"`
+	Setup     bool                 `json:"setup,omitempty"`
+	Writable  bool                 `json:"writable,omitempty"`
+	Report    string               `json:"report"`
+	Projects  []DocumentsCandidate `json:"projects"`
 }
 
 var projectLabel = regexp.MustCompile(`^[\pL\pN][\pL\pN _.()-]*$`)
 
 func safeMember(f foldermap.Folder) bool {
-	if f.Path == "" || len(f.Path) > 256 || f.Depth() > 12 || f.State != foldermap.StateClosed || f.Witness == "" || f.HasVault || f.MarkerFiles < 1 {
+	if !safeMarkedFolder(f) || f.HasVault {
 		return false
-	}
-	for segment := range strings.SplitSeq(f.Path, "/") {
-		if !secondbrain.ValidFolderName(segment) || !projectLabel.MatchString(segment) || sensitive.ContainsSecretLikeText(segment) || strings.EqualFold(segment, "My Notes") || strings.EqualFold(segment, "Ori Workspaces") {
-			return false
-		}
 	}
 	for _, marker := range folderdigest.Markers {
 		if marker.Name == f.Marker && marker.Shape == f.Shape && marker.Name != ".obsidian" {
@@ -53,6 +52,18 @@ func safeMember(f foldermap.Folder) bool {
 		}
 	}
 	return false
+}
+
+func safeMarkedFolder(f foldermap.Folder) bool {
+	if f.Path == "" || len(f.Path) > 256 || f.Depth() > 12 || f.State != foldermap.StateClosed || f.Witness == "" || f.MarkerFiles < 1 {
+		return false
+	}
+	for segment := range strings.SplitSeq(f.Path, "/") {
+		if !secondbrain.ValidFolderName(segment) || !projectLabel.MatchString(segment) || sensitive.ContainsSecretLikeText(segment) || strings.EqualFold(segment, "My Notes") || strings.EqualFold(segment, "Ori Workspaces") {
+			return false
+		}
+	}
+	return true
 }
 
 // explicitMember checks only the components named by the report. Never list a
@@ -128,7 +139,7 @@ func (s *Service) DocumentsOffer(ctx context.Context, owner, hq, attempt, id str
 		return a.Path < b.Path
 	})
 	report := documentsRef(rec.MapWitness, holderReportKey(rec))
-	out := &DocumentsOffer{Report: report, Writable: scope.Writable && !filejanitor.RootsOverlap(root, scope.Notebook)}
+	out := &DocumentsOffer{Report: report, Setup: scope.Setup, Writable: scope.Writable && !filejanitor.RootsOverlap(root, scope.Notebook)}
 	var taken []DocumentsCandidate
 	// Cap live metadata probes even on an unusually large or badly stale map.
 	for i, f := range folders {
@@ -166,7 +177,14 @@ func (s *Service) DocumentsOffer(ctx context.Context, owner, hq, attempt, id str
 	if len(out.Projects) > 4 {
 		out.Projects = out.Projects[:4]
 	}
-	if len(out.Projects) == 0 {
+	if scope.Notebook == "" {
+		out.Vaults = documentsVaults(rec, root, report, guards)
+	} else if !scope.Writable && len(out.Projects) == 0 {
+		// A vault report still has a voluntary Notes door, never a competing
+		// connection or a pitch to write into an existing vault.
+		out.NotesOnly = len(documentsVaults(rec, root, report, guards[1:])) > 0
+	}
+	if len(out.Projects) == 0 && len(out.Vaults) == 0 && !out.NotesOnly {
 		return nil, nil
 	}
 	return out, nil
