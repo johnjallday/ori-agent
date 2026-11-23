@@ -41,20 +41,21 @@ type View struct {
 	Progress     Progress `json:"progress"`
 	ProgressLine string   `json:"progress_line,omitempty"`
 
-	ProjectHolders *ProjectHoldersView    `json:"project_holders,omitempty"`
-	RootPolicy     folderlook.RootPolicy  `json:"root_policy,omitempty"`
-	PolicyNote     string                 `json:"policy_note,omitempty"`
-	ExploreFolder  bool                   `json:"explore_folder,omitempty"`
-	FactsLine      string                 `json:"facts_line,omitempty"`
-	StageLine      string                 `json:"stage_line,omitempty"`
-	Stage          foldermap.Stage        `json:"stage,omitempty"`
-	Candidates     []folderlook.Candidate `json:"candidates,omitempty"`
-	NextFolders    []string               `json:"next_folders,omitempty"`
-	ModelSentence  string                 `json:"model_sentence,omitempty"`
-	ToolsSentence  string                 `json:"tools_sentence,omitempty"`
-	Actions        []string               `json:"actions,omitempty"`
-	Plan           *PlanView              `json:"plan,omitempty"`
-	Setup          *Setup                 `json:"setup,omitempty"`
+	ProjectHolders     *ProjectHoldersView    `json:"project_holders,omitempty"`
+	OrganizationReview bool                   `json:"organization_review,omitempty"`
+	RootPolicy         folderlook.RootPolicy  `json:"root_policy,omitempty"`
+	PolicyNote         string                 `json:"policy_note,omitempty"`
+	ExploreFolder      bool                   `json:"explore_folder,omitempty"`
+	FactsLine          string                 `json:"facts_line,omitempty"`
+	StageLine          string                 `json:"stage_line,omitempty"`
+	Stage              foldermap.Stage        `json:"stage,omitempty"`
+	Candidates         []folderlook.Candidate `json:"candidates,omitempty"`
+	NextFolders        []string               `json:"next_folders,omitempty"`
+	ModelSentence      string                 `json:"model_sentence,omitempty"`
+	ToolsSentence      string                 `json:"tools_sentence,omitempty"`
+	Actions            []string               `json:"actions,omitempty"`
+	Plan               *PlanView              `json:"plan,omitempty"`
+	Setup              *Setup                 `json:"setup,omitempty"`
 	// FilingPermissionRequired is live display state, never persisted or hashed.
 	FilingPermissionRequired bool          `json:"filing_permission_required,omitempty"`
 	Failure                  string        `json:"failure,omitempty"`
@@ -266,6 +267,10 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	v.StageLine = folderlook.DefaultLine(folderlook.StepsForPolicy(rec.RootPolicy, rec.FolderName, rec.Facts, rec.Candidates))
 	v.ProjectHolders = projectHoldersView(rec)
 	v.RootPolicy = rec.RootPolicy
+	if rec.RootPolicy == folderlook.RootDocuments || completed(rec) {
+		_, err := s.organizationAccess(rec.OwnerUserID, rec)
+		v.OrganizationReview = err == nil
+	}
 	v.PolicyNote = folderlook.PolicyLine(rec.RootPolicy)
 	v.ExploreFolder = rec.RootPolicy.IsCatchAll() && rec.RootPolicy != folderlook.RootDownloads
 	if rec.RootPolicy == folderlook.RootDocuments {

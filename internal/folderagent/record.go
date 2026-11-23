@@ -256,6 +256,7 @@ type Record struct {
 	Candidates         []folderlook.Candidate `json:"candidates,omitempty"`
 	Progress           Progress               `json:"progress"`
 	Turn               *TurnReceipt           `json:"turn,omitempty"`
+	OrganizationRuns   []OrganizationRun      `json:"organization_runs,omitempty"`
 	DocumentsDecisions []DocumentsDecision    `json:"documents_decisions,omitempty"`
 	// Sections are the agent's words that survived the host's parser, with
 	// the turn's provenance; nil when no turn produced any.

@@ -59,6 +59,7 @@ type ClaudeProvider struct {
 	workspaceID       string // sent as anthropic-workspace-id; empty sends none
 	httpClient        *http.Client
 	textConfiguration string
+	directAnthropic   bool // the same endpoint snapshot used to construct client
 
 	// fetchMu lets one model-list fetch run at a time; callers that wait on
 	// it reuse its result. modelsMu guards the cached list, so reading it
@@ -94,9 +95,10 @@ func NewClaudeProvider(config ProviderConfig) *ClaudeProvider {
 	httpClient := NewHTTPClient(DefaultCloudTimeout)
 	workspaceID, _ := config.Options[claudeWorkspaceIDOption].(string)
 
+	endpoint := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL"))
 	var client anthropic.Client
 	if config.APIKey != "" {
-		client = newClaudeClient(httpClient, config.APIKey, workspaceID)
+		client = newClaudeClient(httpClient, config.APIKey, workspaceID, endpoint)
 	}
 
 	return &ClaudeProvider{
@@ -104,11 +106,27 @@ func NewClaudeProvider(config ProviderConfig) *ClaudeProvider {
 		apiKey:            config.APIKey,
 		workspaceID:       workspaceID,
 		httpClient:        httpClient,
-		textConfiguration: claudeTextConfiguration(workspaceID),
+		textConfiguration: textConfiguration("claude", endpoint, workspaceID),
+		directAnthropic:   directAnthropicEndpoint(endpoint),
 	}
 }
 
-func newClaudeClient(httpClient *http.Client, apiKey, workspaceID string) anthropic.Client {
+func directAnthropicEndpoint(endpoint string) bool {
+	return endpoint == "" || strings.TrimSuffix(endpoint, "/") == "https://api.anthropic.com"
+}
+
+// DirectTextDestination exposes a named processor only for the standard API,
+// never an override or an environment value that no longer matches the client.
+func (p *ClaudeProvider) DirectTextDestination() (string, string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if !p.directAnthropic || p.apiKey == "" {
+		return "", ""
+	}
+	return "Anthropic (api.anthropic.com)", p.textConfiguration
+}
+
+func newClaudeClient(httpClient *http.Client, apiKey, workspaceID, endpoint string) anthropic.Client {
 	opts := []option.RequestOption{
 		// Ori supplies the key and the workspace itself. Without this the SDK
 		// also loads the machine's own Anthropic profile
@@ -122,8 +140,8 @@ func newClaudeClient(httpClient *http.Client, apiKey, workspaceID string) anthro
 	}
 	// The endpoint override is the one environment default Ori keeps; it is
 	// part of the provider's configuration (see claudeTextConfiguration).
-	if baseURL := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL")); baseURL != "" {
-		opts = append(opts, option.WithBaseURL(baseURL))
+	if endpoint != "" {
+		opts = append(opts, option.WithBaseURL(endpoint))
 	}
 	if workspaceID != "" {
 		opts = append(opts, option.WithHeader("anthropic-workspace-id", workspaceID))
@@ -361,12 +379,19 @@ func (p *ClaudeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRespon
 
 	// Pin the same destination snapshot that the owner reviewed.
 	p.mu.RLock()
-	client, configuration := p.client, p.textConfiguration
+	client, configuration, transport := p.client, p.textConfiguration, p.httpClient
 	p.mu.RUnlock()
 	if err := checkTextConfiguration(req, configuration); err != nil {
 		return nil, err
 	}
-	message, err := client.Messages.New(ctx, params)
+	var options []option.RequestOption
+	if req.ProviderConfiguration != "" && transport != nil {
+		// A pinned single destination must not forward a body on an HTTP redirect.
+		pinned := *transport
+		pinned.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		options = append(options, option.WithHTTPClient(&pinned))
+	}
+	message, err := client.Messages.New(ctx, params, options...)
 	if err != nil {
 		return nil, classifyAnthropicError("anthropic", err)
 	}
@@ -558,12 +583,14 @@ func (p *ClaudeProvider) UpdateClient(apiKey string) {
 		return
 	}
 	httpClient := NewHTTPClient(DefaultCloudTimeout)
-	client := newClaudeClient(httpClient, apiKey, p.workspaceID)
+	endpoint := strings.TrimSpace(os.Getenv("ANTHROPIC_BASE_URL"))
+	client := newClaudeClient(httpClient, apiKey, p.workspaceID, endpoint)
 	p.mu.Lock()
 	p.apiKey = apiKey
 	p.httpClient = httpClient
 	p.client = client
-	p.textConfiguration = claudeTextConfiguration(p.workspaceID)
+	p.textConfiguration = textConfiguration("claude", endpoint, p.workspaceID)
+	p.directAnthropic = directAnthropicEndpoint(endpoint)
 	p.mu.Unlock()
 
 	// A different key can call a different set of models.

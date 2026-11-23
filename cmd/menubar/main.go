@@ -24,6 +24,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/backuprecovery"
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/environ"
+	"github.com/johnjallday/ori-agent/internal/fileparser"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/menubar"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
@@ -42,6 +43,9 @@ var menuInputDialog = showInputDialog
 func main() {
 	// The embedded server uses this same image for metadata helpers. Exit before
 	// shell settings, credentials, logging, ports or native UI initialization.
+	if handled, code := fileparser.RunReviewPDFWorker(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	if handled, code := backuprecovery.RunHelperProcess(os.Args[1:]); handled {
 		os.Exit(code)
 	}
