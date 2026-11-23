@@ -45,13 +45,32 @@ test('choose two tracks for placement and review remaining songs separately', as
     await sheet.screenshot({ path: join(evidence, `confirm-${label}.png`) });
     await sheet.getByRole('button', { name: 'Put on the map', exact: true }).click();
     await expect(sheet.locator('[data-sheet-results]')).toBeVisible({ timeout: 60000 });
+    if (label === 'tracks') {
+      const retry = sheet.locator('[data-sheet-retry]');
+      await expect(retry).toBeVisible();
+      const first = (await list()).filter((r: any) => r.connection === 'connected');
+      expect(first).toHaveLength(1);
+      await sheet.screenshot({ path: join(evidence, 'partial-tracks.png') });
+      await retry.click();
+      await expect(sheet.locator('[data-sheet-result].is-complete')).toHaveCount(2);
+      expect((await list()).find((r: any) => r.id === first[0].id)?.workspace_id).toBe(
+        first[0].workspace_id
+      );
+    }
     await sheet.screenshot({ path: join(evidence, `receipt-${label}.png`) });
   }
   await open();
   await sheet
     .getByRole('checkbox', { name: /Select projects with a chosen file in .*Picker Songs/ })
     .check();
+  let commits = 0;
+  await page.route('**/activation/commit', async route => {
+    if (++commits === 2)
+      await route.fulfill({ status: 409, json: { error: 'Fixture: please review again' } });
+    else await route.continue();
+  });
   await confirm(2, 'tracks');
+  expect(commits).toBe(3);
   let rows = await list();
   expect(rows).toHaveLength(8);
   expect(
@@ -76,6 +95,18 @@ test('choose two tracks for placement and review remaining songs separately', as
   const album = rows.find((r: any) => r.name === 'Album-5');
   const child = await (await request.get(`/api/workspaces/${album.workspace_id}`)).json();
   expect(JSON.stringify(child)).toContain('Alternate.rpp');
+  // Fixture preparation, before the read-only map journey/restart. Interleave
+  // the two branches explicitly rather than relying on renderer seed positions.
+  const positions = Object.fromEntries(
+    ['Album-1', 'Track-1', 'Album-2', 'Track-2', 'Album-3', 'Album-4', 'Album-5'].map((name, i) => [
+      rows.find((r: any) => r.name === name).workspace_id,
+      { x: (i % 3) * 3 + 1, y: Math.floor(i / 3) * 3 + 1 }
+    ])
+  );
+  const saved = await request.patch('/api/workspace-map/layout', {
+    data: { operations: [{ op: 'set_positions', positions }] }
+  });
+  expect(saved.ok()).toBeTruthy();
 });
 
 test('the populated map groups seven existing tiles without a layout or staffing write', async ({

@@ -357,7 +357,7 @@ export async function runSetup({
     let placementNote = '';
     try {
       const detail = await client.request(path);
-      workspaceId = String(detail?.row?.workspace_id || '');
+      workspaceId = String(detail?.workspace_id || detail?.row?.workspace_id || '');
       if (detail?.row?.connection !== 'connected') {
         const eligibility = await client.request(`${path}/activation`);
         const ok =
@@ -408,6 +408,7 @@ export async function runSetup({
         ...item,
         stage,
         reason: String(error?.reason || ''),
+        ...(placementNote ? { placementNote } : {}),
         workspaceId: stage === 'staffing' ? workspaceId : '',
         created,
         staffing:

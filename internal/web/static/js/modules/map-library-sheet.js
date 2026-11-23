@@ -88,7 +88,9 @@ export function sheetView(
         !progress[row.id]
     };
   });
-  const selected = items.filter(item => item.checked);
+  const selected = (
+    items.some(item => item.section) ? folderGroups(items).flatMap(group => group.items) : items
+  ).filter(item => item.checked);
   const repairing = items.filter(item => item.repairChecked);
   return {
     items,
@@ -133,8 +135,30 @@ export function assistantState(status) {
 }
 
 /** The confirmation's lines: each ticked project with its exact file (FR-11). */
+export function excludedSummary(items, total) {
+  const counts = new Map();
+  for (const item of items) {
+    if (item.checked) continue;
+    const reason =
+      item.kind === SETUP_KINDS.DASHBOARD
+        ? 'library only'
+        : item.kind === SETUP_KINDS.CONNECTED
+          ? 'already on the map'
+          : item.kind === SETUP_KINDS.FILE_CHOICE && !item.file
+            ? 'need a file choice'
+            : 'not selected';
+    counts.set(reason, (counts.get(reason) || 0) + 1);
+  }
+  if (total > items.length) counts.set('not loaded', total - items.length);
+  return counts.size
+    ? 'Outside this setup: ' + [...counts].map(([reason, n]) => `${n} ${reason}`).join(' · ')
+    : '';
+}
+
 export function confirmLines(selected) {
-  return (Array.isArray(selected) ? selected : []).map(item => `${item.name} — ${item.file}`);
+  return (Array.isArray(selected) ? selected : []).map(
+    item => `${[item.section?.breadcrumb, item.name].filter(Boolean).join(' / ')} — ${item.file}`
+  );
 }
 
 /**
@@ -259,6 +283,9 @@ export function resultRows(run) {
     const row = {
       id: item.id,
       name: item.name,
+      ...(item.section ? { section: item.section } : {}),
+      file: item.file || '',
+      placementNote: '',
       workspaceId: '',
       connection: '',
       assistant: '',
@@ -267,6 +294,7 @@ export function resultRows(run) {
     };
     const finished = done.get(item.id);
     if (finished) {
+      row.placementNote = finished.placementNote || '';
       row.workspaceId = finished.workspaceId || '';
       row.connection = finished.created ? 'Put on the map' : 'Already on the map';
       row.assistant = staffingResultLabel(finished.staffing);
@@ -278,6 +306,7 @@ export function resultRows(run) {
     }
     if (failed && failed.id === item.id) {
       if (failed.stage === 'staffing') {
+        row.placementNote = failed.placementNote || '';
         row.workspaceId = failed.workspaceId || '';
         row.connection = failed.created ? 'Put on the map' : 'On the map';
         row.assistant = `assistant not added: ${failed.message || 'it could not be added'}`;
@@ -911,7 +940,14 @@ export function openLibrarySheet({
       row.setAttribute('data-sheet-result', result.id);
       if (result.complete) row.classList.add('is-complete');
       const head = el(doc, 'div', `${SHEET_CLASS}-result-head`);
-      head.append(el(doc, 'span', `${SHEET_CLASS}-name`, result.name));
+      head.append(
+        el(
+          doc,
+          'span',
+          `${SHEET_CLASS}-name`,
+          [result.section?.breadcrumb, result.name].filter(Boolean).join(' / ')
+        )
+      );
       const route = result.workspaceId ? state.routes[result.workspaceId] : '';
       if (route) {
         const open = el(doc, 'a', `${SHEET_CLASS}-link`, 'Open');
@@ -920,6 +956,9 @@ export function openLibrarySheet({
         head.append(open);
       }
       row.append(head, el(doc, 'span', `${SHEET_CLASS}-hint`, result.connection));
+      if (result.file) row.append(el(doc, 'small', `${SHEET_CLASS}-file`, result.file));
+      if (result.placementNote)
+        row.append(el(doc, 'small', `${SHEET_CLASS}-hint`, result.placementNote));
       if (result.assistant) row.append(el(doc, 'span', `${SHEET_CLASS}-hint`, result.assistant));
       if (result.recovery) {
         const href = recoveryHref(result.recovery.kind);
@@ -938,6 +977,20 @@ export function openLibrarySheet({
         }
       }
       list.append(row);
+    }
+    if (rows.some(row => row.section)) {
+      const nodes = new Map(
+        Array.from(list.children, n => [n.getAttribute('data-sheet-result'), n])
+      );
+      list.replaceChildren();
+      for (const group of folderGroups(rows)) {
+        const block = el(doc, 'li', `${SHEET_CLASS}-section`);
+        block.append(el(doc, 'strong', null, group.label));
+        const items = el(doc, 'ul', `${SHEET_CLASS}-rows`);
+        items.append(...group.items.map(item => nodes.get(item.id)));
+        block.append(items);
+        list.append(block);
+      }
     }
     return list;
   }
@@ -984,13 +1037,24 @@ export function openLibrarySheet({
         }${view.selected.length === 1 ? ' as its own workspace' : ', each as its own workspace'} in ${homeName}:`
       );
       const lines = el(doc, 'ul', `${SHEET_CLASS}-confirm`);
-      for (const line of confirmLines(view.selected)) lines.append(el(doc, 'li', null, line));
+      if (view.selected.some(item => item.section)) {
+        for (const group of folderGroups(view.selected)) {
+          const b = el(doc, 'li', null);
+          b.append(el(doc, 'strong', null, group.label));
+          const songs = el(doc, 'ul', null);
+          for (const line of confirmLines(group.items)) songs.append(el(doc, 'li', null, line));
+          b.append(songs);
+          lines.append(b);
+        }
+      } else
+        for (const line of confirmLines(view.selected)) lines.append(el(doc, 'li', null, line));
       body.append(intro, lines);
       const staffing = confirmStaffing(
         state.staffingPlan,
         view.selected.length,
         state.staffingChoice
       );
+      if (state.outside) body.append(el(doc, 'p', `${SHEET_CLASS}-hint`, state.outside));
       body.append(renderStaffingChoice(staffing));
       const go = el(doc, 'button', 'modern-btn modern-btn-primary', staffing.buttonLabel);
       go.type = 'button';
@@ -1006,6 +1070,8 @@ export function openLibrarySheet({
     } else if (state.phase === 'results' && state.lastRun) {
       subtitle.textContent = 'What setup did';
       body.append(renderResults(resultRows(state.lastRun)));
+      if (state.lastRun.kind === 'setup' && state.outside)
+        body.append(el(doc, 'p', `${SHEET_CLASS}-hint`, state.outside));
       const failed = state.lastRun.result.failed;
       const recovery =
         failed && failed.stage === 'staffing'
@@ -1101,6 +1167,7 @@ export function openLibrarySheet({
       go.type = 'button';
       go.disabled = view.buttonDisabled || state.phase === 'running';
       go.addEventListener('click', () => {
+        state.outside = excludedSummary(view.items, state.total);
         state.phase = 'confirm';
         // The last run's status line is about that run, not this confirmation.
         state.message = '';
@@ -1197,7 +1264,12 @@ export function openLibrarySheet({
   async function run(selected, staffing = null) {
     state.lastRun = null;
     await execute(
-      selected.map(item => ({ id: item.id, name: item.name, file: item.file })),
+      selected.map(item => ({
+        id: item.id,
+        name: item.name,
+        file: item.file,
+        ...(item.section ? { section: { ...item.section } } : {})
+      })),
       staffing,
       'setup'
     );
