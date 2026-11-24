@@ -125,7 +125,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Complete workspace setup first.", http.StatusConflict)
 			return
 		}
-		if op == "review-link" {
+		switch op {
+		case "review-link":
 			// Make searchable from a linked folder's row: the two ids only, never a path.
 			var in struct {
 				Workspace string `json:"workspace"`
@@ -135,7 +136,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			out, e = h.Service.ReviewLink(r.Context(), owner, in.Workspace, in.Link)
-		} else if op == "review-source" {
+		case "review-source":
 			var in struct {
 				ID string `json:"id"`
 			}
@@ -143,7 +144,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			out, e = h.Service.ReviewSource(r.Context(), owner, in.ID)
-		} else {
+		default: // connect
 			var in struct {
 				Intent    string `json:"intent"`
 				Workspace string `json:"workspace"`

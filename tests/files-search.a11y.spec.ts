@@ -1,4 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -109,6 +112,83 @@ for (const theme of ['light', 'dark']) {
           fullPage: true
         });
       } finally {
+        await page.request.delete(`/api/workspaces/${ws.id}?confirm=true`);
+      }
+    });
+
+    // A linked folder's row says whether it is searchable, and its menu starts
+    // with that status (merge-tree-into-files PR 2). With the menu open, the row,
+    // its mark and the menu pass axe; the keyboard opens it and gets back out.
+    test(`a linked folder's search mark and open row menu are accessible (${theme}, ${viewport.label})`, async ({
+      page
+    }, info) => {
+      await page.emulateMedia({ colorScheme: theme as 'light' | 'dark', reducedMotion: 'reduce' });
+      await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+      await page.setViewportSize({ width: viewport.width, height: viewport.height });
+      await page.route('**/api/onboarding/status', route =>
+        route.fulfill({ json: { needs_onboarding: false, completed: true, skipped: true } })
+      );
+      const ws = await seed(page);
+      const outside = mkdtempSync(join(tmpdir(), 'ori-a11y-linked-'));
+      try {
+        const linked = await (
+          await page.request.post(`/api/workspaces/${ws.id}/directories`, {
+            data: { name: 'Reference shelf', path: outside }
+          })
+        ).json();
+        const dirId = linked.directory.id as string;
+        await page.goto('/?view=tree');
+        const row = (key: string) => page.locator(`#cockpitTreeNav [data-tree-row="${key}"]`);
+        await row(ws.id).locator('[data-tree-toggle]').click();
+        await row(`${ws.id}/s/linked`).waitFor();
+        if ((await row(`${ws.id}/s/linked`).getAttribute('aria-expanded')) !== 'true')
+          await row(`${ws.id}/s/linked`).locator('[data-tree-toggle]').click();
+        const folder = row(`${ws.id}/l/${dirId}`);
+        // On the Mac that runs Ori the row says so in words; elsewhere it says nothing.
+        const mark = folder.locator('[data-folder-search]');
+        const local = (await page.locator('.desk-rail[data-desk-local]').count()) > 0;
+        if (!local) {
+          await expect(mark).toHaveCount(0);
+          test.skip(true, 'the filename index answers only on the Mac that runs Ori');
+        }
+        await expect(mark).toHaveText('Not searchable');
+
+        await folder.focus();
+        await page.keyboard.press('Shift+F10');
+        const menu = page.getByRole('menu', { name: 'Actions for Reference shelf' });
+        await expect(menu).toBeVisible();
+        await expect(menu).toHaveAccessibleDescription(/Not searchable/);
+        const make = page.getByRole('menuitem', { name: 'Make searchable: Reference shelf' });
+        await expect(make).toBeFocused();
+
+        await page.addScriptTag({
+          path: fileURLToPath(new URL('../node_modules/axe-core/axe.min.js', import.meta.url))
+        });
+        const result = await page.evaluate(async () => {
+          const found = await (window as any).axe.run(
+            { include: [['#cockpitTree'], ['.cockpit-tree-menu-host']] },
+            { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa'] } }
+          );
+          return {
+            violations: found.violations.map((v: any) => ({
+              id: v.id,
+              nodes: v.nodes.map((n: any) => n.target.join(' '))
+            })),
+            contrast: found.passes.find((r: any) => r.id === 'color-contrast')?.nodes.length || 0
+          };
+        });
+        expect(result.violations).toEqual([]);
+        expect(result.contrast).toBeGreaterThan(0);
+        // Not full-page: that resizes the window, and a resize closes the menu.
+        await page.screenshot({
+          path: info.outputPath(`folder-row-menu-${theme}-${viewport.label}.png`)
+        });
+
+        await page.keyboard.press('Escape');
+        await expect(menu).toHaveCount(0);
+        await expect(folder).toBeFocused();
+      } finally {
+        rmSync(outside, { recursive: true, force: true });
         await page.request.delete(`/api/workspaces/${ws.id}?confirm=true`);
       }
     });
