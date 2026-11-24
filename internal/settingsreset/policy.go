@@ -35,6 +35,13 @@ func ReadStartupPolicy(lease *resetstate.Lease) (StartupPolicy, error) {
 	if data == nil {
 		return StartupPolicy{}, nil
 	}
+	return decodeStartupPolicy(data)
+}
+
+// decodeStartupPolicy is the strict, canonical-bytes-only decoder behind
+// ReadStartupPolicy. It touches no file, so stored policy bytes can be checked
+// without a lease.
+func decodeStartupPolicy(data []byte) (StartupPolicy, error) {
 	var policy StartupPolicy
 	if err := json.Unmarshal(data, &policy); err != nil {
 		return StartupPolicy{}, ErrPolicyInvalid

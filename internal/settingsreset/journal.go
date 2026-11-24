@@ -223,9 +223,24 @@ func validateJournal(j *journal) error {
 			wantKinds[kind] = id
 		}
 	}
+	// The cancellation record belongs to a canceled receipt and to nothing else.
+	if op.State != StateCanceled && op.Cancellation != nil {
+		return ErrJournalInvalid
+	}
 	switch op.State {
 	case StatePreparing:
 		if !allPending || len(op.Blockers) != 0 {
+			return ErrJournalInvalid
+		}
+	case StateCanceled:
+		// Terminal and deliberately narrow: only the receipt shape that
+		// receiptProvesPreApply recognises can ever become canceled, so every
+		// category is still pending, no archive is involved, and the revision is
+		// exactly the retired block plus one.
+		c := op.Cancellation
+		if !allPending || len(op.Blockers) != 0 || j.Archive != nil || evidence.HQArchive != nil || op.HQArchive != nil ||
+			v.Intent != IntentStartFresh || c == nil ||
+			c.FromRevision != cancelRevision || c.PriorBlocker != "recovery_scope_changed" || op.Revision != cancelRevision+1 {
 			return ErrJournalInvalid
 		}
 	case StateAwaitingRestart:

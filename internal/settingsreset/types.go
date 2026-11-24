@@ -165,6 +165,10 @@ const (
 	StatePartialFailure  OperationState = "partial_failure"
 	StateBlocked         OperationState = "blocked"
 	StateInterrupted     OperationState = "interrupted"
+	// StateCanceled is terminal. It records that a staged reset was retired
+	// without applying any category. It is not completion: nothing was reset,
+	// nothing was restored, and no category result is claimed.
+	StateCanceled OperationState = "canceled"
 )
 
 type Outcome string
@@ -220,6 +224,22 @@ type Operation struct {
 	CreatedAt     time.Time        `json:"created_at"`
 	UpdatedAt     time.Time        `json:"updated_at"`
 	HQArchive     *HQArchiveResult `json:"hq_archive,omitempty"`
+	// Cancellation is present exactly on a canceled receipt and omitted
+	// otherwise, so every earlier receipt keeps its canonical bytes.
+	Cancellation *Cancellation `json:"cancellation,omitempty"`
+}
+
+// Cancellation says which blocked receipt was retired. It carries no path,
+// count, user-supplied text or claim about why the reset was blocked: host
+// observations can be stale by the time of the write, so none is stored. Safety
+// rests on the receipt and policy evidence alone.
+type Cancellation struct {
+	// FromRevision is the blocked receipt that was retired. Cancellation exists
+	// only for revision 3, the receipt recovery wrote straight from the staged
+	// one, before any category could have been applied.
+	FromRevision uint64 `json:"from_revision"`
+	// PriorBlocker is the blocker code the receipt carried when it was retired.
+	PriorBlocker string `json:"prior_blocker"`
 }
 
 // HQArchiveResult is independent of the database reset outcome. A verified

@@ -96,6 +96,12 @@ func RecoverBeforeStores(ctx context.Context, lease *resetstate.Lease, options R
 	switch j.Operation.State {
 	case StateCompleted:
 		return lease.AuthorizeRecoveredRuntime()
+	case StateCanceled:
+		// A strictly validated canceled receipt is terminal evidence that this
+		// operation applied nothing. Like a completed one it is retained, never
+		// re-run, and never re-checked against the (now irrelevant) reviewed
+		// scope; unlike a completed one it claims no category verified.
+		return lease.AuthorizeRecoveredRuntime()
 	case StateBlocked:
 		if j.Archive == nil || j.Operation.Blockers[0].Code != "hq_archive_recovery" {
 			return ErrRecoveryIncomplete

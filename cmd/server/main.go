@@ -131,14 +131,19 @@ func main() {
 	if supervisor != nil {
 		expected = os.Getenv(expectedResetEnv)
 	}
-	if expected != "" {
+	switch {
+	case expected != "" && os.Getenv(expectedStateEnv) == canceledHandoff:
+		// A recovery host canceled this reset; the replacement must find that
+		// exact operation durably canceled and applies nothing.
+		lease, err = settingsreset.BeforeStoresAfterCancel(context.Background(), dataDir, expected)
+	case expected != "":
 		lease, err = settingsreset.BeforeStoresForRestart(context.Background(), dataDir, expected)
-	} else {
+	default:
 		lease, err = startupBeforeStores(context.Background(), dataDir)
 	}
 	if err != nil {
 		if lease != nil && errors.Is(err, settingsreset.ErrRecoveryIncomplete) {
-			if recoveryErr := runResetRecoveryServer(lease, *port, *noBrowser || expected != "", listener); recoveryErr != nil {
+			if recoveryErr := runResetRecoveryServer(lease, *port, *noBrowser || expected != "", listener, supervisor); recoveryErr != nil {
 				log.Fatalf("Reset recovery host failed: %v", recoveryErr)
 			}
 			return
@@ -276,7 +281,12 @@ func serveStandalone(server *http.Server, listener net.Listener) error {
 	return server.ListenAndServe()
 }
 
-func runResetRecoveryServer(lease *resetstate.Lease, port int, noBrowser bool, listener net.Listener) error {
+// runResetRecoveryServer serves the read-only recovery page. When this process
+// is a managed child, supervisor lets a durably canceled reset reopen Ori once
+// automatically; a manual launch has none, and the page shows exact relaunch
+// steps instead. Nothing here starts the application against the installation:
+// the replacement is a new process the supervisor starts after this one exits.
+func runResetRecoveryServer(lease *resetstate.Lease, port int, noBrowser bool, listener net.Listener, supervisor *inheritedResetSupervisor) error {
 	if listener == nil {
 		if err := startupPortCheck(port); err != nil {
 			return err
@@ -284,7 +294,12 @@ func runResetRecoveryServer(lease *resetstate.Lease, port int, noBrowser bool, l
 	}
 	address := fmt.Sprintf("127.0.0.1:%d", port)
 	url := fmt.Sprintf("http://localhost:%d/", port)
-	httpServer := settingsreset.RecoveryHTTPServer(lease, address)
+	var handoff *settingsreset.RestartHandoff
+	canceled := make(chan string, 1)
+	if supervisor != nil {
+		handoff = settingsreset.NewRestartHandoff(supervisor.ready, func(id string) { canceled <- id })
+	}
+	httpServer := settingsreset.RecoveryHTTPServerWith(lease, address, handoff)
 	serveErr := make(chan error, 1)
 	go func() {
 		err := serveStandalone(httpServer, listener)
@@ -304,14 +319,35 @@ func runResetRecoveryServer(lease *resetstate.Lease, port int, noBrowser bool, l
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(quit)
+	var canceledID string
 	select {
 	case err := <-serveErr:
 		return err
 	case <-quit:
+	case canceledID = <-canceled:
+		// The canceled receipt is already durable and acknowledged. Give the
+		// tab time to read the reply, then stop serving before asking for the
+		// one replacement; an explicit quit takes precedence.
+		select {
+		case <-time.After(restartReplyGrace):
+		case <-quit:
+			canceledID = ""
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return httpServer.Shutdown(ctx)
+	if err := httpServer.Shutdown(ctx); err != nil {
+		if canceledID != "" {
+			return fmt.Errorf("could not finish managed restart: %w; relaunch Ori manually", err)
+		}
+		return err
+	}
+	if canceledID != "" {
+		if err := supervisor.releaseCanceled(canceledID); err != nil {
+			return fmt.Errorf("managed restart handoff failed: %w; relaunch Ori manually", err)
+		}
+	}
+	return nil
 }
 
 // dataDirectoryInputs contains the process facts used to choose the one runtime

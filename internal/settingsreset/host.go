@@ -12,7 +12,7 @@ import (
 // consumer, migration, importer, listener, or background service is created.
 // Unsupported hosts retain resetstate's clean-install-only behavior.
 func BeforeStores(ctx context.Context, dataDir string) (*resetstate.Lease, error) {
-	return beforeStores(ctx, dataDir, "")
+	return beforeStores(ctx, dataDir, "", false)
 }
 
 // BeforeStoresForRestart also checks that this exact operation still awaits a
@@ -22,10 +22,22 @@ func BeforeStoresForRestart(ctx context.Context, dataDir, expectedOperation stri
 	if !ValidOperationID(expectedOperation) || !resetstate.Supported() {
 		return nil, ErrLifecycleUnavailable
 	}
-	return beforeStores(ctx, dataDir, expectedOperation)
+	return beforeStores(ctx, dataDir, expectedOperation, false)
 }
 
-func beforeStores(ctx context.Context, dataDir, expectedOperation string) (*resetstate.Lease, error) {
+// BeforeStoresAfterCancel is the restart counterpart for a reset a recovery
+// host canceled. It requires that exact operation to be a durably canceled,
+// strictly validated receipt, so a stale launcher can neither apply a different
+// receipt nor open a clean installation by mistake. It applies nothing: a
+// canceled receipt is recognised and retained, exactly like a completed one.
+func BeforeStoresAfterCancel(ctx context.Context, dataDir, expectedOperation string) (*resetstate.Lease, error) {
+	if !ValidOperationID(expectedOperation) || !resetstate.Supported() {
+		return nil, ErrLifecycleUnavailable
+	}
+	return beforeStores(ctx, dataDir, expectedOperation, true)
+}
+
+func beforeStores(ctx context.Context, dataDir, expectedOperation string, afterCancel bool) (*resetstate.Lease, error) {
 	if !resetstate.Supported() {
 		return resetstate.BeforeStores(dataDir)
 	}
@@ -41,8 +53,12 @@ func beforeStores(ctx context.Context, dataDir, expectedOperation string) (*rese
 	}()
 	if expectedOperation != "" {
 		j, err := NewCoordinator(lease, nil, nil).load()
-		if err != nil || j == nil || j.Operation.ID != expectedOperation ||
-			j.Operation.State != StateAwaitingRestart || j.AcceptedBy == lease.Identity() {
+		switch {
+		case err != nil || j == nil || j.Operation.ID != expectedOperation:
+			return nil, ErrOperationNotFound
+		case afterCancel && (j.Operation.State != StateCanceled || j.Operation.Cancellation == nil):
+			return nil, ErrOperationNotFound
+		case !afterCancel && (j.Operation.State != StateAwaitingRestart || j.AcceptedBy == lease.Identity()):
 			return nil, ErrOperationNotFound
 		}
 	}

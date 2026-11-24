@@ -53,7 +53,9 @@ func (h *ResetHandler) HandleReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := http.StatusAccepted
-	if op.State == settingsreset.StateBlocked || op.State == settingsreset.StateInterrupted {
+	// A replay of a request whose reset was canceled is a conflict, never an
+	// acceptance: the old plan is retired and will not run.
+	if op.State == settingsreset.StateBlocked || op.State == settingsreset.StateInterrupted || op.State == settingsreset.StateCanceled {
 		status = http.StatusConflict
 	}
 	op.Restart.Managed = op.State == settingsreset.StateAwaitingRestart && h.restart.Available()
@@ -158,7 +160,8 @@ func (h *ResetHandler) GetOperation(w http.ResponseWriter, r *http.Request) {
 
 func operationResponse(op settingsreset.Operation) ResetResponse {
 	response := ResetResponse{Success: op.VerifiedComplete(), ResetItems: []string{}, Operation: &op}
-	response.RequiresRestart = !response.Success && op.Restart.Mode == settingsreset.RestartProcessRelaunch
+	// A canceled receipt is terminal: nothing is pending, so nothing is awaited.
+	response.RequiresRestart = !response.Success && op.State != settingsreset.StateCanceled && op.Restart.Mode == settingsreset.RestartProcessRelaunch
 	for _, blocker := range op.Blockers {
 		response.Errors = append(response.Errors, blocker.Message)
 	}

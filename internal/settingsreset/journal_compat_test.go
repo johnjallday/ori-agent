@@ -188,7 +188,27 @@ func compatCases() []compatCase {
 			}}
 			return j
 		}, StateBlocked},
+		// The incident shape: Start Fresh staged (revision 2), then blocked by the
+		// first recovery launch (revision 3) because its pre-start scope check
+		// failed. Every category is still pending. The blocker code is shared by
+		// many scope checks, so these bytes alone never say what changed.
+		{"start-fresh-blocked-recovery-scope-changed", func() *journal {
+			return compatRecoveryScopeChangedJournal(fresh, 3)
+		}, StateBlocked},
 	}
+}
+
+// compatRecoveryScopeChangedJournal builds the receipt blockRecovery wrote for
+// "recovery_scope_changed", with its message text frozen as shipped so a later
+// copy edit cannot silently change what a stored receipt says.
+func compatRecoveryScopeChangedJournal(selected []CategoryID, revision uint64) *journal {
+	j := compatJournal(IntentStartFresh, selected, StateBlocked, OutcomePending, revision)
+	j.Operation.Blockers = []Blocker{{
+		Code:     "recovery_scope_changed",
+		Message:  "Reset scope changed before pre-start application; no pending category was applied.",
+		Recovery: "Preserve .ori-reset and this installation. Start Ori to view the durable result; review a new operation only after resolving the blocker.",
+	}}
+	return j
 }
 
 func compatGoldenPath(name string) string {
