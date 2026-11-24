@@ -76,19 +76,27 @@ export function failedFolderSearch() {
  * The list as read (`readSources` in home-files-search.js), keyed by the link
  * each source is connected to. A source with no workspace (a search-only
  * folder) has no row here.
+ *
+ * `verify` holds the keys of links the host has said need verifying before
+ * they can be searched (an older link whose folder identity was not recorded).
+ * The listing cannot tell; a Make searchable review does, and the row keeps
+ * saying so for the rest of the visit.
  */
-export function folderSearchFromSources(sources) {
+export function folderSearchFromSources(sources, { verify = null } = {}) {
   const byLink = new Map();
   (Array.isArray(sources) ? sources : []).forEach(source => {
     if (!source || !source.id || !source.workspaceId || !source.link) return;
     byLink.set(linkKey(source.workspaceId, source.link), source);
   });
-  return { status: SEARCH_STATUS_READY, byLink };
+  return { status: SEARCH_STATUS_READY, byLink, verify: new Set(verify || []) };
 }
 
 /** Whether two answers would draw the same marks (so a redraw can be skipped). */
 export function sameFolderSearch(a, b) {
   if (!a || !b || a.status !== b.status || a.byLink.size !== b.byLink.size) return false;
+  const verifyA = a.verify || new Set();
+  const verifyB = b.verify || new Set();
+  if (verifyA.size !== verifyB.size || [...verifyA].some(key => !verifyB.has(key))) return false;
   for (const [key, source] of a.byLink) {
     const other = b.byLink.get(key);
     if (
@@ -119,8 +127,12 @@ export function folderSearchState(row, folderSearch) {
   if (status === SEARCH_STATUS_FAILED) return stateOf(FOLDER_STATUS_UNKNOWN, null);
   if (status !== SEARCH_STATUS_READY) return null;
   const dirId = row.meta && row.meta.dirId;
-  const source = dirId ? folderSearch.byLink.get(linkKey(row.workspaceId, dirId)) : undefined;
-  if (!source) return stateOf(FOLDER_NOT_SEARCHABLE, null);
+  const key = linkKey(row.workspaceId, dirId);
+  const source = dirId ? folderSearch.byLink.get(key) : undefined;
+  if (!source) {
+    const verify = !!dirId && !!folderSearch.verify && folderSearch.verify.has(key);
+    return stateOf(verify ? FOLDER_VERIFY : FOLDER_NOT_SEARCHABLE, null);
+  }
   return stateOf(ROW_STATE_OF[source.state] || FOLDER_STATUS_UNKNOWN, source);
 }
 
@@ -132,6 +144,66 @@ function stateOf(key, source) {
 /** Whether "Search in this folder" can find anything in it right now. */
 export function canSearchFolder(state) {
   return !!(state && state.source && SEARCHABLE_INDEX_STATES.has(state.source.state));
+}
+
+/** What a linked folder's menu can do about its search (requirement 33). */
+export const FOLDER_ACTION_SEARCH_IN = 'search-in';
+export const FOLDER_ACTION_MAKE_SEARCHABLE = 'make-searchable';
+export const FOLDER_ACTION_REFRESH = 'refresh-index';
+export const FOLDER_ACTION_REMOVE = 'remove-from-search';
+
+/**
+ * The actions that apply to a row's state, in menu order; none for a row with
+ * no state or an unknown one. A folder being indexed cannot be refreshed (the
+ * index refuses a second scan), and a folder that is unavailable has nothing
+ * to search but can be refreshed once it is back, or removed.
+ */
+export function folderActions(state) {
+  if (!state) return [];
+  const actions = [];
+  if (canSearchFolder(state)) actions.push(FOLDER_ACTION_SEARCH_IN);
+  switch (state.key) {
+    case FOLDER_NOT_SEARCHABLE:
+    case FOLDER_VERIFY:
+      actions.push(FOLDER_ACTION_MAKE_SEARCHABLE);
+      break;
+    case FOLDER_SEARCHABLE:
+    case FOLDER_PARTIAL:
+    case FOLDER_UNAVAILABLE:
+      actions.push(FOLDER_ACTION_REFRESH, FOLDER_ACTION_REMOVE);
+      break;
+    case FOLDER_INDEXING:
+      actions.push(FOLDER_ACTION_REMOVE);
+      break;
+    default:
+      break;
+  }
+  return actions;
+}
+
+/** Whether a source is still being indexed, so its row is asked again soon. */
+export function isIndexing(source) {
+  return !!source && (source.state === 'queued' || source.state === 'mapping');
+}
+
+/**
+ * What is said once a folder this page started indexing has finished:
+ * searchable, partly indexed and why, or unavailable and what to do.
+ */
+export function indexOutcome(name, source, locale) {
+  const reason = String((source && source.reason) || '').trim();
+  const count = filenameCount(source && source.count, locale);
+  switch (source && source.state) {
+    case 'ready':
+      return `${name} is searchable: ${count}.`;
+    case 'partial':
+    case 'interrupted':
+      return `${name} is partly indexed: ${count}.${reason ? ` ${reason}` : ''}`;
+    case 'unavailable':
+      return `${name} is unavailable.${reason ? ` ${reason}` : ''}`;
+    default:
+      return '';
+  }
 }
 
 /** "1 filename", "1,284 filenames". */

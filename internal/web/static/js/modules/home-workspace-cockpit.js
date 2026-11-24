@@ -2041,10 +2041,13 @@ import {
 import {
   MENU_FILE_OPEN,
   MENU_FILE_REVEAL,
+  MENU_MAKE_SEARCHABLE,
   MENU_NEW_NOTE,
   MENU_NEW_TICKET,
   MENU_OPEN_IN_WORKSPACE,
   MENU_REFRESH,
+  MENU_REFRESH_INDEX,
+  MENU_REMOVE_FROM_SEARCH,
   MENU_SEARCH_IN,
   MENU_SHOW_OUTPUTS,
   MENU_UPLOAD
@@ -2088,8 +2091,17 @@ import {
   emptyFolderSearch,
   failedFolderSearch,
   folderSearchFromSources,
+  folderSearchState,
+  indexOutcome,
+  isIndexing,
+  linkKey,
   sameFolderSearch
 } from './home-folder-search.js';
+import {
+  askFolderConsent,
+  askRemoveFromSearch,
+  showFolderNotice
+} from './home-folder-search-dialogs.js';
 import {
   applyTreeState,
   dropMissingRows,
@@ -2290,6 +2302,8 @@ import {
     // Read once per Files visit, on the Mac that runs Ori only.
     searchSources: [],
     folderSearch: emptyFolderSearch(),
+    // Links the host said need verifying before they can be searched.
+    folderVerify: new Set(),
     // The one-column layout (FR4): whether the Tree view is too narrow for two
     // columns, and whether the pane has taken the tree's place.
     treeNarrow: false,
@@ -3535,11 +3549,15 @@ import {
   // Cleared on the way into Files so each visit reads the list once.
   let searchSourcesRequested = false;
   function useSearchSources(sources) {
-    const next = folderSearchFromSources(sources);
+    const next = folderSearchFromSources(sources, { verify: state.folderVerify });
     state.searchSources = sources;
-    if (sameFolderSearch(state.folderSearch, next)) return;
-    state.folderSearch = next;
-    mountTreeView();
+    if (!sameFolderSearch(state.folderSearch, next)) {
+      state.folderSearch = next;
+      mountTreeView();
+    }
+    // While a folder is being indexed the list is asked again, and a folder
+    // made searchable or refreshed here is followed to its result.
+    followIndexing();
   }
 
   async function refreshSearchSources() {
@@ -3554,6 +3572,184 @@ import {
       state.folderSearch = failedFolderSearch();
       mountTreeView();
     }
+  }
+
+  // ---- A linked folder's search, from its row (PR 2, requirements 33-37) ----
+  //
+  // Make searchable, Refresh index and Remove from search. The page names the
+  // row's workspace and link and nothing else: the host resolves the folder
+  // from the workspace's own record and observes it (filesearch ReviewLink).
+  // None of it gives an agent access, hires anyone, starts Filing or sends
+  // anything to a model: it is the local filename index and nothing more.
+
+  const FOLDER_POLL_MS = 750;
+  let folderPollTimer = 0;
+  // Folders this page started indexing (source id → the row's name), followed
+  // until the index says how it went.
+  const followedFolders = new Map();
+
+  // The channel the other Ori pages (the workspace page, the first-run page,
+  // another Files tab) use to say the searchable folders changed. A channel
+  // never hears its own messages, so this page does not answer itself.
+  const fileSearchChannel =
+    localIndex && typeof BroadcastChannel === 'function'
+      ? new BroadcastChannel('ori-file-search-v1')
+      : null;
+  fileSearchChannel?.addEventListener('message', () => {
+    if (state.view === VIEW_TREE) void refreshSearchSources();
+    else searchSourcesRequested = false;
+  });
+
+  function folderSearchChanged() {
+    fileSearchChannel?.postMessage('changed');
+  }
+
+  function followIndexing() {
+    window.clearTimeout(folderPollTimer);
+    followedFolders.forEach((name, id) => {
+      const source = state.searchSources.find(entry => entry.id === id);
+      if (!source) {
+        followedFolders.delete(id); // removed meanwhile
+        return;
+      }
+      if (isIndexing(source)) return;
+      followedFolders.delete(id);
+      const said = indexOutcome(name, source);
+      if (said) announce(said);
+    });
+    if (!localIndex || state.view !== VIEW_TREE || !state.searchSources.some(isIndexing)) return;
+    folderPollTimer = window.setTimeout(() => void refreshSearchSources(), FOLDER_POLL_MS);
+  }
+
+  function followFolder(row) {
+    const now = folderSearchState(row, state.folderSearch);
+    if (now && now.source) followedFolders.set(now.source.id, row.name);
+  }
+
+  /** Put focus back on a row after a dialog, finding it again in the live tree. */
+  function focusBack(row) {
+    return () => {
+      state.focusId = row.id;
+      if (treeHandle) treeHandle.focusRow(row.id);
+    };
+  }
+
+  async function makeFolderSearchable(row) {
+    const origin = focusBack(row);
+    const workspaceId = row.workspaceId;
+    const link = String((row.meta && row.meta.dirId) || '');
+    const key = linkKey(workspaceId, link);
+    let review;
+    try {
+      review = await filenameIndex('review-link', { workspace: workspaceId, link });
+    } catch (err) {
+      await refreshSearchSources();
+      await showFolderNotice({
+        title: `${row.name} can’t be made searchable`,
+        text: err.message,
+        returnFocus: origin
+      });
+      return;
+    }
+    const matches = Array.isArray(review && review.matches) ? review.matches : [];
+    const own = matches.find(m => m.id === workspaceId && m.link === link);
+    const elsewhere = matches.find(m => m.connected && m !== own);
+    const label = String((review && review.label) || row.name);
+    if (own && own.connected) {
+      // Another tab got there first.
+      await refreshSearchSources();
+      announce(`${row.name} is already searchable.`);
+      return;
+    }
+    if (elsewhere) {
+      await showFolderNotice({
+        title: `${label} is already searchable`,
+        text: `Files searches it through ${elsewhere.name}. To search it through this workspace instead, remove it from search there first.`,
+        returnFocus: origin
+      });
+      return;
+    }
+    const verify = !!(own && own.verify);
+    if (verify && !state.folderVerify.has(key)) {
+      // The row says so from now on, whether or not the step is taken now.
+      state.folderVerify.add(key);
+      useSearchSources(state.searchSources);
+    }
+    const answer = await askFolderConsent({ label, verify, returnFocus: origin });
+    // Cancel: nothing was written. The review the host holds simply expires.
+    if (!answer.allowed) return;
+    try {
+      await filenameIndex('connect', {
+        intent: review.id,
+        workspace: workspaceId,
+        link,
+        verify_current_link: answer.verified
+      });
+    } catch (err) {
+      // A confirmation from another tab may have won; the folder's state now decides.
+      await refreshSearchSources();
+      const now = folderSearchState(row, state.folderSearch);
+      if (!now || !now.source) {
+        reportTreeFailure(`Couldn't make ${row.name} searchable: ${err.message}`);
+        return;
+      }
+    }
+    state.folderVerify.delete(key);
+    folderSearchChanged();
+    await refreshSearchSources();
+    followFolder(row);
+    announce(`Indexing ${row.name}. Only filenames, locations and dates are indexed.`);
+    followIndexing();
+  }
+
+  async function refreshFolderIndex(row) {
+    const current = folderSearchState(row, state.folderSearch);
+    const source = current && current.source;
+    if (!source) return;
+    try {
+      await filenameIndex('refresh', { id: source.id, generation: source.generation });
+    } catch (err) {
+      await refreshSearchSources();
+      reportTreeFailure(
+        err && err.status === 503
+          ? `${row.name} can’t be indexed right now. If the folder was moved or renamed, put it back and refresh again.`
+          : `Couldn't refresh ${row.name}: ${err.message}`
+      );
+      return;
+    }
+    followedFolders.set(source.id, row.name);
+    folderSearchChanged();
+    announce(`Indexing ${row.name}.`);
+    await refreshSearchSources();
+  }
+
+  async function removeFolderFromSearch(row) {
+    const origin = focusBack(row);
+    const current = folderSearchState(row, state.folderSearch);
+    const source = current && current.source;
+    if (!source) return;
+    if (!(await askRemoveFromSearch({ label: row.name, returnFocus: origin }))) return;
+    try {
+      await filenameIndex('remove', { id: source.id });
+    } catch (err) {
+      await refreshSearchSources();
+      reportTreeFailure(`Couldn't remove ${row.name} from search: ${err.message}`);
+      return;
+    }
+    followedFolders.delete(source.id);
+    folderSearchChanged();
+    // A search that looked only in this folder now looks everywhere, and a
+    // search on screen is asked again so that its files leave the results.
+    const scope = state.treeSearchScope;
+    if (scope && scope.kind === 'linked' && scope.sourceId === source.id) {
+      state.treeSearchScope = null;
+      syncSearchScope();
+    }
+    filesSearch.rescope();
+    await refreshSearchSources();
+    announce(
+      `${row.name} is no longer searchable. Its workspace, link, notes, tickets and files are unchanged.`
+    );
   }
 
   /**
@@ -3901,7 +4097,10 @@ import {
     if (action === MENU_SEARCH_IN) {
       const scope = scopeFromRow(row);
       if (scope) setSearchScope(scope);
-    } else if (action === MENU_NEW_NOTE) startTreeDraft(workspaceId, 'notes', 'note');
+    } else if (action === MENU_MAKE_SEARCHABLE) void makeFolderSearchable(row);
+    else if (action === MENU_REFRESH_INDEX) void refreshFolderIndex(row);
+    else if (action === MENU_REMOVE_FROM_SEARCH) void removeFolderFromSearch(row);
+    else if (action === MENU_NEW_NOTE) startTreeDraft(workspaceId, 'notes', 'note');
     else if (action === MENU_NEW_TICKET) startTreeDraft(workspaceId, 'backlog', 'ticket');
     else if (action === MENU_UPLOAD) {
       pickFileToUpload(workspaceId, row.kind === 'folder' ? String(row.meta.path || '') : '');

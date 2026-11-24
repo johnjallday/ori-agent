@@ -21,6 +21,9 @@ var (
 	ErrChoice      = errors.New("this choice expired; choose the folder again")
 	ErrMissing     = errors.New("this search source has changed or was removed")
 	ErrRequest     = errors.New("invalid search request")
+	// ErrLink: the folder a workspace link names is not there now, or is not
+	// the folder the link was made for. Reconnecting or relinking it is the fix.
+	ErrLink = errors.New("this folder is missing or is not the one the workspace links to")
 )
 
 type Policy struct {

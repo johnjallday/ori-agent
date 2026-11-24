@@ -120,12 +120,22 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			out, e = h.Service.ResumeReview(r.Context(), owner, in.Intent)
 		}
-	case "review-source", "connect":
+	case "review-source", "review-link", "connect":
 		if h.WorkspaceReady == nil || !h.WorkspaceReady() {
 			http.Error(w, "Complete workspace setup first.", http.StatusConflict)
 			return
 		}
-		if op == "review-source" {
+		if op == "review-link" {
+			// Make searchable from a linked folder's row: the two ids only, never a path.
+			var in struct {
+				Workspace string `json:"workspace"`
+				Link      string `json:"link"`
+			}
+			if !decode(&in) {
+				return
+			}
+			out, e = h.Service.ReviewLink(r.Context(), owner, in.Workspace, in.Link)
+		} else if op == "review-source" {
 			var in struct {
 				ID string `json:"id"`
 			}

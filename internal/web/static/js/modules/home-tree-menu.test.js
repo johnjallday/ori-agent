@@ -16,7 +16,10 @@ import {
   MENU_OPEN,
   MENU_OPEN_IN_WORKSPACE,
   MENU_OPEN_PAGE,
+  MENU_MAKE_SEARCHABLE,
   MENU_REFRESH,
+  MENU_REFRESH_INDEX,
+  MENU_REMOVE_FROM_SEARCH,
   MENU_SEARCH_IN,
   MENU_SHOW_OUTPUTS,
   MENU_UPLOAD,
@@ -144,28 +147,68 @@ const folderSearch = (...sources) =>
   );
 const statusOptions = { locale: 'en-GB', timeZone: 'UTC', now: Date.UTC(2026, 10, 24) };
 
-test('a linked folder offers Search in this folder only while it is searchable', () => {
-  const row = { kind: 'linked', workspaceId: 'ws1', meta: { dirId: 'dir1' } };
+test("a linked folder's menu holds only the search actions its state allows", () => {
+  const row = {
+    kind: 'linked',
+    name: 'Album masters',
+    workspaceId: 'ws1',
+    meta: { dirId: 'dir1' }
+  };
+  const actions = folderSearchList =>
+    choosableEntries(menuItemsFor(row, { folderSearch: folderSearchList })).map(
+      entry => entry.action
+    );
+  // Nothing to say away from the local Mac, or when the list could not be read.
   assert.deepEqual(menuItemsFor(row), []);
   assert.deepEqual(menuItemsFor(row, {}), []);
-  assert.deepEqual(menuItemsFor(row, { folderSearch: folderSearch() }), []);
-  assert.deepEqual(menuItemsFor(row, { folderSearch: folderSearch(['ws1', 'other']) }), []);
-  assert.deepEqual(menuItemsFor(row, { folderSearch: folderSearch(['ws2', 'dir1']) }), []);
   assert.deepEqual(menuItemsFor(row, { folderSearch: failedFolderSearch() }), []);
-  assert.deepEqual(
-    menuItemsFor(row, { folderSearch: folderSearch(['ws1', 'dir1', 'unavailable']) }),
-    []
+  // Not searchable (no source for this workspace AND link).
+  for (const list of [
+    folderSearch(),
+    folderSearch(['ws1', 'other']),
+    folderSearch(['ws2', 'dir1'])
+  ]) {
+    assert.deepEqual(actions(list), [MENU_MAKE_SEARCHABLE]);
+  }
+  assert.deepEqual(actions(folderSearch(['ws1', 'dir1'])), [
+    MENU_SEARCH_IN,
+    MENU_REFRESH_INDEX,
+    MENU_REMOVE_FROM_SEARCH
+  ]);
+  assert.deepEqual(actions(folderSearch(['ws1', 'dir1', 'unavailable'])), [
+    MENU_REFRESH_INDEX,
+    MENU_REMOVE_FROM_SEARCH
+  ]);
+  assert.deepEqual(actions(folderSearch(['ws1', 'dir1', 'mapping'])), [
+    MENU_SEARCH_IN,
+    MENU_REMOVE_FROM_SEARCH
+  ]);
+  const searchable = choosableEntries(
+    menuItemsFor(row, { folderSearch: folderSearch(['ws1', 'dir1']), statusOptions })
   );
-  const searchable = menuItemsFor(row, {
-    folderSearch: folderSearch(['ws1', 'dir1']),
-    statusOptions
-  });
   assert.deepEqual(
-    choosableEntries(searchable).map(entry => entry.action),
-    [MENU_SEARCH_IN]
+    searchable.map(entry => entry.label),
+    ['Search in this folder', 'Refresh index', 'Remove from search']
   );
-  assert.equal(choosableEntries(searchable)[0].label, 'Search in this folder');
+  // Spoken labels start with the visible words and name the folder.
+  assert.deepEqual(
+    searchable.map(entry => entry.ariaLabel),
+    [
+      'Search in this folder: Album masters',
+      'Refresh index: Album masters',
+      'Remove from search: Album masters'
+    ]
+  );
+  assert.deepEqual(
+    searchable.map(entry => !!entry.danger),
+    [false, false, true]
+  );
+  assert.match(
+    renderMenuHTML(searchable),
+    /data-tree-menu-action="remove-from-search" aria-label="Remove from search: Album masters">Remove from search</
+  );
   assert.equal(rowHasMenu(row), false);
+  assert.equal(rowHasMenu(row, { folderSearch: folderSearch() }), true);
   assert.equal(rowHasMenu(row, { folderSearch: folderSearch(['ws1', 'dir1']) }), true);
   // The folders inside a linked folder have no menu of their own.
   assert.deepEqual(
@@ -199,7 +242,7 @@ test("a linked folder's menu starts with its status: state, count, last indexed"
     /Searchable<\/span><span class="cockpit-tree-menu-status__detail">1,284 filenames · indexed 22 Nov, 09:14</
   );
   assert.ok(html.indexOf('data-tree-menu-status') < html.indexOf('role="menu"'));
-  assert.equal((html.match(/role="menuitem"/g) || []).length, 1);
+  assert.equal((html.match(/role="menuitem"/g) || []).length, 3);
 });
 
 test('a partly indexed folder says why in its status', () => {

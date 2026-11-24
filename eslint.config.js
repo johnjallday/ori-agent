@@ -252,6 +252,7 @@ export default defineConfig([
       'internal/web/static/js/modules/home-plugin-updates.js',
       'internal/web/static/js/modules/home-files-search.js',
       'internal/web/static/js/modules/home-folder-search.js',
+      'internal/web/static/js/modules/home-folder-search-dialogs.js',
       'internal/web/static/js/modules/home-tree-icons.js',
       'internal/web/static/js/modules/home-tree-menu.js',
       'internal/web/static/js/modules/home-tree-pane.js',

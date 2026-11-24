@@ -13,7 +13,15 @@
 // shares none of the Map's menu contents.
 
 import { escapeHtml } from './home-workspace-cockpit.js';
-import { canSearchFolder, folderSearchState, folderStatusLines } from './home-folder-search.js';
+import {
+  FOLDER_ACTION_MAKE_SEARCHABLE,
+  FOLDER_ACTION_REFRESH,
+  FOLDER_ACTION_REMOVE,
+  FOLDER_ACTION_SEARCH_IN,
+  folderActions,
+  folderSearchState,
+  folderStatusLines
+} from './home-folder-search.js';
 
 export const MENU_NEW_NOTE = 'new-note';
 export const MENU_NEW_TICKET = 'new-ticket';
@@ -33,7 +41,21 @@ export const MENU_FILE_REVEAL = 'file-reveal';
 // Show the workspace's outputs/ folder in the file manager.
 export const MENU_SHOW_OUTPUTS = 'show-outputs';
 // Make Files' search look only inside this workspace, group or folder.
-export const MENU_SEARCH_IN = 'search-in';
+export const MENU_SEARCH_IN = FOLDER_ACTION_SEARCH_IN;
+// A linked folder's search: ask consent and index it, index it again, or
+// clear its index (home-folder-search.js).
+export const MENU_MAKE_SEARCHABLE = FOLDER_ACTION_MAKE_SEARCHABLE;
+export const MENU_REFRESH_INDEX = FOLDER_ACTION_REFRESH;
+export const MENU_REMOVE_FROM_SEARCH = FOLDER_ACTION_REMOVE;
+
+// A linked folder's menu items: the visible words, and what a screen reader
+// hears, which starts with those words and adds the folder's name.
+const FOLDER_ITEMS = {
+  [FOLDER_ACTION_SEARCH_IN]: { label: 'Search in this folder' },
+  [FOLDER_ACTION_MAKE_SEARCHABLE]: { label: 'Make searchable' },
+  [FOLDER_ACTION_REFRESH]: { label: 'Refresh index' },
+  [FOLDER_ACTION_REMOVE]: { label: 'Remove from search', danger: true }
+};
 
 const item = (action, label, extra) => ({ action, label, ...extra });
 const DIVIDER = { divider: true };
@@ -102,10 +124,18 @@ export function menuItemsFor(row, context = {}) {
   if (kind === 'outputFolder') return [item(MENU_SEARCH_IN, 'Search in this folder')];
   if (kind === 'linked') {
     const state = folderSearchState(row, context && context.folderSearch);
-    if (!canSearchFolder(state)) return [];
+    const actions = folderActions(state);
+    if (actions.length === 0) return [];
+    const name = String(row.name || 'this folder');
     return [
       statusEntry(state, context && context.statusOptions),
-      item(MENU_SEARCH_IN, 'Search in this folder')
+      ...actions.map(action => {
+        const entry = FOLDER_ITEMS[action];
+        return item(action, entry.label, {
+          ariaLabel: `${entry.label}: ${name}`,
+          ...(entry.danger ? { danger: true } : {})
+        });
+      })
     ];
   }
   if (kind === 'note' || kind === 'ticket' || kind === 'agent' || kind === 'chat') {

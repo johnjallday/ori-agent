@@ -4,6 +4,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  FOLDER_ACTION_MAKE_SEARCHABLE,
+  FOLDER_ACTION_REFRESH,
+  FOLDER_ACTION_REMOVE,
+  FOLDER_ACTION_SEARCH_IN,
+  FOLDER_VERIFY,
+  folderActions,
+  indexOutcome,
+  isIndexing,
+  linkKey,
   FOLDER_INDEXING,
   FOLDER_NOT_SEARCHABLE,
   FOLDER_PARTIAL,
@@ -237,6 +246,79 @@ test('an answer that would draw the same marks is the same; a count change is no
   assert.equal(sameFolderSearch(one, partial), false);
   assert.equal(sameFolderSearch(one, failedFolderSearch()), false);
   assert.equal(sameFolderSearch(failedFolderSearch(), failedFolderSearch()), true);
+});
+
+test('each state offers only the actions that apply to it (requirement 33)', () => {
+  const actions = serverState =>
+    folderActions(
+      folderSearchState(
+        linkedRow('ws1', 'dir1'),
+        index(apiSource('s1', serverState, connected('ws1', 'dir1')))
+      )
+    );
+  assert.deepEqual(actions('ready'), [
+    FOLDER_ACTION_SEARCH_IN,
+    FOLDER_ACTION_REFRESH,
+    FOLDER_ACTION_REMOVE
+  ]);
+  assert.deepEqual(actions('partial'), [
+    FOLDER_ACTION_SEARCH_IN,
+    FOLDER_ACTION_REFRESH,
+    FOLDER_ACTION_REMOVE
+  ]);
+  assert.deepEqual(actions('interrupted'), [
+    FOLDER_ACTION_SEARCH_IN,
+    FOLDER_ACTION_REFRESH,
+    FOLDER_ACTION_REMOVE
+  ]);
+  // Being indexed: no second scan; queued has nothing to search yet.
+  assert.deepEqual(actions('mapping'), [FOLDER_ACTION_SEARCH_IN, FOLDER_ACTION_REMOVE]);
+  assert.deepEqual(actions('queued'), [FOLDER_ACTION_REMOVE]);
+  assert.deepEqual(actions('unavailable'), [FOLDER_ACTION_REFRESH, FOLDER_ACTION_REMOVE]);
+  assert.deepEqual(folderActions(folderSearchState(linkedRow('ws1', 'dir1'), index())), [
+    FOLDER_ACTION_MAKE_SEARCHABLE
+  ]);
+  assert.deepEqual(
+    folderActions(folderSearchState(linkedRow('ws1', 'dir1'), failedFolderSearch())),
+    []
+  );
+  assert.deepEqual(folderActions(null), []);
+});
+
+test('a link the host said needs verifying reads "Needs verifying" until it is searchable', () => {
+  const pending = folderSearchFromSources([], { verify: [linkKey('ws1', 'dir1')] });
+  const state = folderSearchState(linkedRow('ws1', 'dir1'), pending);
+  assert.equal(state.key, FOLDER_VERIFY);
+  assert.equal(state.label, 'Needs verifying');
+  assert.deepEqual(folderActions(state), [FOLDER_ACTION_MAKE_SEARCHABLE]);
+  // Another link of the same workspace is not affected.
+  assert.equal(folderSearchState(linkedRow('ws1', 'dir2'), pending).key, FOLDER_NOT_SEARCHABLE);
+  // Once the folder is searchable through that link, the source wins.
+  const done = folderSearchFromSources(
+    readSources([apiSource('s1', 'ready', connected('ws1', 'dir1'))]),
+    { verify: [linkKey('ws1', 'dir1')] }
+  );
+  assert.equal(folderSearchState(linkedRow('ws1', 'dir1'), done).key, FOLDER_SEARCHABLE);
+  assert.equal(sameFolderSearch(pending, folderSearchFromSources([])), false);
+});
+
+test('what is said when a followed folder finishes indexing', () => {
+  const said = (state, extra = {}) =>
+    indexOutcome('Album masters', { state, count: 1284, reason: '', ...extra }, 'en-GB');
+  assert.equal(said('ready'), 'Album masters is searchable: 1,284 filenames.');
+  assert.equal(
+    said('partial', { reason: 'Not every entry fit within the search limits.' }),
+    'Album masters is partly indexed: 1,284 filenames. Not every entry fit within the search limits.'
+  );
+  assert.equal(
+    said('unavailable', { count: 0, reason: 'Cannot read this folder.' }),
+    'Album masters is unavailable. Cannot read this folder.'
+  );
+  assert.equal(said('mapping'), '');
+  assert.equal(isIndexing({ state: 'queued' }), true);
+  assert.equal(isIndexing({ state: 'mapping' }), true);
+  assert.equal(isIndexing({ state: 'ready' }), false);
+  assert.equal(isIndexing(null), false);
 });
 
 test('readSources keeps the reason, the count and when the folder was indexed', () => {

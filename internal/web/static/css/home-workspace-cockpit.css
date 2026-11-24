@@ -1845,6 +1845,14 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   }
 }
 
+/* Remove from search asks first (home-folder-search-dialogs.js, in the Explore
+   card's look); its confirming button reads as the one that takes away. */
+.folder-search-dialog .explore-card__actions .folder-search-dialog__danger {
+  border-color: var(--danger-text);
+  background: var(--danger-text);
+  color: var(--bg-primary);
+}
+
 /* The status line a linked folder's menu starts with: not a choice. */
 .cockpit-tree-menu-status {
   display: flex;
