@@ -1244,3 +1244,123 @@ finds an empty registry.
   deletion is verified through the fixture's injected memory secret store, and
   the browser suite disables the native store. Windows and Linux reset remain
   compile-only.
+
+## Canceling a Start Fresh that never applied
+
+A staged Start Fresh is bound to the folders the person reviewed. If the
+retained workspace is emptied or removed outside Ori between acceptance and the
+restart, the first recovery launch refuses the plan and writes a **blocked**
+receipt (`recovery_scope_changed`). A blocked non-archive receipt is never
+retried, so before this change the installation stayed fenced forever. This is a
+narrow, evidence-gated exception to "the recovery host is read-only": the
+recovery host may retire such a receipt, and only such a receipt.
+
+Cancellation is **not** completion, restoration or a new reset. It records that
+the old plan will not run. It removes, restores and re-plans nothing.
+
+### What proves a receipt applied nothing
+
+The blocker code is shared by many scope checks and legacy receipts record none
+of them, so pending results, the blocker text and timestamps prove nothing. Two
+independent pieces of evidence do, and a third decides only the wording.
+
+1. **Revision lineage.** Staging writes `preparing` at revision 1 and
+   `awaiting_restart` at revision 2; recovery writes the policy, then the
+   `applying` marker (revision+1), then changes any category, and every block
+   adds one. A `recovery_scope_changed` receipt at **revision 3** can therefore
+   only have been produced from the staged revision-2 receipt, before any
+   `applying` marker. The look-alike left by a crash after the first category
+   changed but before its result was recorded is blocked at **revision 4** with
+   the same blocker and all-pending results, and is never eligible. The order
+   is identical in every release since the first (checked at seven revisions of
+   `recovery.go`); there is one receipt `version` (1).
+2. **Policy provenance.** Start Fresh always writes the startup policy, only
+   before the `applying` marker. A policy that is absent, or owned by another
+   (earlier) operation, proves that marker never became durable. A policy owned
+   by *this* operation is ineligible: the same lineage describes a receipt that
+   was hand-edited back to `awaiting_restart` after an apply, and cancellation
+   never edits the policy, so it would also keep this operation's suppression
+   flags in force. An unreadable or non-canonical policy is ineligible.
+3. **Host attribution (wording and a safety guard).** The host re-derives which
+   protected path is the workspace from `settings.json` (never from the receipt
+   or a client), hashes only paths already in the receipt, and judges the rest
+   of the reviewed scope by running the real recovery scope check against the
+   receipt as the first launch saw it, with the retained digests replaced by
+   their current values and an in-memory secret store, so no check is
+   re-implemented and no credential store is touched. Cancellation needs the
+   workspace to differ and everything else to hold. Any change to the workspace
+   counts (emptied, removed, Finder metadata only, edited by a sync client);
+   "missing" may be an unmounted volume, so copy never says "deleted". A
+   retained folder that exists but cannot be read is uncertain, not missing.
+
+Only Start Fresh without an HQ archive qualifies. Other blockers, intents,
+partial or applying receipts, a changed vault, a changed database schema or
+target, and anything the host cannot verify stay fenced with the existing
+recovery guidance.
+
+### The action
+
+`POST /api/reset/operations/{id}/cancel` exists **only** on the recovery host;
+the normal application never mounts it. GET and HEAD stay read-only. The request
+must come from a loopback peer, with a loopback `Host` that names the listener's
+own port, a same-origin `Origin`, `Sec-Fetch-Site: same-origin` when sent, JSON
+plus `X-Requested-With`, and a per-process token minted at recovery start and
+rendered only into that host's own page and operation JSON. The body is exactly
+`{"revision": N}`: no path, category or reason is ever accepted. The server
+re-decides everything under the installation lease and its admission gate:
+reload through the strict decoder, require the operation id and revision the
+page showed, recompute eligibility against the current host, re-read the receipt
+and policy bytes after the (long) host hashing, then replace `operation.json`
+only. A repeated request answers from the durable receipt without writing; a
+stale, refused or uncertain request writes nothing, and an uncertain write is
+reported as "not confirmed" and latches the lease. The live process is never
+un-fenced: only a fresh process start opens the application.
+
+### The canceled receipt
+
+`state: "canceled"` is terminal, at revision 4, with every category result still
+`pending`, no blocker, and a `cancellation` record holding only the retired
+revision and blocker code. No claim about *why* is stored, because host
+observations can be stale by the write. The decoder accepts exactly that shape,
+so nothing can mint a canceled receipt from any other state. It is not
+`VerifiedComplete`, lists no completed category, and never reads as "restart
+required" in the settings API.
+
+At the next start it is recognised like a completed receipt: the runtime is
+handed over, nothing is applied, and the receipt and policy are retained. Old
+request ids replay as a conflict without a write; only a newly reviewed and
+explicitly confirmed reset replaces it. Status pages say "Reset canceled", never
+run completed-reset browser cleanup, and offer **Back to Ori**, not **Continue
+setup**. Older binaries do not know the state and refuse the receipt (fail
+closed); do not downgrade across a cancellation.
+
+### Restart after cancellation
+
+- **Direct terminal launch:** the page shows the exact quit and relaunch steps.
+- **Managed launch (`-managed-restart`):** after the durable reply, the recovery
+  host stops serving and asks its supervisor for exactly one replacement that
+  expects *this operation durably canceled*. The supervisor allows one canceled
+  handoff per operation after the staged one and refuses a repeat.
+- **macOS menubar:** the recovery host has no native reopen path for a
+  cancellation; the page shows manual quit-and-reopen steps. A plain menubar or
+  command-line start after the cancellation opens normally.
+
+### Ordinary startup afterwards
+
+Cancellation changes nothing about how a normal launch treats the workspace.
+Traced on real processes: a removed configured root is recreated empty at the
+same path, a registered workspace stays registered and its own folder skeleton
+(`workspace.json`, empty `files/` and `notes/`) is rewritten from Ori's records
+as on any launch, no default folder is substituted, and files the person removed
+are never restored. Cancellation is not restoration.
+
+### Known limits
+
+A block at revision 4 whose `applying` persist returned an unknown-durability
+error did apply nothing but cannot be proven; the narrow crash window between the
+policy write and the `applying` marker; a workspace restored after the block; HQ
+archive operations; and a vault changed together with the workspace (unless it is
+nested inside it) all stay fenced. A hand-edited but canonical receipt at
+revision 3 with a policy owned by another operation cannot be told from a real
+one; receipts are private, single-encoder files and nothing else on disk can
+corroborate them.

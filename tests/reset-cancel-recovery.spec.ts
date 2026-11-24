@@ -29,7 +29,12 @@ function guarded() {
   const state = JSON.parse(fs.readFileSync(path.join(root, '.reset-cancel-demo.json'), 'utf8'));
   const receipt = () =>
     JSON.parse(fs.readFileSync(path.join(root, '.ori-reset', 'operation.json'), 'utf8')).operation;
-  return { root, operation: state.operation_id as string, receipt };
+  return {
+    root,
+    state: state as { workspace: string },
+    operation: state.operation_id as string,
+    receipt
+  };
 }
 
 const title = (page: Page) => page.locator('#reset-state-title');
@@ -56,8 +61,9 @@ test.describe('recovery page: cancel an unapplied Start Fresh', () => {
     page
   }) => {
     test.skip(phase !== 'recovery', 'phase=recovery only');
-    const { root, operation, receipt } = guarded();
+    const { state, operation, receipt } = guarded();
     expect(receipt()).toMatchObject({ state: 'blocked', revision: 3 });
+    const workspaceBefore = fs.existsSync(state.workspace);
     fs.mkdirSync(evidence, { recursive: true });
 
     await page.goto('/reset/status');
@@ -65,13 +71,28 @@ test.describe('recovery page: cancel an unapplied Start Fresh', () => {
     await expect(title(page)).toHaveText('Reset needs attention');
     const section = page.locator('#reset-cancel');
     await expect(section).toBeVisible();
-    await expect(section).toContainText('is now empty');
+    // The sentence says only what the host observed: "is now empty" for an
+    // emptied folder, "can't find" for a removed one (never "deleted").
+    await expect(section).toContainText(process.env.ORI_RESET_CANCEL_COPY ?? 'is now empty');
     await expect(section).toContainText('No part of this reset was applied');
     await expect(section).toContainText('does not restore anything that was removed outside Ori');
     await expect(section).toContainText('Canceled is not completed');
     await expect(page.locator('#reset-restart-instructions')).toBeVisible();
     expect((await page.content()).toLowerCase()).not.toContain('deleted');
     await page.screenshot({ path: `${evidence}/03-recovery-eligible.png`, fullPage: true });
+
+    // Layout and theme: a dark colour scheme at phone width must not overflow,
+    // and the action and its warning stay on screen.
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(section).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Cancel reset' })).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+    ).toBeTruthy();
+    await page.screenshot({ path: `${evidence}/03b-recovery-dark-narrow.png`, fullPage: true });
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.setViewportSize({ width: 1280, height: 720 });
 
     // Keyboard reachability and a visible focus ring.
     const presses = await focusCancel(page);
@@ -127,7 +148,8 @@ test.describe('recovery page: cancel an unapplied Start Fresh', () => {
     expect(
       receipt().results.every((r: { outcome: string }) => r.outcome === 'pending')
     ).toBeTruthy();
-    expect(fs.existsSync(path.join(root, 'workspace-staging'))).toBeTruthy();
+    // The recovery host neither recreates nor removes the person's folder.
+    expect(fs.existsSync(state.workspace)).toBe(workspaceBefore);
     await page.screenshot({ path: `${evidence}/06-canceled-manual-steps.png`, fullPage: true });
 
     await page.reload();
@@ -141,7 +163,7 @@ test.describe('recovery page: cancel an unapplied Start Fresh', () => {
     request
   }) => {
     test.skip(phase !== 'reopened', 'phase=reopened only');
-    const { operation, receipt } = guarded();
+    const { root, state, operation, receipt } = guarded();
     const before = JSON.stringify(receipt());
     const api = await request.get(`/api/reset/operations/${operation}`);
     expect(api.headers()['x-ori-reset-ready']).toBe('1');
@@ -164,6 +186,17 @@ test.describe('recovery page: cancel an unapplied Start Fresh', () => {
     // None of a completed reset's browser cleanup ran.
     expect(await page.evaluate(() => localStorage.getItem('ori-theme'))).toBe('canceled-sentinel');
     expect(await page.evaluate(() => localStorage.getItem('ori.reset.generation'))).toBeNull();
+    // Ordinary startup after the cancellation: no default folder is substituted,
+    // the person's emptied folder is not refilled with the file they removed, and
+    // a registered workspace stays registered (its own skeleton may be rewritten
+    // from Ori's records, as on any launch; its files are never restored).
+    expect(fs.existsSync(path.join(root, 'Ori Workspaces'))).toBeFalsy();
+    const kept = path.join(state.workspace, 'keep-me.md');
+    expect(fs.existsSync(kept)).toBeFalsy();
+    for (const slug of (process.env.ORI_RESET_CANCEL_REGISTERED ?? '').split(',').filter(Boolean)) {
+      const listing = JSON.stringify(await (await request.get('/api/workspaces')).json());
+      expect(listing).toContain(slug);
+    }
     await page.screenshot({ path: `${evidence}/08-reopened-ready.png`, fullPage: true });
     await enter.click();
     await expect(page).toHaveURL(/\/$/);
