@@ -2004,6 +2004,7 @@ import {
   mountTree,
   updateTreeWorkspaceBadges,
   ancestorIds,
+  descendantIds,
   isWorkspaceRowKind,
   removeWorkspaceTag,
   revealTargets,
@@ -2044,6 +2045,7 @@ import {
   MENU_NEW_TICKET,
   MENU_OPEN_IN_WORKSPACE,
   MENU_REFRESH,
+  MENU_SEARCH_IN,
   MENU_SHOW_OUTPUTS,
   MENU_UPLOAD
 } from './home-tree-menu.js';
@@ -2070,7 +2072,14 @@ import {
   PAGE_SIZE,
   RESULTS_TAB_KEY,
   createFilesSearch,
+  decodePages,
+  decodeScope,
+  encodePages,
+  encodeScope,
   findResult,
+  readSources,
+  scopeLabel,
+  searchableLinkIds,
   statusLine,
   tabFromResult
 } from './home-files-search.js';
@@ -2118,6 +2127,7 @@ import {
     filesSearchInput: document.getElementById('cockpitFilesSearchInput'),
     filesSearchClear: document.getElementById('cockpitFilesSearchClear'),
     filesSearchStatus: document.getElementById('cockpitFilesSearchStatus'),
+    filesSearchScope: document.getElementById('cockpitFilesSearchScope'),
     areaTitle: document.querySelector('[data-cockpit-area-title]'),
     areaStatus: document.getElementById('cockpitWorkspaceStatus'),
     // The Desk rail is the one view switcher: two links on a wide screen, one
@@ -2264,6 +2274,13 @@ import {
     treeSearch: null,
     treeSearchNote: '',
     tabBeforeSearch: '',
+    // Where the search looks: everywhere (null), or in one workspace, group or
+    // folder chosen from a row's menu. A removable chip beside the box says so.
+    treeSearchScope: null,
+    // What the filename index says about each folder it searches, so a linked
+    // folder's row knows whether it can offer Search in this folder.
+    searchSources: [],
+    searchableLinks: new Set(),
     // The one-column layout (FR4): whether the Tree view is too narrow for two
     // columns, and whether the pane has taken the tree's place.
     treeNarrow: false,
@@ -2413,6 +2430,28 @@ import {
     (query === '' || query === '?home=1') &&
     window.performance?.getEntriesByType?.('navigation')[0]?.type === 'back_forward';
   let returnMap = query === '?view=map' || traversingHome ? place?.read() : null;
+  // Files' search comes back the same way: on Back into this tab, from this tab's
+  // own slot on the server. The term never goes in the address or in storage.
+  const filesPlace = els.deskRail?.hasAttribute('data-desk-local')
+    ? destinationPlace('files')
+    : null;
+  const backForward =
+    window.performance?.getEntriesByType?.('navigation')[0]?.type === 'back_forward';
+  let returnFiles = backForward ? filesPlace?.read() : null;
+  window.addEventListener('pagehide', () => {
+    if (!filesPlace) return;
+    const snapshot = filesSearch.snapshot();
+    const scope = encodeScope(state.treeSearchScope);
+    // Always saved, empty when there is nothing: a search that was cleared must
+    // not come back from an older visit.
+    const keep = scope !== null && (snapshot || state.treeSearchScope);
+    void filesPlace.save({
+      term: keep && snapshot ? snapshot.term : '',
+      scope: keep ? scope : '',
+      selected: keep && snapshot ? snapshot.selected : '',
+      pages: keep && snapshot ? encodePages(snapshot) : ''
+    });
+  });
   window.addEventListener('pagehide', () => {
     if (!place || !mapShowing || !els.map) return;
     const camera = window.OriWorkspaceMap?.getCamera?.();
@@ -2792,6 +2831,10 @@ import {
 
   function mountTreeView() {
     if (!els.treeNav || state.view !== VIEW_TREE) return;
+    if (!searchSourcesRequested) {
+      searchSourcesRequested = true;
+      void refreshSearchSources();
+    }
     // Re-mounting replaces the rows, which would drop keyboard focus on the
     // floor mid-navigation. Restore it afterwards when it was ours to begin
     // with, and never steal it when it was not (FR129) — in particular not
@@ -3346,10 +3389,16 @@ import {
   const localIndex = !!els.deskRail && els.deskRail.hasAttribute('data-desk-local');
   const filesSearch = createFilesSearch({
     onChange: (snapshot, reason) => handleSearchChange(snapshot, reason),
+    getScope: () => state.treeSearchScope,
     ...(localIndex
       ? {
-          indexSearch: ({ term, cursor }) =>
-            filenameIndex('query', { term, cursor, limit: PAGE_SIZE }),
+          indexSearch: ({ term, cursor, source }) =>
+            filenameIndex('query', {
+              term,
+              cursor,
+              limit: PAGE_SIZE,
+              ...(source ? { source } : {})
+            }),
           indexAct: (op, body) => filenameIndex(op, body),
           indexRefresh: body => filenameIndex('refresh', body)
         }
@@ -3400,8 +3449,132 @@ import {
     });
   }
 
+  // ---- where the search looks (Search in this workspace / folder) ----
+
+  /** The scope a row's menu item chooses, or null for a row that is not one. */
+  function scopeFromRow(row) {
+    if (row.kind === 'workspace' || row.kind === 'group') {
+      const ids =
+        row.kind === 'group' ? [row.id, ...descendantIds(state.flattened, row.id)] : [row.id];
+      return { kind: row.kind, name: row.name, workspaceId: row.id, workspaceIds: ids };
+    }
+    if (row.kind === 'folder' || row.kind === 'outputFolder') {
+      return {
+        kind: 'folder',
+        name: row.name,
+        workspaceId: row.workspaceId,
+        section: row.kind === 'folder' ? 'files' : 'outputs',
+        path: String((row.meta && row.meta.path) || '')
+      };
+    }
+    if (row.kind === 'linked') {
+      const source = state.searchSources.find(
+        entry =>
+          entry.workspaceId === row.workspaceId && entry.link === (row.meta && row.meta.dirId)
+      );
+      if (!source) return null;
+      return {
+        kind: 'linked',
+        name: row.name,
+        workspaceId: row.workspaceId,
+        sourceId: source.id,
+        workspaceIds: [row.workspaceId]
+      };
+    }
+    return null;
+  }
+
+  /** The removable chip beside the box: `in <name>` and a way to take it off. */
+  function syncSearchScope() {
+    if (!els.filesSearchScope) return;
+    const label = scopeLabel(state.treeSearchScope);
+    els.filesSearchScope.hidden = !label;
+    // A long name is cut with an ellipsis; the whole of it is the tooltip.
+    if (label) els.filesSearchScope.title = label;
+    else els.filesSearchScope.removeAttribute('title');
+    els.filesSearchScope.innerHTML = label
+      ? `<span class="cockpit-files-search-scope__text">${escapeHtml(label)}</span>` +
+        `<button type="button" class="cockpit-files-search-scope__remove" data-files-scope-clear ` +
+        `aria-label="Search everywhere, not only ${escapeHtml(label)}" title="Search everywhere">` +
+        `<svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button>`
+      : '';
+  }
+
+  /** Search only in `scope` (null: everywhere). A search already typed is asked again. */
+  function setSearchScope(scope) {
+    state.treeSearchScope = scope;
+    syncSearchScope();
+    announce(scope ? `Searching ${scopeLabel(scope)}.` : 'Searching everywhere.');
+    filesSearch.rescope();
+    if (els.filesSearchInput) els.filesSearchInput.focus();
+  }
+
+  els.filesSearchScope?.addEventListener('click', event => {
+    if (event.target.closest('[data-files-scope-clear]')) setSearchScope(null);
+  });
+
+  // The filename index tells which folders it searches; a linked folder's row
+  // offers Search in this folder only for one of them.
+  let searchSourcesRequested = false;
+  function useSearchSources(sources) {
+    const links = searchableLinkIds(sources);
+    const same =
+      links.size === state.searchableLinks.size &&
+      [...links].every(id => state.searchableLinks.has(id));
+    state.searchSources = sources;
+    if (same) return;
+    state.searchableLinks = links;
+    mountTreeView();
+  }
+
+  async function refreshSearchSources() {
+    if (!localIndex) return;
+    try {
+      useSearchSources(readSources(await filenameIndex('sources')));
+    } catch (_) {
+      /* Without the list, linked folders simply offer no search of their own. */
+    }
+  }
+
+  /**
+   * Back into this tab: the scope and the search that were on screen, asked
+   * again as they were, down to the pages and the selected file. Only once, and
+   * never over something the user has already typed. A scope whose workspace or
+   * folder is gone brings back nothing: the same term elsewhere finds other things.
+   */
+  async function restoreFilesSearch() {
+    const pending = returnFiles;
+    returnFiles = null;
+    const saved = pending && (await pending);
+    if (!saved || (!saved.term && !saved.scope)) return;
+    if (filesSearch.snapshot() || state.treeSearchScope) return;
+    if (localIndex) await refreshSearchSources();
+    const decoded = decodeScope(saved.scope, {
+      exists: id => !!findWorkspace(state.flattened, id),
+      members: id => descendantIds(state.flattened, id)
+    });
+    const scope = decoded.scope;
+    const gone =
+      !decoded.ok ||
+      (scope && scope.kind === 'linked' && !state.searchSources.some(s => s.id === scope.sourceId));
+    if (gone) return;
+    if (scope) {
+      state.treeSearchScope = scope;
+      syncSearchScope();
+    }
+    if (!saved.term) return;
+    if (els.filesSearchInput) els.filesSearchInput.value = saved.term;
+    await filesSearch.restore({
+      term: saved.term,
+      selected: saved.selected,
+      pages: decodePages(saved.pages)
+    });
+  }
+
   function handleSearchChange(snapshot, reason) {
     state.treeSearch = snapshot;
+    // Every answer from the index also lists the folders it searches.
+    if (snapshot && snapshot.index.status === 'ok') useSearchSources(snapshot.index.sources);
     syncSearchBox();
     if (reason === 'typed') {
       // Selected whenever the user types. The tab that was open comes back when
@@ -3703,7 +3876,10 @@ import {
   /** An item was chosen from a row's menu, or the header's New note was pressed. */
   function handleTreeMenuAction(action, row) {
     const workspaceId = row.workspaceId || row.id;
-    if (action === MENU_NEW_NOTE) startTreeDraft(workspaceId, 'notes', 'note');
+    if (action === MENU_SEARCH_IN) {
+      const scope = scopeFromRow(row);
+      if (scope) setSearchScope(scope);
+    } else if (action === MENU_NEW_NOTE) startTreeDraft(workspaceId, 'notes', 'note');
     else if (action === MENU_NEW_TICKET) startTreeDraft(workspaceId, 'backlog', 'ticket');
     else if (action === MENU_UPLOAD) {
       pickFileToUpload(workspaceId, row.kind === 'folder' ? String(row.meta.path || '') : '');
@@ -4116,6 +4292,8 @@ import {
     mountMap();
     mountTreeView();
     mountPaneView();
+    // Files entered after a Back that landed on the Map: its search comes now.
+    if (state.view === VIEW_TREE && returnFiles && !state.loading) void restoreFilesSearch();
     // Group layout controls are Map-only. Re-render the stable context body in
     // place on view changes without changing modal visibility.
     if (state.railState === RAIL_GROUP) renderRail({ announceChange: false });
@@ -6629,6 +6807,7 @@ import {
     const pending = returnMap;
     returnMap = null;
     await refresh();
+    if (state.view === VIEW_TREE) void restoreFilesSearch();
     const prior = pending && (await pending);
     if (prior && !state.selectedId && mapShowing && state.view === VIEW_MAP) {
       if (findWorkspace(state.flattened, prior.selected))

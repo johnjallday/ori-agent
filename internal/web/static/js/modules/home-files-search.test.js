@@ -636,7 +636,7 @@ test('the answer arrives as results; the scope is read at the moment of the requ
   let scope = null;
   const { search, timers, net, events } = harness({ getScope: () => scope });
   search.input('album');
-  scope = { workspace_id: 'w1' };
+  scope = { kind: 'workspace', name: 'Harbor', workspaceId: 'w1' };
   timers.flush();
   await tick();
   assert.deepEqual(net.calls[0].body.scope, { workspace_id: 'w1' });

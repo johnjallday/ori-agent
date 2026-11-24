@@ -491,4 +491,102 @@ test.describe('Files search: finding Ori’s own items by name', () => {
       page.getByRole('tab', { name: new RegExp(`Results for .*${stamp}`) })
     ).toBeVisible();
   });
+
+  test('Search in this workspace limits the search to it, and the chip takes that off', async ({
+    page
+  }) => {
+    const stamp = stampOf();
+    const a = await seed(page, stamp, 'Harbor');
+    const b = await seed(page, stamp, 'Garden');
+    await openFiles(page);
+    await treeRow(page, a.id).waitFor();
+    const requests = searchRequests(page);
+
+    // The row's own menu, from the keyboard.
+    await treeRow(page, a.id).focus();
+    await page.keyboard.press('Shift+F10');
+    await page.getByRole('menuitem', { name: 'Search in this workspace' }).click();
+
+    const chip = page.locator('#cockpitFilesSearchScope');
+    await expect(chip).toBeVisible();
+    await expect(chip).toContainText(`in ${a.name}`);
+    // The box has the focus, ready for the term.
+    await expect(search(page)).toBeFocused();
+
+    await search(page).fill(stamp);
+    await expect(group(page, 'workspaces')).toContainText(a.name);
+    await expect(group(page, 'workspaces')).not.toContainText(b.name);
+    await expect(group(page, 'notes')).toContainText(a.noteName);
+    await expect(group(page, 'notes')).not.toContainText(b.noteName);
+    expect(requests[requests.length - 1]).toMatchObject({
+      term: stamp,
+      scope: { workspace_id: a.id }
+    });
+
+    // Taking the chip off asks again, everywhere, without retyping.
+    await chip.getByRole('button', { name: /Search everywhere/ }).click();
+    await expect(chip).toBeHidden();
+    await expect(group(page, 'workspaces')).toContainText(b.name);
+    await expect(group(page, 'notes')).toContainText(b.noteName);
+    await expect(search(page)).toHaveValue(stamp);
+  });
+
+  test('the scope stays when the term is cleared, and the term is still never stored', async ({
+    page
+  }) => {
+    const stamp = stampOf();
+    const a = await seed(page, stamp, 'Keeps');
+    await openFiles(page);
+    await treeRow(page, a.id).waitFor();
+    await treeRow(page, a.id).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Search in this workspace' }).click();
+    await search(page).fill(stamp);
+    await expect(resultsTab(page)).toBeVisible();
+    await search(page).press('Escape');
+    await expect(search(page)).toHaveValue('');
+    await expect(page.locator('#cockpitFilesSearchScope')).toContainText(`in ${a.name}`);
+    // Neither the term nor the scope reaches the address or browser storage.
+    expect(page.url()).not.toContain(stamp);
+    const stored = await page.evaluate(() =>
+      JSON.stringify([Object.entries(localStorage), Object.entries(sessionStorage), window.name])
+    );
+    expect(stored).not.toContain(stamp);
+  });
+
+  test('Back to Files brings the search, its scope and its results back in the same tab', async ({
+    page
+  }) => {
+    const stamp = stampOf();
+    const a = await seed(page, stamp, 'Return');
+    const b = await seed(page, stamp, 'Other');
+    await openFiles(page);
+    await treeRow(page, a.id).waitFor();
+    // Only the Mac that runs Ori keeps a place; a remote browser clears instead.
+    test.skip(
+      (await page.locator('.desk-rail[data-desk-local]').count()) === 0,
+      'not the local Mac'
+    );
+
+    await treeRow(page, a.id).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Search in this workspace' }).click();
+    await search(page).fill(stamp);
+    await expect(group(page, 'notes')).toContainText(a.noteName);
+
+    // Leave the page entirely, then come Back.
+    await page.goto('/templates');
+    await page.goBack();
+    await expect(page.locator('#cockpitTree')).toBeVisible();
+    await expect(search(page)).toHaveValue(stamp);
+    await expect(page.locator('#cockpitFilesSearchScope')).toContainText(`in ${a.name}`);
+    await expect(group(page, 'notes')).toContainText(a.noteName);
+    await expect(group(page, 'notes')).not.toContainText(b.noteName);
+
+    // A new tab starts clean: the place belongs to the tab that made it.
+    const fresh = await page.context().newPage();
+    await skipOnboarding(fresh);
+    await fresh.goto('/?view=tree');
+    await expect(fresh.locator('#cockpitFilesSearchInput')).toHaveValue('');
+    await expect(fresh.locator('#cockpitFilesSearchScope')).toBeHidden();
+    await fresh.close();
+  });
 });

@@ -727,7 +727,7 @@ function rowHTML(row, ctx) {
   if (isDimRow(row)) classes.push('is-dim');
   // The "⋯" button. It is out of the tab order — the keyboard opens the same
   // menu with Shift+F10 or the Menu key on the row itself (FR54).
-  const more = rowHasMenu(row)
+  const more = rowHasMenu(row, { searchableLinks: ctx.searchableLinks })
     ? `<button type="button" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-tree-more" data-tree-menu-for="${id}" tabindex="-1" ` +
       `aria-haspopup="menu" aria-label="Actions for ${name}">${iconHTML('more', { size: 16 })}</button>`
     : '';
@@ -1064,7 +1064,8 @@ export function mountTree(container, state, callbacks) {
       tabbableId,
       bulkState: bulkSelectionState(state.flattened, selected),
       workspaceUpdateBadges: state.workspaceUpdateBadges,
-      activeTags
+      activeTags,
+      searchableLinks: state.searchableLinks
     }) +
     '<div class="cockpit-tree-root-drop" data-tree-drop-into="">Drop here to move to the top level</div>' +
     '</div>' +
@@ -1328,7 +1329,7 @@ function bindTree(container, state, cb, rows) {
 
   // --- the row menu (FR54) -------------------------------------------------
   const openMenuFor = (row, at, event) => {
-    const items = menuItemsFor(row);
+    const items = menuItemsFor(row, { searchableLinks: state.searchableLinks });
     if (items.length === 0) return false;
     const findOrigin = () =>
       Array.from(container.querySelectorAll('[data-tree-row]')).find(

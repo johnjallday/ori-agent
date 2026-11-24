@@ -495,7 +495,7 @@ function makeIndex() {
   };
 }
 
-function harness() {
+function harness(extra = {}) {
   const timers = makeTimers();
   const server = makeServer();
   const index = makeIndex();
@@ -507,7 +507,8 @@ function harness() {
     clearTimeoutImpl: timers.clearTimeoutImpl,
     indexSearch: index.indexSearch,
     indexAct: index.indexAct,
-    indexRefresh: index.indexRefresh
+    indexRefresh: index.indexRefresh,
+    ...extra
   });
   return { search, timers, server, index, events };
 }
@@ -523,7 +524,7 @@ test('the server and the filename index are asked together, the term in neither 
   await started(h, 'plan');
   assert.equal(h.server.calls.length, 1);
   assert.equal(h.index.queries.length, 1);
-  assert.deepEqual(h.index.queries[0].params, { term: 'plan', cursor: '', scope: null });
+  assert.deepEqual(h.index.queries[0].params, { term: 'plan', cursor: '', source: '' });
   assert.equal(h.search.snapshot().index.status, 'loading');
 });
 

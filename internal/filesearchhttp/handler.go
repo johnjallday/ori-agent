@@ -68,6 +68,15 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out, e = h.Service.DeskPlace(owner, in.Tab, in.Place)
+	case "files-place":
+		var in struct {
+			Tab   string                 `json:"tab"`
+			Place *filesearch.FilesPlace `json:"place"`
+		}
+		if !decode(&in) {
+			return
+		}
+		out, e = h.Service.FilesPlace(owner, in.Tab, in.Place)
 	case "map-place":
 		var in struct {
 			Tab   string               `json:"tab"`

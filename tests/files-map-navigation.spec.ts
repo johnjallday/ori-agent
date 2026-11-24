@@ -401,6 +401,14 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await page.goto('/search');
   await page.getByRole('button', { name: 'Make Files my starting page' }).click();
   await expect(page.getByRole('button', { name: 'Start on Home instead' })).toBeVisible();
+  // Files as the starting page, with workspaces present, is the merged Files:
+  // Home's tree with its one search box. The standalone page is still one click
+  // away, from the Manage search locations link.
   await page.goto('/');
+  await expect(page).toHaveURL(/\/\?view=tree$/);
+  await expect(page.locator('#cockpitTree')).toBeVisible();
+  await expect(page.locator('[data-cockpit-area-title]')).toHaveText('Files');
+  await expectDestination(page, 'files');
+  await page.getByRole('link', { name: 'Manage search locations', exact: true }).click();
   await expect(page.locator('#title')).toHaveText('All locations');
 });

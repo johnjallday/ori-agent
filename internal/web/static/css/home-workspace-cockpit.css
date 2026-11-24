@@ -1909,6 +1909,64 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   display: none;
 }
 
+/* "in <name>", beside the box: where the search looks when it is not everywhere. */
+.cockpit-files-search-scope {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 2px;
+  max-width: 40%;
+  min-height: 32px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--hc-line);
+  border-radius: 999px;
+  background: var(--hc-panel-raised);
+  color: var(--hc-ink);
+  font-size: 13px;
+}
+
+.cockpit-files-search-scope[hidden] {
+  display: none;
+}
+
+.cockpit-files-search-scope__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cockpit-files-search-scope__remove {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--hc-ink-dim);
+  fill: none;
+  stroke: currentcolor;
+  stroke-linecap: round;
+  stroke-width: 1.6;
+}
+
+.cockpit-files-search-scope__remove:hover {
+  color: var(--hc-ink);
+}
+
+@media (pointer: coarse), (max-width: 768px) {
+  .cockpit-files-search-scope {
+    min-height: 44px;
+  }
+
+  .cockpit-files-search-scope__remove {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 .cockpit-files-search-clear {
   flex: 0 0 auto;
   fill: none;

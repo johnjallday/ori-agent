@@ -503,6 +503,9 @@
                      spellcheck="false" enterkeyhint="search" maxlength="128">
               <kbd class="cockpit-files-search-hint" aria-hidden="true">/</kbd>
             </label>
+            <!-- Where the search looks, when it is not everywhere: "in <name>", with a
+                 button that takes it off. Filled by the cockpit from a row's menu. -->
+            <span id="cockpitFilesSearchScope" class="cockpit-files-search-scope" hidden></span>
             <button type="button" id="cockpitFilesSearchClear" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-files-search-clear"
                     aria-label="Clear the search" title="Clear the search" hidden>
               <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg>

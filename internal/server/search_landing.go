@@ -40,8 +40,17 @@ func (s *Server) maybeSearchLanding(w http.ResponseWriter, r *http.Request) bool
 		if setup.Completed || !setup.SkippedAt.IsZero() || setup.CurrentStep != 0 || len(setup.StepsCompleted) != 0 || s.Core.ConfigManager.IsWorkspaceRootConfirmed() {
 			return false
 		}
-		fallthrough
+		s.searchPage(w, r, state, false)
+		return true
 	case onboarding.SearchDesk:
+		// Files is Home's tree with one search box, so a user who made Files
+		// their starting page lands there once a workspace exists. With none, the
+		// first-run page is still what there is to show, as before.
+		if s.hasWorkspace() {
+			w.Header().Set("Cache-Control", "no-store")
+			http.Redirect(w, r, "/?view=tree", http.StatusFound)
+			return true
+		}
 		s.searchPage(w, r, state, false)
 		return true
 	case onboarding.SearchLater:
@@ -51,6 +60,16 @@ func (s *Server) maybeSearchLanding(w http.ResponseWriter, r *http.Request) bool
 		}
 	}
 	return false
+}
+
+// hasWorkspace reports whether any workspace exists, the same count Home's own
+// first-run check uses.
+func (s *Server) hasWorkspace() bool {
+	if s.Storage == nil || s.Storage.WorkspaceStore == nil {
+		return false
+	}
+	ids, err := s.Storage.WorkspaceStore.List()
+	return err == nil && len(ids) > 0
 }
 func (s *Server) searchPage(w http.ResponseWriter, r *http.Request, state string, home bool) {
 	if !localSearchPage(r) || s.fileSearch == nil {

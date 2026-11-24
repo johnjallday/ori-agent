@@ -127,6 +127,8 @@ function emptyIndex(status) {
  * the local filename index will be asked too (only on the Mac that runs Ori).
  */
 export function searchingSnapshot(term, { index = false } = {}) {
+  // `index`: true when the filename index will be asked, 'none' when the scope
+  // leaves it out (a folder inside a workspace), false where there is no index.
   const kinds = {};
   KIND_ORDER.forEach(kind => {
     kinds[kind] = emptyKind();
@@ -136,7 +138,7 @@ export function searchingSnapshot(term, { index = false } = {}) {
     status: 'searching',
     error: '',
     kinds,
-    index: emptyIndex(index ? 'loading' : 'off'),
+    index: emptyIndex(index === 'none' ? 'none' : index ? 'loading' : 'off'),
     // How many of the merged Files rows are on screen; More results adds a page.
     filesShown: PAGE_SIZE,
     // The file in a searchable folder that is selected, and what happened when
@@ -153,7 +155,7 @@ export function searchingSnapshot(term, { index = false } = {}) {
 // ---------------------------------------------------------------------------
 
 /** What the filename index tells us about a folder it searches. */
-function readSources(list) {
+export function readSources(list) {
   return (Array.isArray(list) ? list : [])
     .filter(source => source && source.id)
     .map(source => ({
@@ -166,6 +168,18 @@ function readSources(list) {
       // The linked folder's own id: how a source is matched to its tree row.
       link: String((source.workspace && source.workspace.link) || '')
     }));
+}
+
+/**
+ * The ids of the linked folders the filename index searches: what a linked
+ * folder's row needs to know before it can offer Search in this folder.
+ */
+export function searchableLinkIds(sources) {
+  return new Set(
+    (Array.isArray(sources) ? sources : [])
+      .filter(source => source && source.workspaceId && source.link)
+      .map(source => source.link)
+  );
 }
 
 /** A folder's name, with the start of its id when two folders share one. */
@@ -213,13 +227,16 @@ function indexItem(hit, source, names) {
  * Fold the filename index's answer into the snapshot. `append` adds a page
  * ("More results"); otherwise the index slice is replaced.
  */
-export function applyIndexAnswer(snapshot, answer, { append = false } = {}) {
+export function applyIndexAnswer(snapshot, answer, { append = false, only = null } = {}) {
   const sources = readSources(answer && answer.sources);
   const names = sourceNames(sources);
   const bySource = new Map(sources.map(source => [source.id, source]));
   const items = (answer && Array.isArray(answer.hits) ? answer.hits : [])
     .filter(hit => hit && hit.id && hit.name)
-    .map(hit => indexItem(hit, bySource.get(hit.source), names));
+    .map(hit => indexItem(hit, bySource.get(hit.source), names))
+    // A workspace or group scope: the index has no such filter, so only the files
+    // of that scope's workspaces are kept.
+    .filter(item => !only || only.includes(item.workspaceId));
   return {
     ...snapshot,
     index: {
@@ -389,6 +406,141 @@ export function totalFound(snapshot) {
 }
 
 // ---------------------------------------------------------------------------
+// Scope: searching in one workspace, group or folder instead of everywhere
+// ---------------------------------------------------------------------------
+//
+// A scope is `{ kind, name, workspaceId, ... }` chosen from a row's menu:
+//   workspace | group  every kind, inside that workspace (a group: and its members);
+//                      the filename index is kept to the files of those workspaces
+//   folder             a folder of the workspace's Files or Outputs: files only
+//   linked             a searchable linked folder: the filename index alone, for
+//                      that folder (the server has nothing inside it)
+
+/** The chip beside the box. */
+export function scopeLabel(scope) {
+  return scope && scope.name ? `in ${scope.name}` : '';
+}
+
+/** What the by-name search is told about the scope, or null for everywhere. */
+export function requestScope(scope) {
+  if (!scope || !scope.workspaceId || scope.kind === 'linked') return null;
+  if (scope.kind === 'folder') {
+    return {
+      workspace_id: scope.workspaceId,
+      folder: { section: scope.section, path: scope.path || '' }
+    };
+  }
+  return { workspace_id: scope.workspaceId };
+}
+
+/** Which kinds the by-name search is asked for under a scope; null is all of them. */
+export function scopeKinds(scope) {
+  return scope && scope.kind === 'folder' ? ['files'] : null;
+}
+
+/** A linked folder is the filename index's alone: there is nothing to ask the server. */
+export function scopeAsksServer(scope) {
+  return !(scope && scope.kind === 'linked');
+}
+
+/** A folder inside a workspace holds nothing the filename index knows about. */
+export function scopeAsksIndex(scope) {
+  return !(scope && scope.kind === 'folder');
+}
+
+// ---------------------------------------------------------------------------
+// What a tab remembers when the page is left and came back to (Back)
+// ---------------------------------------------------------------------------
+//
+// The cockpit saves this to the tab's own slot on the server (never the address
+// or browser storage) and reads it again on a Back navigation. It is the search
+// term, the scope, which file was selected, and how many pages of each kind were
+// on screen. The server bounds every part; so does this.
+
+const SCOPE_KINDS = ['workspace', 'group', 'folder', 'linked'];
+const MAX_SCOPE_JSON = 600;
+const MAX_PAGES = 40;
+
+/** The scope as saved: small, and without anything that can be worked out again. */
+export function encodeScope(scope) {
+  if (!scope) return '';
+  const { workspaceIds: _members, ...rest } = scope;
+  const text = JSON.stringify(rest);
+  // Too big to keep: the caller saves nothing rather than a search with its
+  // scope missing, which would bring back different results.
+  return text.length <= MAX_SCOPE_JSON ? text : null;
+}
+
+/**
+ * A saved scope back into one, or `{ ok: false }` when it no longer holds: a
+ * workspace that is gone, a shape this build does not know. `exists(id)` says
+ * whether a workspace is still there and `members(id)` lists a group's members.
+ */
+export function decodeScope(text, { exists = () => true, members = () => [] } = {}) {
+  if (!text) return { ok: true, scope: null };
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch (_) {
+    return { ok: false };
+  }
+  const text_ = value => (typeof value === 'string' ? value : '');
+  if (!raw || typeof raw !== 'object' || !SCOPE_KINDS.includes(raw.kind)) return { ok: false };
+  const workspaceId = text_(raw.workspaceId);
+  if (!workspaceId || !exists(workspaceId)) return { ok: false };
+  const scope = { kind: raw.kind, name: text_(raw.name).slice(0, 200), workspaceId };
+  if (raw.kind === 'group') scope.workspaceIds = [workspaceId, ...members(workspaceId)];
+  else if (raw.kind === 'workspace') scope.workspaceIds = [workspaceId];
+  else if (raw.kind === 'folder') {
+    if (raw.section !== 'files' && raw.section !== 'outputs') return { ok: false };
+    scope.section = raw.section;
+    scope.path = text_(raw.path);
+  } else {
+    scope.sourceId = text_(raw.sourceId);
+    if (!scope.sourceId) return { ok: false };
+    scope.workspaceIds = [workspaceId];
+  }
+  return { ok: true, scope };
+}
+
+/** "notes:2,files:3": how many pages of each kind are on screen (only those past one). */
+export function encodePages(snapshot) {
+  if (!snapshot) return '';
+  const parts = [];
+  KIND_ORDER.forEach(kind => {
+    const pages =
+      kind === 'files'
+        ? Math.ceil(snapshot.filesShown / PAGE_SIZE)
+        : Math.ceil(snapshot.kinds[kind].items.length / PAGE_SIZE);
+    if (pages > 1) parts.push(`${kind}:${Math.min(pages, MAX_PAGES)}`);
+  });
+  return parts.join(',');
+}
+
+export function decodePages(text) {
+  const out = {};
+  String(text || '')
+    .split(',')
+    .forEach(part => {
+      const [kind, count] = part.split(':');
+      const pages = Number(count);
+      if (KIND_ORDER.includes(kind) && Number.isInteger(pages) && pages > 1) {
+        out[kind] = Math.min(pages, MAX_PAGES);
+      }
+    });
+  return out;
+}
+
+/** The kinds are all in, empty: the server was not asked, by the scope's choice. */
+export function serverSkipped(snapshot) {
+  const kinds = {};
+  KIND_ORDER.forEach(kind => {
+    kinds[kind] = { ...emptyKind(), status: 'ok', count: 0 };
+  });
+  return { ...snapshot, status: 'done', error: '', kinds };
+}
+
+// ---------------------------------------------------------------------------
 // The controller
 // ---------------------------------------------------------------------------
 
@@ -489,13 +641,21 @@ export function createFilesSearch({
   // answered; a failed first page marks the index unavailable, a failed later
   // page only says More results did not work.
   async function queryIndex(gen, sent, { append = false } = {}) {
-    if (!indexSearch) return true;
+    const scope = getScope();
+    if (!indexSearch || !scopeAsksIndex(scope)) return true;
     const cursor = append ? current.index.next : '';
     if (append) current = { ...current, index: { ...current.index, loadingMore: true } };
     try {
-      const answer = await indexSearch({ term: sent, cursor, scope: getScope() });
+      const answer = await indexSearch({
+        term: sent,
+        cursor,
+        source: scope && scope.sourceId ? scope.sourceId : ''
+      });
       if (gen !== generation) return false;
-      current = applyIndexAnswer(current, answer, { append });
+      current = applyIndexAnswer(current, answer, {
+        append,
+        only: scope && scope.workspaceIds ? scope.workspaceIds : null
+      });
       schedulePoll(gen, sent);
       return true;
     } catch (err) {
@@ -535,7 +695,7 @@ export function createFilesSearch({
     const result = await post(
       requestBody({
         term,
-        scope: getScope(),
+        scope: requestScope(getScope()),
         kinds: ['files'],
         cursors: { files: files.nextCursor }
       }),
@@ -583,7 +743,16 @@ export function createFilesSearch({
     const gen = generation;
     const sent = term;
     const server = (async () => {
-      const result = await post(requestBody({ term: sent, scope: getScope() }), gen);
+      const scope = getScope();
+      if (!scopeAsksServer(scope)) {
+        current = serverSkipped(current);
+        emit('results');
+        return;
+      }
+      const result = await post(
+        requestBody({ term: sent, scope: requestScope(scope), kinds: scopeKinds(scope) }),
+        gen
+      );
       if (result.stale) return;
       current = result.error ? failedSnapshot(current, '') : applyAnswer(current, result.answer);
       emit('results');
@@ -616,17 +785,66 @@ export function createFilesSearch({
     if (next === term && current) return; // only spaces changed
     cancelAll();
     term = next;
-    current = searchingSnapshot(term, { index: !!indexSearch });
+    begin(debounceMs);
+  }
+
+  // Whether, and how, the filename index is asked under the scope in force.
+  const indexMode = () => (!indexSearch ? false : scopeAsksIndex(getScope()) ? true : 'none');
+
+  // Start a search for the current term: the Results tab shows at once, the
+  // request follows after `delay`.
+  function begin(delay) {
+    current = searchingSnapshot(term, { index: indexMode() });
     emit('typed');
     const gen = generation;
     timer = setTimeoutImpl(() => {
       if (gen === generation) void run();
-    }, debounceMs);
+    }, delay);
+  }
+
+  // The scope changed: ask again for the same term, at once.
+  function rescope() {
+    if (term === '') return;
+    cancelAll();
+    begin(0);
   }
 
   return {
     input,
     clear,
+    rescope,
+
+    // Bring a search back after the page was left: the same term, asked at once,
+    // then the pages that were on screen, then the selected file when it is still
+    // there. The scope is the caller's, already back in place.
+    async restore({ term: saved, selected = '', pages = {} } = {}) {
+      const next = normalizeTerm(saved);
+      if (!next) return;
+      cancelAll();
+      term = next;
+      begin(0);
+      // Asked right now, not after the timer begin() set.
+      clearTimeoutImpl(timer);
+      timer = null;
+      const gen = generation;
+      await run();
+      if (gen !== generation) return;
+      for (const [kind, count] of Object.entries(pages)) {
+        for (let page = 1; page < count; page += 1) {
+          const more =
+            kind === 'files'
+              ? mergedFiles(current).more
+              : !!(current.kinds[kind] && current.kinds[kind].nextCursor);
+          if (!more || gen !== generation) break;
+          await this.loadMore(kind);
+        }
+      }
+      if (gen !== generation) return;
+      if (selected && current.index.items.some(item => item.rowKey === selected)) {
+        current = { ...current, selected, notice: '', noticeAt: '' };
+        emit('select');
+      }
+    },
 
     async loadMore(kind) {
       if (kind === 'files') {
@@ -651,7 +869,7 @@ export function createFilesSearch({
       const result = await post(
         requestBody({
           term,
-          scope: getScope(),
+          scope: requestScope(getScope()),
           kinds: [kind],
           cursors: { [kind]: state.nextCursor }
         }),
@@ -674,7 +892,7 @@ export function createFilesSearch({
       if (!current) return;
       const gen = generation;
       if (kind === 'all') {
-        current = searchingSnapshot(term, { index: !!indexSearch });
+        current = searchingSnapshot(term, { index: indexMode() });
         emit('retry');
         await run();
         return;
@@ -697,7 +915,10 @@ export function createFilesSearch({
         current = { ...current, kinds: { ...current.kinds, [kind]: emptyKind() } };
         again.push(
           (async () => {
-            const result = await post(requestBody({ term, scope: getScope(), kinds: [kind] }), gen);
+            const result = await post(
+              requestBody({ term, scope: requestScope(getScope()), kinds: [kind] }),
+              gen
+            );
             if (result.stale) return;
             if (result.error) {
               current = {

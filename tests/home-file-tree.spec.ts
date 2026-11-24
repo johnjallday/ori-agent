@@ -245,6 +245,7 @@ test.describe('Home file tree', () => {
       'New note',
       'New ticket',
       'Upload file…',
+      'Search in this workspace',
       'Refresh',
       'Move…',
       'Delete'
