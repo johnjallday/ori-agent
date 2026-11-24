@@ -105,7 +105,10 @@ export function exploreFolder(
       editing = true;
     const matches = review.matches || [],
       connected = matches.find(m => m.connected);
-    const openOnly = matches.length && !connected ? button('Open workspace', true) : null;
+    // The filename index belongs to at most one link; it doesn't choose
+    // which workspace a person wants to open when several links match.
+    const soleConnected = matches.length === 1 && connected;
+    const openOnly = matches.length && !soleConnected ? button('Open workspace', true) : null;
     const name = element('input');
     name.required = true;
     name.maxLength = 120;
@@ -123,13 +126,18 @@ export function exploreFolder(
         'I confirm this is the folder currently linked to this workspace. Its original disk identity was not recorded.'
       )
     );
-    const chosen = () => connected || (select.value === '' ? null : matches[Number(select.value)]);
+    const chosen = () =>
+      soleConnected || (select.value === '' ? null : matches[Number(select.value)]);
     function update() {
       const m = chosen();
-      verifyLabel.hidden = !m?.verify;
+      verifyLabel.hidden = !m?.verify || Boolean(connected);
       if (openOnly) {
         openOnly.disabled = busy || !m;
         openOnly.textContent = m ? `Open ${m.name}` : 'Open workspace';
+      }
+      if (connected && openOnly) {
+        submit.hidden = preferWorkspace || !m?.connected;
+        submit.textContent = 'Search this folder in Files';
       }
       submit.disabled =
         busy || (!matches.length ? !name.value.trim() : !m || (m.verify && !verify.checked));
@@ -237,7 +245,7 @@ export function exploreFolder(
       );
       name.oninput = update;
       submit.textContent = 'Create workspace';
-    } else if (connected) {
+    } else if (soleConnected) {
       description.textContent = `This folder is already linked to ${connected.name}.`;
       submit.textContent = `Open ${connected.name}`;
     } else {
@@ -258,9 +266,11 @@ export function exploreFolder(
         verifyLabel,
         element(
           'small',
-          review.source
-            ? 'Keep the existing index; nothing is rescanned.'
-            : 'Allow local filename indexing. File contents are not indexed.'
+          connected
+            ? `Filename search stays connected to ${connected.name}.`
+            : review.source
+              ? 'Keep the existing index; nothing is rescanned.'
+              : 'Allow local filename indexing. File contents are not indexed.'
         )
       );
       select.onchange = () => {
@@ -298,7 +308,7 @@ export function exploreFolder(
       if (!m.connected) notifyFiles();
       if (alive) finish(result.workspace, result.source, destination);
     }
-    if (connected && !preferWorkspace) {
+    if (soleConnected && !preferWorkspace) {
       const files = button('Search this folder in Files');
       files.onclick = () => perform(() => connect('files'));
       actions.append(files);
@@ -370,12 +380,7 @@ export function exploreFolder(
     signal?.addEventListener('abort', abort, { once: true });
     update();
     if (!inline) card.showModal();
-    (matches.length > 1 && !connected
-      ? select
-      : matches.length
-        ? openOnly || submit
-        : name
-    ).focus();
+    (matches.length > 1 ? select : matches.length ? openOnly || submit : name).focus();
   });
 }
 

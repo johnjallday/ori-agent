@@ -158,6 +158,7 @@ test('the assistant links a folder without starting a hire or filename scan', as
   const card = host.locator('section.explore-card');
   await expect(card.getByRole('heading')).toHaveText('Create a workspace from Documents?');
   await card.getByRole('button', { name: 'Cancel' }).click();
+  await expect(host.getByRole('button', { name: 'Documents', exact: true })).toBeFocused();
   await host.getByRole('button', { name: 'Downloads', exact: true }).click();
   await expect(card.getByRole('checkbox')).not.toBeChecked();
   await card.getByLabel('Workspace name').fill('Reading inbox');
@@ -392,6 +393,22 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
     ).find(d => d.path.endsWith(folder))!.id;
   const otherID =
     documents.workspace.id === connected.workspace.id ? same.workspace.id : connected.workspace.id;
+  // Opening another matching workspace must not move the existing index.
+  await addFolder.click();
+  await chooser.getByRole('button', { name: 'Documents', exact: true }).click();
+  const choices = dialog.getByRole('combobox');
+  await expect(choices).toBeFocused();
+  await expect(dialog.getByRole('button', { name: 'Open workspace' })).toBeDisabled();
+  const other = choices.locator('option').filter({ hasText: otherID.slice(0, 8) });
+  await choices.selectOption((await other.getAttribute('value'))!);
+  await expect(dialog.getByRole('button', { name: 'Search this folder in Files' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: /^Open / }).click();
+  await expect(page.locator('body')).toHaveAttribute('data-workspace-id', otherID);
+  const reopened = (await sources()).find((s: { id: string }) => s.id === documents.id);
+  expect(reopened.workspace).toEqual(documents.workspace);
+  expect(reopened.generation).toBe(documents.generation);
+  expect(await workspaceIds()).toEqual(beforeAdd);
+  await page.goto('/?view=tree');
   const chosenLink = await linkOf(documents.workspace.id, '/home/Documents');
   const otherLink = await linkOf(otherID, '/home/Documents');
   expect(chosenLink).toBe(documents.workspace.link);
