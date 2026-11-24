@@ -1343,7 +1343,14 @@ test('a full workspace load resolves the parent through the real header render p
     return response(url.includes('tree=true') ? memberTree() : workspace('loaded'));
   });
   await page.loadWorkspace();
-  assert.deepEqual(urls, ['/api/orchestration/workspace?id=ws', '/api/workspaces?tree=true']);
+  // The workspace, then the bounded "does it have any plan" read behind the
+  // Existing plans link under Tickets, then the member tree that resolves the
+  // parent. The presence read is its own request and changes nothing else here.
+  assert.deepEqual(urls, [
+    '/api/orchestration/workspace?id=ws',
+    '/api/workspaces/ws/plan-presence',
+    '/api/workspaces?tree=true'
+  ]);
   assert.deepEqual(page.parentGroup, descriptorFor(STUDIO_GROUP));
   assert.equal(view.refreshes, 1);
 });
