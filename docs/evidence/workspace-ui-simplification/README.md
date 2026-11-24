@@ -9,7 +9,7 @@ They are **not** a separately approved root README screenshot refresh.
 | [Overview](overview.webp) | Compact Team/Resources and linked workspace membership; real reviewed group and member |
 | [Map](map.webp) | Shared Resources/Add workspace toolbar, real member/agent selection and Memory station |
 | [Phone Map](mobile-map.webp) | 390px layout with ordinary scrolling and reachable dock/assistant hit areas |
-| [HQ More views](more-views-hq.webp) | Dark HQ Map menu above Resources, with both native links unobstructed |
+| [HQ More views](more-views-hq.webp) | Historical: the dark HQ Map menu as it was when this was captured. The menu has since been retired (its only link, Plans, is now reached from Tickets) |
 
 The HQ designation is a labelled read fixture for host layout, not a configured
 personal HQ or live brief/email/Notes integration. Unavailable stations remain

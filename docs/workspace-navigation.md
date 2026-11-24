@@ -19,13 +19,42 @@ internal `details` preference and URL key; this is not a route migration.
 | Successful setup/portability badges               | Settings → Advanced; failures, missing requirements and imported routines-off remain visible |
 | Full agent deck                                   | Overview → Team → Manage team; existing selection, staffing and agent controls               |
 | Group Build / Add existing                        | Add workspace → Create new / Add existing, through the locked creator or member picker       |
-| Plans                                             | More views, using its native full-page link                                                  |
+| Plans (More views)                                | None for a new workspace; see [Plans](#plans-retired-creation-supported-api) for an existing one |
 | Canvas (retired)                                  | None: `/workspaces/{slug}/canvas` is a 404; see Overview, Tickets and Resources              |
 | Program/profile/catalog links                     | Declaration-owned destinations; the profile jump stays on its owning assistant page          |
 
 Dashboard appears only when configured. Personal HQ keeps its station-first body;
 custom dashboards and plugin consoles retain their own DOM, session and bridge.
 Generic workspace names do not confer HQ or program behavior.
+
+There is no **More views** menu. Plans was its only item, so the menu went with
+it.
+
+## Plans: retired creation, supported API
+
+Ori's own screens no longer start new structured Plans. A workspace with no Plans
+has no Plans destination, no setup prompt for one and no creation form. To hand a
+workspace work, use **Give work** or add a ticket; talking about work in chat
+starts nothing, and chat answers several-step requests with advice that names
+Give work.
+
+A finished first assessment still suggests one next ticket. **Review suggested
+ticket** opens `/workspaces/{slug}?next=assessment`: Give work opens once with the
+suggestion typed in as plain text, nobody assigned and Start now off. Nothing is
+saved unless you press **Give work**; cancelling, reloading, Back and Forward
+create nothing. The old `/workspaces/{slug}/plans?next=assessment` bookmark is
+redirected to the same place.
+
+What is **retired** is the first-party creation UI. What is **supported** is
+unchanged: the Plan API (including `POST …/plans`), every stored Plan, version,
+approval, export and Ticket/Run link, the Plans collection
+(`/workspaces/{slug}/plans`) and its detail pages. A workspace that has at least
+one Plan, active or in History, shows a secondary **Existing plans** link under
+**Tickets**; opening a Plan changes nothing, and review, approval, start, pause and
+cancel keep their original gates. If that check cannot be read the link area says
+so and offers **Try again** instead of hiding the link. In Settings the planning
+controls are folded into **Existing plans**; saving settings writes every value
+back exactly as loaded.
 
 ## Work, unknown data and attention
 

@@ -2429,14 +2429,14 @@ What Set it up runs depends on `stage`, which follows the chosen steps (a group 
   "recipe": "software_assessment (present only for a task that runs under a host recipe)",
   "can_retry": true,
   "repair_route": "/agents", "repair_label": "Choose a model",
-  "next_request": "the one next task a finished assessment suggested, as plain text",
-  "next_route": "/workspaces/thesis/plans?next=assessment",
+  "next_request": "the one next ticket a finished assessment suggested, as plain text",
+  "next_route": "/workspaces/thesis?next=assessment",
   "report_route": "/workspaces/thesis/task/<task id>",
   "readiness": [ { "id": "folder | model | github", "label": "…", "state": "verified | configured | absent | unknown", "required": true, "detail": "…", "source": "…", "route": "…" } ]
 }
 ```
 
-`can_start` is true only for a `seeded` look that `POST …/folder-first-task/start` would start now (`no_model` is added when no model is configured). Routes are built from the folder slug, never an internal id, and no field carries a filesystem path. While a look runs, the Home card re-reads `?offer_id=` only while the drawer is open.
+`can_start` is true only for a `seeded` look that `POST …/folder-first-task/start` would start now (`no_model` is added when no model is configured). `next_route` opens that workspace with the Give work dialog already holding `next_request` as plain text: nothing assigned, Start now off, nothing saved until the person presses Give work. It reads the suggestion from this endpoint, never from the address. The retired `/workspaces/{slug}/plans?next=assessment` address is redirected (`303`) to the same arrival, so old bookmarks and older clients keep working. Routes are built from the folder slug, never an internal id, and no field carries a filesystem path. While a look runs, the Home card re-reads `?offer_id=` only while the drawer is open.
 
 The last six fields are sent only for a task with a `recipe` (a software project's first assessment; see "The first assessment" under Review a Software Project's Setup). For such a task `reason` is also one of `assistant_unavailable`, `model_unavailable`, `model_unsupported`, `project_folder_unavailable`, `workspace_unavailable` (each must be repaired before a start or a retry) or `tool_call_refused`, `context_too_small`, `nothing_to_assess`, `timed_out`, `provider_configuration_required`, `provider_quota_exhausted` (how one run ended). `can_retry` is true only for a `failed` assessment that could be run again now; when something must be repaired first it is false and `repair_route`/`repair_label` name the existing page that repairs it. `detail` for one that cannot start says what it waits for ("Needs a model before it can start", "Needs the project folder back before it can start") and never that it is ready. `readiness` is read live without opening a project file or calling a model or GitHub: a model that is set reads `configured` ("set, not checked"), never `verified`, and a saved GitHub connection does not claim the repository can be reached. `next_request` is text the model wrote; `next_route` opens the workspace's Plans page with it placed, unsubmitted, in the "Start a plan" box. `report_route` is sent for a finished assessment and opens the task's own page, where the whole result is shown (the `ticket_route` detail lists the work and its runs but not what a run wrote).
 
@@ -2569,7 +2569,7 @@ The result is the task's result: the project's purpose and structure, detected s
 
 **Endpoint:** `GET /api/workspaces/{id}/folder-first-task`
 
-Answers `200` with `{ "first_task": <the shape above> }` for the workspace's first task as it stands now, or `{ "first_task": null }` when the workspace has none. It is a read: it starts nothing and spends nothing. The workspace page's banner and the Plans page (`?next=assessment`) use it so every surface shows the server's one reading of the task.
+Answers `200` with `{ "first_task": <the shape above> }` for the workspace's first task as it stands now, or `{ "first_task": null }` when the workspace has none. It is a read: it starts nothing and spends nothing. The workspace page's banner and its suggested-ticket arrival (`?next=assessment`) use it so every surface shows the server's one reading of the task.
 
 #### Stop a First Look
 
@@ -4312,6 +4312,18 @@ Trigger failures (mission disabled, watched folder removed, run-creation error) 
 
 ## Workspace Plans
 
+> **Retired creation UI, supported API.** Ori's own screens no longer start new
+> Plans: there is no "Start a plan" form, chat does not open one, and the
+> orchestrator does not draft one. Work is given as a **ticket** (Give work).
+> This section is unchanged for everything else: the endpoints below keep their
+> contract, every stored Plan, version, approval, artifact and Task/Run link is
+> kept, and `POST …/plans` still creates a draft for any client, whatever the
+> workspace's planning setting says (the setting never gated the route). Plans a
+> workspace already has stay reachable at `/workspaces/{slug}/plans` and
+> `/workspaces/{slug}/plans/{planID}` and are reviewed, approved, started,
+> paused and cancelled under the same gates as before; the workspace links to
+> them from Tickets ("Existing plans") only when it has at least one.
+
 A **Plan** is the durable, versioned record of work Ori intends to do: it moves
 from clarification through drafting, review, explicit approval, materialization
 into Tasks, execution, and completion. Compiled Ori code owns every lifecycle
@@ -4355,6 +4367,17 @@ POST   /api/workspaces/{workspaceID}/plans/{planID}/reopen
 `DELETE` hard-deletes **only** a Plan that was never approved and has no linked
 Tasks, Runs, or artifacts. Anything else returns `plan_not_deletable`; archive
 it instead. Materialized work is never silently removed.
+
+```
+GET    /api/workspaces/{workspaceID}/plan-presence
+```
+
+Whether the workspace has any Plan, for chrome that only needs to know:
+`{ "studio_id", "has_plans", "active", "history" }`. A Plan counts once, by its
+stored archived state, so a History-only workspace has plans. Unlike
+`GET …/plans` it loads no draft, link or progress and applies no retention (the
+list moves an idle draft to History as it reads; this never does). A failure is
+an error status, never zero counts.
 
 ### Drafting and clarification
 
@@ -4542,10 +4565,18 @@ Chat may preview **one immediate action** the user already named — a `/tool`
 command or a single routed utility tool — and approve it inline. Its ID is
 prefixed `preview_`, never `plan_`.
 
-Anything that creates Tasks, carries dependencies, spans agents, or hands off to
-a specialist is Plan work: chat opens a durable Plan and returns its canonical
-link instead. Read-only requests and flows with their own confirmation (mail
-send, destructive-action confirmation) stay as they are.
+Anything that creates tickets, carries dependencies, spans agents, or hands off
+to a specialist is several steps, and chat does not start it or preview it: it
+answers with advice that says nothing was started and names Give work as the
+manual next step. The reply carries `manual_next_step: "give_work"` and
+`requires_approval: false`, and none of `plan_id`, `plan_url`, an action
+preview, `dynamic_agent_requests` or an action receipt. The same reply answers
+planned work that needs an agent which does not exist yet; no workspace, queued
+agent request or run is created for it. Read-only requests and flows with their
+own confirmation (mail send, destructive-action confirmation) stay as they are.
+
+`POST /api/orchestration/dynamic-agents/approve` is unchanged for requests that
+already exist; approving an agent never resumes or starts work.
 
 ### Legacy planning skill
 
