@@ -19,13 +19,13 @@
     {{if .Extra.FolderSearchReady}}
     <div id="assistantExploreFolder" hidden>
       <div data-explore-choices>
-        <p class="pa-folder__prompt">Which folder would you like to explore?</p>
+        <p class="pa-folder__prompt">Choose a folder</p>
         <div class="pa-folder__chips" role="group" aria-label="Explore a folder">
           <button type="button" class="pa-folder__chip" data-explore-kind="downloads">Downloads</button>
           <button type="button" class="pa-folder__chip" data-explore-kind="documents">Documents</button>
           <button type="button" class="pa-folder__chip" data-explore-kind="custom">Choose another folder…</button>
         </div>
-        <p class="pa-folder__note">Link a folder to a workspace. No agent is hired.</p>
+        <p class="pa-folder__note">Review the folder and workspace name before creating anything.</p>
         <button type="button" class="pa-folder__chip" data-explore-assisted>Hire an agent or explore a file instead…</button>
       </div>
       <p data-explore-status role="status" aria-live="polite"></p>

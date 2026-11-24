@@ -30,11 +30,9 @@ test("Make searchable asks with the standalone page's own consent sentence", () 
   assert.equal(consentTitle('Album masters'), 'Allow Ori to search Album masters?');
 });
 
-test("Add folder… offers the first-run page's own folder choices", () => {
-  const page = read('../../search-desk.html');
-  const block = page.match(/\{\{define "folderChoices"\}\}([\s\S]*?)\{\{end\}\}/);
-  assert.ok(block, 'the page still defines its folder choices');
-  const offered = [...block[1].matchAll(/data-kind="([a-z]+)">([^<]+)</g)].map(m => ({
+test('Files and ordinary assistant Explore present the same folder choices', () => {
+  const page = read('../../../templates/components/personal-assistant-folder.tmpl');
+  const offered = [...page.matchAll(/data-explore-kind="([a-z]+)">([^<]+)</g)].map(m => ({
     kind: m[1],
     label: m[2]
   }));

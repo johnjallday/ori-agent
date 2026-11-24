@@ -1860,6 +1860,9 @@ test('Add folder… shows on the Mac that runs Ori only', () => {
   assert.equal(addFolderHTML({ folderSearch: emptyFolderSearch() }), '');
   assert.equal(addFolderHTML({}), '');
   for (const list of [emptyFolderSearch({ local: true }), sourcesList(), failedFolderSearch()]) {
-    assert.match(addFolderHTML({ folderSearch: list }), /data-tree-add-folder[^>]*>.*Add folder…</);
+    assert.match(
+      addFolderHTML({ folderSearch: list }),
+      /data-tree-add-folder[^>]*>.*New workspace from folder…</
+    );
   }
 });

@@ -31,14 +31,16 @@ export async function chooseSearchFolder(kind) {
 
 // The compact card has one creation shape. The same owner-bound review and
 // delivery journal as advanced creation recheck all material at confirmation.
-export function folderWorkspaceRequest(review, name, search) {
+export function folderWorkspaceRequest(review, name, search, revision) {
   return {
     name: name.trim(),
     folder_selection: review.id,
     allow_filename_search: search,
     blank: true,
     create_template_agents: false,
-    existing_agent_names: []
+    existing_agent_names: [],
+    team_intent: { version: 1, mode: 'agentless', plan_revision: revision },
+    role_staffing: []
   };
 }
 
@@ -71,7 +73,12 @@ export function exploreFolder(
   if (signal?.aborted) return Promise.resolve(null);
   return new Promise(resolve => {
     const card = element(inline ? 'section' : 'dialog', null, 'explore-card');
-    const title = element('h2', `Explore ${review.label}`);
+    const title = element(
+      'h2',
+      review.matches?.length
+        ? `Linked workspaces for ${review.label}`
+        : `Create a workspace from ${review.label}?`
+    );
     title.id = `explore-${crypto.randomUUID()}`;
     card.setAttribute('aria-labelledby', title.id);
     const description = element('p', null, 'explore-card__description');
@@ -98,7 +105,7 @@ export function exploreFolder(
       editing = true;
     const matches = review.matches || [],
       connected = matches.find(m => m.connected);
-    const openOnly = matches.length && !connected ? button('Open workspace') : null;
+    const openOnly = matches.length && !connected ? button('Open workspace', true) : null;
     const name = element('input');
     name.required = true;
     name.maxLength = 120;
@@ -120,7 +127,10 @@ export function exploreFolder(
     function update() {
       const m = chosen();
       verifyLabel.hidden = !m?.verify;
-      if (openOnly) openOnly.disabled = busy || !m;
+      if (openOnly) {
+        openOnly.disabled = busy || !m;
+        openOnly.textContent = m ? `Open ${m.name}` : 'Open workspace';
+      }
       submit.disabled =
         busy || (!matches.length ? !name.value.trim() : !m || (m.verify && !verify.checked));
     }
@@ -148,6 +158,14 @@ export function exploreFolder(
         actions.append(files);
       }
       actions.append(open);
+      const staff = button('Add an agent…');
+      staff.onclick = () => {
+        close();
+        location.assign(
+          `/workspaces/${encodeURIComponent(workspace.slug)}?staffWorkspace=${encodeURIComponent(workspace.id)}`
+        );
+      };
+      actions.append(staff);
       const done = button('Done');
       done.onclick = () => close();
       actions.append(done);
@@ -221,12 +239,12 @@ export function exploreFolder(
       submit.textContent = 'Create workspace';
     } else if (connected) {
       description.textContent = `This folder is already linked to ${connected.name}.`;
-      submit.textContent = 'Open workspace';
+      submit.textContent = `Open ${connected.name}`;
     } else {
       description.textContent =
         matches.length === 1
           ? `This folder is already linked to ${matches[0].name}.`
-          : 'More than one workspace links to this folder. Choose which one to connect.';
+          : 'More than one workspace links to this folder. Choose which one to open or connect.';
       if (matches.length > 1) select.add(new Option('Choose a workspace…', ''));
       matches.forEach((m, i) =>
         select.add(new Option(`${m.name} · ${m.slug} · ${m.id.slice(0, 8)}`, String(i)))
@@ -254,18 +272,20 @@ export function exploreFolder(
     }
     actions.append(cancel, submit);
     if (openOnly) {
-      actions.append(openOnly);
-      openOnly.onclick = () =>
-        perform(async () => {
-          // Opening an owned workspace does not require granting filename search.
-          const selected = chosen();
-          const current = await post('resume-review', { intent: review.id });
-          const workspace = current.matches?.find(
-            m => m.id === selected.id && m.link === selected.link
-          );
-          if (!workspace) throw new Error('This folder link changed. Choose the folder again.');
-          if (alive) finish(workspace, null, 'workspace');
-        });
+      submit.className = '';
+      submit.type = 'button';
+      submit.onclick = () => perform(() => connect(preferWorkspace ? 'workspace' : 'files'));
+      openOnly.type = 'submit';
+      actions.insertBefore(openOnly, submit);
+    }
+    async function openVerified() {
+      const selected = chosen();
+      const current = await post('resume-review', { intent: review.id });
+      const workspace = current.matches?.find(
+        m => m.id === selected.id && m.link === selected.link
+      );
+      if (!workspace) throw new Error('This folder link changed. Choose the folder again.');
+      if (alive) finish(workspace, null, 'workspace');
     }
     async function connect(destination) {
       const m = chosen();
@@ -304,19 +324,28 @@ export function exploreFolder(
     }
     form.onsubmit = event => {
       event.preventDefault();
-      if (!editing || submit.disabled) return;
+      if (!editing || (openOnly || submit).disabled) return;
       void perform(async () => {
         if (matches.length) {
-          return connect(connected || preferWorkspace ? 'workspace' : 'files');
+          return openVerified();
         }
         if (savedCreationReference(localStorage) || savedGroupedCreationReference(localStorage))
           throw new Error(
             'Open New Workspace on Map to check the previous creation receipt first.'
           );
+        const planResponse = await fetch('/api/workspaces/template-agent-plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ blank: true })
+        });
+        const plan = planResponse.ok ? await planResponse.json() : null;
+        if (!alive) return;
+        if (!plan?.revision)
+          throw new Error('Could not verify the empty workspace plan. Nothing was created.');
         reference = await reviewCreationOperation(
           fetch,
           crypto.randomUUID(),
-          folderWorkspaceRequest(review, name.value, search.checked)
+          folderWorkspaceRequest(review, name.value, search.checked, plan.revision)
         );
         if (!alive) return;
         const view = await confirmCreationOperation(fetch, localStorage, reference);
@@ -341,7 +370,12 @@ export function exploreFolder(
     signal?.addEventListener('abort', abort, { once: true });
     update();
     if (!inline) card.showModal();
-    (matches.length > 1 && !connected ? select : matches.length ? submit : name).focus();
+    (matches.length > 1 && !connected
+      ? select
+      : matches.length
+        ? openOnly || submit
+        : name
+    ).focus();
   });
 }
 

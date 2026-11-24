@@ -598,7 +598,13 @@ export class WorkspaceDetailPage {
     // not an agent task racing the deterministic setup it duplicates.
     const setupOwned = await this.initSharedSetupWizard();
     if (this._destroyed) return;
-    if (!restoredBlockedTask && !setupOwned && !this.checkAutoOpenCreateAgent()) {
+    const arrival = new URL(window.location.href);
+    const staffingId = arrival.searchParams.get('staffWorkspace');
+    if (staffingId) {
+      arrival.searchParams.delete('staffWorkspace');
+      window.history.replaceState({}, '', arrival.pathname + arrival.search + arrival.hash);
+      if (!setupOwned && staffingId === this.workspaceId) await this.openAddAgentModal();
+    } else if (!restoredBlockedTask && !setupOwned && !this.checkAutoOpenCreateAgent()) {
       await this.maybePromptForMissingEntryAgent();
       if (this._destroyed) return;
     }

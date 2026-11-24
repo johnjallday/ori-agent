@@ -47,6 +47,7 @@ function ask({
   title,
   description,
   accept,
+  kicker = 'Ori / Local file search',
   cancel = 'Cancel',
   danger = false,
   build,
@@ -88,12 +89,7 @@ function ask({
     body.addEventListener('change', sync);
     sync();
     form.append(body, actions);
-    dialog.append(
-      element('small', 'Ori / Local file search', 'explore-card__kicker'),
-      heading,
-      text,
-      form
-    );
+    dialog.append(element('small', kicker, 'explore-card__kicker'), heading, text, form);
     dialog.returnValue = '';
     dialog.addEventListener(
       'close',
@@ -155,8 +151,8 @@ export async function askRemoveFromSearch({ label, returnFocus = null }) {
 
 /** The first-run page's folder choices (search-desk.html, "folderChoices"). */
 export const FOLDER_CHOICES = [
-  { kind: 'documents', label: 'Documents' },
   { kind: 'downloads', label: 'Downloads' },
+  { kind: 'documents', label: 'Documents' },
   { kind: 'custom', label: 'Choose another folder…' }
 ];
 
@@ -167,9 +163,9 @@ export const FOLDER_CHOICES = [
  */
 export async function askFolderToAdd({ returnFocus = null } = {}) {
   return ask({
-    title: 'Add a folder',
-    description:
-      'Choose a folder to explore. Nothing is made until you confirm, and the originals stay where they are.',
+    title: 'Choose a folder',
+    kicker: 'New workspace from folder',
+    description: 'Review the folder and workspace name before creating anything.',
     returnFocus,
     build: body => {
       const choices = element('div', null, 'folder-search-dialog__choices');

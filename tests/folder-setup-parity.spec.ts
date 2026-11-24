@@ -47,7 +47,7 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
       await page.goto('/?view=tree');
       await page.locator('[data-tree-add-folder]').click();
       await page
-        .getByRole('dialog', { name: 'Add a folder' })
+        .getByRole('dialog', { name: 'Choose a folder' })
         .locator(`[data-folder-choice="${kind}"]`)
         .click();
     } else {
@@ -113,12 +113,19 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
   await inventory();
   const receipt = await inspect();
   const beforeOpen = await arrivalState(request, ws.id);
-  expect(beforeOpen).toMatchObject({ agents: [], pending: false, goalRuns: 0, inFlight: false });
+  expect(beforeOpen).toMatchObject({
+    agents: [],
+    roles: 1,
+    filled: 0,
+    pending: false,
+    goalRuns: 0,
+    inFlight: false
+  });
   expect(receipt.hires).toEqual(initial.hires);
   await choose(entry === 'files' ? 'workspace' : 'files');
   await compact
     .getByRole('button', {
-      name: entry === 'files' ? 'Open workspace' : 'Search this folder in Files'
+      name: entry === 'files' ? `Open ${name}` : 'Search this folder in Files'
     })
     .click();
   if (entry === 'files') await expect(page).toHaveURL(new RegExp('/workspaces/' + ws.slug + '$'));
@@ -142,4 +149,40 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
   await page.getByRole('button', { name: `Search ${folder} in Files` }).press('Enter');
   await expectFilesScoped();
   await page.screenshot({ path: path('narrow-files') });
+  if (scenario === 'parity-files-documents') {
+    // The global tree action is independent of the current search selection.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/?view=tree');
+    const beforeBlank = await inspect();
+    await page.locator('[data-tree-add-folder]').click();
+    await page
+      .getByRole('dialog', { name: 'Choose a folder' })
+      .getByRole('button', { name: 'Downloads', exact: true })
+      .click();
+    await expect(compact.getByRole('checkbox')).not.toBeChecked();
+    await compact.getByRole('button', { name: 'Create workspace' }).click();
+    await compact.getByRole('button', { name: 'Open workspace', exact: true }).click();
+    const blankId = await page.locator('body').getAttribute('data-workspace-id');
+    expect(blankId).toBeTruthy();
+    const blank = await inspect();
+    expect(blank.workspaces).toEqual([...beforeBlank.workspaces, blankId].sort());
+    expect(blank.sources).toEqual(beforeBlank.sources);
+    expect(blank.hires).toEqual(beforeBlank.hires);
+    expect(await arrivalState(request, blankId!)).toMatchObject({
+      agents: [],
+      filled: 0,
+      roles: 1,
+      pending: false,
+      goalRuns: 0
+    });
+    await page.goto('/?view=tree');
+    await page.locator('[data-tree-add-folder]').click();
+    await page
+      .getByRole('dialog', { name: 'Choose a folder' })
+      .getByRole('button', { name: 'Downloads', exact: true })
+      .click();
+    await compact.getByRole('button', { name: 'Open Downloads', exact: true }).click();
+    await expect(page.locator('body')).toHaveAttribute('data-workspace-id', blankId!);
+    expect(await inspect()).toEqual(blank);
+  }
 });

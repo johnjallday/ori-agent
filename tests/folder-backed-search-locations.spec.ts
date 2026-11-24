@@ -1,5 +1,6 @@
 import { test, expect, type Page, type Request } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { arrivalState, choiceInventory } from './helpers/workspace-choice-state';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
@@ -58,7 +59,9 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
   await expect(page.getByRole('button', { name: /Add folder/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Choose another folder…', exact: true }).click();
   const review = page.locator('dialog.explore-card');
-  await expect(review.getByRole('heading')).toHaveText('Explore Synthetic Project');
+  await expect(review.getByRole('heading')).toHaveText(
+    'Create a workspace from Synthetic Project?'
+  );
   await expect(review.getByRole('checkbox')).not.toBeChecked();
   await review.getByRole('checkbox').check();
   await review.getByLabel('Workspace name').fill('Research archive');
@@ -153,7 +156,7 @@ test('the assistant links a folder without starting a hire or filename scan', as
   const host = page.locator('#assistantExploreFolder');
   await host.getByRole('button', { name: 'Documents', exact: true }).click();
   const card = host.locator('section.explore-card');
-  await expect(card.getByRole('heading')).toHaveText('Explore Documents');
+  await expect(card.getByRole('heading')).toHaveText('Create a workspace from Documents?');
   await card.getByRole('button', { name: 'Cancel' }).click();
   await host.getByRole('button', { name: 'Downloads', exact: true }).click();
   await expect(card.getByRole('checkbox')).not.toBeChecked();
@@ -185,22 +188,40 @@ test('the assistant links a folder without starting a hire or filename scan', as
       await request.get('/api/file-search/sources', { headers: { 'X-Ori-Search': '1' } })
     ).json();
   expect(await sources()).toEqual([]);
-  await card.getByRole('button', { name: 'Open workspace' }).click();
-  await expect(page).toHaveURL(/\/workspaces\//);
+  await expect(card.getByRole('button', { name: 'Open workspace' })).toBeVisible();
+  const inventory = () => choiceInventory(request, join(fixture!, 'data'));
+  const receipt = await inventory();
+  await card.getByRole('button', { name: 'Add an agent…' }).click();
+  const rosterForm = page.locator('#workspace-detail-add-agent-modal');
+  await expect(rosterForm).toBeVisible();
   const id = await page.locator('body').getAttribute('data-workspace-id');
+  expect(receipt.workspaces).toContain(id);
+  await page.screenshot({
+    path: `tasks/evidence-folder-backed-search-locations/${browserName}/optional-staffing.png`
+  });
+  await rosterForm.getByRole('button', { name: 'Cancel' }).click();
+  await expect(rosterForm).toBeHidden();
+  expect(await inventory()).toEqual(receipt);
+  expect(await arrivalState(request, id!)).toMatchObject({
+    agents: [],
+    filled: 0,
+    roles: 1,
+    goalRuns: 0,
+    pending: false
+  });
   // With a workspace, folders are added in Files (requirement 39).
   const addDownloadsFromFiles = async () => {
     await page.goto('/?view=tree');
     await page.locator('[data-tree-add-folder]').click();
     await page
-      .getByRole('dialog', { name: 'Add a folder' })
+      .getByRole('dialog', { name: 'Choose a folder' })
       .getByRole('button', { name: 'Downloads', exact: true })
       .click();
   };
   await addDownloadsFromFiles();
-  const match = page.getByRole('dialog', { name: 'Explore Downloads' });
+  const match = page.getByRole('dialog', { name: 'Linked workspaces for Downloads' });
   await expect(match).toContainText('already linked to Reading inbox');
-  await match.getByRole('button', { name: 'Open workspace' }).click();
+  await match.getByRole('button', { name: 'Open Reading inbox' }).click();
   await expect(page.locator('body')).toHaveAttribute('data-workspace-id', id!);
   expect(await sources()).toEqual([]);
   await addDownloadsFromFiles();
@@ -237,7 +258,10 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   await page.locator('#wizardNextBtn').click();
   await page.locator('#workspaceFolderModeAnchored').check();
   await page.locator('[data-search-folder="custom"]').click();
-  await page.locator('dialog.explore-card').getByRole('button', { name: 'Open workspace' }).click();
+  await page
+    .locator('dialog.explore-card')
+    .getByRole('button', { name: 'Open Research archive' })
+    .click();
   await expect(page).toHaveURL(new RegExp('/workspaces/' + project.workspace.slug + '$'));
   // The independent grant is a search-only folder: it sits in Files' group at
   // the foot of the tree (PR 2, requirement 38), and connects from there.
@@ -312,11 +336,11 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   // Add folder… in Files (requirement 39): the first-run page's choices, then
   // the same Explore card. Cancelling either step makes nothing.
   const addFolder = page.locator('[data-tree-add-folder]');
-  const chooser = page.getByRole('dialog', { name: 'Add a folder' });
+  const chooser = page.getByRole('dialog', { name: 'Choose a folder' });
   await addFolder.click();
   await expect(chooser.getByRole('group', { name: 'Folder' }).getByRole('button')).toHaveText([
-    'Documents',
     'Downloads',
+    'Documents',
     'Choose another folder…'
   ]);
   await chooser.getByRole('button', { name: 'Cancel' }).click();
@@ -326,7 +350,7 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   const sourcesBeforeAdd = (await sources()).map((s: { id: string }) => s.id);
   await addFolder.click();
   await chooser.getByRole('button', { name: 'Documents', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Explore Documents' });
+  const dialog = page.getByRole('dialog', { name: 'Linked workspaces for Documents' });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Cancel' }).click();
   await expect(dialog).toHaveCount(0);
