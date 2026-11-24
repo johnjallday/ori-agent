@@ -17,6 +17,7 @@ import {
   MENU_OPEN_IN_WORKSPACE,
   MENU_OPEN_PAGE,
   MENU_REFRESH,
+  MENU_SEARCH_IN,
   MENU_SHOW_OUTPUTS,
   MENU_UPLOAD,
   menuItemsFor,
@@ -37,6 +38,7 @@ test('a workspace and a group carry the whole management menu (FR55)', () => {
     'New note',
     'New ticket',
     'Upload file…',
+    'Search in this workspace',
     'Refresh',
     'Move…',
     'Delete'
@@ -46,6 +48,7 @@ test('a workspace and a group carry the whole management menu (FR55)', () => {
     'New note',
     'New ticket',
     'Upload file…',
+    'Search in this group',
     'Refresh',
     'Move…',
     'Delete'
@@ -59,6 +62,7 @@ test('a workspace and a group carry the whole management menu (FR55)', () => {
       MENU_NEW_NOTE,
       MENU_NEW_TICKET,
       MENU_UPLOAD,
+      MENU_SEARCH_IN,
       MENU_REFRESH,
       MENU_MOVE,
       MENU_DELETE
@@ -115,9 +119,30 @@ test('an output file offers Open only: no default app, no Reveal, no workspace p
   );
 });
 
-test('a folder in Outputs has no menu: nothing is uploaded into outputs/', () => {
-  assert.deepEqual(menuItemsFor({ kind: 'outputFolder' }), []);
-  assert.equal(rowHasMenu({ kind: 'outputFolder' }), false);
+test('a folder in Outputs offers only a search: nothing is uploaded into outputs/', () => {
+  assert.deepEqual(labels({ kind: 'outputFolder' }), ['Search in this folder']);
+  assert.equal(rowHasMenu({ kind: 'outputFolder' }), true);
+});
+
+test('a linked folder offers Search in this folder only while it is searchable', () => {
+  const row = { kind: 'linked', meta: { dirId: 'dir1' } };
+  assert.deepEqual(menuItemsFor(row), []);
+  assert.deepEqual(menuItemsFor(row, {}), []);
+  assert.deepEqual(menuItemsFor(row, { searchableLinks: new Set() }), []);
+  assert.deepEqual(menuItemsFor(row, { searchableLinks: new Set(['other']) }), []);
+  const searchable = menuItemsFor(row, { searchableLinks: new Set(['dir1']) });
+  assert.deepEqual(
+    searchable.map(entry => entry.action),
+    [MENU_SEARCH_IN]
+  );
+  assert.equal(searchable[0].label, 'Search in this folder');
+  assert.equal(rowHasMenu(row), false);
+  assert.equal(rowHasMenu(row, { searchableLinks: new Set(['dir1']) }), true);
+  // The folders inside a linked folder have no menu of their own.
+  assert.deepEqual(
+    menuItemsFor({ kind: 'linkedFolder' }, { searchableLinks: new Set(['dir1']) }),
+    []
+  );
 });
 
 test('a file in a linked folder offers Open only (FR55)', () => {
@@ -161,7 +186,7 @@ test('each section offers the one thing that can be created in it (FR55)', () =>
   assert.deepEqual(labels({ kind: 'section', section: 'notes' }), ['New note']);
   assert.deepEqual(labels({ kind: 'section', section: 'backlog' }), ['New ticket']);
   assert.deepEqual(labels({ kind: 'section', section: 'files' }), ['Upload file…']);
-  assert.deepEqual(labels({ kind: 'folder' }), ['Upload file…']);
+  assert.deepEqual(labels({ kind: 'folder' }), ['Upload file…', 'Search in this folder']);
 });
 
 test('rows with nothing to offer have no menu, and so no "⋯" button', () => {
@@ -185,10 +210,11 @@ test('the menu is drawn with menu semantics, one tabbable item at a time', () =>
   const html = renderMenuHTML(menuItemsFor({ kind: 'workspace' }), 'Actions for My HQ');
   assert.match(html, /class="ori-context-menu cockpit-tree-menu"/);
   assert.match(html, /role="menu" aria-label="Actions for My HQ"/);
-  assert.equal((html.match(/role="menuitem"/g) || []).length, 7);
+  assert.equal((html.match(/role="menuitem"/g) || []).length, 8);
   assert.equal((html.match(/role="separator"/g) || []).length, 3);
   assert.doesNotMatch(html, /tabindex="0"/);
   assert.match(html, /data-tree-menu-action="new-note"[^>]*>New note</);
+  assert.match(html, /data-tree-menu-action="search-in"[^>]*>Search in this workspace</);
 });
 
 test('a menu label is escaped', () => {

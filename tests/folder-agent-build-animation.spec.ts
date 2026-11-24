@@ -3,6 +3,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import fs from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { goToFiles, goToMap } from './helpers/home-destination';
 
 // Real folder, accepted hire, workspace and agent. Only the look's GET/start
 // projection is held at looking, so a fast model-free report cannot race the
@@ -121,7 +122,7 @@ for (const mode of [
     const evidence = `tasks/evidence-folder-build-animation/${group}/${live ? 'live-claude/' : ''}${mode}`;
     fs.mkdirSync(evidence, { recursive: true });
     await page.screenshot({ path: `${evidence}/before-hire.png` });
-    if (mode === 'tree') await page.locator('[data-cockpit-view="tree"]').click();
+    if (mode === 'tree') await goToFiles(page);
     if (mode === 'skipped-narrowing')
       await page.evaluate(() => {
         // Models the panel's existing skipped outcome when stepped aside.
@@ -141,7 +142,7 @@ for (const mode of [
       await page.clock.runFor(2000);
       await expect(page.locator('.is-assembling')).toHaveCount(0);
       await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
-      await page.locator('[data-cockpit-view="map"]').click();
+      await goToMap(page);
       await expect(tile).toBeVisible();
       await expect(tile).not.toHaveAttribute('data-build-reveal', 'playing');
       await page.screenshot({ path: `${evidence}/later-map-finished.png` });
@@ -175,9 +176,9 @@ for (const mode of [
         await style.evaluate(el => el.remove());
       }
       if (mode === 'navigate') {
-        await page.locator('[data-cockpit-view="tree"]').click();
+        await goToFiles(page);
         await expect(page.locator('.is-assembling')).toHaveCount(0);
-        await page.locator('[data-cockpit-view="map"]').click();
+        await goToMap(page);
         await expect(tile).toHaveAttribute('data-build-reveal', 'settled');
         await page.screenshot({ path: `${evidence}/returned-finished.png` });
         await page.clock.resume();

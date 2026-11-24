@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
+import { goToFiles } from './helpers/home-destination';
 
 // Reviewed Home package upgrade (docs/architecture/independent-program-homes.md
 // §6.1) between two exact Music candidates. Run only through
@@ -85,7 +86,7 @@ test('a Home-pinned package is reviewed in place on Plugins and upgraded from it
 
   // An ordinary staffed Music Home on the installed release.
   await page.goto('/');
-  await page.getByRole('button', { name: 'Tree', exact: true }).click();
+  await goToFiles(page);
   await page.locator('[data-tree-new-group]').click();
   const creator = page.locator('#addFolderModal');
   const music = creator.locator('.workspace-group-template-option', {

@@ -13,6 +13,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/namesearchhttp"
 	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/settingsreset"
 	"github.com/johnjallday/ori-agent/internal/setupjourneyhttp"
@@ -1062,6 +1063,9 @@ func registerSessionRoutes(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET /api/workspaces/{workspaceID}/roles", s.Handlers.Session.GetWorkspaceRoles)
 		mux.HandleFunc("PUT /api/workspaces/{workspaceID}/roles/{roleID}", s.Handlers.Session.PutWorkspaceRole)
 		mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/roles/{roleID}", s.Handlers.Session.DeleteWorkspaceRole)
+
+		// Find Ori's own items by name for Home's Files view (read-only).
+		mux.Handle(namesearchhttp.Path, s.nameSearchHandler())
 
 		// Workspace routes (unified workspace API)
 		mux.HandleFunc("/api/workspaces", s.handleWorkspaceCollectionAPI)

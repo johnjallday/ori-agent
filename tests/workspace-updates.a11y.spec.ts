@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page, type Locator } from '@
 import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { goToFiles } from './helpers/home-destination';
 
 // Canonical host data throughout. Only CDN assets and pinned axe are supplied
 // locally. Chromium reflow/keyboard/axe evidence is not native AT certification.
@@ -240,7 +241,7 @@ for (const theme of ['light', 'dark']) {
         await page.keyboard.press('Escape');
         await expect(tile).toBeFocused();
         await scan(page, '#cockpitMap .ws-map-update-markers', true);
-        await page.locator('[data-cockpit-view="tree"]').click();
+        await goToFiles(page);
         const row = page.locator(`#cockpitTreeNav [data-tree-row="${ws.id}"]`);
         await row.focus();
         await page.keyboard.press('Tab');

@@ -9,6 +9,7 @@ import {
 } from './helpers/music-home-placement';
 import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
 import { withOwnedBrowserZoom } from './helpers/owned-browser-zoom';
+import { expectDestination } from './helpers/home-destination';
 const expect = baseExpect.configure({ timeout: 60_000 });
 
 // One variant per freshly staged exact-candidate server. Creation and canonical
@@ -235,11 +236,7 @@ async function exercise(page: Page) {
     await openMapReceiptDetails(page, /Home (ready|kept)/);
   } else {
     await expect(place).toBeDisabled();
-    if (variant === 'tree')
-      await expect(page.getByRole('button', { name: 'Tree', exact: true })).toHaveAttribute(
-        'aria-pressed',
-        'true'
-      );
+    if (variant === 'tree') await expectDestination(page, 'files');
     const automatic = review.getByRole('button', { name: 'Use automatic placement', exact: true });
     await usable(automatic);
     if (touch) await automatic.tap();

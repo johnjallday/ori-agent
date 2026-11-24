@@ -8,6 +8,7 @@ import {
   reachable
 } from './helpers/ui-consistency';
 import { homeLeaf, homeReads } from './fixtures/ui-consistency-home';
+import { destinationControls, goToFiles, goToMap } from './helpers/home-destination';
 
 async function homeA11y(page, selector: string) {
   if (!(await page.evaluate(() => Boolean(window.axe)))) {
@@ -39,9 +40,12 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator('#cockpitMap')).toBeVisible();
       await expect(page.locator('#cockpitEconomy')).toBeVisible();
       await expect(page.locator('#cockpitQuestsToggle')).toBeVisible();
+      // The view switcher is the Desk rail (the picker on a narrow screen): its
+      // controls keep the same floor as the header's own.
+      const destinations = await destinationControls(page).all();
+      expect(destinations.length).toBeGreaterThan(0);
+      for (const control of destinations) await reachable(control, width < 769 ? 44 : 32);
       for (const selector of [
-        '#cockpitViewMap',
-        '#cockpitViewTree',
         '#cockpitCaptureBtn',
         '#cockpitSummaryBtn',
         '#cockpitPrimaryActionBtn',
@@ -104,7 +108,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page.keyboard.press('Escape');
       await expect(context).toBeHidden();
       await expect(tile).toHaveClass(/is-selected/);
-      await page.locator('#cockpitViewTree').click();
+      await goToFiles(page);
       await expect(page.locator('#cockpitTree')).toBeVisible();
       await expect(page.locator('#cockpitMap')).toBeHidden();
       await expect(page.locator('#cockpitSignalFilters')).toBeHidden();
@@ -113,7 +117,9 @@ for (const theme of ['light', 'dark'] as const) {
         .all()) {
         await reachable(tool, width < 769 ? 44 : 32);
       }
-      await reachable(page.locator('[data-tree-filter]'), width < 769 ? 44 : 40);
+      // Files' one search box, above the tree and the pane.
+      await reachable(page.locator('#cockpitFilesSearchInput'), width < 769 ? 44 : 40);
+      await homeA11y(page, '#cockpitFilesSearch');
       await homeA11y(page, '#cockpitTreeNav');
       await page.locator(`[data-tree-row="${homeLeaf.id}"] .cockpit-tree-name`).click();
       await expect(page.locator('#cockpitTreePane')).toContainText(homeLeaf.name);
@@ -126,7 +132,7 @@ for (const theme of ['light', 'dark'] as const) {
         { fixture: 'GET-only tree content and selected pane' },
         { fullPage: false }
       );
-      await page.locator('#cockpitViewMap').click();
+      await goToMap(page);
       await expect(page.locator('#cockpitMap')).toBeVisible();
       await expect(tile).toHaveClass(/is-selected/);
       await page.locator('#cockpitCaptureBtn').click();
@@ -177,7 +183,7 @@ for (const theme of ['light', 'dark'] as const) {
       { fixture: 'GET-only needs_hire relationship; welcome retained; no hire or HQ provisioning' },
       { fullPage: false }
     );
-    await page.locator('#cockpitViewTree').click();
+    await goToFiles(page);
     await expect(page.locator('#cockpitTree')).toContainText('No workspaces yet');
     await capture(page, info, 'home-empty-tree', {}, { fullPage: false });
     expect(writes).toEqual([]);

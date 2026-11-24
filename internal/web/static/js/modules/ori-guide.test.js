@@ -1377,6 +1377,32 @@ test('resolve returns null for a missing or hidden target', () => {
   assert.equal(ctx.coachmarks.resolve('new_agent', '/agents', ctx.sandbox.document), visible);
 });
 
+// The Map/Tree toggle is gone: view_toggle now points at the Desk rail's Files
+// item. On a narrow screen the rail is not drawn and the Destination picker is
+// the control, so the key resolves to whichever of the two is on screen.
+test('view_toggle points at the Desk rail Files item or the narrow picker, whichever shows', () => {
+  const { coachmarks } = load({ route: '/' });
+  const { selector, firstVisible } = coachmarks.REGISTRY.view_toggle;
+  assert.ok(firstVisible);
+  assert.match(selector, /\.desk-rail \[data-desk-destination="tree"\]/);
+  assert.match(selector, /\[data-map-picker\]/);
+  assert.doesNotMatch(selector, /cockpitView/);
+
+  const notDrawn = () => makeElement('rail-files', { getClientRects: () => [] });
+  const drawn = id => makeElement(id);
+  const docOf = (...nodes) => ({ querySelectorAll: () => nodes, querySelector: () => nodes[0] });
+
+  const rail = drawn('rail-files');
+  const picker = drawn('picker');
+  assert.equal(coachmarks.resolve('view_toggle', '/', docOf(rail, notDrawn())), rail, 'wide');
+  const hiddenRail = notDrawn();
+  assert.equal(coachmarks.resolve('view_toggle', '/', docOf(hiddenRail, picker)), picker, 'narrow');
+  assert.equal(coachmarks.resolve('view_toggle', '/', docOf(notDrawn(), notDrawn())), null);
+  assert.equal(coachmarks.resolve('view_toggle', '/', docOf()), null);
+  // Still only Home's key.
+  assert.equal(coachmarks.resolve('view_toggle', '/agents', docOf(rail)), null);
+});
+
 test('a coachmark marks and focuses its target but never activates it', () => {
   const ctx = load({ route: '/agents', elements: guideEls() });
   const target = makeElement('newAgentBtn', {

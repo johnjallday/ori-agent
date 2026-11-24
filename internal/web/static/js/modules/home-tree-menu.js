@@ -31,6 +31,8 @@ export const MENU_FILE_OPEN = 'file-open';
 export const MENU_FILE_REVEAL = 'file-reveal';
 // Show the workspace's outputs/ folder in the file manager.
 export const MENU_SHOW_OUTPUTS = 'show-outputs';
+// Make Files' search look only inside this workspace, group or folder.
+export const MENU_SEARCH_IN = 'search-in';
 
 const item = (action, label, extra) => ({ action, label, ...extra });
 const DIVIDER = { divider: true };
@@ -42,13 +44,16 @@ const DIVIDER = { divider: true };
  * This is the PRD's menu table (FR55):
  *
  *   group              Open group, New note, New ticket, Upload file…,
- *                      Refresh, Move…, Delete
+ *                      Search in this group, Refresh, Move…, Delete
  *   workspace          Open workspace, New note, New ticket, Upload file…,
- *                      Refresh, Move…, Delete
+ *                      Search in this workspace, Refresh, Move…, Delete
  *   Notes section      New note
  *   Backlog section    New ticket
- *   Files section,
- *   a folder in Files  Upload file…
+ *   Files section      Upload file…
+ *   a folder in Files  Upload file…, Search in this folder
+ *   a folder in
+ *   Outputs            Search in this folder
+ *   a linked folder    Search in this folder (only while it is searchable)
  *   Outputs section    Show outputs folder
  *   note, ticket,
  *   agent              Open, Open in workspace
@@ -56,12 +61,15 @@ const DIVIDER = { divider: true };
  *   output file,
  *   linked-folder file Open
  *
- * A folder in Outputs has no menu: nothing is uploaded into outputs/, and
- * one output file is not opened or revealed on its own (decision D15). A
- * linked folder and the folders inside it have none either; the workspace's
- * Refresh reloads the linked folders that are open.
+ * A folder in Outputs has nothing to upload into (outputs/ is written by task
+ * runs) and one output file is not opened or revealed on its own (decision
+ * D15), so searching it is all its menu holds. A linked folder's menu is only
+ * Search in this folder, and only while the filename index knows the folder
+ * (`context.searchableLinks`, the ids of the linked folders it searches); the
+ * folders inside it have none. The workspace's Refresh reloads the linked
+ * folders that are open.
  */
-export function menuItemsFor(row) {
+export function menuItemsFor(row, context = {}) {
   const kind = row && row.kind;
   if (kind === 'group' || kind === 'workspace') {
     return [
@@ -71,6 +79,7 @@ export function menuItemsFor(row) {
       item(MENU_NEW_TICKET, 'New ticket'),
       item(MENU_UPLOAD, 'Upload file…'),
       DIVIDER,
+      item(MENU_SEARCH_IN, kind === 'group' ? 'Search in this group' : 'Search in this workspace'),
       item(MENU_REFRESH, 'Refresh'),
       DIVIDER,
       item(MENU_MOVE, 'Move…'),
@@ -84,7 +93,17 @@ export function menuItemsFor(row) {
     if (row.section === 'outputs') return [item(MENU_SHOW_OUTPUTS, 'Show outputs folder')];
     return [];
   }
-  if (kind === 'folder') return [item(MENU_UPLOAD, 'Upload file…')];
+  if (kind === 'folder') {
+    return [item(MENU_UPLOAD, 'Upload file…'), item(MENU_SEARCH_IN, 'Search in this folder')];
+  }
+  if (kind === 'outputFolder') return [item(MENU_SEARCH_IN, 'Search in this folder')];
+  if (kind === 'linked') {
+    const searchable = context && context.searchableLinks;
+    const dirId = row.meta && row.meta.dirId;
+    return searchable && dirId && searchable.has(dirId)
+      ? [item(MENU_SEARCH_IN, 'Search in this folder')]
+      : [];
+  }
   if (kind === 'note' || kind === 'ticket' || kind === 'agent' || kind === 'chat') {
     return [item(MENU_OPEN, 'Open'), item(MENU_OPEN_IN_WORKSPACE, 'Open in workspace')];
   }
@@ -99,8 +118,8 @@ export function menuItemsFor(row) {
   return [];
 }
 
-export function rowHasMenu(row) {
-  return menuItemsFor(row).length > 0;
+export function rowHasMenu(row, context) {
+  return menuItemsFor(row, context).length > 0;
 }
 
 /**

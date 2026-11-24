@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
+import { goToFiles } from './helpers/home-destination';
 
 async function settled(page) {
   await page.route('**/api/onboarding/status', route =>
@@ -78,7 +79,7 @@ test('Tree Create Group reviews its Manager and refreshes the workspace views wi
   await settled(page);
   await page.goto('/');
   await page.getByRole('button', { name: 'Switch to dark mode' }).click();
-  await page.getByRole('button', { name: 'Tree', exact: true }).click();
+  await goToFiles(page);
   await expect(page.locator('#cockpitTree')).toBeVisible();
   await page
     .locator('#cockpitTree')

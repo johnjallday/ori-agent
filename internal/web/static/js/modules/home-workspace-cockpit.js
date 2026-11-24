@@ -1,6 +1,7 @@
 // Importing this also registers window.OriEconomy, which is how dashboard.js —
 // a plain script, not a module — reaches the same harvest client.
 import { destinationPlace } from './destination-place.js';
+import { request as filenameIndex } from './search-desk.js';
 import { guidedHint, showHQReturnLinks } from './hq-guided-attempt.js';
 import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 // Importing this also registers window.OriTicketCounts, which is how the classic
@@ -536,6 +537,14 @@ export function searchForView(search, view) {
   else params.delete('view');
   const next = params.toString();
   return next ? `?${next}` : '';
+}
+
+/**
+ * The heading over the cockpit: what the Desk rail says you are looking at.
+ * Map keeps its long name; Files is simply Files (the tree with its search).
+ */
+export function deskHeading(view) {
+  return view === VIEW_TREE ? 'Files' : 'Workspace Map';
 }
 
 // ---------------------------------------------------------------------------
@@ -1995,6 +2004,7 @@ import {
   mountTree,
   updateTreeWorkspaceBadges,
   ancestorIds,
+  descendantIds,
   isWorkspaceRowKind,
   removeWorkspaceTag,
   revealTargets,
@@ -2019,9 +2029,11 @@ import {
   loadSections,
   loadTicket,
   openWorkspaceFile,
+  parseItemKey,
   saveNoteContent,
   sectionInfo,
   sectionKey,
+  sectionOfKind,
   shouldReloadOnReturn,
   showOutputsFolder,
   uploadFile
@@ -2033,6 +2045,7 @@ import {
   MENU_NEW_TICKET,
   MENU_OPEN_IN_WORKSPACE,
   MENU_REFRESH,
+  MENU_SEARCH_IN,
   MENU_SHOW_OUTPUTS,
   MENU_UPLOAD
 } from './home-tree-menu.js';
@@ -2042,6 +2055,7 @@ import {
   ITEM_READY,
   NOTE_EDITOR_ID,
   activateTab,
+  adoptRowMeta,
   closeTab,
   createNoteController,
   isNarrowTreeWidth,
@@ -2053,6 +2067,22 @@ import {
   tabFromRow,
   treeColumns
 } from './home-tree-pane.js';
+import {
+  MAX_TERM_LENGTH,
+  PAGE_SIZE,
+  RESULTS_TAB_KEY,
+  createFilesSearch,
+  decodePages,
+  decodeScope,
+  encodePages,
+  encodeScope,
+  findResult,
+  readSources,
+  scopeLabel,
+  searchableLinkIds,
+  statusLine,
+  tabFromResult
+} from './home-files-search.js';
 import {
   applyTreeState,
   dropMissingRows,
@@ -2093,9 +2123,21 @@ import {
     // Tree view's two columns: the tree itself, and the pane beside it.
     treeNav: document.getElementById('cockpitTreeNav'),
     treePane: document.getElementById('cockpitTreePane'),
+    // Files' one search box, above both columns (home-files-search.js).
+    filesSearchInput: document.getElementById('cockpitFilesSearchInput'),
+    filesSearchClear: document.getElementById('cockpitFilesSearchClear'),
+    filesSearchStatus: document.getElementById('cockpitFilesSearchStatus'),
+    filesSearchScope: document.getElementById('cockpitFilesSearchScope'),
     areaTitle: document.querySelector('[data-cockpit-area-title]'),
     areaStatus: document.getElementById('cockpitWorkspaceStatus'),
-    viewButtons: Array.from(document.querySelectorAll('[data-cockpit-view]')),
+    // The Desk rail is the one view switcher: two links on a wide screen, one
+    // picker on a narrow one. Both are in the page already, rendered by the
+    // template; this module only keeps them in step with the view.
+    deskLinks: Array.from(document.querySelectorAll('[data-desk-destination]')),
+    deskPicker: document.querySelector('[data-map-picker]'),
+    deskRail: document.querySelector('.desk-rail'),
+    // Files' link to the standalone page that still manages search locations.
+    filesManage: document.querySelector('[data-files-manage]'),
     filters: document.getElementById('cockpitSignalFilters'),
     contextModal: document.getElementById('cockpitContextModal'),
     contextModalLabel: document.getElementById('cockpitContextModalLabel'),
@@ -2225,9 +2267,20 @@ import {
     // Shift-click selects from.
     treeMoveId: '',
     bulkAnchorId: '',
-    // The filter box's text. Not remembered across reloads: a filter left on
-    // would hide most of the tree with nothing on screen to say why.
-    treeFilter: '',
+    // What the Files search box found (home-files-search.js), or null with no
+    // text in it. Memory only: the term is never written to the address, to
+    // browser storage or to the remembered tree state. The tab that was open
+    // when the user began typing comes back when the box is cleared.
+    treeSearch: null,
+    treeSearchNote: '',
+    tabBeforeSearch: '',
+    // Where the search looks: everywhere (null), or in one workspace, group or
+    // folder chosen from a row's menu. A removable chip beside the box says so.
+    treeSearchScope: null,
+    // What the filename index says about each folder it searches, so a linked
+    // folder's row knows whether it can offer Search in this folder.
+    searchSources: [],
+    searchableLinks: new Set(),
     // The one-column layout (FR4): whether the Tree view is too narrow for two
     // columns, and whether the pane has taken the tree's place.
     treeNarrow: false,
@@ -2319,7 +2372,18 @@ import {
   /** Store the Tree's rows and tabs when they have changed. */
   function rememberTreeState() {
     if (!treeStorage) return;
-    storedTreeText = writeTreeState(treeStorage, snapshotTreeState(state), storedTreeText);
+    // Open rows, open tabs and the active tab: nothing else. The Results tab is
+    // not a stored tab and the search term is not stored at all; while Results is
+    // showing, the tab that was active before the user began typing is the one
+    // remembered.
+    const snapshot = snapshotTreeState({
+      treeTabs: state.treeTabs,
+      collapsedGroups: state.collapsedGroups,
+      expandedRows: state.expandedRows,
+      activeTabKey:
+        state.activeTabKey === RESULTS_TAB_KEY ? state.tabBeforeSearch : state.activeTabKey
+    });
+    storedTreeText = writeTreeState(treeStorage, snapshot, storedTreeText);
   }
 
   function announce(message) {
@@ -2355,9 +2419,10 @@ import {
     return variant;
   }
 
-  const mapDestination = document.querySelector('[data-map-destination]');
-  const destinationPicker = document.querySelector('[data-map-picker]');
-  const place = destinationPicker ? destinationPlace('map') : null;
+  // The same-tab Map restore needs the local Mac's index to hold it (the
+  // endpoint answers only there), so a remote browser keeps no place at all.
+  let mapShowing = false;
+  const place = els.deskRail?.hasAttribute('data-desk-local') ? destinationPlace('map') : null;
   // A clean Home is also a Map entry on history traversal. A deliberate
   // Home launch or a deep link keeps its own intent, not an old selection.
   const query = window.location.search;
@@ -2365,17 +2430,39 @@ import {
     (query === '' || query === '?home=1') &&
     window.performance?.getEntriesByType?.('navigation')[0]?.type === 'back_forward';
   let returnMap = query === '?view=map' || traversingHome ? place?.read() : null;
+  // Files' search comes back the same way: on Back into this tab, from this tab's
+  // own slot on the server. The term never goes in the address or in storage.
+  const filesPlace = els.deskRail?.hasAttribute('data-desk-local')
+    ? destinationPlace('files')
+    : null;
+  const backForward =
+    window.performance?.getEntriesByType?.('navigation')[0]?.type === 'back_forward';
+  let returnFiles = backForward ? filesPlace?.read() : null;
+  // The Map's place goes first. Both saves are requests sent as the page is
+  // left, and the page that opens next reads the Map's straight away: the older,
+  // more timing-sensitive save must not wait behind the newer one.
   window.addEventListener('pagehide', () => {
-    if (!place || mapDestination.hidden || !els.map) return;
+    if (!place || !mapShowing || !els.map) return;
     const camera = window.OriWorkspaceMap?.getCamera?.();
     if (camera) void place.save({ selected: state.selectedId, ...camera });
   });
-  destinationPicker?.addEventListener('change', () => {
-    if (destinationPicker.value === '/search') window.location.assign('/search');
+  window.addEventListener('pagehide', () => {
+    if (!filesPlace) return;
+    const snapshot = filesSearch.snapshot();
+    const scope = encodeScope(state.treeSearchScope);
+    // Always saved, empty when there is nothing: a search that was cleared must
+    // not come back from an older visit.
+    const keep = scope !== null && (snapshot || state.treeSearchScope);
+    void filesPlace.save({
+      term: keep && snapshot ? snapshot.term : '',
+      scope: keep ? scope : '',
+      selected: keep && snapshot ? snapshot.selected : '',
+      pages: keep && snapshot ? encodePages(snapshot) : ''
+    });
   });
-  window.addEventListener('pageshow', () => {
-    if (destinationPicker) destinationPicker.selectedIndex = 0;
-  });
+  // A page restored from the back/forward cache keeps its picker as it was; the
+  // view is the truth, so put the picker back in step with it.
+  window.addEventListener('pageshow', () => syncDeskDestination());
 
   function renderAreaStatus() {
     const status = currentAreaState();
@@ -2404,8 +2491,7 @@ import {
     const mapRenderable = status.state === 'ready' || status.state === 'empty-map';
     const onMap = state.view === VIEW_MAP && mapRenderable;
     if (els.map) els.map.hidden = !onMap;
-    if (mapDestination) mapDestination.hidden = !onMap;
-    if (destinationPicker) destinationPicker.hidden = !onMap;
+    mapShowing = onMap;
     if (els.filters) els.filters.hidden = status.state !== 'ready' || state.view !== VIEW_MAP;
     currentInvitation();
     renderWelcome(status);
@@ -2748,6 +2834,10 @@ import {
 
   function mountTreeView() {
     if (!els.treeNav || state.view !== VIEW_TREE) return;
+    if (!searchSourcesRequested) {
+      searchSourcesRequested = true;
+      void refreshSearchSources();
+    }
     // Re-mounting replaces the rows, which would drop keyboard focus on the
     // floor mid-navigation. Restore it afterwards when it was ours to begin
     // with, and never steal it when it was not (FR129) — in particular not
@@ -2782,28 +2872,89 @@ import {
         els.treeNav.querySelector('[data-tree-row]');
       if (target) target.focus();
     }
-    // A row that was asked to be revealed is scrolled into view once it is
-    // actually drawn — which, for a row inside a workspace that has only just
-    // been expanded, is a render or two later, when its section has loaded.
-    if (pendingRevealKey && treeHandle.rows.some(row => row.id === pendingRevealKey)) {
-      const rowEl = Array.from(els.treeNav.querySelectorAll('[data-tree-row]')).find(
-        el => el.getAttribute('data-tree-row') === pendingRevealKey
-      );
-      pendingRevealKey = '';
-      if (rowEl) rowEl.scrollIntoView({ block: 'nearest' });
-    }
+    if (pendingRevealKey) settlePendingReveal();
     syncTreeContents();
     rememberTreeState();
   }
 
   let pendingRevealKey = '';
+  // Show in tree also moves focus to the row; opening a tab only scrolls to it.
+  let pendingRevealFocus = false;
+
+  /**
+   * Finish a reveal once its row can be drawn. A row inside a workspace that has
+   * only just been expanded is drawn a render or two later, when its section has
+   * loaded. A row that is still not there once its section HAS loaded is one the
+   * tree does not list, and the user is told rather than left looking.
+   */
+  function settlePendingReveal() {
+    const key = pendingRevealKey;
+    if (treeHandle.rows.some(row => row.id === key)) {
+      const rowEl = Array.from(els.treeNav.querySelectorAll('[data-tree-row]')).find(
+        el => el.getAttribute('data-tree-row') === key
+      );
+      const focus = pendingRevealFocus;
+      pendingRevealKey = '';
+      pendingRevealFocus = false;
+      if (rowEl) {
+        rowEl.scrollIntoView({ block: 'nearest' });
+        if (focus) {
+          rowEl.focus({ preventScroll: true });
+          // Focus alone shows nothing after a mouse click; mark the row for a
+          // moment so the eye finds it. It is a static outline, not motion.
+          rowEl.classList.add('is-revealed');
+          window.setTimeout(() => rowEl.classList.remove('is-revealed'), 2000);
+        }
+      }
+      return;
+    }
+    const parsed = parseItemKey(key);
+    // Wait while the workspace list is still arriving (a restored tab asks to be
+    // revealed before it has), and drop a reveal whose workspace is gone.
+    if (!parsed || (!state.loading && !findWorkspace(state.flattened, parsed.workspaceId))) {
+      pendingRevealKey = '';
+      pendingRevealFocus = false;
+      return;
+    }
+    if (state.loading) return;
+    let reason = '';
+    if (parsed.kind === 'workspace') {
+      // Every group above it was opened, so the row can only be hidden by the
+      // tag filter.
+      reason = 'The tree is not showing it right now; a tag filter may be hiding it.';
+    } else {
+      const contents = state.treeContents[parsed.workspaceId] || { sections: {} };
+      // A file inside a linked folder is listed by that folder's own request,
+      // made when its row is opened; the section only lists the folders.
+      const section =
+        parsed.kind === 'linkedFile' || parsed.kind === 'linkedFolder'
+          ? contents.linked && contents.linked[parsed.itemId.split('/')[0]]
+          : contents.sections[sectionOfKind(parsed.kind)];
+      if (section && section.status === SECTION_READY) {
+        reason =
+          'The tree does not list it: a section shows only its first rows. It stays open in the pane.';
+      } else if (section && section.status === SECTION_FAILED) {
+        reason = 'That section could not be loaded, so the tree cannot show it yet.';
+      }
+    }
+    if (!reason) return; // its section is still loading
+    const explicit = pendingRevealFocus;
+    pendingRevealKey = '';
+    pendingRevealFocus = false;
+    // Only someone who asked to see the row is told it cannot be shown: an
+    // ordinary open, or a tab remembered from last time, says nothing.
+    if (!explicit) return;
+    announce(reason);
+    if (window.Toast && typeof window.Toast.info === 'function') window.Toast.info(reason);
+  }
 
   /** Expand whatever hides a row, and scroll to the row once it is drawn (FR28). */
-  function revealTreeRow(key) {
+  function revealTreeRow(key, { focus = false } = {}) {
     revealTargets(key, state.flattened).forEach(target =>
       setRowExpanded(state, target.kind, target.id, true)
     );
     pendingRevealKey = key;
+    pendingRevealFocus = focus;
   }
 
   // ---- Tree contents: fetched when a row is expanded (FR17) ----
@@ -2817,9 +2968,7 @@ import {
   function syncTreeContents() {
     if (!treeHandle) return;
     treeHandle.rows.forEach(row => {
-      // A row the filter is showing open was not opened by the user: the
-      // filter searches what is loaded and never loads anything itself.
-      if (!row.expanded || row.forced) return;
+      if (!row.expanded) return;
       // A linked folder's files are fetched when its own row is opened, and
       // only then: that request walks the whole outside folder.
       if (row.kind === 'linked') {
@@ -2840,15 +2989,11 @@ import {
     return (entry && entry.linked && entry.linked[dirId]) || null;
   }
 
-  // The linked folders of a workspace whose rows are open on screen, the
-  // filter's own openings left out.
+  // The linked folders of a workspace whose rows are open on screen.
   function openLinkedFolders(workspaceId) {
     if (!treeHandle) return [];
     return treeHandle.rows
-      .filter(
-        row =>
-          row.kind === 'linked' && row.workspaceId === workspaceId && row.expanded && !row.forced
-      )
+      .filter(row => row.kind === 'linked' && row.workspaceId === workspaceId && row.expanded)
       .map(row => row.meta.dirId);
   }
 
@@ -2889,6 +3034,8 @@ import {
   }
 
   let treeRenderQueued = false;
+  // A tab's own data changed under it (see adoptRowMeta), so the pane redraws.
+  let treePaneDirty = false;
 
   /** Redraw the tree once for a burst of section answers, not once per answer. */
   function queueTreeRender() {
@@ -2899,7 +3046,10 @@ import {
       mountTreeView();
       // An overview lists its sections with their counts, so it follows them.
       const active = state.treeTabs.find(tab => tab.key === state.activeTabKey);
-      if (active && isWorkspaceRowKind(active.kind)) mountPaneView();
+      if (treePaneDirty || (active && isWorkspaceRowKind(active.kind))) {
+        treePaneDirty = false;
+        mountPaneView();
+      }
     }, 0);
   }
 
@@ -2923,6 +3073,15 @@ import {
             return;
           }
           entry.sections[sectionId] = sectionState;
+          // A tab opened from a search result takes what its row knows, such as
+          // an agent's role and model, once the row is on screen.
+          if (sectionState.status === SECTION_READY) {
+            const adopted = adoptRowMeta(state.treeTabs, workspaceId, sectionState.rows);
+            if (adopted !== state.treeTabs) {
+              state.treeTabs = adopted;
+              treePaneDirty = true;
+            }
+          }
           if (sectionState.status === SECTION_FAILED) {
             const owner = findWorkspace(state.flattened, workspaceId);
             const section = sectionInfo(sectionId);
@@ -2960,7 +3119,9 @@ import {
         onCloseTab: key => void closeTreeTab(key),
         onRetryTab: key => void loadTabItem(key, { force: true }),
         onAction: (action, target) => handlePaneAction(action, target),
-        onBack: () => backToTree()
+        onBack: () => backToTree(),
+        onResultAction: (action, payload) => handleResultAction(action, payload),
+        onResultsToInput: () => els.filesSearchInput && els.filesSearchInput.focus()
       },
       { focusTitle }
     );
@@ -2985,12 +3146,15 @@ import {
    */
   function syncTreeColumns() {
     if (!els.tree) return;
-    if (state.treeTabs.length === 0) state.treePaneShown = false;
+    // The Results tab counts: while the search box has text the pane has
+    // something to show even with no item open.
+    const tabCount = state.treeTabs.length + (state.treeSearch ? 1 : 0);
+    if (tabCount === 0) state.treePaneShown = false;
     els.tree.classList.toggle('is-narrow', state.treeNarrow);
     els.tree.dataset.columns = treeColumns({
       narrow: state.treeNarrow,
       paneShown: state.treePaneShown,
-      tabCount: state.treeTabs.length
+      tabCount
     });
   }
 
@@ -3033,10 +3197,9 @@ import {
     const now = Date.now();
     if (!shouldReloadOnReturn(now, lastReturnReload)) return;
     lastReturnReload = now;
-    // Every expanded workspace and group whose contents are loaded. A row the
-    // filter is showing open is not one the user expanded.
+    // Every expanded workspace and group whose contents are loaded.
     treeHandle.rows.forEach(row => {
-      if (!row.expanded || row.forced) return;
+      if (!row.expanded) return;
       // A linked folder is reloaded only while its own row is open.
       if (row.kind === 'linked') {
         if (linkedFolderState(row.workspaceId, row.meta.dirId)) {
@@ -3170,6 +3333,7 @@ import {
   }
 
   function activateTreeTab(key) {
+    if (key === RESULTS_TAB_KEY) return showResultsTab();
     return changeTreeTab(key, () => {
       const next = activateTab(state.treeTabs, state.activeTabKey, key);
       showActiveTreeTab(next.activeKey);
@@ -3213,6 +3377,330 @@ import {
         ? els.treePane && els.treePane.querySelector('.cockpit-pane-tab.is-active [data-pane-tab]')
         : els.treeNav && els.treeNav.querySelector('[data-tree-row][tabindex="0"]');
       if (target) target.focus();
+    });
+  }
+
+  // ---- Files search: one box above the tree and the pane (merge-tree-into-files) ----
+  //
+  // What it finds is shown as a Results tab, first in the pane's strip. The tree
+  // is not filtered: the two are side by side. The term lives in the controller
+  // and in the request body, and nowhere else (home-files-search.js).
+
+  // The filename index (files in linked and searchable folders) answers only the
+  // Mac that runs Ori, and the rail says whether this is it. Anywhere else the
+  // search covers everything inside workspaces and says so (INDEX_OFF_WORDS).
+  const localIndex = !!els.deskRail && els.deskRail.hasAttribute('data-desk-local');
+  const filesSearch = createFilesSearch({
+    onChange: (snapshot, reason) => handleSearchChange(snapshot, reason),
+    getScope: () => state.treeSearchScope,
+    ...(localIndex
+      ? {
+          indexSearch: ({ term, cursor, source }) =>
+            filenameIndex('query', {
+              term,
+              cursor,
+              limit: PAGE_SIZE,
+              ...(source ? { source } : {})
+            }),
+          indexAct: (op, body) => filenameIndex(op, body),
+          indexRefresh: body => filenameIndex('refresh', body)
+        }
+      : {})
+  });
+
+  /** Keep the box's clear button and the spoken status in step with the snapshot. */
+  function syncSearchBox() {
+    const snapshot = state.treeSearch;
+    if (els.filesSearchClear) {
+      els.filesSearchClear.hidden = !(els.filesSearchInput && els.filesSearchInput.value);
+    }
+    if (els.filesSearchStatus) {
+      // Said once an answer is in, not on every keystroke.
+      els.filesSearchStatus.textContent =
+        snapshot && snapshot.status !== 'searching' ? statusLine(snapshot) : '';
+    }
+  }
+
+  function showResultsTab() {
+    return changeTreeTab(RESULTS_TAB_KEY, () => {
+      state.activeTabKey = RESULTS_TAB_KEY;
+      // In the one-column layout the results take the tree's place.
+      state.treePaneShown = true;
+      mountTreeView();
+      mountPaneView();
+    });
+  }
+
+  /** The box was cleared: the pane goes back to the tab it had, or to nothing open. */
+  function leaveResults() {
+    const back = state.treeTabs.some(tab => tab.key === state.tabBeforeSearch)
+      ? state.tabBeforeSearch
+      : '';
+    state.tabBeforeSearch = '';
+    if (state.activeTabKey !== RESULTS_TAB_KEY) {
+      // Another tab was opened from the results; it stays. Only the Results
+      // tab itself goes.
+      syncTreeColumns();
+      mountPaneView();
+      return Promise.resolve();
+    }
+    return changeTreeTab(back, () => {
+      state.activeTabKey = back;
+      if (back) showActiveTreeTab(back);
+      else mountTreeView();
+      mountPaneView();
+    });
+  }
+
+  // ---- where the search looks (Search in this workspace / folder) ----
+
+  /** The scope a row's menu item chooses, or null for a row that is not one. */
+  function scopeFromRow(row) {
+    if (row.kind === 'workspace' || row.kind === 'group') {
+      const ids =
+        row.kind === 'group' ? [row.id, ...descendantIds(state.flattened, row.id)] : [row.id];
+      return { kind: row.kind, name: row.name, workspaceId: row.id, workspaceIds: ids };
+    }
+    if (row.kind === 'folder' || row.kind === 'outputFolder') {
+      return {
+        kind: 'folder',
+        name: row.name,
+        workspaceId: row.workspaceId,
+        section: row.kind === 'folder' ? 'files' : 'outputs',
+        path: String((row.meta && row.meta.path) || '')
+      };
+    }
+    if (row.kind === 'linked') {
+      const source = state.searchSources.find(
+        entry =>
+          entry.workspaceId === row.workspaceId && entry.link === (row.meta && row.meta.dirId)
+      );
+      if (!source) return null;
+      return {
+        kind: 'linked',
+        name: row.name,
+        workspaceId: row.workspaceId,
+        sourceId: source.id,
+        workspaceIds: [row.workspaceId]
+      };
+    }
+    return null;
+  }
+
+  /** The removable chip beside the box: `in <name>` and a way to take it off. */
+  function syncSearchScope() {
+    if (!els.filesSearchScope) return;
+    const label = scopeLabel(state.treeSearchScope);
+    els.filesSearchScope.hidden = !label;
+    // A long name is cut with an ellipsis; the whole of it is the tooltip.
+    if (label) els.filesSearchScope.title = label;
+    else els.filesSearchScope.removeAttribute('title');
+    els.filesSearchScope.innerHTML = label
+      ? `<span class="cockpit-files-search-scope__text">${escapeHtml(label)}</span>` +
+        `<button type="button" class="cockpit-files-search-scope__remove" data-files-scope-clear ` +
+        `aria-label="Search everywhere, not only ${escapeHtml(label)}" title="Search everywhere">` +
+        `<svg width="10" height="10" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button>`
+      : '';
+  }
+
+  /** Search only in `scope` (null: everywhere). A search already typed is asked again. */
+  function setSearchScope(scope) {
+    state.treeSearchScope = scope;
+    syncSearchScope();
+    announce(scope ? `Searching ${scopeLabel(scope)}.` : 'Searching everywhere.');
+    filesSearch.rescope();
+    if (els.filesSearchInput) els.filesSearchInput.focus();
+  }
+
+  els.filesSearchScope?.addEventListener('click', event => {
+    if (event.target.closest('[data-files-scope-clear]')) setSearchScope(null);
+  });
+
+  // The filename index tells which folders it searches; a linked folder's row
+  // offers Search in this folder only for one of them.
+  let searchSourcesRequested = false;
+  function useSearchSources(sources) {
+    const links = searchableLinkIds(sources);
+    const same =
+      links.size === state.searchableLinks.size &&
+      [...links].every(id => state.searchableLinks.has(id));
+    state.searchSources = sources;
+    if (same) return;
+    state.searchableLinks = links;
+    mountTreeView();
+  }
+
+  async function refreshSearchSources() {
+    if (!localIndex) return;
+    try {
+      useSearchSources(readSources(await filenameIndex('sources')));
+    } catch (_) {
+      /* Without the list, linked folders simply offer no search of their own. */
+    }
+  }
+
+  /**
+   * Back into this tab: the scope and the search that were on screen, asked
+   * again as they were, down to the pages and the selected file. Only once, and
+   * never over something the user has already typed. A scope whose workspace or
+   * folder is gone brings back nothing: the same term elsewhere finds other things.
+   */
+  async function restoreFilesSearch() {
+    const pending = returnFiles;
+    returnFiles = null;
+    const saved = pending && (await pending);
+    if (!saved || (!saved.term && !saved.scope)) return;
+    if (filesSearch.snapshot() || state.treeSearchScope) return;
+    if (localIndex) await refreshSearchSources();
+    const decoded = decodeScope(saved.scope, {
+      exists: id => !!findWorkspace(state.flattened, id),
+      members: id => descendantIds(state.flattened, id)
+    });
+    const scope = decoded.scope;
+    const gone =
+      !decoded.ok ||
+      (scope && scope.kind === 'linked' && !state.searchSources.some(s => s.id === scope.sourceId));
+    if (gone) return;
+    if (scope) {
+      state.treeSearchScope = scope;
+      syncSearchScope();
+    }
+    if (!saved.term) return;
+    if (els.filesSearchInput) els.filesSearchInput.value = saved.term;
+    await filesSearch.restore({
+      term: saved.term,
+      selected: saved.selected,
+      pages: decodePages(saved.pages)
+    });
+  }
+
+  function handleSearchChange(snapshot, reason) {
+    state.treeSearch = snapshot;
+    // Every answer from the index also lists the folders it searches.
+    if (snapshot && snapshot.index.status === 'ok') useSearchSources(snapshot.index.sources);
+    syncSearchBox();
+    if (reason === 'typed') {
+      // Selected whenever the user types. The tab that was open comes back when
+      // the box is cleared.
+      if (state.activeTabKey !== RESULTS_TAB_KEY) state.tabBeforeSearch = state.activeTabKey;
+      void showResultsTab();
+    } else if (reason === 'cleared') {
+      void leaveResults();
+    } else {
+      mountPaneView();
+      // What opening or revealing a file did, or why it was refused.
+      if (reason === 'notice' && snapshot && snapshot.notice) announce(snapshot.notice);
+    }
+  }
+
+  function clearFilesSearch({ focus = true } = {}) {
+    if (els.filesSearchInput) {
+      els.filesSearchInput.value = '';
+      if (focus) els.filesSearchInput.focus();
+    }
+    filesSearch.clear();
+    syncSearchBox();
+  }
+
+  /** Open a result in the pane: the same tab its tree row would open. */
+  function openResult(item, options) {
+    const tab = { ...tabFromResult(item), fromSearch: true };
+    return openTreeTab(tab, options);
+  }
+
+  /** Show in tree: open the row's parents, load what they hold, scroll to the row. */
+  function showResultInTree(item) {
+    // In the one-column layout the pane covers the tree: bring the tree back.
+    if (state.treeNarrow) backToTree();
+    // A file in a linked folder shows at its place under that folder; a file in
+    // a folder with no workspace has no row at all, and offers no way here.
+    revealTreeRow(item.treeKey || item.rowKey, { focus: true });
+    mountTreeView();
+  }
+
+  function handleResultAction(action, payload) {
+    if (action === 'more') return void filesSearch.loadMore(payload.kind);
+    if (action === 'retry') return void filesSearch.retry(payload.kind);
+    if (action === 'refresh-index') return void filesSearch.refreshIndex();
+    // A file in a searchable folder is selected, then opened in its reader or
+    // revealed in Finder. It never becomes a tab, so never a remembered one.
+    if (action === 'select') return void filesSearch.select(payload.key);
+    if (action === 'open-indexed' || action === 'reveal-indexed') {
+      const file = findResult(state.treeSearch, 'indexed', payload.key);
+      if (!file) return undefined;
+      const op = action === 'reveal-indexed' || !file.reader ? 'reveal' : 'open';
+      return void filesSearch.dispatch(payload.key, op);
+    }
+    const item = findResult(state.treeSearch, payload.kind, payload.key);
+    if (!item) return undefined; // the results moved on under the click
+    // Opened with the keyboard, focus follows to the pane's title: the result
+    // button it was on is gone with the Results tab.
+    if (action === 'open') return void openResult(item, { keyboard: !!payload.keyboard });
+    if (action === 'reveal') return void showResultInTree(item);
+    return undefined;
+  }
+
+  if (els.filesSearchInput) {
+    const input = els.filesSearchInput;
+    input.maxLength = MAX_TERM_LENGTH;
+    // While text is being composed (an IME) the input reports every keystroke;
+    // the search waits for the composed text, which arrives with compositionend.
+    const apply = () => {
+      filesSearch.input(input.value);
+      syncSearchBox();
+    };
+    input.addEventListener('input', event => {
+      if (!event.isComposing) apply();
+    });
+    input.addEventListener('compositionend', apply);
+    els.filesSearchClear?.addEventListener('click', () => clearFilesSearch());
+    input.addEventListener('keydown', event => {
+      if (event.isComposing) return;
+      if (event.key === 'Escape' && input.value !== '') {
+        event.preventDefault();
+        event.stopPropagation();
+        clearFilesSearch();
+        return;
+      }
+      if (event.key !== 'ArrowDown' && event.key !== 'Enter') return;
+      const first = els.treePane && els.treePane.querySelector('[data-result-open]');
+      if (!first) return;
+      event.preventDefault();
+      // Down walks to the results; Enter opens the first one.
+      if (event.key === 'ArrowDown') first.focus();
+      else first.click();
+    });
+    // Esc clears the box from the results too, and puts the cursor back in it.
+    els.treePane?.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || event.defaultPrevented || !state.treeSearch) return;
+      if (!event.target.closest || !event.target.closest('[data-results], [data-pane-tab]')) return;
+      event.preventDefault();
+      clearFilesSearch();
+    });
+    // "/" focuses the box from anywhere on Files that is not already a place to
+    // type, and not while something modal is open.
+    document.addEventListener('keydown', event => {
+      if (
+        event.key !== '/' ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.isComposing
+      ) {
+        return;
+      }
+      if (state.view !== VIEW_TREE || event.defaultPrevented) return;
+      const target = event.target;
+      if (
+        target &&
+        target.closest &&
+        target.closest('input, textarea, select, [contenteditable], .ProseMirror, .modal.show')
+      ) {
+        return;
+      }
+      event.preventDefault();
+      input.focus();
+      input.select();
     });
   }
 
@@ -3393,7 +3881,10 @@ import {
   /** An item was chosen from a row's menu, or the header's New note was pressed. */
   function handleTreeMenuAction(action, row) {
     const workspaceId = row.workspaceId || row.id;
-    if (action === MENU_NEW_NOTE) startTreeDraft(workspaceId, 'notes', 'note');
+    if (action === MENU_SEARCH_IN) {
+      const scope = scopeFromRow(row);
+      if (scope) setSearchScope(scope);
+    } else if (action === MENU_NEW_NOTE) startTreeDraft(workspaceId, 'notes', 'note');
     else if (action === MENU_NEW_TICKET) startTreeDraft(workspaceId, 'backlog', 'ticket');
     else if (action === MENU_UPLOAD) {
       pickFileToUpload(workspaceId, row.kind === 'folder' ? String(row.meta.path || '') : '');
@@ -3587,7 +4078,8 @@ import {
     if (gone.length === 0) return;
     const next = dropMissingTabs(state.treeTabs, state.activeTabKey, live);
     state.treeTabs = next.tabs;
-    state.activeTabKey = next.activeKey;
+    // The Results tab is not a stored tab, so it is not "missing" and stays.
+    if (state.activeTabKey !== RESULTS_TAB_KEY) state.activeTabKey = next.activeKey;
     gone.forEach(tab => delete state.treeTabItems[tab.key]);
     // A note whose workspace is gone has nowhere left to be saved to.
     const editing = noteController.activeKey();
@@ -3754,6 +4246,25 @@ import {
 
   // ---- view state ----
 
+  /**
+   * Put the rail, the narrow picker, the heading and Files' management link in
+   * step with the view. The current destination is marked on BOTH views by the
+   * view itself, not by whether the map is drawable: a loading or empty map
+   * still means "you are on Map".
+   */
+  function syncDeskDestination() {
+    els.deskLinks.forEach(link => {
+      if (link.getAttribute('data-desk-destination') === state.view) {
+        link.setAttribute('aria-current', 'page');
+      } else {
+        link.removeAttribute('aria-current');
+      }
+    });
+    if (els.deskPicker) els.deskPicker.value = state.view;
+    if (els.areaTitle) els.areaTitle.textContent = deskHeading(state.view);
+    if (els.filesManage) els.filesManage.hidden = state.view !== VIEW_TREE;
+  }
+
   function applyView(view, { pushUrl = true, transient = false } = {}) {
     // Leaving Tree saves the note being edited first (home-file-tree FR43).
     // The note stays mounted, hidden with the rest of the Tree, so its text is
@@ -3763,14 +4274,7 @@ import {
       window.OriWorkspaceMap?.suspendDraftPlacement?.();
     state.view = view === VIEW_TREE ? VIEW_TREE : VIEW_MAP;
     if (state.view === VIEW_TREE) window.OriWorkspaceMap?.finishAssemblies?.();
-    els.viewButtons.forEach(btn => {
-      const isActive = btn.getAttribute('data-cockpit-view') === state.view;
-      btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-      btn.classList.toggle('is-active', isActive);
-    });
-    if (els.areaTitle) {
-      els.areaTitle.textContent = state.view === VIEW_TREE ? 'Workspace Tree' : 'Workspace Map';
-    }
+    syncDeskDestination();
     // Exactly one peer view is exposed at a time (FR18/FR19).
     if (els.tree) els.tree.hidden = state.view !== VIEW_TREE;
     root.dataset.view = state.view;
@@ -3793,6 +4297,8 @@ import {
     mountMap();
     mountTreeView();
     mountPaneView();
+    // Files entered after a Back that landed on the Map: its search comes now.
+    if (state.view === VIEW_TREE && returnFiles && !state.loading) void restoreFilesSearch();
     // Group layout controls are Map-only. Re-render the stable context body in
     // place on view changes without changing modal visibility.
     if (state.railState === RAIL_GROUP) renderRail({ announceChange: false });
@@ -4100,7 +4606,7 @@ import {
     const fallback =
       selected ||
       (state.view === VIEW_TREE ? els.tree : els.map) ||
-      els.viewButtons.find(btn => btn.getAttribute('aria-pressed') === 'true');
+      els.deskLinks.find(link => link.getAttribute('aria-current') === 'page');
     if (fallback && typeof fallback.focus === 'function') {
       if (!fallback.hasAttribute('tabindex') && fallback.tagName !== 'BUTTON') {
         fallback.setAttribute('tabindex', '-1');
@@ -5954,12 +6460,25 @@ import {
     });
   }
 
-  els.viewButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      applyView(btn.getAttribute('data-cockpit-view'));
+  // The rail switches the view in the page. A modified or non-primary click
+  // keeps the link's own href so "open in a new tab" still works.
+  els.deskLinks.forEach(link => {
+    link.addEventListener('click', event => {
+      if (event.defaultPrevented || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      applyView(link.getAttribute('data-desk-destination'));
       fireTTFA('view-toggle');
     });
   });
+  if (els.deskPicker) {
+    els.deskPicker.addEventListener('change', () => {
+      applyView(els.deskPicker.value);
+      fireTTFA('view-toggle');
+    });
+    // Rendered disabled: until this handler exists a change would be lost.
+    els.deskPicker.disabled = false;
+  }
 
   // Updates / Quests / Quick Capture: three triggers sharing one panel state
   // (FR7-FR9). The Quests trigger does not exist in the template until Group
@@ -6293,8 +6812,9 @@ import {
     const pending = returnMap;
     returnMap = null;
     await refresh();
+    if (state.view === VIEW_TREE) void restoreFilesSearch();
     const prior = pending && (await pending);
-    if (prior && !state.selectedId && !mapDestination.hidden && state.view === VIEW_MAP) {
+    if (prior && !state.selectedId && mapShowing && state.view === VIEW_MAP) {
       if (findWorkspace(state.flattened, prior.selected))
         selectItem(prior.selected, { openModal: false, announceChange: false });
       window.OriWorkspaceMap?.restoreCamera?.(els.map, prior);

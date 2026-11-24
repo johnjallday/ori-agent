@@ -10,6 +10,7 @@ import {
   writeFileSync
 } from 'node:fs';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { goToDestination } from './helpers/home-destination';
 
 const endpoint = '/api/personal-assistant/second-brain';
 const evidence = process.env.MY_NOTES_EVIDENCE;
@@ -64,16 +65,20 @@ test('Home Map and Tree link to an independent, refreshable My Notes page', asyn
   await expect(page.getByRole('heading', { name: 'Meet your assistant first' })).toBeVisible();
   await capture(page, '01-setup-needed');
   await page.goto('/');
-  for (const mode of ['Map', 'Tree']) {
-    await page.getByRole('button', { name: mode, exact: true }).click();
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-view', mode.toLowerCase());
+  // Each Home destination in the Desk rail, and the view it leaves in the cockpit.
+  for (const [destination, view] of [
+    ['map', 'map'],
+    ['files', 'tree']
+  ] as const) {
+    await goToDestination(page, destination);
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-view', view);
     await page.getByRole('link', { name: 'My Notes' }).click();
     await expect(page).toHaveURL(/\/my-notes$/);
     await expect(heading).toBeFocused();
     await page.reload();
     await expect(heading).toBeFocused();
     await page.goBack();
-    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-view', mode.toLowerCase());
+    await expect(page.locator('#homeCockpit')).toHaveAttribute('data-view', view);
   }
   expect(await notes(request)).toEqual(before);
 });

@@ -4,7 +4,8 @@
 //
 // Three things are kept in the browser's localStorage: which rows are open,
 // which tabs are open, and which tab is active. Nothing else is: not the text
-// of a note (the server has that), not the filter box, not a bulk selection.
+// of a note (the server has that), not the search box or its Results tab, not a
+// bulk selection.
 //
 // This module only reads and writes the stored text and turns it into plain
 // data. It never fetches. Putting the data back into Home's state is one call

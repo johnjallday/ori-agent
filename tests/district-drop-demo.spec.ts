@@ -1,4 +1,5 @@
 import { test, expect, Page, Locator } from '@playwright/test';
+import { goToFiles } from './helpers/home-destination';
 
 /**
  * Issue #346 join-by-drop and Issue #374 confirmed ungroup demo.
@@ -185,6 +186,6 @@ test('#346 join and #374 confirmed ungroup preserve the dropped coordinate', asy
   await expect(district.locator('.ws-map-district-count')).toHaveText('1 workspace');
   await page.screenshot({ path: 'test-results/374-drop-left.png' });
 
-  await page.locator('[data-cockpit-view="tree"]').click();
+  await goToFiles(page);
   await expect(page.locator(`[data-tree-row="${loose}"]`)).toHaveAttribute('aria-level', '1');
 });

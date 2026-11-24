@@ -6,6 +6,7 @@ import {
   guardReadTour,
   removeOwnedWorkspace
 } from './helpers/ui-consistency';
+import { goToFiles, goToMap } from './helpers/home-destination';
 
 let ownedWorkspaces: Awaited<ReturnType<typeof createWorkspace>>[] = [];
 let unexpectedReads: string[] | null = null;
@@ -92,7 +93,7 @@ test.describe('Home cockpit resilience', () => {
       // Help, the view toggle, and Quick Capture all still work.
       await expect(page.locator('#oriGuideLauncher')).toBeEnabled();
       await expect(page.locator('#cockpitCaptureBtn')).toBeVisible();
-      await page.locator('[data-cockpit-view="tree"]').click();
+      await goToFiles(page);
       await expect(page.locator('#cockpitTree')).toBeVisible();
     });
   }
@@ -159,8 +160,8 @@ test.describe('Home cockpit resilience', () => {
 
     // FR119/FR122: hammer the view toggle; nothing may drift.
     for (let i = 0; i < 8; i++) {
-      await page.locator('[data-cockpit-view="tree"]').click();
-      await page.locator('[data-cockpit-view="map"]').click();
+      await goToFiles(page);
+      await goToMap(page);
     }
     await page.waitForTimeout(500);
 
@@ -234,8 +235,8 @@ test.describe('Home cockpit resilience', () => {
     await expect(page.locator('[data-tree-bulkbar]')).toBeVisible();
 
     for (let i = 0; i < 5; i++) {
-      await page.locator('[data-cockpit-view="map"]').click();
-      await page.locator('[data-cockpit-view="tree"]').click();
+      await goToMap(page);
+      await goToFiles(page);
     }
     await page.waitForTimeout(400);
 

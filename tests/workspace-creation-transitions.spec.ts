@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { placementJSON } from './helpers/assisted-workspace-placement';
+import { goToFiles, goToMap } from './helpers/home-destination';
 
 // Real server, real gestures. Runs against scripts/demo-inbox-folder.sh, whose
 // sandbox has a hired assistant and seeded folders but no model provider.
@@ -22,7 +23,7 @@ async function openExpandedChat(page: Page) {
   await page.goto('/');
   await page.waitForFunction(() => (window as any).PersonalAssistantPanel?._state.view.available);
   await page.evaluate(() => (window as any).PersonalAssistantPanel.close());
-  await page.locator('[data-cockpit-view="map"]').click();
+  await goToMap(page);
   await page.locator('#personalAssistantLauncher').click();
   const expand = page.locator('#personalAssistantExpand');
   if ((await expand.getAttribute('aria-pressed')) !== 'true') await expand.click();
@@ -289,7 +290,7 @@ test('leaving the Map during placement returns the review and chat with nothing 
   const before = await domain(page);
   await (await placeButton(review)).click();
   await expectClearMap(page);
-  await page.locator('[data-cockpit-view="tree"]').click();
+  await goToFiles(page);
   await expect(review).toBeVisible();
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
   await expect(page.locator('#personalAssistantInput')).toHaveValue(UNSENT);

@@ -4,7 +4,8 @@ const prefix = 'ori-destination:';
 const handlePattern =
   /^ori-destination:([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
 export function destinationPlace(surface) {
-  if (surface !== 'map' && surface !== 'desk') throw new Error('Unknown destination');
+  if (surface !== 'map' && surface !== 'desk' && surface !== 'files')
+    throw new Error('Unknown destination');
   if (window !== window.top) return null;
   if (!window.name && typeof crypto.randomUUID === 'function')
     window.name = prefix + crypto.randomUUID();

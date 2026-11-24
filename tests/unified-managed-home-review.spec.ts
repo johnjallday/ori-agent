@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { randomUUID } from 'node:crypto';
 import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
 import { startRosterStaffingModel } from './helpers/roster-staffing-model';
+import { goToFiles, goToMap } from './helpers/home-destination';
 
 // Real exact-candidate owner/journal/role/layout acceptance. The Music wrapper
 // must stage its immutable candidate in disposable HOME/data first. No model,
@@ -53,11 +54,11 @@ const originalCommits = sourceChanged ? 2 : 1;
 async function openReview(page: Page, name?: string, resume = false) {
   await page.goto('/');
   if (map) {
-    await page.getByRole('button', { name: 'Map', exact: true }).click();
+    await goToMap(page);
     await page.locator('#cockpitCreateWorkspaceBtn').click();
     await page.locator('#workspaceCreatorKindGroup').check();
   } else {
-    await page.getByRole('button', { name: 'Tree', exact: true }).click();
+    await goToFiles(page);
     await page.locator('[data-tree-new-group]').click();
   }
   const creator = page.locator('#addFolderModal');

@@ -37,6 +37,13 @@ import {
   sectionOfKind
 } from './home-tree-sources.js';
 import { iconHTML, rowIconName } from './home-tree-icons.js';
+import {
+  RESULTS_TAB_KEY,
+  renderResultsHTML,
+  renderResultsTabHTML,
+  resultsTabLabel,
+  stepResult
+} from './home-files-search.js';
 import { TicketCounts } from './ticket-count-line.js';
 import { renderMarkdown } from './note-editor.js';
 import { workspaceNotePath } from './note-routes.js';
@@ -111,6 +118,30 @@ export function closeTab(tabs, activeKey, key) {
   if (activeKey !== key) return { tabs: next, activeKey: activeKey || '' };
   const neighbour = next[at] || next[at - 1] || null;
   return { tabs: next, activeKey: neighbour ? neighbour.key : '' };
+}
+
+/**
+ * Let tabs that were opened from a search result take what their tree row
+ * knows, once the row's section has loaded.
+ *
+ * A result carries a name, a place and a date; the tree row also carries what
+ * its tab shows beside the item itself (an agent's role and model). The tab
+ * keeps what the result gave it, adds what the row has, and stops being
+ * "from search" once it has found its row. Returns the same array when nothing
+ * changed.
+ */
+export function adoptRowMeta(tabs, workspaceId, rows) {
+  const list = Array.isArray(tabs) ? tabs : [];
+  const known = new Map((Array.isArray(rows) ? rows : []).map(row => [String(row.id), row]));
+  let changed = false;
+  const next = list.map(tab => {
+    if (!tab.fromSearch || tab.workspaceId !== workspaceId) return tab;
+    const row = known.get(tab.key);
+    if (!row) return tab;
+    changed = true;
+    return { ...tab, meta: { ...(row.meta || {}), ...tab.meta }, fromSearch: false };
+  });
+  return changed ? next : list;
 }
 
 // ---------------------------------------------------------------------------
@@ -869,7 +900,11 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
   if (!host) return;
   const cb = callbacks || {};
   const tabs = Array.isArray(state.treeTabs) ? state.treeTabs : [];
-  const active = tabs.find(tab => tab.key === state.activeTabKey) || null;
+  // The Results tab is not one of the open tabs: it exists while the search
+  // box has text, comes first, and is never stored.
+  const search = state.treeSearch || null;
+  const resultsActive = !!search && state.activeTabKey === RESULTS_TAB_KEY;
+  const active = resultsActive ? null : tabs.find(tab => tab.key === state.activeTabKey) || null;
 
   let strip = host.querySelector(':scope > .cockpit-pane-tabs');
   let panel = host.querySelector(':scope > .cockpit-pane-panel');
@@ -888,20 +923,24 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
     drawn.delete(host);
   }
 
-  const stripHTML = renderTabStripHTML(tabs, state.activeTabKey, state.flattened);
+  const stripHTML =
+    (search ? renderResultsTabHTML(search, resultsActive) : '') +
+    renderTabStripHTML(tabs, resultsActive ? '' : state.activeTabKey, state.flattened);
   const contents = (state.treeContents || {})[active ? active.workspaceId : ''];
-  const panelHTML = active
-    ? renderPaneHTML(
-        paneView(active, {
-          flattened: state.flattened,
-          item: (state.treeTabItems || {})[active.key] || null,
-          sections: contents ? contents.sections : null,
-          tagsById: (state.metadata && state.metadata.tagsById) || {},
-          scheduleIndex: state.scheduleIndex,
-          activeTags: state.activeTags
-        })
-      )
-    : renderEmptyPaneHTML();
+  const panelHTML = resultsActive
+    ? renderResultsHTML(search, { note: state.treeSearchNote || '' })
+    : active
+      ? renderPaneHTML(
+          paneView(active, {
+            flattened: state.flattened,
+            item: (state.treeTabItems || {})[active.key] || null,
+            sections: contents ? contents.sections : null,
+            tagsById: (state.metadata && state.metadata.tagsById) || {},
+            scheduleIndex: state.scheduleIndex,
+            activeTags: state.activeTags
+          })
+        )
+      : renderEmptyPaneHTML();
 
   // Redrawing replaces the elements, so focus that sat on one of them has to be
   // put back on its replacement: the tab that was clicked, the title that
@@ -914,12 +953,37 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
   const titleHadFocus = inPanel && focused.hasAttribute('data-pane-title');
   const focusedAction = inPanel ? focused.getAttribute('data-pane-action') : null;
   const focusedTarget = inPanel ? focused.getAttribute('data-pane-target') : null;
+  // The search redraws its results as answers arrive; focus on a result, its
+  // Show in tree, or More results has to survive that.
+  const focusedResult =
+    inPanel && focused.hasAttribute('data-result-open')
+      ? {
+          attribute: 'data-result-open',
+          kind: focused.getAttribute('data-result-kind'),
+          key: focused.getAttribute('data-result-key')
+        }
+      : inPanel && focused.hasAttribute('data-result-reveal')
+        ? {
+            attribute: 'data-result-reveal',
+            kind: focused.getAttribute('data-result-kind'),
+            key: focused.getAttribute('data-result-key')
+          }
+        : inPanel && focused.hasAttribute('data-result-act')
+          ? {
+              // Open in reader / Reveal in Finder under a selected file.
+              attribute: 'data-result-act',
+              kind: null,
+              key: focused.getAttribute('data-result-key'),
+              value: focused.getAttribute('data-result-act')
+            }
+          : null;
+  const focusedMore = inPanel ? focused.getAttribute('data-result-more') : null;
 
   const last = drawn.get(host) || { strip: null, panel: null, key: '' };
-  const activeKey = active ? active.key : '';
+  const activeKey = resultsActive ? RESULTS_TAB_KEY : active ? active.key : '';
   if (last.strip !== stripHTML) {
     strip.innerHTML = stripHTML;
-    strip.hidden = tabs.length === 0;
+    strip.hidden = tabs.length === 0 && !search;
     // Keep the active tab in view when the strip is scrolled (FR27).
     const activeTab = strip.querySelector('.cockpit-pane-tab.is-active');
     if (activeTab && typeof activeTab.scrollIntoView === 'function') {
@@ -946,8 +1010,27 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
       );
       if (again) again.focus({ preventScroll: true });
     }
+    if (resultsActive && (focusedResult || focusedMore)) {
+      const again = focusedResult
+        ? Array.from(panel.querySelectorAll(`[${focusedResult.attribute}]`)).find(
+            el =>
+              el.getAttribute('data-result-kind') === focusedResult.kind &&
+              el.getAttribute('data-result-key') === focusedResult.key &&
+              (!focusedResult.value ||
+                el.getAttribute(focusedResult.attribute) === focusedResult.value)
+          )
+        : panel.querySelector(`[data-result-more="${focusedMore}"]`);
+      if (again) again.focus({ preventScroll: true });
+    }
   }
-  panel.setAttribute('aria-label', active ? `${active.label || 'Open item'}` : 'Nothing open');
+  panel.setAttribute(
+    'aria-label',
+    resultsActive
+      ? resultsTabLabel(search)
+      : active
+        ? `${active.label || 'Open item'}`
+        : 'Nothing open'
+  );
   drawn.set(host, { strip: stripHTML, panel: panelHTML, key: activeKey });
 
   // The listener is bound once per host and always reads the latest callbacks.
@@ -981,6 +1064,47 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
         }
         return;
       }
+      // The Results tab: open a result, show it in the tree, more of a kind,
+      // retry a kind that could not be searched.
+      const resultOpen = event.target.closest('[data-result-open]');
+      const resultReveal = event.target.closest('[data-result-reveal]');
+      const resultMore = event.target.closest('[data-result-more]');
+      const resultRetry = event.target.closest('[data-result-retry]');
+      const resultAct = event.target.closest('[data-result-act]');
+      const indexRefresh = event.target.closest('[data-result-index-refresh]');
+      if (resultOpen || resultReveal || resultMore || resultRetry || resultAct || indexRefresh) {
+        if (typeof handlers.onResultAction !== 'function') return;
+        const hit = resultOpen || resultReveal;
+        if (indexRefresh) {
+          handlers.onResultAction('refresh-index', {});
+        } else if (resultAct) {
+          // Open in reader / Reveal in Finder under a selected file.
+          handlers.onResultAction(
+            resultAct.getAttribute('data-result-act') === 'open'
+              ? 'open-indexed'
+              : 'reveal-indexed',
+            { key: resultAct.getAttribute('data-result-key') }
+          );
+        } else if (hit) {
+          // A file in a searchable folder is selected, not opened in a tab.
+          const action = resultReveal
+            ? 'reveal'
+            : resultOpen.hasAttribute('data-result-indexed')
+              ? 'select'
+              : 'open';
+          handlers.onResultAction(action, {
+            kind: hit.getAttribute('data-result-kind'),
+            key: hit.getAttribute('data-result-key'),
+            // Enter or Space on the button: a click with no pointer (detail 0).
+            keyboard: event.detail === 0
+          });
+        } else if (resultMore) {
+          handlers.onResultAction('more', { kind: resultMore.getAttribute('data-result-more') });
+        } else {
+          handlers.onResultAction('retry', { kind: resultRetry.getAttribute('data-result-retry') });
+        }
+        return;
+      }
       if (event.target.closest('[data-pane-save-retry]')) {
         if (typeof handlers.onAction === 'function') handlers.onAction('note-save-retry', '');
         return;
@@ -992,6 +1116,42 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
           action.getAttribute('data-pane-target') || ''
         );
       }
+    });
+    // Up and Down walk the results (the first result's Up returns to the
+    // search box), Enter opens the one in focus through its own click, and
+    // Shift+Enter is for a file's Reveal (handled by the cockpit).
+    host.addEventListener('keydown', event => {
+      const target = event.target;
+      if (!target || !target.matches || !target.matches('[data-result-open]')) return;
+      const handlers = bindings.get(host) || {};
+      // On a file in a searchable folder Enter opens it in its reader (Reveal in
+      // Finder when it has none) and Shift+Enter reveals it; anywhere else Enter
+      // is the button's own click.
+      if (event.key === 'Enter' && target.hasAttribute('data-result-indexed')) {
+        if (typeof handlers.onResultAction === 'function') {
+          event.preventDefault();
+          handlers.onResultAction(event.shiftKey ? 'reveal-indexed' : 'open-indexed', {
+            key: target.getAttribute('data-result-key')
+          });
+        }
+        return;
+      }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      event.preventDefault();
+      const buttons = Array.from(host.querySelectorAll('[data-result-open]'));
+      const next = stepResult(
+        buttons.indexOf(target),
+        event.key === 'ArrowDown' ? 1 : -1,
+        buttons.length
+      );
+      if (next < 0) {
+        if (typeof handlers.onResultsToInput === 'function') handlers.onResultsToInput();
+        return;
+      }
+      buttons.forEach((button, index) =>
+        button.setAttribute('tabindex', index === next ? '0' : '-1')
+      );
+      buttons[next].focus();
     });
   }
 

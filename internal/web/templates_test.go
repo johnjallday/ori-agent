@@ -837,9 +837,10 @@ func TestRenderHomeCockpitShell(t *testing.T) {
 		`id="cockpitContextModalLabel"`,
 		`id="cockpitRailContext"`,
 		`id="cockpitRailLive"`,
-		// Mutually exclusive Map/Tree control (FR17, FR24).
-		`data-cockpit-view="map"`,
-		`data-cockpit-view="tree"`,
+		// The Desk rail is the one view switcher: Files and Map (FR17, FR24;
+		// merge-tree-into-files FR1-FR3).
+		`data-desk-destination="tree"`,
+		`data-desk-destination="map"`,
 		// Map-only signal filters and the rail footer (FR31, FR88, FR101).
 		`id="cockpitSignalFilters"`,
 		`id="cockpitSummaryBtn"`,

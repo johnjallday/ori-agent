@@ -4,6 +4,7 @@ import { assertSandbox, capture, reachable } from './helpers/ui-consistency';
 import { guardAgentCreationReads } from './fixtures/ui-consistency-agent-create';
 import { detailReads, detailAgentName } from './fixtures/ui-consistency-agent-detail';
 import { homeReads } from './fixtures/ui-consistency-home';
+import { destinationControls, goToFiles, goToMap } from './helpers/home-destination';
 
 for (const theme of ['light', 'dark'] as const)
   for (const density of ['compact', 'roomy'] as const) {
@@ -67,11 +68,10 @@ for (const theme of ['light', 'dark'] as const)
       await page.goto('/');
       await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'ready');
       await assertPreferences();
-      await reachable(page.locator('#cockpitViewMap'), 44);
-      await reachable(page.locator('#cockpitViewTree'), 44);
-      await page.locator('#cockpitViewTree').click();
+      for (const control of await destinationControls(page).all()) await reachable(control, 44);
+      await goToFiles(page);
       await expect(page.locator('#cockpitTree')).toBeVisible();
-      await page.locator('#cockpitViewMap').click();
+      await goToMap(page);
       await expect(page.locator('#cockpitMap')).toBeVisible();
       await capture(
         page,

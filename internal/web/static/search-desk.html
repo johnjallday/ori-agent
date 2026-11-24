@@ -9,7 +9,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>{{if .Home}}Home{{else}}Files{{end}} · Ori</title>
+    <title>{{if .Home}}Home{{else if .MapEligible}}Search locations{{else}}Files{{end}} · Ori</title>
     <link rel="stylesheet" href="/css/desk-navigation.css" />
     <link rel="stylesheet" href="/css/search-desk.css" />
     <link rel="stylesheet" href="/css/explore-folder.css" />
@@ -31,8 +31,15 @@
       <aside class="desk-rail" aria-label="Desk sidebar">
         <div class="desk-brand"><img src="/favicon.svg" alt="" />Ori</div>
         <nav aria-label="Destination" class="destinations">
-          <small>Desk</small> <span aria-current="page">Files</span>{{if .MapEligible}}<a href="/?view=map">Map</a
-          >{{else}}<a href="/?home=1">Home</a>{{end}}
+          <!-- Files and Map are Home's two destinations. For a set-up user this
+               page is neither: it is where search locations are managed, so it
+               marks no destination current and links to both. Before any
+               workspace exists it is still the first-run page, unchanged. -->
+          <small>Desk</small>
+          {{if .MapEligible}}<a href="/?view=tree">Files</a><a href="/?view=map">Map</a>{{else}}<span
+            aria-current="page"
+            >Files</span
+          ><a href="/?home=1">Home</a>{{end}}
         </nav>
         <nav class="locations" aria-label="Search locations">
           <small>Search locations</small>
@@ -44,13 +51,14 @@
       <main>
         <div class="desk-mobile">
           <span class="desk-brand">Ori</span>{{if .MapEligible}}<select id="destinationPicker" aria-label="Destination">
-            <option selected>Files</option>
+            <option selected>Search locations</option>
+            <option value="/?view=tree">Files</option>
             <option value="/?view=map">Map</option></select
           >{{else}}<a href="/?home=1">Home</a>{{end}}
         </div>
         <div class="wrap">
           <div class="top">
-            <span>Local desk &nbsp; / &nbsp; <b>Files</b></span
+            <span>Local desk &nbsp; / &nbsp; <b>{{if .MapEligible}}Search locations{{else}}Files{{end}}</b></span
             ><span class="stamp">LOCAL EDITION</span>
           </div>
           <header>

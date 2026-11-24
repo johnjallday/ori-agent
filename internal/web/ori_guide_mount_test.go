@@ -240,11 +240,16 @@ func TestHomeCockpitHasNoTodayOrWorkingAgreementGridSibling(t *testing.T) {
 	if err := r.LoadTemplates(); err != nil {
 		t.Fatal(err)
 	}
-	for _, rail := range []bool{false, true} {
-		t.Run(fmt.Sprintf("rail=%t", rail), func(t *testing.T) {
-			body, err := r.RenderTemplate("index", TemplateData{CurrentPage: "index", Extra: map[string]any{"HomeCommandBridge": true, "ShowFileSearch": rail}})
+	// The Desk rail is Home's one switcher, so it is in the page for a browser
+	// away from the Mac that runs Ori as well as for one on it.
+	for _, local := range []bool{false, true} {
+		t.Run(fmt.Sprintf("local=%t", local), func(t *testing.T) {
+			body, err := r.RenderTemplate("index", TemplateData{CurrentPage: "index", Extra: map[string]any{"HomeCommandBridge": true, "FileSearchAvailable": local}})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if !strings.Contains(body, `class="desk-rail"`) {
+				t.Error("the Desk rail must render whether or not the filename index is available")
 			}
 			doc, err := html.Parse(strings.NewReader(body))
 			if err != nil {

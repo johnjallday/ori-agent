@@ -71,7 +71,7 @@ def serve(root, rev=None, build_tmp=None, fixture_binary=None):
 
 def spec(root,url,scenario,name,browser='chromium'):
     env=dict(os.environ,PLAYWRIGHT_BASE_URL=url,ORI_SEARCH_FIRST_FIXTURE=str(root),ORI_SEARCH_FIRST_SCENARIO=scenario,ORI_SEARCH_EVIDENCE=str(EVIDENCE))
-    config=['--config','playwright.files-map.config.ts'] if scenario in ('navigation', 'folder-backed','folder-return','folder-assistant') or scenario.startswith('parity-') else []
+    config=['--config','playwright.files-map.config.ts'] if scenario in ('navigation', 'files-search', 'folder-backed','folder-return','folder-assistant') or scenario.startswith('parity-') else []
     subprocess.run([str(REPO/'node_modules/.bin/playwright'),'test',*config,'--project',browser,'--reporter=list','tests/'+name+'.spec.ts'],cwd=REPO,env=env,check=True)
 
 
@@ -147,4 +147,8 @@ if __name__=='__main__':
     for browser in ('chromium','webkit'):
         root=fixture()
         with serve(root) as url:spec(root,url,'navigation','files-map-navigation',browser)
+    # Files in searchable folders, found from Files' own search box.
+    for browser in ('chromium','webkit'):
+        root=fixture()
+        with serve(root) as url:spec(root,url,'files-search','files-search-folders',browser)
     if args.upgrades:upgrades()

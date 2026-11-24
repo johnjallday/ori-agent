@@ -50,10 +50,15 @@
       selector: '#cockpitCreateWorkspaceBtn',
       label: 'New Workspace'
     },
+    // The key keeps its name: the server allowlist knows it. What it points at
+    // is the Desk rail's Files item, or the narrow screen's Destination picker
+    // when the rail is not drawn. `firstVisible` makes resolve() take whichever
+    // of the two is on screen rather than the first in the page.
     view_toggle: {
       routes: ['/'],
-      selector: '#cockpitViewTree',
-      label: 'Map / Tree view switch'
+      selector: '.desk-rail [data-desk-destination="tree"], [data-map-picker]',
+      firstVisible: true,
+      label: 'Files in the Desk rail'
     },
     new_agent: {
       routes: ['/agents'],
@@ -213,16 +218,25 @@
     var d = doc || (typeof document !== 'undefined' ? document : null);
     if (!d || !supports(key, route)) return null;
 
-    var el = null;
+    function visible(node) {
+      if (!node) return false;
+      if (node.hidden || node.getAttribute('aria-hidden') === 'true') return false;
+      return typeof node.getClientRects !== 'function' || node.getClientRects().length > 0;
+    }
+
     try {
-      el = d.querySelector(REGISTRY[key].selector);
+      if (REGISTRY[key].firstVisible) {
+        // A key with two homes (a wide and a narrow control) is on screen in
+        // only one of them; the first match in the page may be the hidden one.
+        return (
+          Array.prototype.find.call(d.querySelectorAll(REGISTRY[key].selector), visible) || null
+        );
+      }
+      var el = d.querySelector(REGISTRY[key].selector);
+      return visible(el) ? el : null;
     } catch (err) {
       return null;
     }
-    if (!el) return null;
-    if (el.hidden || el.getAttribute('aria-hidden') === 'true') return null;
-    if (typeof el.getClientRects === 'function' && el.getClientRects().length === 0) return null;
-    return el;
   }
 
   var CONTROL_SELECTOR = [

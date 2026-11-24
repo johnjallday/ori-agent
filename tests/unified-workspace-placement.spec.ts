@@ -6,6 +6,7 @@ import { prepareFolderCreationRuntime, abandonOpenBuild } from './helpers/folder
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
+import { goToFiles } from './helpers/home-destination';
 
 // Real server acceptance. No successful create/receipt/layout response is
 // fabricated. Run only against the isolated branch demo via scripts/e2e.sh.
@@ -177,7 +178,7 @@ test.describe('ordinary blueprint review with a local catalog-only model fixture
     const suffix = randomUUID().slice(0, 8);
     await request.post('/api/onboarding/skip');
     await page.goto('/');
-    await page.locator('[data-cockpit-view="tree"]').click();
+    await goToFiles(page);
     await page.locator('#cockpitCreateWorkspaceBtn').click();
     await page.locator('.workspace-template-card', { hasText: 'Calendar Ops' }).first().click();
     await page.locator('#wizardNextBtn').click();
@@ -691,7 +692,7 @@ test('Blank automatic confirmation works without a mounted map and cancellation 
   await review.getByRole('button', { name: 'Cancel draft', exact: true }).click();
   await expect(page.locator('#addFolderModal')).toBeHidden();
   expect(await resources(request)).toEqual(before);
-  await page.locator('[data-cockpit-view="tree"]').click();
+  await goToFiles(page);
   await page.locator('#cockpitCreateWorkspaceBtn').click();
   await page.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
   await page.locator('#wizardNextBtn').click();

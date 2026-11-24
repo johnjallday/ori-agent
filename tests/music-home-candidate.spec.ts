@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
+import { goToFiles } from './helpers/home-destination';
 
 // Exact-source acceptance for the locally staged Music Project Management
 // candidate. Run only through scripts/music-home-demo.sh so HOME, ORI_DATA_DIR,
@@ -148,7 +149,7 @@ test('Create Group reviews, staffs, replays, renames, and reuses one empty Home'
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Tree', exact: true }).click();
+  await goToFiles(page);
   await page.locator('[data-tree-new-group]').click();
   const creator = page.locator('#addFolderModal');
   await expect(creator).toBeVisible();

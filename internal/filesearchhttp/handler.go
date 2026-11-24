@@ -48,8 +48,14 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Folder search is unavailable.", http.StatusServiceUnavailable)
 		return
 	}
+	// Files' place carries a term, a scope and a list of page counts, which the
+	// page escapes into one JSON string: a full one is past the usual limit.
+	limit := int64(2048)
+	if op == "files-place" {
+		limit = 8192
+	}
 	decode := func(v any) bool {
-		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048))
+		d := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 		d.DisallowUnknownFields()
 		if d.Decode(v) != nil || d.Decode(new(any)) != io.EOF {
 			http.Error(w, "Invalid request.", http.StatusBadRequest)
@@ -68,6 +74,15 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		out, e = h.Service.DeskPlace(owner, in.Tab, in.Place)
+	case "files-place":
+		var in struct {
+			Tab   string                 `json:"tab"`
+			Place *filesearch.FilesPlace `json:"place"`
+		}
+		if !decode(&in) {
+			return
+		}
+		out, e = h.Service.FilesPlace(owner, in.Tab, in.Place)
 	case "map-place":
 		var in struct {
 			Tab   string               `json:"tab"`
