@@ -25,6 +25,10 @@
              view mode, and the HQ's attention strip and panels carry what the
              mounts say. Every module keeps running; other pages are untouched. -->
         <div id="workspaceTopMounts" class="workspace-top-mounts">
+        {{if .Extra.FolderSearchReady}}
+        <nav id="workspaceSearchLocations" aria-label="Search linked folders in Files" hidden></nav>
+        <script type="module" src="/js/modules/workspace-search-links.js"></script>
+        {{end}}
         <!-- Song card: filled by song-card.js only on a song workspace linked to a
              Home library (song-card PRD FR8); hidden and empty everywhere else. -->
         <section id="workspaceSongCardMount" class="song-card-mount" hidden></section>

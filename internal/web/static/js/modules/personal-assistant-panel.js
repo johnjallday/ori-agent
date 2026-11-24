@@ -407,9 +407,9 @@ export function assistantNeedsLine(today, { failed = false } = {}) {
 }
 
 /** Where "Explore a folder" goes from a page that is not Home. */
-export const EXPLORE_FOLDER_URL = '/?panel=today&folder=show';
+export const EXPLORE_FOLDER_URL = '/?panel=today&folder=explore';
 // An explicit shortcut to the existing Documents pre-hire card, never Start.
-export const DOCUMENTS_FOLDER_URL = `${EXPLORE_FOLDER_URL}&suggest=documents`;
+export const DOCUMENTS_FOLDER_URL = '/?panel=today&folder=show&suggest=documents';
 
 /**
  * The one suggestion above the composer, "Explore a folder". It is offered when
@@ -1726,8 +1726,8 @@ function setFolderBusy(busy, source = 'legacy') {
  * other page has no folder flow of its own, so it goes to Home's.
  */
 function exploreFolder() {
-  // Every page's drawer starts an agent on the chosen folder (the one folder
-  // card); attaching remains only where the folder module is missing.
+  // The folder controller owns the review and any separate assisted choice.
+  // Attaching remains only where the folder module is missing.
   const folder = window.PersonalAssistantFolder;
   if (folder && typeof folder.openFromAttach === 'function') {
     folder.openFromAttach();

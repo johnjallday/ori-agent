@@ -24,6 +24,16 @@ test('distinguish duplicate copies by location and date before acting', async ({
   // Exercise navigation on an established assistant fixture. First-run model
   // verification belongs to onboarding, not the filename query/controller.
   await installLocalCdn(page);
+  // This navigation regression starts with independent search-only grants, as
+  // on an upgraded installation. Create them before workspace onboarding;
+  // established-profile workspace review has its own acceptance journeys.
+  await page.goto('/search');
+  for (const kind of ['Documents', 'Downloads']) {
+    if (kind === 'Downloads') await page.getByRole('button', { name: /Add folder/ }).click();
+    await page.getByRole('button', { name: kind, exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Allow search' }).click();
+    await expect(page.locator('#sources li').filter({ hasText: kind })).toContainText('ready');
+  }
   // The tall, empty-map welcome is where a stretched destination row was
   // most obvious. Capture it before creating the assistant fixture.
   expect((await request.post('/api/onboarding/skip')).ok()).toBeTruthy();
@@ -56,12 +66,14 @@ test('distinguish duplicate copies by location and date before acting', async ({
   for (let n = 0; n < 27; n++)
     writeFileSync(join(fixture!, `home/Downloads/sample-${n}.unknown`), '', { flag: 'wx' });
   await page.goto('/search');
+  // Files were added after fixture setup. Refresh, rather than granting again.
+  await page.locator('#manage summary').click();
   for (const kind of ['Documents', 'Downloads']) {
-    if (kind === 'Downloads') await page.getByRole('button', { name: /Add folder/ }).click();
-    await page.getByRole('button', { name: kind, exact: true }).click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Allow search' }).click();
-    await expect(page.locator('#sources li').filter({ hasText: kind })).toContainText('ready');
+    const row = page.locator('#sources li').filter({ hasText: kind });
+    await row.getByRole('button', { name: /Refresh/ }).click();
+    await expect(row).toContainText('ready');
   }
+  await page.locator('#manage summary').click();
   const term = page.getByRole('searchbox');
   await term.fill('proposal');
   const rows = page.locator('#hits li');
@@ -131,6 +143,9 @@ test('distinguish duplicate copies by location and date before acting', async ({
   ]) {
     await page.setViewportSize(size);
     const picker = page.getByRole('navigation', { name: 'Destination', exact: true });
+    // WebKit can momentarily expose both the rail and mobile picker while
+    // applying the viewport change. Assert the layout settles to exactly one.
+    await expect(picker).toHaveCount(1);
     await expect(picker).toBeVisible();
     await expect(page.locator('[data-ws-map-viewport]').first()).toBeVisible();
     const gap = await page.evaluate(() => {

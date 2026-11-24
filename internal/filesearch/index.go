@@ -96,7 +96,7 @@ func (s *Service) QueryLocation(ctx context.Context, owner, term, location, curs
 	term = folded(strings.TrimSpace(term))
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ss, err := s.sourcesLocked(ctx, owner, true)
+	ss, err := s.visibleSourcesLocked(ctx, owner)
 	if err != nil {
 		return page, err
 	}

@@ -228,6 +228,7 @@ export function workspaceCreationReviewHTML(view = {}) {
         ${view.accepted && !view.result && !view.definiteRefusal ? `<button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>` : ''}
         ${view.canAbandonReview && !view.result ? `<button type="button" data-placement-action="abandon-review"${view.busy ? ' disabled' : ''}>${view.definiteRefusal ? 'Return to review' : 'Release unaccepted review'}</button>` : ''}
         ${view.positionFailed && view.result ? `<button type="button" data-placement-action="retry-position"${view.busy ? ' disabled' : ''}>Retry position only</button>` : ''}
+        ${view.result && view.searchSource ? `<button type="button" data-placement-action="files"${view.busy ? ' disabled' : ''}>Search this folder in Files</button>` : ''}
         ${view.result ? `<button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>${escapeReviewText(view.openLabel || (group ? 'Open group' : 'Open workspace'))}</button>` : ''}
         ${view.canShowOnMap ? `<button type="button" data-placement-action="show-map"${view.busy ? ' disabled' : ''}>Show on map</button>` : ''}
         ${view.canMoveGroup ? `<button type="button" data-placement-action="move-group"${view.busy ? ' disabled' : ''}>Move group</button>` : ''}

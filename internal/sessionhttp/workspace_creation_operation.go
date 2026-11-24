@@ -109,6 +109,17 @@ func (h *Handler) handleWorkspaceCreationOperations(w http.ResponseWriter, r *ht
 		h.respondCreationOperationReadError(w, err)
 		return
 	}
+	var source struct {
+		FolderSelection string `json:"folder_selection"`
+	}
+	if json.Unmarshal([]byte(op.Request), &source) != nil {
+		creationOperationError(w, http.StatusConflict, "creation_uncertain", "The original review cannot be read.")
+		return
+	}
+	if source.FolderSelection != "" && (h.folderSearchAllowed == nil || !h.folderSearchAllowed(r, owner)) {
+		creationOperationError(w, http.StatusForbidden, "local_folder_only", "Open the folder review on this Mac.")
+		return
+	}
 	if abandon {
 		var input struct{}
 		if !decodeBuildBody(w, r, &input) {
@@ -157,6 +168,10 @@ func (h *Handler) handleWorkspaceCreationOperations(w http.ResponseWriter, r *ht
 		creationOperationError(w, http.StatusConflict, "creation_uncertain", "The original request is unreadable. Nothing can be resubmitted.")
 		return
 	}
+	if material.FolderSelection != "" {
+		unlock := h.folderSearch.LockWorkspaceSetup()
+		defer unlock()
+	}
 	if material.BuildReviewVersion != 0 {
 		release, ok := h.acquireCreationBuild(w, r, owner, material.BuildSessionID)
 		if !ok {
@@ -196,6 +211,12 @@ func (h *Handler) reviewWorkspaceCreationOperation(w http.ResponseWriter, r *htt
 		json.Unmarshal(input.Request, &request) != nil || strings.TrimSpace(request.Name) == "" {
 		_ = orihttp.RespondBadRequest(w, "a canonical operation UUID and named material create request are required")
 		return
+	}
+	if request.FolderSelection != "" || request.AllowFilenameSearch {
+		if _, err := h.resolveSearchableAnchor(r, owner, request); err != nil {
+			creationOperationError(w, http.StatusConflict, "folder_review_changed", err.Error())
+			return
+		}
 	}
 	if request.GroupRequirementReview || request.GroupReviewToken != "" || request.IdempotencyKey != "" ||
 		request.CreateRequiredHome || request.GroupComposition != "" {

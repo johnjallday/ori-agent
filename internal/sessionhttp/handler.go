@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/filesearch"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -34,8 +35,10 @@ import (
 
 // Handler handles session-related HTTP requests.
 type Handler struct {
-	store          session.HybridStore
-	workspaceStore *workspace.FileStore // optional folder-based workspace store
+	folderSearch        *filesearch.Service
+	folderSearchAllowed func(*http.Request, string) bool
+	store               session.HybridStore
+	workspaceStore      *workspace.FileStore // optional folder-based workspace store
 	// workspaceTaskStore is the primary (SyncStore-wrapped) workspace store used
 	// for task mutations such as the entry-agent claim sweep. It must be the same
 	// store orchestration reads from (SQLite primary + disk write-through), not

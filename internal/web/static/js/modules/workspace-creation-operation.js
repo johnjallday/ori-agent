@@ -1,5 +1,5 @@
-// Ordinary creator transport only. Material choices stay in sessions.js and
-// its existing setters; accepted effects belong to the server operation. No
+// Ordinary creator transport. The advanced creator and compact folder review
+// supply their own material choices; effects belong to the server operation. No
 // setup fallback, model call, name-based lookup or automatic POST retry.
 const referenceKey = 'ori.workspaceCreationOperation.v1';
 const states = new Set([

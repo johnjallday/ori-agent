@@ -6012,12 +6012,12 @@ import {
   let folderDeepLinkRetries = 0;
   function consumeFolderDeepLink() {
     const folder = new URLSearchParams(window.location.search).get('folder');
-    if (!['show', 'guide'].includes(folder) || !folderAction.visible) return;
+    if (!['show', 'guide', 'explore'].includes(folder) || !folderAction.visible) return;
     const suggestion = folderSuggestion(window.location.search);
     if (
       openHomeFolder(
         els.primaryActionBtn,
-        suggestion,
+        suggestion || (folder === 'show' ? 'assisted' : ''), // Preserve existing pre-hire/repair links.
         folder === 'guide' || guidedFolder?.path === 'folder'
       )
     ) {
@@ -6037,7 +6037,10 @@ import {
       window.location.assign(primaryAction.href);
       return true;
     }
-    return openHomeFolder(invoker || els.primaryActionBtn);
+    return openHomeFolder(
+      invoker || els.primaryActionBtn,
+      primaryAction.kind === 'folder' ? 'assisted' : ''
+    );
   }
   // The label is plain visible text and not announced: the button is outside
   // any live region, and it changes only when the relationship does. Whether

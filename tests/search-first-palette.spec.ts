@@ -28,7 +28,10 @@ test('Files and Notes keep separate inputs, requests and history on established 
   await page.getByRole('link', { name: 'Files', exact: true }).click();
   await page.getByRole('button', { name: /Add folder/ }).click();
   await page.getByRole('button', { name: 'Documents', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Allow search' }).click();
+  const review = page.locator('dialog.explore-card');
+  await review.getByRole('checkbox').check();
+  await review.getByRole('button', { name: 'Create workspace' }).click();
+  await review.getByRole('button', { name: 'Search this folder in Files' }).click();
   await expect(page.locator('#hits li').first()).toBeVisible();
   await page.goto('/');
   await expect(page.locator('.home-command-bridge')).toBeVisible();

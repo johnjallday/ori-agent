@@ -3,7 +3,11 @@ import { defineConfig, devices } from '@playwright/test';
 // scripts/test-search-first.py supplies a distinct marked profile per browser.
 export default defineConfig({
   testDir: './tests',
-  testMatch: 'files-map-navigation.spec.ts',
+  testMatch: [
+    'files-map-navigation.spec.ts',
+    'folder-backed-search-locations.spec.ts',
+    'folder-setup-parity.spec.ts'
+  ],
   workers: 1,
   retries: 0,
   timeout: 90000,

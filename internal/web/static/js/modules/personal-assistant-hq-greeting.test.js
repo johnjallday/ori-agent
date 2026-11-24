@@ -108,7 +108,7 @@ test('a choice is a link only for the folder; the rest are buttons the page runs
     assert.equal(greetingChoiceHref({ action }), '', String(action));
   assert.equal(greetingChoiceHref(null), '');
   assert.equal(DOCUMENTS_FOLDER_URL, '/?panel=today&folder=show&suggest=documents');
-  assert.equal(EXPLORE_FOLDER_URL, '/?panel=today&folder=show');
+  assert.equal(EXPLORE_FOLDER_URL, '/?panel=today&folder=explore');
 });
 
 // ── the controller, against a fake DOM ─────────────────────────────────────────

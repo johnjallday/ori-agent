@@ -61,10 +61,11 @@ func (s *Server) searchPage(w http.ResponseWriter, r *http.Request, state string
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	ready := s.folderSearchReady()
 	_ = deskTemplate.Execute(w, struct {
 		State                    string
 		Home, First, MapEligible bool
-	}{state, home, state == onboarding.SearchFirst, s.Storage.OnboardingMgr.IsOnboardingComplete()})
+	}{state, home, state == onboarding.SearchFirst && !ready, ready})
 }
 func (s *Server) searchPreference(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")

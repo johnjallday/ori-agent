@@ -20,7 +20,8 @@ type Handler struct {
 	Service *filesearch.Service
 	Users   userprofile.UserProvider
 	// Accepted records first-open landing only, never on cancel or a failed grant.
-	Accepted func() error
+	Accepted       func() error
+	WorkspaceReady func() bool // established profile only; independent of the starting-page preference
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +89,52 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var id string
 		id, e = h.Service.Begin(owner, in.Kind)
 		out = map[string]string{"intent": id}
+	case "review", "resume-review":
+		if h.WorkspaceReady == nil || !h.WorkspaceReady() {
+			http.Error(w, "Complete workspace setup first.", http.StatusConflict)
+			return
+		}
+		var in struct {
+			Intent string `json:"intent"`
+		}
+		if !decode(&in) {
+			return
+		}
+		if op == "review" {
+			out, e = h.Service.Review(r.Context(), owner, in.Intent)
+		} else {
+			out, e = h.Service.ResumeReview(r.Context(), owner, in.Intent)
+		}
+	case "review-source", "connect":
+		if h.WorkspaceReady == nil || !h.WorkspaceReady() {
+			http.Error(w, "Complete workspace setup first.", http.StatusConflict)
+			return
+		}
+		if op == "review-source" {
+			var in struct {
+				ID string `json:"id"`
+			}
+			if !decode(&in) {
+				return
+			}
+			out, e = h.Service.ReviewSource(r.Context(), owner, in.ID)
+		} else {
+			var in struct {
+				Intent    string `json:"intent"`
+				Workspace string `json:"workspace"`
+				Link      string `json:"link"`
+				Verify    bool   `json:"verify_current_link"`
+			}
+			if !decode(&in) {
+				return
+			}
+			out, e = h.Service.Connect(r.Context(), owner, in.Intent, in.Workspace, in.Link, in.Verify)
+		}
 	case "select":
+		if h.WorkspaceReady != nil && h.WorkspaceReady() {
+			http.Error(w, "Review the workspace and filename search together. Reload Files to continue.", http.StatusConflict)
+			return
+		}
 		var in struct {
 			Intent string `json:"intent"`
 		}

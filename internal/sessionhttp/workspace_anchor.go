@@ -1,6 +1,7 @@
 package sessionhttp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -189,9 +190,16 @@ func (h *Handler) plannedAnchorSidecarPath(req createWorkspaceRequest) string {
 
 // Serialize the final owner check and durable anchor write with all existing
 // project attaches. A second concurrent create must see the first one's anchor.
-func (h *Handler) saveAnchoredWorkspaceFolder(path string, ws *agentworkspace.Workspace, location string) *anchorPathError {
+func (h *Handler) saveAnchoredWorkspaceFolder(ctx context.Context, req createWorkspaceRequest, ws *agentworkspace.Workspace, location string) *anchorPathError {
 	unlock := projectconnection.LockAttachCommit()
 	defer unlock()
+	path := req.AnchorPath
+	if req.FolderSelection != "" {
+		root, err := h.folderSearch.ReviewedRoot(ctx, ws.OwnerUserID, req.FolderSelection)
+		if err != nil || root != path {
+			return anchorError("folder_review_changed", "The selected folder changed. Choose it again.", http.StatusConflict)
+		}
+	}
 	if _, err := h.validateAnchorPath(path, ws.ID); err != nil {
 		return err
 	}

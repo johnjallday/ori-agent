@@ -1,0 +1,130 @@
+.explore-card {
+  background: var(--paper, var(--bg-secondary));
+  color: var(--ink, var(--text-primary));
+  border: 1px solid var(--line, var(--border-color));
+  border-radius: 15px;
+  padding: clamp(1.25rem, 4vw, 2rem);
+  box-sizing: border-box;
+}
+/* The conversation already supplies the reply's frame; don't nest cards. */
+.pa-folder section.explore-card {
+  --paper: var(--ori-paper);
+  --ink: var(--ori-ink);
+  --muted: var(--hc-ink-dim);
+  --line: var(--ori-line);
+  --field: var(--hc-panel);
+  --stamp: var(--hc-signal-deep);
+  padding: 0.25rem;
+  border: 0;
+  background: transparent;
+}
+.pa-folder section.explore-card h2 {
+  font-size: 1.4rem;
+}
+#assistantExploreFolder :is([data-explore-choices], [data-explore-review]),
+#assistantGuidedFolderChooser:not([hidden]) {
+  display: grid;
+  gap: 0.5rem;
+}
+#assistantExploreFolder [data-explore-choices][hidden],
+#assistantExploreFolder [data-explore-status]:empty {
+  display: none;
+}
+dialog.explore-card {
+  width: min(29rem, calc(100% - 2rem));
+  max-height: calc(100dvh - 2rem);
+  margin: auto;
+}
+.explore-card::backdrop {
+  background: rgb(14 26 20 / 50%);
+}
+.explore-card .explore-card__kicker {
+  font:
+    600 0.7rem/1.5 ui-monospace,
+    monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--stamp, var(--text-secondary));
+}
+.explore-card h2 {
+  font:
+    600 clamp(1.5rem, 4vw, 2rem)/1.12 Georgia,
+    serif;
+  margin: 0.45rem 0 0.75rem;
+  overflow-wrap: anywhere;
+}
+.explore-card p,
+.explore-card small {
+  line-height: 1.5;
+}
+.explore-card .explore-card__description {
+  margin: 0 0 1.1rem;
+}
+.explore-card fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.explore-card__name {
+  display: grid;
+  gap: 0.3rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+.explore-card__name :is(input, select) {
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--line, var(--border-color));
+  border-radius: 6px;
+  color: inherit;
+  background: var(--field, var(--bg-primary));
+  font: inherit;
+}
+.explore-card__check {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  line-height: 1.4;
+}
+.explore-card [hidden],
+.explore-card__status:empty {
+  display: none;
+}
+.explore-card fieldset small {
+  display: block;
+  font: inherit;
+  font-size: 0.85rem;
+  text-transform: none;
+  letter-spacing: normal;
+  margin-top: 0.4rem;
+  color: var(--muted, var(--text-secondary));
+}
+.explore-card__actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  border-top: 1px solid var(--line, var(--border-color));
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+}
+.explore-card__actions button {
+  font: inherit;
+  line-height: 1.3;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--line, var(--border-color));
+  background: transparent;
+  color: inherit;
+}
+.explore-card__actions .explore-card__primary {
+  background: var(--ink, var(--text-primary));
+  color: var(--paper, var(--bg-primary));
+}
+.explore-card__actions button:disabled {
+  opacity: 0.55;
+}
+.explore-card__status:not(:empty) {
+  margin-top: 0.75rem;
+}

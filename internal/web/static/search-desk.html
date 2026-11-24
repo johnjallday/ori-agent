@@ -12,8 +12,9 @@
     <title>{{if .Home}}Home{{else}}Files{{end}} · Ori</title>
     <link rel="stylesheet" href="/css/desk-navigation.css" />
     <link rel="stylesheet" href="/css/search-desk.css" />
+    <link rel="stylesheet" href="/css/explore-folder.css" />
   </head>
-  <body data-landing="{{.State}}">
+  <body data-landing="{{.State}}" data-workspace-ready="{{and .MapEligible (not .First)}}">
     {{if .Home}}
     <main class="welcome">
       <div class="top">Local desk / Home</div>
@@ -112,7 +113,10 @@
           <p id="emptyMap">Checking your locations…</p>
           <details id="manage">
             <summary>Manage search locations</summary>
-            <p>These folders are searchable by name. They aren’t workspaces or folders an agent can read.</p>
+            <p>
+              These folders are searchable by name. Search permission alone gives no agent access. Remove from search
+              clears that index, not the folder, its workspace, notes or tickets.
+            </p>
             <ul id="sources" aria-label="Mapped folders"></ul>
             {{if not .First}}{{template "folderChoices"}}{{end}}
           </details>

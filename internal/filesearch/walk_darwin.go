@@ -37,6 +37,18 @@ func openDirectory(path string) (*os.File, unix.Stat_t, error) {
 	}
 	return f, st, nil
 }
+
+// A directory born after a legacy reference cannot be its original target.
+// Older birth time alone is not proof; legacy links need explicit verification.
+func rootExistedAt(path, identity string, at time.Time) bool {
+	f, st, err := openDirectory(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	return witness(&st) == identity && !time.Unix(st.Btim.Sec, st.Btim.Nsec).After(at)
+}
+
 func rootWitness(path string) (string, error) {
 	f, st, err := openDirectory(path)
 	if err != nil {
