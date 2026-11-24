@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { arrivalState, choiceInventory } from './helpers/workspace-choice-state';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
@@ -32,6 +33,8 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
       await request.get('/api/file-search/sources', { headers: { 'X-Ori-Search': '1' } })
     ).json();
   const workspaces = async () => (await (await request.get('/api/workspaces')).json()).folders;
+  const inspect = () => choiceInventory(request, join(fixture!, 'data'));
+  const initial = await inspect();
   const before = await workspaces();
   async function blank() {
     await page.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
@@ -71,6 +74,7 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     await expect(review).toContainText('Index filenames');
   }
   expect(await sources()).toEqual([]);
+  expect(await inspect()).toEqual(initial);
   await page.screenshot({ path: path('review') });
   if (entry === 'files') await review.getByRole('button', { name: 'Create workspace' }).click();
   else {
@@ -107,6 +111,10 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     });
   };
   await inventory();
+  const receipt = await inspect();
+  const beforeOpen = await arrivalState(request, ws.id);
+  expect(beforeOpen).toMatchObject({ agents: [], pending: false, goalRuns: 0, inFlight: false });
+  expect(receipt.hires).toEqual(initial.hires);
   await choose(entry === 'files' ? 'workspace' : 'files');
   await compact
     .getByRole('button', {
@@ -123,6 +131,14 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
   await expect(page.locator(`#cockpitTreeNav [data-tree-row="${ws.id}"]`)).toContainText(name);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/workspaces/${ws.slug}`);
+  await expect(page.locator('body')).toHaveAttribute('data-workspace-id', ws.id);
+  const opened = await arrivalState(request, ws.id);
+  expect(opened).toEqual(beforeOpen);
+  expect(await inspect()).toEqual(receipt);
+  writeFileSync(
+    path('resources').replace(/\.png$/, '.json'),
+    JSON.stringify({ initial, receipt, beforeOpen, opened })
+  );
   await page.getByRole('button', { name: `Search ${folder} in Files` }).press('Enter');
   await expectFilesScoped();
   await page.screenshot({ path: path('narrow-files') });

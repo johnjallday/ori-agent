@@ -1,7 +1,8 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { openFolderAttach, chooseAttach } from './helpers/assistant-menus';
+import { openFolderAttach, chooseConversation } from './helpers/assistant-menus';
+import { arrivalState, choiceInventory } from './helpers/workspace-choice-state';
 
 // The assistant hires from a plain request (assistant-hires-from-a-request):
 // the real built drawer, Route -> Ask -> the loopback Ollama stand-in and
@@ -88,7 +89,9 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
   await mkdir(evidence, { recursive: true, mode: 0o750 });
   await seedAssistant(request);
   await stageCodeFolder(sandbox!);
-  const before = (await workspaces(request)).length;
+  const inventory = () => choiceInventory(request, sandbox!);
+  const baseline = await inventory();
+  const before = baseline.workspaces.length;
 
   const drawer = page.locator('#personalAssistantPanel');
   const input = page.locator('#personalAssistantInput');
@@ -140,6 +143,7 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
   expect((await conversation(request, id)).hire_proposals[0].state).toBe('offered');
   await card.scrollIntoViewIfNeeded();
   await shot('spec-01-hire-card.png');
+  expect(await inventory()).toEqual(baseline);
 
   // 2. A role change updates the blueprint line and the name; the brief stays.
   await card.getByRole('radio', { name: /Writer/ }).click();
@@ -183,6 +187,20 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
     workspace_id: hired.workspace_id
   });
   await shot('spec-02-hired.png');
+  const bought = await inventory();
+  expect(bought.hires).toHaveLength(baseline.hires.length + 1);
+  expect(bought.hires).toContainEqual(
+    expect.objectContaining({
+      id: hired.hire_id,
+      workspace_id: hired.workspace_id,
+      agent_name: 'Ruth'
+    })
+  );
+  expect(bought.sources).toEqual(baseline.sources);
+  await writeFile(
+    join(evidence, 'resources.json'),
+    JSON.stringify({ baseline, bought, arrival: await arrivalState(request, hired.workspace_id) })
+  );
 
   // 4. A second offer put aside with Not now: the card keeps its headline and
   // loses its buttons; the next request about that work gets prose, no card.
@@ -237,4 +255,13 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
   await expect(drawer).not.toContainText('Offer: hire');
   await restored.scrollIntoViewIfNeeded();
   await shot('spec-05-reload-hired.png');
+
+  // Real Route -> Ask on the natural advice question, without an attached
+  // folder or a prior offer to suppress it. The reply is scripted.
+  await chooseConversation(page, '#personalAssistantConversationNew');
+  const advice = await send('How should I compare interviews?');
+  expect(advice.confirmation).toBeUndefined();
+  await expect(cards).toHaveCount(0);
+  expect((await inventory()).workspaces).toEqual(bought.workspaces);
+  await shot('spec-06-advice.png');
 });
