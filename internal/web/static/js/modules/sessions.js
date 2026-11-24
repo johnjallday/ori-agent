@@ -671,6 +671,30 @@ const sessionManager = {
         this.setAnchorMode(event.target.value === 'anchored');
       }
     });
+    document.getElementById('workspaceSearchChoices')?.addEventListener('click', async event => {
+      const kind = event.target.closest('[data-search-folder]')?.dataset.searchFolder;
+      const choice = this.anchorChoice;
+      if (!kind || !choice?.enabled || choice.pending) return;
+      choice.pending = true;
+      this.refreshWizardChrome();
+      try {
+        const { chooseSearchFolder } = await import('./folder-search-review.js');
+        const review = await chooseSearchFolder(kind);
+        if (review && this.anchorChoice === choice) this.applySearchFolderReview(review, false);
+      } catch (error) {
+        this.showToast(error.message, 'warning');
+      } finally {
+        if (this.anchorChoice === choice) {
+          choice.pending = false;
+          this.refreshWizardChrome();
+        }
+      }
+    });
+    document.getElementById('workspaceSearchConsent')?.addEventListener('change', event => {
+      if (!this.anchorChoice?.review) return;
+      this.anchorChoice.search = event.target.checked;
+      this.refreshWizardChrome();
+    });
     document.getElementById('workspaceAnchorPath')?.addEventListener('input', event => {
       if (!this.anchorChoice?.enabled) return;
       Object.assign(this.anchorChoice, {
@@ -832,6 +856,8 @@ const sessionManager = {
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
       this.applyCreatorPrefill(this.workspaceCreatorContext);
       this.applyAnchorPrefill();
+      if (pendingOptions.searchFolderReview)
+        this.applySearchFolderReview(pendingOptions.searchFolderReview, true);
       this.importEntryPoint =
         entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
       this.workspacePostCreateAction = postCreateAction;
@@ -3885,6 +3911,7 @@ const sessionManager = {
   anchorFolderProblem() {
     if (!this.anchorChoice?.enabled || this.importModeEnabled || this.isGroupCreator()) return '';
     const choice = this.anchorChoice;
+    if (choice.review) return choice.pending ? 'Checking folder…' : '';
     if (!choice.path) return 'Choose an existing folder for this workspace.';
     if (choice.pending) return 'Checking folder ownership…';
     if (choice.message) return choice.message;
@@ -3915,6 +3942,12 @@ const sessionManager = {
         '<name>';
       help.textContent = `Ori reads this folder as the workspace. Its own notes and settings stay in ~/Ori Workspaces/${name}, so nothing is written into your folder.`;
     }
+    const consentRow = document.getElementById('workspaceSearchConsentRow');
+    if (consentRow) consentRow.hidden = !enabled || !choice?.review;
+    const consent = document.getElementById('workspaceSearchConsent');
+    if (consent) consent.checked = Boolean(choice?.search);
+    const pathInput = document.getElementById('workspaceAnchorPath');
+    if (pathInput) pathInput.readOnly = Boolean(choice?.review);
     const status = document.getElementById('workspaceAnchorStatus');
     if (status) {
       status.textContent = enabled
@@ -3935,10 +3968,20 @@ const sessionManager = {
     if (enabled && projectChoice) projectChoice.hidden = true;
   },
 
+  applySearchFolderReview(review, search) {
+    this.setAnchorMode(true);
+    if (!this.anchorChoice?.enabled) return;
+    this.anchorChoice.review = review;
+    this.anchorChoice.search = search;
+    const input = document.getElementById('workspaceAnchorPath');
+    if (input) input.value = review.label;
+    this.refreshWizardChrome();
+  },
+
   async checkAnchorPath() {
     const choice = this.anchorChoice;
     const input = document.getElementById('workspaceAnchorPath');
-    if (!choice?.enabled || !input) return;
+    if (!choice?.enabled || choice.review || !input) return;
     const path = input.value.trim();
     const sequence = ++this.anchorCheckSequence;
     Object.assign(choice, {
@@ -3992,6 +4035,8 @@ const sessionManager = {
       if (this.anchorChoice !== choice) return;
       if (response.ok && result.success && result.selected && result.path) {
         const input = document.getElementById('workspaceAnchorPath');
+        choice.review = null;
+        choice.search = false;
         if (input) input.value = result.path;
         await this.checkAnchorPath();
       } else if (result.reason === 'dialog_off' || !response.ok) {
@@ -4999,6 +5044,7 @@ const sessionManager = {
             ? review.api.creationRecoveryTitle?.(review.observedState)
             : '',
         openLabel: review.result && review.buildDraft ? `Open ${review.result.name}` : '',
+        searchSource: review.searchSource,
         definiteRefusal,
         resultParentName: review.result?.parent_id
           ? this.findFolderById(review.result.parent_id, this.folders || [])?.name || ''
@@ -5176,6 +5222,26 @@ const sessionManager = {
       });
     }
     const session = this.workspaceBuild?.session;
+    if (this.anchorChoice?.enabled && this.anchorChoice.review) {
+      rows.push({
+        label: 'Work folder',
+        value: this.anchorChoice.review.label,
+        detail:
+          'Linked in place. Workspace tools can read files here; creating the link does not send files to a model.'
+      });
+      rows.push({
+        label: 'Files',
+        value: this.anchorChoice.search
+          ? 'Index filenames, locations and dates on this Mac.'
+          : 'No new search permission.',
+        detail:
+          this.anchorChoice.review.kind === 'downloads'
+            ? 'No file contents are indexed. Reviewing Downloads and allowing Filing are separate choices.'
+            : this.anchorChoice.review.kind === 'documents'
+              ? 'No file contents are indexed. This does not set up Notes or share documents.'
+              : 'No file contents are indexed. Refresh manually.'
+      });
+    }
     const attached = session?.folder?.observation;
     if (attached) {
       rows.push({
@@ -5368,6 +5434,22 @@ const sessionManager = {
     )
       return;
     if (action === 'read-status') return this.readOrdinaryCreationStatus(context);
+    if (action === 'files' && review.result?.id && review.searchSource) {
+      const { destinationPlace } = await import('./destination-place.js');
+      const place = destinationPlace('desk');
+      const saved = await place?.save({
+        source: review.searchSource,
+        term: '',
+        selected: '',
+        generation: 0,
+        pages: 1
+      });
+      if (!saved?.ok)
+        throw new Error('The folder view could not be opened. Your workspace is unchanged.');
+      this.releaseCreationReviewReference(review);
+      window.location.assign('/search');
+      return;
+    }
     if (action === 'open' && review.result?.id) {
       this.releaseCreationReviewReference(review);
       // Workspace pages are routed by slug; resolve it rather than use the ID.
@@ -5542,12 +5624,14 @@ const sessionManager = {
         review.observedState = outcome.state;
       review.buildDraft ||= outcome.operation?.build_backed === true;
       if (outcome.state === 'complete') {
+        review.searchSource = outcome.result.filename_source_id || '';
         review.result = await this.observeOrdinaryCreationResource(context, outcome.result.folder);
         if (this.workspaceCreatorContext !== context) return;
         review.positionFailed = Boolean(review.candidate && review.result);
         review.message = [
           'The original workspace is verified. Reading status did not create or start work.',
           review.buildDraft ? 'Workspace creation does not verify operational readiness.' : '',
+          outcome.result.search_warning,
           this.ordinaryCreationSeededTickets(outcome.result),
           review.positionFailed
             ? 'The original position was not saved. Retry position only if you still want that point.'
@@ -5856,6 +5940,7 @@ const sessionManager = {
     if (this.workspaceCreatorContext !== context || context.generation !== review.generation)
       return;
     review.accepted = true;
+    review.searchSource = result?.filename_source_id || '';
     review.result = result?.folder
       ? await this.observeOrdinaryCreationResource(context, result.folder)
       : null;
@@ -5871,6 +5956,8 @@ const sessionManager = {
             ? 'No ticket was started. Workspace creation does not verify operational readiness.'
             : `${review.result.kind === 'group' ? 'Group' : 'Workspace'} created. No run or scan was started by placement.`,
           review.owner === 'grouped' ? this.groupedCreationResultLine(result, review.result) : '',
+          result.search_warning ||
+            (review.searchSource ? 'Folder added to local filename search.' : ''),
           this.ordinaryCreationSeededTickets(result),
           review.buildDraft && placementResult?.saved ? 'Map position saved.' : '',
           typeof result.project_warning === 'string' ? result.project_warning : '',
@@ -19796,8 +19883,12 @@ const sessionManager = {
       payload.entry_point = this.importEntryPoint || 'workspace_hub_create';
       if (this.importLegacyAdopt) payload.adopt_assistant = true;
     } else if (requiresReviewedRoster || !ordinaryGroup) {
-      if (this.anchorChoice?.enabled && !ordinaryGroup)
-        payload.anchor_path = this.anchorChoice.path;
+      if (this.anchorChoice?.enabled && !ordinaryGroup) {
+        if (this.anchorChoice.review) {
+          payload.folder_selection = this.anchorChoice.review.id;
+          payload.allow_filename_search = Boolean(this.anchorChoice.search);
+        } else payload.anchor_path = this.anchorChoice.path;
+      }
       // A create opened for a "show me a folder" offer names the offer so
       // the server can attach that folder afterwards (FR28). The folder's
       // path is never part of this request.
@@ -26123,6 +26214,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const secondBrainProject = openCreate
         ? String(params.get('second_brain_project') || '').trim()
         : '';
+      const searchReview = openCreate && params.get('folder_review') === '1';
+      params.delete('folder_review');
       params.delete('second_brain_project');
       const lockedParent =
         openCreate && blueprint && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(parent) ? parent : '';
@@ -26134,6 +26227,22 @@ document.addEventListener('DOMContentLoaded', () => {
       const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
       window.history.replaceState(null, '', cleanUrl);
       // Defer a frame so init()'s show.bs.modal handler is bound first.
+      if (searchReview) {
+        requestAnimationFrame(async () => {
+          try {
+            const { resumeFolderReview } = await import('./folder-search-review.js');
+            const review = await resumeFolderReview();
+            sessionManager.showAddWorkspaceModal({
+              entryPoint: 'files_folder_review',
+              name: review.label,
+              searchFolderReview: review
+            });
+          } catch (error) {
+            sessionManager.showToast(error.message, 'warning');
+          }
+        });
+        return;
+      }
       if (secondBrainProject) {
         requestAnimationFrame(
           () => void sessionManager.openSecondBrainProjectWorkspace(secondBrainProject)

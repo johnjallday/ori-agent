@@ -35,9 +35,10 @@ type Options struct {
 	Gate   *resetstate.WorkGate
 }
 type choice struct {
-	id, kind string
-	expires  time.Time
-	started  bool
+	id, kind      string
+	expires       time.Time
+	started       bool
+	root, witness string // only populated for a host-selected, unconfirmed review
 }
 type Service struct {
 	Options
@@ -86,7 +87,7 @@ func (s *Service) Begin(owner, kind string) (string, error) {
 	if s.life.Err() != nil {
 		return "", ErrUnavailable
 	}
-	if prev := s.intents[owner]; prev.started && time.Now().Before(prev.expires) {
+	if prev := s.intents[owner]; prev.started && prev.root == "" && time.Now().Before(prev.expires) {
 		return "", ErrChoice
 	}
 	id := rand.Text()
@@ -97,6 +98,24 @@ func (s *Service) Begin(owner, kind string) (string, error) {
 // Select accepts only this owner's single-use intent. Even if the dialog is still
 // open, removal/expiry invalidates it before it can commit or start work.
 func (s *Service) Select(ctx context.Context, owner, id string) (*Source, error) {
+	review, err := s.Review(ctx, owner, id)
+	if err != nil || review == nil {
+		return nil, err
+	}
+	return s.GrantReviewed(ctx, owner, review.ID)
+}
+
+// FolderReview discloses no raw path or filesystem identity to the browser.
+// Its ID names one volatile selection, not a grant or workspace.
+type FolderReview struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Kind  string `json:"kind"` // host-classified, not the pressed chip
+}
+
+// Review resolves the folder on the host. No source exists and no filenames
+// are enumerated as a consequence of this selection.
+func (s *Service) Review(ctx context.Context, owner, id string) (*FolderReview, error) {
 	s.mu.Lock()
 	c := s.intents[owner]
 	if id == "" || c.id != id || c.started || time.Now().After(c.expires) || s.life.Err() != nil {
@@ -156,6 +175,46 @@ func (s *Service) Select(ctx context.Context, owner, id string) (*Source, error)
 	if err != nil {
 		return nil, ErrUnavailable
 	}
+	if _, err := s.sourceMatchLocked(ctx, owner, path, w); err != nil {
+		return nil, err
+	}
+	c.id, c.root, c.witness = rand.Text(), path, w
+	c.kind = s.knownKind(path, w)
+	c.expires = time.Now().Add(10 * time.Minute)
+	s.intents[owner] = c
+	return c.review(), nil
+}
+
+func (c choice) review() *FolderReview {
+	return &FolderReview{ID: c.id, Label: filepath.Base(c.root), Kind: c.kind}
+}
+
+// A basename is display only. Check the known location using the same
+// physical-home and no-alias rules as the corresponding chip. Do not open
+// unrelated known directories while reviewing an ordinary project.
+func (s *Service) knownKind(path, witness string) string {
+	home, err := physicalGuard(s.Policy().Home)
+	if err != nil {
+		return "custom"
+	}
+	for kind, name := range map[string]string{"documents": "Documents", "downloads": "Downloads"} {
+		expected := filepath.Join(home, name)
+		if folded(expected) != folded(path) {
+			continue
+		}
+		p, err := knownfolder.Resolve(home, kind, nil)
+		if err != nil || p != expected {
+			continue
+		}
+		w, err := rootWitness(p)
+		if err == nil && w == witness {
+			return kind
+		}
+	}
+	return "custom"
+}
+
+func (s *Service) sourceMatchLocked(ctx context.Context, owner, path, w string) (*Source, error) {
 	sources, err := s.sourcesLocked(ctx, owner, false)
 	if err != nil {
 		return nil, err
@@ -171,6 +230,61 @@ func (s *Service) Select(ctx context.Context, owner, id string) (*Source, error)
 	if len(sources) >= maxSources {
 		return nil, ErrLimit
 	}
+	return nil, nil
+}
+
+func (s *Service) reviewedLocked(owner, id string) (choice, error) {
+	c := s.intents[owner]
+	if id == "" || c.id != id || c.root == "" || time.Now().After(c.expires) || s.life.Err() != nil {
+		return choice{}, ErrChoice
+	}
+	if !s.current(Source{root: c.root, witness: c.witness}) {
+		return choice{}, ErrRoot
+	}
+	return c, nil
+}
+
+// ReviewedRoot is for the host's workspace creator, never serialized. Only
+// the selected root can be linked, and policy is rechecked at use time.
+func (s *Service) ReviewedRoot(ctx context.Context, owner, id string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, err := s.reviewedLocked(owner, id)
+	if err != nil {
+		return "", err
+	}
+	if _, err = s.sourceMatchLocked(ctx, owner, c.root, c.witness); err != nil {
+		return "", err
+	}
+	return c.root, nil
+}
+
+// ResumeReview returns only display information for an unchanged live pick.
+func (s *Service) ResumeReview(ctx context.Context, owner, id string) (*FolderReview, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, err := s.reviewedLocked(owner, id)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = s.sourceMatchLocked(ctx, owner, c.root, c.witness); err != nil {
+		return nil, err
+	}
+	return c.review(), nil
+}
+
+func (s *Service) GrantReviewed(ctx context.Context, owner, id string) (*Source, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c, err := s.reviewedLocked(owner, id)
+	if err != nil {
+		return nil, err
+	}
+	delete(s.intents, owner)
+	if existing, e := s.sourceMatchLocked(ctx, owner, c.root, c.witness); e != nil || existing != nil {
+		return existing, e
+	}
+	path, w := c.root, c.witness
 	v := Source{ID: rand.Text(), Label: filepath.Base(path), Generation: 1, State: "queued", root: path, witness: w}
 	release, err := s.Gate.Enter()
 	if err != nil {

@@ -293,6 +293,10 @@ func splitWorkspaceBootstrapValues(raw string) []string {
 
 // createWorkspaceRequest is the JSON body of POST /api/workspaces.
 type createWorkspaceRequest struct {
+	// Only ordinary reviewed creation accepts a volatile host selection.
+	FolderSelection     string `json:"folder_selection,omitempty"`
+	AllowFilenameSearch bool   `json:"allow_filename_search,omitempty"`
+
 	Name            string `json:"name"`
 	Kind            string `json:"kind,omitempty"`
 	WorkspacePreset string `json:"workspace_preset,omitempty"`
@@ -594,6 +598,19 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	if req.FolderSelection != "" || req.AllowFilenameSearch {
+		op := creationOperationFrom(r.Context())
+		if op == nil {
+			creationOperationError(w, http.StatusConflict, "folder_review_required", "Review this folder before creating a workspace.")
+			return
+		}
+		root, err := h.resolveSearchableAnchor(r, op.Owner, req)
+		if err != nil {
+			creationOperationError(w, http.StatusConflict, "folder_review_changed", err.Error())
+			return
+		}
+		req.AnchorPath = root
+	}
 	if requestHasStaffingRecommendation(req) && (creationOperationFrom(r.Context()) == nil || req.BuildSessionID == "" || req.BuildReviewVersion < 1) {
 		respondStaffingReviewChanged(w)
 		return
@@ -768,6 +785,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 		path, anchorErr := h.validateAnchorPath(req.AnchorPath, "")
 		if anchorErr != nil {
+			if req.FolderSelection != "" {
+				anchorErr = searchableAnchorRefusal(anchorErr)
+			}
 			respondAnchorError(w, anchorErr)
 			return
 		}
@@ -964,6 +984,11 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.AnchorPath != "" {
+		// The directory reference embeds its workspace ID. Use the journal's
+		// reserved identity before constructing it, not a throwaway UUID.
+		if op := creationOperationFrom(r.Context()); op != nil {
+			ws.ID = op.WorkspaceID
+		}
 		if err := provisionAnchoredScaffolding(ws, req.AnchorPath); err != nil {
 			_ = orihttp.RespondInternalError(w, "Failed to prepare the anchored workspace")
 			return
@@ -1018,6 +1043,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if prov.anchorErr != nil {
 		h.rollbackFailedAttachCreate(r.Context(), ws.ID, seed)
+		if req.FolderSelection != "" {
+			prov.anchorErr = searchableAnchorRefusal(prov.anchorErr)
+		}
 		respondAnchorError(w, prov.anchorErr)
 		return
 	}
@@ -1206,6 +1234,9 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	response := map[string]any{
 		"success": true,
 		"folder":  ws,
+	}
+	if req.FolderSelection != "" {
+		h.finishSearchableAnchor(r.Context(), ws, req, response)
 	}
 	if assistantStationID != "" {
 		response["assistant_station_id"] = assistantStationID
@@ -1629,7 +1660,7 @@ func (h *Handler) provisionCreateWorkspaceFolder(ctx context.Context, w http.Res
 	var folderErr error
 	switch {
 	case folderWS.IsAnchored():
-		out.anchorErr = h.saveAnchoredWorkspaceFolder(req.AnchorPath, folderWS, targetLocation)
+		out.anchorErr = h.saveAnchoredWorkspaceFolder(ctx, req, folderWS, targetLocation)
 		if out.anchorErr != nil {
 			return out, false
 		}

@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="/css/desk-navigation.css" />
     <link rel="stylesheet" href="/css/search-desk.css" />
   </head>
-  <body data-landing="{{.State}}">
+  <body data-landing="{{.State}}" data-workspace-ready="{{and .MapEligible (not .First)}}">
     {{if .Home}}
     <main class="welcome">
       <div class="top">Local desk / Home</div>

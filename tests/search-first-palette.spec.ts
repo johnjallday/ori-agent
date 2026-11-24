@@ -28,7 +28,16 @@ test('Files and Notes keep separate inputs, requests and history on established 
   await page.getByRole('link', { name: 'Files', exact: true }).click();
   await page.getByRole('button', { name: /Add folder/ }).click();
   await page.getByRole('button', { name: 'Documents', exact: true }).click();
-  await page.getByRole('dialog').getByRole('button', { name: 'Allow search' }).click();
+  await page.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#workspaceSearchConsent')).toBeChecked();
+  await page.locator('#wizardNextBtn').click();
+  await page.getByRole('checkbox', { name: 'Create without agents' }).check();
+  await page.locator('#wizardNextBtn').click();
+  const review = page.locator('#workspaceCreationReviewPanel');
+  await review.getByRole('button', { name: 'Use automatic placement' }).click();
+  await review.locator('[data-placement-action="confirm"]').click();
+  await review.getByRole('button', { name: 'Search this folder in Files' }).click();
   await expect(page.locator('#hits li').first()).toBeVisible();
   await page.goto('/');
   await expect(page.locator('.home-command-bridge')).toBeVisible();

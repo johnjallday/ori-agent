@@ -123,6 +123,16 @@ export function mountFileSearch(root, compact = false) {
     location.replace(target === 'search' ? '/search' : '/?home=1');
   }
   async function choose(kind, button) {
+    if (document.body.dataset.workspaceReady === 'true') {
+      const { chooseSearchFolder, openFolderReview } = await import('./folder-search-review.js');
+      const review = await chooseSearchFolder(kind);
+      if (review) openFolderReview(review);
+      else {
+        notice.textContent = 'No folder chosen.';
+        button.focus();
+      }
+      return;
+    }
     if (kind === 'documents' || kind === 'downloads') {
       const dialog = $('folderConsent');
       $('consentTitle').textContent =

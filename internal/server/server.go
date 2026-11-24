@@ -475,6 +475,7 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	data.Extra["HomeCommandBridge"] = true
 	localFiles := s.fileSearch != nil && localSearchPage(r)
 	data.Extra["ShowFileSearch"] = localFiles
+	data.Extra["FolderSearchReady"] = localFiles && s.folderSearchReady()
 	data.Extra["FileSearchAvailable"] = localFiles
 
 	s.renderAndWritePage(w, "index", data)

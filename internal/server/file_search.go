@@ -10,8 +10,8 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/filesearch"
 	"github.com/johnjallday/ori-agent/internal/filesearchhttp"
+	"github.com/johnjallday/ori-agent/internal/learningmissionshttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
-	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
 func (b *ServerBuilder) initializeFileSearch() {
@@ -29,19 +29,31 @@ func (b *ServerBuilder) initializeFileSearch() {
 			protected = append(protected, filepath.Dir(abs))
 		}
 		return filesearch.Policy{Home: home, Protected: protected}
-	}, Pick: func(ctx context.Context) (string, bool, error) {
-		return platform.ChooseFolder(ctx, "Choose one folder for local filename search")
-	}})
+	}, Pick: pickSearchFolder})
 	if err == nil {
 		b.server.fileSearch = service
+		if b.sessionHandler != nil {
+			b.sessionHandler.SetFolderSearch(service, func(r *http.Request, owner string) bool {
+				if !localSearchPage(r) || !b.server.folderSearchReady() {
+					return false
+				}
+				current, e := learningmissionshttp.LocalOwner(r, b.userProvider, r.Method != http.MethodGet)
+				site := r.Header.Get("Sec-Fetch-Site")
+				return e == nil && current == owner && (site == "" || site == "same-origin")
+			})
+		}
 	}
 }
+func (s *Server) folderSearchReady() bool {
+	return s.Storage != nil && s.Storage.OnboardingMgr != nil && s.Storage.OnboardingMgr.IsOnboardingComplete()
+}
+
 func (s *Server) registerFileSearch(mux *http.ServeMux) {
 	if runtime.GOOS == "darwin" && s.Storage != nil {
 		mux.HandleFunc("GET /search", func(w http.ResponseWriter, r *http.Request) {
 			s.searchPage(w, r, onboarding.SearchLanding(config.DefaultDataDir()), false)
 		})
 		mux.HandleFunc("POST /api/file-search/preference", s.searchPreference)
-		mux.Handle(filesearchhttp.Prefix, filesearchhttp.Handler{Service: s.fileSearch, Users: s.Storage.UserProvider, Accepted: func() error { return onboarding.AcceptSearchFolder(config.DefaultDataDir()) }})
+		mux.Handle(filesearchhttp.Prefix, filesearchhttp.Handler{Service: s.fileSearch, Users: s.Storage.UserProvider, WorkspaceReady: s.folderSearchReady, Accepted: func() error { return onboarding.AcceptSearchFolder(config.DefaultDataDir()) }})
 	}
 }

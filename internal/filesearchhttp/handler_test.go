@@ -44,6 +44,8 @@ func TestOnlyLocalBrowserCanStartSearchChoice(t *testing.T) {
 		{"url terms refused", "GET", "sources?term=anything", peer, host, "", "", "", "1", "", 403},
 		{"arbitrary path", "POST", "select", peer, host, origin, "", "application/json", "", `{"path":"/tmp"}`, 400},
 		{"owner override", "POST", "begin", peer, host, origin, "", "application/json", "", `{"kind":"custom","owner":"other"}`, 400},
+		{"review needs established profile", "POST", "review", peer, host, origin, "", "application/json", "", `{"intent":"foreign"}`, 409},
+		{"review rejects remote peer", "POST", "review", "192.0.2.5:12345", host, origin, "", "application/json", "", `{"intent":"foreign"}`, 403},
 		{"foreign token", "POST", "select", peer, host, origin, "", "application/json", "", `{"intent":"foreign"}`, 409},
 		{"null source", "POST", "query", peer, host, origin, "", "application/json", "", `{"source":null}`, 400},
 		{"empty source", "POST", "query", peer, host, origin, "", "application/json", "", `{"source":""}`, 400},

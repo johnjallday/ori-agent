@@ -36,7 +36,7 @@ def api(url, path, body=None):
 
 
 @contextlib.contextmanager
-def serve(root, rev=None, build_tmp=None):
+def serve(root, rev=None, build_tmp=None, fixture_binary=None):
     assert (root/'.search-first-fixture').read_text() == 'synthetic-v1\n'
     number = port()
     url = f'http://localhost:{number}'
@@ -47,7 +47,14 @@ def serve(root, rev=None, build_tmp=None):
         # git archive and Go scratch never become dependencies on another checkout.
         env['TMPDIR'] = str(build_tmp)
     with (root/'server.log').open('ab') as log:
-        p = subprocess.Popen([str(REPO/'scripts/demo-server.sh')] + (['--rev',rev] if rev else []) + [str(number),str(root)], cwd=REPO, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
+        command = [str(REPO/'scripts/demo-server.sh')] + (['--rev',rev] if rev else []) + [str(number),str(root)]
+        cwd = REPO
+        if fixture_binary:
+            assert not rev and fixture_binary.is_relative_to(SCRATCH)
+            cwd = root
+            command = [str(fixture_binary)]
+            env.update(HOME=str(root/'home'), XDG_CONFIG_HOME=str(root/'home/.config'), ORI_DATA_DIR=str(root/'data'), PORT=str(number), NO_BROWSER='1', ORI_NO_DESKTOP_OPEN='1')
+        p = subprocess.Popen(command, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log)
         try:
             for _ in range(450):
                 if p.poll() is not None:
@@ -64,7 +71,7 @@ def serve(root, rev=None, build_tmp=None):
 
 def spec(root,url,scenario,name,browser='chromium'):
     env=dict(os.environ,PLAYWRIGHT_BASE_URL=url,ORI_SEARCH_FIRST_FIXTURE=str(root),ORI_SEARCH_FIRST_SCENARIO=scenario,ORI_SEARCH_EVIDENCE=str(EVIDENCE))
-    config=['--config','playwright.files-map.config.ts'] if scenario=='navigation' else []
+    config=['--config','playwright.files-map.config.ts'] if scenario in ('navigation', 'folder-backed') else []
     subprocess.run([str(REPO/'node_modules/.bin/playwright'),'test',*config,'--project',browser,'--reporter=list','tests/'+name+'.spec.ts'],cwd=REPO,env=env,check=True)
 
 
@@ -91,9 +98,24 @@ def upgrades():
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--upgrades',action='store_true',help='also build the prior-version fixture')
+    parser.add_argument('--folder-backed',action='store_true',help='run only reviewed folder setup on established split profiles')
     args=parser.parse_args()
     if sys.platform!='darwin':sys.exit('macOS only')
     SCRATCH.mkdir(parents=True,exist_ok=True);EVIDENCE.mkdir(parents=True,exist_ok=True)
+    if args.folder_backed:
+        build=Path(tempfile.mkdtemp(prefix='picker-build-',dir=SCRATCH))
+        overlay=build/'overlay.json'
+        overlay.write_text(json.dumps({'Replace':{str(REPO/'internal/server/search_folder_picker.go'):str(REPO/'internal/server/testdata/search_folder_picker.go')}}))
+        binary=build/'fixture-server'
+        subprocess.run(['go','build','-overlay',str(overlay),'-o',str(binary),'./cmd/server'],cwd=REPO,env={**os.environ,'GOWORK':'off'},check=True)
+        for browser in ('chromium', 'webkit'):
+            root=fixture()
+            project=root/'home/Synthetic Project'
+            project.mkdir()
+            (project/'Harbor.txt').write_text('Synthetic project fixture.\n')
+            (root/'data').mkdir(mode=0o700)  # pre-existing installation; not the first-run landing
+            with serve(root, fixture_binary=binary) as url:spec(root,url,'folder-backed','folder-backed-search-locations',browser)
+        sys.exit(0)
     for scenario in ('fresh','skip'):
         root=fixture(large=scenario=='fresh')
         with serve(root) as url:spec(root,url,scenario,'search-first-onboarding')
