@@ -161,6 +161,35 @@ func (f *Fixture) AssertPreserved(t testing.TB) {
 	}
 }
 
+// EmptyRetainedFolder plays the person who empties or removes a retained
+// folder outside Ori (Finder, a sync client, a cleanup tool). It removes
+// everything under one fixture-relative directory and stops asserting that
+// directory's sentinels at cleanup, because the test itself — not Ori — made
+// the change. Only Ori-caused changes may fail AssertPreserved. When keepRoot
+// is true the directory itself remains (an emptied folder); otherwise it is
+// removed too (a missing folder). The name must be a fixture-local directory
+// that holds a seeded sentinel, so a caller cannot point it at anything else.
+func (f *Fixture) EmptyRetainedFolder(t testing.TB, name string, keepRoot bool) {
+	t.Helper()
+	if !filepath.IsLocal(name) || name == "." {
+		t.Fatalf("fixture folder must have a local relative name: %q", name)
+	}
+	owned := false
+	for sentinel := range f.sentinels {
+		if sentinel == name || strings.HasPrefix(sentinel, name+string(filepath.Separator)) {
+			owned = true
+			delete(f.sentinels, sentinel)
+		}
+	}
+	if !owned {
+		t.Fatalf("fixture folder %q holds no seeded sentinel", name)
+	}
+	must(t, f.root.RemoveAll(name))
+	if keepRoot {
+		must(t, f.root.MkdirAll(name, 0o750))
+	}
+}
+
 func must(t testing.TB, err error) {
 	t.Helper()
 	if err != nil {
