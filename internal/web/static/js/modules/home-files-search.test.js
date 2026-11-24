@@ -234,9 +234,30 @@ test('a top-level workspace or group says what it is where the place would be', 
       )
     )
   );
-  assert.match(html, /cockpit-result-where">Workspace</);
-  assert.match(html, /cockpit-result-where">Group</);
-  assert.match(html, /cockpit-result-where">Studio</);
+  assert.match(html, /cockpit-result-where"[^>]*>Workspace</);
+  assert.match(html, /cockpit-result-where"[^>]*>Group</);
+  assert.match(html, /cockpit-result-where"[^>]*>Studio</);
+});
+
+test('a name cut short by the row is whole in its tooltip, escaped', () => {
+  const html = renderResultsHTML(
+    applyAnswer(
+      searchingSnapshot('a'),
+      answerOf(
+        kindAnswer('notes', [
+          item('note', 'n1', 'A very long note name <b>with markup</b> & more', {
+            location: ['Harbor', 'Notes']
+          })
+        ])
+      )
+    )
+  );
+  assert.match(
+    html,
+    /class="cockpit-result-name" title="A very long note name &lt;b&gt;with markup&lt;\/b&gt; &amp; more"/
+  );
+  assert.match(html, /class="cockpit-result-where" title="Harbor › Notes"/);
+  assert.doesNotMatch(html, /<b>/);
 });
 
 // ---- the Results tab ----------------------------------------------------------

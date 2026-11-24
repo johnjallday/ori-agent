@@ -1981,7 +1981,10 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
 
 /* The Results tab and its panel. A row reads icon, name, where it lives, when;
    Show in tree is a quiet button at the end of the row. */
+/* Its own container: how much room a row has depends on this panel, not on the
+   window (the tree beside it keeps its width). */
 .cockpit-results {
+  container: cockpit-results / inline-size;
   padding: 14px 16px 24px;
 }
 
@@ -2044,7 +2047,8 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   display: grid;
   /* Zero basis: the name's own width never pushes Show in tree to a line below. */
   flex: 1 1 0;
-  grid-template-columns: 22px minmax(0, 1.2fr) minmax(0, 1.6fr) 6.5rem;
+  /* The name is what is looked for: it gets twice the place's share. */
+  grid-template-columns: 22px minmax(0, 2fr) minmax(0, 1fr) 6.5rem;
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -2143,6 +2147,30 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
 
 .cockpit-results-more {
   margin-top: 8px;
+}
+
+/* A panel too narrow for name, place and date side by side (a window under about
+   1200px, with the tree beside it): the place goes under the name, so the name
+   keeps the width the row has. Show in tree stays at the end of the row. */
+@container cockpit-results (max-width: 40rem) {
+  .cockpit-result-open {
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    row-gap: 0;
+  }
+
+  .cockpit-result-where {
+    grid-column: 2 / 3;
+    grid-row: 2;
+  }
+
+  .cockpit-result-date {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .cockpit-result-icon {
+    grid-row: 1;
+  }
 }
 
 /* One column: the place goes under the name, the date stays at the end, and

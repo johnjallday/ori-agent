@@ -1114,8 +1114,8 @@ function resultRowHTML(item, tabbable, snapshot = null) {
     `<button type="button" class="cockpit-result-open" data-result-open${indexed ? ` data-result-indexed aria-pressed="${selected ? 'true' : 'false'}"` : ''} ` +
     `data-result-kind="${esc(item.kind)}" data-result-key="${esc(item.rowKey)}" tabindex="${tabbable ? '0' : '-1'}">` +
     `<span class="cockpit-result-icon">${iconHTML(icon, { size: 15 })}</span>` +
-    `<span class="cockpit-result-name">${esc(item.label)}</span>` +
-    `<span class="cockpit-result-where">${esc(where)}</span>` +
+    `<span class="cockpit-result-name" title="${esc(item.label)}">${esc(item.label)}</span>` +
+    `<span class="cockpit-result-where" title="${esc(where)}">${esc(where)}</span>` +
     `<span class="cockpit-result-date">${date ? `<time datetime="${esc(item.modified)}">${esc(date)}</time>` : ''}</span>` +
     '</button>' +
     // A file in a folder with no workspace has no row in the tree to show. A

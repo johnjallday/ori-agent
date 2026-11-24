@@ -1094,7 +1094,9 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
               : 'open';
           handlers.onResultAction(action, {
             kind: hit.getAttribute('data-result-kind'),
-            key: hit.getAttribute('data-result-key')
+            key: hit.getAttribute('data-result-key'),
+            // Enter or Space on the button: a click with no pointer (detail 0).
+            keyboard: event.detail === 0
           });
         } else if (resultMore) {
           handlers.onResultAction('more', { kind: resultMore.getAttribute('data-result-more') });

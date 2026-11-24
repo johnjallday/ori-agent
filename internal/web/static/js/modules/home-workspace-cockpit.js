@@ -3633,7 +3633,9 @@ import {
     }
     const item = findResult(state.treeSearch, payload.kind, payload.key);
     if (!item) return undefined; // the results moved on under the click
-    if (action === 'open') return void openResult(item, { keyboard: false });
+    // Opened with the keyboard, focus follows to the pane's title: the result
+    // button it was on is gone with the Results tab.
+    if (action === 'open') return void openResult(item, { keyboard: !!payload.keyboard });
     if (action === 'reveal') return void showResultInTree(item);
     return undefined;
   }
