@@ -409,6 +409,8 @@ export function totalFound(snapshot) {
 //   folder             a folder of the workspace's Files or Outputs: files only
 //   linked             a searchable linked folder: the filename index alone, for
 //                      that folder (the server has nothing inside it)
+//   source             a search-only folder (searchable, no workspace): the same,
+//                      with no workspace to keep the results to
 
 /** The chip beside the box. */
 export function scopeLabel(scope) {
@@ -432,9 +434,9 @@ export function scopeKinds(scope) {
   return scope && scope.kind === 'folder' ? ['files'] : null;
 }
 
-/** A linked folder is the filename index's alone: there is nothing to ask the server. */
+/** A searchable folder is the filename index's alone: there is nothing to ask the server. */
 export function scopeAsksServer(scope) {
-  return !(scope && scope.kind === 'linked');
+  return !(scope && (scope.kind === 'linked' || scope.kind === 'source'));
 }
 
 /** A folder inside a workspace holds nothing the filename index knows about. */
@@ -451,7 +453,7 @@ export function scopeAsksIndex(scope) {
 // term, the scope, which file was selected, and how many pages of each kind were
 // on screen. The server bounds every part; so does this.
 
-const SCOPE_KINDS = ['workspace', 'group', 'folder', 'linked'];
+const SCOPE_KINDS = ['workspace', 'group', 'folder', 'linked', 'source'];
 const MAX_SCOPE_JSON = 600;
 const MAX_PAGES = 40;
 
@@ -480,6 +482,13 @@ export function decodeScope(text, { exists = () => true, members = () => [] } = 
   }
   const text_ = value => (typeof value === 'string' ? value : '');
   if (!raw || typeof raw !== 'object' || !SCOPE_KINDS.includes(raw.kind)) return { ok: false };
+  // A search-only folder has no workspace; whether it is still searchable is
+  // the caller's to check against the filename index's list.
+  if (raw.kind === 'source') {
+    const sourceId = text_(raw.sourceId);
+    if (!sourceId) return { ok: false };
+    return { ok: true, scope: { kind: 'source', name: text_(raw.name).slice(0, 200), sourceId } };
+  }
   const workspaceId = text_(raw.workspaceId);
   if (!workspaceId || !exists(workspaceId)) return { ok: false };
   const scope = { kind: raw.kind, name: text_(raw.name).slice(0, 200), workspaceId };

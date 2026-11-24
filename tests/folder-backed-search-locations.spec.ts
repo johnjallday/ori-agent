@@ -223,11 +223,45 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   await page.locator('[data-search-folder="custom"]').click();
   await page.locator('dialog.explore-card').getByRole('button', { name: 'Open workspace' }).click();
   await expect(page).toHaveURL(new RegExp('/workspaces/' + project.workspace.slug + '$'));
-  await page.goto('/search');
-  await page.getByText('Manage search locations', { exact: true }).click();
-  await page.getByRole('button', { name: 'Connect to workspace', exact: true }).click();
+  // The independent grant is a search-only folder: it sits in Files' group at
+  // the foot of the tree (PR 2, requirement 38), and connects from there.
+  const workspaceIds = async () =>
+    ((await (await request.get('/api/workspaces')).json()).folders as { id: string }[])
+      .map(w => w.id)
+      .sort();
+  await page.goto('/?view=tree');
+  const group = treeRow(page, 'search-only');
+  await expect(group).toContainText('Search-only folders');
+  await expect(group).toHaveAttribute('aria-expanded', 'true');
+  const legacyRow = treeRow(page, `search-only/${legacy.id}`);
+  await expect(legacyRow).toContainText('Downloads');
+  await expect(legacyRow).not.toHaveAttribute('aria-expanded', /.*/);
+  await expect(legacyRow.locator('[data-folder-search]')).toHaveText('Searchable');
+  await page.screenshot({
+    path: `tasks/evidence-folder-backed-search-locations/${browserName}/search-only-group.png`
+  });
+  const openLegacyMenu = async () => {
+    await legacyRow.hover();
+    await legacyRow.locator('[data-tree-menu-for]').click();
+  };
+  await openLegacyMenu();
+  await expect(page.getByRole('menuitem')).toHaveText([
+    'Search in this folder',
+    'Connect to workspace',
+    'Refresh index',
+    'Remove from search'
+  ]);
+  // Cancelling the review links and makes nothing.
+  const beforeConnect = await workspaceIds();
+  await page.getByRole('menuitem', { name: 'Connect to workspace: Downloads' }).click();
   const review = page.locator('dialog.explore-card');
   await expect(review.getByRole('checkbox', { name: /existing filename index/ })).toBeChecked();
+  await review.getByRole('button', { name: 'Cancel' }).click();
+  await expect(review).toHaveCount(0);
+  expect(await workspaceIds()).toEqual(beforeConnect);
+  expect((await sources())[0].workspace).toBeUndefined();
+  await openLegacyMenu();
+  await page.getByRole('menuitem', { name: 'Connect to workspace: Downloads' }).click();
   await review.getByLabel('Workspace name').fill('My downloads');
   await review.getByRole('button', { name: 'Create workspace' }).click();
   await expect(review.getByRole('button', { name: 'Search this folder in Files' })).toBeVisible();
@@ -235,9 +269,16 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   expect(same.workspace.id).toBe(project.workspace.id);
   expect(connected.id).toBe(legacy.id);
   expect(connected.generation).toBe(legacy.generation);
+  expect(connected.count).toBe(legacy.count);
   expect(connected.workspace.name).toBe('My downloads');
   await review.getByRole('button', { name: 'Search this folder in Files' }).click();
-  await expect(page.locator('#title')).toHaveText('Downloads');
+  // It left the group (now empty, so gone) and is under its workspace's Linked
+  // folders: the same source and index generation, shown, and searched.
+  await expect(group).toHaveCount(0);
+  const movedRow = treeRow(page, `${connected.workspace.id}/l/${connected.workspace.link}`);
+  await expect(movedRow).toBeVisible();
+  await expect(movedRow.locator('[data-folder-search]')).toHaveText('Searchable');
+  await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Downloads');
   await page.screenshot({
     path: `tasks/evidence-folder-backed-search-locations/${browserName}/legacy-connected.png`
   });
@@ -252,9 +293,31 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
       ).ok()
     ).toBeTruthy();
   }
-  await page.getByRole('button', { name: /Add folder/ }).click();
-  await page.getByRole('button', { name: 'Documents', exact: true }).click();
+  // Add folder… in Files (requirement 39): the first-run page's choices, then
+  // the same Explore card. Cancelling either step makes nothing.
+  const addFolder = page.locator('[data-tree-add-folder]');
+  const chooser = page.getByRole('dialog', { name: 'Add a folder' });
+  await addFolder.click();
+  await expect(chooser.getByRole('group', { name: 'Folder' }).getByRole('button')).toHaveText([
+    'Documents',
+    'Downloads',
+    'Choose another folder…'
+  ]);
+  await chooser.getByRole('button', { name: 'Cancel' }).click();
+  await expect(chooser).toHaveCount(0);
+  await expect(addFolder).toBeFocused();
+  const beforeAdd = await workspaceIds();
+  const sourcesBeforeAdd = (await sources()).map((s: { id: string }) => s.id);
+  await addFolder.click();
+  await chooser.getByRole('button', { name: 'Documents', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Explore Documents' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await workspaceIds()).toEqual(beforeAdd);
+  expect((await sources()).map((s: { id: string }) => s.id)).toEqual(sourcesBeforeAdd);
+  await addFolder.click();
+  await chooser.getByRole('button', { name: 'Documents', exact: true }).click();
   await expect(dialog).toBeVisible();
   const allow = dialog.getByRole('button', { name: 'Allow filename search' });
   await expect(allow).toBeDisabled();
@@ -266,8 +329,10 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   await expect(allow).toBeDisabled();
   await dialog.getByRole('checkbox').check();
   await allow.click();
-  await expect(page.locator('#title')).toHaveText('Documents');
+  // Back in Files, searching the folder just added; nothing new was made.
+  await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Documents');
   expect(await sources()).toHaveLength(3);
+  expect(await workspaceIds()).toEqual(beforeAdd);
   const projectID = project.workspace.id;
   await page.goto('/?home=1');
   await expect(page.locator(`.ws-map-tile[data-ws-id="${projectID}"]`).first()).toBeVisible();

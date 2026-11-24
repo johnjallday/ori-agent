@@ -98,7 +98,8 @@ function ask({
     dialog.addEventListener(
       'close',
       () => {
-        const answer = dialog.returnValue === 'accept' ? 'accept' : '';
+        // The value of the button pressed; Cancel and Escape are no answer.
+        const answer = dialog.returnValue === 'cancel' ? '' : String(dialog.returnValue || '');
         dialog.remove();
         // A function finds the row again: the tree may have been redrawn
         // while the dialog was open, replacing the element focus came from.
@@ -150,6 +151,41 @@ export async function askRemoveFromSearch({ label, returnFocus = null }) {
     returnFocus
   });
   return answer === 'accept';
+}
+
+/** The first-run page's folder choices (search-desk.html, "folderChoices"). */
+export const FOLDER_CHOICES = [
+  { kind: 'documents', label: 'Documents' },
+  { kind: 'downloads', label: 'Downloads' },
+  { kind: 'custom', label: 'Choose another folder…' }
+];
+
+/**
+ * Add folder… in Files: which folder to explore. Resolves with its kind for
+ * chooseSearchFolder (folder-search-review.js), or '' when cancelled. The
+ * Explore card that follows is the same one the first-run page opens.
+ */
+export async function askFolderToAdd({ returnFocus = null } = {}) {
+  return ask({
+    title: 'Add a folder',
+    description:
+      'Choose a folder to explore. Nothing is made until you confirm, and the originals stay where they are.',
+    returnFocus,
+    build: body => {
+      const choices = element('div', null, 'folder-search-dialog__choices');
+      choices.setAttribute('role', 'group');
+      choices.setAttribute('aria-label', 'Folder');
+      FOLDER_CHOICES.forEach(choice => {
+        const button = element('button', choice.label);
+        button.type = 'submit';
+        button.value = choice.kind;
+        button.setAttribute('data-folder-choice', choice.kind);
+        choices.append(button);
+      });
+      body.append(choices);
+      return null;
+    }
+  });
 }
 
 /** A notice with one way out: something the row cannot do, and why. */

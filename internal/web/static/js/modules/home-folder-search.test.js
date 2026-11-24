@@ -4,6 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  FOLDER_ACTION_CONNECT,
+  searchOnlySources,
   FOLDER_ACTION_MAKE_SEARCHABLE,
   FOLDER_ACTION_REFRESH,
   FOLDER_ACTION_REMOVE,
@@ -319,6 +321,80 @@ test('what is said when a followed folder finishes indexing', () => {
   assert.equal(isIndexing({ state: 'mapping' }), true);
   assert.equal(isIndexing({ state: 'ready' }), false);
   assert.equal(isIndexing(null), false);
+});
+
+// --- Search-only folders (requirement 38) -----------------------------------
+
+const searchOnlyRow = sourceId => ({
+  id: `search-only/${sourceId}`,
+  kind: 'searchOnly',
+  name: 'Old projects',
+  workspaceId: '',
+  meta: { sourceId }
+});
+
+test('search-only folders are the searchable ones with no workspace, in list order', () => {
+  const all = index(
+    apiSource('solo-b', 'ready'),
+    apiSource('linked', 'ready', connected('ws1', 'dir1')),
+    apiSource('solo-a', 'partial')
+  );
+  assert.deepEqual(
+    searchOnlySources(all).map(source => source.id),
+    ['solo-b', 'solo-a']
+  );
+  assert.deepEqual(searchOnlySources(index()), []);
+  assert.deepEqual(searchOnlySources(failedFolderSearch()), []);
+  assert.deepEqual(searchOnlySources(emptyFolderSearch({ local: true })), []);
+  assert.deepEqual(searchOnlySources(emptyFolderSearch()), []);
+});
+
+test("a search-only folder's row says its state and offers Connect to workspace", () => {
+  const state = serverState =>
+    folderSearchState(searchOnlyRow('s1'), index(apiSource('s1', serverState)));
+  assert.equal(state('ready').key, FOLDER_SEARCHABLE);
+  assert.equal(state('ready').searchOnly, true);
+  assert.deepEqual(folderActions(state('ready')), [
+    FOLDER_ACTION_SEARCH_IN,
+    FOLDER_ACTION_CONNECT,
+    FOLDER_ACTION_REFRESH,
+    FOLDER_ACTION_REMOVE
+  ]);
+  assert.deepEqual(folderActions(state('partial')), [
+    FOLDER_ACTION_SEARCH_IN,
+    FOLDER_ACTION_CONNECT,
+    FOLDER_ACTION_REFRESH,
+    FOLDER_ACTION_REMOVE
+  ]);
+  assert.deepEqual(folderActions(state('mapping')), [
+    FOLDER_ACTION_SEARCH_IN,
+    FOLDER_ACTION_CONNECT,
+    FOLDER_ACTION_REMOVE
+  ]);
+  // A folder that is not there cannot be reviewed for a workspace.
+  assert.deepEqual(folderActions(state('unavailable')), [
+    FOLDER_ACTION_REFRESH,
+    FOLDER_ACTION_REMOVE
+  ]);
+  assert.deepEqual(folderActions(state('something-new')), []);
+  // Never Make searchable: it is searchable already.
+  assert.ok(!folderActions(state('ready')).includes(FOLDER_ACTION_MAKE_SEARCHABLE));
+  // A row whose source has gone (connected or removed meanwhile) says nothing.
+  assert.equal(folderSearchState(searchOnlyRow('gone'), index(apiSource('s1', 'ready'))), null);
+  assert.equal(folderSearchState(searchOnlyRow('s1'), failedFolderSearch()), null);
+});
+
+test('connecting or adding a search-only folder is a change worth a redraw', () => {
+  const before = index(apiSource('s1', 'ready'));
+  const connectedNow = index(apiSource('s1', 'ready', connected('ws1', 'dir1')));
+  const another = index(apiSource('s1', 'ready'), apiSource('s2', 'ready'));
+  assert.equal(sameFolderSearch(before, index(apiSource('s1', 'ready'))), true);
+  assert.equal(sameFolderSearch(before, connectedNow), false);
+  assert.equal(sameFolderSearch(before, another), false);
+  assert.equal(
+    sameFolderSearch(another, index(apiSource('s2', 'ready'), apiSource('s1', 'ready'))),
+    false
+  );
 });
 
 test('readSources keeps the reason, the count and when the folder was indexed', () => {

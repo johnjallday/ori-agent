@@ -69,13 +69,14 @@ export function emptyFolderSearch({ local = false } = {}) {
 
 /** The list could not be read: every linked folder says its status is unknown. */
 export function failedFolderSearch() {
-  return { status: SEARCH_STATUS_FAILED, byLink: new Map() };
+  return { status: SEARCH_STATUS_FAILED, byLink: new Map(), bySource: new Map() };
 }
 
 /**
- * The list as read (`readSources` in home-files-search.js), keyed by the link
- * each source is connected to. A source with no workspace (a search-only
- * folder) has no row here.
+ * The list as read (`readSources` in home-files-search.js): every source by its
+ * id, in the list's order, and those connected to a workspace link also by
+ * that link. A source with no workspace is a search-only folder: it has a row
+ * of its own in the Search-only folders group, never under a workspace.
  *
  * `verify` holds the keys of links the host has said need verifying before
  * they can be searched (an older link whose folder identity was not recorded).
@@ -84,29 +85,49 @@ export function failedFolderSearch() {
  */
 export function folderSearchFromSources(sources, { verify = null } = {}) {
   const byLink = new Map();
+  const bySource = new Map();
   (Array.isArray(sources) ? sources : []).forEach(source => {
-    if (!source || !source.id || !source.workspaceId || !source.link) return;
-    byLink.set(linkKey(source.workspaceId, source.link), source);
+    if (!source || !source.id) return;
+    bySource.set(source.id, source);
+    if (source.workspaceId && source.link) {
+      byLink.set(linkKey(source.workspaceId, source.link), source);
+    }
   });
-  return { status: SEARCH_STATUS_READY, byLink, verify: new Set(verify || []) };
+  return { status: SEARCH_STATUS_READY, byLink, bySource, verify: new Set(verify || []) };
 }
 
-/** Whether two answers would draw the same marks (so a redraw can be skipped). */
+/** The searchable folders with no workspace, in the list's order. */
+export function searchOnlySources(folderSearch) {
+  if (!folderSearch || folderSearch.status !== SEARCH_STATUS_READY || !folderSearch.bySource) {
+    return [];
+  }
+  return [...folderSearch.bySource.values()].filter(source => !source.workspaceId);
+}
+
+/** Whether two answers would draw the same rows and marks (so a redraw can be skipped). */
 export function sameFolderSearch(a, b) {
-  if (!a || !b || a.status !== b.status || a.byLink.size !== b.byLink.size) return false;
+  if (!a || !b || a.status !== b.status) return false;
+  const sourcesA = a.bySource || new Map();
+  const sourcesB = b.bySource || new Map();
+  if (sourcesA.size !== sourcesB.size) return false;
   const verifyA = a.verify || new Set();
   const verifyB = b.verify || new Set();
   if (verifyA.size !== verifyB.size || [...verifyA].some(key => !verifyB.has(key))) return false;
-  for (const [key, source] of a.byLink) {
-    const other = b.byLink.get(key);
+  const idsA = [...sourcesA.keys()];
+  const idsB = [...sourcesB.keys()];
+  if (idsA.some((id, index) => idsB[index] !== id)) return false;
+  for (const [id, source] of sourcesA) {
+    const other = sourcesB.get(id);
     if (
       !other ||
-      other.id !== source.id ||
+      other.label !== source.label ||
       other.state !== source.state ||
       other.reason !== source.reason ||
       other.count !== source.count ||
       other.mappedAt !== source.mappedAt ||
-      other.generation !== source.generation
+      other.generation !== source.generation ||
+      other.workspaceId !== source.workspaceId ||
+      other.link !== source.link
     ) {
       return false;
     }
@@ -116,13 +137,25 @@ export function sameFolderSearch(a, b) {
 
 /**
  * The search state of one tree row, or null when the row says nothing: it is
- * not a linked folder, this is not the Mac that runs Ori, or the list has not
- * answered yet.
+ * not a linked or search-only folder, this is not the Mac that runs Ori, or
+ * the list has not answered yet.
  *
- * `{ key, label, tone, source }`; `source` is the matched source, or null.
+ * `{ key, label, tone, source, searchOnly }`; `source` is the matched source,
+ * or null.
  */
 export function folderSearchState(row, folderSearch) {
-  if (!row || row.kind !== 'linked') return null;
+  if (!row) return null;
+  if (row.kind === 'searchOnly') {
+    const ready = folderSearch && folderSearch.status === SEARCH_STATUS_READY;
+    const source =
+      ready && folderSearch.bySource && folderSearch.bySource.get(row.meta && row.meta.sourceId);
+    if (!source) return null;
+    return {
+      ...stateOf(ROW_STATE_OF[source.state] || FOLDER_STATUS_UNKNOWN, source),
+      searchOnly: true
+    };
+  }
+  if (row.kind !== 'linked') return null;
   const status = folderSearch && folderSearch.status;
   if (status === SEARCH_STATUS_FAILED) return stateOf(FOLDER_STATUS_UNKNOWN, null);
   if (status !== SEARCH_STATUS_READY) return null;
@@ -151,17 +184,30 @@ export const FOLDER_ACTION_SEARCH_IN = 'search-in';
 export const FOLDER_ACTION_MAKE_SEARCHABLE = 'make-searchable';
 export const FOLDER_ACTION_REFRESH = 'refresh-index';
 export const FOLDER_ACTION_REMOVE = 'remove-from-search';
+/** A search-only folder only: link it to a workspace, keeping its index. */
+export const FOLDER_ACTION_CONNECT = 'connect-workspace';
 
 /**
  * The actions that apply to a row's state, in menu order; none for a row with
  * no state or an unknown one. A folder being indexed cannot be refreshed (the
  * index refuses a second scan), and a folder that is unavailable has nothing
  * to search but can be refreshed once it is back, or removed.
+ *
+ * A search-only folder (requirement 38) is searchable by definition: its menu
+ * swaps Make searchable for Connect to workspace, which the host can only
+ * review while the folder is there.
  */
 export function folderActions(state) {
   if (!state) return [];
   const actions = [];
   if (canSearchFolder(state)) actions.push(FOLDER_ACTION_SEARCH_IN);
+  if (state.searchOnly) {
+    if (state.key === FOLDER_STATUS_UNKNOWN) return [];
+    if (state.key !== FOLDER_UNAVAILABLE) actions.push(FOLDER_ACTION_CONNECT);
+    if (state.key !== FOLDER_INDEXING) actions.push(FOLDER_ACTION_REFRESH);
+    actions.push(FOLDER_ACTION_REMOVE);
+    return actions;
+  }
   switch (state.key) {
     case FOLDER_NOT_SEARCHABLE:
     case FOLDER_VERIFY:

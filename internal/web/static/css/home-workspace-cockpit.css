@@ -1845,6 +1845,80 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   }
 }
 
+/* The Search-only folders group at the foot of the tree: a quiet heading under
+   a rule, set apart from the workspaces above it. */
+.cockpit-tree-row.is-kind-searchOnlyGroup {
+  margin-top: 10px;
+  border-top: 1px solid var(--hc-line);
+  border-radius: 0;
+}
+
+.cockpit-tree-row.is-kind-searchOnlyGroup > .cockpit-tree-name {
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Add folder… at the foot of the tree. */
+.cockpit-tree-add-folder {
+  display: flex;
+  width: calc(100% - 8px);
+  min-height: var(--control-height, 32px);
+  align-items: center;
+  gap: 6px;
+  margin: 10px 4px 4px;
+  padding: 0 10px;
+  border: 1px dashed var(--hc-line-bright, var(--hc-line));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--hc-ink-dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.cockpit-tree-add-folder:hover {
+  border-color: var(--hc-ink-dim);
+  color: var(--hc-ink);
+}
+
+.cockpit-tree-add-folder:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse), (max-width: 768px) {
+  .cockpit-tree-add-folder {
+    min-height: var(--touch-target);
+  }
+}
+
+/* Add a folder: the first-run page's three choices, one per line. */
+.folder-search-dialog__choices {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.folder-search-dialog__choices button {
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line, var(--border-color));
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.folder-search-dialog__choices button:hover,
+.folder-search-dialog__choices button:focus-visible {
+  border-color: var(--ink, var(--text-primary));
+}
+
 /* Remove from search asks first (home-folder-search-dialogs.js, in the Explore
    card's look); its confirming button reads as the one that takes away. */
 .folder-search-dialog .explore-card__actions .folder-search-dialog__danger {

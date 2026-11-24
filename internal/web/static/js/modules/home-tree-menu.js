@@ -14,6 +14,7 @@
 
 import { escapeHtml } from './home-workspace-cockpit.js';
 import {
+  FOLDER_ACTION_CONNECT,
   FOLDER_ACTION_MAKE_SEARCHABLE,
   FOLDER_ACTION_REFRESH,
   FOLDER_ACTION_REMOVE,
@@ -47,12 +48,15 @@ export const MENU_SEARCH_IN = FOLDER_ACTION_SEARCH_IN;
 export const MENU_MAKE_SEARCHABLE = FOLDER_ACTION_MAKE_SEARCHABLE;
 export const MENU_REFRESH_INDEX = FOLDER_ACTION_REFRESH;
 export const MENU_REMOVE_FROM_SEARCH = FOLDER_ACTION_REMOVE;
+// A search-only folder: link it to a workspace through the existing review.
+export const MENU_CONNECT_WORKSPACE = FOLDER_ACTION_CONNECT;
 
-// A linked folder's menu items: the visible words, and what a screen reader
-// hears, which starts with those words and adds the folder's name.
+// A linked or search-only folder's menu items: the visible words, and what a
+// screen reader hears, which starts with those words and adds the folder's name.
 const FOLDER_ITEMS = {
   [FOLDER_ACTION_SEARCH_IN]: { label: 'Search in this folder' },
   [FOLDER_ACTION_MAKE_SEARCHABLE]: { label: 'Make searchable' },
+  [FOLDER_ACTION_CONNECT]: { label: 'Connect to workspace' },
   [FOLDER_ACTION_REFRESH]: { label: 'Refresh index' },
   [FOLDER_ACTION_REMOVE]: { label: 'Remove from search', danger: true }
 };
@@ -122,7 +126,7 @@ export function menuItemsFor(row, context = {}) {
     return [item(MENU_UPLOAD, 'Upload file…'), item(MENU_SEARCH_IN, 'Search in this folder')];
   }
   if (kind === 'outputFolder') return [item(MENU_SEARCH_IN, 'Search in this folder')];
-  if (kind === 'linked') {
+  if (kind === 'linked' || kind === 'searchOnly') {
     const state = folderSearchState(row, context && context.folderSearch);
     const actions = folderActions(state);
     if (actions.length === 0) return [];

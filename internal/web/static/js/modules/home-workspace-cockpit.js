@@ -2040,6 +2040,7 @@ import {
 } from './home-tree-sources.js';
 import {
   MENU_FILE_OPEN,
+  MENU_CONNECT_WORKSPACE,
   MENU_FILE_REVEAL,
   MENU_MAKE_SEARCHABLE,
   MENU_NEW_NOTE,
@@ -2099,6 +2100,7 @@ import {
 } from './home-folder-search.js';
 import {
   askFolderConsent,
+  askFolderToAdd,
   askRemoveFromSearch,
   showFolderNotice
 } from './home-folder-search-dialogs.js';
@@ -3512,6 +3514,11 @@ import {
         workspaceIds: [row.workspaceId]
       };
     }
+    if (row.kind === 'searchOnly') {
+      const sourceId = String((row.meta && row.meta.sourceId) || '');
+      if (!state.searchSources.some(entry => entry.id === sourceId)) return null;
+      return { kind: 'source', name: row.name, sourceId };
+    }
     return null;
   }
 
@@ -3741,7 +3748,11 @@ import {
     // A search that looked only in this folder now looks everywhere, and a
     // search on screen is asked again so that its files leave the results.
     const scope = state.treeSearchScope;
-    if (scope && scope.kind === 'linked' && scope.sourceId === source.id) {
+    if (
+      scope &&
+      (scope.kind === 'linked' || scope.kind === 'source') &&
+      scope.sourceId === source.id
+    ) {
       state.treeSearchScope = null;
       syncSearchScope();
     }
@@ -3751,6 +3762,118 @@ import {
       `${row.name} is no longer searchable. Its workspace, link, notes, tickets and files are unchanged.`
     );
   }
+
+  // ---- Search-only folders and Add folder (PR 2, requirements 38-39) ----
+
+  /**
+   * After the Explore card linked a folder to a workspace (made or existing):
+   * reload the workspaces and the searchable folders, then show the folder's
+   * row under its workspace's Linked folders. "Open workspace" goes there;
+   * "Search this folder in Files" also scopes the search to it.
+   */
+  async function afterFolderLinked(connection) {
+    if (!connection || !connection.workspace) return;
+    if (connection.source) folderSearchChanged();
+    if (connection.destination === 'workspace' && connection.workspace.slug) {
+      window.location.assign(`/workspaces/${encodeURIComponent(connection.workspace.slug)}`);
+      return;
+    }
+    await refreshQuietly();
+    await refreshSearchSources();
+    const workspaceId = connection.workspace.id;
+    const source = state.searchSources.find(
+      entry =>
+        entry.workspaceId === workspaceId && (!connection.source || entry.id === connection.source)
+    );
+    const key = source && source.link ? `${workspaceId}/l/${source.link}` : workspaceId;
+    revealTreeRow(key, { focus: true });
+    mountTreeView();
+    if (connection.destination === 'files' && source) {
+      const linkedRow = {
+        kind: 'linked',
+        name: source.label,
+        workspaceId,
+        meta: { dirId: source.link }
+      };
+      const scope = scopeFromRow(linkedRow);
+      if (scope) setSearchScope(scope);
+    }
+    announce(`${connection.workspace.name || 'The workspace'} is shown in Files.`);
+  }
+
+  /**
+   * The Explore card for a reviewed folder. Its Done button closes without an
+   * answer even after it made a workspace, so a creation it announces while
+   * open is kept and stands in for one.
+   */
+  async function exploreReviewedFolder(review) {
+    const { exploreFolder } = await import('./folder-search-review.js');
+    let created = '';
+    const onChanged = event => {
+      const detail = event && event.detail;
+      if (detail && detail.reason === 'create' && detail.workspaceId) created = detail.workspaceId;
+    };
+    window.addEventListener('ori:workspaces-changed', onChanged);
+    try {
+      const connection = await exploreFolder(review);
+      if (connection) return connection;
+      return created ? { workspace: { id: created }, source: '', destination: '' } : null;
+    } finally {
+      window.removeEventListener('ori:workspaces-changed', onChanged);
+    }
+  }
+
+  /** Connect to workspace: the existing review, keeping the folder's index. */
+  async function connectSearchOnlyFolder(row) {
+    const sourceId = String((row.meta && row.meta.sourceId) || '');
+    let review;
+    try {
+      review = await filenameIndex('review-source', { id: sourceId });
+    } catch (err) {
+      await refreshSearchSources();
+      reportTreeFailure(`Couldn't connect ${row.name}: ${err.message}`);
+      return;
+    }
+    const connection = await exploreReviewedFolder(review);
+    if (!connection) {
+      // Cancelled: nothing was linked or made.
+      focusBack(row)();
+      return;
+    }
+    await afterFolderLinked(connection);
+  }
+
+  /** Add folder… in Files: the first-run page's choices, then the same Explore card. */
+  async function addFolderFromFiles() {
+    const returnFocus = () => els.treeNav?.querySelector('[data-tree-add-folder]')?.focus();
+    const kind = await askFolderToAdd({ returnFocus });
+    if (!kind) return;
+    const { chooseSearchFolder } = await import('./folder-search-review.js');
+    let review;
+    try {
+      review = await chooseSearchFolder(kind);
+    } catch (err) {
+      reportTreeFailure(err.message || 'That folder could not be opened.');
+      returnFocus();
+      return;
+    }
+    if (!review) {
+      announce('No folder chosen.');
+      returnFocus();
+      return;
+    }
+    const connection = await exploreReviewedFolder(review);
+    if (!connection) {
+      // Cancelled: nothing was made.
+      returnFocus();
+      return;
+    }
+    await afterFolderLinked(connection);
+  }
+
+  els.treeNav?.addEventListener('click', event => {
+    if (event.target.closest('[data-tree-add-folder]')) void addFolderFromFiles();
+  });
 
   /**
    * Back into this tab: the scope and the search that were on screen, asked
@@ -3772,7 +3895,9 @@ import {
     const scope = decoded.scope;
     const gone =
       !decoded.ok ||
-      (scope && scope.kind === 'linked' && !state.searchSources.some(s => s.id === scope.sourceId));
+      (scope &&
+        (scope.kind === 'linked' || scope.kind === 'source') &&
+        !state.searchSources.some(s => s.id === scope.sourceId));
     if (gone) return;
     if (scope) {
       state.treeSearchScope = scope;
@@ -4098,6 +4223,7 @@ import {
       const scope = scopeFromRow(row);
       if (scope) setSearchScope(scope);
     } else if (action === MENU_MAKE_SEARCHABLE) void makeFolderSearchable(row);
+    else if (action === MENU_CONNECT_WORKSPACE) void connectSearchOnlyFolder(row);
     else if (action === MENU_REFRESH_INDEX) void refreshFolderIndex(row);
     else if (action === MENU_REMOVE_FROM_SEARCH) void removeFolderFromSearch(row);
     else if (action === MENU_NEW_NOTE) startTreeDraft(workspaceId, 'notes', 'note');

@@ -16,6 +16,7 @@ import {
   MENU_OPEN,
   MENU_OPEN_IN_WORKSPACE,
   MENU_OPEN_PAGE,
+  MENU_CONNECT_WORKSPACE,
   MENU_MAKE_SEARCHABLE,
   MENU_REFRESH,
   MENU_REFRESH_INDEX,
@@ -259,6 +260,42 @@ test('a partly indexed folder says why in its status', () => {
     renderMenuHTML([status, { action: 'x', label: 'X' }]),
     /status__reason">Some folders/
   );
+});
+
+test("a search-only folder's menu: Search in, Connect to workspace, Refresh, Remove", () => {
+  const row = {
+    kind: 'searchOnly',
+    name: 'Old projects',
+    workspaceId: '',
+    meta: { sourceId: 'src-old' }
+  };
+  const list = folderSearchFromSources([
+    {
+      id: 'src-old',
+      label: 'Old projects',
+      state: 'ready',
+      reason: '',
+      count: 9,
+      mappedAt: 1,
+      generation: 1,
+      workspaceId: '',
+      workspaceName: '',
+      link: ''
+    }
+  ]);
+  const items = menuItemsFor(row, { folderSearch: list, statusOptions });
+  assert.equal(items[0].status, true);
+  assert.equal(items[0].title, 'Searchable');
+  assert.deepEqual(
+    choosableEntries(items).map(entry => [entry.action, entry.label, entry.ariaLabel]),
+    [
+      [MENU_SEARCH_IN, 'Search in this folder', 'Search in this folder: Old projects'],
+      [MENU_CONNECT_WORKSPACE, 'Connect to workspace', 'Connect to workspace: Old projects'],
+      [MENU_REFRESH_INDEX, 'Refresh index', 'Refresh index: Old projects'],
+      [MENU_REMOVE_FROM_SEARCH, 'Remove from search', 'Remove from search: Old projects']
+    ]
+  );
+  assert.equal(rowHasMenu({ kind: 'searchOnlyGroup' }, { folderSearch: list }), false);
 });
 
 test('a menu without a status line has no description', () => {

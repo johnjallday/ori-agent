@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   CONSENT_SCOPE,
+  FOLDER_CHOICES,
   REMOVE_KEEPS,
   VERIFY_SENTENCE,
   consentTitle,
@@ -27,6 +28,17 @@ test("Make searchable asks with the standalone page's own consent sentence", () 
   // The same title the page builds, naming the folder.
   assert.match(read('./search-desk.js'), /`Allow Ori to search \$\{/);
   assert.equal(consentTitle('Album masters'), 'Allow Ori to search Album masters?');
+});
+
+test("Add folder… offers the first-run page's own folder choices", () => {
+  const page = read('../../search-desk.html');
+  const block = page.match(/\{\{define "folderChoices"\}\}([\s\S]*?)\{\{end\}\}/);
+  assert.ok(block, 'the page still defines its folder choices');
+  const offered = [...block[1].matchAll(/data-kind="([a-z]+)">([^<]+)</g)].map(m => ({
+    kind: m[1],
+    label: m[2]
+  }));
+  assert.deepEqual(FOLDER_CHOICES, offered);
 });
 
 test('an older link is verified with the existing sentence', () => {
