@@ -43,7 +43,7 @@ test('search before workspace setup', async ({ page, baseURL }) => {
     await expect(page.getByRole('link', { name: 'Start or resume workspace setup' })).toBeVisible();
     await shot('deferred-home');
     await page.getByRole('link', { name: 'Search local files' }).click();
-    await expect(page.getByRole('button', { name: 'Make Search my starting page' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Make Files my starting page' })).toBeVisible();
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'Welcome to Ori.' })).toBeVisible();
   } else {
@@ -135,7 +135,7 @@ test('search before workspace setup', async ({ page, baseURL }) => {
       Math.round(timings.sort((a, b) => a - b)[9])
     );
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'Your search desk.' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'All locations', exact: true })).toBeVisible();
     await expect(page.locator('#sources')).toContainText('Documents');
     await page.getByRole('link', { name: 'Home', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Welcome to Ori.' })).toBeVisible();

@@ -1,19 +1,23 @@
+{{define "folderChoices"}}
+<div class="actions" id="choices" aria-label="Add a search location">
+  <button data-kind="documents">Documents</button><button data-kind="downloads">Downloads</button
+  ><button data-kind="custom">Choose another folder…</button>
+</div>
+{{end}}
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>{{if .Home}}Home{{else}}File search{{end}} · Ori</title>
+    <title>{{if .Home}}Home{{else}}Files{{end}} · Ori</title>
+    <link rel="stylesheet" href="/css/desk-navigation.css" />
     <link rel="stylesheet" href="/css/search-desk.css" />
   </head>
   <body data-landing="{{.State}}">
-    <header>
-      <span class="brand">ORI</span><span class="edition">ON DEVICE / LOCAL EDITION</span>
-      <nav>{{if .Home}}<a href="/search">File search</a>{{else}}<a href="/?home=1">Home</a>{{end}}</nav>
-    </header>
     {{if .Home}}
-    <main class="arrival">
-      <small>YOUR DESK / HOME</small>
+    <main class="welcome">
+      <div class="top">Local desk / Home</div>
+      <p class="kicker">YOUR DESK / HOME</p>
       <h1>Welcome to Ori.</h1>
       <p>Find files on this Mac, or set up your workspace when you’re ready.</p>
       <div class="actions">
@@ -22,65 +26,104 @@
       </div>
     </main>
     {{else}}
-    <main id="desk">
-      <section class="arrival">
-        <small>01 / LOCAL FILE SEARCH</small>
-        <h1 id="title">{{if .First}}Start with one folder.{{else}}Your search desk.{{end}}</h1>
-        <p>
-          Only the folder you choose. Names, locations and dates stay on this device. No file contents, uploads or
-          changes.
-        </p>
-        <div class="actions" id="choices">
-          <button data-kind="documents">Documents</button><button data-kind="downloads">Downloads</button
-          ><button data-kind="custom">Choose another folder…</button>
+    <div class="desk-shell" id="desk">
+      <aside class="desk-rail" aria-label="Desk sidebar">
+        <div class="desk-brand"><img src="/favicon.svg" alt="" />Ori</div>
+        <nav aria-label="Destination" class="destinations">
+          <small>Desk</small> <span aria-current="page">Files</span>{{if .MapEligible}}<a href="/?view=map">Map</a
+          >{{else}}<a href="/?home=1">Home</a>{{end}}
+        </nav>
+        <nav class="locations" aria-label="Search locations">
+          <small>Search locations</small>
+          <div id="locationList"></div>
+          {{if not .First}}<button id="addLocation">＋ Add folder…</button>{{end}}
+        </nav>
+        <div class="rail-foot">● &nbsp; Local desk<br />Filename index · On this Mac</div>
+      </aside>
+      <main>
+        <div class="desk-mobile">
+          <span class="desk-brand">Ori</span>{{if .MapEligible}}<select id="destinationPicker" aria-label="Destination">
+            <option selected>Files</option>
+            <option value="/?view=map">Map</option></select
+          >{{else}}<a href="/?home=1">Home</a>{{end}}
         </div>
-        <dialog id="folderConsent" aria-labelledby="consentTitle" aria-describedby="consentScope">
-          <small>ORI / LOCAL FILE SEARCH</small>
-          <h2 id="consentTitle"></h2>
-          <p id="consentScope">
-            Ori will index filenames, locations and dates in this folder on your Mac. It won’t read file contents or
-            give agents access.
-          </p>
-          <form method="dialog" class="actions">
-            <button value="cancel" autofocus>Cancel</button><button value="allow">Allow search</button>
-          </form>
-        </dialog>
-        {{if .First}}
-        <p class="decision">
-          Choosing a folder makes Search your starting page. <button id="skip" class="link">Not now</button>
-        </p>
-        {{else if eq .State "search"}}<button id="homeDefault" class="link">Start on Home instead</button>{{else if ne
-        .State "unavailable"}}<button id="searchDefault" class="link">Make Search my starting page</button>{{end}}
-        <p id="notice" role="status" aria-live="polite"></p>
-      </section>
-      <div class="worktop">
-        <aside>
-          <small>02 / FOLDER MAP</small>
-          <h2>Search sources</h2>
-          <p class="muted">Folders, not workspaces.</p>
-          <div class="map">
-            <ul id="sources" aria-label="Mapped folders"></ul>
-            <p id="emptyMap">Checking your map…</p>
+        <div class="wrap">
+          <div class="top">
+            <span>Local desk &nbsp; / &nbsp; <b>Files</b></span
+            ><span class="stamp">LOCAL EDITION</span>
           </div>
-        </aside>
-        <section class="catalog">
-          <small>03 / FILENAME INDEX</small>
-          <h2><label for="term">Find a file</label></h2>
-          <input
-            id="term"
-            type="search"
-            maxlength="128"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="Search by filename"
-          />
-          <p class="muted">Use ↑ or ↓ to select, Enter for the file action, or Shift+Enter to reveal in Finder.</p>
-          <p class="muted" id="coverage" role="status"></p>
-          <ul id="hits" aria-label="Matching files"></ul>
-          <button id="more" hidden>More results</button>
-        </section>
-      </div>
-    </main>
+          <header>
+            <small class="kicker">FILE INDEX &nbsp; / &nbsp; ON DEVICE</small>
+            <h1 id="title">{{if .First}}Start with one folder.{{else}}All locations{{end}}</h1>
+          </header>
+          {{if .First}}
+          <p>
+            Choose a folder to search by filename. Names, locations and dates stay on this Mac. No file contents,
+            uploads or changes.
+          </p>
+          {{template "folderChoices"}}
+          <p class="decision">
+            Choosing your first folder makes Files your starting page. <button id="skip" class="link">Not now</button>
+          </p>
+          {{end}}
+          <dialog id="folderConsent" aria-labelledby="consentTitle" aria-describedby="consentScope">
+            <small>ORI / LOCAL FILE SEARCH</small>
+            <h2 id="consentTitle"></h2>
+            <p id="consentScope">
+              Ori will index filenames, locations and dates in this folder on your Mac. It won’t read file contents or
+              give agents access.
+            </p>
+            <form method="dialog" class="actions">
+              <button value="cancel" autofocus>Cancel</button
+              ><button class="primary" value="allow">Allow search</button>
+            </form>
+          </dialog>
+          <section class="catalog" aria-label="Filename index">
+            <label class="search"
+              ><svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10" cy="10" r="6.5" />
+                <path d="m15 15 6 6" /></svg
+              ><input
+                id="term"
+                type="search"
+                aria-label="Search by filename"
+                maxlength="128"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Search by filename…"
+              /><kbd>/</kbd></label
+            >
+            <label class="mobile-scope"
+              >Search in
+              <select id="scope">
+                <option value="">All locations</option>
+              </select></label
+            >
+            <div class="meta"><span id="coverage" role="status"></span><span>Newest first ↓</span></div>
+            <div class="columns" aria-hidden="true">
+              <small>Name</small><small>Location</small><small>Modified</small>
+            </div>
+            <ul id="hits" aria-label="Matching files"></ul>
+            <button id="more" hidden>More results</button><button id="retry" hidden>Retry search</button>
+            <section id="selectedFile" aria-label="Selected file actions" hidden></section>
+            <p class="keys">↑ ↓ Select &nbsp; · &nbsp; Enter Open or reveal &nbsp; · &nbsp; Shift Enter Reveal</p>
+            <p id="notice" role="status" aria-live="polite"></p>
+          </section>
+          <p id="emptyMap">Checking your locations…</p>
+          <details id="manage">
+            <summary>Manage search locations</summary>
+            <p>These folders are searchable by name. They aren’t workspaces or folders an agent can read.</p>
+            <ul id="sources" aria-label="Mapped folders"></ul>
+            {{if not .First}}{{template "folderChoices"}}{{end}}
+          </details>
+          <footer>
+            {{if not .MapEligible}}<a href="/?setup=1">Start or resume workspace setup</a>{{end}} {{if eq .State
+            "search"}}<button id="homeDefault" class="link">Start on Home instead</button>{{else if and (not .First) (ne
+            .State "unavailable")}}<button id="searchDefault" class="link">Make Files my starting page</button>{{end}}
+          </footer>
+        </div>
+      </main>
+    </div>
     <script type="module" src="/js/modules/search-desk.js"></script>
     {{end}}
   </body>

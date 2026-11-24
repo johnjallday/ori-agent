@@ -39,6 +39,10 @@ an explicit unknown/unavailable state and an existing retry/repair destination.
 A rendered zero must come from a successful canonical read. An idle agent's
 **Ready to help** is not proof that a workspace has no queued work.
 
+## Files and Map
+
+On a local Mac with filename search available, **Files** opens the standalone filename desk. **Map** returns to Home's workspace map once workspace setup allows it; on a narrow screen use the **Destination** picker. On desktop the two destinations share a left-hand rail; folder grants appear only on Files. The global app bar and workspace controls remain on Map. This does not change your starting page or grant a search folder to a workspace. Switch back to the map in the same tab to recover the camera and a workspace that still exists. Its Commander reads the current question; following a destination never answers it. Workspace and ticket deep links keep their normal meaning. See [searching one folder](search-first.md) for consent, selection and restoration limits.
+
 ## Home workspace panel
 
 Select a workspace on Home's map to open its context panel. **Team** shows the

@@ -62,9 +62,10 @@ def serve(root, rev=None, build_tmp=None):
             p.terminate(); p.wait(timeout=30)
 
 
-def spec(root,url,scenario,name):
+def spec(root,url,scenario,name,browser='chromium'):
     env=dict(os.environ,PLAYWRIGHT_BASE_URL=url,ORI_SEARCH_FIRST_FIXTURE=str(root),ORI_SEARCH_FIRST_SCENARIO=scenario,ORI_SEARCH_EVIDENCE=str(EVIDENCE))
-    subprocess.run([str(REPO/'node_modules/.bin/playwright'),'test','--project','chromium','--reporter=list','tests/'+name+'.spec.ts'],cwd=REPO,env=env,check=True)
+    config=['--config','playwright.files-map.config.ts'] if scenario=='navigation' else []
+    subprocess.run([str(REPO/'node_modules/.bin/playwright'),'test',*config,'--project',browser,'--reporter=list','tests/'+name+'.spec.ts'],cwd=REPO,env=env,check=True)
 
 
 def upgrades():
@@ -98,4 +99,7 @@ if __name__=='__main__':
         with serve(root) as url:spec(root,url,scenario,'search-first-onboarding')
         if scenario=='fresh':
             with serve(root) as url:spec(root,url,'return','search-first-return')
+    for browser in ('chromium','webkit'):
+        root=fixture()
+        with serve(root) as url:spec(root,url,'navigation','files-map-navigation',browser)
     if args.upgrades:upgrades()

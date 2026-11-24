@@ -1,5 +1,6 @@
 // Importing this also registers window.OriEconomy, which is how dashboard.js —
 // a plain script, not a module — reaches the same harvest client.
+import { destinationPlace } from './destination-place.js';
 import { guidedHint, showHQReturnLinks } from './hq-guided-attempt.js';
 import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 // Importing this also registers window.OriTicketCounts, which is how the classic
@@ -2354,6 +2355,28 @@ import {
     return variant;
   }
 
+  const mapDestination = document.querySelector('[data-map-destination]');
+  const destinationPicker = document.querySelector('[data-map-picker]');
+  const place = destinationPicker ? destinationPlace('map') : null;
+  // A clean Home is also a Map entry on history traversal. A deliberate
+  // Home launch or a deep link keeps its own intent, not an old selection.
+  const query = window.location.search;
+  const traversingHome =
+    (query === '' || query === '?home=1') &&
+    window.performance?.getEntriesByType?.('navigation')[0]?.type === 'back_forward';
+  let returnMap = query === '?view=map' || traversingHome ? place?.read() : null;
+  window.addEventListener('pagehide', () => {
+    if (!place || mapDestination.hidden || !els.map) return;
+    const camera = window.OriWorkspaceMap?.getCamera?.();
+    if (camera) void place.save({ selected: state.selectedId, ...camera });
+  });
+  destinationPicker?.addEventListener('change', () => {
+    if (destinationPicker.value === '/search') window.location.assign('/search');
+  });
+  window.addEventListener('pageshow', () => {
+    if (destinationPicker) destinationPicker.selectedIndex = 0;
+  });
+
   function renderAreaStatus() {
     const status = currentAreaState();
     if (els.areaStatus) {
@@ -2379,7 +2402,10 @@ import {
     // An authoritative empty list is truthful map state: render the canvas,
     // while every pending, failed, or malformed state continues to fail closed.
     const mapRenderable = status.state === 'ready' || status.state === 'empty-map';
-    if (els.map) els.map.hidden = state.view !== VIEW_MAP || !mapRenderable;
+    const onMap = state.view === VIEW_MAP && mapRenderable;
+    if (els.map) els.map.hidden = !onMap;
+    if (mapDestination) mapDestination.hidden = !onMap;
+    if (destinationPicker) destinationPicker.hidden = !onMap;
     if (els.filters) els.filters.hidden = status.state !== 'ready' || state.view !== VIEW_MAP;
     currentInvitation();
     renderWelcome(status);
@@ -5852,7 +5878,10 @@ import {
   window.addEventListener('pagehide', () => noteController.keepalive());
   window.addEventListener('beforeunload', () => noteController.keepalive());
   window.addEventListener('pageshow', event => {
-    if (event.persisted) void refreshLibraryBadges({ force: true });
+    if (event.persisted) {
+      void refreshLibraryBadges({ force: true });
+      if (place && canHydrateWorkspaceData() && state.view === VIEW_MAP) void refreshQuietly();
+    }
   });
 
   // District tags may be reconciled after the Map's initial shell binding when
@@ -6258,7 +6287,15 @@ import {
 
     void refreshWorkspaceRoot();
     void refreshHQStatus();
+    const pending = returnMap;
+    returnMap = null;
     await refresh();
+    const prior = pending && (await pending);
+    if (prior && !state.selectedId && !mapDestination.hidden && state.view === VIEW_MAP) {
+      if (findWorkspace(state.flattened, prior.selected))
+        selectItem(prior.selected, { openModal: false, announceChange: false });
+      window.OriWorkspaceMap?.restoreCamera?.(els.map, prior);
+    }
     consumeMoveDeepLink();
     return state.onboardingGate;
   }

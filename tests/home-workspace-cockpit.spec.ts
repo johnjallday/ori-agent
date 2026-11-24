@@ -549,7 +549,7 @@ test.describe('Home workspace cockpit', () => {
     await ensureWorkspace(page);
     await page.goto('/');
     await expect(page.locator('#homeCockpit')).toBeVisible();
-    await expect(page.locator('#oriGuideMapTrigger')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Help', exact: true })).toBeVisible();
     await expect(page.locator('#oriGuideInput')).toHaveCount(1);
     await expect(page.locator('#cockpitMap')).toBeVisible();
     await expect(page.locator('#cockpitTree')).toBeHidden();

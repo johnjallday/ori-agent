@@ -473,7 +473,9 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	data.Extra["IsFirstRun"] = workspaceCount == 0
 	// Keep the command bridge as the home surface under the shared top bar.
 	data.Extra["HomeCommandBridge"] = true
-	data.Extra["ShowFileSearch"] = s.fileSearch != nil && localSearchPage(r)
+	localFiles := s.fileSearch != nil && localSearchPage(r)
+	data.Extra["ShowFileSearch"] = localFiles
+	data.Extra["FileSearchAvailable"] = localFiles
 
 	s.renderAndWritePage(w, "index", data)
 }

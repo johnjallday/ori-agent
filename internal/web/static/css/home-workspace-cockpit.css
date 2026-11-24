@@ -8,6 +8,27 @@
  * than introducing a second visual language.
  */
 
+/* The rail is beside the single-track bridge, not a row claiming the
+   height reserved for the map. Cockpit container queries still measure the
+   theatre's actual width, not the width of the rail plus the theatre. */
+.map-desk-shell {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+body.home-command-page .home-command-main:has(> .map-desk-shell) {
+  padding: 0;
+}
+.map-desk-shell > .home-command-bridge {
+  min-width: 0;
+  padding: var(--space-2);
+}
+@media (max-width: 44rem) {
+  .map-desk-shell > .home-command-bridge {
+    padding: var(--space-1);
+  }
+}
+
 /* The container must be an ANCESTOR of what it styles — an element cannot
    query its own size — so the query container is the bridge that wraps the
    cockpit. Its inline size is the cockpit's available width, which is what

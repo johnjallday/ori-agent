@@ -58,6 +58,24 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	var out any
 	switch op {
+	case "desk-place":
+		var in struct {
+			Tab   string                `json:"tab"`
+			Place *filesearch.DeskPlace `json:"place"`
+		}
+		if !decode(&in) {
+			return
+		}
+		out, e = h.Service.DeskPlace(owner, in.Tab, in.Place)
+	case "map-place":
+		var in struct {
+			Tab   string               `json:"tab"`
+			Place *filesearch.MapPlace `json:"place"`
+		}
+		if !decode(&in) {
+			return
+		}
+		out, e = h.Service.MapPlace(owner, in.Tab, in.Place)
 	case "sources":
 		out, e = h.Service.Sources(r.Context(), owner)
 	case "begin":
@@ -85,14 +103,21 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	case "query":
 		var in struct {
-			Term   string `json:"term"`
-			Cursor string `json:"cursor"`
-			Limit  int    `json:"limit"`
+			Term   string          `json:"term"`
+			Source json.RawMessage `json:"source"`
+			Cursor string          `json:"cursor"`
+			Limit  int             `json:"limit"`
 		}
 		if !decode(&in) {
 			return
 		}
-		out, e = h.Service.Query(r.Context(), owner, in.Term, in.Cursor, in.Limit)
+		// Only omission means all grants. A malformed picker value must never widen a query.
+		var source string
+		if in.Source != nil && (json.Unmarshal(in.Source, &source) != nil || source == "") {
+			http.Error(w, "Invalid source.", http.StatusBadRequest)
+			return
+		}
+		out, e = h.Service.QueryLocation(r.Context(), owner, in.Term, source, in.Cursor, in.Limit)
 	case "remove":
 		var in struct {
 			ID string `json:"id"`

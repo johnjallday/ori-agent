@@ -80,8 +80,14 @@ type Page struct {
 }
 
 func (s *Service) Query(ctx context.Context, owner, term, cursor string, limit int) (Page, error) {
+	return s.QueryLocation(ctx, owner, term, "", cursor, limit)
+}
+
+// QueryLocation narrows the authorized generation set before keyset pagination.
+// Sources still describes the owner's grants, including those with no coverage.
+func (s *Service) QueryLocation(ctx context.Context, owner, term, location, cursor string, limit int) (Page, error) {
 	var page Page
-	if !utf8.ValidString(term) || len(term) > 512 || utf8.RuneCountInString(term) > 128 || len(cursor) > 128 || limit < 0 || limit > 50 {
+	if len(location) > 64 || !utf8.ValidString(term) || len(term) > 512 || utf8.RuneCountInString(term) > 128 || len(cursor) > 128 || limit < 0 || limit > 50 {
 		return page, ErrRequest
 	}
 	if limit == 0 {
@@ -98,13 +104,21 @@ func (s *Service) Query(ctx context.Context, owner, term, cursor string, limit i
 	page.Hits = []Hit{}
 	ids := []string{}
 	hash := sha256.New()
-	_, _ = fmt.Fprintf(hash, "%q:%q", owner, term)
+	_, _ = fmt.Fprintf(hash, "%q:%q:%q", owner, term, location)
+	found := location == ""
 	for _, v := range ss {
+		if location != "" && location != v.ID {
+			continue
+		}
+		found = true
 		switch v.State {
 		case "ready", "partial", "mapping", "interrupted":
 			ids = append(ids, v.ID)
 			_, _ = fmt.Fprintf(hash, ":%s:%d", v.ID, v.Generation)
 		}
+	}
+	if !found {
+		return Page{}, ErrMissing
 	}
 	scope, _ := json.Marshal(ids)
 	stamp := hex.EncodeToString(hash.Sum(nil))
@@ -112,6 +126,13 @@ func (s *Service) Query(ctx context.Context, owner, term, cursor string, limit i
 	if cursor != "" {
 		prefix, id, ok := strings.Cut(cursor, ".")
 		if !ok || prefix != stamp || id == "" || len(id) > 64 {
+			return Page{}, ErrMissing
+		}
+		var valid bool
+		if err := s.DB.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM filename_entries e JOIN filename_sources g ON g.id=e.source AND g.generation=e.generation WHERE e.id=? AND g.owner=? AND e.source IN (SELECT value FROM json_each(?)) AND instr(e.folded,?)>0)`, id, owner, string(scope), term).Scan(&valid); err != nil {
+			return Page{}, ErrUnavailable
+		}
+		if !valid {
 			return Page{}, ErrMissing
 		}
 		after = id

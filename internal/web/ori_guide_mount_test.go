@@ -1,9 +1,13 @@
 package web
 
 import (
+	"fmt"
 	"io/fs"
+	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/net/html"
 )
 
 // The guide mounts through navbar.tmpl rather than base.tmpl.
@@ -232,21 +236,46 @@ func TestPAFPanelRendersHomeAsOneViewWithTheComposerLast(t *testing.T) {
 }
 
 func TestHomeCockpitHasNoTodayOrWorkingAgreementGridSibling(t *testing.T) {
-	body := readTemplate(t, "templates/components/dashboard.tmpl")
-	if strings.Contains(body, `id="personalAssistantToday"`) {
-		t.Fatal("Today must be owned by the shared Personal Assistant drawer, not the Home grid")
+	r := NewTemplateRenderer()
+	if err := r.LoadTemplates(); err != nil {
+		t.Fatal(err)
 	}
-	cockpit := strings.Index(body, `id="homeCockpit"`)
-	agreement := strings.Index(body, `id="personalAssistantContinuity"`)
-	if cockpit < 0 || agreement < 0 {
-		t.Fatalf("could not locate cockpit=%d agreement=%d", cockpit, agreement)
-	}
-	bridgeEndOffset := strings.Index(body[cockpit:], "\n</div>\n\n<!-- Working Agreement")
-	if bridgeEndOffset < 0 {
-		t.Fatal("could not locate the Home command bridge boundary")
-	}
-	if agreement < cockpit+bridgeEndOffset {
-		t.Fatal("Working Agreement still occupies the Home command grid ahead of the cockpit")
+	for _, rail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rail=%t", rail), func(t *testing.T) {
+			body, err := r.RenderTemplate("index", TemplateData{CurrentPage: "index", Extra: map[string]any{"HomeCommandBridge": true, "ShowFileSearch": rail}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			doc, err := html.Parse(strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var bridge *html.Node
+			ids := map[string]*html.Node{}
+			for node := range doc.Descendants() {
+				for _, attr := range node.Attr {
+					if attr.Key == "id" {
+						ids[attr.Val] = node
+					}
+					if attr.Key == "class" && slices.Contains(strings.Fields(attr.Val), "home-command-bridge") {
+						bridge = node
+					}
+				}
+			}
+			if bridge == nil || ids["homeCockpit"] == nil || ids["homeCockpit"].Parent != bridge {
+				t.Fatal("cockpit must be a direct child of the Home command grid")
+			}
+			for _, id := range []string{"personalAssistantToday", "personalAssistantContinuity"} {
+				if ids[id] == nil {
+					t.Fatalf("missing %s", id)
+				}
+				for ancestor := range ids[id].Ancestors() {
+					if ancestor == bridge {
+						t.Errorf("%s must be outside the Home command grid", id)
+					}
+				}
+			}
+		})
 	}
 }
 

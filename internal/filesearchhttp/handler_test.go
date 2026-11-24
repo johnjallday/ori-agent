@@ -45,6 +45,9 @@ func TestOnlyLocalBrowserCanStartSearchChoice(t *testing.T) {
 		{"arbitrary path", "POST", "select", peer, host, origin, "", "application/json", "", `{"path":"/tmp"}`, 400},
 		{"owner override", "POST", "begin", peer, host, origin, "", "application/json", "", `{"kind":"custom","owner":"other"}`, 400},
 		{"foreign token", "POST", "select", peer, host, origin, "", "application/json", "", `{"intent":"foreign"}`, 409},
+		{"null source", "POST", "query", peer, host, origin, "", "application/json", "", `{"source":null}`, 400},
+		{"empty source", "POST", "query", peer, host, origin, "", "application/json", "", `{"source":""}`, 400},
+		{"compact unrestricted", "POST", "query", peer, host, origin, "", "application/json", "", `{}`, 200},
 		{"oversize body", "POST", "query", peer, host, origin, "", "application/json", "", `{"term":"` + strings.Repeat("x", 2400) + `"}`, 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

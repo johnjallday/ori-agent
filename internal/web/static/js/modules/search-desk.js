@@ -1,3 +1,5 @@
+import { destinationPlace } from './destination-place.js';
+
 const base = '/api/file-search/';
 export async function request(op, body) {
   const res = await fetch(base + op, {
@@ -38,8 +40,36 @@ export function mountFileSearch(root, compact = false) {
     hits = [],
     sources = [],
     selected = '',
+    scope = '',
     visibleTerm = '',
     busy = false;
+  const place = compact ? null : destinationPlace('desk');
+  let restoring = false,
+    leaving = false,
+    pending = null;
+  function snapshot() {
+    if (pending && pending.term === term.value && pending.source === scope) return pending;
+    const hit = hits.find(h => h.id === selected);
+    return {
+      term: term.value,
+      source: scope,
+      selected: hit?.id || '',
+      generation: hit?.generation || 0,
+      pages: Math.max(1, Math.ceil(hits.length / 25))
+    };
+  }
+  // A browser may discard its unload request. Checkpoint the last settled
+  // descriptor while the document is live; never send hits or path strings.
+  let lastCheckpoint = '';
+  function checkpoint() {
+    if (!place || leaving) return;
+    const descriptor = snapshot(),
+      key = JSON.stringify(descriptor);
+    if (lastCheckpoint !== key) {
+      lastCheckpoint = key;
+      void place.save(descriptor);
+    }
+  }
   const channel =
     typeof BroadcastChannel === 'function' ? new BroadcastChannel('ori-file-search-v1') : null;
   function element(tag, text) {
@@ -67,6 +97,7 @@ export function mountFileSearch(root, compact = false) {
     }
   }
   function clear() {
+    pending = null;
     version++;
     clearTimeout(timer);
     hits = [];
@@ -74,13 +105,17 @@ export function mountFileSearch(root, compact = false) {
     next = '';
     $('more').hidden = true;
     $('hits').replaceChildren();
+    if ($('selectedFile')) {
+      $('selectedFile').replaceChildren();
+      $('selectedFile').hidden = true;
+    }
   }
-  function invalidate() {
+  function invalidate(saved = snapshot()) {
     clear();
     sources = [];
     $('sources')?.replaceChildren();
     $('coverage').textContent = 'Checking current sources…';
-    void query();
+    void query(false, saved);
   }
   async function preference(target) {
     await request('preference', { expected: document.body.dataset.landing, next: target });
@@ -130,8 +165,38 @@ export function mountFileSearch(root, compact = false) {
   function map(ss) {
     const same = JSON.stringify(sources) === JSON.stringify(ss);
     sources = ss;
-    if (compact || (same && ss.length)) return;
+    if (compact) return;
     const names = scopeNames(ss);
+    if (document.body.dataset.landing !== 'first')
+      $('title').textContent = scope ? names.get(scope) || 'Unavailable location' : 'All locations';
+    if (same && ss.length) return;
+    const all = { id: '', count: ss.reduce((n, s) => n + s.count, 0) };
+    $('locationList').replaceChildren(
+      ...[all, ...ss].map(s => {
+        const label = names.get(s.id) || 'All locations';
+        const button = element('button', '');
+        button.type = 'button';
+        button.dataset.scope = s.id;
+        button.setAttribute('aria-label', `Search in ${label}`);
+        button.setAttribute('aria-pressed', String(scope === s.id));
+        const icon = element('span', s.id ? '' : '▱');
+        if (s.id) icon.className = 'location-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        const name = element('span', label);
+        name.className = 'rail-label';
+        const count = element('span', String(s.count));
+        count.className = 'rail-count';
+        button.append(icon, name, count);
+        return button;
+      })
+    );
+    $('scope').replaceChildren(
+      new Option('All locations', ''),
+      ...ss.map(s => new Option(names.get(s.id), s.id))
+    );
+    if (scope && !names.has(scope))
+      $('scope').add(new Option('Location no longer available', scope));
+    $('scope').value = scope;
     $('emptyMap').textContent = ss.length ? '' : 'No folders mapped yet.';
     $('sources').replaceChildren(
       ...ss.map(s => {
@@ -177,41 +242,131 @@ export function mountFileSearch(root, compact = false) {
         const li = element('li', '');
         li.dataset.id = h.id;
         li.classList.toggle('current', h.id === selected);
-        li.append(
-          element('strong', h.name),
-          element(
-            'span',
-            `${names.get(h.source)}${h.parent ? ' / ' + h.parent : ''} · ${new Date(h.modified).toLocaleString()}`
-          )
-        );
-        if (h.reader) li.append(act(`Open in ${h.reader}`, () => dispatch(h, 'open')));
-        li.append(act('Reveal in Finder', () => dispatch(h, 'reveal')));
+        const title = element('strong', h.name);
+        if (!compact) {
+          const pick = act('', () => {
+            select(h);
+            term.focus();
+          });
+          pick.className = 'file-row';
+          pick.setAttribute('aria-pressed', String(h.id === selected));
+          const file = element('span', '');
+          file.className = 'fname';
+          const ext = h.name
+            .match(/\.([a-z0-9]{1,6})$/i)?.[1]
+            .slice(0, 4)
+            .toUpperCase();
+          const badge = element('span', ext || 'FILE');
+          badge.className = 'badge';
+          badge.setAttribute('aria-hidden', 'true');
+          file.append(badge, title);
+          const path = element('span', [names.get(h.source), h.parent].filter(Boolean).join(' / '));
+          path.className = 'path';
+          const date = element(
+            'time',
+            new Date(h.modified).toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric'
+            })
+          );
+          date.className = 'date';
+          date.dateTime = h.modified;
+          date.title = new Date(h.modified).toLocaleString();
+          pick.append(file, path, date);
+          li.append(pick);
+        } else {
+          li.append(title);
+          li.append(
+            element(
+              'span',
+              `${names.get(h.source)}${h.parent ? ' / ' + h.parent : ''} · ${new Date(h.modified).toLocaleString()}`
+            )
+          );
+          addActions(li, h);
+        }
         return li;
       })
     );
     $('more').hidden = !next;
+    if (!compact) {
+      const hit = hits.find(h => h.id === selected),
+        panel = $('selectedFile');
+      panel.hidden = !hit;
+      panel.replaceChildren();
+      if (hit) {
+        const info = element('div', ''),
+          buttons = element('div', '');
+        buttons.className = 'actions';
+        const path = element(
+          'p',
+          [names.get(hit.source), hit.parent, hit.name].filter(Boolean).join(' / ')
+        );
+        path.className = 'path';
+        info.append(element('small', 'Selected file'), element('strong', hit.name), path);
+        addActions(buttons, hit);
+        panel.append(info, buttons);
+      }
+    }
   }
-  async function query(append = false) {
+  function addActions(host, hit) {
+    if (hit.reader) host.append(act(`Open in ${hit.reader}`, () => dispatch(hit, 'open')));
+    host.append(act('Reveal in Finder', () => dispatch(hit, 'reveal')));
+  }
+  function select(hit) {
+    selected = hit.id;
+    checkpoint();
+    render();
+    notice.textContent = `Selected ${hit.name}, ${[scopeNames(sources).get(hit.source), hit.parent].filter(Boolean).join(' / ')}`;
+  }
+  async function query(append = false, saved = null) {
     clearTimeout(timer);
     if (compact && root.closest('[hidden]')) return;
+    pending = saved;
     const stamp = ++version,
       value = term.value;
     try {
-      const p = await request('query', { term: value, cursor: append ? next : '', limit: 25 });
-      if (stamp !== version) return;
-      const updated = append ? [...hits, ...p.hits] : p.hits;
+      const updated = append ? [...hits] : [];
+      let cursor = append ? next : '',
+        p;
+      const pages = saved?.pages || 1;
+      for (let i = 0; i < pages; i++) {
+        p = await request('query', {
+          term: value,
+          ...(scope ? { source: scope } : {}),
+          cursor,
+          limit: 25
+        });
+        if (stamp !== version) return;
+        updated.push(...p.hits);
+        cursor = p.next;
+        if (!cursor) break;
+      }
       const changed = JSON.stringify(updated) !== JSON.stringify(hits) || next !== (p.next || '');
+      pending = null;
       hits = updated;
       next = p.next || '';
       visibleTerm = value;
       map(p.sources);
-      if (!hits.some(h => h.id === selected)) selected = '';
-      if (changed) render();
-      const names = [...scopeNames(sources).values()].join(', ');
-      const partial = sources.some(s => s.state !== 'ready');
+      if (saved?.selected) {
+        selected =
+          hits.find(h => h.id === saved.selected && h.generation === saved.generation)?.id || '';
+        notice.textContent = selected
+          ? 'Selection restored.'
+          : 'The selected file is no longer in these results.';
+      } else if (!hits.some(h => h.id === selected)) selected = '';
+      if (changed || saved) render();
+      checkpoint();
+      if ($('retry')) $('retry').hidden = true;
+      const included = sources.filter(s => !scope || s.id === scope);
+      const labels = scopeNames(sources);
+      const names = included.map(s => labels.get(s.id)).join(', ');
+      const partial = included.some(s => s.state !== 'ready');
       $('coverage').textContent =
         (hits.length
-          ? `${hits.length} shown`
+          ? !compact && !value && !next && !partial
+            ? `${hits.length} ${hits.length === 1 ? 'file' : 'files'} ${scope ? 'in ' + names : 'across ' + included.length + ' ' + (included.length === 1 ? 'location' : 'locations')}`
+            : `${hits.length} shown`
           : sources.length
             ? value
               ? `No matches in ${names}`
@@ -219,15 +374,31 @@ export function mountFileSearch(root, compact = false) {
             : 'Choose a folder to search its filenames.') +
         (partial ? ' · Coverage incomplete.' : '');
       if (sources.some(s => ['mapping', 'queued'].includes(s.state)) && !append)
-        timer = setTimeout(() => query(), 250);
+        timer = setTimeout(() => query(false, snapshot()), 250);
     } catch (e) {
       if (stamp !== version) return;
       clear();
       sources = [];
       $('sources')?.replaceChildren();
-      if (!compact) $('emptyMap').textContent = 'Map unavailable.';
+      if (!compact) {
+        map([]);
+        $('retry').hidden = false;
+        $('emptyMap').textContent = 'Locations unavailable.';
+        if (scope && e.status === 409) {
+          try {
+            const current = await request('sources');
+            if (version !== stamp + 1) return;
+            map(current);
+          } catch {
+            /* Results remain unavailable; never widen the scope. */
+          }
+        }
+      }
       $('coverage').textContent = e.message;
-      notice.textContent = 'Could not load current results. Retry the search.';
+      notice.textContent =
+        scope && e.status === 409
+          ? 'This location changed. Select another location to search.'
+          : 'Could not load current results. Retry the search.';
     }
   }
   $('choices')?.addEventListener('click', event => {
@@ -252,19 +423,40 @@ export function mountFileSearch(root, compact = false) {
     if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && hits.length) {
       e.preventDefault();
       i = Math.min(hits.length - 1, Math.max(0, i + (e.key === 'ArrowDown' ? 1 : -1)));
-      selected = hits[i].id;
-      render();
-      notice.textContent = `Selected ${hits[i].name}, ${hits[i].parent || 'source folder'}`;
+      select(hits[i]);
     }
     if (e.key === 'Enter' && i >= 0) {
       e.preventDefault();
       void run(() => dispatch(hits[i], e.shiftKey || !hits[i].reader ? 'reveal' : 'open'), term);
     }
   });
+  function changeScope(value) {
+    scope = value;
+    $('scope').value = scope;
+    for (const button of $('locationList').querySelectorAll('[data-scope]'))
+      button.setAttribute('aria-pressed', String(button.dataset.scope === scope));
+    clear();
+    notice.textContent = '';
+    void query();
+  }
+  $('scope')?.addEventListener('change', () => changeScope($('scope').value));
+  $('locationList')?.addEventListener('click', e => {
+    const b = e.target.closest('[data-scope]');
+    if (b) changeScope(b.dataset.scope);
+  });
+  $('addLocation')?.addEventListener('click', () => {
+    $('manage').open = true;
+    $('choices').querySelector('button').focus();
+  });
+  $('retry')?.addEventListener('click', () => query());
   $('more').addEventListener('click', () => query(true));
   if (!compact)
     window.addEventListener('keydown', e => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if ($('folderConsent')?.open) return;
+      if (
+        ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') ||
+        (e.key === '/' && e.target !== term && !e.metaKey && !e.ctrlKey && !e.altKey)
+      ) {
         e.preventDefault();
         term.focus();
       }
@@ -276,11 +468,33 @@ export function mountFileSearch(root, compact = false) {
     }
     invalidate();
   });
-  window.addEventListener('pageshow', () => invalidate());
-  window.addEventListener('focus', () => query());
-  window.addEventListener('pagehide', () => clear());
-  if (!compact && document.body.dataset.landing === 'search') term.focus();
-  void query();
+  async function arrive() {
+    leaving = false;
+    restoring = true;
+    clear();
+    const stamp = version;
+    const saved = await place?.read();
+    restoring = false;
+    if (version !== stamp || leaving) return;
+    if (saved) {
+      term.value = saved.term;
+      scope = saved.source;
+    }
+    await query(false, saved);
+  }
+  window.addEventListener('pageshow', e => {
+    if (e.persisted) void arrive();
+  });
+  window.addEventListener('focus', () => {
+    if (!leaving && !restoring) invalidate();
+  });
+  window.addEventListener('pagehide', () => {
+    if (!restoring && !leaving) void place?.save(snapshot());
+    leaving = true;
+    clear();
+  });
+  if (!compact && document.body.dataset.landing !== 'first') term.focus();
+  void arrive();
   return {
     show() {
       invalidate();
@@ -293,5 +507,13 @@ export function mountFileSearch(root, compact = false) {
     }
   };
 }
-if (typeof document !== 'undefined' && document.getElementById('desk'))
+if (typeof document !== 'undefined' && document.getElementById('desk')) {
+  const picker = document.getElementById('destinationPicker');
+  picker?.addEventListener('change', () => {
+    if (picker.value === '/?view=map') location.assign('/?view=map');
+  });
+  window.addEventListener('pageshow', () => {
+    if (picker) picker.selectedIndex = 0;
+  });
   mountFileSearch(document.getElementById('desk'));
+}

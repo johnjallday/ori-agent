@@ -1,0 +1,142 @@
+/* Files and the eligible Home cockpit share presentation, not a document or
+   a state store. Location grants and workspace contents stay with their owner. */
+.desk-shell {
+  --desk-forest: #233f34;
+  --desk-rail-width: clamp(12rem, 18vw, 15rem);
+  display: grid;
+  grid-template-columns: var(--desk-rail-width) minmax(0, 1fr);
+}
+@media (prefers-color-scheme: dark) {
+  .desk-shell {
+    --desk-forest: #112b22;
+  }
+}
+[data-bs-theme="dark"] .desk-shell {
+  --desk-forest: #112b22;
+}
+[data-bs-theme="light"] .desk-shell {
+  --desk-forest: #233f34;
+}
+.desk-rail,
+.desk-mobile {
+  font:
+    1rem/1.5 "Avenir Next",
+    -apple-system,
+    sans-serif;
+  color: #edf4e7;
+  background: var(--desk-forest);
+}
+.desk-rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding: 1.9rem 0.85rem 1.45rem;
+  box-sizing: border-box;
+}
+.desk-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font:
+    2.75rem/1 Georgia,
+    serif;
+  letter-spacing: -0.06em;
+  color: #edf4e7;
+}
+.desk-rail .desk-brand {
+  margin: 0 0.65rem 2.7rem;
+}
+.desk-brand img {
+  width: 2.4rem;
+  height: 2.4rem;
+  filter: brightness(0) invert(0.92);
+}
+.desk-rail small {
+  display: block;
+  font:
+    650 0.75rem/1.5 ui-monospace,
+    Menlo,
+    monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  color: #c1d1c4;
+  margin: 1.45rem 0.65rem 0.4rem;
+}
+.desk-rail nav a,
+.desk-rail [aria-current],
+.desk-rail .locations button {
+  box-sizing: border-box;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.65rem;
+  padding: 0.55rem 0.7rem;
+  line-height: 1.3;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  text-align: start;
+  color: inherit;
+  text-decoration: none;
+}
+.desk-rail nav a:hover,
+.desk-rail .locations button:hover {
+  background: #315243;
+  color: inherit;
+}
+.desk-rail [aria-current] {
+  font-weight: 700;
+  box-shadow: inset 3px 0 #bdddac;
+}
+.desk-rail [hidden],
+.desk-mobile [hidden] {
+  display: none !important;
+}
+.desk-rail :focus-visible,
+.desk-mobile :focus-visible {
+  outline: 2px solid #d7e9ce;
+  outline-offset: 2px;
+}
+.desk-rail .locations button[aria-pressed="true"] {
+  background: #d7e9ce;
+  color: #213d31;
+}
+.rail-foot {
+  margin: auto 0.65rem 0;
+  padding-top: 2.5rem;
+  font-size: 0.75rem;
+  color: #c1d4c7;
+}
+.desk-mobile {
+  display: none;
+}
+@media (max-width: 44rem) {
+  .desk-shell {
+    display: block;
+  }
+  .desk-rail {
+    display: none;
+  }
+  .desk-mobile {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.4rem 1rem;
+  }
+  .desk-mobile .desk-brand {
+    font-size: 1.6rem;
+  }
+  .desk-mobile select,
+  .desk-mobile a {
+    font: inherit;
+    color: inherit;
+    background: var(--desk-forest);
+    border: 0;
+    min-height: 44px;
+  }
+  .desk-mobile:has(select:not([hidden])) a {
+    display: none;
+  }
+}
