@@ -2167,6 +2167,7 @@ import {
     railContext: document.getElementById('cockpitRailContext'),
     railLive: document.getElementById('cockpitRailLive'),
     summaryBtn: document.getElementById('cockpitSummaryBtn'),
+    updatesSummaryBtn: document.getElementById('cockpitUpdatesSummaryBtn'),
     primaryActionBtn: document.getElementById('cockpitPrimaryActionBtn'),
     // The empty map's first-run welcome (home-welcome.js). Host-owned, over
     // the map, so the Map's geometry, camera and selection stay its own.
@@ -4705,6 +4706,8 @@ import {
     // Exactly one peer view is exposed at a time (FR18/FR19).
     if (els.tree) els.tree.hidden = state.view !== VIEW_TREE;
     root.dataset.view = state.view;
+    if (els.summaryBtn) els.summaryBtn.hidden = state.view !== VIEW_TREE;
+    if (els.updatesSummaryBtn) els.updatesSummaryBtn.hidden = state.view !== VIEW_MAP;
     // Entering Tree with something selected on the Map must REVEAL that row by
     // expanding its ancestors — without mutating stored hierarchy (FR59).
     if (state.view === VIEW_TREE && state.selectedId) {
@@ -6915,6 +6918,8 @@ import {
   if (els.questsToggle) els.questsToggle.addEventListener('click', () => togglePanel(PANEL_QUESTS));
   if (els.questsClose) els.questsClose.addEventListener('click', () => closePanel());
 
+  // The flyout closes as the dialog opens. Return to its visible disclosure.
+  els.updatesSummaryBtn?.addEventListener('click', () => showSummary({ invoker: els.railToggle }));
   if (els.summaryBtn) {
     els.summaryBtn.addEventListener('click', () => {
       if (state.railState === RAIL_SUMMARY && (state.modalVisible || state.modalRequested)) {

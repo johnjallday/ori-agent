@@ -69,14 +69,12 @@
             {{with index .Extra "SearchLanding"}}<button type="button" class="cockpit-files-landing" data-files-landing data-landing="{{.}}"{{if not (index $.Extra "HomeViewTree")}} hidden{{end}}>{{if eq . "search"}}Start on Map instead{{else}}Make Files my starting page{{end}}</button>{{end}}
           </div>
           <div class="cockpit-area-actions" role="group" aria-label="Workspace actions">
-            <!-- Add to backlog and Summary stay visible in the stable header so
-                 they are reachable whether context is bare, selected, or
-                 dismissed — secondary, never tucked into an overflow menu. -->
+            <!-- Files keeps its header Summary; Map offers it inside Updates. -->
             <div class="cockpit-area-actions__secondary">
               <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
                       aria-haspopup="dialog" aria-expanded="false" aria-controls="cockpitCaptureModal">Add to backlog</button>
               <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
-                      aria-pressed="false" aria-expanded="false" aria-controls="cockpitContextModal">Summary</button>
+                      aria-pressed="false" aria-expanded="false" aria-controls="cockpitContextModal"{{if not (index .Extra "HomeViewTree")}} hidden{{end}}>Summary</button>
             </div>
             <!-- Creation. The primary is the next step in the hire-first story,
                  chosen from the assistant relationship (cockpitPrimaryActionView):
@@ -247,6 +245,8 @@
            role="region" aria-labelledby="cockpitUpdatesFlyoutTitle" hidden>
         <header class="cockpit-flyout-head">
           <h2 id="cockpitUpdatesFlyoutTitle" class="cockpit-flyout-title">Updates</h2>
+          <button type="button" id="cockpitUpdatesSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
+                  aria-haspopup="dialog" aria-controls="cockpitContextModal"{{if index .Extra "HomeViewTree"}} hidden{{end}}>View summary</button>
           <button type="button" class="modern-btn modern-btn-quiet modern-btn-icon cockpit-flyout-close" data-cockpit-flyout-close
                   aria-label="Close Updates">
             <span aria-hidden="true">&times;</span>

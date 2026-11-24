@@ -325,7 +325,7 @@ test('closed panel roots do not intercept Home controls or narrow-screen taps', 
     await gotoPage(page, '/');
     for (const selector of [
       '#cockpitCaptureBtn',
-      '#cockpitSummaryBtn',
+      '#cockpitCreateWorkspaceBtn',
       '#cockpitRailToggle',
       '#oriGuideLauncher'
     ]) {

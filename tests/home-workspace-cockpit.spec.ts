@@ -829,15 +829,18 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.locator('#cockpitContextModal')).toBeHidden();
     await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === false);
 
-    const summary = page.locator('#cockpitSummaryBtn');
+    const updates = page.locator('#cockpitRailToggle');
+    const summary = page.getByRole('button', { name: 'View summary' });
+    await updates.click();
     await summary.click();
     await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('#cockpitContextModal')).toBeHidden();
     await page.waitForFunction(() => window.OriHomeCockpit?.getState?.()?.modalVisible === false);
     expect(await page.evaluate(() => window.OriHomeCockpit?.getState?.()?.selectedId)).toBe(id);
-    await expect(summary).toHaveAttribute('aria-expanded', 'false');
+    await expect(updates).toBeFocused();
 
+    await updates.click();
     await summary.click();
     await page.locator('[data-cockpit-rail-back]').click();
     await expect(page.locator('#cockpitContextModal')).toBeVisible();
@@ -1055,10 +1058,27 @@ test.describe('Home workspace cockpit', () => {
     }
   });
 
-  test('Summary header action opens the shared context modal truthfully', async ({ page }) => {
-    await ensureWorkspace(page);
-    await page.goto('/');
-    await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
+  test('Map Summary opens from Updates without feed data; Files keeps its header action', async ({
+    page
+  }) => {
+    await page.route('**/api/workspace-updates?*', route => route.fulfill({ status: 503 }));
+    await page.goto('/?view=map');
+    const updates = page.locator('#cockpitRailToggle');
+    await expect(page.locator('#cockpitSummaryBtn')).toBeHidden();
+    await updates.press('Enter');
+    await expect(updates).toHaveAttribute('aria-expanded', 'true');
+    await page.getByRole('button', { name: 'View summary' }).press('Enter');
+    await expect(page.locator('#cockpitUpdatesFlyout')).toBeHidden();
+    await expect(updates).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
+    await expect(page.locator('[data-cockpit-rail-back]')).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(updates).toBeFocused();
+
+    await goToFiles(page);
+    await updates.click();
+    await expect(page.locator('#cockpitUpdatesSummaryBtn')).toBeHidden();
+    await updates.click();
 
     const summary = page.locator('#cockpitSummaryBtn');
     await expect(summary).toHaveAttribute('aria-controls', 'cockpitContextModal');
@@ -1070,6 +1090,7 @@ test.describe('Home workspace cockpit', () => {
     await page.keyboard.press('Escape');
     await expect(summary).toHaveAttribute('aria-expanded', 'false');
     await expect(summary).toHaveText('Summary');
+    await expect(summary).toBeFocused();
   });
 });
 
@@ -1260,7 +1281,8 @@ test.describe('Header disclosure coordination', () => {
     await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
     await expect(page.locator('[data-role="progress-count"]')).toHaveText('0/2');
 
-    await page.locator('#cockpitSummaryBtn').click();
+    await page.locator('#cockpitRailToggle').click();
+    await page.getByRole('button', { name: 'View summary' }).click();
     await expect(page.locator('#cockpitContextModal')).toBeVisible();
     await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
     await page.keyboard.press('Escape');
@@ -1450,7 +1472,7 @@ test.describe('Header hierarchy', () => {
     await expect(main.locator('[data-desk-destination]')).toHaveCount(0);
     await expect(page.locator('.desk-rail [data-desk-destination]')).toHaveText(['Files', 'Map']);
     await expect(main.locator('#cockpitCaptureBtn')).toBeVisible();
-    await expect(main.locator('#cockpitSummaryBtn')).toBeVisible();
+    await expect(main.locator('#cockpitSummaryBtn')).toBeHidden();
     await expect(utility.locator('#cockpitSignalFilters')).toBeVisible();
     await expect(utility.locator('#cockpitRailToggle')).toBeVisible();
 
@@ -1548,24 +1570,17 @@ test.describe('Header hierarchy', () => {
     expect(geometry.clipped).toEqual([]);
   });
 
-  test('Map and Tree keep the same header; only the Map-only filters step out', async ({
-    page
-  }) => {
+  test('Map and Files share their common header actions', async ({ page }) => {
     await ensureWorkspace(page);
     await page.goto('/');
     await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
-    const always = [
-      '#cockpitCaptureBtn',
-      '#cockpitSummaryBtn',
-      '#cockpitCreateWorkspaceBtn',
-      '#cockpitRailToggle',
-      '#oriGuideMapTrigger'
-    ];
+    const always = ['#cockpitCaptureBtn', '#cockpitCreateWorkspaceBtn', '#cockpitRailToggle'];
     for (const selector of always) await expect(page.locator(selector)).toBeVisible();
     await expect(page.locator('#cockpitSignalFilters')).toBeVisible();
 
     await goToFiles(page);
-    await expect(page.locator('[data-cockpit-area-title]')).toHaveText('Workspace Tree');
+    await expect(page.locator('[data-cockpit-area-title]')).toHaveText('Files');
+    await expect(page.locator('#cockpitSummaryBtn')).toBeVisible();
     for (const selector of always) await expect(page.locator(selector)).toBeVisible();
     await expect(page.locator('#cockpitSignalFilters')).toBeHidden();
     // The readouts keep their right-hand home even with the filters gone.
