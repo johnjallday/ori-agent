@@ -10,6 +10,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>{{if .Home}}Home{{else}}Files{{end}} · Ori</title>
+    <link rel="stylesheet" href="/css/desk-navigation.css" />
     <link rel="stylesheet" href="/css/search-desk.css" />
   </head>
   <body data-landing="{{.State}}">
@@ -25,9 +26,9 @@
       </div>
     </main>
     {{else}}
-    <div id="desk">
-      <aside class="rail" aria-label="Desk sidebar">
-        <div class="brand"><img src="/favicon.svg" alt="" />Ori</div>
+    <div class="desk-shell" id="desk">
+      <aside class="desk-rail" aria-label="Desk sidebar">
+        <div class="desk-brand"><img src="/favicon.svg" alt="" />Ori</div>
         <nav aria-label="Destination" class="destinations">
           <small>Desk</small> <span aria-current="page">Files</span>{{if .MapEligible}}<a href="/?view=map">Map</a
           >{{else}}<a href="/?home=1">Home</a>{{end}}
@@ -40,8 +41,8 @@
         <div class="rail-foot">● &nbsp; Local desk<br />Filename index · On this Mac</div>
       </aside>
       <main>
-        <div class="mobile">
-          <span class="brand">Ori</span>{{if .MapEligible}}<select id="destinationPicker" aria-label="Destination">
+        <div class="desk-mobile">
+          <span class="desk-brand">Ori</span>{{if .MapEligible}}<select id="destinationPicker" aria-label="Destination">
             <option selected>Files</option>
             <option value="/?view=map">Map</option></select
           >{{else}}<a href="/?home=1">Home</a>{{end}}

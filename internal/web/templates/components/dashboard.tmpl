@@ -1,12 +1,16 @@
 <!-- Ori Dashboard — Command Bridge -->
-<div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
-  {{if .Extra.ShowFileSearch}}
-  <nav class="cockpit-destinations" aria-label="Destination">
-    <a class="modern-btn modern-btn-secondary" href="/search">Files</a>
-    <span hidden aria-current="page" data-map-destination>Map</span>
+{{if .Extra.ShowFileSearch}}
+<div class="desk-shell map-desk-shell">
+  <aside class="desk-rail" aria-label="Desk sidebar">
+    <div class="desk-brand"><img src="/favicon.svg" alt="" />Ori</div>
+    <nav aria-label="Destination"><small>Desk</small><a href="/search">Files</a><span hidden aria-current="page" data-map-destination>Map</span></nav>
+    <div class="rail-foot">● &nbsp; Local desk<br />Workspace cockpit</div>
+  </aside>
+  <nav class="desk-mobile" aria-label="Destination"><span class="desk-brand">Ori</span><a href="/search">Files</a>
     <select hidden aria-label="Destination" data-map-picker><option selected>Map</option><option value="/search">Files</option></select>
   </nav>
-  {{end}}
+{{end}}
+<div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
   <!-- Only the HQ-owned result moves here; conversation and Today stay in the drawer. -->
   <aside id="personalHQResultHost" class="pa-hq-result" aria-label="Personal HQ setup result" hidden></aside>
   <!--
@@ -487,6 +491,7 @@
 
   </div>
 </div>
+{{if .Extra.ShowFileSearch}}</div>{{end}}
 
 <!-- Working Agreement is an on-demand overlay, not a Home cockpit row. Its
      canonical controller and APIs remain unchanged while opening it can no

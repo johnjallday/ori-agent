@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Request } from '@playwright/test';
 import { readFileSync, mkdirSync, writeFileSync, utimesSync, existsSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { seedQuestionFolder } from './helpers/commander-question-fixture';
@@ -21,6 +21,27 @@ test('distinguish duplicate copies by location and date before acting', async ({
   expect(new URL(baseURL!).hostname).toBe('localhost');
   expect(readFileSync(join(fixture!, '.search-first-fixture'), 'utf8')).toBe('synthetic-v1\n');
   expect(readFileSync(join(fixture!, '.search-first-test-url'), 'utf8').trim()).toBe(baseURL);
+  // Exercise navigation on an established assistant fixture. First-run model
+  // verification belongs to onboarding, not the filename query/controller.
+  await installLocalCdn(page);
+  // The tall, empty-map welcome is where a stretched destination row was
+  // most obvious. Capture it before creating the assistant fixture.
+  expect((await request.post('/api/onboarding/skip')).ok()).toBeTruthy();
+  const defaultSize = page.viewportSize()!;
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/?view=map');
+  await expect(page.getByRole('heading', { name: 'Meet your assistant.' })).toBeVisible();
+  await page.screenshot({ path: join(evidence, 'map-header-welcome.png') });
+  await page.setViewportSize(defaultSize);
+  await page.goto('about:blank');
+  const music = await seedQuestionFolder(request, join(fixture!, 'home'), 'Map Albums', true);
+  const other = await seedQuestionFolder(request, join(fixture!, 'home'), 'Other Albums', true);
+  const deskRequests: string[] = [];
+  const captureDeskRequest = (r: Request) => {
+    const path = new URL(r.url()).pathname;
+    if (path.startsWith('/api/')) deskRequests.push(path);
+  };
+  page.on('request', captureDeskRequest);
   const original = join(fixture!, 'home/Downloads/Saved/proposal.pdf');
   for (const [dir, stamp] of [
     ['Documents/Final', 1704067200],
@@ -72,12 +93,9 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await page.locator('#selectedFile').scrollIntoViewIfNeeded();
   await page.screenshot({ path: join(evidence, 'scoped-last-page.png') });
   const last = await rows.last().getAttribute('data-id');
-  await expect(page.getByRole('link', { name: 'Map', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('link', { name: 'Start or resume workspace setup' })).toBeVisible();
-
-  await installLocalCdn(page);
-  const music = await seedQuestionFolder(request, join(fixture!, 'home'), 'Map Albums', true);
-  const other = await seedQuestionFolder(request, join(fixture!, 'home'), 'Other Albums', true);
+  page.off('request', captureDeskRequest);
+  expect(deskRequests).toContain('/api/file-search/query');
+  expect(deskRequests.filter(path => !path.startsWith('/api/file-search/'))).toEqual([]);
   const read = async (id: string) =>
     (await (await request.get(`/api/personal-assistant/folder-agent/${id}`)).json()).folder_agent;
   // Seed a pending-question record, not a simulated answer or a live model turn.
@@ -105,6 +123,42 @@ test('distinguish duplicate copies by location and date before acting', async ({
   };
   await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', last!);
   await toMap();
+  // Only the map should absorb spare height, never the destination controls.
+  const originalSize = page.viewportSize()!;
+  for (const size of [
+    { width: 1440, height: 1000 },
+    { width: 390, height: 844 }
+  ]) {
+    await page.setViewportSize(size);
+    const picker = page.getByRole('navigation', { name: 'Destination', exact: true });
+    await expect(picker).toBeVisible();
+    await expect(page.locator('[data-ws-map-viewport]').first()).toBeVisible();
+    const gap = await page.evaluate(() => {
+      const shell = document.querySelector('.map-desk-shell')!.getBoundingClientRect();
+      const mobile = document.querySelector('.desk-mobile')!.getBoundingClientRect();
+      const rail = document.querySelector('.desk-rail')!.getBoundingClientRect();
+      const cockpit = document.querySelector('#homeCockpit')!.getBoundingClientRect();
+      return {
+        above: cockpit.top - (mobile.height ? mobile.bottom : shell.top),
+        left: cockpit.left - rail.right,
+        rail: rail.width,
+        bar: mobile.height
+      };
+    });
+    expect(gap.above).toBeGreaterThanOrEqual(0);
+    expect(gap.above).toBeLessThan(20);
+    if (size.width > 700) {
+      expect(gap.left).toBeGreaterThanOrEqual(0);
+      expect(gap.rail).toBeGreaterThan(150);
+      expect(gap.bar).toBe(0);
+    } else {
+      expect(gap.rail).toBe(0);
+      expect(gap.bar).toBeGreaterThan(0);
+      expect(gap.bar).toBeLessThan(70);
+    }
+    await page.screenshot({ path: join(evidence, `map-header-${size.width}.png`) });
+  }
+  await page.setViewportSize(originalSize);
   await toFiles();
   await expect(term).toHaveValue('sample-');
   await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', last!);
@@ -218,7 +272,8 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await expect(page.locator('#notice')).toContainText('no longer');
   // Home-origin traversal is not always the explicit ?view=map link.
   await page.goto('/?home=1');
-  await tile.press('Space');
+  // The main journey above uses Space; cover pointer selection on a fresh Home too.
+  await tile.click();
   await expect(open).toBeVisible();
   await page.keyboard.press('Escape');
   await toFiles();

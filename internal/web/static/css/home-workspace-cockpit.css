@@ -8,25 +8,24 @@
  * than introducing a second visual language.
  */
 
-.cockpit-destinations {
-  display: flex;
-  align-items: center;
-  gap: 0.85rem;
+/* The rail is beside the single-track bridge, not a row claiming the
+   height reserved for the map. Cockpit container queries still measure the
+   theatre's actual width, not the width of the rail plus the theatre. */
+.map-desk-shell {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
-.cockpit-destinations [aria-current] {
-  font-weight: 700;
-  border-bottom: 2px solid currentColor;
+body.home-command-page .home-command-main:has(> .map-desk-shell) {
+  padding: 0;
 }
-.cockpit-destinations select {
-  display: none;
+.map-desk-shell > .home-command-bridge {
+  min-width: 0;
+  padding: var(--space-2);
 }
 @media (max-width: 44rem) {
-  .cockpit-destinations:has(select:not([hidden])) > :not(select) {
-    display: none;
-  }
-  .cockpit-destinations select:not([hidden]) {
-    display: block;
-    padding: 0.4rem;
+  .map-desk-shell > .home-command-bridge {
+    padding: var(--space-1);
   }
 }
 

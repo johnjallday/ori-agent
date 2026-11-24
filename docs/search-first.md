@@ -2,7 +2,7 @@
 
 On a new local Mac installation, open Ori in the browser. Choose **Documents**, **Downloads**, or **Choose another folder…** to make a folder searchable. For Documents or Downloads, Ori asks for confirmation by folder name before indexing. Choose **Allow search** to continue, or **Cancel** to leave your sources unchanged. This is separate from macOS privacy permissions: macOS may also ask for access, but won’t necessarily prompt if access was already decided. Choosing your first folder also makes Files your starting page on a new installation. **Not now** goes to Home without confirming a workspace directory or completing Welcome. Canceling a folder dialog makes no choice at all.
 
-If you've already set up Ori, use **Files** above Home's workspace cockpit. Visiting Files or **Map** does not change your starting page. Use the explicit starting-page button on Files to change it. If setup is incomplete, the desk offers **Start or resume workspace setup** instead of promising a map. Filename search doesn't need a provider key, model, assistant, or Personal HQ.
+If you've already set up Ori, use **Files** above Home's workspace cockpit. Visiting Files or **Map** does not change your starting page. Use the explicit starting-page button on Files to change it. If setup is incomplete, the desk offers **Start or resume workspace setup** instead of promising a map. Once you're in Files, filename search runs locally: querying or selecting a folder never calls a model and doesn't require a Personal HQ.
 
 ## Search locations
 
