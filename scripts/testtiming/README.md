@@ -10,11 +10,20 @@ sharding the Darwin subset are errors. Race, short, fresh execution, atomic
 coverage and the per-package timeout remain identical on every shard. No test
 exclusion or retry is added.
 
+`ORI_UNIT_RACE=0` drops `-race`, and only the Darwin subset may set it (any other
+scope refuses it before running a test). CI sets it on macOS for pull requests:
+the race detector was most of that leg's ~13 minutes, and the Ubuntu shards
+already run every package, the platform ones included, under it. Pushes to dev
+and release branches keep it on macOS too. The recorded `flags=` line is what
+actually ran.
+
 CI runs four Ubuntu partitions and the existing Darwin subset concurrently in
 `test-unit-run`. The `test-unit` aggregation matrix retains both original
 `Unit Tests (OS, go.mod)` required names and downstream dependencies. Both gates
-require all executions to succeed; failure, cancellation or skipping is not a
-pass. The Linux gate additionally re-enumerates the canonical package list and
+run on pinned Linux (the names come from the matrix, not the runner); the
+Darwin gate only reads the executions' result, so it no longer waits for a
+macOS runner. Both gates require all executions to succeed; failure,
+cancellation or skipping is not a pass. The Linux gate additionally re-enumerates the canonical package list and
 verifies each shard's exact assignment, full list, revision, flags, success
 metadata and coverage before merging. It rejects absent/extra artifacts,
 duplicated packages/coverage blocks, foreign coverage and malformed profiles.
@@ -125,7 +134,9 @@ existing behavior. Explicit restore/save actions own two non-overlapping paths:
 - `GOMODCACHE`: `ori-unit-mod-v1`, keyed by OS/architecture/image family, actual
   `go env GOVERSION`, and both dependency files. No broad restore fallback.
 - `GOCACHE`: `ori-unit-build-v2`, with those same compatibility dimensions plus
-  `race-cover-atomic` and shard identity (including `platform` for Darwin).
+  the instrumentation (`race-cover-atomic`, or `norace-cover-atomic` for a
+  race-free Darwin pull request) and shard identity (including `platform` for
+  Darwin).
   The primary key ends in source SHA / run ID / attempt. Restore uses exactly
   one compatible shard prefix, never another Go version, image family,
   dependency hash, instrumentation or workflow namespace. Each successful run

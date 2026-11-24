@@ -7,7 +7,7 @@ mkdir -p "$root/repo/scripts" "$root/bin" "$root/artifacts" "$root/tmp"
 cp "$script_dir/run-unit-tests.sh" "$script_dir/run-test-command.sh" "$script_dir/prune-test-cache.sh" "$script_dir/list-unit-packages.sh" "$script_dir/unit-shards.py" "$script_dir/unit-shard-weights.json" "$root/repo/scripts/"
 # Do not inherit the enclosing CI shard or the local gate's package cap and
 # cache setting.
-unset ORI_UNIT_SHARD ORI_UNIT_SHARD_COUNT ORI_UNIT_TEST_PARALLEL ORI_UNIT_TEST_CACHE
+unset ORI_UNIT_SHARD ORI_UNIT_SHARD_COUNT ORI_UNIT_TEST_PARALLEL ORI_UNIT_TEST_CACHE ORI_UNIT_RACE
 # The fixture weights make internal/two the heavier package, so the run order
 # (heaviest first) differs from the alphabetical selection.
 printf '{"github.com/johnjallday/ori-agent/internal/two": 50}\n' > "$root/repo/scripts/unit-shard-weights.json"
@@ -190,6 +190,40 @@ for cache in 2 yes true; do
   [[ ! -e "$TEST_ARGUMENTS" ]] || { printf 'Invalid ORI_UNIT_TEST_CACHE ran tests\n' >&2; exit 1; }
 done
 
+# The macOS platform leg may drop the race detector (CI does so for pull
+# requests). It keeps every platform package and every other flag, still makes
+# no coverage, and records the flags it really used.
+RUNNER_OS=macOS ORI_UNIT_RACE=0 check_case platform-no-race 0 0 0
+if grep -qx -- '-race' "$TEST_ARGUMENTS"; then printf 'ORI_UNIT_RACE=0 still ran the race detector\n' >&2; exit 1; fi
+for flag in -json -short -timeout 30m -count=1; do
+  grep -qx -- "$flag" "$TEST_ARGUMENTS"
+done
+grep -qx 'github.com/johnjallday/ori-agent/internal/platform' "$TEST_ARGUMENTS"
+grep -qx 'github.com/johnjallday/ori-agent/cmd/server' "$TEST_ARGUMENTS"
+if grep -q 'internal/one' "$TEST_ARGUMENTS"; then printf 'Race-free platform leg widened its scope\n' >&2; exit 1; fi
+if grep -q -- '-cover' "$TEST_ARGUMENTS"; then printf 'Race-free platform leg requested coverage\n' >&2; exit 1; fi
+grep -qx 'flags=-json -short -timeout 30m -count=1' "$root/artifacts"/ori-unit.*/metadata.txt
+# 1 is the default, stated explicitly.
+RUNNER_OS=macOS ORI_UNIT_RACE=1 check_case platform-race 0 0 0
+grep -qx -- '-race' "$TEST_ARGUMENTS"
+# The full and sharded scopes are the race gate, so they refuse to drop it, and
+# anything but 0 or 1 is refused; none of these runs a test.
+for settings in 'ORI_UNIT_RACE=0' \
+  'ORI_UNIT_RACE=0 ORI_UNIT_SHARD=1 ORI_UNIT_SHARD_COUNT=2' \
+  'RUNNER_OS=Linux ORI_UNIT_RACE=0' \
+  'RUNNER_OS=macOS ORI_UNIT_RACE=2' \
+  'RUNNER_OS=macOS ORI_UNIT_RACE=no' \
+  'ORI_UNIT_RACE=true'; do
+  # Settings are fixed literals above, not a shell program or caller input.
+  read -r -a settings_args <<< "$settings"
+  rm -f "$TEST_ARGUMENTS"
+  if env "${settings_args[@]}" "$runner" > "$root/invalid-race.log" 2>&1; then
+    printf 'Invalid ORI_UNIT_RACE setting accepted: %s\n' "$settings" >&2
+    exit 1
+  fi
+  [[ ! -e "$TEST_ARGUMENTS" ]] || { printf 'Invalid ORI_UNIT_RACE setting ran tests: %s\n' "$settings" >&2; exit 1; }
+done
+
 WAIT_FOR_SIGNAL=1 "$runner" > "$root/cancel.log" 2>&1 &
 parent=$!
 for ((i=0; i<100; i++)); do
@@ -208,4 +242,4 @@ grep -q 'Test command exit status: 143' "$root/cancel.log"
 for file in "$root/artifacts"/ori-unit.*/events.json; do
   if grep -q 'Cache pruning\|Test sandbox' "$file"; then exit 1; fi
 done
-printf 'unit wrapper: scope, run order, flags, cache switch, owned artifacts, failures and cancellation passed\n'
+printf 'unit wrapper: scope, run order, flags, cache and race switches, owned artifacts, failures and cancellation passed\n'
