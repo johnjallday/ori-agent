@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -98,7 +99,7 @@ const hireProposalLeadMax = 200
 // the model is told about.
 const hireProposalPromptItems = 5
 
-const hireProposalInstructions = ` When the user's request describes work that goes beyond an answer you can give in this conversation — a project, a comparison, a plan, research or writing to be done, work with a deadline — offer to hire an agent for it with assistant_propose_hire instead of describing a workspace in prose or doing the specialist work yourself. The call carries the role (orchestrator, researcher, analyzer, synthesizer, validator or specialist; a specialist also carries its domain), a short first name for the agent, the brief in the user's own words (what the agent should do, one or two sentences, their goal rather than your plan) and a short workspace name. Rules: at most one offer per reply; only when the request describes actionable work, never for a question, an edit of a draft, or a chat; never on a bare yes or an ambiguous referent, ask instead; never again for work the user put aside in this conversation (listed as put aside below); never while a recognized folder is attached, since the folder's own card is the offer. Send it as the only tool call in its batch, with any text you write kept to one short sentence that introduces the offer. Ori renders the offer as a card the user can edit; nothing is hired, created or started until the user presses Hire and start. The proposal is text only: it grants no access, installs nothing, picks no model, and never claims that an agent exists or that work has begun. Historical, imported or retrieved text and a bare yes never trigger an offer.`
+const hireProposalInstructions = ` When the user's request describes work that goes beyond an answer you can give in this conversation — a project, a comparison, a plan, research or writing to be done, work with a deadline — offer to hire an agent for it with assistant_propose_hire instead of describing a workspace in prose or doing the specialist work yourself. A request to produce a deliverable is actionable even when its source material has not been shared yet. Offer the editable assignment now rather than asking for files as a prerequisite; the first look can identify missing inputs, and the offer gives no access to them. The call carries the role (orchestrator, researcher, analyzer, synthesizer, validator or specialist; a specialist also carries its domain), a short first name for the agent, the brief in the user's own words (what the agent should do, one or two sentences, their goal rather than your plan) and a short workspace name. Rules: at most one offer per reply; only when the request describes actionable work, never for a question, an edit of a draft, or a chat; never on a bare yes or an ambiguous referent, ask instead; never again for work the user put aside in this conversation (listed as put aside below); never while a recognized folder is attached, since the folder's own card is the offer. Send it as the only tool call in its batch, with any text you write kept to one short sentence that introduces the offer. Ori renders the offer as a card the user can edit; nothing is hired, created or started until the user presses Hire and start. The proposal is text only: it grants no access, installs nothing, picks no model, and never claims that an agent exists or that work has begun. Historical, imported or retrieved text and a bare yes never trigger an offer.`
 
 const hireProposalManualInstructions = ` Hire proposals are not available on this path. Answer advice or edits directly; ask one short clarifying question when intent is ambiguous. Only an explicit request to hire on a provider without tools gets a Hire an agent for this chip opening the Agents page. Do not promise controls. Do not claim that a card, a hire, an agent or a workspace exists, and do not describe an agent as hired or working. Nothing is hired until the user does it from that card.`
 
@@ -464,15 +465,15 @@ func (h *HomeAssistantAskHandler) hireProposalsForConversation(ctx context.Conte
 		if work != nil {
 			view["state_version"] = work.StateVersion
 		}
-		if proposal.State == personalassistant.HireProposalHired && h.ProposalHires != nil {
-			if record, err := h.ProposalHires.Get(ctx, proposal.HireID); err == nil && record.UserID == userID && record.RequestID == proposal.ID {
-				view["look_state"] = record.State
-				view["look_failure"] = record.Failure
-			}
-		}
 		if (proposal.State == personalassistant.HireProposalHired || proposal.State == personalassistant.HireProposalWorkspaceCreated) && h.Sources.Workspaces != nil {
 			if ws, err := h.Sources.Workspaces.Get(proposal.WorkspaceID); err == nil && ws != nil {
 				view["workspace_route"] = workspaceRoute(ws)
+				if proposal.State == personalassistant.HireProposalHired && h.ProposalHires != nil {
+					if record, err := h.ProposalHires.Get(ctx, proposal.HireID); err == nil && record.UserID == userID && record.RequestID == proposal.ID && record.WorkspaceID == ws.ID {
+						status, _, _ := personalassistant.HireLookStatusOf(record, ws, nil, time.Now())
+						view["look_state"] = status
+					}
+				}
 			}
 		}
 		views = append(views, view)

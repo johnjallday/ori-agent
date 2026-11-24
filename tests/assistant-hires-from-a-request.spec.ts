@@ -239,6 +239,13 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
   await shot('spec-04-folder-keeps-its-card.png');
 
   // 6. A reload draws the saved cards again, in their states.
+  // The loopback stand-in rejects worker execution; the scheduler records
+  // the failed run separately from the already successful hire.
+  await expect
+    .poll(async () => (await conversation(request, id)).hire_proposals[0].look_state, {
+      timeout: 30000
+    })
+    .toBe('failed');
   await page.reload();
   await open();
   await expect
@@ -249,10 +256,8 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
   await expect(cards).toHaveCount(2);
   const restored = cards.first();
   await expect(restored).toHaveAttribute('data-state', 'hired');
-  const recorded = (await inventory()).hires.find((h: { id: string }) => h.id === hired.hire_id);
-  await expect(restored).toContainText(
-    recorded.state === 'failed' ? 'Hired Ruth, but the first look' : /Hired.*Ruth/
-  );
+  await expect(restored.getByRole('status')).toHaveAttribute('aria-live', 'polite');
+  await expect(restored).toContainText('Hired Ruth. The first look did not finish.');
   await expect(restored.getByRole('link', { name: /Open Compare the three CRMs/ })).toBeVisible();
   await expect(cards.last()).toHaveAttribute('data-state', 'declined');
   await expect(drawer).not.toContainText('Offer: hire');
@@ -283,15 +288,48 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
   const offer = cards.last();
   const goal = 'Compare participant interviews and draft findings with supporting quotes.';
   const name = 'Interview findings';
+  const primary = offer.getByRole('button', { name: 'Hire and start', exact: true });
+  await primary.focus();
+  for (const label of ['Just create the workspace', 'Not now', 'Adjust']) {
+    await page.keyboard.press('Tab');
+    await expect(offer.getByRole('button', { name: label, exact: true })).toBeFocused();
+  }
+  const previousViewport = page.viewportSize()!;
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const theme of ['light', 'dark'] as const) {
+    await page.evaluate(theme => document.documentElement.setAttribute('data-bs-theme', theme), theme);
+    const action = offer.getByRole('button', { name: 'Just create the workspace' });
+    await action.scrollIntoViewIfNeeded();
+    const bounds = await action.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+    await shot(`spec-07-narrow-${theme}.png`);
+  }
+  await page.setViewportSize(previousViewport);
   await offer.locator('textarea').fill(goal);
   await offer.locator('input[id$="WorkspaceName"]').fill(name);
   await shot('spec-07-report-offer.png');
   const beforeDraft = await inventory();
+  const other = await page.context().newPage();
+  await other.goto('/');
+  await other.locator('#personalAssistantLauncher').click();
+  // Conversation selection is tab-local. Load this exact saved conversation
+  // through the same canonical read used by the drawer's Continue menu.
+  await other.waitForFunction(() => Boolean((window as any).PersonalAssistantConversation));
+  await other.evaluate(
+    id => (window as any).PersonalAssistantConversation.resume(id),
+    report.conversation.id
+  );
+  const stale = other.locator('.personal-assistant-hire').last();
+  await expect(stale).toHaveAttribute('data-state', 'offered');
   await offer.getByRole('button', { name: 'Just create the workspace' }).click();
   const modal = page.locator('#addFolderModal');
   await expect(modal).toBeVisible();
+  const refused = other.waitForResponse(r => r.url().endsWith('/decline'));
+  await stale.getByRole('button', { name: 'Not now' }).click();
+  expect((await refused).status()).toBe(409);
+  await other.close();
   const next = modal.locator('#wizardNextBtn');
-  await modal.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
   await next.click();
   await expect(modal.locator('#folderNameInput')).toHaveValue(name);
   await expect(modal.locator('#folderGoalInput')).toHaveValue(goal);
@@ -302,11 +340,19 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
   await review.getByRole('button', { name: 'Use automatic placement' }).click();
   expect(await inventory()).toEqual(beforeDraft);
   await page.screenshot({ path: join(evidence, 'spec-08-blank-review.png') });
-  const accepted = page.waitForResponse(
-    r => r.url().endsWith('/confirm') && r.url().includes('/create-operations/')
+  let writes = 0;
+  await page.route('**/create-operations/*/confirm', async route => {
+    writes++;
+    const saved = await route.fetch();
+    expect(saved.status(), await saved.text()).toBe(201);
+    await route.fulfill({ status: 503, body: 'Receipt unavailable' });
+  });
+  const observed = page.waitForResponse(
+    r => r.request().method() === 'GET' && r.url().includes('/create-operations/')
   );
   await review.locator('[data-placement-action="confirm"]').click();
-  const receipt = await json(await accepted);
+  const receipt = (await json(await observed)).result;
+  expect(writes).toBe(1);
   const empty = await arrivalState(request, receipt.folder.id);
   expect(empty).toMatchObject({
     mission: goal,
@@ -323,8 +369,34 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
   expect(afterBlank.workspaces).toEqual([...beforeDraft.workspaces, receipt.folder.id].sort());
   const journal = await conversation(request, report.conversation.id);
   expect(journal.hire_proposals[0].state).toBe('workspace_created');
+  const route = journal.hire_proposals[0].workspace_route;
+  await page.goto(route);
+  const staff = page.getByRole('button', { name: 'Add an agent…', exact: true });
+  await expect(staff).toBeVisible();
+  await expect(page.locator('#workspace-detail-task-confirm-modal')).toBeHidden();
+  expect(await arrivalState(request, receipt.folder.id)).toEqual(empty);
+  await page.reload();
+  await staff.click();
+  const add = page.locator('#workspace-detail-add-agent-modal');
+  await expect(add).toBeVisible();
+  expect(await inventory()).toEqual(afterBlank);
+  await add.locator('select').selectOption({ label: 'Ruth' });
+  await add.getByRole('button', { name: 'Add to Workspace' }).click();
+  await expect(add).toBeHidden();
+  await page.reload();
+  await expect(page.locator('body')).toHaveAttribute('data-workspace-id', receipt.folder.id);
+  const assigned = await arrivalState(request, receipt.folder.id);
+  expect(assigned).toMatchObject({
+    agents: ['Ruth'],
+    mission: goal,
+    pending: false,
+    goalRuns: 0,
+    inFlight: false
+  });
+  expect(await inventory()).toEqual(afterBlank);
+  await page.screenshot({ path: join(evidence, 'spec-09-assigned.png') });
   await writeFile(
     join(evidence, 'blank-resources.json'),
-    JSON.stringify({ beforeDraft, afterBlank, empty })
+    JSON.stringify({ beforeDraft, afterBlank, empty, assigned, writes })
   );
 });

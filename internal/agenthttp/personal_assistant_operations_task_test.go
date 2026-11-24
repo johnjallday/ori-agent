@@ -141,7 +141,11 @@ func TestPrepareTask_ReplacesOnlyTheOneClickCreateAndOnlyWhereOriCanOperate(t *t
 		"Create a workspace named Mix": "",
 	} {
 		response := kept.ask(prompt, true)
-		if response.Confirmation == nil || (action != "" && response.Confirmation.ActionType != action) {
+		if action == "" {
+			if response.Confirmation != nil || len(response.Actions) != 1 || response.Actions[0].Type != "blank_workspace_review" {
+				t.Errorf("%q lost its blank review", prompt)
+			}
+		} else if response.Confirmation == nil || response.Confirmation.ActionType != action {
 			t.Errorf("%q lost its own confirmation: %+v", prompt, response.Confirmation)
 		}
 		if response.Operation != nil {

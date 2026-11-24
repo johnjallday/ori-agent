@@ -544,6 +544,19 @@
       } catch (_) {
         response = null;
       }
+      if (
+        options.proposalConversation &&
+        (!response ||
+          response.status >= 500 ||
+          (response.ok && (!payload.hire_id || !payload.workspace_id)))
+      ) {
+        // The server may already have accepted the choice. A bound offer
+        // recovers from its conversation; never re-POST on uncertainty.
+        state.phase = 'done';
+        render();
+        await options.onHireUncertain?.();
+        return null;
+      }
       if (response && response.ok) {
         state.phase = 'done';
         render();

@@ -113,7 +113,7 @@ export function settledText(proposal, result) {
     case 'workspace_created':
       return `Created ${proposal.workspaceName} without agents.`;
     case 'hiring':
-      return 'Hire confirmation received. Reopen the conversation for its recorded outcome; do not start another hire.';
+      return 'The hire outcome is not yet verified. Reopen this conversation to read its saved state; do not start another hire.';
     case 'unavailable':
       return 'This offer is unavailable.';
     case 'declined':
@@ -127,7 +127,9 @@ export function settledText(proposal, result) {
         look_state: proposal.lookState,
         look_failure: proposal.lookFailure
       };
-      if (!result && !['failed', 'looking'].includes(proposal.lookState))
+      if (!result && proposal.lookState === 'failed')
+        return `Hired ${outcome.agent_name}. The first look did not finish. Open the workspace to review it.`;
+      if (!result && !['running', 'looking'].includes(proposal.lookState))
         return `Hired ${outcome.agent_name}. Open the workspace for the first-look status.`;
       if (typeof hire?.hiredMessage === 'function') return hire.hiredMessage(outcome);
       return `Hired. ${text(outcome.agent_name) || 'Your agent'} is taking a first look; your assistant will report back.`;
@@ -284,6 +286,26 @@ export function render(row, confirmationOrProposal, options = {}) {
         else primary.removeAttribute?.('aria-busy');
         if (current.state === 'offered') paint();
       },
+      onHireUncertain: async () => {
+        settle('hiring');
+        try {
+          const read = options.fetchImpl || fetch;
+          const response = await read(
+            `/api/home-assistant/conversations/${encodeURIComponent(proposal.conversationId)}`,
+            { cache: 'no-store' }
+          );
+          if (!response.ok || !isCurrent()) return;
+          const view = (await response.json()).hire_proposals?.find(
+            item => item.proposal_id === proposal.proposalId
+          );
+          if (view?.state === 'hired' && view.hire_id && view.workspace_id && isCurrent()) {
+            current = proposalFromReload(view, proposal.catalog, proposal.conversationId);
+            settle('hired');
+          }
+        } catch {
+          /* An unreadable ledger is not permission to submit again. */
+        }
+      },
       onHired: result => {
         // Hired from this tab: the agent's report opens Today's strip once.
         if (text(result?.hire_id)) claimNeedsItem(`hire:${text(result.hire_id)}`);
@@ -314,7 +336,8 @@ export function render(row, confirmationOrProposal, options = {}) {
     }
     button.disabled = true;
     try {
-      if (typeof handler !== 'function') throw new Error('This action is unavailable. Nothing was confirmed.');
+      if (typeof handler !== 'function')
+        throw new Error('This action is unavailable. Nothing was confirmed.');
       await handler(current);
       settle(state);
     } catch (error) {

@@ -584,19 +584,25 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 		defer func() { response.FolderReviewContext, response.FolderReviewElsewhere = shown, shown.elsewhereRef() }()
 	}
 
-	if conversation != nil && (folderTurn == nil || !h.folderOwnsTheOffer(ctx, folderTurn)) && workspaceOnlyRequest(prompt) {
+	if conversation != nil && folderTurn == nil && workspaceOnlyRequest(prompt) {
 		// A folder in prose (or attached to a chat) is not a Files grant.
 		// Hand off to the chooser without copying any path or token.
 		answer := "Review a blank workspace. No agents will be added and nothing has been created."
 		action := HomeAction{ID: "blank-workspace", Type: "blank_workspace_review", Label: "Review workspace"}
-		if namesFolder || folderTurn != nil || strings.Contains(strings.ToLower(prompt), " from ") || strings.Contains(strings.ToLower(prompt), "folder") {
+		var projects []HomeAction
+		if namesFolder || strings.Contains(strings.ToLower(prompt), " from ") || strings.Contains(strings.ToLower(prompt), "folder") {
 			answer = "Choose the folder on this Mac to review its workspace name and access. Nothing has been linked or created."
 			action = HomeAction{ID: "choose-workspace-folder", Type: HomeActionNavigate, Label: "Choose a folder", Href: "/?panel=today&folder=explore"}
+		} else if projects = h.secondBrainWorkspaceActions(ctx, prompt); len(projects) > 0 {
+			answer = "Review the named project in the workspace form. Nothing has been created."
 		}
 		reply := HomeAssistantAskResponse{Response: answer, Intent: intent, Identity: identity, Conversation: h.storeTurn(ctx, conversation, prompt, answer)}
 		if saved := reply.Conversation; saved != nil && saved.Stored {
 			action.Arguments = map[string]any{"conversation_id": saved.ID, "state_version": workContext.StateVersion, "entry_point": "assistant_workspace_only", "name": workspaceRequestName(prompt)}
 			reply.Actions = []HomeAction{action}
+			if len(projects) > 0 {
+				reply.Actions = projects
+			}
 		}
 		return reply
 	}
