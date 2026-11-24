@@ -7,10 +7,12 @@ export function chromeText(value) {
   );
 }
 
+// The header holds the workspace's own views. There is no "More views" menu:
+// Plans was its only item, and a workspace with no Plans has no Plans
+// destination (an existing one is reached from Tickets).
 export function workspaceNavigationHTML({
   mode,
   dashboard = false,
-  plans = '',
   ticketCount = '—',
   ticketDescription = '',
   ticketAlert = false
@@ -30,12 +32,6 @@ export function workspaceNavigationHTML({
       )
       .join('') +
     '<span class="ws-cmd-program-destinations" data-cmd-program-destinations></span>' +
-    (plans
-      ? '<details class="ws-cmd-disclosure" data-cmd-disclosure="views"><summary class="ws-cmd-view-btn">More views</summary>' +
-        '<div class="ws-cmd-disclosure-body">' +
-        plans +
-        '</div></details>'
-      : '') +
     '</nav>'
   );
 }

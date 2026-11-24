@@ -159,8 +159,9 @@ func TestSoftwareSetup_CarriesOutTheReviewedPlanExactlyOnce(t *testing.T) {
 		t.Fatalf("assistant model = %q %q %v", provider, model, found)
 	}
 
-	// The effective workflow, not its label: planning first, nothing starts on
-	// its own, destructive actions confirm, and no document goes into the project.
+	// The effective workflow, not its label: planning stays enabled as saved (so
+	// the plans a workspace already has keep their policy), nothing starts on its
+	// own, destructive actions confirm, and no document goes into the project.
 	settings := workspacesettings.Extract(ws.SharedData)
 	policy := workspacesettings.BuildEffectivePolicy(settings, workspacesettings.WorkspaceCapabilities{HasFolder: true, IsRepository: true})
 	confirm, _ := policy.Control(workspacesettings.ControlDestructiveConfirm)
@@ -206,7 +207,7 @@ func TestSoftwareSetup_CarriesOutTheReviewedPlanExactlyOnce(t *testing.T) {
 	for kind, want := range map[string][2]string{
 		"workspace": {"widget", "created"},
 		"folder":    {"widget", "linked where it is, read-only"},
-		"blueprint": {"Code Project", "planning first"},
+		"blueprint": {"Code Project", "work waits for you to start it"},
 		"agent":     {"Development Assistant", "development assistant, added"},
 		"task":      {"Assess this project and suggest a first task", "Needs a different model before it can start"},
 	} {

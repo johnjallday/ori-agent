@@ -43,8 +43,12 @@ for (const theme of ['light', 'dark'] as const)
       await page.goto(index);
       await expect(page.locator('#plan-active-list .plan-card')).toHaveCount(2);
       await expect(page.locator('#plan-history-list .plan-card')).toHaveCount(1);
-      await expect(page.locator('#plan-disabled-banner')).toBeVisible();
-      await expect(page.locator('#plan-create-panel')).toBeHidden();
+      // Existing plans are listed whatever planning says; the page has no
+      // creation panel and no "turn planning on" banner, and it does not claim
+      // the workspace has no plans.
+      await expect(page.locator('#plan-disabled-banner')).toHaveCount(0);
+      await expect(page.locator('#plan-create-panel')).toHaveCount(0);
+      await expect(page.locator('#plan-retired-note')).toBeHidden();
       if (width <= 720) {
         const description = (await page.locator('.plans-subtitle').boundingBox())!;
         const refresh = (await page.locator('#plan-refresh').boundingBox())!;

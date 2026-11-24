@@ -229,107 +229,113 @@ test('the plans page shows an empty state when there is nothing active', async (
   assert.equal(elements['#plan-active-list'].innerHTML, '');
 });
 
-// Planning being off hides creation and never hides history, and nothing on
-// this page turns planning back on (FR-159).
-test('disabled planning hides creation but keeps history readable', async () => {
-  const elements = {
-    '#plan-disabled-banner': fakeEl(),
-    '#plan-create-panel': fakeEl(),
-    '#plan-active-list': fakeEl(),
-    '#plan-active-empty': fakeEl(),
-    '#plan-history-list': fakeEl(),
-    '#plan-history-empty': fakeEl(),
-    '#plan-history-section': fakeEl(),
-    '#plan-status': fakeEl()
-  };
+const plansElements = () => ({
+  '#plan-retired-note': fakeEl({ hidden: true }),
+  '#plan-active-list': fakeEl(),
+  '#plan-active-empty': fakeEl(),
+  '#plan-history-list': fakeEl(),
+  '#plan-history-empty': fakeEl(),
+  '#plan-history-section': fakeEl(),
+  '#plan-status': fakeEl()
+});
 
+// Existing plans stay listed and readable whatever the workspace's planning
+// setting says, and loading the page only ever reads: it does not look at the
+// setting, it creates nothing, and it turns nothing on (FR-159).
+test('existing plans are listed by reads alone, active and history, with no settings lookup', async () => {
+  const elements = plansElements();
+  const calls = [];
   const page = new WorkspacePlansPage('ws-1', {
+    workspaceSlug: 'widget',
     document: fakeDocument(elements),
-    fetch: async url => {
-      if (url.endsWith('/settings')) {
-        return jsonResponse({ settings: { planning: { enabled: false } } });
-      }
+    fetch: async (url, options = {}) => {
+      calls.push({ url, method: options.method || 'GET' });
       if (url.includes('scope=history')) {
         return jsonResponse({ plans: [plan({ id: 'plan_old', status: 'cancelled' })] });
       }
+      return jsonResponse({ plans: [plan({ id: 'plan_now', status: 'in_review' })] });
+    }
+  });
+
+  await page.init();
+
+  assert.match(elements['#plan-active-list'].innerHTML, /plan_now/);
+  assert.equal(elements['#plan-history-section'].hidden, false, 'history stays readable');
+  assert.match(elements['#plan-history-list'].innerHTML, /plan_old/);
+  assert.equal(elements['#plan-retired-note'].hidden, true, 'plans exist, so nothing is retired');
+  assert.deepEqual(
+    calls.filter(call => call.method !== 'GET'),
+    [],
+    'opening the page only reads'
+  );
+  assert.equal(
+    calls.some(call => call.url.endsWith('/settings')),
+    false,
+    'the planning setting does not decide what is listed'
+  );
+});
+
+test('a history-only workspace still lists its plan and does not claim to have none', async () => {
+  const elements = plansElements();
+  const page = new WorkspacePlansPage('ws-1', {
+    document: fakeDocument(elements),
+    fetch: async url =>
+      jsonResponse({
+        plans: url.includes('scope=history') ? [plan({ id: 'plan_old', status: 'cancelled' })] : []
+      })
+  });
+  await page.init();
+  assert.equal(elements['#plan-active-empty'].hidden, false);
+  assert.match(elements['#plan-history-list'].innerHTML, /plan_old/);
+  assert.equal(elements['#plan-retired-note'].hidden, true);
+});
+
+test('a workspace with no plans says creation is retired and points at Tickets', async () => {
+  const elements = plansElements();
+  const page = new WorkspacePlansPage('ws-1', {
+    document: fakeDocument(elements),
+    fetch: async () => jsonResponse({ plans: [] })
+  });
+  await page.init();
+  assert.equal(elements['#plan-retired-note'].hidden, false);
+});
+
+// Unknown is not zero: a failed read must not tell the person they have no plans.
+test('a failed read does not claim the workspace has no plans', async () => {
+  const elements = plansElements();
+  const page = new WorkspacePlansPage('ws-1', {
+    document: fakeDocument(elements),
+    fetch: async () => jsonResponse({ code: 'internal_error', message: 'boom' }, false, 500)
+  });
+  await page.init();
+  assert.equal(elements['#plan-retired-note'].hidden, true);
+  assert.match(elements['#plan-status'].textContent, /Could not load plans/);
+});
+
+test('the page has no way to create a plan and ignores the retired suggestion link', async () => {
+  for (const name of ['createPlan', 'loadPlanningPolicy', 'offerAssessmentSuggestion'])
+    assert.equal(typeof WorkspacePlansPage.prototype[name], 'undefined', name);
+  const elements = plansElements();
+  const calls = [];
+  const doc = fakeDocument(elements);
+  doc.defaultView.location.search = '?next=assessment';
+  const page = new WorkspacePlansPage('ws-1', {
+    document: doc,
+    fetch: async (url, options = {}) => {
+      calls.push({ url, method: options.method || 'GET' });
       return jsonResponse({ plans: [] });
     }
   });
-
-  await page.loadPlanningPolicy();
-  await page.reload();
-
+  await page.init();
   assert.equal(
-    elements['#plan-disabled-banner'].hidden,
+    calls.some(call => call.url.endsWith('/folder-first-task')),
     false,
-    'the disabled notice must be visible'
+    'the assessment suggestion is not read here any more'
   );
-  assert.equal(elements['#plan-create-panel'].hidden, true, 'creation must be hidden');
-  assert.equal(elements['#plan-history-section'].hidden, false, 'history must stay readable');
-  assert.match(elements['#plan-history-list'].innerHTML, /plan_old/);
-});
-
-test('enabled planning shows creation and hides the disabled notice', async () => {
-  const elements = {
-    '#plan-disabled-banner': fakeEl(),
-    '#plan-create-panel': fakeEl()
-  };
-
-  const page = new WorkspacePlansPage('ws-1', {
-    document: fakeDocument(elements),
-    fetch: async () => jsonResponse({ settings: { planning: { enabled: true } } })
-  });
-
-  await page.loadPlanningPolicy();
-
-  assert.equal(elements['#plan-disabled-banner'].hidden, true);
-  assert.equal(elements['#plan-create-panel'].hidden, false);
-});
-
-test('creating a plan navigates to its canonical detail route', async () => {
-  const elements = {
-    '#plan-create-request': fakeEl({ value: 'Plan the migration' }),
-    '#plan-status': fakeEl()
-  };
-  const doc = fakeDocument(elements);
-
-  let posted = null;
-  const page = new WorkspacePlansPage('ws-1', {
-    document: doc,
-    fetch: async (url, options) => {
-      posted = { url, body: JSON.parse(options.body) };
-      return jsonResponse({ id: 'plan_new' }, true, 201);
-    }
-  });
-
-  await page.createPlan();
-
-  assert.equal(posted.url, '/api/workspaces/ws-1/plans');
-  assert.equal(posted.body.request, 'Plan the migration');
-  assert.equal(doc.defaultView.location.href, '/workspaces/ws-1/plans/plan_new');
-  assert.equal(elements['#plan-create-request'].value, '');
-});
-
-test('creating a plan with an empty request asks for one instead of calling the API', async () => {
-  const elements = {
-    '#plan-create-request': fakeEl({ value: '   ' }),
-    '#plan-status': fakeEl()
-  };
-
-  let called = false;
-  const page = new WorkspacePlansPage('ws-1', {
-    document: fakeDocument(elements),
-    fetch: async () => {
-      called = true;
-      return jsonResponse({});
-    }
-  });
-
-  const result = await page.createPlan();
-
-  assert.equal(result, null);
-  assert.equal(called, false, 'an empty request must not reach the API');
-  assert.match(elements['#plan-status'].textContent, /Describe what you want planned/);
+  assert.deepEqual(
+    calls.filter(call => call.method !== 'GET'),
+    []
+  );
 });
 
 // The server's stable error code is the contract; the message is for the human
@@ -354,127 +360,6 @@ test('an API failure surfaces the server message and preserves its code', async 
   );
 });
 
-// --- The first assessment's suggested next task ------------------------------
-
-// A plans page reached from a finished assessment, with what its APIs answer.
-function assessmentPage({ search = '?next=assessment', look, planning = true, typed = '' } = {}) {
-  const elements = {
-    '#plan-disabled-banner': fakeEl(),
-    '#plan-create-panel': fakeEl(),
-    '#plan-create-request': fakeEl({ value: typed, focused: 0 }),
-    '#plan-status': fakeEl(),
-    '#plan-active-list': fakeEl(),
-    '#plan-active-empty': fakeEl(),
-    '#plan-history-list': fakeEl(),
-    '#plan-history-empty': fakeEl(),
-    '#plan-history-section': fakeEl()
-  };
-  elements['#plan-create-request'].focus = function focus() {
-    this.focused += 1;
-  };
-  const calls = [];
-  const replaced = [];
-  const doc = {
-    querySelector: selector => elements[selector] || null,
-    defaultView: {
-      location: { href: '', pathname: '/workspaces/widget/plans', search, hash: '' },
-      history: { state: null, replaceState: (_state, _title, url) => replaced.push(url) }
-    }
-  };
-  const page = new WorkspacePlansPage('ws-1', {
-    workspaceSlug: 'widget',
-    document: doc,
-    fetch: async (url, options = {}) => {
-      calls.push({ url, method: options.method || 'GET' });
-      if (url.endsWith('/settings'))
-        return jsonResponse({ settings: { planning: { enabled: planning } } });
-      if (url.endsWith('/folder-first-task')) return jsonResponse({ first_task: look ?? null });
-      return jsonResponse({ plans: [] });
-    }
-  });
-  return { page, elements, calls, replaced };
-}
-
-const finishedAssessment = {
-  recipe: 'software_assessment',
-  state: 'finished',
-  folder_name: 'widget',
-  next_request: 'Add a health check endpoint to the service.'
-};
-
-test('a finished assessment places its suggestion in the box and submits nothing', async () => {
-  const { page, elements, calls, replaced } = assessmentPage({ look: finishedAssessment });
-  await page.init();
-
-  assert.equal(
-    elements['#plan-create-request'].value,
-    'Add a health check endpoint to the service.\n\n(Suggested by the first assessment of widget.)'
-  );
-  assert.equal(elements['#plan-create-request'].focused, 1);
-  assert.match(elements['#plan-status'].textContent, /Nothing is created until you do/);
-  // Arriving created nothing: every request was a read.
-  assert.ok(calls.length > 0);
-  assert.deepEqual(
-    calls.filter(call => call.method !== 'GET'),
-    []
-  );
-  assert.ok(calls.some(call => call.url === '/api/workspaces/ws-1/folder-first-task'));
-  // The address no longer asks for it, so a reload does not fill the box again.
-  assert.deepEqual(replaced, ['/workspaces/widget/plans']);
-});
-
-test('the suggestion never replaces what the user has typed', async () => {
-  const { page, elements } = assessmentPage({ look: finishedAssessment, typed: 'My own request' });
-  await page.init();
-  assert.equal(elements['#plan-create-request'].value, 'My own request');
-});
-
-test('without the link the page reads no assessment and fills nothing', async () => {
-  const { page, elements, calls } = assessmentPage({ search: '', look: finishedAssessment });
-  await page.init();
-  assert.equal(elements['#plan-create-request'].value, '');
-  assert.equal(
-    calls.some(call => call.url.endsWith('/folder-first-task')),
-    false
-  );
-});
-
-test('with planning off the suggestion is shown with the step that is missing', async () => {
-  const { page, elements } = assessmentPage({ look: finishedAssessment, planning: false });
-  await page.init();
-  assert.equal(elements['#plan-create-request'].value, '');
-  assert.equal(elements['#plan-create-panel'].hidden, true);
-  assert.match(
-    elements['#plan-status'].textContent,
-    /^The first assessment suggested: “Add a health check endpoint to the service\.” Structured planning is off for this workspace/
-  );
-  assert.match(elements['#plan-status'].textContent, /Turn it on in Workspace Settings first\.$/);
-});
-
-test('an assessment with nothing to suggest fills nothing and says so', async () => {
-  for (const look of [
-    null,
-    { ...finishedAssessment, next_request: '' },
-    { ...finishedAssessment, state: 'running' },
-    // A first look that is not an assessment is never read as one.
-    { ...finishedAssessment, recipe: '' }
-  ]) {
-    const { page, elements } = assessmentPage({ look });
-    await page.init();
-    assert.equal(elements['#plan-create-request'].value, '');
-    assert.match(elements['#plan-status'].textContent, /no finished assessment/);
-  }
-});
-
-test('a suggestion is only ever text', async () => {
-  const hostile = {
-    ...finishedAssessment,
-    next_request: '<img src=x onerror=alert(1)> Run `rm -rf` now'
-  };
-  const { page, elements } = assessmentPage({ look: hostile });
-  await page.init();
-  // It goes into the box's value and nowhere that parses markup.
-  assert.ok(elements['#plan-create-request'].value.startsWith('<img src=x onerror=alert(1)>'));
-  for (const selector of ['#plan-active-list', '#plan-history-list', '#plan-status'])
-    assert.equal(elements[selector].innerHTML, '', selector);
-});
+// The first assessment's suggested next ticket no longer lands on this page: it
+// opens in Give work (workspace-suggested-ticket.js, with its own tests), and the
+// retired /plans?next=assessment address is redirected by the server.

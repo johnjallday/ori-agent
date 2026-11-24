@@ -14,7 +14,7 @@ func TestWorkThatCreatesTasksNeedsAPlan(t *testing.T) {
 	if got.Route != RoutePlan {
 		t.Fatalf("route = %q, want plan", got.Route)
 	}
-	if !strings.Contains(got.Reason, "creates workspace tasks") {
+	if !strings.Contains(got.Reason, "would create tickets") {
 		t.Errorf("reason does not say why: %q", got.Reason)
 	}
 }
@@ -188,15 +188,26 @@ func TestThePreviewMessageDoesNotSayPlan(t *testing.T) {
 	}
 }
 
-// A Plan-routed request points at the canonical surface rather than offering to
-// approve anything inline (FR-149).
-func TestThePlanRequiredMessagePointsAtTheCanonicalSurface(t *testing.T) {
-	message := planRequiredMessage(ClassifyPlanningRoute(PlanningRequest{ProposedTaskCount: 2}))
-	if !strings.Contains(message, "Open the plan") {
-		t.Errorf("message does not point at the plan: %q", message)
+// Multi-step work is answered with advice, not an approval and not a Plan: the
+// reply says nothing was started, gives the reason, and names Give work as the
+// manual next step. There is no Plan to open, so it must not tell anyone to open
+// one or to approve anything.
+func TestTheMultiStepMessageStartsNothingAndNamesGiveWork(t *testing.T) {
+	message := manualNextStepMessage(ClassifyPlanningRoute(PlanningRequest{ProposedTaskCount: 2}))
+	for _, want := range []string{"more than a single action", "I haven't started anything", "Give work"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("message lacks %q: %q", want, message)
+		}
 	}
-	if !strings.Contains(strings.ToLower(message), "approve") {
-		t.Errorf("message does not say approval happens there: %q", message)
+	lower := strings.ToLower(message)
+	for _, banned := range []string{"open the plan", "approve", "plan"} {
+		if strings.Contains(lower, banned) {
+			t.Errorf("message mentions %q, but there is nothing to open or approve: %q", banned, message)
+		}
+	}
+	// A route with no recorded reason still reads sensibly.
+	if got := manualNextStepMessage(PlanningClassification{}); !strings.Contains(got, "more than a single action") {
+		t.Errorf("fallback reason missing: %q", got)
 	}
 }
 

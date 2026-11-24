@@ -526,7 +526,7 @@ func (h *folderSetupHost) softwareReceipt(ctx context.Context, ws *workspace.Wor
 		if provenance := ws.GetTemplateProvenance(); provenance != nil && provenance.TemplateName != "" {
 			detail := "its settings were changed after setup"
 			if _, ok := softwareWorkflowOf(ws.SharedData); ok {
-				detail = "planning first; approved work waits for you, and planning documents stay in Ori"
+				detail = "work waits for you to start it, and planning documents stay in Ori"
 			}
 			rows = append(rows, personalassistant.FolderReceiptRow{Kind: "blueprint", Name: provenance.TemplateName, Detail: detail})
 		}

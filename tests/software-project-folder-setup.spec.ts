@@ -937,7 +937,7 @@ test.describe('after the server was restarted', () => {
     const receipt = (await list(page, '#personalAssistantFolderReceipt')).join(' | ');
     expect(receipt).toContain('widget (created)');
     expect(receipt).toContain('linked where it is, read-only');
-    expect(receipt).toContain('Code Project (planning first; approved work waits for you');
+    expect(receipt).toContain('Code Project (work waits for you to start it');
     expect(receipt).toContain('Development Assistant (development assistant, added)');
     expect(receipt).toContain('Assess this project and suggest a first task');
     expect(receipt).toContain('Starts when you press Start assessment');

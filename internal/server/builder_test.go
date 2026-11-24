@@ -119,11 +119,12 @@ func TestServerBuilder_Build_Integration(t *testing.T) {
 	if builder.workspacePlanPreflight() == nil {
 		t.Error("plan execution preflight not wired; enforced preconditions cannot be checked")
 	}
-	// The orchestrator must be able to write proposed multi-agent work down as
-	// a durable Plan. Without the drafter it falls back to the ephemeral stash,
-	// and the user has nothing versioned to approve.
-	if builder.multiAgentOrchestrator == nil || !builder.multiAgentOrchestrator.HasPlanDrafter() {
-		t.Error("orchestrator plan drafter not wired; proposed work would have no durable plan")
+	// The orchestrator is deliberately wired with no way to create a Plan (and
+	// chat with none): multi-agent work that needs new agents is answered with
+	// advice. That is structural now (the types no longer exist), so the build
+	// check is only that the orchestrator itself is there.
+	if builder.multiAgentOrchestrator == nil {
+		t.Error("multi-agent orchestrator not wired")
 	}
 	// Workspace import restores an exported workspace's personal_hq marker
 	// through the authoritative Personal HQ service. Unwired, the marker is

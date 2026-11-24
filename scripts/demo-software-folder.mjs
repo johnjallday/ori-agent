@@ -615,7 +615,7 @@ async function resumePhase(untouched) {
   for (const wanted of [
     new RegExp(`${projectName} \\(created\\)`),
     /linked where it is, read-only/,
-    /Code Project \(planning first; approved work waits for you/,
+    /Code Project \(work waits for you to start it/,
     /Development Assistant \(development assistant, added\)/,
     // Task state is separate from setup; do not guess whether the look finished.
     /Assess this project and suggest a first task/

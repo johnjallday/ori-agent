@@ -4060,13 +4060,11 @@ test('Operations Map inventory derives counts from existing page data', () => {
   assert.equal(counts.systems, 2);
 });
 
-// Plans must be REACHABLE from the workspace, not just routable.
-//
-// The pages and routes existed for several groups while nothing in the UI
-// linked to them — you had to type the URL. Green tests and a working route
-// are not the same thing as a destination somebody can find, which is exactly
-// the failure the per-group demo checkpoint exists to catch.
-test('the workspace view switch offers Plans as a real link', () => {
+// The Plans page stays routable for the plans a workspace already has, but the
+// header no longer offers it: a workspace with no Plans has no Plans
+// destination, and the only item of the old "More views" menu was Plans, so the
+// menu is gone with it. Existing plans are reached from Tickets.
+test('the workspace view switch offers no Plans link and no empty More views menu', () => {
   const commandView = Object.create(WorkspaceCommandView.prototype);
   Object.assign(commandView, {
     viewMode: 'details',
@@ -4080,11 +4078,11 @@ test('the workspace view switch offers Plans as a real link', () => {
   });
 
   const switcher = commandView.commandViewSwitchHTML();
-  assert.match(switcher, /href="\/workspaces\/marketing-site\/plans"/);
-  assert.match(switcher, />Plans</);
-  // An anchor, not a button: middle-click, cmd-click, and "copy link address"
-  // must behave the way a link does.
-  assert.match(switcher, /<a class="ws-cmd-view-btn ws-cmd-view-link"/);
+  assert.doesNotMatch(switcher, /\/plans|>Plans</);
+  assert.doesNotMatch(switcher, /More views|data-cmd-disclosure|<details/);
+  // The workspace's own views are untouched.
+  for (const mode of ['details', 'map', 'tickets'])
+    assert.match(switcher, new RegExp(`data-cmd-view-mode="${mode}"`));
 });
 
 const DASHBOARD_SURFACE_KEY = 'user:ori.dashboard:dashboard:main';
@@ -4325,15 +4323,6 @@ test('full task links use the slug while their return target preserves route sta
   assert.match(href, /^\/workspaces\/marketing-site\/task\/task%2F1\?return=/);
   assert.match(decodeURIComponent(href), /\/workspaces\/marketing-site\?panel=backlog/);
   assert.doesNotMatch(href, /workspace-uuid/);
-});
-
-// Without a workspace id there is no honest link to build, so none is rendered
-// rather than one pointing at /workspaces//plans.
-test('the Plans link is omitted when the workspace id is unknown', () => {
-  const commandView = Object.create(WorkspaceCommandView.prototype);
-  Object.assign(commandView, { viewMode: 'details', page: {} });
-
-  assert.ok(!commandView.commandViewSwitchHTML().includes('/plans'));
 });
 
 test('Operations Map controls expose accessible pressed and dialog state', () => {
@@ -10019,14 +10008,14 @@ test('HQ Overview: the header keeps identity and Settings, without facts or a wo
   assert.doesNotMatch(html, /ws-cmd-garrison|ws-cmd-work-first|data-cmd-admin|ws-cmd-mission"/);
 });
 
-test('HQ Overview uses the shared primary views, secondary links and Settings', () => {
+test('HQ Overview uses the shared primary views and Settings, with no Plans link or More views menu', () => {
   const { html } = hqDetailsMarkup();
   const nav = html.match(/<nav class="ws-cmd-view-switch"[^>]*>(.*?)<\/nav>/)[1];
   for (const mode of ['details', 'map', 'tickets'])
     assert.match(nav, new RegExp('data-cmd-view-mode="' + mode + '"'));
   assert.match(nav, />Overview<\/button>/);
-  const secondary = nav.match(/<details[^>]*data-cmd-disclosure="views"[^>]*>(.*?)<\/details>/)[1];
-  assert.match(secondary, /href="[^"]*\/plans">Plans/);
+  assert.doesNotMatch(nav, /<details|data-cmd-disclosure|More views/);
+  assert.doesNotMatch(nav, /\/plans|>Plans</);
   assert.doesNotMatch(nav, /\/canvas|>Canvas</);
   assert.doesNotMatch(nav, /Diagnostics|Orchestration Skills/);
   assert.match(html, /data-cmd-settings aria-haspopup="dialog"/);

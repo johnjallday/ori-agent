@@ -820,15 +820,10 @@ func (b *ServerBuilder) initializeOrchestration() error {
 	orch := orchestration.NewOrchestrator(b.st, b.workspaceStore, history, communicator, b.llmFactory, b.configManager, b.eventBus)
 	b.multiAgentOrchestrator = orch
 
-	// Proposed multi-agent work becomes a durable Plan draft rather than an
-	// ephemeral stash on the workspace, so the thing the user approves is a
-	// versioned record (FR-59, FR-149).
-	if b.workspacePlanService != nil {
-		orch.SetPlanDrafter(orchestratorPlanDrafter{
-			service: b.workspacePlanService,
-			agents:  b.resolvePlanAvailability,
-		})
-	}
+	// The orchestrator is deliberately given no way to create a Plan: proposed
+	// multi-agent work that needs new agents is answered with advice and starts
+	// nothing (orchestration.StatusNeedsManualWork). The Plan service is reached
+	// only through its own API.
 
 	// Wire gateway to orchestrator if initialized
 	if b.gateway != nil {

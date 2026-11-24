@@ -12,33 +12,16 @@ import {
   simulatedHQRead
 } from './fixtures/ui-consistency-workspace';
 
-async function verifyMoreViews(page: import('@playwright/test').Page, base: string, width: number) {
-  const disclosure = page.locator('[data-cmd-disclosure="views"]');
-  const summary = disclosure.locator('summary');
-  await summary.click();
-  await expect(disclosure).toHaveAttribute('open', '');
-  for (const destination of ['plans', 'canvas']) {
-    const link = disclosure.locator(`a[href="${base}/${destination}"]`);
-    await reachable(link, width <= 768 ? 44 : 32);
-    expect(
-      await link.evaluate(node => {
-        const box = node.getBoundingClientRect();
-        return [0.25, 0.75].every(x =>
-          [0.25, 0.75].every(y => {
-            const hit = document.elementFromPoint(
-              box.left + box.width * x,
-              box.top + box.height * y
-            );
-            return hit === node || node.contains(hit);
-          })
-        );
-      }),
-      'destination must paint above map content'
-    ).toBe(true);
-  }
-  await summary.press('Escape');
-  await expect(disclosure).not.toHaveAttribute('open');
-  await expect(summary).toBeFocused();
+// The header has no More views menu: Plans was its only item and the workspace
+// canvas is retired, so neither destination is linked from it.
+async function verifyNoMoreViews(
+  page: import('@playwright/test').Page,
+  base: string,
+  _width: number
+) {
+  await expect(page.locator('[data-cmd-disclosure="views"]')).toHaveCount(0);
+  for (const destination of ['plans', 'canvas'])
+    await expect(page.locator(`a[href="${base}/${destination}"]`)).toHaveCount(0);
 }
 
 let seeds: WorkspaceSeed[] = [];
@@ -111,7 +94,7 @@ for (const theme of ['light', 'dark'] as const)
           }))
         ).toEqual(placement);
       }
-      await verifyMoreViews(page, `/workspaces/${group.workspace.folder_slug}`, width);
+      await verifyNoMoreViews(page, `/workspaces/${group.workspace.folder_slug}`, width);
       await page.locator('[data-cmd-map-resources]').click();
       const resources = page.getByRole('dialog', { name: 'Resources', exact: true });
       await expect(resources).toBeVisible();
@@ -138,7 +121,7 @@ for (const theme of ['light', 'dark'] as const)
         'true'
       );
       await expect(page.locator('.ws-cmd-map-shell.is-hq')).toBeVisible();
-      await verifyMoreViews(page, `/workspaces/${member.workspace.folder_slug}`, width);
+      await verifyNoMoreViews(page, `/workspaces/${member.workspace.folder_slug}`, width);
       await capture(
         page,
         info,

@@ -642,15 +642,6 @@
                       </div>
                       <div class="col-sm-6">
                         <div class="form-check form-switch">
-                          <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-plan-enabled">
-                          <label class="form-check-label" for="workspace-detail-settings-plan-enabled">Enable structured planning</label>
-                        </div>
-                        <div class="workspace-detail-settings-field-hint">
-                          Turn this on when you want the workspace manager to create a more formal plan or staged workflow before moving into execution.
-                        </div>
-                      </div>
-                      <div class="col-sm-6">
-                        <div class="form-check form-switch">
                           <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-save-notes">
                           <label class="form-check-label" for="workspace-detail-settings-save-notes">Auto-save useful outputs as notes</label>
                         </div>
@@ -667,13 +658,31 @@
                           <div id="workspace-detail-settings-summary" class="workspace-detail-settings-summary-copy">Loading workspace settings...</div>
                         </div>
                       </div>
+                      <!--
+                        Existing plans. Ori no longer starts new plans, so none of
+                        these settings is an invitation to make one. Every control
+                        stays in the form, saved as loaded, because the plans a
+                        workspace already has keep using them: approved-plan file
+                        export, execution defaults, and the checks below. Folded
+                        away by default so a workspace with no plans does not read
+                        a planning setup it has no use for.
+                      -->
                       <div class="col-12" id="workspace-detail-settings-planning-fields">
-                        <div class="workspace-detail-settings-advanced">
-                          <div class="workspace-detail-settings-advanced-title">Planning &amp; Implementation Defaults</div>
+                        <details class="workspace-detail-settings-advanced workspace-detail-settings-existing-plans" id="workspace-detail-settings-existing-plans">
+                          <summary class="workspace-detail-settings-advanced-title">Existing plans</summary>
                           <div class="workspace-detail-settings-advanced-copy">
-                            These options are mainly useful when the workspace is being used like a software project with implementation steps and tracked planning artifacts, but they remain available here for any workspace that needs a more structured process.
+                            Ori no longer starts new plans. These settings still apply to the plans this workspace already has: their review, exported files and execution checks. Changing them does not start anything.
                           </div>
                           <div class="row g-3">
+                            <div class="col-sm-6">
+                              <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-plan-enabled">
+                                <label class="form-check-label" for="workspace-detail-settings-plan-enabled">Enable structured planning</label>
+                              </div>
+                              <div class="workspace-detail-settings-field-hint">
+                                Kept as saved. It does not start new plans.
+                              </div>
+                            </div>
                             <div class="col-sm-6">
                               <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" role="switch" id="workspace-detail-settings-require-scan">
@@ -733,7 +742,32 @@
                               </div>
                             </div>
                           </div>
-                        </div>
+                          <!--
+                            Planning policy, split into what the model is ASKED for
+                            and what compiled code CHECKS.
+
+                            The two sections are separate cards rather than one list
+                            because the difference is the point: a guidance line is
+                            a preference nothing verifies, and an enforced line is a
+                            check that runs. Mixing them taught users that the
+                            workspace would refuse things it happily does
+                            (FR-124, FR-128, FR-129).
+                          -->
+                          <div class="workspace-detail-settings-managed-card mt-3">
+                            <div class="workspace-detail-settings-summary-title">Model Guidance</div>
+                            <p class="workspace-detail-settings-field-hint">
+                              Preferences passed to the planner. These shape what it proposes; they are not checked afterwards.
+                            </p>
+                            <ul id="workspace-detail-settings-guidance" class="workspace-detail-settings-summary-copy"></ul>
+                          </div>
+                          <div class="workspace-detail-settings-managed-card mt-3">
+                            <div class="workspace-detail-settings-summary-title">Enforced Workflow Policy</div>
+                            <p class="workspace-detail-settings-field-hint">
+                              Checks Ori performs itself. Each one blocks the work it names.
+                            </p>
+                            <ul id="workspace-detail-settings-enforced" class="workspace-detail-settings-summary-copy" aria-live="polite"></ul>
+                          </div>
+                        </details>
                       </div>
                       <div class="col-12">
                         <div class="workspace-detail-settings-advanced">
@@ -773,35 +807,6 @@
                         <div class="workspace-detail-settings-managed-card">
                           <div class="workspace-detail-settings-summary-title">Structured Workflows</div>
                           <div id="workspace-detail-settings-managed-skills" class="workspace-detail-settings-summary-copy">No settings-managed workflows active.</div>
-                        </div>
-                      </div>
-                      <!--
-                        Planning policy, split into what the model is ASKED for
-                        and what compiled code CHECKS.
-
-                        The two sections are separate cards rather than one list
-                        because the difference is the point: a guidance line is
-                        a preference nothing verifies, and an enforced line is a
-                        check that runs. Mixing them taught users that the
-                        workspace would refuse things it happily does
-                        (FR-124, FR-128, FR-129).
-                      -->
-                      <div class="col-12">
-                        <div class="workspace-detail-settings-managed-card">
-                          <div class="workspace-detail-settings-summary-title">Model Guidance</div>
-                          <p class="workspace-detail-settings-field-hint">
-                            Preferences passed to the planner. These shape what it proposes; they are not checked afterwards.
-                          </p>
-                          <ul id="workspace-detail-settings-guidance" class="workspace-detail-settings-summary-copy"></ul>
-                        </div>
-                      </div>
-                      <div class="col-12">
-                        <div class="workspace-detail-settings-managed-card">
-                          <div class="workspace-detail-settings-summary-title">Enforced Workflow Policy</div>
-                          <p class="workspace-detail-settings-field-hint">
-                            Checks Ori performs itself. Each one blocks the work it names.
-                          </p>
-                          <ul id="workspace-detail-settings-enforced" class="workspace-detail-settings-summary-copy" aria-live="polite"></ul>
                         </div>
                       </div>
                     </div>
@@ -5542,6 +5547,14 @@
       background:
         linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015)),
         rgba(6, 12, 28, 0.74);
+    }
+
+    .workspace-detail-settings-existing-plans > summary {
+      cursor: pointer;
+    }
+
+    .workspace-detail-settings-existing-plans[open] > summary {
+      margin-bottom: 0.55rem;
     }
 
     .workspace-detail-settings-summary-title,

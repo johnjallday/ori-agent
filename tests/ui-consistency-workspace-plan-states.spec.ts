@@ -27,31 +27,16 @@ test.afterEach(async ({ page, request }) => {
 
 for (const theme of ['light', 'dark'] as const)
   for (const width of [320, 1440]) {
-    test(`Plans empty loading error and neutral create draft ${theme} ${width}`, async ({
+    test(`Plans empty loading and error states offer no way to create ${theme} ${width}`, async ({
       page,
       request
     }, info) => {
       seed = await createWorkspaceSeed(request);
       await freezeWorkspaceSeed(request, seed);
       const base = `/api/workspaces/${seed.workspace.id}`;
-      const settings = await (await request.get(`${base}/settings`)).json();
       await preparePage(page, theme, width);
       await workspaceMetadataReads(page);
       check = await guardWorkspaceReadTour(page, [seed]);
-      // Presentation only: do not enable structured/automatic planning on the
-      // real workspace merely to photograph the creation affordance.
-      await page.route(`**${base}/settings`, route => {
-        expect(route.request().method()).toBe('GET');
-        return route.fulfill({
-          json: {
-            ...settings,
-            settings: {
-              ...settings.settings,
-              planning: { ...settings.settings?.planning, enabled: true }
-            }
-          }
-        });
-      });
       let release!: () => void;
       const gate = new Promise<void>(resolve => {
         release = resolve;
@@ -78,7 +63,7 @@ for (const theme of ['light', 'dark'] as const)
           'workspace-plans-loading',
           {
             workspaceId: seed.workspace.id,
-            fixture: 'Deferred genuine empty list GET; enabled-policy presentation only'
+            fixture: 'Deferred genuine empty list GET'
           },
           { fullPage: false }
         );
@@ -87,27 +72,29 @@ for (const theme of ['light', 'dark'] as const)
       }
       await expect(page.locator('#plan-active-empty')).toBeVisible();
       await expect(page.locator('#plan-history-section')).toBeHidden();
-      await expect(page.locator('#plan-create-panel')).toBeVisible();
-      const field = page.locator('#plan-create-request');
-      await expect(field).toHaveValue('');
-      expect(await field.evaluate(node => node.matches(':user-invalid'))).toBe(false);
-      await page.locator('#plan-create-form button[type="submit"]').click();
-      await expect(page.locator('#plan-status')).toContainText('Describe what you want');
-      expect((await contrast(page.locator('#plan-status'))).ratio).toBeGreaterThanOrEqual(4.5);
-      await field.fill('Unsent fictional outline. Do not generate, approve or start work.');
+      // A workspace with no plan says creation is retired and points at Tickets;
+      // there is no form, no setup prompt and no Plan-enabling banner.
+      await expect(page.locator('#plan-retired-note')).toBeVisible();
+      await expect(page.locator('#plan-tickets-link')).toHaveAttribute(
+        'href',
+        `/workspaces/${seed.workspace.folder_slug}?tickets=all`
+      );
+      for (const gone of [
+        '#plan-create-panel',
+        '#plan-create-form',
+        '#plan-create-request',
+        '#plan-disabled-banner'
+      ])
+        await expect(page.locator(gone)).toHaveCount(0);
       await page.locator('#plan-refresh').click();
       await expect(page.locator('#plan-status')).toBeHidden();
-      await expect(field).toHaveValue(
-        'Unsent fictional outline. Do not generate, approve or start work.'
-      );
       await capture(
         page,
         info,
-        'workspace-plans-empty-create-draft',
+        'workspace-plans-empty-retired',
         {
           workspaceId: seed.workspace.id,
-          fixture:
-            'Real empty collection; policy GET projection only; blank submission rejected locally'
+          fixture: 'Real empty collection; no creation affordance'
         },
         { fullPage: false }
       );
@@ -115,9 +102,6 @@ for (const theme of ['light', 'dark'] as const)
       await page.locator('#plan-refresh').click();
       await expect(page.locator('#plan-status')).toContainText('Fictional local read refusal');
       expect((await contrast(page.locator('#plan-status'))).ratio).toBeGreaterThanOrEqual(4.5);
-      await expect(field).toHaveValue(
-        'Unsent fictional outline. Do not generate, approve or start work.'
-      );
       await reachable(page.locator('#plan-refresh'), width <= 768 ? 44 : 40);
       await capture(
         page,

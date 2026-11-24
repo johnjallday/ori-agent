@@ -1806,7 +1806,6 @@ export class WorkspaceCommandView {
     return workspaceNavigationHTML({
       mode: this.viewMode,
       dashboard: this.hasCustomDashboard(),
-      plans: this.plansLinkHTML(),
       ticketCount: TicketCounts.isKnown(this.currentTicketCounts())
         ? TicketCounts.openCount(this.currentTicketCounts())
         : '—',
@@ -1814,30 +1813,6 @@ export class WorkspaceCommandView {
         TicketCounts.describe(this.currentTicketCounts()) || 'Ticket counts unavailable',
       ticketAlert: this.hasAttentionTasks()
     });
-  }
-
-  // Plans is a LINK, not a fourth view mode.
-  //
-  // The other three swap what this page renders. Plans has its own canonical
-  // pages — /workspaces/{slug}/plans and .../plans/{planId} — because a plan is
-  // reviewed, edited, and approved on exactly one surface, and giving it an
-  // in-page mode here would be the second surface this feature exists to
-  // prevent (FR-145, FR-148, FR-149).
-  //
-  // It sits in the same switch so it is where someone looks for a workspace
-  // destination, and it is an <a> so middle-click, cmd-click, and "copy link
-  // address" all behave the way a link should.
-  plansLinkHTML() {
-    const workspaceSlug = this.workspaceSlug();
-    if (!workspaceSlug) return '';
-
-    return (
-      '<a class="ws-cmd-view-btn ws-cmd-view-link" href="' +
-      escapeHtml(workspacePageURL(workspaceSlug, ['plans'])) +
-      '">' +
-      escapeHtml('Plans') +
-      '</a>'
-    );
   }
 
   // quiet (the Map tab) says nothing while the folder is where it should be;

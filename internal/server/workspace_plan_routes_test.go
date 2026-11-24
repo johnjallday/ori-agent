@@ -98,6 +98,101 @@ func TestLegacyAssessmentBookmarkArrivesAtTheWorkspaceNotThePlansPage(t *testing
 	}
 }
 
+// The Plans collection lists the plans a workspace has; it offers no way to start
+// one. The creation form, the "turn planning on" banner and their copy are gone
+// from the served page, and an empty collection says creation is retired and
+// links to Tickets. The route itself, and every plan behind it, is unchanged.
+func TestWorkspacePlansPageOffersNoWayToCreateAPlan(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Plans Page Retired Workspace")
+
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug+"/plans", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, gone := range []string{
+		"plan-create-form", "plan-create-request", "plan-create-panel", "plan-disabled-banner",
+		"Start a plan", "Create plan", "What would you like planned", "Structured planning is off",
+	} {
+		if strings.Contains(body, gone) {
+			t.Errorf("the Plans page still carries %q", gone)
+		}
+	}
+	for _, want := range []string{
+		`id="plan-retired-note"`, `id="plan-active-list"`, `id="plan-history-list"`,
+		"/workspaces/" + workspace.Slug + "?tickets=all",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the Plans page lost %q", want)
+		}
+	}
+}
+
+// Workspace Settings keeps every planning control so a save writes the policy
+// back as loaded, but they sit in a folded "Existing plans" section, and the
+// copy no longer invites anyone to start a plan.
+func TestWorkspaceSettingsFoldsPlanningIntoExistingPlans(t *testing.T) {
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Settings Existing Plans Workspace")
+
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	body := rec.Body.String()
+
+	open := strings.Index(body, `id="workspace-detail-settings-existing-plans"`)
+	if open < 0 {
+		t.Fatal("the Existing plans section is missing from Workspace Settings")
+	}
+	closing := strings.Index(body[open:], "</details>")
+	if closing < 0 {
+		t.Fatal("the Existing plans section is not closed")
+	}
+	section := body[open : open+closing]
+	tagStart := strings.LastIndex(body[:open], "<details")
+	tagEnd := open + strings.Index(body[open:], ">")
+	if tagStart < 0 || strings.Contains(body[tagStart:tagEnd], " open") {
+		t.Error("the Existing plans section must be a <details> folded by default")
+	}
+	for _, id := range []string{
+		"workspace-detail-settings-plan-enabled", "workspace-detail-settings-planning-mode",
+		"workspace-detail-settings-clarification-mode", "workspace-detail-settings-tasks-dir",
+		"workspace-detail-settings-execution-mode", "workspace-detail-settings-write-prd",
+		"workspace-detail-settings-write-task-list", "workspace-detail-settings-require-branch",
+		"workspace-detail-settings-require-scan", "workspace-detail-settings-sync-tasks",
+		"workspace-detail-settings-guidance", "workspace-detail-settings-enforced",
+	} {
+		if !strings.Contains(section, `id="`+id+`"`) {
+			t.Errorf("control %s is not inside the Existing plans section", id)
+		}
+		if strings.Count(body, `id="`+id+`"`) != 1 {
+			t.Errorf("control %s must exist exactly once", id)
+		}
+	}
+	for _, gone := range []string{
+		"to create a more formal plan", "Turn this on when you want the workspace manager to create",
+	} {
+		if strings.Contains(body, gone) {
+			t.Errorf("Workspace Settings still invites starting a plan: %q", gone)
+		}
+	}
+	// The controls that are not about plans stay where they were, outside it.
+	for _, id := range []string{
+		"workspace-detail-settings-mode", "workspace-detail-settings-confirmation",
+		"workspace-detail-settings-ask-handoff", "workspace-detail-settings-save-notes",
+	} {
+		if strings.Contains(section, `id="`+id+`"`) {
+			t.Errorf("control %s must not be folded into Existing plans", id)
+		}
+	}
+}
+
 // A Plan detail page must carry its own Plan ID, so the client asks the
 // workspace-scoped API for that exact Plan rather than inferring one.
 func TestWorkspacePlanDetailPageCarriesPlanID(t *testing.T) {

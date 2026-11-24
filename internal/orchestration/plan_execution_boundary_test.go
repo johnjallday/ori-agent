@@ -2,7 +2,6 @@ package orchestration
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,16 +11,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
-
-// failingDrafter stands in for an unavailable or refusing Plan service: the
-// shape a drafter failure takes when planning is disabled for a workspace, the
-// store errors, or the drafter was never wired.
-type failingDrafter struct{ calls int }
-
-func (d *failingDrafter) DraftPlan(context.Context, string, string, *types.PlannerOutput) (string, error) {
-	d.calls++
-	return "", errors.New("workspace planning is not enabled")
-}
 
 func newBoundaryOrchestrator(t *testing.T) (*Orchestrator, store.Store, workspace.Store) {
 	t.Helper()
@@ -58,44 +47,77 @@ func plannedWorkNeedingANewAgent() (*types.PlannerOutput, types.PlannerDecision)
 	}
 }
 
-// Work that needs an agent which does not exist yet is never run, whether or not
-// a durable Plan could be drafted for it. A drafter failure must not turn into
-// execution or into an agent created behind the user's back.
-func TestExecutePlannedTask_DynamicAgentWorkIsNeverRun(t *testing.T) {
-	cases := map[string]PlanDrafter{
-		"no drafter wired":    nil,
-		"drafter that errors": &failingDrafter{},
+func workspaceCount(t *testing.T, store workspace.Store) int {
+	t.Helper()
+	ids, err := store.List()
+	if err != nil {
+		t.Fatalf("list workspaces: %v", err)
 	}
-	for name, drafter := range cases {
-		t.Run(name, func(t *testing.T) {
-			orch, agentStore, workspaceStore := newBoundaryOrchestrator(t)
-			if drafter != nil {
-				orch.SetPlanDrafter(drafter)
-			}
-			plan, decision := plannedWorkNeedingANewAgent()
+	return len(ids)
+}
 
-			result, err := orch.ExecutePlannedTask(context.Background(), "default", "Get weather", plan, decision, time.Minute)
-			if err != nil {
-				t.Fatalf("ExecutePlannedTask: %v", err)
-			}
-			if result.Status == "completed" || result.FinalOutput != "" {
-				t.Fatalf("work needing a new agent must not run: status=%q output=%q", result.Status, result.FinalOutput)
-			}
-			if len(result.SubResults) != 0 {
-				t.Fatalf("no step may have produced a result: %v", result.SubResults)
-			}
-			if _, exists := agentStore.GetAgent("weather-agent"); exists {
-				t.Fatalf("the proposed agent must not be created without an approval")
-			}
-			if result.WorkspaceID != "" {
-				ws, err := workspaceStore.Get(result.WorkspaceID)
-				if err != nil {
-					t.Fatalf("load workspace: %v", err)
-				}
-				if len(ws.Tasks) != 0 {
-					t.Fatalf("no ticket may be delegated for the proposed work, got %d", len(ws.Tasks))
-				}
-			}
-		})
+// Work that needs an agent which does not exist yet is not run, not proposed and
+// not queued. It used to open a durable Plan and queue agent requests for an
+// inline approval; now the decision is made before any side effect, so there is
+// no workspace, no stash, no request, no event, no new agent and no run to
+// clean up if anything later fails.
+func TestExecutePlannedTask_WorkNeedingANewAgentStartsNothing(t *testing.T) {
+	orch, agentStore, workspaceStore := newBoundaryOrchestrator(t)
+	plan, decision := plannedWorkNeedingANewAgent()
+	agentsBefore := len(agentStore.ListAgents())
+
+	result, err := orch.ExecutePlannedTask(context.Background(), "default", "Get weather", plan, decision, time.Minute)
+	if err != nil {
+		t.Fatalf("ExecutePlannedTask: %v", err)
+	}
+	if result.Status != StatusNeedsManualWork {
+		t.Fatalf("status = %q, want %q", result.Status, StatusNeedsManualWork)
+	}
+	if result.FinalOutput != "" || len(result.SubResults) != 0 {
+		t.Fatalf("no step may have run: output=%q results=%v", result.FinalOutput, result.SubResults)
+	}
+	if result.WorkspaceID != "" || result.PendingPlanID != "" || result.PlanID != "" ||
+		len(result.DynamicAgentRequests) != 0 {
+		t.Fatalf("nothing may be proposed or queued: %+v", result)
+	}
+	if result.PlannerDecision == nil || !result.PlannerDecision.MultiAgent {
+		t.Fatalf("the planner's decision is still reported: %+v", result.PlannerDecision)
+	}
+	if got := workspaceCount(t, workspaceStore); got != 0 {
+		t.Fatalf("a workspace was created for work that was not started (%d)", got)
+	}
+	if _, exists := agentStore.GetAgent("weather-agent"); exists {
+		t.Fatalf("the proposed agent must not be created")
+	}
+	if got := len(agentStore.ListAgents()); got != agentsBefore {
+		t.Fatalf("agent roster changed: %d -> %d", agentsBefore, got)
+	}
+}
+
+// The decision is about missing agents, not about multi-agent work in general:
+// work for agents that exist takes the same path it always did (a workspace is
+// opened and the steps are delegated), so this change cannot have turned every
+// multi-agent request into advice.
+func TestExecutePlannedTask_WorkForExistingAgentsStillTakesTheNormalPath(t *testing.T) {
+	orch, _, workspaceStore := newBoundaryOrchestrator(t)
+	plan := &types.PlannerOutput{
+		ComplexityScore: 8,
+		Rationale:       "one general step",
+		Tasks: []types.PlannerTask{{
+			ID:           "step-1",
+			Description:  "Summarize the notes",
+			RequiredRole: types.RoleGeneral,
+		}},
+	}
+	decision := types.PlannerDecision{ComplexityScore: 8, Threshold: 6, Mode: "auto", MultiAgent: true}
+
+	// Nobody answers the delegated step, so the run times out; that it got that
+	// far (a workspace, a delegation) is the point.
+	result, _ := orch.ExecutePlannedTask(context.Background(), "default", "Summarize", plan, decision, 150*time.Millisecond)
+	if result != nil && result.Status == StatusNeedsManualWork {
+		t.Fatalf("work for existing agents must not be turned into advice")
+	}
+	if got := workspaceCount(t, workspaceStore); got != 1 {
+		t.Fatalf("the normal path opens one workspace for the run, got %d", got)
 	}
 }

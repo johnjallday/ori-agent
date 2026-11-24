@@ -30,8 +30,8 @@
             </div>
             <h1 class="plans-title">Plans</h1>
             <p class="plans-subtitle">
-              A plan is proposed work you review and approve before anything is created or run.
-              Creating a ticket directly skips that review and starts from an already-decided unit of work.
+              The plans this workspace already has. Each keeps its own review and approval, and
+              opening one starts nothing.
             </p>
           </div>
           <div class="plans-hero-actions">
@@ -46,45 +46,24 @@
              and failure outcomes without the focus being stolen (FR-161). -->
         <p id="plan-status" class="plans-status" role="status" aria-live="polite" hidden></p>
 
-        <!-- Planning off: history stays readable and Settings is one link away.
-             Nothing here turns planning on (FR-159). -->
-        <section id="plan-disabled-banner" class="plans-disabled-banner ui-section" hidden>
-          <h2 class="plans-disabled-title">Structured planning is off for this workspace</h2>
+        <!-- Nothing here creates a plan. A workspace with no plans says so and
+             points at Tickets; a plan that exists is listed whatever the
+             workspace's planning setting says (FR-159). -->
+        <section id="plan-retired-note" class="plans-retired-note ui-section" hidden>
+          <h2 class="plans-section-title">No plans in this workspace</h2>
           <p>
-            Existing plans below stay readable. To draft new ones, turn on structured planning in
-            Workspace Settings.
+            Ori no longer starts new plans. To hand this workspace some work, use Give work or
+            add a ticket.
           </p>
-          <a class="plans-settings-link modern-btn modern-btn-secondary modern-btn-sm" href="/workspaces/{{.Extra.WorkspaceSlug}}?panel=settings">
-            Open Workspace Settings
+          <a id="plan-tickets-link" class="plans-tickets-link modern-btn modern-btn-secondary modern-btn-sm" href="/workspaces/{{.Extra.WorkspaceSlug}}?tickets=all">
+            Open Tickets
           </a>
-        </section>
-
-        <section id="plan-create-panel" class="plans-create-panel ui-section" hidden>
-          <h2 class="plans-section-title">Start a plan</h2>
-          <form id="plan-create-form" class="plans-create-form">
-            <label class="plans-create-label" for="plan-create-request">
-              What would you like planned?
-            </label>
-            <textarea
-              id="plan-create-request"
-              class="plans-create-input form-control"
-              rows="3"
-              placeholder="Describe the outcome you want. Ori will draft a plan for you to review."
-            ></textarea>
-            <p class="plans-create-hint">
-              Creating a plan does not create tickets or start work. You approve an exact version first.
-            </p>
-            <button type="submit" class="plans-create-btn modern-btn modern-btn-primary">Create plan</button>
-          </form>
         </section>
 
         <section class="plans-section" aria-labelledby="plan-active-heading">
           <h2 id="plan-active-heading" class="plans-section-title">Active</h2>
           <ul id="plan-active-list" class="plans-list"></ul>
-          <p id="plan-active-empty" class="plans-empty" hidden>
-            No active plans. A plan is for work worth reviewing before it starts —
-            for anything already decided, create a ticket directly from the workspace.
-          </p>
+          <p id="plan-active-empty" class="plans-empty" hidden>No active plans.</p>
         </section>
 
         <section id="plan-history-section" class="plans-section" aria-labelledby="plan-history-heading" hidden>
@@ -161,37 +140,19 @@
       color: var(--danger-text);
     }
 
-    .plans-disabled-banner,
-    .plans-create-panel {
+    .plans-retired-note {
       padding: var(--space-4);
       margin-bottom: 1.5rem;
     }
 
-    .plans-disabled-title,
     .plans-section-title {
       font-size: 1.05rem;
       margin: 0 0 0.5rem;
     }
 
-    .plans-settings-link {
+    .plans-tickets-link {
       display: inline-block;
       margin-top: 0.35rem;
-    }
-
-    .plans-create-form {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-
-    .plans-create-hint {
-      margin: 0;
-      font-size: 0.85rem;
-      color: var(--text-secondary);
-    }
-
-    .plans-create-btn {
-      align-self: flex-start;
     }
 
     .plans-section {

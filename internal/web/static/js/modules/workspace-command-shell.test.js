@@ -78,25 +78,22 @@ test('a detached shared-header opener resolves to its live replacement', () => {
   assert.equal(view.resolveStatModalTrigger(opener), replacement);
 });
 
-test('Overview keeps the details key; primary modes and secondary native links stay distinct', () => {
-  const html = workspaceNavigationHTML({
-    mode: 'details',
-    dashboard: true,
-    plans: '<a href="/workspaces/w/plans">Plans</a>'
-  });
+test('Overview keeps the details key; the primary modes stand alone with no More views menu', () => {
+  const html = workspaceNavigationHTML({ mode: 'details', dashboard: true });
   assert.match(html, /data-cmd-view-mode="details" aria-pressed="true">Overview/);
   for (const key of ['map', 'tickets', 'dashboard'])
     assert.match(html, new RegExp(`data-cmd-view-mode="${key}"`));
   assert.match(html, /data-cmd-program-destinations/);
-  assert.match(
-    html,
-    /<details[^>]*data-cmd-disclosure="views"[\s\S]*href="\/workspaces\/w\/plans"/
-  );
-  // The workspace canvas is retired: More views lists no Canvas, even if a caller still passes one.
-  assert.doesNotMatch(html, />Canvas</);
+  // Plans was the only item of More views; both are gone, even for a caller that
+  // still passes a link for it. The workspace canvas stays retired too.
+  assert.doesNotMatch(html, /More views|<details|data-cmd-disclosure|>Canvas</);
   assert.doesNotMatch(
-    workspaceNavigationHTML({ mode: 'details', plans: '', canvas: '/workspaces/w/canvas' }),
-    /More views|>Canvas</
+    workspaceNavigationHTML({
+      mode: 'details',
+      plans: '<a href="/workspaces/w/plans">Plans</a>',
+      canvas: '/workspaces/w/canvas'
+    }),
+    /More views|\/plans|>Plans<|>Canvas</
   );
   assert.doesNotMatch(html, /data-cmd-view-mode="(?:plans|canvas)"/);
   assert.doesNotMatch(workspaceNavigationHTML({ mode: 'map' }), /data-cmd-view-mode="dashboard"/);

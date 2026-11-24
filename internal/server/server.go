@@ -921,7 +921,8 @@ func (s *Server) serveWorkspaceCatalog(w http.ResponseWriter, workspaceID, works
 }
 
 // serveWorkspacePlans renders the canonical Plans destination for a workspace:
-// Active and History, plus creation when planning is enabled (FR-145, FR-146).
+// the Active and History lists of the plans it already has (FR-145, FR-146).
+// It offers no way to start a new one; the Plan API behind it is unchanged.
 func (s *Server) serveWorkspacePlans(w http.ResponseWriter, workspaceID, workspaceSlug string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Plans - Ori Agent"

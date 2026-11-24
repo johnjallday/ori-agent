@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/llm"
-	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspaceplan"
 	"github.com/johnjallday/ori-agent/internal/workspacepolicy"
@@ -182,91 +181,6 @@ func (m planTaskMutator) MutateTask(workspaceID, taskID string, fn func(*workspa
 	})
 }
 
-// chatPlanOpener lets chat start a durable Plan without handing it the plan
-// service.
-//
-// It exposes exactly one operation. Chat routes work into a Plan and links to
-// it; every other verb — edit, review, compare, approve — stays on Plan Detail,
-// and the narrowness of this type is what makes that a fact rather than a
-// convention (FR-19, FR-149).
-type chatPlanOpener struct {
-	service *workspaceplan.Service
-}
-
-func (o chatPlanOpener) OpenPlan(ctx context.Context, workspaceID, request, actor string) (string, error) {
-	if o.service == nil {
-		return "", fmt.Errorf("workspace planning is not configured")
-	}
-	plan, err := o.service.Create(ctx, workspaceID, workspaceplan.CreateInput{
-		// The request is stored exactly as the user typed it, because the
-		// clarifying and drafting that follow are about THAT sentence (FR-21).
-		Request: request,
-		Origin: workspaceplan.Origin{
-			Kind:      workspaceplan.OriginChat,
-			Actor:     actor,
-			AgentName: actor,
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-	return plan.ID, nil
-}
-
-// orchestratorPlanDrafter turns planner output into a durable Plan draft.
-//
-// The orchestrator proposes; this writes the proposal down where a person can
-// read and approve it. Nothing here approves anything: the Plan lands as a
-// draft, and the only path to Tasks is still a consumed approval on Plan
-// Detail (FR-59, FR-149).
-type orchestratorPlanDrafter struct {
-	service *workspaceplan.Service
-	agents  func(ctx context.Context, workspaceID string) workspaceplan.ValidationContext
-}
-
-func (d orchestratorPlanDrafter) DraftPlan(ctx context.Context, workspaceID, request string, output *types.PlannerOutput) (string, error) {
-	if d.service == nil {
-		return "", fmt.Errorf("workspace planning is not configured")
-	}
-
-	// The roster is read here so a suggested agent that does not exist becomes
-	// a required capability rather than an assignment nobody approved.
-	var available []string
-	if d.agents != nil {
-		available = d.agents(ctx, workspaceID).AvailableAgents
-	}
-	conversion, err := workspaceplan.FromPlannerOutput(request, output, available)
-	if err != nil {
-		return "", err
-	}
-
-	plan, err := d.service.Create(ctx, workspaceID, workspaceplan.CreateInput{
-		Request: request,
-		Origin: workspaceplan.Origin{
-			Kind:  workspaceplan.OriginOrchestration,
-			Actor: "orchestrator",
-		},
-	})
-	if err != nil {
-		return "", err
-	}
-
-	objective := strings.TrimSpace(output.Rationale)
-	if objective == "" {
-		objective = request
-	}
-	if _, err := d.service.Store().UpdatePlanDraft(ctx, workspaceID, plan.ID, plan.DraftRevision,
-		workspaceplan.DraftUpdate{
-			Title:     plan.Title,
-			Objective: objective,
-			Content:   conversion.Content,
-			UpdatedAt: d.service.Now(),
-		}); err != nil {
-		return plan.ID, err
-	}
-	return plan.ID, nil
-}
-
 // workspacePlanPreflight returns the compiled enforcement behind a Plan's
 // execution preconditions.
 //
@@ -425,11 +339,6 @@ func (b *ServerBuilder) attachWorkspacePlanExecutor() {
 		b.workspacePlanService, b.workspaceStore, options...)
 	b.workspacePlanHandler.SetExecutor(b.workspacePlanExecutor)
 	b.workspacePlanHandler.SetSlots(slots)
-
-	// Chat can now open a durable Plan for work it must not approve inline.
-	if b.chatHandler != nil {
-		b.chatHandler.SetPlanOpener(chatPlanOpener{service: b.workspacePlanService})
-	}
 
 	// Guidance and enforced policy are wired HERE rather than during handler
 	// construction, for the same reason as everything else in this function:
