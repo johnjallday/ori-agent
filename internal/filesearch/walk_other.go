@@ -2,7 +2,12 @@
 
 package filesearch
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+func rootExistedAt(string, string, time.Time) bool { return false }
 
 func dispatch(context.Context, Source, entry, bool, func(context.Context, string, string) error) error {
 	return ErrUnavailable

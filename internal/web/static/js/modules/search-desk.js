@@ -122,11 +122,25 @@ export function mountFileSearch(root, compact = false) {
     channel?.postMessage('landing');
     location.replace(target === 'search' ? '/search' : '/?home=1');
   }
+  async function setupReviewedFolder(review) {
+    const { reviewExisting, openFolderReview } = await import('./folder-search-review.js');
+    if (!review.matches?.length) {
+      openFolderReview(review);
+      return;
+    }
+    const connection = await reviewExisting(review);
+    if (!connection) return;
+    scope = connection.source;
+    term.value = '';
+    channel?.postMessage('changed');
+    await query();
+    term.focus();
+  }
   async function choose(kind, button) {
     if (document.body.dataset.workspaceReady === 'true') {
-      const { chooseSearchFolder, openFolderReview } = await import('./folder-search-review.js');
+      const { chooseSearchFolder } = await import('./folder-search-review.js');
       const review = await chooseSearchFolder(kind);
-      if (review) openFolderReview(review);
+      if (review) await setupReviewedFolder(review);
       else {
         notice.textContent = 'No folder chosen.';
         button.focus();
@@ -215,6 +229,18 @@ export function mountFileSearch(root, compact = false) {
           element('strong', names.get(s.id)),
           element('span', `${s.state} · ${s.count} files`)
         );
+        if (document.body.dataset.workspaceReady === 'true' && s.state !== 'unavailable') {
+          if (s.workspace) {
+            const open = element('a', `Open ${s.workspace.name}`);
+            open.href = `/workspaces/${encodeURIComponent(s.workspace.slug)}`;
+            li.append(open);
+          } else
+            li.append(
+              act('Connect to workspace', async () =>
+                setupReviewedFolder(await request('review-source', { id: s.id }))
+              )
+            );
+        }
         if (s.reason) li.append(element('span', s.reason));
         if (s.mapped_at)
           li.append(

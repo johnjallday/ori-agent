@@ -104,7 +104,8 @@ func TestExternalAnchorAndSearchHaveIndependentWriteBoundaries(t *testing.T) {
 }
 
 func TestSearchableAnchorUsesOneReviewedSelection(t *testing.T) {
-	for _, consent := range []bool{true, false} {
+	for _, scenario := range []string{"allow", "deny", "failed grant"} {
+		consent := scenario != "deny"
 		h, managed, _, cleanup := templateTestEnv(t)
 		t.Cleanup(cleanup)
 		home := canonicalAnchorTestDir(t)
@@ -112,7 +113,14 @@ func TestSearchableAnchorUsesOneReviewedSelection(t *testing.T) {
 		if err := os.Mkdir(root, 0700); err != nil {
 			t.Fatal(err)
 		}
-		s, e := filesearch.New(t.Context(), filesearch.Options{DB: h.store.DB().DB, Policy: func() filesearch.Policy { return filesearch.Policy{Home: home, Protected: []string{managed}} }, Pick: func(context.Context) (string, bool, error) { return root, true, nil }})
+		s, e := filesearch.New(t.Context(), filesearch.Options{DB: h.store.DB().DB, Policy: func() filesearch.Policy { return filesearch.Policy{Home: home, Protected: []string{managed}} }, Pick: func(context.Context) (string, bool, error) { return root, true, nil }, ValidLink: func(owner, path string, m filesearch.WorkspaceMatch) bool {
+			ws, err := h.workspaceStore.Get(m.ID)
+			if err != nil || ws.OwnerUserID != owner {
+				return false
+			}
+			ref, err := ws.GetDirectoryReference(m.Link)
+			return err == nil && ref.Path == path && ref.WorkspaceID == ws.ID
+		}})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -138,6 +146,11 @@ func TestSearchableAnchorUsesOneReviewedSelection(t *testing.T) {
 		if ws, e := h.store.ListWorkspaces(t.Context()); e != nil || len(ws) != 0 {
 			t.Fatal("review created workspace", e)
 		}
+		if scenario == "failed grant" {
+			if _, err := s.DB.Exec(`CREATE TRIGGER fail_grant BEFORE INSERT ON filename_sources BEGIN SELECT RAISE(ABORT,'fixture grant failure'); END`); err != nil {
+				t.Fatal(err)
+			}
+		}
 		w, body := creationOperationRequest(t, h, http.MethodPost, "/"+op+"/confirm", map[string]any{"review_digest": digest})
 		if w.Code != http.StatusCreated {
 			t.Fatalf("confirm %d %s", w.Code, w.Body)
@@ -155,7 +168,30 @@ func TestSearchableAnchorUsesOneReviewedSelection(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if consent {
+		if scenario == "failed grant" {
+			if len(ss) != 0 || body["search_warning"] == nil || body["directory_reference_id"] != ref.ID {
+				t.Fatal("missing partial receipt", body)
+			}
+			if _, err := s.DB.Exec(`DROP TRIGGER fail_grant`); err != nil {
+				t.Fatal(err)
+			}
+			intent, err := s.Begin("local", "custom")
+			if err != nil {
+				t.Fatal(err)
+			}
+			again, err := s.Review(t.Context(), "local", intent)
+			if err != nil || len(again.Matches) != 1 || again.Matches[0].Verify || again.Matches[0].ID != id {
+				t.Fatalf("recovery did not recover persisted link: %+v %v", again, err)
+			}
+			connected, err := s.Connect(t.Context(), "local", again.ID, id, ref.ID, false)
+			if err != nil || connected.Source == "" {
+				t.Fatalf("failed to retry missing effect: %v", err)
+			}
+			all, err := h.store.ListWorkspaces(t.Context())
+			if err != nil || len(all) != 1 || all[0].ID != id {
+				t.Fatal("recovery duplicated creation", err)
+			}
+		} else if consent {
 			if len(ss) != 1 || ss[0].ID != body["filename_source_id"] || ref.ID != body["directory_reference_id"] {
 				t.Fatal("receipt did not identify persisted anchor and grant")
 			}

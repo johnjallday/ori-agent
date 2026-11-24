@@ -678,9 +678,15 @@ const sessionManager = {
       choice.pending = true;
       this.refreshWizardChrome();
       try {
-        const { chooseSearchFolder } = await import('./folder-search-review.js');
+        const { chooseSearchFolder, reviewExisting } = await import('./folder-search-review.js');
         const review = await chooseSearchFolder(kind);
-        if (review && this.anchorChoice === choice) this.applySearchFolderReview(review, false);
+        if (review && this.anchorChoice === choice) {
+          if (review.matches?.length) {
+            const result = await reviewExisting(review, document.getElementById('addFolderModal'));
+            if (result && this.anchorChoice === choice)
+              window.location.assign(`/workspaces/${encodeURIComponent(result.workspace.slug)}`);
+          } else this.applySearchFolderReview(review, false);
+        }
       } catch (error) {
         this.showToast(error.message, 'warning');
       } finally {
@@ -3946,6 +3952,11 @@ const sessionManager = {
     if (consentRow) consentRow.hidden = !enabled || !choice?.review;
     const consent = document.getElementById('workspaceSearchConsent');
     if (consent) consent.checked = Boolean(choice?.search);
+    const consentLabel = document.getElementById('workspaceSearchConsentLabel');
+    if (consentLabel)
+      consentLabel.textContent = choice?.review?.source
+        ? 'Connect this workspace to the existing filename index. Leaving this off does not remove the folder from Files.'
+        : 'Index this folder’s filenames, locations and dates in Files on this Mac.';
     const pathInput = document.getElementById('workspaceAnchorPath');
     if (pathInput) pathInput.readOnly = Boolean(choice?.review);
     const status = document.getElementById('workspaceAnchorStatus');
@@ -5232,7 +5243,9 @@ const sessionManager = {
       rows.push({
         label: 'Files',
         value: this.anchorChoice.search
-          ? 'Index filenames, locations and dates on this Mac.'
+          ? this.anchorChoice.review.source
+            ? 'Connect the existing filename index without rescanning.'
+            : 'Index filenames, locations and dates on this Mac.'
           : 'No new search permission.',
         detail:
           this.anchorChoice.review.kind === 'downloads'

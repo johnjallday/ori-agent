@@ -5,7 +5,8 @@ import { installLocalCdn } from './helpers/offline-cdn';
 
 const fixture = process.env.ORI_SEARCH_FIRST_FIXTURE;
 test.skip(
-  !fixture || process.env.ORI_SEARCH_FIRST_SCENARIO !== 'folder-backed',
+  !fixture ||
+    !['folder-backed', 'folder-return'].includes(process.env.ORI_SEARCH_FIRST_SCENARIO || ''),
   'requires an isolated split profile'
 );
 test('Files uses the workspace review; selection alone makes nothing', async ({
@@ -14,6 +15,7 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
   request,
   browserName
 }) => {
+  test.skip(process.env.ORI_SEARCH_FIRST_SCENARIO !== 'folder-backed', 'initial launch only');
   expect(new URL(baseURL!).hostname).toBe('localhost');
   expect(readFileSync(join(fixture!, '.search-first-fixture'), 'utf8')).toBe('synthetic-v1\n');
   expect(readFileSync(join(fixture!, '.search-first-test-url'), 'utf8').trim()).toBe(baseURL);
@@ -65,7 +67,9 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
     await (
       await request.get('/api/file-search/sources', { headers: { 'X-Ori-Search': '1' } })
     ).json();
-  expect(await sources()).toEqual([]);
+  const [legacy] = await sources();
+  expect(legacy.label).toBe('Downloads');
+  expect(legacy.workspace).toBeUndefined();
   await page.screenshot({
     path: `tasks/evidence-folder-backed-search-locations/${browserName}/project-review.png`
   });
@@ -79,7 +83,10 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
   const body = await response.json();
   expect(body.folder.name).toBe('Research archive');
   expect(body.filename_source_id).toBeTruthy();
-  expect((await sources()).map((s: { id: string }) => s.id)).toEqual([body.filename_source_id]);
+  expect((await sources()).map((s: { id: string }) => s.id)).toEqual([
+    legacy.id,
+    body.filename_source_id
+  ]);
   await expect(review.getByRole('button', { name: 'Open workspace', exact: true })).toBeVisible();
   await page.screenshot({
     path: `tasks/evidence-folder-backed-search-locations/${browserName}/project-created.png`
@@ -93,4 +100,84 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
     new RegExp('/workspaces/' + body.folder.folder_slug + '(?:[/?#]|$)')
   );
   await expect(page.getByText('Research archive', { exact: true }).first()).toBeVisible();
+});
+
+test('Restart keeps workspace identity and does not adopt an independent grant', async ({
+  page,
+  request,
+  baseURL,
+  browserName
+}) => {
+  test.skip(process.env.ORI_SEARCH_FIRST_SCENARIO !== 'folder-return', 'restart only');
+  expect(new URL(baseURL!).hostname).toBe('localhost');
+  expect(readFileSync(join(fixture!, '.search-first-test-url'), 'utf8').trim()).toBe(baseURL);
+  await installLocalCdn(page);
+  const sources = async () =>
+    await (
+      await request.get('/api/file-search/sources', { headers: { 'X-Ori-Search': '1' } })
+    ).json();
+  const [legacy, project] = await sources();
+  expect(project.workspace.name).toBe('Research archive');
+  expect(legacy.label).toBe('Downloads');
+  expect(legacy.workspace).toBeUndefined();
+  await page.goto('/?create=1');
+  await page.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
+  await page.locator('#wizardNextBtn').click();
+  await page.locator('#workspaceFolderModeAnchored').check();
+  await page.locator('[data-search-folder="custom"]').click();
+  await expect(page).toHaveURL(new RegExp('/workspaces/' + project.workspace.slug + '$'));
+  await page.goto('/search');
+  await page.getByText('Manage search locations', { exact: true }).click();
+  await page.getByRole('button', { name: 'Connect to workspace', exact: true }).click();
+  await page.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#workspaceSearchConsentLabel')).toContainText(
+    'existing filename index'
+  );
+  await page.locator('#folderNameInput').fill('My downloads');
+  await page.locator('#wizardNextBtn').click();
+  await page.getByRole('checkbox', { name: 'Create without agents' }).check();
+  await page.locator('#wizardNextBtn').click();
+  const review = page.locator('#workspaceCreationReviewPanel');
+  await expect(review).toContainText('without rescanning');
+  await review.getByRole('button', { name: 'Use automatic placement' }).click();
+  await review.locator('[data-placement-action="confirm"]').click();
+  await expect(review.getByRole('button', { name: 'Search this folder in Files' })).toBeVisible();
+  const [connected, same] = await sources();
+  expect(same.workspace.id).toBe(project.workspace.id);
+  expect(connected.id).toBe(legacy.id);
+  expect(connected.generation).toBe(legacy.generation);
+  expect(connected.workspace.name).toBe('My downloads');
+  await review.getByRole('button', { name: 'Search this folder in Files' }).click();
+  await expect(page.locator('#title')).toHaveText('Downloads');
+  await page.screenshot({
+    path: `tasks/evidence-folder-backed-search-locations/${browserName}/legacy-connected.png`
+  });
+  // Seed two real pre-feature user links to the same separate folder. Neither
+  // one is authority to start search until the owner chooses that exact link.
+  for (const ws of [connected.workspace, same.workspace]) {
+    expect(
+      (
+        await request.post(`/api/workspaces/${ws.id}/directories`, {
+          data: { name: 'Documents', path: join(fixture!, 'home', 'Documents') }
+        })
+      ).ok()
+    ).toBeTruthy();
+  }
+  await page.getByRole('button', { name: /Add folder/ }).click();
+  await page.getByRole('button', { name: 'Documents', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Connect folder to workspace' });
+  await expect(dialog).toBeVisible();
+  const allow = dialog.getByRole('button', { name: 'Allow filename search' });
+  await expect(allow).toBeDisabled();
+  await expect(dialog.getByRole('combobox').locator('option')).toHaveCount(3);
+  await page.screenshot({
+    path: `tasks/evidence-folder-backed-search-locations/${browserName}/choose-workspace.png`
+  });
+  await dialog.getByRole('combobox').selectOption({ index: 1 });
+  await expect(allow).toBeDisabled();
+  await dialog.getByRole('checkbox').check();
+  await allow.click();
+  await expect(page.locator('#title')).toHaveText('Documents');
+  expect(await sources()).toHaveLength(3);
 });

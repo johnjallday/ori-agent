@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -18,13 +19,14 @@ const maxSources = 8
 var errUnreadable = errors.New("unreadable search entry")
 
 type Source struct {
-	ID            string `json:"id"`
-	Label         string `json:"label"`
-	Generation    int    `json:"generation"`
-	State         string `json:"state"`
-	Reason        string `json:"reason,omitempty"`
-	Count         int    `json:"count"`
-	MappedAt      int64  `json:"mapped_at,omitempty"`
+	ID            string          `json:"id"`
+	Label         string          `json:"label"`
+	Generation    int             `json:"generation"`
+	State         string          `json:"state"`
+	Reason        string          `json:"reason,omitempty"`
+	Count         int             `json:"count"`
+	MappedAt      int64           `json:"mapped_at,omitempty"`
+	Workspace     *WorkspaceMatch `json:"workspace,omitempty"`
 	root, witness string
 }
 
@@ -33,15 +35,20 @@ type Options struct {
 	Policy func() Policy
 	Pick   func(context.Context) (string, bool, error)
 	Gate   *resetstate.WorkGate
+	// ValidLink checks the live workspace sidecar against its SQL directory reference.
+	ValidLink func(owner, path string, match WorkspaceMatch) bool
 }
 type choice struct {
 	id, kind      string
 	expires       time.Time
 	started       bool
+	offered       []WorkspaceMatch
+	source        string // previously reviewed source, if any
 	root, witness string // only populated for a host-selected, unconfirmed review
 }
 type Service struct {
 	Options
+	setupMu      sync.Mutex           // serialize setup confirmation; never held while waiting for user input
 	mu           sync.Mutex           // serializes grant changes, publication, and snapshots
 	places       map[tabKey]*tabPlace // ephemeral view descriptors, never written to the index
 	intents      map[string]choice
@@ -98,7 +105,7 @@ func (s *Service) Begin(owner, kind string) (string, error) {
 // Select accepts only this owner's single-use intent. Even if the dialog is still
 // open, removal/expiry invalidates it before it can commit or start work.
 func (s *Service) Select(ctx context.Context, owner, id string) (*Source, error) {
-	review, err := s.Review(ctx, owner, id)
+	review, err := s.pickReview(ctx, owner, id, false)
 	if err != nil || review == nil {
 		return nil, err
 	}
@@ -108,14 +115,20 @@ func (s *Service) Select(ctx context.Context, owner, id string) (*Source, error)
 // FolderReview discloses no raw path or filesystem identity to the browser.
 // Its ID names one volatile selection, not a grant or workspace.
 type FolderReview struct {
-	ID    string `json:"id"`
-	Label string `json:"label"`
-	Kind  string `json:"kind"` // host-classified, not the pressed chip
+	ID      string           `json:"id"`
+	Label   string           `json:"label"`
+	Kind    string           `json:"kind"` // host-classified, not the pressed chip
+	Matches []WorkspaceMatch `json:"matches,omitempty"`
+	Source  string           `json:"source,omitempty"`
 }
 
 // Review resolves the folder on the host. No source exists and no filenames
 // are enumerated as a consequence of this selection.
 func (s *Service) Review(ctx context.Context, owner, id string) (*FolderReview, error) {
+	return s.pickReview(ctx, owner, id, true)
+}
+
+func (s *Service) pickReview(ctx context.Context, owner, id string, workspace bool) (*FolderReview, error) {
 	s.mu.Lock()
 	c := s.intents[owner]
 	if id == "" || c.id != id || c.started || time.Now().After(c.expires) || s.life.Err() != nil {
@@ -175,18 +188,28 @@ func (s *Service) Review(ctx context.Context, owner, id string) (*FolderReview, 
 	if err != nil {
 		return nil, ErrUnavailable
 	}
-	if _, err := s.sourceMatchLocked(ctx, owner, path, w); err != nil {
+	source, err := s.sourceMatchLocked(ctx, owner, path, w)
+	if err != nil {
 		return nil, err
 	}
 	c.id, c.root, c.witness = rand.Text(), path, w
 	c.kind = s.knownKind(path, w)
+	if workspace {
+		if source != nil {
+			c.source = source.ID
+		}
+		c.offered, err = s.matchesLocked(ctx, owner, c)
+		if err != nil {
+			return nil, err
+		}
+	}
 	c.expires = time.Now().Add(10 * time.Minute)
 	s.intents[owner] = c
 	return c.review(), nil
 }
 
 func (c choice) review() *FolderReview {
-	return &FolderReview{ID: c.id, Label: filepath.Base(c.root), Kind: c.kind}
+	return &FolderReview{ID: c.id, Label: filepath.Base(c.root), Kind: c.kind, Matches: slices.Clone(c.offered), Source: c.source}
 }
 
 // A basename is display only. Check the known location using the same
@@ -267,8 +290,19 @@ func (s *Service) ResumeReview(ctx context.Context, owner, id string) (*FolderRe
 	if err != nil {
 		return nil, err
 	}
-	if _, err = s.sourceMatchLocked(ctx, owner, c.root, c.witness); err != nil {
+	existing, err := s.sourceMatchLocked(ctx, owner, c.root, c.witness)
+	if err != nil {
 		return nil, err
+	}
+	if (existing != nil && existing.ID != c.source) || (existing == nil && c.source != "") {
+		return nil, ErrChoice
+	}
+	matches, err := s.matchesLocked(ctx, owner, c)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Equal(c.offered, matches) {
+		return nil, ErrChoice
 	}
 	return c.review(), nil
 }
@@ -301,7 +335,31 @@ func (s *Service) GrantReviewed(ctx context.Context, owner, id string) (*Source,
 func (s *Service) Sources(ctx context.Context, owner string) ([]Source, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.sourcesLocked(ctx, owner, true)
+	return s.visibleSourcesLocked(ctx, owner)
+}
+
+func (s *Service) visibleSourcesLocked(ctx context.Context, owner string) ([]Source, error) {
+	sources, err := s.sourcesLocked(ctx, owner, true)
+	if err != nil {
+		return nil, err
+	}
+	for i := range sources {
+		v := &sources[i]
+		if v.State == "unavailable" {
+			continue
+		}
+		matches, e := s.matchesLocked(ctx, owner, choice{root: v.root, witness: v.witness, source: v.ID})
+		if e != nil {
+			return nil, e
+		}
+		for _, m := range matches {
+			if m.Connected {
+				v.Workspace = &m
+				break
+			}
+		}
+	}
+	return sources, nil
 }
 func (s *Service) sourcesLocked(ctx context.Context, owner string, verify bool) ([]Source, error) {
 	if owner == "" || s.life.Err() != nil {

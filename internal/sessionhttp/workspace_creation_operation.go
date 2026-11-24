@@ -168,6 +168,10 @@ func (h *Handler) handleWorkspaceCreationOperations(w http.ResponseWriter, r *ht
 		creationOperationError(w, http.StatusConflict, "creation_uncertain", "The original request is unreadable. Nothing can be resubmitted.")
 		return
 	}
+	if material.FolderSelection != "" {
+		unlock := h.folderSearch.LockWorkspaceSetup()
+		defer unlock()
+	}
 	if material.BuildReviewVersion != 0 {
 		release, ok := h.acquireCreationBuild(w, r, owner, material.BuildSessionID)
 		if !ok {

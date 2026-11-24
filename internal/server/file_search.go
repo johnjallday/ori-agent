@@ -12,6 +12,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filesearchhttp"
 	"github.com/johnjallday/ori-agent/internal/learningmissionshttp"
 	"github.com/johnjallday/ori-agent/internal/onboarding"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 func (b *ServerBuilder) initializeFileSearch() {
@@ -29,7 +30,17 @@ func (b *ServerBuilder) initializeFileSearch() {
 			protected = append(protected, filepath.Dir(abs))
 		}
 		return filesearch.Policy{Home: home, Protected: protected}
-	}, Pick: pickSearchFolder})
+	}, Pick: pickSearchFolder, ValidLink: func(owner, path string, m filesearch.WorkspaceMatch) bool {
+		if b.workspaceFileStore == nil {
+			return false
+		}
+		ws, err := b.workspaceFileStore.Get(m.ID)
+		if err != nil || ws.ID != m.ID || ws.OwnerUserID != owner || ws.GetStatus() == workspace.StatusTrashed || ws.GetStatus() == workspace.StatusMissing {
+			return false
+		}
+		ref, err := ws.GetDirectoryReference(m.Link)
+		return err == nil && ref.WorkspaceID == ws.ID && ref.Purpose == "" && ref.Path == path
+	}})
 	if err == nil {
 		b.server.fileSearch = service
 		if b.sessionHandler != nil {

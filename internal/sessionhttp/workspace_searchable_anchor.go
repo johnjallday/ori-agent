@@ -21,7 +21,10 @@ func (h *Handler) resolveSearchableAnchor(r *http.Request, owner string, req cre
 		return "", filesearch.ErrUnavailable
 	}
 	if req.FolderSelection == "" || req.AnchorPath != "" || req.BuildSessionID != "" || req.Kind == "group" || req.ProjectConnection != nil || req.Location != "" {
-		return "", errors.New("Choose one folder with the folder controls before review.")
+		return "", errors.New("choose one folder with the folder controls before review")
+	}
+	if err := h.folderSearch.CanCreate(r.Context(), owner, req.FolderSelection); err != nil {
+		return "", err
 	}
 	return h.folderSearch.ReviewedRoot(r.Context(), owner, req.FolderSelection)
 }
@@ -36,10 +39,10 @@ func searchableAnchorRefusal(cause *anchorPathError) *anchorPathError {
 // predicted name or an arbitrary primary link, before starting the search
 // effect. A failed grant is not a reason to repeat or roll back creation.
 func (h *Handler) finishSearchableAnchor(ctx context.Context, ws *session.Workspace, req createWorkspaceRequest, response map[string]any) {
-	if !req.AllowFilenameSearch {
-		return
+	partial := "Workspace created. Its folder connection could not be verified."
+	if req.AllowFilenameSearch {
+		partial = "Workspace created, but its search connection was not saved. Choose the same folder again in Files to retry the connection without creating another workspace."
 	}
-	const partial = "Workspace created, but the folder was not added to search. Review the folder again in Files."
 	stored, err := h.workspaceStore.Get(ws.ID)
 	if err != nil || stored == nil || stored.OwnerUserID != ws.OwnerUserID {
 		response["search_warning"] = partial
@@ -50,11 +53,13 @@ func (h *Handler) finishSearchableAnchor(ctx context.Context, ws *session.Worksp
 		response["search_warning"] = partial
 		return
 	}
-	source, err := h.folderSearch.GrantReviewed(ctx, ws.OwnerUserID, req.FolderSelection)
+	response["directory_reference_id"] = ref.ID
+	source, err := h.folderSearch.BindCreated(ctx, ws.OwnerUserID, req.FolderSelection, ws.ID, ref.ID, req.AllowFilenameSearch)
 	if err != nil {
 		response["search_warning"] = partial
 		return
 	}
-	response["filename_source_id"] = source.ID
-	response["directory_reference_id"] = ref.ID
+	if req.AllowFilenameSearch {
+		response["filename_source_id"] = source.ID
+	}
 }

@@ -71,7 +71,7 @@ def serve(root, rev=None, build_tmp=None, fixture_binary=None):
 
 def spec(root,url,scenario,name,browser='chromium'):
     env=dict(os.environ,PLAYWRIGHT_BASE_URL=url,ORI_SEARCH_FIRST_FIXTURE=str(root),ORI_SEARCH_FIRST_SCENARIO=scenario,ORI_SEARCH_EVIDENCE=str(EVIDENCE))
-    config=['--config','playwright.files-map.config.ts'] if scenario in ('navigation', 'folder-backed') else []
+    config=['--config','playwright.files-map.config.ts'] if scenario in ('navigation', 'folder-backed','folder-return') else []
     subprocess.run([str(REPO/'node_modules/.bin/playwright'),'test',*config,'--project',browser,'--reporter=list','tests/'+name+'.spec.ts'],cwd=REPO,env=env,check=True)
 
 
@@ -114,7 +114,13 @@ if __name__=='__main__':
             project.mkdir()
             (project/'Harbor.txt').write_text('Synthetic project fixture.\n')
             (root/'data').mkdir(mode=0o700)  # pre-existing installation; not the first-run landing
-            with serve(root, fixture_binary=binary) as url:spec(root,url,'folder-backed','folder-backed-search-locations',browser)
+            with serve(root, fixture_binary=binary) as url:
+                # First-run search consent predates established workspace setup.
+                intent=json.loads(api(url,'/api/file-search/begin',{'kind':'downloads'}))
+                api(url,'/api/file-search/select',intent)
+                spec(root,url,'folder-backed','folder-backed-search-locations',browser)
+            with serve(root, fixture_binary=binary) as url:
+                spec(root,url,'folder-return','folder-backed-search-locations',browser)
         sys.exit(0)
     for scenario in ('fresh','skip'):
         root=fixture(large=scenario=='fresh')

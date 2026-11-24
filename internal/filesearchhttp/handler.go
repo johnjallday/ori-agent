@@ -105,6 +105,31 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			out, e = h.Service.ResumeReview(r.Context(), owner, in.Intent)
 		}
+	case "review-source", "connect":
+		if h.WorkspaceReady == nil || !h.WorkspaceReady() {
+			http.Error(w, "Complete workspace setup first.", http.StatusConflict)
+			return
+		}
+		if op == "review-source" {
+			var in struct {
+				ID string `json:"id"`
+			}
+			if !decode(&in) {
+				return
+			}
+			out, e = h.Service.ReviewSource(r.Context(), owner, in.ID)
+		} else {
+			var in struct {
+				Intent    string `json:"intent"`
+				Workspace string `json:"workspace"`
+				Link      string `json:"link"`
+				Verify    bool   `json:"verify_current_link"`
+			}
+			if !decode(&in) {
+				return
+			}
+			out, e = h.Service.Connect(r.Context(), owner, in.Intent, in.Workspace, in.Link, in.Verify)
+		}
 	case "select":
 		if h.WorkspaceReady != nil && h.WorkspaceReady() {
 			http.Error(w, "Review the workspace and filename search together. Reload Files to continue.", http.StatusConflict)
