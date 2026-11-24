@@ -232,20 +232,25 @@ func TestBrandNewProfileLandsOnHome(t *testing.T) {
 	}
 	// The rail is Home's one switcher for every user, so a browser away from the
 	// Mac that runs Ori still has Files and Map; only the filename-index pieces
-	// (the link to the standalone page, the same-tab place) stay local.
+	// (the starting-page control, the same-tab place) stay local.
 	remote := page("/?view=tree", "192.0.2.5:1010")
 	if !strings.Contains(remote, `data-desk-destination="tree"`) || !strings.Contains(remote, `data-desk-destination="map"`) {
 		t.Fatal("nonlocal Home lost the Desk rail")
 	}
-	if strings.Contains(remote, "data-files-manage") || strings.Contains(remote, "data-desk-local") {
+	if strings.Contains(remote, "data-files-landing") || strings.Contains(remote, "data-desk-local") {
 		t.Fatal("nonlocal Home offered filename-index controls")
 	}
 	if !strings.Contains(openingTagFor(t, remote, `data-desk-destination="tree"`), `aria-current="page"`) {
 		t.Fatal("/?view=tree did not mark Files current")
 	}
+	// Local Files chooses the starting page itself; the temporary link to the
+	// standalone page is gone (merge-tree-into-files PR 2, req. 40 and 43).
 	localTree := page("/?view=tree", local)
-	if !strings.Contains(localTree, "data-files-manage") || !strings.Contains(localTree, "data-desk-local") {
-		t.Fatal("local Files lost its link to the standalone page")
+	if !strings.Contains(localTree, "data-files-landing") || !strings.Contains(localTree, "data-desk-local") {
+		t.Fatal("local Files lost its starting-page control")
+	}
+	if strings.Contains(localTree, "data-files-manage") {
+		t.Fatal("local Files still links to the standalone page")
 	}
 	if err := onboarding.DecideSearchLanding(os.Getenv("ORI_DATA_DIR"), onboarding.SearchFirst, onboarding.SearchLater); err != nil {
 		t.Fatal(err)

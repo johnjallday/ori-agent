@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type Request } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
@@ -485,11 +485,28 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   await expect(projectRow).toBeFocused();
   expect(await ids()).toEqual(before);
   await expect(projectMark).toHaveText('Not searchable');
-  // Allow: indexed, found by name, connected to this very link.
+  // Allow: indexed, found by name, connected to this very link. Consent is the
+  // filename index and nothing else (requirement 35): the only writes it makes
+  // are the review and the connect; no agent, hire, Filing or model is asked.
+  const writes: string[] = [];
+  const noteWrite = (r: Request) => {
+    if (r.method() !== 'GET') writes.push(new URL(r.url()).pathname);
+  };
+  page.on('request', noteWrite);
   await openRowMenu();
   await page.getByRole('menuitem', { name: 'Make searchable: Synthetic Project' }).click();
   await consent.getByRole('button', { name: 'Allow search' }).click();
   await expect(projectMark).toHaveText('Searchable', { timeout: 15000 });
+  page.off('request', noteWrite);
+  expect(writes.filter(path => path.startsWith('/api/file-search/'))).toEqual([
+    '/api/file-search/review-link',
+    '/api/file-search/connect'
+  ]);
+  expect(
+    writes.filter(path =>
+      /agent|hire|filing|janitor|chat|session|message|model|premise|folder-agent/i.test(path)
+    )
+  ).toEqual([]);
   const regranted = (await sources()).find(
     (s: { workspace?: { id: string; link: string } }) =>
       s.workspace?.id === projectID && s.workspace.link === project.workspace.link
