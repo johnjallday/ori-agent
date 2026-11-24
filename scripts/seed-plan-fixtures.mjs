@@ -99,14 +99,18 @@ const contract = await api(
   'GET',
   `/api/workspaces/${out.approved.id}/plans/${approvedPlan.id}/versions/1`
 );
-const approval = await api('POST', `/api/workspaces/${out.approved.id}/plans/${approvedPlan.id}/approvals`, {
-  version: contract.version,
-  content_hash: contract.content_hash,
-  effect: contract.effect,
-  user_id: 'fixture',
-  user_name: 'Fixture',
-  idempotency_key: `${approvedPlan.id}:${contract.version}:${contract.content_hash}`
-});
+const approval = await api(
+  'POST',
+  `/api/workspaces/${out.approved.id}/plans/${approvedPlan.id}/approvals`,
+  {
+    version: contract.version,
+    content_hash: contract.content_hash,
+    effect: contract.effect,
+    user_id: 'fixture',
+    user_name: 'Fixture',
+    idempotency_key: `${approvedPlan.id}:${contract.version}:${contract.content_hash}`
+  }
+);
 const materialized = await api(
   'POST',
   `/api/workspaces/${out.approved.id}/plans/${approvedPlan.id}/materialize`,

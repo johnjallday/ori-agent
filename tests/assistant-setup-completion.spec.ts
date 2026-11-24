@@ -216,7 +216,7 @@ test('fixture finished result appears once and opens its saved report without ex
     result_excerpt: '<img src=x onerror=alert(1)> Saved overview',
     next_request: 'Review the chorus',
     report_route: '/workspaces/album-three/task/summary',
-    next_route: '/workspaces/album-three/plans?next=assessment',
+    next_route: '/workspaces/album-three?next=assessment',
     executor: { agent: 'Ari', model: 'Fixture model', provider: 'loopback' }
   };
   const { card, effects } = await mount(page, offer);

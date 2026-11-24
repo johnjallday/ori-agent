@@ -367,7 +367,7 @@ func TestFolderFirstTaskViewOfAnAssessmentAfterItsRun(t *testing.T) {
 		task.Result = "## What it is\nA service (README.md).\n\nNext task: Add a health check endpoint.\n\n---\n*What this is based on: Ori read 2 files.*"
 	})
 	if finished.State != personalassistant.FolderFirstTaskFinished || finished.NextRequest != "Add a health check endpoint." ||
-		finished.NextRoute != finished.WorkspaceRoute+"/plans?next=assessment" || finished.CanRetry || finished.Reason != "" {
+		finished.NextRoute != finished.WorkspaceRoute+"?next=assessment" || finished.CanRetry || finished.Reason != "" {
 		t.Fatalf("a finished assessment = %+v", finished)
 	}
 	// The report opens on the task's own page, which shows what the run wrote;

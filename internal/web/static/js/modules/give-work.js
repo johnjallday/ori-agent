@@ -153,8 +153,9 @@ function ticketClient() {
 /**
  * Opens Give work for one workspace.
  *
- * options: { workspaceId, workspaceName, agents, assignee, trigger, onSaved }.
- * `trigger` gets focus back on close. `onSaved(ticket)` runs after any save.
+ * options: { workspaceId, workspaceName, agents, assignee, what, details, trigger, onSaved }.
+ * `what` and `details` are starting text for the two fields. `trigger` gets focus
+ * back on close. `onSaved(ticket)` runs after any save.
  * Returns the dialog element, or null when the page cannot show one.
  */
 export function openGiveWork(options = {}) {
@@ -293,7 +294,11 @@ export function openGiveWork(options = {}) {
   if (who) who.addEventListener('change', syncStartNow);
 
   syncStartNow();
+  // Starting text from the door: plain text set as a value, never as markup, and
+  // never submitted for the person. Start now stays off and nobody is chosen
+  // unless the door passed an assignee.
   if (typeof options.what === 'string') what.value = options.what;
+  if (typeof options.details === 'string') form.elements.details.value = options.details;
   dialog.showModal();
   what.focus();
   return dialog;

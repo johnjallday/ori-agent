@@ -1052,7 +1052,7 @@ test.describe('after the server was restarted', () => {
         .locator('#personalAssistantFolderTaskActions')
         .locator('button, a')
         .allInnerTexts()
-    ).toEqual(['Open the assessment', 'Plan the suggested ticket']);
+    ).toEqual(['Open the assessment', 'Review suggested ticket']);
     const result = page.locator('#personalAssistantFolderFirstLookResult');
     await expect(result).toContainText('Widget is a small service that counts widgets');
     await expect(result).toContainText('Add a health check endpoint to the service.');
@@ -1082,7 +1082,7 @@ test.describe('after the server was restarted', () => {
     await expect(open).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(
-      card(page).getByRole('link', { name: 'Plan the suggested ticket', exact: true })
+      card(page).getByRole('link', { name: 'Review suggested ticket', exact: true })
     ).toBeFocused();
     await page.setViewportSize({ width: 1280, height: 720 });
 
@@ -1098,7 +1098,7 @@ test.describe('after the server was restarted', () => {
     await settled(request, before);
   });
 
-  test('the assessment is read on its task page, handed on by the workspace, and planned without creating anything', async ({
+  test('the assessment is read on its task page, handed on by the workspace, and its suggestion opens in Give work without creating anything', async ({
     page,
     request
   }) => {
@@ -1128,7 +1128,7 @@ test.describe('after the server was restarted', () => {
     );
     expect(await banner.locator('button, a').allInnerTexts()).toEqual([
       'Open the assessment',
-      'Plan the suggested ticket',
+      'Review suggested ticket',
       'Dismiss'
     ]);
     await expect(
@@ -1142,17 +1142,38 @@ test.describe('after the server was restarted', () => {
     expect(box390!.x + box390!.width).toBeLessThanOrEqual(391);
     await page.setViewportSize({ width: 1280, height: 720 });
 
-    // The suggestion is placed in the Plans page's box and nothing is sent.
-    await banner.getByRole('link', { name: 'Plan the suggested ticket', exact: true }).click();
-    const box = page.locator('#plan-create-request');
-    await expect(box).toBeVisible({ timeout: 30_000 });
-    await expect(box).toHaveValue(
-      'Add a health check endpoint to the service.\n\n(Suggested by the first assessment of widget.)'
-    );
-    await expect(page.locator('#plan-status')).toContainText('Nothing is created until you do');
-    expect(new URL(page.url()).search).toBe('');
+    // The suggestion opens in Give work, unsent and unassigned, and nothing is
+    // saved by arriving or by cancelling.
+    const reviewSuggestion = async (shot: string) => {
+      const dialog = page.locator('dialog.give-work');
+      await expect(dialog).toBeVisible({ timeout: 30_000 });
+      await expect(dialog.locator('#giveWorkWhat')).toHaveValue(
+        'Add a health check endpoint to the service.'
+      );
+      await expect(dialog.locator('#giveWorkDetails')).toHaveValue(
+        'Suggested by the first assessment of widget.'
+      );
+      await expect(dialog.locator('input[name="startNow"]')).not.toBeChecked();
+      expect(new URL(page.url()).search).toBe('');
+      if (process.env.ORI_VISUAL_EVIDENCE)
+        await page.screenshot({ path: `${process.env.ORI_VISUAL_EVIDENCE}/${shot}.png` });
+      await dialog.getByRole('button', { name: 'Cancel' }).click();
+      await expect(dialog).toHaveCount(0);
+    };
+    await banner.getByRole('link', { name: 'Review suggested ticket', exact: true }).click();
+    await reviewSuggestion('2.5-banner-link-give-work');
+    // The retired Plans address arrives at the same place.
+    await page.goto('/workspaces/widget/plans?next=assessment');
+    await page.waitForURL(url => url.pathname === '/workspaces/widget');
+    await reviewSuggestion('2.5-old-bookmark-give-work');
+    // A reload after the parameter is gone never opens it again.
+    await page.reload();
+    await expect(banner).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('dialog.give-work')).toHaveCount(0);
     const plans = await ok(await request.get(`/api/workspaces/${before.workspace}/plans`));
     expect(plans.plans || []).toHaveLength(0);
+    const ticketsAfter = await ok(await request.get(`/api/workspaces/${before.workspace}/tickets`));
+    expect(JSON.stringify(ticketsAfter)).not.toContain('health check');
 
     // Reading it ran nothing, sent nothing to the model and made nothing.
     const acted = writes.filter(write =>
@@ -1200,6 +1221,65 @@ test.describe('after the server was restarted', () => {
     expect(plan[2]).toContain('Uses your saved agent Development Assistant');
 
     await settled(request, before);
+  });
+
+  // Last in this phase on purpose: it makes the one ticket the earlier tests
+  // assert is absent, and nothing after it counts tickets.
+  test('saving the suggested ticket on purpose makes exactly one backlog ticket and starts nothing', async ({
+    page,
+    request
+  }) => {
+    const before = readCarried();
+    const finished = await firstTask(request, before.resolved!);
+    const calls = provider.calls.length;
+    const listed = async () =>
+      (await ok(await request.get(`/api/workspaces/${before.workspace}/tickets`))).tickets || [];
+    const title = 'Add a health check endpoint to the service, with a test.';
+    expect((await listed()).filter((ticket: any) => ticket.title === title)).toHaveLength(0);
+
+    const writes = watchWrites(page);
+    await page.goto('/workspaces/widget?next=assessment');
+    const dialog = page.locator('dialog.give-work');
+    await expect(dialog).toBeVisible({ timeout: 30_000 });
+    // The person edits the suggestion, then saves it with Start now off.
+    await dialog.locator('#giveWorkWhat').fill(title);
+    await expect(dialog.locator('input[name="startNow"]')).not.toBeChecked();
+    await dialog.getByRole('button', { name: 'Give work', exact: true }).click();
+    await expect(dialog).toHaveCount(0, { timeout: 30_000 });
+
+    const made = (await listed()).filter((ticket: any) => ticket.title === title);
+    expect(made).toHaveLength(1);
+    expect(made[0].state).toBe('backlog');
+    expect(made[0].description).toBe('Suggested by the first assessment of widget.');
+    // Exactly one ticket was written, and nothing was started, planned or sent.
+    expect(writes.filter(write => /\/tickets(\/|$)/.test(write))).toEqual([
+      `POST /api/workspaces/${before.workspace}/tickets`
+    ]);
+    expect(
+      writes.filter(write =>
+        /folder-first-task\/start$|\/tasks\/execute$|\/plans(\/|$)|\/api\/chat|\/orchestration\/tasks$/.test(
+          write
+        )
+      )
+    ).toEqual([]);
+    expect(provider.calls).toHaveLength(calls);
+    expect(
+      ((await ok(await request.get(`/api/workspaces/${before.workspace}/plans`))).plans || [])
+        .length
+    ).toBe(0);
+    expect((await firstTask(request, before.resolved!)).finished_at).toBe(finished.finished_at);
+
+    // Arriving again, or reloading, does not make a second one.
+    await page.reload();
+    await expect(page.locator('dialog.give-work')).toHaveCount(0);
+    expect((await listed()).filter((ticket: any) => ticket.title === title)).toHaveLength(1);
+    if (process.env.ORI_VISUAL_EVIDENCE) {
+      await page.goto('/workspaces/widget?ticket=' + encodeURIComponent(made[0].id));
+      await expect(page.getByText(title).first()).toBeVisible({ timeout: 30_000 });
+      await page.screenshot({
+        path: `${process.env.ORI_VISUAL_EVIDENCE}/2.5-saved-ticket.png`
+      });
+    }
   });
 });
 

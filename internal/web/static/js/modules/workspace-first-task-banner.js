@@ -5,6 +5,7 @@
 // ended up.
 
 import { folderTaskDisclosure } from './folder-task-disclosure.js';
+import { isSuggestedTicketRoute } from './workspace-suggested-ticket.js';
 
 const WORKING = new Set(['', 'pending', 'in_progress', 'running', 'started']);
 const NEEDS_YOU = new Set(['blocked', 'waiting_for_choice', 'needs_input']);
@@ -122,9 +123,6 @@ const ASSESSMENT_STATES = new Set(['seeded', 'running', 'waiting', 'finished', '
 // The full report is read on the task's own page in its workspace, which shows
 // what the run wrote, and nowhere else.
 const ASSESSMENT_REPORT = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/task\/[A-Za-z0-9_-]+$/;
-// The link that opens the Plans page with the assessment's suggestion placed,
-// unsubmitted, in its "Start a plan" box. Nothing else is accepted as that link.
-const ASSESSMENT_NEXT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/plans\?next=assessment$/;
 const ASSESSMENT_COST =
   'Starting it spends model tokens once. The model gets what Ori read from the project and no tools, so nothing in the project is run or changed.';
 const ASSESSMENT_NOT_STARTED = 'The assessment could not start. Try again.';
@@ -240,13 +238,16 @@ function recipeBannerView(
       const reportHref = ASSESSMENT_REPORT.test(report) ? report : task;
       const nextRequest = String(look.next_request || '').trim();
       const nextRoute = local(look.next_route);
-      const next = Boolean(nextRequest) && ASSESSMENT_NEXT_ROUTE.test(nextRoute);
+      // The link opens this workspace with Give work holding the suggestion,
+      // unsent and unassigned. Only this workspace's own link is accepted.
+      const next =
+        Boolean(nextRequest) && isSuggestedTicketRoute(nextRoute, local(look.workspace_route));
       return {
         ...base,
         phase: 'done',
         heading: `The first assessment of ${project} is ready`,
         // The suggestion is text the model wrote: it is shown as text, and
-        // following it only opens the Plans page with it in the box.
+        // following it only opens Give work with it typed in.
         detail: next
           ? `It suggests one next ticket: ${nextRequest}`
           : 'Open it to read what was found.',
@@ -255,7 +256,7 @@ function recipeBannerView(
             ? [{ id: 'report', label: 'Open the assessment', href: reportHref, primary: true }]
             : []),
           ...(next
-            ? [{ id: 'next', label: 'Plan the suggested ticket', href: nextRoute, primary: false }]
+            ? [{ id: 'next', label: 'Review suggested ticket', href: nextRoute, primary: false }]
             : [])
         ],
         dismiss: true

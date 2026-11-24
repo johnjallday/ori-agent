@@ -704,6 +704,27 @@ func redirectWorkspacePage(w http.ResponseWriter, r *http.Request, workspaceSlug
 	http.Redirect(w, r, target.String(), http.StatusSeeOther)
 }
 
+// redirectLegacyAssessmentArrival sends the retired
+// /workspaces/{slug}/plans?next=assessment address to the workspace's own
+// `?next=assessment` arrival, which opens Give work with the first
+// assessment's suggested ticket. Only that exact request is redirected, so
+// every other use of the Plans collection address is untouched. It reports
+// whether it wrote a response.
+func redirectLegacyAssessmentArrival(w http.ResponseWriter, r *http.Request, workspaceSlug string) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return false
+	}
+	if r.URL.Query().Get("next") != "assessment" {
+		return false
+	}
+	target := url.URL{
+		Path:     "/workspaces/" + url.PathEscape(workspaceSlug),
+		RawQuery: "next=assessment",
+	}
+	http.Redirect(w, r, target.String(), http.StatusSeeOther)
+	return true
+}
+
 // handleWorkspacesRoutes handles all /workspaces/* routes.
 func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) {
 	// Extract path after /workspaces/
@@ -776,6 +797,13 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 	// rendering an empty Plan page for an ID that was never valid.
 	if len(parts) >= 2 && parts[1] == "plans" {
 		if len(parts) == 2 {
+			// A finished assessment used to link here to start a Plan from its
+			// suggestion. That bookmark keeps working: it arrives where the
+			// suggestion now opens, in the workspace's Give work dialog. Nothing
+			// is created by arriving.
+			if redirectLegacyAssessmentArrival(w, r, workspaceSlug) {
+				return
+			}
 			s.serveWorkspacePlans(w, workspaceID, workspaceSlug)
 			return
 		}

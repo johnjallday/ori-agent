@@ -17674,15 +17674,21 @@ export class WorkspaceDetailPage {
    */
   showAddTaskModal(options = {}) {
     // Every door on this page opens the one Give work flow (PRD 760 FR-15).
-    window.OriGiveWork?.open({
-      workspaceId: this.workspaceId,
-      workspaceName: this.workspace?.name || '',
-      agents: this.workspace?.agents || [],
-      assignee: options?.assignee || '',
-      trigger:
-        options?.trigger || (typeof document !== 'undefined' ? document.activeElement : null),
-      onSaved: () => this.loadTasks()
-    });
+    // `what` and `details` are optional starting text (the first assessment's
+    // suggested ticket); the dialog returns, so a caller can tell it opened.
+    return (
+      window.OriGiveWork?.open({
+        workspaceId: this.workspaceId,
+        workspaceName: this.workspace?.name || '',
+        agents: this.workspace?.agents || [],
+        assignee: options?.assignee || '',
+        what: typeof options?.what === 'string' ? options.what : undefined,
+        details: typeof options?.details === 'string' ? options.details : undefined,
+        trigger:
+          options?.trigger || (typeof document !== 'undefined' ? document.activeElement : null),
+        onSaved: () => this.loadTasks()
+      }) || null
+    );
   }
 
   showAddTaskModalForAgent(encodedAgentName = '') {

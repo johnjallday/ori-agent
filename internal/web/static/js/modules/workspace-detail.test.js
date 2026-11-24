@@ -2269,6 +2269,9 @@ const seededAssessment = {
   can_start: true,
   task_id: 't-1',
   folder_name: 'widget',
+  // The server always names the workspace's own route; a suggestion link is
+  // accepted only when it belongs to that workspace.
+  workspace_route: '/workspaces/widget',
   executor: {
     agent: 'Robin',
     provider: 'fixture',
@@ -2494,7 +2497,7 @@ test('the assessment banner is read again whenever its task moves, and only then
     can_start: false,
     report_route: '/workspaces/widget/task/t-1',
     next_request: 'Add a health check endpoint.',
-    next_route: '/workspaces/widget/plans?next=assessment'
+    next_route: '/workspaces/widget?next=assessment'
   };
   page.updateFirstTaskBanner({ ...task, status: 'completed' });
   await settle();
@@ -2503,7 +2506,7 @@ test('the assessment banner is read again whenever its task moves, and only then
     phase: 'done',
     hidden: false,
     buttons: ['Dismiss'],
-    links: ['Open the assessment', 'Plan the suggested ticket']
+    links: ['Open the assessment', 'Review suggested ticket']
   });
   // The realtime end-of-task signal reads the same thing.
   await page.refreshFirstTaskBanner();

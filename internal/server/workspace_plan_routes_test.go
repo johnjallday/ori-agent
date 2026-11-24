@@ -47,6 +47,57 @@ func TestWorkspacePlanPageRoutesResolveCanonically(t *testing.T) {
 	}
 }
 
+// The retired "Plan the suggested ticket" bookmark still arrives somewhere
+// useful: the workspace, where the suggestion opens in Give work. Only that
+// exact request redirects; the collection address keeps serving its page, and a
+// redirect creates nothing.
+func TestLegacyAssessmentBookmarkArrivesAtTheWorkspaceNotThePlansPage(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	handler := newRoutesTestHandler(t)
+	workspace := createRouteTestWorkspace(t, handler, "Legacy Assessment Bookmark")
+
+	bookmark := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug+"/plans?next=assessment", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, bookmark)
+	if rec.Code != http.StatusSeeOther {
+		t.Fatalf("bookmark status = %d, want 303", rec.Code)
+	}
+	if got, want := rec.Header().Get("Location"), "/workspaces/"+workspace.Slug+"?next=assessment"; got != want {
+		t.Fatalf("bookmark redirect = %q, want %q", got, want)
+	}
+
+	// The new address is the workspace page itself, not another redirect.
+	arrival := httptest.NewRecorder()
+	handler.ServeHTTP(arrival, httptest.NewRequest(http.MethodGet, "/workspaces/"+workspace.Slug+"?next=assessment", nil))
+	if arrival.Code != http.StatusOK {
+		t.Fatalf("arrival status = %d, want 200", arrival.Code)
+	}
+
+	for _, path := range []string{
+		"/workspaces/" + workspace.Slug + "/plans",
+		"/workspaces/" + workspace.Slug + "/plans?panel=history",
+		"/workspaces/" + workspace.Slug + "/plans?next=other",
+	} {
+		other := httptest.NewRecorder()
+		handler.ServeHTTP(other, httptest.NewRequest(http.MethodGet, path, nil))
+		if other.Code != http.StatusOK {
+			t.Errorf("%s status = %d, want 200 (only next=assessment redirects)", path, other.Code)
+		}
+	}
+
+	list := httptest.NewRecorder()
+	handler.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/workspaces/"+workspace.ID+"/plans?scope=all", nil))
+	var body struct {
+		Plans []any `json:"plans"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode plans: %v", err)
+	}
+	if len(body.Plans) != 0 {
+		t.Fatalf("arriving from the bookmark created %d plan(s)", len(body.Plans))
+	}
+}
+
 // A Plan detail page must carry its own Plan ID, so the client asks the
 // workspace-scoped API for that exact Plan rather than inferring one.
 func TestWorkspacePlanDetailPageCarriesPlanID(t *testing.T) {
