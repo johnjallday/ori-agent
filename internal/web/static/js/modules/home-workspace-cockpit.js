@@ -1,6 +1,7 @@
 // Importing this also registers window.OriEconomy, which is how dashboard.js —
 // a plain script, not a module — reaches the same harvest client.
 import { destinationPlace } from './destination-place.js';
+import { request as filenameIndex } from './search-desk.js';
 import { guidedHint, showHQReturnLinks } from './hq-guided-attempt.js';
 import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 // Importing this also registers window.OriTicketCounts, which is how the classic
@@ -2066,6 +2067,7 @@ import {
 } from './home-tree-pane.js';
 import {
   MAX_TERM_LENGTH,
+  PAGE_SIZE,
   RESULTS_TAB_KEY,
   createFilesSearch,
   findResult,
@@ -2850,7 +2852,13 @@ import {
       pendingRevealFocus = false;
       if (rowEl) {
         rowEl.scrollIntoView({ block: 'nearest' });
-        if (focus) rowEl.focus({ preventScroll: true });
+        if (focus) {
+          rowEl.focus({ preventScroll: true });
+          // Focus alone shows nothing after a mouse click; mark the row for a
+          // moment so the eye finds it. It is a static outline, not motion.
+          rowEl.classList.add('is-revealed');
+          window.setTimeout(() => rowEl.classList.remove('is-revealed'), 2000);
+        }
       }
       return;
     }
@@ -2869,9 +2877,13 @@ import {
       // tag filter.
       reason = 'The tree is not showing it right now; a tag filter may be hiding it.';
     } else {
-      const section = (state.treeContents[parsed.workspaceId] || { sections: {} }).sections[
-        sectionOfKind(parsed.kind)
-      ];
+      const contents = state.treeContents[parsed.workspaceId] || { sections: {} };
+      // A file inside a linked folder is listed by that folder's own request,
+      // made when its row is opened; the section only lists the folders.
+      const section =
+        parsed.kind === 'linkedFile' || parsed.kind === 'linkedFolder'
+          ? contents.linked && contents.linked[parsed.itemId.split('/')[0]]
+          : contents.sections[sectionOfKind(parsed.kind)];
       if (section && section.status === SECTION_READY) {
         reason =
           'The tree does not list it: a section shows only its first rows. It stays open in the pane.';
@@ -3328,8 +3340,20 @@ import {
   // is not filtered: the two are side by side. The term lives in the controller
   // and in the request body, and nowhere else (home-files-search.js).
 
+  // The filename index (files in linked and searchable folders) answers only the
+  // Mac that runs Ori, and the rail says whether this is it. Anywhere else the
+  // search covers everything inside workspaces and says so (INDEX_OFF_WORDS).
+  const localIndex = !!els.deskRail && els.deskRail.hasAttribute('data-desk-local');
   const filesSearch = createFilesSearch({
-    onChange: (snapshot, reason) => handleSearchChange(snapshot, reason)
+    onChange: (snapshot, reason) => handleSearchChange(snapshot, reason),
+    ...(localIndex
+      ? {
+          indexSearch: ({ term, cursor }) =>
+            filenameIndex('query', { term, cursor, limit: PAGE_SIZE }),
+          indexAct: (op, body) => filenameIndex(op, body),
+          indexRefresh: body => filenameIndex('refresh', body)
+        }
+      : {})
   });
 
   /** Keep the box's clear button and the spoken status in step with the snapshot. */
@@ -3388,6 +3412,8 @@ import {
       void leaveResults();
     } else {
       mountPaneView();
+      // What opening or revealing a file did, or why it was refused.
+      if (reason === 'notice' && snapshot && snapshot.notice) announce(snapshot.notice);
     }
   }
 
@@ -3410,13 +3436,25 @@ import {
   function showResultInTree(item) {
     // In the one-column layout the pane covers the tree: bring the tree back.
     if (state.treeNarrow) backToTree();
-    revealTreeRow(item.rowKey, { focus: true });
+    // A file in a linked folder shows at its place under that folder; a file in
+    // a folder with no workspace has no row at all, and offers no way here.
+    revealTreeRow(item.treeKey || item.rowKey, { focus: true });
     mountTreeView();
   }
 
   function handleResultAction(action, payload) {
     if (action === 'more') return void filesSearch.loadMore(payload.kind);
     if (action === 'retry') return void filesSearch.retry(payload.kind);
+    if (action === 'refresh-index') return void filesSearch.refreshIndex();
+    // A file in a searchable folder is selected, then opened in its reader or
+    // revealed in Finder. It never becomes a tab, so never a remembered one.
+    if (action === 'select') return void filesSearch.select(payload.key);
+    if (action === 'open-indexed' || action === 'reveal-indexed') {
+      const file = findResult(state.treeSearch, 'indexed', payload.key);
+      if (!file) return undefined;
+      const op = action === 'reveal-indexed' || !file.reader ? 'reveal' : 'open';
+      return void filesSearch.dispatch(payload.key, op);
+    }
     const item = findResult(state.treeSearch, payload.kind, payload.key);
     if (!item) return undefined; // the results moved on under the click
     if (action === 'open') return void openResult(item, { keyboard: false });

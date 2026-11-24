@@ -5,6 +5,7 @@ export default defineConfig({
   testDir: './tests',
   testMatch: [
     'files-map-navigation.spec.ts',
+    'files-search-folders.spec.ts',
     'folder-backed-search-locations.spec.ts',
     'folder-setup-parity.spec.ts'
   ],

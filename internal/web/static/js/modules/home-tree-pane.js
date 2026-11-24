@@ -968,7 +968,15 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
             kind: focused.getAttribute('data-result-kind'),
             key: focused.getAttribute('data-result-key')
           }
-        : null;
+        : inPanel && focused.hasAttribute('data-result-act')
+          ? {
+              // Open in reader / Reveal in Finder under a selected file.
+              attribute: 'data-result-act',
+              kind: null,
+              key: focused.getAttribute('data-result-key'),
+              value: focused.getAttribute('data-result-act')
+            }
+          : null;
   const focusedMore = inPanel ? focused.getAttribute('data-result-more') : null;
 
   const last = drawn.get(host) || { strip: null, panel: null, key: '' };
@@ -1007,7 +1015,9 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
         ? Array.from(panel.querySelectorAll(`[${focusedResult.attribute}]`)).find(
             el =>
               el.getAttribute('data-result-kind') === focusedResult.kind &&
-              el.getAttribute('data-result-key') === focusedResult.key
+              el.getAttribute('data-result-key') === focusedResult.key &&
+              (!focusedResult.value ||
+                el.getAttribute(focusedResult.attribute) === focusedResult.value)
           )
         : panel.querySelector(`[data-result-more="${focusedMore}"]`);
       if (again) again.focus({ preventScroll: true });
@@ -1060,11 +1070,29 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
       const resultReveal = event.target.closest('[data-result-reveal]');
       const resultMore = event.target.closest('[data-result-more]');
       const resultRetry = event.target.closest('[data-result-retry]');
-      if (resultOpen || resultReveal || resultMore || resultRetry) {
+      const resultAct = event.target.closest('[data-result-act]');
+      const indexRefresh = event.target.closest('[data-result-index-refresh]');
+      if (resultOpen || resultReveal || resultMore || resultRetry || resultAct || indexRefresh) {
         if (typeof handlers.onResultAction !== 'function') return;
         const hit = resultOpen || resultReveal;
-        if (hit) {
-          handlers.onResultAction(resultOpen ? 'open' : 'reveal', {
+        if (indexRefresh) {
+          handlers.onResultAction('refresh-index', {});
+        } else if (resultAct) {
+          // Open in reader / Reveal in Finder under a selected file.
+          handlers.onResultAction(
+            resultAct.getAttribute('data-result-act') === 'open'
+              ? 'open-indexed'
+              : 'reveal-indexed',
+            { key: resultAct.getAttribute('data-result-key') }
+          );
+        } else if (hit) {
+          // A file in a searchable folder is selected, not opened in a tab.
+          const action = resultReveal
+            ? 'reveal'
+            : resultOpen.hasAttribute('data-result-indexed')
+              ? 'select'
+              : 'open';
+          handlers.onResultAction(action, {
             kind: hit.getAttribute('data-result-kind'),
             key: hit.getAttribute('data-result-key')
           });
@@ -1094,11 +1122,13 @@ export function mountPane(host, state, callbacks, { focusTitle = false } = {}) {
       const target = event.target;
       if (!target || !target.matches || !target.matches('[data-result-open]')) return;
       const handlers = bindings.get(host) || {};
-      if (event.key === 'Enter' && event.shiftKey) {
+      // On a file in a searchable folder Enter opens it in its reader (Reveal in
+      // Finder when it has none) and Shift+Enter reveals it; anywhere else Enter
+      // is the button's own click.
+      if (event.key === 'Enter' && target.hasAttribute('data-result-indexed')) {
         if (typeof handlers.onResultAction === 'function') {
           event.preventDefault();
-          handlers.onResultAction('reveal-file', {
-            kind: target.getAttribute('data-result-kind'),
+          handlers.onResultAction(event.shiftKey ? 'reveal-indexed' : 'open-indexed', {
             key: target.getAttribute('data-result-key')
           });
         }
