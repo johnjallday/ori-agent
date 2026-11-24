@@ -130,9 +130,45 @@ test('files in searchable folders: found, ordered, selected, opened, refused, sh
   const reader = await actions.getByRole('button', { name: /^Open in / }).count();
   await page.screenshot({ path: join(evidence, 'selected.png') });
   await expect(pane(page).locator('.cockpit-pane-tab')).toHaveCount(1); // Results only
-  const stored = await page.evaluate(() => JSON.stringify({ ...localStorage }));
-  expect(stored).not.toContain('idx:');
-  expect(stored).not.toContain('harbor');
+  // Nothing about the term, or about a file in a search-only folder, is kept
+  // anywhere the page can read: not the address, history state, window.name,
+  // either storage, nor the remembered tree tabs. Checked now and after a reload.
+  const remembered = () =>
+    page.evaluate(() => {
+      const tree = Object.entries(localStorage).find(([key]) =>
+        key.startsWith('ori.home.fileTree')
+      );
+      return {
+        everything: JSON.stringify({
+          url: location.href,
+          state: history.state,
+          name: window.name,
+          local: { ...localStorage },
+          session: { ...sessionStorage }
+        }),
+        tabs: tree ? JSON.stringify(JSON.parse(tree[1]).tabs ?? []) : '[]'
+      };
+    });
+  const expectNothingKept = async () => {
+    const kept = await remembered();
+    for (const word of ['idx:', 'harbor']) {
+      expect(kept.everything.toLowerCase(), word).not.toContain(word.toLowerCase());
+    }
+    expect(kept.tabs).not.toContain('search:results');
+    expect(kept.tabs).not.toContain('idx:');
+    expect(kept.tabs.toLowerCase()).not.toContain('harbor');
+  };
+  await expectNothingKept();
+  await page.reload();
+  await expect(page.locator('#cockpitTree')).toBeVisible();
+  await expect(search(page)).toHaveValue('');
+  await expect(pane(page).locator('.cockpit-pane-tab--results')).toHaveCount(0);
+  await expectNothingKept();
+  // The page after a reload holds nothing to search from: ask again.
+  await search(page).fill('harbor');
+  await expect(rows(page)).toHaveCount(2);
+  await rows(page).nth(0).click();
+  await expect(rows(page).nth(0)).toHaveAttribute('aria-pressed', 'true');
 
   // On a real desktop the answer is "Requested in Finder." A sandboxed server
   // runs with desktop effects off and says so in its own words; either way the

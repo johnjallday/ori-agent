@@ -26,6 +26,9 @@ test('Files and Notes keep separate inputs, requests and history on established 
   if (process.env.ORI_SEARCH_EVIDENCE)
     await page.screenshot({ path: join(process.env.ORI_SEARCH_EVIDENCE, 'established-home.png') });
   await page.getByRole('link', { name: 'Files', exact: true }).click();
+  // Files is Home's tree now; search locations are added on the page that
+  // manages them, one link away in Files' header.
+  await page.getByRole('link', { name: 'Manage search locations', exact: true }).click();
   await page.getByRole('button', { name: /Add folder/ }).click();
   await page.getByRole('button', { name: 'Documents', exact: true }).click();
   const review = page.locator('dialog.explore-card');

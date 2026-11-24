@@ -399,6 +399,58 @@ test.describe('Files search: finding Ori’s own items by name', () => {
     await expect(resultsTab(page)).toHaveCount(0);
   });
 
+  test('Enter on a focused result opens it and focus follows into the pane, not to the page', async ({
+    page
+  }) => {
+    const stamp = stampOf();
+    const a = await seed(page, stamp, 'Focus');
+    await openFiles(page);
+    await treeRow(page, a.id).waitFor();
+    await search(page).fill(stamp);
+    const note = group(page, 'notes').locator('[data-result-open]').first();
+    await expect(note).toContainText(a.noteName);
+    await note.focus();
+    await page.keyboard.press('Enter');
+    await expect(pane(page).locator('.cockpit-pane-tab.is-active')).toContainText(a.noteName);
+    // The result button went with the Results panel; focus must not be on <body>.
+    await expect
+      .poll(() => page.evaluate(() => document.activeElement === document.body))
+      .toBe(false);
+    await expect(pane(page).locator(':focus')).toHaveCount(1);
+  });
+
+  test('a short name is whole in its row at a mid-size window; a long one has its tooltip', async ({
+    page
+  }) => {
+    const stamp = stampOf();
+    const a = await seed(page, stamp, 'Fit');
+    const longName = `Fit expedition logistics and harbor restoration planning worksheet ${stamp}`;
+    const made = await page.request.post(`/api/workspaces/${a.id}/notes`, {
+      data: { name: longName, content: 'x' }
+    });
+    expect(made.ok()).toBeTruthy();
+    await page.setViewportSize({ width: 1100, height: 800 });
+    await openFiles(page);
+    await treeRow(page, a.id).waitFor();
+    await search(page).fill(stamp);
+    await expect(group(page, 'notes')).toContainText(longName.slice(0, 20));
+
+    const cut = (label: string) =>
+      group(page, 'notes')
+        .locator('.cockpit-result-name', { hasText: label })
+        .first()
+        .evaluate(el => el.scrollWidth > el.clientWidth);
+    // "Fit note <stamp>" is about 20 characters: it fits beside its place and date.
+    expect(await cut(a.noteName)).toBe(false);
+    // The long one is cut, and its whole name is in the tooltip.
+    expect(await cut(longName)).toBe(true);
+    await expect(
+      group(page, 'notes')
+        .locator('.cockpit-result-name', { hasText: longName.slice(0, 20) })
+        .last()
+    ).toHaveAttribute('title', longName);
+  });
+
   test('"/" typed inside another field is just a character', async ({ page }) => {
     const ws = await seed(page, stampOf(), 'Slash');
     await openFiles(page);

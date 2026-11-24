@@ -253,6 +253,9 @@ test('distinguish duplicate copies by location and date before acting', async ({
   expect((await read(other.workspace_id)).premise.state).toBe(other.premise.state);
   await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
   await page.goBack();
+  // The Map puts the selection back a moment after it draws; leaving before that
+  // would save the empty selection over the one this journey is about.
+  await expect(tile).toHaveClass(/is-selected/);
   if (await page.locator('#cockpitContextModal').isVisible()) await page.keyboard.press('Escape');
   await toLocations();
   await expect(term).toHaveValue('proposal.pdf');
@@ -285,6 +288,8 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await page.screenshot({ path: join(evidence, 'revoked-copy.png') });
   // Return to the same workspace, not a cached cue or reply.
   await toMap();
+  // Enter opens the selected workspace; wait for the selection to be back.
+  await expect(tile).toHaveClass(/is-selected/);
   await tile.press('Enter');
   await expect(page).toHaveURL(new RegExp('/workspaces/map-albums'));
   if (await page.locator('#personalAssistantPanel').isVisible())
