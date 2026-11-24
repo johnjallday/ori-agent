@@ -36,6 +36,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
     writeFileSync(join(fixture!, `home/Downloads/sample-${n}.unknown`), '', { flag: 'wx' });
   await page.goto('/search');
   for (const kind of ['Documents', 'Downloads']) {
+    if (kind === 'Downloads') await page.getByRole('button', { name: /Add folder/ }).click();
     await page.getByRole('button', { name: kind, exact: true }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Allow search' }).click();
     await expect(page.locator('#sources li').filter({ hasText: kind })).toContainText('ready');
@@ -49,7 +50,16 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await rows.first().getByRole('button').click();
   await expect(page.locator('#selectedFile')).toContainText('Downloads / Saved');
   await page.screenshot({ path: join(evidence, 'copies.png') });
-  await page.locator('#scope').selectOption({ label: 'Downloads' });
+  await page.getByRole('button', { name: 'Search in Documents', exact: true }).click();
+  await expect(page.locator('#title')).toHaveText('Documents');
+  await term.fill('');
+  await expect(rows).toHaveCount(4);
+  await rows.filter({ hasText: 'proposal.pdf' }).getByRole('button').click();
+  await page.locator('#manage summary').click();
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: join(evidence, 'documents-desk.png') });
+  await page.getByRole('button', { name: 'Search in Downloads', exact: true }).click();
+  await term.fill('proposal.pdf');
   await expect(rows).toHaveCount(1);
   await expect(page.locator('#selectedFile')).toBeHidden();
   await term.fill('sample-');
@@ -98,7 +108,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await toFiles();
   await expect(term).toHaveValue('sample-');
   await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', last!);
-  await page.locator('#scope').selectOption('');
+  await page.getByRole('button', { name: 'Search in All locations', exact: true }).press('Enter');
   await expect(rows).toHaveCount(25);
   await page.locator('#more').click();
   await expect(rows).toHaveCount(27);
@@ -166,6 +176,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   const second = await context.newPage();
   await second.goto('/search');
   await expect(second.locator('#term')).toHaveValue('');
+  await second.locator('#manage summary').click();
   await second
     .locator('#sources li')
     .filter({ hasText: 'Downloads' })
@@ -195,6 +206,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await toMap();
   const refresher = await context.newPage();
   await refresher.goto('/search');
+  await refresher.locator('#manage summary').click();
   const refreshed = refresher.waitForResponse(r => r.url().endsWith('/api/file-search/refresh'));
   await refresher.locator('#sources li').getByRole('button', { name: 'Refresh' }).click();
   expect((await refreshed).ok()).toBeTruthy();
@@ -272,6 +284,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   mkdirSync(locked, { mode: 0o700 });
   try {
     chmodSync(locked, 0);
+    await page.locator('#manage summary').click();
     await page.locator('#sources').getByRole('button', { name: 'Refresh' }).click();
     await expect(page.locator('#sources')).toContainText('partial');
     await expect(page.locator('#coverage')).toContainText('Coverage incomplete');
@@ -286,5 +299,5 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await page.getByRole('button', { name: 'Make Files my starting page' }).click();
   await expect(page.getByRole('button', { name: 'Start on Home instead' })).toBeVisible();
   await page.goto('/');
-  await expect(page.locator('#title')).toHaveText('Files');
+  await expect(page.locator('#title')).toHaveText('All locations');
 });

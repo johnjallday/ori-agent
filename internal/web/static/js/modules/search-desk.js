@@ -165,8 +165,31 @@ export function mountFileSearch(root, compact = false) {
   function map(ss) {
     const same = JSON.stringify(sources) === JSON.stringify(ss);
     sources = ss;
-    if (compact || (same && ss.length)) return;
+    if (compact) return;
     const names = scopeNames(ss);
+    if (document.body.dataset.landing !== 'first')
+      $('title').textContent = scope ? names.get(scope) || 'Unavailable location' : 'All locations';
+    if (same && ss.length) return;
+    const all = { id: '', count: ss.reduce((n, s) => n + s.count, 0) };
+    $('locationList').replaceChildren(
+      ...[all, ...ss].map(s => {
+        const label = names.get(s.id) || 'All locations';
+        const button = element('button', '');
+        button.type = 'button';
+        button.dataset.scope = s.id;
+        button.setAttribute('aria-label', `Search in ${label}`);
+        button.setAttribute('aria-pressed', String(scope === s.id));
+        const icon = element('span', s.id ? '' : '▱');
+        if (s.id) icon.className = 'location-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        const name = element('span', label);
+        name.className = 'rail-label';
+        const count = element('span', String(s.count));
+        count.className = 'rail-count';
+        button.append(icon, name, count);
+        return button;
+      })
+    );
     $('scope').replaceChildren(
       new Option('All locations', ''),
       ...ss.map(s => new Option(names.get(s.id), s.id))
@@ -225,18 +248,43 @@ export function mountFileSearch(root, compact = false) {
             select(h);
             term.focus();
           });
-          pick.className = 'hit-name';
+          pick.className = 'file-row';
           pick.setAttribute('aria-pressed', String(h.id === selected));
-          pick.append(title);
+          const file = element('span', '');
+          file.className = 'fname';
+          const ext = h.name
+            .match(/\.([a-z0-9]{1,6})$/i)?.[1]
+            .slice(0, 4)
+            .toUpperCase();
+          const badge = element('span', ext || 'FILE');
+          badge.className = 'badge';
+          badge.setAttribute('aria-hidden', 'true');
+          file.append(badge, title);
+          const path = element('span', [names.get(h.source), h.parent].filter(Boolean).join(' / '));
+          path.className = 'path';
+          const date = element(
+            'time',
+            new Date(h.modified).toLocaleDateString(undefined, {
+              year: 'numeric',
+              month: 'short',
+              day: 'numeric'
+            })
+          );
+          date.className = 'date';
+          date.dateTime = h.modified;
+          date.title = new Date(h.modified).toLocaleString();
+          pick.append(file, path, date);
           li.append(pick);
-        } else li.append(title);
-        li.append(
-          element(
-            'span',
-            `${names.get(h.source)}${h.parent ? ' / ' + h.parent : ''} · ${new Date(h.modified).toLocaleString()}`
-          )
-        );
-        if (compact) addActions(li, h);
+        } else {
+          li.append(title);
+          li.append(
+            element(
+              'span',
+              `${names.get(h.source)}${h.parent ? ' / ' + h.parent : ''} · ${new Date(h.modified).toLocaleString()}`
+            )
+          );
+          addActions(li, h);
+        }
         return li;
       })
     );
@@ -247,12 +295,17 @@ export function mountFileSearch(root, compact = false) {
       panel.hidden = !hit;
       panel.replaceChildren();
       if (hit) {
-        panel.append(
-          element('small', 'SELECTED FILE'),
-          element('h2', hit.name),
-          element('p', [names.get(hit.source), hit.parent].filter(Boolean).join(' / '))
+        const info = element('div', ''),
+          buttons = element('div', '');
+        buttons.className = 'actions';
+        const path = element(
+          'p',
+          [names.get(hit.source), hit.parent, hit.name].filter(Boolean).join(' / ')
         );
-        addActions(panel, hit);
+        path.className = 'path';
+        info.append(element('small', 'Selected file'), element('strong', hit.name), path);
+        addActions(buttons, hit);
+        panel.append(info, buttons);
       }
     }
   }
@@ -311,7 +364,9 @@ export function mountFileSearch(root, compact = false) {
       const partial = included.some(s => s.state !== 'ready');
       $('coverage').textContent =
         (hits.length
-          ? `${hits.length} shown`
+          ? !compact && !value && !next && !partial
+            ? `${hits.length} ${hits.length === 1 ? 'file' : 'files'} ${scope ? 'in ' + names : 'across ' + included.length + ' ' + (included.length === 1 ? 'location' : 'locations')}`
+            : `${hits.length} shown`
           : sources.length
             ? value
               ? `No matches in ${names}`
@@ -326,6 +381,7 @@ export function mountFileSearch(root, compact = false) {
       sources = [];
       $('sources')?.replaceChildren();
       if (!compact) {
+        map([]);
         $('retry').hidden = false;
         $('emptyMap').textContent = 'Locations unavailable.';
         if (scope && e.status === 409) {
@@ -374,17 +430,33 @@ export function mountFileSearch(root, compact = false) {
       void run(() => dispatch(hits[i], e.shiftKey || !hits[i].reader ? 'reveal' : 'open'), term);
     }
   });
-  $('scope')?.addEventListener('change', () => {
-    scope = $('scope').value;
+  function changeScope(value) {
+    scope = value;
+    $('scope').value = scope;
+    for (const button of $('locationList').querySelectorAll('[data-scope]'))
+      button.setAttribute('aria-pressed', String(button.dataset.scope === scope));
     clear();
     notice.textContent = '';
     void query();
+  }
+  $('scope')?.addEventListener('change', () => changeScope($('scope').value));
+  $('locationList')?.addEventListener('click', e => {
+    const b = e.target.closest('[data-scope]');
+    if (b) changeScope(b.dataset.scope);
+  });
+  $('addLocation')?.addEventListener('click', () => {
+    $('manage').open = true;
+    $('choices').querySelector('button').focus();
   });
   $('retry')?.addEventListener('click', () => query());
   $('more').addEventListener('click', () => query(true));
   if (!compact)
     window.addEventListener('keydown', e => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if ($('folderConsent')?.open) return;
+      if (
+        ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') ||
+        (e.key === '/' && e.target !== term && !e.metaKey && !e.ctrlKey && !e.altKey)
+      ) {
         e.preventDefault();
         term.focus();
       }

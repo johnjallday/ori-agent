@@ -135,7 +135,7 @@ test('search before workspace setup', async ({ page, baseURL }) => {
       Math.round(timings.sort((a, b) => a - b)[9])
     );
     await page.goto('/');
-    await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'All locations', exact: true })).toBeVisible();
     await expect(page.locator('#sources')).toContainText('Documents');
     await page.getByRole('link', { name: 'Home', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Welcome to Ori.' })).toBeVisible();

@@ -26,6 +26,7 @@ test('Files and Notes keep separate inputs, requests and history on established 
   if (process.env.ORI_SEARCH_EVIDENCE)
     await page.screenshot({ path: join(process.env.ORI_SEARCH_EVIDENCE, 'established-home.png') });
   await page.getByRole('link', { name: 'Files', exact: true }).click();
+  await page.getByRole('button', { name: /Add folder/ }).click();
   await page.getByRole('button', { name: 'Documents', exact: true }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Allow search' }).click();
   await expect(page.locator('#hits li').first()).toBeVisible();

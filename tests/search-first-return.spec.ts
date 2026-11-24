@@ -16,7 +16,8 @@ test('manual refresh, two-tab removal, empty desk after return', async ({
   expect(readFileSync(join(fixture!, '.search-first-test-url'), 'utf8').trim()).toBe(baseURL);
   expect(new URL(baseURL!).hostname).toBe('localhost');
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'All locations', exact: true })).toBeVisible();
+  await page.locator('#manage summary').click();
   const sources = page.locator('#sources');
   await expect(sources).toContainText('Documents');
   const term = page.getByRole('searchbox');
@@ -73,7 +74,7 @@ test('manual refresh, two-tab removal, empty desk after return', async ({
   await sources.getByRole('button', { name: 'Remove from search' }).click();
   await expect(other.locator('#emptyMap')).toHaveText('No folders mapped yet.');
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Files', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'All locations', exact: true })).toBeVisible();
   await expect(page.locator('#sources li')).toHaveCount(0);
   if (process.env.ORI_SEARCH_EVIDENCE)
     await page.screenshot({ path: join(process.env.ORI_SEARCH_EVIDENCE, 'empty-return.png') });
