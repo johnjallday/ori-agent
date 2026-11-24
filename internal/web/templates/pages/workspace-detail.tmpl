@@ -195,6 +195,11 @@
             </button>
           </div>
 
+          <!-- Secondary, and only for a workspace that has plans (active or in
+               History): the one way left to reach them, now that Ori no longer
+               starts new ones. Filled by workspace-existing-plans.js from a
+               bounded read; a failed read says so here instead of hiding it. -->
+          <p class="hub-tickets-secondary" id="hubTicketsExistingPlans" data-existing-plans hidden></p>
           <p class="hub-tickets-status" id="hubTicketsStatus" role="status" aria-live="polite" hidden></p>
           <!-- Announces state changes to assistive technology. Visually
                hidden but never display:none — a hidden live region is

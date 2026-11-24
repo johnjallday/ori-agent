@@ -1211,6 +1211,10 @@ func registerWorkspacePlanRoutes(mux *http.ServeMux, s *Server) {
 		// the answer is about the workspace: one plan runs, the rest queue
 		// (FR-106, FR-107).
 		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-execution-slot", s.Handlers.WorkspacePlans.WorkspaceExecutionSlot)
+		// Whether the workspace has any plan at all, active or historical: two
+		// counts, no content, no retention. The chrome links to the Plans list
+		// only when this says yes.
+		mux.HandleFunc("/api/workspaces/{workspaceID}/plan-presence", s.Handlers.WorkspacePlans.PlanPresence)
 		// Read-only capability report: what planning can actually do here, and
 		// which dependencies are wired. No plan content, no prompts — safe to
 		// paste into a bug report (FR-175, FR-176).

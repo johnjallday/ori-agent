@@ -84,6 +84,59 @@ func TestWorkspacePlanAPICreatesWhetherOrNotPlanningIsEnabled(t *testing.T) {
 	}
 }
 
+// The chrome links to the Plans list only for a workspace that has a plan, and
+// learns that from a bounded presence read. Every way a plan can exist after the
+// upgrade must count: made over the API with no ticket yet, in History, or in a
+// workspace whose planning setting is off. An empty workspace must not.
+func TestWorkspacePlanPresenceCountsEveryRecordTheWorkspaceHas(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	handler := newRoutesTestHandler(t)
+
+	presence := func(workspaceID string) map[string]any {
+		t.Helper()
+		status, body := planAPICall(t, handler, http.MethodGet, "/api/workspaces/"+workspaceID+"/plan-presence", "")
+		if status != http.StatusOK {
+			t.Fatalf("presence status = %d (%v)", status, body)
+		}
+		return body
+	}
+
+	empty := createWorkspaceForTest(t, handler, "Presence Empty")
+	if got := presence(empty); got["has_plans"] != false || got["active"] != float64(0) || got["history"] != float64(0) {
+		t.Fatalf("an empty workspace reports %v", got)
+	}
+
+	// A plan made over the API after the upgrade, with no ticket and planning off.
+	apiOnly := createWorkspaceForTest(t, handler, "Presence API")
+	setPlanningEnabledForTest(t, handler, apiOnly, false)
+	planID := createPlanForTest(t, handler, apiOnly, "Created by an external client")
+	if got := presence(apiOnly); got["has_plans"] != true || got["active"] != float64(1) {
+		t.Fatalf("an API-created plan with no ticket reports %v", got)
+	}
+
+	// Archived, it is History, and still a record the workspace has.
+	status, body := planAPICall(t, handler, http.MethodPost,
+		"/api/workspaces/"+apiOnly+"/plans/"+planID+"/archive", `{"reason":"done"}`)
+	if status != http.StatusOK {
+		t.Fatalf("archive status = %d (%v)", status, body)
+	}
+	if got := presence(apiOnly); got["has_plans"] != true || got["active"] != float64(0) || got["history"] != float64(1) {
+		t.Fatalf("a history-only workspace reports %v", got)
+	}
+
+	// Another workspace's plans never count here.
+	if got := presence(empty); got["has_plans"] != false {
+		t.Fatalf("the empty workspace now reports %v", got)
+	}
+
+	// Presence is a read: it does not accept writes.
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		if status, _ := planAPICall(t, handler, method, "/api/workspaces/"+apiOnly+"/plan-presence", ""); status != http.StatusMethodNotAllowed {
+			t.Errorf("%s status = %d, want 405", method, status)
+		}
+	}
+}
+
 // Opening or reading a Plan advances nothing. Starting execution and creating
 // tickets stay behind approval, over HTTP exactly as in the service.
 func TestWorkspacePlanAPIDraftPlanRefusesExecutionAndMaterialization(t *testing.T) {

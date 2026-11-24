@@ -285,6 +285,35 @@ func (h *Handler) ListPlans(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// PlanPresence handles GET /api/workspaces/{workspaceID}/plan-presence: whether
+// the workspace has any Plan, active or historical, and how many of each.
+//
+// It exists for the workspace chrome, which links to the Plans collection only
+// for a workspace that has one. It is deliberately not the list: it loads no
+// draft, link or progress, it applies no retention (so asking never changes
+// which Plans are active), and it is read-only. A failure is an error status,
+// never zero counts: "could not read" and "none" are different answers.
+func (h *Handler) PlanPresence(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodGet) {
+		return
+	}
+	workspaceID := requireWorkspaceID(w, r)
+	if workspaceID == "" {
+		return
+	}
+	counts, err := h.service.Counts(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{
+		"studio_id": workspaceID,
+		"has_plans": counts.Total() > 0,
+		"active":    counts.Active,
+		"history":   counts.History,
+	})
+}
+
 // GetPlan handles GET /api/workspaces/{workspaceID}/plans/{planID}.
 func (h *Handler) GetPlan(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodGet) {

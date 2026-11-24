@@ -42,6 +42,11 @@ import { taskCreateBody } from './quick-task.js';
 import { loadSongCard } from './song-card.js';
 // Importing this registers window.OriGiveWork, the flow every door opens.
 import './give-work.js';
+import {
+  existingPlansView,
+  readPlanPresence,
+  renderExistingPlans
+} from './workspace-existing-plans.js';
 
 // Live events after which a ticket's state may differ. Frequent phase events
 // (thinking, tool calls, heartbeats) are left out on purpose.
@@ -2759,6 +2764,10 @@ export class WorkspaceDetailPage {
       // describe. It is not awaited: the settings section renders empty for a
       // moment rather than holding the whole page on a filesystem check.
       void this.loadWorkspacePlanningPolicy('', request);
+      // Whether this workspace has any plan, for the secondary "Existing plans"
+      // link under Tickets. Not awaited, and independent of the workspace
+      // payload: a failure here is shown in place, never as "no plans".
+      void this.loadExistingPlansPresence(request);
       if (
         window.OriAskRouting &&
         typeof window.OriAskRouting.refreshWorkspaceIdentity === 'function'
@@ -12844,6 +12853,36 @@ export class WorkspaceDetailPage {
 
   // loadWorkspacePlanningPolicy fetches the effective policy. A preset argument
   // previews one without saving it (FR-142).
+  // The secondary "Existing plans" link under Tickets. A bounded presence read
+  // (two counts, no plan content, no retention) decides whether it is shown. It
+  // rides the same stale-answer rules as every other read of this page: an
+  // answer for a workspace the page has left is dropped, and a failed read is
+  // drawn as an explained gap with a retry because unknown is not zero.
+  async loadExistingPlansPresence(parent = null) {
+    if (!this.workspaceId) return null;
+    const request = this.beginResourceRequest('planPresence', parent);
+    if (!request) return null;
+    const presence = await readPlanPresence({
+      workspaceId: request.workspaceId,
+      signal: request.controller.signal
+    });
+    if (!this.isResourceRequestCurrent(request)) return null;
+    this.existingPlans = presence;
+    this.renderExistingPlansLink();
+    return presence;
+  }
+
+  renderExistingPlansLink() {
+    const mount =
+      typeof document === 'undefined' ? null : document.getElementById?.('hubTicketsExistingPlans');
+    if (!mount) return;
+    renderExistingPlans(
+      mount,
+      existingPlansView(this.existingPlans, { workspaceSlug: this.workspaceSlug }),
+      { onRetry: () => void this.loadExistingPlansPresence() }
+    );
+  }
+
   async loadWorkspacePlanningPolicy(preset = '', parent = null) {
     if (!this.workspaceId) return null;
     const request = this.beginResourceRequest('planningPolicy', parent);

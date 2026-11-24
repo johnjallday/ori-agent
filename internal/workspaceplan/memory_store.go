@@ -100,6 +100,24 @@ func (r *planRecord) hydrated() *Plan {
 	return out
 }
 
+func (s *MemoryStore) CountPlans(_ context.Context, workspaceID string) (PlanCounts, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var counts PlanCounts
+	for _, record := range s.plans {
+		if record.plan.WorkspaceID != workspaceID {
+			continue
+		}
+		if record.plan.ArchivedAt != nil {
+			counts.History++
+		} else {
+			counts.Active++
+		}
+	}
+	return counts, nil
+}
+
 func (s *MemoryStore) ListPlans(_ context.Context, workspaceID string, filter ListFilter) ([]*Plan, error) {
 	filter = filter.Normalized()
 

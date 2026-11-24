@@ -12,6 +12,7 @@
  *   empty-off       no Plans, planning OFF (fresh workspace)
  *   active          one draft + one in-review Plan, nothing materialized
  *   approved        an approved Plan with its tickets materialized, not started
+ *   revised         a Plan with two retained versions (v1 sent back, v2 in review)
  *   history         one archived (history-only) Plan, planning OFF
  *   api-created     a Plan created by a bare API call after "upgrade", no ticket
  *
@@ -46,7 +47,13 @@ async function workspace(name, planningEnabled) {
   const created = await api('POST', '/api/workspaces', { name: `${name} ${stamp}` });
   const id = (created.folder && created.folder.id) || created.id;
   const slug = (created.folder && created.folder.folder_slug) || '';
-  await api('PATCH', `/api/workspaces/${id}/settings`, { planning: { enabled: planningEnabled } });
+  // A preset, not a lone flag: patching only planning.enabled stores a preset
+  // label ("guided") that does not describe its own values, which the settings
+  // form then rewrites to "custom" on the first save. Planner is the preset that
+  // enables planning; Guided is the one that leaves it off.
+  await api('PATCH', `/api/workspaces/${id}/settings`, {
+    preset: planningEnabled ? 'planner' : 'guided'
+  });
   return { id, slug, name: `${name} ${stamp}` };
 }
 
@@ -118,6 +125,34 @@ const materialized = await api(
 );
 out.approved.plan = approvedPlan.id;
 out.approved.taskIds = materialized.task_ids || [];
+
+// Two retained versions: version one was sent back for changes, the draft was
+// extended, and version two is now in review. Version one stays readable.
+out.revised = await workspace('Plans Fixture Revised', true);
+const revisedPlan = await plan(out.revised, 'Revised outline', 'Outline the rollout');
+const revisedBase = `/api/workspaces/${out.revised.id}/plans/${revisedPlan.id}`;
+await api('POST', `${revisedBase}/versions`, {});
+await api('POST', `${revisedBase}/decision`, {
+  decision: 'request_changes',
+  version: 1,
+  actor: 'fixture',
+  reason: 'Fixture: keep version one and extend the outline.'
+});
+const reopened = await api('GET', revisedBase);
+const extended = structuredClone(reopened.draft);
+extended.groups[0].items.push({
+  id: 'i2',
+  description: 'Add a rollback note to the outline.',
+  expected_result: 'A short rollback paragraph.',
+  author: 'user'
+});
+await api('PATCH', `${revisedBase}/draft`, {
+  revision: reopened.draft_revision,
+  objective: reopened.objective,
+  content: extended
+});
+await api('POST', `${revisedBase}/versions`, {});
+out.revised.plan = revisedPlan.id;
 
 out.history = await workspace('Plans Fixture History', false);
 const archivedPlan = await plan(out.history, 'Old outline', 'Outline the retired project');

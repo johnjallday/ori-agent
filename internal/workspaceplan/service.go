@@ -223,6 +223,18 @@ func (s *Service) List(ctx context.Context, workspaceID string, filter ListFilte
 	return plans, nil
 }
 
+// Counts reports how many Plans a workspace has, active and historical. Unlike
+// List it applies no retention and reads no Plan content: asking whether a
+// workspace has Plans must not change which of them are active, or load a draft.
+func (s *Service) Counts(ctx context.Context, workspaceID string) (PlanCounts, error) {
+	release, err := s.admissionGate.Enter()
+	if err != nil {
+		return PlanCounts{}, err
+	}
+	defer release()
+	return s.store.CountPlans(ctx, workspaceID)
+}
+
 // attachProgress fills in the derived read model. A progress failure is not a
 // read failure: the Plan is still readable, just without a summary, because the
 // authority for that data is the Task and Run records rather than this call

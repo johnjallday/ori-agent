@@ -5244,6 +5244,22 @@ body.chat-panel-open .chat-panel-backdrop {
   color: var(--text-muted, #9aa0a6);
 }
 
+/* The secondary "Existing plans" link under Tickets: quiet, in the text flow. */
+.hub-tickets-secondary {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #bdc1c6);
+}
+
+.hub-tickets-secondary[hidden] {
+  display: none;
+}
+
+.hub-tickets-existing-plans-link {
+  color: inherit;
+  text-decoration: underline;
+}
+
 .hub-tickets-status {
   margin: 0;
   padding: 0.5rem 0.7rem;
