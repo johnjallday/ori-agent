@@ -1,6 +1,12 @@
-// Only an opaque, short-lived selection crosses the same-tab handoff. Paths,
-// labels and filenames never enter browser storage, history or query strings.
-const handoffKey = 'ori.folderSearchReview.v1';
+import { savedGroupedCreationReference } from './grouped-creation-operation.js';
+import {
+  reviewCreationOperation,
+  confirmCreationOperation,
+  observeCreationOperation,
+  releaseCreationReference,
+  savedCreationReference
+} from './workspace-creation-operation.js';
+
 async function post(op, body) {
   const response = await fetch(`/api/file-search/${op}`, {
     method: 'POST',
@@ -22,87 +28,322 @@ export async function chooseSearchFolder(kind) {
   const { intent } = await post('begin', { kind });
   return post('review', { intent });
 }
-// Both entry points use this same review for an existing workspace. The
-// opaque IDs identify an offered link; the server checks it again on submit.
-export async function reviewExisting(review, host = document.body) {
-  const matches = review.matches || [];
-  if (!matches.length) return null;
-  const connect = (m, verify = false) =>
-    post('connect', {
-      intent: review.id,
-      workspace: m.id,
-      link: m.link,
-      verify_current_link: verify
-    });
-  const connected = matches.find(m => m.connected);
-  if (connected) return connect(connected);
-  const el = (tag, text) => {
-    const node = document.createElement(tag);
-    node.textContent = text;
-    return node;
+
+// The compact card has one creation shape. The same owner-bound review and
+// delivery journal as advanced creation recheck all material at confirmation.
+export function folderWorkspaceRequest(review, name, search) {
+  return {
+    name: name.trim(),
+    folder_selection: review.id,
+    allow_filename_search: search,
+    blank: true,
+    create_template_agents: false,
+    existing_agent_names: []
   };
-  const dialog = el('dialog', '');
-  dialog.setAttribute('aria-label', 'Connect folder to workspace');
-  const title = el('h2', `Connect ${review.label} to a workspace`);
-  const details = el(
-    'p',
-    review.source
-      ? 'Keep the existing filename index. No workspace, agent or ticket will be created.'
-      : 'Make filenames, locations and dates searchable on this Mac. File contents are not indexed. No workspace, agent or ticket will be created.'
-  );
-  const label = el('label', 'Workspace '),
-    select = el('select', '');
-  label.append(select);
-  if (matches.length > 1) select.add(new Option('Choose a workspace…', ''));
-  matches.forEach((m, i) =>
-    select.add(new Option(`${m.name} · ${m.slug} · ${m.id.slice(0, 8)}`, String(i)))
-  );
-  const confirm = el('button', review.source ? 'Connect to workspace' : 'Allow filename search'),
-    cancel = el('button', 'Cancel');
-  confirm.type = cancel.type = 'button';
-  const verify = el('input', '');
-  verify.type = 'checkbox';
-  const attestation = el('label', '');
-  attestation.append(
-    verify,
-    document.createTextNode(
-      ' I confirm this is the folder currently linked to this workspace. Its original disk identity was not recorded.'
-    )
-  );
-  const chosen = () => (select.value === '' ? null : matches[Number(select.value)]);
-  const update = () => {
-    attestation.hidden = !chosen()?.verify;
-    confirm.disabled = !chosen() || (chosen().verify && !verify.checked);
-  };
-  select.onchange = () => {
-    verify.checked = false;
-    update();
-  };
-  verify.onchange = update;
-  update();
-  dialog.append(title, details, label, attestation, cancel, confirm);
-  host.append(dialog);
-  cancel.onclick = () => dialog.close('cancel');
-  confirm.onclick = () => dialog.close('confirm');
-  cancel.autofocus = true;
-  try {
-    dialog.showModal();
-    await new Promise(resolve => dialog.addEventListener('close', resolve, { once: true }));
-    return dialog.returnValue === 'confirm' && chosen()
-      ? await connect(chosen(), verify.checked)
-      : null;
-  } finally {
-    dialog.remove();
+}
+
+function notifyFiles() {
+  if (typeof BroadcastChannel === 'function') {
+    const channel = new BroadcastChannel('ori-file-search-v1');
+    channel.postMessage('changed');
+    channel.close();
   }
 }
 
-export function openFolderReview(review) {
-  sessionStorage.setItem(handoffKey, review.id);
-  location.assign('/?create=1&folder_review=1');
+function element(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text) node.textContent = text;
+  if (className) node.className = className;
+  return node;
 }
-export async function resumeFolderReview() {
-  const intent = sessionStorage.getItem(handoffKey);
-  sessionStorage.removeItem(handoffKey);
-  if (!intent) throw new Error('Choose the folder again in Files.');
-  return post('resume-review', { intent });
+function button(text, primary = false) {
+  const b = element('button', text, primary ? 'explore-card__primary' : '');
+  b.type = 'button';
+  return b;
 }
+
+// The native modal owns focus on Files; the same form is a reply on Home.
+// Only opaque operation IDs are retained by the existing recovery transport.
+export function exploreFolder(
+  review,
+  { host = document.body, inline = false, signal, preferWorkspace = false } = {}
+) {
+  if (signal?.aborted) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const card = element(inline ? 'section' : 'dialog', null, 'explore-card');
+    const title = element('h2', `Explore ${review.label}`);
+    title.id = `explore-${crypto.randomUUID()}`;
+    card.setAttribute('aria-labelledby', title.id);
+    const description = element('p', null, 'explore-card__description');
+    const form = element('form');
+    const fields = element('fieldset');
+    const actions = element('div', null, 'explore-card__actions');
+    const status = element('p', null, 'explore-card__status');
+    status.setAttribute('role', 'status');
+    const cancel = button('Cancel'),
+      submit = button('', true);
+    submit.type = 'submit';
+    const close = (result = null) => {
+      if (!alive) return;
+      alive = false;
+      signal?.removeEventListener('abort', abort);
+      if (!inline && card.open) card.close();
+      card.remove();
+      resolve(result);
+    };
+    const abort = () => close();
+    let alive = true,
+      busy = false,
+      reference = null,
+      editing = true;
+    const matches = review.matches || [],
+      connected = matches.find(m => m.connected);
+    const openOnly = matches.length && !connected ? button('Open workspace') : null;
+    const name = element('input');
+    name.required = true;
+    name.maxLength = 120;
+    name.value = review.label;
+    const search = element('input');
+    search.type = 'checkbox';
+    search.checked = !!review.source;
+    const select = element('select'),
+      verify = element('input');
+    verify.type = 'checkbox';
+    const verifyLabel = element('label', null, 'explore-card__check');
+    verifyLabel.append(
+      verify,
+      document.createTextNode(
+        'I confirm this is the folder currently linked to this workspace. Its original disk identity was not recorded.'
+      )
+    );
+    const chosen = () => connected || (select.value === '' ? null : matches[Number(select.value)]);
+    function update() {
+      const m = chosen();
+      verifyLabel.hidden = !m?.verify;
+      if (openOnly) openOnly.disabled = busy || !m;
+      submit.disabled =
+        busy || (!matches.length ? !name.value.trim() : !m || (m.verify && !verify.checked));
+    }
+    function finish(workspace, source, destination) {
+      close({ workspace, source, destination });
+    }
+    function receipt(workspace, source, warning) {
+      editing = false;
+      fields.hidden = true;
+      status.textContent = warning || '';
+      title.textContent = 'Workspace created';
+      window.dispatchEvent(
+        new CustomEvent('ori:workspaces-changed', {
+          detail: { reason: 'create', workspaceId: workspace.id }
+        })
+      );
+      description.textContent = `${review.label} is linked to ${workspace.name}.`;
+      actions.replaceChildren();
+      const open = button('Open workspace', preferWorkspace || !source);
+      open.onclick = () => finish(workspace, source, 'workspace');
+      if (source) {
+        notifyFiles();
+        const files = button('Search this folder in Files', !preferWorkspace);
+        files.onclick = () => finish(workspace, source, 'files');
+        actions.append(files);
+      }
+      actions.append(open);
+      const done = button('Done');
+      done.onclick = () => close();
+      actions.append(done);
+      actions.querySelector('.explore-card__primary')?.focus();
+    }
+    function outcome(view) {
+      if (view.state === 'complete') {
+        releaseCreationReference(localStorage, reference);
+        const { folder, filename_source_id, search_warning } = view.result;
+        receipt(
+          { id: folder.id, name: folder.name, slug: folder.folder_slug },
+          filename_source_id,
+          search_warning
+        );
+        return;
+      }
+      if (view.state === 'refused' || view.state === 'abandoned') {
+        releaseCreationReference(localStorage, reference);
+        reference = null;
+        throw new Error(
+          view.message || 'Workspace was not created. Check the name or choose the folder again.'
+        );
+      }
+      editing = false;
+      fields.disabled = true;
+      actions.replaceChildren();
+      const read = button('Read saved status', true);
+      read.onclick = async () => {
+        read.disabled = true;
+        try {
+          const next = await observeCreationOperation(fetch, reference);
+          if (alive) outcome(next);
+        } catch (error) {
+          status.textContent = error.message;
+          actions.replaceChildren(cancel);
+        } finally {
+          read.disabled = false;
+        }
+      };
+      actions.append(cancel, read);
+      cancel.disabled = false;
+      cancel.textContent = 'Close';
+      status.textContent =
+        'Creation is not yet verified. Read its saved status; do not create again.';
+    }
+    if (!matches.length) {
+      description.textContent =
+        'Create a workspace linked to this folder. Workspace tools can read its files. The originals stay where they are.';
+      const label = element('label', 'Workspace name', 'explore-card__name');
+      label.append(name);
+      const consent = element('label', null, 'explore-card__check');
+      consent.append(
+        search,
+        document.createTextNode(
+          review.source
+            ? 'Connect the existing filename index without rescanning.'
+            : 'Make filenames searchable in Files on this Mac.'
+        )
+      );
+      fields.append(
+        label,
+        consent,
+        element(
+          'small',
+          review.source
+            ? 'Leaving this off does not revoke existing search access.'
+            : 'Only names, locations and dates are indexed, not file contents.'
+        )
+      );
+      name.oninput = update;
+      submit.textContent = 'Create workspace';
+    } else if (connected) {
+      description.textContent = `This folder is already linked to ${connected.name}.`;
+      submit.textContent = 'Open workspace';
+    } else {
+      description.textContent =
+        matches.length === 1
+          ? `This folder is already linked to ${matches[0].name}.`
+          : 'More than one workspace links to this folder. Choose which one to connect.';
+      if (matches.length > 1) select.add(new Option('Choose a workspace…', ''));
+      matches.forEach((m, i) =>
+        select.add(new Option(`${m.name} · ${m.slug} · ${m.id.slice(0, 8)}`, String(i)))
+      );
+      if (matches.length > 1) {
+        const label = element('label', 'Workspace', 'explore-card__name');
+        label.append(select);
+        fields.append(label);
+      }
+      fields.append(
+        verifyLabel,
+        element(
+          'small',
+          review.source
+            ? 'Keep the existing index; nothing is rescanned.'
+            : 'Allow local filename indexing. File contents are not indexed.'
+        )
+      );
+      select.onchange = () => {
+        verify.checked = false;
+        update();
+      };
+      verify.onchange = update;
+      submit.textContent = review.source ? 'Connect to workspace' : 'Allow filename search';
+    }
+    actions.append(cancel, submit);
+    if (openOnly) {
+      actions.append(openOnly);
+      openOnly.onclick = () =>
+        perform(async () => {
+          // Opening an owned workspace does not require granting filename search.
+          const selected = chosen();
+          const current = await post('resume-review', { intent: review.id });
+          const workspace = current.matches?.find(
+            m => m.id === selected.id && m.link === selected.link
+          );
+          if (!workspace) throw new Error('This folder link changed. Choose the folder again.');
+          if (alive) finish(workspace, null, 'workspace');
+        });
+    }
+    async function connect(destination) {
+      const m = chosen();
+      const result = await post('connect', {
+        intent: review.id,
+        workspace: m.id,
+        link: m.link,
+        verify_current_link: verify.checked
+      });
+      if (!m.connected) notifyFiles();
+      if (alive) finish(result.workspace, result.source, destination);
+    }
+    if (connected && !preferWorkspace) {
+      const files = button('Search this folder in Files');
+      files.onclick = () => perform(() => connect('files'));
+      actions.append(files);
+    }
+    async function perform(action) {
+      if (busy) return;
+      busy = true;
+      fields.disabled = true;
+      for (const b of actions.children) b.disabled = true;
+      status.textContent = '';
+      try {
+        await action();
+      } catch (err) {
+        if (alive) status.textContent = err.message || 'Folder setup could not be completed.';
+      } finally {
+        busy = false;
+        if (alive && editing) {
+          fields.disabled = false;
+          for (const b of actions.children) b.disabled = false;
+          update();
+        }
+      }
+    }
+    form.onsubmit = event => {
+      event.preventDefault();
+      if (!editing || submit.disabled) return;
+      void perform(async () => {
+        if (matches.length) {
+          return connect(connected || preferWorkspace ? 'workspace' : 'files');
+        }
+        if (savedCreationReference(localStorage) || savedGroupedCreationReference(localStorage))
+          throw new Error(
+            'Open New Workspace on Map to check the previous creation receipt first.'
+          );
+        reference = await reviewCreationOperation(
+          fetch,
+          crypto.randomUUID(),
+          folderWorkspaceRequest(review, name.value, search.checked)
+        );
+        if (!alive) return;
+        const view = await confirmCreationOperation(fetch, localStorage, reference);
+        if (alive) outcome(view);
+      });
+    };
+    cancel.onclick = () => close();
+    card.addEventListener('cancel', e => {
+      e.preventDefault();
+      if (!busy) close();
+    });
+    card.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        e.preventDefault();
+        if (!busy) close();
+      }
+    });
+    form.append(fields, status, actions);
+    card.append(element('small', 'Local folder', 'explore-card__kicker'), title, description, form);
+    host.append(card);
+    signal?.addEventListener('abort', abort, { once: true });
+    update();
+    if (!inline) card.showModal();
+    (matches.length > 1 && !connected ? select : matches.length ? submit : name).focus();
+  });
+}
+
+export const reviewExisting = (review, host) =>
+  exploreFolder(review, { host, preferWorkspace: true });

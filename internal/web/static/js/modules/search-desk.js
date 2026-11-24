@@ -123,15 +123,17 @@ export function mountFileSearch(root, compact = false) {
     location.replace(target === 'search' ? '/search' : '/?home=1');
   }
   async function setupReviewedFolder(review) {
-    const { reviewExisting, openFolderReview } = await import('./folder-search-review.js');
-    if (!review.matches?.length) {
-      openFolderReview(review);
+    const { exploreFolder } = await import('./folder-search-review.js');
+    const connection = await exploreFolder(review);
+    if (!connection) {
+      await query();
       return;
     }
-    const connection = await reviewExisting(review);
-    if (!connection) return;
+    if (connection.destination === 'workspace') {
+      location.assign(`/workspaces/${encodeURIComponent(connection.workspace.slug)}`);
+      return;
+    }
     term.value = '';
-    channel?.postMessage('changed');
     await changeScope(connection.source);
     term.focus();
   }

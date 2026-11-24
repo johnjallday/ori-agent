@@ -266,6 +266,7 @@ export default defineConfig([
       'internal/web/static/js/modules/search-palette.js',
       'internal/web/static/js/modules/search-desk.js',
       'internal/web/static/js/modules/folder-search-review.js',
+      'internal/web/static/js/modules/assistant-explore-folder.js',
       'internal/web/static/js/modules/workspace-search-links.js',
       'internal/web/static/js/modules/destination-place.js',
       'internal/web/static/js/modules/setup-journey.js',

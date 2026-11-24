@@ -71,7 +71,7 @@ def serve(root, rev=None, build_tmp=None, fixture_binary=None):
 
 def spec(root,url,scenario,name,browser='chromium'):
     env=dict(os.environ,PLAYWRIGHT_BASE_URL=url,ORI_SEARCH_FIRST_FIXTURE=str(root),ORI_SEARCH_FIRST_SCENARIO=scenario,ORI_SEARCH_EVIDENCE=str(EVIDENCE))
-    config=['--config','playwright.files-map.config.ts'] if scenario in ('navigation', 'folder-backed','folder-return') or scenario.startswith('parity-') else []
+    config=['--config','playwright.files-map.config.ts'] if scenario in ('navigation', 'folder-backed','folder-return','folder-assistant') or scenario.startswith('parity-') else []
     subprocess.run([str(REPO/'node_modules/.bin/playwright'),'test',*config,'--project',browser,'--reporter=list','tests/'+name+'.spec.ts'],cwd=REPO,env=env,check=True)
 
 
@@ -129,6 +129,9 @@ if __name__=='__main__':
                 locations=json.loads(api(url,'/api/file-search/sources'))
                 assert sorted(s['label'] for s in locations)==['Documents','Downloads']
                 assert len([w for w in json.loads(api(url,'/api/workspaces'))['folders'] if w['name']=='Research archive'])==1
+            root=project_fixture()
+            with serve(root,fixture_binary=binary) as url:
+                spec(root,url,'folder-assistant','folder-backed-search-locations',browser)
             for entry in ('files','workspace'):
                 for kind in ('downloads','documents','custom'):
                     root=project_fixture()

@@ -16,6 +16,23 @@
     <span class="visually-hidden">You asked: </span>Explore a folder
   </p>
   <div id="personalAssistantFolderChooser" class="pa-thread__reply pa-folder__chooser" hidden>
+    {{if .Extra.FolderSearchReady}}
+    <div id="assistantExploreFolder" hidden>
+      <div data-explore-choices>
+        <p class="pa-folder__prompt">Which folder would you like to explore?</p>
+        <div class="pa-folder__chips" role="group" aria-label="Explore a folder">
+          <button type="button" class="pa-folder__chip" data-explore-kind="downloads">Downloads</button>
+          <button type="button" class="pa-folder__chip" data-explore-kind="documents">Documents</button>
+          <button type="button" class="pa-folder__chip" data-explore-kind="custom">Choose another folder…</button>
+        </div>
+        <p class="pa-folder__note">Link a folder to a workspace. No agent is hired.</p>
+        <button type="button" class="pa-folder__chip" data-explore-assisted>Hire an agent or explore a file instead…</button>
+      </div>
+      <p data-explore-status role="status" aria-live="polite"></p>
+      <div data-explore-review></div>
+    </div>
+    <div id="assistantGuidedFolderChooser">
+    {{end}}
     <p id="personalAssistantFolderTitle" class="pa-folder__prompt">Which folder should I explore?</p>
     <div id="personalAssistantFolderChips" class="pa-folder__chips" role="group" aria-label="Folders"></div>
     <p id="personalAssistantFolderNote" class="pa-folder__note" hidden></p>
@@ -23,6 +40,7 @@
     <div id="personalAssistantFolderPathEntry"></div>
     <p id="personalAssistantFolderStatus" class="pa-folder__status" role="status" aria-live="polite" hidden></p>
     <p class="pa-folder__assurance">A read-only peek. Nothing moves.</p>
+    {{if .Extra.FolderSearchReady}}</div>{{end}}
   </div>
   <div id="personalAssistantFolderScene" class="pa-thread__reply pa-folder__scene" data-phase="choosing" hidden>
     <div class="pa-folder__scene-copy">

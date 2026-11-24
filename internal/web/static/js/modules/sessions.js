@@ -862,8 +862,6 @@ const sessionManager = {
       this.resetAddWorkspaceModalForm({ preserveAskOri: true });
       this.applyCreatorPrefill(this.workspaceCreatorContext);
       this.applyAnchorPrefill();
-      if (pendingOptions.searchFolderReview)
-        this.applySearchFolderReview(pendingOptions.searchFolderReview, true);
       this.importEntryPoint =
         entryPoint || (importMode ? 'workspace_hub_import' : 'workspace_hub_create');
       this.workspacePostCreateAction = postCreateAction;
@@ -26227,8 +26225,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const secondBrainProject = openCreate
         ? String(params.get('second_brain_project') || '').trim()
         : '';
-      const searchReview = openCreate && params.get('folder_review') === '1';
-      params.delete('folder_review');
       params.delete('second_brain_project');
       const lockedParent =
         openCreate && blueprint && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(parent) ? parent : '';
@@ -26240,22 +26236,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash;
       window.history.replaceState(null, '', cleanUrl);
       // Defer a frame so init()'s show.bs.modal handler is bound first.
-      if (searchReview) {
-        requestAnimationFrame(async () => {
-          try {
-            const { resumeFolderReview } = await import('./folder-search-review.js');
-            const review = await resumeFolderReview();
-            sessionManager.showAddWorkspaceModal({
-              entryPoint: 'files_folder_review',
-              name: review.label,
-              searchFolderReview: review
-            });
-          } catch (error) {
-            sessionManager.showToast(error.message, 'warning');
-          }
-        });
-        return;
-      }
       if (secondBrainProject) {
         requestAnimationFrame(
           () => void sessionManager.openSecondBrainProjectWorkspace(secondBrainProject)

@@ -1011,7 +1011,7 @@ test('"Explore a folder" is offered when the assistant can accept work, and wait
   }
   assert.equal(assistantChipView().visible, false);
   // Off Home the chip goes to Home's flow, which the drawer there starts.
-  assert.equal(EXPLORE_FOLDER_URL, '/?panel=today&folder=show');
+  assert.equal(EXPLORE_FOLDER_URL, '/?panel=today&folder=explore');
 });
 
 test('a page that is not Home says how much needs the user, in one line that goes there', () => {

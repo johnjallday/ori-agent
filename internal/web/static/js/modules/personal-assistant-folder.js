@@ -12,6 +12,7 @@
 import './folder-plan-lines.js';
 import { recordFolderWorkspace } from './hq-guided-attempt.js';
 import { folderPickCopy } from './folder-pick-copy.js';
+import { mountAssistantExplore } from './assistant-explore-folder.js';
 import './folder-setup-visual.js';
 import { mountPlacementPanel } from './assisted-workspace-placement.js';
 import { createSourceSetupDialog } from './source-setup-dialog.js';
@@ -4769,7 +4770,7 @@ function runAction(action) {
   if (action.repick) {
     // Straight to the dialog where there is one; the chips otherwise.
     if (state.digest?.picker_available === true) scan({ picker: true });
-    else openChooser();
+    else openChooser('assisted');
     return;
   }
   if (action.remove) {
@@ -6808,11 +6809,13 @@ function openHQCard() {
 // openChooser is the user asking to explore a folder: the composer's Add
 // folder, Home's toolbar button, the `folder=show` link, the mission's Start,
 // or an offer's own "Show another folder". Every one of them starts the same
-// turn in the conversation, and the folder chosen there starts an agent on it
-// (one card for every folder, folder-agent-card.js); the receipt and the
-// report follow in the conversation and the status line under it. Offers made
+// turn in the conversation. Established local Macs offer the compact workspace
+// review; explicit guided and assisted choices keep the folder-agent card.
+// Offers made
 // before this change keep their own controls until they are decided.
+let assistantExplore = null;
 function openChooser(suggestion = '', fromAttach = false) {
+  assistantExplore?.stop();
   if (!fromAttach) endFolderGuide();
   if (folderGuide) folderGuide.step = 'choose';
   state.guidedFolder = folderGuide?.hint || null;
@@ -6833,6 +6836,10 @@ function openChooser(suggestion = '', fromAttach = false) {
     void chooseForAgent({ chip: 'documents' });
     return;
   }
+  if (assistantExplore && !suggestion && !folderGuide) {
+    assistantExplore.open();
+    return;
+  }
   // The first folder, or the typed path when there are none to offer.
   const first =
     (folderGuide?.tips && els?.chips?.querySelector('[data-chip="documents"]')) ||
@@ -6844,6 +6851,7 @@ function openChooser(suggestion = '', fromAttach = false) {
 // closeChooser puts the chooser away (Esc) and returns focus to where the
 // folder was asked for.
 function closeChooser() {
+  assistantExplore?.stop();
   endFolderGuide();
   state.guidedFolder = null;
   state.chooserOpen = false;
@@ -7137,7 +7145,7 @@ async function startAgent(brief, button, hire) {
         ? `${result.error} Open ${result.duplicate.name} from the map.`
         : result.error;
       if (result.repick) state.agent.card = null;
-      if (result.repick) openChooser();
+      if (result.repick) openChooser('assisted');
       return;
     }
     recordFolderWorkspace(hint, result.view?.workspace_id);
@@ -7798,6 +7806,7 @@ function onStatus(personalAssistant) {
   const changed = available !== state.available;
   state.available = available;
   if (!available) {
+    assistantExplore?.stop();
     state.handOver = false;
     state.chooserOpen = false;
     state.inThread = false;
@@ -7823,6 +7832,13 @@ function keepLatestLast() {
 function init() {
   const els = elements();
   if (!els) return;
+  const exploreHost = document.getElementById('assistantExploreFolder');
+  if (exploreHost)
+    assistantExplore = mountAssistantExplore(
+      exploreHost,
+      document.getElementById('assistantGuidedFolderChooser'),
+      () => els.chips?.querySelector('button')?.focus()
+    );
   document.addEventListener('personal-assistant:status', event => {
     onStatus(event.detail?.personalAssistant);
   });
@@ -7846,6 +7862,7 @@ function init() {
     (target || document.getElementById('personalAssistantAttachMenu'))?.focus();
   });
   document.addEventListener('personal-assistant:closed', () => {
+    if (exploreHost && !exploreHost.hidden) closeChooser();
     endFolderGuide();
     state.guidedFolder = null;
     runSongs.navigationGeneration++;

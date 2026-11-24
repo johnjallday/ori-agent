@@ -50,23 +50,28 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     }
   }
   await choose(entry);
-  if (entry === 'files') await blank();
-  const consent = page.locator('#workspaceSearchConsent');
+  const compact = page.locator('dialog.explore-card');
+  const consent =
+    entry === 'files' ? compact.getByRole('checkbox') : page.locator('#workspaceSearchConsent');
   await expect(consent).toBeVisible();
-  if (entry === 'workspace') {
-    await expect(consent).not.toBeChecked();
-    await consent.check();
-  } else await expect(consent).toBeChecked();
-  await page.locator('#folderNameInput').fill(name);
-  await page.locator('#wizardNextBtn').click();
-  await page.getByRole('checkbox', { name: 'Create without agents' }).check();
-  await page.locator('#wizardNextBtn').click();
-  const review = page.locator('#workspaceCreationReviewPanel');
-  await expect(review).toContainText('Index filenames');
+  await expect(consent).not.toBeChecked();
+  await consent.check();
+  const review = entry === 'files' ? compact : page.locator('#workspaceCreationReviewPanel');
+  if (entry === 'files') await compact.getByLabel('Workspace name').fill(name);
+  else {
+    await page.locator('#folderNameInput').fill(name);
+    await page.locator('#wizardNextBtn').click();
+    await page.getByRole('checkbox', { name: 'Create without agents' }).check();
+    await page.locator('#wizardNextBtn').click();
+    await expect(review).toContainText('Index filenames');
+  }
   expect(await sources()).toEqual([]);
   await page.screenshot({ path: path('review') });
-  await review.getByRole('button', { name: 'Use automatic placement' }).click();
-  await review.locator('[data-placement-action="confirm"]').click();
+  if (entry === 'files') await review.getByRole('button', { name: 'Create workspace' }).click();
+  else {
+    await review.getByRole('button', { name: 'Use automatic placement' }).click();
+    await review.locator('[data-placement-action="confirm"]').click();
+  }
   await review.getByRole('button', { name: 'Search this folder in Files' }).click();
   await expect(page.locator('#title')).toHaveText(folder);
   await expect(page.locator('#hits')).toContainText(
@@ -91,6 +96,11 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
   };
   await inventory();
   await choose(entry === 'files' ? 'workspace' : 'files');
+  await compact
+    .getByRole('button', {
+      name: entry === 'files' ? 'Open workspace' : 'Search this folder in Files'
+    })
+    .click();
   if (entry === 'files') await expect(page).toHaveURL(new RegExp('/workspaces/' + ws.slug + '$'));
   else await expect(page.locator('#title')).toHaveText(folder);
   await inventory();
