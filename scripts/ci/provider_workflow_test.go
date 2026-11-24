@@ -41,7 +41,7 @@ type providerStep struct {
 type providerJob struct {
 	Name            string            `yaml:"name"`
 	RunsOn          string            `yaml:"runs-on"`
-	Needs           string            `yaml:"needs"`
+	Needs           any               `yaml:"needs"`
 	If              string            `yaml:"if"`
 	Env             map[string]string `yaml:"env"`
 	ContinueOnError any               `yaml:"continue-on-error"`

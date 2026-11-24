@@ -22,7 +22,7 @@ type workflowStep struct {
 
 type workflowJob struct {
 	If              string            `yaml:"if"`
-	Needs           string            `yaml:"needs"`
+	Needs           any               `yaml:"needs"`
 	Permissions     map[string]string `yaml:"permissions"`
 	ContinueOnError any               `yaml:"continue-on-error"`
 	Steps           []workflowStep    `yaml:"steps"`

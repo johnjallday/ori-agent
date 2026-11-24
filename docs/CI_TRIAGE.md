@@ -31,7 +31,16 @@ that; `./scripts/release.sh status` shows where they stand.
    - `release-sync/vX.Y.Z-<7-char dev sha>`, pinned at a `dev` commit, with a PR
      into `release/vX.Y.Z`. `auto-release.yml` merges it once dev CI is green
      for that exact commit, then re-cuts the RC when the release branch is green.
-4. CI facts that matter for reproduction: the Unit Tests job runs
+4. On ordinary PRs into `dev`, **Select and run PR unit scope** reports the
+   unit gate used. `docs` omits Go units for Markdown under `docs/` or the root
+   README (architecture contracts are an exception). `affected` runs fresh
+   Linux race tests on the changed packages and their Go importers, including
+   test imports; the job log lists the packages. `full` runs the existing matrix
+   when the change is broad or uncertain (for example module files, workflows,
+   or more than 12 affected packages). Both required Unit Tests checks still
+   report the result; only full runs publish unit coverage. Lint, security,
+   build, README, and frontend checks are unchanged.
+5. All pushes and release PRs keep the full gate. For reproduction the full Linux suite runs
    `go test -short -race -covermode=atomic -count=1` on a 2-core Ubuntu 24.04
    runner with the Go version from the `go` line of `go.mod`, exactly that patch
    (`go-version-file`). A test that fails only there is still a real failure.

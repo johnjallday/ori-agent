@@ -29,7 +29,7 @@ type unitMatrix struct {
 type unitJob struct {
 	Name            string            `yaml:"name"`
 	RunsOn          string            `yaml:"runs-on"`
-	Needs           string            `yaml:"needs"`
+	Needs           any               `yaml:"needs"`
 	If              string            `yaml:"if"`
 	Permissions     map[string]string `yaml:"permissions"`
 	Env             map[string]string `yaml:"env"`
@@ -68,10 +68,14 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 	if !reflect.DeepEqual(gate.Strategy.Matrix, wantMatrix) {
 		t.Fatalf("matrix renamed required contexts: %#v", gate.Strategy.Matrix)
 	}
-	if gate.Needs != "test-unit-run" || gate.If != "${{ always() }}" {
+	if !reflect.DeepEqual(gate.Needs, []any{"unit-scope", "test-unit-run"}) || gate.If != "${{ always() }}" {
 		t.Fatal("required gate must report failure for failed, cancelled or skipped executions")
 	}
 	job := workflow.Jobs["test-unit-run"]
+	scope := workflow.Jobs["unit-scope"]
+	if scope.Env["FAST_PR"] != "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && !startsWith(github.head_ref, 'release/') && !startsWith(github.head_ref, 'release-') }}" || job.Needs != "unit-scope" || job.If != "needs.unit-scope.outputs.mode == 'full'" {
+		t.Fatal("fast unit path must be limited to ordinary dev PRs; full mode requires all shards")
+	}
 	wantExecution := unitMatrix{Include: []unitShard{
 		{"ubuntu-latest", "1"}, {"ubuntu-latest", "2"}, {"ubuntu-latest", "3"}, {"ubuntu-latest", "4"}, {"macos-latest", "platform"},
 	}}
@@ -190,13 +194,25 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 			t.Fatalf("required gate %s hides failures", step.Name)
 		}
 	}
-	guard := gateSteps["Require every unit execution"]
-	if gateOrder[guard.Name] != 0 || guard.If != "" || guard.Env["UNIT_RESULT"] != "${{ needs.test-unit-run.result }}" || !strings.Contains(guard.Run, `if [[ "$UNIT_RESULT" != success ]]`) || !strings.Contains(guard.Run, "exit 1") {
+	guard := gateSteps["Require selected unit executions"]
+	if gateOrder[guard.Name] != 0 || guard.If != "" || guard.Env["UNIT_RESULT"] != "${{ needs.test-unit-run.result }}" || guard.Env["SCOPE_RESULT"] != "${{ needs.unit-scope.result }}" || guard.Env["MODE"] != "${{ needs.unit-scope.outputs.mode }}" {
 		t.Fatal("required gate must reject every non-success result before any other work")
+	}
+	for _, scope := range []string{"success", "failure", "skipped", "cancelled"} {
+		for _, mode := range []string{"full", "affected", "docs", "candidate", ""} {
+			for _, result := range []string{"success", "failure", "skipped", "cancelled"} {
+				cmd := exec.CommandContext(t.Context(), "bash", "-c", guard.Run)
+				cmd.Env = []string{"SCOPE_RESULT=" + scope, "MODE=" + mode, "UNIT_RESULT=" + result}
+				want := scope == "success" && ((mode == "full" && result == "success") || ((mode == "docs" || mode == "affected") && result == "skipped"))
+				if got := cmd.Run() == nil; got != want {
+					t.Fatalf("gate(%s,%s,%s) = %t; want %t", scope, mode, result, got, want)
+				}
+			}
+		}
 	}
 	receive := gateSteps["Receive successful unit shards"]
 	// Both gates run on Linux, so the Ubuntu-only work keys on the matrix label.
-	const ubuntuGate = "matrix.os == 'ubuntu-latest'"
+	const ubuntuGate = "needs.unit-scope.outputs.mode == 'full' && matrix.os == 'ubuntu-latest'"
 	for _, name := range []string{"Checkout code", "Set up Go"} {
 		if gateSteps[name].If != ubuntuGate {
 			t.Fatalf("%s must run only in the Ubuntu gate", name)
@@ -226,6 +242,13 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 		if workflow.Jobs[name].Needs != "test-unit" {
 			t.Fatalf("%s no longer depends on unit tests", name)
 		}
+	}
+}
+
+func TestPRUnitScope(t *testing.T) {
+	command := exec.CommandContext(t.Context(), "python3", "-B", "../pr-unit-scope.test.py")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("PR unit scope: %v\n%s", err, output)
 	}
 }
 
