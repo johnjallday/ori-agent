@@ -823,6 +823,15 @@ def wait_for_demo(process, log, port):
             sandbox = Path(match.group(1))
             if not sandbox.name.startswith("ori-demo."):
                 raise RuntimeError("unexpected demo sandbox")
+            # A healthy response alone might be another checkout. Require
+            # the listener to be in this invocation's session before a probe.
+            listeners = subprocess.run(['lsof', '-nP', '-t', f'-iTCP:{port}', '-sTCP:LISTEN'],
+                                       capture_output=True, text=True).stdout.split()
+            if not listeners:
+                time.sleep(0.1)
+                continue
+            if any(os.getsid(int(pid)) != process.pid for pid in listeners):
+                raise RuntimeError('demo port belongs to another session; refusing to send requests')
             try:
                 with urlopen(f"http://127.0.0.1:{port}/api/personal-assistant", timeout=1) as response:
                     if response.status == 200:
@@ -933,7 +942,7 @@ def main():
         env = {key: value for key, value in os.environ.items()
                if not key.endswith("_API_KEY") and key not in {
                    "CODEX_HOME", "AGENT_STORE_PATH", "ORI_KEEP_DEMO_SANDBOX", "ORI_DEMO_OPEN"}}
-        env.update(ORI_DEMO_NO_CODEX="1", ORI_DEMO_OPEN="0",
+        env.update(ORI_DEMO_NO_CODEX="1", ORI_DEMO_OPEN="0", ORI_DEMO_REQUIRE_FREE_PORT="1",
                    ORI_ASSISTANT_EVIDENCE_DIR=str(evidence),
                    OLLAMA_BASE_URL=f"http://127.0.0.1:{provider.server_port}")
         # Two demos restart the same isolated host on the same data between two

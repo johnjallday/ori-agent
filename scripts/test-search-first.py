@@ -44,7 +44,7 @@ def serve(root, rev=None, build_tmp=None, fixture_binary=None):
     url = f'http://localhost:{number}'
     (root/'.search-first-test-url').write_text(url+'\n')
     env = {k: os.environ[k] for k in ('PATH','HOME','TMPDIR','GOCACHE','GOMODCACHE','GOPATH') if k in os.environ}
-    env.update(GOWORK='off', ORI_DEMO_SPLIT_PROFILE='1', HTTP_PROXY='http://127.0.0.1:1', HTTPS_PROXY='http://127.0.0.1:1', NO_PROXY='localhost,127.0.0.1')
+    env.update(GOWORK='off', ORI_DEMO_REQUIRE_FREE_PORT='1', ORI_DEMO_SPLIT_PROFILE='1', HTTP_PROXY='http://127.0.0.1:1', HTTPS_PROXY='http://127.0.0.1:1', NO_PROXY='localhost,127.0.0.1')
     if rev:
         # git archive and Go scratch never become dependencies on another checkout.
         env['TMPDIR'] = str(build_tmp)
@@ -62,7 +62,12 @@ def serve(root, rev=None, build_tmp=None, fixture_binary=None):
                 if p.poll() is not None:
                     raise RuntimeError('isolated launch failed; see the fixture server.log')
                 try:
-                    if json.loads(api(url,'/health'))['status']=='ok':break
+                    # demo-server execs the binary in place. Never seed a
+                    # profile unless this exact process owns the listener.
+                    owners = subprocess.run(['lsof','-nP','-t',f'-iTCP:{number}','-sTCP:LISTEN'], capture_output=True,text=True).stdout.split()
+                    if owners and owners != [str(p.pid)]:
+                        raise RuntimeError('fixture port belongs to another process')
+                    if owners and json.loads(api(url,'/health'))['status']=='ok':break
                 except OSError: pass
                 time.sleep(.2)
             else:raise RuntimeError('isolated startup timed out')
