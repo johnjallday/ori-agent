@@ -37,6 +37,19 @@ const blank = {
     'Click a valid position or press Enter to create this workspace. Escape returns to review.'
 };
 
+test('the scoped Files action waits until the creation receipt can accept navigation', () => {
+  const view = { ...blank, result: { id: 'workspace' }, searchSource: 'approved-source' };
+  assert.match(
+    workspaceCreationReviewHTML({ ...view, busy: true }),
+    /data-placement-action="files" disabled/
+  );
+  assert.match(workspaceCreationReviewHTML(view), /data-placement-action="files">/);
+  assert.doesNotMatch(
+    workspaceCreationReviewHTML({ ...view, searchSource: '' }),
+    /data-placement-action="files"/
+  );
+});
+
 function normalizedRoleRows(roles) {
   const window = {};
   vm.runInNewContext(readFileSync(new URL('./workspace-role-roster.js', import.meta.url), 'utf8'), {

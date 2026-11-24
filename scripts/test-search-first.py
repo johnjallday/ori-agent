@@ -71,7 +71,7 @@ def serve(root, rev=None, build_tmp=None, fixture_binary=None):
 
 def spec(root,url,scenario,name,browser='chromium'):
     env=dict(os.environ,PLAYWRIGHT_BASE_URL=url,ORI_SEARCH_FIRST_FIXTURE=str(root),ORI_SEARCH_FIRST_SCENARIO=scenario,ORI_SEARCH_EVIDENCE=str(EVIDENCE))
-    config=['--config','playwright.files-map.config.ts'] if scenario in ('navigation', 'folder-backed','folder-return') else []
+    config=['--config','playwright.files-map.config.ts'] if scenario in ('navigation', 'folder-backed','folder-return') or scenario.startswith('parity-') else []
     subprocess.run([str(REPO/'node_modules/.bin/playwright'),'test',*config,'--project',browser,'--reporter=list','tests/'+name+'.spec.ts'],cwd=REPO,env=env,check=True)
 
 
@@ -103,17 +103,21 @@ if __name__=='__main__':
     if sys.platform!='darwin':sys.exit('macOS only')
     SCRATCH.mkdir(parents=True,exist_ok=True);EVIDENCE.mkdir(parents=True,exist_ok=True)
     if args.folder_backed:
+        def project_fixture():
+            root=fixture()
+            project=root/'home/Synthetic Project'
+            project.mkdir()
+            (project/'Harbor.txt').write_text('Synthetic project fixture.\n')
+            (root/'home/Downloads/Ship.txt').write_text('Synthetic download.\n')
+            (root/'data').mkdir(mode=0o700)
+            return root
         build=Path(tempfile.mkdtemp(prefix='picker-build-',dir=SCRATCH))
         overlay=build/'overlay.json'
         overlay.write_text(json.dumps({'Replace':{str(REPO/'internal/server/search_folder_picker.go'):str(REPO/'internal/server/testdata/search_folder_picker.go')}}))
         binary=build/'fixture-server'
         subprocess.run(['go','build','-overlay',str(overlay),'-o',str(binary),'./cmd/server'],cwd=REPO,env={**os.environ,'GOWORK':'off'},check=True)
         for browser in ('chromium', 'webkit'):
-            root=fixture()
-            project=root/'home/Synthetic Project'
-            project.mkdir()
-            (project/'Harbor.txt').write_text('Synthetic project fixture.\n')
-            (root/'data').mkdir(mode=0o700)  # pre-existing installation; not the first-run landing
+            root=project_fixture()
             with serve(root, fixture_binary=binary) as url:
                 # First-run search consent predates established workspace setup.
                 intent=json.loads(api(url,'/api/file-search/begin',{'kind':'downloads'}))
@@ -125,6 +129,12 @@ if __name__=='__main__':
                 locations=json.loads(api(url,'/api/file-search/sources'))
                 assert sorted(s['label'] for s in locations)==['Documents','Downloads']
                 assert len([w for w in json.loads(api(url,'/api/workspaces'))['folders'] if w['name']=='Research archive'])==1
+            for entry in ('files','workspace'):
+                for kind in ('downloads','documents','custom'):
+                    root=project_fixture()
+                    with serve(root,fixture_binary=binary) as url:
+                        spec(root,url,'parity-'+entry+'-'+kind,'folder-setup-parity',browser)
+        binary.unlink()  # evidence is the fixture, not its disposable executable
         sys.exit(0)
     for scenario in ('fresh','skip'):
         root=fixture(large=scenario=='fresh')
