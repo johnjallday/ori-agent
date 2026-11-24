@@ -647,3 +647,45 @@ test('isGoneError: 404 and 410 mean gone; anything else is a failure to report',
   assert.equal(isGoneError(new Error('Failed to fetch')), false);
   assert.equal(isGoneError(null), false);
 });
+
+// Upgrading converts nothing (merge-tree-into-files PR 2, requirement 44): the
+// rows and tabs a browser remembered before folders were managed in Files load
+// exactly as they were stored.
+test('rows and tabs remembered before this change load as they were', () => {
+  const stored = {
+    version: TREE_STATE_VERSION,
+    collapsed: ['g1'],
+    expanded: ['w1', 'w1/s/linked', 'w1/l/dir-1', 'w1/ld/dir-1/Saved'],
+    tabs: [
+      { key: 'w1/n/note-1', kind: 'note', workspaceId: 'w1', label: 'Plan', meta: {} },
+      {
+        key: 'w1/lf/dir-1/Saved/ship-plan.txt',
+        kind: 'linkedFile',
+        workspaceId: 'w1',
+        label: 'ship-plan.txt',
+        meta: { dirId: 'dir-1', path: 'Saved/ship-plan.txt', dirName: 'Downloads' }
+      }
+    ],
+    activeKey: 'w1/lf/dir-1/Saved/ship-plan.txt'
+  };
+  const loaded = parseTreeState(JSON.stringify(stored));
+  assert.deepEqual(loaded.collapsed, stored.collapsed);
+  assert.deepEqual(loaded.expanded, stored.expanded);
+  assert.deepEqual(
+    loaded.tabs.map(tab => [tab.key, tab.kind, tab.workspaceId, tab.label]),
+    stored.tabs.map(tab => [tab.key, tab.kind, tab.workspaceId, tab.label])
+  );
+  assert.equal(loaded.activeKey, stored.activeKey);
+  // Nothing is pruned while every workspace is still there.
+  assert.deepEqual(dropMissingRows(loaded.expanded, ['w1', 'g1']), stored.expanded);
+});
+
+test('a closed Search-only folders group stays closed: it belongs to no workspace', () => {
+  assert.deepEqual(dropMissingRows(['search-only', 'gone/s/notes', 'w1'], ['w1']), [
+    'search-only',
+    'w1'
+  ]);
+  const state = { collapsedGroups: new Set(['search-only']), expandedRows: new Set() };
+  const again = parseTreeState(JSON.stringify(snapshotTreeState(state)));
+  assert.deepEqual(again.collapsed, ['search-only']);
+});

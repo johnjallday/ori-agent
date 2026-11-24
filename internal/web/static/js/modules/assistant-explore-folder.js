@@ -1,5 +1,5 @@
 import { chooseSearchFolder, exploreFolder } from './folder-search-review.js';
-import { destinationPlace } from './destination-place.js';
+import { saveArrival } from './files-arrival.js';
 
 // Ordinary Home conversation only. Guided hires, typed paths and file reads
 // keep their own existing chooser and authorization; no Files token is passed
@@ -47,18 +47,12 @@ export function mountAssistantExplore(host, guided, onAssisted) {
       if (result.destination === 'workspace')
         location.assign(`/workspaces/${encodeURIComponent(result.workspace.slug)}`);
       else {
-        const saved = await destinationPlace('desk')?.save({
-          source: result.source,
-          term: '',
-          selected: '',
-          generation: 0,
-          pages: 1
-        });
-        if (!saved?.ok)
+        // Search this folder in Files: the merged Files, scoped to it.
+        if (!(await saveArrival(result.source)))
           throw new Error(
             'Cannot open that Files location right now. Your workspace is unchanged.'
           );
-        if (!controller.signal.aborted) location.assign('/search');
+        if (!controller.signal.aborted) location.assign('/?view=tree');
       }
     } catch (error) {
       if (!controller.signal.aborted) status.textContent = error.message;

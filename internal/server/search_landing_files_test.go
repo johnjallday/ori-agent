@@ -87,7 +87,6 @@ func TestFilesStartingPageOpensMergedFilesOnceAWorkspaceExists(t *testing.T) {
 	}{
 		{"an explicit Map address", onboarding.SearchDesk, "/?view=map", local},
 		{"an explicit Files address", onboarding.SearchDesk, "/?view=tree", local},
-		{"the standalone page itself", onboarding.SearchDesk, "/search", local},
 		{"a browser away from the Mac", onboarding.SearchDesk, "/", remote},
 		{"Home as the starting page", onboarding.SearchLater, "/", local},
 	} {
@@ -108,5 +107,75 @@ func TestFilesStartingPageOpensMergedFilesOnceAWorkspaceExists(t *testing.T) {
 	rec = get("/", local)
 	if redirectsToFiles(rec) {
 		t.Fatal("the first-run state was sent to Files")
+	}
+}
+
+// /search opens the merged Files for anyone with a workspace, whatever the
+// starting page, and drops anything in the address: a scoped arrival travels
+// in the tab's Files place. With no workspace it is the first-run page, and a
+// browser away from the Mac that runs Ori gets neither (PR 2, req. 41-42).
+func TestSearchAddressOpensFilesOnceAWorkspaceExists(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("the filename index, and with it /search, is macOS only")
+	}
+	handler := newRoutesTestHandler(t)
+	root := os.Getenv("ORI_DATA_DIR")
+	const local, remote = "127.0.0.1:43210", "192.0.2.5:1010"
+	get := func(path, peer string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "http://localhost"+path, nil)
+		req.RemoteAddr = peer
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec
+	}
+	setLanding := func(state string) {
+		t.Helper()
+		if err := onboarding.ResetSearchLanding(root); err != nil {
+			t.Fatal(err)
+		}
+		if state != onboarding.SearchFirst {
+			if err := onboarding.DecideSearchLanding(root, onboarding.SearchFirst, state); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	states := []string{onboarding.SearchFirst, onboarding.SearchDesk, onboarding.SearchLater}
+
+	// No workspace: the first-run page, in every starting-page state.
+	for _, state := range states {
+		setLanding(state)
+		rec := get("/search", local)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `id="desk"`) {
+			t.Fatalf("%s, no workspace: status %d, want the first-run page", state, rec.Code)
+		}
+	}
+	if rec := get("/search", remote); rec.Code != http.StatusNotFound {
+		t.Fatalf("a remote browser got status %d", rec.Code)
+	}
+
+	if created := createRouteTestWorkspace(t, handler, "Search address workspace"); created.ID == "" {
+		t.Fatal("no workspace")
+	}
+	for _, state := range states {
+		for _, path := range []string{"/search", "/search?source=abc&term=harbor"} {
+			setLanding(state)
+			rec := get(path, local)
+			if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/?view=tree" {
+				t.Fatalf("%s %s: status %d, Location %q; want /?view=tree", state, path, rec.Code, rec.Header().Get("Location"))
+			}
+			if rec.Header().Get("Cache-Control") != "no-store" {
+				t.Errorf("%s %s: the redirect must not be cached", state, path)
+			}
+		}
+	}
+	if rec := get("/search", remote); rec.Code == http.StatusFound {
+		t.Fatal("a remote browser was sent to Files")
+	}
+	// Choosing the starting page is not changed by visiting /search.
+	setLanding(onboarding.SearchLater)
+	get("/search", local)
+	if got := onboarding.SearchLanding(root); got != onboarding.SearchLater {
+		t.Fatalf("visiting /search changed the starting page to %q", got)
 	}
 }

@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {
   FOLDER_ACTION_CONNECT,
   searchOnlySources,
+  startingPageChoice,
   FOLDER_ACTION_MAKE_SEARCHABLE,
   FOLDER_ACTION_REFRESH,
   FOLDER_ACTION_REMOVE,
@@ -395,6 +396,21 @@ test('connecting or adding a search-only folder is a change worth a redraw', () 
     sameFolderSearch(another, index(apiSource('s2', 'ready'), apiSource('s1', 'ready'))),
     false
   );
+});
+
+test("Files' starting-page control offers the other choice, and sends the current one back", () => {
+  assert.deepEqual(startingPageChoice('search'), {
+    label: 'Start on Map instead',
+    next: 'later',
+    done: 'Ori will start on the Map.',
+    after: 'Make Files my starting page'
+  });
+  for (const current of ['later', 'first', 'legacy']) {
+    const choice = startingPageChoice(current);
+    assert.equal(choice.label, 'Make Files my starting page', current);
+    assert.equal(choice.next, 'search', current);
+    assert.equal(choice.after, 'Start on Map instead', current);
+  }
 });
 
 test('readSources keeps the reason, the count and when the folder was indexed', () => {

@@ -62,6 +62,22 @@ func (s *Server) maybeSearchLanding(w http.ResponseWriter, r *http.Request) bool
 	return false
 }
 
+// filesStartingPage is the starting-page choice Files' control shows on the
+// Mac that runs Ori (merge-tree-into-files PR 2, requirement 40): "search"
+// when Files is the starting page, another known state when it is not, and ""
+// where the control has nothing to offer (away from that Mac, or a choice the
+// receipt cannot say). The control sends it back as `expected`.
+func (s *Server) filesStartingPage(local bool) string {
+	if !local || s.fileSearch == nil {
+		return ""
+	}
+	state := onboarding.SearchLanding(config.DefaultDataDir())
+	if state == onboarding.SearchUnknown {
+		return ""
+	}
+	return state
+}
+
 // hasWorkspace reports whether any workspace exists, the same count Home's own
 // first-run check uses.
 func (s *Server) hasWorkspace() bool {

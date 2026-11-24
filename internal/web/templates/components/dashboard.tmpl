@@ -61,10 +61,12 @@
               <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>{{if index .Extra "HomeViewTree"}}Files{{else}}Workspace Map{{end}}</h2>
             </div>
             <!-- The view is chosen in the Desk rail, not here. Searchable
-                 folders are still managed on the standalone page until their
-                 rows carry that themselves, so Files points at it. Shown on
-                 Files only, and only where the filename index exists. -->
-            {{if .Extra.FileSearchAvailable}}<a href="/search" class="cockpit-files-manage" data-files-manage{{if not (index .Extra "HomeViewTree")}} hidden{{end}}>Manage search locations</a>{{end}}
+                 folders are managed on their own rows in Files. What Files
+                 offers here is the starting page: Files, or the Map. Shown on
+                 Files only, and only on the Mac that runs the filename index.
+                 `data-landing` is the choice as it stands, sent back as the
+                 expected value so a choice made elsewhere is not overwritten. -->
+            {{with index .Extra "SearchLanding"}}<button type="button" class="cockpit-files-landing" data-files-landing data-landing="{{.}}"{{if not (index $.Extra "HomeViewTree")}} hidden{{end}}>{{if eq . "search"}}Start on Map instead{{else}}Make Files my starting page{{end}}</button>{{end}}
           </div>
           <div class="cockpit-area-actions" role="group" aria-label="Workspace actions">
             <!-- Add to backlog and Summary stay visible in the stable header so

@@ -26,16 +26,25 @@ test('Files and Notes keep separate inputs, requests and history on established 
   if (process.env.ORI_SEARCH_EVIDENCE)
     await page.screenshot({ path: join(process.env.ORI_SEARCH_EVIDENCE, 'established-home.png') });
   await page.getByRole('link', { name: 'Files', exact: true }).click();
-  // Files is Home's tree now; search locations are added on the page that
-  // manages them, one link away in Files' header.
-  await page.getByRole('link', { name: 'Manage search locations', exact: true }).click();
-  await page.getByRole('button', { name: /Add folder/ }).click();
-  await page.getByRole('button', { name: 'Documents', exact: true }).click();
+  // Files is Home's tree; folders are added at its foot and managed on their
+  // rows (merge-tree-into-files PR 2). No link to another page is left.
+  await expect(page.getByRole('link', { name: 'Manage search locations' })).toHaveCount(0);
+  await page.locator('[data-tree-add-folder]').click();
+  await page
+    .getByRole('dialog', { name: 'Add a folder' })
+    .getByRole('button', { name: 'Documents', exact: true })
+    .click();
+  // The card's title changes to "Workspace created" once it has made one.
   const review = page.locator('dialog.explore-card');
+  await expect(review.getByRole('heading')).toHaveText('Explore Documents');
   await review.getByRole('checkbox').check();
   await review.getByRole('button', { name: 'Create workspace' }).click();
   await review.getByRole('button', { name: 'Search this folder in Files' }).click();
-  await expect(page.locator('#hits li').first()).toBeVisible();
+  await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Documents');
+  await page.locator('#cockpitFilesSearchInput').fill('Harbor');
+  await expect(
+    page.locator('#cockpitTreePane [data-results-group="files"] [data-result-indexed]').first()
+  ).toBeVisible();
   await page.goto('/');
   await expect(page.locator('.home-command-bridge')).toBeVisible();
   await page.keyboard.press('Control+k');

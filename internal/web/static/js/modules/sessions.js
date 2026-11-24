@@ -5446,19 +5446,12 @@ const sessionManager = {
       return;
     if (action === 'read-status') return this.readOrdinaryCreationStatus(context);
     if (action === 'files' && review.result?.id && review.searchSource) {
-      const { destinationPlace } = await import('./destination-place.js');
-      const place = destinationPlace('desk');
-      const saved = await place?.save({
-        source: review.searchSource,
-        term: '',
-        selected: '',
-        generation: 0,
-        pages: 1
-      });
-      if (!saved?.ok)
+      // Search <folder> in Files: the merged Files, scoped to it, in this tab.
+      const { saveArrival } = await import('./files-arrival.js');
+      if (!(await saveArrival(review.searchSource)))
         throw new Error('The folder view could not be opened. Your workspace is unchanged.');
       this.releaseCreationReviewReference(review);
-      window.location.assign('/search');
+      window.location.assign('/?view=tree');
       return;
     }
     if (action === 'open' && review.result?.id) {

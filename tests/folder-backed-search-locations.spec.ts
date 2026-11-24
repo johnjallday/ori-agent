@@ -51,8 +51,11 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
     .click();
   await expect(page.locator('#addFolderModal')).toBeHidden();
   expect(await inventory()).toEqual(initial);
+  // Set up with no workspace yet: /search is still the first-run page, with
+  // the folder choices and no list of locations to manage (requirement 42).
   await page.goto('/search');
-  await page.getByRole('button', { name: /Add folder/ }).click();
+  await expect(page.locator('#manage')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Add folder/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Choose another folder…', exact: true }).click();
   const review = page.locator('dialog.explore-card');
   await expect(review.getByRole('heading')).toHaveText('Explore Synthetic Project');
@@ -86,10 +89,18 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
   await page.screenshot({
     path: `tasks/evidence-folder-backed-search-locations/${browserName}/project-created.png`
   });
+  // A workspace exists now: the folder is searched in the merged Files, scoped
+  // to it through the tab's own place, with nothing in the address.
   await review.getByRole('button', { name: 'Search this folder in Files' }).click();
-  await expect(page).toHaveURL(/\/search$/);
-  await expect(page.locator('#title')).toHaveText('Synthetic Project');
-  await expect(page.locator('#hits')).toContainText('Harbor.txt');
+  await expect(page).toHaveURL(/\/\?view=tree$/);
+  await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Synthetic Project');
+  await page.locator('#cockpitFilesSearchInput').fill('Harbor');
+  await expect(page.locator('#cockpitTreePane [data-result-indexed]')).toContainText([
+    'Harbor.txt'
+  ]);
+  // /search itself now opens Files.
+  await page.goto('/search');
+  await expect(page).toHaveURL(/\/\?view=tree$/);
   await page.goto(`/workspaces/${encodeURIComponent(body.folder.folder_slug)}`);
   await expect(page).toHaveURL(
     new RegExp('/workspaces/' + body.folder.folder_slug + '(?:[/?#]|$)')
@@ -177,19 +188,24 @@ test('the assistant links a folder without starting a hire or filename scan', as
   await card.getByRole('button', { name: 'Open workspace' }).click();
   await expect(page).toHaveURL(/\/workspaces\//);
   const id = await page.locator('body').getAttribute('data-workspace-id');
-  await page.goto('/search');
-  await page.getByRole('button', { name: /Add folder/ }).click();
-  await page.getByRole('button', { name: 'Downloads', exact: true }).click();
-  const match = page.locator('dialog.explore-card');
+  // With a workspace, folders are added in Files (requirement 39).
+  const addDownloadsFromFiles = async () => {
+    await page.goto('/?view=tree');
+    await page.locator('[data-tree-add-folder]').click();
+    await page
+      .getByRole('dialog', { name: 'Add a folder' })
+      .getByRole('button', { name: 'Downloads', exact: true })
+      .click();
+  };
+  await addDownloadsFromFiles();
+  const match = page.getByRole('dialog', { name: 'Explore Downloads' });
   await expect(match).toContainText('already linked to Reading inbox');
   await match.getByRole('button', { name: 'Open workspace' }).click();
   await expect(page.locator('body')).toHaveAttribute('data-workspace-id', id!);
   expect(await sources()).toEqual([]);
-  await page.goto('/search');
-  await page.getByRole('button', { name: /Add folder/ }).click();
-  await page.getByRole('button', { name: 'Downloads', exact: true }).click();
+  await addDownloadsFromFiles();
   await match.getByRole('button', { name: 'Allow filename search' }).click();
-  await expect(page.locator('#title')).toHaveText('Downloads');
+  await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Downloads');
   expect((await sources())[0].workspace.id).toBe(id);
   await page.goto('/?panel=today&folder=explore');
   await host.getByRole('button', { name: /Hire an agent or explore a file/ }).click();
@@ -394,28 +410,38 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   expect(
     (await sources()).find((s: { label: string }) => s.label === 'Documents').workspace.id
   ).toBe(documents.workspace.id);
-  await page.goto('/search');
-  await page.locator('#manage summary').click();
-  await page.getByRole('button', { name: 'Open Research archive', exact: true }).first().click();
+  // The workspace page's "Search Synthetic Project in Files" opens the merged
+  // Files scoped to that folder, with nothing in the address (requirement 41).
+  await page.goto(`/workspaces/${encodeURIComponent(project.workspace.slug)}`);
   await expect(page.locator('#workspaceSearchLocations')).toBeVisible();
   await page.getByRole('button', { name: 'Search Synthetic Project in Files' }).press('Enter');
-  await expect(page.locator('#title')).toHaveText('Synthetic Project');
-  await expect(page.locator('#hits')).toContainText('Harbor.txt');
+  await expect(page).toHaveURL(/\/\?view=tree$/);
+  await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Synthetic Project');
+  await page.locator('#cockpitFilesSearchInput').fill('Harbor');
+  const harborHits = page.locator('#cockpitTreePane [data-result-indexed]');
+  await expect(harborHits).toContainText(['Harbor.txt']);
   const note = await request.post(`/api/workspaces/${projectID}/notes`, {
     data: { name: 'Keep this note', content: 'Not part of the filename index.' }
   });
   expect(note.ok()).toBeTruthy();
   const noteID = (await note.json()).note.id;
-  await page.locator('#manage summary').click();
+  // Remove from search, from the folder's own row.
+  await openLinkedFolders(page, projectID);
+  const projectRow = treeRow(page, `${projectID}/l/${project.workspace.link}`);
+  const projectMark = projectRow.locator('[data-folder-search]');
+  await projectRow.hover();
+  await projectRow.locator('[data-tree-menu-for]').click();
+  await page.getByRole('menuitem', { name: 'Remove from search: Synthetic Project' }).click();
   await page
-    .locator('#sources li')
-    .filter({ hasText: 'Synthetic Project' })
+    .getByRole('dialog', { name: 'Remove Synthetic Project from search?' })
     .getByRole('button', { name: 'Remove from search' })
     .click();
   await expect
     .poll(async () => (await sources()).map((s: { id: string }) => s.id))
     .not.toContain(project.id);
-  await expect(page.locator('#hits')).not.toContainText('Harbor.txt');
+  // The search that looked only there looks everywhere, without its files.
+  await expect(page.locator('#cockpitFilesSearchScope')).toBeHidden();
+  await expect(harborHits.filter({ hasText: 'Synthetic Project' })).toHaveCount(0);
   expect(readFileSync(join(fixture!, 'home/Synthetic Project/Harbor.txt'), 'utf8')).toContain(
     'Synthetic project fixture'
   );
@@ -430,8 +456,6 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   });
   // Removed from search, the project's own folder reads Not searchable.
   await openLinkedFolders(page, projectID);
-  const projectRow = treeRow(page, `${projectID}/l/${project.workspace.link}`);
-  const projectMark = projectRow.locator('[data-folder-search]');
   await expect(projectMark).toHaveText('Not searchable');
 
   // --- managed from its row (PR 2, requirements 33-37) ---------------------

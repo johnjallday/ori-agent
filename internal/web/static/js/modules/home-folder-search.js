@@ -227,6 +227,29 @@ export function folderActions(state) {
   return actions;
 }
 
+/**
+ * Files' starting-page control (requirement 40), from the choice as it stands:
+ * the label it shows, the choice pressing it makes ("search" is Files, "later"
+ * is the Map) and what is said once it is made. The current value goes back
+ * as `expected`, so a choice changed elsewhere is refused, not overwritten.
+ */
+export function startingPageChoice(current) {
+  if (current === 'search') {
+    return {
+      label: 'Start on Map instead',
+      next: 'later',
+      done: 'Ori will start on the Map.',
+      after: 'Make Files my starting page'
+    };
+  }
+  return {
+    label: 'Make Files my starting page',
+    next: 'search',
+    done: 'Files is now your starting page.',
+    after: 'Start on Map instead'
+  };
+}
+
 /** Whether a source is still being indexed, so its row is asked again soon. */
 export function isIndexing(source) {
   return !!source && (source.state === 'queued' || source.state === 'mapping');

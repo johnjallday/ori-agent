@@ -182,26 +182,34 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   margin-left: auto;
 }
 
-/* Files' pointer to the standalone page that manages search locations. A quiet
-   text link beside the heading: it is a place to go, not an action. It takes
-   the header's compact 32px height so switching to Files does not make the row
-   taller and move everything below it; narrow and touch screens get the 44px
-   floor the header's buttons keep there too. */
-.cockpit-files-manage {
+/* Files' starting-page choice beside the heading: Make Files my starting page,
+   or Start on Map instead. A quiet text button, since it is a preference, not
+   the page's work. It takes the header's compact 32px height so switching to
+   Files does not make the row taller and move everything below it; narrow and
+   touch screens get the 44px floor the header's buttons keep there too. */
+.cockpit-files-landing {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
   padding: 0 var(--space-1);
+  border: 0;
+  background: none;
   color: var(--hc-signal);
+  font: inherit;
   font-size: var(--ui-text-sm, 0.875rem);
   text-decoration: underline;
   text-underline-offset: 2px;
+  cursor: pointer;
 }
-.cockpit-files-manage[hidden] {
+.cockpit-files-landing[hidden] {
   display: none;
 }
+.cockpit-files-landing:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
 @media (pointer: coarse), (max-width: 768px) {
-  .cockpit-files-manage {
+  .cockpit-files-landing {
     min-height: 44px;
   }
 }

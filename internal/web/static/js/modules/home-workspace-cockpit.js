@@ -1,6 +1,7 @@
 // Importing this also registers window.OriEconomy, which is how dashboard.js —
 // a plain script, not a module — reaches the same harvest client.
 import { destinationPlace } from './destination-place.js';
+import { arrivalSaved, arrivalSource } from './files-arrival.js';
 import { request as filenameIndex } from './search-desk.js';
 import { guidedHint, showHQReturnLinks } from './hq-guided-attempt.js';
 import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
@@ -2096,7 +2097,8 @@ import {
   indexOutcome,
   isIndexing,
   linkKey,
-  sameFolderSearch
+  sameFolderSearch,
+  startingPageChoice
 } from './home-folder-search.js';
 import {
   askFolderConsent,
@@ -2158,7 +2160,7 @@ import {
     deskPicker: document.querySelector('[data-map-picker]'),
     deskRail: document.querySelector('.desk-rail'),
     // Files' link to the standalone page that still manages search locations.
-    filesManage: document.querySelector('[data-files-manage]'),
+    filesLanding: document.querySelector('[data-files-landing]'),
     filters: document.getElementById('cockpitSignalFilters'),
     contextModal: document.getElementById('cockpitContextModal'),
     contextModalLabel: document.getElementById('cockpitContextModalLabel'),
@@ -2462,7 +2464,9 @@ import {
     : null;
   const backForward =
     window.performance?.getEntriesByType?.('navigation')[0]?.type === 'back_forward';
-  let returnFiles = backForward ? filesPlace?.read() : null;
+  // A fresh visit to Files reads the place too, for "Search <folder> in Files"
+  // (files-arrival.js): that, and nothing else, is applied outside a Back.
+  let returnFiles = backForward || query === '?view=tree' ? filesPlace?.read() : null;
   // The Map's place goes first. Both saves are requests sent as the page is
   // left, and the page that opens next reads the Map's straight away: the older,
   // more timing-sensitive save must not wait behind the newer one.
@@ -2472,7 +2476,9 @@ import {
     if (camera) void place.save({ selected: state.selectedId, ...camera });
   });
   window.addEventListener('pagehide', () => {
-    if (!filesPlace) return;
+    // Leaving for Files with a folder to search (files-arrival.js): that place
+    // is the one the next page reads, so it is not written over.
+    if (!filesPlace || arrivalSaved()) return;
     const snapshot = filesSearch.snapshot();
     const scope = encodeScope(state.treeSearchScope);
     // Always saved, empty when there is nothing: a search that was cleared must
@@ -3603,13 +3609,57 @@ import {
       ? new BroadcastChannel('ori-file-search-v1')
       : null;
   fileSearchChannel?.addEventListener('message', () => {
-    if (state.view === VIEW_TREE) void refreshSearchSources();
-    else searchSourcesRequested = false;
+    if (state.view !== VIEW_TREE) {
+      searchSourcesRequested = false;
+      return;
+    }
+    void (async () => {
+      await refreshSearchSources();
+      // A folder removed elsewhere takes its scope with it, said once; the
+      // search on screen is asked again so that its files leave the results.
+      const scope = state.treeSearchScope;
+      if (
+        scope &&
+        (scope.kind === 'linked' || scope.kind === 'source') &&
+        !state.searchSources.some(source => source.id === scope.sourceId)
+      ) {
+        state.treeSearchScope = null;
+        syncSearchScope();
+        announce(`${scope.name} is no longer searchable. Searching everywhere.`);
+      }
+      filesSearch.rescope();
+    })();
   });
 
   function folderSearchChanged() {
     fileSearchChannel?.postMessage('changed');
   }
+
+  // ---- The starting page, chosen in Files (PR 2, requirement 40) ----
+  //
+  // The same decision the first-run page made with its own buttons, through the
+  // same compare-and-set: the button sends the choice it shows as `expected`,
+  // and one changed in another window is refused with the server's words.
+  els.filesLanding?.addEventListener('click', async () => {
+    const button = els.filesLanding;
+    const current = String(button.dataset.landing || '');
+    const choice = startingPageChoice(current);
+    button.disabled = true;
+    try {
+      await filenameIndex('preference', { expected: current, next: choice.next });
+      button.dataset.landing = choice.next;
+      button.textContent = choice.after;
+      announce(choice.done);
+      // The first-run page, open in another tab, reloads on this.
+      fileSearchChannel?.postMessage('landing');
+    } catch (err) {
+      reportTreeFailure(
+        err && err.message ? err.message : 'The starting page could not be changed.'
+      );
+    } finally {
+      button.disabled = false;
+    }
+  });
 
   function followIndexing() {
     window.clearTimeout(folderPollTimer);
@@ -3887,6 +3937,10 @@ import {
     const saved = pending && (await pending);
     if (!saved || (!saved.term && !saved.scope)) return;
     if (filesSearch.snapshot() || state.treeSearchScope) return;
+    const arrival = arrivalSource(saved.scope);
+    if (arrival) return void arriveAtFolder(arrival);
+    // Outside a Back, an older search of this tab is not brought back.
+    if (!backForward) return;
     if (localIndex) await refreshSearchSources();
     const decoded = decodeScope(saved.scope, {
       exists: id => !!findWorkspace(state.flattened, id),
@@ -3910,6 +3964,34 @@ import {
       selected: saved.selected,
       pages: decodePages(saved.pages)
     });
+  }
+
+  /**
+   * Arrived from "Search <folder> in Files" on another page: search only that
+   * folder, found by its source id in the filename index's own list, and show
+   * its row. A folder that is no longer searchable is said so, not guessed.
+   */
+  async function arriveAtFolder(sourceId) {
+    if (!localIndex) return;
+    await refreshSearchSources();
+    const source = state.searchSources.find(entry => entry.id === sourceId);
+    if (!source) {
+      announce('That folder is no longer searchable. Search covers everything else.');
+      return;
+    }
+    if (source.workspaceId && source.link) {
+      revealTreeRow(`${source.workspaceId}/l/${source.link}`);
+      mountTreeView();
+      setSearchScope({
+        kind: 'linked',
+        name: source.label,
+        workspaceId: source.workspaceId,
+        sourceId,
+        workspaceIds: [source.workspaceId]
+      });
+    } else {
+      setSearchScope({ kind: 'source', name: source.label, sourceId });
+    }
   }
 
   function handleSearchChange(snapshot, reason) {
@@ -4604,7 +4686,7 @@ import {
     });
     if (els.deskPicker) els.deskPicker.value = state.view;
     if (els.areaTitle) els.areaTitle.textContent = deskHeading(state.view);
-    if (els.filesManage) els.filesManage.hidden = state.view !== VIEW_TREE;
+    if (els.filesLanding) els.filesLanding.hidden = state.view !== VIEW_TREE;
   }
 
   function applyView(view, { pushUrl = true, transient = false } = {}) {
