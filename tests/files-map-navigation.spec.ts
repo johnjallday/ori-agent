@@ -143,6 +143,9 @@ test('distinguish duplicate copies by location and date before acting', async ({
   ]) {
     await page.setViewportSize(size);
     const picker = page.getByRole('navigation', { name: 'Destination', exact: true });
+    // WebKit can momentarily expose both the rail and mobile picker while
+    // applying the viewport change. Assert the layout settles to exactly one.
+    await expect(picker).toHaveCount(1);
     await expect(picker).toBeVisible();
     await expect(page.locator('[data-ws-map-viewport]').first()).toBeVisible();
     const gap = await page.evaluate(() => {

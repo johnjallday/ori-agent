@@ -15,6 +15,7 @@ func pickSearchFolder(context.Context) (string, bool, error) {
 		return "", false, err
 	}
 	root := filepath.Dir(cwd)
+	// #nosec G304 -- fixture-only binary: fixed marker name under the harness-owned cwd, never a request path.
 	marker, err := os.ReadFile(filepath.Join(root, ".search-first-fixture"))
 	if err != nil || string(marker) != "synthetic-v1\n" || os.Getenv("HOME") != filepath.Join(root, "home") || os.Getenv("ORI_DATA_DIR") != filepath.Join(root, "data") || os.Getenv("ORI_NO_DESKTOP_OPEN") != "1" {
 		return "", false, errors.New("not a marked isolated fixture")
