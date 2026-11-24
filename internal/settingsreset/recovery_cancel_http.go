@@ -20,7 +20,7 @@ import (
 // CancelTokenHeader carries the per-process proof the recovery page was served
 // by THIS recovery process. It is minted at start, never stored, and rendered
 // only into the recovery host's own status page and read-only operation JSON.
-const CancelTokenHeader = "X-Ori-Reset-Token"
+const CancelTokenHeader = "X-Ori-Reset-Token" // #nosec G101 -- the name of an HTTP header; the constant holds no secret, the token is minted per process
 
 const maxCancelBody = 1 << 10
 
