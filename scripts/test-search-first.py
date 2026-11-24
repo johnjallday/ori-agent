@@ -99,7 +99,9 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--upgrades',action='store_true',help='also build the prior-version fixture')
     parser.add_argument('--folder-backed',action='store_true',help='run only reviewed folder setup on established split profiles')
+    parser.add_argument('--browser',choices=('chromium','webkit'),action='append',help='limit the browser journeys to this browser (repeatable; default both)')
     args=parser.parse_args()
+    BROWSERS=tuple(args.browser or ('chromium','webkit'))
     if sys.platform!='darwin':sys.exit('macOS only')
     SCRATCH.mkdir(parents=True,exist_ok=True);EVIDENCE.mkdir(parents=True,exist_ok=True)
     if args.folder_backed:
@@ -116,7 +118,7 @@ if __name__=='__main__':
         overlay.write_text(json.dumps({'Replace':{str(REPO/'internal/server/search_folder_picker.go'):str(REPO/'internal/server/testdata/search_folder_picker.go')}}))
         binary=build/'fixture-server'
         subprocess.run(['go','build','-overlay',str(overlay),'-o',str(binary),'./cmd/server'],cwd=REPO,env={**os.environ,'GOWORK':'off'},check=True)
-        for browser in ('chromium', 'webkit'):
+        for browser in BROWSERS:
             root=project_fixture()
             with serve(root, fixture_binary=binary) as url:
                 # First-run search consent predates established workspace setup.
@@ -144,11 +146,11 @@ if __name__=='__main__':
         with serve(root) as url:spec(root,url,scenario,'search-first-onboarding')
         if scenario=='fresh':
             with serve(root) as url:spec(root,url,'return','search-first-return')
-    for browser in ('chromium','webkit'):
+    for browser in BROWSERS:
         root=fixture()
         with serve(root) as url:spec(root,url,'navigation','files-map-navigation',browser)
     # Files in searchable folders, found from Files' own search box.
-    for browser in ('chromium','webkit'):
+    for browser in BROWSERS:
         root=fixture()
         with serve(root) as url:spec(root,url,'files-search','files-search-folders',browser)
     if args.upgrades:upgrades()

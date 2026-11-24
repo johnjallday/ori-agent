@@ -47,6 +47,7 @@ import {
 } from './home-tree-sources.js';
 import { iconHTML, rowIconName } from './home-tree-icons.js';
 import { RESULTS_TAB_KEY } from './home-files-search.js';
+import { folderSearchState } from './home-folder-search.js';
 import { renderWorkspaceUpdateSignals } from './workspace-update-signals.js';
 import {
   MENU_DELETE,
@@ -636,7 +637,34 @@ export function workspaceMarker(workspace) {
   };
 }
 
-function markerHTML(row) {
+/**
+ * Whether a linked folder is searchable, after its name: a dot and a short
+ * label (home-folder-search.js). The words are the signal; the dot only
+ * repeats them. Nothing on a Mac other than the one that runs Ori, and nothing
+ * until the list of searchable folders has answered.
+ */
+export function folderMarkHTML(row, folderSearch) {
+  const state = folderSearchState(row, folderSearch);
+  if (!state) return '';
+  // The tooltip keeps the words for a row too narrow to show them.
+  return (
+    `<span class="cockpit-folder-mark" data-folder-search="${escapeHtml(state.key)}" ` +
+    `data-tone="${escapeHtml(state.tone)}" title="${escapeHtml(state.label)}">` +
+    '<span class="cockpit-folder-dot" aria-hidden="true"></span>' +
+    `<span class="cockpit-folder-mark__label">${escapeHtml(state.label)}</span>` +
+    '</span>'
+  );
+}
+
+function markerHTML(row, ctx = {}) {
+  if (row.kind === 'linked') {
+    // A linked folder's count is its files, known once it has been opened.
+    const count =
+      row.count === null || row.count === undefined
+        ? ''
+        : `<span class="cockpit-tree-count">${escapeHtml(row.count)}</span>`;
+    return count + folderMarkHTML(row, ctx.folderSearch);
+  }
   if (row.kind === 'workspace') {
     const marker = workspaceMarker(row.workspace);
     return (
@@ -650,8 +678,7 @@ function markerHTML(row) {
     );
   }
   if (row.kind === 'group') return '<span class="visually-hidden">Group</span>';
-  // A linked folder's count is its files, known once it has been opened.
-  if (row.kind === 'section' || row.kind === 'memory' || row.kind === 'linked') {
+  if (row.kind === 'section' || row.kind === 'memory') {
     return row.count === null || row.count === undefined
       ? ''
       : `<span class="cockpit-tree-count">${escapeHtml(row.count)}</span>`;
@@ -727,7 +754,7 @@ function rowHTML(row, ctx) {
   if (isDimRow(row)) classes.push('is-dim');
   // The "⋯" button. It is out of the tab order — the keyboard opens the same
   // menu with Shift+F10 or the Menu key on the row itself (FR54).
-  const more = rowHasMenu(row, { searchableLinks: ctx.searchableLinks })
+  const more = rowHasMenu(row, { folderSearch: ctx.folderSearch })
     ? `<button type="button" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-tree-more" data-tree-menu-for="${id}" tabindex="-1" ` +
       `aria-haspopup="menu" aria-label="Actions for ${name}">${iconHTML('more', { size: 16 })}</button>`
     : '';
@@ -761,7 +788,7 @@ function rowHTML(row, ctx) {
       : '<span class="cockpit-tree-caret-space" aria-hidden="true"></span>') +
     iconHTML(rowIconName(row)) +
     `<span class="cockpit-tree-name" title="${name}">${name}</span>` +
-    markerHTML(row) +
+    markerHTML(row, ctx) +
     (isWorkspaceRow
       ? `<span class="cockpit-tree-updates" data-tree-updates="${escapeHtml(row.workspaceId)}"${updates ? '' : ' hidden'}>${updates}</span>`
       : '') +
@@ -1065,7 +1092,7 @@ export function mountTree(container, state, callbacks) {
       bulkState: bulkSelectionState(state.flattened, selected),
       workspaceUpdateBadges: state.workspaceUpdateBadges,
       activeTags,
-      searchableLinks: state.searchableLinks
+      folderSearch: state.folderSearch
     }) +
     '<div class="cockpit-tree-root-drop" data-tree-drop-into="">Drop here to move to the top level</div>' +
     '</div>' +
@@ -1329,8 +1356,8 @@ function bindTree(container, state, cb, rows) {
 
   // --- the row menu (FR54) -------------------------------------------------
   const openMenuFor = (row, at, event) => {
-    const items = menuItemsFor(row, { searchableLinks: state.searchableLinks });
-    if (items.length === 0) return false;
+    const items = menuItemsFor(row, { folderSearch: state.folderSearch });
+    if (!rowHasMenu(row, { folderSearch: state.folderSearch })) return false;
     const findOrigin = () =>
       Array.from(container.querySelectorAll('[data-tree-row]')).find(
         el => el.getAttribute('data-tree-row') === row.id

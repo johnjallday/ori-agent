@@ -2079,10 +2079,17 @@ import {
   findResult,
   readSources,
   scopeLabel,
-  searchableLinkIds,
   statusLine,
   tabFromResult
 } from './home-files-search.js';
+import {
+  SEARCH_STATUS_FAILED,
+  SEARCH_STATUS_OFF,
+  emptyFolderSearch,
+  failedFolderSearch,
+  folderSearchFromSources,
+  sameFolderSearch
+} from './home-folder-search.js';
 import {
   applyTreeState,
   dropMissingRows,
@@ -2277,10 +2284,12 @@ import {
     // Where the search looks: everywhere (null), or in one workspace, group or
     // folder chosen from a row's menu. A removable chip beside the box says so.
     treeSearchScope: null,
-    // What the filename index says about each folder it searches, so a linked
-    // folder's row knows whether it can offer Search in this folder.
+    // What the filename index says about each folder it searches, and the same
+    // keyed by the link each is connected to: a linked folder's row says whether
+    // it is searchable and offers Search in this folder (home-folder-search.js).
+    // Read once per Files visit, on the Mac that runs Ori only.
     searchSources: [],
-    searchableLinks: new Set(),
+    folderSearch: emptyFolderSearch(),
     // The one-column layout (FR4): whether the Tree view is too narrow for two
     // columns, and whether the pane has taken the tree's place.
     treeNarrow: false,
@@ -2835,7 +2844,12 @@ import {
   function mountTreeView() {
     if (!els.treeNav || state.view !== VIEW_TREE) return;
     if (!searchSourcesRequested) {
+      // Once per Files visit. The first read says nothing until it answers; a
+      // later visit keeps the marks it had while it asks again.
       searchSourcesRequested = true;
+      if (localIndex && state.folderSearch.status === SEARCH_STATUS_OFF) {
+        state.folderSearch = emptyFolderSearch({ local: true });
+      }
       void refreshSearchSources();
     }
     // Re-mounting replaces the rows, which would drop keyboard focus on the
@@ -3517,16 +3531,14 @@ import {
   });
 
   // The filename index tells which folders it searches; a linked folder's row
-  // offers Search in this folder only for one of them.
+  // says whether it is one of them, and offers Search in this folder if so.
+  // Cleared on the way into Files so each visit reads the list once.
   let searchSourcesRequested = false;
   function useSearchSources(sources) {
-    const links = searchableLinkIds(sources);
-    const same =
-      links.size === state.searchableLinks.size &&
-      [...links].every(id => state.searchableLinks.has(id));
+    const next = folderSearchFromSources(sources);
     state.searchSources = sources;
-    if (same) return;
-    state.searchableLinks = links;
+    if (sameFolderSearch(state.folderSearch, next)) return;
+    state.folderSearch = next;
     mountTreeView();
   }
 
@@ -3535,7 +3547,12 @@ import {
     try {
       useSearchSources(readSources(await filenameIndex('sources')));
     } catch (_) {
-      /* Without the list, linked folders simply offer no search of their own. */
+      // A list that could not be read is never "Not searchable": the rows say
+      // their status is unavailable, and the next Files visit asks again.
+      state.searchSources = [];
+      if (state.folderSearch.status === SEARCH_STATUS_FAILED) return;
+      state.folderSearch = failedFolderSearch();
+      mountTreeView();
     }
   }
 
@@ -4270,8 +4287,11 @@ import {
     // The note stays mounted, hidden with the rest of the Tree, so its text is
     // still there on the way back whether or not the save worked.
     if (!transient && view !== VIEW_TREE && state.view === VIEW_TREE) void noteController.flush();
-    if (view === VIEW_TREE && state.view === VIEW_MAP)
+    if (view === VIEW_TREE && state.view === VIEW_MAP) {
       window.OriWorkspaceMap?.suspendDraftPlacement?.();
+      // A new Files visit: the next mount reads the searchable folders again.
+      searchSourcesRequested = false;
+    }
     state.view = view === VIEW_TREE ? VIEW_TREE : VIEW_MAP;
     if (state.view === VIEW_TREE) window.OriWorkspaceMap?.finishAssemblies?.();
     syncDeskDestination();

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
@@ -275,6 +275,44 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   await expect(page.locator(`#cockpitTreeNav [data-tree-row="${projectID}"]`)).toContainText(
     'Research archive'
   );
+  // Each linked folder's row says whether it is searchable (PR 2, req. 32-33).
+  // Both workspaces link Documents; only the link the owner chose is the
+  // source's connection, so only that row is searchable. Matched by ids.
+  const documents = (await sources()).find((s: { label: string }) => s.label === 'Documents');
+  expect(documents.workspace).toBeTruthy();
+  const linkOf = async (workspaceId: string, folder: string) =>
+    (
+      (await (await request.get(`/api/workspaces/${workspaceId}/directories`)).json())
+        .directories as { id: string; path: string }[]
+    ).find(d => d.path.endsWith(folder))!.id;
+  const otherID =
+    documents.workspace.id === connected.workspace.id ? same.workspace.id : connected.workspace.id;
+  const chosenLink = await linkOf(documents.workspace.id, '/home/Documents');
+  const otherLink = await linkOf(otherID, '/home/Documents');
+  expect(chosenLink).toBe(documents.workspace.link);
+  await openLinkedFolders(page, documents.workspace.id);
+  await openLinkedFolders(page, otherID);
+  const chosenRow = treeRow(page, `${documents.workspace.id}/l/${chosenLink}`);
+  const otherRow = treeRow(page, `${otherID}/l/${otherLink}`);
+  await expect(chosenRow.locator('[data-folder-search]')).toHaveAttribute(
+    'data-folder-search',
+    'searchable'
+  );
+  await expect(chosenRow.locator('[data-folder-search]')).toHaveText('Searchable');
+  await expect(otherRow.locator('[data-folder-search]')).toHaveText('Not searchable');
+  // The menu starts with the status: state, file count, when it was indexed.
+  await chosenRow.hover();
+  await chosenRow.locator('[data-tree-menu-for]').click();
+  const status = page.locator('[data-tree-menu-status]');
+  await expect(status).toContainText('Searchable');
+  await expect(status).toContainText(/\d[\d,]* filenames? · indexed /);
+  await expect(page.getByRole('menu')).toHaveAttribute('aria-describedby', 'cockpitTreeMenuStatus');
+  await expect(page.getByRole('menuitem')).toHaveText(['Search in this folder']);
+  await page.screenshot({
+    path: `tasks/evidence-folder-backed-search-locations/${browserName}/row-status.png`
+  });
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
   await page.goto('/search');
   await page.locator('#manage summary').click();
   await page.getByRole('button', { name: 'Open Research archive', exact: true }).first().click();
@@ -301,12 +339,36 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
     'Synthetic project fixture'
   );
   await page.goto('/?view=tree');
-  const row = page.locator(`#cockpitTreeNav [data-tree-row="${projectID}"]`);
-  await row.locator('[data-tree-toggle]').click();
+  // The tree remembers rows opened earlier in this test; open it only if shut.
+  await expandRow(page, projectID);
   await expect(page.locator(`[data-tree-row="${projectID}/n/${noteID}"]`)).toContainText(
     'Keep this note'
   );
   await page.screenshot({
     path: `tasks/evidence-folder-backed-search-locations/${browserName}/removed-note-survives.png`
   });
+  // Removed from search, the project's own folder reads Not searchable.
+  await openLinkedFolders(page, projectID);
+  await expect(
+    treeRow(page, `${projectID}/l/${project.workspace.link}`).locator('[data-folder-search]')
+  ).toHaveText('Not searchable');
 });
+
+const treeRow = (page: Page, key: string) =>
+  page.locator(`#cockpitTreeNav [data-tree-row="${key}"]`);
+
+/** Open a row in Files unless it is open already (the tree remembers it). */
+async function expandRow(page: Page, key: string) {
+  const row = treeRow(page, key);
+  await row.waitFor();
+  if ((await row.getAttribute('aria-expanded')) !== 'true') {
+    await row.locator('[data-tree-toggle]').click();
+  }
+  await expect(row).toHaveAttribute('aria-expanded', 'true');
+}
+
+/** Open a workspace's row and its Linked folders section in Files. */
+async function openLinkedFolders(page: Page, workspaceId: string) {
+  await expandRow(page, workspaceId);
+  await expandRow(page, `${workspaceId}/s/linked`);
+}

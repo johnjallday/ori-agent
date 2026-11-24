@@ -162,24 +162,18 @@ export function readSources(list) {
       id: String(source.id),
       label: String(source.label || ''),
       state: String(source.state || ''),
+      // Why an index is partial or a folder unavailable, in the index's words.
+      reason: String(source.reason || ''),
+      // Filenames in the current index, and when it last finished (Unix seconds).
+      count: Math.max(0, Number(source.count) || 0),
+      mappedAt: Math.max(0, Number(source.mapped_at) || 0),
       generation: source.generation,
       workspaceId: String((source.workspace && source.workspace.id) || ''),
       workspaceName: String((source.workspace && source.workspace.name) || ''),
-      // The linked folder's own id: how a source is matched to its tree row.
+      // The linked folder's own id: how a source is matched to its tree row
+      // (home-folder-search.js).
       link: String((source.workspace && source.workspace.link) || '')
     }));
-}
-
-/**
- * The ids of the linked folders the filename index searches: what a linked
- * folder's row needs to know before it can offer Search in this folder.
- */
-export function searchableLinkIds(sources) {
-  return new Set(
-    (Array.isArray(sources) ? sources : [])
-      .filter(source => source && source.workspaceId && source.link)
-      .map(source => source.link)
-  );
 }
 
 /** A folder's name, with the start of its id when two folders share one. */

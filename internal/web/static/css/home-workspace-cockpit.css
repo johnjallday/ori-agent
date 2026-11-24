@@ -1742,6 +1742,135 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   background: var(--hc-signal);
 }
 
+/* Whether a linked folder is searchable (home-folder-search.js): a short label
+   after the name, with a dot that repeats it. The colours are the app's status
+   text tokens, which hold contrast in light and dark.
+
+   The folder's name wins the row. The mark gives way first (its shrink factor
+   dwarfs the name's), and when its label no longer fits beside the dot the
+   label wraps onto a second line that the one-line box clips: it is gone
+   whole, never cut to "Partly i…", and the dot stays. The words are still the
+   mark's tooltip, still read by a screen reader, and lead the row's menu. So
+   that a dot alone does not depend on colour, each state has its own shape:
+   filled (searchable), half (partly indexed), struck (unavailable), dashed
+   (indexing), hollow (not searchable), dotted (status unknown). */
+.cockpit-folder-mark {
+  display: inline-flex;
+  height: 16px;
+  min-width: 8px;
+  /* Flex shrinks every item in proportion, so with a modest factor the name
+     still gave up a fraction of a pixel, which is enough for its ellipsis.
+     This factor leaves the name's share far below a layout unit until the
+     mark is down to its dot; past that, the name shrinks as it always did. */
+  flex: 0 1000000 auto;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: center;
+  column-gap: 5px;
+  overflow: hidden;
+  color: var(--hc-ink-dim);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.cockpit-folder-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  /* A full 16px line for the dot alone, so a wrapped label starts below the
+     clip box instead of halfway into it. */
+  margin: 4px 0;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.cockpit-folder-mark[data-tone="on"],
+.cockpit-tree-menu-status[data-tone="on"] {
+  color: var(--success-text);
+}
+
+.cockpit-folder-mark[data-tone="part"],
+.cockpit-tree-menu-status[data-tone="part"] {
+  color: var(--warning-text);
+}
+
+.cockpit-folder-mark[data-tone="alert"],
+.cockpit-tree-menu-status[data-tone="alert"] {
+  color: var(--danger-text);
+}
+
+[data-tone="on"] > .cockpit-folder-dot,
+[data-tone="on"] > * > .cockpit-folder-dot {
+  background: currentColor;
+}
+
+[data-tone="part"] > .cockpit-folder-dot,
+[data-tone="part"] > * > .cockpit-folder-dot {
+  background: linear-gradient(90deg, currentColor 50%, transparent 50%);
+}
+
+[data-tone="alert"] > .cockpit-folder-dot,
+[data-tone="alert"] > * > .cockpit-folder-dot {
+  background: linear-gradient(
+    135deg,
+    transparent 40%,
+    currentColor 40%,
+    currentColor 60%,
+    transparent 60%
+  );
+}
+
+[data-tone="busy"] > .cockpit-folder-dot,
+[data-tone="busy"] > * > .cockpit-folder-dot {
+  border-style: dashed;
+}
+
+[data-tone="unknown"] > .cockpit-folder-dot,
+[data-tone="unknown"] > * > .cockpit-folder-dot {
+  border-style: dotted;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cockpit-folder-mark[data-tone="busy"] .cockpit-folder-dot {
+    animation: cockpit-folder-busy 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes cockpit-folder-busy {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* The status line a linked folder's menu starts with: not a choice. */
+.cockpit-tree-menu-status {
+  display: flex;
+  max-width: 300px;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 4px;
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.cockpit-tree-menu-status__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cockpit-tree-menu-status__detail,
+.cockpit-tree-menu-status__reason {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 /* The "⋯" button: shown when the row is hovered or focused, always on a touch
    screen. It opens the same menu as a right-click or the Menu key (FR54). */
 .cockpit-tree-more {
