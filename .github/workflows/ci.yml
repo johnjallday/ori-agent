@@ -241,7 +241,41 @@ jobs:
             bash scripts/readme-refresh.sh cleanup --run-id "$README_CAPTURE_CI_RUN_ID"
           fi
 
+  unit-scope:
+    name: Select and run PR unit scope
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.affected.outputs.mode || steps.paths.outputs.mode || 'full' }}
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      FAST_PR: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && !startsWith(github.head_ref, 'release/') && !startsWith(github.head_ref, 'release-') }}
+    steps:
+      - uses: actions/checkout@v5
+        if: env.FAST_PR == 'true'
+        with:
+          fetch-depth: 2
+      - name: Classify the complete merge diff
+        id: paths
+        if: env.FAST_PR == 'true'
+        run: python3 scripts/pr-unit-scope.py paths "$BASE_SHA"
+      - uses: actions/setup-go@v6
+        if: steps.paths.outputs.mode == 'candidate'
+        with:
+          go-version-file: go.mod
+      - name: Run affected packages or request the full matrix
+        id: affected
+        if: steps.paths.outputs.mode == 'candidate'
+        run: python3 scripts/pr-unit-scope.py test "$BASE_SHA"
+      - name: Report selected unit scope
+        env:
+          MODE: ${{ steps.affected.outputs.mode || steps.paths.outputs.mode || 'full' }}
+        run: echo "Unit test scope — $MODE" >> "$GITHUB_STEP_SUMMARY"
+
   test-unit-run:
+    needs: unit-scope
+    if: needs.unit-scope.outputs.mode == 'full'
     name: Unit execution (${{ matrix.os }}, ${{ matrix.shard }})
     runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
     permissions:
@@ -384,8 +418,8 @@ jobs:
         continue-on-error: true
 
   # Keep both existing required check names and downstream needs: test-unit.
-  # Both gates require all five executions. Linux also proves exact partition
-  # completeness and merges coverage; an absent/skipped/failed shard is red.
+  # Full runs require every shard and complete coverage. A fast PR must have
+  # successfully completed selection/testing and intentionally skipped the matrix.
   #
   # Both gates run on Linux. The macOS gate only reads needs.test-unit-run's
   # result (the macOS execution itself still runs on macOS, above), so asking
@@ -394,7 +428,7 @@ jobs:
   # check names come from the matrix values, so they are unchanged.
   test-unit:
     name: Unit Tests
-    needs: test-unit-run
+    needs: [unit-scope, test-unit-run]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     permissions:
@@ -406,38 +440,40 @@ jobs:
         # Stable required-check label only; the actual toolchain is in go.mod.
         go-version: ['go.mod']
     steps:
-      - name: Require every unit execution
+      - name: Require selected unit executions
         shell: bash
         env:
+          MODE: ${{ needs.unit-scope.outputs.mode }}
+          SCOPE_RESULT: ${{ needs.unit-scope.result }}
           UNIT_RESULT: ${{ needs.test-unit-run.result }}
         run: |
-          if [[ "$UNIT_RESULT" != success ]]; then
-            echo '::error::A unit execution failed, was cancelled or was skipped.'
-            exit 1
-          fi
+          case "$SCOPE_RESULT:$MODE:$UNIT_RESULT" in
+            success:full:success|success:affected:skipped|success:docs:skipped) ;;
+            *) echo "::error::Unexpected unit results: $SCOPE_RESULT:$MODE:$UNIT_RESULT"; exit 1 ;;
+          esac
 
       # Only the Ubuntu-named gate merges coverage. Both gates run on Linux now,
       # so these steps key on the matrix label, not runner.os.
       - name: Checkout code
-        if: matrix.os == 'ubuntu-latest'
+        if: needs.unit-scope.outputs.mode == 'full' && matrix.os == 'ubuntu-latest'
         uses: actions/checkout@v5
 
       - name: Set up Go
-        if: matrix.os == 'ubuntu-latest'
+        if: needs.unit-scope.outputs.mode == 'full' && matrix.os == 'ubuntu-latest'
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Receive successful unit shards
-        if: matrix.os == 'ubuntu-latest'
+        if: needs.unit-scope.outputs.mode == 'full' && matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@v4
         with:
           pattern: unit-results-*
           path: ${{ runner.temp }}/unit-results
 
       - name: Verify complete partition and merge coverage
-        if: matrix.os == 'ubuntu-latest'
+        if: needs.unit-scope.outputs.mode == 'full' && matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           set -euo pipefail
@@ -449,7 +485,7 @@ jobs:
 
       # Upload once, only after verifying all Linux coverage. Darwin is partial.
       - name: Upload coverage to Codecov
-        if: matrix.os == 'ubuntu-latest'
+        if: needs.unit-scope.outputs.mode == 'full' && matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v4
         with:
           file: ${{ runner.temp }}/unit-coverage.txt
