@@ -89,24 +89,27 @@ func TestCIMatrixRunnerPinsPreserveCheckNames(t *testing.T) {
 		id     string
 		name   string
 		matrix unitMatrix
+		runner string
 	}{
 		{"devtools-contract", "Ori workflow adapter contract (${{ matrix.os }})", unitMatrix{
 			OS: []string{"ubuntu-latest", "macos-latest"},
-		}},
+		}, pinnedUbuntuMatrixRunner},
+		// The unit gates only read the executions' result, so both run on pinned
+		// Linux; their check labels still come from the unchanged matrix.
 		{"test-unit", "Unit Tests", unitMatrix{
 			OS: []string{"ubuntu-latest", "macos-latest"}, GoVersion: []string{"go.mod"},
-		}},
+		}, "ubuntu-24.04"},
 		{"build", "Build", unitMatrix{
 			OS: []string{"ubuntu-latest", "macos-latest", "windows-latest"}, GoVersion: []string{"go.mod"},
-		}},
+		}, pinnedUbuntuMatrixRunner},
 	} {
 		t.Run(test.id, func(t *testing.T) {
 			job := workflow.Jobs[test.id]
 			if job.Name != test.name || !reflect.DeepEqual(job.Strategy.Matrix, test.matrix) {
 				t.Fatalf("check identity changed: name=%q matrix=%#v", job.Name, job.Strategy.Matrix)
 			}
-			if job.RunsOn != pinnedUbuntuMatrixRunner {
-				t.Fatalf("runner = %q; pin Linux without changing macOS/Windows runners or check labels", job.RunsOn)
+			if job.RunsOn != test.runner {
+				t.Fatalf("runner = %q, want %q; keep check labels unchanged and Linux pinned", job.RunsOn, test.runner)
 			}
 		})
 	}

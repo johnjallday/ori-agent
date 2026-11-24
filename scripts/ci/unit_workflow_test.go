@@ -57,8 +57,12 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 		t.Fatal("unit cache must not add privileged triggers/promotion")
 	}
 	gate := workflow.Jobs["test-unit"]
-	if gate.Name != "Unit Tests" || gate.RunsOn != pinnedUbuntuMatrixRunner {
-		t.Fatal("required-check identity changed")
+	// Both required gates only read the executions' result (and the Ubuntu one
+	// merges coverage), so both run on pinned Linux: the macOS-named gate asking
+	// for a macOS runner only added a chance of the scarce pool never acquiring it.
+	// The check names come from the matrix below, not from the runner.
+	if gate.Name != "Unit Tests" || gate.RunsOn != "ubuntu-24.04" {
+		t.Fatal("required-check identity changed, or a gate asks for a macOS runner it does not use")
 	}
 	wantMatrix := unitMatrix{OS: []string{"ubuntu-latest", "macos-latest"}, GoVersion: []string{"go.mod"}}
 	if !reflect.DeepEqual(gate.Strategy.Matrix, wantMatrix) {
@@ -76,6 +80,11 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 	}
 	if job.Env["ORI_UNIT_SHARD"] != "${{ matrix.os == 'ubuntu-latest' && matrix.shard || '' }}" || job.Env["ORI_UNIT_SHARD_COUNT"] != "${{ matrix.os == 'ubuntu-latest' && '4' || '' }}" || job.Env["ORI_SKIP_CACHE_PRUNE"] != "1" {
 		t.Fatal("unit scope or cache ownership drift")
+	}
+	// Only the macOS leg, and only on pull requests, drops the race detector; the
+	// Ubuntu shards and every push keep it (the runner also refuses 0 elsewhere).
+	if job.Env["ORI_UNIT_RACE"] != "${{ matrix.os == 'macos-latest' && github.event_name == 'pull_request' && '0' || '1' }}" {
+		t.Fatalf("race detector scope drift: ORI_UNIT_RACE=%q", job.Env["ORI_UNIT_RACE"])
 	}
 	for _, j := range []unitJob{job, gate} {
 		if !reflect.DeepEqual(j.Permissions, map[string]string{"contents": "read"}) || j.ContinueOnError == true {
@@ -133,7 +142,9 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 		t.Fatal("unbounded module cache fallback")
 	}
 	prefix := strings.TrimSpace(build.With["restore-keys"].(string))
-	if strings.Contains(prefix, "\n") || !strings.HasPrefix(prefix, "ori-unit-build-v2-") || !strings.HasSuffix(prefix, "-race-cover-atomic-${{ matrix.shard }}-") {
+	// The instrumentation is part of the identity, so race-free and race
+	// compilations never restore or overwrite each other.
+	if strings.Contains(prefix, "\n") || !strings.HasPrefix(prefix, "ori-unit-build-v2-") || !strings.HasSuffix(prefix, "-${{ env.ORI_UNIT_RACE == '0' && 'norace' || 'race' }}-cover-atomic-${{ matrix.shard }}-") {
 		t.Fatal("unbounded build fallback or instrumentation drift")
 	}
 	wantKey := prefix + "${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}"
@@ -184,7 +195,14 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 		t.Fatal("required gate must reject every non-success result before any other work")
 	}
 	receive := gateSteps["Receive successful unit shards"]
-	if receive.Uses != "actions/download-artifact@v4" || receive.If != "runner.os == 'Linux'" || receive.With["pattern"] != "unit-results-*" || receive.With["merge-multiple"] == true {
+	// Both gates run on Linux, so the Ubuntu-only work keys on the matrix label.
+	const ubuntuGate = "matrix.os == 'ubuntu-latest'"
+	for _, name := range []string{"Checkout code", "Set up Go"} {
+		if gateSteps[name].If != ubuntuGate {
+			t.Fatalf("%s must run only in the Ubuntu gate", name)
+		}
+	}
+	if receive.Uses != "actions/download-artifact@v4" || receive.If != ubuntuGate || receive.With["pattern"] != "unit-results-*" || receive.With["merge-multiple"] == true {
 		t.Fatal("all separate result manifests must reach the Linux gate")
 	}
 	merge := gateSteps["Verify complete partition and merge coverage"]
@@ -193,11 +211,11 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 			t.Fatalf("coverage aggregation missing %s", fragment)
 		}
 	}
-	if merge.If != "runner.os == 'Linux'" || gateOrder[receive.Name] >= gateOrder[merge.Name] {
+	if merge.If != ubuntuGate || gateOrder[receive.Name] >= gateOrder[merge.Name] {
 		t.Fatal("Linux-only coverage verification must follow artifact download")
 	}
 	coverage := gateSteps["Upload coverage to Codecov"]
-	if coverage.If != "runner.os == 'Linux'" || coverage.Uses != "codecov/codecov-action@v4" || coverage.With["flags"] != "unittests" || coverage.With["file"] != "${{ runner.temp }}/unit-coverage.txt" || coverage.ContinueOnError != true || gateOrder[merge.Name] >= gateOrder[coverage.Name] {
+	if coverage.If != ubuntuGate || coverage.Uses != "codecov/codecov-action@v4" || coverage.With["flags"] != "unittests" || coverage.With["file"] != "${{ runner.temp }}/unit-coverage.txt" || coverage.ContinueOnError != true || gateOrder[merge.Name] >= gateOrder[coverage.Name] {
 		t.Fatal("Linux coverage upload must follow successful full-suite verification")
 	}
 	artifacts := steps["Preserve unit timing evidence"]

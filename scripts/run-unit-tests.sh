@@ -3,7 +3,7 @@
 # this wrapper owns a separate, newly allocated evidence directory.
 set -euo pipefail
 if [[ $# -ne 0 ]]; then
-  printf 'Usage: ./scripts/run-unit-tests.sh (RUNNER_OS=macOS selects platform scope; ORI_UNIT_SHARD + ORI_UNIT_SHARD_COUNT partition Linux; ORI_UNIT_TEST_PARALLEL caps packages run at once; ORI_UNIT_TEST_CACHE=1 lets unchanged packages come back from Go'"'"'s test cache)\n' >&2
+  printf 'Usage: ./scripts/run-unit-tests.sh (RUNNER_OS=macOS selects platform scope; ORI_UNIT_SHARD + ORI_UNIT_SHARD_COUNT partition Linux; ORI_UNIT_TEST_PARALLEL caps packages run at once; ORI_UNIT_TEST_CACHE=1 lets unchanged packages come back from Go'"'"'s test cache; ORI_UNIT_RACE=0 drops the race detector, macOS platform scope only)\n' >&2
   exit 2
 fi
 if [[ -n "${ORI_UNIT_SHARD:-}${ORI_UNIT_SHARD_COUNT:-}" ]]; then
@@ -22,6 +22,20 @@ fi
 # test cache instead of running again.
 if [[ -n "${ORI_UNIT_TEST_CACHE:-}" && ! "${ORI_UNIT_TEST_CACHE}" =~ ^[01]$ ]]; then
   printf 'ORI_UNIT_TEST_CACHE must be 0 or 1\n' >&2
+  exit 2
+fi
+# Unset or 1 runs every package under the race detector. 0 drops it, and only
+# the macOS platform leg may ask for that: the Ubuntu shards are the race gate
+# for every package (the platform packages included), and their coverage merge
+# checks those exact flags. CI sets 0 on macOS for pull requests, where the race
+# detector costs most of the leg's wall clock and finds nothing platform-specific
+# that Ubuntu does not; pushes to dev keep it.
+if [[ -n "${ORI_UNIT_RACE:-}" && ! "${ORI_UNIT_RACE}" =~ ^[01]$ ]]; then
+  printf 'ORI_UNIT_RACE must be 0 or 1\n' >&2
+  exit 2
+fi
+if [[ "${ORI_UNIT_RACE:-1}" == 0 && "${RUNNER_OS:-}" != macOS ]]; then
+  printf 'ORI_UNIT_RACE=0 is only for the macOS platform leg (RUNNER_OS=macOS); the full and sharded scopes are the race gate\n' >&2
   exit 2
 fi
 script_dir="$(cd "$(dirname "$0")" && pwd -P)"
@@ -155,7 +169,11 @@ fi
 # Coverage is merged from the Ubuntu shards only (unit-shards.py checks these
 # exact flags there). The platform leg's profile was never consumed, and atomic
 # counters cost it ~40% of its race-mode wall clock, so it runs without them.
-flags=(-json -short -race -timeout 30m)
+flags=(-json -short)
+if [[ "${ORI_UNIT_RACE:-1}" == 1 ]]; then
+  flags+=(-race)
+fi
+flags+=(-timeout 30m)
 if [[ "${ORI_UNIT_TEST_CACHE:-0}" != 1 ]]; then
   flags+=(-count=1)
 fi

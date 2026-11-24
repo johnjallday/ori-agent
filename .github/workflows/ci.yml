@@ -251,6 +251,13 @@ jobs:
       ORI_SKIP_CACHE_PRUNE: '1'
       ORI_UNIT_SHARD: ${{ matrix.os == 'ubuntu-latest' && matrix.shard || '' }}
       ORI_UNIT_SHARD_COUNT: ${{ matrix.os == 'ubuntu-latest' && '4' || '' }}
+      # The Ubuntu shards run every package under the race detector, always. On
+      # pull requests the macOS leg runs its platform packages without it: the
+      # race detector cost most of that leg's ~13 minutes and is not where its
+      # macOS-only value lies. Pushes (dev, release branches) keep it, so a
+      # macOS-only race still turns dev red before any release is cut. The
+      # runner refuses 0 outside the macOS platform scope.
+      ORI_UNIT_RACE: ${{ matrix.os == 'macos-latest' && github.event_name == 'pull_request' && '0' || '1' }}
     strategy:
       # Run every shard to completion; a failing sibling must not hide evidence.
       fail-fast: false
@@ -307,9 +314,11 @@ jobs:
           path: ${{ steps.unit_cache_identity.outputs.build }}
           # Each shard refreshes only its own compilation, not whichever sibling
           # saved last. v2 starts cold; compare compatible-warm runs separately.
-          key: ori-unit-build-v2-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-race-cover-atomic-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          # The instrumentation is part of the identity: a race-free macOS pull
+          # request never restores, or saves over, the race compilation of a push.
+          key: ori-unit-build-v2-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ env.ORI_UNIT_RACE == '0' && 'norace' || 'race' }}-cover-atomic-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            ori-unit-build-v2-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-race-cover-atomic-${{ matrix.shard }}-
+            ori-unit-build-v2-${{ steps.unit_cache_identity.outputs.platform }}-${{ steps.unit_cache_identity.outputs.go }}-${{ hashFiles('go.mod', 'go.sum') }}-${{ env.ORI_UNIT_RACE == '0' && 'norace' || 'race' }}-cover-atomic-${{ matrix.shard }}-
         continue-on-error: true
 
       - name: Download dependencies
@@ -317,7 +326,8 @@ jobs:
 
       # Ubuntu partitions the full canonical list with coverage; macOS keeps
       # --platform and skips coverage, which only the Linux merge below ever
-      # consumed. Assertions never change. Required names live on the
+      # consumed, and on pull requests also the race detector (ORI_UNIT_RACE
+      # above). Assertions never change. Required names live on the
       # fail-closed aggregation jobs below, outside this execution matrix.
       - name: Run unit tests
         id: unit
@@ -376,11 +386,17 @@ jobs:
   # Keep both existing required check names and downstream needs: test-unit.
   # Both gates require all five executions. Linux also proves exact partition
   # completeness and merges coverage; an absent/skipped/failed shard is red.
+  #
+  # Both gates run on Linux. The macOS gate only reads needs.test-unit-run's
+  # result (the macOS execution itself still runs on macOS, above), so asking
+  # for a macOS runner here added nothing but one more chance of the scarce
+  # macOS pool never acquiring the job, which cancels the required check. The
+  # check names come from the matrix values, so they are unchanged.
   test-unit:
     name: Unit Tests
     needs: test-unit-run
     if: ${{ always() }}
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     strategy:
@@ -400,26 +416,28 @@ jobs:
             exit 1
           fi
 
+      # Only the Ubuntu-named gate merges coverage. Both gates run on Linux now,
+      # so these steps key on the matrix label, not runner.os.
       - name: Checkout code
-        if: runner.os == 'Linux'
+        if: matrix.os == 'ubuntu-latest'
         uses: actions/checkout@v5
 
       - name: Set up Go
-        if: runner.os == 'Linux'
+        if: matrix.os == 'ubuntu-latest'
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Receive successful unit shards
-        if: runner.os == 'Linux'
+        if: matrix.os == 'ubuntu-latest'
         uses: actions/download-artifact@v4
         with:
           pattern: unit-results-*
           path: ${{ runner.temp }}/unit-results
 
       - name: Verify complete partition and merge coverage
-        if: runner.os == 'Linux'
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           set -euo pipefail
@@ -431,7 +449,7 @@ jobs:
 
       # Upload once, only after verifying all Linux coverage. Darwin is partial.
       - name: Upload coverage to Codecov
-        if: runner.os == 'Linux'
+        if: matrix.os == 'ubuntu-latest'
         uses: codecov/codecov-action@v4
         with:
           file: ${{ runner.temp }}/unit-coverage.txt
