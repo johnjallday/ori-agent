@@ -83,7 +83,9 @@ test('a snapshot holds the open rows, the tabs and the active tab, and nothing e
     // None of these may reach storage.
     treeTabItems: { [noteTab.key]: { status: 'ready', value: { content: 'secret text' } } },
     treeContents: { ws1: { sections: {} } },
-    treeFilter: 'lyr',
+    treeSearch: { term: 'zebra-secret-term', status: 'done', kinds: {} },
+    treeSearchNote: 'a note',
+    tabBeforeSearch: fileTab.key,
     bulkSelection: new Set(['ws1']),
     activeTags: new Set(['music'])
   });
@@ -100,6 +102,21 @@ test('a snapshot holds the open rows, the tabs and the active tab, and nothing e
   assert.deepEqual(snapshot.tabs, [noteTab, fileTab, overviewTab]);
   assert.equal(snapshot.activeKey, fileTab.key);
   assert.doesNotMatch(JSON.stringify(snapshot), /secret text/);
+  // The search term is not remembered either (merge-tree-into-files FR27).
+  assert.doesNotMatch(JSON.stringify(snapshot), /zebra-secret-term/);
+});
+
+test('the Results tab is not a stored tab: it is never the remembered active tab', () => {
+  const snapshot = snapshotTreeState({
+    ...homeState(),
+    activeTabKey: 'search:results'
+  });
+  assert.equal(snapshot.activeKey, '');
+  assert.doesNotMatch(JSON.stringify(snapshot), /search:results/);
+  assert.equal(
+    snapshot.tabs.some(tab => tab.key === 'search:results'),
+    false
+  );
 });
 
 test('a tab keeps only what its loader needs: the restored flag and nested values are left out', () => {

@@ -316,40 +316,28 @@ test.describe('Home file tree', () => {
     await expect(bar).toBeHidden();
   });
 
-  test('the filter narrows the tree to matching names, loaded contents included', async ({
+  // Finding things by name is the Files search box's job, above the tree and the
+  // pane, and is covered by tests/files-name-search.spec.ts. The tree itself is
+  // never narrowed: it has no filter box of its own.
+  test('the tree has no filter box of its own; the search sits above both columns', async ({
     page
   }) => {
-    const ws = await seedWorkspace(page, 'Tree filter');
+    const ws = await seedWorkspace(page, 'Tree no filter');
     await openTree(page, ws.id);
-    const filter = page.locator('#cockpitTreeNav [data-tree-filter]');
-    const rows = page.locator('#cockpitTreeNav [data-tree-row]');
-
-    // By workspace name; the cursor stays in the box as the tree redraws.
-    await filter.click();
-    await page.keyboard.type(ws.name.toUpperCase());
-    await expect(rows).toHaveCount(1);
-    await expect(rows.first()).toHaveAttribute('data-tree-row', ws.id);
-    await expect(filter).toBeFocused();
-    await page.keyboard.press('Escape');
-    await expect(filter).toHaveValue('');
-    await expect(row(page, ws.id)).toBeVisible();
-
-    // A note is found once its workspace has been expanded, even when closed.
-    await filter.fill(ws.noteName);
-    await expect(page.locator('#cockpitTreeNav .cockpit-tree-empty')).toHaveText(
-      'Nothing matches that filter.'
-    );
-    await expect(page.locator('#cockpitTreeNav .cockpit-tree-empty-note')).toContainText(
-      'searched only after they are expanded'
-    );
-    await page.locator('#cockpitTreeNav [data-tree-filter-clear]').click();
-    await expand(page, ws.id);
-    await row(page, ws.id).locator('[data-tree-toggle]').click();
-    await expect(row(page, `${ws.id}/s/notes`)).toHaveCount(0);
-    await filter.fill(ws.noteName);
-    await expect(rows).toHaveCount(3);
-    await expect(row(page, `${ws.id}/n/${ws.noteId}`)).toBeVisible();
-    await expect(row(page, ws.id)).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#cockpitTreeNav [data-tree-filter]')).toHaveCount(0);
+    await expect(page.locator('#cockpitTreeNav input[type="text"]')).toHaveCount(0);
+    const search = page.locator('#cockpitFilesSearch');
+    const [box, nav, pane] = await Promise.all([
+      search.boundingBox(),
+      page.locator('#cockpitTreeNav').boundingBox(),
+      page.locator('#cockpitTreePane').boundingBox()
+    ]);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(nav!.y + 1);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(pane!.y + 1);
+    // One box over both columns.
+    expect(box!.x).toBeLessThanOrEqual(nav!.x + 1);
+    expect(box!.x + box!.width).toBeGreaterThanOrEqual(pane!.x + pane!.width - 1);
+    await expect(page.getByPlaceholder('Search by name…')).toBeVisible();
   });
 
   test('open rows and tabs come back after a reload, and a deleted note’s tab does not', async ({

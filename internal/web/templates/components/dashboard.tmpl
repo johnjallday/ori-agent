@@ -489,7 +489,26 @@
              slim tree on the left, and the pane where a clicked item opens on
              the right. They are separate hosts on purpose: the tree redraws on
              every expand, and that must never rebuild the pane beside it. -->
-        <div id="cockpitTree" class="cockpit-tree" role="region" aria-label="Workspace tree" tabindex="-1" hidden>
+        <div id="cockpitTree" class="cockpit-tree" role="region" aria-label="Files" tabindex="-1" hidden>
+          <!-- One search box across the top of Files, above the tree AND the
+               pane. It finds Ori's own items by name (home-files-search.js);
+               what it finds shows as a Results tab in the pane, and the tree is
+               never filtered. The term lives in memory only. -->
+          <div id="cockpitFilesSearch" class="cockpit-files-search" role="search">
+            <label class="cockpit-files-search-field" for="cockpitFilesSearchInput">
+              <svg class="cockpit-files-search-icon" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M7 11.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zM10.3 10.3 13.8 13.8"></path></svg>
+              <span class="visually-hidden">Search by name</span>
+              <input id="cockpitFilesSearchInput" type="text" class="form-control cockpit-files-search-input"
+                     placeholder="Search by name…" autocomplete="off" autocapitalize="off"
+                     spellcheck="false" enterkeyhint="search" maxlength="128">
+              <kbd class="cockpit-files-search-hint" aria-hidden="true">/</kbd>
+            </label>
+            <button type="button" id="cockpitFilesSearchClear" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-files-search-clear"
+                    aria-label="Clear the search" title="Clear the search" hidden>
+              <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg>
+            </button>
+            <span id="cockpitFilesSearchStatus" class="visually-hidden" role="status" aria-live="polite"></span>
+          </div>
           <nav id="cockpitTreeNav" class="cockpit-tree-nav" aria-label="Workspaces and their contents"></nav>
           <section id="cockpitTreePane" class="cockpit-tree-pane" aria-label="Open item"></section>
         </div>

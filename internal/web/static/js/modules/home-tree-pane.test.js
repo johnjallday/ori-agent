@@ -14,6 +14,7 @@ import {
   NARROW_TREE_WIDTH,
   NOTE_EDITOR_ID,
   activateTab,
+  adoptRowMeta,
   closeTab,
   createNoteController,
   isNarrowTreeWidth,
@@ -1564,6 +1565,61 @@ test("a note's and a ticket's tags stay read-only (FR32, FR33)", () => {
     assert.doesNotMatch(html, /tag-filter|tag-remove|is-editable/);
     assert.match(html, /<span class="cockpit-pane-tag">#/);
   });
+});
+
+// ---------------------------------------------------------------------------
+// A tab opened from a search result takes what its row knows
+// ---------------------------------------------------------------------------
+
+test('adoptRowMeta gives a result-opened tab its row’s meta once the row has loaded', () => {
+  const tabs = [
+    {
+      key: 'ws1/a/Scout',
+      kind: 'agent',
+      workspaceId: 'ws1',
+      label: 'Scout',
+      meta: { name: 'Scout' },
+      fromSearch: true
+    },
+    { key: 'ws1/n/n1', kind: 'note', workspaceId: 'ws1', label: 'Note', meta: { noteId: 'n1' } }
+  ];
+  const rows = [{ id: 'ws1/a/Scout', meta: { name: 'Scout', role: 'Reviewer', model: 'sonnet' } }];
+  const next = adoptRowMeta(tabs, 'ws1', rows);
+  assert.notEqual(next, tabs);
+  assert.deepEqual(next[0].meta, { name: 'Scout', role: 'Reviewer', model: 'sonnet' });
+  assert.equal(next[0].fromSearch, false, 'it has found its row');
+  assert.equal(next[1], tabs[1], 'other tabs are left as they were');
+});
+
+test('adoptRowMeta keeps what the result gave the tab over what the row says', () => {
+  const tabs = [
+    {
+      key: 'ws1/a/S',
+      kind: 'agent',
+      workspaceId: 'ws1',
+      label: 'S',
+      meta: { name: 'Fresh' },
+      fromSearch: true
+    }
+  ];
+  const next = adoptRowMeta(tabs, 'ws1', [{ id: 'ws1/a/S', meta: { name: 'Stale', role: 'R' } }]);
+  assert.deepEqual(next[0].meta, { name: 'Fresh', role: 'R' });
+});
+
+test('adoptRowMeta changes nothing, and returns the same list, when there is nothing to adopt', () => {
+  const tabs = [
+    { key: 'ws1/a/S', kind: 'agent', workspaceId: 'ws1', label: 'S', meta: {}, fromSearch: true },
+    { key: 'ws2/a/T', kind: 'agent', workspaceId: 'ws2', label: 'T', meta: {}, fromSearch: true }
+  ];
+  // Another workspace's rows, or rows that do not include the tab, are no news.
+  assert.equal(adoptRowMeta(tabs, 'ws3', [{ id: 'ws1/a/S', meta: { role: 'R' } }]), tabs);
+  assert.equal(adoptRowMeta(tabs, 'ws1', [{ id: 'ws1/a/other', meta: {} }]), tabs);
+  assert.equal(adoptRowMeta(tabs, 'ws1', []), tabs);
+  assert.equal(adoptRowMeta(tabs, 'ws1', null), tabs);
+  assert.deepEqual(adoptRowMeta(null, 'ws1', []), []);
+  // A tab not opened from search is never rewritten.
+  const plain = [{ key: 'ws1/a/S', kind: 'agent', workspaceId: 'ws1', label: 'S', meta: {} }];
+  assert.equal(adoptRowMeta(plain, 'ws1', [{ id: 'ws1/a/S', meta: { role: 'R' } }]), plain);
 });
 
 test('a hostile tag is escaped in its label, its target and its names', () => {

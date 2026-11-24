@@ -117,7 +117,9 @@ for (const theme of ['light', 'dark'] as const) {
         .all()) {
         await reachable(tool, width < 769 ? 44 : 32);
       }
-      await reachable(page.locator('[data-tree-filter]'), width < 769 ? 44 : 40);
+      // Files' one search box, above the tree and the pane.
+      await reachable(page.locator('#cockpitFilesSearchInput'), width < 769 ? 44 : 40);
+      await homeA11y(page, '#cockpitFilesSearch');
       await homeA11y(page, '#cockpitTreeNav');
       await page.locator(`[data-tree-row="${homeLeaf.id}"] .cockpit-tree-name`).click();
       await expect(page.locator('#cockpitTreePane')).toContainText(homeLeaf.name);

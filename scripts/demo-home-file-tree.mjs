@@ -18,8 +18,8 @@
  *   create Group 4: a note, a ticket and an upload made from the row menu.
  *   manage Group 5: Move by menu and by drag, a move that is refused, Delete
  *          and Undo, selecting rows and grouping them, and tag filters.
- *   finish Group 6: the filter box, what is remembered across a reload, the
- *          one-column layout, the reload on coming back, roles and contrast.
+ *   finish Group 6: what is remembered across a reload, the one-column layout,
+ *          the reload on coming back, roles and contrast.
  *
  * Release 2 (tasks/tasks-home-file-tree-r2.md) adds a stage for each new
  * section. They leave the seeded sandbox as they found it:
@@ -1824,24 +1824,21 @@ async function runManageStage({ stamp, names, ids, tags, madeGroups }) {
   );
 }
 
-// Group 6: the filter box, what is remembered across a reload, the one-column
-// layout, the reload on coming back to the browser tab, and accessibility.
+// Group 6: what is remembered across a reload, the one-column layout, the
+// reload on coming back to the browser tab, and accessibility.
 async function stageFinish() {
   const stamp = Date.now().toString(36);
   const names = {
     recall: `Recall ${stamp}`,
-    unopened: `Unopened ${stamp}`,
     note: `Blue hour ${stamp}`,
     second: `Second verse ${stamp}`,
     ticket: `Tune the snare ${stamp}`,
-    hidden: `Hidden gem ${stamp}`,
     file: `deep-${stamp}.md`
   };
   const post = async (path, data) =>
     (await page.request.post(`${baseUrl}${path}`, { data })).json();
   const ids = {
-    recall: (await post('/api/workspaces', { name: names.recall })).folder.id,
-    unopened: (await post('/api/workspaces', { name: names.unopened })).folder.id
+    recall: (await post('/api/workspaces', { name: names.recall })).folder.id
   };
   ids.note = (
     await post(`/api/workspaces/${ids.recall}/notes`, {
@@ -1859,7 +1856,6 @@ async function stageFinish() {
       source: 'manual'
     })
   ).id;
-  await post(`/api/workspaces/${ids.unopened}/notes`, { name: names.hidden, content: 'Unseen.' });
   await page.request.post(`${baseUrl}/api/workspaces/${ids.recall}/files`, {
     multipart: {
       folder_path: 'inbox',
@@ -1870,20 +1866,14 @@ async function stageFinish() {
     await runFinishStage({ stamp, names, ids });
   } finally {
     await page.setViewportSize({ width: 1440, height: 900 });
-    for (const key of ['recall', 'unopened']) {
-      await page.request.delete(`${baseUrl}/api/workspaces/${ids[key]}?confirm=true`);
-    }
+    await page.request.delete(`${baseUrl}/api/workspaces/${ids.recall}?confirm=true`);
   }
 }
 
 async function runFinishStage({ stamp, names, ids }) {
   const nav = page.locator('#cockpitTreeNav');
-  const filter = nav.locator('[data-tree-filter]');
-  const clearFilter = nav.locator('[data-tree-filter-clear]');
   const byId = id => nav.locator(`[data-tree-row="${id}"]`);
   const live = () => page.locator('#cockpitRailLive').innerText();
-  const visibleRows = () =>
-    nav.locator('[data-tree-row]').evaluateAll(rows => rows.map(el => el.dataset.treeRow));
   const noteKey = `${ids.recall}/n/${ids.note}`;
   const secondKey = `${ids.recall}/n/${ids.second}`;
   const ticketKey = `${ids.recall}/t/${ids.ticket}`;
@@ -1896,126 +1886,14 @@ async function runFinishStage({ stamp, names, ids }) {
   await byId(ids.recall).scrollIntoViewIfNeeded();
 
   // =========================================================================
-  // The filter box (FR65-FR67)
-  // =========================================================================
-  check(
-    (await filter.getAttribute('aria-label')) === 'Filter the tree by name' &&
-      (await filter.getAttribute('placeholder')) === 'Filter' &&
-      (await clearFilter.isHidden()),
-    'a named filter box sits above the tree; its clear button is hidden while it is empty'
-  );
-  const totalRows = (await visibleRows()).length;
-
-  // By workspace name.
-  await filter.click();
-  await page.keyboard.type('recall', { delay: 20 });
-  await expectEventually(
-    async () => (await visibleRows()).join() === ids.recall,
-    'typing narrows the tree to the workspace whose name matches'
-  );
-  check(
-    (await filter.evaluate(el => el === document.activeElement)) &&
-      (await filter.inputValue()) === 'recall',
-    'the cursor stays in the box while the tree redraws under it'
-  );
-  check(!(await clearFilter.isHidden()), 'the clear button appears once there is text');
-  await shot('f1-filter-workspace');
-
-  // Escape clears.
-  await page.keyboard.press('Escape');
-  await expectEventually(
-    async () => (await visibleRows()).length === totalRows && (await filter.inputValue()) === '',
-    'Escape clears the filter and every row comes back'
-  );
-
-  // Loaded contents are searched: open the workspace once, then close it.
-  await byId(ids.recall).locator('[data-tree-toggle]').click();
-  await byId(noteKey).waitFor();
-  await byId(ids.recall).locator('[data-tree-toggle]').click();
-  await expectEventually(
-    async () => (await byId(noteKey).count()) === 0,
-    'the workspace is closed again, its contents loaded'
-  );
-  const beforeFilter = contentRequests().length;
-  await filter.fill('blue hour');
-  await expectEventually(
-    async () =>
-      (await visibleRows()).join() === [ids.recall, `${ids.recall}/s/notes`, noteKey].join(),
-    'a loaded note is found by name, with only its workspace and section kept above it'
-  );
-  check(
-    (await byId(ids.recall).getAttribute('aria-expanded')) === 'true',
-    'the closed workspace is shown open while the filter holds a match inside it'
-  );
-  await shot('f2-filter-note');
-
-  // A file inside a closed folder.
-  await filter.fill('DEEP-');
-  await expectEventually(
-    async () =>
-      (await visibleRows()).length === 4 &&
-      (await nav.locator('[data-tree-kind="file"]').innerText()).includes('deep-'),
-    'a file in a closed folder is found, whatever the case typed, and the folder is shown open'
-  );
-  check(
-    (await nav.locator('[data-tree-kind="folder"]').getAttribute('aria-expanded')) === 'true',
-    '…with the folder open'
-  );
-
-  // Something in a workspace that was never expanded is not found, and the
-  // tree says why.
-  await filter.fill(names.hidden);
-  await nav.locator('.cockpit-tree-empty').waitFor();
-  check(
-    (await nav.locator('.cockpit-tree-empty').innerText()) === 'Nothing matches that filter.',
-    'no match: "Nothing matches that filter."'
-  );
-  check(
-    (await nav.locator('.cockpit-tree-empty-note').innerText()) ===
-      'Workspaces that have not been expanded yet are searched only after they are expanded.',
-    '…and, with workspaces never expanded, that their contents are searched only once expanded'
-  );
-  await expectEventually(
-    async () => (await live()) === 'Nothing matches that filter.',
-    'the empty result is announced'
-  );
-  check(
-    contentRequests().length === beforeFilter,
-    'filtering searches what is loaded and asks the server for nothing'
-  );
-  await shot('f3-filter-no-match');
-
-  // The clear button.
-  await clearFilter.click();
-  await expectEventually(
-    async () => (await visibleRows()).length === totalRows,
-    'the clear button brings every row back'
-  );
-  check(
-    (await filter.evaluate(el => el === document.activeElement)) && (await clearFilter.isHidden()),
-    '…leaves the cursor in the box, and hides itself'
-  );
-
-  // Down from the box goes to the rows; opening from a filtered tree works.
-  await filter.fill('blue hour');
-  await byId(noteKey).waitFor();
-  await filter.press('ArrowDown');
-  check(
-    await page.evaluate(() => document.activeElement?.hasAttribute('data-tree-row')),
-    'Down from the box moves focus to the rows'
-  );
-  await byId(noteKey).locator('.cockpit-tree-name').click();
-  await page.locator('#cockpitPaneNoteEditor .note-live-line').first().waitFor();
-  check(
-    (await activeTab().innerText()).includes(names.note) &&
-      (await filter.inputValue()) === 'blue hour',
-    'an item opens from the filtered tree, and the filter stays as typed'
-  );
-  await clearFilter.click();
-
-  // =========================================================================
   // Remembered across a reload (FR68-FR70)
   // =========================================================================
+  // Open the workspace and its note first: opening the note reveals its row,
+  // and the note is the first of the tabs the steps below leave open.
+  await byId(ids.recall).locator('[data-tree-toggle]').click();
+  await byId(noteKey).waitFor();
+  await byId(noteKey).locator('.cockpit-tree-name').click();
+  await page.locator('#cockpitPaneNoteEditor .note-live-line').first().waitFor();
   // Three tabs — a note, a ticket, the workspace's overview — the note active,
   // the workspace and one folder open, and the Backlog section closed.
   await byId(ticketKey).locator('.cockpit-tree-name').click();
@@ -2356,48 +2234,34 @@ async function runFinishStage({ stamp, names, ids }) {
   // Contrast (FR75)
   // =========================================================================
   // Open the things whose colours are to be measured.
-  await filter.fill('zzzz-nothing');
-  await nav.locator('.cockpit-tree-empty').waitFor();
-  const emptyContrast = await measureContrast([
-    ['"Nothing matches" line', '#cockpitTreeNav .cockpit-tree-empty'],
-    ['"searched only after" line', '#cockpitTreeNav .cockpit-tree-empty-note'],
-    ['filter text', '#cockpitTreeNav [data-tree-filter]']
-  ]);
-  await clearFilter.click();
   await byId(ids.recall).locator('.cockpit-tree-name').click();
   await page.locator('.cockpit-pane-article[data-pane-kind="workspace"]').waitFor();
   await settle(300);
-  const contrast = [
-    ...emptyContrast,
-    ...(await measureContrast([
-      ['workspace and group names', '#cockpitTreeNav .cockpit-tree-row .cockpit-tree-name'],
-      ['section headings', '#cockpitTreeNav .is-kind-section .cockpit-tree-name'],
-      ['counts and ticket states', '#cockpitTreeNav .cockpit-tree-count'],
-      ['"No … yet" lines', '#cockpitTreeNav .is-kind-empty .cockpit-tree-name'],
-      ['the active row', '#cockpitTreeNav .cockpit-tree-row.is-active .cockpit-tree-name'],
-      ['directory path', '#cockpitTreeNav .cockpit-tree-root-path'],
-      ['directory badge', '#cockpitTreeNav .cockpit-tree-root-badge'],
-      ['header buttons', '#cockpitTreeNav .cockpit-tree-tool:not(:disabled)'],
-      ['tag chips', '#cockpitTreeNav .cockpit-tree-tagbar-chip'],
-      ['tags label', '#cockpitTreeNav .cockpit-tree-tagbar-label'],
-      [
-        'inactive tabs',
-        '#cockpitTreePane .cockpit-pane-tab:not(.is-active) .cockpit-pane-tab-label'
-      ],
-      ['the active tab', '#cockpitTreePane .cockpit-pane-tab.is-active .cockpit-pane-tab-label'],
-      ['breadcrumb', '#cockpitTreePane .cockpit-pane-crumbs'],
-      ['title', '#cockpitTreePane .cockpit-pane-title'],
-      ['"what and where" line', '#cockpitTreePane .cockpit-pane-sub'],
-      ['status chip', '#cockpitTreePane .cockpit-pane-chip'],
-      ['stat and list labels', '#cockpitTreePane .cockpit-pane-kicker'],
-      ['stat values', '#cockpitTreePane .cockpit-pane-stat-value'],
-      ['field names', '#cockpitTreePane .cockpit-pane-fields dt'],
-      ['section links', '#cockpitTreePane .cockpit-pane-link'],
-      ['Open workspace button', '#cockpitTreePane .cockpit-pane-actions .modern-btn-primary'],
-      ['Move… button', '#cockpitTreePane .cockpit-pane-actions .modern-btn-secondary'],
-      ['Delete button', '#cockpitTreePane .cockpit-pane-actions .modern-btn-danger']
-    ]))
-  ];
+  const contrast = await measureContrast([
+    ['workspace and group names', '#cockpitTreeNav .cockpit-tree-row .cockpit-tree-name'],
+    ['section headings', '#cockpitTreeNav .is-kind-section .cockpit-tree-name'],
+    ['counts and ticket states', '#cockpitTreeNav .cockpit-tree-count'],
+    ['"No … yet" lines', '#cockpitTreeNav .is-kind-empty .cockpit-tree-name'],
+    ['the active row', '#cockpitTreeNav .cockpit-tree-row.is-active .cockpit-tree-name'],
+    ['directory path', '#cockpitTreeNav .cockpit-tree-root-path'],
+    ['directory badge', '#cockpitTreeNav .cockpit-tree-root-badge'],
+    ['header buttons', '#cockpitTreeNav .cockpit-tree-tool:not(:disabled)'],
+    ['tag chips', '#cockpitTreeNav .cockpit-tree-tagbar-chip'],
+    ['tags label', '#cockpitTreeNav .cockpit-tree-tagbar-label'],
+    ['inactive tabs', '#cockpitTreePane .cockpit-pane-tab:not(.is-active) .cockpit-pane-tab-label'],
+    ['the active tab', '#cockpitTreePane .cockpit-pane-tab.is-active .cockpit-pane-tab-label'],
+    ['breadcrumb', '#cockpitTreePane .cockpit-pane-crumbs'],
+    ['title', '#cockpitTreePane .cockpit-pane-title'],
+    ['"what and where" line', '#cockpitTreePane .cockpit-pane-sub'],
+    ['status chip', '#cockpitTreePane .cockpit-pane-chip'],
+    ['stat and list labels', '#cockpitTreePane .cockpit-pane-kicker'],
+    ['stat values', '#cockpitTreePane .cockpit-pane-stat-value'],
+    ['field names', '#cockpitTreePane .cockpit-pane-fields dt'],
+    ['section links', '#cockpitTreePane .cockpit-pane-link'],
+    ['Open workspace button', '#cockpitTreePane .cockpit-pane-actions .modern-btn-primary'],
+    ['Move… button', '#cockpitTreePane .cockpit-pane-actions .modern-btn-secondary'],
+    ['Delete button', '#cockpitTreePane .cockpit-pane-actions .modern-btn-danger']
+  ]);
   // The bar that appears with a selection has buttons of its own.
   await byId(ids.recall).focus();
   await page.keyboard.press('Space');
@@ -2714,25 +2578,8 @@ async function stageOutputs() {
   );
   await rowByKind('workspace', 'Night Drive').locator('[data-tree-toggle]').click();
 
-  // --- The filter finds outputs by name (FR65, FR66) ------------------------
-  await folder('runs').locator('[data-tree-toggle]').click();
-  const filter = nav.locator('[data-tree-filter]');
-  await filter.fill('summary');
-  await output('runs/2026-10-04/summary.md').waitFor();
-  check(
-    (await folder('runs').getAttribute('aria-expanded')) === 'true' &&
-      (await output('weekly-report.md').count()) === 0,
-    'the filter finds an output two folders down, opens the way to it, and hides the rest'
-  );
-  await filter.fill('');
-  await output('weekly-report.md').waitFor();
-  check(
-    (await folder('runs').getAttribute('aria-expanded')) === 'false',
-    'with the filter cleared the folder is closed again, as it was left'
-  );
-
   // --- Remembered across a reload (FR68, FR70) ------------------------------
-  await folder('runs').locator('[data-tree-toggle]').click();
+  // The runs folder is already open here (it was opened above), as it is stored.
   await output('runs/tempo-check.csv').click();
   await output('weekly-report.md').click();
   await page.locator('.cockpit-pane-markdown h1', { hasText: 'Weekly report' }).waitFor();
@@ -2954,22 +2801,6 @@ async function stageLinked() {
     fileListings() === 0,
     `expanding the workspace asks for no file of the linked folder (${fileListings()} listing requests)`
   );
-  // Neither does the filter, even with text that only a file inside matches.
-  const filter = nav.locator('[data-tree-filter]');
-  await filter.fill('tracklist');
-  await settle(500);
-  check(
-    fileListings() === 0 && (await nav.locator('[data-tree-row]').count()) === 0,
-    'the filter does not load the folder to search it: nothing matches, nothing is asked for'
-  );
-  await filter.fill('reference');
-  await folderRow.waitFor();
-  await settle(300);
-  check(
-    fileListings() === 0 && (await folderRow.getAttribute('aria-expanded')) === 'false',
-    'the filter finds the linked folder by its name, and still asks for no file'
-  );
-  await filter.fill('');
   await byId(section).scrollIntoViewIfNeeded();
   await shot('l1-linked-closed');
 
@@ -3187,19 +3018,8 @@ async function stageLinked() {
     'its link opens the Linked folders section in the tree and focuses it'
   );
 
-  // --- The filter finds files in a folder that has been loaded --------------
-  await sub('stems').waitFor();
-  const beforeFilter = fileListings();
-  await filter.fill('tracklist');
-  await file('tracklist.csv').waitFor();
-  check(
-    fileListings() === beforeFilter && (await file('readme.md').count()) === 0,
-    'the filter finds a file in the loaded folder, hides the rest, and asks for nothing'
-  );
-  await filter.fill('');
-  await file('readme.md').waitFor();
-
   // --- Remembered across a reload (FR68, FR70) ------------------------------
+  await file('readme.md').waitFor();
   await file('tracklist.csv').click();
   await file('readme.md').click();
   await page.locator(`${linkedArticle} .cockpit-pane-markdown h1`).waitFor();
@@ -3496,17 +3316,6 @@ async function stageChats() {
     'a chat row offers Open and Open in workspace'
   );
   await page.keyboard.press('Escape');
-
-  // --- The filter finds a chat by title -------------------------------------
-  const filter = nav.locator('[data-tree-filter]');
-  await filter.fill('quick');
-  await rowByKind('chat', 'Quick question').waitFor();
-  check(
-    (await rowByKind('chat', 'Mix review').count()) === 0,
-    'the filter finds a chat by its title and hides the rest'
-  );
-  await filter.fill('');
-  await rowByKind('chat', 'Mix review').waitFor();
 
   // --- The overview lists Chats ---------------------------------------------
   await rowByKind('workspace', 'Studio Notes').locator('.cockpit-tree-name').click();
