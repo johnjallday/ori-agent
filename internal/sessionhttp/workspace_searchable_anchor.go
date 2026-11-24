@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
+
+	"github.com/johnjallday/ori-agent/internal/folderagent"
+	orihttp "github.com/johnjallday/ori-agent/internal/http"
 
 	"github.com/johnjallday/ori-agent/internal/filesearch"
 	"github.com/johnjallday/ori-agent/internal/session"
@@ -27,6 +31,28 @@ func (h *Handler) resolveSearchableAnchor(r *http.Request, owner string, req cre
 		return "", err
 	}
 	return h.folderSearch.ReviewedRoot(r.Context(), owner, req.FolderSelection)
+}
+
+// Only a reviewed, still-linked folder supplies manager defaults. A missing
+// suggestion leaves ordinary workspace staffing available; no model is called.
+func (h *Handler) handleFolderManagerDraft(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodGet {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if h.workspaceStore != nil && h.folderSearch != nil && h.folderSearchAllowed != nil {
+		ws, err := h.workspaceStore.Get(id)
+		if err == nil && ws != nil && ws.ID == id && h.folderSearchAllowed(r, ws.OwnerUserID) {
+			if ref, err := ws.GetDirectoryReference(ws.AnchorDirectoryReferenceID()); err == nil && ref != nil && ref.WorkspaceID == id {
+				if kind, ok := h.folderSearch.StaffingFolderKind(r.Context(), ws.OwnerUserID, ref.Path, filesearch.WorkspaceMatch{ID: id, Link: ref.ID}); ok {
+					orihttp.WriteJSON(w, map[string]string{"workspace_id": id, "name": filepath.Base(ref.Path) + " Manager", "brief": folderagent.WorkspaceManagerBrief(kind)})
+					return
+				}
+			}
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // The ordinary anchor checker may report a foreign workspace name or the

@@ -6826,8 +6826,48 @@ export class WorkspaceDetailPage {
   }
 
   async openAddAgentModal() {
+    const workspaceId = this.workspaceId;
+    const generation = (this.staffingGeneration = (this.staffingGeneration || 0) + 1);
+    const offer = document.getElementById('workspace-folder-manager-offer');
+    if (offer) offer.hidden = true;
+    const suggestion =
+      offer && this.workspace?.shared_data?.anchor_directory_reference_id
+        ? fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/folder-manager-draft`, {
+            cache: 'no-store'
+          })
+            .then(r => (r.status === 200 ? r.json() : null))
+            .catch(() => null)
+        : null;
     await this.loadAgentCatalog(true);
     await this.populateAddAgentOptions();
+    const draft = await suggestion;
+    if (this.workspaceId !== workspaceId || generation !== this.staffingGeneration) return;
+    if (draft?.workspace_id === workspaceId && draft.name && draft.brief && offer) {
+      const review = offer.querySelector('[data-folder-manager-review]');
+      offer.querySelector('[data-folder-manager-brief]').textContent = draft.brief;
+      review.textContent = `Hire a ${draft.name}…`;
+      review.onclick = () => {
+        if (this.workspaceId !== workspaceId || generation !== this.staffingGeneration) return;
+        const modal = this.elements.addAgentModal;
+        modal.addEventListener(
+          'hidden.bs.modal',
+          () => {
+            if (this.workspaceId === workspaceId && generation === this.staffingGeneration) {
+              window.showAddAgentModal({
+                workspaceId,
+                folderManagerWorkspace: this.workspace.name,
+                seedRole: 'orchestrator',
+                seedName: draft.name,
+                seedSystemPrompt: draft.brief
+              });
+            }
+          },
+          { once: true }
+        );
+        bootstrap.Modal.getInstance(modal)?.hide();
+      };
+      offer.hidden = false;
+    }
 
     if (this.elements.addAgentModal && window.bootstrap) {
       const modal =

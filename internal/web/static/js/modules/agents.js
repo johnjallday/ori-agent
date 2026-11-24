@@ -628,7 +628,14 @@ function showAddAgentModal(options = {}) {
     }
   }
   if (agentAllowWebSearchInput) {
-    agentAllowWebSearchInput.checked = true;
+    agentAllowWebSearchInput.checked = !options.folderManagerWorkspace;
+  }
+  const destination = document.getElementById('folderManagerDestination');
+  if (destination) {
+    destination.hidden = !options.folderManagerWorkspace;
+    destination.textContent = options.folderManagerWorkspace
+      ? `Create this agent and add it to ${options.folderManagerWorkspace}. No workspace will be created and no work will start.`
+      : '';
   }
   resetBaseAutoConfigState();
   resetAgentCreationCapabilitySelections();
@@ -732,6 +739,7 @@ async function applyPendingAgentCreationFlowToModal() {
   let systemPref = null;
   if (options.seedRole === 'orchestrator') {
     systemPref = await loadSystemModelPreference();
+    if (pendingAgentCreationFlow !== options) return;
   }
 
   if (options.seedModel && agentModelInput) {
@@ -1488,8 +1496,7 @@ async function bindAgentCreationMCPServersForWorkspace(
   return summary;
 }
 
-async function applyPendingAgentCreationFollowUp(agentName) {
-  const flow = pendingAgentCreationFlow;
+async function applyPendingAgentCreationFollowUp(agentName, flow = pendingAgentCreationFlow) {
   const summary = {
     workspaceAdded: false,
     workspaceMCPReady: 0,
@@ -1620,7 +1627,8 @@ async function createNewAgent() {
   const agentName = formValues.name;
   // Taken now: hiding the modal below clears the pending flow before the
   // success path reaches it.
-  const onCreated = pendingAgentCreationFlow.onCreated;
+  const reviewedFlow = pendingAgentCreationFlow;
+  const onCreated = reviewedFlow.onCreated;
 
   // Set loading state
   const originalText = createBtn.textContent;
@@ -1711,10 +1719,10 @@ async function createNewAgent() {
       taskAssigned: false,
       failures: []
     };
-    if (pendingAgentCreationFlow.workspaceId || pendingAgentCreationFlow.taskId) {
+    if (reviewedFlow.workspaceId || reviewedFlow.taskId) {
       createBtn.innerHTML =
         '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Linking...';
-      followUpSummary = await applyPendingAgentCreationFollowUp(agentName);
+      followUpSummary = await applyPendingAgentCreationFollowUp(agentName, reviewedFlow);
     }
 
     // Success - close modal and refresh agent list

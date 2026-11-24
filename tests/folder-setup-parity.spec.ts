@@ -184,5 +184,43 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     await compact.getByRole('button', { name: 'Open Downloads', exact: true }).click();
     await expect(page.locator('body')).toHaveAttribute('data-workspace-id', blankId!);
     expect(await inspect()).toEqual(blank);
+
+    // The second review adds an agent to this exact workspace, without HQ,
+    // another workspace, filename consent, or an implicit first look.
+    const staff = page.getByRole('button', { name: 'Add an agent…', exact: true });
+    const assignment = page.locator('#workspace-detail-add-agent-modal');
+    const hire = assignment.getByRole('button', { name: 'Hire a Downloads Manager…' });
+    const form = page.locator('#addAgentModal');
+    await staff.click();
+    await expect(assignment.getByLabel('Assign an existing agent')).toBeVisible();
+    await expect(hire).toBeVisible();
+    await assignment.screenshot({ path: path('staffing-choices') });
+    await hire.click();
+    await expect(form.locator('#agentName')).toHaveValue('Downloads Manager');
+    await expect(form.locator('#agentSystemPrompt')).toHaveValue('Keep Downloads sorted');
+    await expect(form.locator('#agentAllowWebSearch')).not.toBeChecked();
+    await expect(form.locator('#folderManagerDestination')).toContainText('add it to Downloads');
+    await form.getByRole('button', { name: 'Cancel' }).click();
+    await expect(form).toBeHidden();
+    expect(await inspect()).toEqual(blank);
+    await staff.click();
+    await hire.click();
+    const manager = 'Inbox Steward';
+    await form.locator('#agentName').fill(manager);
+    await form.locator('#agentSystemPrompt').fill('Prepare an inbox summary for review.');
+    const assigned = page.waitForResponse(
+      r =>
+        r.request().method() === 'POST' &&
+        new URL(r.url()).pathname === `/api/workspaces/${blankId}/agents`
+    );
+    await form.locator('#createAgentBtn').click();
+    expect((await assigned).ok()).toBeTruthy();
+    expect(await arrivalState(request, blankId!)).toMatchObject({
+      agents: [manager],
+      pending: false,
+      goalRuns: 0,
+      inFlight: false
+    });
+    expect(await inspect()).toEqual(blank);
   }
 });

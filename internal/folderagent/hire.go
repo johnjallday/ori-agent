@@ -29,6 +29,20 @@ func knownFolderHire(policy folderlook.RootPolicy) (purpose, brief string) {
 	}
 }
 
+// WorkspaceManagerBrief supplies the same editable brief for a manager in an
+// already-created workspace. The kind comes from the verified Files anchor.
+func WorkspaceManagerBrief(kind string) string {
+	policy := folderlook.RootOrdinary
+	switch kind {
+	case "downloads":
+		policy = folderlook.RootDownloads
+	case "documents":
+		policy = folderlook.RootDocuments
+	}
+	_, brief := knownFolderHire(policy)
+	return brief
+}
+
 // PreferredCharacter is a presentation hint, never a role or a permission.
 // Keep the folder defaults together with knownFolderHire.
 func PreferredCharacter(policy folderlook.RootPolicy) string {
