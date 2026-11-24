@@ -367,8 +367,10 @@ type createWorkspaceRequest struct {
 	// folder" offer records FolderOfferID so the offer's resolution can attach
 	// the folder to this workspace and no other. The folder's path never
 	// travels here; the server holds it against the offer.
-	EntryPoint    string `json:"entry_point,omitempty"`
-	FolderOfferID string `json:"folder_offer_id,omitempty"`
+	EntryPoint             string `json:"entry_point,omitempty"`
+	FolderOfferID          string `json:"folder_offer_id,omitempty"`
+	HireProposalID         string `json:"hire_proposal_id,omitempty"`
+	ProposalConversationID string `json:"proposal_conversation_id,omitempty"`
 	// BuildSessionID names the "Build with your assistant" session this create
 	// finishes. It is a reference only: it never changes what is created. After
 	// the workspace exists the session is marked created and its summary is
@@ -597,6 +599,15 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	var req createWorkspaceRequest
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
+	}
+	if req.EntryPoint == "assistant_workspace_only" || req.HireProposalID != "" || req.ProposalConversationID != "" {
+		op := creationOperationFrom(r.Context())
+		intent, err := parseWorkspaceTeamIntent(req.TeamIntent)
+		if op == nil || req.EntryPoint != "assistant_workspace_only" || !req.Blank || err != nil || intent == nil || intent.Mode != workspaceTeamModeAgentless || req.FolderSelection != "" || req.AllowFilenameSearch || req.AnchorPath != "" || req.ProjectPath != "" || req.ProjectConnection != nil || req.FolderOfferID != "" || req.BuildSessionID != "" || req.GroupRoster || req.GroupRequirementReview || req.GroupReviewToken != "" || req.Location != "" || (req.HireProposalID == "") != (req.ProposalConversationID == "") {
+			creationOperationError(w, 409, "workspace_review_required", "Review a blank workspace without staffing or folder access.")
+			return
+		}
+		op.deferFirstGoal = true
 	}
 	if req.FolderSelection != "" || req.AllowFilenameSearch {
 		op := creationOperationFrom(r.Context())

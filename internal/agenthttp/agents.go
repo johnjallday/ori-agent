@@ -132,11 +132,12 @@ type Handler struct {
 	hireRecords personalassistant.HireRecordStore
 	// hireProposals keeps the assistant's conversation offers; a hire whose
 	// request id is a proposal's id marks that proposal hired.
-	hireProposals   personalassistant.HireProposalStore
-	hireLookStarter HireLookStarter
-	runnableModel   RunnableModelChooser
-	hireWorkspaces  HireWorkspaces
-	hireMu          sync.Mutex
+	hireProposals           personalassistant.HireProposalStore
+	hireConversationAllowed func(context.Context, string, string) bool
+	hireLookStarter         HireLookStarter
+	runnableModel           RunnableModelChooser
+	hireWorkspaces          HireWorkspaces
+	hireMu                  sync.Mutex
 	// systemModel is Settings → System Model, which the assistant's
 	// conversations run on; a model edit on a system-model agent is mirrored
 	// into it (system_model_mirror.go). providers vets the mirrored provider.

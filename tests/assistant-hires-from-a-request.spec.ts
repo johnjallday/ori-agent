@@ -249,7 +249,10 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
   await expect(cards).toHaveCount(2);
   const restored = cards.first();
   await expect(restored).toHaveAttribute('data-state', 'hired');
-  await expect(restored).toContainText('Hired. Ruth is taking a first look');
+  const recorded = (await inventory()).hires.find((h: { id: string }) => h.id === hired.hire_id);
+  await expect(restored).toContainText(
+    recorded.state === 'failed' ? 'Hired Ruth, but the first look' : /Hired.*Ruth/
+  );
   await expect(restored.getByRole('link', { name: /Open Compare the three CRMs/ })).toBeVisible();
   await expect(cards.last()).toHaveAttribute('data-state', 'declined');
   await expect(drawer).not.toContainText('Offer: hire');
@@ -264,4 +267,64 @@ test('wt demo: a request becomes the hire card, Hire and start hires, Not now is
   await expect(cards).toHaveCount(0);
   expect((await inventory()).workspaces).toEqual(bought.workspaces);
   await shot('spec-06-advice.png');
+  await chooseConversation(page, '#personalAssistantConversationNew');
+  const folderReply = await send('Create a workspace from Field Notes');
+  expect(folderReply.actions).toContainEqual(
+    expect.objectContaining({ label: 'Choose a folder', href: '/?panel=today&folder=explore' })
+  );
+  await expect(cards).toHaveCount(0);
+  await chooseConversation(page, '#personalAssistantConversationNew');
+  const topic = await send('Create a workspace for marine biology');
+  expect(topic.actions[0].type).toBe('blank_workspace_review');
+  await expect(cards).toHaveCount(0);
+  await chooseConversation(page, '#personalAssistantConversationNew');
+  const report = await send('Compare the interviews and draft a findings report.');
+  expect(report.confirmation?.action_type).toBe('hire_agent');
+  const offer = cards.last();
+  const goal = 'Compare participant interviews and draft findings with supporting quotes.';
+  const name = 'Interview findings';
+  await offer.locator('textarea').fill(goal);
+  await offer.locator('input[id$="WorkspaceName"]').fill(name);
+  await shot('spec-07-report-offer.png');
+  const beforeDraft = await inventory();
+  await offer.getByRole('button', { name: 'Just create the workspace' }).click();
+  const modal = page.locator('#addFolderModal');
+  await expect(modal).toBeVisible();
+  const next = modal.locator('#wizardNextBtn');
+  await modal.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
+  await next.click();
+  await expect(modal.locator('#folderNameInput')).toHaveValue(name);
+  await expect(modal.locator('#folderGoalInput')).toHaveValue(goal);
+  await next.click();
+  await expect(modal.getByRole('checkbox', { name: 'Create without agents' })).toBeChecked();
+  await next.click();
+  const review = modal.locator('#workspaceCreationReviewPanel');
+  await review.getByRole('button', { name: 'Use automatic placement' }).click();
+  expect(await inventory()).toEqual(beforeDraft);
+  await page.screenshot({ path: join(evidence, 'spec-08-blank-review.png') });
+  const accepted = page.waitForResponse(
+    r => r.url().endsWith('/confirm') && r.url().includes('/create-operations/')
+  );
+  await review.locator('[data-placement-action="confirm"]').click();
+  const receipt = await json(await accepted);
+  const empty = await arrivalState(request, receipt.folder.id);
+  expect(empty).toMatchObject({
+    mission: goal,
+    agents: [],
+    filled: 0,
+    roles: 1,
+    pending: false,
+    goalRuns: 0,
+    inFlight: false
+  });
+  const afterBlank = await inventory();
+  expect(afterBlank.hires).toEqual(beforeDraft.hires);
+  expect(afterBlank.sources).toEqual(beforeDraft.sources);
+  expect(afterBlank.workspaces).toEqual([...beforeDraft.workspaces, receipt.folder.id].sort());
+  const journal = await conversation(request, report.conversation.id);
+  expect(journal.hire_proposals[0].state).toBe('workspace_created');
+  await writeFile(
+    join(evidence, 'blank-resources.json'),
+    JSON.stringify({ beforeDraft, afterBlank, empty })
+  );
 });

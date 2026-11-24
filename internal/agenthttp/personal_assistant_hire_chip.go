@@ -118,7 +118,7 @@ func hireChipHref(brief string) string {
 // there), the request did not ask for a hire or a workspace, or the request
 // has no words to make a brief of.
 func (h *HomeAssistantAskHandler) hireChipForRequest(prompt string) *HomeAction {
-	if !isAssistantWorkspaceReviewRequest(prompt) && !isHireRequestHint(prompt) {
+	if workspaceOnlyRequest(prompt) || !isHireRequestHint(prompt) {
 		return nil
 	}
 	provider, _, err := h.resolveProvider()

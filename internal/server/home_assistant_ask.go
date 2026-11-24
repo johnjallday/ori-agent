@@ -444,6 +444,7 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 			// The hires the assistant proposes in those conversations live in
 			// the same database as the hires they become.
 			handler.SetHireProposals(personalassistant.NewSQLiteHireProposals(s.Storage.SessionStore.DB()))
+			handler.ProposalHires = personalassistant.NewSQLiteHireRecords(s.Storage.SessionStore.DB())
 		}
 		if s.Storage.PersonalAssistantFolderObservations != nil {
 			handler.SetFolderSetups(s.Storage.PersonalAssistantFolderObservations)

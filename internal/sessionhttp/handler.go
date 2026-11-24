@@ -35,10 +35,11 @@ import (
 
 // Handler handles session-related HTTP requests.
 type Handler struct {
-	folderSearch        *filesearch.Service
-	folderSearchAllowed func(*http.Request, string) bool
-	store               session.HybridStore
-	workspaceStore      *workspace.FileStore // optional folder-based workspace store
+	folderSearch            *filesearch.Service
+	folderSearchAllowed     func(*http.Request, string) bool
+	hireConversationAllowed func(context.Context, string, string) bool
+	store                   session.HybridStore
+	workspaceStore          *workspace.FileStore // optional folder-based workspace store
 	// workspaceTaskStore is the primary (SyncStore-wrapped) workspace store used
 	// for task mutations such as the entry-agent claim sweep. It must be the same
 	// store orchestration reads from (SQLite primary + disk write-through), not

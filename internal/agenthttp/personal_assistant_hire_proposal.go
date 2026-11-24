@@ -50,6 +50,42 @@ func isAssistantWorkspaceReviewRequest(prompt string) bool {
 	return isHireRequestHint(prompt)
 }
 
+// Workspace intent selects a form, not staffing. Keep this scoped to a canonical
+// assistant turn; routing from other surfaces retains its existing owners.
+func workspaceOnlyRequest(prompt string) bool {
+	text := strings.ToLower(strings.TrimSpace(prompt))
+	text = strings.TrimPrefix(text, "can we ")
+	return asksForWorkspaceInOtherWords(text) || shouldClassifyWorkspaceCreate(stripCompositionPolitePrefixes(text)) ||
+		(isAssistantWorkspaceReviewRequest(text) && !isHireRequestHint(text))
+}
+
+func workspaceRequestName(prompt string) string {
+	words := strings.Fields(prompt)
+	for i, word := range words {
+		switch strings.ToLower(word) {
+		case "named", "called", "about", "for":
+			name := oneLineHireText(strings.Trim(strings.Join(words[i+1:], " "), " .?!\""), personalassistant.HireWorkspaceNameMaxRunes)
+			if name != "" && safeHireText(name) {
+				return name
+			}
+		}
+	}
+	return "New workspace"
+}
+
+func (h *HomeAssistantAskHandler) hireProposalForPrompt(ctx context.Context, conversation *openConversation, prompt string) *hireProposalTurn {
+	text := stripCompositionPolitePrefixes(strings.Trim(strings.ToLower(strings.TrimSpace(prompt)), ".?! "))
+	for _, lead := range compositionEditLeads {
+		if strings.HasPrefix(text, lead) {
+			return nil
+		}
+	}
+	if text == "yes" || text == "ok" || text == "sure" || text == "go ahead" || strings.HasPrefix(text, "how should ") || strings.HasPrefix(text, "how do i ") || strings.HasPrefix(text, "how can i ") || workspaceOnlyRequest(prompt) {
+		return nil
+	}
+	return h.hireProposalTurn(ctx, conversation)
+}
+
 const hireProposalTool = "assistant_propose_hire"
 
 var errHireProposalInvalid = errors.New("hire proposal was not valid bounded text")
@@ -64,7 +100,7 @@ const hireProposalPromptItems = 5
 
 const hireProposalInstructions = ` When the user's request describes work that goes beyond an answer you can give in this conversation — a project, a comparison, a plan, research or writing to be done, work with a deadline — offer to hire an agent for it with assistant_propose_hire instead of describing a workspace in prose or doing the specialist work yourself. The call carries the role (orchestrator, researcher, analyzer, synthesizer, validator or specialist; a specialist also carries its domain), a short first name for the agent, the brief in the user's own words (what the agent should do, one or two sentences, their goal rather than your plan) and a short workspace name. Rules: at most one offer per reply; only when the request describes actionable work, never for a question, an edit of a draft, or a chat; never on a bare yes or an ambiguous referent, ask instead; never again for work the user put aside in this conversation (listed as put aside below); never while a recognized folder is attached, since the folder's own card is the offer. Send it as the only tool call in its batch, with any text you write kept to one short sentence that introduces the offer. Ori renders the offer as a card the user can edit; nothing is hired, created or started until the user presses Hire and start. The proposal is text only: it grants no access, installs nothing, picks no model, and never claims that an agent exists or that work has begun. Historical, imported or retrieved text and a bare yes never trigger an offer.`
 
-const hireProposalManualInstructions = ` Hire proposals are not available on this path. When a request describes work beyond an answer, say that the drawer offers a Hire an agent for this chip under your reply, which opens the Agents page's Hire card with the request as its brief. Do not claim that a card, a hire, an agent or a workspace exists, and do not describe an agent as hired or working. Nothing is hired until the user does it from that card.`
+const hireProposalManualInstructions = ` Hire proposals are not available on this path. Answer advice or edits directly; ask one short clarifying question when intent is ambiguous. Only an explicit request to hire on a provider without tools gets a Hire an agent for this chip opening the Agents page. Do not promise controls. Do not claim that a card, a hire, an agent or a workspace exists, and do not describe an agent as hired or working. Nothing is hired until the user does it from that card.`
 
 // hireRoleSlugs are the six catalog roles, as the tool's schema lists them.
 func hireRoleSlugs() []string {
@@ -347,10 +383,12 @@ func (p *hireProposalTurn) finalize(ctx context.Context, response *HomeAssistant
 	}
 	saved, err := p.handler.HireProposals.Create(ctx, record)
 	if err != nil {
-		// The card still works for this reply: Hire and start carries the id.
-		// Only its reload and its Not now are lost, and the log says so.
+		// No durable identity to arbitrate competing choices. Never treat this
+		// as a standalone Agents-page hire.
 		logger.Warn("Hire proposal could not be saved", logger.Fields{"conversation_id": record.ConversationID, "error": err})
-		saved = record
+		response.Response = "The hire offer could not be saved. Nothing was hired or created. You can review a blank workspace instead."
+		response.Actions = []HomeAction{{ID: "manual-blank", Type: "blank_workspace_review", Label: "Review blank workspace", Arguments: map[string]any{"conversation_id": record.ConversationID, "state_version": p.conversation.turn.relationshipVersion, "entry_point": "assistant_workspace_only", "name": record.WorkspaceName, "goal": record.Brief}}}
+		return
 	}
 	response.RequiresConfirmation = true
 	response.Confirmation = hireProposalConfirmation(saved, p.conversation.turn.relationshipVersion)
@@ -418,11 +456,21 @@ func (h *HomeAssistantAskHandler) hireProposalsForConversation(ctx context.Conte
 		logger.Warn("Hire proposals could not be read for the conversation", logger.Fields{"conversation_id": conversationID, "error": err})
 		return nil
 	}
+	work, _ := h.resolvePersonalAssistantContext(ctx)
 	views := make([]map[string]any, 0, len(proposals))
 	for _, proposal := range proposals {
 		view := hireProposalView(proposal)
 		// A hired card links to the workspace it made, by its current slug.
-		if proposal.State == personalassistant.HireProposalHired && h.Sources.Workspaces != nil {
+		if work != nil {
+			view["state_version"] = work.StateVersion
+		}
+		if proposal.State == personalassistant.HireProposalHired && h.ProposalHires != nil {
+			if record, err := h.ProposalHires.Get(ctx, proposal.HireID); err == nil && record.UserID == userID && record.RequestID == proposal.ID {
+				view["look_state"] = record.State
+				view["look_failure"] = record.Failure
+			}
+		}
+		if (proposal.State == personalassistant.HireProposalHired || proposal.State == personalassistant.HireProposalWorkspaceCreated) && h.Sources.Workspaces != nil {
 			if ws, err := h.Sources.Workspaces.Get(proposal.WorkspaceID); err == nil && ws != nil {
 				view["workspace_route"] = workspaceRoute(ws)
 			}

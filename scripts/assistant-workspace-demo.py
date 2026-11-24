@@ -515,7 +515,7 @@ def requested_workspace(own_words):
 # decides whether the hire tool is offered; the fixture only proves it was and
 # fills the card from the words at hand.
 HIRE_REQUEST_LEADS = ("prepare a workspace review", "let's set up a workspace", "help me plan", "help me compare",
-                      "i need to compare", "i need someone to")
+                      "i need to compare", "i need someone to", "compare the interviews and draft")
 
 
 def hire_proposal(own_words, history, requested):
@@ -566,6 +566,8 @@ def conversation_reply(prompt):
     }:
         return ("Deterministic discussion fixture: compare community options, not talent coaching. "
                 "No external catalog or document was read and no setup was performed.")
+    if prompt == 'How should I compare interviews?':
+        return 'List the same questions for each interview, group answers by theme, and check exceptions before drawing conclusions.'
     if prompt.startswith("Conversation fixture: long answer"):
         return "Beginning of the long fixture reply.\n\n" + "\n\n".join(
             f"Section {index + 1}. This is synthetic discussion, not a setup plan. "

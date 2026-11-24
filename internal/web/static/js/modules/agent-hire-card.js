@@ -535,7 +535,10 @@
         response = await fetchImpl('/api/agents/hire', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(hireRequestBody(state, appearanceEditor?.createRequest?.() || null))
+          body: JSON.stringify({
+            ...hireRequestBody(state, appearanceEditor?.createRequest?.() || null),
+            proposal_conversation_id: options.proposalConversation || undefined
+          })
         });
         payload = (await response.json().catch(() => ({}))) || {};
       } catch (_) {

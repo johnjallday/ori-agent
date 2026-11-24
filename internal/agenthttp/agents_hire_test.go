@@ -134,8 +134,9 @@ func TestHire_MarksTheConversationProposalItCameFrom(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	f.h.SetHireConversationAllowed(func(_ context.Context, user, id string) bool { return user == "local" && id == "conv-1" })
 	// The user changed the role on the card before pressing Hire and start.
-	rr, got := f.hire(t, `{"request_id":"proposal-1","role":"validator","name":"Rita","brief":"Check the CRM shortlist for mistakes.","workspace_name":"CRM check"}`)
+	rr, got := f.hire(t, `{"request_id":"proposal-1","proposal_conversation_id":"conv-1","role":"validator","name":"Rita","brief":"Check the CRM shortlist for mistakes.","workspace_name":"CRM check"}`)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 	}
@@ -151,7 +152,7 @@ func TestHire_MarksTheConversationProposalItCameFrom(t *testing.T) {
 	}
 	// Another user's proposal: refused as a foreign request id, untouched.
 	rr, _ = f.hire(t, `{"request_id":"proposal-2","role":"validator","name":"Rita 2","brief":"Check it."}`)
-	if rr.Code != http.StatusCreated {
+	if rr.Code != http.StatusConflict {
 		t.Fatalf("status %d: %s", rr.Code, rr.Body.String())
 	}
 	if foreign, _ := f.proposals.Get(t.Context(), "proposal-2"); foreign.State != personalassistant.HireProposalOffered {
