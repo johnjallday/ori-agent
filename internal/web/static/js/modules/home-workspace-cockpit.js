@@ -2438,6 +2438,14 @@ import {
   const backForward =
     window.performance?.getEntriesByType?.('navigation')[0]?.type === 'back_forward';
   let returnFiles = backForward ? filesPlace?.read() : null;
+  // The Map's place goes first. Both saves are requests sent as the page is
+  // left, and the page that opens next reads the Map's straight away: the older,
+  // more timing-sensitive save must not wait behind the newer one.
+  window.addEventListener('pagehide', () => {
+    if (!place || !mapShowing || !els.map) return;
+    const camera = window.OriWorkspaceMap?.getCamera?.();
+    if (camera) void place.save({ selected: state.selectedId, ...camera });
+  });
   window.addEventListener('pagehide', () => {
     if (!filesPlace) return;
     const snapshot = filesSearch.snapshot();
@@ -2451,11 +2459,6 @@ import {
       selected: keep && snapshot ? snapshot.selected : '',
       pages: keep && snapshot ? encodePages(snapshot) : ''
     });
-  });
-  window.addEventListener('pagehide', () => {
-    if (!place || !mapShowing || !els.map) return;
-    const camera = window.OriWorkspaceMap?.getCamera?.();
-    if (camera) void place.save({ selected: state.selectedId, ...camera });
   });
   // A page restored from the back/forward cache keeps its picker as it was; the
   // view is the truth, so put the picker back in step with it.

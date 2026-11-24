@@ -2042,7 +2042,8 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
 
 .cockpit-result-open {
   display: grid;
-  flex: 1 1 auto;
+  /* Zero basis: the name's own width never pushes Show in tree to a line below. */
+  flex: 1 1 0;
   grid-template-columns: 22px minmax(0, 1.2fr) minmax(0, 1.6fr) 6.5rem;
   align-items: center;
   gap: 10px;
@@ -2118,6 +2119,7 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
 .cockpit-result-reveal-slot {
   flex: 0 0 6.75rem;
   text-align: center;
+  white-space: nowrap;
 }
 
 /* What opening or revealing a file did, under that file's own buttons. */

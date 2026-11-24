@@ -11,6 +11,53 @@ import (
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
 
+// A full Files place, as the page sends it, is bigger than the usual body limit
+// because the scope travels as an escaped JSON string. It must still be kept,
+// and read back whole; one past what the service allows is still refused.
+func TestFilesPlaceFullSizeRoundTrip(t *testing.T) {
+	db, e := database.Open(t.Context(), &database.Config{InMemory: true})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer func() { _ = db.Close() }()
+	s, e := filesearch.New(t.Context(), filesearch.Options{DB: db.DB, Policy: func() filesearch.Policy { return filesearch.Policy{} }, Pick: func(context.Context) (string, bool, error) { return "", false, nil }})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer s.Close()
+	h := Handler{Service: s, Users: userprofile.LocalUserProvider{}}
+	const tab = "1822561b-104d-4d57-b079-33dded692620"
+	post := func(body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("POST", Prefix+"files-place", strings.NewReader(body))
+		r.RemoteAddr = "127.0.0.1:12345"
+		r.Host = "localhost:8765"
+		r.Header.Set("Origin", "http://localhost:8765")
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	quotes := strings.Repeat(`\"`, 640) // 640 quote marks (the most a scope may be), each escaped inside the body
+	full := `{"tab":"` + tab + `","place":{"term":"` + strings.Repeat("€", 128) + `","scope":"` + quotes +
+		`","selected":"` + strings.Repeat(`\"`, 128) + `","pages":"` + strings.Repeat("a:1,", 39) + `a:1"}}`
+	if len(full) <= 2048 {
+		t.Fatalf("the case is meant to exceed the usual limit; it is %d bytes", len(full))
+	}
+	if w := post(full); w.Code != 200 {
+		t.Fatalf("a full place was refused: %d %s", w.Code, w.Body.String())
+	}
+	w := post(`{"tab":"` + tab + `"}`)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), strings.Repeat("€", 128)) {
+		t.Fatalf("a full place was not read back: %d %.80s", w.Code, w.Body.String())
+	}
+	// Past the limit it is refused, not truncated.
+	huge := `{"tab":"` + tab + `","place":{"term":"` + strings.Repeat("x", 9000) + `"}}`
+	if w := post(huge); w.Code != 400 {
+		t.Fatalf("an oversize place got %d", w.Code)
+	}
+}
+
 func TestOnlyLocalBrowserCanStartSearchChoice(t *testing.T) {
 	db, e := database.Open(t.Context(), &database.Config{InMemory: true})
 	if e != nil {
