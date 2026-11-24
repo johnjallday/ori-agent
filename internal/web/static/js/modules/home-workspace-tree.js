@@ -46,7 +46,8 @@ import {
   sectionOfKind
 } from './home-tree-sources.js';
 import { iconHTML, rowIconName } from './home-tree-icons.js';
-import { RESULTS_TAB_KEY } from './home-files-search.js';
+import { RESULTS_TAB_KEY, sourceNames } from './home-files-search.js';
+import { SEARCH_STATUS_OFF, folderSearchState, searchOnlySources } from './home-folder-search.js';
 import { renderWorkspaceUpdateSignals } from './workspace-update-signals.js';
 import {
   MENU_DELETE,
@@ -71,7 +72,7 @@ export function isWorkspaceRowKind(kind) {
 // The two sets below record only where the user differs from that default, so
 // a row nobody has touched needs no entry.
 function opensByDefault(kind) {
-  return kind === 'group' || kind === 'section';
+  return kind === 'group' || kind === 'section' || kind === 'searchOnlyGroup';
 }
 
 /**
@@ -444,6 +445,62 @@ export function visibleTreeRows(nodes, collapsedIds, depth = 0, parentId = '', o
   return rows;
 }
 
+/** The row key of the Search-only folders group, and the prefix of its rows. */
+export const SEARCH_ONLY_GROUP_ID = 'search-only';
+
+/**
+ * The Search-only folders group at the foot of the tree (requirement 38): the
+ * searchable folders that no workspace links to, each a row that does not
+ * open. Nothing on a Mac other than the one that runs Ori, and nothing unless
+ * at least one such folder exists. The group is open until it is closed, like
+ * a section. `topLevelCount` is how many rows the tree has at its top level,
+ * which the group joins as the last of them.
+ */
+export function searchOnlyRows(folderSearch, collapsed, topLevelCount = 0) {
+  const sources = searchOnlySources(folderSearch);
+  if (sources.length === 0) return [];
+  const names = sourceNames(sources);
+  const closed = collapsed instanceof Set && collapsed.has(SEARCH_ONLY_GROUP_ID);
+  const header = {
+    id: SEARCH_ONLY_GROUP_ID,
+    kind: 'searchOnlyGroup',
+    name: 'Search-only folders',
+    workspaceId: '',
+    meta: {},
+    depth: 0,
+    parentId: '',
+    posInSet: topLevelCount + 1,
+    setSize: topLevelCount + 1,
+    isGroup: false,
+    hasChildren: true,
+    childCount: sources.length,
+    nextSiblingId: '',
+    expandable: true,
+    expanded: !closed
+  };
+  if (closed) return [header];
+  return [
+    header,
+    ...sources.map((source, index) => ({
+      id: `${SEARCH_ONLY_GROUP_ID}/${source.id}`,
+      kind: 'searchOnly',
+      name: names.get(source.id) || source.label || 'Folder',
+      workspaceId: '',
+      meta: { sourceId: source.id },
+      depth: 1,
+      parentId: SEARCH_ONLY_GROUP_ID,
+      posInSet: index + 1,
+      setSize: sources.length,
+      isGroup: false,
+      hasChildren: false,
+      childCount: 0,
+      nextSiblingId: '',
+      expandable: false,
+      expanded: null
+    }))
+  ];
+}
+
 /** Every descendant id of `id`, from the FLAT row list. */
 export function descendantIds(flattened, id) {
   const rows = Array.isArray(flattened) ? flattened : [];
@@ -636,7 +693,38 @@ export function workspaceMarker(workspace) {
   };
 }
 
-function markerHTML(row) {
+/**
+ * Whether a linked folder is searchable, after its name: a dot and a short
+ * label (home-folder-search.js). The words are the signal; the dot only
+ * repeats them. Nothing on a Mac other than the one that runs Ori, and nothing
+ * until the list of searchable folders has answered.
+ */
+export function folderMarkHTML(row, folderSearch) {
+  const state = folderSearchState(row, folderSearch);
+  if (!state) return '';
+  // The tooltip keeps the words for a row too narrow to show them.
+  return (
+    `<span class="cockpit-folder-mark" data-folder-search="${escapeHtml(state.key)}" ` +
+    `data-tone="${escapeHtml(state.tone)}" title="${escapeHtml(state.label)}">` +
+    '<span class="cockpit-folder-dot" aria-hidden="true"></span>' +
+    `<span class="cockpit-folder-mark__label">${escapeHtml(state.label)}</span>` +
+    '</span>'
+  );
+}
+
+function markerHTML(row, ctx = {}) {
+  if (row.kind === 'searchOnly') return folderMarkHTML(row, ctx.folderSearch);
+  if (row.kind === 'searchOnlyGroup') {
+    return `<span class="cockpit-tree-count">${escapeHtml(row.childCount)}</span>`;
+  }
+  if (row.kind === 'linked') {
+    // A linked folder's count is its files, known once it has been opened.
+    const count =
+      row.count === null || row.count === undefined
+        ? ''
+        : `<span class="cockpit-tree-count">${escapeHtml(row.count)}</span>`;
+    return count + folderMarkHTML(row, ctx.folderSearch);
+  }
   if (row.kind === 'workspace') {
     const marker = workspaceMarker(row.workspace);
     return (
@@ -650,8 +738,7 @@ function markerHTML(row) {
     );
   }
   if (row.kind === 'group') return '<span class="visually-hidden">Group</span>';
-  // A linked folder's count is its files, known once it has been opened.
-  if (row.kind === 'section' || row.kind === 'memory' || row.kind === 'linked') {
+  if (row.kind === 'section' || row.kind === 'memory') {
     return row.count === null || row.count === undefined
       ? ''
       : `<span class="cockpit-tree-count">${escapeHtml(row.count)}</span>`;
@@ -727,7 +814,7 @@ function rowHTML(row, ctx) {
   if (isDimRow(row)) classes.push('is-dim');
   // The "⋯" button. It is out of the tab order — the keyboard opens the same
   // menu with Shift+F10 or the Menu key on the row itself (FR54).
-  const more = rowHasMenu(row, { searchableLinks: ctx.searchableLinks })
+  const more = rowHasMenu(row, { folderSearch: ctx.folderSearch })
     ? `<button type="button" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-tree-more" data-tree-menu-for="${id}" tabindex="-1" ` +
       `aria-haspopup="menu" aria-label="Actions for ${name}">${iconHTML('more', { size: 16 })}</button>`
     : '';
@@ -761,7 +848,7 @@ function rowHTML(row, ctx) {
       : '<span class="cockpit-tree-caret-space" aria-hidden="true"></span>') +
     iconHTML(rowIconName(row)) +
     `<span class="cockpit-tree-name" title="${name}">${name}</span>` +
-    markerHTML(row) +
+    markerHTML(row, ctx) +
     (isWorkspaceRow
       ? `<span class="cockpit-tree-updates" data-tree-updates="${escapeHtml(row.workspaceId)}"${updates ? '' : ' hidden'}>${updates}</span>`
       : '') +
@@ -940,6 +1027,10 @@ export function rowActivation(row) {
   const kind = row && row.kind;
   if (isWorkspaceRowKind(kind)) return 'open';
   if (kind === 'section' || kind === 'linked' || isFolderKind(kind)) return 'toggle';
+  if (kind === 'searchOnlyGroup') return 'toggle';
+  // A search-only folder does not open: there is no workspace to show it in.
+  // Its menu is what it offers.
+  if (kind === 'searchOnly') return '';
   if (kind === 'failed') return 'retry';
   if (kind === 'more') return 'visit';
   // The naming row is an input; clicking it must not open or toggle anything.
@@ -1027,6 +1118,15 @@ export function mountTree(container, state, callbacks) {
     contents: state.treeContents || {},
     draft: state.treeDraft || null
   });
+  // The Search-only folders group joins the top level, last.
+  const topLevel = rows.filter(row => row.depth === 0);
+  const searchOnly = searchOnlyRows(state.folderSearch, collapsed, topLevel.length);
+  if (searchOnly.length) {
+    topLevel.forEach(row => {
+      row.setSize += 1;
+    });
+    rows.push(...searchOnly);
+  }
   const activeId = treeActiveRowId(state);
 
   // Roving tabindex: exactly one row is tabbable, and it follows the active
@@ -1065,9 +1165,10 @@ export function mountTree(container, state, callbacks) {
       bulkState: bulkSelectionState(state.flattened, selected),
       workspaceUpdateBadges: state.workspaceUpdateBadges,
       activeTags,
-      searchableLinks: state.searchableLinks
+      folderSearch: state.folderSearch
     }) +
     '<div class="cockpit-tree-root-drop" data-tree-drop-into="">Drop here to move to the top level</div>' +
+    addFolderHTML(state) +
     '</div>' +
     (moving
       ? '<div class="cockpit-tree-move-dialog" data-tree-move-dialog>' +
@@ -1149,6 +1250,20 @@ function newNoteButtonHTML(enabled) {
     '<button type="button" class="modern-btn modern-btn-quiet modern-btn-sm modern-btn-icon cockpit-tree-tool" data-tree-new-note aria-label="New note" ' +
     `title="${enabled ? 'New note' : NEW_NOTE_HINT}" aria-disabled="${enabled ? 'false' : 'true'}">` +
     `${iconHTML('newNote', { size: 16 })}</button>`
+  );
+}
+
+/**
+ * Add folder… at the foot of the tree (requirement 39): the same choice of
+ * folder and Explore card as the first-run page, opened in Files by the
+ * cockpit. Only on the Mac that runs Ori, which alone can choose a folder.
+ */
+export function addFolderHTML(state) {
+  const status = state && state.folderSearch && state.folderSearch.status;
+  if (!status || status === SEARCH_STATUS_OFF) return '';
+  return (
+    '<button type="button" class="cockpit-tree-add-folder" data-tree-add-folder ' +
+    'aria-haspopup="dialog"><span aria-hidden="true">+</span> Add folder…</button>'
   );
 }
 
@@ -1329,8 +1444,8 @@ function bindTree(container, state, cb, rows) {
 
   // --- the row menu (FR54) -------------------------------------------------
   const openMenuFor = (row, at, event) => {
-    const items = menuItemsFor(row, { searchableLinks: state.searchableLinks });
-    if (items.length === 0) return false;
+    const items = menuItemsFor(row, { folderSearch: state.folderSearch });
+    if (!rowHasMenu(row, { folderSearch: state.folderSearch })) return false;
     const findOrigin = () =>
       Array.from(container.querySelectorAll('[data-tree-row]')).find(
         el => el.getAttribute('data-tree-row') === row.id

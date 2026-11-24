@@ -133,6 +133,9 @@ export function mountFileSearch(root, compact = false) {
       location.assign(`/workspaces/${encodeURIComponent(connection.workspace.slug)}`);
       return;
     }
+    // A workspace links the folder now, so it is searched in the merged Files.
+    const { openFolderInFiles } = await import('./files-arrival.js');
+    if (await openFolderInFiles(connection.source)) return;
     term.value = '';
     await changeScope(connection.source);
     term.focus();
@@ -223,7 +226,9 @@ export function mountFileSearch(root, compact = false) {
       $('scope').add(new Option('Location no longer available', scope));
     $('scope').value = scope;
     $('emptyMap').textContent = ss.length ? '' : 'No folders mapped yet.';
-    $('sources').replaceChildren(
+    // The list that manages each location is here only before setup is done;
+    // after it, folders are managed on their rows in Files.
+    $('sources')?.replaceChildren(
       ...ss.map(s => {
         const li = element('li', '');
         li.append(

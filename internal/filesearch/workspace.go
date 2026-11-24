@@ -132,6 +132,58 @@ func (s *Service) ReviewSource(ctx context.Context, owner, id string) (*FolderRe
 	return nil, ErrMissing
 }
 
+// ReviewLink starts an explicit review of the folder an owned workspace link
+// already names: "Make searchable" on that link's row in Files. The page sends
+// only the two ids. The folder is the path the workspace's own record holds,
+// confirmed against the live workspace store (ValidLink), and its identity is
+// observed now. Nothing is written: like Review and ReviewSource this leaves
+// one short-lived choice for Connect, which the owner's consent then confirms.
+// The choice is refused unless this very link is among the folder's matches,
+// so a link whose recorded identity no longer fits the folder (replaced, or an
+// older link the folder did not yet exist for) cannot be reviewed from its row.
+func (s *Service) ReviewLink(ctx context.Context, owner, workspace, link string) (*FolderReview, error) {
+	if owner == "" || workspace == "" || link == "" || len(workspace) > 128 || len(link) > 128 {
+		return nil, ErrRequest
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.life.Err() != nil || s.ValidLink == nil {
+		return nil, ErrUnavailable
+	}
+	if prev := s.intents[owner]; prev.started && prev.root == "" && time.Now().Before(prev.expires) {
+		return nil, ErrChoice
+	}
+	var root string
+	err := s.DB.QueryRowContext(ctx, `SELECT r.value->>'$.path' FROM workspaces w, json_each(w.directory_references_json) r
+ WHERE w.id=? AND w.owner_user_id=? AND COALESCE(w.status,'') NOT IN ('missing','trashed') AND r.value->>'$.id'=? AND r.value->>'$.workspace_id'=w.id AND COALESCE(r.value->>'$.purpose','')='' LIMIT 1`, workspace, owner, link).Scan(&root)
+	if err != nil || root == "" || !filepath.IsAbs(root) || !s.ValidLink(owner, root, WorkspaceMatch{ID: workspace, Link: link}) {
+		return nil, ErrMissing
+	}
+	if !s.Policy().allows(root) {
+		return nil, ErrRoot
+	}
+	w, err := rootWitness(root)
+	if err != nil {
+		return nil, ErrLink
+	}
+	existing, err := s.sourceMatchLocked(ctx, owner, root, w)
+	if err != nil {
+		return nil, err
+	}
+	c := choice{id: rand.Text(), root: root, witness: w, kind: s.knownKind(root, w), started: true, expires: time.Now().Add(10 * time.Minute)}
+	if existing != nil {
+		c.source = existing.ID
+	}
+	if c.offered, err = s.matchesLocked(ctx, owner, c); err != nil {
+		return nil, err
+	}
+	if !slices.ContainsFunc(c.offered, func(m WorkspaceMatch) bool { return m.ID == workspace && m.Link == link }) {
+		return nil, ErrLink
+	}
+	s.intents[owner] = c
+	return c.review(), nil
+}
+
 func (s *Service) Connect(ctx context.Context, owner, id, workspace, link string, verify bool) (*Connection, error) {
 	unlock := s.LockWorkspaceSetup()
 	defer unlock()

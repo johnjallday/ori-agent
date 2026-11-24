@@ -1,7 +1,8 @@
-import { destinationPlace } from './destination-place.js';
+import { openFolderInFiles } from './files-arrival.js';
 
 // Search grants are not workspace access. Project only current connections
 // from the local owner's Files view; opening this page never requests a grant.
+// "Search <folder> in Files" opens the merged Files scoped to that folder.
 const mount = document.getElementById('workspaceSearchLocations');
 const workspace = document.body.dataset.workspaceId;
 async function connected() {
@@ -10,7 +11,10 @@ async function connected() {
     headers: { 'X-Ori-Search': '1' }
   });
   if (!response.ok) return [];
-  return (await response.json()).filter(s => s.workspace?.id === workspace);
+  // An unavailable folder still names its workspace, but has nothing to search.
+  return (await response.json()).filter(
+    s => s.workspace?.id === workspace && s.state !== 'unavailable'
+  );
 }
 let revision = 0;
 async function refresh() {
@@ -32,15 +36,7 @@ async function refresh() {
             )
           )
             throw Error();
-          const response = await destinationPlace('desk')?.save({
-            source: source.id,
-            term: '',
-            selected: '',
-            generation: 0,
-            pages: 1
-          });
-          if (!response?.ok) throw Error();
-          window.location.assign('/search');
+          if (!(await openFolderInFiles(source.id))) throw Error();
         } catch {
           mount.textContent =
             'This folder connection is no longer available. Reopen the workspace to check again.';

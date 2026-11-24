@@ -62,6 +62,16 @@ func (s *Server) folderSearchReady() bool {
 func (s *Server) registerFileSearch(mux *http.ServeMux) {
 	if runtime.GOOS == "darwin" && s.Storage != nil {
 		mux.HandleFunc("GET /search", func(w http.ResponseWriter, r *http.Request) {
+			// Once a workspace exists, searchable folders are managed in Files
+			// (merge-tree-into-files PR 2, requirement 41): /search opens it. A
+			// scoped arrival travels in the tab's own Files place, never in the
+			// address, so nothing of the request is carried over. With no
+			// workspace this is still the first-run page.
+			if s.fileSearch != nil && localSearchPage(r) && s.hasWorkspace() {
+				w.Header().Set("Cache-Control", "no-store")
+				http.Redirect(w, r, "/?view=tree", http.StatusFound)
+				return
+			}
 			s.searchPage(w, r, onboarding.SearchLanding(config.DefaultDataDir()), false)
 		})
 		mux.HandleFunc("POST /api/file-search/preference", s.searchPreference)

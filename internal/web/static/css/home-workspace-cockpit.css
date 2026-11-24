@@ -182,26 +182,34 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   margin-left: auto;
 }
 
-/* Files' pointer to the standalone page that manages search locations. A quiet
-   text link beside the heading: it is a place to go, not an action. It takes
-   the header's compact 32px height so switching to Files does not make the row
-   taller and move everything below it; narrow and touch screens get the 44px
-   floor the header's buttons keep there too. */
-.cockpit-files-manage {
+/* Files' starting-page choice beside the heading: Make Files my starting page,
+   or Start on Map instead. A quiet text button, since it is a preference, not
+   the page's work. It takes the header's compact 32px height so switching to
+   Files does not make the row taller and move everything below it; narrow and
+   touch screens get the 44px floor the header's buttons keep there too. */
+.cockpit-files-landing {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
   padding: 0 var(--space-1);
+  border: 0;
+  background: none;
   color: var(--hc-signal);
+  font: inherit;
   font-size: var(--ui-text-sm, 0.875rem);
   text-decoration: underline;
   text-underline-offset: 2px;
+  cursor: pointer;
 }
-.cockpit-files-manage[hidden] {
+.cockpit-files-landing[hidden] {
   display: none;
 }
+.cockpit-files-landing:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
 @media (pointer: coarse), (max-width: 768px) {
-  .cockpit-files-manage {
+  .cockpit-files-landing {
     min-height: 44px;
   }
 }
@@ -1740,6 +1748,217 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   flex: 0 0 auto;
   border-radius: 50%;
   background: var(--hc-signal);
+}
+
+/* Whether a linked folder is searchable (home-folder-search.js): a short label
+   after the name, with a dot that repeats it. The colours are the app's status
+   text tokens, which hold contrast in light and dark.
+
+   The folder's name wins the row. The mark gives way first (its shrink factor
+   dwarfs the name's), and when its label no longer fits beside the dot the
+   label wraps onto a second line that the one-line box clips: it is gone
+   whole, never cut to "Partly i…", and the dot stays. The words are still the
+   mark's tooltip, still read by a screen reader, and lead the row's menu. So
+   that a dot alone does not depend on colour, each state has its own shape:
+   filled (searchable), half (partly indexed), struck (unavailable), dashed
+   (indexing), hollow (not searchable), dotted (status unknown). */
+.cockpit-folder-mark {
+  display: inline-flex;
+  height: 16px;
+  min-width: 8px;
+  /* Flex shrinks every item in proportion, so with a modest factor the name
+     still gave up a fraction of a pixel, which is enough for its ellipsis.
+     This factor leaves the name's share far below a layout unit until the
+     mark is down to its dot; past that, the name shrinks as it always did. */
+  flex: 0 1000000 auto;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: center;
+  column-gap: 5px;
+  overflow: hidden;
+  color: var(--hc-ink-dim);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.cockpit-folder-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  /* A full 16px line for the dot alone, so a wrapped label starts below the
+     clip box instead of halfway into it. */
+  margin: 4px 0;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+}
+
+.cockpit-folder-mark[data-tone="on"],
+.cockpit-tree-menu-status[data-tone="on"] {
+  color: var(--success-text);
+}
+
+.cockpit-folder-mark[data-tone="part"],
+.cockpit-tree-menu-status[data-tone="part"] {
+  color: var(--warning-text);
+}
+
+.cockpit-folder-mark[data-tone="alert"],
+.cockpit-tree-menu-status[data-tone="alert"] {
+  color: var(--danger-text);
+}
+
+[data-tone="on"] > .cockpit-folder-dot,
+[data-tone="on"] > * > .cockpit-folder-dot {
+  background: currentColor;
+}
+
+[data-tone="part"] > .cockpit-folder-dot,
+[data-tone="part"] > * > .cockpit-folder-dot {
+  background: linear-gradient(90deg, currentColor 50%, transparent 50%);
+}
+
+[data-tone="alert"] > .cockpit-folder-dot,
+[data-tone="alert"] > * > .cockpit-folder-dot {
+  background: linear-gradient(
+    135deg,
+    transparent 40%,
+    currentColor 40%,
+    currentColor 60%,
+    transparent 60%
+  );
+}
+
+[data-tone="busy"] > .cockpit-folder-dot,
+[data-tone="busy"] > * > .cockpit-folder-dot {
+  border-style: dashed;
+}
+
+[data-tone="unknown"] > .cockpit-folder-dot,
+[data-tone="unknown"] > * > .cockpit-folder-dot {
+  border-style: dotted;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cockpit-folder-mark[data-tone="busy"] .cockpit-folder-dot {
+    animation: cockpit-folder-busy 1.2s ease-in-out infinite;
+  }
+}
+
+@keyframes cockpit-folder-busy {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* The Search-only folders group at the foot of the tree: a quiet heading under
+   a rule, set apart from the workspaces above it. */
+.cockpit-tree-row.is-kind-searchOnlyGroup {
+  margin-top: 10px;
+  border-top: 1px solid var(--hc-line);
+  border-radius: 0;
+}
+
+.cockpit-tree-row.is-kind-searchOnlyGroup > .cockpit-tree-name {
+  color: var(--hc-ink-dim);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Add folder… at the foot of the tree. */
+.cockpit-tree-add-folder {
+  display: flex;
+  width: calc(100% - 8px);
+  min-height: var(--control-height, 32px);
+  align-items: center;
+  gap: 6px;
+  margin: 10px 4px 4px;
+  padding: 0 10px;
+  border: 1px dashed var(--hc-line-bright, var(--hc-line));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--hc-ink-dim);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.cockpit-tree-add-folder:hover {
+  border-color: var(--hc-ink-dim);
+  color: var(--hc-ink);
+}
+
+.cockpit-tree-add-folder:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse), (max-width: 768px) {
+  .cockpit-tree-add-folder {
+    min-height: var(--touch-target);
+  }
+}
+
+/* Add a folder: the first-run page's three choices, one per line. */
+.folder-search-dialog__choices {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.folder-search-dialog__choices button {
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--line, var(--border-color));
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.folder-search-dialog__choices button:hover,
+.folder-search-dialog__choices button:focus-visible {
+  border-color: var(--ink, var(--text-primary));
+}
+
+/* Remove from search asks first (home-folder-search-dialogs.js, in the Explore
+   card's look); its confirming button reads as the one that takes away. */
+.folder-search-dialog .explore-card__actions .folder-search-dialog__danger {
+  border-color: var(--danger-text);
+  background: var(--danger-text);
+  color: var(--bg-primary);
+}
+
+/* The status line a linked folder's menu starts with: not a choice. */
+.cockpit-tree-menu-status {
+  display: flex;
+  max-width: 300px;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 4px;
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.cockpit-tree-menu-status__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cockpit-tree-menu-status__detail,
+.cockpit-tree-menu-status__reason {
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 /* The "⋯" button: shown when the row is hovered or focused, always on a touch

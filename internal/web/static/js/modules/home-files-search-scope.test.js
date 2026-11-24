@@ -486,3 +486,16 @@ test('restoring nothing, or a blank term, asks nothing', async () => {
   assert.equal(h.calls.length, 0);
   assert.equal(h.search.snapshot(), null);
 });
+
+test('a search-only folder is a scope of its own: the filename index alone, no workspace', () => {
+  const source = { kind: 'source', name: 'Old projects', sourceId: 'src-9' };
+  assert.equal(scopeLabel(source), 'in Old projects');
+  assert.equal(requestScope(source), null);
+  assert.equal(scopeAsksServer(source), false);
+  assert.equal(scopeAsksIndex(source), true);
+  assert.equal(scopeKinds(source), null);
+  // Saved and read back without a workspace; a scope with no source is not one.
+  const text = encodeScope(source);
+  assert.deepEqual(decodeScope(text, { exists: () => false }), { ok: true, scope: source });
+  assert.deepEqual(decodeScope(JSON.stringify({ kind: 'source', name: 'x' })), { ok: false });
+});

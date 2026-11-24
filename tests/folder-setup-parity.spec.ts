@@ -37,11 +37,16 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     await page.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
     await page.locator('#wizardNextBtn').click();
   }
+  const file = kind === 'downloads' ? 'Ship.txt' : 'Harbor.txt';
+  // Files first is the merged Files' Add folder… (PR 2, requirement 39).
   async function choose(side: string) {
     if (side === 'files') {
-      await page.goto('/search');
-      await page.getByRole('button', { name: /Add folder/ }).click();
-      await page.locator(`[data-kind="${kind}"]`).filter({ visible: true }).click();
+      await page.goto('/?view=tree');
+      await page.locator('[data-tree-add-folder]').click();
+      await page
+        .getByRole('dialog', { name: 'Add a folder' })
+        .locator(`[data-folder-choice="${kind}"]`)
+        .click();
     } else {
       await page.goto('/?create=1');
       await blank();
@@ -72,11 +77,18 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     await review.getByRole('button', { name: 'Use automatic placement' }).click();
     await review.locator('[data-placement-action="confirm"]').click();
   }
+  // "Search this folder in Files" lands in the merged Files, searching only
+  // that folder, with nothing about it in the address (requirement 41).
+  async function expectFilesScoped() {
+    await expect(page).toHaveURL(/\/\?view=tree$/);
+    await expect(page.locator('#cockpitFilesSearchScope')).toContainText(`in ${folder}`);
+    await page.locator('#cockpitFilesSearchInput').fill(file.replace('.txt', ''));
+    await expect(
+      page.locator('#cockpitTreePane [data-result-indexed]').filter({ hasText: file }).first()
+    ).toContainText(folder);
+  }
   await review.getByRole('button', { name: 'Search this folder in Files' }).click();
-  await expect(page.locator('#title')).toHaveText(folder);
-  await expect(page.locator('#hits')).toContainText(
-    kind === 'downloads' ? 'Ship.txt' : 'Harbor.txt'
-  );
+  await expectFilesScoped();
   const [s] = await sources();
   expect(s.workspace.name).toBe(name);
   const ws = s.workspace;
@@ -102,7 +114,7 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     })
     .click();
   if (entry === 'files') await expect(page).toHaveURL(new RegExp('/workspaces/' + ws.slug + '$'));
-  else await expect(page.locator('#title')).toHaveText(folder);
+  else await expectFilesScoped();
   await inventory();
   await page.goto('/?home=1');
   await expect(page.locator(`.ws-map-tile[data-ws-id="${ws.id}"]`).first()).toBeVisible();
@@ -112,9 +124,6 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/workspaces/${ws.slug}`);
   await page.getByRole('button', { name: `Search ${folder} in Files` }).press('Enter');
-  await expect(page.locator('#scope')).toHaveValue(s.id);
-  await expect(page.locator('#hits')).toContainText(
-    kind === 'downloads' ? 'Ship.txt' : 'Harbor.txt'
-  );
+  await expectFilesScoped();
   await page.screenshot({ path: path('narrow-files') });
 });

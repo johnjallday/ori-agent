@@ -78,8 +78,8 @@ test('files in searchable folders: found, ordered, selected, opened, refused, sh
   expect((await request.post('/api/onboarding/skip')).ok()).toBeTruthy();
 
   // Downloads: linked to a workspace, through the reviewed folder setup.
+  // Set up with no workspace yet, /search offers the folder choices directly.
   await page.goto('/search');
-  await page.getByRole('button', { name: /Add folder/ }).click();
   await page.locator('[data-kind="downloads"]').filter({ visible: true }).click();
   const review = page.locator('dialog.explore-card');
   await review.getByRole('checkbox').check();

@@ -10,6 +10,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { flattenWorkspaceTree } from './home-workspace-cockpit.js';
 import {
+  emptyFolderSearch,
+  failedFolderSearch,
+  folderSearchFromSources
+} from './home-folder-search.js';
+import {
+  SEARCH_ONLY_GROUP_ID,
+  addFolderHTML,
+  searchOnlyRows,
   visibleTreeRows,
   descendantIds,
   ancestorIds,
@@ -1658,4 +1666,200 @@ test('Chats comes after Linked folders, newest first, with its count; hidden whe
     contents: { w4: contentsFor('w4', { chats: failed('x') }) }
   });
   assert.equal(under(bad, 'w4/s/chats')[0].name, "Couldn't load Chats");
+});
+
+// ---------------------------------------------------------------------------
+// Whether a linked folder is searchable (merge-tree-into-files PR 2, req. 32)
+// ---------------------------------------------------------------------------
+
+const linkedFolderRow = (extra = {}) => ({
+  id: 'w4/linked/d1',
+  kind: 'linked',
+  name: 'Album masters',
+  workspaceId: 'w4',
+  meta: { dirId: 'd1', path: '/Users/someone/Album masters' },
+  parentId: 'w4/s/linked',
+  // Drawn alone, so at the top: the tree nests rows from depth 0.
+  depth: 0,
+  posInSet: 1,
+  setSize: 1,
+  expandable: true,
+  expanded: false,
+  count: null,
+  ...extra
+});
+const searchList = state =>
+  folderSearchFromSources([
+    {
+      id: 's1',
+      label: 'Album masters',
+      state,
+      reason: '',
+      count: 3,
+      mappedAt: 1,
+      generation: 1,
+      workspaceId: 'w4',
+      workspaceName: 'Four',
+      link: 'd1'
+    }
+  ]);
+
+test('a linked folder row says whether it is searchable, in words after its name', () => {
+  const html = folderSearch =>
+    rowMarkup(
+      renderTreeHTML([linkedFolderRow()], { tabbableId: '', folderSearch }),
+      'w4/linked/d1'
+    );
+  const on = html(searchList('ready'));
+  assert.match(on, /data-folder-search="searchable" data-tone="on"/);
+  assert.match(on, /cockpit-folder-mark__label">Searchable</);
+  // The mark follows the name, and the row (now with a menu) has its "⋯".
+  assert.ok(on.indexOf('cockpit-tree-name') < on.indexOf('cockpit-folder-mark'));
+  assert.match(on, /data-tree-menu-for="w4\/linked\/d1"/);
+  assert.match(html(searchList('partial')), />Partly indexed</);
+  assert.match(html(searchList('mapping')), />Indexing…</);
+  assert.match(html(searchList('unavailable')), />Folder unavailable</);
+  const off = html(folderSearchFromSources([]));
+  assert.match(off, /data-folder-search="not-searchable" data-tone="off"/);
+  assert.match(off, />Not searchable</);
+  const failed = html(failedFolderSearch());
+  assert.match(failed, />Status unavailable</);
+  assert.doesNotMatch(failed, /Not searchable/);
+});
+
+test('no mark away from the local Mac, before the list answers, or on other rows', () => {
+  const html = folderSearch =>
+    rowMarkup(
+      renderTreeHTML([linkedFolderRow()], { tabbableId: '', folderSearch }),
+      'w4/linked/d1'
+    );
+  assert.doesNotMatch(html(undefined), /cockpit-folder-mark/);
+  assert.doesNotMatch(html(emptyFolderSearch()), /cockpit-folder-mark/);
+  assert.doesNotMatch(html(emptyFolderSearch({ local: true })), /cockpit-folder-mark/);
+  const file = rowMarkup(
+    renderTreeHTML(
+      [linkedFolderRow({ id: 'w4/lf/d1/a.txt', kind: 'linkedFile', expandable: false })],
+      {
+        tabbableId: '',
+        folderSearch: searchList('ready')
+      }
+    ),
+    'w4/lf/d1/a.txt'
+  );
+  assert.doesNotMatch(file, /cockpit-folder-mark/);
+});
+
+test('an opened linked folder keeps its file count beside its search mark', () => {
+  const row = rowMarkup(
+    renderTreeHTML([linkedFolderRow({ count: 12 })], {
+      tabbableId: '',
+      folderSearch: searchList('ready')
+    }),
+    'w4/linked/d1'
+  );
+  assert.match(row, /cockpit-tree-count">12<\/span><span class="cockpit-folder-mark"/);
+});
+
+// ---------------------------------------------------------------------------
+// Search-only folders and Add folder (merge-tree-into-files PR 2, req. 38-39)
+// ---------------------------------------------------------------------------
+
+const sourcesList = (...sources) =>
+  folderSearchFromSources(
+    sources.map(([id, label, workspaceId = '', state = 'ready']) => ({
+      id,
+      label,
+      state,
+      reason: '',
+      count: 4,
+      mappedAt: 1,
+      generation: 1,
+      workspaceId,
+      workspaceName: workspaceId ? 'Four' : '',
+      link: workspaceId ? `link-${id}` : ''
+    }))
+  );
+
+test('no Search-only folders group unless a searchable folder has no workspace', () => {
+  assert.deepEqual(searchOnlyRows(undefined, new Set(), 3), []);
+  assert.deepEqual(searchOnlyRows(emptyFolderSearch(), new Set(), 3), []);
+  assert.deepEqual(searchOnlyRows(emptyFolderSearch({ local: true }), new Set(), 3), []);
+  assert.deepEqual(searchOnlyRows(failedFolderSearch(), new Set(), 3), []);
+  assert.deepEqual(searchOnlyRows(sourcesList(['a', 'Albums', 'w4']), new Set(), 3), []);
+});
+
+test('the group comes last at the top level, open, and its rows do not open', () => {
+  const rows = searchOnlyRows(
+    sourcesList(['a', 'Old projects'], ['b', 'Albums', 'w4'], ['c', 'Scans']),
+    new Set(),
+    3
+  );
+  assert.deepEqual(
+    rows.map(row => [row.id, row.kind, row.name, row.depth]),
+    [
+      [SEARCH_ONLY_GROUP_ID, 'searchOnlyGroup', 'Search-only folders', 0],
+      ['search-only/a', 'searchOnly', 'Old projects', 1],
+      ['search-only/c', 'searchOnly', 'Scans', 1]
+    ]
+  );
+  assert.equal(rows[0].posInSet, 4);
+  assert.equal(rows[0].setSize, 4);
+  assert.equal(rows[0].expanded, true);
+  assert.equal(rows[0].childCount, 2);
+  assert.deepEqual(
+    rows.slice(1).map(row => [row.posInSet, row.setSize, row.expandable, row.meta.sourceId]),
+    [
+      [1, 2, false, 'a'],
+      [2, 2, false, 'c']
+    ]
+  );
+  assert.equal(rowActivation(rows[0]), 'toggle');
+  assert.equal(rowActivation(rows[1]), '');
+  // Closed, it is one row; the same set that keeps groups closed keeps it so.
+  const closed = searchOnlyRows(
+    sourcesList(['a', 'Old projects']),
+    new Set([SEARCH_ONLY_GROUP_ID]),
+    0
+  );
+  assert.deepEqual(
+    closed.map(row => [row.id, row.expanded]),
+    [[SEARCH_ONLY_GROUP_ID, false]]
+  );
+  assert.equal(isRowExpanded('searchOnlyGroup', SEARCH_ONLY_GROUP_ID, new Set(), new Set()), true);
+});
+
+test('two search-only folders with one name are told apart by their id', () => {
+  const rows = searchOnlyRows(
+    sourcesList(['abcdef123', 'Downloads'], ['987654zzz', 'Downloads']),
+    new Set(),
+    0
+  );
+  assert.deepEqual(
+    rows.slice(1).map(row => row.name),
+    ['Downloads · abcdef', 'Downloads · 987654']
+  );
+});
+
+test('a search-only row wears its mark; the group heading its count', () => {
+  const list = sourcesList(['a', 'Old projects', '', 'partial']);
+  const html = renderTreeHTML(searchOnlyRows(list, new Set(), 0), {
+    tabbableId: '',
+    folderSearch: list
+  });
+  const heading = rowMarkup(html, SEARCH_ONLY_GROUP_ID);
+  assert.match(heading, /aria-expanded="true"/);
+  assert.match(heading, /cockpit-tree-count">1</);
+  const row = rowMarkup(html, 'search-only/a');
+  assert.match(row, /data-folder-search="partial"/);
+  assert.match(row, />Partly indexed</);
+  assert.doesNotMatch(row, /aria-expanded/);
+  assert.match(row, /data-tree-menu-for="search-only\/a"/);
+});
+
+test('Add folder… shows on the Mac that runs Ori only', () => {
+  assert.equal(addFolderHTML({ folderSearch: emptyFolderSearch() }), '');
+  assert.equal(addFolderHTML({}), '');
+  for (const list of [emptyFolderSearch({ local: true }), sourcesList(), failedFolderSearch()]) {
+    assert.match(addFolderHTML({ folderSearch: list }), /data-tree-add-folder[^>]*>.*Add folder…</);
+  }
 });

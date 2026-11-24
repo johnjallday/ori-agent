@@ -17,6 +17,8 @@ FIXTURE = REPO / 'scripts/search-first-fixture.py'
 EVIDENCE = REPO / 'tasks/evidence-search-first-onboarding'
 # Repository source audits skip testdata; fixtures may intentionally contain unreadable directories.
 SCRATCH = REPO / 'bin/testdata/search-first'
+# The build before folders were managed in Files (merge-tree-into-files PR 1).
+PRIOR_FILES = '02f3c35e5'
 
 
 def fixture(large=False):
@@ -93,13 +95,52 @@ def upgrades():
                 assert json.loads(api(url,'/api/personal-hq/status'))['status']['workspace_id']==hq
                 spec(root,url,'established','search-first-palette')
             print('Preserved prior-version '+('HQ' if established else 'partial setup'),flush=True)
+    # From the build before folders were managed in Files (merge-tree-into-files
+    # PR 1) to this one: a search-only profile and a workspace-only profile load
+    # with their folders, indexes and links as they were, and nothing is converted.
+    def snapshot(url):
+        sources=json.loads(api(url,'/api/file-search/sources'))
+        links={}
+        for w in json.loads(api(url,'/api/workspaces'))['folders']:
+            dirs=json.loads(api(url,'/api/workspaces/'+w['id']+'/directories')).get('directories') or []
+            links[w['id']]=sorted((d['id'],d['path']) for d in dirs)
+        return sources,links
+    def settled(url):
+        for _ in range(150):
+            if all(s['state'] not in ('queued','mapping') for s in json.loads(api(url,'/api/file-search/sources'))):return
+            time.sleep(.2)
+        raise RuntimeError('indexing did not settle')
+    for shape in ('search-only','workspace-only'):
+        root=fixture()
+        with serve(root,PRIOR_FILES,build_tmp) as url:
+            if shape=='search-only':
+                intent=json.loads(api(url,'/api/file-search/begin',{'kind':'documents'}))
+                api(url,'/api/file-search/select',intent)
+            else:
+                api(url,'/api/onboarding/skip',{})
+                ws=json.loads(api(url,'/api/workspaces',{'name':'Upgrade sketches'}))['folder']['id']
+                api(url,'/api/workspaces/'+ws+'/directories',{'name':'Downloads','path':str(root/'home/Downloads')})
+            settled(url)
+            before=snapshot(url)
+        with serve(root) as url:
+            after=snapshot(url)
+            assert after==before,(shape,before,after)
+            if shape=='search-only':
+                assert len(after[0])==1 and 'workspace' not in after[0][0],after
+            else:
+                assert after[0]==[] and any(after[1].values()),after
+        print('Preserved PR 1 '+shape+' profile',flush=True)
 
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--upgrades',action='store_true',help='also build the prior-version fixture')
     parser.add_argument('--folder-backed',action='store_true',help='run only reviewed folder setup on established split profiles')
+    parser.add_argument('--browser',choices=('chromium','webkit'),action='append',help='limit the browser journeys to this browser (repeatable; default both)')
+    parser.add_argument('--scenario',choices=('fresh','skip','navigation','files-search'),action='append',help='run only these default scenarios while iterating (repeatable; default all; not with --folder-backed)')
     args=parser.parse_args()
+    BROWSERS=tuple(args.browser or ('chromium','webkit'))
+    SCENARIOS=set(args.scenario or ('fresh','skip','navigation','files-search'))
     if sys.platform!='darwin':sys.exit('macOS only')
     SCRATCH.mkdir(parents=True,exist_ok=True);EVIDENCE.mkdir(parents=True,exist_ok=True)
     if args.folder_backed:
@@ -116,7 +157,7 @@ if __name__=='__main__':
         overlay.write_text(json.dumps({'Replace':{str(REPO/'internal/server/search_folder_picker.go'):str(REPO/'internal/server/testdata/search_folder_picker.go')}}))
         binary=build/'fixture-server'
         subprocess.run(['go','build','-overlay',str(overlay),'-o',str(binary),'./cmd/server'],cwd=REPO,env={**os.environ,'GOWORK':'off'},check=True)
-        for browser in ('chromium', 'webkit'):
+        for browser in BROWSERS:
             root=project_fixture()
             with serve(root, fixture_binary=binary) as url:
                 # First-run search consent predates established workspace setup.
@@ -140,15 +181,18 @@ if __name__=='__main__':
         binary.unlink()  # evidence is the fixture, not its disposable executable
         sys.exit(0)
     for scenario in ('fresh','skip'):
+        if scenario not in SCENARIOS:continue
         root=fixture(large=scenario=='fresh')
         with serve(root) as url:spec(root,url,scenario,'search-first-onboarding')
         if scenario=='fresh':
             with serve(root) as url:spec(root,url,'return','search-first-return')
-    for browser in ('chromium','webkit'):
+    for browser in BROWSERS:
+        if 'navigation' not in SCENARIOS:break
         root=fixture()
         with serve(root) as url:spec(root,url,'navigation','files-map-navigation',browser)
     # Files in searchable folders, found from Files' own search box.
-    for browser in ('chromium','webkit'):
+    for browser in BROWSERS:
+        if 'files-search' not in SCENARIOS:break
         root=fixture()
         with serve(root) as url:spec(root,url,'files-search','files-search-folders',browser)
     if args.upgrades:upgrades()

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page, type Request } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
@@ -51,8 +51,11 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
     .click();
   await expect(page.locator('#addFolderModal')).toBeHidden();
   expect(await inventory()).toEqual(initial);
+  // Set up with no workspace yet: /search is still the first-run page, with
+  // the folder choices and no list of locations to manage (requirement 42).
   await page.goto('/search');
-  await page.getByRole('button', { name: /Add folder/ }).click();
+  await expect(page.locator('#manage')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Add folder/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Choose another folder…', exact: true }).click();
   const review = page.locator('dialog.explore-card');
   await expect(review.getByRole('heading')).toHaveText('Explore Synthetic Project');
@@ -86,10 +89,18 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
   await page.screenshot({
     path: `tasks/evidence-folder-backed-search-locations/${browserName}/project-created.png`
   });
+  // A workspace exists now: the folder is searched in the merged Files, scoped
+  // to it through the tab's own place, with nothing in the address.
   await review.getByRole('button', { name: 'Search this folder in Files' }).click();
-  await expect(page).toHaveURL(/\/search$/);
-  await expect(page.locator('#title')).toHaveText('Synthetic Project');
-  await expect(page.locator('#hits')).toContainText('Harbor.txt');
+  await expect(page).toHaveURL(/\/\?view=tree$/);
+  await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Synthetic Project');
+  await page.locator('#cockpitFilesSearchInput').fill('Harbor');
+  await expect(page.locator('#cockpitTreePane [data-result-indexed]')).toContainText([
+    'Harbor.txt'
+  ]);
+  // /search itself now opens Files.
+  await page.goto('/search');
+  await expect(page).toHaveURL(/\/\?view=tree$/);
   await page.goto(`/workspaces/${encodeURIComponent(body.folder.folder_slug)}`);
   await expect(page).toHaveURL(
     new RegExp('/workspaces/' + body.folder.folder_slug + '(?:[/?#]|$)')
@@ -177,19 +188,24 @@ test('the assistant links a folder without starting a hire or filename scan', as
   await card.getByRole('button', { name: 'Open workspace' }).click();
   await expect(page).toHaveURL(/\/workspaces\//);
   const id = await page.locator('body').getAttribute('data-workspace-id');
-  await page.goto('/search');
-  await page.getByRole('button', { name: /Add folder/ }).click();
-  await page.getByRole('button', { name: 'Downloads', exact: true }).click();
-  const match = page.locator('dialog.explore-card');
+  // With a workspace, folders are added in Files (requirement 39).
+  const addDownloadsFromFiles = async () => {
+    await page.goto('/?view=tree');
+    await page.locator('[data-tree-add-folder]').click();
+    await page
+      .getByRole('dialog', { name: 'Add a folder' })
+      .getByRole('button', { name: 'Downloads', exact: true })
+      .click();
+  };
+  await addDownloadsFromFiles();
+  const match = page.getByRole('dialog', { name: 'Explore Downloads' });
   await expect(match).toContainText('already linked to Reading inbox');
   await match.getByRole('button', { name: 'Open workspace' }).click();
   await expect(page.locator('body')).toHaveAttribute('data-workspace-id', id!);
   expect(await sources()).toEqual([]);
-  await page.goto('/search');
-  await page.getByRole('button', { name: /Add folder/ }).click();
-  await page.getByRole('button', { name: 'Downloads', exact: true }).click();
+  await addDownloadsFromFiles();
   await match.getByRole('button', { name: 'Allow filename search' }).click();
-  await expect(page.locator('#title')).toHaveText('Downloads');
+  await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Downloads');
   expect((await sources())[0].workspace.id).toBe(id);
   await page.goto('/?panel=today&folder=explore');
   await host.getByRole('button', { name: /Hire an agent or explore a file/ }).click();
@@ -223,11 +239,45 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   await page.locator('[data-search-folder="custom"]').click();
   await page.locator('dialog.explore-card').getByRole('button', { name: 'Open workspace' }).click();
   await expect(page).toHaveURL(new RegExp('/workspaces/' + project.workspace.slug + '$'));
-  await page.goto('/search');
-  await page.getByText('Manage search locations', { exact: true }).click();
-  await page.getByRole('button', { name: 'Connect to workspace', exact: true }).click();
+  // The independent grant is a search-only folder: it sits in Files' group at
+  // the foot of the tree (PR 2, requirement 38), and connects from there.
+  const workspaceIds = async () =>
+    ((await (await request.get('/api/workspaces')).json()).folders as { id: string }[])
+      .map(w => w.id)
+      .sort();
+  await page.goto('/?view=tree');
+  const group = treeRow(page, 'search-only');
+  await expect(group).toContainText('Search-only folders');
+  await expect(group).toHaveAttribute('aria-expanded', 'true');
+  const legacyRow = treeRow(page, `search-only/${legacy.id}`);
+  await expect(legacyRow).toContainText('Downloads');
+  await expect(legacyRow).not.toHaveAttribute('aria-expanded', /.*/);
+  await expect(legacyRow.locator('[data-folder-search]')).toHaveText('Searchable');
+  await page.screenshot({
+    path: `tasks/evidence-folder-backed-search-locations/${browserName}/search-only-group.png`
+  });
+  const openLegacyMenu = async () => {
+    await legacyRow.hover();
+    await legacyRow.locator('[data-tree-menu-for]').click();
+  };
+  await openLegacyMenu();
+  await expect(page.getByRole('menuitem')).toHaveText([
+    'Search in this folder',
+    'Connect to workspace',
+    'Refresh index',
+    'Remove from search'
+  ]);
+  // Cancelling the review links and makes nothing.
+  const beforeConnect = await workspaceIds();
+  await page.getByRole('menuitem', { name: 'Connect to workspace: Downloads' }).click();
   const review = page.locator('dialog.explore-card');
   await expect(review.getByRole('checkbox', { name: /existing filename index/ })).toBeChecked();
+  await review.getByRole('button', { name: 'Cancel' }).click();
+  await expect(review).toHaveCount(0);
+  expect(await workspaceIds()).toEqual(beforeConnect);
+  expect((await sources())[0].workspace).toBeUndefined();
+  await openLegacyMenu();
+  await page.getByRole('menuitem', { name: 'Connect to workspace: Downloads' }).click();
   await review.getByLabel('Workspace name').fill('My downloads');
   await review.getByRole('button', { name: 'Create workspace' }).click();
   await expect(review.getByRole('button', { name: 'Search this folder in Files' })).toBeVisible();
@@ -235,9 +285,16 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   expect(same.workspace.id).toBe(project.workspace.id);
   expect(connected.id).toBe(legacy.id);
   expect(connected.generation).toBe(legacy.generation);
+  expect(connected.count).toBe(legacy.count);
   expect(connected.workspace.name).toBe('My downloads');
   await review.getByRole('button', { name: 'Search this folder in Files' }).click();
-  await expect(page.locator('#title')).toHaveText('Downloads');
+  // It left the group (now empty, so gone) and is under its workspace's Linked
+  // folders: the same source and index generation, shown, and searched.
+  await expect(group).toHaveCount(0);
+  const movedRow = treeRow(page, `${connected.workspace.id}/l/${connected.workspace.link}`);
+  await expect(movedRow).toBeVisible();
+  await expect(movedRow.locator('[data-folder-search]')).toHaveText('Searchable');
+  await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Downloads');
   await page.screenshot({
     path: `tasks/evidence-folder-backed-search-locations/${browserName}/legacy-connected.png`
   });
@@ -252,9 +309,31 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
       ).ok()
     ).toBeTruthy();
   }
-  await page.getByRole('button', { name: /Add folder/ }).click();
-  await page.getByRole('button', { name: 'Documents', exact: true }).click();
+  // Add folder… in Files (requirement 39): the first-run page's choices, then
+  // the same Explore card. Cancelling either step makes nothing.
+  const addFolder = page.locator('[data-tree-add-folder]');
+  const chooser = page.getByRole('dialog', { name: 'Add a folder' });
+  await addFolder.click();
+  await expect(chooser.getByRole('group', { name: 'Folder' }).getByRole('button')).toHaveText([
+    'Documents',
+    'Downloads',
+    'Choose another folder…'
+  ]);
+  await chooser.getByRole('button', { name: 'Cancel' }).click();
+  await expect(chooser).toHaveCount(0);
+  await expect(addFolder).toBeFocused();
+  const beforeAdd = await workspaceIds();
+  const sourcesBeforeAdd = (await sources()).map((s: { id: string }) => s.id);
+  await addFolder.click();
+  await chooser.getByRole('button', { name: 'Documents', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Explore Documents' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(await workspaceIds()).toEqual(beforeAdd);
+  expect((await sources()).map((s: { id: string }) => s.id)).toEqual(sourcesBeforeAdd);
+  await addFolder.click();
+  await chooser.getByRole('button', { name: 'Documents', exact: true }).click();
   await expect(dialog).toBeVisible();
   const allow = dialog.getByRole('button', { name: 'Allow filename search' });
   await expect(allow).toBeDisabled();
@@ -266,8 +345,10 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   await expect(allow).toBeDisabled();
   await dialog.getByRole('checkbox').check();
   await allow.click();
-  await expect(page.locator('#title')).toHaveText('Documents');
+  // Back in Files, searching the folder just added; nothing new was made.
+  await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Documents');
   expect(await sources()).toHaveLength(3);
+  expect(await workspaceIds()).toEqual(beforeAdd);
   const projectID = project.workspace.id;
   await page.goto('/?home=1');
   await expect(page.locator(`.ws-map-tile[data-ws-id="${projectID}"]`).first()).toBeVisible();
@@ -275,38 +356,226 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   await expect(page.locator(`#cockpitTreeNav [data-tree-row="${projectID}"]`)).toContainText(
     'Research archive'
   );
-  await page.goto('/search');
-  await page.locator('#manage summary').click();
-  await page.getByRole('button', { name: 'Open Research archive', exact: true }).first().click();
+  // Each linked folder's row says whether it is searchable (PR 2, req. 32-33).
+  // Both workspaces link Documents; only the link the owner chose is the
+  // source's connection, so only that row is searchable. Matched by ids.
+  const documents = (await sources()).find((s: { label: string }) => s.label === 'Documents');
+  expect(documents.workspace).toBeTruthy();
+  const linkOf = async (workspaceId: string, folder: string) =>
+    (
+      (await (await request.get(`/api/workspaces/${workspaceId}/directories`)).json())
+        .directories as { id: string; path: string }[]
+    ).find(d => d.path.endsWith(folder))!.id;
+  const otherID =
+    documents.workspace.id === connected.workspace.id ? same.workspace.id : connected.workspace.id;
+  const chosenLink = await linkOf(documents.workspace.id, '/home/Documents');
+  const otherLink = await linkOf(otherID, '/home/Documents');
+  expect(chosenLink).toBe(documents.workspace.link);
+  await openLinkedFolders(page, documents.workspace.id);
+  await openLinkedFolders(page, otherID);
+  const chosenRow = treeRow(page, `${documents.workspace.id}/l/${chosenLink}`);
+  const otherRow = treeRow(page, `${otherID}/l/${otherLink}`);
+  await expect(chosenRow.locator('[data-folder-search]')).toHaveAttribute(
+    'data-folder-search',
+    'searchable'
+  );
+  await expect(chosenRow.locator('[data-folder-search]')).toHaveText('Searchable');
+  await expect(otherRow.locator('[data-folder-search]')).toHaveText('Not searchable');
+  // The menu starts with the status: state, file count, when it was indexed.
+  await chosenRow.hover();
+  await chosenRow.locator('[data-tree-menu-for]').click();
+  const status = page.locator('[data-tree-menu-status]');
+  await expect(status).toContainText('Searchable');
+  await expect(status).toContainText(/\d[\d,]* filenames? · indexed /);
+  await expect(page.getByRole('menu')).toHaveAttribute('aria-describedby', 'cockpitTreeMenuStatus');
+  await expect(page.getByRole('menuitem')).toHaveText([
+    'Search in this folder',
+    'Refresh index',
+    'Remove from search'
+  ]);
+  await page.screenshot({
+    path: `tasks/evidence-folder-backed-search-locations/${browserName}/row-status.png`
+  });
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  // The other workspace's link to the same folder: already searchable through
+  // the chosen one, so Make searchable says so and asks nothing.
+  await otherRow.hover();
+  await otherRow.locator('[data-tree-menu-for]').click();
+  await page.getByRole('menuitem', { name: /^Make searchable/ }).click();
+  const elsewhere = page.getByRole('dialog', { name: 'Documents is already searchable' });
+  await expect(elsewhere).toContainText(`Files searches it through ${documents.workspace.name}.`);
+  await elsewhere.getByRole('button', { name: 'OK' }).click();
+  await expect(otherRow.locator('[data-folder-search]')).toHaveText('Not searchable');
+  expect(
+    (await sources()).find((s: { label: string }) => s.label === 'Documents').workspace.id
+  ).toBe(documents.workspace.id);
+  // The workspace page's "Search Synthetic Project in Files" opens the merged
+  // Files scoped to that folder, with nothing in the address (requirement 41).
+  await page.goto(`/workspaces/${encodeURIComponent(project.workspace.slug)}`);
   await expect(page.locator('#workspaceSearchLocations')).toBeVisible();
   await page.getByRole('button', { name: 'Search Synthetic Project in Files' }).press('Enter');
-  await expect(page.locator('#title')).toHaveText('Synthetic Project');
-  await expect(page.locator('#hits')).toContainText('Harbor.txt');
+  await expect(page).toHaveURL(/\/\?view=tree$/);
+  await expect(page.locator('#cockpitFilesSearchScope')).toContainText('in Synthetic Project');
+  await page.locator('#cockpitFilesSearchInput').fill('Harbor');
+  const harborHits = page.locator('#cockpitTreePane [data-result-indexed]');
+  await expect(harborHits).toContainText(['Harbor.txt']);
   const note = await request.post(`/api/workspaces/${projectID}/notes`, {
     data: { name: 'Keep this note', content: 'Not part of the filename index.' }
   });
   expect(note.ok()).toBeTruthy();
   const noteID = (await note.json()).note.id;
-  await page.locator('#manage summary').click();
+  // Remove from search, from the folder's own row.
+  await openLinkedFolders(page, projectID);
+  const projectRow = treeRow(page, `${projectID}/l/${project.workspace.link}`);
+  const projectMark = projectRow.locator('[data-folder-search]');
+  await projectRow.hover();
+  await projectRow.locator('[data-tree-menu-for]').click();
+  await page.getByRole('menuitem', { name: 'Remove from search: Synthetic Project' }).click();
   await page
-    .locator('#sources li')
-    .filter({ hasText: 'Synthetic Project' })
+    .getByRole('dialog', { name: 'Remove Synthetic Project from search?' })
     .getByRole('button', { name: 'Remove from search' })
     .click();
   await expect
     .poll(async () => (await sources()).map((s: { id: string }) => s.id))
     .not.toContain(project.id);
-  await expect(page.locator('#hits')).not.toContainText('Harbor.txt');
+  // The search that looked only there looks everywhere, without its files.
+  await expect(page.locator('#cockpitFilesSearchScope')).toBeHidden();
+  await expect(harborHits.filter({ hasText: 'Synthetic Project' })).toHaveCount(0);
   expect(readFileSync(join(fixture!, 'home/Synthetic Project/Harbor.txt'), 'utf8')).toContain(
     'Synthetic project fixture'
   );
   await page.goto('/?view=tree');
-  const row = page.locator(`#cockpitTreeNav [data-tree-row="${projectID}"]`);
-  await row.locator('[data-tree-toggle]').click();
+  // The tree remembers rows opened earlier in this test; open it only if shut.
+  await expandRow(page, projectID);
   await expect(page.locator(`[data-tree-row="${projectID}/n/${noteID}"]`)).toContainText(
     'Keep this note'
   );
   await page.screenshot({
     path: `tasks/evidence-folder-backed-search-locations/${browserName}/removed-note-survives.png`
   });
+  // Removed from search, the project's own folder reads Not searchable.
+  await openLinkedFolders(page, projectID);
+  await expect(projectMark).toHaveText('Not searchable');
+
+  // --- managed from its row (PR 2, requirements 33-37) ---------------------
+  const ids = async () => (await sources()).map((s: { id: string }) => s.id).sort();
+  const before = await ids();
+  const openRowMenu = async () => {
+    await projectRow.hover();
+    await projectRow.locator('[data-tree-menu-for]').click();
+    await expect(page.getByRole('menu')).toBeVisible();
+  };
+  // Make searchable asks first, naming the folder in the page's own words.
+  await openRowMenu();
+  await expect(page.getByRole('menuitem')).toHaveText(['Make searchable']);
+  await page.getByRole('menuitem', { name: 'Make searchable: Synthetic Project' }).click();
+  const consent = page.getByRole('dialog', { name: 'Allow Ori to search Synthetic Project?' });
+  await expect(consent).toBeVisible();
+  await expect(consent).toContainText(
+    'Ori will index filenames, locations and dates in this folder on your Mac. It won’t read file contents or give agents access.'
+  );
+  await expect(consent.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await page.screenshot({
+    path: `tasks/evidence-folder-backed-search-locations/${browserName}/row-consent.png`
+  });
+  // Cancel changes nothing.
+  await consent.getByRole('button', { name: 'Cancel' }).click();
+  await expect(consent).toHaveCount(0);
+  await expect(projectRow).toBeFocused();
+  expect(await ids()).toEqual(before);
+  await expect(projectMark).toHaveText('Not searchable');
+  // Allow: indexed, found by name, connected to this very link. Consent is the
+  // filename index and nothing else (requirement 35): the only writes it makes
+  // are the review and the connect; no agent, hire, Filing or model is asked.
+  const writes: string[] = [];
+  const noteWrite = (r: Request) => {
+    if (r.method() !== 'GET') writes.push(new URL(r.url()).pathname);
+  };
+  page.on('request', noteWrite);
+  await openRowMenu();
+  await page.getByRole('menuitem', { name: 'Make searchable: Synthetic Project' }).click();
+  await consent.getByRole('button', { name: 'Allow search' }).click();
+  await expect(projectMark).toHaveText('Searchable', { timeout: 15000 });
+  page.off('request', noteWrite);
+  expect(writes.filter(path => path.startsWith('/api/file-search/'))).toEqual([
+    '/api/file-search/review-link',
+    '/api/file-search/connect'
+  ]);
+  expect(
+    writes.filter(path =>
+      /agent|hire|filing|janitor|chat|session|message|model|premise|folder-agent/i.test(path)
+    )
+  ).toEqual([]);
+  const regranted = (await sources()).find(
+    (s: { workspace?: { id: string; link: string } }) =>
+      s.workspace?.id === projectID && s.workspace.link === project.workspace.link
+  );
+  expect(regranted).toBeTruthy();
+  expect(regranted.id).not.toBe(project.id);
+  await page.locator('#cockpitFilesSearchInput').fill('Harbor');
+  // A result from this folder says where it lives: Synthetic Project.
+  const projectHits = page
+    .locator('#cockpitTreePane [data-result-indexed]')
+    .filter({ hasText: 'Synthetic Project' });
+  await expect(projectHits).toHaveCount(1);
+  await expect(projectHits).toContainText('Harbor.txt');
+  // Refresh index: indexed again, same source.
+  await openRowMenu();
+  await expect(page.getByRole('menuitem')).toHaveText([
+    'Search in this folder',
+    'Refresh index',
+    'Remove from search'
+  ]);
+  await page.getByRole('menuitem', { name: 'Refresh index: Synthetic Project' }).click();
+  await expect(projectMark).toHaveText('Searchable', { timeout: 15000 });
+  expect((await sources()).map((s: { id: string }) => s.id)).toContain(regranted.id);
+  // Remove from search says what stays, and clears only the index.
+  await openRowMenu();
+  await page.getByRole('menuitem', { name: 'Remove from search: Synthetic Project' }).click();
+  const remove = page.getByRole('dialog', { name: 'Remove Synthetic Project from search?' });
+  await expect(remove).toContainText(
+    'Only this folder’s filename index is cleared. The workspace, its link to the folder, its notes, tickets and files all stay'
+  );
+  await page.screenshot({
+    path: `tasks/evidence-folder-backed-search-locations/${browserName}/row-remove.png`
+  });
+  await remove.getByRole('button', { name: 'Remove from search' }).click();
+  await expect(projectMark).toHaveText('Not searchable');
+  expect(await ids()).toEqual(before);
+  // The open results drop that folder's files (Documents has a Harbor.txt too).
+  await expect(projectHits).toHaveCount(0);
+  await expect(page.locator(`[data-tree-row="${projectID}/n/${noteID}"]`)).toContainText(
+    'Keep this note'
+  );
+  expect(readFileSync(join(fixture!, 'home/Synthetic Project/Harbor.txt'), 'utf8')).toContain(
+    'Synthetic project fixture'
+  );
+  // Nothing regrants it on the way back from Map or after a reload.
+  await page.locator('[data-desk-destination="map"]').click();
+  await page.locator('[data-desk-destination="tree"]').click();
+  await expect(projectMark).toHaveText('Not searchable');
+  await page.reload();
+  await openLinkedFolders(page, projectID);
+  await expect(projectMark).toHaveText('Not searchable');
+  expect(await ids()).toEqual(before);
 });
+
+const treeRow = (page: Page, key: string) =>
+  page.locator(`#cockpitTreeNav [data-tree-row="${key}"]`);
+
+/** Open a row in Files unless it is open already (the tree remembers it). */
+async function expandRow(page: Page, key: string) {
+  const row = treeRow(page, key);
+  await row.waitFor();
+  if ((await row.getAttribute('aria-expanded')) !== 'true') {
+    await row.locator('[data-tree-toggle]').click();
+  }
+  await expect(row).toHaveAttribute('aria-expanded', 'true');
+}
+
+/** Open a workspace's row and its Linked folders section in Files. */
+async function openLinkedFolders(page: Page, workspaceId: string) {
+  await expandRow(page, workspaceId);
+  await expandRow(page, `${workspaceId}/s/linked`);
+}

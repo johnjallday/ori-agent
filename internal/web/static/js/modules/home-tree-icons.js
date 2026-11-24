@@ -58,7 +58,10 @@ const KIND_ICONS = {
   outputFolder: 'folder',
   linkedFile: 'file',
   linkedFolder: 'folder',
-  chat: 'chats'
+  chat: 'chats',
+  // The group of searchable folders with no workspace, and each of them.
+  searchOnlyGroup: 'search',
+  searchOnly: 'folder'
 };
 
 /** The icon name for a tree row. */

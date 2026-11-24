@@ -13,6 +13,16 @@
 // shares none of the Map's menu contents.
 
 import { escapeHtml } from './home-workspace-cockpit.js';
+import {
+  FOLDER_ACTION_CONNECT,
+  FOLDER_ACTION_MAKE_SEARCHABLE,
+  FOLDER_ACTION_REFRESH,
+  FOLDER_ACTION_REMOVE,
+  FOLDER_ACTION_SEARCH_IN,
+  folderActions,
+  folderSearchState,
+  folderStatusLines
+} from './home-folder-search.js';
 
 export const MENU_NEW_NOTE = 'new-note';
 export const MENU_NEW_TICKET = 'new-ticket';
@@ -32,7 +42,24 @@ export const MENU_FILE_REVEAL = 'file-reveal';
 // Show the workspace's outputs/ folder in the file manager.
 export const MENU_SHOW_OUTPUTS = 'show-outputs';
 // Make Files' search look only inside this workspace, group or folder.
-export const MENU_SEARCH_IN = 'search-in';
+export const MENU_SEARCH_IN = FOLDER_ACTION_SEARCH_IN;
+// A linked folder's search: ask consent and index it, index it again, or
+// clear its index (home-folder-search.js).
+export const MENU_MAKE_SEARCHABLE = FOLDER_ACTION_MAKE_SEARCHABLE;
+export const MENU_REFRESH_INDEX = FOLDER_ACTION_REFRESH;
+export const MENU_REMOVE_FROM_SEARCH = FOLDER_ACTION_REMOVE;
+// A search-only folder: link it to a workspace through the existing review.
+export const MENU_CONNECT_WORKSPACE = FOLDER_ACTION_CONNECT;
+
+// A linked or search-only folder's menu items: the visible words, and what a
+// screen reader hears, which starts with those words and adds the folder's name.
+const FOLDER_ITEMS = {
+  [FOLDER_ACTION_SEARCH_IN]: { label: 'Search in this folder' },
+  [FOLDER_ACTION_MAKE_SEARCHABLE]: { label: 'Make searchable' },
+  [FOLDER_ACTION_CONNECT]: { label: 'Connect to workspace' },
+  [FOLDER_ACTION_REFRESH]: { label: 'Refresh index' },
+  [FOLDER_ACTION_REMOVE]: { label: 'Remove from search', danger: true }
+};
 
 const item = (action, label, extra) => ({ action, label, ...extra });
 const DIVIDER = { divider: true };
@@ -63,11 +90,13 @@ const DIVIDER = { divider: true };
  *
  * A folder in Outputs has nothing to upload into (outputs/ is written by task
  * runs) and one output file is not opened or revealed on its own (decision
- * D15), so searching it is all its menu holds. A linked folder's menu is only
- * Search in this folder, and only while the filename index knows the folder
- * (`context.searchableLinks`, the ids of the linked folders it searches); the
- * folders inside it have none. The workspace's Refresh reloads the linked
- * folders that are open.
+ * D15), so searching it is all its menu holds. A linked folder's menu starts
+ * with a status line (whether it is searchable, how many filenames, when it
+ * was last indexed; home-folder-search.js), followed by Search in this folder
+ * while the filename index has something of it to search. `context.folderSearch`
+ * is the list of searchable folders for this Files visit; without it a linked
+ * folder has no menu. The folders inside it have none. The workspace's Refresh
+ * reloads the linked folders that are open.
  */
 export function menuItemsFor(row, context = {}) {
   const kind = row && row.kind;
@@ -97,12 +126,21 @@ export function menuItemsFor(row, context = {}) {
     return [item(MENU_UPLOAD, 'Upload file…'), item(MENU_SEARCH_IN, 'Search in this folder')];
   }
   if (kind === 'outputFolder') return [item(MENU_SEARCH_IN, 'Search in this folder')];
-  if (kind === 'linked') {
-    const searchable = context && context.searchableLinks;
-    const dirId = row.meta && row.meta.dirId;
-    return searchable && dirId && searchable.has(dirId)
-      ? [item(MENU_SEARCH_IN, 'Search in this folder')]
-      : [];
+  if (kind === 'linked' || kind === 'searchOnly') {
+    const state = folderSearchState(row, context && context.folderSearch);
+    const actions = folderActions(state);
+    if (actions.length === 0) return [];
+    const name = String(row.name || 'this folder');
+    return [
+      statusEntry(state, context && context.statusOptions),
+      ...actions.map(action => {
+        const entry = FOLDER_ITEMS[action];
+        return item(action, entry.label, {
+          ariaLabel: `${entry.label}: ${name}`,
+          ...(entry.danger ? { danger: true } : {})
+        });
+      })
+    ];
   }
   if (kind === 'note' || kind === 'ticket' || kind === 'agent' || kind === 'chat') {
     return [item(MENU_OPEN, 'Open'), item(MENU_OPEN_IN_WORKSPACE, 'Open in workspace')];
@@ -118,8 +156,25 @@ export function menuItemsFor(row, context = {}) {
   return [];
 }
 
+/**
+ * The status line a linked folder's menu starts with: not a choice, only what
+ * is true of the folder now. It is drawn above the items and is the menu's
+ * description for a screen reader.
+ */
+function statusEntry(state, options) {
+  const lines = folderStatusLines(state, options || {});
+  return { status: true, tone: state.tone, ...lines };
+}
+
+/** The entries of a menu that can be chosen (not dividers or status lines). */
+export function choosableEntries(items) {
+  return (Array.isArray(items) ? items : []).filter(
+    entry => entry && !entry.divider && !entry.status
+  );
+}
+
 export function rowHasMenu(row, context) {
-  return menuItemsFor(row, context).length > 0;
+  return choosableEntries(menuItemsFor(row, context)).length > 0;
 }
 
 /**
@@ -141,22 +196,49 @@ export function menuPosition(point, size, viewport, margin = 8) {
   };
 }
 
-/** Menu markup: a `role="menu"` of `menuitem` buttons, one tabbable at a time. */
+export const MENU_STATUS_ID = 'cockpitTreeMenuStatus';
+
+function statusHTML(entry) {
+  const line = (cls, text) =>
+    text ? `<span class="cockpit-tree-menu-status__${cls}">${escapeHtml(text)}</span>` : '';
+  return (
+    `<div class="cockpit-tree-menu-status" id="${MENU_STATUS_ID}" data-tree-menu-status ` +
+    `data-tone="${escapeHtml(entry.tone || '')}">` +
+    '<span class="cockpit-tree-menu-status__title">' +
+    '<span class="cockpit-folder-dot" aria-hidden="true"></span>' +
+    `${escapeHtml(entry.title)}</span>` +
+    line('detail', entry.detail) +
+    line('reason', entry.reason) +
+    '</div>'
+  );
+}
+
+/**
+ * Menu markup: a `role="menu"` of `menuitem` buttons, one tabbable at a time,
+ * inside the positioned panel. A status entry is drawn above the menu, outside
+ * it (a menu holds only items and separators), and describes it.
+ */
 export function renderMenuHTML(items, label) {
-  const body = (Array.isArray(items) ? items : [])
+  const entries = (Array.isArray(items) ? items : []).filter(Boolean);
+  const status = entries.find(entry => entry.status);
+  const body = entries
     .map(entry => {
-      if (!entry) return '';
+      if (entry.status) return '';
       if (entry.divider) return '<div class="ori-context-divider" role="separator"></div>';
       return (
         `<button type="button" class="ori-context-item${entry.danger ? ' ori-context-danger' : ''}" ` +
-        `role="menuitem" tabindex="-1" data-tree-menu-action="${escapeHtml(entry.action)}">` +
+        `role="menuitem" tabindex="-1" data-tree-menu-action="${escapeHtml(entry.action)}"` +
+        `${entry.ariaLabel ? ` aria-label="${escapeHtml(entry.ariaLabel)}"` : ''}>` +
         `${escapeHtml(entry.label)}</button>`
       );
     })
     .join('');
   return (
-    `<div class="ori-context-menu cockpit-tree-menu" data-tree-menu role="menu" ` +
-    `aria-label="${escapeHtml(label || 'Actions')}">${body}</div>`
+    '<div class="ori-context-menu cockpit-tree-menu" data-tree-menu>' +
+    (status ? statusHTML(status) : '') +
+    `<div class="cockpit-tree-menu-items" role="menu" aria-label="${escapeHtml(label || 'Actions')}"` +
+    `${status ? ` aria-describedby="${MENU_STATUS_ID}"` : ''}>${body}</div>` +
+    '</div>'
   );
 }
 
@@ -232,7 +314,7 @@ export function openRowMenu({
 }) {
   closeRowMenu({ restoreFocus: false });
   const entries = (Array.isArray(items) ? items : []).filter(Boolean);
-  if (!entries.some(entry => !entry.divider)) return false;
+  if (choosableEntries(entries).length === 0) return false;
 
   const host = document.createElement('div');
   host.className = 'cockpit-tree-menu-host';
@@ -269,6 +351,11 @@ export function openRowMenu({
   };
 
   buttons.forEach(button => listen(button, 'click', () => choose(button)));
+  // A press on the status line (or any gap between items) must not take focus
+  // away from the menu, or its keys (Escape, the arrows) would stop working.
+  listen(menu, 'mousedown', pressEvent => {
+    if (!pressEvent.target.closest('[data-tree-menu-action]')) pressEvent.preventDefault();
+  });
   listen(menu, 'keydown', keyEvent => {
     const at = buttons.indexOf(document.activeElement);
     if (keyEvent.key === 'ArrowDown' || keyEvent.key === 'ArrowUp') {

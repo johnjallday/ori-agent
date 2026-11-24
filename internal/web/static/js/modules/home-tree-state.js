@@ -200,10 +200,16 @@ export function dropMissingTabs(tabs, activeKey, liveWorkspaceIds) {
   return { tabs: kept, activeKey: next ? next.key : '' };
 }
 
+// The Search-only folders group (home-workspace-tree.js) belongs to no
+// workspace; whether it was closed is kept like any other row.
+const SEARCH_ONLY_GROUP_KEY = 'search-only';
+
 /** Leave out the remembered rows of workspaces and groups that are gone. */
 export function dropMissingRows(ids, liveWorkspaceIds) {
   const live = liveWorkspaceIds instanceof Set ? liveWorkspaceIds : new Set(liveWorkspaceIds || []);
-  return Array.from(ids || []).filter(id => live.has(workspaceOfKey(id)));
+  return Array.from(ids || []).filter(
+    id => id === SEARCH_ONLY_GROUP_KEY || live.has(workspaceOfKey(id))
+  );
 }
 
 // Every row id in a section's rows, folders included.

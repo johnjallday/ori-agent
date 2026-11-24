@@ -44,7 +44,7 @@
         <nav class="locations" aria-label="Search locations">
           <small>Search locations</small>
           <div id="locationList"></div>
-          {{if not .First}}<button id="addLocation">＋ Add folder…</button>{{end}}
+          {{if not (or .First .MapEligible)}}<button id="addLocation">＋ Add folder…</button>{{end}}
         </nav>
         <div class="rail-foot">● &nbsp; Local desk<br />Filename index · On this Mac</div>
       </aside>
@@ -74,7 +74,12 @@
           <p class="decision">
             Choosing your first folder makes Files your starting page. <button id="skip" class="link">Not now</button>
           </p>
-          {{end}}
+          {{else if .MapEligible}}
+          <!-- Set up, with no workspace yet: a folder becomes the first one. Its
+               search, and every other folder's, is managed in Files once a
+               workspace exists (merge-tree-into-files PR 2). -->
+          <p>Choose a folder to explore. Ori shows what it would set up before anything is made.</p>
+          {{template "folderChoices"}} {{end}}
           <dialog id="folderConsent" aria-labelledby="consentTitle" aria-describedby="consentScope">
             <small>ORI / LOCAL FILE SEARCH</small>
             <h2 id="consentTitle"></h2>
@@ -119,6 +124,10 @@
             <p id="notice" role="status" aria-live="polite"></p>
           </section>
           <p id="emptyMap">Checking your locations…</p>
+          <!-- Managing search locations and choosing the starting page are here
+               only before setup is done; after it they are in Files, on each
+               folder's row and beside the Files heading. -->
+          {{if not .MapEligible}}
           <details id="manage">
             <summary>Manage search locations</summary>
             <p>
@@ -129,10 +138,16 @@
             {{if not .First}}{{template "folderChoices"}}{{end}}
           </details>
           <footer>
-            {{if not .MapEligible}}<a href="/?setup=1">Start or resume workspace setup</a>{{end}} {{if eq .State
-            "search"}}<button id="homeDefault" class="link">Start on Home instead</button>{{else if and (not .First) (ne
-            .State "unavailable")}}<button id="searchDefault" class="link">Make Files my starting page</button>{{end}}
+            <a href="/?setup=1">Start or resume workspace setup</a> {{if eq .State "search"}}<button
+              id="homeDefault"
+              class="link"
+            >
+              Start on Home instead</button
+            >{{else if and (not .First) (ne .State "unavailable")}}<button id="searchDefault" class="link">
+              Make Files my starting page</button
+            >{{end}}
           </footer>
+          {{end}}
         </div>
       </main>
     </div>

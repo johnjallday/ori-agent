@@ -109,6 +109,43 @@ func TestReviewAndConnectUsesOneOwnedCurrentLink(t *testing.T) {
 		t.Fatal("unlinked workspace still associated")
 	}
 }
+
+// A connected folder that goes missing still names the workspace link it was
+// connected to, so that link's row in Files can say the folder is unavailable.
+// Nothing about the folder itself is observed for that, and nothing is
+// regranted when it comes back: the same source simply reads as current again.
+func TestUnavailableSourceKeepsItsSavedConnection(t *testing.T) {
+	f := setup(t)
+	f.ValidLink = func(string, string, WorkspaceMatch) bool { return true }
+	legacyLink(t, f, "local", "one", f.docs)
+	r := reviewPick(t, f, f.docs)
+	v, e := f.Connect(t.Context(), "local", r.ID, "one", "ref-one", true)
+	must(t, e)
+	f.await(t, "ready")
+	must(t, os.Rename(f.docs, f.docs+"-moved"))
+	ss, e := f.Sources(t.Context(), "local")
+	must(t, e)
+	if len(ss) != 1 || ss[0].State != "unavailable" || ss[0].Count != 0 {
+		t.Fatalf("missing folder not reported as unavailable: %+v", ss)
+	}
+	if ss[0].Workspace == nil || ss[0].Workspace.ID != "one" || ss[0].Workspace.Link != "ref-one" || !ss[0].Workspace.Connected || ss[0].Workspace.Verify {
+		t.Fatalf("unavailable folder lost its saved connection: %+v", ss[0].Workspace)
+	}
+	// Another workspace linking the same path was never connected: no match.
+	legacyLink(t, f, "local", "two", f.docs)
+	ss, e = f.Sources(t.Context(), "local")
+	must(t, e)
+	if ss[0].Workspace == nil || ss[0].Workspace.ID != "one" {
+		t.Fatalf("listing enumerated another candidate: %+v", ss[0].Workspace)
+	}
+	must(t, os.Rename(f.docs+"-moved", f.docs))
+	ss, e = f.Sources(t.Context(), "local")
+	must(t, e)
+	if len(ss) != 1 || ss[0].ID != v.Source || ss[0].State == "unavailable" || ss[0].Workspace == nil || ss[0].Workspace.ID != "one" {
+		t.Fatalf("restored folder: %+v", ss)
+	}
+}
+
 func TestWorkspaceConnectRefusesStaleReviewAndRollsBackFailedGrant(t *testing.T) {
 	f := setup(t)
 	f.ValidLink = func(string, string, WorkspaceMatch) bool { return true }

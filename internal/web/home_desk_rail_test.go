@@ -24,18 +24,18 @@ func renderHome(t *testing.T, extra map[string]any) string {
 // destination marked on both views.
 func TestHomeDeskRailIsTheOnlySwitcher(t *testing.T) {
 	cases := []struct {
-		name       string
-		extra      map[string]any
-		current    string // the destination marked aria-current
-		heading    string
-		manageLink bool // Files' link to the standalone page is in the markup
-		manageHide bool // ...and hidden
-		local      bool
+		name        string
+		extra       map[string]any
+		current     string // the destination marked aria-current
+		heading     string
+		landingText string // Files' starting-page control, "" when there is none
+		landingHide bool   // ...and hidden (it belongs to Files)
+		local       bool
 	}{
-		{"remote on Map", map[string]any{}, "map", "Workspace Map", false, false, false},
-		{"remote on Files", map[string]any{"HomeViewTree": true}, "tree", "Files", false, false, false},
-		{"local on Map", map[string]any{"FileSearchAvailable": true}, "map", "Workspace Map", true, true, true},
-		{"local on Files", map[string]any{"FileSearchAvailable": true, "HomeViewTree": true}, "tree", "Files", true, false, true},
+		{"remote on Map", map[string]any{}, "map", "Workspace Map", "", false, false},
+		{"remote on Files", map[string]any{"HomeViewTree": true}, "tree", "Files", "", false, false},
+		{"local on Map", map[string]any{"FileSearchAvailable": true, "SearchLanding": "later"}, "map", "Workspace Map", "Make Files my starting page", true, true},
+		{"local on Files", map[string]any{"FileSearchAvailable": true, "HomeViewTree": true, "SearchLanding": "search"}, "tree", "Files", "Start on Map instead", false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -97,16 +97,27 @@ func TestHomeDeskRailIsTheOnlySwitcher(t *testing.T) {
 				t.Errorf("heading = %q, want %q", title, tc.heading)
 			}
 
-			if strings.Contains(body, `data-files-manage`) != tc.manageLink {
-				t.Fatalf("Manage search locations link present = %t, want %t", !tc.manageLink, tc.manageLink)
+			// Folders are managed on their rows in Files now: no link to the
+			// standalone page is left (merge-tree-into-files PR 2, req. 43). The
+			// starting page is chosen beside the Files heading instead (req. 40).
+			if strings.Contains(body, `data-files-manage`) || strings.Contains(body, "Manage search locations") {
+				t.Fatal("the temporary Manage search locations link must be gone")
 			}
-			if tc.manageLink {
-				tag := openingTag(t, body, `data-files-manage`)
-				if strings.Contains(tag, " hidden") != tc.manageHide {
-					t.Errorf("manage link hidden = %t, want %t: %s", !tc.manageHide, tc.manageHide, tag)
+			if got := strings.Contains(body, `data-files-landing`); got != (tc.landingText != "") {
+				t.Fatalf("starting-page control present = %t, want %t", got, tc.landingText != "")
+			}
+			if tc.landingText != "" {
+				tag := openingTag(t, body, `data-files-landing`)
+				if strings.Contains(tag, " hidden") != tc.landingHide {
+					t.Errorf("starting-page control hidden = %t, want %t: %s", !tc.landingHide, tc.landingHide, tag)
 				}
-				if !strings.Contains(tag, `href="/search"`) {
-					t.Errorf("manage link must go to /search: %s", tag)
+				if !strings.Contains(tag, `data-landing="`+tc.extra["SearchLanding"].(string)+`"`) {
+					t.Errorf("the control must carry the current choice as data-landing: %s", tag)
+				}
+				label := body[strings.Index(body, `data-files-landing`):]
+				label = label[strings.Index(label, ">")+1 : strings.Index(label, "</button>")]
+				if label != tc.landingText {
+					t.Errorf("starting-page control reads %q, want %q", label, tc.landingText)
 				}
 			}
 

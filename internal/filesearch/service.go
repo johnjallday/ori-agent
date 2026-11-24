@@ -345,9 +345,10 @@ func (s *Service) visibleSourcesLocked(ctx context.Context, owner string) ([]Sou
 	}
 	for i := range sources {
 		v := &sources[i]
-		if v.State == "unavailable" {
-			continue
-		}
+		// An unavailable folder keeps its saved connection, so the workspace's
+		// row can say the folder is unavailable instead of "not searchable".
+		// The listing projects only the link recorded for this source and
+		// compares stored identities; it never observes the missing folder.
 		matches, e := s.matchesLocked(ctx, owner, choice{root: v.root, witness: v.witness, source: v.ID})
 		if e != nil {
 			return nil, e

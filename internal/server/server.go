@@ -478,6 +478,8 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	localFiles := s.fileSearch != nil && localSearchPage(r)
 	data.Extra["FolderSearchReady"] = localFiles && s.folderSearchReady()
 	data.Extra["FileSearchAvailable"] = localFiles
+	// Files' starting-page control needs the choice as it stands now.
+	data.Extra["SearchLanding"] = s.filesStartingPage(localFiles)
 	// ?view=tree opens Files; anything else is Map. The cockpit reads the same
 	// parameter, so the first paint of the rail and heading already agree.
 	data.Extra["HomeViewTree"] = strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("view")), "tree")
