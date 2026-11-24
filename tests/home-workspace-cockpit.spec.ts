@@ -1,5 +1,6 @@
 import { test, expect, Page } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { expectDestination, goToFiles, goToMap } from './helpers/home-destination';
 
 test.beforeEach(async ({ page }) => installLocalCdn(page));
 
@@ -352,9 +353,9 @@ test.describe('Home onboarding workspace gate', () => {
     await page.locator('#addFolderModal [data-bs-dismiss="modal"]').first().click();
     await expect(page.locator('#addFolderModal')).toBeHidden();
 
-    await page.getByRole('button', { name: 'Tree' }).click();
+    await goToFiles(page);
     await expect(page.locator('#cockpitTree')).toContainText('No workspaces yet');
-    await page.getByRole('button', { name: 'Map' }).click();
+    await goToMap(page);
 
     populated = true;
     await page.evaluate(() => window.dispatchEvent(new Event('ori:workspaces-changed')));
@@ -486,7 +487,7 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.locator('#workspaceCreatorKindGroup')).toBeEnabled();
     await dismissCreator(page);
 
-    await page.getByRole('button', { name: 'Tree', exact: true }).click();
+    await goToFiles(page);
     await expect(page.locator('#cockpitTree')).toBeVisible();
     await page.locator('[data-tree-new-group]').click();
     await expect(page.locator('#addFolderModal')).toBeVisible();
@@ -553,7 +554,7 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.locator('#oriGuideInput')).toHaveCount(1);
     await expect(page.locator('#cockpitMap')).toBeVisible();
     await expect(page.locator('#cockpitTree')).toBeHidden();
-    await expect(page.locator('[data-cockpit-view="map"]')).toHaveAttribute('aria-pressed', 'true');
+    await expectDestination(page, 'map');
 
     // Issue #366: bare Home has one dormant modal host and no docked rail.
     await expect(page.locator('#cockpitContextModal')).toBeHidden();
@@ -758,7 +759,7 @@ test.describe('Home workspace cockpit', () => {
     );
     expect(new URL(page.url()).pathname).toBe('/');
 
-    await page.locator('[data-cockpit-view="map"]').click();
+    await goToMap(page);
     await expect(page.locator(`.ws-map-tile[data-ws-id="${id}"]`)).toHaveClass(/is-selected/);
     await expect(page.locator('#cockpitContextModal')).toBeHidden();
   });
@@ -901,12 +902,12 @@ test.describe('Home workspace cockpit', () => {
     await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
     const historyBefore = await page.evaluate(() => history.length);
 
-    await page.locator('[data-cockpit-view="tree"]').click();
+    await goToFiles(page);
     await expect(page.locator('#cockpitTree')).toBeVisible();
     await expect(page.locator('#cockpitMap')).toBeHidden();
     expect(page.url()).toContain('view=tree');
 
-    await page.locator('[data-cockpit-view="map"]').click();
+    await goToMap(page);
     await expect(page.locator('#cockpitMap')).toBeVisible();
     expect(page.url()).not.toContain('view=');
 
@@ -1211,19 +1212,19 @@ test.describe('Header disclosure coordination', () => {
     await page.locator('#cockpitQuestsToggle').click();
     await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
 
-    await page.locator('[data-cockpit-view="tree"]').click();
+    await goToFiles(page);
     await expect(page.locator('#cockpitTree')).toBeVisible();
     await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
     await expect(page.locator('[data-role="progress-count"]')).toHaveText('0/2');
 
-    await page.locator('[data-cockpit-view="map"]').click();
+    await goToMap(page);
     await expect(page.locator('#cockpitMap')).toBeVisible();
     await expect(page.locator('#cockpitQuestsFlyout')).toBeVisible();
 
     // Closing, then switching views again, must never reopen it on its own.
     await page.locator('#cockpitQuestsToggle').click();
     await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
-    await page.locator('[data-cockpit-view="tree"]').click();
+    await goToFiles(page);
     await expect(page.locator('#cockpitQuestsFlyout')).toBeHidden();
   });
 
@@ -1355,12 +1356,11 @@ test.describe('Responsive and regression hardening', () => {
     await page.goto('/');
     await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
 
-    // Identity row (view switch, then actions, creation last with the
-    // hire-first primary before New Workspace), then the readout row (filters,
-    // Updates, Quests, resources). Help moved to the navbar in #630.
+    // Identity row (actions, creation last with the hire-first primary before
+    // New Workspace), then the readout row (filters, Updates, Quests,
+    // resources). The view is chosen in the Desk rail, not in this header.
+    // Help moved to the navbar in #630.
     const ids = [
-      'cockpitViewMap',
-      'cockpitViewTree',
       'cockpitCaptureBtn',
       'cockpitSummaryBtn',
       'cockpitPrimaryActionBtn',
@@ -1444,7 +1444,11 @@ test.describe('Header hierarchy', () => {
     const main = page.locator('.cockpit-area-main');
     const utility = page.locator('.cockpit-area-utility');
     await expect(main.locator('[data-cockpit-area-title]')).toHaveText('Workspace Map');
-    await expect(main.locator('#cockpitViewMap')).toBeVisible();
+    // The Map/Tree toggle is gone: the rail beside the cockpit is the one
+    // switcher, and the header holds no view control.
+    await expect(page.locator('.cockpit-view-toggle')).toHaveCount(0);
+    await expect(main.locator('[data-desk-destination]')).toHaveCount(0);
+    await expect(page.locator('.desk-rail [data-desk-destination]')).toHaveText(['Files', 'Map']);
     await expect(main.locator('#cockpitCaptureBtn')).toBeVisible();
     await expect(main.locator('#cockpitSummaryBtn')).toBeVisible();
     await expect(utility.locator('#cockpitSignalFilters')).toBeVisible();
@@ -1560,7 +1564,7 @@ test.describe('Header hierarchy', () => {
     for (const selector of always) await expect(page.locator(selector)).toBeVisible();
     await expect(page.locator('#cockpitSignalFilters')).toBeVisible();
 
-    await page.locator('#cockpitViewTree').click();
+    await goToFiles(page);
     await expect(page.locator('[data-cockpit-area-title]')).toHaveText('Workspace Tree');
     for (const selector of always) await expect(page.locator(selector)).toBeVisible();
     await expect(page.locator('#cockpitSignalFilters')).toBeHidden();
@@ -2520,7 +2524,7 @@ test.describe('group Map layout context (#346)', () => {
 
     await page.keyboard.press('Escape');
     await expect(page.locator('#cockpitContextModal')).toBeHidden();
-    await page.locator('#cockpitViewTree').click();
+    await goToFiles(page);
     // A Tree row opens the pane rather than the context modal (home-file-tree
     // FR30), so reopen the group's context the way a non-Tree surface would.
     await page.evaluate(id => window.OriHomeCockpit?.select?.(id), group);
@@ -2532,7 +2536,7 @@ test.describe('group Map layout context (#346)', () => {
     await expect(page.locator('[data-rail-map-layout]')).toHaveCount(0);
 
     await page.keyboard.press('Escape');
-    await page.locator('#cockpitViewMap').click();
+    await goToMap(page);
     await page.waitForTimeout(500);
   });
 

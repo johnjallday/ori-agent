@@ -1,6 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 import { mockHiredAssistant } from './helpers/hired-assistant';
 import { abandonOpenBuild } from './helpers/folder-first-runtime';
+import { goToFiles, goToMap } from './helpers/home-destination';
 
 /**
  * Browser suite for the coordinate-based Workspace Map
@@ -442,8 +443,8 @@ test.describe('Coordinate Workspace Map', () => {
     expect(await anchors(page)).toEqual(before);
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.locator('[data-cockpit-view="tree"]').click();
-    await page.locator('[data-cockpit-view="map"]').click();
+    await goToFiles(page);
+    await goToMap(page);
     await page.locator('.ws-map-world .ws-map-tile[data-ws-id]').first().waitFor();
     await page.waitForTimeout(300);
     expect(await anchors(page)).toEqual(before);
@@ -646,7 +647,7 @@ test.describe('Coordinate Workspace Map', () => {
   test('Home Tree header keeps the ordinary create flow', async ({ page }) => {
     await ensureWorkspace(page);
     await openMap(page);
-    await page.locator('#cockpitViewTree').click();
+    await goToFiles(page);
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-view', 'tree');
     await page.locator('#cockpitCreateWorkspaceBtn').click();
     await reviewCreateWizard(page, `Header Tree ${Date.now()}`);
@@ -1620,7 +1621,7 @@ test.describe('Coordinate Workspace Map', () => {
       await centerOnWorkspace(page, group);
       await zoomTo(page, 1);
       await page.screenshot({ path: testInfo.outputPath('grouped-build.png'), fullPage: true });
-      await page.locator('[data-cockpit-view="tree"]').click();
+      await goToFiles(page);
       await expect(page.locator(`[data-tree-row="${built.id}"]`)).toHaveAttribute(
         'data-parent-id',
         group

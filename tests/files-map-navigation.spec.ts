@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync, writeFileSync, utimesSync, existsSync, chmodSy
 import { join } from 'node:path';
 import { seedQuestionFolder } from './helpers/commander-question-fixture';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { expectDestination, goToFiles, goToMap } from './helpers/home-destination';
 
 const fixture = process.env.ORI_SEARCH_FIRST_FIXTURE;
 const evidenceRoot = 'tasks/evidence-files-map-navigation';
@@ -124,13 +125,36 @@ test('distinguish duplicate copies by location and date before acting', async ({
   page.on('request', r => {
     if (r.method() === 'POST') mutations.push(new URL(r.url()).pathname);
   });
+  // Home's rail is the one switcher: Files is the merged tree and Map is the
+  // map, both in the page. The standalone page is where search locations are
+  // managed, reached from Files by "Manage search locations"; its own rail
+  // links back to Files and Map. This journey walks between that page and Map.
+  const onStandalone = async () => (await page.locator('#desk').count()) > 0;
   const toMap = async () => {
-    await page.getByRole('link', { name: 'Map', exact: true }).press('Enter');
-    await expect(page).toHaveURL(/\/\?view=map$/);
+    if (await onStandalone()) {
+      await page.getByRole('link', { name: 'Map', exact: true }).press('Enter');
+      await expect(page).toHaveURL(/\/\?view=map$/);
+    } else {
+      await goToMap(page);
+    }
+    await expectDestination(page, 'map');
+    // The rail marks the destination at once; the old Map marker only showed
+    // once the map could be drawn, and this journey relied on that wait.
+    await expect(page.locator('[data-ws-map-viewport]').first()).toBeVisible();
   };
-  const toFiles = async () => {
-    await page.getByRole('link', { name: 'Files', exact: true }).press('Enter');
+  const toLocations = async () => {
+    if (!(await onStandalone())) {
+      await goToFiles(page);
+      await expectDestination(page, 'files');
+      await page.getByRole('link', { name: 'Manage search locations', exact: true }).press('Enter');
+    }
     await expect(page).toHaveURL(/\/search$/);
+    await expect(page.locator('#coverage')).not.toHaveText('');
+  };
+  // Home to the standalone page by address: the history traversal under test is
+  // the browser's, not the rail's.
+  const toLocationsByAddress = async () => {
+    await page.goto('/search');
     await expect(page.locator('#coverage')).not.toHaveText('');
   };
   await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', last!);
@@ -174,7 +198,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
     await page.screenshot({ path: join(evidence, `map-header-${size.width}.png`) });
   }
   await page.setViewportSize(originalSize);
-  await toFiles();
+  await toLocations();
   await expect(term).toHaveValue('sample-');
   await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', last!);
   await page.getByRole('button', { name: 'Search in All locations', exact: true }).press('Enter');
@@ -186,13 +210,13 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await page.goBack();
   await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', last!);
   await page.goForward();
-  await toFiles();
+  await toLocations();
   await term.fill('proposal.pdf');
   await expect(rows).toHaveCount(2);
   await rows.first().getByRole('button').click();
   const proposal = await rows.first().getAttribute('data-id');
   await toMap();
-  await expect(page.locator('[data-map-destination]')).toBeVisible();
+  await expectDestination(page, 'map');
   const camera = () => page.evaluate(() => (window as any).OriWorkspaceMap.getCamera());
   const viewport = page.locator('[data-ws-map-viewport]').first();
   const initialCamera = await camera();
@@ -230,7 +254,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
   await page.goBack();
   if (await page.locator('#cockpitContextModal').isVisible()) await page.keyboard.press('Escape');
-  await toFiles();
+  await toLocations();
   await expect(term).toHaveValue('proposal.pdf');
   await expect(page.locator('#hits li.current')).toHaveAttribute('data-id', proposal!);
   await expect(term).toBeFocused();
@@ -253,7 +277,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
     .click();
   await expect(second.locator('#sources')).not.toContainText('Downloads');
   await second.close();
-  await toFiles();
+  await toLocations();
   await expect(rows).toHaveCount(1);
   await expect(page.locator('#selectedFile')).toBeHidden();
   await expect(page.locator('#notice')).toContainText('no longer');
@@ -269,7 +293,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await expect(launcher.locator('[data-question]')).toHaveCount(0);
   expect((await read(music.workspace_id)).premise.state).not.toBe('asked');
   await page.goBack();
-  await toFiles();
+  await toLocations();
   await expect(rows).toHaveCount(1);
   await rows.first().getByRole('button').click();
   await toMap();
@@ -281,7 +305,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   expect((await refreshed).ok()).toBeTruthy();
   await expect(refresher.locator('#sources')).toContainText('ready');
   await refresher.close();
-  await toFiles();
+  await toLocations();
   await expect(rows).toHaveCount(1);
   await expect(page.locator('#selectedFile')).toBeHidden();
   await expect(page.locator('#notice')).toContainText('no longer');
@@ -291,19 +315,19 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await tile.click();
   await expect(open).toBeVisible();
   await page.keyboard.press('Escape');
-  await toFiles();
+  await toLocationsByAddress();
   await page.goBack();
   await expect(tile).toHaveClass(/is-selected/);
-  await toFiles();
+  await toLocationsByAddress();
   const deleted = await request.delete(
     `/api/workspaces/${music.workspace_id}?confirm=true&delete_sessions=true`
   );
   expect(deleted.ok()).toBe(true);
   await toMap();
-  await expect(page.locator('[data-map-destination]')).toBeVisible();
+  await expectDestination(page, 'map');
   await expect(tile).toHaveCount(0);
   await expect(page.locator('.ws-map-tile.is-selected')).toHaveCount(0);
-  await toFiles();
+  await toLocations();
   // Deliberately deliver an obsolete successful read after a newer one.
   let release!: () => void;
   const wait = new Promise<void>(resolve => (release = resolve));
@@ -342,9 +366,18 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await expect(page.getByRole('combobox', { name: 'Destination' })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: join(evidence, 'narrow.png') });
+  // The standalone page's picker leads to Home's two destinations.
   await page.getByRole('combobox', { name: 'Destination' }).selectOption('/?view=map');
-  await expect(page.locator('[data-map-picker]')).toBeVisible();
-  await page.locator('[data-map-picker]').selectOption('/search');
+  // Home's own picker offers the same two options on both of its destinations.
+  const homePicker = page.locator('[data-map-picker]');
+  await expect(homePicker).toBeVisible();
+  await expect(homePicker.locator('option')).toHaveText(['Files', 'Map']);
+  await expectDestination(page, 'map');
+  await goToFiles(page);
+  await expect(homePicker.locator('option')).toHaveText(['Files', 'Map']);
+  await expectDestination(page, 'files');
+  await page.getByRole('link', { name: 'Manage search locations', exact: true }).click();
+  await expect(page).toHaveURL(/\/search$/);
   await expect(page.locator('#selectedFile')).toContainText('Documents / Final');
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.evaluate(() => (document.documentElement.style.zoom = '200%'));

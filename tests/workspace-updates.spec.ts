@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { goToFiles } from './helpers/home-destination';
 
 // Real host sources, sessions, filing and navigation. The existing goal wrapper
 // supplies only a deterministic provider and disposable HOME/data:
@@ -351,7 +352,7 @@ test('Home updates: Tree keyboard navigation survives a qualified outage and ret
     )
   ).toHaveCount(1);
   await page.getByRole('button', { name: 'Hide Updates', exact: true }).click();
-  await page.locator('[data-cockpit-view="tree"]').click();
+  await goToFiles(page);
   const row = page.locator(`#cockpitTreeNav [data-tree-row="${filing.id}"]`);
   await row.focus();
   const review = row.locator('[data-workspace-update="review"]');

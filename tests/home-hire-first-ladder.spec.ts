@@ -1,5 +1,6 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { goToFiles, goToMap } from './helpers/home-destination';
 
 // Home's one primary action follows the assistant relationship, end to end in a
 // real browser against the real server and store (home-hire-first-actions
@@ -152,11 +153,11 @@ test.describe('Home leads with the next hire-first step', () => {
     writes.length = 0;
 
     // Tree reaches the same step through the compact header entry.
-    await page.locator('#cockpitViewTree').click();
+    await goToFiles(page);
     await expect(page.locator('#cockpitWelcome')).toBeHidden();
     await expect(page.locator('#cockpitPrimaryActionBtn')).toBeVisible();
     await expect(page.locator('#cockpitPrimaryActionBtn')).toHaveText('Meet your assistant');
-    await page.locator('#cockpitViewMap').click();
+    await goToMap(page);
     await expect(page.locator('#cockpitWelcome [data-home-welcome]')).toBeVisible();
     await expect(page.locator('#cockpitPrimaryActionBtn')).toBeHidden();
 

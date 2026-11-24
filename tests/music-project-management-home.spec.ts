@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { goToFiles } from './helpers/home-destination';
 
 // Exact-candidate acceptance for the reciprocal Music Project Management and
 // REAPER split-ownership contract. Run only through scripts/reaper-demo.sh so
@@ -542,7 +543,7 @@ test('two REAPER projects share one independently staffed Home and one manager',
   expect(await workspaces(request)).toEqual([]);
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Tree', exact: true }).click();
+  await goToFiles(page);
   await page.locator('[data-tree-new-group]').click();
   const creator = page.locator('#addFolderModal');
   const music = creator.locator('.workspace-group-template-option', {

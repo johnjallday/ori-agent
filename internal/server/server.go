@@ -473,10 +473,14 @@ func (s *Server) serveIndex(w http.ResponseWriter, r *http.Request) {
 	data.Extra["IsFirstRun"] = workspaceCount == 0
 	// Keep the command bridge as the home surface under the shared top bar.
 	data.Extra["HomeCommandBridge"] = true
+	// The Desk rail shows for every user; only the filename features need the
+	// local Mac that runs the index.
 	localFiles := s.fileSearch != nil && localSearchPage(r)
-	data.Extra["ShowFileSearch"] = localFiles
 	data.Extra["FolderSearchReady"] = localFiles && s.folderSearchReady()
 	data.Extra["FileSearchAvailable"] = localFiles
+	// ?view=tree opens Files; anything else is Map. The cockpit reads the same
+	// parameter, so the first paint of the rail and heading already agree.
+	data.Extra["HomeViewTree"] = strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("view")), "tree")
 
 	s.renderAndWritePage(w, "index", data)
 }

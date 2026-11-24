@@ -18,6 +18,7 @@ import {
   retireWorkspaceSeed,
   type WorkspaceSeed
 } from './helpers/ui-consistency-workspace';
+import { destinationControls, goToFiles, goToMap } from './helpers/home-destination';
 
 const ownedStrictSeeds = new Map<string, WorkspaceSeed>();
 const ownedWorkspaces = new Map<string, Awaited<ReturnType<typeof createWorkspace>>>();
@@ -238,11 +239,11 @@ for (const [theme, width] of [
     const writes = await guardReadTour(page, [setupPath]);
     await page.goto('/');
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'ready');
-    // Existing Home toggle is 32px; group 4 owns its target migration.
-    await reachable(page.locator('#cockpitViewTree'));
-    await page.locator('#cockpitViewTree').click();
+    // The view switcher is the Desk rail (the picker on a narrow screen).
+    for (const control of await destinationControls(page).all()) await reachable(control);
+    await goToFiles(page);
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-view', 'tree');
-    await page.locator('#cockpitViewMap').click();
+    await goToMap(page);
     await expect(page.locator('#homeCockpit')).toHaveAttribute('data-view', 'map');
     await capture(page, info, 'sentinel-home');
     const agentsLink = page.locator('.ori-navbar-links a[href="/agents"]');

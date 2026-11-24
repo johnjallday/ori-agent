@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { confirmCreatorFinalAction, openCreatorResult } from './helpers/confirm-reviewed-creation';
+import { goToFiles } from './helpers/home-destination';
 
 // Exact-source acceptance for Group Templates with the published REAPER plugin
 // 0.5.2 (commit 9fde099d, blueprint reaper-song v6). Opt-in: run it only against
@@ -110,7 +111,7 @@ test('Tree → Create Group → Blueprint builds one Music Production group, its
   const beforeFolders = await folders(request);
   const beforeAgents = await agentNames(request);
   await page.goto('/');
-  await page.getByRole('button', { name: 'Tree', exact: true }).click();
+  await goToFiles(page);
   await page.locator('[data-tree-new-group]').click();
   const creator = page.locator('#addFolderModal');
   await expect(creator).toBeVisible();

@@ -10,6 +10,7 @@ import {
 import { join, dirname } from 'node:path';
 import { confirmCreatorFinalAction, openCreatorResult } from './helpers/confirm-reviewed-creation';
 import { createHash } from 'node:crypto';
+import { goToFiles } from './helpers/home-destination';
 
 // A small exact-source acceptance for the current single-role REAPER blueprint.
 // The older three-role contract has its own legacy fixture/spec; never substitute
@@ -105,7 +106,7 @@ test('paired candidates preserve order and create only the declared local projec
   });
   await json(await request.post('/api/onboarding/skip'));
   await page.goto('/');
-  await page.getByRole('button', { name: 'Tree', exact: true }).click();
+  await goToFiles(page);
   await page.locator('[data-tree-new-group]').click();
   const group = page.locator('#addFolderModal');
   const musicOption = group.locator('.workspace-group-template-option', {

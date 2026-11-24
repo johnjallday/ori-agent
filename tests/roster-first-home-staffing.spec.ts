@@ -3,6 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { installLocalCdn } from './helpers/offline-cdn';
 import { prepareFolderCreationRuntime } from './helpers/folder-first-runtime';
 import { startRosterStaffingModel } from './helpers/roster-staffing-model';
+import { goToFiles } from './helpers/home-destination';
 
 // Run only against music-home-demo's exact clean export in disposable HOME/data,
 // with LM_STUDIO_BASE_URL=http://127.0.0.1:8944/v1. The sole scripted boundary is
@@ -34,7 +35,7 @@ test('roster-first Music Home reuses its retained renamed manager over three rem
   });
   async function openTeam(name: string) {
     await page.goto('/');
-    await page.getByRole('button', { name: 'Tree', exact: true }).click();
+    await goToFiles(page);
     await page.locator('[data-tree-new-group]').click();
     const creator = page.locator('#addFolderModal');
     await creator

@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test';
+import { goToMap } from './home-destination';
 
 export async function placementJSON(page: Page, path: string) {
   const response = await page.request.get(path);
@@ -18,7 +19,7 @@ export async function attachPlacementFolder(
   await page.goto('/');
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.close));
   await page.evaluate(() => (window as any).PersonalAssistantPanel.close());
-  if (map) await page.locator('[data-cockpit-view="map"]').click();
+  if (map) await goToMap(page);
   const trigger = page.locator('#cockpitPrimaryActionBtn');
   if (keyboard) {
     await trigger.focus();

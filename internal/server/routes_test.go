@@ -230,6 +230,23 @@ func TestBrandNewProfileLandsOnHome(t *testing.T) {
 	if remote := page("/", "192.0.2.5:1010"); strings.Contains(remote, `id="desk"`) || strings.Contains(remote, `href="/search"`) {
 		t.Fatal("nonlocal search desk")
 	}
+	// The rail is Home's one switcher for every user, so a browser away from the
+	// Mac that runs Ori still has Files and Map; only the filename-index pieces
+	// (the link to the standalone page, the same-tab place) stay local.
+	remote := page("/?view=tree", "192.0.2.5:1010")
+	if !strings.Contains(remote, `data-desk-destination="tree"`) || !strings.Contains(remote, `data-desk-destination="map"`) {
+		t.Fatal("nonlocal Home lost the Desk rail")
+	}
+	if strings.Contains(remote, "data-files-manage") || strings.Contains(remote, "data-desk-local") {
+		t.Fatal("nonlocal Home offered filename-index controls")
+	}
+	if !strings.Contains(openingTagFor(t, remote, `data-desk-destination="tree"`), `aria-current="page"`) {
+		t.Fatal("/?view=tree did not mark Files current")
+	}
+	localTree := page("/?view=tree", local)
+	if !strings.Contains(localTree, "data-files-manage") || !strings.Contains(localTree, "data-desk-local") {
+		t.Fatal("local Files lost its link to the standalone page")
+	}
 	if err := onboarding.DecideSearchLanding(os.Getenv("ORI_DATA_DIR"), onboarding.SearchFirst, onboarding.SearchLater); err != nil {
 		t.Fatal(err)
 	}
@@ -247,6 +264,18 @@ func TestBrandNewProfileLandsOnHome(t *testing.T) {
 	if rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Referrer-Policy") != "no-referrer" || !strings.Contains(rec.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
 		t.Fatal("Files document lost response guards")
 	}
+}
+
+// openingTagFor returns the opening tag that carries marker.
+func openingTagFor(t *testing.T, markup, marker string) string {
+	t.Helper()
+	at := strings.Index(markup, marker)
+	if at < 0 {
+		t.Fatalf("markup has no %s", marker)
+	}
+	start := strings.LastIndex(markup[:at], "<")
+	end := strings.Index(markup[at:], ">")
+	return markup[start : at+end+1]
 }
 
 func TestWorkspaceProjectOpenRouteUsesRuntimeHandler(t *testing.T) {

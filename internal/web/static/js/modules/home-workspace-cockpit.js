@@ -538,6 +538,14 @@ export function searchForView(search, view) {
   return next ? `?${next}` : '';
 }
 
+/**
+ * The heading over the cockpit: what the Desk rail says you are looking at.
+ * Map keeps its long name; Files is simply Files (the tree with its search).
+ */
+export function deskHeading(view) {
+  return view === VIEW_TREE ? 'Files' : 'Workspace Map';
+}
+
 // ---------------------------------------------------------------------------
 // Workspace collection shaping
 // ---------------------------------------------------------------------------
@@ -2095,7 +2103,14 @@ import {
     treePane: document.getElementById('cockpitTreePane'),
     areaTitle: document.querySelector('[data-cockpit-area-title]'),
     areaStatus: document.getElementById('cockpitWorkspaceStatus'),
-    viewButtons: Array.from(document.querySelectorAll('[data-cockpit-view]')),
+    // The Desk rail is the one view switcher: two links on a wide screen, one
+    // picker on a narrow one. Both are in the page already, rendered by the
+    // template; this module only keeps them in step with the view.
+    deskLinks: Array.from(document.querySelectorAll('[data-desk-destination]')),
+    deskPicker: document.querySelector('[data-map-picker]'),
+    deskRail: document.querySelector('.desk-rail'),
+    // Files' link to the standalone page that still manages search locations.
+    filesManage: document.querySelector('[data-files-manage]'),
     filters: document.getElementById('cockpitSignalFilters'),
     contextModal: document.getElementById('cockpitContextModal'),
     contextModalLabel: document.getElementById('cockpitContextModalLabel'),
@@ -2355,9 +2370,10 @@ import {
     return variant;
   }
 
-  const mapDestination = document.querySelector('[data-map-destination]');
-  const destinationPicker = document.querySelector('[data-map-picker]');
-  const place = destinationPicker ? destinationPlace('map') : null;
+  // The same-tab Map restore needs the local Mac's index to hold it (the
+  // endpoint answers only there), so a remote browser keeps no place at all.
+  let mapShowing = false;
+  const place = els.deskRail?.hasAttribute('data-desk-local') ? destinationPlace('map') : null;
   // A clean Home is also a Map entry on history traversal. A deliberate
   // Home launch or a deep link keeps its own intent, not an old selection.
   const query = window.location.search;
@@ -2366,16 +2382,13 @@ import {
     window.performance?.getEntriesByType?.('navigation')[0]?.type === 'back_forward';
   let returnMap = query === '?view=map' || traversingHome ? place?.read() : null;
   window.addEventListener('pagehide', () => {
-    if (!place || mapDestination.hidden || !els.map) return;
+    if (!place || !mapShowing || !els.map) return;
     const camera = window.OriWorkspaceMap?.getCamera?.();
     if (camera) void place.save({ selected: state.selectedId, ...camera });
   });
-  destinationPicker?.addEventListener('change', () => {
-    if (destinationPicker.value === '/search') window.location.assign('/search');
-  });
-  window.addEventListener('pageshow', () => {
-    if (destinationPicker) destinationPicker.selectedIndex = 0;
-  });
+  // A page restored from the back/forward cache keeps its picker as it was; the
+  // view is the truth, so put the picker back in step with it.
+  window.addEventListener('pageshow', () => syncDeskDestination());
 
   function renderAreaStatus() {
     const status = currentAreaState();
@@ -2404,8 +2417,7 @@ import {
     const mapRenderable = status.state === 'ready' || status.state === 'empty-map';
     const onMap = state.view === VIEW_MAP && mapRenderable;
     if (els.map) els.map.hidden = !onMap;
-    if (mapDestination) mapDestination.hidden = !onMap;
-    if (destinationPicker) destinationPicker.hidden = !onMap;
+    mapShowing = onMap;
     if (els.filters) els.filters.hidden = status.state !== 'ready' || state.view !== VIEW_MAP;
     currentInvitation();
     renderWelcome(status);
@@ -3754,6 +3766,25 @@ import {
 
   // ---- view state ----
 
+  /**
+   * Put the rail, the narrow picker, the heading and Files' management link in
+   * step with the view. The current destination is marked on BOTH views by the
+   * view itself, not by whether the map is drawable: a loading or empty map
+   * still means "you are on Map".
+   */
+  function syncDeskDestination() {
+    els.deskLinks.forEach(link => {
+      if (link.getAttribute('data-desk-destination') === state.view) {
+        link.setAttribute('aria-current', 'page');
+      } else {
+        link.removeAttribute('aria-current');
+      }
+    });
+    if (els.deskPicker) els.deskPicker.value = state.view;
+    if (els.areaTitle) els.areaTitle.textContent = deskHeading(state.view);
+    if (els.filesManage) els.filesManage.hidden = state.view !== VIEW_TREE;
+  }
+
   function applyView(view, { pushUrl = true, transient = false } = {}) {
     // Leaving Tree saves the note being edited first (home-file-tree FR43).
     // The note stays mounted, hidden with the rest of the Tree, so its text is
@@ -3763,14 +3794,7 @@ import {
       window.OriWorkspaceMap?.suspendDraftPlacement?.();
     state.view = view === VIEW_TREE ? VIEW_TREE : VIEW_MAP;
     if (state.view === VIEW_TREE) window.OriWorkspaceMap?.finishAssemblies?.();
-    els.viewButtons.forEach(btn => {
-      const isActive = btn.getAttribute('data-cockpit-view') === state.view;
-      btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
-      btn.classList.toggle('is-active', isActive);
-    });
-    if (els.areaTitle) {
-      els.areaTitle.textContent = state.view === VIEW_TREE ? 'Workspace Tree' : 'Workspace Map';
-    }
+    syncDeskDestination();
     // Exactly one peer view is exposed at a time (FR18/FR19).
     if (els.tree) els.tree.hidden = state.view !== VIEW_TREE;
     root.dataset.view = state.view;
@@ -4100,7 +4124,7 @@ import {
     const fallback =
       selected ||
       (state.view === VIEW_TREE ? els.tree : els.map) ||
-      els.viewButtons.find(btn => btn.getAttribute('aria-pressed') === 'true');
+      els.deskLinks.find(link => link.getAttribute('aria-current') === 'page');
     if (fallback && typeof fallback.focus === 'function') {
       if (!fallback.hasAttribute('tabindex') && fallback.tagName !== 'BUTTON') {
         fallback.setAttribute('tabindex', '-1');
@@ -5954,12 +5978,25 @@ import {
     });
   }
 
-  els.viewButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      applyView(btn.getAttribute('data-cockpit-view'));
+  // The rail switches the view in the page. A modified or non-primary click
+  // keeps the link's own href so "open in a new tab" still works.
+  els.deskLinks.forEach(link => {
+    link.addEventListener('click', event => {
+      if (event.defaultPrevented || event.button !== 0) return;
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      applyView(link.getAttribute('data-desk-destination'));
       fireTTFA('view-toggle');
     });
   });
+  if (els.deskPicker) {
+    els.deskPicker.addEventListener('change', () => {
+      applyView(els.deskPicker.value);
+      fireTTFA('view-toggle');
+    });
+    // Rendered disabled: until this handler exists a change would be lost.
+    els.deskPicker.disabled = false;
+  }
 
   // Updates / Quests / Quick Capture: three triggers sharing one panel state
   // (FR7-FR9). The Quests trigger does not exist in the template until Group
@@ -6294,7 +6331,7 @@ import {
     returnMap = null;
     await refresh();
     const prior = pending && (await pending);
-    if (prior && !state.selectedId && !mapDestination.hidden && state.view === VIEW_MAP) {
+    if (prior && !state.selectedId && mapShowing && state.view === VIEW_MAP) {
       if (findWorkspace(state.flattened, prior.selected))
         selectItem(prior.selected, { openModal: false, announceChange: false });
       window.OriWorkspaceMap?.restoreCamera?.(els.map, prior);

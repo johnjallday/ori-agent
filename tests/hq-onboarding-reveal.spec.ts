@@ -1,6 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import fs from 'node:fs';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { goToFiles } from './helpers/home-destination';
 
 // One durable journey per fresh server. A browser context is not a profile reset.
 // ./scripts/e2e-fresh.sh tests/hq-onboarding-reveal.spec.ts -- --project=chromium --workers=1
@@ -213,7 +214,7 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
     `tasks/evidence-hq-onboarding-reveal/group-${group}/${test.info().project.name}-${mobile ? '390' : 'desktop'}${unknown ? '-uncertain' : stale ? '-stale-view' : lost ? '-lost-response' : noMap ? '-renderer-failure' : noStorage ? '-no-storage' : ''}-${name}.png`;
   if (reduced) await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
-  await page.locator('[data-cockpit-view="tree"]').click();
+  await goToFiles(page);
   await page.waitForFunction(() => Boolean((window as any).PersonalAssistantHQCard?.show));
   await page.locator('#personalAssistantLauncher').click();
   await expect(page.locator('#personalAssistantHQCard')).toBeVisible();
@@ -381,7 +382,7 @@ test('confirmed customized payload builds exactly one real HQ with reviewed Note
     } else if (process.env.ORI_HQ_REVEAL_SKIP === '1') {
       await page.getByRole('button', { name: 'Skip animation' }).click();
     } else if (process.env.ORI_HQ_REVEAL_INTERRUPT === '1') {
-      await page.locator('[data-cockpit-view="tree"]').click();
+      await goToFiles(page);
       await expect(page.locator('[data-creation-map-status]')).toBeHidden();
       await expect(page.locator('#personalHQResultHost')).toBeHidden();
       await expect(page.locator('.is-assembling')).toHaveCount(0);

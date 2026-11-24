@@ -557,7 +557,8 @@ export function mountFileSearch(root, compact = false) {
 if (typeof document !== 'undefined' && document.getElementById('desk')) {
   const picker = document.getElementById('destinationPicker');
   picker?.addEventListener('change', () => {
-    if (picker.value === '/?view=map') location.assign('/?view=map');
+    if (picker.value === '/?view=map' || picker.value === '/?view=tree')
+      location.assign(picker.value);
   });
   window.addEventListener('pageshow', () => {
     if (picker) picker.selectedIndex = 0;

@@ -11,6 +11,7 @@ import {
   guardWorkspaceReadTour,
   workspaceMetadataReads
 } from './fixtures/ui-consistency-workspace';
+import { goToMap } from './helpers/home-destination';
 
 let seed: WorkspaceSeed | undefined;
 let check: (() => Promise<void>) | undefined;
@@ -91,7 +92,7 @@ for (const theme of ['light', 'dark'] as const) {
     if (process.env.ORI_UI_HOME_TO_TICKET === '1') {
       await page.goto('/');
       await expect(page.locator('#homeCockpit')).toHaveAttribute('data-state', 'ready');
-      await page.locator('#cockpitViewMap').click();
+      await goToMap(page);
       await page.locator(`.ws-map-tile[data-ws-id="${seed.workspace.id}"]`).click();
       const door = page.locator(
         `[data-cockpit-rail-open][data-workspace-id="${seed.workspace.id}"]:visible`

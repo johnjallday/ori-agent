@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { confirmCreatorFinalAction } from './helpers/confirm-reviewed-creation';
+import { goToFiles } from './helpers/home-destination';
 
 // Run only through the Music candidate sandbox. Five disposable project folders
 // under its HOME make the actual chip scanner offer a portfolio. No native
@@ -105,7 +106,7 @@ test('a local-only provider cannot resolve a portfolio offer or grant a discover
   );
   expect((await json(await request.get('/api/workspaces'))).folders).toHaveLength(1);
   await page.getByRole('button', { name: 'Close personal assistant' }).click();
-  await page.getByRole('button', { name: 'Tree', exact: true }).click();
+  await goToFiles(page);
   await page.locator('[data-tree-new-group]').click();
   const creator = page.locator('#addFolderModal');
   await expect(creator).toBeVisible();

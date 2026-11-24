@@ -1,15 +1,23 @@
 <!-- Ori Dashboard — Command Bridge -->
-{{if .Extra.ShowFileSearch}}
+<!--
+  The rail is Home's one view switcher, for every user. Files and Map are two
+  views of the cockpit below, so the cockpit switches them in the page; the
+  hrefs are the fallback for a new tab. The current destination is marked here
+  from ?view= so the first paint is right, then kept by home-workspace-cockpit.js.
+  Map links to /?view=map, not /, because a bare / can land on the standalone
+  page for a user whose starting page is Files. The narrow picker has no href to
+  fall back on, so it starts disabled and the cockpit enables it the moment its
+  change handler exists; a choice made before that would be lost.
+-->
 <div class="desk-shell map-desk-shell">
-  <aside class="desk-rail" aria-label="Desk sidebar">
+  <aside class="desk-rail" aria-label="Desk sidebar"{{if .Extra.FileSearchAvailable}} data-desk-local{{end}}>
     <div class="desk-brand"><img src="/favicon.svg" alt="" />Ori</div>
-    <nav aria-label="Destination"><small>Desk</small><a href="/search">Files</a><span hidden aria-current="page" data-map-destination>Map</span></nav>
-    <div class="rail-foot">● &nbsp; Local desk<br />Workspace cockpit</div>
+    <nav aria-label="Destination"><small>Desk</small><a href="/?view=tree" data-desk-destination="tree"{{if index .Extra "HomeViewTree"}} aria-current="page"{{end}}>Files</a><a href="/?view=map" data-desk-destination="map"{{if not (index .Extra "HomeViewTree")}} aria-current="page"{{end}}>Map</a></nav>
+    <div class="rail-foot">● &nbsp; {{if .Extra.FileSearchAvailable}}Local desk<br />{{end}}Workspace cockpit</div>
   </aside>
-  <nav class="desk-mobile" aria-label="Destination"><span class="desk-brand">Ori</span><a href="/search">Files</a>
-    <select hidden aria-label="Destination" data-map-picker><option selected>Map</option><option value="/search">Files</option></select>
+  <nav class="desk-mobile" aria-label="Destination"><span class="desk-brand">Ori</span>
+    <select aria-label="Destination" data-map-picker disabled><option value="tree"{{if index .Extra "HomeViewTree"}} selected{{end}}>Files</option><option value="map"{{if not (index .Extra "HomeViewTree")}} selected{{end}}>Map</option></select>
   </nav>
-{{end}}
 <div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
   <!-- Only the HQ-owned result moves here; conversation and Today stay in the drawer. -->
   <aside id="personalHQResultHost" class="pa-hq-result" aria-label="Personal HQ setup result" hidden></aside>
@@ -20,11 +28,12 @@
     universal Personal Assistant work host now, mounted on every page rather
     than just this one. Help is a separate read-only navbar utility.
   -->
-  <!-- The Map-first workspace cockpit: one primary workspace area (Map or Tree
-       as mutually exclusive peer views). Issue #366 moved selected context to
+  <!-- The Map-first workspace cockpit: one primary workspace area (Map or Files,
+       the tree, as mutually exclusive views chosen in the Desk rail beside it).
+       Issue #366 moved selected context to
        the on-demand modal after this grid, so the theatre always owns the full
        cockpit width. Global Help and Personal Assistant entry points stay available. -->
-  <div class="home-cockpit" id="homeCockpit" data-view="map" data-state="loading">
+  <div class="home-cockpit" id="homeCockpit" data-view="{{if index .Extra "HomeViewTree"}}tree{{else}}map{{end}}" data-state="loading">
     <section class="cockpit-workspace-area" id="cockpitWorkspaceArea" aria-labelledby="cockpitWorkspaceAreaTitle">
       <!--
         Wraps the header AND the two flyouts below so they share one
@@ -37,9 +46,9 @@
       <div class="cockpit-area-header-zone">
       <!--
         Two rows with two jobs. The first says where you are and what you can
-        make: the Workspace Map/Tree identity, the view switch, the capture and
-        Summary actions, and creation (the hire-first primary, then New
-        Workspace). The second is the quieter readout row: the App Guide and
+        make: the heading (Workspace Map or Files; the Desk rail beside the
+        cockpit is the view switch), the capture and Summary actions, and
+        creation (the hire-first primary, then New Workspace). The second is the quieter readout row: the App Guide and
         signal filters on the left; Updates, Quests, and the city's resources
         on the right. Every control
         keeps its id — coachmarks, progression, setup quests, and the specs all
@@ -49,14 +58,13 @@
         <div class="cockpit-area-main">
           <div class="cockpit-area-identity">
             <div class="cockpit-area-heading">
-              <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>Workspace Map</h2>
+              <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>{{if index .Extra "HomeViewTree"}}Files{{else}}Workspace Map{{end}}</h2>
             </div>
-            <!-- Mutually exclusive Map/Tree toggle. aria-pressed carries the
-                 active view; the visible labels carry it without color (FR24). -->
-            <div class="cockpit-view-toggle" role="group" aria-label="Workspace view">
-              <button type="button" id="cockpitViewMap" class="modern-btn modern-btn-secondary modern-btn-sm ui-filter cockpit-view-btn is-active" data-cockpit-view="map" aria-pressed="true">Map</button>
-              <button type="button" id="cockpitViewTree" class="modern-btn modern-btn-secondary modern-btn-sm ui-filter cockpit-view-btn" data-cockpit-view="tree" aria-pressed="false">Tree</button>
-            </div>
+            <!-- The view is chosen in the Desk rail, not here. Searchable
+                 folders are still managed on the standalone page until their
+                 rows carry that themselves, so Files points at it. Shown on
+                 Files only, and only where the filename index exists. -->
+            {{if .Extra.FileSearchAvailable}}<a href="/search" class="cockpit-files-manage" data-files-manage{{if not (index .Extra "HomeViewTree")}} hidden{{end}}>Manage search locations</a>{{end}}
           </div>
           <div class="cockpit-area-actions" role="group" aria-label="Workspace actions">
             <!-- Add to backlog and Summary stay visible in the stable header so
@@ -491,7 +499,7 @@
 
   </div>
 </div>
-{{if .Extra.ShowFileSearch}}</div>{{end}}
+</div>
 
 <!-- Working Agreement is an on-demand overlay, not a Home cockpit row. Its
      canonical controller and APIs remain unchanged while opening it can no

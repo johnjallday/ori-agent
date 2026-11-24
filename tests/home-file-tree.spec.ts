@@ -2,6 +2,7 @@ import { test, expect, Page } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { goToFiles } from './helpers/home-destination';
 
 /**
  * The Home file tree and its reading pane (tasks/prd-home-file-tree.md,
@@ -387,7 +388,7 @@ test.describe('Home file tree', () => {
     expect(asked).toEqual([]);
 
     // Back in Tree: the same rows are open, the same tabs, the same one active.
-    await page.locator('[data-cockpit-view="tree"]').click();
+    await goToFiles(page);
     await expect(row(page, ws.id)).toHaveAttribute('aria-expanded', 'true');
     await expect(tabs(page)).toHaveText(['Second verse', ws.noteName]);
     await expect(activeTab(page)).toContainText(ws.noteName);

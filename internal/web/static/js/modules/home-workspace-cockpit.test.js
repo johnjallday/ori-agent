@@ -38,6 +38,7 @@ import {
   homeWaitMarks,
   registerFolderBuild,
   searchForView,
+  deskHeading,
   readCount,
   formatCount,
   readEconomy,
@@ -202,6 +203,22 @@ test('parseViewFromQuery: the query is authoritative when it carries a valid vie
   // Case and surrounding whitespace must not defeat a legitimate deep link.
   assert.equal(parseViewFromQuery('?view=TREE'), VIEW_TREE);
   assert.equal(parseViewFromQuery('?view=%20tree%20'), VIEW_TREE);
+});
+
+// The Desk rail is the one switcher, so the heading is what tells you which of
+// its two destinations you are on (merge-tree-into-files FR5).
+test('deskHeading: Workspace Map on Map, Files on Files', () => {
+  assert.equal(deskHeading(VIEW_MAP), 'Workspace Map');
+  assert.equal(deskHeading(VIEW_TREE), 'Files');
+  assert.equal(deskHeading('anything else'), 'Workspace Map');
+});
+
+// Files keeps the existing address, and Map still drops the parameter, so the
+// rail's two destinations round-trip through the URL without a route change.
+test('searchForView: the rail destinations map to ?view=tree and no parameter', () => {
+  assert.equal(searchForView('', VIEW_TREE), '?view=tree');
+  assert.equal(searchForView('?view=tree', VIEW_MAP), '');
+  assert.equal(searchForView('?create=1&view=tree', VIEW_MAP), '?create=1');
 });
 
 // The goal offer belongs to the folder's own workspace: Home's map never

@@ -177,7 +177,7 @@ async function stageTree() {
   const baselineCount = baseline.length;
 
   // --- Tree view: split layout ------------------------------------------
-  await page.locator('#cockpitViewTree').click();
+  await page.locator('.desk-rail [data-desk-destination="tree"]').click();
   await page.locator('#cockpitTreeNav [data-tree-row]').first().waitFor();
   await applyTheme();
   await settle(800);
@@ -454,7 +454,7 @@ async function stageTree() {
 
   // --- Back to Map: nothing new is fetched -------------------------------
   const contentBefore = contentRequests().length;
-  await page.locator('#cockpitViewMap').click();
+  await page.locator('.desk-rail [data-desk-destination="map"]').click();
   await page.locator('#cockpitMap').waitFor({ state: 'visible' });
   await settle(1500);
   check(
@@ -749,7 +749,7 @@ async function stagePane() {
   // show that workspace selected, and still no context modal.
   await rowByKind('workspace', 'Harbor Lights').locator('.cockpit-tree-name').click();
   const harborId = await rowByKind('workspace', 'Harbor Lights').getAttribute('data-tree-row');
-  await page.locator('#cockpitViewMap').click();
+  await page.locator('.desk-rail [data-desk-destination="map"]').click();
   await page.locator('#cockpitMap').waitFor({ state: 'visible' });
   await settle(500);
   check(
@@ -857,9 +857,9 @@ async function stageNote() {
   await editor.locator('.note-live-line').first().waitFor();
   await typeAtEndOfFirstLine(' Then went to the Map.');
   const beforeMap = page.waitForResponse(notePut);
-  await page.locator('#cockpitViewMap').click();
+  await page.locator('.desk-rail [data-desk-destination="map"]').click();
   check((await beforeMap).ok(), 'switching to Map saves first');
-  await page.locator('#cockpitViewTree').click();
+  await page.locator('.desk-rail [data-desk-destination="tree"]').click();
   await editor.locator('.note-live-line').first().waitFor();
   // The line being edited is a textarea, whose text is its value.
   const editorText = () =>
@@ -2069,7 +2069,7 @@ async function runFinishStage({ stamp, names, ids }) {
   );
 
   // Switching to Tree shows it all again.
-  await page.locator('#cockpitViewTree').click();
+  await page.locator('.desk-rail [data-desk-destination="tree"]').click();
   await byId(ids.recall).waitFor();
   await applyTheme();
   await page.locator('#cockpitPaneNoteEditor .note-live-line').first().waitFor();
@@ -2475,7 +2475,7 @@ async function stageOutputs() {
   await settle(1500);
   check(outputRequests().length === 0, 'Map view asks for no outputs');
 
-  await page.locator('#cockpitViewTree').click();
+  await page.locator('.desk-rail [data-desk-destination="tree"]').click();
   await nav.locator('[data-tree-row]').first().waitFor();
   await applyTheme();
   await settle(600);
@@ -2901,7 +2901,7 @@ async function stageLinked() {
   await settle(1500);
   check(linkedRequests().length === 0, 'Map view asks nothing about linked folders');
 
-  await page.locator('#cockpitViewTree').click();
+  await page.locator('.desk-rail [data-desk-destination="tree"]').click();
   await nav.locator('[data-tree-row]').first().waitFor();
   await applyTheme();
   await settle(600);
@@ -3375,7 +3375,7 @@ async function stageChats() {
   await page.locator('#cockpitMap').waitFor({ state: 'visible' });
   await settle(1500);
   const mapReads = wholeChatReads();
-  await page.locator('#cockpitViewTree').click();
+  await page.locator('.desk-rail [data-desk-destination="tree"]').click();
   await nav.locator('[data-tree-row]').first().waitFor();
   await applyTheme();
   await settle(600);

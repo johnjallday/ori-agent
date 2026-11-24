@@ -182,15 +182,31 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   margin-left: auto;
 }
 
-.cockpit-view-toggle {
+/* Files' pointer to the standalone page that manages search locations. A quiet
+   text link beside the heading: it is a place to go, not an action. It takes
+   the header's compact 32px height so switching to Files does not make the row
+   taller and move everything below it; narrow and touch screens get the 44px
+   floor the header's buttons keep there too. */
+.cockpit-files-manage {
   display: inline-flex;
-  gap: var(--space-1);
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--space-1);
+  color: var(--hc-signal);
+  font-size: var(--ui-text-sm, 0.875rem);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.cockpit-files-manage[hidden] {
+  display: none;
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .cockpit-files-manage {
+    min-height: 44px;
+  }
 }
 
-/* Native Map/Tree buttons use the shared pressed-filter state and focus ring. */
-
-/* City Economy HUD (city-economy FR34): what the city has, beside the view
-   toggle it shares a shape with.
+/* City Economy HUD (city-economy FR34): what the city has.
 
    Each element is a button that opens its own explanation. They are styled as
    readouts rather than as buttons — the number is the point, and three loud

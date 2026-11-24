@@ -14,6 +14,7 @@ import {
 } from 'node:fs';
 import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
+import { goToFiles } from './helpers/home-destination';
 
 // Real, no-provider host. Never fabricate create/grant/scan/layout responses.
 // Recovery tests explicitly lose a REAL response or abort a layout write;
@@ -491,7 +492,7 @@ test('two tabs preserve current consent; explicit reload, Back and map view chan
   expect(
     await page.evaluate(() => (window as any).sessionManager.workspaceBuild.placement.candidate)
   ).toEqual(candidate);
-  await page.locator('[data-cockpit-view="tree"]').click();
+  await goToFiles(page);
   await expect(page.locator('#addFolderModal')).toBeVisible();
   await expect(sheet).toBeVisible();
   await expect(sheet.getByLabel('Workspace name')).toHaveValue('Saved in another tab');
