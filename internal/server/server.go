@@ -820,7 +820,7 @@ func (s *Server) handleWorkspacesRoutes(w http.ResponseWriter, r *http.Request) 
 			http.Redirect(w, r, "/my-notes", http.StatusFound)
 			return
 		}
-		s.serveWorkspaceDetail(w, workspaceID, workspaceSlug)
+		s.serveWorkspaceDetail(w, r, workspaceID, workspaceSlug)
 		return
 	}
 
@@ -921,12 +921,13 @@ func (s *Server) serveWorkspacePlan(w http.ResponseWriter, workspaceID, workspac
 // kind. Groups render the same page as concrete workspaces; the page itself
 // shows group-specific UI (header badge, Members panel) based on the loaded
 // workspace's kind.
-func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, workspaceID, workspaceSlug string) {
+func (s *Server) serveWorkspaceDetail(w http.ResponseWriter, r *http.Request, workspaceID, workspaceSlug string) {
 	data := s.prepareBasePageData("workspaces")
 	data.Title = "Workspace - Ori Agent"
 	data.BrandText = "Ori Agent"
 	data.Extra["WorkspaceID"] = workspaceID
 	data.Extra["WorkspaceSlug"] = workspaceSlug
+	data.Extra["FolderSearchReady"] = s.fileSearch != nil && localSearchPage(r) && s.folderSearchReady()
 	isHQ := s.currentPersonalHQForPage(workspaceID, "")
 	data.Extra["IsPersonalHQ"] = isHQ
 	if isHQ {

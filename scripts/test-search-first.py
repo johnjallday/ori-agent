@@ -121,6 +121,10 @@ if __name__=='__main__':
                 spec(root,url,'folder-backed','folder-backed-search-locations',browser)
             with serve(root, fixture_binary=binary) as url:
                 spec(root,url,'folder-return','folder-backed-search-locations',browser)
+            with serve(root, fixture_binary=binary) as url:
+                locations=json.loads(api(url,'/api/file-search/sources'))
+                assert sorted(s['label'] for s in locations)==['Documents','Downloads']
+                assert len([w for w in json.loads(api(url,'/api/workspaces'))['folders'] if w['name']=='Research archive'])==1
         sys.exit(0)
     for scenario in ('fresh','skip'):
         root=fixture(large=scenario=='fresh')

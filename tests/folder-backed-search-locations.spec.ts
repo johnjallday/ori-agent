@@ -180,4 +180,45 @@ test('Restart keeps workspace identity and does not adopt an independent grant',
   await allow.click();
   await expect(page.locator('#title')).toHaveText('Documents');
   expect(await sources()).toHaveLength(3);
+  const projectID = project.workspace.id;
+  await page.goto('/?home=1');
+  await expect(page.locator(`.ws-map-tile[data-ws-id="${projectID}"]`).first()).toBeVisible();
+  await page.goto('/?view=tree');
+  await expect(page.locator(`#cockpitTreeNav [data-tree-row="${projectID}"]`)).toContainText(
+    'Research archive'
+  );
+  await page.goto('/search');
+  await page.locator('#manage summary').click();
+  await page.getByRole('button', { name: 'Open Research archive', exact: true }).first().click();
+  await expect(page.locator('#workspaceSearchLocations')).toBeVisible();
+  await page.getByRole('button', { name: 'Search Synthetic Project in Files' }).press('Enter');
+  await expect(page.locator('#title')).toHaveText('Synthetic Project');
+  await expect(page.locator('#hits')).toContainText('Harbor.txt');
+  const note = await request.post(`/api/workspaces/${projectID}/notes`, {
+    data: { name: 'Keep this note', content: 'Not part of the filename index.' }
+  });
+  expect(note.ok()).toBeTruthy();
+  const noteID = (await note.json()).note.id;
+  await page.locator('#manage summary').click();
+  await page
+    .locator('#sources li')
+    .filter({ hasText: 'Synthetic Project' })
+    .getByRole('button', { name: 'Remove from search' })
+    .click();
+  await expect
+    .poll(async () => (await sources()).map((s: { id: string }) => s.id))
+    .not.toContain(project.id);
+  await expect(page.locator('#hits')).not.toContainText('Harbor.txt');
+  expect(readFileSync(join(fixture!, 'home/Synthetic Project/Harbor.txt'), 'utf8')).toContain(
+    'Synthetic project fixture'
+  );
+  await page.goto('/?view=tree');
+  const row = page.locator(`#cockpitTreeNav [data-tree-row="${projectID}"]`);
+  await row.locator('[data-tree-toggle]').click();
+  await expect(page.locator(`[data-tree-row="${projectID}/n/${noteID}"]`)).toContainText(
+    'Keep this note'
+  );
+  await page.screenshot({
+    path: `tasks/evidence-folder-backed-search-locations/${browserName}/removed-note-survives.png`
+  });
 });

@@ -130,10 +130,9 @@ export function mountFileSearch(root, compact = false) {
     }
     const connection = await reviewExisting(review);
     if (!connection) return;
-    scope = connection.source;
     term.value = '';
     channel?.postMessage('changed');
-    await query();
+    await changeScope(connection.source);
     term.focus();
   }
   async function choose(kind, button) {
@@ -231,9 +230,19 @@ export function mountFileSearch(root, compact = false) {
         );
         if (document.body.dataset.workspaceReady === 'true' && s.state !== 'unavailable') {
           if (s.workspace) {
-            const open = element('a', `Open ${s.workspace.name}`);
-            open.href = `/workspaces/${encodeURIComponent(s.workspace.slug)}`;
-            li.append(open);
+            li.append(
+              act(`Open ${s.workspace.name}`, async () => {
+                const latest = (await request('sources')).find(v => v.id === s.id);
+                if (
+                  latest?.workspace?.id !== s.workspace.id ||
+                  latest.workspace.link !== s.workspace.link
+                ) {
+                  await query();
+                  throw new Error('This workspace connection changed. Choose a current location.');
+                }
+                location.assign(`/workspaces/${encodeURIComponent(latest.workspace.slug)}`);
+              })
+            );
           } else
             li.append(
               act('Connect to workspace', async () =>
@@ -473,7 +482,7 @@ export function mountFileSearch(root, compact = false) {
       button.setAttribute('aria-pressed', String(button.dataset.scope === scope));
     clear();
     notice.textContent = '';
-    void query();
+    return query();
   }
   $('scope')?.addEventListener('change', () => changeScope($('scope').value));
   $('locationList')?.addEventListener('click', e => {

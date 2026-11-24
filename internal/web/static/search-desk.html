@@ -112,7 +112,7 @@
           <p id="emptyMap">Checking your locations…</p>
           <details id="manage">
             <summary>Manage search locations</summary>
-            <p>These folders are searchable by name. They aren’t workspaces or folders an agent can read.</p>
+            <p>These folders are searchable by name. Search permission alone gives no agent access. Remove from search clears that index, not the folder, its workspace, notes or tickets.</p>
             <ul id="sources" aria-label="Mapped folders"></ul>
             {{if not .First}}{{template "folderChoices"}}{{end}}
           </details>

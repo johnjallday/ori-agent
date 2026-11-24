@@ -94,6 +94,13 @@ func TestReviewAndConnectUsesOneOwnedCurrentLink(t *testing.T) {
 	if v.Source == source.ID {
 		t.Fatal("reused revoked source")
 	}
+	_, e = f.DB.Exec(`UPDATE workspaces SET name='Renamed',folder_slug='renamed' WHERE id='two'`)
+	must(t, e)
+	ss, e = f.Sources(t.Context(), "local")
+	must(t, e)
+	if len(ss) != 1 || ss[0].Workspace == nil || ss[0].Workspace.Slug != "renamed" || ss[0].Workspace.ID != "two" || ss[0].ID != v.Source {
+		t.Fatal("workspace rename broke navigation", ss)
+	}
 	_, e = f.DB.Exec(`UPDATE workspaces SET directory_references_json='[]' WHERE id='two'`)
 	must(t, e)
 	ss, e = f.Sources(t.Context(), "local")
