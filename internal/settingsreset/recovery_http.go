@@ -38,9 +38,14 @@ type statusView struct {
 	Message     string
 	ShowRestart bool
 	Operation   Operation
+	// Cancel is present only on the recovery host, for a receipt the server
+	// itself just found provably unapplied. The normal app never sets it.
+	Cancel *CancelOffer
 }
 
-func viewResetStatus(id string, op Operation) statusView {
+// viewResetStatus describes a receipt. recovery is true on the recovery-only
+// host, where a canceled receipt still needs a full relaunch before Ori opens.
+func viewResetStatus(id string, op Operation, recovery bool) statusView {
 	view := statusView{ID: id, Operation: op}
 	switch op.State {
 	case StatePreparing:
@@ -60,6 +65,15 @@ func viewResetStatus(id string, op Operation) statusView {
 	case StateCompleted:
 		view.Title = "Reset receipt found"
 		view.Message = "The stored receipt is complete. Ori still needs to be ready before you return."
+	case StateCanceled:
+		// Canceled is not completed: nothing was reset, removed or restored.
+		view.Title = "Reset canceled"
+		if recovery {
+			view.Message = "This reset was canceled before it ran. Nothing was reset, removed or restored. Ori needs one full restart before it opens normally."
+			view.ShowRestart = true
+		} else {
+			view.Message = "This reset was canceled before it ran. Nothing was reset, removed or restored. Ori is open with your data as it was."
+		}
 	default:
 		view.Title = "Reset status unavailable"
 		view.Message = "Ori cannot read the awaited reset receipt. The request may still be preparing, or its receipt may be missing or replaced. This does not confirm success or failure. Do not submit the reset again."
@@ -71,7 +85,7 @@ func viewResetStatus(id string, op Operation) statusView {
 // A supplied operation ID is authoritative for the page identity, including
 // when its receipt is absent. The bare path is for fenced navigation without a
 // receipt, not a shortcut to a previous successful operation.
-func newResetStatusHandler(lease *resetstate.Lease) http.HandlerFunc {
+func newResetStatusHandler(lease *resetstate.Lease, cancel *cancelHost) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		setRecoveryHeaders(w)
 		if r.URL.EscapedPath() != ResetStatusPath {
@@ -110,7 +124,10 @@ func newResetStatusHandler(lease *resetstate.Lease) http.HandlerFunc {
 			}
 		}
 		if r.Method == http.MethodGet {
-			_ = recoveryPage.Execute(w, viewResetStatus(id, operation))
+			view := viewResetStatus(id, operation, cancel != nil)
+			// A GET only ever reads: it evaluates and offers, never writes.
+			view.Cancel = cancel.offer(r.Context(), operation)
+			_ = recoveryPage.Execute(w, view)
 		}
 	}
 }
@@ -135,7 +152,11 @@ func CurrentRecoveryOperation(ctx context.Context, lease *resetstate.Lease) (Ope
 // RegisterResetStatusRoutes mounts only the reset page and two fixed embedded
 // scripts. The recovery host never dispatches into a general static file server.
 func RegisterResetStatusRoutes(mux *http.ServeMux, lease *resetstate.Lease) {
-	mux.HandleFunc(ResetStatusPath, newResetStatusHandler(lease))
+	registerStatusRoutes(mux, lease, nil)
+}
+
+func registerStatusRoutes(mux *http.ServeMux, lease *resetstate.Lease, cancel *cancelHost) {
+	mux.HandleFunc(ResetStatusPath, newResetStatusHandler(lease, cancel))
 	for route, asset := range map[string]string{
 		"/reset/assets/generation.js": "static/js/modules/reset-generation.js",
 		"/reset/assets/status.js":     "static/js/modules/reset-status.js",
@@ -162,6 +183,28 @@ func RegisterResetStatusRoutes(mux *http.ServeMux, lease *resetstate.Lease) {
 // NewRecoveryHandler exposes only read-only reset evidence. It has no route to
 // application stores, credentials, arbitrary files, or reset application.
 func NewRecoveryHandler(lease *resetstate.Lease) http.Handler {
+	return NewRecoveryHandlerWith(lease, nil)
+}
+
+type recoveryEvidence struct {
+	Success   bool         `json:"success"`
+	Operation Operation    `json:"operation"`
+	Cancel    *CancelOffer `json:"cancel,omitempty"`
+}
+
+// NewRecoveryHandlerWith is NewRecoveryHandler plus the one narrow write a
+// recovery host may offer: cancelling a provably unapplied reset. handoff is the
+// host's optional restart capability, used only after the canceled receipt is
+// durable; nil means the page shows manual relaunch instructions.
+//
+// GET and HEAD remain read-only. The single POST route is local-origin,
+// token-bound, operation- and revision-bound, and re-decided by the server.
+func NewRecoveryHandlerWith(lease *resetstate.Lease, handoff *RestartHandoff) http.Handler {
+	cancel := newCancelHost(lease, handoff)
+	evidence := func(r *http.Request, operation Operation) recoveryEvidence {
+		operation.Restart.Managed = operation.State == StateCanceled && handoff.Available()
+		return recoveryEvidence{Success: operation.VerifiedComplete(), Operation: operation, Cancel: cancel.offer(r.Context(), operation)}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/reset/recovery", func(w http.ResponseWriter, r *http.Request) {
 		setRecoveryHeaders(w)
@@ -171,10 +214,7 @@ func NewRecoveryHandler(lease *resetstate.Lease) http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(struct {
-			Success   bool      `json:"success"`
-			Operation Operation `json:"operation"`
-		}{Success: operation.VerifiedComplete(), Operation: operation})
+		_ = json.NewEncoder(w).Encode(evidence(r, operation))
 	})
 	mux.HandleFunc("GET /api/reset/operations/{id}", func(w http.ResponseWriter, r *http.Request) {
 		setRecoveryHeaders(w)
@@ -185,12 +225,10 @@ func NewRecoveryHandler(lease *resetstate.Lease) http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(struct {
-			Success   bool      `json:"success"`
-			Operation Operation `json:"operation"`
-		}{Success: operation.VerifiedComplete(), Operation: operation})
+		_ = json.NewEncoder(w).Encode(evidence(r, operation))
 	})
-	RegisterResetStatusRoutes(mux, lease)
+	mux.HandleFunc("POST /api/reset/operations/{id}/cancel", cancel.handle)
+	registerStatusRoutes(mux, lease, cancel)
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		setRecoveryHeaders(w)
 		http.Redirect(w, r, ResetStatusPath, http.StatusSeeOther)
@@ -207,9 +245,15 @@ func setRecoveryHeaders(w http.ResponseWriter) {
 }
 
 func RecoveryHTTPServer(lease *resetstate.Lease, address string) *http.Server {
+	return RecoveryHTTPServerWith(lease, address, nil)
+}
+
+// RecoveryHTTPServerWith serves NewRecoveryHandlerWith. A host passes its restart
+// capability only when it can really reopen the same installation.
+func RecoveryHTTPServerWith(lease *resetstate.Lease, address string, handoff *RestartHandoff) *http.Server {
 	return &http.Server{
 		Addr:              address,
-		Handler:           NewRecoveryHandler(lease),
+		Handler:           NewRecoveryHandlerWith(lease, handoff),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,

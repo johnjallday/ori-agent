@@ -19,10 +19,24 @@ import (
 )
 
 const (
-	supervisorPIDEnv  = "ORI_RESET_SUPERVISOR_PID"
-	expectedResetEnv  = "ORI_RESET_EXPECTED_OPERATION"
+	supervisorPIDEnv = "ORI_RESET_SUPERVISOR_PID"
+	expectedResetEnv = "ORI_RESET_EXPECTED_OPERATION"
+	// expectedStateEnv is "canceled" when the replacement must find a durably
+	// canceled receipt for the expected operation instead of a staged one.
+	expectedStateEnv  = "ORI_RESET_EXPECTED_STATE"
+	canceledHandoff   = "canceled"
 	restartReplyGrace = 2 * time.Second
 )
+
+// maxHandoffBytes bounds the pipe protocol: "canceled " + a 128-byte id + "\n".
+const maxHandoffBytes = 160
+
+// resetHandoff is the one thing a child may ask the supervisor for: a single
+// replacement expecting one operation in one of two durable states.
+type resetHandoff struct {
+	id       string
+	canceled bool
+}
 
 // The supervisor never opens app stores or serves HTTP. It starts an exact
 // pinned binary, and recognizes a request only from that direct child's private
@@ -63,7 +77,7 @@ func runResetSupervisor(port int) error {
 }
 
 func superviseResetServer(ctx context.Context, spec managedServerSpec) error {
-	var expected string
+	var expected resetHandoff
 	for ctx.Err() == nil {
 		requested, err := spec.runChild(ctx, expected)
 		if ctx.Err() != nil {
@@ -72,41 +86,49 @@ func superviseResetServer(ctx context.Context, spec managedServerSpec) error {
 		if err != nil {
 			return fmt.Errorf("server stopped: %w; check the error above and relaunch the same Ori installation manually", err)
 		}
-		if requested == "" {
+		if requested.id == "" {
 			return nil // Ordinary child exit.
 		}
+		// The same operation in the same state is never restarted twice. A
+		// staged reset's recovery child may still hand off once more for that
+		// operation once it is canceled: that is a different, durable state.
 		if requested == expected {
 			return errors.New("refused a repeated restart for the same reset; relaunch the same installation manually")
 		}
-		// One replacement per operation. Any failure to start/own the correct
+		// One replacement per handoff. Any failure to start/own the correct
 		// root or address exits the supervisor instead of respawning.
 		expected = requested
 	}
 	return nil
 }
 
-func (s managedServerSpec) runChild(ctx context.Context, expected string) (string, error) {
+func (s managedServerSpec) runChild(ctx context.Context, expected resetHandoff) (resetHandoff, error) {
+	var none resetHandoff
 	current, err := os.Stat(s.binary)
 	if err != nil {
-		return "", err
+		return none, err
 	}
 	if !os.SameFile(s.inode, current) || !s.inode.ModTime().Equal(current.ModTime()) || s.inode.Size() != current.Size() {
-		return "", errors.New("the managed server executable changed")
+		return none, errors.New("the managed server executable changed")
 	}
 	reader, writer, err := os.Pipe()
 	if err != nil {
-		return "", err
+		return none, err
 	}
 	defer func() { _ = reader.Close() }()
 	// #nosec G204 -- canonical path to this exact executable; args are the operator's original CLI.
 	cmd := exec.Command(s.binary, s.args...)
 	cmd.Dir, cmd.Stdin, cmd.Stdout, cmd.Stderr = s.root, s.stdin, s.stdout, s.stderr
-	cmd.Env = append(append([]string(nil), s.env...), supervisorPIDEnv+"="+strconv.Itoa(os.Getpid()), expectedResetEnv+"="+expected)
+	state := ""
+	if expected.canceled {
+		state = canceledHandoff
+	}
+	cmd.Env = append(append([]string(nil), s.env...), supervisorPIDEnv+"="+strconv.Itoa(os.Getpid()), expectedResetEnv+"="+expected.id, expectedStateEnv+"="+state)
 	cmd.ExtraFiles = []*os.File{writer} // FD 3 is a private, one-way restart signal.
 	err = cmd.Start()
 	_ = writer.Close()
 	if err != nil {
-		return "", err
+		return none, err
 	}
 	wait := make(chan error, 1)
 	go func() { wait <- cmd.Wait() }()
@@ -122,25 +144,34 @@ func (s managedServerSpec) runChild(ctx context.Context, expected string) (strin
 			_ = cmd.Process.Kill()
 			<-wait
 		}
-		return "", nil
+		return none, nil
 	}
 	if err != nil {
-		return "", err
+		return none, err
 	}
 	// A bounded protocol, read only after our exact writer process exited.
 	// Deadline also handles an unexpected inherited descriptor.
 	if err := reader.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
-		return "", err
+		return none, err
 	}
-	data, err := io.ReadAll(io.LimitReader(reader, 130))
+	data, err := io.ReadAll(io.LimitReader(reader, maxHandoffBytes))
 	if err != nil || len(data) == 0 {
-		return "", err
+		return none, err
 	}
-	id, ok := strings.CutSuffix(string(data), "\n")
-	if !ok || !settingsreset.ValidOperationID(id) {
-		return "", errors.New("invalid managed reset restart handoff")
+	line, ok := strings.CutSuffix(string(data), "\n")
+	if !ok {
+		return none, errors.New("invalid managed reset restart handoff")
 	}
-	return id, nil
+	// "id" asks for a replacement that applies the staged receipt;
+	// "canceled id" for one that finds that operation durably canceled.
+	handoff := resetHandoff{id: line}
+	if rest, found := strings.CutPrefix(line, canceledHandoff+" "); found {
+		handoff = resetHandoff{id: rest, canceled: true}
+	}
+	if !settingsreset.ValidOperationID(handoff.id) {
+		return none, errors.New("invalid managed reset restart handoff")
+	}
+	return handoff, nil
 }
 
 type inheritedResetSupervisor struct {
@@ -174,5 +205,16 @@ func (s *inheritedResetSupervisor) releaseOperation(id string) error {
 		return errors.New("managed reset restart supervisor is unavailable")
 	}
 	_, err := io.WriteString(s.pipe, id+"\n")
+	return err
+}
+
+// releaseCanceled asks for exactly one replacement that expects this operation
+// to be a durably canceled receipt. Only a recovery host calls it, after the
+// canceled receipt was acknowledged and its own server has stopped.
+func (s *inheritedResetSupervisor) releaseCanceled(id string) error {
+	if !s.ready() || !settingsreset.ValidOperationID(id) {
+		return errors.New("managed reset restart supervisor is unavailable")
+	}
+	_, err := io.WriteString(s.pipe, canceledHandoff+" "+id+"\n")
 	return err
 }

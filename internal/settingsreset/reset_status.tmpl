@@ -34,16 +34,20 @@
     .id { font-size: .85rem; color: var(--muted); overflow-wrap: anywhere; }
     .blockers strong { display: block; }
     footer { margin-block-start: 1.5rem; padding-block-start: 1rem; border-block-start: 1px solid var(--line); }
+    .cancel { padding: 1rem 1.2rem; border: 1px solid var(--line); border-inline-start: .25rem solid var(--accent); }
+    .cancel .warning { color: var(--muted); }
+    .cancel [role="alert"] { font-weight: 700; }
     [hidden] { display: none !important; }
     button { display: inline-block; color: var(--button-ink); background: var(--accent); font: inherit; font-weight: 700; border: 0; border-radius: .35rem; padding: .65rem 1rem; cursor: pointer; }
     :focus-visible { outline: .2rem solid var(--accent); outline-offset: .25rem; }
+    h1:focus { outline: none; }
   </style>
 </head>
 <body>
   <main>
     <header class="eyebrow">Ori / Reset &amp; Recovery</header>
     <div class="status" role="status" aria-live="polite" aria-atomic="true">
-      <h1 id="reset-state-title">{{.Title}}</h1>
+      <h1 id="reset-state-title" tabindex="-1">{{.Title}}</h1>
       <p id="reset-state-message">{{.Message}}</p>
       {{if .ID}}<p class="id">Operation <code>{{.ID}}</code></p>{{end}}
     </div>
@@ -51,6 +55,14 @@
     <section id="reset-blockers" aria-labelledby="blockers-heading" {{if not .Operation.Blockers}}hidden{{end}}>
       <h2 id="blockers-heading">What needs attention</h2>
       <ul class="blockers" id="reset-blocker-list">{{range .Operation.Blockers}}<li><strong>{{.Message}}</strong>{{.Recovery}}</li>{{end}}</ul>
+    </section>
+    <section id="reset-cancel" class="cancel" aria-labelledby="cancel-heading" {{if not .Cancel}}hidden{{end}}{{with .Cancel}} data-revision="{{.Revision}}" data-token="{{.Token}}"{{end}}>
+      <h2 id="cancel-heading">Cancel this reset</h2>
+      <p id="reset-cancel-headline">{{with .Cancel}}{{.Headline}}{{end}}</p>
+      <p id="reset-cancel-detail">{{with .Cancel}}{{.Detail}}{{end}}</p>
+      <p id="reset-cancel-warning" class="warning">{{with .Cancel}}{{.Warning}}{{end}}</p>
+      <button id="reset-cancel-button" type="button">Cancel reset</button>
+      <p id="reset-cancel-feedback" role="alert" hidden></p>
     </section>
     <section id="reset-hq-archive" aria-labelledby="archive-heading" {{if not .Operation.HQArchive}}hidden{{end}}>
       <h2 id="archive-heading">Personal HQ archive</h2>
@@ -68,7 +80,7 @@
       </ul>
       <p>Keep this tab open. Do not delete <code>.ori-reset</code> or start another Ori process against this data folder while the old one is running.</p>
     </section>
-    <details id="reset-results" {{if not .Operation.Results}}hidden{{end}}>
+    <details id="reset-results" {{if or (not .Operation.Results) (eq .Operation.State "canceled")}}hidden{{end}}>
       <summary>Reviewed categories and checks</summary>
       <ul id="reset-result-list">
         {{range .Operation.Results}}

@@ -454,6 +454,56 @@ func TestCanceledReceiptKeepsTheExistingFailClosedRules(t *testing.T) {
 	})
 }
 
+// A managed restart after cancellation expects exactly that canceled operation;
+// a launcher for any other state or operation is refused before stores open.
+func TestRestartAfterCancelExpectsExactlyTheCanceledOperation(t *testing.T) {
+	t.Run("a blocked receipt is not a canceled one", func(t *testing.T) {
+		b := newBlockedIncident(t, true)
+		mustPreview(t, b.lease.Close())
+		if _, err := BeforeStoresAfterCancel(t.Context(), b.DataDir, b.OperationID); !errors.Is(err, ErrOperationNotFound) {
+			t.Fatalf("BeforeStoresAfterCancel on a blocked receipt = %v", err)
+		}
+	})
+	t.Run("another operation id", func(t *testing.T) {
+		b := newBlockedIncident(t, true)
+		_, err := b.coordinator().Cancel(t.Context(), b.request())
+		mustPreview(t, err)
+		mustPreview(t, b.lease.Close())
+		if _, err := BeforeStoresAfterCancel(t.Context(), b.DataDir, "another-operation-id"); !errors.Is(err, ErrOperationNotFound) {
+			t.Fatalf("BeforeStoresAfterCancel for another operation = %v", err)
+		}
+	})
+	t.Run("the staged-restart launcher does not accept a canceled receipt", func(t *testing.T) {
+		b := newBlockedIncident(t, true)
+		_, err := b.coordinator().Cancel(t.Context(), b.request())
+		mustPreview(t, err)
+		mustPreview(t, b.lease.Close())
+		if _, err := BeforeStoresForRestart(t.Context(), b.DataDir, b.OperationID); !errors.Is(err, ErrOperationNotFound) {
+			t.Fatalf("BeforeStoresForRestart on a canceled receipt = %v", err)
+		}
+	})
+	t.Run("the exact canceled operation opens the runtime and applies nothing", func(t *testing.T) {
+		b := newBlockedIncident(t, true)
+		_, err := b.coordinator().Cancel(t.Context(), b.request())
+		mustPreview(t, err)
+		mustPreview(t, b.lease.Close())
+		keyBefore, err := b.Fixture.Secrets().Get(vault.SecretKeyOpenAIAPIKey)
+		mustPreview(t, err)
+		lease, err := BeforeStoresAfterCancel(t.Context(), b.DataDir, b.OperationID)
+		if err != nil {
+			t.Fatalf("BeforeStoresAfterCancel = %v", err)
+		}
+		release, err := lease.EnterRuntime(b.DataDir, b.DataDir)
+		if err != nil {
+			t.Fatalf("the canceled receipt did not hand the runtime over: %v", err)
+		}
+		release()
+		if key, err := b.Fixture.Secrets().Get(vault.SecretKeyOpenAIAPIKey); err != nil || key != keyBefore {
+			t.Fatalf("the restart applied the old plan: %v", err)
+		}
+	})
+}
+
 func TestCanceledReceiptCannotBeRevivedByTheOldRequest(t *testing.T) {
 	b := newBlockedIncident(t, false)
 	_, err := b.coordinator().Cancel(t.Context(), b.request())

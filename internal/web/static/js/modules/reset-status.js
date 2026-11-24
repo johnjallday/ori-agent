@@ -50,9 +50,21 @@
     completed: [
       'Waiting for Ori to be ready',
       'The receipt says the reset finished, but this tab has not verified both the reset and normal app readiness.'
+    ],
+    // Canceled is not completed: the reset never ran, so nothing was reset,
+    // removed or restored. Ori still needs one full restart before it opens.
+    canceled: [
+      'Reset canceled',
+      'This reset was canceled before it ran. Nothing was reset, removed or restored. Ori needs one full restart before it opens normally.',
+      true
     ]
   };
   states.verifying = states.applying;
+  const cancelSection = byID('reset-cancel');
+  const cancelButton = byID('reset-cancel-button');
+  const cancelFeedback = byID('reset-cancel-feedback');
+  let cancelOffer = null;
+  let canceling = false;
   const categoryLabels = {
     settings: 'Settings & API keys',
     agents: 'Agents',
@@ -97,19 +109,31 @@
   }
 
   function report(op, ready) {
-    const managed = op.state === 'awaiting_restart' && op.restart?.managed === true;
+    const canceled = op.state === 'canceled';
+    const managed = (op.state === 'awaiting_restart' || canceled) && op.restart?.managed === true;
     const key = `${op.revision}:${op.state}:${ready}:${managed}`;
     // Don't reset expanded details, scroll position or announcements on every poll.
     if (rendered === key) return;
     rendered = key;
     const [heading, description, showRestart] = ready
-      ? ['Reset completed', 'Ori verified the reviewed changes and is ready.']
-      : managed
+      ? canceled
         ? [
-            'Restarting Ori',
-            'Ori saved the reset and will try to restart automatically. Keep this tab open. If it cannot reconnect, use the manual steps below.',
-            true
+            'Reset canceled',
+            'Ori is ready. The reset did not run, so nothing was reset, removed or restored.'
           ]
+        : ['Reset completed', 'Ori verified the reviewed changes and is ready.']
+      : managed
+        ? canceled
+          ? [
+              'Reopening Ori',
+              'The reset was canceled. Ori will try to reopen automatically. Keep this tab open. If it cannot reconnect, use the manual steps below.',
+              true
+            ]
+          : [
+              'Restarting Ori',
+              'Ori saved the reset and will try to restart automatically. Keep this tab open. If it cannot reconnect, use the manual steps below.',
+              true
+            ]
         : states[op.state];
     setText(title, heading);
     setText(message, description);
@@ -142,7 +166,96 @@
         return item;
       })
     );
-    results.hidden = op.results.length === 0;
+    // A canceled reset has no category results to report: every one is still
+    // pending because nothing ran, and listing them would read as work in progress.
+    results.hidden = op.results.length === 0 || canceled;
+  }
+
+  // The server offers cancellation only for a receipt it just found provably
+  // unapplied. Button visibility is a convenience, never permission: the POST is
+  // decided again on the server.
+  function renderCancel(offer, op) {
+    const show = offer?.available === true && op.state === 'blocked' && !canceling;
+    cancelOffer = show ? offer : null;
+    cancelSection.hidden = !show;
+    if (!show) return;
+    setText(byID('reset-cancel-headline'), offer.headline || '');
+    setText(byID('reset-cancel-detail'), offer.detail || '');
+    setText(byID('reset-cancel-warning'), offer.warning || '');
+  }
+
+  function showCancelFeedback(text) {
+    setText(cancelFeedback, text);
+    cancelFeedback.hidden = !text;
+  }
+
+  async function cancelReset() {
+    if (!cancelOffer || canceling) return;
+    canceling = true;
+    cancelButton.disabled = true;
+    showCancelFeedback('');
+    const offer = cancelOffer;
+    try {
+      const response = await fetch(`/api/reset/operations/${encodeURIComponent(id)}/cancel`, {
+        method: 'POST',
+        mode: 'same-origin',
+        redirect: 'error',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(35000),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-Ori-Reset-Token': offer.token
+        },
+        body: JSON.stringify({ revision: offer.revision })
+      });
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        // A non-JSON reply is not confirmation.
+      }
+      const op = payload?.operation;
+      if (
+        response.ok &&
+        payload?.canceled === true &&
+        op?.id === id &&
+        op.state === 'canceled' &&
+        Number.isSafeInteger(op.revision)
+      ) {
+        revision = Math.max(revision, op.revision);
+        cancelOffer = null;
+        cancelSection.hidden = true;
+        report(op, false);
+        title.focus?.();
+        return;
+      }
+      canceling = false;
+      cancelButton.disabled = false;
+      showCancelFeedback(
+        payload?.message ||
+          'Ori could not confirm that the reset was canceled. Nothing is assumed. Check this page again before doing anything else.'
+      );
+    } catch {
+      // A lost reply is not a lost write and not a success: only a later poll
+      // of the durable receipt can say which.
+      canceling = false;
+      cancelButton.disabled = false;
+      showCancelFeedback(
+        'Ori could not confirm that the reset was canceled. Nothing is assumed. Check status before doing anything else.'
+      );
+    }
+  }
+
+  function verifiedCanceled(payload, op) {
+    return (
+      payload.success === false &&
+      op.state === 'canceled' &&
+      !op.blockers?.length &&
+      op.cancellation?.from_revision === 3 &&
+      op.results.length > 0 &&
+      op.results.every(result => result.outcome === 'pending')
+    );
   }
 
   function verified(payload, op) {
@@ -202,11 +315,16 @@
         entry.hidden = true;
         return;
       }
-      ready = response.headers.get('X-Ori-Reset-Ready') === '1' && verified(payload, op);
+      const headerReady = response.headers.get('X-Ori-Reset-Ready') === '1';
+      // A canceled reset is ready only by its own verification, and never takes
+      // the completed-reset path: no first-run generation, no setup handoff.
+      const canceledReady = headerReady && verifiedCanceled(payload, op);
+      ready = canceledReady || (headerReady && verified(payload, op));
       revision = op.revision;
       report(op, ready);
+      renderCancel(payload.cancel, op);
       showConnection('');
-      const fresh = op.intent === 'start_fresh';
+      const fresh = op.intent === 'start_fresh' && !canceledReady;
       if (fresh && ready) window.OriResetGeneration?.apply(id);
       if (ready) setText(entry, fresh ? 'Continue setup' : 'Back to Ori');
       entry.hidden = !ready;
@@ -236,6 +354,9 @@
   entry.addEventListener('click', () => {
     entering = true;
     void poll();
+  });
+  cancelButton?.addEventListener('click', () => {
+    void cancelReset();
   });
   window.addEventListener('pagehide', () => {
     paused = true;

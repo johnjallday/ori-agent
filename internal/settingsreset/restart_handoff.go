@@ -27,3 +27,13 @@ func (h *RestartHandoff) AfterResponse(op Operation) {
 		h.once.Do(func() { h.enqueue(op.ID) })
 	}
 }
+
+// AfterCancel is the recovery host's counterpart: called only on a cancel
+// request's successful path, after the canceled receipt is durable and the reply
+// is written. It never runs for a request that failed, was refused or whose
+// write is uncertain, so a restart can never precede the persistence it relies on.
+func (h *RestartHandoff) AfterCancel(op Operation) {
+	if op.State == StateCanceled && ValidOperationID(op.ID) && h.Available() {
+		h.once.Do(func() { h.enqueue(op.ID) })
+	}
+}
