@@ -29,11 +29,11 @@
 // bridges that owner's presentation into the shared history.
 export const MODE = Object.freeze({ MAP: 'map', DETAILS: 'details', DASHBOARD: 'dashboard' });
 const VALID_MODES = new Set([MODE.MAP, MODE.DETAILS, MODE.DASHBOARD]);
-// `settings` opens the Manager Settings surface. It is here because the Plans
-// page links to it: a workspace with structured planning off needs to say
-// where to turn it on, and a link that gets sanitized away lands the user on
-// the workspace with a confusing "some link details were out of date" toast
-// and no settings in sight.
+// `settings` opens the Manager Settings surface. It is here because pages link
+// to it (setup receipts, the Home's knowledge rows, the folder capability
+// actions): a link that gets sanitized away lands the user on the workspace
+// with a confusing "some link details were out of date" toast and no settings
+// in sight.
 const VALID_PANELS = new Set(['tasks', 'backlog', 'settings']);
 // Panels a capability console owns on the same page: File Janitor's console
 // (`?panel=file-janitor`, its History deep link from Today) and Calendar Ops'

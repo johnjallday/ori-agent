@@ -86,10 +86,6 @@ type Handler struct {
 	workspaceProtection    workspaceProtectionReader
 	fileCuratorWelcome     fileCuratorWelcomeReader
 	folderWelcome          folderWelcomeReader
-	// planOpener starts a durable Plan for chat requests that need one. It is
-	// deliberately one method wide: chat may open a plan and link to it, never
-	// edit, review, or approve one (FR-19, FR-149).
-	planOpener PlanOpener
 
 	// Project-template tool dependencies (optional; see SetProjectTemplateDeps)
 	templatesRootResolver   func() string
@@ -249,13 +245,6 @@ func (h *Handler) SetProjectTemplateDeps(templatesRootResolver func() string, ev
 func (h *Handler) SetProjectTemplateCatalog(resolve func(string) (projecttemplates.Template, error), list func() ([]projecttemplates.Template, error)) {
 	h.projectTemplateResolver = resolve
 	h.projectTemplateCatalog = list
-}
-
-// SetPlanOpener enables chat to start a durable Plan for requests that need
-// one. Without it, chat still explains that a plan is required; it just cannot
-// create it on the user's behalf.
-func (h *Handler) SetPlanOpener(opener PlanOpener) {
-	h.planOpener = opener
 }
 
 // publishMessageSent emits a message.sent event when the user sends a chat
@@ -1127,32 +1116,23 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		classification, planDecision := h.classifyChatRequest(
 			ctx, q, routeDecision, req.MultiAgentMode, req.MultiAgentThreshold)
 
-		// Plan work never gets an inline approval. Chat points at the canonical
-		// Plan surface instead, where the version, the diff, and the exact
-		// effects of approving are all visible (FR-19, FR-149).
+		// Multi-step work never gets an inline approval, and chat no longer
+		// starts a structured Plan for it either. The reply is terminal: it says
+		// nothing was started and names the manual next step (Give work). It
+		// MUST stay a `return`. Falling through would reach the utility-direct
+		// path and the planner orchestration below, which execute work
+		// immediately (FR-19, FR-149).
 		if classification.Route == RoutePlan {
 			payload := map[string]any{
-				"response":           planRequiredMessage(classification),
+				"response":           manualNextStepMessage(classification),
 				"requires_approval":  false,
-				"requires_plan":      true,
-				"plan_reason":        classification.Reason,
-				"plan_triggers":      classification.Triggers,
+				"manual_next_step":   manualNextStepGiveWork,
+				"work_triggers":      classification.Triggers,
 				"plan_before_action": true,
-			}
-			// Opening the Plan here saves the user a step, but a failure is not
-			// fatal: the message already says a plan is needed, and reporting
-			// "I could not create it" beats swallowing the reason.
-			if planID, workspaceID := h.openPlanForChat(ctx, normalizedRouteContext, q); planID != "" {
-				payload["plan_id"] = planID
-				if h.workspaceStore != nil {
-					if ws, err := h.workspaceStore.Get(workspaceID); err == nil && ws != nil && strings.TrimSpace(ws.FolderSlug) != "" {
-						payload["plan_url"] = planLink(ws.FolderSlug, planID)
-					}
-				}
 			}
 			writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(payload, chatRouteMetadata{
 				Mode:   string(routeDecision.Mode),
-				Reason: "this request needs a durable plan",
+				Reason: "this request is several steps and nothing was started",
 			}), planDecision))
 			return
 		}
@@ -1526,12 +1506,17 @@ func (h *Handler) maybeRunPlannerOrchestration(ctx context.Context, w http.Respo
 				result, err := h.orchestrator.ExecutePlannedTask(ctx, current, q, plan, decision, 10*time.Minute)
 				if err != nil {
 					logger.Error("Orchestration failed", logger.Fields{"error": err})
+				} else if result.Status == orchestration.StatusNeedsManualWork {
+					// The work needs an agent that does not exist. Nothing was
+					// started, queued or proposed; the reply is terminal advice, the
+					// same one a plan-required request gets, and never a receipt for
+					// work that did not run.
+					logger.Info("Planned work needs a new agent; nothing started", logger.Fields{})
+					writeNeedsNewAgentReply(w, plannerDecision)
+					return plannerDecision, true
 				} else {
 					logger.Info("Orchestration completed successfully", logger.Fields{})
 					responseText := result.FinalOutput
-					if responseText == "" && result.Status == "pending_approval" {
-						responseText = "Dynamic agent approval required to continue."
-					}
 					if h.utilityTelemetry != nil {
 						h.utilityTelemetry.RecordDelegationEvent(routeModeSpecialistFlow, "planner selected multi-agent execution", current)
 					}
@@ -1547,14 +1532,12 @@ func (h *Handler) maybeRunPlannerOrchestration(ctx context.Context, w http.Respo
 						result.Error,
 					)
 					orihttp.WriteJSON(w, attachActionReceipts(attachRouteMetadata(map[string]any{
-						"response":               responseText,
-						"orchestrated":           true,
-						"workspace_id":           result.WorkspaceID,
-						"status":                 result.Status,
-						"pending_plan_id":        result.PendingPlanID,
-						"planner_decision":       result.PlannerDecision,
-						"planner_plan":           plan,
-						"dynamic_agent_requests": result.DynamicAgentRequests,
+						"response":         responseText,
+						"orchestrated":     true,
+						"workspace_id":     result.WorkspaceID,
+						"status":           result.Status,
+						"planner_decision": result.PlannerDecision,
+						"planner_plan":     plan,
 					}, chatRouteMetadata{
 						Mode:   routeModeSpecialistFlow,
 						Reason: "planner selected multi-agent execution",
@@ -1575,6 +1558,22 @@ func (h *Handler) maybeRunPlannerOrchestration(ctx context.Context, w http.Respo
 		plannerDecision = &decision
 	}
 	return plannerDecision, false
+}
+
+// writeNeedsNewAgentReply answers planned work that needs an agent which does
+// not exist: terminal advice naming Give work, with no receipt, no approval and
+// nothing queued. It never reports the work as run.
+func writeNeedsNewAgentReply(w http.ResponseWriter, planner *types.PlannerDecision) {
+	writeJSONResponse(w, attachPlannerDecision(attachRouteMetadata(map[string]any{
+		"response": manualNextStepMessage(PlanningClassification{
+			Reason: "This is more than a single action because it needs an agent that doesn't exist yet.",
+		}),
+		"requires_approval": false,
+		"manual_next_step":  manualNextStepGiveWork,
+	}, chatRouteMetadata{
+		Mode:   routeModeAssistantChat,
+		Reason: "this request needs a new agent and nothing was started",
+	}), planner))
 }
 
 // buildChatToolList aggregates the tool definitions offered to the model for

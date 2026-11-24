@@ -17,8 +17,8 @@
 //   assess     after the server was restarted: a run the server lost did not
 //              finish and says so; Try again (or Start assessment, when it was
 //              never started) runs the same task with the real model; its
-//              result is followed into the workspace and its suggestion onto
-//              the Plans page, where nothing is created
+//              result is followed into the workspace and its suggestion into
+//              Give work, where nothing is created until it is saved
 //   repeat     the same folder shown again opens that workspace, and a sibling
 //              worktree is a different project
 //   add-folder on a fresh seeded sandbox of its own: a checkout is attached
@@ -615,7 +615,7 @@ async function resumePhase(untouched) {
   for (const wanted of [
     new RegExp(`${projectName} \\(created\\)`),
     /linked where it is, read-only/,
-    /Code Project \(planning first; approved work waits for you/,
+    /Code Project \(work waits for you to start it/,
     /Development Assistant \(development assistant, added\)/,
     // Task state is separate from setup; do not guess whether the look finished.
     /Assess this project and suggest a first task/
@@ -874,7 +874,7 @@ async function runAssessment(before, { writes, waiting, left, retry, tasksBefore
 }
 
 // readAssessment follows a finished assessment from Home to its report, to the
-// workspace's banner, and to the Plans page. It only reads.
+// workspace's banner, and to its suggested ticket in Give work. It only reads.
 async function readAssessment(before, { writes, done, tasksBefore }) {
   // 19. The result on Home: one line of it, the suggestion, and the two links.
   await page.waitForFunction(
@@ -892,7 +892,7 @@ async function readAssessment(before, { writes, done, tasksBefore }) {
   expect(Boolean(done.next_request), 'the assessment suggested no next task');
   expect(
     finished.buttons.join(',') ===
-      `Open the assessment,Plan the suggested task,Open ${projectName}`,
+      `Open the assessment,Review suggested ticket,Open ${projectName}`,
     `actions on a finished assessment: ${finished.buttons}`
   );
   expect(
@@ -977,41 +977,43 @@ async function readAssessment(before, { writes, done, tasksBefore }) {
     `the banner's suggestion differs from the card's: ${bannerSays.text}`
   );
   expect(
-    bannerSays.controls.join(',') === 'Open the assessment,Plan the suggested task,Dismiss',
+    bannerSays.controls.join(',') === 'Open the assessment,Review suggested ticket,Dismiss',
     `banner controls: ${bannerSays.controls}`
   );
   expect(bannerSays.report === reportPage.url, `the banner's report link: ${bannerSays.report}`);
   await shot('37-workspace-banner');
   await phoneShot('37-workspace-banner', banner);
 
-  // 22. Plan the suggested task: the Plans page with the suggestion in its box.
-  //     Nothing is created by arriving, and nothing is written into the project.
-  await banner.getByRole('link', { name: 'Plan the suggested task', exact: true }).click();
-  const box = page.locator('#plan-create-request');
-  await box.waitFor({ state: 'visible', timeout: 30000 });
+  // 22. Review suggested ticket: the workspace opens Give work with the
+  //     suggestion typed in, unsent and unassigned. Nothing is created by
+  //     arriving, and nothing is written into the project.
+  await banner.getByRole('link', { name: 'Review suggested ticket', exact: true }).click();
+  const dialog = page.locator('dialog.give-work');
+  await dialog.waitFor({ state: 'visible', timeout: 30000 });
   await page.waitForFunction(
-    () => (document.getElementById('plan-create-request')?.value || '').length > 0,
+    () => (document.getElementById('giveWorkWhat')?.value || '').length > 0,
     null,
     { timeout: 30000 }
   );
   const planning = {
     url: new URL(page.url()).pathname + new URL(page.url()).search,
-    box: await box.inputValue(),
-    status: await text('#plan-status')
+    what: await dialog.locator('#giveWorkWhat').inputValue(),
+    details: await dialog.locator('#giveWorkDetails').inputValue(),
+    startNow: await dialog.locator('input[name="startNow"]').isChecked()
   };
-  console.log('plans page:', JSON.stringify(planning));
-  expect(planning.box.startsWith(done.next_request), `the box: ${planning.box}`);
+  console.log('give work:', JSON.stringify(planning));
   expect(
-    /Suggested by the first assessment of/.test(planning.box),
-    `the box does not say where the request came from: ${planning.box}`
+    done.next_request.startsWith(planning.what.replace(/…$/, '')),
+    `the title: ${planning.what}`
   );
   expect(
-    /Nothing is created until you do/.test(planning.status),
-    `plans status: ${planning.status}`
+    /Suggested by the first assessment of/.test(planning.details),
+    `Details does not say where the request came from: ${planning.details}`
   );
+  expect(planning.startNow === false, 'Start now was on');
   expect(!/next=assessment/.test(planning.url), `the address still asks for it: ${planning.url}`);
   const plans = await api('GET', `/api/workspaces/${encodeURIComponent(before.workspace)}/plans`);
-  expect((plans.plans || []).length === 0, 'arriving on the Plans page created a plan');
+  expect((plans.plans || []).length === 0, 'arriving created a plan');
   // Opening a workspace page makes its own open-time requests (activating the
   // workspace on this computer, and asking whether a blueprint setup task is
   // waiting). None of them may run a task, send a message, or create a plan or
@@ -1024,8 +1026,10 @@ async function readAssessment(before, { writes, done, tasksBefore }) {
     )
   );
   expect(acted.length === 0, `following the suggestion sent: ${acted}`);
-  await shot('38-suggestion-on-plans-page');
-  await phoneShot('38-suggestion-on-plans-page', page.locator('#plan-create-panel'));
+  await shot('38-suggestion-in-give-work');
+  await phoneShot('38-suggestion-in-give-work', dialog);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await dialog.waitFor({ state: 'detached', timeout: 10000 });
 
   expect(
     JSON.stringify(await taskIDs(before.workspace)) === JSON.stringify(tasksBefore),

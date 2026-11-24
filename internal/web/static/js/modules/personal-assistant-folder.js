@@ -12,6 +12,7 @@
 import './folder-plan-lines.js';
 import { recordFolderWorkspace } from './hq-guided-attempt.js';
 import { folderPickCopy } from './folder-pick-copy.js';
+import { isSuggestedTicketRoute } from './workspace-suggested-ticket.js';
 import { mountAssistantExplore } from './assistant-explore-folder.js';
 import './folder-setup-visual.js';
 import { mountPlacementPanel } from './assisted-workspace-placement.js';
@@ -2684,17 +2685,17 @@ function assessmentLookView(look, { state, base, open, busy, said, local }) {
       const link = ASSESSMENT_REPORT_ROUTE.test(report)
         ? [{ id: 'report', label: 'Open the assessment', style: 'primary', href: report }]
         : [];
-      // The one next request the assessment suggested. The link opens the
-      // workspace's Plans page with it in the "Start a plan" box, unsubmitted,
-      // for the user to edit or discard.
+      // The one next request the assessment suggested. The link opens this
+      // workspace with Give work already holding it, unsent and unassigned, for
+      // the user to edit or discard. Only this workspace's own link is accepted.
       const nextRequest = String(look.next_request || '').trim();
       const nextRoute = local(look.next_route);
       const next =
-        nextRequest && ASSESSMENT_NEXT_ROUTE.test(nextRoute)
+        nextRequest && isSuggestedTicketRoute(nextRoute, local(look.workspace_route))
           ? [
               {
                 id: 'next',
-                label: 'Plan the suggested ticket',
+                label: 'Review suggested ticket',
                 style: 'outline',
                 href: nextRoute
               }
@@ -2739,10 +2740,6 @@ function assessmentLookView(look, { state, base, open, busy, said, local }) {
   }
 }
 
-// The link that opens a workspace's Plans page with the assessment's
-// suggestion placed, unsubmitted, in its "Start a plan" box. Nothing else is
-// accepted as that link.
-const ASSESSMENT_NEXT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/plans\?next=assessment$/;
 // The page of the assessment's own task in its workspace, and nothing else.
 const ASSESSMENT_REPORT_ROUTE = /^\/workspaces\/[a-z0-9][a-z0-9-]*\/task\/[A-Za-z0-9_-]+$/;
 

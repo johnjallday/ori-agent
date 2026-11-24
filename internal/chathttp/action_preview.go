@@ -1,10 +1,8 @@
 package chathttp
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -164,37 +162,23 @@ func formatActionPreviewMessage(preview *ActionPreview) string {
 	return strings.TrimSpace(sb.String())
 }
 
-// PlanOpener creates a durable Plan on chat's behalf and returns its ID.
-//
-// The interface is one method wide on purpose. Chat may START a plan and link
-// to it; editing, review, comparison, and approval live on Plan Detail and
-// nowhere else. Handing chat the whole plan service would make that boundary a
-// convention rather than a fact about what it can call (FR-19, FR-149).
-type PlanOpener interface {
-	OpenPlan(ctx context.Context, workspaceID, request, actor string) (string, error)
-}
+// manualNextStepGiveWork names the one manual next step chat points at for work
+// it will not start: the workspace's Give work dialog, where the person writes
+// the first ticket themselves. It is a value for clients to read, not a route.
+const manualNextStepGiveWork = "give_work"
 
-// planLink returns the canonical Plan Detail URL.
+// manualNextStepMessage is what chat says for a request that is several steps.
 //
-// One canonical route, built in one place. A second link shape somewhere else
-// is how a "plan" ends up rendered by two different surfaces with two different
-// ideas of what approving means (FR-145, FR-148).
-func planLink(workspaceSlug, planID string) string {
-	if workspaceSlug == "" || planID == "" {
-		return ""
-	}
-	return fmt.Sprintf("/workspaces/%s/plans/%s", url.PathEscape(workspaceSlug), url.PathEscape(planID))
-}
-
-// planRequiredMessage is what chat says when a request is Plan work.
-//
-// It names the reason and points at the canonical Plan surface rather than
-// offering to do the work here, because full review, editing, and approval live
-// on Plan Detail and nowhere else (FR-149).
-func planRequiredMessage(classification PlanningClassification) string {
+// Chat has no Plan to open any more and starts nothing for this work: not a
+// ticket, not an agent, not a run, and not an inline approval. The reply says so
+// plainly, gives the reason it is more than one action, and names the manual
+// next step. It never says "plan": there is nothing by that name to open.
+func manualNextStepMessage(classification PlanningClassification) string {
 	reason := strings.TrimSpace(classification.Reason)
 	if reason == "" {
-		reason = "This work needs a plan."
+		reason = "This is more than a single action."
 	}
-	return reason + "\n\nOpen the plan to review the steps, edit them, and approve."
+	return reason + " I haven't started anything.\n\n" +
+		"To track it as work, open the workspace and use **Give work** to write the first ticket. " +
+		"If you'd like me to do one specific step now, tell me which."
 }

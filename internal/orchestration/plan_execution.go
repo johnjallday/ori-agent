@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/agentcomm"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -19,11 +18,36 @@ const (
 	planPollInterval       = 500 * time.Millisecond
 )
 
+// StatusNeedsManualWork is the result of planned work that needs an agent which
+// does not exist yet. Nothing was started for it: no workspace, no Plan, no
+// queued agent request and no run. The caller tells the person to give the
+// work as a ticket themselves.
+const StatusNeedsManualWork = "needs_manual_work"
+
 // ExecutePlannedTask runs a planner output through multi-agent execution.
+//
+// Work that needs an agent which does not exist yet is not run and not
+// proposed: it returns StatusNeedsManualWork before any side effect. It used to
+// open a durable Plan and queue dynamic-agent requests for approval, which put
+// a structured Plan and an agent-creation prompt in front of someone who had
+// only asked a question. The decision is made first, from facts, so no later
+// failure (a missing store, a refused write) can leave a half-started proposal
+// behind.
 func (o *Orchestrator) ExecutePlannedTask(ctx context.Context, mainAgent, request string, plan *types.PlannerOutput, decision types.PlannerDecision, maxDuration time.Duration) (*CollaborativeResult, error) {
 	startTime := time.Now()
 	if maxDuration <= 0 {
 		maxDuration = defaultPlanTaskTimeout
+	}
+
+	assignments, dynamicAgents := o.resolvePlanAssignments(plan)
+	if len(dynamicAgents) > 0 {
+		logger.Info("Planned work needs agents that do not exist; starting nothing", logger.Fields{"count": len(dynamicAgents)})
+		return &CollaborativeResult{
+			SubResults:      make(map[string]any),
+			Duration:        time.Since(startTime),
+			Status:          StatusNeedsManualWork,
+			PlannerDecision: &decision,
+		}, nil
 	}
 
 	workspaceName := fmt.Sprintf("plan-%s-%d", mainAgent, time.Now().Unix())
@@ -43,78 +67,6 @@ func (o *Orchestrator) ExecutePlannedTask(ctx context.Context, mainAgent, reques
 		"mode":             decision.Mode,
 		"multi_agent":      decision.MultiAgent,
 	})
-
-	assignments, dynamicAgents := o.resolvePlanAssignments(plan)
-	if len(dynamicAgents) > 0 {
-		logger.Info("Dynamic agents required for plan", logger.Fields{"count": len(dynamicAgents)})
-
-		// Work that needs an agent which does not exist becomes a durable Plan,
-		// not an ephemeral stash on the workspace.
-		//
-		// The old path saved a types.PendingPlan and let the dynamic-agent
-		// approval resume it: one click created an agent AND ran a multi-agent
-		// workflow, with no version, no content hash, and nothing an audit
-		// could read afterwards. A durable Plan carries the proposed work as
-		// reviewable content, and its own approval is the only thing that can
-		// turn it into Tasks (FR-59, FR-60, FR-149).
-		planID, planErr := o.openDurablePlan(ctx, ws.ID, request, plan)
-
-		pending := &types.PendingPlan{
-			ID:        uuid.New().String(),
-			Request:   request,
-			Plan:      *plan,
-			Decision:  decision,
-			CreatedAt: time.Now(),
-		}
-		// The stash is retained ONLY as the record of which agents this
-		// proposal wanted; nothing resumes from it any more.
-		ws.SetPendingPlan(pending)
-
-		requests := make([]types.DynamicAgentRequest, 0, len(dynamicAgents))
-		for _, spec := range dynamicAgents {
-			req := types.DynamicAgentRequest{
-				WorkspaceID:  ws.ID,
-				PlanID:       pending.ID,
-				Name:         spec.Name,
-				Role:         spec.Role,
-				Capabilities: spec.Capabilities,
-				Description:  spec.Description,
-				Rationale:    spec.Rationale,
-			}
-			requests = append(requests, ws.AddDynamicAgentRequest(req))
-		}
-
-		if err := o.workspaceStore.Save(ws); err != nil {
-			return nil, fmt.Errorf("failed to save pending plan: %w", err)
-		}
-		o.publishEvent(workspace.EventDynamicAgentRequested, ws.ID, map[string]any{
-			"requests": requests,
-			"plan_id":  pending.ID,
-		})
-
-		result := &CollaborativeResult{
-			WorkspaceID:          ws.ID,
-			FinalOutput:          "",
-			SubResults:           make(map[string]any),
-			Duration:             time.Since(startTime),
-			Status:               "pending_approval",
-			PendingPlanID:        pending.ID,
-			PlannerDecision:      &decision,
-			DynamicAgentRequests: requests,
-		}
-		if planErr != nil {
-			// A plan that could not be created is reported, not swallowed:
-			// without it there is nothing for the user to approve, and silence
-			// would look like work that is merely waiting.
-			logger.Warn("Could not open a durable plan for proposed work", logger.Fields{
-				"workspace_id": ws.ID,
-				"error":        planErr,
-			})
-		}
-		result.PlanID = planID
-
-		return result, nil
-	}
 
 	if err := o.ensureWorkspaceAgents(ws, mainAgent, assignments); err != nil {
 		return nil, err
@@ -192,41 +144,6 @@ func (o *Orchestrator) ResumePendingPlan(ctx context.Context, workspaceID string
 	result.PlannerDecision = &pending.Decision
 
 	return result, nil
-}
-
-// PlanDrafter opens a durable Plan carrying proposed work.
-//
-// The orchestrator holds this rather than the plan service for the same reason
-// chat does: it may propose work, never approve it. One method wide means the
-// boundary is a fact about what this package can call, not a rule somebody has
-// to remember (FR-59, FR-149).
-type PlanDrafter interface {
-	// DraftPlan creates a Plan from planner output and returns its ID.
-	DraftPlan(ctx context.Context, workspaceID, request string, plan *types.PlannerOutput) (string, error)
-}
-
-// SetPlanDrafter attaches durable Plan creation.
-func (o *Orchestrator) SetPlanDrafter(drafter PlanDrafter) {
-	o.planDrafter = drafter
-}
-
-// HasPlanDrafter reports whether durable Plan creation is wired. Build wiring
-// tests assert it, because the failure mode is silent: proposed work still
-// appears, it just has no versioned record behind it.
-func (o *Orchestrator) HasPlanDrafter() bool {
-	return o != nil && o.planDrafter != nil
-}
-
-// openDurablePlan creates the Plan a user will review and approve.
-//
-// A failure here is returned rather than fatal: the proposal still exists as
-// dynamic-agent requests, and reporting "no plan was created" beats failing the
-// whole call for something the user can retry.
-func (o *Orchestrator) openDurablePlan(ctx context.Context, workspaceID, request string, plan *types.PlannerOutput) (string, error) {
-	if o == nil || o.planDrafter == nil {
-		return "", fmt.Errorf("durable planning is not configured")
-	}
-	return o.planDrafter.DraftPlan(ctx, workspaceID, request, plan)
 }
 
 func primaryAgent(ws *workspace.Workspace) string {

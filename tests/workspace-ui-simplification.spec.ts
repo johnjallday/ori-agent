@@ -121,39 +121,26 @@ test('shell: shared capture preserves its draft through refresh and returns focu
   }
 });
 
-test('shell: secondary links remain native and disclosure Escape restores focus across refresh', async ({
-  page,
-  context
+test('shell: the header has no Plans link and no More views menu, and keeps its own views', async ({
+  page
 }) => {
   const ws = await workspace(page);
   await open(page, ws.folder_slug);
-  const summary = page.locator('[data-cmd-disclosure="views"] > summary');
-  await summary.focus();
-  await page.keyboard.press('Enter');
-  await expect(page.getByRole('link', { name: 'Plans', exact: true })).toBeVisible();
-  await capture(page, 'secondary-navigation');
+  await expect(page.locator('[data-cmd-disclosure="views"]')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Plans', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'More views', exact: true })).toHaveCount(0);
+  for (const mode of ['details', 'map', 'tickets'])
+    await expect(page.locator(`[data-cmd-view-mode="${mode}"]`)).toBeVisible();
+  await capture(page, 'navigation-without-more-views');
   await refresh(page);
-  await expect(summary).toBeFocused();
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('link', { name: 'Plans', exact: true })).not.toBeVisible();
-  await expect(summary).toBeFocused();
-  await summary.click();
-  const plans = page.getByRole('link', { name: 'Plans', exact: true });
-  await expect(plans).toHaveAttribute('href', `/workspaces/${ws.folder_slug}/plans`);
-  const [tab] = await Promise.all([
-    context.waitForEvent('page'),
-    plans.click({ modifiers: ['ControlOrMeta'] })
-  ]);
-  await tab.waitForURL(`**/workspaces/${ws.folder_slug}/plans`);
-  await tab.close();
+  await expect(page.locator('[data-cmd-disclosure="views"]')).toHaveCount(0);
   expect(new URL(page.url()).pathname).toBe(`/workspaces/${ws.folder_slug}`);
 });
 
 for (const variant of ['leaf', 'group', 'hq']) {
   for (const width of [390, 1440]) {
-    test(`menu stacking: ${variant} at ${width}px keeps More views above content, below dialogs`, async ({
-      page,
-      context
+    test(`header menus: ${variant} at ${width}px has no More views and Settings still opens over content`, async ({
+      page
     }) => {
       await page.setViewportSize({ width, height: 900 });
       await page.addInitScript(
@@ -171,73 +158,29 @@ for (const variant of ['leaf', 'group', 'hq']) {
         });
       }
       await open(page, ws.folder_slug);
-      const disclosure = page.locator('[data-cmd-disclosure="views"]');
-      const summary = disclosure.locator('summary');
-      const assertHitTargets = async () => {
-        for (const name of ['Plans']) {
-          await expect
-            .poll(
-              () =>
-                page.evaluate(label => {
-                  // Query and hit-test the live DOM in one turn: background
-                  // status reads may replace chrome between locator actions.
-                  const menu = document.querySelector<HTMLDetailsElement>(
-                    '[data-cmd-disclosure="views"]'
-                  );
-                  const node = Array.from(menu?.querySelectorAll('a') || []).find(
-                    link => link.textContent?.trim() === label
-                  );
-                  if (!menu?.open || !node) return false;
-                  const box = node.getBoundingClientRect();
-                  return [0.25, 0.75].every(x =>
-                    [0.25, 0.75].every(y => {
-                      const top = document.elementFromPoint(
-                        box.left + box.width * x,
-                        box.top + box.height * y
-                      );
-                      return top === node || node.contains(top);
-                    })
-                  );
-                }, name),
-              {
-                message: `${name} must be the real pointer target, not merely visible behind page furniture`
-              }
-            )
-            .toBe(true);
-        }
+      // More views had one item, Plans, and is gone with it. No view, motion
+      // preference or refresh brings a menu or a Plans/Canvas link back.
+      const assertNoMoreViews = async () => {
+        await expect(page.locator('[data-cmd-disclosure="views"]')).toHaveCount(0);
+        await expect(page.getByRole('link', { name: 'Plans', exact: true })).toHaveCount(0);
+        await expect(page.getByRole('link', { name: 'Canvas', exact: true })).toHaveCount(0);
       };
       for (const motion of ['no-preference', 'reduce'] as const) {
         await page.emulateMedia({ reducedMotion: motion });
         for (const mode of ['details', 'tickets', 'map']) {
           await page.locator(`[data-cmd-view-mode="${mode}"]`).click();
-          await summary.click();
-          await assertHitTargets();
+          await assertNoMoreViews();
           await refresh(page);
-          await assertHitTargets();
+          await assertNoMoreViews();
           if (motion === 'no-preference' && mode === 'map')
-            await capture(page, `journey-more-views-${variant}-${width}`);
-          await summary.press('Escape');
+            await capture(page, `journey-no-more-views-${variant}-${width}`);
         }
       }
       if (variant === 'hq') {
         await page.locator('[data-cmd-map-arrangement="free"]').click();
-        await summary.click();
-        await assertHitTargets();
-        await summary.press('Escape');
+        await assertNoMoreViews();
       }
-      await summary.click();
-      // The workspace canvas is retired: More views lists no Canvas.
-      await expect(disclosure.getByRole('link', { name: 'Canvas', exact: true })).toHaveCount(0);
-      // What is left is a native link: it opens in a new tab like any link.
-      const [plans] = await Promise.all([
-        context.waitForEvent('page'),
-        disclosure
-          .getByRole('link', { name: 'Plans', exact: true })
-          .click({ modifiers: ['ControlOrMeta'] })
-      ]);
-      await plans.waitForURL(`**/workspaces/${ws.folder_slug}/plans`);
-      await plans.close();
-      // Raising a header menu must not let it paint over a real modal owner.
+      // Settings is the header's remaining control and still opens as a dialog.
       await page.locator('[data-cmd-settings]').click();
       const panel = page.getByRole('dialog', { name: 'Workspace settings', exact: true });
       await expect(panel).toBeVisible();
@@ -1153,21 +1096,8 @@ for (const width of [320, 390, 768, 1440]) {
       await capture(page, `map-${width}`);
     }
     await expect(page.locator('[data-cmd-settings]')).toBeVisible();
-    for (const key of ['views']) {
-      const disclosure = page.locator(`[data-cmd-disclosure="${key}"]`);
-      await disclosure.locator('summary').click();
-      const menu = disclosure.locator('.ws-cmd-disclosure-body');
-      await expect(menu).toBeVisible();
-      await expect
-        .poll(() =>
-          menu.evaluate(node => {
-            const rect = node.getBoundingClientRect();
-            return rect.left >= 0 && rect.right <= innerWidth;
-          })
-        )
-        .toBe(true);
-      await disclosure.locator('summary').press('Escape');
-    }
+    // No header menu remains to overflow the viewport.
+    await expect(page.locator('[data-cmd-disclosure="views"]')).toHaveCount(0);
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
     ).toBeLessThanOrEqual(0);

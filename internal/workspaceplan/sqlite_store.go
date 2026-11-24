@@ -146,6 +146,20 @@ func scanPlanRow(row rowScanner) (*Plan, error) {
 	return &plan, nil
 }
 
+// CountPlans counts a workspace's Plans in one aggregate query. It selects no
+// column of a Plan, so a large draft costs nothing, and it never archives.
+func (s *SQLiteStore) CountPlans(ctx context.Context, workspaceID string) (PlanCounts, error) {
+	var counts PlanCounts
+	err := s.db.QueryRowContext(ctx, `SELECT
+		COALESCE(SUM(CASE WHEN archived_at IS NULL THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN archived_at IS NOT NULL THEN 1 ELSE 0 END), 0)
+		FROM workspace_plans WHERE workspace_id = ?`, workspaceID).Scan(&counts.Active, &counts.History)
+	if err != nil {
+		return PlanCounts{}, fmt.Errorf("count workspace plans: %w", err)
+	}
+	return counts, nil
+}
+
 func (s *SQLiteStore) ListPlans(ctx context.Context, workspaceID string, filter ListFilter) ([]*Plan, error) {
 	filter = filter.Normalized()
 

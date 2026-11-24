@@ -238,7 +238,7 @@ func TestSoftwareAssessment_OneIsolatedCallFromHostCollectedEvidence(t *testing.
 	}
 	// The card reads what was found, not the recipe's first heading, and the
 	// report opens on the task's own page, where the result is shown.
-	if done["next_request"] != "Add a health check endpoint to the service." || done["next_route"] != done["workspace_route"].(string)+"/plans?next=assessment" ||
+	if done["next_request"] != "Add a health check endpoint to the service." || done["next_route"] != done["workspace_route"].(string)+"?next=assessment" ||
 		!strings.HasPrefix(done["result_excerpt"].(string), "Widget is a small service") ||
 		done["report_route"] != done["workspace_route"].(string)+"/task/"+task.ID {
 		t.Fatalf("finished view = %v", done)

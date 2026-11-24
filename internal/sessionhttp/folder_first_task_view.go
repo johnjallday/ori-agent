@@ -141,10 +141,11 @@ func (h *Handler) describeRecipeFirstTask(ctx context.Context, ws *agentworkspac
 		view.ResultExcerpt = personalassistant.FolderFirstTaskRecipeExcerpt(task.Result)
 		view.ReportRoute = view.WorkspaceRoute + "/task/" + url.PathEscape(task.ID)
 		if next := softwareassessment.NextTask(task.Result); next != "" {
-			// The workspace's Plans page is where a request is drafted into a plan,
-			// and where nothing is created until the user presses Create plan.
+			// The workspace opens Give work with this suggestion typed in and nothing saved;
+			// a ticket exists only if the user presses Give work. The retired
+			// /plans?next=assessment address still arrives at the same place.
 			view.NextRequest = next
-			view.NextRoute = view.WorkspaceRoute + "/plans?next=assessment"
+			view.NextRoute = view.WorkspaceRoute + "?next=assessment"
 		}
 	}
 }

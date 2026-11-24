@@ -143,6 +143,12 @@ import {
   buildWorkspaceURL
 } from './workspace-url-state.js';
 import { readRailSection, resolveRailSection, writeRailSection } from './workspace-command-rail.js';
+import {
+  ARRIVAL_MESSAGES as SUGGESTED_TICKET_MESSAGES,
+  offerSuggestedTicket,
+  searchWithoutSuggestedTicketArrival,
+  suggestedTicketArrivalFromSearch
+} from './workspace-suggested-ticket.js';
 import { HQ_LABELS, portabilityWord } from './hq-labels.js';
 import { HQFirstVisitCard } from './hq-first-visit-card.js';
 import { hqGreetingView as buildHQGreetingView } from './hq-first-visit.js';
@@ -369,6 +375,24 @@ export class WorkspaceCommandView {
         window.history.replaceState(window.history.state, '', url.pathname + search + url.hash);
       } catch {
         /* the sheet still opens once; only the address keeps the parameters */
+      }
+    }
+    // A finished first assessment's suggested ticket (`?next=assessment`) opens
+    // Give work once, with the suggestion in it and nothing saved
+    // (workspace-suggested-ticket.js). The parameter leaves the address at once,
+    // so a reload, Back or Forward never asks again; the request lives on this
+    // view until the workspace has loaded.
+    this._suggestedTicketArrival =
+      typeof window !== 'undefined'
+        ? suggestedTicketArrivalFromSearch(window.location.search)
+        : null;
+    if (this._suggestedTicketArrival) {
+      try {
+        const url = new URL(window.location.href);
+        const search = searchWithoutSuggestedTicketArrival(url.search);
+        window.history.replaceState(window.history.state, '', url.pathname + search + url.hash);
+      } catch {
+        /* the dialog still opens once; only the address keeps the parameter */
       }
     }
     this.viewMode = resolveEffectiveMode(
@@ -636,6 +660,7 @@ export class WorkspaceCommandView {
     this.ensureWorkspaceProtection();
     this.applyBootURLState();
     void this.consumeUpdateArrival();
+    void this.consumeSuggestedTicketArrival();
   }
 
   // The linked folder's Protection fact is stored evidence the server reads;
@@ -1126,6 +1151,7 @@ export class WorkspaceCommandView {
     // page.tasks/agents are actually populated (FR90: refresh restores from URL).
     this.applyBootURLState();
     void this.consumeUpdateArrival();
+    void this.consumeSuggestedTicketArrival();
   }
 
   // ---------- URL / history restoration (group 6) ----------
@@ -1780,7 +1806,6 @@ export class WorkspaceCommandView {
     return workspaceNavigationHTML({
       mode: this.viewMode,
       dashboard: this.hasCustomDashboard(),
-      plans: this.plansLinkHTML(),
       ticketCount: TicketCounts.isKnown(this.currentTicketCounts())
         ? TicketCounts.openCount(this.currentTicketCounts())
         : '—',
@@ -1788,30 +1813,6 @@ export class WorkspaceCommandView {
         TicketCounts.describe(this.currentTicketCounts()) || 'Ticket counts unavailable',
       ticketAlert: this.hasAttentionTasks()
     });
-  }
-
-  // Plans is a LINK, not a fourth view mode.
-  //
-  // The other three swap what this page renders. Plans has its own canonical
-  // pages — /workspaces/{slug}/plans and .../plans/{planId} — because a plan is
-  // reviewed, edited, and approved on exactly one surface, and giving it an
-  // in-page mode here would be the second surface this feature exists to
-  // prevent (FR-145, FR-148, FR-149).
-  //
-  // It sits in the same switch so it is where someone looks for a workspace
-  // destination, and it is an <a> so middle-click, cmd-click, and "copy link
-  // address" all behave the way a link should.
-  plansLinkHTML() {
-    const workspaceSlug = this.workspaceSlug();
-    if (!workspaceSlug) return '';
-
-    return (
-      '<a class="ws-cmd-view-btn ws-cmd-view-link" href="' +
-      escapeHtml(workspacePageURL(workspaceSlug, ['plans'])) +
-      '">' +
-      escapeHtml('Plans') +
-      '</a>'
-    );
   }
 
   // quiet (the Map tab) says nothing while the folder is where it should be;
@@ -2892,6 +2893,50 @@ export class WorkspaceCommandView {
       this.workspaceId() === id &&
       !this.container?.querySelector?.('#workspaceNextActionRegion')
     )
+      window.Toast?.info?.(this.workNotice);
+  }
+
+  // Opens Give work with the first assessment's suggested ticket, once, when the
+  // address asked for it (`?next=assessment`). Waits for the workspace to load,
+  // is consumed before the asynchronous read, and drops a late answer if the
+  // person has moved to another workspace. It opens a form, never a ticket:
+  // saving is the person's own press of Give work.
+  async consumeSuggestedTicketArrival() {
+    if (!this._suggestedTicketArrival || this._suggestedTicketArrivalRunning) return;
+    const page = this.page;
+    const id = this.workspaceId();
+    if (!id || !page || !page.workspace || typeof page.showAddTaskModal !== 'function') return;
+    this._suggestedTicketArrival = null; // consumed before any asynchronous read
+    this._suggestedTicketArrivalRunning = true;
+    let result = 'stale';
+    try {
+      result = await offerSuggestedTicket({
+        workspaceId: id,
+        trigger:
+          (typeof document !== 'undefined' && document.querySelector?.('[data-cmd-give-work]')) ||
+          (typeof document !== 'undefined' ? document.activeElement : null),
+        request: async path => {
+          const response = await fetch(path, { headers: { Accept: 'application/json' } });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        },
+        isCurrent: () => this.page === page && this.workspaceId() === id,
+        dialogOpen: () =>
+          typeof document !== 'undefined' && Boolean(document.querySelector?.('dialog.give-work')),
+        openGiveWork: options =>
+          page.showAddTaskModal({
+            what: options.what,
+            details: options.details,
+            trigger: options.trigger
+          })
+      });
+    } finally {
+      this._suggestedTicketArrivalRunning = false;
+    }
+    if (result === 'opened' || result === 'stale') return;
+    this.workNotice = SUGGESTED_TICKET_MESSAGES[result] || SUGGESTED_TICKET_MESSAGES.unavailable;
+    this.render();
+    if (!this.container?.querySelector?.('#workspaceNextActionRegion'))
       window.Toast?.info?.(this.workNotice);
   }
 

@@ -2201,7 +2201,6 @@ async function handleChatResponsePayload(data, trimmedMessage, isSlashCommand) {
 
     EventBus.emit('chat:message:sent', { message: trimmedMessage, isSlashCommand });
     renderPlannerPlanSummary(data);
-    await handleDynamicAgentApprovals(data);
     if (dependencyResolution) {
       renderDependencyResolutionModal(dependencyResolution, data, trimmedMessage, isSlashCommand);
     }
@@ -2268,53 +2267,6 @@ function renderPlannerPlanSummary(data) {
   const lines = tasks.map((task, idx) => `${idx + 1}. ${task.description || 'Ticket'}`);
   const message = `**Plan**\n${lines.join('\n')}`;
   addMessageToChat(message, false, false, true, true);
-}
-
-async function handleDynamicAgentApprovals(data) {
-  if (
-    !data ||
-    !Array.isArray(data.dynamic_agent_requests) ||
-    data.dynamic_agent_requests.length === 0
-  ) {
-    return;
-  }
-  const workspaceId = data.workspace_id;
-  if (!workspaceId) return;
-
-  const summary = data.dynamic_agent_requests
-    .map(req => `- ${req.name} (${req.role || 'general'})`)
-    .join('\n');
-
-  const approve = window.confirm(`Dynamic agent creation requested:\n\n${summary}\n\nApprove?`);
-
-  let resumeResult = null;
-  for (const req of data.dynamic_agent_requests) {
-    const response = await fetch('/api/orchestration/dynamic-agents/approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        workspace_id: workspaceId,
-        request_id: req.id,
-        approve,
-        approved_by: 'user'
-      })
-    });
-    if (response.ok) {
-      const respData = await response.json();
-      if (respData.resume_result) {
-        resumeResult = respData.resume_result;
-      }
-    }
-  }
-
-  if (approve) {
-    addMessageToChat('✅ Approved dynamic agent creation.', false, false, true, true);
-    if (resumeResult && resumeResult.final_output) {
-      addMessageToChat(resumeResult.final_output, false, false, true, true);
-    }
-  } else {
-    addMessageToChat('❌ Dynamic agent creation denied.', false, false, true, true);
-  }
 }
 
 // Chat state machine reference (initialized in initializeApp)

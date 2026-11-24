@@ -27,10 +27,6 @@ type Orchestrator struct {
 	configManager  *config.Manager
 	eventBus       *workspace.EventBus
 	gateway        *gateway.Service
-	// planDrafter opens durable Plans for proposed work. Optional: without it
-	// the orchestrator still reports what it wanted, it just cannot create the
-	// record the user would approve.
-	planDrafter PlanDrafter
 }
 
 // NewOrchestrator creates a new orchestrator

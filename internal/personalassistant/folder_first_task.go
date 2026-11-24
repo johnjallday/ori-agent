@@ -121,8 +121,8 @@ type FolderFirstTaskView struct {
 	RepairLabel string `json:"repair_label,omitempty"`
 	// NextRequest is the one next request a finished assessment suggested, as
 	// plain text for the user to read, edit and submit themselves. NextRoute
-	// opens the workspace's Plans page with it placed, unsubmitted, in the
-	// "Start a plan" box.
+	// opens the workspace's Give work dialog with it typed in, unsent and
+	// unassigned: nothing is created until the user presses Give work.
 	NextRequest string `json:"next_request,omitempty"`
 	NextRoute   string `json:"next_route,omitempty"`
 	// ReportRoute opens a finished assessment where it can be read in full:

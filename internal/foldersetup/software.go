@@ -82,7 +82,7 @@ func BuildSoftwarePlan(facts SoftwareFacts) personalassistant.FolderSetupPlan {
 	}
 	mode := personalassistant.FolderPlanLine{
 		Kind: personalassistant.FolderPlanMode, Name: "Starts with understanding and planning",
-		Detail: "Setup runs no code, installs nothing and changes nothing in the project. Work is planned first: nothing is made from a plan until you approve it, approved work waits for you to start it, and planning documents stay in Ori. The project's own conventions apply.",
+		Detail: "Setup runs no code, installs nothing and changes nothing in the project. Work waits for you to start it, and planning documents stay in Ori. The project's own conventions apply.",
 	}
 
 	workspace := personalassistant.FolderPlanLine{

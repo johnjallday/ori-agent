@@ -280,7 +280,7 @@ test('a finished assessment opens its report and hands on one suggestion', () =>
     ticket_route: '/workspaces/widget?ticket=task-1',
     report_route: '/workspaces/widget/task/task-1',
     next_request: 'Add a health check endpoint.',
-    next_route: '/workspaces/widget/plans?next=assessment'
+    next_route: '/workspaces/widget?next=assessment'
   });
   const view = assessmentBannerView(done, { taskHref });
   assert.equal(view.phase, 'done');
@@ -297,8 +297,8 @@ test('a finished assessment opens its report and hands on one suggestion', () =>
     },
     {
       id: 'next',
-      label: 'Plan the suggested ticket',
-      href: '/workspaces/widget/plans?next=assessment',
+      label: 'Review suggested ticket',
+      href: '/workspaces/widget?next=assessment',
       primary: false
     }
   ]);
@@ -311,26 +311,38 @@ test('a finished assessment opens its report and hands on one suggestion', () =>
   );
 });
 
-test('a suggestion is linked only to its own plans page, and a report only to its task', () => {
+test('a suggestion is linked only to its own workspace, and a report only to its task', () => {
   const done = overrides =>
     assessmentBannerView(
       assessment({ state: 'finished', next_request: 'Add a health check.', ...overrides }),
       { taskHref }
     );
   for (const route of [
-    'https://evil.example/workspaces/widget/plans?next=assessment',
-    '//evil.example/plans?next=assessment',
+    'https://evil.example/workspaces/widget?next=assessment',
+    '//evil.example/workspaces/widget?next=assessment',
+    '/workspaces/widget?next=assessment&run=1',
+    '/workspaces/widget?next=other',
     '/workspaces/widget/plans?next=assessment&run=1',
     '/workspaces/widget/plans',
+    '/workspaces/widget',
+    // Another workspace's suggestion is never this workspace's link.
+    '/workspaces/other?next=assessment',
+    '/workspaces/other/plans?next=assessment',
+    '/workspaces\\widget?next=assessment',
     ''
   ]) {
     const view = done({ next_route: route });
     assert.deepEqual(linkIds(view), ['report'], route);
     assert.equal(view.detail, 'Open it to read what was found.', route);
   }
+  // The retired Plans address a bookmark or older server may still carry is
+  // accepted for this workspace and labelled the same way.
+  const legacy = done({ next_route: '/workspaces/widget/plans?next=assessment' });
+  assert.deepEqual(linkIds(legacy), ['report', 'next']);
+  assert.equal(legacy.links[1].label, 'Review suggested ticket');
   // A route with nothing to carry is not offered.
   assert.deepEqual(
-    linkIds(done({ next_request: '', next_route: '/workspaces/widget/plans?next=assessment' })),
+    linkIds(done({ next_request: '', next_route: '/workspaces/widget?next=assessment' })),
     ['report']
   );
   // A report link that is not the task's page falls back to the page's own
@@ -490,7 +502,7 @@ test('the rendered assessment banner wires each control to its own handler', () 
         report_route: taskHref,
         // The model's words reach the page as text only.
         next_request: '<img src=x onerror=alert(1)>',
-        next_route: '/workspaces/widget/plans?next=assessment'
+        next_route: '/workspaces/widget?next=assessment'
       })
     ),
     doc,

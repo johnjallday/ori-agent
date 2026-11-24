@@ -31,6 +31,11 @@ type Store interface {
 	// ListPlans returns the workspace's Plans matching the filter, newest
 	// activity first.
 	ListPlans(ctx context.Context, workspaceID string, filter ListFilter) ([]*Plan, error)
+	// CountPlans reports how many Plans the workspace has, split into Active
+	// and History. It reads two numbers: no draft, link or progress is loaded
+	// and nothing is archived, so it is safe for chrome that only needs to know
+	// whether any Plan exists.
+	CountPlans(ctx context.Context, workspaceID string) (PlanCounts, error)
 
 	// UpdatePlanDraft replaces the working draft and its record-level title and
 	// objective. expectedRevision is the optimistic-concurrency token the
@@ -141,6 +146,16 @@ type Store interface {
 	// beyond the newest keep. It never touches immutable versions (FR-30).
 	PruneDraftSnapshots(ctx context.Context, workspaceID, planID string, keep int, olderThan time.Time) (int, error)
 }
+
+// PlanCounts is how many Plans a workspace has: those not archived, and those
+// in History. A Plan is counted once, by its archived state as stored.
+type PlanCounts struct {
+	Active  int `json:"active"`
+	History int `json:"history"`
+}
+
+// Total is every Plan the workspace has, active or historical.
+func (c PlanCounts) Total() int { return c.Active + c.History }
 
 // ListFilter selects which of a workspace's Plans to return. The zero value
 // returns active Plans, which is what the Plans destination opens on (FR-146).

@@ -1,6 +1,8 @@
 import { workspacePageURL } from './workspace-routes.js';
 
-// Workspace Plans: the canonical list/create surface for durable Plans.
+// Workspace Plans: the canonical list of the durable Plans a workspace already
+// has. It creates none: the first-party "Start a plan" form is retired, while
+// the Plan API, stored records, approvals and detail pages are untouched.
 //
 // Two rules shape this module:
 //
@@ -168,7 +170,6 @@ export class WorkspacePlansPage {
     this.doc = options.document || (typeof document !== 'undefined' ? document : null);
     this.fetchImpl =
       options.fetch || (typeof fetch !== 'undefined' ? fetch.bind(globalThis) : null);
-    this.planningEnabled = true;
     this.active = [];
     this.history = [];
   }
@@ -179,79 +180,10 @@ export class WorkspacePlansPage {
 
   async init() {
     this.bindEvents();
-    await Promise.all([this.loadPlanningPolicy(), this.reload()]);
-    await this.offerAssessmentSuggestion();
-  }
-
-  // A finished first assessment links here with ?next=assessment. The one next
-  // request it suggested is read from the server (never from the address) and
-  // placed in the "Start a plan" box for the user to edit, submit or discard.
-  // Nothing is created by arriving here: creating the plan is still the user's
-  // own press of Create plan, and even that starts no work.
-  //
-  // The suggestion is text a model wrote from the project's files. It is only
-  // ever set as the value of the box or as plain text.
-  async offerAssessmentSuggestion() {
-    const view = this.doc?.defaultView;
-    const params = new URLSearchParams(view?.location?.search || '');
-    if (params.get('next') !== 'assessment') return;
-    // The parameter has done its job: a reload must not fill the box again over
-    // what the user has typed since.
-    try {
-      params.delete('next');
-      const query = params.toString();
-      view.history?.replaceState?.(
-        view.history.state,
-        '',
-        `${view.location.pathname}${query ? `?${query}` : ''}${view.location.hash || ''}`
-      );
-    } catch {
-      // The address is left as it is.
-    }
-
-    let look = null;
-    try {
-      const body = await this.request(
-        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/folder-first-task`
-      );
-      look = body?.first_task || null;
-    } catch {
-      look = null;
-    }
-    const suggestion = String(look?.next_request || '').trim();
-    if (!look || !String(look.recipe || '').trim() || look.state !== 'finished' || !suggestion) {
-      this.setStatus('This workspace has no finished assessment with a suggested next ticket.');
-      return;
-    }
-    if (!this.planningEnabled) {
-      // The concrete missing step, rather than a box that would do nothing.
-      this.setStatus(
-        `The first assessment suggested: “${suggestion}” Structured planning is off for this workspace, so a plan cannot be drafted from it here. Turn it on in Workspace Settings first.`
-      );
-      return;
-    }
-    const input = this.el('#plan-create-request');
-    if (!input) return;
-    const project = String(look.folder_name || look.workspace_name || '').trim();
-    const source = project
-      ? `Suggested by the first assessment of ${project}.`
-      : 'Suggested by the first assessment.';
-    // What the user has already typed is theirs.
-    if (!String(input.value || '').trim()) input.value = `${suggestion}\n\n(${source})`;
-    input.focus?.();
-    this.setStatus(
-      'The first assessment suggested this next ticket. Edit it if you like, then press Create plan. Nothing is created until you do, and creating a plan starts no work.'
-    );
+    await this.reload();
   }
 
   bindEvents() {
-    const form = this.el('#plan-create-form');
-    if (form) {
-      form.addEventListener('submit', event => {
-        event.preventDefault();
-        void this.createPlan();
-      });
-    }
     const refresh = this.el('#plan-refresh');
     if (refresh) {
       refresh.addEventListener('click', () => void this.reload());
@@ -276,28 +208,6 @@ export class WorkspacePlansPage {
     return body;
   }
 
-  // Planning being disabled hides creation but never hides history: existing
-  // Plans stay inspectable and the user is pointed at Settings rather than
-  // having planning silently switched on for them (FR-159).
-  async loadPlanningPolicy() {
-    try {
-      const body = await this.request(
-        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/settings`
-      );
-      this.planningEnabled = Boolean(body?.settings?.planning?.enabled);
-    } catch {
-      this.planningEnabled = false;
-    }
-    this.renderPolicyState();
-  }
-
-  renderPolicyState() {
-    const banner = this.el('#plan-disabled-banner');
-    const createPanel = this.el('#plan-create-panel');
-    if (banner) banner.hidden = this.planningEnabled;
-    if (createPanel) createPanel.hidden = !this.planningEnabled;
-  }
-
   async reload() {
     this.setStatus('Loading plans…');
     try {
@@ -319,6 +229,10 @@ export class WorkspacePlansPage {
     this.renderSection('#plan-history-list', '#plan-history-empty', this.history);
     const historySection = this.el('#plan-history-section');
     if (historySection) historySection.hidden = this.history.length === 0;
+    // A workspace with no plan at all says that creation is retired and points
+    // at Tickets; it is only said once the lists have actually been read.
+    const note = this.el('#plan-retired-note');
+    if (note) note.hidden = this.active.length > 0 || this.history.length > 0;
   }
 
   renderSection(listSelector, emptySelector, plans) {
@@ -336,35 +250,5 @@ export class WorkspacePlansPage {
     status.textContent = message;
     status.dataset.tone = tone;
     status.hidden = !message;
-  }
-
-  async createPlan() {
-    const input = this.el('#plan-create-request');
-    const request = input ? String(input.value || '').trim() : '';
-    if (!request) {
-      this.setStatus('Describe what you want planned before creating a plan.', 'error');
-      return null;
-    }
-
-    this.setStatus('Creating plan…');
-    try {
-      const plan = await this.request(
-        `/api/workspaces/${encodeURIComponent(this.workspaceId)}/plans`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ request, source: 'user' })
-        }
-      );
-      if (input) input.value = '';
-      // Creating a Plan navigates to its canonical detail route; there is one
-      // full editing surface and this is not it (FR-145, FR-149).
-      if (this.doc?.defaultView) {
-        this.doc.defaultView.location.href = planDetailPath(this.workspaceSlug, plan.id);
-      }
-      return plan;
-    } catch (error) {
-      this.setStatus(`Could not create plan: ${error.message}`, 'error');
-      return null;
-    }
   }
 }

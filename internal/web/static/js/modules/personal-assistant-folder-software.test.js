@@ -984,7 +984,7 @@ test('a finished assessment opens its report and hands on one suggestion, unsubm
     report_route: '/workspaces/widget/task/task-1',
     result_excerpt: 'A Go service with a Makefile.',
     next_request: 'Add a health check endpoint.',
-    next_route: '/workspaces/widget/plans?next=assessment'
+    next_route: '/workspaces/widget?next=assessment'
   });
   const view = folderFirstLookView(done, {});
   assert.deepEqual(lookActions(view), ['report', 'next', 'open']);
@@ -993,7 +993,7 @@ test('a finished assessment opens its report and hands on one suggestion, unsubm
     [
       // The task's own page shows what the run wrote; its ticket does not.
       ['Open the assessment', '/workspaces/widget/task/task-1', 'primary'],
-      ['Plan the suggested ticket', '/workspaces/widget/plans?next=assessment', 'outline'],
+      ['Review suggested ticket', '/workspaces/widget?next=assessment', 'outline'],
       ['Open workspace', '/workspaces/widget', 'outline']
     ]
   );
@@ -1006,7 +1006,7 @@ test('a finished assessment opens its report and hands on one suggestion, unsubm
   );
 });
 
-test('a suggestion is linked only to its own workspace plans page', () => {
+test('a suggestion is linked only to its own workspace', () => {
   const done = route =>
     folderFirstLookView(
       assessment({
@@ -1017,10 +1017,16 @@ test('a suggestion is linked only to its own workspace plans page', () => {
       {}
     );
   for (const route of [
-    'https://evil.example/workspaces/widget/plans?next=assessment',
-    '//evil.example/plans?next=assessment',
+    'https://evil.example/workspaces/widget?next=assessment',
+    '//evil.example/workspaces/widget?next=assessment',
+    '/workspaces/widget?next=assessment&run=1',
+    '/workspaces/widget?next=other',
     '/workspaces/widget/plans?next=assessment&run=1',
     '/workspaces/widget/plans',
+    '/workspaces/widget',
+    // Another workspace's suggestion is never this workspace's link.
+    '/workspaces/other?next=assessment',
+    '/workspaces/other/plans?next=assessment',
     '/api/workspaces/ws-1/plans',
     ''
   ]) {
@@ -1028,9 +1034,17 @@ test('a suggestion is linked only to its own workspace plans page', () => {
     assert.equal(lookActions(view).includes('next'), false, route);
     assert.equal(view.next, '', route);
   }
+  // The retired Plans address is accepted for this workspace, and labelled the
+  // same way, so a bookmark or older server never leaves a card with no link.
+  const legacy = done('/workspaces/widget/plans?next=assessment');
+  assert.equal(lookActions(legacy).includes('next'), true);
+  assert.equal(
+    legacy.actions.find(action => action.id === 'next').label,
+    'Review suggested ticket'
+  );
   // A route with no suggestion to carry is not a link either.
   const empty = folderFirstLookView(
-    assessment({ state: 'finished', next_route: '/workspaces/widget/plans?next=assessment' }),
+    assessment({ state: 'finished', next_route: '/workspaces/widget?next=assessment' }),
     {}
   );
   assert.equal(lookActions(empty).includes('next'), false);

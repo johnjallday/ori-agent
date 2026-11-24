@@ -433,7 +433,7 @@ folder authority was lost), `assess-interrupt` (observes the first look already
 authorized by setup), restart, `assess` (Try again uses the same failed task;
 a finished look is only read), `repeat`. A look that finished before interruption
 is reported as **NOT RUN** for that interruption case, never rerun to manufacture
-it. The report, workspace banner and Plans hand-off are followed. Like `wt demo`,
+it. The report, workspace banner and Give work hand-off are followed. Like `wt demo`,
 the server is given your Codex home (`$CODEX_HOME`, else `~/.codex`): confirming
 the hire and explicitly retrying its look can make real model calls. Do not use
 this live path as an implicit signed-in-provider fallback. The report is printed
@@ -462,8 +462,11 @@ Check by eye:
    "declared, not run", and ends with Ori's own note of which files it was
    based on. **Open the assessment** opens the task's page, where the whole
    report is shown.
-5. **Plan the suggested task** opens the workspace's Plans page with the
-   suggestion in the box. Nothing is created until Create plan is pressed.
+5. **Review suggested ticket** opens the workspace with Give work already holding
+   the suggestion (title, and the assessment note in Details), nobody assigned
+   and Start now off. Nothing is created until **Give work** is pressed;
+   cancelling or reloading creates nothing, and the old
+   `/plans?next=assessment` bookmark arrives at the same dialog.
 6. The project folder is byte-for-byte unchanged afterwards.
 7. Through **Add folder**, a folder that is itself one project is proposed by
    name as one workspace. It never asks which of its subfolders to set up, and

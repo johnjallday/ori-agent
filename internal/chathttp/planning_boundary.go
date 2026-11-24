@@ -8,29 +8,34 @@ import (
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
-// The planning boundary: one place that decides whether a request becomes a
-// durable Plan, an ephemeral Action Preview, or neither (FR-19, FR-20,
+// The planning boundary: one place that decides whether a request is a single
+// action chat may preview, or work too large for chat to start (FR-19, FR-20,
 // FR-149, FR-150).
 //
 // Before this, "plan" meant two different things depending on which code path
 // you were in. Chat's plan-before-action produced an ephemeral preview that
 // could contain multi-agent delegation and several planner tasks, approved by
-// clicking once in a chat bubble and surviving nothing. The durable Plan is
-// versioned, reviewable, and its approval is the only thing that may create
-// work. Two mechanisms wearing one word meant a user could approve what looked
-// like a plan and get work nobody could later audit.
+// clicking once in a chat bubble and surviving nothing. Two mechanisms wearing
+// one word meant a user could approve what looked like a plan and get work
+// nobody could later audit.
+//
+// First-party surfaces no longer start a structured Plan for that work: chat
+// answers it with a terminal reply that starts nothing and names Give work as
+// the manual next step. The Plan API and every stored Plan are untouched.
 //
 // The rule here is deliberately conservative: anything that produces Tasks,
-// carries dependencies, spans agents, or spans Runs is Plan work. The preview
-// keeps exactly one case — a single immediate action the user already named.
+// carries dependencies, spans agents, or spans Runs is multi-step work. The
+// preview keeps exactly one case — a single immediate action the user already
+// named.
 
 // PlanningRoute is where a request goes.
 type PlanningRoute string
 
 const (
-	// RoutePlan means the request must become or open a durable Plan: it
-	// creates Tasks, carries dependencies, involves more than one agent, or
-	// would produce more than one Run (FR-19).
+	// RoutePlan means the request is multi-step work chat will not start or
+	// preview: it creates Tasks, carries dependencies, involves more than one
+	// agent, or would produce more than one Run (FR-19). The name is historical;
+	// the route's reply is terminal advice, never a Plan, an approval or a run.
 	RoutePlan PlanningRoute = "plan"
 	// RouteActionPreview means one immediate action may be previewed and
 	// approved inline, with no Plan record (FR-20).
@@ -203,33 +208,6 @@ func (h *Handler) classifyChatRequest(
 	return ClassifyPlanningRoute(input), plannerDecision
 }
 
-// openPlanForChat starts a durable Plan for a request chat cannot handle
-// inline, returning the plan and workspace IDs.
-//
-// It needs a workspace: a Plan belongs to exactly one, and inventing one here
-// would put the user's work somewhere they did not choose. Without a workspace
-// in the route context the chat message still explains that a plan is needed —
-// it just cannot make it for them.
-func (h *Handler) openPlanForChat(
-	ctx context.Context,
-	routeContext normalizedChatRouteContext,
-	request string,
-) (planID string, workspaceID string) {
-	if h == nil || h.planOpener == nil {
-		return "", ""
-	}
-	workspaceID = strings.TrimSpace(routeContext.WorkspaceID)
-	if workspaceID == "" {
-		return "", ""
-	}
-
-	planID, err := h.planOpener.OpenPlan(ctx, workspaceID, request, routeContext.AgentName)
-	if err != nil {
-		return "", ""
-	}
-	return planID, workspaceID
-}
-
 // distinctAssignees counts how many different agents a proposed plan involves.
 //
 // Unassigned tasks are not counted: an unassigned task has no agent yet, and
@@ -270,10 +248,10 @@ func hasDependencies(plan *types.PlannerOutput) bool {
 // planReasonFor turns the triggers into one sentence a user can act on.
 func planReasonFor(triggers []string) string {
 	reasons := map[string]string{
-		"creates_tasks":       "it creates workspace tasks",
+		"creates_tasks":       "it would create tickets",
 		"has_dependencies":    "its steps depend on each other",
 		"multi_agent":         "it involves more than one agent",
-		"planner_multi_agent": "the planner selected multi-agent execution",
+		"planner_multi_agent": "it was assessed as needing several agents",
 		"specialist_handoff":  "it hands work to a specialist",
 	}
 
@@ -284,9 +262,9 @@ func planReasonFor(triggers []string) string {
 		}
 	}
 	if len(parts) == 0 {
-		return "this work needs a plan"
+		return "This is more than a single action."
 	}
-	return "This needs a plan because " + joinReasons(parts) + "."
+	return "This is more than a single action because " + joinReasons(parts) + "."
 }
 
 // joinReasons renders a list the way a person would say it.

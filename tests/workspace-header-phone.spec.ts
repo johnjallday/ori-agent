@@ -153,11 +153,11 @@ for (const width of [375, 320]) {
     );
     expect(header.tabs.map(tab => tab.text)).toEqual(['Overview', 'Map', 'Tickets', 'Dashboard']);
     for (const tab of header.tabs) expect(tab.fits, `${tab.text} shows its whole word`).toBe(true);
-    await page.locator('[data-cmd-disclosure="views"] > summary').click();
-    await expect(page.getByRole('link', { name: 'Plans', exact: true })).toBeVisible();
-    // The workspace canvas is retired: More views lists no Canvas.
+    // There is no More views menu: Plans was its only item, and the workspace
+    // canvas is retired.
+    await expect(page.locator('[data-cmd-disclosure="views"]')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Plans', exact: true })).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Canvas', exact: true })).toHaveCount(0);
-    await page.locator('[data-cmd-disclosure="views"] > summary').press('Escape');
     await page.locator('[data-cmd-settings]').click();
     await page.locator('[data-panel-section="advanced"]').click();
     await expect(

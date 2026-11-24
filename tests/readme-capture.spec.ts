@@ -672,6 +672,20 @@ async function installFixtureRoutes(page: Page) {
       await json(route, { linked: false });
       return;
     }
+    // Workspace Details asks whether the workspace has any plan, for the
+    // "Existing plans" link under Tickets. No README workspace has one, so the
+    // link stays hidden and the picture is the same as without the question.
+    const planPresenceID = /^\/api\/workspaces\/([^/]+)\/plan-presence$/.exec(url.pathname)?.[1];
+    if (
+      request.method() === 'GET' &&
+      planPresenceID &&
+      !url.search &&
+      (planPresenceID === README_SCENES.workspace_command.workspace_id ||
+        README_SCENES.workspaces.some(row => row.id === planPresenceID))
+    ) {
+      await json(route, { studio_id: planPresenceID, has_plans: false, active: 0, history: 0 });
+      return;
+    }
     // The coordinate Workspace Map reads the current user's layout on mount
     // (#292). Fixturing it keeps the capture deterministic: without a saved
     // arrangement the three fictional workspaces would fall back to automatic
