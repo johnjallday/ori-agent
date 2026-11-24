@@ -40,6 +40,9 @@ type Coordinator struct {
 	planner   *Planner
 	lifecycle Lifecycle
 	now       func() time.Time
+	// betweenCancelReads is a test seam: it runs after Cancel's host decision and
+	// before its second read of the receipt and policy. Nil in production.
+	betweenCancelReads func()
 }
 
 func NewCoordinator(lease *resetstate.Lease, planner *Planner, lifecycle Lifecycle) *Coordinator {
@@ -79,12 +82,15 @@ func (c *Coordinator) Stage(ctx context.Context, req ExecuteRequest) (Operation,
 				}
 				return nil // No preview revalidation/drain/rewrite on an admitted replay.
 			}
-			if existing.Operation.State != StateCompleted {
+			if existing.Operation.State != StateCompleted && existing.Operation.State != StateCanceled {
 				return ErrOperationConflict
 			}
 			// One bounded journal doubles as the durable last result. A newly
-			// reviewed operation may replace only a fully verified receipt; blocked,
-			// partial and unknown evidence remains recoverable and exclusive.
+			// reviewed operation may replace only a terminal receipt: a fully
+			// verified one, or one canceled before anything was applied. Blocked,
+			// partial and unknown evidence remains recoverable and exclusive. A
+			// replay of the canceled operation's own preview and request id was
+			// answered above without writing, so it can never revive the old plan.
 			retireCompleted = true
 		}
 		if c.lease.Uncertain() {
