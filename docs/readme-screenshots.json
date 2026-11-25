@@ -37,8 +37,8 @@
         "#personalAssistantPanel",
         "#personalAssistantBriefRow"
       ],
-      "caption": "Home brings the command bridge and a focused Personal HQ Daily Brief into one starting point.",
-      "alt_text": "Ori Agent Home in dark mode showing the command bridge above a populated Personal HQ Daily Brief.",
+      "caption": "See which workspaces are active, check what your assistant needs from you, and open today’s brief in Personal HQ.",
+      "alt_text": "Workspace map beside Mira’s open assistant drawer, with a launch finding and a link to today’s brief.",
       "display_width": 820,
       "owner_paths": [
         "internal/web/templates/components/dashboard.tmpl",
@@ -62,7 +62,7 @@
       "scenario_id": "readme-product-launch",
       "viewport": {
         "width": 1440,
-        "height": 900
+        "height": 1024
       },
       "device_scale_factor": 2,
       "theme": "dark",
@@ -131,8 +131,8 @@
         "#workspaceNextActionRegion",
         "#workspace-command-mission-card"
       ],
-      "caption": "Workspace Command keeps agents, tasks, notes, files, and mission operations in one active workspace.",
-      "alt_text": "Ori Agent Workspace Command in dark mode with a fictional agent roster, task state, workspace context, and mission controls.",
+      "caption": "Open the next ticket, see who’s on the team, and find notes and linked folders in the workspace overview.",
+      "alt_text": "Product Launch workspace showing a launch checklist ticket in progress, two team members, and links to notes and files.",
       "display_width": 420,
       "owner_paths": [
         "internal/web/templates/pages/workspace-detail.tmpl",

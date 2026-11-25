@@ -55,17 +55,19 @@ export async function encodePortfolio({ manifestPath, sourceDir, outputDir }) {
     const output = path.join(proposedDir, `${scene.id}.webp`);
     if (!existsSync(input)) fail(`Missing raw PNG for ${scene.id}: ${input}`);
     const rawMetadata = await sharp(input, { animated: false }).metadata();
-    if (rawMetadata.width !== 2880 || rawMetadata.height !== 1800 || rawMetadata.format !== 'png') {
-      fail(`Raw ${scene.id} must be a 2880x1800 PNG, received ${rawMetadata.format} ${rawMetadata.width}x${rawMetadata.height}.`);
+    const width = scene.viewport.width * scene.device_scale_factor;
+    const height = scene.viewport.height * scene.device_scale_factor;
+    if (rawMetadata.width !== width || rawMetadata.height !== height || rawMetadata.format !== 'png') {
+      fail(`Raw ${scene.id} must be a ${width}x${height} PNG, received ${rawMetadata.format} ${rawMetadata.width}x${rawMetadata.height}.`);
     }
-    await sharp(input, { animated: false, limitInputPixels: 2880 * 1800 })
+    await sharp(input, { animated: false, limitInputPixels: width * height })
       .rotate()
       .webp(WEBP_OPTIONS)
       .toFile(output);
     const bytes = readFileSync(output);
     const encodedMetadata = await sharp(output, { animated: false }).metadata();
-    if (encodedMetadata.format !== 'webp' || encodedMetadata.width !== 2880 || encodedMetadata.height !== 1800) {
-      fail(`Encoded ${scene.id} is not the required 2880x1800 WebP.`);
+    if (encodedMetadata.format !== 'webp' || encodedMetadata.width !== width || encodedMetadata.height !== height) {
+      fail(`Encoded ${scene.id} is not the required ${width}x${height} WebP.`);
     }
     outputs.push({
       id: scene.id,
