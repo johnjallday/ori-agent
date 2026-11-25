@@ -1,5 +1,5 @@
 import { test, expect, type Locator } from '@playwright/test';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
@@ -120,6 +120,68 @@ for (const mode of ['details', 'map'])
     await expect(button).not.toBeFocused();
     expect(access).toEqual([]);
   });
+
+test('Documents workspace wizard reviews only on activation and resets on cancel', async ({
+  page,
+  request
+}, info) => {
+  const sandbox = process.env.ORI_HQ_FIRST_VISIT_SANDBOX;
+  test.skip(!sandbox, 'requires an isolated home');
+  const home = await realpath(sandbox!);
+  expect(home).toMatch(/\/ori-(?:demo|e2e)\.[^/]+$/);
+  const docs = join(home, 'Documents');
+  await installLocalCdn(page);
+  const button = page.locator('#cockpitCreateWorkspaceBtn');
+  const modal = page.locator('#addFolderModal');
+  const path = modal.locator('#workspaceAnchorPath');
+  const checks: string[] = [];
+  page.on('request', r => {
+    if (r.url().includes('/anchor/check?known=')) checks.push(r.url());
+  });
+  async function start() {
+    await page.goto(base + '?mode=details');
+    const card = page.locator('[data-hq-firstvisit]');
+    if (!(await card.isVisible()))
+      await page.getByRole('button', { name: 'Things to try' }).click();
+    await card.getByRole('button', { name: /Create a workspace from Documents/ }).click();
+    const count = checks.length;
+    await card.getByRole('link', { name: 'Go to Home' }).click();
+    await expect(button).toBeFocused();
+    expect(checks).toHaveLength(count);
+    await button.press('Enter');
+    await expect(modal.locator('#workspaceFolderModeAnchored')).toBeChecked();
+    await expect(modal.locator('#folderNameInput')).toBeEditable();
+  }
+  await start();
+  await expect(modal.locator('#workspaceAnchorStatus')).toContainText(
+    'Documents could not be located'
+  );
+  await expect(modal.locator('#workspaceAnchorChoose')).toBeEnabled();
+  await page.keyboard.press('Escape');
+  await expect(modal).toBeHidden();
+  await mkdir(docs, { mode: 0o750 });
+  await start();
+  await expect(path).toHaveValue(docs);
+  await expect(path).toBeEditable();
+  await expect(modal.locator('#workspaceSearchConsent')).not.toBeChecked();
+  await modal.screenshot({ path: info.outputPath('documents-review.png') });
+  await page.keyboard.press('Escape');
+  await expect(modal).toBeHidden();
+  await button.click();
+  await expect(modal.locator('#workspaceFolderModeManaged')).toBeChecked();
+  await expect(path).toHaveValue('');
+  await page.keyboard.press('Escape');
+  await expect(modal).toBeHidden();
+  const create = await request.post('/api/workspaces', {
+    data: { name: 'Document shelves', anchor_path: docs }
+  });
+  expect(create.ok(), await create.text()).toBeTruthy();
+  await start();
+  await expect(modal.locator('#workspaceAnchorOpenExisting')).toBeVisible();
+  await expect(path).toHaveValue(docs);
+  expect(checks).toHaveLength(3);
+  expect(await readdir(docs)).toEqual([]);
+});
 
 test('Documents review can return without a hire, then open its actual reported workspace', async ({
   page,

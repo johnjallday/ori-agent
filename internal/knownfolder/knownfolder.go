@@ -26,6 +26,16 @@ func englishPath(home, id string) (string, error) {
 // A missing/disabled folder is absent, never a reason to reject other folders.
 // Tests inject the platform lookup and a synthetic home.
 func Resolve(home, id string, lookup Lookup) (string, error) {
+	return resolve(home, id, lookup, true)
+}
+
+// ResolveForAnchor keeps the anchor chooser's no-symlink policy: never turn
+// an indirect Documents location into an apparently direct selection.
+func ResolveForAnchor(home, id string) (string, error) {
+	return resolve(home, id, nil, false)
+}
+
+func resolve(home, id string, lookup Lookup, followLinks bool) (string, error) {
 	if !filepath.IsAbs(home) || (id != "desktop" && id != "documents" && id != "downloads") {
 		return "", ErrUnavailable
 	}
@@ -36,8 +46,9 @@ func Resolve(home, id string, lookup Lookup) (string, error) {
 	if err != nil || !filepath.IsAbs(path) {
 		return "", ErrUnavailable
 	}
-	path, err = filepath.EvalSymlinks(path)
-	if err != nil {
+	location := filepath.Clean(path)
+	path, err = filepath.EvalSymlinks(location)
+	if err != nil || (!followLinks && path != location) {
 		return "", ErrUnavailable
 	}
 	info, err := os.Stat(path) // #nosec G304 G703 -- host platform lookup, not browser input

@@ -11,6 +11,7 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/config"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/knownfolder"
 	"github.com/johnjallday/ori-agent/internal/projectconnection"
 	"github.com/johnjallday/ori-agent/internal/session"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
@@ -40,8 +41,30 @@ func (h *Handler) handleWorkspaceAnchorCheck(w http.ResponseWriter, r *http.Requ
 		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
-	path, err := h.validateAnchorPath(r.URL.Query().Get("path"), "")
+	query := r.URL.Query()
+	input := query.Get("path")
+	if query.Has("known") {
+		if query.Get("known") != "documents" || query.Has("path") {
+			respondAnchorError(w, anchorError("anchor_invalid_choice", "Choose Documents or select a folder.", http.StatusBadRequest))
+			return
+		}
+		home, _ := os.UserHomeDir()
+		resolved, err := knownfolder.ResolveForAnchor(home, "documents")
+		if err != nil {
+			respondAnchorError(w, anchorError("anchor_documents_unavailable", "Documents could not be located. Choose another folder or cancel.", http.StatusNotFound))
+			return
+		}
+		input = resolved
+	}
+	path, err := h.validateAnchorPath(input, "")
 	if err != nil {
+		if query.Has("known") && err.Code == "anchor_already_owned" {
+			_ = orihttp.RespondJSON(w, err.status, struct {
+				*anchorPathError
+				Path string `json:"normalized_path"`
+			}{err, input})
+			return
+		}
 		respondAnchorError(w, err)
 		return
 	}
