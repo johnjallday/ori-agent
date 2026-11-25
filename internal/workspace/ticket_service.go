@@ -82,6 +82,8 @@ func (s *TicketService) clock() time.Time {
 // a silent server-side default that would make the two paths
 // indistinguishable.
 type TicketCreateInput struct {
+	// Only the source-bound Inbox bridge can mint this provenance.
+	inboxOwner    string
 	WorkspaceID   string
 	State         TicketState
 	Title         string
@@ -449,7 +451,7 @@ func (s *TicketService) CreateWithKey(input TicketCreateInput) (ticket *Ticket, 
 		if candidate.SourceType != requested.SourceType || candidate.SourceID != requested.SourceID {
 			return false, nil
 		}
-		if candidate.Description != requested.Description {
+		if input.inboxOwner == "" && candidate.Description != requested.Description {
 			return false, fmt.Errorf("%w: %s/%s", ErrTicketSourceConflict, requested.SourceType, requested.SourceID)
 		}
 		return true, nil
@@ -502,6 +504,9 @@ func (s *TicketService) createIdempotent(input TicketCreateInput, replay ticketR
 	}
 	var persisted Task
 	err = s.store.Update(workspaceID, func(ws *Workspace) error {
+		if input.inboxOwner != "" && !InboxReviewDestination(ws, input.inboxOwner) {
+			return invalidTicketField("workspace_id", "not an active workspace for this notebook owner")
+		}
 		for i := range ws.Tasks {
 			candidate := &ws.Tasks[i]
 			matched, matchErr := replay(candidate, &task)
@@ -657,6 +662,9 @@ func buildTicketRecord(workspaceID string, state TicketState, input TicketCreate
 		return Task{}, &TicketValidationError{Field: "source", Message: err.Error()}
 	}
 
+	if source == TicketSourceInboxReview && input.inboxOwner == "" {
+		return Task{}, invalidTicketField("source", "confirm this suggestion in My Notes")
+	}
 	now := time.Now().UTC()
 	actor := strings.TrimSpace(input.Actor)
 	if actor == "" {

@@ -125,6 +125,7 @@ type SecondBrainDeps struct {
 	// everything stays a follow-up.
 	ProjectTickets SecondBrainProjectTickets
 	ReviewLedger   *secondbrain.ReviewLedger
+	InboxTickets   InboxTickets
 	Looker         secondbrain.Looker
 	Now            func() time.Time
 	NewID          func() string

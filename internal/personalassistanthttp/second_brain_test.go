@@ -137,6 +137,10 @@ func (f *fakeSecondBrain) Browse(_ context.Context, _ string, _ string, _ []stri
 	return personalassistant.SecondBrainDirectory{}, f.record("browse")
 }
 
+func (f *fakeSecondBrain) DecideInbox(_ context.Context, _ string, in personalassistant.InboxDecision) (secondbrain.InboxAction, error) {
+	return secondbrain.InboxAction{ID: in.ActionID}, nil
+}
+
 func (f *fakeSecondBrain) Preview(_ context.Context, _ string, kind, name string, _ ...string) (personalassistant.SecondBrainPreviewView, error) {
 	f.preview = [2]string{kind, name}
 	return personalassistant.SecondBrainPreviewView{Name: name, Kind: kind, Title: "Launch", Body: "Finishing the plan\n"}, f.record("preview")
@@ -165,6 +169,7 @@ func newSecondBrainHandler(fake *fakeSecondBrain) http.Handler {
 	mux.HandleFunc("POST "+base+"/nudge/dismiss", h.DismissNudgeSecondBrain)
 	mux.HandleFunc("POST "+base+"/connect", h.ConnectSecondBrain)
 	mux.HandleFunc("POST "+base+"/create", h.CreateSecondBrain)
+	mux.HandleFunc("POST "+base+"/inbox/decision", h.DecideInbox)
 	mux.HandleFunc("POST "+base+"/capture", h.CaptureSecondBrain)
 	mux.HandleFunc("GET "+base+"/look", h.GetSecondBrainLook)
 	mux.HandleFunc("POST "+base+"/look", h.LookSecondBrainAgain)
@@ -263,6 +268,7 @@ func TestSecondBrainRoutes_RefuseAForeignOriginBeforeAnythingElse(t *testing.T) 
 		{http.MethodPost, "/connect", `{"detected_id":"v_1","request_id":"c-1"}`},
 		{http.MethodPost, "/create", `{"selection_token":"t-1","name":"Second Brain","request_id":"s-1"}`},
 		{http.MethodPost, "/capture", `{"text":"Call Dana","request_id":"n-1"}`},
+		{http.MethodPost, "/inbox/decision", `{"decision":"dismiss"}`},
 		{http.MethodGet, "/look", ""},
 		{http.MethodPost, "/look", `{"request_id":"l-1"}`},
 		{http.MethodPost, "/look/look-1/follow-ups", `{"items":"suggested","request_id":"f-1"}`},

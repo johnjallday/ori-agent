@@ -3,7 +3,10 @@ package server
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
+
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
@@ -53,6 +56,42 @@ func (t secondBrainProjectTickets) activeWorkspaces() map[string]*workspace.Work
 		}
 	}
 	return active
+}
+
+// Choices is presentation only. Available re-reads the selected target;
+// CreateInboxReviewTicket repeats the ownership check in its write transaction.
+func (t secondBrainProjectTickets) Choices(owner string) []personalassistant.InboxWorkspace {
+	var out []personalassistant.InboxWorkspace
+	for _, ws := range t.activeWorkspaces() {
+		if workspace.InboxReviewDestination(ws, owner) {
+			out = append(out, personalassistant.InboxWorkspace{ID: ws.ID, Name: ws.Name, Slug: ws.FolderSlug})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name == out[j].Name {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+func (t secondBrainProjectTickets) Available(owner, id string) bool {
+	if t.b == nil || t.b.workspaceStore == nil {
+		return false
+	}
+	ws, err := t.b.workspaceStore.Get(id)
+	return err == nil && workspace.InboxReviewDestination(ws, owner)
+}
+func (t secondBrainProjectTickets) Confirm(owner, id, key, title string) (string, error) {
+	service := t.b.ticketServiceForBridges()
+	if service == nil {
+		return "", errBridgeTicketsUnavailable
+	}
+	ticket, err := service.CreateInboxReviewTicket(owner, id, key, title)
+	if err != nil {
+		return "", err
+	}
+	return ticket.ID, nil
 }
 
 // WorkspaceForFolder finds the active workspace whose primary directory is

@@ -185,6 +185,7 @@ export class MyNotes {
     window.addEventListener('pageshow', event => {
       if (!event.persisted) return;
       this.suspended = false;
+      this.captureArrival = new URLSearchParams(window.location.hash.slice(1));
       void this.load();
     });
     this.title.focus({ preventScroll: true });

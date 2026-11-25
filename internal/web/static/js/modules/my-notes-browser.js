@@ -1,3 +1,4 @@
+import { suggestionSection } from './inbox-review.js';
 import { notesRequest } from './notes-api.js';
 import { isCreatedByOri } from './notes-station.js';
 import { previewParagraphs, secondBrainPreviewPath } from './personal-assistant-second-brain.js';
@@ -392,7 +393,10 @@ export function notebookReaderView(state) {
         title,
         paragraphs,
         ...(reader.preview.suggestions?.length
-          ? { suggestions: reader.preview.suggestions.filter(item => item.state !== 'dismissed') }
+          ? {
+              suggestions: reader.preview.suggestions.filter(item => item.state !== 'dismissed'),
+              workspaces: reader.preview.review_workspaces || []
+            }
           : {}),
         ...(reader.preview.review_unavailable ? { reviewUnavailable: true } : {}),
         truncated: reader.preview.truncated === true
@@ -778,15 +782,14 @@ export class MyNotesBrowser {
           el('p', { text: 'Ticket suggestions could not be checked. Reopen this note to retry.' })
         );
       for (const item of model.suggestions || []) {
+        const reader = this.state.reader;
         out.push(
-          el(
-            'section',
-            { className: 'my-notes-suggestion' },
-            el('h4', { text: 'Suggested ticket' }),
-            el('blockquote', { text: item.excerpt }),
-            el('strong', { text: item.title }),
-            el('p', { text: 'Choose workspace' })
-          )
+          suggestionSection(item, model.workspaces, {
+            ref: this.view.browse_ref,
+            name: model.name,
+            current: () => this.state.reader === reader,
+            focusReader: () => this.panes.reader.querySelector('h3')?.focus({ preventScroll: true })
+          })
         );
       }
       if (model.truncated)

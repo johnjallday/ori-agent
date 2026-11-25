@@ -241,6 +241,28 @@
   margin-block-start: 1rem;
 }
 
+.my-notes-suggestion {
+  border-inline-start: 3px solid var(--primary-color);
+  background: var(--bg-secondary);
+  padding: 0.875rem 1rem;
+  margin-block: 1rem;
+  display: grid;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
+.my-notes-suggestion :is(h4, blockquote, p, .my-notes-reader-actions) {
+  margin: 0;
+}
+.my-notes-suggestion h4 {
+  font-size: 0.9rem;
+}
+.my-notes-suggestion blockquote {
+  font-style: italic;
+}
+.my-notes-suggestion select {
+  min-width: 0;
+}
+
 /* Quick note: a modal over the reader, which stays exactly where it was. */
 .my-notes-quick {
   width: min(32rem, calc(100vw - 2rem));

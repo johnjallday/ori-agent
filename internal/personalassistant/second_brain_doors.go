@@ -91,6 +91,7 @@ type SecondBrainPreviewView struct {
 	Body              string                    `json:"body"`
 	Truncated         bool                      `json:"truncated"`
 	Suggestions       []secondbrain.InboxAction `json:"suggestions,omitempty"`
+	ReviewWorkspaces  []InboxWorkspace          `json:"review_workspaces,omitempty"`
 	ReviewUnavailable bool                      `json:"review_unavailable,omitempty"`
 	Link              string                    `json:"link,omitempty"`
 }
@@ -128,9 +129,13 @@ func (s *SecondBrainService) Preview(ctx context.Context, userID, kind, name str
 		return SecondBrainPreviewView{}, ErrSecondBrainUnavailable
 	}
 	var suggestions []secondbrain.InboxAction
+	var workspaces []InboxWorkspace
 	var reviewErr error
 	if len(browseRef) > 0 && kind == secondbrain.PreviewInbox && !preview.Truncated {
 		suggestions, reviewErr = s.reviewSuggestions(ctx, doc, preview)
+		if len(suggestions) > 0 && s.deps.InboxTickets != nil {
+			workspaces = s.deps.InboxTickets.Choices(userID)
+		}
 	}
 	if len(browseRef) > 0 {
 		if err := s.checkBrowseReference(ctx, userID, browseRef[0]); err != nil {
@@ -139,7 +144,7 @@ func (s *SecondBrainService) Preview(ctx context.Context, userID, kind, name str
 	}
 	return SecondBrainPreviewView{
 		Name: preview.Name, Kind: preview.Kind, Title: preview.Title, Body: preview.Body, Truncated: preview.Truncated,
-		Suggestions: suggestions, ReviewUnavailable: reviewErr != nil,
+		Suggestions: suggestions, ReviewUnavailable: reviewErr != nil, ReviewWorkspaces: workspaces,
 		Link: secondbrain.ObsidianPathLink(filepath.Join(source.Path, filepath.FromSlash(preview.Rel))),
 	}, nil
 }

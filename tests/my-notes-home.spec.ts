@@ -279,6 +279,60 @@ test('only the comparison in mixed Inbox prose is offered for review', async ({ 
   await capture(page, 'inbox-comparison');
 });
 
+test('confirm in House, open the linked ticket, and keep a sibling as a note', async ({
+  page,
+  request
+}) => {
+  const created = await post(request, '/api/workspaces', {
+    name: 'House',
+    folder_slug: `house-review-${Date.now()}`,
+    blank: true
+  });
+  const house = created.folder || created.workspace || created;
+  const text =
+    'Maya said disposal costs extra. Compare both roofing quotes before Friday. Ask Maya about disposal.';
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  await page.locator('#cockpitCaptureTitle').fill(text);
+  await page.getByRole('button', { name: 'Save to Inbox' }).click();
+  await page.locator('#cockpitCaptureReceipt').getByRole('link', { name: 'Open note' }).click();
+  const cards = reader(page).locator('.my-notes-suggestion');
+  await expect(cards).toHaveCount(2);
+  const compare = cards.first();
+  const create = compare.getByRole('button', { name: 'Create ticket' });
+  await expect(create).toBeDisabled();
+  await compare.getByRole('combobox').selectOption(house.id);
+  await capture(page, 'review-confirm-destination');
+  await create.click();
+  const link = compare.getByRole('link', { name: 'Open ticket in House', exact: true });
+  await expect(link).toBeVisible();
+  const url = new URL(await link.getAttribute('href')!, 'http://localhost');
+  const id = url.searchParams.get('ticket');
+  const res = await request.get(`/api/workspaces/${house.id}/tickets/${id}`);
+  expect(res.ok()).toBeTruthy();
+  const ticket = await res.json();
+  expect(ticket).toMatchObject({
+    title: 'Compare both roofing quotes before Friday',
+    state: 'backlog',
+    source: 'personal_note',
+    owning_workspace_id: house.id
+  });
+  expect(ticket.assignee || ticket.current_run_id || ticket.schedule_enabled).toBeFalsy();
+  expect(ticket.linked_note_ids || []).toEqual([]);
+  await capture(page, 'review-linked');
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`ticket=${id}`));
+  await expect(page.getByText(ticket.title, { exact: true }).first()).toBeVisible();
+  await page.goBack();
+  await cards.nth(1).getByRole('button', { name: 'Keep as note' }).click();
+  await expect(cards).toHaveCount(1);
+  await page.reload();
+  await expect(link).toBeVisible();
+  await expect(cards).toHaveCount(1);
+  await expect(reader(page)).toContainText(text);
+  await capture(page, 'review-after-dismiss');
+});
+
 test('HQ Overview saves to the personal Inbox and its Map station navigates', async ({
   page,
   request
