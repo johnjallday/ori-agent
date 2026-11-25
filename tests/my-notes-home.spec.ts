@@ -52,6 +52,28 @@ async function notes(request: APIRequestContext) {
   return (await response.json()).second_brain;
 }
 
+// Every notes request the page makes, as "METHOD /path?query" below the notes
+// endpoint. Arrival may only read; anything else here is a regression.
+function recordNotesRequests(page: Page) {
+  const seen: string[] = [];
+  page.on('request', req => {
+    const url = new URL(req.url());
+    if (url.pathname.startsWith(endpoint))
+      seen.push(`${req.method()} ${url.pathname.slice(endpoint.length)}${url.search}`);
+  });
+  return seen;
+}
+
+const notebookBrowser = (page: Page) => page.getByRole('region', { name: 'Notebook browser' });
+const folders = (page: Page) => notebookBrowser(page).getByRole('navigation', { name: 'Folders' });
+const noteList = (page: Page) => notebookBrowser(page).locator('.my-notes-list');
+const reader = (page: Page) => notebookBrowser(page).locator('.my-notes-reader');
+
+async function listSettled(page: Page) {
+  await expect(noteList(page).getByText('Loading names…')).toHaveCount(0);
+  await expect(folders(page).getByText('Loading…')).toHaveCount(0);
+}
+
 test('Home Map and Tree link to an independent, refreshable My Notes page', async ({
   page,
   request
@@ -83,7 +105,7 @@ test('Home Map and Tree link to an independent, refreshable My Notes page', asyn
   expect(await notes(request)).toEqual(before);
 });
 
-test('explicit notebook setup is reusable and page entry only reads the connection', async ({
+test('explicit notebook setup is reusable and arrival reads only the connection and two folders', async ({
   page,
   request
 }) => {
@@ -126,21 +148,32 @@ test('explicit notebook setup is reusable and page entry only reads the connecti
   await expect.poll(async () => (await notes(request)).status).toBe('connected');
   const source = await notes(request);
   expect(source.source.origin).toBe('created_by_ori');
-  const reads: string[] = [];
-  page.on('request', req => {
-    if (req.url().includes(endpoint))
-      reads.push(`${req.method()} ${new URL(req.url()).search || new URL(req.url()).pathname}`);
-  });
+  const reads = recordNotesRequests(page);
   await page.reload();
   await expect(
     page.getByRole('heading', { name: source.source.name, level: 2, exact: true })
   ).toBeVisible();
+  // Arrival opens the notebook at Inbox, without a Browse step or settings.
+  await expect(page.getByRole('button', { name: 'Browse notebook' })).toHaveCount(0);
+  await expect(noteList(page).getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  await expect(folders(page).getByRole('button', { name: 'Inbox', exact: true })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
+  await listSettled(page);
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'My Notes', level: 1 })).toBeFocused();
   await capture(page, '04-connected-created');
-  expect(reads).toEqual(['GET ?view=connection']);
+  // The connection, the root (for Folders) and Inbox: nothing recursive, no
+  // note bodies, no writes and no look or index started by arriving.
+  const ref = encodeURIComponent(source.browse_ref);
+  expect([...reads].sort()).toEqual(
+    ['GET ?view=connection', `GET /browse?ref=${ref}`, `GET /browse?ref=${ref}&part=Inbox`].sort()
+  );
   expect(await notes(request)).toEqual(source);
-  await page.getByRole('button', { name: 'Inbox', exact: true }).click();
-  await expect(page.getByRole('tab', { name: /Inbox/ })).toBeFocused();
+  // The explicit Inbox destination still opens its view and capture box.
+  await page.goto('/my-notes?view=inbox');
+  await expect(page.getByRole('tab', { name: /Inbox/, selected: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save to Inbox' })).toBeVisible();
 });
 
@@ -200,8 +233,8 @@ test('HQ Overview saves to the personal Inbox and its Map station navigates', as
   expect(snapshot(daily).join('\n')).toContain('Reviewed the field notebook and planned the week.');
   await page.goBack();
   await capturePanel.getByRole('link', { name: 'Open My Notes' }).click();
-  await page.getByRole('button', { name: 'Inbox', exact: true }).click();
-  await expect(page.locator('[data-notes-section="inbox"]')).toContainText(/idea from hq/i);
+  // My Notes opens on Inbox, where the HQ capture landed.
+  await expect(noteList(page).getByRole('button', { name: /idea-from-hq/i })).toBeVisible();
   await capture(page, '10-hq-note-in-personal-inbox');
   await page.goto(base + '?mode=map');
   await page
@@ -266,7 +299,8 @@ test('a Workspace Note stays in workspace A and a personal capture stays in My N
   await expect(page.getByText(title, { exact: true })).toHaveCount(0);
   await page.goto('/');
   await page.getByRole('link', { name: 'My Notes' }).click();
-  await page.getByRole('button', { name: 'Inbox', exact: true }).click();
+  await expect(noteList(page).getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  await page.goto('/my-notes?view=inbox');
   const text = 'A personal reminder, not a workspace document';
   const tools = page.locator('[data-my-notes-tools]');
   const inbox = tools.locator('[data-notes-section="inbox"]');
@@ -294,7 +328,7 @@ test('a Workspace Note stays in workspace A and a personal capture stays in My N
   expect((await notes(request)).browse_ref).toEqual(personal.browse_ref);
 });
 
-test('browse a created notebook on demand, with guarded preview and folder fallback', async ({
+test('a created notebook opens on Inbox; Projects → House reads the project note', async ({
   page,
   request
 }) => {
@@ -307,6 +341,13 @@ test('browse a created notebook on demand, with guarded preview and folder fallb
     request_id: 'browse-preview-capture'
   });
   const file = captureBody.capture.note.split('/').at(-1);
+  // A real project note Ori wrote, through the reviewed fill-in consent.
+  await post(request, `${endpoint}/fill-in`, { decision: 'allow', request_id: 'browse-fill-in' });
+  await post(request, `${endpoint}/project`, {
+    name: 'House',
+    answer: 'Renovate the kitchen before spring.',
+    request_id: 'browse-house-project'
+  });
   const inbox = join(root, 'Inbox');
   const nested = join(root, 'Projects', 'Research', 'Drafts');
   mkdirSync(nested, { recursive: true });
@@ -314,41 +355,60 @@ test('browse a created notebook on demand, with guarded preview and folder fallb
   writeFileSync(join(root, 'Projects', 'Research', 'scratch.md'), 'Private project notes');
   const before = snapshot(root);
   await page.goto('/my-notes');
-  await page.getByRole('button', { name: 'Browse notebook' }).click();
-  const browser = page.getByRole('region', { name: 'Browse notebook' });
-  await expect(browser.getByRole('heading', { name: 'Inbox' })).toBeFocused();
-  await browser.getByRole('button', { name: `Check Ori preview for ${file}` }).click();
-  await expect(browser.getByText(text)).toBeVisible();
+  await expect(noteList(page).getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  await noteList(page).getByRole('button', { name: file, exact: true }).click();
+  await expect(reader(page).getByText(text)).toBeVisible();
+  await expect(reader(page).getByText(`Inbox / ${file}`)).toBeVisible();
+  await expect(noteList(page).getByRole('button', { name: file, exact: true })).toBeFocused();
   await capture(page, '05-inbox-preview');
-  await browser.getByRole('button', { name: 'Check Ori preview for personal.md' }).click();
-  await expect(browser.getByText(/That note is yours/)).toBeVisible();
-  await browser.getByRole('button', { name: 'Open notebook folder' }).click();
+  await noteList(page).getByRole('button', { name: 'personal.md', exact: true }).click();
+  await expect(reader(page).getByText(/That note is yours/)).toBeVisible();
+  // Ori sets its notebook up as a vault: the vault-relative link, never a path.
+  expect(source.source.kind).toBe('obsidian');
+  await expect(
+    reader(page).getByRole('link', { name: 'Open personal.md in Obsidian' })
+  ).toHaveAttribute(
+    'href',
+    `obsidian://open?vault=${encodeURIComponent(source.source.name)}&file=Inbox%2Fpersonal`
+  );
+  await reader(page).getByRole('button', { name: 'Open notebook folder' }).click();
   await expect(page.getByText('Folder handoff requested.')).toBeAttached();
-  await browser.getByRole('navigation').getByRole('button', { name: 'My Notes' }).click();
+
+  await folders(page).getByRole('button', { name: 'My Notes', exact: true }).click();
   for (const folder of ['Inbox', 'Daily', 'Projects', 'People', 'Areas', 'Resources', 'Archive']) {
-    await expect(browser.getByRole('button', { name: folder, exact: true })).toBeVisible();
+    await expect(folders(page).getByRole('button', { name: folder, exact: true })).toBeVisible();
   }
-  await browser.getByRole('button', { name: 'Projects', exact: true }).click();
-  await browser.getByRole('button', { name: 'Research', exact: true }).click();
-  await expect(browser.getByText('scratch.md')).toBeVisible();
-  await expect(browser.getByRole('button', { name: /preview/ })).toHaveCount(0);
-  await capture(page, '06-nested-project');
-  await browser.getByRole('button', { name: 'Drafts', exact: true }).click();
-  await expect(browser.getByText('No folders or Markdown notes here.')).toBeVisible();
+  await expect(reader(page).getByRole('heading', { name: 'No note open' })).toBeVisible();
+  await folders(page).getByRole('button', { name: 'Projects', exact: true }).click();
+  await folders(page).getByRole('button', { name: 'House', exact: true }).click();
+  await noteList(page).getByRole('button', { name: 'README.md', exact: true }).click();
+  await expect(reader(page).getByRole('heading', { level: 3 })).not.toHaveText('No note open');
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  await expect(reader(page).getByText('Projects / House / README.md')).toBeVisible();
+  await capture(page, '06-house-project-note');
+
+  await folders(page).getByRole('button', { name: 'Research', exact: true }).click();
+  await noteList(page).getByRole('button', { name: 'scratch.md', exact: true }).click();
+  await expect(reader(page).getByText(/notes it wrote in Inbox, Daily/)).toBeVisible();
+  await expect(reader(page).getByText('Private project notes')).toHaveCount(0);
+  await capture(page, '06b-unsupported-note');
+  await folders(page).getByRole('button', { name: 'Drafts', exact: true }).click();
+  await expect(noteList(page).getByText('No folders or Markdown notes here.')).toBeVisible();
   expect(snapshot(root)).toEqual(before);
+
   renameSync(nested, nested + '-moved');
-  await browser
-    .getByRole('navigation')
-    .getByRole('button', { name: 'Research', exact: true })
-    .click();
-  await expect(browser.getByRole('button', { name: 'Drafts-moved', exact: true })).toBeVisible();
+  await folders(page).getByRole('button', { name: 'Research', exact: true }).click();
+  await expect(
+    folders(page).getByRole('button', { name: 'Drafts-moved', exact: true })
+  ).toBeVisible();
   renameSync(nested + '-moved', nested);
-  await browser.getByRole('button', { name: 'Drafts-moved', exact: true }).click();
-  await expect(browser.getByRole('alert')).toContainText('moved or removed');
+  await folders(page).getByRole('button', { name: 'Drafts-moved', exact: true }).click();
+  await expect(noteList(page).getByRole('alert')).toContainText('moved or removed');
+
   writeFileSync(join(inbox, file), `${readFileSync(join(inbox, file), 'utf8')}\nMy edits.`);
-  await page.getByRole('button', { name: 'Browse notebook' }).click();
-  await browser.getByRole('button', { name: `Check Ori preview for ${file}` }).click();
-  await expect(browser.getByText(/That note is yours/)).toBeVisible();
+  await folders(page).getByRole('button', { name: 'Inbox', exact: true }).click();
+  await noteList(page).getByRole('button', { name: file, exact: true }).click();
+  await expect(reader(page).getByText(/That note is yours/)).toBeVisible();
 });
 
 test('browse a connected vault with its own layout without scanning or writing', async ({
@@ -370,19 +430,33 @@ test('browse a connected vault with its own layout without scanning or writing',
     request_id: 'browse-test-vault'
   });
   const before = snapshot(root);
+  const connected = await notes(request);
+  const reads = recordNotesRequests(page);
   await page.goto('/my-notes');
   await expect(page.getByText('Connected folder · read-only for Ori')).toBeVisible();
-  await page.getByRole('button', { name: 'Browse notebook' }).click();
-  const browser = page.getByRole('region', { name: 'Browse notebook' });
-  await expect(browser.getByRole('button', { name: /Inbox|Projects|Save/ })).toHaveCount(0);
-  await browser.getByRole('button', { name: 'Expeditions' }).click();
-  await expect(browser.getByRole('link', { name: 'Open Canyon.md in Obsidian' })).toHaveAttribute(
-    'href',
-    /^obsidian:\/\/open/
-  );
-  await expect(browser.getByRole('button', { name: /preview/ })).toHaveCount(0);
+  // A connected folder opens at its own root, with its own names.
+  await expect(
+    noteList(page).getByRole('heading', { name: 'Field Notebook', level: 3 })
+  ).toBeVisible();
+  await listSettled(page);
+  expect(reads).toEqual([
+    'GET ?view=connection',
+    `GET /browse?ref=${encodeURIComponent(connected.browse_ref)}`
+  ]);
+  await expect(
+    notebookBrowser(page).getByRole('button', { name: /^(Inbox|Projects|Save to Inbox)$/ })
+  ).toHaveCount(0);
+  await folders(page).getByRole('button', { name: 'Expeditions', exact: true }).click();
+  await noteList(page).getByRole('button', { name: 'Canyon.md', exact: true }).click();
+  await expect(
+    reader(page).getByRole('link', { name: 'Open Canyon.md in Obsidian' })
+  ).toHaveAttribute('href', /^obsidian:\/\/open/);
+  await expect(reader(page).getByText(/connected folder/)).toBeVisible();
+  await expect(reader(page).getByText('Not an Ori note.')).toHaveCount(0);
   await capture(page, '07-read-only-vault');
   expect(snapshot(root)).toEqual(before);
+  expect(reads.filter(line => !line.startsWith('GET '))).toEqual([]);
+  expect(reads.some(line => line.includes('/preview/'))).toBe(false);
 
   // UI-only error/partial cases follow the real fixture checks above.
   await page.route(
@@ -390,18 +464,18 @@ test('browse a connected vault with its own layout without scanning or writing',
     route => route.fulfill({ json: { directory: { entries: [], partial: true } } }),
     { times: 1 }
   );
-  await page.getByRole('button', { name: 'Browse notebook' }).click();
+  await folders(page).getByRole('button', { name: 'Field Notebook', exact: true }).click();
   await expect(
-    browser.getByText('Only some names could be listed.', { exact: false })
+    noteList(page).getByText('Only some names could be listed.', { exact: false })
   ).toBeVisible();
-  await expect(browser.getByText('No folders or Markdown notes here.')).toHaveCount(0);
+  await expect(noteList(page).getByText('No folders or Markdown notes here.')).toHaveCount(0);
   await page.route(
     `**${endpoint}/browse?*`,
     route => route.fulfill({ status: 403, json: { error: 'Forbidden' } }),
     { times: 1 }
   );
-  await page.getByRole('button', { name: 'Browse notebook' }).click();
-  await expect(browser.getByRole('alert')).toContainText('Ori cannot list this folder');
+  await folders(page).getByRole('button', { name: 'Field Notebook', exact: true }).click();
+  await expect(noteList(page).getByRole('alert')).toContainText('Ori cannot list this folder');
   await expect(page.getByRole('button', { name: 'Open folder', exact: true })).toBeVisible();
 });
 
@@ -416,9 +490,12 @@ test('a missing folder is distinct from disconnected and reuses the reviewed con
   const before = snapshot(root);
   renameSync(root, moved);
   try {
+    const reads = recordNotesRequests(page);
     await page.goto('/my-notes');
     await expect(page.getByRole('heading', { name: 'Notes folder not found' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Browse notebook' })).toHaveCount(0);
+    // An unavailable source offers repair and lists nothing.
+    await expect(notebookBrowser(page)).toBeHidden();
+    expect(reads).toEqual(['GET ?view=connection']);
     await capture(page, '13-missing-source');
     await page.getByRole('button', { name: 'Choose again…' }).click();
     const card = page.locator('#personalAssistantSecondBrain');
@@ -452,6 +529,9 @@ test('a missing folder is distinct from disconnected and reuses the reviewed con
   expect(after.browse_ref).not.toBe(source.browse_ref);
   expect(snapshot(root)).toEqual(before);
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Field Notebook' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Field Notebook', level: 2 })).toBeVisible();
+  await expect(
+    noteList(page).getByRole('heading', { name: 'Field Notebook', level: 3 })
+  ).toBeVisible();
   await capture(page, '15-reconnected');
 });

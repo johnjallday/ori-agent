@@ -1,5 +1,5 @@
 import { notesPost, notesRequest } from './notes-api.js';
-import { MyNotesBrowser } from './my-notes-browser.js';
+import { initialNotesFolder, MyNotesBrowser } from './my-notes-browser.js';
 import {
   isCreatedByOri,
   lookTooSoonLine,
@@ -69,6 +69,24 @@ export function myNotesConnection(view) {
   };
 }
 
+// myNotesLanding is what arrival shows, decided from the lightweight connection
+// view alone. Setup and repair keep their existing flows; arrival never opens
+// settings, creates a notebook or lists a folder that is not connected. A
+// connected notebook opens in the browser: an Ori notebook at Inbox, any other
+// folder at its own root. ?view=inbox and ?view=loops still open those views.
+export function myNotesLanding(view, arrival = null) {
+  if (view?.setup_required || view?.status === 'not_connected') return { kind: 'setup' };
+  if (view?.status === 'missing') return { kind: 'repair' };
+  if (!myNotesConnection(view).connected) return { kind: 'retry' };
+  if (!view.browse_ref) return { kind: 'connected' };
+  const created = isCreatedByOri(view);
+  return {
+    kind: 'browse',
+    folder: initialNotesFolder(view),
+    tools: arrival === 'loops' || (arrival === 'inbox' && created) ? arrival : null
+  };
+}
+
 // Requests can finish after a retry, a connection change or a bfcache departure.
 // Only the latest request in this document's active lifetime can update the view.
 export function latestNotesRequest() {
@@ -114,7 +132,12 @@ export class MyNotes {
     this.status = root.querySelector('[data-my-notes-status]');
     this.tools = root.querySelector('[data-my-notes-tools]');
     this.browser = new MyNotesBrowser(root.querySelector('[data-my-notes-browser]'), {
-      openFolder: () => this.openFolder()
+      openFolder: () => this.openFolder(),
+      // A listing that says the connection changed or the folder is gone asks
+      // for the connection again; a changed one clears and reopens the browser.
+      recheck: () => {
+        if (!this.suspended) void this.load();
+      }
     });
     this.request = latestNotesRequest();
     this.arrival = new URLSearchParams(window.location.search).get('view');
@@ -174,14 +197,17 @@ export class MyNotes {
     this.view = view;
     this.paintStatus();
     this.status.removeAttribute('aria-busy');
-    if (
-      myNotesConnection(view).connected &&
-      (this.arrival === 'loops' || (this.arrival === 'inbox' && isCreatedByOri(view)))
-    ) {
-      const tab = this.arrival;
-      this.arrival = null;
-      void this.openTools(tab, { focus: false });
-    }
+    this.land();
+  }
+
+  // land opens the browser once per connection. A refresh of the same
+  // connection keeps whatever folder and note the reader chose.
+  land() {
+    const landing = myNotesLanding(this.view, this.arrival);
+    if (landing.kind !== 'browse') return;
+    if (!this.browser.view) this.browser.start(this.view, landing.folder);
+    this.arrival = null;
+    if (landing.tools) void this.openTools(landing.tools, { focus: false });
   }
 
   paintStatus() {
@@ -194,8 +220,9 @@ export class MyNotes {
     const actions = node('div', '');
     actions.className = 'my-notes-actions';
     if (state.connected) {
-      if (this.view.browse_ref) actions.append(button('Browse notebook', 'browse'));
-      if (isCreatedByOri(this.view)) actions.append(button('Inbox', 'inbox'));
+      // The notebook itself is the browser below; these are its tools.
+      actions.setAttribute('role', 'group');
+      actions.setAttribute('aria-label', 'Notebook tools');
       actions.append(button('Open loops', 'loops'));
       actions.append(button(isCreatedByOri(this.view) ? 'People & Projects' : 'People', 'more'));
       actions.append(button('Open folder', 'folder'));
@@ -368,8 +395,6 @@ export class MyNotes {
         return this.manage(control);
       case 'folder':
         return this.openFolder();
-      case 'browse':
-        return this.browser.start(this.view);
       case 'inbox':
       case 'loops':
       case 'more':
