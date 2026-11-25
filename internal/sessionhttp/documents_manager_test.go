@@ -22,6 +22,47 @@ func readBlankManagerPlan(t *testing.T, h *Handler, workspaceName, purpose strin
 	return plan
 }
 
+func documentsCreationMaterial(t *testing.T, h *Handler, name, path string) (map[string]any, templateAgentPlan) {
+	t.Helper()
+	plan := readBlankManagerPlan(t, h, name, documentsPurpose)
+	return map[string]any{"name": name, "anchor_path": path, "blank": true, "guided_purpose": documentsPurpose, "team_intent": map[string]any{"version": 1, "mode": "staffed", "plan_revision": plan.Revision}, "role_staffing": []map[string]string{{"role_id": "manager", "mode": "create", "name": plan.EntryAgentName}}}, plan
+}
+
+func TestDocumentsManagerCreate_ReviewedIdentityAndConfigurationSurviveReadback(t *testing.T) {
+	h, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	for i, name := range []string{"My shelves", "My shelves II", "Edited shelves"} {
+		anchor := canonicalAnchorTestDir(t)
+		material, plan := documentsCreationMaterial(t, h, name, anchor)
+		holder, prompt := plan.EntryAgentName, plan.Agents[0].SystemPrompt
+		if holder != []string{"Documents Manager", "Documents Manager 2", "Documents Manager 3"}[i] {
+			t.Fatalf("unexpected proposal %q", holder)
+		}
+		if i == 2 {
+			holder, prompt = "Archivist", "Help me summarize my letters."
+			material["role_staffing"] = []map[string]string{{"role_id": "manager", "mode": "create", "name": holder, "system_prompt": prompt, "provider": "anthropic", "model": "reviewed-model"}}
+		}
+		id, digest := reviewCreationOperation(t, h, material)
+		w, result := creationOperationRequest(t, h, http.MethodPost, "/"+id+"/confirm", map[string]any{"review_digest": digest})
+		if w.Code != http.StatusCreated {
+			t.Fatalf("confirm: %d %s", w.Code, w.Body)
+		}
+		wsID := result["folder"].(map[string]any)["id"].(string)
+		ws, err := h.workspaceTaskStore.Get(wsID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		roster := h.buildWorkspaceRoster(ws)
+		if ws.EntryAgentName() != holder || len(ws.AgentInstances) != 1 || len(roster.Roles) != 1 || roster.Roles[0].RoleID != "manager" || roster.Roles[0].Label != "Documents Manager" || roster.Roles[0].Agent == nil || roster.Roles[0].Agent.Name != holder {
+			t.Fatalf("unexpected persisted team: %#v", roster)
+		}
+		profile, ok := h.agentStore.GetAgent(holder)
+		if !ok || !profile.WorkspaceManager.ManagesWorkspace(wsID) || profile.Settings.SystemPrompt != prompt || (i == 2 && (profile.Settings.Provider != "anthropic" || profile.Settings.Model != "reviewed-model")) {
+			t.Fatalf("%q did not retain its reviewed settings or provenance", holder)
+		}
+	}
+}
+
 func TestDocumentsManagerPlan_OnlyExplicitPurposeChangesManagerDefaults(t *testing.T) {
 	h, cleanup := createTestHandler(t)
 	defer cleanup()

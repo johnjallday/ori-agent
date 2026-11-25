@@ -1375,6 +1375,9 @@ func buildCreateWorkspace(req createWorkspaceRequest, kind session.WorkspaceKind
 			preset = tmpl.BehaviorProfile
 		}
 		ws.SharedData = workspacesettings.Store(ws.SharedData, workspacesettings.ProfileDefaults(preset))
+		if req.GuidedPurpose != "" {
+			ws.SharedData[guidedPurposeKey] = req.GuidedPurpose
+		}
 	}
 	if bootstrapData := normalizeWorkspaceBootstrap(bootstrapWithGoal(req.WorkspaceBootstrap, createWorkspaceGoal(req, kind, tmpl, templateResolved))); bootstrapData != nil {
 		if ws.SharedData == nil {

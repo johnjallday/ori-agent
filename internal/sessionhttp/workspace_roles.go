@@ -116,7 +116,7 @@ func (h *Handler) declaredWorkspaceRoles(current *workspace.Workspace) ([]worksp
 	// Strict Blank workspaces retain their host-owned synthetic declaration so
 	// an intentionally empty manager role remains visible and fillable later.
 	if strings.TrimSpace(provenance.TemplateID) == blankWorkspaceTemplateID {
-		return workspaceroles.FromTemplateAgents(h.blankWorkspaceTemplate(current.Name).Agents), blankLegacyRoleBindings(current), ""
+		return workspaceroles.FromTemplateAgents(h.storedBlankWorkspaceTeam(current).Agents), blankLegacyRoleBindings(current), ""
 	}
 	// The ordinary roster is not snapshotted on the workspace, so it is read
 	// back from the library. A blueprint that has since been removed or edited

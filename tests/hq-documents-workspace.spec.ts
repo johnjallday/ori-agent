@@ -1,6 +1,7 @@
 import { test, expect, type Page, type TestInfo } from '@playwright/test';
 import { mkdir, readdir, realpath } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { confirmReviewedCreation } from './helpers/confirm-reviewed-creation';
 import { freshGuidedHQ } from './helpers/fresh-guided-hq';
 import { installLocalCdn } from './helpers/offline-cdn';
 let base: string;
@@ -22,6 +23,7 @@ test('Documents workspace wizard reviews only on activation and resets on cancel
   page,
   request
 }, info) => {
+  test.setTimeout(60_000);
   const sandbox = process.env.ORI_HQ_FIRST_VISIT_SANDBOX;
   test.skip(!sandbox, 'requires an isolated home');
   const home = await realpath(sandbox!);
@@ -35,12 +37,13 @@ test('Documents workspace wizard reviews only on activation and resets on cancel
   page.on('request', r => {
     if (r.url().includes('/anchor/check?known=')) checks.push(r.url());
   });
-  async function start(repeatActivation = false) {
+  async function start(repeatActivation = false, returning = false) {
     await page.goto(base + '?mode=details');
     const card = page.locator('[data-hq-firstvisit]');
     if (checks.length) await page.getByRole('button', { name: 'Things to try' }).click();
     const suggestion = card.getByRole('button', { name: /Create a workspace from Documents/ });
-    await expect(suggestion).not.toContainText('Completed');
+    if (returning) await expect(suggestion).toContainText('Completed');
+    else await expect(suggestion).not.toContainText('Completed');
     await suggestion.click();
     const count = checks.length;
     await card.getByRole('link', { name: 'Go to Home' }).click();
@@ -100,17 +103,49 @@ test('Documents workspace wizard reviews only on activation and resets on cancel
   await page.screenshot({ path: info.outputPath('ordinary-blank.png') });
   await page.keyboard.press('Escape');
   await expect(modal).toBeHidden();
-  const create = await request.post('/api/workspaces', {
-    data: { name: 'Document shelves', anchor_path: docs }
-  });
-  expect(create.ok(), await create.text()).toBeTruthy();
   await start();
+  await expect(path).toHaveValue(docs);
+  await modal.locator('#folderNameInput').fill('Document shelves');
+  await modal.locator('#wizardNextBtn').click();
+  await expect(role.locator('.ws-role-tag__name')).toHaveText('Documents Manager');
+  await modal.locator('#wizardNextBtn').click();
+  const confirmed = page.waitForResponse(
+    r => r.request().method() === 'POST' && /create-operations\/[^/]+\/confirm$/.test(r.url())
+  );
+  await confirmReviewedCreation(page);
+  const result = await confirmed;
+  expect(result.ok(), await result.text()).toBe(true);
+  const { id: existingId, folder_slug: slug } = (await result.json()).folder;
+  await review.getByRole('button', { name: 'Open workspace', exact: true }).click();
+  const current = async () => (await request.get(`/api/workspaces/${existingId}`)).json();
+  const ws = await current();
+  expect(ws.name).toBe('Document shelves');
+  expect(ws.anchor.path).toBe(docs);
+  expect(ws.agent_instances).toEqual([
+    expect.objectContaining({
+      name: 'Documents Manager',
+      role_id: 'manager',
+      role_source: 'created',
+      entry_point: true
+    })
+  ]);
+  await expect(page.locator('body')).toHaveAttribute('data-workspace-id', existingId);
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(page.locator('#personalAssistantPanelTitle')).toHaveText('Documents Manager');
+  await expect(page.locator('#personalAssistantModelSettings')).toHaveAttribute(
+    'href',
+    `/workspaces/${slug}?editAgentModel=Documents+Manager`
+  );
+  await page.screenshot({ path: info.outputPath('manager-chat.png') });
+  await page.locator('#personalAssistantClose').click();
+  await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await start(false, true);
   await expect(modal.locator('#workspaceAnchorOpenExisting')).toBeVisible();
   await expect(path).toHaveValue(docs);
-  expect(checks).toHaveLength(3);
-  const existingId = (await create.json()).folder.id;
+  expect(checks).toHaveLength(4);
   await modal.locator('#workspaceAnchorOpenExisting').click();
   await assertVisited(page, existingId, info);
+  expect((await current()).agent_instances).toEqual(ws.agent_instances);
   expect(await readdir(docs)).toEqual([]);
 });
 
