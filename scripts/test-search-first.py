@@ -159,7 +159,11 @@ if __name__=='__main__':
             return root
         build=Path(tempfile.mkdtemp(prefix='picker-build-',dir=SCRATCH))
         overlay=build/'overlay.json'
-        overlay.write_text(json.dumps({'Replace':{str(REPO/'internal/server'/name):str(REPO/'internal/server/testdata'/name) for name in ('search_folder_picker.go','folder_agent_model.go')}}))
+        server = REPO/'internal/server'
+        overlay.write_text(json.dumps({'Replace': {
+            str(server/'search_folder_picker.go'): str(server/'testdata/search_folder_picker.go'),
+            str(server/'folder_agent_model.go'): str(server/'testdata/folder_agent_model.go.fixture'),
+        }}))
         binary=build/'fixture-server'
         subprocess.run(['go','build','-overlay',str(overlay),'-o',str(binary),'./cmd/server'],cwd=REPO,env={**os.environ,'GOWORK':'off'},check=True)
         for browser in BROWSERS:
