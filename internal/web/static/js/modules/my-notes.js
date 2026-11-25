@@ -1,5 +1,6 @@
 import { notesPost, notesRequest } from './notes-api.js';
 import { initialNotesFolder, MyNotesBrowser } from './my-notes-browser.js';
+import { inboxHasUserNotes, MyNotesQuickNote, quickNoteEntry } from './my-notes-quick-note.js';
 import {
   isCreatedByOri,
   lookTooSoonLine,
@@ -139,6 +140,13 @@ export class MyNotes {
         if (!this.suspended) void this.load();
       }
     });
+    this.quick = new MyNotesQuickNote(root.querySelector('[data-my-notes-quick]'), {
+      saved: receipt => this.quickSaved(receipt),
+      failed: open => this.quickFailed(open),
+      returnFocus: () => this.focusQuick(),
+      changed: () => this.paintStatus({ keepNotice: true })
+    });
+    this.firstNote = false;
     this.request = latestNotesRequest();
     this.arrival = new URLSearchParams(window.location.search).get('view');
     root.addEventListener('click', event => this.click(event));
@@ -187,17 +195,70 @@ export class MyNotes {
       // A failed request is not the same as having no source.
     }
     if (!this.request.isCurrent(request)) return;
-    if (
+    const changed =
       connectionKey(view) !== connectionKey(this.view) ||
-      view?.browse_ref !== this.view?.browse_ref
-    ) {
+      view?.browse_ref !== this.view?.browse_ref;
+    if (changed) {
       this.browser.clear();
       this.clearTools();
+      this.firstNote = false;
+      this.firstNoteFor = '';
     }
     this.view = view;
-    this.paintStatus();
+    this.paintStatus({ keepNotice: !changed });
     this.status.removeAttribute('aria-busy');
+    // A Quick note draft stays with the connection it was written for.
+    this.quick.update(view, { firstNote: this.firstNote });
     this.land();
+  }
+
+  // checkFirstNote asks Inbox, once per connection, whether the person has
+  // written anything yet; until it answers the control says Quick note.
+  async checkFirstNote() {
+    const view = this.view;
+    const key = connectionKey(view) + ':' + view?.browse_ref;
+    if (!isCreatedByOri(view) || this.firstNoteFor === key) return;
+    this.firstNoteFor = key;
+    let inbox;
+    try {
+      inbox = (await notesRequest('/inbox')).inbox;
+    } catch {
+      return;
+    }
+    if (this.suspended || connectionKey(this.view) + ':' + this.view?.browse_ref !== key) return;
+    this.firstNote = !inboxHasUserNotes(inbox);
+    this.paintStatus({ keepNotice: true });
+    this.quick.update(this.view, { firstNote: this.firstNote });
+  }
+
+  quickSaved(receipt) {
+    this.firstNote = false;
+    this.paintStatus();
+    this.notice(receipt);
+    this.browser.refreshInbox();
+    void this.refreshPanelInbox();
+  }
+
+  quickFailed(open) {
+    if (!open)
+      this.notice('Your quick note was not saved. Open it again to retry; the draft is kept.');
+    // A failed save may mean the connection changed; ask, without clearing.
+    if (!this.suspended) void this.load();
+  }
+
+  focusQuick() {
+    const target = this.status.querySelector('[data-my-notes-action="quick"]') || this.title;
+    target.focus({ preventScroll: true });
+  }
+
+  async refreshPanelInbox() {
+    const panel = this.panel;
+    if (panel?.status !== 'ready' || !isCreatedByOri(this.view)) return;
+    const payload = await notesRequest('/inbox').catch(() => null);
+    if (payload && panel === this.panel) {
+      panel.inbox = payload.inbox;
+      this.paintTools(panel);
+    }
   }
 
   // land opens the browser once per connection. A refresh of the same
@@ -206,19 +267,36 @@ export class MyNotes {
     const landing = myNotesLanding(this.view, this.arrival);
     if (landing.kind !== 'browse') return;
     if (!this.browser.view) this.browser.start(this.view, landing.folder);
+    void this.checkFirstNote();
     this.arrival = null;
     if (landing.tools) void this.openTools(landing.tools, { focus: false });
   }
 
-  paintStatus() {
+  paintStatus({ keepNotice = false } = {}) {
     const state = myNotesConnection(this.view);
     const focused = document.activeElement?.dataset.myNotesAction;
+    const previous = keepNotice
+      ? this.status.querySelector('[data-my-notes-notice]')?.textContent || ''
+      : '';
     const detail = node('p', state.detail);
     if (state.retry) detail.setAttribute('role', 'alert');
     const title = node('h2', state.title);
     title.tabIndex = -1;
     const actions = node('div', '');
     actions.className = 'my-notes-actions';
+    // Quick note only where Ori may write, or to settle an earlier draft.
+    const quick = quickNoteEntry({
+      view: this.view,
+      draft: this.quick.draft,
+      firstNote: this.firstNote
+    });
+    if (quick) {
+      const control = button(quick.label, 'quick');
+      control.className = 'modern-btn modern-btn-primary modern-btn-sm';
+      control.setAttribute('aria-haspopup', 'dialog');
+      if (!quick.stranded) control.title = 'Saves to My Notes → Inbox';
+      actions.append(control);
+    }
     if (state.connected) {
       // The notebook itself is the browser below; these are its tools.
       actions.setAttribute('role', 'group');
@@ -235,7 +313,7 @@ export class MyNotes {
       link.className = 'modern-btn modern-btn-primary modern-btn-sm';
       actions.append(link);
     }
-    const notice = node('p', '');
+    const notice = node('p', previous);
     notice.dataset.myNotesNotice = '';
     notice.setAttribute('role', 'status');
     this.status.replaceChildren(title, detail, actions, notice);
@@ -395,6 +473,8 @@ export class MyNotes {
         return this.manage(control);
       case 'folder':
         return this.openFolder();
+      case 'quick':
+        return this.quick.open(this.view, { firstNote: this.firstNote });
       case 'inbox':
       case 'loops':
       case 'more':
@@ -466,7 +546,13 @@ export class MyNotes {
       panel.captureDraft = '';
       panel.captureID = null;
       panel.captureReceipt = secondBrainCaptureReceipt(payload.capture);
-      if (panel === this.panel) this.browser.refreshInbox();
+      if (panel === this.panel) {
+        this.browser.refreshInbox();
+        if (this.firstNote) {
+          this.firstNote = false;
+          this.paintStatus({ keepNotice: true });
+        }
+      }
       const [inbox, progression] = await Promise.all([
         notesRequest('/inbox').catch(() => null),
         fetch('/api/progression', { cache: 'no-store' })

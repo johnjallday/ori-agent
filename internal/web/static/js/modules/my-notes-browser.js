@@ -443,8 +443,10 @@ export class MyNotesBrowser {
     this.state.start(view, folder);
   }
 
+  // refreshInbox lists Inbox again only while it is the open folder; any
+  // other time, choosing Inbox lists it fresh anyway.
   refreshInbox() {
-    this.state.refresh(['Inbox']);
+    if (sameFolder(this.state.folder, ['Inbox'])) this.state.refresh(['Inbox']);
   }
 
   click(event) {

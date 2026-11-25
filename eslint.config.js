@@ -139,6 +139,7 @@ export default defineConfig([
       'internal/web/static/js/modules/notes-api.js',
       'internal/web/static/js/modules/my-notes.js',
       'internal/web/static/js/modules/my-notes-browser.js',
+      'internal/web/static/js/modules/my-notes-quick-note.js',
       'internal/web/static/js/modules/hq-labels.js',
       'internal/web/static/js/modules/hq-first-visit.js',
       'internal/web/static/js/modules/hq-first-visit-card.js',

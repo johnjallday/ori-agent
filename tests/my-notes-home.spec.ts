@@ -105,7 +105,7 @@ test('Home Map and Tree link to an independent, refreshable My Notes page', asyn
   expect(await notes(request)).toEqual(before);
 });
 
-test('explicit notebook setup is reusable and arrival reads only the connection and two folders', async ({
+test('explicit notebook setup is reusable and arrival only reads the connection, two folders and Inbox kinds', async ({
   page,
   request
 }) => {
@@ -163,12 +163,20 @@ test('explicit notebook setup is reusable and arrival reads only the connection 
   await listSettled(page);
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
   await expect(page.getByRole('heading', { name: 'My Notes', level: 1 })).toBeFocused();
+  // Nothing written yet: the writable notebook invites a first note.
+  await expect(page.getByRole('button', { name: 'Write your first note' })).toBeVisible();
   await capture(page, '04-connected-created');
-  // The connection, the root (for Folders) and Inbox: nothing recursive, no
-  // note bodies, no writes and no look or index started by arriving.
+  // The connection, the root (for Folders), Inbox, and Inbox's kinds (to tell
+  // setup notes from the person's): nothing recursive, no note bodies, no
+  // writes and no look or index started by arriving.
   const ref = encodeURIComponent(source.browse_ref);
   expect([...reads].sort()).toEqual(
-    ['GET ?view=connection', `GET /browse?ref=${ref}`, `GET /browse?ref=${ref}&part=Inbox`].sort()
+    [
+      'GET ?view=connection',
+      'GET /inbox',
+      `GET /browse?ref=${ref}`,
+      `GET /browse?ref=${ref}&part=Inbox`
+    ].sort()
   );
   expect(await notes(request)).toEqual(source);
   // The explicit Inbox destination still opens its view and capture box.
@@ -411,11 +419,119 @@ test('a created notebook opens on Inbox; Projects → House reads the project no
   await expect(reader(page).getByText(/That note is yours/)).toBeVisible();
 });
 
+test('Quick note saves to Inbox while the reader stays on the House note', async ({
+  page,
+  request
+}) => {
+  const source = await notes(request);
+  expect(source.source.origin).toBe('created_by_ori');
+  const inbox = join(source.source.path, 'Inbox');
+  const status = await (await request.get('/api/personal-assistant/today')).json();
+  const workspaceNotesURL = `/api/workspaces/${status.today.hq_workspace_id}/notes`;
+  const workspaceNotes = async () => (await (await request.get(workspaceNotesURL)).json()).notes;
+  const workspaceBefore = await workspaceNotes();
+  const inboxBefore = new Set(readdirSync(inbox));
+
+  await page.goto('/my-notes');
+  await folders(page).getByRole('button', { name: 'Projects', exact: true }).click();
+  await folders(page).getByRole('button', { name: 'House', exact: true }).click();
+  await noteList(page).getByRole('button', { name: 'README.md', exact: true }).click();
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  const scrollBefore = await page.evaluate(() => scrollY);
+
+  // Earlier tests saved notes, so this is the ordinary Quick note.
+  const trigger = page.getByRole('button', { name: 'Quick note', exact: true });
+  await trigger.click();
+  const dialog = page.getByRole('dialog', { name: 'Quick note' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('My Notes → Inbox', { exact: true })).toBeVisible();
+  const field = dialog.getByRole('textbox', { name: 'Note for My Notes → Inbox' });
+  await expect(field).toBeFocused();
+  const text = 'Ask Maya about disposal.';
+  await field.fill(text);
+  await capture(page, '16-quick-note-over-reader');
+
+  // Escape closes, keeps the draft and returns focus to Quick note.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await expect(field).toHaveValue(text);
+  // The backdrop closes it the same way.
+  await page.mouse.click(5, 5);
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(field).toHaveValue(text);
+
+  // A failed save keeps the draft in the open dialog.
+  await page.route(
+    `**${endpoint}/capture`,
+    route => route.fulfill({ status: 500, json: { error: 'Try the save again.' } }),
+    { times: 1 }
+  );
+  await dialog.getByRole('button', { name: 'Save to Inbox' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Try the save again.');
+  await expect(field).toHaveValue(text);
+  await capture(page, '17-quick-note-failed-save');
+  expect(new Set(readdirSync(inbox))).toEqual(inboxBefore);
+
+  // A slow save clicked twice sends one request; the reader never moves.
+  const sent: string[] = [];
+  page.on('request', req => {
+    const url = new URL(req.url());
+    if (url.pathname.startsWith(endpoint))
+      sent.push(`${req.method()} ${url.pathname.slice(endpoint.length)}${url.search}`);
+  });
+  await page.route(`**${endpoint}/capture`, async route => {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    await route.continue();
+  });
+  const save = dialog.getByRole('button', { name: /Save to Inbox|Saving…/ });
+  await save.click();
+  // The second click lands on the disabled "Saving…" button, or on nothing.
+  await save.click({ force: true, noWaitAfter: true, timeout: 1000 }).catch(() => {});
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('Saved to My Notes → Inbox.')).toBeVisible();
+  await expect(trigger).toBeFocused();
+  await page.unroute(`**${endpoint}/capture`);
+  expect(sent.filter(line => line === 'POST /capture')).toHaveLength(1);
+  // Inbox is not open, so it is not listed again on the reader's behalf.
+  expect(sent.some(line => line.includes('part=Inbox'))).toBe(false);
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  await expect(reader(page).getByText('Projects / House / README.md')).toBeVisible();
+  await expect(folders(page).getByRole('button', { name: 'House', exact: true })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
+  expect(await page.evaluate(() => scrollY)).toBe(scrollBefore);
+  await capture(page, '18-quick-note-saved-reader-kept');
+
+  // Exactly one note persisted in Inbox, and nothing in any workspace.
+  const added = readdirSync(inbox).filter(name => !inboxBefore.has(name));
+  expect(added).toHaveLength(1);
+  expect(readFileSync(join(inbox, added[0]), 'utf8')).toContain(text);
+  expect(await workspaceNotes()).toEqual(workspaceBefore);
+  await folders(page).getByRole('button', { name: 'Inbox', exact: true }).click();
+  await expect(noteList(page).getByRole('button', { name: added[0], exact: true })).toBeVisible();
+});
+
 test('browse a connected vault with its own layout without scanning or writing', async ({
   page,
   request
 }) => {
   const source = await notes(request);
+  // A draft written for the Ori notebook must not follow the connection.
+  await page.goto('/my-notes');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  const quickDialog = page.getByRole('dialog', { name: /^(Quick note|Unsent note)$/ });
+  await quickDialog.getByRole('textbox').fill('Draft for the old notebook');
+  await page.keyboard.press('Escape');
+  const sentCaptures: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && req.url().includes(`${endpoint}/capture`))
+      sentCaptures.push(req.url());
+  });
   await post(request, `${endpoint}/disconnect`, {
     request_id: 'browse-test-disconnect',
     if_version: source.version
@@ -431,9 +547,27 @@ test('browse a connected vault with its own layout without scanning or writing',
   });
   const before = snapshot(root);
   const connected = await notes(request);
+  // The open page learns of the new connection; the draft waits for a decision.
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('personal-assistant:second-brain'))
+  );
+  await expect(page.getByText('Connected folder · read-only for Ori')).toBeVisible();
+  await page.getByRole('button', { name: 'Unsent note' }).click();
+  await expect(quickDialog.getByRole('textbox')).toHaveValue('Draft for the old notebook');
+  await expect(quickDialog.getByRole('textbox')).not.toBeEditable();
+  await expect(quickDialog.getByText(/Ori can’t write here/)).toBeVisible();
+  await expect(quickDialog.getByRole('button', { name: 'Keep for this notebook' })).toHaveCount(0);
+  await capture(page, '19-unsent-draft-after-switch');
+  await quickDialog.getByRole('button', { name: 'Discard draft' }).click();
+  await expect(quickDialog).toBeHidden();
+  await expect(page.getByRole('button', { name: /Quick note|Unsent note/ })).toHaveCount(0);
+  expect(sentCaptures).toEqual([]);
+
   const reads = recordNotesRequests(page);
   await page.goto('/my-notes');
   await expect(page.getByText('Connected folder · read-only for Ori')).toBeVisible();
+  // Read-only for Ori: no Quick note at all.
+  await expect(page.getByRole('button', { name: /Quick note|first note/ })).toHaveCount(0);
   // A connected folder opens at its own root, with its own names.
   await expect(
     noteList(page).getByRole('heading', { name: 'Field Notebook', level: 3 })
@@ -493,6 +627,7 @@ test('a missing folder is distinct from disconnected and reuses the reviewed con
     const reads = recordNotesRequests(page);
     await page.goto('/my-notes');
     await expect(page.getByRole('heading', { name: 'Notes folder not found' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Quick note|first note/ })).toHaveCount(0);
     // An unavailable source offers repair and lists nothing.
     await expect(notebookBrowser(page)).toBeHidden();
     expect(reads).toEqual(['GET ?view=connection']);
