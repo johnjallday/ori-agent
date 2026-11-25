@@ -59,7 +59,7 @@ test.describe.serial('Memory station', () => {
     await expect(badge(page)).toHaveText('Empty');
     await expect(page.locator(building)).toHaveAttribute(
       'aria-label',
-      'Memory station, Empty, nothing recorded yet'
+      'Agent memory station, Empty, nothing recorded yet'
     );
 
     await addEntry(page, album.id, 'Build baseline is about 7 minutes.', 'watch');
@@ -68,7 +68,7 @@ test.describe.serial('Memory station', () => {
     await expect(badge(page)).toHaveText('2 entries');
     await expect(page.locator(building)).toHaveAttribute(
       'aria-label',
-      'Memory station, 2 entries, 1 watching'
+      'Agent memory station, 2 entries, 1 watching'
     );
   });
 
@@ -77,7 +77,7 @@ test.describe.serial('Memory station', () => {
     await openMap(page, album.folder_slug);
     await page.locator(building).click();
     await expect(page.locator(`${panel} #workspace-detail-config-memory-pane`)).toBeVisible();
-    await expect(page.locator(`${panel} .ws-cmd-modal-title`)).toHaveText('Memory');
+    await expect(page.locator(`${panel} .ws-cmd-modal-title`)).toHaveText('Agent memory');
     await page.keyboard.press('Escape');
     await expect(page.locator(panel)).toBeHidden();
     await expect(page.locator(building)).toBeFocused();
@@ -146,7 +146,7 @@ test.describe.serial('Memory station', () => {
     await expect(badge(page)).toHaveText('Over budget');
     await expect(page.locator(building)).toHaveAttribute(
       'aria-label',
-      `Memory station, Over budget, ${dropped.length} ${dropped.length === 1 ? 'entry is' : 'entries are'} not shown to agents`
+      `Agent memory station, Over budget, ${dropped.length} ${dropped.length === 1 ? 'entry is' : 'entries are'} not shown to agents`
     );
 
     await page.locator(building).click();

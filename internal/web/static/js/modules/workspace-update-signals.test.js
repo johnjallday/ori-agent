@@ -106,7 +106,7 @@ test('Home loading and unavailable windows stay distinct from a known empty page
   const map = renderWorkspaceUpdateMapMarkers(workspaceUpdateSignals(fixture()));
   assert.doesNotMatch(map, /<(?:a|button)\b/);
   assert.match(map, /data-map-update-route/);
-  assert.match(map, /New message/);
+  assert.match(map, /Read new message/);
   assert.match(map, /10 files to review/);
 });
 

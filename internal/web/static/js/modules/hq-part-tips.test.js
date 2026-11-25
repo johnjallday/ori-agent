@@ -50,7 +50,7 @@ test('the sentences are the approved copy, one per part', () => {
   assert.equal(tipSentence('daily-brief'), 'A short read of your day, on the schedule you chose.');
   assert.equal(
     tipSentence('memory'),
-    'What agents here remember between conversations. You can read and edit every entry.'
+    'Decisions, preferences, and rules agents should follow in this workspace.'
   );
   assert.equal(
     tipSentence(NOTES_PART, { notes: 'created' }),

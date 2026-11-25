@@ -48,21 +48,22 @@
     hq: Object.freeze({
       color: '#e8b54b',
       markup: `
-        <g data-build-part="foundation"><polygon points="60 50 112 70 60 87 8 70" fill="currentColor" opacity=".16" stroke="currentColor" stroke-opacity=".52"/>
-        <polygon points="20 54 60 70 60 84 20 68" fill="currentColor" opacity=".45"/>
-        <polygon points="100 54 60 70 60 84 100 68" fill="currentColor" opacity=".28"/>
-        <polygon points="60 40 100 54 60 70 20 54" fill="currentColor" opacity=".7"/></g>
-        <g data-build-part="walls"><polygon points="38 31 60 40 60 67 38 58" fill="currentColor" opacity=".88"/>
-        <polygon points="82 31 60 40 60 67 82 58" fill="currentColor" opacity=".56"/></g>
-        <g data-build-part="roof"><polygon points="60 20 84 30 60 42 36 30" fill="currentColor"/>
-        <path d="M60 21V5" fill="none" stroke="currentColor" stroke-width="2"/>
-        <path d="M60 7l15 5-15 5z" fill="currentColor"/>
-        <circle cx="60" cy="4" r="2.4" fill="currentColor"/></g>
-        <g data-build-part="finish"><path d="M27 60v11M93 60v11M45 55v18M75 55v18" fill="none" stroke="currentColor" stroke-width="2" opacity=".7"/>
-        <g data-building-emblem="hq">
-          <circle cx="60" cy="50" r="9" fill="#101619" fill-opacity=".78" stroke="currentColor" stroke-width="1.2"/>
-          <path d="M60 43l1.9 5.1L67 50l-5.1 1.9L60 57l-1.9-5.1L53 50l5.1-1.9z" fill="#f6f0df" fill-opacity=".88"/>
-        </g></g>`
+        <g data-build-part="foundation">
+          <path fill="#55674e" d="M2 61l48-23 68 20-53 29z"/><path fill="#95a080" d="M2 58l48-23 68 20-53 29z"/>
+          <path fill="#b8ac80" d="M9 55l44-19 58 17-47 25z"/>
+          <path fill="#405b43" d="M20 37l-5 11h3l-5 7 8 3 6-4-5-7h2zM98 38l-5 11h3l-4 6 7 3 5-3-4-8h2z"/>
+        </g>
+        <g data-build-part="walls"><path fill="#c59c57" d="M31 41l26 11v17L31 58z"/><path fill="#94753f" d="M57 52l25-12v16L57 69z"/>
+          <path fill="#e4be78" d="M28 41l10-15 23 10-4 17z"/><path fill="#bc9757" d="M38 26l24-12 25 12-26 10z"/>
+          <path fill="#dcb974" d="M54 32l13 6v22l-13-6z"/><path fill="#9c7944" d="M67 38l12-6v22l-12 6z"/>
+        </g>
+        <g data-build-part="roof"><path fill="#f2cf82" d="M51 31l16-17 1 25z"/><path fill="#b38c47" d="M67 14l15 16-14 9z"/>
+          <path d="M67 15V2" stroke="#f3db96"/><path fill="#efcb77" d="M68 2q3-2 6 0t7-1l-3 3 3 2q-4 2-7 0t-6 1z"/>
+        </g>
+        <g data-build-part="finish"><path fill="#5c4b33" d="M35 46l3 1v5l-3-1zm7 3l3 1v5l-3-1zm7 3l3 1v5l-3-1zm21 6v-7q2-4 5-4v9z"/>
+          <path fill="#dfc788" d="M69 59l8-4 5 2-8 4zm4 4l9-5 3 2-9 5z"/>
+          <path data-building-emblem="hq" fill="#795b34" d="M60 39l1.2 3.3 3.2 2-3.2.7-1.2 3-1.1-3.6-3-2.1 3-.6z"/>
+        </g>`
     }),
     briefing: Object.freeze({
       color: '#d08aa7',

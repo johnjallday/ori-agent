@@ -66,7 +66,7 @@ export const HQ_LABELS = Object.freeze({
   whatNeedsYou: 'What needs you',
   email: 'Email',
   calendar: 'Calendar',
-  memory: 'Memory',
+  memory: 'Agent memory',
   otherWorkspaces: 'Other workspaces',
   todaysBrief: "Today's brief",
   waitingOnYou: 'Waiting on you',
@@ -116,7 +116,7 @@ export const HQ_LABELS = Object.freeze({
   // not set up; a connected one has nothing to explain here.
   tipWatchtower: 'Watches your other workspaces and tells you when one needs you.',
   tipDailyBrief: 'A short read of your day, on the schedule you chose.',
-  tipMemory: 'What agents here remember between conversations. You can read and edit every entry.',
+  tipMemory: 'Decisions, preferences, and rules agents should follow in this workspace.',
   tipNotesCreated:
     'A folder you own. I write there, you edit, and I never read your own notes back.',
   tipNotesOwn: 'Your own vault. I read it and never write there.',

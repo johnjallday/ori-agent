@@ -44,10 +44,11 @@ export async function toolsReceipt(hint, read) {
   if (!stored?.success) throw Error('Profile unavailable');
   const names = reviewNames(stored.profile?.preferred_tools || []);
   const ids = await Promise.all(names.map(name => fingerprint(hint, name)));
-  const present = names.filter((_, i) => saved.hashes.includes(ids[i]));
+  const count = ids.filter(id => saved.hashes.includes(id)).length;
   return {
-    text: present.length
-      ? `Selected tools now in Profile: ${present.join(', ')}.`
+    savedAttempt: count ? hint.attempt : null,
+    text: count
+      ? `${count} ${count === 1 ? 'tool' : 'tools'} saved to Profile.`
       : 'The selected tools are no longer in Profile.',
     ...profile
   };

@@ -1,5 +1,7 @@
 import { chromeText as text } from './workspace-command-chrome.js';
 import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
+import { HQ_LABELS } from './hq-labels.js';
+import { memoryOneLiner } from './memory-station.js';
 import { writeRailSection } from './workspace-command-rail.js';
 
 const SECTIONS = {
@@ -12,7 +14,7 @@ const SECTIONS = {
   resources: [
     ['notes', 'Notes'],
     ['files', 'Files & linked folders'],
-    ['memory', 'Memory'],
+    ['memory', HQ_LABELS.memory],
     ['sessions', 'Conversations']
   ]
 };
@@ -263,7 +265,7 @@ export class WorkspacePanels {
     const unavailable = key => !known || p[key + 'Loading'] || p[key + 'LoadFailed'];
     if (this.section === 'memory')
       return (
-        '<p>Memory is what agents are shown. Your notes folder is separate.</p>' +
+        `<p>${memoryOneLiner({ personalHQ: this.command.isPersonalHQ?.() })}</p>` +
         button('owner', 'Open memory manager', 'memory')
       );
     if (this.section === 'files')

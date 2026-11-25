@@ -461,7 +461,7 @@ for (const theme of ['light', 'dark']) {
       expect(laneNames).toEqual(['What Ori reads', 'Your lead agent', 'What needs you']);
       await expect(operationsMap.locator('.ws-cmd-map-belt')).toHaveCount(0);
       await expect(operationsMap.locator('[style*="--station-x"]')).toHaveCount(0);
-      for (const name of ['Memory', 'Needs you', 'Follow-ups', "Today's brief", 'Tickets']) {
+      for (const name of ['Agent memory', 'Needs you', 'Follow-ups', "Today's brief", 'Tickets']) {
         await expect(
           operationsMap.getByRole('button', { name: new RegExp('^' + name) })
         ).toBeVisible();
@@ -496,13 +496,13 @@ for (const theme of ['light', 'dark']) {
 
       // A node opens its panel with the map still there behind it, and
       // closing hands focus back to the node (FR14).
-      const memory = operationsMap.getByRole('button', { name: /^Memory/ });
+      const memory = operationsMap.getByRole('button', { name: /^Agent memory/ });
       await memory.click();
       await expect(page.locator('.ws-cmd-modal:not([hidden])')).toBeVisible();
       await expect(page.locator('.ws-cmd-opmap')).toBeVisible();
       await page.keyboard.press('Escape');
       await expect(page.locator('.ws-cmd-modal:not([hidden])')).toHaveCount(0);
-      await expect(operationsMap.getByRole('button', { name: /^Memory/ })).toBeFocused();
+      await expect(memory).toBeFocused();
       const needsYou = operationsMap.getByRole('button', { name: /^Needs you/ });
       await needsYou.focus();
       await page.keyboard.press('Enter');

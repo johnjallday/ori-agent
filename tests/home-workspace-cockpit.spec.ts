@@ -1417,10 +1417,10 @@ test.describe('Responsive and regression hardening', () => {
     // resources). The view is chosen in the Desk rail, not in this header.
     // Help moved to the navbar in #630.
     const ids = [
-      'cockpitCaptureBtn',
-      'cockpitSummaryBtn',
       'cockpitPrimaryActionBtn',
       'cockpitCreateWorkspaceBtn',
+      'cockpitCaptureBtn',
+      'cockpitSummaryBtn',
       'cockpitSignalFilters',
       'cockpitRailToggle',
       'cockpitQuestsToggle',
@@ -1499,14 +1499,15 @@ test.describe('Header hierarchy', () => {
 
     const main = page.locator('.cockpit-area-main');
     const utility = page.locator('.cockpit-area-utility');
-    await expect(main.locator('[data-cockpit-area-title]')).toHaveText('Workspace Map');
+    await expect(main.locator('[data-cockpit-area-title]')).toHaveText('Workspaces');
     // The Map/Tree toggle is gone: the rail beside the cockpit is the one
     // switcher, and the header holds no view control.
     await expect(page.locator('.cockpit-view-toggle')).toHaveCount(0);
     await expect(main.locator('[data-desk-destination]')).toHaveCount(0);
-    await expect(page.locator('.desk-rail [data-desk-destination]')).toHaveText(['Files', 'Map']);
-    await expect(main.locator('#cockpitCaptureBtn')).toBeVisible();
-    await expect(main.locator('#cockpitSummaryBtn')).toBeHidden();
+    await expect(page.locator('.desk-rail [data-desk-destination]')).toHaveText(['Map', 'Files']);
+    const toolbar = page.locator('.atlas-toolbar');
+    await expect(toolbar.locator('#cockpitCaptureBtn')).toBeVisible();
+    await expect(toolbar.locator('#cockpitSummaryBtn')).toBeHidden();
     await expect(utility.locator('#cockpitSignalFilters')).toBeVisible();
     await expect(utility.locator('#cockpitRailToggle')).toBeVisible();
 
@@ -1730,6 +1731,7 @@ test.describe('Header hierarchy', () => {
     await page.goto('/');
     const economy = page.locator('#cockpitEconomy');
     await expect(economy).toBeVisible();
+    await economy.locator('summary').click();
     await expect(page.locator('[data-economy-craft]')).toHaveText('0');
     await expect(page.locator('[data-economy-craft]')).toHaveAttribute('data-zero', 'true');
     await expect(page.locator('[data-economy-harvest]')).toHaveText('3');
@@ -1748,7 +1750,7 @@ test.describe('Header hierarchy', () => {
       help.boundingBox(),
       page.locator('.cockpit-area-utility').boundingBox()
     ]);
-    expect(helpBox!.y).toBeGreaterThanOrEqual(utilityBox!.y + utilityBox!.height);
+    expect(helpBox!.y + helpBox!.height).toBeLessThanOrEqual(utilityBox!.y);
     await page.keyboard.press('Escape');
     await expect(help).toBeHidden();
     await expect(energy).toBeFocused();
@@ -1823,20 +1825,22 @@ test.describe('Header hierarchy', () => {
       expect(geometry.heights.length).toBe(1);
 
       const body = page.locator('.cockpit-area-body');
-      const before = await body.boundingBox();
       for (const trigger of ['#cockpitRailToggle', '#cockpitQuestsToggle']) {
+        // A phone scrolls down to reach the footer; measure after that scroll.
+        await page.locator(trigger).scrollIntoViewIfNeeded();
+        const before = await body.boundingBox();
         await page.locator(trigger).click();
         const flyout = page.locator(
           trigger === '#cockpitRailToggle' ? '#cockpitUpdatesFlyout' : '#cockpitQuestsFlyout'
         );
         await expect(flyout).toBeVisible();
         expect(await body.boundingBox()).toEqual(before);
-        // The overlay opens under its trigger row rather than over it.
+        // The footer overlay opens upward over the map, never over its trigger.
         const [flyoutBox, triggerBox] = await Promise.all([
           flyout.boundingBox(),
           page.locator(trigger).boundingBox()
         ]);
-        expect(flyoutBox!.y).toBeGreaterThanOrEqual(triggerBox!.y + triggerBox!.height);
+        expect(flyoutBox!.y + flyoutBox!.height).toBeLessThanOrEqual(triggerBox!.y);
         await page.keyboard.press('Escape');
         await expect(flyout).toBeHidden();
       }

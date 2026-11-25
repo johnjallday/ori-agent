@@ -32,9 +32,9 @@ func TestHomeDeskRailIsTheOnlySwitcher(t *testing.T) {
 		landingHide bool   // ...and hidden (it belongs to Files)
 		local       bool
 	}{
-		{"remote on Map", map[string]any{}, "map", "Workspace Map", "", false, false},
+		{"remote on Map", map[string]any{}, "map", "Workspaces", "", false, false},
 		{"remote on Files", map[string]any{"HomeViewTree": true}, "tree", "Files", "", false, false},
-		{"local on Map", map[string]any{"FileSearchAvailable": true, "SearchLanding": "later"}, "map", "Workspace Map", "Make Files my starting page", true, true},
+		{"local on Map", map[string]any{"FileSearchAvailable": true, "SearchLanding": "later"}, "map", "Workspaces", "Make Files my starting page", true, true},
 		{"local on Files", map[string]any{"FileSearchAvailable": true, "HomeViewTree": true, "SearchLanding": "search"}, "tree", "Files", "Start on Map instead", false, true},
 	}
 	for _, tc := range cases {
@@ -46,8 +46,8 @@ func TestHomeDeskRailIsTheOnlySwitcher(t *testing.T) {
 			if files < 0 || mapAt < 0 {
 				t.Fatal("the rail must list Files and Map")
 			}
-			if files > mapAt {
-				t.Error("Files must come before Map")
+			if mapAt > files {
+				t.Error("Map must come before Files in the atlas toolbar")
 			}
 
 			for _, gone := range []string{`cockpitViewMap`, `cockpitViewTree`, `data-cockpit-view`, `cockpit-view-toggle`, `data-map-destination`} {
@@ -133,7 +133,7 @@ func TestHomeDeskRailIsTheOnlySwitcher(t *testing.T) {
 
 			// Only the local Mac keeps a same-tab place for the Map; a remote
 			// browser has no endpoint to hold one.
-			rail := openingTag(t, body, `aria-label="Desk sidebar"`)
+			rail := openingTag(t, body, `class="desk-rail"`)
 			if strings.Contains(rail, "data-desk-local") != tc.local {
 				t.Errorf("data-desk-local on the rail = %t, want %t", !tc.local, tc.local)
 			}

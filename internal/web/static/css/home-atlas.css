@@ -1,0 +1,247 @@
+/* Home only. The standalone filename index keeps its own Desk navigation. */
+body.home-command-page {
+  --atlas-paper: #edf0e2;
+  --atlas-edge: #929d85;
+  --atlas-ground: #d8e0cb;
+  --atlas-center: #edf0de;
+  --atlas-accent: #30593e;
+  --atlas-on-accent: #fff;
+  --home-command-canvas: var(--atlas-paper);
+  --hc-grid: transparent;
+  --hc-grid-soft: transparent;
+}
+[data-bs-theme="dark"] body.home-command-page {
+  --atlas-paper: #111b18;
+  --atlas-edge: #3f4e40;
+  --atlas-ground: #13241d;
+  --atlas-center: #2c3d33;
+  --atlas-accent: #d6e3b7;
+  --atlas-on-accent: #17231a;
+  --hc-grid: transparent;
+  --hc-grid-soft: transparent;
+}
+body.home-command-page .home-command-main {
+  background: var(--atlas-paper);
+}
+.map-desk-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.map-desk-shell > .home-command-bridge {
+  padding: clamp(12px, 2.3vh, 32px) clamp(14px, 4vw, 72px) 12px;
+}
+.map-desk-shell .cockpit-workspace-area {
+  grid-template-rows: auto minmax(320px, 1fr) auto;
+  border: none;
+  background: var(--atlas-paper);
+  box-shadow: none;
+}
+.map-desk-shell .cockpit-area-header {
+  padding: 0;
+  gap: 12px;
+}
+.map-desk-shell .cockpit-area-title {
+  font:
+    normal clamp(32px, 3.5vw, 54px)/1.08 Georgia,
+    serif;
+  letter-spacing: -0.04em;
+}
+.atlas-kicker {
+  font:
+    10px/1.8 ui-monospace,
+    Menlo,
+    monospace;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--hc-ink-dim);
+}
+.map-desk-shell .cockpit-area-actions__create {
+  border: 0;
+  padding: 0;
+}
+#cockpitPrimaryActionBtn[hidden] + #cockpitCreateWorkspaceBtn {
+  background: var(--atlas-accent);
+  color: var(--atlas-on-accent);
+  border-color: transparent;
+}
+/* Draw attention when New Workspace is the highlighted creation action.
+   Keep the button and its keyboard focus outline stationary. */
+@media (prefers-reduced-motion: no-preference) {
+  #cockpitPrimaryActionBtn[hidden] + #cockpitCreateWorkspaceBtn:not(.is-ori-coachmark) {
+    animation: atlas-create-ring 1.1s ease-out 2;
+  }
+  @keyframes atlas-create-ring {
+    from {
+      box-shadow: 0 0 0 0 var(--atlas-accent);
+    }
+    to {
+      box-shadow: 0 0 0 8px transparent;
+    }
+  }
+}
+.atlas-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.atlas-toolbar .desk-rail {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--atlas-edge);
+  border-radius: 8px;
+}
+.atlas-toolbar .desk-rail a,
+.atlas-toolbar select {
+  padding: 5px 15px;
+  color: var(--hc-ink);
+  text-decoration: none;
+  font: inherit;
+}
+.atlas-toolbar .desk-rail a[aria-current],
+.atlas-toolbar select {
+  background: var(--hc-panel-raised);
+  box-shadow: inset 0 -2px var(--atlas-accent);
+  border-radius: 4px;
+}
+.atlas-toolbar .desk-rail a:hover {
+  text-decoration: underline;
+}
+.atlas-toolbar .desk-mobile {
+  display: none;
+}
+.map-desk-shell .cockpit-map {
+  padding: 0;
+}
+.map-desk-shell .is-cockpit .ws-map-theatre {
+  clip-path: none;
+  border-radius: 10px;
+  border-color: var(--atlas-edge);
+  background: radial-gradient(ellipse at center, var(--atlas-center), var(--atlas-ground) 84%);
+}
+/* Contours and the fine grid share the live camera offset and scale. This is
+   decorative ground, never a second viewport or a layer that handles input. */
+.cockpit-map .ws-map-canvas::before {
+  background-position:
+    var(--atlas-ground-x, 0) var(--atlas-ground-y, 0),
+    var(--ws-map-grid-x, 0) var(--ws-map-grid-y, 0),
+    var(--ws-map-grid-x, 0) var(--ws-map-grid-y, 0);
+  background-image:
+    url("/icons/atlas-contours.svg"), linear-gradient(#82967c24 1px, transparent 1px),
+    linear-gradient(90deg, #82967c24 1px, transparent 1px);
+  background-size:
+    calc(26 * var(--ws-map-grid, 38px)) calc(16 * var(--ws-map-grid, 38px)),
+    var(--ws-map-grid, 38px) var(--ws-map-grid, 38px),
+    var(--ws-map-grid, 38px) var(--ws-map-grid, 38px);
+  mask-image: none;
+}
+.cockpit-map .ws-map-theatre::after {
+  content: "Fig. 01  /  Workspace map";
+  position: absolute;
+  top: 13px;
+  left: 15px;
+  z-index: 5;
+  pointer-events: none;
+  font:
+    10px/1.3 ui-monospace,
+    Menlo,
+    monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--hc-ink-dim);
+}
+/* A lone built HQ can use the full tile width. Keep its world anchor, the
+   camera controls, and all dense-map spacing unchanged. */
+.cockpit-map .has-one-site .is-hq[data-ws-id] > .ws-map-struct {
+  width: 160px;
+  height: 98px;
+}
+.cockpit-map .has-one-site .is-hq[data-ws-id] > .ws-map-tile-name {
+  font-size: 21px;
+  line-height: 24px;
+}
+.cockpit-map .is-hq[data-ws-id] > .ws-map-tile-name {
+  font-family: Georgia, serif;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.cockpit-map .is-hq .ws-map-update-markers [data-map-update-route] {
+  border-radius: 12px;
+  padding-inline: 8px;
+  background: #eed6a0;
+  color: #272a1d;
+  border-color: #907d50;
+}
+.atlas-toolbar .desk-rail a {
+  min-height: 32px;
+  display: inline-grid;
+  place-items: center;
+}
+.map-desk-shell .cockpit-area-utility {
+  padding-block: 3px;
+  border: 0;
+}
+/* Leave the global assistant launcher its bottom-right corner. */
+@media (min-width: 44.01rem) {
+  .map-desk-shell .cockpit-area-header-zone {
+    margin-inline-end: min(36vw, 310px);
+  }
+}
+.map-desk-shell :is(.cockpit-flyout, .cockpit-economy-help) {
+  top: auto;
+  bottom: calc(100% + 6px);
+  margin-top: 0;
+}
+.atlas-resources summary {
+  min-height: 32px;
+  cursor: pointer;
+  padding: 6px 8px;
+  color: var(--hc-ink-dim);
+}
+@media (pointer: coarse), (max-width: 768px) {
+  .atlas-toolbar .desk-rail a,
+  .atlas-resources summary {
+    min-height: 44px;
+  }
+}
+.atlas-resources .cockpit-economy {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 29;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.atlas-resources[open] ~ .cockpit-economy-help {
+  bottom: calc(100% + 58px);
+}
+@media (max-width: 1199px), (max-height: 679px) {
+  .map-desk-shell .cockpit-workspace-area {
+    grid-template-rows: auto minmax(360px, 60dvh) auto;
+  }
+  /* On a scrolled phone the navbar still covers the top of the viewport.
+     Keep the opening flyout within the map, clear of both it and the footer. */
+  .map-desk-shell .cockpit-flyout {
+    max-height: min(48dvh, 520px);
+  }
+  .map-desk-shell > .home-command-bridge {
+    padding-bottom: 76px;
+  }
+}
+@media (max-width: 44rem) {
+  .atlas-toolbar .desk-rail {
+    display: none;
+  }
+  .atlas-toolbar .desk-mobile {
+    display: block;
+  }
+  .atlas-toolbar select {
+    min-height: 44px;
+    border: 1px solid var(--atlas-edge);
+  }
+  .map-desk-shell .cockpit-area-controls {
+    flex-wrap: wrap;
+  }
+}

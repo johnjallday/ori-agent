@@ -1,4 +1,5 @@
 import { chromeText as text } from './workspace-command-chrome.js';
+import { HQ_LABELS } from './hq-labels.js';
 import { linkedAgents, placesLine } from './linked-agents.js';
 
 // Presentation and delegation only. Agent, member, work and resource state stay
@@ -155,7 +156,7 @@ export function resourceAccessHTML(c) {
   const resources = [
     ['notes', 'Notes', p.notes],
     ['files', 'Files & linked folders', p.files],
-    ['memory', 'Memory', null],
+    ['memory', HQ_LABELS.memory, null],
     ['sessions', 'Conversations', p.sessions]
   ];
   return (
