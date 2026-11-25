@@ -215,13 +215,24 @@ func groupRosterTemplate(groupName string) projecttemplates.Template {
 // too: a second create that would otherwise reuse a manager made in between
 // sees a changed plan instead.
 func (h *Handler) blankWorkspaceTemplate(workspaceName string) projecttemplates.Template {
+	return h.blankWorkspaceTeam(workspaceName, "")
+}
+
+const documentsPurpose = "documents"
+
+// The guided suggestion changes defaults, never the host-owned manager slot.
+// The workspace name and anchor remain independently editable.
+func (h *Handler) blankWorkspaceTeam(workspaceName, purpose string) projecttemplates.Template {
+	if purpose == documentsPurpose {
+		workspaceName = "Documents"
+	}
 	name := h.proposeWorkspaceManagerName(workspaceName)
 	if name == "" {
 		// No free name in range: keep the base name so the plan stays
 		// reviewable; the strict create refuses it as taken.
 		name = workspaceManagerBaseName(workspaceName)
 	}
-	return blankWorkspaceTemplateFor(name)
+	return blankWorkspaceDeclaration(name, purpose)
 }
 
 // blankWorkspaceRoles is the Blank roster's declaration, for reading an
@@ -232,14 +243,23 @@ func blankWorkspaceRoles() []workspaceroles.Role {
 }
 
 func blankWorkspaceTemplateFor(managerName string) projecttemplates.Template {
+	return blankWorkspaceDeclaration(managerName, "")
+}
+
+func blankWorkspaceDeclaration(managerName, purpose string) projecttemplates.Template {
+	label, prompt := blankManagerRoleLabel, blankWorkspaceManagerPrompt
+	if purpose == documentsPurpose {
+		label = "Documents Manager"
+		prompt = "You are this workspace's Documents Manager. Help the person find, understand, and organize documents in this workspace when asked. Work only with this workspace's files, notes, and tickets. Do not scan, index, edit, move, or share files without explicit permission."
+	}
 	return projecttemplates.Template{
 		ID: blankWorkspaceTemplateID, Name: "Blank workspace", Builtin: true,
 		Agents: []projecttemplates.AgentSpec{{
 			Name:          managerName,
 			Role:          string(types.RoleOrchestrator),
-			SystemPrompt:  blankWorkspaceManagerPrompt,
+			SystemPrompt:  prompt,
 			HostRoleID:    blankManagerRoleID,
-			HostRoleLabel: blankManagerRoleLabel,
+			HostRoleLabel: label,
 		}},
 	}
 }

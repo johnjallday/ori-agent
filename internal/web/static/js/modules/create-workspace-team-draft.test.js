@@ -2421,6 +2421,42 @@ test('renaming the workspace renames an untouched default manager, never an edit
   assert.equal(Draft.getRoleFill(draft, 'manager').name, 'Quotes Desk');
 });
 
+test('guided Documents uses the reviewed manager slot; edits, opt-out and cancel win', () => {
+  const draft = Draft.createDraft();
+  draft.guidedPurpose = 'documents';
+  const plan = planResponse(
+    [{ ...blankManagerPlanAgent('Documents Manager'), role_label: 'Documents Manager' }],
+    { template_id: 'blank', revision: 'documents-review' }
+  );
+  Draft.setPlanReady(draft, 'blank', plan);
+  assert.equal(Draft.declaredRoles(draft)[0].label, 'Documents Manager');
+  assert.equal(managerStaffing(draft).name, 'Documents Manager');
+  Draft.clearRoleFill(draft, 'manager');
+  Draft.setRoleFill(draft, 'manager', {
+    mode: 'create',
+    name: 'Archivist',
+    systemPrompt: 'Help with letters.'
+  });
+  Draft.setPlanReady(draft, 'blank', plan);
+  assert.equal(managerStaffing(draft).system_prompt, 'Help with letters.');
+  assert.equal(managerStaffing(draft).name, 'Archivist');
+  Draft.setAgentless(draft, true);
+  assert.deepEqual(Draft.derive(draft).payload, {
+    guided_purpose: 'documents',
+    team_intent: { version: 1, mode: 'agentless', plan_revision: 'documents-review' },
+    role_staffing: [],
+    create_template_agents: false
+  });
+  Draft.resetDraft(draft);
+  Draft.setPlanReady(
+    draft,
+    'blank',
+    planResponse([blankManagerPlanAgent('Documents Manager')], { template_id: 'blank' })
+  );
+  assert.equal(Draft.declaredRoles(draft)[0].label, 'Manager');
+  assert.equal(Draft.derive(draft).payload.guided_purpose, undefined);
+});
+
 test('a cleared manager stays cleared when the plan is read again', () => {
   const draft = blankDraft('House Manager');
   assert.equal(Draft.clearRoleFill(draft, 'manager'), true);

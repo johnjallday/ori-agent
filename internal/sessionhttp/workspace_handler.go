@@ -352,7 +352,8 @@ type createWorkspaceRequest struct {
 	// explicit array; nil remains meaningful to legacy callers.
 	roleStaffingPresent bool
 	roleStaffingNull    bool
-	Blank               bool `json:"blank,omitempty"` // The Blank blueprint: seed the synthetic single-agent roster (no template, no project)
+	GuidedPurpose       string `json:"guided_purpose,omitempty"`
+	Blank               bool   `json:"blank,omitempty"` // The Blank blueprint: seed the synthetic single-agent roster (no template, no project)
 	// GroupRequirementReview makes this request an inert review. A policy-aware
 	// commit must replay the same request with the returned token and one caller
 	// idempotency key; neither field is accepted as a trusted destination.
@@ -607,6 +608,14 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
 	}
+	if req.GuidedPurpose != "" {
+		op := creationOperationFrom(r.Context())
+		if op == nil || req.GuidedPurpose != documentsPurpose || !req.Blank || !req.teamIntentPresent || req.GroupRoster || req.TemplateID != "" || req.TemplatePath != "" {
+			_ = orihttp.RespondBadRequest(w, "guided_purpose requires a reviewed Documents workspace team")
+			return
+		}
+		op.deferFirstGoal = true
+	}
 	if req.EntryPoint == "assistant_workspace_only" || req.HireProposalID != "" || req.ProposalConversationID != "" {
 		op := creationOperationFrom(r.Context())
 		intent, err := parseWorkspaceTeamIntent(req.TeamIntent)
@@ -827,7 +836,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	teamTemplate := resolvedTemplate
 	teamTemplateResolved := templateResolved
 	if req.teamIntentPresent && req.Blank && !wantsProject {
-		teamTemplate = h.blankWorkspaceTemplate(req.Name)
+		teamTemplate = h.blankWorkspaceTeam(req.Name, req.GuidedPurpose)
 		teamTemplateResolved = true
 	}
 	if req.teamIntentPresent && teamTemplateResolved && strings.TrimSpace(req.GroupComposition) == string(grouprequirements.CompositionStandalone) {

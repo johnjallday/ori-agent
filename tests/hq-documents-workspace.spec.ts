@@ -1,11 +1,20 @@
 import { test, expect, type Page, type TestInfo } from '@playwright/test';
 import { mkdir, readdir, realpath } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { freshGuidedHQ } from './helpers/fresh-guided-hq';
 import { installLocalCdn } from './helpers/offline-cdn';
 let base: string;
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(async ({ request }) => {
+  test.skip(!process.env.ORI_HQ_FIRST_VISIT_SANDBOX, 'requires isolated HOME');
+  const home = await realpath(process.env.ORI_HQ_FIRST_VISIT_SANDBOX!);
+  expect(home).toMatch(/\/ori-(?:demo|e2e)\.[^/]+$/);
+  // A busy port can answer from a different installation. Prove the server's
+  // HOME matches the fixture before freshGuidedHQ makes its first write.
+  const root = (await (await request.get('/api/settings/workspace-root')).json())
+    .default_workspace_root;
+  expect(basename(root)).toBe('Ori Workspaces');
+  expect(await realpath(dirname(root))).toBe(home);
   base = await freshGuidedHQ(request);
 });
 
@@ -65,12 +74,30 @@ test('Documents workspace wizard reviews only on activation and resets on cancel
   await expect(modal.locator('#workspaceSearchConsent')).not.toBeChecked();
   await expect(modal).toHaveCSS('opacity', '1');
   await path.scrollIntoViewIfNeeded();
+  await page.locator('#wizardNextBtn').click();
+  const role = modal.locator('#workspaceRoleRoster [data-role-id="manager"]');
+  await expect(role.locator('.ws-role-row__label')).toHaveText('Documents Manager');
+  await page.locator('#wizardNextBtn').click();
+  const review = modal.locator('#workspaceCreationReviewPanel');
+  await expect(review).toContainText('Documents Manager');
+  await expect(review).toContainText(docs);
   await page.screenshot({ path: info.outputPath('documents-review.png'), animations: 'disabled' });
+  await review.getByRole('button', { name: 'Edit team' }).click();
+  await modal.getByRole('checkbox', { name: 'Create without agents' }).check();
+  await page.locator('#wizardNextBtn').click();
+  await expect(review).toContainText('No agents will be created or attached.');
+  await page.screenshot({ path: info.outputPath('documents-opt-out.png') });
   await page.keyboard.press('Escape');
   await expect(modal).toBeHidden();
   await button.click();
   await expect(modal.locator('#workspaceFolderModeManaged')).toBeChecked();
   await expect(path).toHaveValue('');
+  await page.locator('#wizardNextBtn').click();
+  await modal.locator('#folderNameInput').fill('Documents');
+  await page.locator('#wizardNextBtn').click();
+  await expect(role.locator('.ws-role-row__label')).toHaveText('Manager');
+  await expect(role).toContainText('Documents Manager');
+  await page.screenshot({ path: info.outputPath('ordinary-blank.png') });
   await page.keyboard.press('Escape');
   await expect(modal).toBeHidden();
   const create = await request.post('/api/workspaces', {
