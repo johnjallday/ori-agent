@@ -17,6 +17,22 @@ export class HQCaptureDraft {
   problem = '';
   receipt = '';
 
+  constructor(prefix = 'hq-capture') {
+    this.prefix = prefix;
+  }
+
+  // retarget sends a draft written for an earlier connection to the current
+  // one, only because the person reviewed it and asked. A new destination is a
+  // new request.
+  retarget(ref) {
+    if (this.busy || !this.text || !ref || ref === this.ref) return false;
+    this.ref = ref;
+    this.id = '';
+    this.problem = '';
+    this.receipt = '';
+    return true;
+  }
+
   edit(text, ref) {
     if (this.busy || this.text === text) return;
     this.text = text;
@@ -37,7 +53,7 @@ export class HQCaptureDraft {
     }
     this.problem = secondBrainCaptureProblem(this.text);
     if (this.problem) return false;
-    this.id ||= newRequestID('hq-capture');
+    this.id ||= newRequestID(this.prefix);
     this.busy = true;
     try {
       const { capture } = await send(

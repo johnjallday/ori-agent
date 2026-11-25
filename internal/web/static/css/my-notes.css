@@ -6,7 +6,7 @@
   --ws-ink-faint: var(--text-secondary);
   --ws-faction: var(--primary-color);
   --ws-font-mono: ui-monospace, monospace;
-  width: min(54rem, 100%);
+  width: min(72rem, 100%);
   margin-inline: auto;
   padding: clamp(1rem, 4vw, 3rem);
   color: var(--text-primary);
@@ -71,59 +71,239 @@
   margin-block-start: 0.75rem;
 }
 
-.my-notes-browser {
+/* Folders | notes | reader. Each pane scrolls on its own, so choosing a folder
+   or loading the tree never moves the note being read. */
+.my-notes-browser:not([hidden]) {
+  display: grid;
+  grid-template-columns: minmax(9rem, 0.8fr) minmax(11rem, 1fr) minmax(0, 2.2fr);
   border-block-start: 1px solid var(--border-color);
-  padding: clamp(1rem, 3vw, 1.5rem);
 }
 
-.my-notes-browser h2 {
+.my-notes-pane {
+  min-width: 0;
+  max-height: min(72vh, 52rem);
+  overflow: auto;
+  padding: clamp(0.85rem, 2vw, 1.25rem);
+}
+
+.my-notes-pane + .my-notes-pane {
+  border-inline-start: 1px solid var(--border-color);
+}
+
+.my-notes-pane h3 {
   width: fit-content;
-  margin-block: 1rem 0.75rem;
+  margin: 0 0 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
 }
 
-.my-notes-crumbs,
-.my-notes-file-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.45rem;
+.my-notes-reader h3 {
+  margin-block-end: 0.2rem;
+  font:
+    500 clamp(1.35rem, 3vw, 1.75rem) / 1.2 Georgia,
+    serif;
+  letter-spacing: -0.02em;
+  text-transform: none;
+  color: var(--text-primary);
 }
 
-.my-notes-crumbs button {
-  text-align: start;
+.my-notes-pane-line,
+.my-notes-reader-place,
+.my-notes-tree-line {
+  color: var(--text-secondary);
 }
 
-.my-notes-filenames {
-  padding: 0;
+.my-notes-pane-line {
+  margin-block: 0.25rem 0.75rem;
+}
+
+.my-notes-reader-place {
+  margin-block-end: 1rem;
+  font-size: 0.8rem;
+}
+
+.my-notes-tree,
+.my-notes-tree ul,
+.my-notes-notes {
   margin: 0;
+  padding: 0;
   list-style: none;
 }
 
-.my-notes-filename {
+.my-notes-tree ul {
+  padding-inline-start: 0.85rem;
+}
+
+.my-notes-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+/* Toggle and spacer are the same box, so names line up with or without a
+   chevron. */
+.my-notes-tree-toggle,
+.my-notes-tree-spacer {
+  --my-notes-toggle: 1.5rem;
+  box-sizing: border-box;
+  flex: 0 0 var(--my-notes-toggle);
+  width: var(--my-notes-toggle);
+  min-width: var(--my-notes-toggle);
+  max-width: var(--my-notes-toggle);
+  height: 1.75rem;
+}
+
+.my-notes-tree > li > .my-notes-tree-row > .my-notes-tree-spacer {
+  display: none;
+}
+
+.my-notes-tree-toggle {
+  border: 0;
+  border-radius: 0.35rem;
+  padding: 0;
+  background: none;
+  color: var(--text-secondary);
+}
+
+.my-notes-tree-toggle i {
+  display: inline-block;
+  font-size: 0.75rem;
+  transition: transform 0.12s ease;
+}
+
+.my-notes-tree-toggle[aria-expanded="true"] i {
+  transform: rotate(90deg);
+}
+
+.my-notes-tree-folder,
+.my-notes-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  border-radius: 0.4rem;
+  padding: 0.3rem 0.5rem;
+  background: none;
+  color: var(--text-primary);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.my-notes-note {
+  display: block;
+  width: 100%;
+}
+
+.my-notes-tree-toggle:hover,
+.my-notes-tree-folder:hover,
+.my-notes-note:hover {
+  background: var(--bg-secondary);
+}
+
+/* Selection is a fill, a bar and weight: the bar carries it where the fill is
+   faint (dark mode). */
+.my-notes-tree-folder[aria-current],
+.my-notes-note[aria-current] {
+  background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+  box-shadow: inset 3px 0 0 var(--primary-color);
+  font-weight: 600;
+}
+
+[data-bs-theme="dark"] .my-notes-tree-folder[aria-current],
+[data-bs-theme="dark"] .my-notes-note[aria-current] {
+  background: color-mix(in srgb, var(--primary-color) 28%, transparent);
+}
+
+.my-notes-tree-toggle:focus-visible,
+.my-notes-tree-folder:focus-visible,
+.my-notes-note:focus-visible,
+.my-notes-pane h3:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 1px;
+}
+
+.my-notes-tree-line {
+  padding: 0.15rem 0.5rem 0.15rem 1.6rem;
+  font-size: 0.8rem;
+}
+
+.my-notes-reader-body p {
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+
+.my-notes-reader-actions {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
-  border-block-start: 1px solid var(--border-color);
-  padding-block: 0.55rem;
+  margin-block-start: 1rem;
 }
 
-.my-notes-child-folder::before {
-  content: "↳";
-  margin-inline-end: 0.5rem;
+/* Quick note: a modal over the reader, which stays exactly where it was. */
+.my-notes-quick {
+  width: min(32rem, calc(100vw - 2rem));
+  border: 1px solid var(--border-color);
+  border-block-start: 3px solid var(--primary-color);
+  border-radius: 0.75rem;
+  padding: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  box-shadow: 0 1.25rem 3rem rgb(0 0 0 / 0.25);
 }
 
-.my-notes-file-preview {
-  flex: 0 0 100%;
-  border-inline-start: 2px solid var(--primary-color);
-  padding: 0.7rem 1rem;
-  background: var(--bg-secondary);
-  white-space: pre-wrap;
+.my-notes-quick::backdrop {
+  background: rgb(0 0 0 / 0.4);
 }
 
-.my-notes-file-preview p:last-child {
-  margin: 0;
+.my-notes-quick-body {
+  padding: clamp(1rem, 4vw, 1.5rem);
+}
+
+.my-notes-quick h2 {
+  margin: 0 0 0.35rem;
+  font:
+    500 1.5rem / 1.2 Georgia,
+    serif;
+}
+
+.my-notes-quick-destination,
+.my-notes-quick-line {
+  color: var(--text-secondary);
+}
+
+.my-notes-quick-destination strong {
+  color: var(--text-primary);
+}
+
+.my-notes-quick-form label {
+  display: block;
+  margin-block-end: 0.35rem;
+  font-weight: 600;
+}
+
+.my-notes-quick-form textarea {
+  width: 100%;
+  min-height: 7rem;
+  resize: vertical;
+}
+
+.my-notes-quick-line,
+.my-notes-quick-problem {
+  margin-block: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.my-notes-quick-problem {
+  color: var(--danger-text);
+}
+
+.my-notes-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-block-start: 0.75rem;
 }
 
 .my-notes [data-my-notes-tools] {
@@ -154,6 +334,84 @@
 .my-notes .ws-notes-capture-input {
   flex: 1 1 12rem;
   min-width: 0;
+}
+
+.my-notes-back {
+  display: none;
+}
+
+/* Phones: Folders → notes → note, one pane at a time, each with Back. */
+@media (max-width: 760px) {
+  .my-notes-browser:not([hidden]) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .my-notes-pane {
+    max-height: none;
+    overflow: visible;
+  }
+  .my-notes-pane + .my-notes-pane {
+    border-inline-start: 0;
+  }
+  .my-notes-browser[data-pane="folders"] > .my-notes-pane:not(.my-notes-folders),
+  .my-notes-browser[data-pane="list"] > .my-notes-pane:not(.my-notes-list),
+  .my-notes-browser[data-pane="reader"] > .my-notes-pane:not(.my-notes-reader) {
+    display: none;
+  }
+  .my-notes-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    max-width: 100%;
+    margin-block-end: 0.85rem;
+    text-align: start;
+  }
+  .my-notes-back span {
+    overflow-wrap: anywhere;
+  }
+  .my-notes-tree-toggle,
+  .my-notes-tree-spacer {
+    --my-notes-toggle: 2.5rem;
+    height: 2.5rem;
+  }
+  .my-notes-tree-folder,
+  .my-notes-note {
+    min-height: 2.5rem;
+  }
+  /* Bring the notebook above the fold: a shorter heading and status, and the
+     secondary tools in one row that scrolls sideways. */
+  .my-notes-heading {
+    margin-block-end: 1rem;
+  }
+  .my-notes-home {
+    margin-block-end: 0.75rem;
+  }
+  .my-notes-heading h1 {
+    font-size: 2rem;
+  }
+  .my-notes-heading p:not(.my-notes-kicker) {
+    margin-block-end: 0;
+    font-size: 0.9rem;
+  }
+  .my-notes [data-my-notes-status] {
+    padding: 0.85rem 1rem;
+  }
+  .my-notes [data-my-notes-status] h2 {
+    margin-block-end: 0.15rem;
+    font-size: 1.1rem;
+  }
+  .my-notes [data-my-notes-status] > p:not([data-my-notes-notice]) {
+    margin-block-end: 0.6rem;
+    font-size: 0.9rem;
+  }
+  .my-notes-actions[role="group"] {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-block-end: 0.2rem;
+    scrollbar-width: thin;
+  }
+  .my-notes-actions[role="group"] > * {
+    flex: 0 0 auto;
+  }
 }
 
 @media (max-width: 640px) {
