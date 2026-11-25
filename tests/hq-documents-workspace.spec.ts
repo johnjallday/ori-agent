@@ -42,7 +42,9 @@ test('Documents workspace wizard reviews only on activation and resets on cancel
         el.click();
         el.click();
       });
-    } else await button.press('Enter');
+    } else await button.click();
+    await expect(page.locator('#hqWorkspaceHint')).toBeHidden();
+    await expect(button).toHaveCSS('animation-name', 'none');
     await expect(page.locator('.modal-backdrop')).toHaveCount(1);
     await expect(modal.locator('#workspaceFolderModeAnchored')).toBeChecked();
     await expect(modal.locator('#folderNameInput')).toBeEditable();

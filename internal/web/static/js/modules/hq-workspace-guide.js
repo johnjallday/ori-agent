@@ -39,13 +39,6 @@ export function showWorkspaceGuide(win, doc) {
     },
     options
   );
-  doc.addEventListener(
-    'click',
-    event => {
-      if (!button.contains(event.target) && !hint.contains(event.target)) close();
-    },
-    options
-  );
   win.addEventListener('pagehide', close, options);
   doc.addEventListener(
     'show.bs.modal',

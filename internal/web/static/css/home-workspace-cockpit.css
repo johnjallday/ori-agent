@@ -131,20 +131,24 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   border-left: 1px solid var(--hc-line);
 }
 
-/* Echo the focus ring without moving the hit target. The guide removes
-   its description on dismissal or activation, which also stops the pulse. */
+/* Grow around the button's center without reflowing the toolbar. Its guide
+   description is removed on dismissal or activation, stopping the loop. */
 @media (prefers-reduced-motion: no-preference) {
   #cockpitCreateWorkspaceBtn[aria-describedby~="hqWorkspaceInstruction"] {
-    animation: hq-workspace-pulse 1.4s ease-out 3;
+    animation: hq-workspace-pulse 1.6s ease-in-out infinite;
   }
 }
 
 @keyframes hq-workspace-pulse {
-  from {
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--hc-signal) 65%, transparent);
+  0%,
+  80%,
+  100% {
+    scale: 1;
+    box-shadow: 0 0 0 0 transparent;
   }
-  to {
-    box-shadow: 0 0 0 9px transparent;
+  40% {
+    scale: 1.12;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--hc-signal) 40%, transparent);
   }
 }
 

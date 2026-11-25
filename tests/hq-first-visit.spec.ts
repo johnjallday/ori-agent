@@ -84,11 +84,20 @@ for (const mode of ['details', 'map'])
     await expect(button).toBeFocused();
     await expect(button).toHaveAccessibleDescription(/review your Documents/);
     await expect(button).toHaveCSS('animation-name', reducedMotion ? 'none' : 'hq-workspace-pulse');
-    if (!reducedMotion) await expect(button).toHaveCSS('animation-iteration-count', '3');
+    // An incidental click on the dashboard isn't a decision about the guide.
+    await page.locator('#homeCockpit').dispatchEvent('click');
+    await expect(page.locator('#hqWorkspaceHint')).toBeVisible();
+    if (!reducedMotion) {
+      await expect(button).toHaveCSS('animation-iteration-count', 'infinite');
+      await expect
+        .poll(() => button.evaluate(el => Number(getComputedStyle(el).scale)))
+        .toBeGreaterThan(1.08);
+    }
     await expect(page.locator('#addFolderModal')).toBeHidden();
     await expect(page.locator('#personalAssistantPanel')).toBeHidden();
     await page.screenshot({ path: info.outputPath('home-hint.png'), animations: 'disabled' });
-    await button.press('Escape');
+    if (reducedMotion) await button.press('Escape');
+    else await page.getByRole('button', { name: 'Dismiss hint' }).click();
     await expect(button).toHaveCSS('animation-name', 'none');
     await expect(page.locator('#hqWorkspaceHint')).toBeHidden();
     await page.goto(url!);
