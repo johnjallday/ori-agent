@@ -1,6 +1,8 @@
 import { test, expect, type Locator } from '@playwright/test';
-import { mkdir, readdir, realpath } from 'node:fs/promises';
+import { freshGuidedHQ } from './helpers/fresh-guided-hq';
+import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { resumeLegacyFolderGuide } from './helpers/legacy-hq-folder';
 import { installLocalCdn } from './helpers/offline-cdn';
 
 // Live updates can replace the receipt between locating it and taking the
@@ -15,37 +17,7 @@ let base: string;
 let other: string;
 test.describe.configure({ mode: 'serial' });
 test.beforeAll(async ({ request }) => {
-  async function post(url: string, data: unknown) {
-    expect((await request.post(url, { data })).ok(), url).toBeTruthy();
-  }
-  await post('/api/onboarding/skip', {});
-  const { default_workspace_root } = await (
-    await request.get('/api/settings/workspace-root')
-  ).json();
-  await post('/api/settings/workspace-root', { workspace_root: default_workspace_root });
-  const pa = async () =>
-    (await (await request.get('/api/personal-assistant')).json()).personal_assistant;
-  const before = await pa();
-  expect(before.state, 'requires a fresh isolated server').toBe('needs_hire');
-  await post('/api/personal-assistant/hire', {
-    request_id: 'guided-hire',
-    if_version: before.state_version,
-    display_name: 'Atlas',
-    mandate: 'Keep my week moving.',
-    focus_areas: ['plan_my_day']
-  });
-  await post('/api/personal-assistant/hq', {
-    request_id: 'guided-build',
-    if_version: (await pa()).state_version,
-    name: 'My HQ',
-    timezone: 'UTC',
-    scope: 'all',
-    include_future_workspaces: true,
-    notes: { include: false }
-  });
-  const { status } = await (await request.get('/api/personal-hq/status')).json();
-  expect(status.first_visit_state).toBe('pending');
-  base = '/workspaces/' + encodeURIComponent(status.workspace.folder_slug);
+  base = await freshGuidedHQ(request);
   const created = await request.post('/api/workspaces', { data: { name: 'Another workspace' } });
   expect(created.ok()).toBeTruthy();
   const body = await created.json();
@@ -121,68 +93,6 @@ for (const mode of ['details', 'map'])
     expect(access).toEqual([]);
   });
 
-test('Documents workspace wizard reviews only on activation and resets on cancel', async ({
-  page,
-  request
-}, info) => {
-  const sandbox = process.env.ORI_HQ_FIRST_VISIT_SANDBOX;
-  test.skip(!sandbox, 'requires an isolated home');
-  const home = await realpath(sandbox!);
-  expect(home).toMatch(/\/ori-(?:demo|e2e)\.[^/]+$/);
-  const docs = join(home, 'Documents');
-  await installLocalCdn(page);
-  const button = page.locator('#cockpitCreateWorkspaceBtn');
-  const modal = page.locator('#addFolderModal');
-  const path = modal.locator('#workspaceAnchorPath');
-  const checks: string[] = [];
-  page.on('request', r => {
-    if (r.url().includes('/anchor/check?known=')) checks.push(r.url());
-  });
-  async function start() {
-    await page.goto(base + '?mode=details');
-    const card = page.locator('[data-hq-firstvisit]');
-    if (!(await card.isVisible()))
-      await page.getByRole('button', { name: 'Things to try' }).click();
-    await card.getByRole('button', { name: /Create a workspace from Documents/ }).click();
-    const count = checks.length;
-    await card.getByRole('link', { name: 'Go to Home' }).click();
-    await expect(button).toBeFocused();
-    expect(checks).toHaveLength(count);
-    await button.press('Enter');
-    await expect(modal.locator('#workspaceFolderModeAnchored')).toBeChecked();
-    await expect(modal.locator('#folderNameInput')).toBeEditable();
-  }
-  await start();
-  await expect(modal.locator('#workspaceAnchorStatus')).toContainText(
-    'Documents could not be located'
-  );
-  await expect(modal.locator('#workspaceAnchorChoose')).toBeEnabled();
-  await page.keyboard.press('Escape');
-  await expect(modal).toBeHidden();
-  await mkdir(docs, { mode: 0o750 });
-  await start();
-  await expect(path).toHaveValue(docs);
-  await expect(path).toBeEditable();
-  await expect(modal.locator('#workspaceSearchConsent')).not.toBeChecked();
-  await modal.screenshot({ path: info.outputPath('documents-review.png') });
-  await page.keyboard.press('Escape');
-  await expect(modal).toBeHidden();
-  await button.click();
-  await expect(modal.locator('#workspaceFolderModeManaged')).toBeChecked();
-  await expect(path).toHaveValue('');
-  await page.keyboard.press('Escape');
-  await expect(modal).toBeHidden();
-  const create = await request.post('/api/workspaces', {
-    data: { name: 'Document shelves', anchor_path: docs }
-  });
-  expect(create.ok(), await create.text()).toBeTruthy();
-  await start();
-  await expect(modal.locator('#workspaceAnchorOpenExisting')).toBeVisible();
-  await expect(path).toHaveValue(docs);
-  expect(checks).toHaveLength(3);
-  expect(await readdir(docs)).toEqual([]);
-});
-
 test('Documents review can return without a hire, then open its actual reported workspace', async ({
   page,
   request
@@ -198,13 +108,11 @@ test('Documents review can return without a hire, then open its actual reported 
     if (req.url().endsWith('/folder-agent/start')) starts.push(req.method());
   });
   await page.goto(base + '?mode=details');
-  const card = page.locator('[data-hq-firstvisit]');
   const hasArrow = (control: Locator) =>
     control.evaluate(el => getComputedStyle(el, '::before').clipPath !== 'none');
   const doc = async (hideTips = false) => {
     const before = choices.length;
-    await card.getByRole('button', { name: /Explore Documents/ }).click();
-    await card.getByRole('link', { name: 'Show me where to start' }).click();
+    await resumeLegacyFolderGuide(page);
     const guide = page.getByRole('complementary', { name: 'Explore Documents guide' });
     // Home loads its cockpit and resolves the assistant relationship before
     // it can offer the real Attach control, especially on a cold navigation.

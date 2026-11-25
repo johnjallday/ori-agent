@@ -722,7 +722,16 @@ const sessionManager = {
       ?.addEventListener('click', () => void this.browseAnchorFolder());
     document.getElementById('workspaceAnchorOpenExisting')?.addEventListener('click', () => {
       const owner = this.anchorChoice?.duplicate || this.anchorChoice?.related;
-      if (owner?.workspace_id) this.openImportedWorkspace(owner.slug || owner.workspace_id);
+      if (!owner?.workspace_id) return;
+      const context = this.workspaceCreatorContext;
+      if (owner === this.anchorChoice.duplicate) {
+        context?.hqWorkspaceOutcome?.openingExistingWorkspace(
+          context.hqWorkspaceAttempt,
+          owner.workspace_id,
+          this.anchorChoice.path
+        );
+      }
+      this.openImportedWorkspace(owner.slug || owner.workspace_id);
     });
 
     const importToggle = document.getElementById('folderImportToggle');
@@ -954,7 +963,11 @@ const sessionManager = {
     let closingCreatorContext;
     addFolderModal?.addEventListener('hide.bs.modal', () => {
       closingCreatorContext = this.workspaceCreatorContext;
-      this.anchorCheckSequence++;
+      if (
+        !addFolderModal.dataset.suspendedForAgentSetup &&
+        !addFolderModal.dataset.suspendedForMapPlacement
+      )
+        this.anchorCheckSequence++;
     });
     addFolderModal?.addEventListener('hidden.bs.modal', () => {
       const closing = closingCreatorContext;
@@ -4020,7 +4033,10 @@ const sessionManager = {
         input.value = result.normalized_path;
       } else {
         choice.message = result.error || 'Folder ownership could not be checked. Try again.';
-        choice.duplicate = result.duplicate || null;
+        choice.duplicate =
+          knownDocuments && result.code !== 'anchor_already_owned'
+            ? null
+            : result.duplicate || null;
         if (knownDocuments && result.normalized_path)
           input.value = choice.path = result.normalized_path;
       }
@@ -5459,6 +5475,13 @@ const sessionManager = {
       return;
     }
     if (action === 'open' && review.result?.id) {
+      // Recovery reads the original operation, not the HQ intention (if any)
+      // that happened to open this dialog. Only an exact retained match binds.
+      const outcome =
+        context.hqWorkspaceOutcome ||
+        (review.restored && (await import('./hq-workspace-outcome.js').catch(() => null)));
+      if (this.workspaceCreatorContext !== context) return;
+      outcome?.openingReviewedWorkspace?.(review.reference, review.result.id);
       this.releaseCreationReviewReference(review);
       // Workspace pages are routed by slug; resolve it rather than use the ID.
       const slug = String(review.result.folder_slug || '').trim();
@@ -14409,6 +14432,9 @@ const sessionManager = {
       // A saved confirmation always wins. Without its reader we cannot know
       // whether this is a fresh wizard, so leave the ordinary form untouched.
       if (sequence !== this.anchorCheckSequence || !checkedForRecovery) return;
+      const outcome = await import('./hq-workspace-outcome.js').catch(() => null);
+      if (this.workspaceCreatorContext !== context || sequence !== this.anchorCheckSequence) return;
+      context.hqWorkspaceOutcome = outcome;
       context.hqWorkspaceAttempt = hqAttempt;
       this.workspaceMapOrigin = false;
       this.wizardStep = 2;
@@ -20361,6 +20387,11 @@ const sessionManager = {
       let compositeLayout = false;
 
       if (ordinaryReview) {
+        creatorContext.hqWorkspaceOutcome?.rememberWorkspaceReview(
+          creatorContext.hqWorkspaceAttempt,
+          ordinaryReview.reference,
+          requestPayload.anchor_path
+        );
         ordinaryReview.accepted = true;
         const groupedOwner = ordinaryReview.owner === 'grouped';
         let outcome;

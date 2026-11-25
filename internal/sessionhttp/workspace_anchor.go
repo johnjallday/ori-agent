@@ -23,6 +23,7 @@ type anchorPathError struct {
 	Code      string                         `json:"code"`
 	Message   string                         `json:"error"`
 	Duplicate *projectconnection.FolderOwner `json:"duplicate,omitempty"`
+	Path      string                         `json:"normalized_path,omitempty"`
 	status    int
 }
 
@@ -59,11 +60,7 @@ func (h *Handler) handleWorkspaceAnchorCheck(w http.ResponseWriter, r *http.Requ
 	path, err := h.validateAnchorPath(input, "")
 	if err != nil {
 		if query.Has("known") && err.Code == "anchor_already_owned" {
-			_ = orihttp.RespondJSON(w, err.status, struct {
-				*anchorPathError
-				Path string `json:"normalized_path"`
-			}{err, input})
-			return
+			err.Path = input
 		}
 		respondAnchorError(w, err)
 		return

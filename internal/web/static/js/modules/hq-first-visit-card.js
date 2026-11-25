@@ -14,6 +14,7 @@ import {
   guidedReturnURL,
   handoffURL
 } from './hq-guided-attempt.js';
+import { hasWorkspaceVisit } from './hq-workspace-outcome.js';
 import { folderReceipt } from './hq-guided-folder.js';
 import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
 
@@ -216,8 +217,9 @@ export class HQFirstVisitCard {
 
   html() {
     const choice = choices[this.path];
+    const visited = hasWorkspaceVisit(this.owner.workspaceId());
     const row = (key, [label, hint]) =>
-      `<li><button type="button" class="ws-hq-suggestion" data-hq-firstvisit-action="${key}"><span class="ws-hq-suggestion-icon" aria-hidden="true"><i class="bi bi-${{ workspace: 'folder2', email: 'envelope', apps: 'grid' }[key]}"></i></span><span><strong>${label}</strong><small>${hint}</small></span><span aria-hidden="true">→</span></button></li>`;
+      `<li><button type="button" class="ws-hq-suggestion" data-hq-firstvisit-action="${key}"><span class="ws-hq-suggestion-icon" aria-hidden="true"><i class="bi bi-${{ workspace: 'folder2', email: 'envelope', apps: 'grid' }[key]}"></i></span><span><strong>${label}</strong><small>${key === 'workspace' && visited ? 'Completed · You opened your chosen workspace.' : hint}</small></span><span aria-hidden="true">→</span></button></li>`;
     const link = (url, label) =>
       `<li><a class="ws-hq-suggestion" data-hq-firstvisit-action="continue" href="${escape(handoffURL(url, this.attempt))}">${label}</a></li>`;
     const steps =

@@ -143,6 +143,7 @@ export default defineConfig([
       'internal/web/static/js/modules/hq-first-visit.js',
       'internal/web/static/js/modules/hq-first-visit-card.js',
       'internal/web/static/js/modules/hq-guided-*.js',
+      'internal/web/static/js/modules/hq-workspace-*.js',
       'internal/web/static/js/modules/hq-documents-draft.js',
       'internal/web/static/js/modules/hq-part-tips.js',
       'internal/web/static/js/modules/hq-tip-layer.js',

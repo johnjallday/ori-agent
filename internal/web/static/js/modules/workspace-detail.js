@@ -26,6 +26,7 @@ import {
   firstTaskStartMessage,
   renderFirstTaskBanner
 } from './workspace-first-task-banner.js';
+import { verifyWorkspaceVisit } from './hq-workspace-outcome.js';
 import { folderStaffingDraft, showAssignedFolderLook } from './workspace-folder-first-look.js';
 import { mountWorkspaceFolderAgent } from './folder-agent-card.js';
 import { commanderPresenter, workspaceCommanderMap } from './commander-map.js';
@@ -2757,6 +2758,7 @@ export class WorkspaceDetailPage {
       });
       if (!this.isResourceRequestCurrent(request)) return;
       this.publishWorkspaceSnapshot(workspace, request);
+      verifyWorkspaceVisit(document.body?.dataset?.workspaceId, workspace);
       void showAssignedFolderLook(this);
       this.workspaceSlug = String(this.workspace?.folder_slug || this.workspaceSlug || '').trim();
       this.workspaceSettings = this.normalizeWorkspaceSettings(
