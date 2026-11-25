@@ -1,0 +1,90 @@
+name: README Capture
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ main, dev, develop, 'epic/**', 'release/**' ]
+    paths: &capture_paths
+      - 'README.md'
+      - 'docs/images/*.webp'
+      - 'docs/readme-screenshots.json'
+      - 'scripts/readme/**'
+      - 'scripts/readme-refresh.sh'
+      - 'tests/readme-capture.spec.ts'
+      - 'tests/fixtures/readme-*'
+      - 'playwright.readme.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/readme-capture.yml'
+  push:
+    branches: [ main, dev, develop, 'release/**' ]
+    paths: *capture_paths
+
+permissions:
+  contents: read
+
+concurrency:
+  group: readme-capture-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    name: Capture README screenshots
+    runs-on: ubuntu-24.04
+    env:
+      README_CAPTURE_CI_RUN_ID: ci-readme-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.13.0'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      # The lifecycle tests use a Go fixture server and a Playwright browser cache.
+      - name: Run README Node tests
+        run: npm run readme:test
+
+      - name: Capture and compare disposable README screenshots
+        id: readme_capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_dir="test-results/readme-refresh/${README_CAPTURE_CI_RUN_ID}"
+          if ! bash scripts/readme-refresh.sh capture --run-id "$README_CAPTURE_CI_RUN_ID"; then
+            echo "::error::Disposable README capture failed; the command output above includes the failed scene or rule and safe retry command."
+            find "$run_dir/logs" -maxdepth 1 -type f -print -exec tail -n 40 {} \; 2>/dev/null || true
+            exit 1
+          fi
+          test -f "$run_dir/comparison/README_CAPTURE_REPORT.md"
+          git diff --exit-code -- README.md docs/images docs/readme-screenshots.json
+
+      # Preserve the fictional scene pairs, encoder metadata and logs only on failure.
+      - name: Upload failed README capture evidence
+        if: failure() && steps.readme_capture.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: readme-capture-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/raw/*.png
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/raw-repeat/*.png
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed/*.webp
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed/image-metadata.json
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed-repeat/*.webp
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/proposed-repeat/image-metadata.json
+            test-results/readme-refresh/${{ env.README_CAPTURE_CI_RUN_ID }}/logs/
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Clean up disposable README capture
+        if: always()
+        shell: bash
+        run: |
+          run_dir="test-results/readme-refresh/${README_CAPTURE_CI_RUN_ID}"
+          if [[ -d "$run_dir" ]]; then
+            bash scripts/readme-refresh.sh cleanup --run-id "$README_CAPTURE_CI_RUN_ID"
+          fi

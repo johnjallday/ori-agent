@@ -32,7 +32,7 @@
 #   character-assets  npm run test:character-assets, as CI's Frontend Lint
 #   gosec-new   scripts/smoke.sh gosec-new with gosec pinned to CI's version,
 #               installed on first use into a cached tool dir (skipped by --quick)
-#   readme      CI's README Contract: npm run readme:test, make readme-check, a
+#   readme      Local README gate: npm run readme:test, make readme-check, a
 #               disposable capture, and the tracked-README-files check. Runs when
 #               the branch touches a path the README scenes photograph (--readme
 #               forces it, --no-readme skips it, --quick skips it)
