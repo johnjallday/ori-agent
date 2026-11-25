@@ -173,7 +173,7 @@ test('Home updates: distinct rows open current Review without opening or acknowl
   await home(page);
   const lettersTile = page.locator(`#cockpitMap [data-ws-id="${letters.id}"]`);
   const filingTile = page.locator(`#cockpitMap [data-ws-id="${filing.id}"]`);
-  await expect(lettersTile).toContainText('New message');
+  await expect(lettersTile).toContainText('Read new message');
   await expect(filingTile).toContainText('2 files to review');
   await expect(page.locator('[data-cockpit-rail-toggle-count]')).toHaveText('1');
   await page.screenshot({
@@ -249,7 +249,7 @@ test('Home updates: keyboard Map message arrival exposes only its saved conversa
   await page.goBack();
   await expect(
     page.locator(`#cockpitMap .ws-map-tile[data-ws-id="${letters.id}"]`)
-  ).not.toContainText('New message');
+  ).not.toContainText('Read new message');
   await expect(page.locator(`#cockpitMap .ws-map-tile[data-ws-id="${filing.id}"]`)).toContainText(
     '2 files to review'
   );

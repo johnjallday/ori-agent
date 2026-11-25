@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1000 600" fill="none" stroke="#87997e" opacity=".43">
+  <defs>
+    <path id="ridge" vector-effect="non-scaling-stroke" d="M-132-31C-93-60-98-99-42-100S16-64 52-73 111-64 119-26 168 8 128 44 100 47 76 83 26 115-22 92-106 94-112 59-176 2-132-31Z"/>
+    <g id="hill" stroke-width=".8"><use xlink:href="#ridge"/><use xlink:href="#ridge" transform="scale(.9)"/><use xlink:href="#ridge" transform="scale(.8)"/><use xlink:href="#ridge" transform="scale(.7)"/><use xlink:href="#ridge" transform="scale(.6)"/><use xlink:href="#ridge" transform="scale(.5)"/><use xlink:href="#ridge" transform="scale(.4)"/><use xlink:href="#ridge" transform="scale(.3)"/><use xlink:href="#ridge" transform="scale(.2)"/></g>
+  </defs>
+  <use xlink:href="#hill" transform="translate(235 168) scale(1.48 1.28) rotate(-16)"/><use xlink:href="#hill" transform="translate(762 402) scale(1.48 1.42) rotate(17)"/><use xlink:href="#hill" transform="translate(165 507) scale(.97 .74)"/>
+</svg>

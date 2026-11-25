@@ -1,6 +1,6 @@
 <!-- Ori Dashboard — Command Bridge -->
 <!--
-  The rail is Home's one view switcher, for every user. Files and Map are two
+  The toolbar is Home's one view switcher, for every user. Files and Map are two
   views of the cockpit below, so the cockpit switches them in the page; the
   hrefs are the fallback for a new tab. The current destination is marked here
   from ?view= so the first paint is right, then kept by home-workspace-cockpit.js.
@@ -9,15 +9,7 @@
   fall back on, so it starts disabled and the cockpit enables it the moment its
   change handler exists; a choice made before that would be lost.
 -->
-<div class="desk-shell map-desk-shell">
-  <aside class="desk-rail" aria-label="Desk sidebar"{{if .Extra.FileSearchAvailable}} data-desk-local{{end}}>
-    <div class="desk-brand"><img src="/favicon.svg" alt="" />Ori</div>
-    <nav aria-label="Destination"><small>Desk</small><a href="/?view=tree" data-desk-destination="tree"{{if index .Extra "HomeViewTree"}} aria-current="page"{{end}}>Files</a><a href="/?view=map" data-desk-destination="map"{{if not (index .Extra "HomeViewTree")}} aria-current="page"{{end}}>Map</a></nav>
-    <div class="rail-foot">● &nbsp; {{if .Extra.FileSearchAvailable}}Local desk<br />{{end}}Workspace cockpit</div>
-  </aside>
-  <nav class="desk-mobile" aria-label="Destination"><span class="desk-brand">Ori</span>
-    <select aria-label="Destination" data-map-picker disabled><option value="tree"{{if index .Extra "HomeViewTree"}} selected{{end}}>Files</option><option value="map"{{if not (index .Extra "HomeViewTree")}} selected{{end}}>Map</option></select>
-  </nav>
+<div class="map-desk-shell">
 <div class="home-command-bridge" data-first-run="{{if .Extra.IsFirstRun}}true{{else}}false{{end}}">
   <!-- Only the HQ-owned result moves here; conversation and Today stay in the drawer. -->
   <aside id="personalHQResultHost" class="pa-hq-result" aria-label="Personal HQ setup result" hidden></aside>
@@ -29,38 +21,21 @@
     than just this one. Help is a separate read-only navbar utility.
   -->
   <!-- The Map-first workspace cockpit: one primary workspace area (Map or Files,
-       the tree, as mutually exclusive views chosen in the Desk rail beside it).
+       the tree, as mutually exclusive views chosen in the toolbar).
        Issue #366 moved selected context to
        the on-demand modal after this grid, so the theatre always owns the full
        cockpit width. Global Help and Personal Assistant entry points stay available. -->
   <div class="home-cockpit" id="homeCockpit" data-view="{{if index .Extra "HomeViewTree"}}tree{{else}}map{{end}}" data-state="loading">
     <section class="cockpit-workspace-area" id="cockpitWorkspaceArea" aria-labelledby="cockpitWorkspaceAreaTitle">
-      <!--
-        Wraps the header AND the two flyouts below so they share one
-        positioning context (Issue #334). The wrapper — not the header alone
-        — is what occupies the grid's header row; position: relative lives
-        here rather than on the <header>, because the flyouts are the
-        header's DOM SIBLINGS, not its descendants, and an absolutely
-        positioned element's containing block must be an ancestor.
-      -->
-      <div class="cockpit-area-header-zone">
-      <!--
-        Two rows with two jobs. The first says where you are and what you can
-        make: the heading (Workspace Map or Files; the Desk rail beside the
-        cockpit is the view switch), the capture and Summary actions, and
-        creation (the hire-first primary, then New Workspace). The second is the quieter readout row: the App Guide and
-        signal filters on the left; Updates, Quests, and the city's resources
-        on the right. Every control
-        keeps its id — coachmarks, progression, setup quests, and the specs all
-        find them by it.
-      -->
+      <!-- The atlas header owns creation and navigation; its footer owns live signals. -->
       <header class="cockpit-area-header">
         <div class="cockpit-area-main">
           <div class="cockpit-area-identity">
             <div class="cockpit-area-heading">
-              <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>{{if index .Extra "HomeViewTree"}}Files{{else}}Workspace Map{{end}}</h2>
+              <span class="atlas-kicker">Personal atlas &nbsp;/&nbsp; 01</span>
+              <h2 id="cockpitWorkspaceAreaTitle" class="cockpit-area-title" data-cockpit-area-title>{{if index .Extra "HomeViewTree"}}Files{{else}}Workspaces{{end}}</h2>
             </div>
-            <!-- The view is chosen in the Desk rail, not here. Searchable
+            <!-- Searchable
                  folders are managed on their own rows in Files. What Files
                  offers here is the starting page: Files, or the Map. Shown on
                  Files only, and only on the Mac that runs the filename index.
@@ -69,13 +44,6 @@
             {{with index .Extra "SearchLanding"}}<button type="button" class="cockpit-files-landing" data-files-landing data-landing="{{.}}"{{if not (index $.Extra "HomeViewTree")}} hidden{{end}}>{{if eq . "search"}}Start on Map instead{{else}}Make Files my starting page{{end}}</button>{{end}}
           </div>
           <div class="cockpit-area-actions" role="group" aria-label="Workspace actions">
-            <!-- Files keeps its header Summary; Map offers it inside Updates. -->
-            <div class="cockpit-area-actions__secondary">
-              <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
-                      aria-haspopup="dialog" aria-expanded="false" aria-controls="cockpitCaptureModal">Add to backlog</button>
-              <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-secondary modern-btn-sm"
-                      aria-pressed="false" aria-expanded="false" aria-controls="cockpitContextModal"{{if not (index .Extra "HomeViewTree")}} hidden{{end}}>Summary</button>
-            </div>
             <!-- Creation. The primary is the next step in the hire-first story,
                  chosen from the assistant relationship (cockpitPrimaryActionView):
                  Meet your assistant before a hire, Build My HQ after it, and
@@ -97,6 +65,21 @@
             </aside>
           </div>
         </div>
+        <div class="atlas-toolbar">
+          <nav class="desk-rail" aria-label="Destination"{{if .Extra.FileSearchAvailable}} data-desk-local{{end}}>
+            <a href="/?view=map" data-desk-destination="map"{{if not (index .Extra "HomeViewTree")}} aria-current="page"{{end}}>Map</a>
+            <a href="/?view=tree" data-desk-destination="tree"{{if index .Extra "HomeViewTree"}} aria-current="page"{{end}}>Files</a>
+          </nav>
+          <nav class="desk-mobile" aria-label="Destination"><select aria-label="Destination" data-map-picker disabled><option value="map"{{if not (index .Extra "HomeViewTree")}} selected{{end}}>Map</option><option value="tree"{{if index .Extra "HomeViewTree"}} selected{{end}}>Files</option></select></nav>
+          <div class="cockpit-area-actions__secondary">
+            <a href="/my-notes" class="modern-btn modern-btn-quiet modern-btn-sm">My Notes</a>
+            <button type="button" id="cockpitCaptureBtn" class="modern-btn modern-btn-quiet modern-btn-sm" aria-haspopup="dialog" aria-expanded="false" aria-controls="cockpitCaptureModal">Add to backlog</button>
+            <button type="button" id="cockpitSummaryBtn" class="modern-btn modern-btn-quiet modern-btn-sm" aria-pressed="false" aria-expanded="false" aria-controls="cockpitContextModal"{{if not (index .Extra "HomeViewTree")}} hidden{{end}}>Summary</button>
+          </div>
+        </div>
+      </header>
+      {{template "home-atlas-views" .}}
+      <footer class="cockpit-area-header-zone">
         <div class="cockpit-area-utility">
           <!-- Map-only signal filters. Single-select and keyboard-operable;
                counts come from the same authoritative state Map and Summary
@@ -106,7 +89,7 @@
           <!-- Readouts and on-demand panels. Updates, Quests, and the resource
                help open BELOW this row, over the map, and never resize it. -->
           <div class="cockpit-area-controls">
-          <a href="/my-notes" class="modern-btn modern-btn-secondary modern-btn-sm"><i class="bi bi-journal-text" aria-hidden="true"></i> My Notes</a>
+
           <!--
             Updates: a manual, non-modal flyout for the day's non-Progression
             content — attention, scheduled work, Daily Brief, Calendar,
@@ -173,8 +156,9 @@
             (see below), or opening it would read the whole panel out as a
             balance change.
           -->
-          <div class="cockpit-economy" id="cockpitEconomy" role="group"
-               aria-label="City resources" aria-live="polite" hidden>
+          <details class="atlas-resources" id="cockpitEconomy" hidden>
+            <summary>Resources</summary>
+            <div class="cockpit-economy" role="group" aria-label="City resources" aria-live="polite">
             <button type="button" class="modern-btn modern-btn-quiet modern-btn-sm cockpit-economy__chip" data-economy-chip="craft"
                     data-economy-help="craft" aria-expanded="false"
                     aria-controls="cockpitEconomyHelp"
@@ -211,7 +195,8 @@
               </span>
               <span class="cockpit-economy__energy-text" data-economy-energy-text></span>
             </button>
-          </div>
+            </div>
+          </details>
           <!--
             The help panel, deliberately OUTSIDE the aria-live region above: its
             content is requested, not announced, and a live region would read
@@ -234,7 +219,6 @@
           </div>
           </div>
         </div>
-      </header>
 
       <!--
         Updates: a bounded, non-modal overlay anchored to its header trigger
@@ -467,8 +451,13 @@
           </div>
         </div>
       </div>
-      </div>
+      </footer>
+    </section>
+  </div>
+</div>
+</div>
 
+{{define "home-atlas-views"}}
       <div class="cockpit-area-body">
         <!-- Quick Capture's success receipt (home-workspace-map-ui-refresh 4.7).
              Absolutely positioned over the top of the map area, so showing it
@@ -523,11 +512,7 @@
         </div>
         <div id="cockpitWorkspaceStatus" class="cockpit-area-status" role="status" aria-live="polite"></div>
       </div>
-    </section>
-
-  </div>
-</div>
-</div>
+{{end}}
 
 <!-- Working Agreement is an on-demand overlay, not a Home cockpit row. Its
      canonical controller and APIs remain unchanged while opening it can no

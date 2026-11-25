@@ -70,6 +70,7 @@ export function receiptHint(location, hq) {
     return null;
   }
 }
+
 export function claimWorkspaceArrival(search) {
   const hint = guidedHint(search);
   if (hint?.path !== 'workspace' || hint.arrived) return null;
@@ -78,6 +79,17 @@ export function claimWorkspaceArrival(search) {
     return hint;
   } catch (_) {
     return null;
+  }
+}
+
+// Dismiss only this tab's saved-tools receipt. A newer journey owns its own hint.
+export function dismissToolsReceipt(hq, attempt) {
+  if (!currentHQAttempt(hq, 'apps', attempt)?.returned) return false;
+  try {
+    sessionStorage.removeItem(KEY);
+    return true;
+  } catch (_) {
+    return false;
   }
 }
 

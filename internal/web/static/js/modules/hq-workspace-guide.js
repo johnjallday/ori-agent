@@ -20,6 +20,9 @@ export function showWorkspaceGuide(win, doc) {
     hint.hidden = true;
     button.removeAttribute('aria-describedby');
   };
+  // This Home visit uses the guide's pulse instead of Atlas's entry ring.
+  // Keep the marker after dismissal so the entry ring doesn't start then.
+  button.dataset.hqGuidedArrival = 'true';
   hint.hidden = false;
   button.setAttribute('aria-describedby', 'hqWorkspaceInstruction');
   button.scrollIntoView({ block: 'nearest', behavior: 'instant' });

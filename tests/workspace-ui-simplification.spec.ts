@@ -215,7 +215,7 @@ test('shell: old details preference, Map history, Manager settings and Memory st
   await expect(page.getByRole('dialog', { name: 'Manager Settings', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Close manager' }).click();
   await open(page, ws.folder_slug, '?mode=map&station=memory');
-  await expect(page.getByRole('dialog', { name: 'Memory', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Agent memory', exact: true })).toBeVisible();
 });
 
 test('shell: declared non-music Home and catalog occupy one safe contribution host', async ({
@@ -301,7 +301,7 @@ test('panels: dirty Escape is guarded and Resources child owners suspend rather 
   }
   await page.getByRole('button', { name: 'Open memory manager', exact: true }).click();
   await expect(resources).not.toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Memory', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Agent memory', exact: true })).toBeVisible();
   await refresh(page);
   await page.getByRole('button', { name: 'Close manager' }).click();
   await expect(resources).toBeVisible();
@@ -693,7 +693,7 @@ test('map: group camera and selected member survive Overview and Tickets round t
   await page.getByRole('button', { name: 'Close workspace panel' }).click();
   await expect(page.locator('[data-cmd-map-resources]')).toBeFocused();
   await map.locator('[data-cmd-hq-station="memory"]').click();
-  await expect(page.getByRole('dialog', { name: 'Memory', exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Agent memory', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Close manager' }).click();
   await capture(page, 'field-group-map');
   const geometry = await page.evaluate(() => {

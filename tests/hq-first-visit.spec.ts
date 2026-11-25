@@ -103,7 +103,9 @@ for (const mode of ['details', 'map'])
     await page.goto(url!);
     await expect(page.locator('#hqWorkspaceHint')).toBeHidden();
     await page.goto('/');
-    await expect(button).toHaveCSS('animation-name', 'none');
+    // A normal Home visit may show Atlas's short entry ring, not the guide.
+    await expect(button).not.toHaveAttribute('data-hq-guided-arrival', 'true');
+    await expect(button).not.toHaveCSS('animation-name', 'hq-workspace-pulse');
     await expect(button).not.toBeFocused();
     await page.goBack();
     await expect(button).not.toBeFocused();
@@ -340,15 +342,23 @@ test('explicit app review saves only chosen tools and never scans on return', as
   await card.getByRole('checkbox', { name: 'Fixture Editor' }).check();
   await card.screenshot({ path: info.outputPath('app-review.png') });
   await card.getByRole('button', { name: 'Save selected tools' }).click();
-  await expect(receipt).toContainText('Selected tools now in Profile: Fixture Editor');
+  await expect(receipt).toContainText('1 tool saved to Profile.');
+  await expect(page.locator('[data-cmd-hq-needs] ~ [data-guided-receipt]')).toBeVisible();
   await page.reload();
-  await expect(receipt).toContainText('Fixture Editor');
+  await expect(receipt).toContainText('1 tool saved to Profile.');
   const saved = await read();
   expect(saved.preferred_tools).toEqual(['Fixture Editor']);
   expect(scans).toBe(1);
   await receipt.getByRole('link', { name: /Profile/ }).click();
   await expect(page.locator('[data-tool="Fixture Editor"]')).toHaveClass(/active/);
   await page.goBack();
+  await receipt.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(receipt).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Things to try' })).toBeFocused();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Things to try' })).toBeVisible();
+  await expect(receipt).toHaveCount(0);
+  expect(await read()).toEqual(saved);
   await page.getByRole('button', { name: 'Things to try' }).click();
   await scan();
   await card.getByRole('button', { name: 'Save none' }).click();

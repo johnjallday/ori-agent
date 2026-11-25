@@ -40,7 +40,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator('#cockpitMap')).toBeVisible();
       await expect(page.locator('#cockpitEconomy')).toBeVisible();
       await expect(page.locator('#cockpitQuestsToggle')).toBeVisible();
-      // The view switcher is the Desk rail (the picker on a narrow screen): its
+      // The atlas toolbar switches views (a picker on a narrow screen): its
       // controls keep the same floor as the header's own.
       const destinations = await destinationControls(page).all();
       expect(destinations.length).toBeGreaterThan(0);
@@ -50,14 +50,18 @@ for (const theme of ['light', 'dark'] as const) {
         '#cockpitCreateWorkspaceBtn',
         '#cockpitRailToggle',
         '#cockpitQuestsToggle',
-        '[data-economy-chip="craft"]',
-        '[data-economy-chip="harvest"]',
-        '[data-economy-energy]'
+        '#cockpitEconomy summary'
       ]) {
         // Home uses the shared compact (32px) variant, never a private height;
         // narrow/coarse targets retain the canonical 44px floor.
         await reachable(page.locator(selector), width < 769 ? 44 : 32);
       }
+      const resources = page.locator('#cockpitEconomy summary');
+      await resources.click();
+      for (const chip of await page.locator('#cockpitEconomy button').all()) {
+        await reachable(chip, width < 769 ? 44 : 32);
+      }
+      await resources.press('Escape');
       await expect(page.locator('#cockpitPrimaryActionBtn')).toBeHidden();
       await page.locator('#cockpitRailToggle').click();
       await reachable(page.getByRole('button', { name: 'View summary' }), width < 769 ? 44 : 32);
