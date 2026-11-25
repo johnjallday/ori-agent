@@ -544,42 +544,48 @@ func TestSeedTemplateAgents_EmptyRosterNoop(t *testing.T) {
 	}
 }
 
-func TestBlankWorkspaceTemplate_SeedsSingleEntryAgent(t *testing.T) {
+func TestBlankWorkspaceTemplate_SeedsTheWorkspacesOwnManager(t *testing.T) {
 	handler, cleanup := createTestHandler(t)
 	defer cleanup()
 
-	tpl := blankWorkspaceTemplate()
-	if !tpl.HasAgents() || len(tpl.Agents) != 1 {
-		t.Fatalf("expected exactly one blank roster agent, got %d", len(tpl.Agents))
+	tpl := handler.blankWorkspaceTemplate("Plain")
+	if !tpl.HasAgents() || len(tpl.Agents) != 1 || tpl.Agents[0].Name != "Plain Manager" {
+		t.Fatalf("expected one proposed manager named Plain Manager, got %#v", tpl.Agents)
 	}
 
 	before := handler.buildTemplateAgentPlan(tpl)
-	if before.Agents[0].Action != "create" {
-		t.Fatalf("blank plan without Ask Ori action = %q, want create", before.Agents[0].Action)
+	if before.Agents[0].Action != "create" || before.Agents[0].RoleID != blankManagerRoleID {
+		t.Fatalf("blank plan = %#v, want a create into the manager role", before.Agents[0])
 	}
 
 	ws := &session.Workspace{ID: "ws-blank", Name: "Plain"}
 	res := handler.seedTemplateAgents(ws, tpl)
 
-	if !res.EntrySet {
-		t.Fatal("expected the blank Workspace Manager to be set as entry agent")
+	if !res.EntrySet || currentWorkspaceEntryAgentName(ws) != "Plain Manager" {
+		t.Fatalf("expected Plain Manager as entry agent, got EntrySet=%v entry=%q", res.EntrySet, currentWorkspaceEntryAgentName(ws))
 	}
-	if got := currentWorkspaceEntryAgentName(ws); got != blankWorkspaceEntryAgentName {
-		t.Fatalf("expected entry agent %q, got %q", blankWorkspaceEntryAgentName, got)
-	}
-	created, ok := handler.agentStore.GetAgent(blankWorkspaceEntryAgentName)
+	created, ok := handler.agentStore.GetAgent("Plain Manager")
 	if !ok {
-		t.Fatalf("expected agent %q to be created", blankWorkspaceEntryAgentName)
+		t.Fatal("expected Plain Manager to be created")
 	}
 	if strings.TrimSpace(created.Settings.SystemPrompt) == "" {
-		t.Fatal("expected the blank entry agent to carry a system prompt")
+		t.Fatal("expected the manager to carry a system prompt")
+	}
+	if !created.WorkspaceManager.ManagesWorkspace("ws-blank") {
+		t.Fatalf("manager provenance = %#v, want ws-blank", created.WorkspaceManager)
+	}
+	if len(res.OwnedNames) != 1 || res.OwnedNames[0] != "Plain Manager" {
+		t.Fatalf("the create must own its manager for rollback, owned=%v", res.OwnedNames)
+	}
+	if instance := ws.AgentInstances[0]; instance.RoleID != blankManagerRoleID {
+		t.Fatalf("manager attachment = %#v, want role %q", instance, blankManagerRoleID)
 	}
 
-	// The plan the review panel renders must advertise the single entry agent.
-	plan := handler.buildTemplateAgentPlan(blankWorkspaceTemplate())
-	if !plan.HasAgents || plan.EntryAgentName != blankWorkspaceEntryAgentName || plan.Agents[0].Action != "reuse" {
-		t.Fatalf("expected plan entry %q, got has_agents=%v entry=%q",
-			blankWorkspaceEntryAgentName, plan.HasAgents, plan.EntryAgentName)
+	// A second Blank workspace with the same name gets a manager of its own,
+	// never the first one by name match.
+	next := handler.buildTemplateAgentPlan(handler.blankWorkspaceTemplate("Plain"))
+	if next.EntryAgentName != "Plain Manager 2" || next.Agents[0].Action != "create" {
+		t.Fatalf("second Blank plan = entry %q action %q, want a new Plain Manager 2", next.EntryAgentName, next.Agents[0].Action)
 	}
 }
 

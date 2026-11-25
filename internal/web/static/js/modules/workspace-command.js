@@ -6114,7 +6114,7 @@ export class WorkspaceCommandView {
       omitFields: templateInstructions ? ['systemPrompt'] : [],
       note: templateInstructions ? groupTemplateRolePromptNote(this.groupTemplateStatus) : '',
       values: {
-        name: row.label,
+        name: row.proposed?.name || row.label,
         model: proposed.model || '',
         provider: proposed.provider || '',
         systemPrompt: proposed.system_prompt || ''

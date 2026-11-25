@@ -99,7 +99,12 @@
       modelSource: text(agent && agent.model_source),
       tools: (agent && agent.tools) || null,
       warning: text(agent && agent.warning),
-      recommended: normalizeRecommendedSetup(agent && agent.recommended_setup)
+      recommended: normalizeRecommendedSetup(agent && agent.recommended_setup),
+      // A host-owned role (Blank's manager) carries its own identity, which
+      // does not follow the proposed agent name. Empty for every authorable
+      // blueprint, whose role is derived from the name.
+      roleId: text(agent && agent.role_id),
+      roleLabel: text(agent && agent.role_label)
     };
   }
 
@@ -279,7 +284,7 @@
     }
     const seen = new Map();
     return planAgents(source).map((agent, index) => {
-      const base = roleIdFromName(agent.name);
+      const base = agent.roleId ? roleIdFromName(agent.roleId) : roleIdFromName(agent.name);
       let roleId = base;
       for (;;) {
         const count = seen.get(roleId) || 0;
@@ -293,7 +298,7 @@
       const recommended = agent.recommended || agent;
       return {
         roleId,
-        label: agent.name,
+        label: agent.roleLabel || agent.name,
         description: agent.systemPrompt ? firstSentence(agent.systemPrompt) : '',
         scope: 'project',
         required: index === 0,
@@ -301,6 +306,9 @@
         heldElsewhere: '',
         templateAgentIndex: index,
         proposed: {
+          // A host-owned role's label ("Manager") is not an agent name; it
+          // proposes the plan's own free name, as the server roster does.
+          ...(agent.roleId ? { name: agent.name } : {}),
           // The role and any declared face seed the Create form's Appearance
           // editor: the suggested character follows the role, and a blueprint
           // that declares a face keeps it. Both present only when declared.
@@ -506,6 +514,7 @@
     if (!draft) return false;
     const blank = draft.plan?.status === PLAN_READY && draft.plan.data?.templateId === 'blank';
     if (enabled && !blank) return false;
+    const wasAgentless = draft.agentless;
     draft.agentless = Boolean(enabled);
     if (draft.agentless) {
       draft.roleFills.clear();
@@ -513,6 +522,11 @@
       draft.explicitPrimary = '';
       draft.overrides.clear();
       draft.acknowledgements.clear();
+    } else if (wasAgentless) {
+      // Turning agentless off asks for a staffed Blank again: offer its
+      // manager as a fresh default.
+      draft.managerDefault = null;
+      applyBlankManagerDefault(draft);
     }
     clearResolvedReadinessConflict(draft);
     return true;
@@ -535,6 +549,10 @@
     const id = text(roleId);
     if (!draft || !id || !draft.roleFills) return false;
     const cleared = draft.roleFills.delete(id);
+    // Clearing the prefilled manager is a decision, not a gap to refill.
+    if (cleared && draft.managerDefault && blankManagerRole(draft)?.roleId === id) {
+      draft.managerDefault = { name: '', declined: true };
+    }
     if (cleared && draft.staffingAdvice) {
       const advice = draft.staffingAdvice.roles.find(role => role.roleId === id);
       if (advice) advice.state = 'stale';
@@ -613,6 +631,7 @@
     draft.staffingAdvice = null;
     draft.includeBlueprintTeam = true;
     draft.agentless = false;
+    draft.managerDefault = null;
     if (draft.explicitPrimary && !isSelected(draft, draft.explicitPrimary)) {
       draft.explicitPrimary = '';
     }
@@ -683,7 +702,62 @@
     } else {
       draft.assistantHire = emptyAssistantHire();
     }
+    applyBlankManagerDefault(draft);
     return draft;
+  }
+
+  // Blank means the workspace's purpose is unspecified, not that it should be
+  // unstaffed: a new Blank workspace starts with a manager of its own, under
+  // the free name the plan proposes. Unlike an assistant program's roles
+  // (which start empty, FR11), this one slot is prefilled — but only while the
+  // person has not decided otherwise. Choosing agentless, clearing the slot, or
+  // editing the fill all win, and the default never comes back by itself.
+  // When the workspace name changes, an untouched default follows the new
+  // proposal instead of keeping the old workspace's name.
+  function blankManagerRole(draft) {
+    if (draft?.plan?.status !== PLAN_READY || draft.plan.data?.templateId !== 'blank') return null;
+    const agent = planAgents(draft).find(item => item.entryPoint && item.roleId);
+    if (!agent) return null;
+    const role = declaredRoles(draft).find(
+      item => item.templateAgentIndex === planAgents(draft).indexOf(agent)
+    );
+    return role ? { roleId: role.roleId, name: agent.name } : null;
+  }
+
+  function applyBlankManagerDefault(draft) {
+    const manager = blankManagerRole(draft);
+    if (!manager || draft.agentless) return;
+    const previous = draft.managerDefault;
+    if (previous?.declined) return;
+    const current = draft.roleFills.get(manager.roleId);
+    const untouchedDefault =
+      current &&
+      current.mode === FILL_CREATE &&
+      previous &&
+      agentKey(current.name) === agentKey(previous.name) &&
+      !text(current.systemPrompt) &&
+      !text(current.model) &&
+      !current.appearance;
+    if (current && !untouchedDefault) {
+      draft.managerDefault = { name: '', declined: true };
+      return;
+    }
+    if (current) draft.roleFills.delete(manager.roleId);
+    if (findSavedAgent(draft, manager.name)) {
+      // The proposal is free when the plan was read; a saved agent that now
+      // holds the name means the plan is stale, and a refresh proposes anew.
+      draft.managerDefault = { name: '', declined: false };
+      return;
+    }
+    draft.roleFills.set(manager.roleId, {
+      mode: FILL_CREATE,
+      name: manager.name,
+      provider: '',
+      model: '',
+      systemPrompt: '',
+      reasoningEffort: ''
+    });
+    draft.managerDefault = { name: manager.name, declined: false };
   }
 
   function setAssistantHire(draft, fields) {
@@ -1836,6 +1910,27 @@
         message: 'This blueprint declares no agent roles. You can still add a saved teammate.',
         recovery: ['add-saved-agent'],
         anchor: 'saved-agent-picker'
+      });
+    }
+    // A Blank manager created with no Default model and no model of its own
+    // would quietly answer on Ori's built-in fallback. Say so before Create
+    // rather than let the first chat be the surprise; nothing else stands in.
+    const blankManager = !agentless ? blankManagerRole(source) : null;
+    const blankManagerFill = blankManager && source.roleFills?.get(blankManager.roleId);
+    if (
+      blankManagerFill &&
+      blankManagerFill.mode === FILL_CREATE &&
+      !text(blankManagerFill.model) &&
+      plan.data &&
+      !plan.data.systemModelConfigured
+    ) {
+      issues.push({
+        id: 'manager-without-model',
+        severity: 'advisory',
+        message: `No Default model is set, so ${blankManagerFill.name} will use Ori's built-in fallback model. Choose a Default model in Settings, or pick a model for it here.`,
+        recovery: [],
+        anchor: `workspace-role-${blankManager.roleId}`,
+        roleId: blankManager.roleId
       });
     }
     shadowedSelections.forEach(shadowed => {

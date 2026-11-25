@@ -141,6 +141,57 @@ test('a saved File Curator is explicitly assigned and persisted without duplicat
   expect(afterNames).toHaveLength(beforeNames.length);
 });
 
+test('Blank starts with a manager of its own and creates it with the workspace', async ({
+  page,
+  request
+}) => {
+  const workspaceName = `Manager Readiness ${RUN}`;
+  await openCreateModal(page);
+  await cardByLabel(page, 'Blank').click();
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep2')).toBeVisible();
+  await page.locator('#folderNameInput').fill(workspaceName);
+  await page.locator('#wizardNextBtn').click();
+  await expect(page.locator('#wizardStep3')).toBeVisible();
+  // The manager slot is filled by default, so the Team step is complete.
+  await expect(page.locator('#wizardStep3')).toContainText('Manager');
+  await expect(page.locator('#wizardStep3')).toContainText(`${workspaceName} Manager`);
+  await expect(page.locator('#wizardNextBtn')).toBeEnabled();
+  await page.screenshot({ path: `${SHOTS}/blank-manager-default.png`, fullPage: true });
+  await page.locator('#wizardNextBtn').click();
+
+  const material = page.waitForRequest(
+    request =>
+      new URL(request.url()).pathname === '/api/workspaces/create-operations' &&
+      request.method() === 'POST'
+  );
+  const created = page
+    .waitForResponse(
+      response =>
+        /\/api\/workspaces\/create-operations\/[^/]+\/confirm$/.test(
+          new URL(response.url()).pathname
+        ) && response.request().method() === 'POST'
+    )
+    .then(async response => ({ response, body: await response.json() }));
+  await confirmReviewedCreation(page, true);
+  const { response, body } = await created;
+  expect(response.ok(), JSON.stringify(body)).toBe(true);
+  const requestBody = (await material).postDataJSON().request;
+  expect(requestBody.role_staffing).toEqual([
+    expect.objectContaining({
+      role_id: 'manager',
+      mode: 'create',
+      name: `${workspaceName} Manager`
+    })
+  ]);
+  createdWorkspaceIds.push(body.folder.id);
+  const names = (body.folder.agent_instances || []).map(
+    (instance: { name?: string }) => instance.name
+  );
+  expect(names).toEqual([`${workspaceName} Manager`]);
+  expect(await savedAgentNames(request)).toContain(`${workspaceName} Manager`);
+});
+
 test('Blank creates agentless only after the explicit choice', async ({ page }) => {
   await openCreateModal(page);
   await cardByLabel(page, 'Blank').click();
@@ -149,7 +200,8 @@ test('Blank creates agentless only after the explicit choice', async ({ page }) 
   await page.locator('#folderNameInput').fill(`Agentless Readiness ${RUN}`);
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
-  await expect(page.locator('#wizardNextBtn')).toBeDisabled();
+  // The default manager makes the step complete; no agents needs a choice.
+  await expect(page.locator('#wizardNextBtn')).toBeEnabled();
 
   await page.locator('#workspaceBlankAgentlessToggle').check();
   await expect(page.locator('#wizardNextBtn')).toBeEnabled();

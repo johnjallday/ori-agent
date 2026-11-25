@@ -2,10 +2,12 @@ package chathttp
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspaceupdates"
 )
 
 // Local work goes to the workspace's own manager. These tests pin the routing
@@ -85,6 +87,34 @@ func TestWorkspaceManagerRouting_MissingManagerNeverFallsBackAcrossWorkspaces(t 
 	got := resolveExecutionAgentName(context.Background(), nil, agentStore, lookup, "", "", "ws-empty")
 	if got.isResolved() || got.Source != executionAgentSourceUnavailable {
 		t.Fatalf("an unstaffed workspace resolved %#v; want unresolved, never another workspace's manager", got)
+	}
+}
+
+// A Blank workspace's own manager greets the person as its manager and offers
+// both ways in; it never asks a goal question that must be answered first.
+func TestComposeLeadWelcome_OwnManagerOffersHelpOrWorkWithoutAnInterview(t *testing.T) {
+	h, _, ws, _ := folderWelcomeFixture(t)
+	ag, _ := h.store.GetAgent("cli-agent")
+	ag.WorkspaceManager = &agent.WorkspaceManagerProvenance{WorkspaceID: ws.ID}
+
+	intro, state := composeIntro(t, h, ws)
+	if state != workspaceupdates.StateReady {
+		t.Fatalf("state = %q, want ready", state)
+	}
+	for _, want := range []string{"Hi, I’m cli-agent, the manager for", "Tell me what you’d like done", "help work out what this workspace is for"} {
+		if !strings.Contains(intro, want) {
+			t.Errorf("missing %q in %q", want, intro)
+		}
+	}
+	if strings.Contains(intro, goalQuestion) {
+		t.Fatalf("a manager welcome asked the goal question: %q", intro)
+	}
+
+	// The same agent bound to another workspace is an ordinary lead here.
+	ag.WorkspaceManager = &agent.WorkspaceManagerProvenance{WorkspaceID: "ws-elsewhere"}
+	intro, _ = composeIntro(t, h, ws)
+	if !strings.Contains(intro, "the lead for") || !strings.Contains(intro, goalQuestion) {
+		t.Fatalf("a foreign manager must greet as an ordinary lead: %q", intro)
 	}
 }
 

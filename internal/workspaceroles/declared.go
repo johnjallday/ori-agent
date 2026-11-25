@@ -58,8 +58,11 @@ func FromTemplateAgents(specs []projecttemplates.AgentSpec) []Role {
 	roles := make([]Role, 0, len(specs))
 	for index, spec := range specs {
 		label := strings.TrimSpace(spec.HostRoleLabel)
+		proposedName := ""
 		if label == "" {
 			label = strings.TrimSpace(spec.Name)
+		} else {
+			proposedName = strings.TrimSpace(spec.Name)
 		}
 		roles = append(roles, Role{
 			ID:          ids[index],
@@ -72,6 +75,7 @@ func FromTemplateAgents(specs []projecttemplates.AgentSpec) []Role {
 			// shows the instructions the agent would actually get rather than
 			// an empty box that hides a 250-character prompt.
 			Proposed: &ProposedSetup{
+				Name:         proposedName,
 				Model:        strings.TrimSpace(spec.Model),
 				Provider:     strings.TrimSpace(spec.Provider),
 				SystemPrompt: strings.TrimSpace(spec.SystemPrompt),

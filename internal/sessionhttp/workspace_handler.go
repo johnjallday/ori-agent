@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/johnjallday/ori-agent/internal/agentappearance"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -826,7 +827,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 	teamTemplate := resolvedTemplate
 	teamTemplateResolved := templateResolved
 	if req.teamIntentPresent && req.Blank && !wantsProject {
-		teamTemplate = blankWorkspaceTemplate()
+		teamTemplate = h.blankWorkspaceTemplate(req.Name)
 		teamTemplateResolved = true
 	}
 	if req.teamIntentPresent && teamTemplateResolved && strings.TrimSpace(req.GroupComposition) == string(grouprequirements.CompositionStandalone) {
@@ -914,7 +915,7 @@ func (h *Handler) createWorkspace(w http.ResponseWriter, r *http.Request) {
 			rawReviewTemplate = rawResolvedTemplate
 			effectiveReviewTemplate = resolvedTemplate
 		case req.Blank && kind != session.WorkspaceKindGroup:
-			rawReviewTemplate = blankWorkspaceTemplate()
+			rawReviewTemplate = h.blankWorkspaceTemplate(req.Name)
 			var applyErr error
 			effectiveReviewTemplate, applyErr = applyTemplateAgentOverrides(rawReviewTemplate, req.TemplateAgentOverrides)
 			if applyErr != nil {
@@ -1392,6 +1393,13 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(ctx context.Context, w http.Re
 	var seed seedAgentsResult
 	usesExistingAgentRoster := req.ExistingAgentNames != nil
 
+	// A Blank workspace's manager records the workspace it was made for, so
+	// that identity must exist before the profile does. The durable create
+	// operation has already reserved one; a plain create reserves it here.
+	if req.Blank && kind != session.WorkspaceKindGroup && strings.TrimSpace(ws.ID) == "" {
+		ws.ID = uuid.NewString()
+	}
+
 	// The vacancy model replaces automatic staffing entirely: exactly the roles
 	// the user filled are staffed, and NOTHING else runs — no whole-roster
 	// seeding, and no fallback "<Name> Manager" when every role was left empty
@@ -1469,7 +1477,7 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(ctx context.Context, w http.Re
 				}
 			}
 		case req.Blank && kind != session.WorkspaceKindGroup && createTemplateAgentsEnabled(req):
-			blankTpl, err := applyTemplateAgentOverrides(blankWorkspaceTemplate(), req.TemplateAgentOverrides)
+			blankTpl, err := applyTemplateAgentOverrides(h.blankWorkspaceTemplate(req.Name), req.TemplateAgentOverrides)
 			if err != nil {
 				_ = orihttp.RespondBadRequest(w, err.Error())
 				return seed, false
@@ -1522,12 +1530,12 @@ func (h *Handler) selectCreateWorkspaceEntryAgent(ctx context.Context, w http.Re
 			}
 		}
 	case req.Blank && kind != session.WorkspaceKindGroup && createTemplateAgentsEnabled(req):
-		// Blank blueprint: seed the synthetic single-agent roster (a reusable
-		// "Workspace Manager") so a blank workspace is chat-ready, honoring the
-		// review panel's edits (overrides) and its Create toggle. A seed failure
-		// surfaces a warning and leaves the workspace agent-less — the legacy
-		// no-entry-agent fallback the detail page already handles.
-		blankTpl, err := applyTemplateAgentOverrides(blankWorkspaceTemplate(), req.TemplateAgentOverrides)
+		// Blank blueprint: seed this workspace's own manager so a blank
+		// workspace is chat-ready, honoring the review panel's edits
+		// (overrides) and its Create toggle. A seed failure surfaces a warning
+		// and leaves the workspace agent-less — the no-entry-agent recovery
+		// the detail page already handles, never a substitute agent.
+		blankTpl, err := applyTemplateAgentOverrides(h.blankWorkspaceTemplate(req.Name), req.TemplateAgentOverrides)
 		if err != nil {
 			_ = orihttp.RespondBadRequest(w, err.Error())
 			return seed, false

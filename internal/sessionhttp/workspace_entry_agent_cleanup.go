@@ -18,7 +18,11 @@ import (
 type entryAgentCleanup struct {
 	selection   agentstore.StaffingSelection
 	operationID string
-	folderPath  string // internal location evidence; never projected or logged
+	// managerOf is set instead of operationID when the entry agent is a Blank
+	// workspace's own manager: its provenance, not an assistant-setup run, is
+	// the deletion authority.
+	managerOf  string
+	folderPath string // internal location evidence; never projected or logged
 }
 
 func (h *Handler) prepareEntryAgentCleanup(ctx context.Context, workspaceID string) *entryAgentCleanup {
@@ -43,13 +47,26 @@ func (h *Handler) prepareEntryAgentCleanup(ctx context.Context, workspaceID stri
 		}
 		created = true
 	}
-	provenance := ws.GetTemplateProvenance()
-	if !created || provenance == nil || provenance.AssistantSetup == nil ||
-		provenance.AssistantSetup.OperationID == "" || provenance.AssistantSetup.ReviewDigest == "" || provenance.AssistantSetup.RunID == "" {
+	if !created {
 		return nil
 	}
 	folder, err := h.workspaceStore.GetFolderPath(workspaceID)
 	if err != nil || folder == "" {
+		return nil
+	}
+	// A workspace's own manager is removed with the workspace that made it.
+	// Only the profile's provenance decides this — never the agent's name.
+	if profile, ok := h.agentStore.GetAgent(name); ok && profile != nil && profile.WorkspaceManager.ManagesWorkspace(workspaceID) {
+		for _, snapshot := range agentstore.ReadStaffingSnapshot(ctx, h.agentStore).Profiles {
+			if snapshot.Name == name {
+				return &entryAgentCleanup{selection: agentstore.StaffingSelection{Name: name, Witness: snapshot.Witness}, managerOf: workspaceID, folderPath: folder}
+			}
+		}
+		return nil
+	}
+	provenance := ws.GetTemplateProvenance()
+	if provenance == nil || provenance.AssistantSetup == nil ||
+		provenance.AssistantSetup.OperationID == "" || provenance.AssistantSetup.ReviewDigest == "" || provenance.AssistantSetup.RunID == "" {
 		return nil
 	}
 	for _, profile := range agentstore.ReadStaffingSnapshot(ctx, h.agentStore).Profiles {
@@ -78,7 +95,12 @@ func (h *Handler) cleanupEntryAgent(ctx context.Context, candidate *entryAgentCl
 		return
 	}
 	_, err := guard.DeleteStaffingProfile(ctx, candidate.selection, func(profile *agent.Agent) bool {
-		if profile.AssistantSetup == nil || profile.AssistantSetup.ID == "" || profile.AssistantSetup.ConfigDigest == "" || profile.AssistantSetup.OperationID != candidate.operationID {
+		switch {
+		case candidate.managerOf != "":
+			if !profile.WorkspaceManager.ManagesWorkspace(candidate.managerOf) {
+				return false
+			}
+		case profile.AssistantSetup == nil || profile.AssistantSetup.ID == "" || profile.AssistantSetup.ConfigDigest == "" || profile.AssistantSetup.OperationID != candidate.operationID:
 			return false
 		}
 		referenced, err := refs.HasWorkspaceAgentReference(ctx, candidate.selection.Name, workspaceID)

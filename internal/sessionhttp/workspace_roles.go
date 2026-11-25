@@ -114,9 +114,9 @@ func (h *Handler) declaredWorkspaceRoles(current *workspace.Workspace) ([]worksp
 		return nil, nil, ""
 	}
 	// Strict Blank workspaces retain their host-owned synthetic declaration so
-	// an intentionally empty Ask Ori role remains visible and fillable later.
+	// an intentionally empty manager role remains visible and fillable later.
 	if strings.TrimSpace(provenance.TemplateID) == blankWorkspaceTemplateID {
-		return workspaceroles.FromTemplateAgents(blankWorkspaceTemplate().Agents), nil, ""
+		return workspaceroles.FromTemplateAgents(h.blankWorkspaceTemplate(current.Name).Agents), blankLegacyRoleBindings(current), ""
 	}
 	// The ordinary roster is not snapshotted on the workspace, so it is read
 	// back from the library. A blueprint that has since been removed or edited
@@ -174,8 +174,23 @@ func blankLeadVacant(current *workspace.Workspace) bool {
 	// Use the same legacy-holder inference as the visible roster, but do not
 	// look up profiles under the staffing write guard. Even a stale holder
 	// must be cleared before this slot can be filled.
-	roster := workspaceroles.Build(workspaceroles.Input{Roles: workspaceroles.FromTemplateAgents(blankWorkspaceTemplate().Agents), Attachments: workspaceRosterAttachments(current)})
+	roster := workspaceroles.Build(workspaceroles.Input{Roles: blankWorkspaceRoles(), Attachments: workspaceRosterAttachments(current), Bindings: blankLegacyRoleBindings(current)})
 	return roster.FilledCount == 0
+}
+
+// blankLegacyRoleBindings reports who held an existing Blank workspace's lead
+// slot under a role id an earlier Blank roster derived from the former
+// assistant's name. Returned as roster bindings, the same mechanism that reads
+// pre-role-id records, so the holder stays in the manager slot (or shows as a
+// stale holder to clear) instead of moving to "Also in this workspace". It is
+// a read: the stored attachment keeps its role id.
+func blankLegacyRoleBindings(current *workspace.Workspace) map[string]string {
+	for _, instance := range current.GetAgentInstances() {
+		if isLegacyBlankRoleID(instance.RoleID) && strings.TrimSpace(instance.Name) != "" {
+			return map[string]string{blankManagerRoleID: strings.TrimSpace(instance.Name)}
+		}
+	}
+	return nil
 }
 
 func workspaceRosterAttachments(current *workspace.Workspace) []workspaceroles.Attachment {

@@ -10,9 +10,9 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspaceroles"
 )
 
 // createdAgent is a roster entry the seeder newly created (not reused), carried
@@ -177,20 +177,10 @@ func (e *templateAgentOverrideValidationError) Unwrap() error {
 	return e.Cause
 }
 
-// blankWorkspaceEntryAgentName is the reusable entry agent seeded for the Blank
-// blueprint. Like every other template's entry agent,
-// it is a normal global agent reused on name-match across blank workspaces.
-//
-// A new blank workspace must never mint a record under a retired name (FR59), so
-// this tracks the canonical identity rather than restating it.
-const (
-	blankWorkspaceTemplateID     = "blank"
-	blankWorkspaceEntryAgentName = systemassistant.CanonicalName
-)
-
-const blankWorkspaceEntryPrompt = "You are this workspace's front door: " +
-	"clarify user intent, answer directly when the request only needs shared context, and break work into " +
-	"tasks for specialists when needed."
+// blankWorkspaceTemplateID identifies the Blank blueprint. Blank means the
+// workspace's purpose is not yet specified, not that it is unstaffed: it
+// proposes one manager of its own (see workspace_manager.go).
+const blankWorkspaceTemplateID = "blank"
 
 // groupRosterTemplate is the synthetic, reviewed roster used only while creating
 // a Group. It deliberately uses the Group name in its manager identity: a person
@@ -214,19 +204,52 @@ func groupRosterTemplate(groupName string) projecttemplates.Template {
 	}
 }
 
-// blankWorkspaceTemplate is the synthetic single-agent roster for the Blank
-// blueprint. It flows through the normal template-agent plan/seed machinery so a
-// blank workspace ships with a reviewable, editable entry agent — but it carries
-// no skeleton, starter tasks, or project, so only its Agents roster is ever used.
-func blankWorkspaceTemplate() projecttemplates.Template {
+// blankWorkspaceTemplate is the synthetic single-role roster for a Blank
+// workspace named workspaceName: one manager of its own, proposed under a free
+// "<Workspace> Manager" name. It flows through the normal template-agent
+// plan/seed machinery so the manager is reviewable and editable — but it
+// carries no skeleton, starter tasks, or project, so only its Agents roster is
+// ever used.
+//
+// The proposed name depends on the saved agents, so the plan revision does
+// too: a second create that would otherwise reuse a manager made in between
+// sees a changed plan instead.
+func (h *Handler) blankWorkspaceTemplate(workspaceName string) projecttemplates.Template {
+	name := h.proposeWorkspaceManagerName(workspaceName)
+	if name == "" {
+		// No free name in range: keep the base name so the plan stays
+		// reviewable; the strict create refuses it as taken.
+		name = workspaceManagerBaseName(workspaceName)
+	}
+	return blankWorkspaceTemplateFor(name)
+}
+
+// blankWorkspaceRoles is the Blank roster's declaration, for reading an
+// existing workspace's slots. The role identity is host-owned, so it does not
+// depend on any proposed agent name.
+func blankWorkspaceRoles() []workspaceroles.Role {
+	return workspaceroles.FromTemplateAgents(blankWorkspaceTemplateFor(blankManagerRoleLabel).Agents)
+}
+
+func blankWorkspaceTemplateFor(managerName string) projecttemplates.Template {
 	return projecttemplates.Template{
 		ID: blankWorkspaceTemplateID, Name: "Blank workspace", Builtin: true,
 		Agents: []projecttemplates.AgentSpec{{
-			Name:         blankWorkspaceEntryAgentName,
-			Role:         string(types.RoleOrchestrator),
-			SystemPrompt: blankWorkspaceEntryPrompt,
+			Name:          managerName,
+			Role:          string(types.RoleOrchestrator),
+			SystemPrompt:  blankWorkspaceManagerPrompt,
+			HostRoleID:    blankManagerRoleID,
+			HostRoleLabel: blankManagerRoleLabel,
 		}},
 	}
+}
+
+// isBlankManagerSpec reports whether roster entry index of tpl is the Blank
+// blueprint's manager role — the one profile that is created as a workspace's
+// own manager and stamped with that workspace's ID.
+func isBlankManagerSpec(tpl projecttemplates.Template, index int) bool {
+	return tpl.Builtin && tpl.ID == blankWorkspaceTemplateID && index == 0 &&
+		index < len(tpl.Agents) && tpl.Agents[index].HostRoleID == blankManagerRoleID
 }
 
 // validAgentRoles canonicalizes a template-declared role. cli_agent is
@@ -436,7 +459,7 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 		_, exists := h.agentStore.GetAgent(spec.Name)
 		if !exists {
 			cfg, _ := h.templateAgentCreateConfig(spec)
-			if err := h.createTemplateSeededProfile(context.Background(), &result, tpl, spec.Name, cfg); err != nil {
+			if err := h.createTemplateSeededProfile(context.Background(), &result, tpl, i, ws.ID, spec.Name, cfg); err != nil {
 				if isEntry {
 					logger.Warn("Failed to seed template entry agent; falling back to entry-agent prompt",
 						logger.Fields{"workspace": ws.ID, "agent": spec.Name, "error": err})
@@ -463,6 +486,9 @@ func (h *Handler) seedTemplateAgents(ws *session.Workspace, tpl projecttemplates
 		if isEntry {
 			setWorkspaceEntryAgent(ws, spec.Name)
 			result.EntrySet = true
+			if isBlankManagerSpec(tpl, i) {
+				markBlankManagerAttachment(ws, spec.Name, !exists)
+			}
 		} else {
 			attachWorkspaceSpecialist(ws, spec.Name)
 		}

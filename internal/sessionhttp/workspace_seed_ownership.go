@@ -9,19 +9,20 @@ import (
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
 // The strict store result, not a successful idempotent CreateAgent call, proves
 // which definition this request owns. Existing manual test/extension stores can
 // still create, but missing source evidence never authorizes deleting by name.
-// The built-in Blank blueprint retains its existing system-assistant bootstrap
-// contract. It is not a roster candidate or an operation-owned user profile;
-// even a successful bootstrap must never authorize deleting it on rollback.
-func (h *Handler) createTemplateSeededProfile(ctx context.Context, seed *seedAgentsResult, tpl projecttemplates.Template, name string, config *store.CreateAgentConfig) error {
-	if tpl.Builtin && tpl.ID == blankWorkspaceTemplateID && name == systemassistant.CanonicalName {
-		return h.agentStore.CreateAgent(name, config)
+//
+// A Blank workspace's manager is an ordinary operation-owned profile like any
+// other roster agent, so a failed create rolls it back. It additionally records
+// the workspace it was made for, which is what later lets that workspace's
+// deletion remove it and keeps another workspace's chat from addressing it.
+func (h *Handler) createTemplateSeededProfile(ctx context.Context, seed *seedAgentsResult, tpl projecttemplates.Template, index int, workspaceID string, name string, config *store.CreateAgentConfig) error {
+	if isBlankManagerSpec(tpl, index) && workspaceID != "" && config != nil {
+		config.WorkspaceManager = &agent.WorkspaceManagerProvenance{WorkspaceID: workspaceID}
 	}
 	return h.createSeededProfile(ctx, seed, name, config)
 }
