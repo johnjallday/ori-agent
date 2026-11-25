@@ -5,7 +5,7 @@ import { goToFiles, goToMap } from './helpers/home-destination';
 // Home's one primary action follows the assistant relationship, end to end in a
 // real browser against the real server and store (home-hire-first-actions
 // FR26): "Meet your assistant" before the hire, "Build My HQ" after it, and
-// "Hire an agent" once the HQ exists. New Workspace stays beside it as the
+// "Hire an agent" in Files once the HQ exists. New Workspace stays beside it as the
 // secondary and opens the Create Workspace modal in every state.
 //
 // On an empty map before the HQ exists, the first-run welcome card carries the
@@ -32,14 +32,12 @@ async function relationship(request: APIRequestContext) {
   return (await ok(await request.get('/api/personal-assistant'))).personal_assistant;
 }
 
-// expectPrimary loads Home and checks the creation group in one ladder state:
-// the primary first with its label, New Workspace second as the secondary, and
-// no create affordance on the Map to tell a different story.
-async function expectPrimary(page: Page, label: string) {
-  await page.goto('/');
+// Files retains its post-HQ creation group, including the original order.
+async function expectFilesHire(page: Page) {
+  await goToFiles(page);
   const primary = page.locator('#cockpitPrimaryActionBtn');
   await expect(primary).toBeVisible();
-  await expect(primary).toHaveText(label);
+  await expect(primary).toHaveText('Hire an agent');
   await expect(primary).toHaveClass(/modern-btn-primary/);
   const create = page.locator('#cockpitCreateWorkspaceBtn');
   await expect(create).toBeVisible();
@@ -50,10 +48,7 @@ async function expectPrimary(page: Page, label: string) {
       buttons.filter(button => !(button as HTMLElement).hidden).map(button => button.id)
     );
   expect(order).toEqual(['cockpitPrimaryActionBtn', 'cockpitCreateWorkspaceBtn']);
-  await expect(page.locator('#cockpitMap')).toBeVisible();
-  await expect(
-    page.locator('#cockpitMap [data-ws-map-create], #cockpitMap .ws-map-pad')
-  ).toHaveCount(0);
+  await expect(page.locator('#cockpitTree')).toBeVisible();
   return primary;
 }
 
@@ -89,13 +84,16 @@ async function expectAssistantConfiguration(page: Page) {
   await expect(page.locator('#oriSpotlight .ori-spotlight__callout')).toHaveCount(0);
 }
 
-// Every request this page makes that could change something. Showing the
-// welcome, choosing Explore first and reloading must make none.
+// Ignore only the desk's navigation bookmarks (also saved on reload).
+// The welcome, Explore first and reload must not write any other state.
 function recordWrites(page: Page) {
   const writes: string[] = [];
   page.on('request', request => {
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) {
-      writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+      const path = new URL(request.url()).pathname;
+      if (request.method() === 'POST' && /^\/api\/file-search\/(map|files)-place$/.test(path))
+        return;
+      writes.push(`${request.method()} ${path}`);
     }
   });
   return writes;
@@ -330,8 +328,10 @@ test.describe('Home leads with the next hire-first step', () => {
     );
     expect((await relationship(request)).state).toBe('active');
 
-    const primary = await expectPrimary(page, 'Hire an agent');
+    await page.goto('/?view=map');
+    await expect(page.locator('#cockpitPrimaryActionBtn')).toBeHidden();
     await expectNewWorkspaceOpens(page);
+    const primary = await expectFilesHire(page);
     await waitForDrawerControllers(page);
     await primary.click();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
@@ -342,7 +342,8 @@ test.describe('Home leads with the next hire-first step', () => {
 
   test('at phone width both header buttons fit without horizontal scroll', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await expectPrimary(page, 'Hire an agent');
+    await page.goto('/?view=map');
+    await expectFilesHire(page);
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - window.innerWidth
     );

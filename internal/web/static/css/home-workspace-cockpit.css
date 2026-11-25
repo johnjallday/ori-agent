@@ -182,6 +182,18 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   margin-left: auto;
 }
 
+/* On the narrowest Map, recover room between wrapped rows, not from the
+   controls' touch targets. */
+@container cockpit (max-width: 340px) {
+  .home-cockpit[data-view="map"] .cockpit-area-header {
+    padding-top: var(--space-1);
+  }
+  .home-cockpit[data-view="map"]
+    :is(.cockpit-area-header, .cockpit-area-main, .cockpit-area-utility, .cockpit-area-controls) {
+    row-gap: var(--space-1);
+  }
+}
+
 /* Files' starting-page choice beside the heading: Make Files my starting page,
    or Start on Map instead. A quiet text button, since it is a preference, not
    the page's work. It takes the header's compact 32px height so switching to
