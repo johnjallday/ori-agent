@@ -212,10 +212,10 @@ test('parseViewFromQuery: the query is authoritative when it carries a valid vie
 
 // The Desk rail is the one switcher, so the heading is what tells you which of
 // its two destinations you are on (merge-tree-into-files FR5).
-test('deskHeading: Workspace Map on Map, Files on Files', () => {
-  assert.equal(deskHeading(VIEW_MAP), 'Workspace Map');
+test('deskHeading: Workspaces on Map, Files on Files', () => {
+  assert.equal(deskHeading(VIEW_MAP), 'Workspaces');
   assert.equal(deskHeading(VIEW_TREE), 'Files');
-  assert.equal(deskHeading('anything else'), 'Workspace Map');
+  assert.equal(deskHeading('anything else'), 'Workspaces');
 });
 
 // Files keeps the existing address, and Map still drops the parameter, so the

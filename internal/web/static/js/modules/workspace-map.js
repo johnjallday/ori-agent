@@ -3145,6 +3145,8 @@
     if (canvas.style && typeof canvas.style.setProperty === 'function') {
       var grid = SNAP_STEP * camera.zoom;
       canvas.style.setProperty('--ws-map-grid', grid + 'px');
+      canvas.style.setProperty('--atlas-ground-x', translateX + 'px');
+      canvas.style.setProperty('--atlas-ground-y', translateY + 'px');
       canvas.style.setProperty('--ws-map-grid-x', (translateX % grid) + 'px');
       canvas.style.setProperty('--ws-map-grid-y', (translateY % grid) + 'px');
     }
@@ -4199,6 +4201,7 @@
         '<div class="ws-map-canvas' +
         settling +
         readOnly +
+        (layout.nodes.length === 1 ? ' has-one-site' : '') +
         (placementSession ? ' is-placement-active' : '') +
         '" role="group" aria-label="Workspaces map" tabindex="0"' +
         (settling ? ' aria-busy="true"' : '') +
