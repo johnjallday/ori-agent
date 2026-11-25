@@ -14,22 +14,28 @@ import (
 // manifest must never be treated as a broken manifest.
 
 func TestSurfaceContributionMountsWithAndWithoutAskOriIntent(t *testing.T) {
-	old := canonicalSurfaceFixture(t)
-	if !bytes.Contains(old, []byte(`"ask_ori"`)) {
-		t.Fatal("fixture no longer declares ask_ori; this test needs an older-release manifest")
+	// The canonical fixture is the current shape (reaper-plugin 0.12.1 and
+	// later): no ask_ori declaration.
+	current := canonicalSurfaceFixture(t)
+	if bytes.Contains(current, []byte(`"ask_ori"`)) {
+		t.Fatal("the canonical fixture declares ask_ori again; it mirrors reaper-plugin 0.12.1, which removed it")
 	}
-	if _, err := ParseSurfaceContribution(old); err != nil {
-		t.Fatalf("an older release declaring host_intents.ask_ori must still mount: %v", err)
+	if _, err := ParseSurfaceContribution(current); err != nil {
+		t.Fatalf("a release without host_intents.ask_ori must mount: %v", err)
 	}
 
-	candidate := bytes.Replace(old, []byte(`"ask_ori": {
+	// An older installed release (reaper-plugin 0.12.0 and earlier) still
+	// declares it.
+	older := bytes.Replace(current, []byte(`"host_intents": {
+`), []byte(`"host_intents": {
+            "ask_ori": {
               "required_capabilities": []
             },
-            `), nil, 1)
-	if bytes.Contains(candidate, []byte(`"ask_ori"`)) {
-		t.Fatal("could not remove ask_ori from the fixture; update the replacement to its current layout")
+`), 1)
+	if !bytes.Contains(older, []byte(`"ask_ori"`)) {
+		t.Fatal("could not add ask_ori to the fixture; update the insertion to its current layout")
 	}
-	if _, err := ParseSurfaceContribution(candidate); err != nil {
-		t.Fatalf("a candidate release without host_intents.ask_ori must mount: %v", err)
+	if _, err := ParseSurfaceContribution(older); err != nil {
+		t.Fatalf("an older release declaring host_intents.ask_ori must still mount: %v", err)
 	}
 }

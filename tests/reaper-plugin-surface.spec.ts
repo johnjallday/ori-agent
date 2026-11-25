@@ -749,11 +749,10 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
     await expect(frame.locator('[data-status]')).not.toHaveText('Connecting', { timeout: 15_000 });
     await expect(frame.locator('[data-actions] .action').first()).toBeVisible({ timeout: 15_000 });
     await expect(frame.locator('[data-scripts]')).toBeVisible();
-    const firstChip = frame.locator('[data-prompt-chips] button').first();
-    await expect(firstChip).toBeVisible();
-    const chipText = await firstChip.textContent();
-    await firstChip.click();
-    await expect(frame.locator('[data-ask-input]')).toHaveValue(chipText || '');
+    // Ask Ori is retired (reaper-plugin 0.12.1): no question box and no
+    // suggested-question chips. Workspace chat lives outside the surface.
+    await expect(frame.locator('[data-ask-input], [data-prompt-chips]')).toHaveCount(0);
+    await expect(frame.getByText(/ask ori/i)).toHaveCount(0);
     await capture('group4-01-live-control.png');
 
     await frame.getByRole('button', { name: 'Play', exact: true }).click();

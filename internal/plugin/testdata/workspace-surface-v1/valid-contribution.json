@@ -41,9 +41,6 @@
             "open_seconds": 1
           },
           "host_intents": {
-            "ask_ori": {
-              "required_capabilities": []
-            },
             "open_setup": {
               "provider_id": "demo-runtime"
             },
