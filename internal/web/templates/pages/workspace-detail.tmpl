@@ -42,6 +42,13 @@
         <section id="workspaceFirstTaskBanner" class="first-task-banner" role="status" aria-live="polite" hidden></section>
         <!-- Folder agent report: a workspace started from a folder shows its
              agent's look and report here; folder-agent-card.js fills it. -->
+        <section id="workspaceAssignedFolderLook" class="mb-3 p-3 border rounded" aria-label="Folder first look" hidden>
+          <strong>Folder first look</strong>
+          <p class="mb-2" data-look-description></p>
+          <label data-look-picker>Assigned agent <select class="form-select" data-look-agent></select></label>
+          <button class="btn btn-outline-primary" type="button" data-look-action>Look around</button>
+          <p class="form-text mb-0" role="status" data-look-status></p>
+        </section>
         <section id="workspaceFolderAgentReport" class="folder-agent-host" aria-live="polite" hidden></section>
         <!-- Email Ops connect CTA: populated by personal-hq-email-setup.js on the
              Email Ops workspace when no account is linked yet — one-click setup on
@@ -2124,8 +2131,14 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
+          <section id="workspace-folder-manager-offer" class="mb-3 pb-3 border-bottom" hidden>
+            <h6>Suggested for this folder</h6>
+            <p data-folder-manager-brief class="mb-2"></p>
+            <button type="button" data-folder-manager-review class="btn btn-outline-primary"></button>
+            <p class="form-text mb-0">Review the name, brief and model. Adding a manager does not start work.</p>
+          </section>
           <div class="mb-3">
-            <label for="workspace-detail-add-agent-select" class="form-label">Available Agents</label>
+            <label for="workspace-detail-add-agent-select" class="form-label">Assign an existing agent</label>
             <select id="workspace-detail-add-agent-select" class="form-select">
               <option value="">Loading agents...</option>
             </select>

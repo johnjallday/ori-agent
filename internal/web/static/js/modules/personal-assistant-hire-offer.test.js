@@ -132,10 +132,10 @@ test('a reloaded proposal keeps its state and takes the catalog the reload carri
   assert.equal(proposal.workspaceRoute, '/workspaces/crm-comparison');
   assert.equal(proposal.catalog, catalog);
   assert.equal(proposal.conversationId, 'conv-1');
-  // An unknown state is drawn as an offer rather than trusted.
+  // An unknown state cannot authorize a fresh hire.
   assert.equal(
     hire.proposalFromReload({ ...view, state: 'maybe' }, catalog, 'conv-1').state,
-    'offered'
+    'unavailable'
   );
   assert.deepEqual([...hire.offeredMessageIds([view, { message_id: '' }, null])], ['m-4']);
 });
@@ -171,7 +171,7 @@ test('the headline reads Hire <name> for <workspace>, as the folder hire card wr
   );
   assert.equal(
     hire.settledText({ ...proposal, state: 'hired', agentName: 'Ruth 2' }),
-    'Hired. Ruth 2 is taking a first look; your assistant will report back.'
+    'Hired Ruth 2. Open the workspace for the first-look status.'
   );
   assert.equal(hire.settledText(proposal), '');
   assert.equal(hire.primaryLabel({ buttonLabel: 'Try again' }), 'Try again');
@@ -300,7 +300,7 @@ test('an offer draws the shared card under the reply, prefilled with the proposa
     const buttons = card
       .find('personal-assistant-hire__actions')
       .children.map(button => button.textContent);
-    assert.deepEqual(buttons, ['Hire and start', 'Not now', 'Adjust']);
+    assert.deepEqual(buttons, ['Hire and start', 'Just create the workspace', 'Not now', 'Adjust']);
     assert.equal(card.find('personal-assistant-hire__actions').children[0].dataset.hirePrimary, '');
     assert.equal(calls.mounts.length, 1);
     const { host, options } = calls.mounts[0];
@@ -446,7 +446,7 @@ test('Not now and Adjust settle the card through their handlers, and a refused o
       }
     });
     const actions = card.find('personal-assistant-hire__actions');
-    const [, later, adjust] = actions.children;
+    const [, , later, adjust] = actions.children;
     await adjust.listeners.click();
     assert.equal(card.dataset.state, 'offered');
     assert.equal(adjust.disabled, false);

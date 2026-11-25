@@ -61,8 +61,15 @@ phrase-triggered second generation or an installed skill. Ori saves that offer
 on the conversation and shows it as the Hire card only after a successful
 canonical atomic save. Prose alone, historical instructions and a bare yes
 cannot hire or create anything: the card's own Hire and start is the user's
-`POST /api/agents/hire`, Not now puts the offer aside for that conversation, and
-Adjust hands the existing creator a prefilled form that still owns blueprint,
+`POST /api/agents/hire`. It creates the workspace and requests a first look,
+not a finished deliverable or access to referenced files. A failed first look
+does not undo the hire. **Just create the workspace** instead takes the edited
+name and brief to a Blank review; only the final **Create workspace** saves
+an unstaffed workspace with the brief as its mission. Opening it or assigning
+an agent later does not start that mission. These choices and **Not now**
+(put the offer aside for this conversation) are mutually exclusive. Explicit
+workspace requests go straight to review or folder selection; advice stays in
+chat. Advanced **Adjust** hands the existing creator a prefilled form that still owns blueprint,
 placement, team and final Create. A permanent **Open workspace form manually**
 drawer option needs no model and passes no inferred fields.
 Failures preserve the draft, expose bounded honest reasons and offer the same

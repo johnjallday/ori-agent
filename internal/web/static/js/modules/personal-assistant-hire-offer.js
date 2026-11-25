@@ -11,7 +11,15 @@ import './agent-hire-card.js';
 import { claimNeedsItem } from './personal-assistant-needs-reveal.js';
 
 const HIRE_ACTION = 'hire_agent';
-const STATES = ['offered', 'declined', 'adjusted', 'hired'];
+const STATES = [
+  'offered',
+  'declined',
+  'adjusted',
+  'hiring',
+  'hired',
+  'workspace_draft',
+  'workspace_created'
+];
 
 const NOT_CURRENT = 'Reopen the conversation this offer belongs to. Nothing was hired.';
 
@@ -36,7 +44,9 @@ function normalize(view, extra = {}) {
   const openRoles = Number(view.open_roles);
   return {
     proposalId,
-    state: STATES.includes(view.state) ? view.state : 'offered',
+    state: !view.state ? 'offered' : STATES.includes(view.state) ? view.state : 'unavailable',
+    lookState: text(view.look_state),
+    lookFailure: text(view.look_failure),
     conversationId: text(extra.conversationId ?? view.conversation_id),
     stateVersion: Number(view.state_version ?? extra.stateVersion ?? 0) || 0,
     messageId: text(view.message_id),
@@ -98,13 +108,29 @@ export function detailText(proposal) {
 /** What the card says once the offer is settled, by its state. */
 export function settledText(proposal, result) {
   switch (proposal.state) {
+    case 'workspace_draft':
+      return 'Taken to blank workspace review. No hire was authorized.';
+    case 'workspace_created':
+      return `Created ${proposal.workspaceName} without agents.`;
+    case 'hiring':
+      return 'The hire outcome is not yet verified. Reopen this conversation to read its saved state; do not start another hire.';
+    case 'unavailable':
+      return 'This offer is unavailable.';
     case 'declined':
       return 'Put aside.';
     case 'adjusted':
       return 'Taken to the workspace form. Nothing is created until you press Create there.';
     case 'hired': {
       const hire = globalThis.OriAgentHire;
-      const outcome = result || { agent_name: proposal.agentName || proposal.name };
+      const outcome = result || {
+        agent_name: proposal.agentName || proposal.name,
+        look_state: proposal.lookState,
+        look_failure: proposal.lookFailure
+      };
+      if (!result && proposal.lookState === 'failed')
+        return `Hired ${outcome.agent_name}. The first look did not finish. Open the workspace to review it.`;
+      if (!result && !['running', 'looking'].includes(proposal.lookState))
+        return `Hired ${outcome.agent_name}. Open the workspace for the first-look status.`;
       if (typeof hire?.hiredMessage === 'function') return hire.hiredMessage(outcome);
       return `Hired. ${text(outcome.agent_name) || 'Your agent'} is taking a first look; your assistant will report back.`;
     }
@@ -198,7 +224,7 @@ export function render(row, confirmationOrProposal, options = {}) {
     }
     status.textContent = settledText(current, result);
     const route = text(result?.workspace_route) || current.workspaceRoute;
-    if (state === 'hired' && route) {
+    if ((state === 'hired' || state === 'workspace_created') && route) {
       const link = doc.createElement('a');
       link.className = 'personal-assistant-hire__link';
       link.href = route;
@@ -216,7 +242,8 @@ export function render(row, confirmationOrProposal, options = {}) {
   const primary = makeButton(doc, 'Hire and start', true);
   const later = makeButton(doc, 'Not now', false);
   const adjust = makeButton(doc, 'Adjust', false);
-  actions.append(primary, later, adjust);
+  const blank = makeButton(doc, 'Just create the workspace', false);
+  actions.append(primary, blank, later, adjust);
   paint();
 
   const hire = globalThis.OriAgentHire;
@@ -231,6 +258,7 @@ export function render(row, confirmationOrProposal, options = {}) {
         workspaceName: proposal.workspaceName
       },
       requestId: proposal.proposalId,
+      proposalConversation: proposal.conversationId,
       appearance: false,
       idPrefix: `assistantHire${proposal.proposalId.replace(/[^A-Za-z0-9]/g, '').slice(0, 12)}`,
       takenNames: options.takenNames,
@@ -251,11 +279,32 @@ export function render(row, confirmationOrProposal, options = {}) {
         };
         primary.textContent = primaryLabel(view);
         primary.disabled = Boolean(view?.busy);
+        blank.disabled = Boolean(view?.busy);
         later.disabled = Boolean(view?.busy);
         adjust.disabled = Boolean(view?.busy);
         if (view?.busy) primary.setAttribute('aria-busy', 'true');
         else primary.removeAttribute?.('aria-busy');
         if (current.state === 'offered') paint();
+      },
+      onHireUncertain: async () => {
+        settle('hiring');
+        try {
+          const read = options.fetchImpl || fetch;
+          const response = await read(
+            `/api/home-assistant/conversations/${encodeURIComponent(proposal.conversationId)}`,
+            { cache: 'no-store' }
+          );
+          if (!response.ok || !isCurrent()) return;
+          const view = (await response.json()).hire_proposals?.find(
+            item => item.proposal_id === proposal.proposalId
+          );
+          if (view?.state === 'hired' && view.hire_id && view.workspace_id && isCurrent()) {
+            current = proposalFromReload(view, proposal.catalog, proposal.conversationId);
+            settle('hired');
+          }
+        } catch {
+          /* An unreadable ledger is not permission to submit again. */
+        }
       },
       onHired: result => {
         // Hired from this tab: the agent's report opens Today's strip once.
@@ -287,13 +336,18 @@ export function render(row, confirmationOrProposal, options = {}) {
     }
     button.disabled = true;
     try {
-      if (typeof handler === 'function') await handler(current);
+      if (typeof handler !== 'function')
+        throw new Error('This action is unavailable. Nothing was confirmed.');
+      await handler(current);
       settle(state);
     } catch (error) {
       button.disabled = false;
       status.textContent = text(error?.message) || 'That did not go through. Try again.';
     }
   }
+  blank.addEventListener('click', () =>
+    settleThrough(options.workspaceOnly, 'workspace_draft', blank)
+  );
   later.addEventListener('click', () => settleThrough(options.decline, 'declined', later));
   adjust.addEventListener('click', () => settleThrough(options.adjust, 'adjusted', adjust));
   return card;

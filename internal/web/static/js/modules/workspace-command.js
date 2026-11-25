@@ -836,7 +836,12 @@ export class WorkspaceCommandView {
       else this.sharedAssistantView = null;
       // An empty roster's hire offer names a role from this answer, so it is
       // redrawn; otherwise only the roster itself needs mounting.
-      if (this.active && !this.agentGroups().agents.length) this.render();
+      if (
+        this.active &&
+        (!this.agentGroups().agents.length ||
+          this.page?.workspace?.shared_data?.anchor_directory_reference_id)
+      )
+        this.render();
       else if (this.active) this.mountRoleRoster();
       this.showGroupTemplateLanding();
       // The role form names the template its instructions come from, so it
@@ -2023,6 +2028,13 @@ export class WorkspaceCommandView {
       (tags.length ? '<div class="ws-cmd-tags">' + this.commandTagsHTML(tags) + '</div>' : '') +
       '</div><div class="ws-cmd-header-actions">' +
       (hqDetails || (mapTab && this.isPersonalHQ()) ? this.firstVisit?.headerHTML?.() || '' : '') +
+      (this.roleRoster?.workspace_id === ws.id &&
+      this.roleRoster?.total_count === 1 &&
+      this.roleRoster.roles?.[0]?.role_id === 'ask-ori' &&
+      !this.roleRoster.filled_count &&
+      !this.roleRoster.unassigned?.length
+        ? '<button type="button" class="ws-cmd-nav-btn" data-cmd-staff-workspace aria-haspopup="dialog">Add an agent…</button>'
+        : '') +
       workspaceSettingsHTML({
         diagnostics: this.workspaceRoute('/diagnostics'),
         workflow: this.workflowHref()
@@ -3326,7 +3338,12 @@ export class WorkspaceCommandView {
     const active = typeof document === 'undefined' ? null : document.activeElement;
     this.chromeFocus = null;
     if (active && root.contains?.(active)) {
-      for (const attribute of ['data-cmd-view-mode', 'data-cmd-give-work', 'data-cmd-settings']) {
+      for (const attribute of [
+        'data-cmd-view-mode',
+        'data-cmd-give-work',
+        'data-cmd-staff-workspace',
+        'data-cmd-settings'
+      ]) {
         if (active.hasAttribute?.(attribute))
           this.chromeFocus = { attribute, value: active.getAttribute(attribute) };
       }
@@ -3397,6 +3414,10 @@ export class WorkspaceCommandView {
     if (!root) return;
 
     root.addEventListener('click', event => {
+      if (event.target.closest('[data-cmd-staff-workspace]')) {
+        void this.page?.openAddAgentModal?.();
+        return;
+      }
       const giveWork = event.target.closest('[data-cmd-give-work]');
       if (giveWork) {
         this.page?.showAddTaskModal?.({ trigger: giveWork });

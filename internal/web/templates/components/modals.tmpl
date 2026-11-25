@@ -61,6 +61,11 @@
           </fieldset>
         </section>
         <form id="addAgentForm">
+          <p id="folderManagerDestination" class="form-text mb-3" hidden></p>
+          <label id="folderManagerLookChoice" class="mb-3" hidden>
+            <input type="checkbox" id="folderManagerLookCheck"> Start a first-look ticket after hiring
+            <small class="d-block form-text">Look at folder names and structure, then suggest setup. No file contents are read or changed. You review setup separately.</small>
+          </label>
           <div class="mb-3 agent-create-standalone-only">
             <div class="d-flex align-items-center gap-3">
               <label class="form-label mb-0" style="color: var(--text-primary);">Configuration Mode</label>

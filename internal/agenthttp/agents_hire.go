@@ -98,13 +98,14 @@ func (h *Handler) SetHireWorkspaces(workspaces HireWorkspaces) {
 type hireRequest struct {
 	// RequestID is fresh per opened card; a retry with the same id returns the
 	// first hire rather than hiring twice.
-	RequestID     string             `json:"request_id"`
-	Role          string             `json:"role"`
-	Name          string             `json:"name"`
-	Domain        string             `json:"domain,omitempty"`
-	Appearance    *appearanceRequest `json:"appearance,omitempty"`
-	Brief         string             `json:"brief"`
-	WorkspaceName string             `json:"workspace_name,omitempty"`
+	RequestID            string             `json:"request_id"`
+	ProposalConversation string             `json:"proposal_conversation_id,omitempty"`
+	Role                 string             `json:"role"`
+	Name                 string             `json:"name"`
+	Domain               string             `json:"domain,omitempty"`
+	Appearance           *appearanceRequest `json:"appearance,omitempty"`
+	Brief                string             `json:"brief"`
+	WorkspaceName        string             `json:"workspace_name,omitempty"`
 }
 
 // hireResult is what a hire made.
@@ -164,11 +165,14 @@ func (h *Handler) markProposalHired(ctx context.Context, userID string, record p
 		}
 		return
 	}
-	if proposal.UserID != userID || proposal.State == personalassistant.HireProposalHired {
+	if proposal.UserID != userID || proposal.State != personalassistant.HireProposalHiring {
 		return
 	}
 	blueprint := hireBlueprintFor(types.AgentRole(record.Role))
 	if _, err := h.hireProposals.Update(ctx, proposal.ID, func(p *personalassistant.HireProposal) error {
+		if p.State != personalassistant.HireProposalHiring || p.UserID != userID {
+			return errOfferChanged
+		}
 		p.State, p.HireID, p.AgentName, p.WorkspaceID = personalassistant.HireProposalHired, record.ID, record.AgentName, record.WorkspaceID
 		p.Role, p.Name, p.Brief = record.Role, record.AgentName, record.Brief
 		p.Blueprint, p.BlueprintLabel, p.OpenRoles = blueprint.ID, blueprint.Label, blueprint.OpenRoles
@@ -271,6 +275,12 @@ func (h *Handler) HandleHire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A proposal id is never an independent Agents-page hire, even if a stale
+	// tab omitted the conversation field. Claim before creating anything.
+	if !h.claimProposalHire(w, r, requestID, userID, req.ProposalConversation) {
+		return
+	}
+
 	// (a) The agent, exactly as catalog create makes it. Only this request's
 	// agent is ever removed again: the name was checked free just above, so
 	// a pre-existing agent is never the one created here.
@@ -326,6 +336,44 @@ func (h *Handler) HandleHire(w http.ResponseWriter, r *http.Request) {
 		result.ModelCategoryFallback, result.Notice = true, created.ModelNotice()
 	}
 	_ = orihttp.RespondJSON(w, http.StatusCreated, result)
+}
+
+func (h *Handler) claimProposalHire(w http.ResponseWriter, r *http.Request, id, user, conversation string) bool {
+	if h.hireProposals == nil {
+		if conversation == "" {
+			return true
+		}
+		writeHireFailure(w, 503, "offer_unavailable", "The saved offer is unavailable.", "")
+		return false
+	}
+	p, err := h.hireProposals.Get(r.Context(), id)
+	if errors.Is(err, personalassistant.ErrHireProposalNotFound) && conversation == "" {
+		return true
+	}
+	if err != nil || p.UserID != user || conversation == "" || p.ConversationID != conversation {
+		writeHireFailure(w, 409, "offer_unavailable", "Reopen the original conversation to review this offer.", "")
+		return false
+	}
+	if h.hireConversationAllowed == nil || !h.hireConversationAllowed(r.Context(), user, conversation) {
+		writeHireFailure(w, 409, "offer_unavailable", "That offer is outside the current assistant conversation scope.", "")
+		return false
+	}
+	_, err = h.hireProposals.Update(r.Context(), id, func(p *personalassistant.HireProposal) error {
+		if p.State != personalassistant.HireProposalOffered || p.UserID != user || p.ConversationID != conversation {
+			return errOfferChanged
+		}
+		p.State = personalassistant.HireProposalHiring
+		return nil
+	})
+	if err != nil {
+		writeHireFailure(w, 409, "offer_changed", "That offer is no longer open. Read its saved state in the conversation.", "")
+		return false
+	}
+	return true
+}
+
+func (h *Handler) SetHireConversationAllowed(check func(context.Context, string, string) bool) {
+	h.hireConversationAllowed = check
 }
 
 // startHireLook starts the hire's first look and records its run, or why it

@@ -47,6 +47,12 @@ func (b *ServerBuilder) wireFolderAgent() {
 	// workspace updates service when called; none yet is fine).
 	store.OnWelcomeRelease(func(string) { b.notifyWorkspaceWelcomeReady(context.Background(), "") })
 	service := folderagent.NewService(folderagent.Deps{
+		AssignedRoot: func(ctx context.Context, owner, id, agent, link string) (string, string, bool) {
+			if b.sessionHandler == nil {
+				return "", "", false
+			}
+			return b.sessionHandler.AssignedLookRoot(ctx, owner, id, agent, link)
+		},
 		Store:                  store,
 		Folders:                b.personalAssistantFolderDigest,
 		Workspaces:             folderAgentWorkspaces{builder: b},
@@ -109,6 +115,9 @@ func (b *ServerBuilder) wireFolderAgent() {
 		},
 	})
 	b.folderAgentService = service
+	if b.sessionHandler != nil {
+		b.sessionHandler.SetFolderManagerService(service)
+	}
 	b.folderAgentHandler = folderagenthttp.New(service, func(ctx context.Context) (string, error) {
 		if b.userProvider == nil {
 			return "", errors.New("no user provider")
@@ -523,17 +532,6 @@ func (h folderAgentHiring) AgentExists(name string) bool {
 // Manager's turn does: the agent's own provider and model in this workspace,
 // tool-capable, or no model at all.
 type folderAgentTurns struct{ builder *ServerBuilder }
-
-func (t folderAgentTurns) Model(_ context.Context, workspaceID, agentName string) (folderlook.Chat, folderlook.ModelRef, error) {
-	chat, ref, err := t.builder.agentToolModel(workspaceID, agentName)
-	if err != nil {
-		return nil, ref, err
-	}
-	if chat == nil {
-		return nil, ref, folderlook.ErrNoModel
-	}
-	return folderlook.Chat(chat), ref, nil
-}
 
 func (t folderAgentTurns) TokenBudget() int {
 	if t.builder.configManager == nil {

@@ -4,8 +4,10 @@ package sessionhttp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -198,7 +200,38 @@ func TestSearchableAnchorUsesOneReviewedSelection(t *testing.T) {
 		} else if len(ss) != 0 {
 			t.Fatal("created grant without consent")
 		}
+		draft := func() (int, map[string]string) {
+			w := httptest.NewRecorder()
+			h.HandleWorkspaces(w, httptest.NewRequest(http.MethodGet, "/api/workspaces/"+id+"/folder-manager-draft", nil))
+			var result map[string]string
+			if w.Code == http.StatusOK {
+				if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+			}
+			return w.Code, result
+		}
+		if code, d := draft(); code != http.StatusOK || d["workspace_id"] != id || d["name"] != "External Manager" || d["brief"] == "" {
+			t.Fatalf("manager suggestion %d: %v", code, d)
+		}
+		if scenario == "deny" {
+			// Same name and workspace id, but a replacement directory must
+			// not inherit the saved folder identity.
+			if err := os.Rename(root, root+"-previous"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if code, _ := draft(); code != http.StatusNoContent {
+				t.Fatal("offered manager for a replacement directory")
+			}
+		}
 		h.SetFolderSearch(s, func(*http.Request, string) bool { return false })
+		if code, _ := draft(); code != http.StatusNoContent {
+			t.Fatal("folder manager defaults disclosed outside local Files")
+		}
+
 		denied, body := creationOperationRequest(t, h, http.MethodGet, "/"+op, nil)
 		if denied.Code != http.StatusForbidden || body["result"] != nil {
 			t.Fatal("local-only review was disclosed")

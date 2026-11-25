@@ -43,6 +43,10 @@ type workspaceCreationOperation struct {
 
 type creationOperationContextKey struct{}
 
+func (h *Handler) SetHireConversationAllowed(check func(context.Context, string, string) bool) {
+	h.hireConversationAllowed = check
+}
+
 func creationOperationFrom(ctx context.Context) *workspaceCreationOperation {
 	op, _ := ctx.Value(creationOperationContextKey{}).(*workspaceCreationOperation)
 	return op
@@ -337,14 +341,20 @@ func (h *Handler) acceptWorkspaceCreationOperation(w http.ResponseWriter, r *htt
 		creationOperationError(w, http.StatusConflict, "creation_uncertain", "The original request is unreadable.")
 		return false
 	}
+	if req.HireProposalID != "" && (h.hireConversationAllowed == nil || !h.hireConversationAllowed(r.Context(), op.Owner, req.ProposalConversationID)) {
+		creationOperationError(w, 409, "offer_changed", "Reopen the original conversation. Nothing was created.")
+		return false
+	}
 	claim := func() error {
 		result, err := h.store.DB().ExecContext(r.Context(), `UPDATE workspace_creation_operations SET state='accepted',updated_at=CURRENT_TIMESTAMP
 			WHERE id=? AND owner_user_id=? AND request_digest=? AND state='reviewed'
 			AND (?=0 OR NOT EXISTS (SELECT 1 FROM workspace_creation_operations other
 				WHERE other.owner_user_id=? AND other.id<>? AND other.state IN ('accepted','complete','reconciliation_required')
 				AND json_extract(other.request_json,'$.build_session_id')=?
-				AND json_extract(other.request_json,'$.build_review_version')>0))`, op.ID, op.Owner, op.Digest,
-			req.BuildReviewVersion, op.Owner, op.ID, req.BuildSessionID)
+				AND json_extract(other.request_json,'$.build_review_version')>0))
+			AND (?='' OR (EXISTS (SELECT 1 FROM assistant_hire_proposals p WHERE p.id=? AND p.user_id=? AND p.conversation_id=? AND p.state='workspace_draft')
+			AND NOT EXISTS (SELECT 1 FROM workspace_creation_operations other WHERE other.owner_user_id=? AND other.id<>? AND other.state IN ('accepted','complete','reconciliation_required') AND json_extract(other.request_json,'$.hire_proposal_id')=?)))`, op.ID, op.Owner, op.Digest,
+			req.BuildReviewVersion, op.Owner, op.ID, req.BuildSessionID, req.HireProposalID, req.HireProposalID, op.Owner, req.ProposalConversationID, op.Owner, op.ID, req.HireProposalID)
 		if err != nil {
 			return err
 		}
@@ -422,9 +432,23 @@ func (h *Handler) finishWorkspaceCreationOperation(ctx context.Context, op *work
 			return nil
 		}
 	}
-	_, err := h.store.DB().ExecContext(ctx, `UPDATE workspace_creation_operations
+	err := h.store.DB().InTransaction(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `UPDATE workspace_creation_operations
 		SET state=?,response_status=?,response_json=?,updated_at=CURRENT_TIMESTAMP
 		WHERE id=? AND owner_user_id=? AND state=?`, state, recorder.Code, recorder.Body.String(), op.ID, op.Owner, prior)
+		if err != nil || state != "complete" {
+			return err
+		}
+		var req createWorkspaceRequest
+		if err := json.Unmarshal([]byte(op.Request), &req); err != nil {
+			return err
+		}
+		if req.HireProposalID == "" {
+			return nil
+		}
+		_, err = tx.ExecContext(ctx, `UPDATE assistant_hire_proposals SET state='workspace_created',workspace_id=?,workspace_name=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND user_id=? AND conversation_id=? AND state='workspace_draft'`, op.WorkspaceID, req.Name, req.HireProposalID, op.Owner, req.ProposalConversationID)
+		return err
+	})
 	// A failed receipt write leaves accepted/reviewed state, never permission
 	// to repeat accepted effects. Observation truthfully retains uncertainty.
 	return err

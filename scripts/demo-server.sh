@@ -107,6 +107,7 @@ echo "SANDBOX=$sandbox"
 echo "BRANCH=$label"
 echo "URL=http://localhost:$port"
 
+export ORI_DEMO_REQUIRE_FREE_PORT=1
 cd "$sandbox"
 # A search-first demo needs HOME and app records in different physical roots:
 # never make the search validator special-case a folder inside ORI_DATA_DIR.

@@ -83,6 +83,23 @@ func (s *Service) matchesLocked(ctx context.Context, owner string, c choice) ([]
 	return slices.DeleteFunc(out, func(m WorkspaceMatch) bool { return !s.ValidLink(owner, c.root, m) }), nil
 }
 
+// StaffingFolderKind recognizes only a current link with an identity saved by
+// the reviewed folder flow. It reads no filenames and grants no search access.
+func (s *Service) StaffingFolderKind(ctx context.Context, owner, path string, m WorkspaceMatch) (string, bool) {
+	if s.ValidLink == nil || !s.ValidLink(owner, path, m) || !s.Policy().allows(path) {
+		return "", false
+	}
+	var saved string
+	if err := s.DB.QueryRowContext(ctx, `SELECT witness FROM filename_workspace_links WHERE owner=? AND workspace_id=? AND reference_id=?`, owner, m.ID, m.Link).Scan(&saved); err != nil || saved == "" {
+		return "", false
+	}
+	current, err := rootWitness(path)
+	if err != nil || current != saved {
+		return "", false
+	}
+	return s.knownKind(path, current), true
+}
+
 // CanCreate rechecks the owner's decision under the setup lock before the
 // creator writes anything. A newly appeared match needs a new review.
 func (s *Service) CanCreate(ctx context.Context, owner, id string) error {

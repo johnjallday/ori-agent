@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { arrivalState, choiceInventory } from './helpers/workspace-choice-state';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
@@ -32,6 +33,8 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
       await request.get('/api/file-search/sources', { headers: { 'X-Ori-Search': '1' } })
     ).json();
   const workspaces = async () => (await (await request.get('/api/workspaces')).json()).folders;
+  const inspect = () => choiceInventory(request, join(fixture!, 'data'));
+  const initial = await inspect();
   const before = await workspaces();
   async function blank() {
     await page.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
@@ -44,7 +47,7 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
       await page.goto('/?view=tree');
       await page.locator('[data-tree-add-folder]').click();
       await page
-        .getByRole('dialog', { name: 'Add a folder' })
+        .getByRole('dialog', { name: 'Choose a folder' })
         .locator(`[data-folder-choice="${kind}"]`)
         .click();
     } else {
@@ -71,6 +74,7 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     await expect(review).toContainText('Index filenames');
   }
   expect(await sources()).toEqual([]);
+  expect(await inspect()).toEqual(initial);
   await page.screenshot({ path: path('review') });
   if (entry === 'files') await review.getByRole('button', { name: 'Create workspace' }).click();
   else {
@@ -107,10 +111,21 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     });
   };
   await inventory();
+  const receipt = await inspect();
+  const beforeOpen = await arrivalState(request, ws.id);
+  expect(beforeOpen).toMatchObject({
+    agents: [],
+    roles: 1,
+    filled: 0,
+    pending: false,
+    goalRuns: 0,
+    inFlight: false
+  });
+  expect(receipt.hires).toEqual(initial.hires);
   await choose(entry === 'files' ? 'workspace' : 'files');
   await compact
     .getByRole('button', {
-      name: entry === 'files' ? 'Open workspace' : 'Search this folder in Files'
+      name: entry === 'files' ? `Open ${name}` : 'Search this folder in Files'
     })
     .click();
   if (entry === 'files') await expect(page).toHaveURL(new RegExp('/workspaces/' + ws.slug + '$'));
@@ -123,7 +138,150 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
   await expect(page.locator(`#cockpitTreeNav [data-tree-row="${ws.id}"]`)).toContainText(name);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/workspaces/${ws.slug}`);
+  await expect(page.locator('body')).toHaveAttribute('data-workspace-id', ws.id);
+  const opened = await arrivalState(request, ws.id);
+  expect(opened).toEqual(beforeOpen);
+  expect(await inspect()).toEqual(receipt);
+  writeFileSync(
+    path('resources').replace(/\.png$/, '.json'),
+    JSON.stringify({ initial, receipt, beforeOpen, opened })
+  );
   await page.getByRole('button', { name: `Search ${folder} in Files` }).press('Enter');
   await expectFilesScoped();
   await page.screenshot({ path: path('narrow-files') });
+  if (scenario === 'parity-files-documents') {
+    // The global tree action is independent of the current search selection.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/?view=tree');
+    const beforeBlank = await inspect();
+    await page.locator('[data-tree-add-folder]').click();
+    await page
+      .getByRole('dialog', { name: 'Choose a folder' })
+      .getByRole('button', { name: 'Downloads', exact: true })
+      .click();
+    await expect(compact.getByRole('checkbox')).not.toBeChecked();
+    await compact.getByRole('button', { name: 'Create workspace' }).click();
+    await compact.getByRole('button', { name: 'Open workspace', exact: true }).click();
+    const blankId = await page.locator('body').getAttribute('data-workspace-id');
+    expect(blankId).toBeTruthy();
+    const blank = await inspect();
+    expect(blank.workspaces).toEqual([...beforeBlank.workspaces, blankId].sort());
+    expect(blank.sources).toEqual(beforeBlank.sources);
+    expect(blank.hires).toEqual(beforeBlank.hires);
+    expect(await arrivalState(request, blankId!)).toMatchObject({
+      agents: [],
+      filled: 0,
+      roles: 1,
+      pending: false,
+      goalRuns: 0
+    });
+    await page.goto('/?view=tree');
+    await page.locator('[data-tree-add-folder]').click();
+    await page
+      .getByRole('dialog', { name: 'Choose a folder' })
+      .getByRole('button', { name: 'Downloads', exact: true })
+      .click();
+    await compact.getByRole('button', { name: 'Open Downloads', exact: true }).click();
+    await expect(page.locator('body')).toHaveAttribute('data-workspace-id', blankId!);
+    expect(await inspect()).toEqual(blank);
+
+    // The second review adds an agent to this exact workspace, without HQ,
+    // another workspace, filename consent, or an implicit first look.
+    const staff = page.getByRole('button', { name: 'Add an agent…', exact: true });
+    const assignment = page.locator('#workspace-detail-add-agent-modal');
+    const hire = assignment.getByRole('button', { name: 'Hire a Downloads Manager…' });
+    const form = page.locator('#addAgentModal');
+    await staff.click();
+    await expect(assignment.getByLabel('Assign an existing agent')).toBeVisible();
+    await expect(hire).toBeVisible();
+    await assignment.screenshot({ path: path('staffing-choices') });
+    await hire.click();
+    await expect(form.locator('#agentName')).toHaveValue('Downloads Manager');
+    await expect(form.locator('#agentSystemPrompt')).toHaveValue('Keep Downloads sorted');
+    await expect(form.locator('#agentAllowWebSearch')).not.toBeChecked();
+    await expect(form.locator('#folderManagerDestination')).toContainText(
+      'add it to Downloads as Project Lead'
+    );
+    await form.getByRole('button', { name: 'Cancel' }).click();
+    await expect(form).toBeHidden();
+    expect(await inspect()).toEqual(blank);
+    await staff.click();
+    await hire.click();
+    const manager = 'Inbox Steward';
+    await form.locator('#agentName').fill(manager);
+    await form.locator('#agentSystemPrompt').fill('Prepare an inbox summary for review.');
+    const assigned = page.waitForResponse(
+      r =>
+        r.request().method() === 'PUT' &&
+        new URL(r.url()).pathname === `/api/workspaces/${blankId}/roles/ask-ori`
+    );
+    const report = async () =>
+      (await (await request.get(`/api/personal-assistant/folder-agent/${blankId}`)).json())
+        .folder_agent;
+    expect(await report()).toBeNull();
+    await expect(form.getByRole('button', { name: 'Hire only' })).toBeVisible();
+    if (browserName === 'webkit') {
+      await form.locator('#folderManagerLookCheck').check();
+      await form.getByRole('button', { name: 'Hire & look around' }).click();
+    } else await form.getByRole('button', { name: 'Hire only' }).click();
+    const bound = await assigned;
+    expect(bound.ok(), await bound.text()).toBeTruthy();
+    expect((await bound.json()).roles).toMatchObject({
+      filled_count: 1,
+      roles: [{ role_id: 'ask-ori', agent: { name: manager } }],
+      unassigned: []
+    });
+    expect(
+      await (await request.get(`/api/workspaces/${blankId}/folder-manager-draft`)).json()
+    ).not.toHaveProperty('lead_role_id');
+    expect(await arrivalState(request, blankId!)).toMatchObject({
+      agents: [manager],
+      pending: false,
+      goalRuns: 0,
+      inFlight: false
+    });
+    expect(await inspect()).toEqual(blank);
+    if (browserName === 'chromium') {
+      const look = page.locator('#workspaceAssignedFolderLook');
+      await expect(look.getByRole('button', { name: 'Look around' })).toBeVisible();
+      expect(await report()).toBeNull();
+      await expect(look.getByLabel('Assigned agent')).toHaveValue(manager);
+      await look.getByRole('button', { name: 'Look around' }).click();
+    }
+    await expect.poll(async () => (await report())?.state).toBe('reported');
+    const saved = await report();
+    expect(saved.ticket_id).toBeTruthy();
+    expect(saved.agent_name).toBe(manager);
+    await page.reload();
+    const team = page.locator('.ws-cmd-team');
+    await expect(team).toContainText('1 of 1 role filled');
+    await expect(team.getByText(manager, { exact: true })).toHaveCount(1);
+    await expect(team.getByText('Project Lead', { exact: true })).toBeVisible();
+    await expect(
+      page.locator('#workspaceAssignedFolderLook').getByRole('button', { name: 'View report' })
+    ).toBeVisible();
+    await page
+      .locator('#workspaceAssignedFolderLook')
+      .getByRole('button', { name: 'View report' })
+      .click();
+    await expect(page.locator('#workspaceAssignedFolderLook [data-look-status]')).toBeEmpty();
+    expect((await report()).ticket_id).toBe(saved.ticket_id);
+    if (browserName === 'chromium') {
+      // Reproduce an older workspace: the same manager is attached without a
+      // role. Assigning it repairs the binding, not the agent or the ticket.
+      const base = `/api/workspaces/${blankId}`;
+      expect((await request.delete(`${base}/roles/ask-ori`)).ok()).toBeTruthy();
+      expect(
+        (await request.post(`${base}/agents`, { data: { agent_name: manager } })).ok()
+      ).toBeTruthy();
+      await page.reload();
+      await team.getByRole('button', { name: 'Assign an agent to Ask Ori' }).click();
+      await assignment.getByLabel('Assign an existing agent').selectOption(manager);
+      await assignment.getByRole('button', { name: 'Assign to role' }).click();
+      await expect(team.getByText('1 of 1 role filled')).toBeVisible();
+      await expect(team.getByText(manager, { exact: true })).toHaveCount(1);
+      expect((await report()).ticket_id).toBe(saved.ticket_id);
+    }
+    expect(await inspect()).toEqual(blank);
+  }
 });

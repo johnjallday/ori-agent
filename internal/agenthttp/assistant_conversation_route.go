@@ -24,10 +24,13 @@ var compositionPolitePrefixes = []string{
 
 // compositionLeads open a request to produce or reshape text. The second group
 // are follow-ups that point at an earlier draft ("make it warmer").
-var compositionLeads = []string{
-	"write ", "draft ", "compose ", "rewrite ", "rephrase ", "reword ",
-	"translate ", "proofread ", "polish ", "paraphrase ",
+var compositionLeads = append([]string{
+	"write ", "draft ", "compose ", "translate ",
 	"make a list", "make a proposal", "make an outline", "make a plan", "design a plan", "design an implementation plan",
+}, compositionEditLeads...)
+
+var compositionEditLeads = []string{
+	"rewrite ", "rephrase ", "reword ", "proofread ", "polish ", "paraphrase ",
 	"make it ", "make this ", "make that ",
 	"turn it ", "turn this ", "turn that ",
 	"convert it ", "convert this ", "convert that ",

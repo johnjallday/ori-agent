@@ -1,6 +1,7 @@
 package agenthttp
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -31,6 +32,36 @@ func (h *HomeAssistantAskHandler) DeclineHireProposalHandler(w http.ResponseWrit
 // form by hand; nothing is created here. POST /api/personal-assistant/hire-proposals/{proposalID}/adjust
 func (h *HomeAssistantAskHandler) AdjustHireProposalHandler(w http.ResponseWriter, r *http.Request) {
 	h.settleHireProposal(w, r, personalassistant.HireProposalAdjusted)
+}
+
+// HireConversationAllowed rechecks the active assistant scope when either
+// effect owner claims an offer, not just while its buttons are drawn.
+func (h *HomeAssistantAskHandler) HireConversationAllowed(ctx context.Context, user, id string) bool {
+	if h.Conversations == nil {
+		return false
+	}
+	owner, err := h.currentAssistantUser(ctx)
+	if err != nil || owner != user {
+		return false
+	}
+	work, err := h.resolvePersonalAssistantContext(ctx)
+	if err != nil {
+		return false
+	}
+	scope, ok := conversationScope(work)
+	if !ok {
+		return false
+	}
+	record, err := h.Conversations.Get(ctx, id)
+	return err == nil && scope.owns(record)
+}
+
+var errOfferChanged = errors.New("hire offer changed")
+
+// WorkspaceHireProposalHandler puts the offer aside for the blank creator. No
+// workspace exists until that creator confirms its own exact reviewed material.
+func (h *HomeAssistantAskHandler) WorkspaceHireProposalHandler(w http.ResponseWriter, r *http.Request) {
+	h.settleHireProposal(w, r, personalassistant.HireProposalWorkspaceDraft)
 }
 
 // settleHireProposal moves one offered proposal of the current user, in a
@@ -69,8 +100,26 @@ func (h *HomeAssistantAskHandler) settleHireProposal(w http.ResponseWriter, r *h
 		writeConversationError(w, http.StatusConflict, PersonalAssistantConversationOutOfScope, "That offer belongs to a conversation outside your assistant's Personal HQ. Nothing was changed.")
 		return
 	}
+	var draft struct {
+		ConversationID string `json:"conversation_id"`
+		Name           string `json:"workspace_name"`
+		Brief          string `json:"brief"`
+	}
+	if state == personalassistant.HireProposalWorkspaceDraft {
+		if !orihttp.ParseJSONBody(w, r, &draft) {
+			return
+		}
+		if draft.ConversationID != proposal.ConversationID || strings.TrimSpace(draft.Name) == "" || strings.TrimSpace(draft.Brief) == "" || !safeHireText(strings.Join(strings.Fields(draft.Brief), " ")) || !safeHireText(draft.Name) {
+			writeConversationError(w, http.StatusConflict, PersonalAssistantHireProposalSettled, "Reopen the original offer and review the workspace name and brief.")
+			return
+		}
+	}
 	switch proposal.State {
 	case state:
+		if state == personalassistant.HireProposalWorkspaceDraft && (proposal.WorkspaceName != strings.TrimSpace(draft.Name) || proposal.Brief != strings.TrimSpace(draft.Brief)) {
+			writeConversationError(w, 409, PersonalAssistantHireProposalSettled, "A different draft was already handed off. Nothing was changed.")
+			return
+		}
 		orihttp.WriteJSON(w, map[string]any{"proposal": hireProposalView(proposal), "changed": false})
 		return
 	case personalassistant.HireProposalOffered:
@@ -82,9 +131,19 @@ func (h *HomeAssistantAskHandler) settleHireProposal(w http.ResponseWriter, r *h
 		return
 	}
 	updated, err := h.HireProposals.Update(ctx, id, func(p *personalassistant.HireProposal) error {
+		if p.UserID != userID || p.ConversationID != proposal.ConversationID || p.State != personalassistant.HireProposalOffered {
+			return errOfferChanged
+		}
+		if state == personalassistant.HireProposalWorkspaceDraft {
+			p.Brief, p.WorkspaceName = strings.TrimSpace(draft.Brief), strings.TrimSpace(draft.Name)
+		}
 		p.State = state
 		return nil
 	})
+	if errors.Is(err, errOfferChanged) {
+		writeConversationError(w, http.StatusConflict, PersonalAssistantHireProposalSettled, "That offer changed. Reopen the conversation to see its saved choice.")
+		return
+	}
 	if err != nil {
 		logger.Warn("Hire proposal could not be settled", logger.Fields{"proposal": id, "state": string(state), "error": err})
 		writeConversationError(w, http.StatusServiceUnavailable, PersonalAssistantHireProposalUnavailable, "That offer could not be updated right now. Nothing was changed.")

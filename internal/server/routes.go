@@ -402,6 +402,10 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	// and holds the hired assistant's everyday conversations. The two reads
 	// list and open those conversations; both validate the relationship first.
 	homeAssistantAskHandler := s.newHomeAssistantAskHandler()
+	agentHandler.SetHireConversationAllowed(homeAssistantAskHandler.HireConversationAllowed)
+	if s.Handlers.Session != nil {
+		s.Handlers.Session.SetHireConversationAllowed(homeAssistantAskHandler.HireConversationAllowed)
+	}
 	homeAssistantRouteHandler.FolderConversation = homeAssistantAskHandler.FolderConversationRoute
 	homeAssistantRouteHandler.LinkConversation = homeAssistantAskHandler.LinkConversationRoute
 	homeAssistantRouteHandler.PanelContext = homeAssistantAskHandler.ResolvePanelRouteContext
@@ -433,6 +437,7 @@ func registerAgentRoutes(mux *http.ServeMux, s *Server) {
 	// The assistant's offer to hire: Not now and Adjust record the offer's
 	// state; Hire and start is POST /api/agents/hire with the offer's id.
 	mux.HandleFunc("POST /api/personal-assistant/hire-proposals/{proposalID}/decline", homeAssistantAskHandler.DeclineHireProposalHandler)
+	mux.HandleFunc("POST /api/personal-assistant/hire-proposals/{proposalID}/workspace", homeAssistantAskHandler.WorkspaceHireProposalHandler)
 	mux.HandleFunc("POST /api/personal-assistant/hire-proposals/{proposalID}/adjust", homeAssistantAskHandler.AdjustHireProposalHandler)
 	mux.HandleFunc("GET /api/home-assistant/folder-context/choices", homeAssistantAskHandler.FolderChoicesHandler)
 	mux.HandleFunc("POST /api/home-assistant/folder-context/select", homeAssistantAskHandler.SelectFolderContextHandler)

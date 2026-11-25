@@ -233,6 +233,7 @@ type PremiseAnswer struct {
 
 // Record is one folder workspace's state.
 type Record struct {
+	AssignedLink string `json:"assigned_link,omitempty"` // existing workspace; recheck before a walk
 	// Current trusted identity is projected at runtime, never persisted.
 	RootPolicy    folderlook.RootPolicy `json:"-"`
 	PolicyBinding string                `json:"-"`
@@ -476,7 +477,10 @@ func (s *Store) Read(workspaceID string) (*Record, error) {
 func (s *Store) Create(rec *Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if existing, err := s.Read(rec.WorkspaceID); err == nil && existing != nil {
+	if _, err := s.Read(rec.WorkspaceID); !errors.Is(err, ErrNoRecord) {
+		if err != nil {
+			return err
+		}
 		return errors.New("folderagent: record already exists")
 	}
 	now := s.now().UTC()

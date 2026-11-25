@@ -535,11 +535,27 @@
         response = await fetchImpl('/api/agents/hire', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(hireRequestBody(state, appearanceEditor?.createRequest?.() || null))
+          body: JSON.stringify({
+            ...hireRequestBody(state, appearanceEditor?.createRequest?.() || null),
+            proposal_conversation_id: options.proposalConversation || undefined
+          })
         });
         payload = (await response.json().catch(() => ({}))) || {};
       } catch (_) {
         response = null;
+      }
+      if (
+        options.proposalConversation &&
+        (!response ||
+          response.status >= 500 ||
+          (response.ok && (!payload.hire_id || !payload.workspace_id)))
+      ) {
+        // The server may already have accepted the choice. A bound offer
+        // recovers from its conversation; never re-POST on uncertainty.
+        state.phase = 'done';
+        render();
+        await options.onHireUncertain?.();
+        return null;
       }
       if (response && response.ok) {
         state.phase = 'done';

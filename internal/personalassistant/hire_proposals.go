@@ -25,7 +25,10 @@ type HireProposalState string
 
 const (
 	// HireProposalOffered is a card with its buttons: nothing has happened yet.
-	HireProposalOffered HireProposalState = "offered"
+	HireProposalOffered          HireProposalState = "offered"
+	HireProposalHiring           HireProposalState = "hiring"
+	HireProposalWorkspaceDraft   HireProposalState = "workspace_draft"
+	HireProposalWorkspaceCreated HireProposalState = "workspace_created"
 	// HireProposalDeclined is a card put aside with Not now.
 	HireProposalDeclined HireProposalState = "declined"
 	// HireProposalAdjusted is a card taken to the workspace form by hand.
@@ -151,7 +154,7 @@ func (p *HireProposal) validate() error {
 		return fmt.Errorf("%w: hire proposal open roles", ErrValidation)
 	}
 	switch p.State {
-	case HireProposalOffered, HireProposalDeclined, HireProposalAdjusted, HireProposalHired:
+	case HireProposalOffered, HireProposalDeclined, HireProposalAdjusted, HireProposalHired, HireProposalHiring, HireProposalWorkspaceDraft, HireProposalWorkspaceCreated:
 	default:
 		return fmt.Errorf("%w: hire proposal state", ErrValidation)
 	}

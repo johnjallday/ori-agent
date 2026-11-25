@@ -11015,6 +11015,15 @@
 
     // The host's own action for a conversation's attached link: open Create
     // Workspace with the same address attached. The server never runs it.
+    if (type === 'blank_workspace_review') {
+      return {
+        label: label,
+        variant: 'primary',
+        onClick: function () {
+          openPreparedWorkspaceReview(action.arguments || {}, routeContext);
+        }
+      };
+    }
     if (type === 'workspace_build_from_link') {
       var linkURL = String((action.arguments && action.arguments.url) || '').trim();
       var links = window.PersonalAssistantLink;
@@ -11167,13 +11176,13 @@
     var expected = normalizeHomeRouteContext(routeContext);
     // The offer's state routes. A refusal names what happened to the offer
     // (hired, put aside) and the card shows it instead of changing.
-    function settle(proposal, action) {
+    function settle(proposal, action, material) {
       return API.post(
         '/api/personal-assistant/hire-proposals/' +
           encodeURIComponent(String(proposal.proposalId || '')) +
           '/' +
           action,
-        {}
+        material || {}
       );
     }
     return {
@@ -11190,14 +11199,44 @@
       decline: function (proposal) {
         return settle(proposal, 'decline');
       },
+      workspaceOnly: async function (proposal) {
+        const material = {
+          conversation_id: conversationId,
+          workspace_name: proposal.workspaceName,
+          brief: proposal.brief
+        };
+        if (
+          !material.workspace_name ||
+          !material.brief ||
+          window.PersonalAssistantFolderContext?.request?.()
+        )
+          throw new Error('Review the workspace name and brief in the original conversation.');
+        await settle(proposal, 'workspace', material);
+        if (
+          !openPreparedWorkspaceReview(
+            {
+              conversation_id: conversationId,
+              state_version: proposal.stateVersion,
+              proposal_id: proposal.proposalId,
+              entry_point: 'assistant_workspace_only',
+              name: material.workspace_name,
+              goal: material.brief
+            },
+            expected
+          )
+        )
+          throw new Error(
+            'The offer was put aside. Reopen its conversation to see its saved state.'
+          );
+      },
       // Adjust: the existing workspace form, prefilled from the card, and the
       // offer recorded as taken there. Nothing is created until its Create.
       adjust: async function (proposal) {
+        await settle(proposal, 'adjust');
         if (!openPreparedWorkspaceReview(hireAdjustArguments(conversationId, proposal), expected))
           throw new Error(
             'Reopen the conversation this offer belongs to before adjusting it. Nothing was created.'
           );
-        await settle(proposal, 'adjust');
       }
     };
   }
@@ -11240,8 +11279,10 @@
       args.staff_primary_role && String(args.staff_primary_role.name || '').trim()
         ? { name: String(args.staff_primary_role.name).trim() }
         : null;
-    var entryPoint =
-      args.entry_point === 'assistant_hire_adjust'
+    var workspaceOnly = args.entry_point === 'assistant_workspace_only';
+    var entryPoint = workspaceOnly
+      ? 'assistant_workspace_only'
+      : args.entry_point === 'assistant_hire_adjust'
         ? 'assistant_hire_adjust'
         : 'assistant_workspace_review';
     var currentPage = buildHomeRouteContext();
@@ -11260,7 +11301,7 @@
       (window.PersonalAssistantFolderContext && window.PersonalAssistantFolderContext.request()) ||
       !name ||
       Array.from(name).length > 80 ||
-      !description ||
+      (!description && !workspaceOnly) ||
       Array.from(description).length > 1600 ||
       !window.sessionManager ||
       typeof window.sessionManager.showAddWorkspaceModal !== 'function'
@@ -11278,6 +11319,13 @@
       description: description,
       stayAfterCreate: true
     };
+    if (workspaceOnly) {
+      seed.workspaceOnly = true;
+      seed.goal = String(args.goal || '').trim();
+      seed.blueprintNote = 'Blank workspace · No agents. Nothing is created until you confirm.';
+      seed.proposalId = args.proposal_id || '';
+      seed.proposalConversation = args.conversation_id;
+    }
     if (blueprint) seed.blueprint = blueprint;
     if (staffed) seed.staffPrimaryRole = staffed;
     window.sessionManager.showAddWorkspaceModal(seed);

@@ -615,7 +615,7 @@ func TestConversation_ActionsAndConfirmationsAreNotStoredAsTurns(t *testing.T) {
 		t.Fatalf("memory request: %+v", memory)
 	}
 	preview := f.say("create a workspace called Launch", "mine")
-	if !preview.RequiresConfirmation || preview.Conversation != nil {
+	if preview.Confirmation != nil || preview.Conversation == nil || len(preview.Actions) != 1 || preview.Actions[0].Type != "blank_workspace_review" || f.mutator.created != "" {
 		t.Fatalf("workspace request: %+v", preview)
 	}
 	confirmed := f.handler.Ask(context.Background(), HomeAssistantAskRequest{
@@ -625,7 +625,9 @@ func TestConversation_ActionsAndConfirmationsAreNotStoredAsTurns(t *testing.T) {
 	if f.mutator.created != "Launch" || confirmed.Conversation != nil {
 		t.Fatalf("confirmed action: created=%q %+v", f.mutator.created, confirmed.Conversation)
 	}
-	if f.store.messageCount() != 0 || len(f.store.sessions) != 1 || len(f.provider.requests) != 0 {
+	// Only the answer pointing at the blank form is conversation history;
+	// neither the separate legacy confirmation nor any approval is stored.
+	if f.store.messageCount() != 2 || len(f.store.sessions) != 1 || len(f.provider.requests) != 0 {
 		t.Fatalf("an action was stored as a turn or reached the model: messages=%d sessions=%d", f.store.messageCount(), len(f.store.sessions))
 	}
 }

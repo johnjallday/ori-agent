@@ -249,7 +249,9 @@ jobs:
     outputs:
       mode: ${{ steps.affected.outputs.mode || steps.paths.outputs.mode || 'full' }}
     env:
-      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      # Checkout tests the synthetic PR merge. Its first parent is the exact
+      # base of that tree; the event's base SHA can be older and not fetched.
+      MERGE_BASE_PARENT: HEAD^1
       FAST_PR: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && !startsWith(github.head_ref, 'release/') && !startsWith(github.head_ref, 'release-') }}
     steps:
       - uses: actions/checkout@v5
@@ -259,7 +261,7 @@ jobs:
       - name: Classify the complete merge diff
         id: paths
         if: env.FAST_PR == 'true'
-        run: python3 scripts/pr-unit-scope.py paths "$BASE_SHA"
+        run: python3 scripts/pr-unit-scope.py paths "$MERGE_BASE_PARENT"
       - uses: actions/setup-go@v6
         if: steps.paths.outputs.mode == 'candidate'
         with:
@@ -267,7 +269,7 @@ jobs:
       - name: Run affected packages or request the full matrix
         id: affected
         if: steps.paths.outputs.mode == 'candidate'
-        run: python3 scripts/pr-unit-scope.py test "$BASE_SHA"
+        run: python3 scripts/pr-unit-scope.py test "$MERGE_BASE_PARENT"
       - name: Report selected unit scope
         env:
           MODE: ${{ steps.affected.outputs.mode || steps.paths.outputs.mode || 'full' }}

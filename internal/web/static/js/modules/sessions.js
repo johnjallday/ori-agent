@@ -6955,6 +6955,8 @@ const sessionManager = {
       }
       this.applyHomeInputDefaults(data.group_requirement?.home?.input_defaults || null);
       if (draft && api) api.setPlanReady(draft, blueprintKey, data);
+      if (draft && api && isBlank && this.workspaceCreatorContext?.workspaceOnly)
+        api.setAgentless(draft, true);
       await this.ensureEditAgentModelOptions();
       if (requestId !== this.templateAgentPlanRequestId) return;
       this.renderTemplateAgentPlan(data);
@@ -19988,6 +19990,29 @@ const sessionManager = {
         }
       }
     }
+    if (creatorContext?.workspaceOnly) {
+      if (
+        !payload.blank ||
+        !this.usesUnifiedOrdinaryReview() ||
+        ordinaryGroup ||
+        importEnabled ||
+        payload.team_intent?.mode !== 'agentless' ||
+        assistantHireConfig ||
+        payload.folder_selection ||
+        payload.anchor_path ||
+        payload.project_connection ||
+        payload.build_session_id
+      ) {
+        throw new Error(
+          'This choice creates only a blank workspace without agents. Return to Blank and choose Create without agents.'
+        );
+      }
+      payload.entry_point = 'assistant_workspace_only';
+      if (creatorContext.proposalId) {
+        payload.hire_proposal_id = creatorContext.proposalId;
+        payload.proposal_conversation_id = creatorContext.proposalConversation;
+      }
+    }
     return { payload, endpoint, assistantHireConfig };
   },
 
@@ -22037,6 +22062,11 @@ const sessionManager = {
       nameInput.dispatchEvent(new Event('input', { bubbles: true }));
     }
     const descriptionInput = document.getElementById('folderDescriptionInput');
+    const goalInput = document.getElementById('folderGoalInput');
+    if (context?.workspaceOnly && goalInput) {
+      goalInput.value = context.goal;
+      goalInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     const description = String(context?.description || '').trim();
     if (descriptionInput && description) {
       descriptionInput.value = description;

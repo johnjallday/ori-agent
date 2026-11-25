@@ -628,7 +628,35 @@ function showAddAgentModal(options = {}) {
     }
   }
   if (agentAllowWebSearchInput) {
-    agentAllowWebSearchInput.checked = true;
+    agentAllowWebSearchInput.checked = !options.folderManagerWorkspace;
+  }
+  const destination = document.getElementById('folderManagerDestination');
+  if (destination) {
+    destination.hidden = !options.folderManagerWorkspace;
+    destination.textContent = options.folderManagerWorkspace
+      ? `Create this agent and add it to ${options.folderManagerWorkspace}${options.folderLeadRole ? ' as Project Lead' : ''}. No new workspace will be created.`
+      : '';
+  }
+  const choice = document.getElementById('folderManagerLookChoice');
+  const check = document.getElementById('folderManagerLookCheck');
+  const submit = document.getElementById('createAgentBtn');
+  if (choice && check && submit) {
+    choice.hidden = !options.folderLookLink;
+    check.checked = false;
+    check.onchange = () => {
+      submit.textContent = check.checked ? 'Hire & look around' : 'Hire only';
+    };
+    if (options.folderManagerWorkspace) {
+      submit.textContent = 'Hire only';
+      modalElement.addEventListener(
+        'hidden.bs.modal',
+        () => {
+          choice.hidden = true;
+          submit.textContent = 'Create Agent';
+        },
+        { once: true }
+      );
+    }
   }
   resetBaseAutoConfigState();
   resetAgentCreationCapabilitySelections();
@@ -674,6 +702,8 @@ function normalizeAgentCreationFlowSelections(values) {
 
 function normalizeAgentCreationFlowOptions(options = {}) {
   return {
+    folderLookLink: String(options?.folderLookLink || ''),
+    folderLeadRole: options.folderLeadRole === 'ask-ori' ? options.folderLeadRole : '',
     seedName: String(options?.seedName || '').trim(),
     seedRole: String(options?.seedRole || '')
       .trim()
@@ -732,6 +762,7 @@ async function applyPendingAgentCreationFlowToModal() {
   let systemPref = null;
   if (options.seedRole === 'orchestrator') {
     systemPref = await loadSystemModelPreference();
+    if (pendingAgentCreationFlow !== options) return;
   }
 
   if (options.seedModel && agentModelInput) {
@@ -1488,8 +1519,7 @@ async function bindAgentCreationMCPServersForWorkspace(
   return summary;
 }
 
-async function applyPendingAgentCreationFollowUp(agentName) {
-  const flow = pendingAgentCreationFlow;
+async function applyPendingAgentCreationFollowUp(agentName, flow = pendingAgentCreationFlow) {
   const summary = {
     workspaceAdded: false,
     workspaceMCPReady: 0,
@@ -1506,12 +1536,28 @@ async function applyPendingAgentCreationFollowUp(agentName) {
 
   if (flow.workspaceId) {
     try {
-      const result = await API.post(
-        `/api/workspaces/${encodeURIComponent(flow.workspaceId)}/agents`,
-        {
-          agent_name: agentName
+      const url = `/api/workspaces/${encodeURIComponent(flow.workspaceId)}`;
+      let result;
+      if (flow.folderLeadRole) {
+        // One binding adds membership and fills the reviewed role. Never fall
+        // back to a loose attachment if another tab filled the vacancy.
+        await API.put(`${url}/roles/${encodeURIComponent(flow.folderLeadRole)}`, {
+          mode: 'assign',
+          name: agentName
+        });
+        summary.workspaceAdded = true;
+        if (getSelectedAgentCreationMCPServers().length) {
+          const workspace = await API.get(url);
+          result = {
+            workspace,
+            agent_instance: workspace?.agent_instances?.find(
+              instance => instance.name === agentName
+            )
+          };
         }
-      );
+      } else {
+        result = await API.post(`${url}/agents`, { agent_name: agentName });
+      }
       summary.workspaceAdded = true;
       workspaceAgentInstanceId = String(result?.agent_instance?.id || '').trim();
       workspaceData =
@@ -1534,7 +1580,7 @@ async function applyPendingAgentCreationFollowUp(agentName) {
     }
   }
 
-  if (flow.workspaceId && summary.workspaceAdded) {
+  if (flow.workspaceId && summary.workspaceAdded && getSelectedAgentCreationMCPServers().length) {
     if (!workspaceAgentInstanceId) {
       summary.failures.push('MCP binding: missing workspace agent instance');
     } else {
@@ -1620,7 +1666,11 @@ async function createNewAgent() {
   const agentName = formValues.name;
   // Taken now: hiding the modal below clears the pending flow before the
   // success path reaches it.
-  const onCreated = pendingAgentCreationFlow.onCreated;
+  const reviewedFlow = pendingAgentCreationFlow;
+  const onCreated = reviewedFlow.onCreated;
+  const lookLink =
+    document.getElementById('folderManagerLookCheck')?.checked && reviewedFlow.folderLookLink;
+  let lookUnverified = false;
 
   // Set loading state
   const originalText = createBtn.textContent;
@@ -1711,10 +1761,20 @@ async function createNewAgent() {
       taskAssigned: false,
       failures: []
     };
-    if (pendingAgentCreationFlow.workspaceId || pendingAgentCreationFlow.taskId) {
+    if (reviewedFlow.workspaceId || reviewedFlow.taskId) {
       createBtn.innerHTML =
         '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Linking...';
-      followUpSummary = await applyPendingAgentCreationFollowUp(agentName);
+      followUpSummary = await applyPendingAgentCreationFollowUp(agentName, reviewedFlow);
+      if (lookLink && followUpSummary.workspaceAdded) {
+        try {
+          await API.post(
+            `/api/workspaces/${encodeURIComponent(reviewedFlow.workspaceId)}/folder-manager-look`,
+            { link: lookLink, agent: agentName, brief: formValues.systemPrompt }
+          );
+        } catch {
+          lookUnverified = true;
+        }
+      }
     }
 
     // Success - close modal and refresh agent list
@@ -1781,6 +1841,13 @@ async function createNewAgent() {
     EventBus.emit('agent:created', { name: agentName, role: requestBody.role });
 
     // The opener that asked for the result shows the new agent itself.
+    if (lookUnverified) {
+      window.Toast?.warning(
+        `Added ${agentName}, but the first look is not verified. Check Folder first look in the workspace; do not hire again.`
+      );
+      window.dispatchEvent(new Event('ori:refresh-folder-look'));
+      return;
+    }
     if (onCreated) {
       onCreated({ name: agentName, role: requestBody.role });
       return;
@@ -1797,7 +1864,10 @@ async function createNewAgent() {
   } finally {
     // Reset button state
     createBtn.disabled = false;
-    createBtn.innerHTML = originalText;
+    // A closed folder-specific form must not leak its submit label into a
+    // later ordinary Agent form. Keep the choice on validation/write errors.
+    createBtn.textContent =
+      pendingAgentCreationFlow === reviewedFlow ? originalText : 'Create Agent';
   }
 }
 

@@ -87,10 +87,10 @@ func TestAssistantDiscoveryRoute_DiscussionAndActionPairs(t *testing.T) {
 func TestAssistantDiscoveryRoute_ExplicitCreateStillRequiresReview(t *testing.T) {
 	f := newConversationFixture(t)
 	answer := f.say("Create a workspace called Community", "")
-	if !answer.RequiresConfirmation || answer.Confirmation == nil || answer.Confirmation.ActionType != HomeActionCreateWorkspace {
+	if answer.Confirmation != nil || len(answer.Actions) != 1 || answer.Actions[0].Type != "blank_workspace_review" {
 		t.Fatalf("missing actual workspace review: %+v", answer)
 	}
-	if len(f.provider.requests) != 0 || f.mutator.writes != 0 || f.store.messageCount() != 0 {
+	if len(f.provider.requests) != 0 || f.mutator.writes != 0 || f.store.messageCount() != 2 {
 		t.Fatal("opening review called a model, executed a mutation or stored approval")
 	}
 }

@@ -137,9 +137,14 @@ func (h *Handler) fillOrdinaryWorkspaceRole(current *agentworkspace.Workspace, r
 	if provenance == nil || strings.TrimSpace(provenance.TemplateID) == "" {
 		return fmt.Errorf("this workspace declares no blueprint roles")
 	}
-	tpl, err := h.resolveProjectTemplate(provenance.TemplateID, "")
-	if err != nil {
-		return fmt.Errorf("this workspace's blueprint could not be read")
+	// Blank has a host-owned declaration, not a template on the shelf.
+	tpl := blankWorkspaceTemplate()
+	var err error
+	if provenance.TemplateID != blankWorkspaceTemplateID {
+		tpl, err = h.resolveProjectTemplate(provenance.TemplateID, "")
+		if err != nil {
+			return fmt.Errorf("this workspace's blueprint could not be read")
+		}
 	}
 	roleIDs := projecttemplates.AgentRoleIDs(tpl.Agents)
 	index := -1
@@ -188,6 +193,9 @@ func (h *Handler) fillOrdinaryWorkspaceRole(current *agentworkspace.Workspace, r
 		if ws.OwnerUserID != current.OwnerUserID || currentRoleHolder(ws, requested.RoleID) != "" || ws.Status == agentworkspace.StatusTrashed || ws.Status == agentworkspace.StatusMissing {
 			return fmt.Errorf("this role changed; reload its current team")
 		}
+		if provenance.TemplateID == blankWorkspaceTemplateID && !blankLeadVacant(ws) {
+			return fmt.Errorf("this workspace already has a project lead")
+		}
 		instances := ws.GetAgentInstances()
 		for i := range instances {
 			if strings.EqualFold(strings.TrimSpace(instances[i].Name), requested.Name) {
@@ -197,6 +205,9 @@ func (h *Handler) fillOrdinaryWorkspaceRole(current *agentworkspace.Workspace, r
 				instances[i].RoleID = requested.RoleID
 				instances[i].RoleSource = source
 				ws.AgentInstances = instances
+				if index == 0 {
+					return ws.SetEntryAgentName(requested.Name)
+				}
 				return nil
 			}
 		}

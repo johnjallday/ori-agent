@@ -196,7 +196,7 @@ func TestHireProposalWithoutAStoreOffersNoToolAndSaysSo(t *testing.T) {
 }
 
 func TestHireProposalNaturalRequestUsesOneModelTurnAndIsSavedOnTheConversation(t *testing.T) {
-	for _, prompt := range []string{"I need to compare the three CRMs we're evaluating and recommend one by Friday", "can we create a workspace for the CRM comparison"} {
+	for _, prompt := range []string{"I need to compare the three CRMs we're evaluating and recommend one by Friday", "Compare the interviews and draft a findings report."} {
 		for _, failedSave := range []bool{false, true} {
 			f, store, source, proposals := newHireProposalFixture(t)
 			store.seed("canonical", f.work.HQWorkspaceID, f.work.ConversationAgent,
@@ -458,13 +458,13 @@ func TestHireProposalUnreadableHistoryStillOffersTheTool(t *testing.T) {
 	}
 }
 
-func TestHireProposalUnsavedProposalStillPresentsTheCardOnce(t *testing.T) {
+func TestHireProposalUnsavedProposalOffersOnlyIndependentReview(t *testing.T) {
 	f, _, _, proposals := newHireProposalFixture(t)
 	proposals.createErr = errors.New("database is locked")
 	f.provider.script = []llm.ChatResponse{hireProposalReply(hireProposalFixture)}
 	response := askHire(f, "help me compare three CRMs")
-	if response.Confirmation == nil || response.Confirmation.Arguments["proposal_id"] == "" || !response.Conversation.Stored {
-		t.Fatalf("a save failure hid the card from the stored reply: %+v", response)
+	if response.Confirmation != nil || len(response.Actions) != 1 || response.Actions[0].Type != "blank_workspace_review" || !response.Conversation.Stored {
+		t.Fatalf("a transient offer did not fail closed: %+v", response)
 	}
 }
 

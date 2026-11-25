@@ -112,6 +112,10 @@
       name: String(options.name || '').trim(),
       // Reviewed conversational brief: editable text only, not tasks or grants.
       description: String(options.description || '').trim(),
+      workspaceOnly: Boolean(options.workspaceOnly),
+      goal: String(options.goal || '').trim(),
+      proposalId: String(options.proposalId || ''),
+      proposalConversation: String(options.proposalConversation || ''),
       // folderOfferId ties the create to a "show me a folder" offer, so the
       // server can attach that folder after creation. Only the identifier
       // travels; the server holds the folder itself.

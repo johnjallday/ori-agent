@@ -109,16 +109,11 @@ func main() {
 	}
 
 	addr := standaloneAddress(*port, *allowNetwork)
-	var listener net.Listener
-	if supervisor != nil {
-		// Bind without inspecting or evicting port owners. Reserve the exact
-		// address before recovery so an occupied port cannot apply a reset and
-		// then strand the browser. Serve only after acquiring the installation.
-		var err error
-		listener, err = (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
-		if err != nil {
-			log.Fatalf("Cannot bind managed Ori server: %v. Stop only your Ori process or recover manually.", err)
-		}
+	listener, bindErr := reserveStartupListener(addr, supervisor != nil)
+	if bindErr != nil {
+		log.Fatalf("Cannot bind Ori server: %v. Choose a free port or stop only your own Ori process.", bindErr)
+	}
+	if listener != nil {
 		defer func() { _ = listener.Close() }()
 	}
 
@@ -151,8 +146,8 @@ func main() {
 		log.Fatalf("Cannot open installation: %v", err)
 	}
 
-	// Ensure port is safe to take before starting
-	if supervisor == nil {
+	// A managed restart or demo already owns its exact address.
+	if listener == nil {
 		if err := startupPortCheck(*port); err != nil {
 			log.Fatalf("Port %d is unavailable: %v", *port, err)
 		}
@@ -509,6 +504,15 @@ func openBrowser(url string) error {
 	}()
 
 	return nil
+}
+
+// Reserve the exact listener before touching state. Neither reset recovery nor
+// a disposable demo may inspect or evict an existing Ori process.
+func reserveStartupListener(addr string, managed bool) (net.Listener, error) {
+	if !managed && os.Getenv("ORI_DEMO_REQUIRE_FREE_PORT") != "1" {
+		return nil, nil
+	}
+	return (&net.ListenConfig{}).Listen(context.Background(), "tcp", addr)
 }
 
 // ensurePortAvailable stops prior ori processes when safe and prompts before

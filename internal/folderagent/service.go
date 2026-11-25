@@ -191,17 +191,19 @@ type Matches interface {
 
 // Deps wires a Service.
 type Deps struct {
-	Hiring     Hiring
-	Matches    Matches
-	Pins       Pins
-	Turns      Turns
-	Memory     Memory
-	Store      *Store
-	Folders    Folders
-	Workspaces Workspaces
-	Tickets    Tickets
-	Setups     Setups
-	Homes      Homes
+	Hiring  Hiring
+	Matches Matches
+	Pins    Pins
+	Turns   Turns
+	Memory  Memory
+	Store   *Store
+	// AssignedRoot rechecks the owner, saved folder identity and current membership.
+	AssignedRoot func(ctx context.Context, owner, id, agent, link string) (root, workspaceName string, ok bool)
+	Folders      Folders
+	Workspaces   Workspaces
+	Tickets      Tickets
+	Setups       Setups
+	Homes        Homes
 	// ActiveHQ resolves the signed-in owner's current active assistant relationship.
 	ActiveHQ          func(context.Context, string) string
 	DocumentsScope    func(context.Context, string) (DocumentsScope, error)
@@ -565,6 +567,17 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 		}
 	}
 	root, err := s.deps.Workspaces.AnchorRoot(workspaceID)
+	if rec.AssignedLink != "" {
+		if s.deps.AssignedRoot == nil {
+			fail("The folder assignment could not be verified.", nil)
+			return
+		}
+		verified, _, ok := s.deps.AssignedRoot(ctx, rec.OwnerUserID, workspaceID, rec.AgentName, rec.AssignedLink)
+		if !ok || verified != root {
+			fail("The folder or its assigned agent changed. Nothing was scanned.", nil)
+			return
+		}
+	}
 	if err != nil || root == "" {
 		fail("The folder is no longer where it was.", err)
 		return
@@ -976,6 +989,16 @@ func (s *Service) Record(userID, workspaceID string) (*Record, error) {
 	}
 	if rec.OwnerUserID != userID {
 		return nil, ErrNotOwner
+	}
+	// A report from a previous anchor or assignment is not authority for
+	// subsequent setup on a different folder or by a removed manager.
+	if rec.AssignedLink != "" {
+		if s.deps.AssignedRoot == nil {
+			return nil, ErrWrongState
+		}
+		if _, _, ok := s.deps.AssignedRoot(context.Background(), userID, workspaceID, rec.AgentName, rec.AssignedLink); !ok {
+			return nil, ErrWrongState
+		}
 	}
 	return s.effectiveRecord(rec), nil
 }

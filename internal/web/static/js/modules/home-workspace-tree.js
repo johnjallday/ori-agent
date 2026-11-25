@@ -1263,7 +1263,7 @@ export function addFolderHTML(state) {
   if (!status || status === SEARCH_STATUS_OFF) return '';
   return (
     '<button type="button" class="cockpit-tree-add-folder" data-tree-add-folder ' +
-    'aria-haspopup="dialog"><span aria-hidden="true">+</span> Add folder…</button>'
+    'aria-haspopup="dialog"><span aria-hidden="true">+</span> New workspace from folder…</button>'
   );
 }
 

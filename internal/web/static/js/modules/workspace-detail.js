@@ -26,6 +26,7 @@ import {
   firstTaskStartMessage,
   renderFirstTaskBanner
 } from './workspace-first-task-banner.js';
+import { folderStaffingDraft, showAssignedFolderLook } from './workspace-folder-first-look.js';
 import { mountWorkspaceFolderAgent } from './folder-agent-card.js';
 import { commanderPresenter, workspaceCommanderMap } from './commander-map.js';
 import { chatShowsFolderAgentReport } from './folder-agent-chat.js';
@@ -598,7 +599,13 @@ export class WorkspaceDetailPage {
     // not an agent task racing the deterministic setup it duplicates.
     const setupOwned = await this.initSharedSetupWizard();
     if (this._destroyed) return;
-    if (!restoredBlockedTask && !setupOwned && !this.checkAutoOpenCreateAgent()) {
+    const arrival = new URL(window.location.href);
+    const staffingId = arrival.searchParams.get('staffWorkspace');
+    if (staffingId) {
+      arrival.searchParams.delete('staffWorkspace');
+      window.history.replaceState({}, '', arrival.pathname + arrival.search + arrival.hash);
+      if (!setupOwned && staffingId === this.workspaceId) await this.openAddAgentModal();
+    } else if (!restoredBlockedTask && !setupOwned && !this.checkAutoOpenCreateAgent()) {
       await this.maybePromptForMissingEntryAgent();
       if (this._destroyed) return;
     }
@@ -618,6 +625,9 @@ export class WorkspaceDetailPage {
     // this card takes no room: the Commander's line on the map is the status.
     // The look's own ticket is told by that report, so the Map's Next action
     // leaves it out (commanderNarratedTicket).
+    this.listenToPage(window, 'ori:refresh-folder-look', () => {
+      void this.loadWorkspace();
+    });
     this.commanderPresenter?.dispose();
     this.commanderNarratedTicket = '';
     this.folderAgentPhase = undefined;
@@ -727,6 +737,7 @@ export class WorkspaceDetailPage {
     const before = this.folderAgentPhase;
     this.folderAgentPhase = phase;
     if (before && phase && before !== phase) void this.loadTasks();
+    if (phase && before !== phase) void showAssignedFolderLook(this);
     window.workspaceCommand?.setFolderAgent?.(
       this.workspaceId,
       entry ? { ...entry, review: () => this.commanderPresenter?.review?.() } : null
@@ -2746,6 +2757,7 @@ export class WorkspaceDetailPage {
       });
       if (!this.isResourceRequestCurrent(request)) return;
       this.publishWorkspaceSnapshot(workspace, request);
+      void showAssignedFolderLook(this);
       this.workspaceSlug = String(this.workspace?.folder_slug || this.workspaceSlug || '').trim();
       this.workspaceSettings = this.normalizeWorkspaceSettings(
         this.workspace?.workspace_settings || this.workspace?.shared_data?.workspace_settings || {}
@@ -6819,9 +6831,56 @@ export class WorkspaceDetailPage {
     void this.openAddAgentModal();
   }
 
-  async openAddAgentModal() {
+  async openAddAgentModal({ roleId = '', roleLabel = '' } = {}) {
+    this.addAgentRoleId = roleId;
+    const title = document.getElementById('workspace-detail-add-agent-title');
+    if (title)
+      title.textContent = roleId
+        ? `Assign to ${roleLabel || 'workspace role'}`
+        : 'Add Agent to Workspace';
+    if (this.elements.addAgentSubmitBtn)
+      this.elements.addAgentSubmitBtn.textContent = roleId ? 'Assign to role' : 'Add to Workspace';
+    if (this.elements.createAgentBtn) this.elements.createAgentBtn.hidden = Boolean(roleId);
+    const workspaceId = this.workspaceId;
+    const generation = (this.staffingGeneration = (this.staffingGeneration || 0) + 1);
+    const offer = document.getElementById('workspace-folder-manager-offer');
+    if (offer) offer.hidden = true;
+    const suggestion =
+      !roleId && offer && this.workspace?.shared_data?.anchor_directory_reference_id
+        ? folderStaffingDraft(workspaceId)
+        : null;
     await this.loadAgentCatalog(true);
     await this.populateAddAgentOptions();
+    const draft = await suggestion;
+    if (this.workspaceId !== workspaceId || generation !== this.staffingGeneration) return;
+    if (draft?.workspace_id === workspaceId && draft.name && draft.brief && offer) {
+      const review = offer.querySelector('[data-folder-manager-review]');
+      offer.querySelector('[data-folder-manager-brief]').textContent = draft.brief;
+      review.textContent = `Hire a ${draft.name}…`;
+      review.onclick = () => {
+        if (this.workspaceId !== workspaceId || generation !== this.staffingGeneration) return;
+        const modal = this.elements.addAgentModal;
+        modal.addEventListener(
+          'hidden.bs.modal',
+          () => {
+            if (this.workspaceId === workspaceId && generation === this.staffingGeneration) {
+              window.showAddAgentModal({
+                workspaceId,
+                folderManagerWorkspace: this.workspace.name,
+                folderLookLink: draft.look_link,
+                folderLeadRole: draft.lead_role_id,
+                seedRole: 'orchestrator',
+                seedName: draft.name,
+                seedSystemPrompt: draft.brief
+              });
+            }
+          },
+          { once: true }
+        );
+        bootstrap.Modal.getInstance(modal)?.hide();
+      };
+      offer.hidden = false;
+    }
 
     if (this.elements.addAgentModal && window.bootstrap) {
       const modal =
@@ -7953,7 +8012,12 @@ export class WorkspaceDetailPage {
     const candidates = allAgents
       .map(agent => String(agent?.name || '').trim())
       .filter(Boolean)
-      .filter(name => !workspaceAgents.has(this.normalizeAgentName(name)));
+      .filter(
+        name =>
+          !workspaceAgents.has(this.normalizeAgentName(name)) ||
+          (this.addAgentRoleId &&
+            !this.getWorkspaceAgentInstances(name).some(agent => agent.role_id))
+      );
 
     if (candidates.length === 0) {
       const hasCatalogAgents = allAgents.length > 0;
@@ -8039,7 +8103,17 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      await this.addAgentToWorkspace(agentName);
+      if (this.addAgentRoleId) {
+        const outcome = await window.workspaceCommand?.fillRole(this.addAgentRoleId, {
+          mode: 'assign',
+          name: agentName
+        });
+        if (!outcome?.ok)
+          throw new Error(outcome?.error || 'Could not confirm the role assignment.');
+        bootstrap.Modal.getInstance(this.elements.addAgentModal)?.hide();
+      } else {
+        await this.addAgentToWorkspace(agentName);
+      }
     } catch (error) {
       console.error('Failed to add agent to workspace:', error);
       if (window.Toast) window.Toast.error(error.message || 'Failed to add agent');
