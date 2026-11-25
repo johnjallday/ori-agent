@@ -102,7 +102,7 @@ test('no greeting string, with any names, carries a tactical word, "task" or "se
 });
 
 test('a choice is a link only for the folder; the rest are buttons the page runs', () => {
-  assert.equal(greetingChoiceHref({ action: 'folder' }), DOCUMENTS_FOLDER_URL);
+  assert.equal(greetingChoiceHref({ action: 'folder' }), '/');
   assert.equal(greetingChoiceHref({ action: 'home' }), '/');
   for (const action of ['brief', 'note', 'notes', '', undefined])
     assert.equal(greetingChoiceHref({ action }), '', String(action));
@@ -213,7 +213,7 @@ function setup(overrides = {}) {
         {
           key: 'folder',
           action: 'folder',
-          title: 'Explore Documents',
+          title: 'Create a workspace from Documents',
           hint: 'Review the agent first.',
           state: 'open',
           resolved: false
@@ -287,15 +287,13 @@ test('it draws the card with its lines, its author and the three choices, and ne
   const choices = mount.queryAll('[data-hq-greeting-choice]');
   assert.deepEqual(
     choices.map(choice => choice.getAttribute('data-hq-greeting-choice')),
-    ['folder', 'folder-other', 'brief', 'note']
+    ['folder', 'brief', 'note']
   );
   assert.equal(choices[0].tagName, 'A');
-  assert.equal(choices[0].getAttribute('href'), DOCUMENTS_FOLDER_URL);
-  assert.equal(choices[1].getAttribute('href'), EXPLORE_FOLDER_URL);
-  assert.equal(choices[1].textContent, 'Choose another folder');
-  assert.equal(choices[2].tagName, 'BUTTON');
-  assert.equal(choices[2].getAttribute('type'), 'button');
-  assert.match(choices[2].textContent, /Read your Daily Brief/);
+  assert.equal(choices[0].getAttribute('href'), '/');
+  assert.equal(choices[1].tagName, 'BUTTON');
+  assert.equal(choices[1].getAttribute('type'), 'button');
+  assert.match(choices[1].textContent, /Read your Daily Brief/);
   assert.equal(focusLog.length, 0, 'showing it never calls focus()');
   assert.equal(state.dispatched.length, 1);
   // Landmark and naming: labelled by its title, nothing announces it.
@@ -512,18 +510,17 @@ test('a choice the page refuses, or one that is a link, does nothing here', () =
 test('a click on a button choice runs it; a click on a link is left to the browser', () => {
   const { greeting, mount, state } = setup();
   greeting.evaluate();
-  const [folder, other, brief, note] = mount.queryAll('[data-hq-greeting-choice]');
+  const [folder, brief, note] = mount.queryAll('[data-hq-greeting-choice]');
   mount.click(folder);
-  mount.click(other);
   assert.deepEqual(state.ran, []);
-  assert.deepEqual(state.closed, []);
+  assert.deepEqual(state.closed, [{ restoreFocus: false }]);
   mount.click(brief);
   mount.click(note);
   assert.deepEqual(
     state.ran.map(([action]) => action),
     ['brief', 'note']
   );
-  assert.deepEqual(state.closed, [{ restoreFocus: false }], 'only the note closes the drawer');
+  assert.deepEqual(state.closed, [{ restoreFocus: false }, { restoreFocus: false }]);
   mount.click({ closest: () => null });
   assert.equal(state.ran.length, 2, 'a click elsewhere in the card does nothing');
 });

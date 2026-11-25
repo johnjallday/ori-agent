@@ -102,10 +102,22 @@ for (const mode of ['details', 'map'])
       animations: 'disabled'
     });
     await door.click();
-    await card.getByRole('button', { name: /Explore Documents/ }).click();
-    await expect(card.getByRole('link', { name: 'Show me where to start' })).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(door).toBeFocused();
+    await card.getByRole('button', { name: /Create a workspace from Documents/ }).press('Enter');
+    const home = card.getByRole('link', { name: 'Go to Home' });
+    const url = await home.getAttribute('href');
+    await home.press('Enter');
+    const button = page.getByRole('button', { name: 'New Workspace', exact: true });
+    await expect(button).toBeFocused();
+    await expect(button).toHaveAccessibleDescription(/review your Documents/);
+    await expect(page.locator('#addFolderModal')).toBeHidden();
+    await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+    await page.screenshot({ path: info.outputPath('home-hint.png'), animations: 'disabled' });
+    await button.press('Escape');
+    await expect(page.locator('#hqWorkspaceHint')).toBeHidden();
+    await page.goto(url!);
+    await expect(page.locator('#hqWorkspaceHint')).toBeHidden();
+    await page.goto('/');
+    await expect(button).not.toBeFocused();
     expect(access).toEqual([]);
   });
 

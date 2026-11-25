@@ -58,12 +58,13 @@ test('compact choices use real handoffs, with no duplicate editor, quota, avatar
   const before = readNoteDraft();
   const html = card.html();
   assert.match(html, /role="dialog"/);
-  assert.match(html, /Explore Documents/);
+  assert.match(html, /Create a workspace from Documents/);
   assert.match(html, /Connect email/);
   assert.match(html, /Scan recent apps/);
   assert.doesNotMatch(html, /href=/);
-  await card.act('folder');
-  assert.match(card.html(), /folder=guide/);
+  await card.act('workspace');
+  assert.match(card.html(), /Go to Home/);
+  assert.doesNotMatch(card.html(), /panel=today|folder=guide/);
   assert.doesNotMatch(card.html(), /suggest=documents/);
   assert.doesNotMatch(html, /textarea|<input|avatar|Tickets|of 3|aria-modal/);
   assert.match(html, /aria-describedby="hq-suggestions-hint"/);
@@ -164,7 +165,7 @@ test('failed progression reads do not invent progress or block voluntary choices
   assert.equal(card.missions, null);
   assert.equal(card.node, null);
   assert.equal(card.view().count, 0);
-  assert.match(card.html(), /Explore Documents/);
+  assert.match(card.html(), /Create a workspace from Documents/);
 });
 
 test('page departure and BFCache return keep suggestions closed without losing canonical refresh', () => {

@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { beginHQAttempt, currentHQAttempt, guidedReturnURL } from './hq-guided-attempt.js';
+import {
+  beginHQAttempt,
+  claimWorkspaceArrival,
+  currentHQAttempt,
+  guidedReturnURL,
+  handoffURL
+} from './hq-guided-attempt.js';
 
 test('return navigation is scoped to the current tab attempt, path, designated HQ and bounded age', () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
@@ -25,6 +31,13 @@ test('return navigation is scoped to the current tab attempt, path, designated H
     assert.equal(guidedReturnURL(hint, status), '');
     value = JSON.stringify({ ...hint, at: Date.now() - 86400000 });
     assert.equal(guidedReturnURL(hint, status), '');
+    const workspace = beginHQAttempt('ws-1', 'workspace');
+    const search = handoffURL('/', workspace).slice(1);
+    assert.equal(claimWorkspaceArrival(search.replace('ws-1', 'ws-2')), null);
+    assert.deepEqual(claimWorkspaceArrival(search), workspace);
+    assert.equal(claimWorkspaceArrival(search), null, 'an old link cannot arm another open');
+    value = JSON.stringify({ ...workspace, at: Date.now() - 16 * 60000 });
+    assert.equal(claimWorkspaceArrival(search), null);
   } finally {
     if (original) Object.defineProperty(globalThis, 'sessionStorage', original);
     else delete globalThis.sessionStorage;

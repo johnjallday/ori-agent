@@ -15,7 +15,7 @@
 // goes first, and the question shows itself once the greeting is gone.
 import { HQ_LABELS as L } from './hq-labels.js';
 import { RECIPIENT_PERSONAL } from './personal-assistant-recipient.js';
-import { DOCUMENTS_FOLDER_URL, EXPLORE_FOLDER_URL } from './personal-assistant-panel.js';
+import { beginHQAttempt, handoffURL } from './hq-guided-attempt.js';
 
 const text = value => String(value ?? '').trim();
 const list = value => (Array.isArray(value) ? value : []).map(text).filter(Boolean);
@@ -82,7 +82,7 @@ export function greetingLines(view) {
 
 /** The link a choice is, or '' when it is a button the page runs. */
 export function greetingChoiceHref(step) {
-  if (step?.action === 'folder') return DOCUMENTS_FOLDER_URL;
+  if (step?.action === 'folder') return '/';
   if (step?.action === 'home') return '/';
   return '';
 }
@@ -189,12 +189,6 @@ export function createHQGreeting({
     control.appendChild(mark);
     control.appendChild(body);
     item.appendChild(control);
-    if (step.action === 'folder') {
-      const other = element(doc, 'a', 'pa-hq-greeting__alt', L.firstFolderChoose);
-      other.setAttribute('href', EXPLORE_FOLDER_URL);
-      other.setAttribute('data-hq-greeting-choice', 'folder-other');
-      item.appendChild(other);
-    }
     return item;
   }
 
@@ -308,6 +302,14 @@ export function createHQGreeting({
 
   mount.addEventListener?.('click', event => {
     const control = event.target?.closest?.('[data-hq-greeting-choice]');
+    if (control?.getAttribute('data-hq-greeting-choice') === 'folder') {
+      control.setAttribute(
+        'href',
+        handoffURL('/', beginHQAttempt(doc.body?.dataset.guidedHq, 'workspace'))
+      );
+      closeDrawer({ restoreFocus: false });
+      return;
+    }
     if (!control || control.tagName === 'A') return;
     choose(control.getAttribute('data-hq-greeting-choice'));
   });

@@ -149,7 +149,7 @@ test('the greeting names what runs and what is off, in page order, Notes first',
   assert.deepEqual(
     view.steps.map(step => [step.key, step.action, step.title]),
     [
-      ['folder', 'folder', 'Explore Documents'],
+      ['folder', 'folder', 'Create a workspace from Documents'],
       ['brief', 'brief', 'Read your Daily Brief'],
       ['note', 'note', 'Save an idea']
     ]

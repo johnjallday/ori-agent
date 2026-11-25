@@ -3,6 +3,7 @@
 import { destinationPlace } from './destination-place.js';
 import { arrivalSaved, arrivalSource } from './files-arrival.js';
 import { request as filenameIndex } from './search-desk.js';
+import { showWorkspaceGuide } from './hq-workspace-guide.js';
 import { guidedHint, showHQReturnLinks } from './hq-guided-attempt.js';
 import { ECONOMY_CHANGED_EVENT } from './economy-harvest.js';
 // Importing this also registers window.OriTicketCounts, which is how the classic
@@ -6941,6 +6942,7 @@ import {
   let folderAction = { visible: false, target: '' };
   let primaryAction = cockpitPrimaryActionView(null);
   const guidedFolder = guidedHint(window.location.search);
+  if (guidedFolder?.path === 'workspace') showWorkspaceGuide(window, document);
   if (guidedFolder?.path === 'folder') void showHQReturnLinks(guidedFolder);
   function openHomeFolder(invoker = els.primaryActionBtn, suggestion = '', walkThrough = false) {
     if (!folderAction.visible) return false;
