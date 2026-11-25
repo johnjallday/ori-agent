@@ -67,7 +67,8 @@ body.home-command-page .home-command-main {
 /* Draw attention when New Workspace is the highlighted creation action.
    Keep the button and its keyboard focus outline stationary. */
 @media (prefers-reduced-motion: no-preference) {
-  #cockpitPrimaryActionBtn[hidden] + #cockpitCreateWorkspaceBtn:not(.is-ori-coachmark) {
+  #cockpitPrimaryActionBtn[hidden]
+    + #cockpitCreateWorkspaceBtn:not(.is-ori-coachmark, [data-hq-guided-arrival]) {
     animation: atlas-create-ring 1.1s ease-out 2;
   }
   @keyframes atlas-create-ring {

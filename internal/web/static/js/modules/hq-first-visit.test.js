@@ -43,7 +43,9 @@ test('canonical completion and Skip resolve suggestions without claiming a compl
   assert.equal(result.card, 'finished');
   assert.equal(result.count, 3);
   assert.equal(result.steps[0].state, 'skipped');
-  assert.equal(result.steps[0].action, 'folder');
+  assert.equal(result.steps[0].action, 'home');
+  assert.equal(result.steps[0].title, 'Explore a folder with Ori');
+  assert.doesNotMatch(result.steps[0].hint, /workspace/);
   assert.equal(result.finishSilently, false);
   const returning = view({ missions: all, resolvedOnLoad: true });
   assert.equal(returning.card, 'none');
@@ -149,7 +151,7 @@ test('the greeting names what runs and what is off, in page order, Notes first',
   assert.deepEqual(
     view.steps.map(step => [step.key, step.action, step.title]),
     [
-      ['folder', 'folder', 'Explore Documents'],
+      ['folder', 'folder', 'Create a workspace from Documents'],
       ['brief', 'brief', 'Read your Daily Brief'],
       ['note', 'note', 'Save an idea']
     ]

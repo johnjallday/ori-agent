@@ -131,6 +131,27 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   border-left: 1px solid var(--hc-line);
 }
 
+/* Grow around the button's center without reflowing the toolbar. Its guide
+   description is removed on dismissal or activation, stopping the loop. */
+@media (prefers-reduced-motion: no-preference) {
+  #cockpitCreateWorkspaceBtn[aria-describedby~="hqWorkspaceInstruction"] {
+    animation: hq-workspace-pulse 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes hq-workspace-pulse {
+  0%,
+  80%,
+  100% {
+    scale: 1;
+    box-shadow: 0 0 0 0 transparent;
+  }
+  40% {
+    scale: 1.12;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--hc-signal) 40%, transparent);
+  }
+}
+
 /* On a phone-width cockpit the groups wrap under each other; a divider left at
    the start of a wrapped line reads as a stray rule, so it goes. */
 @container cockpit (max-width: 560px) {

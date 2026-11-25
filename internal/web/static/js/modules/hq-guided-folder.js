@@ -7,7 +7,7 @@ export async function folderReceipt(hint, read) {
   if (!current) return null;
   if (!current.workspace)
     return {
-      text: 'No folder exploration was confirmed here. Choose Explore Documents to review a folder.'
+      text: 'No folder exploration was confirmed here. On Home, use Attach → Add folder to review a folder with an agent.'
     };
   const raw = (
     await read(`/api/personal-assistant/folder-agent/${encodeURIComponent(current.workspace)}`)

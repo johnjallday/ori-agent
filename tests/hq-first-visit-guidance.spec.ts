@@ -241,10 +241,11 @@ test.describe('Overview, phone', () => {
     await expect(page.locator('.ws-hq-tip-mark')).toHaveCount(4);
     expect(await sideways(page)).toBeLessThanOrEqual(0);
     const target = mark(page, 'memory');
-    await target.scrollIntoViewIfNeeded();
-    const hit = await target.boundingBox();
-    expect(hit!.width).toBeGreaterThanOrEqual(44);
-    expect(hit!.height).toBeGreaterThanOrEqual(44);
+    await expect(async () => {
+      const hit = await target.boundingBox();
+      expect(hit?.width).toBeGreaterThanOrEqual(44);
+      expect(hit?.height).toBeGreaterThanOrEqual(44);
+    }).toPass({ timeout: 5000 });
     await target.tap();
     await expect(tip(page)).toBeVisible();
     const box = (await tip(page).boundingBox())!;
@@ -450,9 +451,14 @@ test.describe('Map (Flow), narrow', () => {
         await expect(page.locator('.ws-cmd-map-shell.is-flow')).toBeVisible();
         await expect(hint(page)).toBeVisible();
         // Stacked, the hint is the line above the lead card, not an overlay on it.
-        const hintBox = (await hint(page).boundingBox())!;
-        const leadBox = (await page.locator('.ws-cmd-flow-lead').boundingBox())!;
-        expect(hintBox.y + hintBox.height).toBeLessThanOrEqual(leadBox.y + 1);
+        // Live HQ refreshes may replace either node between layout reads.
+        await expect(async () => {
+          const hintBox = await hint(page).boundingBox();
+          const leadBox = await page.locator('.ws-cmd-flow-lead').boundingBox();
+          expect(hintBox).not.toBeNull();
+          expect(leadBox).not.toBeNull();
+          expect(hintBox!.y + hintBox!.height).toBeLessThanOrEqual(leadBox!.y + 1);
+        }).toPass({ timeout: 5000 });
         expect(await sideways(page)).toBeLessThanOrEqual(0);
         await mark(page, 'follow-ups').scrollIntoViewIfNeeded();
         await mark(page, 'follow-ups').tap();
@@ -594,7 +600,7 @@ test.describe('Drawer greeting', () => {
     await expect(page.locator('.ws-hq-tip-mark')).toHaveCount(4);
     await page.getByRole('button', { name: 'Things to try' }).click();
     expect(await sideways(page)).toBeLessThanOrEqual(0);
-    for (const name of ['folder', 'email', 'apps']) {
+    for (const name of ['workspace', 'email', 'apps']) {
       const box = (await choice(page, name).boundingBox())!;
       expect(box.height, name).toBeGreaterThanOrEqual(44);
       expect(box.x + box.width, name + ' inside the screen').toBeLessThanOrEqual(390);

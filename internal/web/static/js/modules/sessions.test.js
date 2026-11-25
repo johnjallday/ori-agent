@@ -8764,6 +8764,26 @@ function anchorChoiceFixture(fetchImpl) {
   return { manager, elements };
 }
 
+test('a delayed known Documents check never replaces a typed path or the next form', async () => {
+  for (const close of [true, false]) {
+    let finish;
+    const { manager, elements } = anchorChoiceFixture(url => {
+      assert.equal(url, '/api/workspaces/anchor/check?known=documents');
+      return new Promise(resolve => {
+        finish = resolve;
+      });
+    });
+    manager.setAnchorMode(true);
+    const checking = manager.checkAnchorPath(true);
+    if (close) manager.resetAnchorChoice();
+    else elements.get('workspaceAnchorPath').value = '/chosen';
+    finish({ ok: true, json: async () => ({ success: true, normalized_path: '/resolved' }) });
+    await checking;
+    assert.equal(elements.get('workspaceAnchorPath').value, close ? '' : '/chosen');
+    assert.equal(manager.anchorChoice.checkedPath, '');
+  }
+});
+
 test('anchor chooser defaults managed and excludes Import Folder and groups', () => {
   const { manager, elements } = anchorChoiceFixture();
   assert.equal(manager.anchorChoice.enabled, false);

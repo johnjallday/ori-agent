@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { lstat, mkdir, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { resumeLegacyFolderGuide } from './helpers/legacy-hq-folder';
 import { installLocalCdn } from './helpers/offline-cdn';
 
 test('the confirmed guided hire returns only its own Documents evidence', async ({
@@ -67,9 +68,7 @@ test('the confirmed guided hire returns only its own Documents evidence', async 
     await page.addInitScript(() => localStorage.setItem('ori-theme', 'dark'));
   }
   await page.goto(`/workspaces/${encodeURIComponent(status.workspace.folder_slug)}?mode=details`);
-  const card = page.locator('[data-hq-firstvisit]');
-  await card.getByRole('button', { name: /Explore Documents/ }).click();
-  await card.getByRole('link', { name: 'Show me where to start' }).click();
+  await resumeLegacyFolderGuide(page);
   const attach = page.getByRole('button', { name: 'Attach', exact: true });
   await expect(attach).toBeFocused({ timeout: 20000 });
   await attach.press('ArrowDown');

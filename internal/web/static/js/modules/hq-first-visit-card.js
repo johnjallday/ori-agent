@@ -15,6 +15,7 @@ import {
   guidedReturnURL,
   handoffURL
 } from './hq-guided-attempt.js';
+import { hasWorkspaceVisit } from './hq-workspace-outcome.js';
 import { folderReceipt } from './hq-guided-folder.js';
 import { workspaceOverlayCoordinator } from './workspace-overlay-coordinator.js';
 
@@ -28,11 +29,7 @@ const OVERLAY = 'hq-suggestions';
 const guideMark = `<svg class="ws-hq-guide-mark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="m16.5 7.5-3 6-6 3 3-6z"/></svg>`;
 
 const choices = Object.freeze({
-  folder: [
-    'Explore Documents',
-    'Review a folder with an agent.',
-    'I’ll show you where to add a folder. Choose Documents or another folder, then review the agent and model. Only Hire & build creates the workspace and starts the first look.'
-  ],
+  workspace: [L.firstFolderDocuments, 'Learn where to start a workspace.', L.firstFolderHint],
   email: [
     'Connect email',
     'Bring your mailbox into Email Ops.',
@@ -131,7 +128,7 @@ export class HQFirstVisitCard {
   async loadReturn() {
     if (!this.available() || typeof window === 'undefined') return;
     const hint = receiptHint(window.location, this.owner.workspaceId());
-    if (!hint) {
+    if (!hint || hint.path === 'workspace') {
       this.checkedAttempt = null;
       this.returnRead = null;
       if (this.receipt) {
@@ -224,13 +221,14 @@ export class HQFirstVisitCard {
 
   html() {
     const choice = choices[this.path];
+    const visited = hasWorkspaceVisit(this.owner.workspaceId());
     const row = (key, [label, hint]) =>
-      `<li><button type="button" class="ws-hq-suggestion" data-hq-firstvisit-action="${key}"><span class="ws-hq-suggestion-icon" aria-hidden="true"><i class="bi bi-${{ folder: 'folder2', email: 'envelope', apps: 'grid' }[key]}"></i></span><span><strong>${label}</strong><small>${hint}</small></span><span aria-hidden="true">→</span></button></li>`;
+      `<li><button type="button" class="ws-hq-suggestion" data-hq-firstvisit-action="${key}"><span class="ws-hq-suggestion-icon" aria-hidden="true"><i class="bi bi-${{ workspace: 'folder2', email: 'envelope', apps: 'grid' }[key]}"></i></span><span><strong>${label}</strong><small>${key === 'workspace' && visited ? 'Completed · You opened your chosen workspace.' : hint}</small></span><span aria-hidden="true">→</span></button></li>`;
     const link = (url, label) =>
       `<li><a class="ws-hq-suggestion" data-hq-firstvisit-action="continue" href="${escape(handoffURL(url, this.attempt))}">${label}</a></li>`;
     const steps =
-      this.path === 'folder'
-        ? link('/?panel=today&folder=guide', 'Show me where to start')
+      this.path === 'workspace'
+        ? link('/', 'Go to Home')
         : this.path === 'email'
           ? this.email?.setup
             ? '<li><button type="button" class="ws-hq-suggestion" data-hq-firstvisit-action="setup">Review mailbox setup</button></li>'

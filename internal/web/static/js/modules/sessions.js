@@ -722,7 +722,16 @@ const sessionManager = {
       ?.addEventListener('click', () => void this.browseAnchorFolder());
     document.getElementById('workspaceAnchorOpenExisting')?.addEventListener('click', () => {
       const owner = this.anchorChoice?.duplicate || this.anchorChoice?.related;
-      if (owner?.workspace_id) this.openImportedWorkspace(owner.slug || owner.workspace_id);
+      if (!owner?.workspace_id) return;
+      const context = this.workspaceCreatorContext;
+      if (owner === this.anchorChoice.duplicate) {
+        context?.hqWorkspaceOutcome?.openingExistingWorkspace(
+          context.hqWorkspaceAttempt,
+          owner.workspace_id,
+          this.anchorChoice.path
+        );
+      }
+      this.openImportedWorkspace(owner.slug || owner.workspace_id);
     });
 
     const importToggle = document.getElementById('folderImportToggle');
@@ -892,7 +901,7 @@ const sessionManager = {
       delete addFolderModal.dataset.pendingParentLocked;
       // Build with your assistant is decided per open, after the form above
       // is reset; an ineligible open leaves the manual wizard untouched.
-      void this.openWorkspaceCreatorBuild(this.workspaceCreatorContext);
+      void this.openWorkspaceCreatorBuild(this.workspaceCreatorContext, event.hqWorkspaceAttempt);
     });
 
     // A dismissed creator must not leave a fixed selected-member Group or a
@@ -954,6 +963,11 @@ const sessionManager = {
     let closingCreatorContext;
     addFolderModal?.addEventListener('hide.bs.modal', () => {
       closingCreatorContext = this.workspaceCreatorContext;
+      if (
+        !addFolderModal.dataset.suspendedForAgentSetup &&
+        !addFolderModal.dataset.suspendedForMapPlacement
+      )
+        this.anchorCheckSequence++;
     });
     addFolderModal?.addEventListener('hidden.bs.modal', () => {
       const closing = closingCreatorContext;
@@ -3916,9 +3930,9 @@ const sessionManager = {
     if (!this.anchorChoice?.enabled || this.importModeEnabled || this.isGroupCreator()) return '';
     const choice = this.anchorChoice;
     if (choice.review) return choice.pending ? 'Checking folder…' : '';
-    if (!choice.path) return 'Choose an existing folder for this workspace.';
     if (choice.pending) return 'Checking folder ownership…';
     if (choice.message) return choice.message;
+    if (!choice.path) return 'Choose an existing folder for this workspace.';
     if (choice.checkedPath !== choice.path)
       return 'Check this folder before creating the workspace.';
     return '';
@@ -3987,7 +4001,7 @@ const sessionManager = {
     this.refreshWizardChrome();
   },
 
-  async checkAnchorPath() {
+  async checkAnchorPath(knownDocuments = false) {
     const choice = this.anchorChoice;
     const input = document.getElementById('workspaceAnchorPath');
     if (!choice?.enabled || choice.review || !input) return;
@@ -3999,12 +4013,13 @@ const sessionManager = {
       message: '',
       duplicate: null,
       related: null,
-      pending: Boolean(path)
+      pending: knownDocuments || Boolean(path)
     });
     this.refreshWizardChrome();
-    if (!path) return;
+    if (!path && !knownDocuments) return;
     try {
-      const response = await fetch(`/api/workspaces/anchor/check?path=${encodeURIComponent(path)}`);
+      const query = knownDocuments ? 'known=documents' : `path=${encodeURIComponent(path)}`;
+      const response = await fetch(`/api/workspaces/anchor/check?${query}`);
       const result = await response.json().catch(() => ({}));
       if (
         this.anchorChoice !== choice ||
@@ -4018,7 +4033,12 @@ const sessionManager = {
         input.value = result.normalized_path;
       } else {
         choice.message = result.error || 'Folder ownership could not be checked. Try again.';
-        choice.duplicate = result.duplicate || null;
+        choice.duplicate =
+          knownDocuments && result.code !== 'anchor_already_owned'
+            ? null
+            : result.duplicate || null;
+        if (knownDocuments && result.normalized_path)
+          input.value = choice.path = result.normalized_path;
       }
     } catch {
       if (this.anchorChoice !== choice || sequence !== this.anchorCheckSequence) return;
@@ -5455,6 +5475,13 @@ const sessionManager = {
       return;
     }
     if (action === 'open' && review.result?.id) {
+      // Recovery reads the original operation, not the HQ intention (if any)
+      // that happened to open this dialog. Only an exact retained match binds.
+      const outcome =
+        context.hqWorkspaceOutcome ||
+        (review.restored && (await import('./hq-workspace-outcome.js').catch(() => null)));
+      if (this.workspaceCreatorContext !== context) return;
+      outcome?.openingReviewedWorkspace?.(review.reference, review.result.id);
       this.releaseCreationReviewReference(review);
       // Workspace pages are routed by slug; resolve it rather than use the ID.
       const slug = String(review.result.folder_slug || '').trim();
@@ -14353,7 +14380,9 @@ const sessionManager = {
     };
   },
 
-  async openWorkspaceCreatorBuild(context) {
+  async openWorkspaceCreatorBuild(context, hqAttempt) {
+    const sequence = this.anchorCheckSequence;
+    let checkedForRecovery = false;
     if (
       context?.mode === 'ordinary' &&
       !context.fixedKind &&
@@ -14369,6 +14398,7 @@ const sessionManager = {
         let reference, message;
         try {
           reference = api.savedCreationReference(window.localStorage);
+          checkedForRecovery = true;
         } catch (error) {
           message = error.message;
         }
@@ -14397,7 +14427,25 @@ const sessionManager = {
         }
       }
     }
-    if (this.workspaceCreatorContext === context) await this.maybeStartWorkspaceBuild(context);
+    if (this.workspaceCreatorContext !== context) return;
+    if (hqAttempt && context.entryPoint === 'home_cockpit_create') {
+      // A saved confirmation always wins. Without its reader we cannot know
+      // whether this is a fresh wizard, so leave the ordinary form untouched.
+      if (sequence !== this.anchorCheckSequence || !checkedForRecovery) return;
+      const outcome = await import('./hq-workspace-outcome.js').catch(() => null);
+      if (this.workspaceCreatorContext !== context || sequence !== this.anchorCheckSequence) return;
+      context.hqWorkspaceOutcome = outcome;
+      context.hqWorkspaceAttempt = hqAttempt;
+      this.workspaceMapOrigin = false;
+      this.wizardStep = 2;
+      const name = document.getElementById('folderNameInput');
+      if (name && !name.value) name.value = 'Documents';
+      this.updateWorkspaceNameHint();
+      this.setAnchorMode(true);
+      await this.checkAnchorPath(true);
+      return;
+    }
+    await this.maybeStartWorkspaceBuild(context);
   },
 
   // maybeStartWorkspaceBuild runs on every open. Build mode is offered only
@@ -20339,6 +20387,11 @@ const sessionManager = {
       let compositeLayout = false;
 
       if (ordinaryReview) {
+        creatorContext.hqWorkspaceOutcome?.rememberWorkspaceReview(
+          creatorContext.hqWorkspaceAttempt,
+          ordinaryReview.reference,
+          requestPayload.anchor_path
+        );
         ordinaryReview.accepted = true;
         const groupedOwner = ordinaryReview.owner === 'grouped';
         let outcome;

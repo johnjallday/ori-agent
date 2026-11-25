@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -200,6 +201,44 @@ func TestAnchorChooserCheckIsReadOnly(t *testing.T) {
 	entries, err := os.ReadDir(path)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("check wrote to folder: %v / %v", entries, err)
+	}
+}
+
+func TestCheckKnownDocumentsForAnchor(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows Known Folders are not redirected by HOME")
+	}
+	h, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	home := canonicalAnchorTestDir(t)
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	docs := filepath.Join(home, "Documents")
+	check := func(query string, status int) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		h.HandleWorkspaces(w, httptest.NewRequest(http.MethodGet, "/api/workspaces/anchor/check?"+query, nil))
+		if w.Code != status {
+			t.Fatalf("%s: %d %s", query, w.Code, w.Body.String())
+		}
+	}
+	check("known=downloads", 400)
+	check("known=documents&path=/", 400)
+	check("known=documents", 404)
+	if err := os.Symlink(canonicalAnchorTestDir(t), docs); err != nil {
+		t.Fatal(err)
+	}
+	check("known=documents", 404)
+	if err := os.Remove(docs); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(docs, 0750); err != nil {
+		t.Fatal(err)
+	}
+	check("known=documents", 200)
+	entries, err := os.ReadDir(docs)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("Documents changed: %v %v", entries, err)
 	}
 }
 

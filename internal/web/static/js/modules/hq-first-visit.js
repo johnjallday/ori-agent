@@ -107,9 +107,11 @@ export function firstVisitView({
     note.disabled ||= !notes;
   } else if (note.state === 'completed') note.hint = L.firstNoteDone;
   if (brief.state === 'completed') brief.hint = L.firstBriefDone;
-  if (folder.state === 'completed') {
+  if (folder.resolved) {
+    // This history belongs to the original folder mission, not the new tour.
     folder.title = L.firstFolderTitle;
-    folder.hint = L.firstFolderDone;
+    folder.hint =
+      folder.state === 'completed' ? L.firstFolderDone : 'You skipped folder exploration.';
     folder.action = 'home';
   }
   const count = steps.filter(s => s.resolved).length;

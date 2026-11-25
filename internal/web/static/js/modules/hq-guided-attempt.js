@@ -2,7 +2,7 @@
 // state before claiming success. Starting another attempt invalidates this one.
 const KEY = 'ori.hq.guidedAttempt.v1';
 const MAX_AGE = 2 * 60 * 60 * 1000;
-const paths = new Set(['folder', 'email', 'apps']);
+const paths = new Set(['folder', 'email', 'apps', 'workspace']);
 const identifier = value => typeof value === 'string' && /^[a-z\d][a-z\d_-]{0,127}$/i.test(value);
 
 export function beginHQAttempt(hq, path) {
@@ -29,7 +29,7 @@ export function currentHQAttempt(hq, path, attempt) {
       attempt !== hint.attempt ||
       !Number.isSafeInteger(hint.at) ||
       hint.at > Date.now() ||
-      Date.now() - hint.at > MAX_AGE
+      Date.now() - hint.at > (path === 'workspace' ? 15 * 60 * 1000 : MAX_AGE)
     )
       return null;
     return {
@@ -37,6 +37,7 @@ export function currentHQAttempt(hq, path, attempt) {
       path,
       attempt,
       at: hint.at,
+      ...(path === 'workspace' && hint.arrived === true ? { arrived: true } : {}),
       ...(hint.returned === true ? { returned: true } : {}),
       ...(identifier(hint.workspace) ? { workspace: hint.workspace } : {}),
       ...(path === 'email' && identifier(hint.account) ? { account: hint.account } : {})
@@ -69,6 +70,18 @@ export function receiptHint(location, hq) {
     return null;
   }
 }
+
+export function claimWorkspaceArrival(search) {
+  const hint = guidedHint(search);
+  if (hint?.path !== 'workspace' || hint.arrived) return null;
+  try {
+    sessionStorage.setItem(KEY, JSON.stringify({ ...hint, arrived: true }));
+    return hint;
+  } catch (_) {
+    return null;
+  }
+}
+
 // Dismiss only this tab's saved-tools receipt. A newer journey owns its own hint.
 export function dismissToolsReceipt(hq, attempt) {
   if (!currentHQAttempt(hq, 'apps', attempt)?.returned) return false;
