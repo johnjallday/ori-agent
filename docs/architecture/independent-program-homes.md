@@ -22,9 +22,10 @@ The contract was revalidated on 2026-09-22 against these exact published sources
 
 From 2026-09-30 the reviewed REAPER floor was `v0.9.0` at
 `0a597684f3b181735c961bfb44ed5c2b80994814` (blueprint v10, one REAPER Assistant
-project role, same project team schema/version 1); it is now `v0.12.0` at
-`ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3`, the first release with the project
-reader, with the same blueprint and team. Music Project Management
+project role, same project team schema/version 1); it moved to `v0.12.0`, the
+first release with the project reader, and is now `v0.12.1` at
+`2c4044171f349d74cf2ab0ee6142bbb23a7c571c` (Ask Ori entry removed), with the
+same blueprint and team. Music Project Management
 `v0.1.1` is a guidance-only update that existing Homes take through §6.1.
 
 The design baseline, REAPER 0.7.0, used Reaper Song blueprint version 8 and one

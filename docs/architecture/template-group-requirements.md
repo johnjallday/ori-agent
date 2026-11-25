@@ -556,9 +556,10 @@ artifact's URL, digest, size, mode and binary version were verified against
 that exact commit. It then moved to `0.6.1`, which kept blueprint v7, and the entry became a
 reviewed floor. The floor moved to `0.8.0` (blueprint v9, independent
 Home/project declarations), then to `0.9.0` (blueprint v10, one REAPER
-Assistant project role), and is now the published `0.12.0` release at
-`ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3` (the first with the project reader;
-same blueprint and role). Ori installs the latest compatible stable release at
+Assistant project role), then to `0.12.0` (the first with the project reader),
+and is now the published `0.12.1` release at
+`2c4044171f349d74cf2ab0ee6142bbb23a7c571c` (Ask Ori entry removed; same
+blueprint and role). Ori installs the latest compatible stable release at
 or above that floor, recorded against its exact commit. See
 [REAPER integration](../reaper-integration.md) for the floor.
 

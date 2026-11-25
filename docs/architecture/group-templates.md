@@ -212,8 +212,8 @@ automatically.
 
 ## Limitations
 
-- The reviewed REAPER floor is 0.12.0 at
-  `ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3`, with blueprint v10 and the split
+- The reviewed REAPER floor is 0.12.1 at
+  `2c4044171f349d74cf2ab0ee6142bbb23a7c571c`, with blueprint v10 and the split
   project declaration (one REAPER Assistant). It needs a Music Production Home
   (Home schema/version 1) from Music Project Management 0.1.0 or later.
 - Disposable Chromium acceptance covers music-only, Music-first, REAPER-first,
