@@ -299,6 +299,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-detail-plugins.js',
       'internal/web/static/js/modules/workspace-detail-memory.js',
       'internal/web/static/js/modules/workspace-first-task-banner.js',
+      'internal/web/static/js/modules/workspace-folder-first-look.js',
       'internal/web/static/js/modules/workspace-suggested-ticket.js',
       'internal/web/static/js/modules/workspace-existing-plans.js',
       'internal/web/static/js/modules/workspace-native-mcp.js',
