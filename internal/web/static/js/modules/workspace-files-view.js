@@ -1,6 +1,11 @@
 // Read-only workspace detail surface. Share Home's qualified keys and read
 // adapters, not its editor, menus, tab persistence or cross-workspace index.
-import { loadFilePreview, loadNote, loadSection, sectionKey } from './home-tree-sources.js';
+import {
+  loadFilePreview,
+  loadNote,
+  loadWorkspaceContents,
+  sectionKey
+} from './home-tree-sources.js';
 import {
   findWorkspaceNode,
   directMembers,
@@ -89,11 +94,15 @@ export class WorkspaceFilesView {
     const renamed = this.root.name !== root.name;
     this.root = root;
     if (this.controller) {
-      if (renamed) this.paintTree();
+      if (renamed) {
+        this.tree.setAttribute('aria-label', `${root.name} contents`);
+        this.paintTree();
+        this.paintPreview();
+      }
       return;
     }
     this.controller = new AbortController();
-    this.host.innerHTML = `<aside class="wf-index"><h2 class="wf-kicker">Contents</h2><div class="wf-tree" role="tree" aria-label="${esc(root.name)} contents"></div></aside><article class="wf-preview" aria-label="Item preview"><span class="wf-kicker">Preview</span><p class="wf-crumb"></p><h2 tabindex="-1" aria-live="polite" aria-atomic="true"></h2><div class="wf-body"></div></article>`;
+    this.host.innerHTML = `<aside class="wf-index"><h2 class="wf-kicker">Contents</h2><div class="wf-tree" role="tree" aria-label="${esc(root.name)} contents"></div></aside><article class="wf-preview" aria-label="Item preview"><button type="button" class="wf-back" data-files-back>${iconHTML('back')}Back to files</button><span class="wf-kicker">Preview</span><p class="wf-crumb"></p><h2 tabindex="-1" aria-live="polite" aria-atomic="true"></h2><div class="wf-body"></div></article>`;
     this.tree = this.host.querySelector('[role="tree"]');
     this.article = this.host.querySelector('article');
     const options = { signal: this.controller.signal };
@@ -101,10 +110,60 @@ export class WorkspaceFilesView {
     this.tree.addEventListener('keydown', e => this.keydown(e), options);
     this.paintTree();
     this.paintPreview();
+    this.syncExpanded();
+  }
+
+  // On re-entry only re-read sections reached through live, expanded parents.
+  // A remembered key is not permission to fetch a row or a member.
+  syncExpanded() {
+    for (const row of this.rows) {
+      if (!this.expanded.has(row.id)) continue;
+      if (row.kind === 'members' && !this.membershipStatus) void this.loadMembers();
+      if (row.kind === 'section' && !this.sections.has(row.id)) void this.load(row);
+    }
+    this.restoreSelection();
+  }
+
+  restoreSelection() {
+    if (!this.saved) return;
+    const row = this.rows.find(r => r.id === this.saved.key);
+    const pending =
+      this.membershipStatus === 'loading' ||
+      [...this.sections.values()].some(s => !s.rows && !s.error);
+    if (!row && pending) return;
+    const saved = this.saved;
+    this.saved = null;
+    this.focusKey =
+      row?.id || saved.ancestors.find(key => this.rows.some(r => r.id === key)) || this.root.id;
+    if (row && ['file', 'note'].includes(row.kind)) {
+      this.showPreview = saved.showPreview;
+      void this.select(row, { restore: true });
+    } else {
+      this.branchSelection = this.focusKey;
+      this.paintTree();
+    }
+    this.tree.scrollTop = saved.scroll;
   }
 
   leave() {
     if (!this.controller) return;
+    // Store keys, never the content or the membership snapshot. A fast second
+    // switch while revalidating must not replace the original saved position.
+    if (!this.saved && this.tree) {
+      const key = this.selected?.id || this.focusKey;
+      const ancestors = [];
+      let r = this.rows.find(row => row.id === key);
+      while (r?.parent) {
+        ancestors.push(r.parent);
+        r = this.rows.find(row => row.id === r.parent);
+      }
+      this.saved = {
+        key,
+        ancestors,
+        scroll: this.tree.offsetHeight ? this.tree.scrollTop : this.previewScroll,
+        showPreview: this.showPreview
+      };
+    }
     this.controller.abort();
     this.controller = null;
     this.membershipVersion++;
@@ -113,7 +172,9 @@ export class WorkspaceFilesView {
     this.sections.clear();
     this.previewVersion++;
     this.selected = this.value = this.error = null;
+    this.showPreview = false;
     this.host.replaceChildren();
+    this.tree = this.article = null;
   }
 
   // Only the confirmed root's subtree is retained. Neither the global tree
@@ -137,6 +198,7 @@ export class WorkspaceFilesView {
     }
     this.paintTree();
     this.paintPreview();
+    if (this.rows) this.syncExpanded();
   }
 
   async loadMembers() {
@@ -232,7 +294,7 @@ export class WorkspaceFilesView {
       .map((r, i) => {
         const branch = ['workspace', 'group', 'section', 'members', 'folder'].includes(r.kind);
         const expanded = this.expanded.has(r.id);
-        return `<div role="treeitem" tabindex="${r.id === this.focusKey ? 0 : -1}" data-row="${i}" data-key="${esc(r.id)}" aria-level="${r.level}" aria-selected="${this.selected?.id === r.id}" ${branch ? `aria-expanded="${expanded}"` : ''} style="--wf-level:${r.level}">${branch ? iconHTML(expanded ? 'caretDown' : 'caretRight', { size: 12 }) : '<span class="wf-spacer"></span>'}${iconHTML(r.kind === 'members' ? 'linkedFolders' : rowIconName(r))}<span>${esc(r.label)}</span></div>`;
+        return `<div role="treeitem" tabindex="${r.id === this.focusKey ? 0 : -1}" data-row="${i}" data-key="${esc(r.id)}" aria-level="${r.level}" aria-selected="${(this.selected?.id || this.branchSelection) === r.id}" ${branch ? `aria-expanded="${expanded}"` : ''} style="--wf-level:${r.level}">${branch ? iconHTML(expanded ? 'caretDown' : 'caretRight', { size: 12 }) : '<span class="wf-spacer"></span>'}${iconHTML(r.kind === 'members' ? 'linkedFolders' : rowIconName(r))}<span>${esc(r.label)}</span></div>`;
       })
       .join('');
     if (focused) this.focusRow(this.focusKey);
@@ -247,10 +309,21 @@ export class WorkspaceFilesView {
     const el = this.tree.children[index];
     el.tabIndex = 0;
     el.focus({ preventScroll: true });
-    el.scrollIntoView({ block: 'nearest' });
+    // Scroll within Contents, not the entire workspace page.
+    const box = el.getBoundingClientRect(),
+      tree = this.tree.getBoundingClientRect();
+    if (box.top < tree.top) this.tree.scrollTop += box.top - tree.top;
+    else if (box.bottom > tree.bottom) this.tree.scrollTop += box.bottom - tree.bottom;
   }
 
   click(event) {
+    if (event.target.closest('[data-files-back]')) {
+      this.showPreview = false;
+      this.host.classList.remove('wf-reading');
+      this.tree.scrollTop = this.previewScroll || 0;
+      this.focusRow(this.selected?.id || this.focusKey);
+      return;
+    }
     const target = event.target.closest('[data-row]');
     if (target && this.tree.contains(target)) {
       const row = this.rows[Number(target.dataset.row)];
@@ -297,6 +370,7 @@ export class WorkspaceFilesView {
   }
 
   activate(row) {
+    this.saved = null;
     if (row.kind === 'file' || row.kind === 'note') {
       void this.select(row);
       return;
@@ -307,13 +381,19 @@ export class WorkspaceFilesView {
       return;
     }
     if (row.kind === 'status') return;
-    if (this.expanded.has(row.id)) this.expanded.delete(row.id);
-    else {
+    if (this.expanded.has(row.id)) {
+      this.expanded.delete(row.id);
+      if (this.selected && !this.visibleRows().some(r => r.id === this.selected.id)) {
+        ++this.previewVersion;
+        this.selected = this.value = this.error = null;
+        this.branchSelection = row.id;
+        this.paintPreview();
+      }
+    } else {
       this.expanded.add(row.id);
-      if (row.kind === 'members' && !this.membershipStatus) void this.loadMembers();
-      if (row.kind === 'section' && !this.sections.has(row.id)) void this.load(row);
     }
     this.paintTree();
+    this.syncExpanded();
   }
 
   async load(row) {
@@ -322,8 +402,7 @@ export class WorkspaceFilesView {
     this.paintTree();
     let result;
     try {
-      result = await loadSection(row.workspaceId, row.section, {
-        limit: Infinity,
+      result = await loadWorkspaceContents(row.workspaceId, row.section, {
         fetchImpl: this.scopedFetch()
       });
     } catch (error) {
@@ -332,6 +411,7 @@ export class WorkspaceFilesView {
     if (this.sections.get(row.id) !== pending) return;
     this.sections.set(row.id, result);
     this.paintTree();
+    this.restoreSelection();
   }
 
   scopedFetch() {
@@ -339,12 +419,21 @@ export class WorkspaceFilesView {
     return (url, init) => fetch(url, { ...init, signal });
   }
 
-  async select(row) {
+  async select(row, { restore = false } = {}) {
     const version = ++this.previewVersion;
     this.selected = row;
+    this.branchSelection = null;
+    if (!restore) {
+      this.previewScroll = this.tree?.scrollTop || 0;
+      this.showPreview = true;
+    }
     this.value = this.error = null;
     this.paintTree();
     this.paintPreview();
+    if (!restore && globalThis.window?.matchMedia('(max-width: 700px)').matches) {
+      this.article.querySelector('h2').focus({ preventScroll: true });
+      this.host.scrollIntoView({ behavior: 'instant', block: 'start' });
+    }
     try {
       const value = await readPreview(row, { fetchImpl: this.scopedFetch() });
       if (version !== this.previewVersion) return;
@@ -358,6 +447,7 @@ export class WorkspaceFilesView {
 
   paintPreview() {
     const row = this.selected;
+    this.host.classList.toggle('wf-reading', !!row && !!this.showPreview);
     const owner =
       row?.workspaceId === this.root.id ? this.root.name : this.members.get(row?.workspaceId)?.name;
     this.article.querySelector('.wf-crumb').textContent = row

@@ -145,7 +145,7 @@ test('the populated map groups seven existing tiles without a layout or staffing
   await installLocalCdn(page);
   const home = await listedHome(request);
   await page.goto(`/workspaces/${home.folder_slug}?mode=map`);
-  const button = page.getByRole('button', { name: 'By folder', exact: true });
+  const button = page.getByRole('button', { name: 'Group projects by folder', exact: true });
   await expect(button).toBeVisible({ timeout: 30000 });
   const before = await musicHomeSnapshot(request);
   await button.click();

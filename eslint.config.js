@@ -335,6 +335,7 @@ export default defineConfig([
       'internal/web/static/js/modules/workspace-tags-card.js',
       'internal/web/static/js/modules/workspace-command.js',
       'internal/web/static/js/modules/workspace-command-chrome.js',
+      'internal/web/static/js/modules/workspace-files-view.js',
       'internal/web/static/js/modules/workspace-panels.js',
       'internal/web/static/js/modules/workspace-overview.js',
       'internal/web/static/js/modules/workspace-ticket-url-state.js',

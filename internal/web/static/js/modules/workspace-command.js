@@ -4055,11 +4055,12 @@ export class WorkspaceCommandView {
       this.filesView.leave();
       this.filesView = null;
     }
-    host.hidden = this.viewMode !== 'files' || !root?.id;
-    if (host.hidden) {
+    if (this.viewMode !== 'files' || !root?.id) {
       this.filesView?.leave();
+      host.hidden = true;
       return;
     }
+    host.hidden = false;
     this.filesView ??= new WorkspaceFilesView(host, root);
     this.filesView.enter(root);
   }
@@ -14527,7 +14528,7 @@ export class WorkspaceCommandView {
 
   musicFolderToggleHTML() {
     return this.canBrowseMusicFolders()
-      ? `<button type="button" class="ws-cmd-nav-btn" data-cmd-by-folder aria-pressed="${!!this.musicFolders}">${this.musicFolders ? 'Saved layout' : 'By folder'}</button>`
+      ? `<button type="button" class="ws-cmd-nav-btn" data-cmd-by-folder aria-pressed="${!!this.musicFolders}">${this.musicFolders ? 'Saved layout' : 'Group projects by folder'}</button>`
       : '';
   }
 
@@ -14613,7 +14614,7 @@ export class WorkspaceCommandView {
     if (this.detachmentMapEl) this.detachmentMapEl.inert = false;
     const button = this.container?.querySelector('[data-cmd-by-folder]');
     if (button) {
-      button.textContent = 'By folder';
+      button.textContent = 'Group projects by folder';
       button.setAttribute('aria-pressed', 'false');
     }
   }

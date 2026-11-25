@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { previewHTML, readPreview, WorkspaceFilesView } from './workspace-files-view.js';
-import { filesToRows, FILE_PREVIEW_LIMIT, loadSection } from './home-tree-sources.js';
+import { filesToRows, FILE_PREVIEW_LIMIT, loadWorkspaceContents } from './home-tree-sources.js';
 
 const text = body => async () => new Response(body);
 const note = {
@@ -17,10 +17,10 @@ const file = (path, size = 10) =>
 test('the full workspace listing keeps nested, empty and beyond-cap entries in place', async () => {
   const files = [
     { relative_path: 'Samples/Empty', is_dir: true },
+    { relative_path: 'Samples/Z-last.txt', status: 'missing' },
     ...Array.from({ length: 110 }, (_, i) => ({ relative_path: `Samples/Take ${i}.txt` }))
   ];
-  const listing = await loadSection('album', 'files', {
-    limit: Infinity,
+  const listing = await loadWorkspaceContents('album', 'files', {
     fetchImpl: text(JSON.stringify({ files }))
   });
   const rows = listing.rows[0].children;

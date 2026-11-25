@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
@@ -129,6 +129,111 @@ test('group keeps its identity while reading same-named files in linked albums',
     );
   }
   expect(seen).toEqual(expected);
+});
+
+test('the scoped map keeps its panned center and zoom across Files', async ({ page }) => {
+  const { home, demo, albums } = await musicGroup(page);
+  await page.goto(`/workspaces/${home.folder_slug}?mode=map`);
+  await ready(page);
+  const viewport = page.locator('[data-ws-map-viewport]');
+  await expect(viewport).toBeVisible();
+  const camera = () => page.evaluate(() => (window as any).OriWorkspaceMap.getCamera());
+  const writes: string[] = [];
+  page.on('request', r => {
+    // The existing assistant independently enrolls the page's lead conversation.
+    // It is not a Files action; still reject every file, member and layout write.
+    if (
+      r.method() !== 'GET' &&
+      r.url().includes('/api/') &&
+      !r.url().endsWith('/lead-conversation/open')
+    )
+      writes.push(r.url());
+  });
+  const initial = await camera();
+  await viewport.press('+');
+  await viewport.press('ArrowRight');
+  const moved = await camera();
+  expect(moved.zoom).not.toBe(initial.zoom);
+  expect(moved.centerX).not.toBe(initial.centerX);
+  await shot(page, 'map-before');
+  await mode(page, 'files').click();
+  await row(page, 'Linked workspaces').click();
+  await row(page, demo.name).click();
+  await row(page, albums[0].name).click();
+  await keyed(page, `${albums[0].id}/s/files`).click();
+  await row(page, 'Mix notes.md').click();
+  await expect(reader(page)).toContainText('Lift the chorus.');
+  await mode(page, 'map').click();
+  await expect(viewport).toBeVisible();
+  expect(await camera()).toEqual(moved);
+  await shot(page, 'map-after');
+  await page.goBack();
+  await expect(mode(page, 'files')).toHaveAttribute('aria-pressed', 'true');
+  await expect(reader(page)).toContainText('Lift the chorus.');
+  await expect(row(page, 'Mix notes.md')).toHaveAttribute('aria-selected', 'true');
+  await shot(page, 'reopened');
+  await page.goForward();
+  await expect(viewport).toBeVisible();
+  expect(await camera()).toEqual(moved);
+  await expect(reader(page).locator('[role=tree]')).toHaveCount(0);
+  expect(writes).toEqual([]);
+});
+
+test('phone returns to a keyboard-selected row, then reconciles a removed file', async ({
+  page
+}) => {
+  const ws = await workspace(page, 'Production journal');
+  const dir = await files(page, ws.id, 'Sessions');
+  for (let i = 0; i < 110; i++) writeFileSync(join(dir, `Take ${i}.txt`), `Session ${i}`);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.addInitScript(() => localStorage.setItem('ori-theme', 'dark'));
+  await page.goto(`/workspaces/${ws.folder_slug}?mode=files`);
+  await ready(page);
+  await row(page, ws.name).focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowRight');
+  await row(page, 'Sessions').waitFor();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  const last = row(page, 'Take 109.txt');
+  await last.waitFor();
+  await row(page, 'Sessions').press('End');
+  await page.keyboard.press('ArrowUp');
+  await expect(last).toBeFocused();
+  const scroll = await reader(page)
+    .locator('.wf-tree')
+    .evaluate(el => el.scrollTop);
+  expect(scroll).toBeGreaterThan(0);
+  await page.keyboard.press('Enter');
+  await expect(reader(page).locator('.wf-body')).toHaveText('Session 109');
+  await expect(reader(page).locator('.wf-preview h2')).toBeFocused();
+  await expect(last).toBeHidden();
+  await shot(page, 'phone-preview');
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(last).toBeVisible();
+  await page.setViewportSize({ width: 375, height: 812 });
+  const back = reader(page).getByRole('button', { name: 'Back to files' });
+  await back.press('Enter');
+  await expect(last).toBeFocused();
+  await expect(back).toBeHidden();
+  await shot(page, 'phone-tree');
+  expect(
+    await reader(page)
+      .locator('.wf-tree')
+      .evaluate(el => el.scrollTop)
+  ).toBe(scroll);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await mode(page, 'details').click();
+  unlinkSync(join(dir, 'Take 109.txt'));
+  await mode(page, 'files').click();
+  await expect(row(page, 'Sessions')).toHaveAttribute('aria-selected', 'true');
+  await expect(last).toHaveCount(0);
+  await expect(mode(page, 'files')).toBeFocused();
+  await mode(page, 'tickets').click();
+  await expect(page.locator('#workspace-detail-tickets-surface')).toBeVisible();
+  await expect(reader(page)).toBeHidden();
+  await mode(page, 'details').click();
+  await expect(page.locator('#workspaceNextActionRegion')).toBeVisible();
 });
 
 test('empty group distinguishes unavailable membership and retries in place', async ({ page }) => {

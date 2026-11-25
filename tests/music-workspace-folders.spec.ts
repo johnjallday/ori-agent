@@ -79,7 +79,7 @@ test('saved map tiles show scoped source folders without a layout write', async 
   expect((await musicHomeSnapshot(page.request)).positions).toEqual(snapshot.positions);
 });
 
-test('child By folder opens only member tiles and returns to the same saved layout', async ({
+test('child Group projects by folder opens only member tiles and returns to the same saved layout', async ({
   page
 }) => {
   const { snapshot, group } = await groupFixture(page);
@@ -114,6 +114,7 @@ test('child By folder opens only member tiles and returns to the same saved layo
   });
   await page.goto(route);
   const toggle = page.locator('[data-cmd-by-folder]');
+  await expect(toggle).toHaveAccessibleName('Group projects by folder');
   await toggle.focus();
   await toggle.press('Enter');
   const folders = page.getByRole('region', { name: 'Workspaces by folder' });
@@ -135,7 +136,9 @@ test('child By folder opens only member tiles and returns to the same saved layo
   await page.goto(route);
   await toggle.press('Enter');
   await expect(folders).toBeVisible();
+  await expect(toggle).toHaveAccessibleName('Saved layout');
   await toggle.press('Space');
+  await expect(toggle).toHaveAccessibleName('Group projects by folder');
   await expect(toggle).toBeFocused();
   await expect(folders).toHaveCount(0);
   await page

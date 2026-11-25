@@ -12,7 +12,7 @@ export async function verifyMusicFolderViews(page: Page, route: string, part: 's
     await p.goto(route);
     await expect(p.locator('html')).toHaveAttribute('data-bs-theme', 'dark');
     const selector = part === 'sheet' ? '[data-library-sheet]' : '.music-folder-view';
-    if (part === 'map') await p.getByRole('button', { name: 'By folder', exact: true }).click();
+    if (part === 'map') await p.getByRole('button', { name: 'Group projects by folder', exact: true }).click();
     const surface = p.locator(selector);
     const control =
       part === 'map'

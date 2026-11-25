@@ -503,6 +503,7 @@ export class WorkspaceDetailPage {
     this.membersPanel?.destroy?.();
     const command = window.workspaceCommand;
     if (command?.page === this) {
+      command.filesView?.leave();
       command.disposeNextAction?.();
       command.workspacePanels?.destroy?.();
       document.removeEventListener?.('ori:workspace-goal-state', command.boundGoalState);
