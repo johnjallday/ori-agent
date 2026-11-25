@@ -62,7 +62,7 @@ export class HQCaptureDraft {
         { text: this.text, source_ref: this.ref },
         this.id
       );
-      if (!capture?.note?.startsWith('Inbox/'))
+      if (typeof capture?.note !== 'string' || !/^Inbox\/[^/\\]+\.md$/u.test(capture.note))
         throw new Error('No save receipt was returned. Try again to check the save.');
       this.text = '';
       this.ref = '';

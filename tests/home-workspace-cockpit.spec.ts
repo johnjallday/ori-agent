@@ -2265,6 +2265,8 @@ test.describe('Quick Capture dialog', () => {
     await expect(hq).toBeVisible();
     await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(0);
 
+    // Wait for the initial map remount before opening its help panel.
+    await settledHomeGeometry(page);
     // Help's heading must be topmost where it is drawn.
     await page.locator('[data-map-help]').click();
     const heading = page.locator('#wsMapHelpPanel h4');

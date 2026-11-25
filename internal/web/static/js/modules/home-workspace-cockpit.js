@@ -2242,11 +2242,10 @@ import {
     draggingId: '',
     workspaceRoot: { state: 'loading', path: '', custom: false },
     undoStack: [],
-    // Personal HQ status, read once and refreshed on HQ actions. Quick Capture
-    // needs it to know where a capture goes (FR102/FR104).
+    // Personal HQ status for the reserved map site, refreshed on HQ actions.
     hqStatus: null,
     // 'loading' | 'ready' | 'error'. A status not read yet, or not readable,
-    // is not "no Personal HQ": capture says which it is (FR120/FR121).
+    // is not "no Personal HQ".
     hqStatusState: 'loading',
     // City Economy. null until GET /api/economy answers successfully, so "the
     // economy is switched off" and "the user has nothing yet" stay
@@ -6822,7 +6821,7 @@ import {
   window.addEventListener('load', consumeFolderDeepLink);
 
   // Personal HQ provisioning can complete while Home is open; re-read the
-  // status so Quick Capture stops explaining a requirement already met.
+  // status to update the reserved map site.
   window.addEventListener('ori:personal-hq-changed', () => void refreshHQStatus());
   window.addEventListener('ori:plugin-updates-changed', event => {
     const count = Number(event.detail?.count);
