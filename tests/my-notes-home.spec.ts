@@ -52,6 +52,28 @@ async function notes(request: APIRequestContext) {
   return (await response.json()).second_brain;
 }
 
+// Every notes request the page makes, as "METHOD /path?query" below the notes
+// endpoint. Arrival may only read; anything else here is a regression.
+function recordNotesRequests(page: Page) {
+  const seen: string[] = [];
+  page.on('request', req => {
+    const url = new URL(req.url());
+    if (url.pathname.startsWith(endpoint))
+      seen.push(`${req.method()} ${url.pathname.slice(endpoint.length)}${url.search}`);
+  });
+  return seen;
+}
+
+const notebookBrowser = (page: Page) => page.getByRole('region', { name: 'Notebook browser' });
+const folders = (page: Page) => notebookBrowser(page).getByRole('navigation', { name: 'Folders' });
+const noteList = (page: Page) => notebookBrowser(page).locator('.my-notes-list');
+const reader = (page: Page) => notebookBrowser(page).locator('.my-notes-reader');
+
+async function listSettled(page: Page) {
+  await expect(noteList(page).getByText('Loading names…')).toHaveCount(0);
+  await expect(folders(page).getByText('Loading…')).toHaveCount(0);
+}
+
 test('Home Map and Tree link to an independent, refreshable My Notes page', async ({
   page,
   request
@@ -65,6 +87,10 @@ test('Home Map and Tree link to an independent, refreshable My Notes page', asyn
   await expect(page.getByRole('heading', { name: 'Meet your assistant first' })).toBeVisible();
   await capture(page, '01-setup-needed');
   await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  await expect(page.locator('#cockpitCaptureStatus')).toContainText('Meet your assistant');
+  await expect(page.locator('#cockpitCaptureSave')).toBeDisabled();
+  await page.keyboard.press('Escape');
   // Each Home destination in the Desk rail, and the view it leaves in the cockpit.
   for (const [destination, view] of [
     ['map', 'map'],
@@ -83,7 +109,7 @@ test('Home Map and Tree link to an independent, refreshable My Notes page', asyn
   expect(await notes(request)).toEqual(before);
 });
 
-test('explicit notebook setup is reusable and page entry only reads the connection', async ({
+test('explicit notebook setup is reusable and arrival only reads the connection, two folders and Inbox kinds', async ({
   page,
   request
 }) => {
@@ -100,6 +126,11 @@ test('explicit notebook setup is reusable and page entry only reads the connecti
   await page.goto('/my-notes');
   await expect(page.getByRole('heading', { name: 'Build My HQ first' })).toBeVisible();
   await capture(page, '02-hq-required');
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  await expect(page.locator('#cockpitCaptureStatus')).toContainText('Build My HQ');
+  await expect(page.locator('#cockpitCaptureSave')).toBeDisabled();
+  await page.goto('/my-notes');
   const assistant = await request.get('/api/personal-assistant');
   expect(assistant.ok()).toBeTruthy();
   const state = await assistant.json();
@@ -126,23 +157,231 @@ test('explicit notebook setup is reusable and page entry only reads the connecti
   await expect.poll(async () => (await notes(request)).status).toBe('connected');
   const source = await notes(request);
   expect(source.source.origin).toBe('created_by_ori');
-  const reads: string[] = [];
-  page.on('request', req => {
-    if (req.url().includes(endpoint))
-      reads.push(`${req.method()} ${new URL(req.url()).search || new URL(req.url()).pathname}`);
-  });
+  const reads = recordNotesRequests(page);
   await page.reload();
   await expect(
     page.getByRole('heading', { name: source.source.name, level: 2, exact: true })
   ).toBeVisible();
+  // Arrival opens the notebook at Inbox, without a Browse step or settings.
+  await expect(page.getByRole('button', { name: 'Browse notebook' })).toHaveCount(0);
+  await expect(noteList(page).getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  await expect(folders(page).getByRole('button', { name: 'Inbox', exact: true })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
+  await listSettled(page);
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
+  await expect(page.getByRole('heading', { name: 'My Notes', level: 1 })).toBeFocused();
+  // Nothing written yet: the writable notebook invites a first note.
+  await expect(page.getByRole('button', { name: 'Write your first note' })).toBeVisible();
   await capture(page, '04-connected-created');
-  expect(reads).toEqual(['GET ?view=connection']);
+  // The connection, the root (for Folders), Inbox, and Inbox's kinds (to tell
+  // setup notes from the person's): nothing recursive, no note bodies, no
+  // writes and no look or index started by arriving.
+  const ref = encodeURIComponent(source.browse_ref);
+  expect([...reads].sort()).toEqual(
+    [
+      'GET ?view=connection',
+      'GET /inbox',
+      `GET /browse?ref=${ref}`,
+      `GET /browse?ref=${ref}&part=Inbox`
+    ].sort()
+  );
   expect(await notes(request)).toEqual(source);
-  await page.getByRole('button', { name: 'Inbox', exact: true }).click();
-  await expect(page.getByRole('tab', { name: /Inbox/ })).toBeFocused();
+  // The explicit Inbox destination still opens its view and capture box.
+  await page.goto('/my-notes?view=inbox');
+  await expect(page.getByRole('tab', { name: /Inbox/, selected: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save to Inbox' })).toBeVisible();
 });
+
+test('Home quick note saves one Markdown file and its receipt opens the source, never work', async ({
+  page,
+  request
+}) => {
+  const source = await notes(request);
+  const hq = (await (await request.get('/api/personal-hq/status')).json()).status.workspace_id;
+  const work = async () =>
+    Promise.all(
+      [
+        `/api/orchestration/backlog?workspace_id=${hq}`,
+        '/api/personal-hq/followups',
+        `/api/workspaces/${hq}/runs`
+      ].map(async path => {
+        const response = await request.get(path);
+        expect(response.ok()).toBeTruthy();
+        return response.json();
+      })
+    );
+  const before = await work();
+  const inbox = join(source.source.path, 'Inbox');
+  const existing = new Set(readdirSync(inbox));
+  const posts: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST') posts.push(new URL(req.url()).pathname);
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  const field = page.locator('#cockpitCaptureTitle');
+  const save = page.getByRole('button', { name: 'Save to Inbox' });
+  await expect(save).toBeEnabled();
+  const notAKey = 'sk-ant-api03-' + 'x'.repeat(32);
+  await field.fill(notAKey);
+  await save.click();
+  await expect(page.locator('#cockpitCaptureStatus')).toContainText('looks like a secret');
+  await expect(field).toHaveValue(notAKey);
+  const text = 'Maya said disposal costs extra.';
+  await field.fill(text);
+  // A connection change must strand this exact draft, not send it elsewhere.
+  await page.route(
+    `**${endpoint}?view=connection`,
+    route =>
+      route.fulfill({
+        json: { second_brain: { ...source, source: { ...source.source, origin: 'connected' } } }
+      }),
+    { times: 1 }
+  );
+  await page.evaluate(() => document.dispatchEvent(new Event('personal-assistant:second-brain')));
+  await expect(save).toBeDisabled();
+  await expect(page.locator('#cockpitCaptureStatus')).toContainText('read-only');
+  await expect(field).toHaveValue(text);
+  await capture(page, 'home-unavailable');
+  await page.evaluate(() => document.dispatchEvent(new Event('personal-assistant:second-brain')));
+  await expect(save).toBeEnabled();
+  // Lose the first response *after* the real backend has committed.
+  await page.route(
+    `**${endpoint}/capture`,
+    async route => {
+      const response = await route.fetch();
+      expect(response.ok()).toBeTruthy();
+      await route.abort();
+    },
+    { times: 1 }
+  );
+  await save.click();
+  await expect(save).toBeEnabled();
+  await expect(field).toHaveValue(text);
+  await field.press('Control+Enter');
+  const receipt = page.locator('#cockpitCaptureReceipt');
+  await expect(receipt).toContainText('Saved to My Notes → Inbox.');
+  await capture(page, 'home-receipt');
+  await receipt.getByRole('link', { name: 'Open note' }).click();
+  await expect(reader(page)).toContainText(text);
+  const added = readdirSync(inbox).filter(name => !existing.has(name));
+  expect(added).toHaveLength(1);
+  expect(new URLSearchParams(new URL(page.url()).hash.slice(1)).get('note')).toBe(added[0]);
+  expect(readFileSync(join(inbox, added[0]), 'utf8')).toContain(text);
+  expect(await work()).toEqual(before);
+  expect(posts.filter(path => /backlog|followups|\/runs|\/tickets/.test(path))).toEqual([]);
+  expect(posts.filter(path => path === endpoint + '/capture')).toHaveLength(3);
+  await expect(reader(page).getByRole('heading', { name: 'Suggested ticket' })).toHaveCount(0);
+  await capture(page, 'home-reference-reader');
+});
+
+test('only the comparison in mixed Inbox prose is offered for review', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  await page
+    .locator('#cockpitCaptureTitle')
+    .fill('Maya said disposal costs extra. Compare both roofing quotes before Friday.');
+  await page.getByRole('button', { name: 'Save to Inbox' }).click();
+  await page.locator('#cockpitCaptureReceipt').getByRole('link', { name: 'Open note' }).click();
+  await expect(reader(page).getByRole('heading', { name: 'Suggested ticket' })).toHaveCount(1);
+  await expect(reader(page).locator('blockquote')).toHaveText(
+    'Compare both roofing quotes before Friday.'
+  );
+  await expect(reader(page)).toContainText('Choose workspace');
+  await capture(page, 'inbox-comparison');
+});
+
+test('confirm in House, open the linked ticket, and keep a sibling as a note', async ({
+  page,
+  request
+}) => {
+  const created = await post(request, '/api/workspaces', {
+    name: 'House',
+    folder_slug: `house-review-${Date.now()}`,
+    blank: true
+  });
+  const house = created.folder || created.workspace || created;
+  const text =
+    'Maya said disposal costs extra. Compare both roofing quotes before Friday. Ask Maya about disposal.';
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  await page.locator('#cockpitCaptureTitle').fill(text);
+  await page.getByRole('button', { name: 'Save to Inbox' }).click();
+  await page.locator('#cockpitCaptureReceipt').getByRole('link', { name: 'Open note' }).click();
+  const cards = reader(page).locator('.my-notes-suggestion');
+  await expect(cards).toHaveCount(2);
+  const compare = cards.first();
+  const create = compare.getByRole('button', { name: 'Create ticket' });
+  await expect(create).toBeDisabled();
+  await compare.getByRole('combobox').selectOption(house.id);
+  await capture(page, 'review-confirm-destination');
+  await create.click();
+  const link = compare.getByRole('link', { name: 'Open ticket in House', exact: true });
+  await expect(link).toBeVisible();
+  const url = new URL(await link.getAttribute('href')!, 'http://localhost');
+  const id = url.searchParams.get('ticket');
+  const res = await request.get(`/api/workspaces/${house.id}/tickets/${id}`);
+  expect(res.ok()).toBeTruthy();
+  const ticket = await res.json();
+  expect(ticket).toMatchObject({
+    title: 'Compare both roofing quotes before Friday',
+    state: 'backlog',
+    source: 'personal_note',
+    owning_workspace_id: house.id
+  });
+  expect(ticket.assignee || ticket.current_run_id || ticket.schedule_enabled).toBeFalsy();
+  expect(ticket.linked_note_ids || []).toEqual([]);
+  await capture(page, 'review-linked');
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`ticket=${id}`));
+  await expect(page.getByText(ticket.title, { exact: true }).first()).toBeVisible();
+  await page.goBack();
+  await cards.nth(1).getByRole('button', { name: 'Keep as note' }).click();
+  await expect(cards).toHaveCount(1);
+  await page.reload();
+  await expect(link).toBeVisible();
+  await expect(cards).toHaveCount(1);
+  await expect(reader(page)).toContainText(text);
+  await capture(page, 'review-after-dismiss');
+});
+
+for (const [theme, width] of [
+  ['dark', 390],
+  ['light', 1440]
+] as const) {
+  test(`keyboard review stays reachable in ${theme} at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 840 });
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    await page.goto('/');
+    const open = page.getByRole('button', { name: 'Quick note', exact: true });
+    await open.focus();
+    await open.press('Enter');
+    const field = page.locator('#cockpitCaptureTitle');
+    await field.fill('Compare the inspection reports.');
+    await field.press('Control+Enter');
+    const receipt = page.locator('#cockpitCaptureReceipt').getByRole('link', { name: 'Open note' });
+    await receipt.focus();
+    await receipt.press('Enter');
+    const card = reader(page).locator('.my-notes-suggestion');
+    await expect(card).toBeVisible();
+    const select = card.getByRole('combobox');
+    await select.focus();
+    await select.press('h'); // native select type-ahead: House
+    const create = card.getByRole('button', { name: 'Create ticket' });
+    await expect(create).toBeEnabled();
+    await select.press('Tab');
+    await expect(create).toBeFocused();
+    expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await capture(page, `review-${theme}-${width}`);
+    await create.press('Tab');
+    const keep = card.getByRole('button', { name: 'Keep as note' });
+    await expect(keep).toBeFocused();
+    await keep.press('Enter');
+    await expect(card).toHaveCount(0);
+  });
+}
 
 test('HQ Overview saves to the personal Inbox and its Map station navigates', async ({
   page,
@@ -200,8 +439,8 @@ test('HQ Overview saves to the personal Inbox and its Map station navigates', as
   expect(snapshot(daily).join('\n')).toContain('Reviewed the field notebook and planned the week.');
   await page.goBack();
   await capturePanel.getByRole('link', { name: 'Open My Notes' }).click();
-  await page.getByRole('button', { name: 'Inbox', exact: true }).click();
-  await expect(page.locator('[data-notes-section="inbox"]')).toContainText(/idea from hq/i);
+  // My Notes opens on Inbox, where the HQ capture landed.
+  await expect(noteList(page).getByRole('button', { name: /idea-from-hq/i })).toBeVisible();
   await capture(page, '10-hq-note-in-personal-inbox');
   await page.goto(base + '?mode=map');
   await page
@@ -266,7 +505,8 @@ test('a Workspace Note stays in workspace A and a personal capture stays in My N
   await expect(page.getByText(title, { exact: true })).toHaveCount(0);
   await page.goto('/');
   await page.getByRole('link', { name: 'My Notes' }).click();
-  await page.getByRole('button', { name: 'Inbox', exact: true }).click();
+  await expect(noteList(page).getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  await page.goto('/my-notes?view=inbox');
   const text = 'A personal reminder, not a workspace document';
   const tools = page.locator('[data-my-notes-tools]');
   const inbox = tools.locator('[data-notes-section="inbox"]');
@@ -294,7 +534,7 @@ test('a Workspace Note stays in workspace A and a personal capture stays in My N
   expect((await notes(request)).browse_ref).toEqual(personal.browse_ref);
 });
 
-test('browse a created notebook on demand, with guarded preview and folder fallback', async ({
+test('a created notebook opens on Inbox; Projects → House reads the project note', async ({
   page,
   request
 }) => {
@@ -307,6 +547,13 @@ test('browse a created notebook on demand, with guarded preview and folder fallb
     request_id: 'browse-preview-capture'
   });
   const file = captureBody.capture.note.split('/').at(-1);
+  // A real project note Ori wrote, through the reviewed fill-in consent.
+  await post(request, `${endpoint}/fill-in`, { decision: 'allow', request_id: 'browse-fill-in' });
+  await post(request, `${endpoint}/project`, {
+    name: 'House',
+    answer: 'Renovate the kitchen before spring.',
+    request_id: 'browse-house-project'
+  });
   const inbox = join(root, 'Inbox');
   const nested = join(root, 'Projects', 'Research', 'Drafts');
   mkdirSync(nested, { recursive: true });
@@ -314,41 +561,318 @@ test('browse a created notebook on demand, with guarded preview and folder fallb
   writeFileSync(join(root, 'Projects', 'Research', 'scratch.md'), 'Private project notes');
   const before = snapshot(root);
   await page.goto('/my-notes');
-  await page.getByRole('button', { name: 'Browse notebook' }).click();
-  const browser = page.getByRole('region', { name: 'Browse notebook' });
-  await expect(browser.getByRole('heading', { name: 'Inbox' })).toBeFocused();
-  await browser.getByRole('button', { name: `Check Ori preview for ${file}` }).click();
-  await expect(browser.getByText(text)).toBeVisible();
+  await expect(noteList(page).getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  await noteList(page).getByRole('button', { name: file, exact: true }).click();
+  await expect(reader(page).getByText(text)).toBeVisible();
+  await expect(reader(page).getByText(`Inbox / ${file}`)).toBeVisible();
+  await expect(noteList(page).getByRole('button', { name: file, exact: true })).toBeFocused();
   await capture(page, '05-inbox-preview');
-  await browser.getByRole('button', { name: 'Check Ori preview for personal.md' }).click();
-  await expect(browser.getByText(/That note is yours/)).toBeVisible();
-  await browser.getByRole('button', { name: 'Open notebook folder' }).click();
+  await noteList(page).getByRole('button', { name: 'personal.md', exact: true }).click();
+  await expect(reader(page).getByText(/That note is yours/)).toBeVisible();
+  // Ori sets its notebook up as a vault: the vault-relative link, never a path.
+  expect(source.source.kind).toBe('obsidian');
+  await expect(
+    reader(page).getByRole('link', { name: 'Open personal.md in Obsidian' })
+  ).toHaveAttribute(
+    'href',
+    `obsidian://open?vault=${encodeURIComponent(source.source.name)}&file=Inbox%2Fpersonal`
+  );
+  await reader(page).getByRole('button', { name: 'Open notebook folder' }).click();
   await expect(page.getByText('Folder handoff requested.')).toBeAttached();
-  await browser.getByRole('navigation').getByRole('button', { name: 'My Notes' }).click();
+
+  await folders(page).getByRole('button', { name: 'My Notes', exact: true }).click();
   for (const folder of ['Inbox', 'Daily', 'Projects', 'People', 'Areas', 'Resources', 'Archive']) {
-    await expect(browser.getByRole('button', { name: folder, exact: true })).toBeVisible();
+    await expect(folders(page).getByRole('button', { name: folder, exact: true })).toBeVisible();
   }
-  await browser.getByRole('button', { name: 'Projects', exact: true }).click();
-  await browser.getByRole('button', { name: 'Research', exact: true }).click();
-  await expect(browser.getByText('scratch.md')).toBeVisible();
-  await expect(browser.getByRole('button', { name: /preview/ })).toHaveCount(0);
-  await capture(page, '06-nested-project');
-  await browser.getByRole('button', { name: 'Drafts', exact: true }).click();
-  await expect(browser.getByText('No folders or Markdown notes here.')).toBeVisible();
+  await expect(reader(page).getByRole('heading', { name: 'No note open' })).toBeVisible();
+  await folders(page).getByRole('button', { name: 'Projects', exact: true }).click();
+  await folders(page).getByRole('button', { name: 'House', exact: true }).click();
+  await noteList(page).getByRole('button', { name: 'README.md', exact: true }).click();
+  await expect(reader(page).getByRole('heading', { level: 3 })).not.toHaveText('No note open');
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  await expect(reader(page).getByText('Projects / House / README.md')).toBeVisible();
+  await capture(page, '06-house-project-note');
+
+  await folders(page).getByRole('button', { name: 'Research', exact: true }).click();
+  await noteList(page).getByRole('button', { name: 'scratch.md', exact: true }).click();
+  await expect(reader(page).getByText(/notes it wrote in Inbox, Daily/)).toBeVisible();
+  await expect(reader(page).getByText('Private project notes')).toHaveCount(0);
+  await capture(page, '06b-unsupported-note');
+  await folders(page).getByRole('button', { name: 'Drafts', exact: true }).click();
+  await expect(noteList(page).getByText('No folders or Markdown notes here.')).toBeVisible();
   expect(snapshot(root)).toEqual(before);
+
   renameSync(nested, nested + '-moved');
-  await browser
-    .getByRole('navigation')
-    .getByRole('button', { name: 'Research', exact: true })
-    .click();
-  await expect(browser.getByRole('button', { name: 'Drafts-moved', exact: true })).toBeVisible();
+  await folders(page).getByRole('button', { name: 'Research', exact: true }).click();
+  await expect(
+    folders(page).getByRole('button', { name: 'Drafts-moved', exact: true })
+  ).toBeVisible();
   renameSync(nested + '-moved', nested);
-  await browser.getByRole('button', { name: 'Drafts-moved', exact: true }).click();
-  await expect(browser.getByRole('alert')).toContainText('moved or removed');
+  await folders(page).getByRole('button', { name: 'Drafts-moved', exact: true }).click();
+  await expect(noteList(page).getByText(/moved or removed/)).toBeVisible();
+  await expect(notebookBrowser(page).locator('[data-browser-announce]')).toContainText(
+    'moved or removed'
+  );
+
   writeFileSync(join(inbox, file), `${readFileSync(join(inbox, file), 'utf8')}\nMy edits.`);
-  await page.getByRole('button', { name: 'Browse notebook' }).click();
-  await browser.getByRole('button', { name: `Check Ori preview for ${file}` }).click();
-  await expect(browser.getByText(/That note is yours/)).toBeVisible();
+  await folders(page).getByRole('button', { name: 'Inbox', exact: true }).click();
+  await noteList(page).getByRole('button', { name: file, exact: true }).click();
+  await expect(reader(page).getByText(/That note is yours/)).toBeVisible();
+});
+
+test('Quick note saves to Inbox while the reader stays on the House note', async ({
+  page,
+  request
+}) => {
+  const source = await notes(request);
+  expect(source.source.origin).toBe('created_by_ori');
+  const inbox = join(source.source.path, 'Inbox');
+  const status = await (await request.get('/api/personal-assistant/today')).json();
+  const workspaceNotesURL = `/api/workspaces/${status.today.hq_workspace_id}/notes`;
+  const workspaceNotes = async () => (await (await request.get(workspaceNotesURL)).json()).notes;
+  const workspaceBefore = await workspaceNotes();
+  const inboxBefore = new Set(readdirSync(inbox));
+
+  await page.goto('/my-notes');
+  await folders(page).getByRole('button', { name: 'Projects', exact: true }).click();
+  await folders(page).getByRole('button', { name: 'House', exact: true }).click();
+  await noteList(page).getByRole('button', { name: 'README.md', exact: true }).click();
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  const scrollBefore = await page.evaluate(() => scrollY);
+
+  // Earlier tests saved notes, so this is the ordinary Quick note.
+  const trigger = page.getByRole('button', { name: 'Quick note', exact: true });
+  await trigger.click();
+  const dialog = page.getByRole('dialog', { name: 'Quick note' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('My Notes → Inbox', { exact: true })).toBeVisible();
+  const field = dialog.getByRole('textbox', { name: 'Note for My Notes → Inbox' });
+  await expect(field).toBeFocused();
+  const text = 'Ask Maya about disposal.';
+  await field.fill(text);
+  await capture(page, '16-quick-note-over-reader');
+
+  // Escape closes, keeps the draft and returns focus to Quick note.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await expect(field).toHaveValue(text);
+  // The backdrop closes it the same way.
+  await page.mouse.click(5, 5);
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(field).toHaveValue(text);
+
+  // A failed save keeps the draft in the open dialog.
+  await page.route(
+    `**${endpoint}/capture`,
+    route => route.fulfill({ status: 500, json: { error: 'Try the save again.' } }),
+    { times: 1 }
+  );
+  await dialog.getByRole('button', { name: 'Save to Inbox' }).click();
+  await expect(dialog.getByRole('alert')).toHaveText('Try the save again.');
+  await expect(field).toHaveValue(text);
+  await capture(page, '17-quick-note-failed-save');
+  expect(new Set(readdirSync(inbox))).toEqual(inboxBefore);
+
+  // A slow save clicked twice sends one request; the reader never moves.
+  const sent: string[] = [];
+  page.on('request', req => {
+    const url = new URL(req.url());
+    if (url.pathname.startsWith(endpoint))
+      sent.push(`${req.method()} ${url.pathname.slice(endpoint.length)}${url.search}`);
+  });
+  await page.route(`**${endpoint}/capture`, async route => {
+    await new Promise(resolve => setTimeout(resolve, 400));
+    await route.continue();
+  });
+  const save = dialog.getByRole('button', { name: /Save to Inbox|Saving…/ });
+  await save.click();
+  // The second click lands on the disabled "Saving…" button, or on nothing.
+  await save.click({ force: true, noWaitAfter: true, timeout: 1000 }).catch(() => {});
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('Saved to My Notes → Inbox.')).toBeVisible();
+  await expect(trigger).toBeFocused();
+  await page.unroute(`**${endpoint}/capture`);
+  expect(sent.filter(line => line === 'POST /capture')).toHaveLength(1);
+  // Inbox is not open, so it is not listed again on the reader's behalf.
+  expect(sent.some(line => line.includes('part=Inbox'))).toBe(false);
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  await expect(reader(page).getByText('Projects / House / README.md')).toBeVisible();
+  await expect(folders(page).getByRole('button', { name: 'House', exact: true })).toHaveAttribute(
+    'aria-current',
+    'true'
+  );
+  expect(await page.evaluate(() => scrollY)).toBe(scrollBefore);
+  await capture(page, '18-quick-note-saved-reader-kept');
+
+  // Exactly one note persisted in Inbox, and nothing in any workspace.
+  const added = readdirSync(inbox).filter(name => !inboxBefore.has(name));
+  expect(added).toHaveLength(1);
+  expect(readFileSync(join(inbox, added[0]), 'utf8')).toContain(text);
+  expect(await workspaceNotes()).toEqual(workspaceBefore);
+  await folders(page).getByRole('button', { name: 'Inbox', exact: true }).click();
+  await expect(noteList(page).getByRole('button', { name: added[0], exact: true })).toBeVisible();
+});
+
+async function tabTo(page: Page, target: ReturnType<Page['locator']>, limit = 30) {
+  for (let i = 0; i < limit; i++) {
+    if (await target.evaluate(el => el === document.activeElement).catch(() => false)) return;
+    await page.keyboard.press('Tab');
+  }
+  await expect(target).toBeFocused();
+}
+
+test('phones step folder → notes → note with Back; desktop works by keyboard; refreshes keep place', async ({
+  page
+}) => {
+  const list = noteList(page);
+  const trigger = page.getByRole('button', { name: 'Quick note', exact: true });
+  await page.evaluate(() => localStorage.setItem('ori-theme', 'light')).catch(() => {});
+
+  // Phone: one pane at a time, landing on Inbox's notes.
+  await page.setViewportSize({ width: 390, height: 760 });
+  await page.goto('/');
+  await page.goto('/my-notes');
+  await expect(list.getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  await expect(folders(page)).toBeHidden();
+  await expect(reader(page)).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await capture(page, '20-phone-landing-inbox');
+  // The notes start inside the first screen, and the sideways tools row brings
+  // a focused control fully into view.
+  const firstNote = list.getByRole('button').filter({ hasText: /\.md$/ }).first();
+  expect((await firstNote.boundingBox())!.y).toBeLessThan(760);
+  const settings = page.getByRole('button', { name: 'Connection settings…' });
+  await settings.focus();
+  await expect
+    .poll(async () => {
+      const [row, box] = await Promise.all([
+        page.locator('.my-notes-actions[role="group"]').boundingBox(),
+        settings.boundingBox()
+      ]);
+      return box!.x + box!.width <= row!.x + row!.width + 1 && box!.x >= row!.x - 1;
+    })
+    .toBe(true);
+  await list.getByRole('button', { name: 'Back to Folders' }).click();
+  await expect(list).toBeHidden();
+  await expect(folders(page).getByRole('button', { name: 'Inbox', exact: true })).toBeFocused();
+  await folders(page).getByRole('button', { name: 'Projects', exact: true }).click();
+  await expect(list.getByRole('heading', { name: 'Projects', level: 3 })).toBeFocused();
+  await list.getByRole('button', { name: 'Back to Folders' }).click();
+  await expect(folders(page).getByRole('button', { name: 'Projects', exact: true })).toBeFocused();
+  await folders(page).getByRole('button', { name: 'House', exact: true }).click();
+  await list.getByRole('button', { name: 'README.md', exact: true }).click();
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  await expect(reader(page).getByRole('heading', { level: 3 })).toBeFocused();
+  await expect(list).toBeHidden();
+  await capture(page, '21-phone-reader');
+
+  // Quick note on a phone leaves the reader where it is.
+  await trigger.click();
+  const dialog = page.getByRole('dialog', { name: 'Quick note' });
+  await dialog.getByRole('textbox').fill('Measure the porch for a new light');
+  await capture(page, '22-phone-quick-note');
+  await dialog.getByRole('button', { name: 'Save to Inbox' }).click();
+  await expect(page.getByText('Saved to My Notes → Inbox.')).toBeVisible();
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+
+  // In-page Back and the browser's Back each go up one level, restoring focus.
+  await reader(page).getByRole('button', { name: 'Back to House' }).click();
+  const readme = list.getByRole('button', { name: 'README.md', exact: true });
+  await expect(readme).toBeFocused();
+  await expect(readme).toHaveAttribute('aria-current', 'true');
+  await readme.click();
+  await expect(reader(page)).toBeVisible();
+  await page.goBack();
+  await expect(readme).toBeFocused();
+  await expect(reader(page)).toBeHidden();
+  await page.goBack();
+  await expect(folders(page).getByRole('button', { name: 'House', exact: true })).toBeFocused();
+  await page.goBack();
+  await expect(page).not.toHaveURL(/my-notes/);
+
+  await page.evaluate(() => localStorage.setItem('ori-theme', 'dark'));
+  await page.goto('/my-notes');
+  await expect(page.locator('html')).toHaveAttribute('data-bs-theme', 'dark');
+  await expect(list.getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  await capture(page, '23-phone-dark-landing');
+
+  // Desktop, keyboard only: choose folders and a note without leaving the tree's order.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => localStorage.setItem('ori-theme', 'light'));
+  await page.goto('/my-notes');
+  await listSettled(page);
+  await folders(page).getByRole('button', { name: 'Projects', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(list.getByRole('heading', { name: 'Projects', level: 3 })).toBeVisible();
+  await expect(folders(page).getByRole('button', { name: 'Projects', exact: true })).toBeFocused();
+  const house = folders(page).getByRole('button', { name: 'House', exact: true });
+  await tabTo(page, house, 6);
+  await page.keyboard.press('Enter');
+  await expect(house).toHaveAttribute('aria-current', 'true');
+  await tabTo(page, readme);
+  await page.keyboard.press('Enter');
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  await expect(readme).toBeFocused();
+  // Focus is never trapped: Tab carries on past the reader's last action.
+  await tabTo(page, reader(page).getByRole('button', { name: 'Open notebook folder' }));
+  await page.keyboard.press('Tab');
+  expect(await notebookBrowser(page).evaluate(el => el.contains(document.activeElement))).toBe(
+    false
+  );
+
+  // A background refresh keeps the folder, the note and a draft.
+  await trigger.focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Check the paint finish');
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+  const isConnectionCheck = (url: URL) =>
+    url.pathname === endpoint && url.searchParams.get('view') === 'connection';
+  const refresh = () =>
+    page.evaluate(() => document.dispatchEvent(new CustomEvent('personal-assistant:second-brain')));
+  // A successful refresh first, settled before the next one is set to fail.
+  await Promise.all([
+    page.waitForResponse(response => isConnectionCheck(new URL(response.url()))),
+    refresh()
+  ]);
+  await expect(reader(page).getByText('Projects / House / README.md')).toBeVisible();
+  await page.route(isConnectionCheck, route => route.abort(), { times: 1 });
+  await Promise.all([
+    page.waitForEvent('requestfailed', req => isConnectionCheck(new URL(req.url()))),
+    refresh()
+  ]);
+  await expect(page.getByText(/could not check your notes connection/)).toBeVisible();
+  await expect(reader(page).getByText('Projects / House / README.md')).toBeVisible();
+  await expect(house).toHaveAttribute('aria-current', 'true');
+  await trigger.click();
+  await expect(dialog.getByRole('textbox')).toHaveValue('Check the paint finish');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+  await page.evaluate(() => localStorage.setItem('ori-theme', 'dark'));
+  await page.reload();
+  await folders(page).getByRole('button', { name: 'Projects', exact: true }).click();
+  await folders(page).getByRole('button', { name: 'House', exact: true }).click();
+  await readme.click();
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  await capture(page, '24-desktop-dark-reader');
+  await page.evaluate(() => localStorage.setItem('ori-theme', 'light'));
+
+  // Existing deep links still open their views, above the notebook.
+  await page.goto('/my-notes?view=loops');
+  const tools = page.locator('[data-my-notes-tools]');
+  await expect(tools.getByRole('tab', { name: /Open loops/, selected: true })).toBeVisible();
+  await expect(list.getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  const [toolsBox, browserBox] = await Promise.all([
+    tools.boundingBox(),
+    notebookBrowser(page).boundingBox()
+  ]);
+  expect(toolsBox!.y).toBeLessThan(browserBox!.y);
+  await page.goto('/my-notes?view=inbox');
+  await expect(tools.getByRole('tab', { name: /Inbox/, selected: true })).toBeVisible();
 });
 
 test('browse a connected vault with its own layout without scanning or writing', async ({
@@ -356,6 +880,17 @@ test('browse a connected vault with its own layout without scanning or writing',
   request
 }) => {
   const source = await notes(request);
+  // A draft written for the Ori notebook must not follow the connection.
+  await page.goto('/my-notes');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  const quickDialog = page.getByRole('dialog', { name: /^(Quick note|Unsent note)$/ });
+  await quickDialog.getByRole('textbox').fill('Draft for the old notebook');
+  await page.keyboard.press('Escape');
+  const sentCaptures: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST' && req.url().includes(`${endpoint}/capture`))
+      sentCaptures.push(req.url());
+  });
   await post(request, `${endpoint}/disconnect`, {
     request_id: 'browse-test-disconnect',
     if_version: source.version
@@ -370,19 +905,51 @@ test('browse a connected vault with its own layout without scanning or writing',
     request_id: 'browse-test-vault'
   });
   const before = snapshot(root);
+  const connected = await notes(request);
+  // The open page learns of the new connection; the draft waits for a decision.
+  await page.evaluate(() =>
+    document.dispatchEvent(new CustomEvent('personal-assistant:second-brain'))
+  );
+  await expect(page.getByText('Connected folder · read-only for Ori')).toBeVisible();
+  await page.getByRole('button', { name: 'Unsent note' }).click();
+  await expect(quickDialog.getByRole('textbox')).toHaveValue('Draft for the old notebook');
+  await expect(quickDialog.getByRole('textbox')).not.toBeEditable();
+  await expect(quickDialog.getByText(/Ori can’t write here/)).toBeVisible();
+  await expect(quickDialog.getByRole('button', { name: 'Keep for this notebook' })).toHaveCount(0);
+  await capture(page, '19-unsent-draft-after-switch');
+  await quickDialog.getByRole('button', { name: 'Discard draft' }).click();
+  await expect(quickDialog).toBeHidden();
+  await expect(page.getByRole('button', { name: /Quick note|Unsent note/ })).toHaveCount(0);
+  expect(sentCaptures).toEqual([]);
+
+  const reads = recordNotesRequests(page);
   await page.goto('/my-notes');
   await expect(page.getByText('Connected folder · read-only for Ori')).toBeVisible();
-  await page.getByRole('button', { name: 'Browse notebook' }).click();
-  const browser = page.getByRole('region', { name: 'Browse notebook' });
-  await expect(browser.getByRole('button', { name: /Inbox|Projects|Save/ })).toHaveCount(0);
-  await browser.getByRole('button', { name: 'Expeditions' }).click();
-  await expect(browser.getByRole('link', { name: 'Open Canyon.md in Obsidian' })).toHaveAttribute(
-    'href',
-    /^obsidian:\/\/open/
-  );
-  await expect(browser.getByRole('button', { name: /preview/ })).toHaveCount(0);
+  // Read-only for Ori: no Quick note at all.
+  await expect(page.getByRole('button', { name: /Quick note|first note/ })).toHaveCount(0);
+  // A connected folder opens at its own root, with its own names.
+  await expect(
+    noteList(page).getByRole('heading', { name: 'Field Notebook', level: 3 })
+  ).toBeVisible();
+  await listSettled(page);
+  expect(reads).toEqual([
+    'GET ?view=connection',
+    `GET /browse?ref=${encodeURIComponent(connected.browse_ref)}`
+  ]);
+  await expect(
+    notebookBrowser(page).getByRole('button', { name: /^(Inbox|Projects|Save to Inbox)$/ })
+  ).toHaveCount(0);
+  await folders(page).getByRole('button', { name: 'Expeditions', exact: true }).click();
+  await noteList(page).getByRole('button', { name: 'Canyon.md', exact: true }).click();
+  await expect(
+    reader(page).getByRole('link', { name: 'Open Canyon.md in Obsidian' })
+  ).toHaveAttribute('href', /^obsidian:\/\/open/);
+  await expect(reader(page).getByText(/connected folder/)).toBeVisible();
+  await expect(reader(page).getByText('Not an Ori note.')).toHaveCount(0);
   await capture(page, '07-read-only-vault');
   expect(snapshot(root)).toEqual(before);
+  expect(reads.filter(line => !line.startsWith('GET '))).toEqual([]);
+  expect(reads.some(line => line.includes('/preview/'))).toBe(false);
 
   // UI-only error/partial cases follow the real fixture checks above.
   await page.route(
@@ -390,18 +957,18 @@ test('browse a connected vault with its own layout without scanning or writing',
     route => route.fulfill({ json: { directory: { entries: [], partial: true } } }),
     { times: 1 }
   );
-  await page.getByRole('button', { name: 'Browse notebook' }).click();
+  await folders(page).getByRole('button', { name: 'Field Notebook', exact: true }).click();
   await expect(
-    browser.getByText('Only some names could be listed.', { exact: false })
+    noteList(page).getByText('Only some names could be listed.', { exact: false })
   ).toBeVisible();
-  await expect(browser.getByText('No folders or Markdown notes here.')).toHaveCount(0);
+  await expect(noteList(page).getByText('No folders or Markdown notes here.')).toHaveCount(0);
   await page.route(
     `**${endpoint}/browse?*`,
     route => route.fulfill({ status: 403, json: { error: 'Forbidden' } }),
     { times: 1 }
   );
-  await page.getByRole('button', { name: 'Browse notebook' }).click();
-  await expect(browser.getByRole('alert')).toContainText('Ori cannot list this folder');
+  await folders(page).getByRole('button', { name: 'Field Notebook', exact: true }).click();
+  await expect(noteList(page).getByText(/Ori cannot list this folder/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open folder', exact: true })).toBeVisible();
 });
 
@@ -416,9 +983,13 @@ test('a missing folder is distinct from disconnected and reuses the reviewed con
   const before = snapshot(root);
   renameSync(root, moved);
   try {
+    const reads = recordNotesRequests(page);
     await page.goto('/my-notes');
     await expect(page.getByRole('heading', { name: 'Notes folder not found' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Browse notebook' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Quick note|first note/ })).toHaveCount(0);
+    // An unavailable source offers repair and lists nothing.
+    await expect(notebookBrowser(page)).toBeHidden();
+    expect(reads).toEqual(['GET ?view=connection']);
     await capture(page, '13-missing-source');
     await page.getByRole('button', { name: 'Choose again…' }).click();
     const card = page.locator('#personalAssistantSecondBrain');
@@ -452,6 +1023,9 @@ test('a missing folder is distinct from disconnected and reuses the reviewed con
   expect(after.browse_ref).not.toBe(source.browse_ref);
   expect(snapshot(root)).toEqual(before);
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Field Notebook' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Field Notebook', level: 2 })).toBeVisible();
+  await expect(
+    noteList(page).getByRole('heading', { name: 'Field Notebook', level: 3 })
+  ).toBeVisible();
   await capture(page, '15-reconnected');
 });

@@ -347,6 +347,10 @@ type Receipt struct {
 	Tickets map[string]int `json:"tickets,omitempty"`
 	// Note is the Inbox path a capture wrote, so a replay links the same note.
 	Note string `json:"note,omitempty"`
+	// ReviewKey and Revision witness a new save, so interrupted processing can
+	// resume for that exact file and connection, not old or imported Markdown.
+	ReviewKey string `json:"review_key,omitempty"`
+	Revision  string `json:"revision,omitempty"`
 	// Item is the open item a triage acted on, so the id cannot be reused for
 	// another item.
 	Item string `json:"item,omitempty"`
@@ -606,6 +610,7 @@ func (r Record) Validate() error {
 	for _, receipt := range r.Receipts {
 		if !ValidRequestID(receipt.RequestID) || receipt.Action == "" || len(receipt.Action) > 32 || receipt.Created < 0 || receipt.Skipped < 0 ||
 			(receipt.Note != "" && (len(receipt.Note) > 300 || !strings.HasPrefix(receipt.Note, FolderInbox+"/") || strings.Contains(receipt.Note, ".."))) ||
+			(receipt.ReviewKey != "" || receipt.Revision != "") && (receipt.Note == "" || !ValidItemID(receipt.ReviewKey) || !ValidItemID(receipt.Revision)) ||
 			(receipt.Item != "" && !ValidItemID(receipt.Item)) {
 			return ErrInvalidRecord
 		}

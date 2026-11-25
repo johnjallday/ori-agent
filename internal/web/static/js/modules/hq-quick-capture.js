@@ -16,6 +16,23 @@ export class HQCaptureDraft {
   busy = false;
   problem = '';
   receipt = '';
+  receiptURL = '';
+
+  constructor(prefix = 'hq-capture') {
+    this.prefix = prefix;
+  }
+
+  // retarget sends a draft written for an earlier connection to the current
+  // one, only because the person reviewed it and asked. A new destination is a
+  // new request.
+  retarget(ref) {
+    if (this.busy || !this.text || !ref || ref === this.ref) return false;
+    this.ref = ref;
+    this.id = '';
+    this.problem = '';
+    this.receipt = '';
+    return true;
+  }
 
   edit(text, ref) {
     if (this.busy || this.text === text) return;
@@ -37,7 +54,7 @@ export class HQCaptureDraft {
     }
     this.problem = secondBrainCaptureProblem(this.text);
     if (this.problem) return false;
-    this.id ||= newRequestID('hq-capture');
+    this.id ||= newRequestID(this.prefix);
     this.busy = true;
     try {
       const { capture } = await send(
@@ -45,12 +62,14 @@ export class HQCaptureDraft {
         { text: this.text, source_ref: this.ref },
         this.id
       );
-      if (!capture?.note?.startsWith('Inbox/'))
+      if (typeof capture?.note !== 'string' || !/^Inbox\/[^/\\]+\.md$/u.test(capture.note))
         throw new Error('No save receipt was returned. Try again to check the save.');
       this.text = '';
       this.ref = '';
       this.id = '';
       this.receipt = 'Saved to My Notes → Inbox.';
+      // A fragment keeps the note filename out of Home navigation request logs.
+      this.receiptURL = `${MY_NOTES_URL}#${new URLSearchParams({ ref, note: capture.note.slice(6) })}`;
       return true;
     } catch (error) {
       this.problem = error.message || 'Ori could not confirm the save. Your draft is still here.';

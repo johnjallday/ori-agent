@@ -1980,9 +1980,8 @@ test.describe('Sparse map invitation and compact assistant', () => {
 
 /**
  * Quick Capture as a focused dialog (home-workspace-map-ui-refresh group 4).
- * Everything but the last test route-mocks the backlog POST and/or the HQ
- * status so each branch is exact; the last test saves for real and reads the
- * item back from the HQ's backlog.
+ * These geometry checks use a writable notebook fixture. Real capture and
+ * source-bound receipt navigation run in my-notes-home.spec.ts.
  */
 test.describe('Quick Capture dialog', () => {
   const HQ_STATUS = {
@@ -1999,26 +1998,6 @@ test.describe('Quick Capture dialog', () => {
         body: JSON.stringify({ status })
       })
     );
-  }
-
-  /** Record every backlog POST; `respond` decides each answer. */
-  async function routeBacklogPosts(
-    page: Page,
-    respond: (index: number) => { status: number; delay?: number }
-  ) {
-    const bodies: Record<string, unknown>[] = [];
-    await page.route('**/api/orchestration/backlog', async route => {
-      if (route.request().method() !== 'POST') return route.fallback();
-      bodies.push(JSON.parse(route.request().postData() || '{}'));
-      const answer = respond(bodies.length - 1);
-      if (answer.delay) await new Promise(resolve => setTimeout(resolve, answer.delay));
-      await route.fulfill({
-        status: answer.status,
-        contentType: 'application/json',
-        body: JSON.stringify(answer.status < 300 ? { success: true } : { error: 'nope' })
-      });
-    });
-    return bodies;
   }
 
   const modal = (page: Page) => page.locator('#cockpitCaptureModal');
@@ -2079,6 +2058,17 @@ test.describe('Quick Capture dialog', () => {
 
   test.beforeEach(async ({ page }) => {
     await skipOnboarding(page);
+    await page.route('**/second-brain?view=connection', route =>
+      route.fulfill({
+        json: {
+          second_brain: {
+            status: 'connected',
+            source: { origin: 'created_by_ori' },
+            browse_ref: 'a'.repeat(64)
+          }
+        }
+      })
+    );
   });
 
   test('capture never moves the Map or changes its camera, selection, filter, or layout — by keyboard or pointer', async ({
@@ -2174,220 +2164,6 @@ test.describe('Quick Capture dialog', () => {
     await noDialogResidue(page);
   });
 
-  test('details are a disclosure that never erases text and reopens with a retained draft', async ({
-    page
-  }) => {
-    await ensureWorkspace(page);
-    await routeHQ(page, HQ_STATUS);
-    const bodies = await routeBacklogPosts(page, () => ({ status: 201 }));
-    await page.goto('/');
-    await openCapture(page);
-    await expect(modal(page).getByRole('heading', { name: 'Add to backlog' })).toBeVisible();
-    await expect(modal(page)).toContainText('Personal HQ · Backlog');
-    const toggle = page.locator('#cockpitCaptureDetailsToggle');
-    const details = page.locator('#cockpitCaptureDetails');
-    await expect(details).toBeHidden();
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await expect(details).toBeFocused();
-    // A plain Enter in details is a new line, never a submit.
-    await details.type('line one');
-    await page.keyboard.press('Enter');
-    await details.type('line two');
-    expect(bodies).toHaveLength(0);
-    await toggle.click();
-    await expect(details).toBeHidden();
-    await expect(details).toHaveValue('line one\nline two');
-
-    await page.keyboard.press('Escape');
-    await openCapture(page);
-    await expect(details).toBeVisible();
-    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await expect(details).toHaveValue('line one\nline two');
-  });
-
-  test('an empty or blank title is refused inline and sends nothing', async ({ page }) => {
-    await ensureWorkspace(page);
-    await routeHQ(page, HQ_STATUS);
-    const bodies = await routeBacklogPosts(page, () => ({ status: 201 }));
-    await page.goto('/');
-    await openCapture(page);
-    for (const value of ['', '    ']) {
-      await title(page).fill(value);
-      await page.locator('#cockpitCaptureSave').click();
-      await expect(page.locator('#cockpitCaptureStatus')).toContainText('Add a title');
-      await expect(title(page)).toHaveAttribute('aria-invalid', 'true');
-      await expect(title(page)).toBeFocused();
-    }
-    expect(bodies).toHaveLength(0);
-    await expect(modal(page)).toBeVisible();
-  });
-
-  test('a confirmed save goes to Personal HQ even with another workspace selected, then closes with a receipt', async ({
-    page
-  }) => {
-    const other = await ensureWorkspace(page);
-    await routeHQ(page, HQ_STATUS);
-    const bodies = await routeBacklogPosts(page, () => ({ status: 201 }));
-    await page.goto('/');
-    await page.locator(`.ws-map-tile[data-ws-id="${other}"]`).click();
-    await expect(page.locator('#cockpitContextModal')).toBeVisible();
-    await page.keyboard.press('Escape');
-    await expect(page.locator('#cockpitContextModal')).toBeHidden();
-    await expect(page.locator(`.ws-map-tile[data-ws-id="${other}"]`)).toHaveClass(/is-selected/);
-
-    await openCapture(page);
-    await title(page).fill('  Book the venue  ');
-    await page.locator('#cockpitCaptureDetailsToggle').click();
-    await page.locator('#cockpitCaptureDetails').fill('  for the June offsite  ');
-    // Cmd/Ctrl+Enter submits from the details field.
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
-
-    await expect(modal(page)).toBeHidden();
-    expect(bodies).toEqual([
-      {
-        workspace_id: 'hq-mock',
-        description: 'Book the venue',
-        details: 'for the June offsite',
-        source_type: 'home_quick_capture'
-      }
-    ]);
-    const receipt = page.locator('#cockpitCaptureReceipt');
-    await expect(receipt).toBeVisible();
-    await expect(receipt).toContainText('Added to Personal HQ backlog');
-    await expect(receipt.getByRole('link', { name: 'View backlog' })).toHaveAttribute(
-      'href',
-      '/workspaces/personal-hq?panel=backlog'
-    );
-    // The receipt informs; it does not take focus.
-    await expect(page.locator('#cockpitCaptureBtn')).toBeFocused();
-    await expect(page.locator('#cockpitRailLive')).toContainText(
-      'Added to your Personal HQ backlog'
-    );
-
-    // The submitted draft is gone; the next capture starts clean and collapsed.
-    await openCapture(page);
-    await expect(title(page)).toHaveValue('');
-    await expect(page.locator('#cockpitCaptureDetails')).toBeHidden();
-    await expect(receipt).toBeHidden();
-  });
-
-  test('an HQ whose slug cannot be resolved still saves, with a receipt that offers no broken link', async ({
-    page
-  }) => {
-    await ensureWorkspace(page);
-    await routeHQ(page, { valid: true, workspace_id: 'hq-unlisted' });
-    const bodies = await routeBacklogPosts(page, () => ({ status: 201 }));
-    await page.goto('/');
-    await openCapture(page);
-    await title(page).fill('Somewhere safe');
-    await page.keyboard.press('Enter');
-    await expect(modal(page)).toBeHidden();
-    expect(bodies).toHaveLength(1);
-    const receipt = page.locator('#cockpitCaptureReceipt');
-    await expect(receipt).toContainText('Added to Personal HQ backlog');
-    await expect(receipt.getByRole('link')).toHaveCount(0);
-  });
-
-  test('a failed save keeps the text and says so; the retry sends exactly once more', async ({
-    page
-  }) => {
-    await ensureWorkspace(page);
-    await routeHQ(page, HQ_STATUS);
-    const bodies = await routeBacklogPosts(page, index => ({ status: index === 0 ? 500 : 201 }));
-    await page.goto('/');
-    await openCapture(page);
-    await title(page).fill('Try twice');
-    await page.locator('#cockpitCaptureSave').click();
-    const status = page.locator('#cockpitCaptureStatus');
-    await expect(status).toContainText('Your text is still here');
-    await expect(status).toHaveAttribute('data-kind', 'error');
-    await expect(modal(page)).toBeVisible();
-    await expect(title(page)).toHaveValue('Try twice');
-    await expect(page.locator('#cockpitCaptureSave')).toBeEnabled();
-
-    await page.locator('#cockpitCaptureSave').click();
-    await expect(modal(page)).toBeHidden();
-    expect(bodies).toHaveLength(2);
-  });
-
-  test('a slow save survives dismissal and reopening, sends once, and never clears newer text', async ({
-    page
-  }) => {
-    await ensureWorkspace(page);
-    await routeHQ(page, HQ_STATUS);
-    const bodies = await routeBacklogPosts(page, () => ({ status: 201, delay: 1500 }));
-    await page.goto('/');
-    await openCapture(page);
-    await title(page).fill('First thought');
-    const save = page.locator('#cockpitCaptureSave');
-    await save.click();
-    await expect(save).toBeDisabled();
-    await expect(save).toHaveText('Adding…');
-    // More submit paths while in flight change nothing.
-    await title(page).press('Enter');
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
-
-    // Dismiss and reopen while the request is still out.
-    await page.keyboard.press('Escape');
-    await expect(modal(page)).toBeHidden();
-    await openCapture(page, { ready: false });
-    await expect(save).toBeDisabled();
-    await expect(page.locator('#cockpitCaptureStatus')).toContainText('Adding');
-    await title(page).fill('First thought, and a second one');
-
-    await expect(page.locator('#cockpitCaptureReceipt')).toBeVisible({ timeout: 5000 });
-    expect(bodies).toHaveLength(1);
-    expect(bodies[0].description).toBe('First thought');
-    // The newer text is not what was saved, so it stays — and so does the dialog.
-    await expect(modal(page)).toBeVisible();
-    await expect(title(page)).toHaveValue('First thought, and a second one');
-    await expect(page.locator('#cockpitCaptureStatus')).toContainText('still here');
-    await expect(save).toBeEnabled();
-  });
-
-  test('user text is sent and shown as text, never as markup', async ({ page }) => {
-    await ensureWorkspace(page);
-    await routeHQ(page, HQ_STATUS);
-    const bodies = await routeBacklogPosts(page, () => ({ status: 201 }));
-    await page.goto('/');
-    const hostile = '<img src=x onerror="window.__capturePwned=1">';
-    await openCapture(page);
-    await title(page).fill(hostile);
-    await page.keyboard.press('Enter');
-    await expect(modal(page)).toBeHidden();
-    expect(bodies[0].description).toBe(hostile);
-    expect(await page.evaluate(() => (window as any).__capturePwned)).toBeUndefined();
-    await expect(page.locator('#cockpitCaptureReceipt img')).toHaveCount(0);
-  });
-
-  test('without a Personal HQ, capture explains, hands off to setup, and keeps the draft', async ({
-    page
-  }) => {
-    await ensureWorkspace(page);
-    await routeHQ(page, { valid: false, hq_onboarding_state: 'unseen' });
-    const bodies = await routeBacklogPosts(page, () => ({ status: 201 }));
-    await page.goto('/');
-    await page.evaluate(() => {
-      (window as any).__hqActions = [];
-      window.addEventListener('ori:personal-hq-action', event =>
-        (window as any).__hqActions.push((event as CustomEvent).detail?.action)
-      );
-    });
-    await openCapture(page, { ready: false });
-    await title(page).fill('Idea before HQ');
-    await expect(page.locator('#cockpitCaptureStatus')).toContainText('no Personal HQ is set up');
-    await expect(page.locator('#cockpitCaptureSave')).toBeDisabled();
-    await page.getByRole('button', { name: 'Set up Personal HQ' }).click();
-    await expect(modal(page)).toBeHidden();
-    expect(await page.evaluate(() => (window as any).__hqActions)).toEqual(['build']);
-    expect(bodies).toHaveLength(0);
-    // Whatever setup opened is its own dialog; close it if it did.
-    await page.keyboard.press('Escape');
-    await page.evaluate(() => (window as any).OriHomeCockpit.openCapture());
-    await expect(title(page)).toHaveValue('Idea before HQ');
-  });
-
   test('a dialog asked for while capture fades in or out waits for it instead of stacking', async ({
     page
   }) => {
@@ -2449,7 +2225,7 @@ test.describe('Quick Capture dialog', () => {
     );
     await openCapture(page, { ready: false });
     await title(page).fill('Kept while gated');
-    await expect(page.locator('#cockpitCaptureStatus')).toContainText("aren't available");
+    await expect(page.locator('#cockpitCaptureStatus')).toContainText('Finish Ori setup');
     await expect(page.locator('#cockpitCaptureStatus')).not.toContainText('Checking');
     await expect(page.locator('#cockpitCaptureSave')).toBeDisabled();
   });
@@ -2470,7 +2246,9 @@ test.describe('Quick Capture dialog', () => {
       })
     );
     await routeHQ(page, HQ_STATUS);
-    await routeBacklogPosts(page, () => ({ status: 201 }));
+    await page.route('**/second-brain/capture', route =>
+      route.fulfill({ json: { capture: { note: 'Inbox/first-idea.md' } } })
+    );
     await page.route('**/api/workspace-map/layout', route =>
       route.fulfill({
         status: 200,
@@ -2487,6 +2265,8 @@ test.describe('Quick Capture dialog', () => {
     await expect(hq).toBeVisible();
     await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(0);
 
+    // Wait for the initial map remount before opening its help panel.
+    await settledHomeGeometry(page);
     // Help's heading must be topmost where it is drawn.
     await page.locator('[data-map-help]').click();
     const heading = page.locator('#wsMapHelpPanel h4');
@@ -2508,7 +2288,7 @@ test.describe('Quick Capture dialog', () => {
     // A capture on this map leaves its only building reachable.
     await openCapture(page);
     await title(page).fill('First idea');
-    await page.keyboard.press('Enter');
+    await page.keyboard.press('Control+Enter');
     const receipt = page.locator('#cockpitCaptureReceipt');
     await expect(receipt).toBeVisible();
     const [a, b] = await Promise.all([receipt.boundingBox(), hq.boundingBox()]);
@@ -2518,61 +2298,6 @@ test.describe('Quick Capture dialog', () => {
       a!.y < b!.y + b!.height &&
       b!.y < a!.y + a!.height;
     expect(overlap, 'the receipt leaves the HQ reachable').toBe(false);
-  });
-
-  test('an HQ status that cannot be read is not reported as a missing HQ', async ({ page }) => {
-    await ensureWorkspace(page);
-    let fail = true;
-    await page.route('**/api/personal-hq/status', route =>
-      fail
-        ? route.fulfill({ status: 503, contentType: 'application/json', body: '{}' })
-        : route.fulfill({
-            status: 200,
-            contentType: 'application/json',
-            body: JSON.stringify({ status: HQ_STATUS })
-          })
-    );
-    await page.goto('/');
-    await openCapture(page, { ready: false });
-    await title(page).fill('Kept while checking');
-    const status = page.locator('#cockpitCaptureStatus');
-    await expect(status).toContainText('could not be checked');
-    await expect(status).not.toContainText('no Personal HQ is set up');
-    await expect(page.locator('#cockpitCaptureSave')).toBeDisabled();
-
-    fail = false;
-    await page.getByRole('button', { name: 'Check again' }).click();
-    await expect(page.locator('#cockpitCaptureSave')).toBeEnabled();
-    await expect(status).toHaveText('');
-    await expect(title(page)).toHaveValue('Kept while checking');
-  });
-
-  test('a real capture persists in the Personal HQ backlog and View backlog opens it', async ({
-    page
-  }) => {
-    const status = (await (await page.request.get('/api/personal-hq/status')).json())?.status;
-    test.skip(!status?.valid, 'this sandbox has no valid Personal HQ to capture into');
-    await page.goto('/');
-    const unique = `Quick capture ${Date.now()}`;
-    await openCapture(page);
-    await title(page).fill(unique);
-    await page.keyboard.press('Enter');
-    await expect(page.locator('#cockpitCaptureReceipt')).toBeVisible();
-
-    const backlog = await (
-      await page.request.get(
-        `/api/orchestration/backlog?workspace_id=${encodeURIComponent(status.workspace_id)}`
-      )
-    ).json();
-    const item = (backlog.items || []).find(
-      (entry: { task?: { description?: string } }) => entry.task?.description === unique
-    );
-    expect(item, 'the captured item is in the HQ backlog').toBeTruthy();
-    expect(item.task.source_type).toBe('home_quick_capture');
-
-    const link = page.locator('#cockpitCaptureReceipt').getByRole('link', { name: 'View backlog' });
-    await link.click();
-    await page.waitForURL(/\/workspaces\/[^/?]+\?panel=backlog/);
   });
 });
 

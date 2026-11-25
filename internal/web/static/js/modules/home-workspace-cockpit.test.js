@@ -87,11 +87,6 @@ import {
   scheduledTodayItems,
   renderAttentionSectionHTML,
   renderScheduledSectionHTML,
-  validateCapture,
-  captureRequestBody,
-  captureAvailability,
-  captureDestinationView,
-  captureSuccessOutcome,
   captureShortcutSubmits,
   captureInitialFocus,
   askTargetDescription,
@@ -2019,94 +2014,6 @@ test('Today sections escape hostile workspace and task names', () => {
 
 // --- Quick Capture ---------------------------------------------------------
 
-test('validateCapture requires a title and allows optional details (FR103)', () => {
-  assert.equal(validateCapture({ title: '' }).ok, false);
-  assert.equal(validateCapture({ title: '   ' }).ok, false);
-  assert.match(validateCapture({}).message, /Add a title/);
-  const ok = validateCapture({ title: '  Ship it  ', details: '  later  ' });
-  assert.equal(ok.ok, true);
-  assert.equal(ok.title, 'Ship it');
-  assert.equal(ok.details, 'later');
-});
-
-test('captureRequestBody uses the EXISTING backlog contract, not a new inbox (FR102)', () => {
-  const body = captureRequestBody('hq-1', { title: 'Idea', details: 'more' });
-  assert.deepEqual(body, {
-    workspace_id: 'hq-1',
-    description: 'Idea',
-    details: 'more',
-    source_type: 'home_quick_capture'
-  });
-});
-
-test('captureAvailability requires a VALID Personal HQ with a workspace id (FR104)', () => {
-  assert.equal(captureAvailability({ valid: true, workspace_id: 'hq-1' }).canSave, true);
-  assert.equal(captureAvailability({ valid: true, workspace_id: 'hq-1' }).hqWorkspaceId, 'hq-1');
-  // A "valid" flag with no workspace is not usable.
-  assert.equal(captureAvailability({ valid: true }).canSave, false);
-  assert.equal(captureAvailability({ valid: false, workspace_id: 'hq-1' }).canSave, false);
-  assert.equal(captureAvailability(null).canSave, false);
-});
-
-test('captureAvailability explains the requirement rather than failing silently', () => {
-  const availability = captureAvailability(null);
-  assert.match(availability.message, /Personal HQ/);
-  assert.notEqual(availability.message, '');
-});
-
-test('captureDestinationView links to the HQ backlog by slug, never by id or a guess', () => {
-  const status = {
-    valid: true,
-    workspace_id: 'hq-1',
-    workspace: { id: 'hq-1', folder_slug: 'personal-hq' }
-  };
-  assert.deepEqual(captureDestinationView(status, []), {
-    workspaceId: 'hq-1',
-    slug: 'personal-hq',
-    backlogURL: '/workspaces/personal-hq?panel=backlog'
-  });
-  // The loaded list can supply the slug when the status has no workspace.
-  assert.equal(
-    captureDestinationView({ valid: true, workspace_id: 'hq-1' }, [
-      { id: 'hq-1', folder_slug: 'home base' }
-    ]).backlogURL,
-    '/workspaces/home%20base?panel=backlog'
-  );
-  // Unresolved: no link at all — never '/workspaces/hq-1', never a guess.
-  const unresolved = captureDestinationView({ valid: true, workspace_id: 'hq-1' }, [
-    { id: 'other', folder_slug: 'other' }
-  ]);
-  assert.deepEqual(unresolved, { workspaceId: 'hq-1', slug: '', backlogURL: '' });
-  // A status workspace for a different id is not trusted for the slug.
-  assert.equal(
-    captureDestinationView(
-      { valid: true, workspace_id: 'hq-1', workspace: { id: 'hq-2', folder_slug: 'wrong' } },
-      []
-    ).backlogURL,
-    ''
-  );
-  assert.equal(captureDestinationView({ valid: false, workspace_id: 'hq-1' }, []).backlogURL, '');
-  assert.equal(captureDestinationView(null, []).workspaceId, '');
-});
-
-test('captureSuccessOutcome clears and closes only when the submitted text is still what is there', () => {
-  const snapshot = { title: 'Call Sam', details: 'about the lease' };
-  assert.deepEqual(captureSuccessOutcome(snapshot, { ...snapshot }), { clear: true, close: true });
-  // Typing after submit (or after reopening) keeps the newer text and the dialog.
-  assert.deepEqual(
-    captureSuccessOutcome(snapshot, { title: 'Call Sam today', details: 'about the lease' }),
-    {
-      clear: false,
-      close: false
-    }
-  );
-  assert.deepEqual(captureSuccessOutcome(snapshot, { title: 'Call Sam', details: '' }), {
-    clear: false,
-    close: false
-  });
-  assert.deepEqual(captureSuccessOutcome(null, { ...snapshot }), { clear: false, close: false });
-});
-
 test('captureShortcutSubmits: Cmd/Ctrl+Enter only, never a plain Enter or an IME confirmation', () => {
   assert.equal(captureShortcutSubmits({ key: 'Enter', metaKey: true }), true);
   assert.equal(captureShortcutSubmits({ key: 'Enter', ctrlKey: true }), true);
@@ -2133,9 +2040,9 @@ test('the capture dialog keeps the field limits and one stable host outside the 
   );
   assert.doesNotMatch(dashboard, /cockpitCapturePanel/, 'no inline capture row remains');
   const modal = dashboard.slice(dashboard.indexOf('id="cockpitCaptureModal"'));
-  assert.match(modal, /id="cockpitCaptureTitle"[^>]*maxlength="300"/);
-  assert.match(modal, /id="cockpitCaptureDetails"[^>]*maxlength="2000"/);
-  assert.match(modal, /Personal HQ · Backlog/);
+  assert.match(modal, /id="cockpitCaptureTitle"[^>]*maxlength="4000"/);
+  assert.match(modal, /My Notes → Inbox/);
+  assert.doesNotMatch(modal, /Idea or ticket|Add to backlog/);
   // The host sits outside #homeCockpit, like the context modal.
   assert.ok(
     dashboard.indexOf('id="cockpitCaptureModal"') > dashboard.indexOf('id="cockpitContextModal"')

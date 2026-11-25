@@ -236,6 +236,8 @@ const (
 	// TicketSourceNote records a Ticket created from a Note (FR-73). The
 	// source ID is the originating Note's ID.
 	TicketSourceNote = "note"
+	// A confirmed action from a personal notebook, not a workspace note ID.
+	TicketSourceInboxReview = "personal_note"
 	// TicketSourceBlueprintIntake records a reviewed blueprint material proposal.
 	TicketSourceBlueprintIntake = "blueprint_intake"
 	// TicketSourceMigration marks records that predate provenance tracking.
@@ -268,6 +270,7 @@ var validTicketSources = map[string]struct{}{
 	TicketSourceGoalSuggestion:      {},
 	TicketSourceFirstLookSuggestion: {},
 	TicketSourceFollowUp:            {},
+	TicketSourceInboxReview:         {},
 	TicketSourceNoteItem:            {},
 }
 

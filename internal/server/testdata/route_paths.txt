@@ -148,6 +148,7 @@
 /api/personal-assistant/second-brain/look/00000000-0000-0000-0000-000000000001/items/00000000-0000-0000-0000-000000000002
 /api/personal-assistant/second-brain/browse
 /api/personal-assistant/second-brain/inbox
+/api/personal-assistant/second-brain/inbox/decision
 /api/personal-assistant/second-brain/nudge/dismiss
 /api/personal-assistant/second-brain/open-folder
 /api/personal-assistant/second-brain/people

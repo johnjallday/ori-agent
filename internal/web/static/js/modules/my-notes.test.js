@@ -1,7 +1,36 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { MyNotes, latestNotesRequest, myNotesConnection } from './my-notes.js';
+import { MyNotes, latestNotesRequest, myNotesConnection, myNotesLanding } from './my-notes.js';
 import { LOOK_POLL_LIMIT, LOOK_POLL_MS } from './personal-assistant-second-brain.js';
+
+test('arrival lands in the notebook only when a source is connected and reachable', () => {
+  const created = {
+    status: 'connected',
+    browse_ref: 'r'.repeat(64),
+    source: { id: 's', name: 'My Notes', origin: 'created_by_ori' }
+  };
+  const external = { ...created, source: { ...created.source, origin: 'connected' } };
+  assert.deepEqual(myNotesLanding({ status: 'not_connected', setup_required: 'assistant' }), {
+    kind: 'setup'
+  });
+  assert.deepEqual(myNotesLanding({ status: 'not_connected', setup_required: 'hq' }), {
+    kind: 'setup'
+  });
+  assert.deepEqual(myNotesLanding({ status: 'not_connected' }, 'inbox'), { kind: 'setup' });
+  assert.deepEqual(myNotesLanding({ status: 'missing', source: created.source }), {
+    kind: 'repair'
+  });
+  assert.deepEqual(myNotesLanding(undefined, 'loops'), { kind: 'retry' });
+  assert.deepEqual(myNotesLanding({ ...created, browse_ref: '' }), { kind: 'connected' });
+  assert.deepEqual(myNotesLanding(created), { kind: 'browse', folder: ['Inbox'], tools: null });
+  assert.deepEqual(myNotesLanding(external), { kind: 'browse', folder: [], tools: null });
+  // Explicit destinations still open their views beside the browser.
+  assert.equal(myNotesLanding(created, 'inbox').tools, 'inbox');
+  assert.equal(myNotesLanding(created, 'loops').tools, 'loops');
+  assert.equal(myNotesLanding(external, 'loops').tools, 'loops');
+  assert.equal(myNotesLanding(external, 'inbox').tools, null, 'a connected folder has no Inbox');
+  assert.equal(myNotesLanding(created, 'settings').tools, null);
+});
 
 test('notes setup prerequisites are not presented as connection errors or empty content', () => {
   assert.equal(
@@ -39,6 +68,46 @@ test('a slow earlier request and a response after departure cannot repaint', () 
   requests.cancel();
   assert.equal(requests.isCurrent(retry), false);
   assert.equal(requests.isCurrent(requests.begin()), true);
+});
+
+function loadingController(view) {
+  const controller = Object.create(MyNotes.prototype);
+  const calls = { clear: 0, notices: [], painted: 0 };
+  controller.view = view;
+  controller.request = latestNotesRequest();
+  controller.status = { setAttribute() {}, removeAttribute() {} };
+  controller.browser = { clear: () => calls.clear++ };
+  controller.quick = { update() {} };
+  controller.clearTools = () => {};
+  controller.paintStatus = () => calls.painted++;
+  controller.notice = message => calls.notices.push(message);
+  controller.land = () => {};
+  return { controller, calls };
+}
+
+test('a failed background check keeps the open notebook; a missing folder clears it', async t => {
+  const connected = {
+    status: 'connected',
+    browse_ref: 'r'.repeat(64),
+    source: { id: 's', name: 'My Notes', origin: 'created_by_ori', connected_at: 't' }
+  };
+  const failed = loadingController(connected);
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new TypeError('network down');
+  });
+  await failed.controller.load();
+  assert.equal(failed.calls.clear, 0, 'selection, reader and drafts stay');
+  assert.equal(failed.controller.view, connected);
+  assert.match(failed.calls.notices[0], /could not check your notes connection/);
+
+  const missing = loadingController(connected);
+  t.mock.method(globalThis, 'fetch', async () => ({
+    ok: true,
+    json: async () => ({ second_brain: { ...connected, status: 'missing', browse_ref: '' } })
+  }));
+  await missing.controller.load();
+  assert.equal(missing.calls.clear, 1, 'an unavailable source shows none of its notes');
+  assert.equal(missing.controller.view.status, 'missing');
 });
 
 function notesController(panel) {
