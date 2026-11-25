@@ -63,9 +63,10 @@ make ci-local-quick   # mid-work subset, not a substitute for the full gate
 `--skip-checks` is an explicit exceptional bypass, never an automatic fallback.
 The full gate covers changed-package gofmt/vet, Wails modes, ratcheted lint,
 `go test -short -race` over `scripts/list-unit-packages.sh`, JS tests/lint/format,
-character assets, fake-only devtools adapters, pinned scoped gosec, and the README
-Contract when photographed paths changed. README validation includes Node tests,
-`make readme-check`, disposable capture and the tracked-files check.
+character assets, fake-only devtools adapters, pinned scoped gosec, and local README
+validation when photographed paths changed (Node tests, `make readme-check`,
+disposable capture and the tracked-files check). On GitHub, Frontend Lint always
+runs `make readme-check`; the separate README Capture workflow is path-filtered.
 `CI_LOCAL_ARGS="--readme"` forces capture; `--no-readme` skips it;
 `--keep-going` runs all gates. `make test` alone is not enough.
 Worktrees share one machine, so the full unit gate runs one at a time: it holds
