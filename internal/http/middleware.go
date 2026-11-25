@@ -9,6 +9,16 @@ import (
 	"github.com/johnjallday/ori-agent/internal/logger"
 )
 
+// A capture filename can be the note's first line. Keep it out of both
+// ordinary request logs and error paths.
+func logPath(path string) string {
+	const preview = "/api/personal-assistant/second-brain/preview/"
+	if strings.HasPrefix(path, preview) {
+		return preview + "[note]"
+	}
+	return path
+}
+
 // ErrorRecovery returns middleware that recovers from panics in HTTP handlers.
 // When a panic occurs, it logs the error with stack trace and returns a
 // 500 Internal Server Error response to the client.
@@ -30,7 +40,7 @@ func ErrorRecovery() func(http.Handler) http.Handler {
 					// Log the panic with stack trace
 					logger.Error("PANIC in HTTP handler", logger.Fields{
 						"method": r.Method,
-						"path":   r.URL.Path,
+						"path":   logPath(r.URL.Path),
 						"error":  err,
 						"stack":  string(debug.Stack()),
 					})
@@ -79,7 +89,7 @@ func RequestLogger() func(http.Handler) http.Handler {
 			logger.Debug("HTTP Request", logger.Fields{
 				"emoji":    emoji,
 				"method":   r.Method,
-				"path":     r.URL.Path,
+				"path":     logPath(r.URL.Path),
 				"status":   lrw.statusCode,
 				"duration": duration,
 			})

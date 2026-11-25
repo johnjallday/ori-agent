@@ -25,6 +25,7 @@ type SecondBrainService interface {
 	DecideAsk(ctx context.Context, userID, decision, requestID string) (personalassistant.SecondBrainView, error)
 	Connect(ctx context.Context, userID string, input personalassistant.SecondBrainConnectInput) (personalassistant.SecondBrainView, error)
 	Create(ctx context.Context, userID string, input personalassistant.SecondBrainCreateInput) (personalassistant.SecondBrainView, error)
+	DecideInbox(context.Context, string, personalassistant.InboxDecision) (secondbrain.InboxAction, error)
 	CaptureForSource(ctx context.Context, userID, text, requestID, sourceRef string) (personalassistant.SecondBrainCaptureView, error)
 	Look(ctx context.Context, userID string) (personalassistant.SecondBrainLookView, error)
 	LookAgain(ctx context.Context, userID, requestID string) (personalassistant.SecondBrainLookView, error)
@@ -446,6 +447,28 @@ func (h *Handler) CaptureSecondBrain(w http.ResponseWriter, r *http.Request) {
 	orihttp.Success(w, map[string]any{"capture": view})
 }
 
+// DecideInbox accepts only reviewed identifiers, never client-chosen prose,
+// title, state or execution parameters. As with capture the origin is guarded.
+func (h *Handler) DecideInbox(w http.ResponseWriter, r *http.Request) {
+	if !orihttp.RequireMethod(w, r, http.MethodPost) {
+		return
+	}
+	user, ok := h.secondBrainReady(w, r)
+	if !ok {
+		return
+	}
+	var in personalassistant.InboxDecision
+	if !decodeClosedBody(w, r, maxSecondBrainBodyBytes, &in, "source_ref", "name", "action_id", "revision", "decision", "workspace_id") {
+		return
+	}
+	item, err := h.secondBrain.DecideInbox(r.Context(), user, in)
+	if err != nil {
+		writeSecondBrainError(w, err)
+		return
+	}
+	orihttp.Success(w, map[string]any{"suggestion": item})
+}
+
 // GetSecondBrainLook reports the current look.
 func (h *Handler) GetSecondBrainLook(w http.ResponseWriter, r *http.Request) {
 	if !orihttp.RequireMethod(w, r, http.MethodGet) {
@@ -752,6 +775,8 @@ func writeSecondBrainError(w http.ResponseWriter, err error) {
 		orihttp.NotFound(w, "That vault is no longer in Obsidian's list. Choose it again")
 	case errors.Is(err, personalassistant.ErrSecondBrainSelection):
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{"error": "Ori no longer has that folder open. Pick it again", "needs_pick": true, "needs_pick_reason": personalassistant.FolderPickReason(err)})
+	case errors.Is(err, secondbrain.ErrReviewConflict):
+		orihttp.Conflict(w, "Could not confirm this decision. Reopen the note to check its current suggestion and workspace.")
 	case errors.Is(err, personalassistant.ErrSecondBrainBrowseStale):
 		orihttp.Conflict(w, "Your notes connection changed. Reopen the notebook")
 	case errors.Is(err, personalassistant.ErrSecondBrainBrowseMissing):

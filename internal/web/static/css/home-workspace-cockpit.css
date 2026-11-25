@@ -3388,7 +3388,7 @@ a.workspace-update-signal:focus-visible {
  * and body scrolling, exactly as for the context modal above; these rules
  * give it the cockpit's visual language and a compact, responsive size. On a
  * short or narrow screen the body scrolls inside the dialog while the header
- * (with Close) and the footer (with Add to backlog) stay reachable.
+ * (with Close) and the footer (with Save to Inbox) stay reachable.
  * ----------------------------------------------------------------------- */
 
 .cockpit-capture-modal {
@@ -3568,6 +3568,9 @@ a.workspace-update-signal:focus-visible {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* Anchored at 50%, auto width otherwise shrink-wraps to half the map,
+     stacking the Inbox receipt across the only building on a phone. */
+  width: max-content;
   max-width: calc(100% - 32px);
   padding: 8px 8px 8px 14px;
   border: 1px solid var(--hc-signal);

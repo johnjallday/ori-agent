@@ -149,6 +149,7 @@ export class MyNotes {
     this.firstNote = false;
     this.request = latestNotesRequest();
     this.arrival = new URLSearchParams(window.location.search).get('view');
+    this.captureArrival = new URLSearchParams(window.location.hash.slice(1));
     root.addEventListener('click', event => this.click(event));
     root.addEventListener('input', event => {
       if (this.panel && event.target.matches('[data-notes-capture]')) {
@@ -184,6 +185,7 @@ export class MyNotes {
     window.addEventListener('pageshow', event => {
       if (!event.persisted) return;
       this.suspended = false;
+      this.captureArrival = new URLSearchParams(window.location.hash.slice(1));
       void this.load();
     });
     this.title.focus({ preventScroll: true });
@@ -282,7 +284,21 @@ export class MyNotes {
   land() {
     const landing = myNotesLanding(this.view, this.arrival);
     if (landing.kind !== 'browse') return;
-    if (!this.browser.view) this.browser.start(this.view, landing.folder);
+    if (!this.browser.view) {
+      this.browser.start(this.view, landing.folder);
+      const receipt = this.captureArrival;
+      this.captureArrival = null;
+      const name = receipt?.get('note');
+      if (
+        name &&
+        isCreatedByOri(this.view) &&
+        receipt.get('ref') === this.view.browse_ref &&
+        /^[^/\\]+\.md$/u.test(name)
+      ) {
+        this.browser.forward('reader', 'list', 'note:' + name);
+        void this.browser.state.openNote(name);
+      }
+    }
     void this.checkFirstNote();
     this.arrival = null;
     if (landing.tools) void this.openTools(landing.tools, { focus: false });

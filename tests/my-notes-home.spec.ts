@@ -87,6 +87,10 @@ test('Home Map and Tree link to an independent, refreshable My Notes page', asyn
   await expect(page.getByRole('heading', { name: 'Meet your assistant first' })).toBeVisible();
   await capture(page, '01-setup-needed');
   await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  await expect(page.locator('#cockpitCaptureStatus')).toContainText('Meet your assistant');
+  await expect(page.locator('#cockpitCaptureSave')).toBeDisabled();
+  await page.keyboard.press('Escape');
   // Each Home destination in the Desk rail, and the view it leaves in the cockpit.
   for (const [destination, view] of [
     ['map', 'map'],
@@ -122,6 +126,11 @@ test('explicit notebook setup is reusable and arrival only reads the connection,
   await page.goto('/my-notes');
   await expect(page.getByRole('heading', { name: 'Build My HQ first' })).toBeVisible();
   await capture(page, '02-hq-required');
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  await expect(page.locator('#cockpitCaptureStatus')).toContainText('Build My HQ');
+  await expect(page.locator('#cockpitCaptureSave')).toBeDisabled();
+  await page.goto('/my-notes');
   const assistant = await request.get('/api/personal-assistant');
   expect(assistant.ok()).toBeTruthy();
   const state = await assistant.json();
@@ -184,6 +193,195 @@ test('explicit notebook setup is reusable and arrival only reads the connection,
   await expect(page.getByRole('tab', { name: /Inbox/, selected: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Save to Inbox' })).toBeVisible();
 });
+
+test('Home quick note saves one Markdown file and its receipt opens the source, never work', async ({
+  page,
+  request
+}) => {
+  const source = await notes(request);
+  const hq = (await (await request.get('/api/personal-hq/status')).json()).status.workspace_id;
+  const work = async () =>
+    Promise.all(
+      [
+        `/api/orchestration/backlog?workspace_id=${hq}`,
+        '/api/personal-hq/followups',
+        `/api/workspaces/${hq}/runs`
+      ].map(async path => {
+        const response = await request.get(path);
+        expect(response.ok()).toBeTruthy();
+        return response.json();
+      })
+    );
+  const before = await work();
+  const inbox = join(source.source.path, 'Inbox');
+  const existing = new Set(readdirSync(inbox));
+  const posts: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST') posts.push(new URL(req.url()).pathname);
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  const field = page.locator('#cockpitCaptureTitle');
+  const save = page.getByRole('button', { name: 'Save to Inbox' });
+  await expect(save).toBeEnabled();
+  const notAKey = 'sk-ant-api03-' + 'x'.repeat(32);
+  await field.fill(notAKey);
+  await save.click();
+  await expect(page.locator('#cockpitCaptureStatus')).toContainText('looks like a secret');
+  await expect(field).toHaveValue(notAKey);
+  const text = 'Maya said disposal costs extra.';
+  await field.fill(text);
+  // A connection change must strand this exact draft, not send it elsewhere.
+  await page.route(
+    `**${endpoint}?view=connection`,
+    route =>
+      route.fulfill({
+        json: { second_brain: { ...source, source: { ...source.source, origin: 'connected' } } }
+      }),
+    { times: 1 }
+  );
+  await page.evaluate(() => document.dispatchEvent(new Event('personal-assistant:second-brain')));
+  await expect(save).toBeDisabled();
+  await expect(page.locator('#cockpitCaptureStatus')).toContainText('read-only');
+  await expect(field).toHaveValue(text);
+  await capture(page, 'home-unavailable');
+  await page.evaluate(() => document.dispatchEvent(new Event('personal-assistant:second-brain')));
+  await expect(save).toBeEnabled();
+  // Lose the first response *after* the real backend has committed.
+  await page.route(
+    `**${endpoint}/capture`,
+    async route => {
+      const response = await route.fetch();
+      expect(response.ok()).toBeTruthy();
+      await route.abort();
+    },
+    { times: 1 }
+  );
+  await save.click();
+  await expect(save).toBeEnabled();
+  await expect(field).toHaveValue(text);
+  await field.press('Control+Enter');
+  const receipt = page.locator('#cockpitCaptureReceipt');
+  await expect(receipt).toContainText('Saved to My Notes → Inbox.');
+  await capture(page, 'home-receipt');
+  await receipt.getByRole('link', { name: 'Open note' }).click();
+  await expect(reader(page)).toContainText(text);
+  const added = readdirSync(inbox).filter(name => !existing.has(name));
+  expect(added).toHaveLength(1);
+  expect(new URLSearchParams(new URL(page.url()).hash.slice(1)).get('note')).toBe(added[0]);
+  expect(readFileSync(join(inbox, added[0]), 'utf8')).toContain(text);
+  expect(await work()).toEqual(before);
+  expect(posts.filter(path => /backlog|followups|\/runs|\/tickets/.test(path))).toEqual([]);
+  expect(posts.filter(path => path === endpoint + '/capture')).toHaveLength(3);
+  await expect(reader(page).getByRole('heading', { name: 'Suggested ticket' })).toHaveCount(0);
+  await capture(page, 'home-reference-reader');
+});
+
+test('only the comparison in mixed Inbox prose is offered for review', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  await page
+    .locator('#cockpitCaptureTitle')
+    .fill('Maya said disposal costs extra. Compare both roofing quotes before Friday.');
+  await page.getByRole('button', { name: 'Save to Inbox' }).click();
+  await page.locator('#cockpitCaptureReceipt').getByRole('link', { name: 'Open note' }).click();
+  await expect(reader(page).getByRole('heading', { name: 'Suggested ticket' })).toHaveCount(1);
+  await expect(reader(page).locator('blockquote')).toHaveText(
+    'Compare both roofing quotes before Friday.'
+  );
+  await expect(reader(page)).toContainText('Choose workspace');
+  await capture(page, 'inbox-comparison');
+});
+
+test('confirm in House, open the linked ticket, and keep a sibling as a note', async ({
+  page,
+  request
+}) => {
+  const created = await post(request, '/api/workspaces', {
+    name: 'House',
+    folder_slug: `house-review-${Date.now()}`,
+    blank: true
+  });
+  const house = created.folder || created.workspace || created;
+  const text =
+    'Maya said disposal costs extra. Compare both roofing quotes before Friday. Ask Maya about disposal.';
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  await page.locator('#cockpitCaptureTitle').fill(text);
+  await page.getByRole('button', { name: 'Save to Inbox' }).click();
+  await page.locator('#cockpitCaptureReceipt').getByRole('link', { name: 'Open note' }).click();
+  const cards = reader(page).locator('.my-notes-suggestion');
+  await expect(cards).toHaveCount(2);
+  const compare = cards.first();
+  const create = compare.getByRole('button', { name: 'Create ticket' });
+  await expect(create).toBeDisabled();
+  await compare.getByRole('combobox').selectOption(house.id);
+  await capture(page, 'review-confirm-destination');
+  await create.click();
+  const link = compare.getByRole('link', { name: 'Open ticket in House', exact: true });
+  await expect(link).toBeVisible();
+  const url = new URL(await link.getAttribute('href')!, 'http://localhost');
+  const id = url.searchParams.get('ticket');
+  const res = await request.get(`/api/workspaces/${house.id}/tickets/${id}`);
+  expect(res.ok()).toBeTruthy();
+  const ticket = await res.json();
+  expect(ticket).toMatchObject({
+    title: 'Compare both roofing quotes before Friday',
+    state: 'backlog',
+    source: 'personal_note',
+    owning_workspace_id: house.id
+  });
+  expect(ticket.assignee || ticket.current_run_id || ticket.schedule_enabled).toBeFalsy();
+  expect(ticket.linked_note_ids || []).toEqual([]);
+  await capture(page, 'review-linked');
+  await link.click();
+  await expect(page).toHaveURL(new RegExp(`ticket=${id}`));
+  await expect(page.getByText(ticket.title, { exact: true }).first()).toBeVisible();
+  await page.goBack();
+  await cards.nth(1).getByRole('button', { name: 'Keep as note' }).click();
+  await expect(cards).toHaveCount(1);
+  await page.reload();
+  await expect(link).toBeVisible();
+  await expect(cards).toHaveCount(1);
+  await expect(reader(page)).toContainText(text);
+  await capture(page, 'review-after-dismiss');
+});
+
+for (const [theme, width] of [
+  ['dark', 390],
+  ['light', 1440]
+] as const) {
+  test(`keyboard review stays reachable in ${theme} at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 840 });
+    await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+    await page.goto('/');
+    const open = page.getByRole('button', { name: 'Quick note', exact: true });
+    await open.focus();
+    await open.press('Enter');
+    const field = page.locator('#cockpitCaptureTitle');
+    await field.fill('Compare the inspection reports.');
+    await field.press('Control+Enter');
+    const receipt = page.locator('#cockpitCaptureReceipt').getByRole('link', { name: 'Open note' });
+    await receipt.focus();
+    await receipt.press('Enter');
+    const card = reader(page).locator('.my-notes-suggestion');
+    await expect(card).toBeVisible();
+    const select = card.getByRole('combobox');
+    await select.focus();
+    await select.press('h'); // native select type-ahead: House
+    const create = card.getByRole('button', { name: 'Create ticket' });
+    await expect(create).toBeEnabled();
+    await select.press('Tab');
+    await expect(create).toBeFocused();
+    expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await capture(page, `review-${theme}-${width}`);
+    await create.press('Tab');
+    const keep = card.getByRole('button', { name: 'Keep as note' });
+    await expect(keep).toBeFocused();
+    await keep.press('Enter');
+    await expect(card).toHaveCount(0);
+  });
+}
 
 test('HQ Overview saves to the personal Inbox and its Map station navigates', async ({
   page,

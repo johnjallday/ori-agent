@@ -145,11 +145,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page.locator('#cockpitCaptureBtn').click();
       const title = page.locator('#cockpitCaptureTitle');
       await expect(page.locator('#cockpitCaptureModal')).toBeVisible();
-      await title.fill('An unsaved fictional research ticket');
-      await page.locator('#cockpitCaptureDetailsToggle').click();
-      await page
-        .locator('#cockpitCaptureDetails')
-        .fill('A retained draft. No ticket is created by this tour.');
+      await title.fill('An unsaved fictional research note');
       await reachable(page.locator('#cockpitCaptureCancel'), width < 769 ? 44 : 40);
       await homeA11y(page, '#cockpitCaptureModal');
       await capture(
@@ -163,10 +159,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(page.locator('#cockpitCaptureModal')).toBeHidden();
       await expect(page.locator('#cockpitCaptureBtn')).toBeFocused();
       await page.locator('#cockpitCaptureBtn').click();
-      await expect(title).toHaveValue('An unsaved fictional research ticket');
-      await expect(page.locator('#cockpitCaptureDetails')).toHaveValue(
-        'A retained draft. No ticket is created by this tour.'
-      );
+      await expect(title).toHaveValue('An unsaved fictional research note');
       await page.locator('#cockpitCaptureCancel').click();
       expect(writes).toEqual([]);
     });

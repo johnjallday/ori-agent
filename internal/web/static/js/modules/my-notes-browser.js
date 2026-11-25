@@ -1,3 +1,4 @@
+import { suggestionSection } from './inbox-review.js';
 import { notesRequest } from './notes-api.js';
 import { isCreatedByOri } from './notes-station.js';
 import { previewParagraphs, secondBrainPreviewPath } from './personal-assistant-second-brain.js';
@@ -391,6 +392,13 @@ export function notebookReaderView(state) {
         ...base,
         title,
         paragraphs,
+        ...(reader.preview.suggestions?.length
+          ? {
+              suggestions: reader.preview.suggestions.filter(item => item.state !== 'dismissed'),
+              workspaces: reader.preview.review_workspaces || []
+            }
+          : {}),
+        ...(reader.preview.review_unavailable ? { reviewUnavailable: true } : {}),
         truncated: reader.preview.truncated === true
       };
     }
@@ -769,6 +777,21 @@ export class MyNotesBrowser {
           ...model.paragraphs.map(text => el('p', { text }))
         )
       );
+      if (model.reviewUnavailable)
+        out.push(
+          el('p', { text: 'Ticket suggestions could not be checked. Reopen this note to retry.' })
+        );
+      for (const item of model.suggestions || []) {
+        const reader = this.state.reader;
+        out.push(
+          suggestionSection(item, model.workspaces, {
+            ref: this.view.browse_ref,
+            name: model.name,
+            current: () => this.state.reader === reader,
+            focusReader: () => this.panes.reader.querySelector('h3')?.focus({ preventScroll: true })
+          })
+        );
+      }
       if (model.truncated)
         out.push(
           el('p', { className: 'my-notes-pane-line', text: 'Only the beginning is shown.' })

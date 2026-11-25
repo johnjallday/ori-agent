@@ -41,4 +41,8 @@ test('an invalid success response is not a receipt', async () => {
   assert.equal(await draft.save('connection-a', async () => ({})), false);
   assert.equal(draft.text, 'Do not silently lose this');
   assert.match(draft.problem, /No save receipt/);
+  for (const note of ['Inbox/', 'Inbox/other/one.md', 'Inbox/../one.md']) {
+    assert.equal(await draft.save('connection-a', async () => ({ capture: { note } })), false);
+    assert.equal(draft.text, 'Do not silently lose this');
+  }
 });

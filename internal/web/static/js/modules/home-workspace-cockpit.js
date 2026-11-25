@@ -1,5 +1,6 @@
 // Importing this also registers window.OriEconomy, which is how dashboard.js —
 // a plain script, not a module — reaches the same harvest client.
+import { HomeNoteForm } from './home-note-form.js';
 import { destinationPlace } from './destination-place.js';
 import { arrivalSaved, arrivalSource } from './files-arrival.js';
 import { request as filenameIndex } from './search-desk.js';
@@ -1762,76 +1763,6 @@ export function renderScheduledSectionHTML(items) {
 // ---------------------------------------------------------------------------
 
 /**
- * Validate a capture draft before it is sent.
- *
- * A title is required; details are optional. The draft itself is never
- * discarded here — the caller keeps it so a failed save can be retried with the
- * text intact (FR103).
- */
-export function validateCapture(draft) {
-  const title = String((draft && draft.title) || '').trim();
-  if (!title) return { ok: false, message: 'Add a title before saving.' };
-  return { ok: true, title, details: String((draft && draft.details) || '').trim() };
-}
-
-/**
- * The request body for a capture, using the EXISTING backlog contract:
- * POST /api/orchestration/backlog { workspace_id, description, details }.
- * There is no second inbox model (FR102).
- */
-export function captureRequestBody(hqWorkspaceId, draft) {
-  const valid = validateCapture(draft);
-  return {
-    workspace_id: hqWorkspaceId,
-    description: valid.title || '',
-    details: valid.details || '',
-    source_type: 'home_quick_capture'
-  };
-}
-
-/**
- * Where a successful capture can send the user: the designated HQ's own
- * workspace page, backlog panel open (workspace-url-state `panel=backlog`).
- *
- * Page URLs are slug-based, and the HQ status names a workspace by id, so the
- * slug is read from the status's resolved workspace or the loaded list. When
- * neither has it, `backlogURL` is '' — the save still succeeded, the receipt
- * just offers no link, rather than a guessed slug or an id in a page URL.
- */
-export function captureDestinationView(hqStatus, flattened) {
-  const workspaceId = hqStatus && hqStatus.valid ? String(hqStatus.workspace_id || '').trim() : '';
-  if (!workspaceId) return { workspaceId: '', slug: '', backlogURL: '' };
-  const fromStatus =
-    hqStatus.workspace && String(hqStatus.workspace.id || '') === workspaceId
-      ? hqStatus.workspace.folder_slug
-      : '';
-  const listed = findWorkspace(flattened, workspaceId);
-  const slug = String(fromStatus || (listed && listed.folder_slug) || '').trim();
-  return {
-    workspaceId,
-    slug,
-    backlogURL: slug ? workspacePageURL(slug, [], { search: 'panel=backlog' }) : ''
-  };
-}
-
-/**
- * What a confirmed save does to the dialog.
- *
- * Only the SUBMITTED text is cleared: if the fields still hold exactly the
- * snapshot that was sent, they clear and the dialog closes; if the user kept
- * typing (or reopened and wrote something new) while the request was in
- * flight, their newer text stays and the dialog is left as they have it.
- */
-export function captureSuccessOutcome(snapshot, current) {
-  const same =
-    !!snapshot &&
-    !!current &&
-    String(current.title ?? '') === String(snapshot.title ?? '') &&
-    String(current.details ?? '') === String(snapshot.details ?? '');
-  return { clear: same, close: same };
-}
-
-/**
  * Cmd/Ctrl+Enter submits from anywhere in the dialog — including the
  * multi-line details, where a plain Enter must stay a new line — but never
  * while an input method is composing, where Enter confirms a candidate.
@@ -1850,19 +1781,6 @@ export function captureShortcutSubmits(event) {
  */
 export function captureInitialFocus({ coarsePointer = false } = {}) {
   return coarsePointer ? 'heading' : 'title';
-}
-
-/** What backlog capture can do right now, given the Personal HQ status. */
-export function captureAvailability(hqStatus) {
-  const valid = !!(hqStatus && hqStatus.valid && hqStatus.workspace_id);
-  if (valid) return { canSave: true, hqWorkspaceId: hqStatus.workspace_id, message: '' };
-  return {
-    canSave: false,
-    hqWorkspaceId: '',
-    // FR104: explain the requirement and offer the existing HQ path, without
-    // discarding whatever the user already typed.
-    message: 'This saves to your Personal HQ backlog, and no Personal HQ is set up yet.'
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2200,9 +2118,8 @@ import {
     captureHeading: document.getElementById('cockpitCaptureModalTitle'),
     captureForm: document.getElementById('cockpitCaptureForm'),
     captureTitle: document.getElementById('cockpitCaptureTitle'),
-    captureDetails: document.getElementById('cockpitCaptureDetails'),
-    captureDetailsToggle: document.getElementById('cockpitCaptureDetailsToggle'),
-    captureDetailsGroup: document.getElementById('cockpitCaptureDetailsGroup'),
+    captureSetup: document.getElementById('cockpitCaptureSetup'),
+    captureDiscard: document.getElementById('cockpitCaptureDiscard'),
     captureSave: document.getElementById('cockpitCaptureSave'),
     captureStatus: document.getElementById('cockpitCaptureStatus'),
     captureReceipt: document.getElementById('cockpitCaptureReceipt'),
@@ -2325,11 +2242,10 @@ import {
     draggingId: '',
     workspaceRoot: { state: 'loading', path: '', custom: false },
     undoStack: [],
-    // Personal HQ status, read once and refreshed on HQ actions. Quick Capture
-    // needs it to know where a capture goes (FR102/FR104).
+    // Personal HQ status for the reserved map site, refreshed on HQ actions.
     hqStatus: null,
     // 'loading' | 'ready' | 'error'. A status not read yet, or not readable,
-    // is not "no Personal HQ": capture says which it is (FR120/FR121).
+    // is not "no Personal HQ".
     hqStatusState: 'loading',
     // City Economy. null until GET /api/economy answers successfully, so "the
     // economy is switched off" and "the user has nothing yet" stay
@@ -5606,10 +5522,12 @@ import {
   let captureVisible = false;
   let hideCaptureAfterShow = false;
   let pendingCaptureHandoff = null;
-  // The one in-flight save: { snapshot: { title, details } }. Every submit path
-  // runs through submitCapture, which refuses to start a second.
-  let captureSaving = null;
-  let captureStatusKind = '';
+  const capture = new HomeNoteForm(els, canHydrateWorkspaceData, draft => {
+    if (captureIsActive()) hideCaptureModal();
+    showCaptureReceipt(draft);
+    announce(draft.receipt);
+    fireTTFA('quick-capture');
+  });
   let captureReceiptTimer = null;
 
   function getCaptureModalInstance() {
@@ -5674,179 +5592,12 @@ import {
     if (typeof handoff === 'function') handoff();
   }
 
-  function setCaptureDetailsOpen(open) {
-    if (els.captureDetailsGroup) els.captureDetailsGroup.hidden = !open;
-    if (els.captureDetailsToggle) {
-      els.captureDetailsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-      els.captureDetailsToggle.textContent = open ? 'Hide details' : 'Add details';
-    }
-  }
-
-  function setCaptureStatus(message, kind = '') {
-    if (!els.captureStatus) return;
-    captureStatusKind = message ? kind : '';
-    els.captureStatus.textContent = message || '';
-    els.captureStatus.dataset.kind = captureStatusKind;
-    if (els.captureTitle) {
-      if (kind === 'invalid') els.captureTitle.setAttribute('aria-invalid', 'true');
-      else els.captureTitle.removeAttribute('aria-invalid');
-    }
-  }
-
-  function setCaptureBusy(busy) {
-    if (els.captureSave) {
-      els.captureSave.disabled = busy || !captureAvailability(state.hqStatus).canSave;
-      els.captureSave.setAttribute('aria-busy', busy ? 'true' : 'false');
-      els.captureSave.textContent = busy ? 'Adding…' : 'Add to backlog';
-    }
-    if (els.captureForm) els.captureForm.setAttribute('aria-busy', busy ? 'true' : 'false');
-  }
-
-  /**
-   * Keep the dialog honest about where a capture can go. Without a valid
-   * Personal HQ it explains the requirement and offers the existing setup
-   * path (FR104); the draft in the fields is never touched here.
-   */
-  function refreshCaptureAvailability() {
-    const availability = captureAvailability(state.hqStatus);
-    setCaptureBusy(!!captureSaving);
-    if (!els.captureStatus || captureSaving) return;
-    if (availability.canSave) {
-      // An HQ that just became valid clears its own availability line, but a
-      // retained validation or save error stays until the user acts on it.
-      if (['needs-hq', 'checking', 'hq-unavailable', 'blocked'].includes(captureStatusKind)) {
-        setCaptureStatus('');
-      }
-      return;
-    }
-    if (state.hqStatusState === 'blocked') {
-      // The onboarding gate (setup still required, or its status unreadable)
-      // holds every workspace read, the HQ status included, so there is
-      // nothing to check yet — say so instead of "checking" forever.
-      setCaptureStatus(
-        "Your workspaces aren't available until Ori's setup is done, so this can't be added yet. Your text is kept.",
-        'blocked'
-      );
-      return;
-    }
-    if (state.hqStatusState === 'loading') {
-      setCaptureStatus('Checking your Personal HQ…', 'checking');
-      return;
-    }
-    if (state.hqStatusState === 'error') {
-      setCaptureStatus(
-        'Your Personal HQ could not be checked, so this cannot be added yet. Your text is kept. ',
-        'hq-unavailable'
-      );
-      const retry = document.createElement('button');
-      retry.type = 'button';
-      retry.className = 'cockpit-capture-hq';
-      retry.textContent = 'Check again';
-      retry.addEventListener('click', () => {
-        state.hqStatusState = 'loading';
-        refreshCaptureAvailability();
-        if (els.captureTitle) els.captureTitle.focus();
-        void refreshHQStatus();
-      });
-      els.captureStatus.append(retry);
-      return;
-    }
-    setCaptureStatus(`${availability.message} `, 'needs-hq');
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'cockpit-capture-hq';
-    btn.textContent = 'Set up Personal HQ';
-    // HQ setup is its own dialog: close capture first (the draft stays in the
-    // fields for next time), then ask for setup.
-    btn.addEventListener('click', () =>
-      handoffAfterCaptureHide(() =>
-        window.dispatchEvent(
-          new CustomEvent('ori:personal-hq-action', { detail: { action: 'build' } })
-        )
-      )
-    );
-    els.captureStatus.append(btn);
-  }
-
-  function readCaptureDraft() {
-    return {
-      title: els.captureTitle ? els.captureTitle.value : '',
-      details: els.captureDetails ? els.captureDetails.value : ''
-    };
-  }
-
-  async function submitCapture(e) {
-    if (e) e.preventDefault();
-    // One request at a time, whichever way it was asked for (FR103).
-    if (captureSaving) return;
-    const draft = readCaptureDraft();
-    const valid = validateCapture(draft);
-    if (!valid.ok) {
-      setCaptureStatus(valid.message, 'invalid');
-      if (els.captureTitle) els.captureTitle.focus();
-      return;
-    }
-    const availability = captureAvailability(state.hqStatus);
-    if (!availability.canSave) {
-      refreshCaptureAvailability();
-      return;
-    }
-    const destination = captureDestinationView(state.hqStatus, state.flattened);
-    captureSaving = { snapshot: draft };
-    setCaptureStatus('Adding to your Personal HQ backlog…', 'saving');
-    setCaptureBusy(true);
-    let saved = false;
-    try {
-      const res = await fetch('/api/orchestration/backlog', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(captureRequestBody(availability.hqWorkspaceId, draft))
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      saved = true;
-    } catch (err) {
-      console.error('home-workspace-cockpit: capture failed', err);
-    }
-    const snapshot = captureSaving.snapshot;
-    captureSaving = null;
-    setCaptureBusy(false);
-    if (!saved) {
-      // FR103: the draft survives a failure and the retry is obvious.
-      setCaptureStatus(
-        'Could not add this to your backlog. Your text is still here — try again.',
-        'error'
-      );
-      announce('Adding to the backlog failed. Your text was kept.');
-      return;
-    }
-    const outcome = captureSuccessOutcome(snapshot, readCaptureDraft());
-    if (outcome.clear) {
-      if (els.captureTitle) els.captureTitle.value = '';
-      if (els.captureDetails) els.captureDetails.value = '';
-      setCaptureDetailsOpen(false);
-      setCaptureStatus('');
-    } else {
-      setCaptureStatus('Your earlier text was added. What you typed since is still here.');
-    }
-    if (outcome.close && captureIsOpen()) hideCaptureModal();
-    showCaptureReceipt(destination);
-    announce('Added to your Personal HQ backlog.');
-    fireTTFA('quick-capture');
-    // Capture records an idea; it never starts an agent or a task run.
-    void refreshQuietly();
-  }
-
   // ---- the receipt: confirmed saves only, over the map, never focused ----
 
-  function showCaptureReceipt(destination) {
+  function showCaptureReceipt(draft) {
     if (!els.captureReceipt) return;
-    if (els.captureReceiptText) els.captureReceiptText.textContent = 'Added to Personal HQ backlog';
-    if (els.captureReceiptLink) {
-      const href = destination && destination.backlogURL;
-      els.captureReceiptLink.hidden = !href;
-      if (href) els.captureReceiptLink.setAttribute('href', href);
-      else els.captureReceiptLink.removeAttribute('href');
-    }
+    els.captureReceiptText.textContent = draft.receipt;
+    els.captureReceiptLink.href = draft.receiptURL;
     els.captureReceipt.hidden = false;
     scheduleCaptureReceiptDismiss();
   }
@@ -5873,26 +5624,23 @@ import {
   function wireCapture() {
     if (els.captureBtn) els.captureBtn.addEventListener('click', () => showCaptureModal());
     if (els.captureForm) {
-      els.captureForm.addEventListener('submit', submitCapture);
+      els.captureForm.addEventListener('submit', event => {
+        event.preventDefault();
+        void capture.submit();
+      });
       els.captureForm.addEventListener('keydown', event => {
         if (!captureShortcutSubmits(event)) return;
         event.preventDefault();
         if (typeof els.captureForm.requestSubmit === 'function') els.captureForm.requestSubmit();
-        else void submitCapture();
+        else void capture.submit();
       });
     }
-    if (els.captureDetailsToggle) {
-      els.captureDetailsToggle.addEventListener('click', () => {
-        const open = els.captureDetailsGroup ? els.captureDetailsGroup.hidden : true;
-        setCaptureDetailsOpen(open);
-        if (open && els.captureDetails) els.captureDetails.focus();
-      });
-    }
-    if (els.captureTitle) {
-      els.captureTitle.addEventListener('input', () => {
-        if (captureStatusKind === 'invalid') setCaptureStatus('');
-      });
-    }
+    capture.wire();
+    const checkOpenDraft = () => {
+      if (captureIsActive()) void capture.check();
+    };
+    document.addEventListener('personal-assistant:second-brain', checkOpenDraft);
+    window.addEventListener('focus', checkOpenDraft);
     els.captureReceiptClose?.addEventListener('click', () => {
       hideCaptureReceipt();
       els.captureBtn?.focus();
@@ -5919,12 +5667,7 @@ import {
         closePanel({ focus: false });
         hideEconomyHelp({ restoreFocus: false });
         hideCaptureReceipt();
-        // A retained draft with details reopens them; collapsing never erased.
-        const hasDetails = !!(els.captureDetails && els.captureDetails.value.trim());
-        setCaptureDetailsOpen(
-          hasDetails || (els.captureDetailsGroup && !els.captureDetailsGroup.hidden)
-        );
-        refreshCaptureAvailability();
+        void capture.check();
         els.captureBtn?.setAttribute('aria-expanded', 'true');
       });
     });
@@ -5959,11 +5702,10 @@ import {
     });
   }
 
-  /** Personal HQ status, used by Quick Capture. Additive and non-blocking. */
+  /** Personal HQ status for the map's reserved site. */
   async function refreshHQStatus() {
     if (!canHydrateWorkspaceData()) {
       state.hqStatusState = 'blocked';
-      refreshCaptureAvailability();
       return;
     }
     if (state.hqStatusState === 'blocked') state.hqStatusState = 'loading';
@@ -5979,7 +5721,6 @@ import {
       state.hqStatus = null;
       state.hqStatusState = 'error';
     }
-    refreshCaptureAvailability();
     // The Map keeps its own copy of this status and draws the reserved HQ site
     // from it. Builds that finish outside personal-hq-onboarding.js (the
     // assistant's HQ card) only fire ori:personal-hq-changed, so without this
@@ -7080,7 +6821,7 @@ import {
   window.addEventListener('load', consumeFolderDeepLink);
 
   // Personal HQ provisioning can complete while Home is open; re-read the
-  // status so Quick Capture stops explaining a requirement already met.
+  // status to update the reserved map site.
   window.addEventListener('ori:personal-hq-changed', () => void refreshHQStatus());
   window.addEventListener('ori:plugin-updates-changed', event => {
     const count = Number(event.detail?.count);
@@ -7250,10 +6991,7 @@ import {
       mountTreeView();
       renderToday();
       renderRail({ announceChange: false });
-      // Capture stays reachable, but the HQ status is gated with everything
-      // else: say so rather than "checking" forever.
       state.hqStatusState = 'blocked';
-      refreshCaptureAvailability();
       return state.onboardingGate;
     }
 
