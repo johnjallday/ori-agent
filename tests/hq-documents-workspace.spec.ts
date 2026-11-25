@@ -218,12 +218,25 @@ for (const staffed of [false, true]) {
     await page.locator('#folderNameInput').fill(name);
     await page.screenshot({ path: info.outputPath('replacement-review.png') });
     await page.locator('#wizardNextBtn').click();
-    if (!staffed) await page.getByRole('checkbox', { name: 'Create without agents' }).check();
+    if (staffed) {
+      const role = page.locator('#workspaceRoleRoster [data-role-id="manager"]');
+      await role.getByRole('button', { name: 'Clear Documents Manager' }).click();
+      await role.getByRole('button', { name: 'Create an agent for Documents Manager' }).click();
+      await expect(page.locator('#agentSystemPrompt')).toHaveValue(
+        /this workspace's Documents Manager/
+      );
+      await page.locator('#agentName').fill('Letters Archivist');
+      await page
+        .locator('#agentSystemPrompt')
+        .fill('Help me review the letters in this workspace.');
+      await page.locator('#createAgentBtn').click();
+      await expect(role.locator('.ws-role-tag__name')).toHaveText('Letters Archivist');
+    } else await page.getByRole('checkbox', { name: 'Create without agents' }).check();
     await page.locator('#wizardNextBtn').click();
     const review = page.locator('#workspaceCreationReviewPanel');
     await expect(review).toContainText(other);
     await expect(review).toContainText(
-      staffed ? 'Documents Manager' : 'No agents will be created or attached.'
+      staffed ? 'Letters Archivist' : 'No agents will be created or attached.'
     );
     await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
     await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
@@ -239,6 +252,7 @@ for (const staffed of [false, true]) {
     if (staffed)
       expect(bindings[0]).toMatchObject({
         role_id: 'manager',
+        name: 'Letters Archivist',
         role_source: 'created',
         entry_point: true
       });

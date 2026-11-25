@@ -177,6 +177,7 @@ test('Blank starts with a manager of its own and creates it with the workspace',
   const { response, body } = await created;
   expect(response.ok(), JSON.stringify(body)).toBe(true);
   const requestBody = (await material).postDataJSON().request;
+  expect(requestBody).not.toHaveProperty('guided_purpose');
   expect(requestBody.role_staffing).toEqual([
     expect.objectContaining({
       role_id: 'manager',
