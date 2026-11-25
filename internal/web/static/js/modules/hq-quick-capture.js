@@ -16,6 +16,7 @@ export class HQCaptureDraft {
   busy = false;
   problem = '';
   receipt = '';
+  receiptURL = '';
 
   constructor(prefix = 'hq-capture') {
     this.prefix = prefix;
@@ -67,6 +68,8 @@ export class HQCaptureDraft {
       this.ref = '';
       this.id = '';
       this.receipt = 'Saved to My Notes → Inbox.';
+      // A fragment keeps the note filename out of Home navigation request logs.
+      this.receiptURL = `${MY_NOTES_URL}#${new URLSearchParams({ ref, note: capture.note.slice(6) })}`;
       return true;
     } catch (error) {
       this.problem = error.message || 'Ori could not confirm the save. Your draft is still here.';

@@ -185,6 +185,83 @@ test('explicit notebook setup is reusable and arrival only reads the connection,
   await expect(page.getByRole('button', { name: 'Save to Inbox' })).toBeVisible();
 });
 
+test('Home quick note saves one Markdown file and its receipt opens the source, never work', async ({
+  page,
+  request
+}) => {
+  const source = await notes(request);
+  const hq = (await (await request.get('/api/personal-hq/status')).json()).status.workspace_id;
+  const work = async () =>
+    Promise.all(
+      [`/api/orchestration/backlog?workspace_id=${hq}`, '/api/personal-hq/followups'].map(
+        async path => {
+          const response = await request.get(path);
+          expect(response.ok()).toBeTruthy();
+          return response.json();
+        }
+      )
+    );
+  const before = await work();
+  const posts: string[] = [];
+  page.on('request', req => {
+    if (req.method() === 'POST') posts.push(new URL(req.url()).pathname);
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  const field = page.locator('#cockpitCaptureTitle');
+  const save = page.getByRole('button', { name: 'Save to Inbox' });
+  await expect(save).toBeEnabled();
+  const text = 'Maya said disposal costs extra.';
+  await field.fill(text);
+  // A connection change must strand this exact draft, not send it elsewhere.
+  await page.route(
+    `**${endpoint}?view=connection`,
+    route =>
+      route.fulfill({
+        json: { second_brain: { ...source, source: { ...source.source, origin: 'connected' } } }
+      }),
+    { times: 1 }
+  );
+  await page.evaluate(() => document.dispatchEvent(new Event('personal-assistant:second-brain')));
+  await expect(save).toBeDisabled();
+  await expect(page.locator('#cockpitCaptureStatus')).toContainText('read-only');
+  await expect(field).toHaveValue(text);
+  await capture(page, 'home-unavailable');
+  await page.evaluate(() => document.dispatchEvent(new Event('personal-assistant:second-brain')));
+  await expect(save).toBeEnabled();
+  // Lose the first response *after* the real backend has committed.
+  await page.route(
+    `**${endpoint}/capture`,
+    async route => {
+      const response = await route.fetch();
+      expect(response.ok()).toBeTruthy();
+      await route.abort();
+    },
+    { times: 1 }
+  );
+  await save.click();
+  await expect(save).toBeEnabled();
+  await expect(field).toHaveValue(text);
+  await field.press('Control+Enter');
+  const receipt = page.locator('#cockpitCaptureReceipt');
+  await expect(receipt).toContainText('Saved to My Notes → Inbox.');
+  await capture(page, 'home-receipt');
+  await receipt.getByRole('link', { name: 'Open note' }).click();
+  await expect(reader(page)).toContainText(text);
+  const inbox = join(source.source.path, 'Inbox');
+  expect(
+    readdirSync(inbox).filter(
+      name =>
+        name.includes('maya-said-disposal') &&
+        readFileSync(join(inbox, name), 'utf8').includes(text)
+    )
+  ).toHaveLength(1);
+  expect(await work()).toEqual(before);
+  expect(posts.filter(path => /backlog|followups|\/runs|\/tickets/.test(path))).toEqual([]);
+  expect(posts.filter(path => path === endpoint + '/capture')).toHaveLength(2);
+  await capture(page, 'home-reference-reader');
+});
+
 test('HQ Overview saves to the personal Inbox and its Map station navigates', async ({
   page,
   request
