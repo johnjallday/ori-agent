@@ -1364,14 +1364,13 @@ async function captureScene(
   }
 }
 
-// Home's header primary appears only once the assistant relationship has been
-// read, and its label follows that state. Both Home scenes photograph the
-// header, so wait for the fixture's active assistant to settle it on its final
-// label; otherwise the two captures of one run can differ by that button.
+// Wait for the fixture's relationship, not just the initially hidden button.
 async function expectFinalHomePrimary(page: Page) {
   const primary = page.locator('#cockpitPrimaryActionBtn');
-  await expect(primary).toBeVisible();
-  await expect(primary).toHaveText('Hire an agent');
+  await page.waitForFunction(
+    () => window.OriHomeCockpit?.getState()?.personalAssistant?.state === 'active'
+  );
+  await expect(primary).toBeHidden();
   await expect(page.locator('#personalHQResultHost')).toBeHidden();
   await expect(page.locator('#personalAssistantHQCard')).not.toHaveAttribute(
     'data-result',

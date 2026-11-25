@@ -854,8 +854,8 @@ async function folder() {
   console.log('after Set up:', new URL(page.url()).pathname + new URL(page.url()).search);
   await shot('09-set-up');
 
-  // The toolbar's primary, "Hire an agent" once the HQ exists, starts the same turn.
-  await page.goto(`${base}/`);
+  // The Files toolbar's post-HQ hire action starts the same turn.
+  await page.goto(`${base}/?view=tree`);
   await page.locator('#cockpitPrimaryActionBtn').waitFor({ state: 'visible', timeout: 20000 });
   await applyTheme();
   await page.locator('#cockpitPrimaryActionBtn').click();

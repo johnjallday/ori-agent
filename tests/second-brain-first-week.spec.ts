@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { attachPlacementFolder } from './helpers/assisted-workspace-placement';
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 
@@ -466,17 +467,7 @@ test.describe('the first Downloads batch teaches Ori', () => {
     expect(brain).toBeTruthy();
 
     // Show Ori Downloads from Home; it prepares the review and the first batch.
-    await page.goto('/');
-    await page.waitForFunction(() =>
-      Boolean((window as unknown as { PersonalAssistantPanel?: unknown }).PersonalAssistantPanel)
-    );
-    await page.evaluate(() =>
-      (
-        window as unknown as { PersonalAssistantPanel: { close: () => void } }
-      ).PersonalAssistantPanel.close()
-    );
-    await page.locator('#cockpitPrimaryActionBtn').click();
-    await page.locator('.personal-assistant-panel__chip', { hasText: 'Downloads' }).first().click();
+    await attachPlacementFolder(page, 'Downloads', true);
     await page
       .getByRole('button', { name: 'Use automatic placement', exact: true })
       .first()

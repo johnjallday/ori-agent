@@ -156,7 +156,8 @@ for (const mode of [
     // Let the arrival camera's next frame run even while the decorative clock
     // is held for captures. Otherwise the screenshots precede the real pan.
     await page.clock.runFor(32);
-    const face = tile.locator('.ws-map-tile-face');
+    // The assigned team portrait takes precedence over the transient work face.
+    const face = tile.locator('.ws-map-tile-team, .ws-map-tile-face');
     if (mode !== 'reduced') {
       await expect(face).toHaveCount(1);
       await expect(face).toBeHidden();
@@ -226,7 +227,9 @@ for (const mode of [
       await mkdir(secondFolder, { recursive: true, mode: 0o750 });
       await writeFile(join(secondFolder, 'Song.rpp'), '<REAPER_PROJECT\\n>\\n', { mode: 0o600 });
       await page.getByRole('button', { name: 'Close personal assistant', exact: true }).click();
+      await goToFiles(page);
       await page.getByRole('button', { name: 'Hire an agent', exact: true }).click();
+      await goToMap(page);
       await expect(entry).toBeVisible();
       await entry.locator('input').fill(secondFolder);
       await entry.getByRole('button').click();

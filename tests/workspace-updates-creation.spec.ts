@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { existsSync, readFileSync, writeFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
+import { attachPlacementFolder } from './helpers/assisted-workspace-placement';
 import { installLocalCdn } from './helpers/offline-cdn';
 
 // A fresh scripts/demo-inbox-folder.sh sandbox, no provider/model. This uses the
@@ -21,11 +22,7 @@ test('Updates creation: attached folder, reviewed setup, quiet Home discovery, e
   const old = new Date(Date.now() - 3600000);
   utimesSync(source, old, old);
   const before = (await (await request.get('/api/workspaces')).json()).folders;
-  await page.goto('/');
-  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.close));
-  await page.evaluate(() => (window as any).PersonalAssistantPanel.close());
-  await page.locator('#cockpitPrimaryActionBtn').click();
-  await page.locator('.personal-assistant-panel__chip', { hasText: 'Desktop' }).first().click();
+  await attachPlacementFolder(page, 'Desktop', true);
   const panel = page.locator('#personalAssistantPanel');
   await expect(panel.locator('.folder-visual__agent strong')).toHaveText('File Curator');
   await expect(panel.getByRole('checkbox', { name: /Also watch this folder/ })).not.toBeChecked();

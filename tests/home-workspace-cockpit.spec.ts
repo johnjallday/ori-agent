@@ -368,6 +368,7 @@ test.describe('Home onboarding workspace gate', () => {
     page
   }) => {
     await skipOnboarding(page);
+    await routeAssistant(page, 'needs_hq');
     await page.route('**/api/workspaces?tree=true', route =>
       route.fulfill({ status: 200, contentType: 'application/json', body: '{"folders":[]}' })
     );
@@ -767,6 +768,7 @@ test.describe('Home workspace cockpit', () => {
   test('Personal HQ uses the shared modal, preserves selection on dismiss, and dispatches actions once', async ({
     page
   }) => {
+    await routeAssistant(page, 'needs_hq');
     await page.route('**/api/personal-hq/status', route =>
       route.fulfill({
         status: 200,
@@ -966,18 +968,16 @@ test.describe('Home workspace cockpit', () => {
     expect(page.url()).not.toContain('create=1');
   });
 
-  test('Ask Ori stays in its universal non-modal panel and never opens context', async ({
-    page
-  }) => {
+  test('Help stays in its universal non-modal panel and never opens context', async ({ page }) => {
     await ensureWorkspace(page);
     await page.goto('/');
     await page.locator('.ws-map-tile[data-ws-id]').first().waitFor();
 
-    await page.locator('#oriGuideMapTrigger').click();
-    await page.locator('#oriGuideInput').fill('What needs attention today?');
-    await page.locator('#oriGuideSend').click();
+    await page.locator('#oriGuideLauncher').click();
+    await page.getByLabel('Search help', { exact: true }).fill('What is a workspace?');
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
     await expect(page.locator('#oriGuidePanel')).toBeVisible();
-    await expect(page.locator('#oriGuideReply')).not.toBeEmpty();
+    await expect(page.locator('#oriGuideReply')).toHaveAttribute('data-status', 'answered');
     await expect(page.locator('#homeAssistantThinkingModal')).toBeHidden();
 
     await expect(page.locator('#cockpitContextModal')).toBeHidden();
@@ -1058,6 +1058,26 @@ test.describe('Home workspace cockpit', () => {
     }
   });
 
+  test('empty Updates still opens Summary; Back with no selection returns to Updates', async ({
+    page
+  }) => {
+    await page.route('**/api/workspace-updates?*', route =>
+      route.fulfill({ json: { items: [], has_more: false } })
+    );
+    await page.goto('/?view=map');
+    const updates = page.locator('#cockpitRailToggle');
+    await updates.click();
+    await expect(page.locator('#cockpitWorkspaceUpdates')).toContainText(
+      'No pending workspace messages'
+    );
+    await page.getByRole('button', { name: 'View summary' }).click();
+    await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
+    await page.locator('[data-cockpit-rail-back]').click();
+    await expect(page.locator('#cockpitContextModal')).toBeHidden();
+    await expect(updates).toHaveAttribute('aria-expanded', 'false');
+    await expect(updates).toBeFocused();
+  });
+
   test('Map Summary opens from Updates without feed data; Files keeps its header action', async ({
     page
   }) => {
@@ -1067,7 +1087,21 @@ test.describe('Home workspace cockpit', () => {
     await expect(page.locator('#cockpitSummaryBtn')).toBeHidden();
     await updates.press('Enter');
     await expect(updates).toHaveAttribute('aria-expanded', 'true');
-    await page.getByRole('button', { name: 'View summary' }).press('Enter');
+    await expect(page.locator('#cockpitWorkspaceUpdates')).toContainText(
+      'Workspace updates are unavailable'
+    );
+    const viewSummary = page.getByRole('button', { name: 'View summary' });
+    // Quests/resources may be present between the toggle and the flyout.
+    // Follow real Tab order rather than focusing the flyout action by locator.
+    for (
+      let i = 0;
+      i < 8 && !(await viewSummary.evaluate(el => el === document.activeElement));
+      i++
+    ) {
+      await page.keyboard.press('Tab');
+    }
+    await expect(viewSummary).toBeFocused();
+    await page.keyboard.press('Enter');
     await expect(page.locator('#cockpitUpdatesFlyout')).toBeHidden();
     await expect(updates).toHaveAttribute('aria-expanded', 'false');
     await expect(page.locator('[data-rail-panel="summary"]')).toBeVisible();
@@ -1455,7 +1489,7 @@ test.describe('Header hierarchy', () => {
     await skipOnboarding(page);
   });
 
-  test('groups identity, actions, and readouts, with the hire-first step as the primary creation action', async ({
+  test('groups identity, actions, and readouts, with post-HQ hiring only on Files', async ({
     page
   }) => {
     await routeAssistant(page, 'active');
@@ -1476,9 +1510,9 @@ test.describe('Header hierarchy', () => {
     await expect(utility.locator('#cockpitSignalFilters')).toBeVisible();
     await expect(utility.locator('#cockpitRailToggle')).toBeVisible();
 
-    // The primary is the next hire-first step and comes before New Workspace,
-    // which stays beside it as the secondary.
     const primary = main.locator('#cockpitPrimaryActionBtn');
+    await expect(primary).toBeHidden();
+    await goToFiles(page);
     await expect(primary).toHaveText('Hire an agent');
     await expect(primary).toHaveClass(/modern-btn-primary/);
     const create = main.locator('#cockpitCreateWorkspaceBtn');
@@ -1505,9 +1539,38 @@ test.describe('Header hierarchy', () => {
       page
     }) => {
       await routeAssistant(page, state);
+      if (opens === '#personalAssistantHQCard') {
+        // Today independently controls the section containing the HQ card.
+        // Both pre-HQ states project as needs_hq, not the empty demo's needs_hire.
+        await page.route('**/api/personal-assistant/today', route =>
+          route.fulfill({
+            json: {
+              today: {
+                state: 'needs_hq',
+                display_name: 'Atlas',
+                needs_you: {
+                  items: [
+                    {
+                      id: 'personal-hq',
+                      kind: 'hq_setup',
+                      title: 'Build My HQ',
+                      route: '/?panel=today'
+                    }
+                  ]
+                }
+              }
+            }
+          })
+        );
+      }
       await ensureWorkspace(page);
       await page.goto('/');
       const primary = page.locator('#cockpitPrimaryActionBtn');
+      if (state === 'active' || state === 'paused') {
+        await expect(primary).toHaveText(label); // relationship has settled
+        await expect(primary).toBeHidden();
+        await goToFiles(page);
+      }
       await expect(primary).toHaveText(label);
       await expect(page.locator('#cockpitCreateWorkspaceBtn')).toHaveClass(/modern-btn-secondary/);
       expect(await visibleCreationButtons(page)).toEqual([
@@ -1530,8 +1593,38 @@ test.describe('Header hierarchy', () => {
       await primary.click();
       await expect(page.locator('#personalAssistantPanel')).toBeVisible();
       await expect(page.locator(opens)).toBeVisible();
+      if (state === 'active' || state === 'paused') {
+        await page.locator('#personalAssistantClose').click();
+        await goToMap(page);
+        await expect(primary).toBeHidden();
+      }
     });
   }
+
+  test('finishing HQ setup while on Map removes only the header hire action', async ({ page }) => {
+    await routeAssistant(page, 'needs_hq');
+    await ensureWorkspace(page);
+    await page.goto('/?view=map');
+    const primary = page.locator('#cockpitPrimaryActionBtn');
+    await expect(primary).toBeVisible();
+    await expect(primary).toHaveText('Build My HQ');
+    await routeAssistant(page, 'active');
+    await page.evaluate(() => (window as any).PersonalAssistantPanel.refresh());
+    await expect(primary).toBeHidden();
+    await expect(page.getByRole('button', { name: 'New Workspace', exact: true })).toBeVisible();
+    await goToFiles(page);
+    await expect(primary).toBeVisible();
+    await expect(primary).toHaveText('Hire an agent');
+  });
+
+  test('direct folder entry on post-HQ Map returns to the assistant launcher', async ({ page }) => {
+    await routeAssistant(page, 'active');
+    await page.goto('/?view=map&folder=show');
+    await expect(page.locator('#personalAssistantFolderChooser')).toBeVisible();
+    await expect(page.locator('#cockpitPrimaryActionBtn')).toBeHidden();
+    await page.locator('#personalAssistantClose').click();
+    await expect(page.locator('#personalAssistantLauncher')).toBeFocused();
+  });
 
   test('an unknown assistant state shows no primary, and New Workspace still creates', async ({
     page
@@ -1587,6 +1680,40 @@ test.describe('Header hierarchy', () => {
     const controls = await page.locator('.cockpit-area-controls').boundingBox();
     const utility = await page.locator('.cockpit-area-utility').boundingBox();
     expect(controls!.x + controls!.width).toBeGreaterThan(utility!.x + utility!.width - 2);
+  });
+
+  test('Summary and Hire follow the destination across direct visits, view switches and history', async ({
+    page
+  }) => {
+    await routeAssistant(page, 'active');
+    const assertActions = async (files: boolean) => {
+      await expectDestination(page, files ? 'files' : 'map');
+      await expect(page.locator('#cockpitPrimaryActionBtn')).toHaveText('Hire an agent');
+      await expect(page.getByRole('button', { name: 'Hire an agent', exact: true })).toHaveCount(
+        files ? 1 : 0
+      );
+      await page.locator('#cockpitRailToggle').click();
+      const actions = page.getByRole('button', { name: /^(View summary|Summary)$/i });
+      await expect(actions).toHaveCount(1);
+      await expect(actions).toHaveText(files ? 'Summary' : 'View summary');
+      await expect(page.getByRole('link', { name: 'My Notes' })).toHaveAttribute(
+        'href',
+        '/my-notes'
+      );
+      await page.locator('#cockpitRailToggle').click();
+    };
+    await page.goto('/?view=tree');
+    await assertActions(true);
+    await page.goto('/?view=map');
+    await assertActions(false);
+    await goToFiles(page);
+    await assertActions(true);
+    await goToMap(page);
+    await assertActions(false);
+    await page.goBack();
+    await assertActions(true);
+    await page.goForward();
+    await assertActions(false);
   });
 
   test('resources: zero is quiet, positive is not, Energy is labelled, and help works by keyboard', async ({
@@ -1806,9 +1933,9 @@ test.describe('Sparse map invitation and compact assistant', () => {
       () => document.documentElement.scrollWidth - window.innerWidth
     );
     expect(overflow).toBeLessThanOrEqual(1);
-    // Still the personal assistant, distinct from the App Guide.
-    await expect(page.locator('#oriGuideMapTrigger')).toContainText('App Guide');
-    await expect(launcher).not.toContainText('App Guide');
+    // Help is the separate navbar utility, not a second assistant.
+    await expect(page.locator('#oriGuideLauncher')).toHaveAccessibleName('Help');
+    await expect(launcher).not.toHaveAccessibleName('Help');
   });
 
   for (const [state, cue] of [
@@ -2323,9 +2450,10 @@ test.describe('Quick Capture dialog', () => {
     await expect(page.locator('#cockpitCaptureSave')).toBeDisabled();
   });
 
-  test('on an invited map, help opens over the card and a phone receipt stays clear of it', async ({
+  test('on an HQ-only phone map, help opens above the map and a receipt stays clear of the HQ', async ({
     page
   }) => {
+    await routeAssistant(page, 'active');
     await page.route('**/api/workspaces?tree=true', route =>
       route.fulfill({
         status: 200,
@@ -2351,34 +2479,41 @@ test.describe('Quick Capture dialog', () => {
     );
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/');
-    const card = page.locator('.cockpit-empty-map-actions');
-    await expect(card).toHaveAttribute('data-map-invitation', 'hq-only');
+    const hq = page.locator('.ws-map-tile[data-ws-id="hq-mock"]');
+    await expect(hq).toBeVisible();
+    await expect(page.locator('.cockpit-empty-map-actions')).toHaveCount(0);
 
-    // Help's heading is the topmost thing where it is drawn, card or not.
+    // Help's heading must be topmost where it is drawn.
     await page.locator('[data-map-help]').click();
     const heading = page.locator('#wsMapHelpPanel h4');
     await expect(heading).toBeVisible();
-    const onTop = await heading.evaluate(el => {
-      const r = el.getBoundingClientRect();
-      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      return !!hit && el.closest('#wsMapHelpPanel')!.contains(hit);
-    });
-    expect(onTop, 'help is not hidden behind the invitation card').toBe(true);
+    await heading.scrollIntoViewIfNeeded();
+    await expect
+      .poll(
+        () =>
+          heading.evaluate(el => {
+            const r = el.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return !!hit && el.closest('#wsMapHelpPanel')!.contains(hit);
+          }),
+        { message: 'help is not hidden behind map content' }
+      )
+      .toBe(true);
     await page.locator('[data-map-help]').click();
 
-    // A capture on this map shows its receipt clear of the card.
+    // A capture on this map leaves its only building reachable.
     await openCapture(page);
     await title(page).fill('First idea');
     await page.keyboard.press('Enter');
     const receipt = page.locator('#cockpitCaptureReceipt');
     await expect(receipt).toBeVisible();
-    const [a, b] = await Promise.all([receipt.boundingBox(), card.boundingBox()]);
+    const [a, b] = await Promise.all([receipt.boundingBox(), hq.boundingBox()]);
     const overlap =
       a!.x < b!.x + b!.width &&
       b!.x < a!.x + a!.width &&
       a!.y < b!.y + b!.height &&
       b!.y < a!.y + a!.height;
-    expect(overlap, 'the receipt leaves the invitation readable').toBe(false);
+    expect(overlap, 'the receipt leaves the HQ reachable').toBe(false);
   });
 
   test('an HQ status that cannot be read is not reported as a missing HQ', async ({ page }) => {
@@ -2474,7 +2609,27 @@ test.describe('group Map layout context (#346)', () => {
       String(f.name || '').startsWith('Rail member ')
     ).length;
     const make = async (name: string, kind = 'workspace') => {
-      const res = await page.request.post('/api/workspaces', { data: { name, kind } });
+      const data: Record<string, unknown> = { name, kind };
+      if (kind === 'group') {
+        // Groups require the reviewed roster, even in a no-model sandbox.
+        const preview = await page.request.post('/api/workspaces/template-agent-plan', {
+          data: { group_roster: true, group_name: name }
+        });
+        expect(preview.ok(), await preview.text()).toBe(true);
+        const plan = await preview.json();
+        expect(plan.agents).toHaveLength(1);
+        const [manager] = plan.agents;
+        Object.assign(data, {
+          group_roster: true,
+          create_template_agents: true,
+          template_agent_review: {
+            version: 1,
+            plan_revision: plan.revision,
+            expectations: [{ index: 0, name: manager.name, action: manager.action }]
+          }
+        });
+      }
+      const res = await page.request.post('/api/workspaces', { data });
       const body = await res.json();
       if (!body?.folder?.id) {
         throw new Error(

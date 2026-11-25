@@ -29,7 +29,10 @@ async function fedFolder(page: Page, request: APIRequestContext, shots: string, 
   await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
   for (const known of ['Downloads', 'Desktop', 'Documents'])
     await mkdir(join(sandbox, known), { recursive: true, mode: 0o750 });
-  const root = join(sandbox, variant, folderName);
+  // This journey installs Filing from the folder agent’s setup plan. The OS
+  // Downloads root instead has its own Review Downloads → Install Filing flow
+  // (folder-agent-downloads-inbox.spec.ts); identity is by path, not basename.
+  const root = join(sandbox, variant || 'filing-case', folderName);
   const files: string[] = [];
   await mkdir(root, { recursive: true, mode: 0o750 });
   const old = new Date(Date.now() - 3_600_000);
@@ -69,12 +72,13 @@ async function fedFolder(page: Page, request: APIRequestContext, shots: string, 
   const existing = new Set(
     (await list()).map((view: { workspace_id: string }) => view.workspace_id)
   );
-  await page.goto('/');
+  await page.goto(entryPoint === 'composer' ? '/' : '/?view=tree');
   if (entryPoint === 'composer') {
     if (!(await page.locator('#personalAssistantInput').isVisible()))
       await page.locator('#personalAssistantLauncher').click();
     await page.locator('#personalAssistantAttachMenu').click();
     await page.getByRole('menuitem', { name: 'Add folder', exact: true }).click();
+    await page.getByRole('button', { name: 'Hire an agent or explore a file instead…' }).click();
   } else {
     await page.locator('#cockpitPrimaryActionBtn').click();
   }
@@ -317,9 +321,9 @@ test(`a fed ${folderName} preview hands off on the map (${entryPoint}, ${theme})
     await panel.getByRole('button', { name: 'Back to map' }).click();
   }
   await expect(panel).toBeHidden();
-  await expect(guidance).toContainText('36 files ready for review');
-  await expect(guidance).toContainText('Nothing moved.');
-  await expect(station).toContainText('36 files ready for review');
+  // When the station owns this exact batch it replaces the duplicate note.
+  await expect(guidance).toHaveCount(0);
+  await expect(station).toHaveAccessibleName(/Review 36 files, Nothing moved/);
   await expect(page.locator('.ws-cmd-map-agent.is-command-node')).not.toContainText(
     'Waiting for permission'
   );
@@ -335,9 +339,9 @@ test(`a fed ${folderName} preview hands off on the map (${entryPoint}, ${theme})
   const saved = (await (await request.get(`${fixture.api}/setup-review`)).json()).review.result;
   expect(saved.outcome).toBe('batch');
   expect(saved.eligible_count).toBe(36);
-  const openers = [station, guidance.getByRole('button', { name: 'Review preview', exact: true })];
-  for (const trigger of openers) {
-    await trigger.click();
+  // Returning and reopening the same batch must not repeat the handoff.
+  for (let visit = 0; visit < 2; visit++) {
+    await station.click();
     await expect(panel).toContainText(ready);
     await expect(page).toHaveURL(new RegExp(`[?&]batch_id=${saved.batch_id}(?:&|$)`));
     await panel.getByRole('button', { name: 'Back to map' }).click();
@@ -356,7 +360,7 @@ test(`a fed ${folderName} preview hands off on the map (${entryPoint}, ${theme})
   );
   await snapshot('06-map-returned');
   await page.reload();
-  await expect(guidance.getByRole('button', { name: 'Review files', exact: true })).toBeVisible();
+  await expect(station).toHaveAccessibleName(/Review 36 files, Nothing moves until you file/);
   await expect(station).not.toHaveClass(/is-preview-handoff/);
 });
 

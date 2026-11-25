@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { goToMap } from './home-destination';
+import { openFolderAttach } from './assistant-menus';
 
 export async function placementJSON(page: Page, path: string) {
   const response = await page.request.get(path);
@@ -16,16 +16,18 @@ export async function attachPlacementFolder(
   map = false,
   keyboard = false
 ) {
-  await page.goto('/');
-  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.close));
-  await page.evaluate(() => (window as any).PersonalAssistantPanel.close());
-  if (map) await goToMap(page);
-  const trigger = page.locator('#cockpitPrimaryActionBtn');
-  if (keyboard) {
-    await trigger.focus();
-    await trigger.press('Enter');
-  } else await trigger.click();
-  const chip = page.locator('.personal-assistant-panel__chip', { hasText: folder }).first();
+  // These journeys review a folder attached to a conversation. The Files
+  // header hires a folder agent instead; it isn't the placement entry.
+  await page.goto(map ? '/?view=map' : '/');
+  const launcher = page.locator('#personalAssistantLauncher');
+  if (!(await page.locator('#personalAssistantPanel').isVisible())) {
+    if (keyboard) await launcher.press('Enter');
+    else await launcher.click();
+  }
+  await openFolderAttach(page);
+  const chip = page
+    .locator('#personalAssistantContextChooser')
+    .getByRole('button', { name: folder, exact: true });
   if (keyboard) {
     await chip.focus();
     await chip.press('Enter');
