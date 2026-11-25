@@ -360,13 +360,21 @@ export function notebookListView(state) {
 export function notebookReaderView(state) {
   if (!state.view || !state.folder) return null;
   const reader = state.reader;
+  // The folder the note list shows, for the phone's Back label.
+  const folder = state.folder.at(-1) || state.view.source?.name || 'Notebook';
   if (!reader)
-    return { status: 'none', title: 'No note open', message: 'Choose a note to read it here.' };
+    return {
+      status: 'none',
+      title: 'No note open',
+      message: 'Choose a note to read it here.',
+      folder
+    };
   const { name, parts, actions } = reader;
   const base = {
     status: reader.status,
     name,
     title: name,
+    folder,
     place: [...parts, name].join(' / '),
     external: actions.external,
     message: ''
@@ -391,6 +399,33 @@ export function notebookReaderView(state) {
     default:
       return { ...base, message: reader.message, retry: reader.status === 'error' };
   }
+}
+
+// On a phone the browser is a sequence: Folders, then a folder's notes, then
+// one note. parentPane is where Back goes from each.
+export const NARROW_QUERY = '(max-width: 760px)';
+
+export function parentPane(pane) {
+  return pane === 'reader' ? 'list' : 'folders';
+}
+
+// browserAnnouncement is the one sentence the live region says after a
+// repaint: what a folder holds, or which note opened, or why not. Loading is
+// left silent so a screen reader hears the result, not the wait.
+export function browserAnnouncement(
+  list,
+  reader,
+  { listChanged = false, readerChanged = false } = {}
+) {
+  if (readerChanged && reader && !['none', 'loading'].includes(reader.status)) {
+    return reader.status === 'ready' ? `Opened ${reader.title}` : reader.message;
+  }
+  if (!listChanged || !list || list.status === 'loading') return '';
+  if (list.status === 'error') return list.message;
+  const count = list.notes.length;
+  if (!count) return `${list.title}: ${list.message}`;
+  const line = `${list.title}: ${count} ${count === 1 ? 'note' : 'notes'}`;
+  return list.partial ? `${line}. Only some names could be listed.` : line;
 }
 
 function el(tag, props = {}, ...children) {
@@ -423,11 +458,25 @@ export class MyNotesBrowser {
     this.state = new NotebookState({ onChange: () => this.render(), onStale: () => recheck() });
     this.panes = null;
     this.signatures = {};
+    this.resetPanes();
     root.addEventListener('click', event => this.click(event));
+    window.addEventListener('popstate', event => this.popstate(event));
   }
 
   get view() {
     return this.state.view;
+  }
+
+  // The phone sequence: which pane shows, how many steps this page pushed onto
+  // the history, and, per level, the control and scroll to return to.
+  resetPanes() {
+    this.pane = 'list';
+    this.depth = 0;
+    this.trail = {};
+  }
+
+  narrow() {
+    return typeof matchMedia === 'function' && matchMedia(NARROW_QUERY).matches;
   }
 
   clear() {
@@ -440,7 +489,68 @@ export class MyNotesBrowser {
 
   start(view, folder) {
     this.clear();
+    this.resetPanes();
+    // A reload keeps old history entries; arrival always shows the landing.
+    if (history.state?.myNotesPane) history.replaceState(null, '');
     this.state.start(view, folder);
+  }
+
+  // forward moves one step into the sequence on a phone, remembering how to
+  // come back; on a wide screen every pane is already visible.
+  forward(target, from, focusKey) {
+    if (!this.narrow()) {
+      this.pane = target;
+      return false;
+    }
+    this.trail[from] = { focusKey, scroll: window.scrollY };
+    this.trail[target] = null;
+    this.pane = target;
+    this.depth += 1;
+    history.pushState({ myNotesPane: target, depth: this.depth }, '');
+    return true;
+  }
+
+  back() {
+    // A step this page pushed is undone by the history, so the browser's own
+    // Back and this button agree.
+    if (this.depth > 0 && history.state?.myNotesPane === this.pane) {
+      history.back();
+      return;
+    }
+    const target = parentPane(this.pane);
+    history.replaceState({ myNotesPane: target, depth: this.depth }, '');
+    this.showPane(target);
+  }
+
+  popstate(event) {
+    if (!this.state.view) return;
+    this.depth = event.state?.depth || 0;
+    this.showPane(event.state?.myNotesPane || 'list');
+  }
+
+  // showPane returns to a level: its scroll, then the control that left it, or
+  // its selection, or its heading.
+  showPane(target) {
+    this.pane = target;
+    this.root.dataset.pane = target;
+    const saved = this.trail[target];
+    if (saved) window.scrollTo(0, saved.scroll);
+    const pane = this.panes?.[target];
+    const control =
+      saved &&
+      [...this.root.querySelectorAll('[data-focus-key]')].find(
+        node => node.dataset.focusKey === saved.focusKey
+      );
+    (control || pane?.querySelector('[aria-current]') || pane?.querySelector('h3'))?.focus({
+      preventScroll: Boolean(saved)
+    });
+  }
+
+  focusPane(target) {
+    const heading = this.panes?.[target]?.querySelector('h3');
+    if (!heading) return;
+    this.root.scrollIntoView({ block: 'start' });
+    heading.focus({ preventScroll: true });
   }
 
   // refreshInbox lists Inbox again only while it is the open folder; any
@@ -455,12 +565,22 @@ export class MyNotesBrowser {
     const state = this.state;
     const { browserAction, folderKey: key = '', note } = control.dataset;
     switch (browserAction) {
-      case 'folder':
-        return state.openFolder(keyParts(key));
+      case 'folder': {
+        const moved = this.forward('list', 'folders', 'folder:' + key);
+        state.openFolder(keyParts(key));
+        if (moved) this.focusPane('list');
+        return;
+      }
       case 'toggle':
         return state.toggleFolder(keyParts(key));
-      case 'note':
-        return void state.openNote(note);
+      case 'note': {
+        const moved = this.forward('reader', 'list', 'note:' + note);
+        void state.openNote(note);
+        if (moved) this.focusPane('reader');
+        return;
+      }
+      case 'back':
+        return this.back();
       case 'folder-retry':
         return state.refresh(state.folder);
       case 'note-retry':
@@ -474,7 +594,14 @@ export class MyNotesBrowser {
     const state = this.state;
     if (!state.view) return;
     if (!this.panes) {
-      const heading = el('h3', { id: 'my-notes-folders-title', text: 'Folders' });
+      const heading = el('h3', { id: 'my-notes-folders-title', tabindex: '-1', text: 'Folders' });
+      // One persistent polite region: repainted panes would otherwise re-add
+      // (and re-announce, or drop) their own status lines.
+      this.announcer = el('p', {
+        className: 'visually-hidden',
+        'aria-live': 'polite',
+        dataset: { browserAnnounce: '' }
+      });
       this.panes = {
         folders: el('nav', {
           className: 'my-notes-pane my-notes-folders',
@@ -490,15 +617,25 @@ export class MyNotesBrowser {
         })
       };
       this.folderHeading = heading;
-      this.root.replaceChildren(this.panes.folders, this.panes.list, this.panes.reader);
+      this.root.replaceChildren(
+        this.panes.folders,
+        this.panes.list,
+        this.panes.reader,
+        this.announcer
+      );
       this.root.hidden = false;
     }
+    this.root.dataset.pane = this.pane;
     const active = this.root.contains(document.activeElement) ? document.activeElement : null;
     const focusKey = active?.dataset.focusKey || '';
     const pane = active?.closest('.my-notes-pane');
+    const list = notebookListView(state);
+    const reader = notebookReaderView(state);
     this.paint('folders', notebookFolderTree(state));
-    this.paint('list', notebookListView(state));
-    this.paint('reader', notebookReaderView(state));
+    const listChanged = this.paint('list', list);
+    const readerChanged = this.paint('reader', reader);
+    const said = browserAnnouncement(list, reader, { listChanged, readerChanged });
+    if (said) this.announcer.textContent = said;
     // A repaint replaces the focused control; focus its replacement, or the
     // heading of the pane it was in.
     if (active && !this.root.contains(document.activeElement)) {
@@ -512,7 +649,7 @@ export class MyNotesBrowser {
 
   paint(name, model) {
     const signature = JSON.stringify(model);
-    if (this.signatures[name] === signature) return;
+    if (this.signatures[name] === signature) return false;
     this.signatures[name] = signature;
     const pane = this.panes[name];
     if (name === 'folders') {
@@ -525,6 +662,23 @@ export class MyNotesBrowser {
     } else {
       pane.replaceChildren(...this.readerContent(model));
     }
+    return true;
+  }
+
+  // backButton is the phone's step back to the previous pane; wide layouts
+  // hide it, since every pane is already on screen.
+  backButton(label, level) {
+    return el(
+      'button',
+      {
+        type: 'button',
+        className: 'my-notes-back modern-btn modern-btn-secondary modern-btn-sm',
+        'aria-label': `Back to ${label}`,
+        dataset: { browserAction: 'back', focusKey: 'back:' + level }
+      },
+      el('i', { className: 'bi bi-chevron-left', 'aria-hidden': 'true' }),
+      el('span', { text: label })
+    );
   }
 
   folderItem(row) {
@@ -563,20 +717,16 @@ export class MyNotesBrowser {
   }
 
   listContent(model) {
-    const out = [el('h3', { id: 'my-notes-list-title', tabindex: '-1', text: model.title })];
+    const out = [
+      this.backButton('Folders', 'list'),
+      el('h3', { id: 'my-notes-list-title', tabindex: '-1', text: model.title })
+    ];
     if (model.status !== 'ready') {
-      out.push(
-        el('p', {
-          className: 'my-notes-pane-line',
-          role: model.status === 'error' ? 'alert' : 'status',
-          text: model.message
-        })
-      );
+      out.push(el('p', { className: 'my-notes-pane-line', text: model.message }));
       if (model.status === 'error') out.push(actionButton('Try this folder again', 'folder-retry'));
       return out;
     }
-    if (model.message)
-      out.push(el('p', { className: 'my-notes-pane-line', role: 'status', text: model.message }));
+    if (model.message) out.push(el('p', { className: 'my-notes-pane-line', text: model.message }));
     if (model.notes.length) {
       out.push(
         el(
@@ -602,7 +752,10 @@ export class MyNotesBrowser {
   }
 
   readerContent(model) {
-    const out = [el('h3', { id: 'my-notes-reader-title', tabindex: '-1', text: model.title })];
+    const out = [
+      this.backButton(model.folder, 'reader'),
+      el('h3', { id: 'my-notes-reader-title', tabindex: '-1', text: model.title })
+    ];
     if (model.status === 'none') {
       out.push(el('p', { className: 'my-notes-pane-line', text: model.message }));
       return out;
@@ -621,13 +774,7 @@ export class MyNotesBrowser {
           el('p', { className: 'my-notes-pane-line', text: 'Only the beginning is shown.' })
         );
     } else {
-      out.push(
-        el('p', {
-          className: 'my-notes-pane-line',
-          role: model.status === 'loading' ? 'status' : model.retry ? 'alert' : null,
-          text: model.message
-        })
-      );
+      out.push(el('p', { className: 'my-notes-pane-line', text: model.message }));
     }
     if (model.status === 'loading') return out;
     const actions = el('div', { className: 'my-notes-reader-actions' });

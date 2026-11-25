@@ -70,6 +70,46 @@ test('a slow earlier request and a response after departure cannot repaint', () 
   assert.equal(requests.isCurrent(requests.begin()), true);
 });
 
+function loadingController(view) {
+  const controller = Object.create(MyNotes.prototype);
+  const calls = { clear: 0, notices: [], painted: 0 };
+  controller.view = view;
+  controller.request = latestNotesRequest();
+  controller.status = { setAttribute() {}, removeAttribute() {} };
+  controller.browser = { clear: () => calls.clear++ };
+  controller.quick = { update() {} };
+  controller.clearTools = () => {};
+  controller.paintStatus = () => calls.painted++;
+  controller.notice = message => calls.notices.push(message);
+  controller.land = () => {};
+  return { controller, calls };
+}
+
+test('a failed background check keeps the open notebook; a missing folder clears it', async t => {
+  const connected = {
+    status: 'connected',
+    browse_ref: 'r'.repeat(64),
+    source: { id: 's', name: 'My Notes', origin: 'created_by_ori', connected_at: 't' }
+  };
+  const failed = loadingController(connected);
+  t.mock.method(globalThis, 'fetch', async () => {
+    throw new TypeError('network down');
+  });
+  await failed.controller.load();
+  assert.equal(failed.calls.clear, 0, 'selection, reader and drafts stay');
+  assert.equal(failed.controller.view, connected);
+  assert.match(failed.calls.notices[0], /could not check your notes connection/);
+
+  const missing = loadingController(connected);
+  t.mock.method(globalThis, 'fetch', async () => ({
+    ok: true,
+    json: async () => ({ second_brain: { ...connected, status: 'missing', browse_ref: '' } })
+  }));
+  await missing.controller.load();
+  assert.equal(missing.calls.clear, 1, 'an unavailable source shows none of its notes');
+  assert.equal(missing.controller.view.status, 'missing');
+});
+
 function notesController(panel) {
   const controller = Object.create(MyNotes.prototype);
   controller.panel = panel;

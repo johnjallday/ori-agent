@@ -157,6 +157,12 @@ export class MyNotes {
       }
     });
     root.addEventListener('keydown', event => this.keydown(event));
+    // On a phone the tools row scrolls sideways; a control reached by Tab is
+    // brought fully into it, so its label and focus ring are never cut off.
+    this.status.addEventListener('focusin', event => {
+      if (event.target.closest?.('.my-notes-actions[role="group"]'))
+        event.target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
     this.tools.addEventListener(
       'toggle',
       event => {
@@ -195,6 +201,16 @@ export class MyNotes {
       // A failed request is not the same as having no source.
     }
     if (!this.request.isCurrent(request)) return;
+    // Not being able to check is not the same as the folder being gone: keep
+    // an open notebook, its selection and any draft, and say so. A real answer
+    // of missing or disconnected still clears it below.
+    if (!view && myNotesConnection(this.view).connected) {
+      this.status.removeAttribute('aria-busy');
+      this.notice(
+        'Ori could not check your notes connection just now. What is open stays; try again in a moment.'
+      );
+      return;
+    }
     const changed =
       connectionKey(view) !== connectionKey(this.view) ||
       view?.browse_ref !== this.view?.browse_ref;

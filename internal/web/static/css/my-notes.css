@@ -143,9 +143,16 @@
   gap: 0.1rem;
 }
 
+/* Toggle and spacer are the same box, so names line up with or without a
+   chevron. */
 .my-notes-tree-toggle,
 .my-notes-tree-spacer {
-  flex: 0 0 1.5rem;
+  --my-notes-toggle: 1.5rem;
+  box-sizing: border-box;
+  flex: 0 0 var(--my-notes-toggle);
+  width: var(--my-notes-toggle);
+  min-width: var(--my-notes-toggle);
+  max-width: var(--my-notes-toggle);
   height: 1.75rem;
 }
 
@@ -195,10 +202,18 @@
   background: var(--bg-secondary);
 }
 
+/* Selection is a fill, a bar and weight: the bar carries it where the fill is
+   faint (dark mode). */
 .my-notes-tree-folder[aria-current],
 .my-notes-note[aria-current] {
   background: color-mix(in srgb, var(--primary-color) 16%, transparent);
+  box-shadow: inset 3px 0 0 var(--primary-color);
   font-weight: 600;
+}
+
+[data-bs-theme="dark"] .my-notes-tree-folder[aria-current],
+[data-bs-theme="dark"] .my-notes-note[aria-current] {
+  background: color-mix(in srgb, var(--primary-color) 28%, transparent);
 }
 
 .my-notes-tree-toggle:focus-visible,
@@ -321,6 +336,11 @@
   min-width: 0;
 }
 
+.my-notes-back {
+  display: none;
+}
+
+/* Phones: Folders → notes → note, one pane at a time, each with Back. */
 @media (max-width: 760px) {
   .my-notes-browser:not([hidden]) {
     grid-template-columns: minmax(0, 1fr);
@@ -331,7 +351,66 @@
   }
   .my-notes-pane + .my-notes-pane {
     border-inline-start: 0;
-    border-block-start: 1px solid var(--border-color);
+  }
+  .my-notes-browser[data-pane="folders"] > .my-notes-pane:not(.my-notes-folders),
+  .my-notes-browser[data-pane="list"] > .my-notes-pane:not(.my-notes-list),
+  .my-notes-browser[data-pane="reader"] > .my-notes-pane:not(.my-notes-reader) {
+    display: none;
+  }
+  .my-notes-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    max-width: 100%;
+    margin-block-end: 0.85rem;
+    text-align: start;
+  }
+  .my-notes-back span {
+    overflow-wrap: anywhere;
+  }
+  .my-notes-tree-toggle,
+  .my-notes-tree-spacer {
+    --my-notes-toggle: 2.5rem;
+    height: 2.5rem;
+  }
+  .my-notes-tree-folder,
+  .my-notes-note {
+    min-height: 2.5rem;
+  }
+  /* Bring the notebook above the fold: a shorter heading and status, and the
+     secondary tools in one row that scrolls sideways. */
+  .my-notes-heading {
+    margin-block-end: 1rem;
+  }
+  .my-notes-home {
+    margin-block-end: 0.75rem;
+  }
+  .my-notes-heading h1 {
+    font-size: 2rem;
+  }
+  .my-notes-heading p:not(.my-notes-kicker) {
+    margin-block-end: 0;
+    font-size: 0.9rem;
+  }
+  .my-notes [data-my-notes-status] {
+    padding: 0.85rem 1rem;
+  }
+  .my-notes [data-my-notes-status] h2 {
+    margin-block-end: 0.15rem;
+    font-size: 1.1rem;
+  }
+  .my-notes [data-my-notes-status] > p:not([data-my-notes-notice]) {
+    margin-block-end: 0.6rem;
+    font-size: 0.9rem;
+  }
+  .my-notes-actions[role="group"] {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-block-end: 0.2rem;
+    scrollbar-width: thin;
+  }
+  .my-notes-actions[role="group"] > * {
+    flex: 0 0 auto;
   }
 }
 

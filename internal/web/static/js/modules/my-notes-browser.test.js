@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  browserAnnouncement,
   initialNotesFolder,
   NotebookState,
+  parentPane,
   notebookFolderTree,
   notebookListView,
   notebookNoteActions,
@@ -410,4 +412,61 @@ test('a failed listing keeps no earlier names', async () => {
   assert.equal(list.status, 'error');
   assert.deepEqual(list.notes, []);
   assert.match(list.message, /cannot list this folder/);
+});
+
+test('on a phone, Back goes one level up: note → its folder → Folders', async () => {
+  assert.equal(parentPane('reader'), 'list');
+  assert.equal(parentPane('list'), 'folders');
+  assert.equal(parentPane('folders'), 'folders');
+  const { state, requests } = browserFor(notebook);
+  requests.answer(ROOT, listing([folder('Inbox'), folder('Projects')]));
+  requests.answer(INBOX, listing([file('a.md')]));
+  await settle();
+  assert.equal(notebookReaderView(state).folder, 'Inbox', 'the reader’s Back names the folder');
+  state.openFolder([]);
+  assert.equal(notebookReaderView(state).folder, 'My Notes');
+});
+
+test('the live region says what a folder holds or which note opened, never the wait', () => {
+  const ready = { status: 'ready', title: 'Inbox', message: '', partial: false, notes: [{}, {}] };
+  assert.equal(browserAnnouncement(ready, null, { listChanged: true }), 'Inbox: 2 notes');
+  assert.equal(
+    browserAnnouncement({ ...ready, notes: [{}], partial: true }, null, { listChanged: true }),
+    'Inbox: 1 note. Only some names could be listed.'
+  );
+  assert.equal(
+    browserAnnouncement(
+      { ...ready, notes: [], message: 'No folders or Markdown notes here.' },
+      null,
+      { listChanged: true }
+    ),
+    'Inbox: No folders or Markdown notes here.'
+  );
+  assert.equal(
+    browserAnnouncement({ status: 'error', message: 'This folder may have been moved' }, null, {
+      listChanged: true
+    }),
+    'This folder may have been moved'
+  );
+  assert.equal(browserAnnouncement({ status: 'loading' }, null, { listChanged: true }), '');
+  assert.equal(browserAnnouncement(ready, null, {}), '', 'an unchanged pane is not repeated');
+  const reader = { status: 'ready', title: 'House' };
+  assert.equal(
+    browserAnnouncement(ready, reader, { listChanged: true, readerChanged: true }),
+    'Opened House'
+  );
+  assert.equal(
+    browserAnnouncement(
+      ready,
+      { status: 'yours', message: 'That note is yours.' },
+      {
+        readerChanged: true
+      }
+    ),
+    'That note is yours.'
+  );
+  assert.equal(
+    browserAnnouncement(ready, { status: 'loading' }, { listChanged: true, readerChanged: true }),
+    'Inbox: 2 notes'
+  );
 });

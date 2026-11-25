@@ -411,7 +411,10 @@ test('a created notebook opens on Inbox; Projects → House reads the project no
   ).toBeVisible();
   renameSync(nested + '-moved', nested);
   await folders(page).getByRole('button', { name: 'Drafts-moved', exact: true }).click();
-  await expect(noteList(page).getByRole('alert')).toContainText('moved or removed');
+  await expect(noteList(page).getByText(/moved or removed/)).toBeVisible();
+  await expect(notebookBrowser(page).locator('[data-browser-announce]')).toContainText(
+    'moved or removed'
+  );
 
   writeFileSync(join(inbox, file), `${readFileSync(join(inbox, file), 'utf8')}\nMy edits.`);
   await folders(page).getByRole('button', { name: 'Inbox', exact: true }).click();
@@ -516,6 +519,164 @@ test('Quick note saves to Inbox while the reader stays on the House note', async
   await expect(noteList(page).getByRole('button', { name: added[0], exact: true })).toBeVisible();
 });
 
+async function tabTo(page: Page, target: ReturnType<Page['locator']>, limit = 30) {
+  for (let i = 0; i < limit; i++) {
+    if (await target.evaluate(el => el === document.activeElement).catch(() => false)) return;
+    await page.keyboard.press('Tab');
+  }
+  await expect(target).toBeFocused();
+}
+
+test('phones step folder → notes → note with Back; desktop works by keyboard; refreshes keep place', async ({
+  page
+}) => {
+  const list = noteList(page);
+  const trigger = page.getByRole('button', { name: 'Quick note', exact: true });
+  await page.evaluate(() => localStorage.setItem('ori-theme', 'light')).catch(() => {});
+
+  // Phone: one pane at a time, landing on Inbox's notes.
+  await page.setViewportSize({ width: 390, height: 760 });
+  await page.goto('/');
+  await page.goto('/my-notes');
+  await expect(list.getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  await expect(folders(page)).toBeHidden();
+  await expect(reader(page)).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await capture(page, '20-phone-landing-inbox');
+  // The notes start inside the first screen, and the sideways tools row brings
+  // a focused control fully into view.
+  const firstNote = list.getByRole('button').filter({ hasText: /\.md$/ }).first();
+  expect((await firstNote.boundingBox())!.y).toBeLessThan(760);
+  const settings = page.getByRole('button', { name: 'Connection settings…' });
+  await settings.focus();
+  await expect
+    .poll(async () => {
+      const [row, box] = await Promise.all([
+        page.locator('.my-notes-actions[role="group"]').boundingBox(),
+        settings.boundingBox()
+      ]);
+      return box!.x + box!.width <= row!.x + row!.width + 1 && box!.x >= row!.x - 1;
+    })
+    .toBe(true);
+  await list.getByRole('button', { name: 'Back to Folders' }).click();
+  await expect(list).toBeHidden();
+  await expect(folders(page).getByRole('button', { name: 'Inbox', exact: true })).toBeFocused();
+  await folders(page).getByRole('button', { name: 'Projects', exact: true }).click();
+  await expect(list.getByRole('heading', { name: 'Projects', level: 3 })).toBeFocused();
+  await list.getByRole('button', { name: 'Back to Folders' }).click();
+  await expect(folders(page).getByRole('button', { name: 'Projects', exact: true })).toBeFocused();
+  await folders(page).getByRole('button', { name: 'House', exact: true }).click();
+  await list.getByRole('button', { name: 'README.md', exact: true }).click();
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  await expect(reader(page).getByRole('heading', { level: 3 })).toBeFocused();
+  await expect(list).toBeHidden();
+  await capture(page, '21-phone-reader');
+
+  // Quick note on a phone leaves the reader where it is.
+  await trigger.click();
+  const dialog = page.getByRole('dialog', { name: 'Quick note' });
+  await dialog.getByRole('textbox').fill('Measure the porch for a new light');
+  await capture(page, '22-phone-quick-note');
+  await dialog.getByRole('button', { name: 'Save to Inbox' }).click();
+  await expect(page.getByText('Saved to My Notes → Inbox.')).toBeVisible();
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+
+  // In-page Back and the browser's Back each go up one level, restoring focus.
+  await reader(page).getByRole('button', { name: 'Back to House' }).click();
+  const readme = list.getByRole('button', { name: 'README.md', exact: true });
+  await expect(readme).toBeFocused();
+  await expect(readme).toHaveAttribute('aria-current', 'true');
+  await readme.click();
+  await expect(reader(page)).toBeVisible();
+  await page.goBack();
+  await expect(readme).toBeFocused();
+  await expect(reader(page)).toBeHidden();
+  await page.goBack();
+  await expect(folders(page).getByRole('button', { name: 'House', exact: true })).toBeFocused();
+  await page.goBack();
+  await expect(page).not.toHaveURL(/my-notes/);
+
+  await page.evaluate(() => localStorage.setItem('ori-theme', 'dark'));
+  await page.goto('/my-notes');
+  await expect(page.locator('html')).toHaveAttribute('data-bs-theme', 'dark');
+  await expect(list.getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  await capture(page, '23-phone-dark-landing');
+
+  // Desktop, keyboard only: choose folders and a note without leaving the tree's order.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.evaluate(() => localStorage.setItem('ori-theme', 'light'));
+  await page.goto('/my-notes');
+  await listSettled(page);
+  await folders(page).getByRole('button', { name: 'Projects', exact: true }).focus();
+  await page.keyboard.press('Enter');
+  await expect(list.getByRole('heading', { name: 'Projects', level: 3 })).toBeVisible();
+  await expect(folders(page).getByRole('button', { name: 'Projects', exact: true })).toBeFocused();
+  const house = folders(page).getByRole('button', { name: 'House', exact: true });
+  await tabTo(page, house, 6);
+  await page.keyboard.press('Enter');
+  await expect(house).toHaveAttribute('aria-current', 'true');
+  await tabTo(page, readme);
+  await page.keyboard.press('Enter');
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  await expect(readme).toBeFocused();
+  // Focus is never trapped: Tab carries on past the reader's last action.
+  await tabTo(page, reader(page).getByRole('button', { name: 'Open notebook folder' }));
+  await page.keyboard.press('Tab');
+  expect(await notebookBrowser(page).evaluate(el => el.contains(document.activeElement))).toBe(
+    false
+  );
+
+  // A background refresh keeps the folder, the note and a draft.
+  await trigger.focus();
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Check the paint finish');
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+  const isConnectionCheck = (url: URL) =>
+    url.pathname === endpoint && url.searchParams.get('view') === 'connection';
+  const refresh = () =>
+    page.evaluate(() => document.dispatchEvent(new CustomEvent('personal-assistant:second-brain')));
+  // A successful refresh first, settled before the next one is set to fail.
+  await Promise.all([
+    page.waitForResponse(response => isConnectionCheck(new URL(response.url()))),
+    refresh()
+  ]);
+  await expect(reader(page).getByText('Projects / House / README.md')).toBeVisible();
+  await page.route(isConnectionCheck, route => route.abort(), { times: 1 });
+  await Promise.all([
+    page.waitForEvent('requestfailed', req => isConnectionCheck(new URL(req.url()))),
+    refresh()
+  ]);
+  await expect(page.getByText(/could not check your notes connection/)).toBeVisible();
+  await expect(reader(page).getByText('Projects / House / README.md')).toBeVisible();
+  await expect(house).toHaveAttribute('aria-current', 'true');
+  await trigger.click();
+  await expect(dialog.getByRole('textbox')).toHaveValue('Check the paint finish');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+
+  await page.evaluate(() => localStorage.setItem('ori-theme', 'dark'));
+  await page.reload();
+  await folders(page).getByRole('button', { name: 'Projects', exact: true }).click();
+  await folders(page).getByRole('button', { name: 'House', exact: true }).click();
+  await readme.click();
+  await expect(reader(page).getByText('Renovate the kitchen before spring.')).toBeVisible();
+  await capture(page, '24-desktop-dark-reader');
+  await page.evaluate(() => localStorage.setItem('ori-theme', 'light'));
+
+  // Existing deep links still open their views, above the notebook.
+  await page.goto('/my-notes?view=loops');
+  const tools = page.locator('[data-my-notes-tools]');
+  await expect(tools.getByRole('tab', { name: /Open loops/, selected: true })).toBeVisible();
+  await expect(list.getByRole('heading', { name: 'Inbox', level: 3 })).toBeVisible();
+  const [toolsBox, browserBox] = await Promise.all([
+    tools.boundingBox(),
+    notebookBrowser(page).boundingBox()
+  ]);
+  expect(toolsBox!.y).toBeLessThan(browserBox!.y);
+  await page.goto('/my-notes?view=inbox');
+  await expect(tools.getByRole('tab', { name: /Inbox/, selected: true })).toBeVisible();
+});
+
 test('browse a connected vault with its own layout without scanning or writing', async ({
   page,
   request
@@ -609,7 +770,7 @@ test('browse a connected vault with its own layout without scanning or writing',
     { times: 1 }
   );
   await folders(page).getByRole('button', { name: 'Field Notebook', exact: true }).click();
-  await expect(noteList(page).getByRole('alert')).toContainText('Ori cannot list this folder');
+  await expect(noteList(page).getByText(/Ori cannot list this folder/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open folder', exact: true })).toBeVisible();
 });
 
