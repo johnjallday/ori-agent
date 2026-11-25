@@ -18,9 +18,11 @@ export function compactTeamHTML(c) {
   // A folder's one staffed lead needs one row in the compact team. Keep the
   // full role controls under Manage team; never hide vacancies or extra staff.
   const onlyRole = c.roleRoster?.roles?.length === 1 && c.roleRoster.roles[0];
+  const anchored = Boolean(c.page?.workspace?.shared_data?.anchor_directory_reference_id);
+  const entryLabel = anchored ? 'Chat contact · ' : 'Lead · ';
   const compactLead =
     !c.teamExpanded &&
-    c.page?.workspace?.shared_data?.anchor_directory_reference_id &&
+    anchored &&
     agents.length === 1 &&
     onlyRole?.role_id === 'ask-ori' &&
     onlyRole.primary &&
@@ -39,7 +41,7 @@ export function compactTeamHTML(c) {
         text(
           compactLead
             ? 'Project Lead'
-            : (agent.entry ? 'Chat contact · ' : '') + (agent.role?.label || 'Agent')
+            : (agent.entry ? entryLabel : '') + (agent.role?.label || 'Agent')
         ) +
         '</small></span><span>' +
         text(agent.status?.label || 'Unknown') +

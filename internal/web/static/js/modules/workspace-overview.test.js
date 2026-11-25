@@ -37,7 +37,7 @@ test('Team is compact for zero, one and many agents; existing controls are on de
     assert.doesNotMatch(html, /data-real-agent-controls/);
     assert.equal((html.match(/data-cmd-team-agent=/g) || []).length, count);
     if (!count) assert.match(html, /Hire an agent/);
-    else assert.match(html, /Chat contact · Specialist/);
+    else assert.match(html, /Lead · Specialist/);
     c.teamExpanded = true;
     assert.match(compactTeamHTML(c), /data-real-agent-controls/);
   }
