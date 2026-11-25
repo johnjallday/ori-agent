@@ -2,9 +2,13 @@ package sessionhttp
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -48,9 +52,18 @@ func TestDocumentsManagerCreate_ReviewedIdentityAndConfigurationSurviveReadback(
 			t.Fatalf("confirm: %d %s", w.Code, w.Body)
 		}
 		wsID := result["folder"].(map[string]any)["id"].(string)
+		replay, observed := creationOperationRequest(t, h, http.MethodPost, "/"+id+"/confirm", map[string]any{"review_digest": digest})
+		if replay.Code != http.StatusCreated || observed["folder"].(map[string]any)["id"] != wsID || len(h.agentStore.ListAgents()) != i+1 {
+			t.Fatalf("retry did not retain one manager for %s: %d %s", wsID, replay.Code, replay.Body)
+		}
 		ws, err := h.workspaceTaskStore.Get(wsID)
 		if err != nil {
 			t.Fatal(err)
+		}
+		// Anchoring already supplies a scoped read-only filesystem binding. The
+		// manager adds no tools of its own and must not broaden that binding.
+		if len(ws.MCPBindings) != 1 || ws.MCPBindings[0].Alias != "anchor-folder" || ws.MCPBindings[0].DefaultSideEffect != "read" || len(ws.DirectoryReferences) != 1 || ws.DirectoryReferences[0].Path != anchor {
+			t.Fatalf("unexpected anchor grant: %#v / %#v", ws.MCPBindings, ws.DirectoryReferences)
 		}
 		roster := h.buildWorkspaceRoster(ws)
 		if ws.EntryAgentName() != holder || len(ws.AgentInstances) != 1 || len(roster.Roles) != 1 || roster.Roles[0].RoleID != "manager" || roster.Roles[0].Label != "Documents Manager" || roster.Roles[0].Agent == nil || roster.Roles[0].Agent.Name != holder {
@@ -60,6 +73,62 @@ func TestDocumentsManagerCreate_ReviewedIdentityAndConfigurationSurviveReadback(
 		if !ok || !profile.WorkspaceManager.ManagesWorkspace(wsID) || profile.Settings.SystemPrompt != prompt || (i == 2 && (profile.Settings.Provider != "anthropic" || profile.Settings.Model != "reviewed-model")) {
 			t.Fatalf("%q did not retain its reviewed settings or provenance", holder)
 		}
+	}
+}
+
+func TestDocumentsManager_AnchorPermissionLossRefusesTheSameOperation(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("requires an unprivileged POSIX filesystem")
+	}
+	h, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	parent := canonicalAnchorTestDir(t)
+	anchor := filepath.Join(parent, "letters")
+	if err := os.Mkdir(anchor, 0750); err != nil {
+		t.Fatal(err)
+	}
+	material, plan := documentsCreationMaterial(t, h, "Shelves", anchor)
+	id, digest := reviewCreationOperation(t, h, material)
+	if err := os.Chmod(parent, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.Chmod(parent, 0750); err != nil {
+			t.Error(err)
+		}
+	}()
+	for range 2 {
+		w, _ := creationOperationRequest(t, h, http.MethodPost, "/"+id+"/confirm", map[string]any{"review_digest": digest})
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("permission refusal: %d %s", w.Code, w.Body)
+		}
+		assertCreationOperationState(t, h, id, "refused")
+	}
+	assertAgentAbsent(t, h, plan.EntryAgentName)
+	if rows, err := h.store.ListWorkspaces(t.Context()); err != nil || len(rows) != 0 {
+		t.Fatalf("refusal left workspaces: %v %v", rows, err)
+	}
+}
+
+func TestDocumentsManager_FailedPersistenceRollsBackProfileAndDoesNotRetry(t *testing.T) {
+	h, _, _, cleanup := templateTestEnv(t)
+	defer cleanup()
+	material, plan := documentsCreationMaterial(t, h, "Shelves", canonicalAnchorTestDir(t))
+	workingStore := h.store
+	h.store = failingWorkspaceCreateStore{HybridStore: workingStore, err: errors.New("simulated persistence failure")}
+	id, digest := reviewCreationOperation(t, h, material)
+	for range 2 {
+		w, _ := creationOperationRequest(t, h, http.MethodPost, "/"+id+"/confirm", map[string]any{"review_digest": digest})
+		if w.Code != http.StatusConflict {
+			t.Fatalf("failed write: %d %s", w.Code, w.Body)
+		}
+		assertCreationOperationState(t, h, id, "reconciliation_required")
+		assertAgentAbsent(t, h, plan.EntryAgentName)
+		// Even with persistence restored, a retry observes the accepted failure.
+		h.store = workingStore
+	}
+	if rows, err := h.store.ListWorkspaces(t.Context()); err != nil || len(rows) != 0 {
+		t.Fatalf("failed operation created a workspace: %v %v", rows, err)
 	}
 }
 

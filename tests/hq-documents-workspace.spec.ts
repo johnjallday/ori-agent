@@ -1,8 +1,9 @@
 import { test, expect, type Page, type TestInfo } from '@playwright/test';
-import { mkdir, readdir, realpath } from 'node:fs/promises';
+import { mkdir, readdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { confirmReviewedCreation } from './helpers/confirm-reviewed-creation';
 import { freshGuidedHQ } from './helpers/fresh-guided-hq';
+import { choiceInventory, arrivalState } from './helpers/workspace-choice-state';
 import { installLocalCdn } from './helpers/offline-cdn';
 let base: string;
 test.describe.configure({ mode: 'serial' });
@@ -169,73 +170,105 @@ async function assertVisited(page: Page, id: string, info: TestInfo) {
   await page.screenshot({ path: info.outputPath('completed.png'), animations: 'disabled' });
 }
 
-test('guided creation opens the reviewed replacement folder and confirms arrival', async ({
-  page,
-  request
-}, info) => {
-  const sandbox = process.env.ORI_HQ_FIRST_VISIT_SANDBOX;
-  test.skip(!sandbox, 'requires isolated HOME');
-  const home = await realpath(sandbox!);
-  expect(home).toMatch(/\/ori-(?:demo|e2e)\.[^/]+$/);
-  await mkdir(join(home, 'Documents'), { recursive: true, mode: 0o750 });
-  const other = join(home, 'Reviewed folder');
-  await mkdir(other, { mode: 0o750 });
-  await installLocalCdn(page);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' });
-  await page.addInitScript(() => localStorage.setItem('ori-theme', 'dark'));
-  const implicit: string[] = [];
-  page.on('request', r => {
-    // Home remembers Map/Files display state via POST; neither is an index.
-    if (
-      r.method() === 'POST' &&
-      /folder-agent\/|\/file-search\/(?!map-place|files-place|desk-place)|\/hire$/.test(r.url())
-    )
-      implicit.push(r.url());
+for (const staffed of [false, true]) {
+  test(`guided ${staffed ? 'staffed' : 'agentless'} creation recovers the reviewed replacement folder`, async ({
+    page,
+    request
+  }, info) => {
+    const sandbox = process.env.ORI_HQ_FIRST_VISIT_SANDBOX;
+    test.skip(!sandbox, 'requires isolated HOME');
+    const home = await realpath(sandbox!);
+    expect(home).toMatch(/\/ori-(?:demo|e2e)\.[^/]+$/);
+    await mkdir(join(home, 'Documents'), { recursive: true, mode: 0o750 });
+    const name = staffed ? 'Reviewed letters' : 'Reviewed shelves';
+    const other = join(home, name);
+    await mkdir(other, { mode: 0o750 });
+    await writeFile(join(other, 'letter.txt'), 'Original letter.\n', { mode: 0o600 });
+    const before = await choiceInventory(request, home);
+    await installLocalCdn(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' });
+    await page.addInitScript(() => localStorage.setItem('ori-theme', 'dark'));
+    const implicit: string[] = [],
+      confirms: string[] = [];
+    page.on('request', r => {
+      if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(r.method())) return;
+      const path = new URL(r.url()).pathname;
+      if (/\/create-operations\/[^/]+\/confirm$/.test(path)) confirms.push(path);
+      if (
+        /\/folder-agent(?:\/|$)|\/file-search\/(sources|scan)|\/hire$|\/api\/chat$|\/mission\/run|\/(tool-grants|mcp-bindings)(?:\/|$)/.test(
+          path
+        )
+      )
+        implicit.push(path);
+    });
+    await page.goto(base + '?mode=details');
+    const card = page.locator('[data-hq-firstvisit]');
+    await card.getByRole('button', { name: /Create a workspace from Documents/ }).click();
+    await card.getByRole('link', { name: 'Go to Home' }).click();
+    const button = page.locator('#cockpitCreateWorkspaceBtn');
+    await expect(button).toBeFocused();
+    await page.screenshot({ path: info.outputPath('hint.png') });
+    await button.press('Enter');
+    const path = page.locator('#workspaceAnchorPath');
+    await expect(path).toHaveValue(join(home, 'Documents'));
+    await path.fill(other);
+    await path.blur();
+    await expect(page.locator('#workspaceAnchorStatus')).toBeHidden();
+    await page.locator('#folderNameInput').fill(name);
+    await page.screenshot({ path: info.outputPath('replacement-review.png') });
+    await page.locator('#wizardNextBtn').click();
+    if (!staffed) await page.getByRole('checkbox', { name: 'Create without agents' }).check();
+    await page.locator('#wizardNextBtn').click();
+    const review = page.locator('#workspaceCreationReviewPanel');
+    await expect(review).toContainText(other);
+    await expect(review).toContainText(
+      staffed ? 'Documents Manager' : 'No agents will be created or attached.'
+    );
+    await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
+    await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
+    const open = review.getByRole('button', { name: 'Open workspace', exact: true });
+    await expect(open).toBeVisible();
+    const id = await page.evaluate(
+      () => (window as any).sessionManager.workspaceCreatorContext.ordinaryReview.result.id
+    );
+    const ws = await (await request.get(`/api/workspaces/${id}`)).json();
+    expect(ws.anchor.path).toBe(other);
+    const bindings = ws.agent_instances || [];
+    expect(bindings).toHaveLength(staffed ? 1 : 0);
+    if (staffed)
+      expect(bindings[0]).toMatchObject({
+        role_id: 'manager',
+        role_source: 'created',
+        entry_point: true
+      });
+    expect(
+      await page.evaluate(() =>
+        Object.keys(localStorage).some(k => k.startsWith('ori.hq.workspaceVisit.'))
+      )
+    ).toBe(false);
+    // Recover this exact confirmed operation, without submitting a second create.
+    await page.reload();
+    await button.click();
+    await open.click();
+    await assertVisited(page, id, info);
+    expect(implicit).toEqual([]);
+    expect(confirms).toHaveLength(1);
+    const after = await choiceInventory(request, home);
+    expect(after.hires).toEqual(before.hires);
+    expect(after.sources).toEqual(before.sources);
+    expect(after.workspaces).toEqual([...before.workspaces, id].sort());
+    const reopened = await (await request.get(`/api/workspaces/${id}`)).json();
+    expect(reopened.anchor).toEqual(ws.anchor);
+    expect(reopened.agent_instances || []).toEqual(bindings);
+    expect(await arrivalState(request, id)).toMatchObject({
+      roles: 1,
+      filled: staffed ? 1 : 0,
+      goalRuns: 0,
+      pending: false,
+      inFlight: false
+    });
+    expect(await readdir(other)).toEqual(['letter.txt']);
+    expect(await readFile(join(other, 'letter.txt'), 'utf8')).toBe('Original letter.\n');
   });
-  await page.goto(base + '?mode=details');
-  const card = page.locator('[data-hq-firstvisit]');
-  await card.getByRole('button', { name: /Create a workspace from Documents/ }).click();
-  await card.getByRole('link', { name: 'Go to Home' }).click();
-  const button = page.locator('#cockpitCreateWorkspaceBtn');
-  await expect(button).toBeFocused();
-  await page.screenshot({ path: info.outputPath('hint.png') });
-  await button.press('Enter');
-  const path = page.locator('#workspaceAnchorPath');
-  await expect(path).toHaveValue(join(home, 'Documents'));
-  await path.fill(other);
-  await path.blur();
-  await expect(page.locator('#workspaceAnchorStatus')).toBeHidden();
-  await page.locator('#folderNameInput').fill('Reviewed shelves');
-  await page.screenshot({ path: info.outputPath('replacement-review.png') });
-  await page.locator('#wizardNextBtn').click();
-  await page.getByRole('checkbox', { name: 'Create without agents' }).check();
-  await page.locator('#wizardNextBtn').click();
-  const review = page.locator('#workspaceCreationReviewPanel');
-  await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
-  await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
-  const open = review.getByRole('button', { name: 'Open workspace', exact: true });
-  await expect(open).toBeVisible();
-  const id = await page.evaluate(
-    () => (window as any).sessionManager.workspaceCreatorContext.ordinaryReview.result.id
-  );
-  const ws = await (await request.get(`/api/workspaces/${id}`)).json();
-  expect(ws.anchor.path).toBe(other);
-  expect(await readdir(other)).toEqual([]);
-  expect(
-    await page.evaluate(() =>
-      Object.keys(localStorage).some(k => k.startsWith('ori.hq.workspaceVisit.'))
-    )
-  ).toBe(false);
-  // Recover this exact confirmed operation, without submitting a second create.
-  await page.reload();
-  await button.click();
-  await open.click();
-  await assertVisited(page, id, info);
-  expect(implicit).toEqual([]);
-  const sources = await request.get('/api/file-search/sources', {
-    headers: { 'X-Ori-Search': '1' }
-  });
-  if (sources.ok()) expect((await sources.json()) || []).toEqual([]);
-  else expect([404, 503]).toContain(sources.status());
-});
+}
