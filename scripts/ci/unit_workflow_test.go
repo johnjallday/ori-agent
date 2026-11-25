@@ -76,6 +76,20 @@ func TestUnitWorkflowPreservesLabelsScopeCoverageAndCacheBoundaries(t *testing.T
 	if scope.Env["FAST_PR"] != "${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && !startsWith(github.head_ref, 'release/') && !startsWith(github.head_ref, 'release-') }}" || job.Needs != "unit-scope" || job.If != "needs.unit-scope.outputs.mode == 'full'" {
 		t.Fatal("fast unit path must be limited to ordinary dev PRs; full mode requires all shards")
 	}
+	// A depth-two checkout contains the tested merge and its parents, not
+	// necessarily the older base SHA recorded on the PR event.
+	if scope.Env["MERGE_BASE_PARENT"] != "HEAD^1" {
+		t.Fatal("classify the tested merge relative to its own base parent")
+	}
+	stages := map[string]string{}
+	for _, step := range scope.Steps {
+		stages[step.ID] = step.Run
+	}
+	for _, id := range []string{"paths", "affected"} {
+		if !strings.Contains(stages[id], `"$MERGE_BASE_PARENT"`) {
+			t.Fatalf("%s must use the tested merge's base", id)
+		}
+	}
 	wantExecution := unitMatrix{Include: []unitShard{
 		{"ubuntu-latest", "1"}, {"ubuntu-latest", "2"}, {"ubuntu-latest", "3"}, {"ubuntu-latest", "4"}, {"macos-latest", "platform"},
 	}}
