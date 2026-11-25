@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+import screenshotManifest from '../docs/readme-screenshots.json' with { type: 'json' };
 import {
   assertReadmeSceneContract,
   README_CAPTURE_CLOCK,
@@ -1295,6 +1296,9 @@ async function captureScene(
     // it when they load. The page-level freeze below cannot reach animations
     // embedded inside assets such as Ori's launcher sprite.
     await page.emulateMedia({ reducedMotion: 'reduce' });
+    const scene = screenshotManifest.screenshots.find(item => item.id === id);
+    if (!scene) throw new Error(`Missing README scene: ${id}`);
+    await page.setViewportSize(scene.viewport);
     await page.goto(route, { waitUntil: 'networkidle' });
     // Freeze the page before a scene-specific interaction. The Map preparation
     // opens and closes a Bootstrap modal; freezing afterwards allowed its body
@@ -1438,9 +1442,16 @@ test('captures exactly three Action Center findings', async ({ page }) => {
     'action-center',
     '/action-center',
     '#action-center-list',
-    'Choose the research direction'
+    'Choose the research direction',
+    async scenePage => {
+      const rows = scenePage.locator('.action-center-row');
+      await expect(rows).toHaveCount(3);
+      for (const row of await rows.all()) {
+        await expect(row).toBeInViewport({ ratio: 1 });
+        await expect(row.getByRole('button', { name: 'Dismiss' })).toBeInViewport({ ratio: 1 });
+      }
+    }
   );
-  await expect(page.locator('.action-center-row')).toHaveCount(3);
 });
 
 test('captures the Workspace Map with Personal HQ and fictional workspaces', async ({ page }) => {

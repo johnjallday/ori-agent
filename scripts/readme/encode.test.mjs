@@ -18,13 +18,13 @@ function digest(filePath) {
 
 async function writePNG(directory, id, color) {
   await sharp({
-    create: { width: 2880, height: 1800, channels: 3, background: color },
+    create: { width: 2880, height: id === 'action-center' ? 2048 : 1800, channels: 3, background: color },
   })
     .png({ compressionLevel: 9, palette: false })
     .toFile(path.join(directory, `${id}.png`));
 }
 
-test('encodes the four-scene portfolio as deterministic 2880x1800 WebP files', async () => {
+test('encodes the four-scene portfolio at the specified scene sizes as deterministic WebP files', async () => {
   const root = mkdtempSync(path.join(tmpdir(), 'readme-encode-test-'));
   const raw = path.join(root, 'raw');
   const first = path.join(root, 'first');
@@ -46,7 +46,7 @@ test('encodes the four-scene portfolio as deterministic 2880x1800 WebP files', a
     for (const image of firstResult.images) {
       assert.equal(image.format, 'webp');
       assert.equal(image.width, 2880);
-      assert.equal(image.height, 1800);
+      assert.equal(image.height, image.id === 'action-center' ? 2048 : 1800);
       assert.equal(image.sha256, digest(path.join(first, `${image.id}.webp`)));
       assert.equal(image.bytes > 0, true);
     }
