@@ -8468,7 +8468,8 @@
   }
 
   function formatWorkspaceManagerFailure(error, workspaceManagerLabel) {
-    var label = String(workspaceManagerLabel || 'The workspace manager').trim() || 'The workspace manager';
+    var label =
+      String(workspaceManagerLabel || 'The workspace manager').trim() || 'The workspace manager';
     var stage = normalizeToken((error && error.homeAssistantStage) || (error && error.stage));
     var status = Number((error && error.status) || 0);
     var url = String((error && error.url) || '').trim();
@@ -10057,7 +10058,6 @@
       setHomeAssistantBusy(false);
     }
   }
-
 
   function formatWorkspaceScheduleTask(task) {
     if (!task || typeof task !== 'object') return 'Scheduled ticket';
