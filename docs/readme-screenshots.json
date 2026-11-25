@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "acceptance_state": "accepted",
-  "last_accepted_capture_commit": "7c28b392b4e3513436fde4fd69165f7fde24a6c1",
-  "accepted_readme_sha256": "1a9f189f4ac1a3f87a270bdd5eb8dd52dc6d1692d6a8f4b66debc0bdba07ad2a",
+  "last_accepted_capture_commit": "9d3cffdd3d3d94e5e03fad856e3d0e47cdd8c2fb",
+  "accepted_readme_sha256": "1616b0a572d7b9c52abf13a70a48caee9048dd6eb63b09b594b49e65c497ead5",
   "accepted_environment": {
     "platform": "darwin",
     "architecture": "arm64",
     "node_version": "v25.9.0",
     "playwright_version": "1.57.0",
     "chromium_version": "Google Chrome for Testing 143.0.7499.4",
-    "encoder_version": "sharp@0.35.3"
+    "encoder_version": "sharp@0.35.5"
   },
   "sensitive_patterns": [
     "/Users/",
@@ -52,8 +52,8 @@
         "internal/web/static/css/home-workspace-cockpit.css",
         "internal/web/static/css/ori-guide.css"
       ],
-      "accepted_sha256": "fdf09c527cd15ccb14c651d13c50c7cdaf0ee96d476302590fc1ed4e2e67486b",
-      "accepted_bytes": 60748
+      "accepted_sha256": "7e713db419a4d4029520053899077ab9c215802aea2f3991720781e68a48a7ba",
+      "accepted_bytes": 123188
     },
     {
       "id": "action-center",
@@ -80,8 +80,8 @@
         "internal/web/static/js/modules/action-center.js",
         "internal/workspace/opportunities.go"
       ],
-      "accepted_sha256": "a0fc0b11b3b80649cf5fde7378fb50eae5282a1d9ae0ebe417c79f8eb05ae9ad",
-      "accepted_bytes": 88948
+      "accepted_sha256": "5b073eef5941c19fcad3d1ab756caf683e21085c8677ac73fe1ee7da9a242ff9",
+      "accepted_bytes": 89148
     },
     {
       "id": "workspace-map",
@@ -109,8 +109,8 @@
         "internal/web/static/js/modules/home-workspace-cockpit.js",
         "internal/web/static/js/modules/personal-hq-onboarding.js"
       ],
-      "accepted_sha256": "caec41e71ea1cbad42fd65a37dbe07f9a616eedc85d7bca7e0c5c104434bcd28",
-      "accepted_bytes": 79674
+      "accepted_sha256": "3ec644e81d67611c7d5ca6a49bfd01bf6824f635820ec846f11db115d5c9faf6",
+      "accepted_bytes": 104606
     },
     {
       "id": "workspace",
@@ -140,8 +140,8 @@
         "internal/web/static/js/modules/workspace-detail.js",
         "internal/web/static/js/modules/workspace-mission.js"
       ],
-      "accepted_sha256": "2599dbce2f0552599c25080099933cb81d9af3ca02a2de361a328083f8a496ea",
-      "accepted_bytes": 118718
+      "accepted_sha256": "0970399ac30c9ca8e67bf132cd72666623084fff39ea976148dcaa9225d34d71",
+      "accepted_bytes": 88126
     }
   ]
 }

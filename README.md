@@ -10,9 +10,9 @@ A **local-first** base of autonomous AI workspaces, guardrailed by the autonomy 
 ![Go](https://img.shields.io/github/go-mod/go-version/johnjallday/ori-agent?label=Go&color=00add8)
 
 <p align="center">
-  <img src="docs/images/hero.webp" alt="Ori Agent Home in dark mode showing the command bridge above a populated Personal HQ Daily Brief." width="820" />
+  <img src="docs/images/hero.webp" alt="Workspace map beside Mira’s open assistant drawer, with a launch finding and a link to today’s brief." width="820" />
 </p>
-<p align="center"><em>Home brings the command bridge and a focused Personal HQ Daily Brief into one starting point.</em></p>
+<p align="center"><em>See which workspaces are active, check what your assistant needs from you, and open today’s brief in Personal HQ.</em></p>
 
 **Ori Agent** is a local-first **AI headquarters** that runs on your machine. A **Personal HQ** anchors your day — daily brief, email station, follow-ups, and a Watchtower view across everything else — while specialized **workspaces** around it pursue missions on a recurring schedule under an **autonomy policy** you set. Findings flow into one cross-workspace **Action Center** for triage. Your **personal assistant** sets those workspaces up from the folders you show it, each with named agents that have their own model, prompt, skills, and MCP tools. Everything stays local unless you opt into cloud LLMs.
 
@@ -59,8 +59,8 @@ Each MCP/skill binding is classified by side effect (read / write / external), a
 
 | Workspace Map | Workspace Command |
 | :---: | :---: |
-| <img src="docs/images/workspace-map.webp" alt="Ori Agent Workspace Map in dark mode showing a Personal HQ landmark and multiple fictional workspaces." width="420" /> | <img src="docs/images/workspace.webp" alt="Ori Agent Workspace Command in dark mode with a fictional agent roster, task state, workspace context, and mission controls." width="420" /> |
-| <sub>Workspace Map shows Personal HQ and the wider operating landscape at a glance.</sub> | <sub>Workspace Command keeps agents, tasks, notes, files, and mission operations in one active workspace.</sub> |
+| <img src="docs/images/workspace-map.webp" alt="Ori Agent Workspace Map in dark mode showing a Personal HQ landmark and multiple fictional workspaces." width="420" /> | <img src="docs/images/workspace.webp" alt="Product Launch workspace showing a launch checklist ticket in progress, two team members, and links to notes and files." width="420" /> |
+| <sub>Workspace Map shows Personal HQ and the wider operating landscape at a glance.</sub> | <sub>Open the next ticket, see who’s on the team, and find notes and linked folders in the workspace overview.</sub> |
 
 ## 🚀 Quick start
 
