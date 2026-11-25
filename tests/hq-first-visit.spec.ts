@@ -90,6 +90,9 @@ for (const mode of ['details', 'map'])
     await expect(page.locator('#hqWorkspaceHint')).toBeHidden();
     await page.goto('/');
     await expect(button).not.toBeFocused();
+    await page.goBack();
+    await expect(button).not.toBeFocused();
+    await expect(page.locator('#hqWorkspaceHint')).toBeHidden();
     expect(access).toEqual([]);
   });
 

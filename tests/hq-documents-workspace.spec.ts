@@ -26,16 +26,24 @@ test('Documents workspace wizard reviews only on activation and resets on cancel
   page.on('request', r => {
     if (r.url().includes('/anchor/check?known=')) checks.push(r.url());
   });
-  async function start() {
+  async function start(repeatActivation = false) {
     await page.goto(base + '?mode=details');
     const card = page.locator('[data-hq-firstvisit]');
     if (checks.length) await page.getByRole('button', { name: 'Things to try' }).click();
-    await card.getByRole('button', { name: /Create a workspace from Documents/ }).click();
+    const suggestion = card.getByRole('button', { name: /Create a workspace from Documents/ });
+    await expect(suggestion).not.toContainText('Completed');
+    await suggestion.click();
     const count = checks.length;
     await card.getByRole('link', { name: 'Go to Home' }).click();
     await expect(button).toBeFocused();
     expect(checks).toHaveLength(count);
-    await button.press('Enter');
+    if (repeatActivation) {
+      await button.evaluate(el => {
+        el.click();
+        el.click();
+      });
+    } else await button.press('Enter');
+    await expect(page.locator('.modal-backdrop')).toHaveCount(1);
     await expect(modal.locator('#workspaceFolderModeAnchored')).toBeChecked();
     await expect(modal.locator('#folderNameInput')).toBeEditable();
   }
@@ -47,7 +55,9 @@ test('Documents workspace wizard reviews only on activation and resets on cancel
   await page.keyboard.press('Escape');
   await expect(modal).toBeHidden();
   await mkdir(docs, { mode: 0o750 });
-  await start();
+  // Simulate Files being unavailable; all workspace reads/writes stay real.
+  await page.route('**/api/file-search/**', route => route.fulfill({ status: 503 }));
+  await start(true);
   await expect(path).toHaveValue(docs);
   await expect(path).toBeEditable();
   await expect(modal.locator('#workspaceSearchConsent')).not.toBeChecked();

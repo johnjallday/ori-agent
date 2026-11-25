@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
+import { installLocalCdn } from './helpers/offline-cdn';
 
 // Real host/creator/picker/storage only. No model calls, fabricated grants or
 // real user directories. Run with e2e-fresh.sh --sandbox-env ORI_ANCHOR_SANDBOX.
@@ -40,6 +41,7 @@ test('existing-folder creation, scoped rows, duplicate recovery, relink and side
     }
   });
   expect(agent.ok(), await agent.text()).toBe(true);
+  await installLocalCdn(page);
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -90,9 +92,11 @@ test('existing-folder creation, scoped rows, duplicate recovery, relink and side
   await expect(page.locator('.ws-cmd-anchor-details')).toContainText(
     'Ori’s notes and settings: ~/Ori Workspaces/anchored-client'
   );
-  await page.getByText(/^Linked folders$/i).click();
+  await page.getByRole('button', { name: /^Files & linked folders/ }).click();
   await expect(page.locator('.ws-cmd-rail-role', { hasText: 'Anchored folder' })).toHaveCount(1);
-  await page.getByText(/^Toolbox$/i).click();
+  await page.getByRole('button', { name: 'Close workspace panel' }).click();
+  await page.getByRole('button', { name: /Anchor Reader.*Project Lead/ }).click();
+  await page.locator('[data-cmd-agent-tab="loadout"]').first().click();
   const scope = page.locator('.ws-cmd-binding-scope');
   await expect(scope).toHaveText('anchor-folder · ~/client-fixture · read-only');
   await scope.scrollIntoViewIfNeeded();
