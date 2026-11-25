@@ -988,6 +988,13 @@ func (s *SecondBrainService) CaptureForSource(ctx context.Context, userID, text,
 		if receipt.ReviewKey != "" && receipt.ReviewKey != secondbrain.ReviewNoteKey(browseReference(doc), receipt.Note) {
 			return SecondBrainCaptureView{}, ErrSecondBrainBrowseStale
 		}
+		// Replay can also repair interrupted indexing. Read just the named,
+		// proven file, never text supplied with a reused request ID.
+		if err == nil && s.deps.ReviewLedger != nil && receipt.ReviewKey != "" && source.CreatedByOri() {
+			if note, e := secondbrain.ReadPreview(source.Path, secondbrain.PreviewInbox, strings.TrimPrefix(receipt.Note, "Inbox/")); e == nil && !note.Truncated && secondbrain.ReviewRevision(note.Body) == receipt.Revision {
+				s.indexCapture(ctx, receipt.ReviewKey, note.Body)
+			}
+		}
 		return captureView(*source, receipt.Note), err
 	}
 	writer, err := secondbrain.NewWriter(source)
@@ -1027,6 +1034,11 @@ func (s *SecondBrainService) CaptureForSource(ctx context.Context, userID, text,
 		// so rather than hide the failure.
 		logger.Warn("A capture's receipt could not be saved", nil)
 	}
+	s.indexCapture(ctx, key, body)
+	return captureView(*source, rel), nil
+}
+
+func (s *SecondBrainService) indexCapture(ctx context.Context, key, body string) {
 	// The file is saved. A busy index gets a short budget and never changes
 	// the outcome; its source-bound receipt permits catch-up on explicit read.
 	if ledger := s.deps.ReviewLedger; ledger != nil {
@@ -1036,7 +1048,6 @@ func (s *SecondBrainService) CaptureForSource(ctx context.Context, userID, text,
 			logger.Warn("Inbox review indexing deferred", nil)
 		}
 	}
-	return captureView(*source, rel), nil
 }
 
 // CaptureAvailable reports whether Capture can work: a second brain Ori set up

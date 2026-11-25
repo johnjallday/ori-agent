@@ -5,11 +5,10 @@ import (
 	"errors"
 	"sort"
 	"strings"
-
-	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/personalassistant"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -75,13 +74,27 @@ func (t secondBrainProjectTickets) Choices(owner string) []personalassistant.Inb
 	})
 	return out
 }
+
 func (t secondBrainProjectTickets) Available(owner, id string) bool {
-	if t.b == nil || t.b.workspaceStore == nil {
+	if t.b == nil || t.b.workspaceStore == nil || !workspace.InboxReviewDestination(t.activeWorkspaces()[id], owner) {
 		return false
 	}
 	ws, err := t.b.workspaceStore.Get(id)
 	return err == nil && workspace.InboxReviewDestination(ws, owner)
 }
+
+func (t secondBrainProjectTickets) HasReceipt(owner, id, key, ticketID string) bool {
+	if t.b == nil || t.b.workspaceStore == nil {
+		return false
+	}
+	ws, err := t.b.workspaceStore.Get(id)
+	if err != nil || !workspace.InboxReviewDestination(ws, owner) {
+		return false
+	}
+	task, err := ws.GetTask(ticketID)
+	return err == nil && task.SourceType == workspace.TicketSourceInboxReview && task.SourceID == key
+}
+
 func (t secondBrainProjectTickets) Confirm(owner, id, key, title string) (string, error) {
 	service := t.b.ticketServiceForBridges()
 	if service == nil {

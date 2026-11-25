@@ -133,8 +133,14 @@ func (s *SecondBrainService) Preview(ctx context.Context, userID, kind, name str
 	var reviewErr error
 	if len(browseRef) > 0 && kind == secondbrain.PreviewInbox && !preview.Truncated {
 		suggestions, reviewErr = s.reviewSuggestions(ctx, doc, preview)
-		if len(suggestions) > 0 && s.deps.InboxTickets != nil {
-			workspaces = s.deps.InboxTickets.Choices(userID)
+		if bridge := s.deps.InboxTickets; len(suggestions) > 0 && bridge != nil {
+			workspaces = bridge.Choices(userID)
+			for i, a := range suggestions {
+				if a.State == "accepted" && !bridge.HasReceipt(userID, a.Workspace, a.ID, a.Ticket) {
+					// Hide a dead link, but never revert its terminal decision.
+					suggestions[i].Ticket = ""
+				}
+			}
 		}
 	}
 	if len(browseRef) > 0 {

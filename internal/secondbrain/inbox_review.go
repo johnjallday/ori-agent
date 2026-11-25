@@ -16,7 +16,7 @@ import (
 // imperatives in plain prose qualify. Never infer an assignee, workspace or
 // calendar date. Checklist and Logseq notes belong to the existing look path.
 var imperative = regexp.MustCompile(`^(Compare|Review|Send|Ask|Call|Check|Schedule|Book) [\pL\pN][\pL\pN ,’'/-]*$`)
-var uncertain = regexp.MustCompile(`(?i)\b(not|never|don't|didn't|already|instead|cancelled|canceled|said|asked|yesterday|if|unless|was|were|maybe|might|could|should)\b`)
+var uncertain = regexp.MustCompile(`(?i)\b(not|never|don['’]t|didn['’]t|already|instead|cancelled|canceled|said|asked|yesterday|if|unless|was|were|maybe|might|could|should)\b`)
 
 func reviewHash(parts ...string) string {
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
@@ -45,11 +45,11 @@ func InboxPassages(key, body string) []InboxAction {
 	if !ok {
 		return nil
 	}
-	// Never split reported speech or a completed historical account into a new imperative.
+	revision := ReviewRevision(body)
 	var out []InboxAction
 	seen := map[string]bool{}
 	for _, line := range strings.Split(prose, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "-") || strings.HasPrefix(strings.TrimSpace(line), "TODO ") || strings.Contains(line, "‘") {
+		if strings.HasPrefix(strings.TrimSpace(line), "-") || logseqOpen.MatchString(line) || logseqDone.MatchString(line) || strings.ContainsAny(line, "‘'") {
 			continue
 		}
 		for _, sentence := range strings.SplitAfter(line, ". ") {
@@ -58,12 +58,14 @@ func InboxPassages(key, body string) []InboxAction {
 			if !imperative.MatchString(title) || uncertain.MatchString(title) || utf8.RuneCountInString(title) > 160 {
 				continue
 			}
-			id := reviewHash(key, strings.ToLower(strings.Join(strings.Fields(title), " ")))
+			// A different capture may later reuse a deleted file's name. Its
+			// actions must not share a cross-workspace key with this version.
+			id := reviewHash(key, revision, strings.ToLower(strings.Join(strings.Fields(title), " ")))
 			if seen[id] {
 				continue
 			}
 			seen[id] = true
-			out = append(out, InboxAction{ID: id, Title: title, Excerpt: excerpt, Revision: ReviewRevision(body), State: "pending"})
+			out = append(out, InboxAction{ID: id, Title: title, Excerpt: excerpt, Revision: revision, State: "pending"})
 			if len(out) == 4 {
 				return out
 			}

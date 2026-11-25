@@ -28,8 +28,11 @@ func TestInboxReviewTicket_OnlyConfirmedOwnedActiveDestination(t *testing.T) {
 	if err := store.Update(ws.ID, func(ws *Workspace) error { ws.Tasks[0].Description = "Renamed"; return nil }); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := svc.Transition(ws.ID, a.ID, TicketTransitionInput{To: TicketStateCancelled, Actor: TicketActorUser}); err != nil {
+		t.Fatal(err)
+	}
 	again, err := svc.CreateInboxReviewTicket("local", ws.ID, "a", "Compare quotes")
-	if err != nil || again.ID != a.ID || again.Title != "Renamed" {
+	if err != nil || again.ID != a.ID || again.Title != "Renamed" || again.State != TicketStateCancelled {
 		t.Fatalf("rename lost identity: %v", err)
 	}
 }

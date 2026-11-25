@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/johnjallday/ori-agent/internal/database"
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
 )
 
@@ -23,6 +24,11 @@ func (f *reviewTicketFixture) Choices(string) []InboxWorkspace {
 }
 func (f *reviewTicketFixture) Available(owner, id string) bool {
 	return owner == "local" && id != f.offline && (id == "house" || id == "garden")
+}
+func (f *reviewTicketFixture) HasReceipt(owner, ws, key, id string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.Available(owner, ws) && f.tickets[ws+":"+key] == id
 }
 func (f *reviewTicketFixture) Confirm(_, ws, key, _ string) (string, error) {
 	f.mu.Lock()
@@ -78,6 +84,50 @@ func TestInboxDecision_ClaimPinsDestinationAndRecoversLostReply(t *testing.T) {
 		t.Fatalf("failed to repair first result: %v", err)
 	}
 }
+
+// Simulate a crash in the gap *after* the workspace write, not just a lost
+// HTTP response after both stores committed. Reopen the actual SQLite file.
+func TestInboxDecision_RestartAfterReceiptFailure(t *testing.T) {
+	ctx := context.Background()
+	s, f, in, _ := reviewFixture(t)
+	cfg := database.DefaultConfig()
+	cfg.Path = filepath.Join(t.TempDir(), "review.db")
+	db, err := database.Open(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.deps.ReviewLedger = &secondbrain.ReviewLedger{DB: db.DB}
+	if _, err = db.Exec(`CREATE TRIGGER fail_receipt BEFORE UPDATE ON inbox_review_actions WHEN NEW.state='accepted' BEGIN SELECT RAISE(ABORT,'receipt unavailable'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DecideInbox(ctx, "local", in); err == nil || len(f.tickets) != 1 {
+		t.Fatalf("expected ticket without success receipt, err=%v", err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := database.Open(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	if _, err = reopened.Exec(`DROP TRIGGER fail_receipt`); err != nil {
+		t.Fatal(err)
+	}
+	deps := s.deps
+	deps.ReviewLedger = &secondbrain.ReviewLedger{DB: reopened.DB}
+	after := NewSecondBrainService(s.store, deps)
+	in.Workspace = "garden"
+	a, err := after.DecideInbox(ctx, "local", in)
+	if err != nil || a.State != "accepted" || a.Workspace != "house" || a.Ticket != "ticket-house" || len(f.tickets) != 1 {
+		t.Fatalf("reopened ledger lost claim: %v", err)
+	}
+	f.offline = "house"
+	if _, err = after.DecideInbox(ctx, "local", in); !errors.Is(err, secondbrain.ErrReviewConflict) {
+		t.Fatalf("missing accepted workspace: %v", err)
+	}
+}
+
 func TestInboxDecision_ConcurrentChoicesAreOneDecision(t *testing.T) {
 	s, f, in, _ := reviewFixture(t)
 	var wg sync.WaitGroup
@@ -98,7 +148,9 @@ func TestInboxDecision_ConcurrentChoicesAreOneDecision(t *testing.T) {
 	}
 	wg.Wait()
 	a, err := s.DecideInbox(context.Background(), "local", in)
-	if err != nil || !(a.State == "accepted" && len(f.tickets) == 1 || a.State == "dismissed" && len(f.tickets) == 0) {
+	accepted := a.State == "accepted" && len(f.tickets) == 1
+	dismissed := a.State == "dismissed" && len(f.tickets) == 0
+	if err != nil || !accepted && !dismissed {
 		t.Fatalf("first decision lost: %v", err)
 	}
 }

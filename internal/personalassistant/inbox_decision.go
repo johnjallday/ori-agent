@@ -3,6 +3,7 @@ package personalassistant
 import (
 	"context"
 	"errors"
+
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
 )
 
@@ -15,6 +16,7 @@ type InboxTickets interface {
 	Choices(owner string) []InboxWorkspace
 	Available(owner, workspaceID string) bool
 	Confirm(owner, workspaceID, key, title string) (string, error)
+	HasReceipt(owner, workspaceID, key, ticketID string) bool
 }
 
 type InboxDecision struct {
@@ -33,7 +35,7 @@ type InboxDecision struct {
 // sidecar write (the decision belongs in the ledger).
 func (s *SecondBrainService) DecideInbox(ctx context.Context, user string, in InboxDecision) (secondbrain.InboxAction, error) {
 	var result secondbrain.InboxAction
-	if !secondbrain.ValidItemID(in.SourceRef) || !secondbrain.ValidItemID(in.ActionID) || !secondbrain.ValidItemID(in.Revision) || (in.Decision != "accept" && in.Decision != "dismiss") || (in.Decision == "accept") != (in.Workspace != "") || len(in.Workspace) > 128 {
+	if !secondbrain.ValidItemID(in.SourceRef) || !secondbrain.ValidItemID(in.ActionID) || !secondbrain.ValidItemID(in.Revision) || (in.Decision != "accept" && in.Decision != "dismiss") || (in.Decision == "accept") != (in.Workspace != "") || (in.Workspace != "" && !secondbrain.ValidRequestID(in.Workspace)) {
 		return result, ErrValidation
 	}
 	if _, err := secondbrain.PreviewRel(secondbrain.PreviewInbox, in.Name); err != nil {
@@ -74,6 +76,9 @@ func (s *SecondBrainService) DecideInbox(ctx context.Context, user string, in In
 		result, err = ledger.Decide(ctx, key, a, in.Workspace)
 		if err != nil {
 			return err
+		}
+		if result.State == "accepted" && !bridge.HasReceipt(user, result.Workspace, result.ID, result.Ticket) {
+			return secondbrain.ErrReviewConflict
 		}
 		if result.State == "claiming" {
 			if in.Decision != "accept" || !bridge.Available(user, result.Workspace) {
