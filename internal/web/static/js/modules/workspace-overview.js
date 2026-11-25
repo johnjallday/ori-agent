@@ -15,6 +15,17 @@ export function compactTeamHTML(c) {
   // while the full controls are collapsed. This does not hire or reassign.
   if (Array.isArray(groups)) c.selectedAgentGroup(groups);
   const agents = (groups || []).map(group => c.agentViewModel(group)).filter(Boolean);
+  // A folder's one staffed lead needs one row in the compact team. Keep the
+  // full role controls under Manage team; never hide vacancies or extra staff.
+  const onlyRole = c.roleRoster?.roles?.length === 1 && c.roleRoster.roles[0];
+  const compactLead =
+    !c.teamExpanded &&
+    c.page?.workspace?.shared_data?.anchor_directory_reference_id &&
+    agents.length === 1 &&
+    onlyRole?.role_id === 'ask-ori' &&
+    onlyRole.primary &&
+    onlyRole.state === 'filled' &&
+    onlyRole.agent?.name === agents[0].name;
   const rows = agents
     .map(
       agent =>
@@ -25,7 +36,11 @@ export function compactTeamHTML(c) {
         '<span><strong>' +
         text(agent.name) +
         '</strong><small>' +
-        text((agent.entry ? 'Lead · ' : '') + (agent.role?.label || 'Agent')) +
+        text(
+          compactLead
+            ? 'Project Lead'
+            : (agent.entry ? 'Chat contact · ' : '') + (agent.role?.label || 'Agent')
+        ) +
         '</small></span><span>' +
         text(agent.status?.label || 'Unknown') +
         '</span></button></li>'
@@ -51,7 +66,9 @@ export function compactTeamHTML(c) {
           : '<div class="ws-cmd-team-empty">' + c.emptyRosterHireHTML() + '</div>') +
     (c.teamExpanded && !unknown
       ? '<section class="ws-cmd-garrison">' + c.renderGarrison() + '</section>'
-      : c.roleRosterHostHTML()) +
+      : compactLead
+        ? '<p>1 of 1 role filled</p>'
+        : c.roleRosterHostHTML()) +
     linkedTeamHTML(c) +
     '</section>'
   );

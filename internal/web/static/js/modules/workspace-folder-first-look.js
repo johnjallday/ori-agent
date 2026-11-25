@@ -11,13 +11,15 @@ export async function folderStaffingDraft(id) {
 }
 
 export async function showAssignedFolderLook(page) {
-  const host = document.getElementById('workspaceAssignedFolderLook');
+  const host = globalThis.document?.getElementById?.('workspaceAssignedFolderLook');
   if (!host) return;
   const id = page.workspaceId;
   const generation = (page.lookGeneration = (page.lookGeneration || 0) + 1);
   const current = () =>
     !page._destroyed && page.workspaceId === id && page.lookGeneration === generation;
-  const names = page.getWorkspaceAgentNames();
+  const names = page.workspace?.shared_data?.anchor_directory_reference_id
+    ? page.getWorkspaceAgentNames()
+    : [];
   if (!page.workspace?.shared_data?.anchor_directory_reference_id || !names.length) {
     host.hidden = true;
     return;
@@ -41,7 +43,8 @@ export async function showAssignedFolderLook(page) {
       ? 'View progress'
       : 'View report'
     : 'Look around';
-  action.disabled = false;
+  action.disabled = Boolean(draft.look_state && !page.folderAgentPhase);
+  status.textContent = action.disabled ? 'Loading saved first look…' : '';
   action.onclick = async () => {
     if (!current()) return;
     if (draft.look_state) {

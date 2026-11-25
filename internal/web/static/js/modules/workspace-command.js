@@ -836,7 +836,12 @@ export class WorkspaceCommandView {
       else this.sharedAssistantView = null;
       // An empty roster's hire offer names a role from this answer, so it is
       // redrawn; otherwise only the roster itself needs mounting.
-      if (this.active && !this.agentGroups().agents.length) this.render();
+      if (
+        this.active &&
+        (!this.agentGroups().agents.length ||
+          this.page?.workspace?.shared_data?.anchor_directory_reference_id)
+      )
+        this.render();
       else if (this.active) this.mountRoleRoster();
       this.showGroupTemplateLanding();
       // The role form names the template its instructions come from, so it

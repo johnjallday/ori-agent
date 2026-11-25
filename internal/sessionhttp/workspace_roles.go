@@ -170,6 +170,14 @@ func workspaceRosterViewScope(current *workspace.Workspace) workspaceroles.Scope
 	return workspaceroles.ScopeProject
 }
 
+func blankLeadVacant(current *workspace.Workspace) bool {
+	// Use the same legacy-holder inference as the visible roster, but do not
+	// look up profiles under the staffing write guard. Even a stale holder
+	// must be cleared before this slot can be filled.
+	roster := workspaceroles.Build(workspaceroles.Input{Roles: workspaceroles.FromTemplateAgents(blankWorkspaceTemplate().Agents), Attachments: workspaceRosterAttachments(current)})
+	return roster.FilledCount == 0
+}
+
 func workspaceRosterAttachments(current *workspace.Workspace) []workspaceroles.Attachment {
 	instances := current.GetAgentInstances()
 	attachments := make([]workspaceroles.Attachment, 0, len(instances))

@@ -736,10 +736,8 @@ export class WorkspaceDetailPage {
     const phase = entry?.view ? String(entry.view.state || '') : '';
     const before = this.folderAgentPhase;
     this.folderAgentPhase = phase;
-    if (before && phase && before !== phase) {
-      void this.loadTasks();
-      void showAssignedFolderLook(this);
-    }
+    if (before && phase && before !== phase) void this.loadTasks();
+    if (phase && before !== phase) void showAssignedFolderLook(this);
     window.workspaceCommand?.setFolderAgent?.(
       this.workspaceId,
       entry ? { ...entry, review: () => this.commanderPresenter?.review?.() } : null
@@ -6833,13 +6831,22 @@ export class WorkspaceDetailPage {
     void this.openAddAgentModal();
   }
 
-  async openAddAgentModal() {
+  async openAddAgentModal({ roleId = '', roleLabel = '' } = {}) {
+    this.addAgentRoleId = roleId;
+    const title = document.getElementById('workspace-detail-add-agent-title');
+    if (title)
+      title.textContent = roleId
+        ? `Assign to ${roleLabel || 'workspace role'}`
+        : 'Add Agent to Workspace';
+    if (this.elements.addAgentSubmitBtn)
+      this.elements.addAgentSubmitBtn.textContent = roleId ? 'Assign to role' : 'Add to Workspace';
+    if (this.elements.createAgentBtn) this.elements.createAgentBtn.hidden = Boolean(roleId);
     const workspaceId = this.workspaceId;
     const generation = (this.staffingGeneration = (this.staffingGeneration || 0) + 1);
     const offer = document.getElementById('workspace-folder-manager-offer');
     if (offer) offer.hidden = true;
     const suggestion =
-      offer && this.workspace?.shared_data?.anchor_directory_reference_id
+      !roleId && offer && this.workspace?.shared_data?.anchor_directory_reference_id
         ? folderStaffingDraft(workspaceId)
         : null;
     await this.loadAgentCatalog(true);
@@ -6861,6 +6868,7 @@ export class WorkspaceDetailPage {
                 workspaceId,
                 folderManagerWorkspace: this.workspace.name,
                 folderLookLink: draft.look_link,
+                folderLeadRole: draft.lead_role_id,
                 seedRole: 'orchestrator',
                 seedName: draft.name,
                 seedSystemPrompt: draft.brief
@@ -8004,7 +8012,12 @@ export class WorkspaceDetailPage {
     const candidates = allAgents
       .map(agent => String(agent?.name || '').trim())
       .filter(Boolean)
-      .filter(name => !workspaceAgents.has(this.normalizeAgentName(name)));
+      .filter(
+        name =>
+          !workspaceAgents.has(this.normalizeAgentName(name)) ||
+          (this.addAgentRoleId &&
+            !this.getWorkspaceAgentInstances(name).some(agent => agent.role_id))
+      );
 
     if (candidates.length === 0) {
       const hasCatalogAgents = allAgents.length > 0;
@@ -8090,7 +8103,17 @@ export class WorkspaceDetailPage {
     }
 
     try {
-      await this.addAgentToWorkspace(agentName);
+      if (this.addAgentRoleId) {
+        const outcome = await window.workspaceCommand?.fillRole(this.addAgentRoleId, {
+          mode: 'assign',
+          name: agentName
+        });
+        if (!outcome?.ok)
+          throw new Error(outcome?.error || 'Could not confirm the role assignment.');
+        bootstrap.Modal.getInstance(this.elements.addAgentModal)?.hide();
+      } else {
+        await this.addAgentToWorkspace(agentName);
+      }
     } catch (error) {
       console.error('Failed to add agent to workspace:', error);
       if (window.Toast) window.Toast.error(error.message || 'Failed to add agent');

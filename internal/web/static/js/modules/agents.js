@@ -634,7 +634,7 @@ function showAddAgentModal(options = {}) {
   if (destination) {
     destination.hidden = !options.folderManagerWorkspace;
     destination.textContent = options.folderManagerWorkspace
-      ? `Create this agent and add it to ${options.folderManagerWorkspace}. No new workspace will be created.`
+      ? `Create this agent and add it to ${options.folderManagerWorkspace}${options.folderLeadRole ? ' as Project Lead' : ''}. No new workspace will be created.`
       : '';
   }
   const choice = document.getElementById('folderManagerLookChoice');
@@ -703,6 +703,7 @@ function normalizeAgentCreationFlowSelections(values) {
 function normalizeAgentCreationFlowOptions(options = {}) {
   return {
     folderLookLink: String(options?.folderLookLink || ''),
+    folderLeadRole: options.folderLeadRole === 'ask-ori' ? options.folderLeadRole : '',
     seedName: String(options?.seedName || '').trim(),
     seedRole: String(options?.seedRole || '')
       .trim()
@@ -1535,12 +1536,28 @@ async function applyPendingAgentCreationFollowUp(agentName, flow = pendingAgentC
 
   if (flow.workspaceId) {
     try {
-      const result = await API.post(
-        `/api/workspaces/${encodeURIComponent(flow.workspaceId)}/agents`,
-        {
-          agent_name: agentName
+      const url = `/api/workspaces/${encodeURIComponent(flow.workspaceId)}`;
+      let result;
+      if (flow.folderLeadRole) {
+        // One binding adds membership and fills the reviewed role. Never fall
+        // back to a loose attachment if another tab filled the vacancy.
+        await API.put(`${url}/roles/${encodeURIComponent(flow.folderLeadRole)}`, {
+          mode: 'assign',
+          name: agentName
+        });
+        summary.workspaceAdded = true;
+        if (getSelectedAgentCreationMCPServers().length) {
+          const workspace = await API.get(url);
+          result = {
+            workspace,
+            agent_instance: workspace?.agent_instances?.find(
+              instance => instance.name === agentName
+            )
+          };
         }
-      );
+      } else {
+        result = await API.post(`${url}/agents`, { agent_name: agentName });
+      }
       summary.workspaceAdded = true;
       workspaceAgentInstanceId = String(result?.agent_instance?.id || '').trim();
       workspaceData =
@@ -1563,7 +1580,7 @@ async function applyPendingAgentCreationFollowUp(agentName, flow = pendingAgentC
     }
   }
 
-  if (flow.workspaceId && summary.workspaceAdded) {
+  if (flow.workspaceId && summary.workspaceAdded && getSelectedAgentCreationMCPServers().length) {
     if (!workspaceAgentInstanceId) {
       summary.failures.push('MCP binding: missing workspace agent instance');
     } else {

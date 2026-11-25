@@ -47,6 +47,11 @@ func (h *Handler) handleFolderManagerDraft(w http.ResponseWriter, r *http.Reques
 			if ref, err := ws.GetDirectoryReference(ws.AnchorDirectoryReferenceID()); err == nil && ref != nil && ref.WorkspaceID == id {
 				if kind, ok := h.folderSearch.StaffingFolderKind(r.Context(), ws.OwnerUserID, ref.Path, filesearch.WorkspaceMatch{ID: id, Link: ref.ID}); ok {
 					draft := map[string]string{"workspace_id": id, "name": filepath.Base(ref.Path) + " Manager", "brief": folderagent.WorkspaceManagerBrief(kind)}
+					// Only offer the known local lead on a strict Blank workspace. An
+					// ordinary attachment must not replace a holder or staff a Home.
+					if provenance := h.workspaceTemplateProvenance(ws); provenance != nil && provenance.TemplateID == blankWorkspaceTemplateID && !h.workspaceIsAssistantProgram(ws) && blankLeadVacant(ws) {
+						draft["lead_role_id"] = "ask-ori"
+					}
 					if h.folderManager != nil {
 						if rec, e := h.folderManager.Record(ws.OwnerUserID, id); e == nil {
 							draft["look_state"] = string(rec.State)

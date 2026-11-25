@@ -199,7 +199,9 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     await expect(form.locator('#agentName')).toHaveValue('Downloads Manager');
     await expect(form.locator('#agentSystemPrompt')).toHaveValue('Keep Downloads sorted');
     await expect(form.locator('#agentAllowWebSearch')).not.toBeChecked();
-    await expect(form.locator('#folderManagerDestination')).toContainText('add it to Downloads');
+    await expect(form.locator('#folderManagerDestination')).toContainText(
+      'add it to Downloads as Project Lead'
+    );
     await form.getByRole('button', { name: 'Cancel' }).click();
     await expect(form).toBeHidden();
     expect(await inspect()).toEqual(blank);
@@ -210,8 +212,8 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     await form.locator('#agentSystemPrompt').fill('Prepare an inbox summary for review.');
     const assigned = page.waitForResponse(
       r =>
-        r.request().method() === 'POST' &&
-        new URL(r.url()).pathname === `/api/workspaces/${blankId}/agents`
+        r.request().method() === 'PUT' &&
+        new URL(r.url()).pathname === `/api/workspaces/${blankId}/roles/ask-ori`
     );
     const report = async () =>
       (await (await request.get(`/api/personal-assistant/folder-agent/${blankId}`)).json())
@@ -222,7 +224,16 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
       await form.locator('#folderManagerLookCheck').check();
       await form.getByRole('button', { name: 'Hire & look around' }).click();
     } else await form.getByRole('button', { name: 'Hire only' }).click();
-    expect((await assigned).ok()).toBeTruthy();
+    const bound = await assigned;
+    expect(bound.ok(), await bound.text()).toBeTruthy();
+    expect((await bound.json()).roles).toMatchObject({
+      filled_count: 1,
+      roles: [{ role_id: 'ask-ori', agent: { name: manager } }],
+      unassigned: []
+    });
+    expect(
+      await (await request.get(`/api/workspaces/${blankId}/folder-manager-draft`)).json()
+    ).not.toHaveProperty('lead_role_id');
     expect(await arrivalState(request, blankId!)).toMatchObject({
       agents: [manager],
       pending: false,
@@ -242,6 +253,10 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     expect(saved.ticket_id).toBeTruthy();
     expect(saved.agent_name).toBe(manager);
     await page.reload();
+    const team = page.locator('.ws-cmd-team');
+    await expect(team).toContainText('1 of 1 role filled');
+    await expect(team.getByText(manager, { exact: true })).toHaveCount(1);
+    await expect(team.getByText('Project Lead', { exact: true })).toBeVisible();
     await expect(
       page.locator('#workspaceAssignedFolderLook').getByRole('button', { name: 'View report' })
     ).toBeVisible();
@@ -251,6 +266,22 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
       .click();
     await expect(page.locator('#workspaceAssignedFolderLook [data-look-status]')).toBeEmpty();
     expect((await report()).ticket_id).toBe(saved.ticket_id);
+    if (browserName === 'chromium') {
+      // Reproduce an older workspace: the same manager is attached without a
+      // role. Assigning it repairs the binding, not the agent or the ticket.
+      const base = `/api/workspaces/${blankId}`;
+      expect((await request.delete(`${base}/roles/ask-ori`)).ok()).toBeTruthy();
+      expect(
+        (await request.post(`${base}/agents`, { data: { agent_name: manager } })).ok()
+      ).toBeTruthy();
+      await page.reload();
+      await team.getByRole('button', { name: 'Assign an agent to Ask Ori' }).click();
+      await assignment.getByLabel('Assign an existing agent').selectOption(manager);
+      await assignment.getByRole('button', { name: 'Assign to role' }).click();
+      await expect(team.getByText('1 of 1 role filled')).toBeVisible();
+      await expect(team.getByText(manager, { exact: true })).toHaveCount(1);
+      expect((await report()).ticket_id).toBe(saved.ticket_id);
+    }
     expect(await inspect()).toEqual(blank);
   }
 });
