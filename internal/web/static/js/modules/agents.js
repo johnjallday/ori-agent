@@ -634,8 +634,29 @@ function showAddAgentModal(options = {}) {
   if (destination) {
     destination.hidden = !options.folderManagerWorkspace;
     destination.textContent = options.folderManagerWorkspace
-      ? `Create this agent and add it to ${options.folderManagerWorkspace}. No workspace will be created and no work will start.`
+      ? `Create this agent and add it to ${options.folderManagerWorkspace}. No new workspace will be created.`
       : '';
+  }
+  const choice = document.getElementById('folderManagerLookChoice');
+  const check = document.getElementById('folderManagerLookCheck');
+  const submit = document.getElementById('createAgentBtn');
+  if (choice && check && submit) {
+    choice.hidden = !options.folderLookLink;
+    check.checked = false;
+    check.onchange = () => {
+      submit.textContent = check.checked ? 'Hire & look around' : 'Hire only';
+    };
+    if (options.folderManagerWorkspace) {
+      submit.textContent = 'Hire only';
+      modalElement.addEventListener(
+        'hidden.bs.modal',
+        () => {
+          choice.hidden = true;
+          submit.textContent = 'Create Agent';
+        },
+        { once: true }
+      );
+    }
   }
   resetBaseAutoConfigState();
   resetAgentCreationCapabilitySelections();
@@ -681,6 +702,7 @@ function normalizeAgentCreationFlowSelections(values) {
 
 function normalizeAgentCreationFlowOptions(options = {}) {
   return {
+    folderLookLink: String(options?.folderLookLink || ''),
     seedName: String(options?.seedName || '').trim(),
     seedRole: String(options?.seedRole || '')
       .trim()
@@ -1629,6 +1651,9 @@ async function createNewAgent() {
   // success path reaches it.
   const reviewedFlow = pendingAgentCreationFlow;
   const onCreated = reviewedFlow.onCreated;
+  const lookLink =
+    document.getElementById('folderManagerLookCheck')?.checked && reviewedFlow.folderLookLink;
+  let lookUnverified = false;
 
   // Set loading state
   const originalText = createBtn.textContent;
@@ -1723,6 +1748,16 @@ async function createNewAgent() {
       createBtn.innerHTML =
         '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Linking...';
       followUpSummary = await applyPendingAgentCreationFollowUp(agentName, reviewedFlow);
+      if (lookLink && followUpSummary.workspaceAdded) {
+        try {
+          await API.post(
+            `/api/workspaces/${encodeURIComponent(reviewedFlow.workspaceId)}/folder-manager-look`,
+            { link: lookLink, agent: agentName, brief: formValues.systemPrompt }
+          );
+        } catch {
+          lookUnverified = true;
+        }
+      }
     }
 
     // Success - close modal and refresh agent list
@@ -1789,6 +1824,13 @@ async function createNewAgent() {
     EventBus.emit('agent:created', { name: agentName, role: requestBody.role });
 
     // The opener that asked for the result shows the new agent itself.
+    if (lookUnverified) {
+      window.Toast?.warning(
+        `Added ${agentName}, but the first look is not verified. Check Folder first look in the workspace; do not hire again.`
+      );
+      window.dispatchEvent(new Event('ori:refresh-folder-look'));
+      return;
+    }
     if (onCreated) {
       onCreated({ name: agentName, role: requestBody.role });
       return;
@@ -1805,7 +1847,10 @@ async function createNewAgent() {
   } finally {
     // Reset button state
     createBtn.disabled = false;
-    createBtn.innerHTML = originalText;
+    // A closed folder-specific form must not leak its submit label into a
+    // later ordinary Agent form. Keep the choice on validation/write errors.
+    createBtn.textContent =
+      pendingAgentCreationFlow === reviewedFlow ? originalText : 'Create Agent';
   }
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/johnjallday/ori-agent/internal/filesearch"
+	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/grouprequirements"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -35,6 +36,7 @@ import (
 
 // Handler handles session-related HTTP requests.
 type Handler struct {
+	folderManager           *folderagent.Service
 	folderSearch            *filesearch.Service
 	folderSearchAllowed     func(*http.Request, string) bool
 	hireConversationAllowed func(context.Context, string, string) bool

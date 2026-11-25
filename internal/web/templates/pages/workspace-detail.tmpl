@@ -42,6 +42,13 @@
         <section id="workspaceFirstTaskBanner" class="first-task-banner" role="status" aria-live="polite" hidden></section>
         <!-- Folder agent report: a workspace started from a folder shows its
              agent's look and report here; folder-agent-card.js fills it. -->
+        <section id="workspaceAssignedFolderLook" class="mb-3 p-3 border rounded" aria-label="Folder first look" hidden>
+          <strong>Folder first look</strong>
+          <p class="mb-2" data-look-description></p>
+          <label data-look-picker>Assigned agent <select class="form-select" data-look-agent></select></label>
+          <button class="btn btn-outline-primary" type="button" data-look-action>Look around</button>
+          <p class="form-text mb-0" role="status" data-look-status></p>
+        </section>
         <section id="workspaceFolderAgentReport" class="folder-agent-host" aria-live="polite" hidden></section>
         <!-- Email Ops connect CTA: populated by personal-hq-email-setup.js on the
              Email Ops workspace when no account is linked yet — one-click setup on

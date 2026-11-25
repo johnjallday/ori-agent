@@ -46,13 +46,78 @@ func (h *Handler) handleFolderManagerDraft(w http.ResponseWriter, r *http.Reques
 		if err == nil && ws != nil && ws.ID == id && h.folderSearchAllowed(r, ws.OwnerUserID) {
 			if ref, err := ws.GetDirectoryReference(ws.AnchorDirectoryReferenceID()); err == nil && ref != nil && ref.WorkspaceID == id {
 				if kind, ok := h.folderSearch.StaffingFolderKind(r.Context(), ws.OwnerUserID, ref.Path, filesearch.WorkspaceMatch{ID: id, Link: ref.ID}); ok {
-					orihttp.WriteJSON(w, map[string]string{"workspace_id": id, "name": filepath.Base(ref.Path) + " Manager", "brief": folderagent.WorkspaceManagerBrief(kind)})
+					draft := map[string]string{"workspace_id": id, "name": filepath.Base(ref.Path) + " Manager", "brief": folderagent.WorkspaceManagerBrief(kind)}
+					if h.folderManager != nil {
+						if rec, e := h.folderManager.Record(ws.OwnerUserID, id); e == nil {
+							draft["look_state"] = string(rec.State)
+						} else if errors.Is(e, folderagent.ErrNoRecord) {
+							draft["look_link"] = ref.ID
+						}
+					}
+					orihttp.WriteJSON(w, draft)
 					return
 				}
 			}
 		}
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) SetFolderManagerService(service *folderagent.Service) { h.folderManager = service }
+
+// AssignedLookRoot checks host-owned identity again before the worker walks.
+func (h *Handler) AssignedLookRoot(ctx context.Context, owner, id, agent, link string) (string, string, bool) {
+	if h.workspaceStore == nil || h.folderSearch == nil || agent == "" || link == "" {
+		return "", "", false
+	}
+	ws, e := h.workspaceStore.Get(id)
+	if e != nil || ws == nil || ws.ID != id || ws.OwnerUserID != owner || ws.AnchorDirectoryReferenceID() != link {
+		return "", "", false
+	}
+	instance, ok := ws.FindAgentInstance(agent, "")
+	if !ok || instance.Name != agent {
+		return "", "", false
+	}
+	if assignment, ok := ws.GetToolboxAssignment(instance.ID); ok && assignment.ToolboxID != "folder-agent-"+instance.ID {
+		return "", "", false
+	}
+	ref, e := ws.GetDirectoryReference(link)
+	if e != nil || ref == nil {
+		return "", "", false
+	}
+	if _, ok := h.folderSearch.StaffingFolderKind(ctx, owner, ref.Path, filesearch.WorkspaceMatch{ID: id, Link: link}); !ok {
+		return "", "", false
+	}
+	return ref.Path, ws.Name, true
+}
+
+func (h *Handler) handleFolderManagerLook(w http.ResponseWriter, r *http.Request, id string) {
+	if r.Method != http.MethodPost {
+		_ = orihttp.RespondMethodNotAllowed(w)
+		return
+	}
+	if h.folderManager == nil || h.workspaceStore == nil || h.folderSearchAllowed == nil {
+		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "Folder review is unavailable.")
+		return
+	}
+	ws, e := h.workspaceStore.Get(id)
+	if e != nil || ws == nil || !h.folderSearchAllowed(r, ws.OwnerUserID) {
+		_ = orihttp.RespondForbidden(w, "This folder is not available here.")
+		return
+	}
+	var choice struct {
+		Agent string `json:"agent"`
+		Link  string `json:"link"`
+		Brief string `json:"brief"`
+	}
+	if !orihttp.ParseJSONBody(w, r, &choice) {
+		return
+	}
+	if err := h.folderManager.StartAssigned(r.Context(), ws.OwnerUserID, id, choice.Agent, choice.Link, choice.Brief); err != nil {
+		_ = orihttp.RespondError(w, http.StatusConflict, "Could not start the first look. Reopen the workspace to check the folder, agent and saved status.")
+		return
+	}
+	orihttp.WriteJSON(w, map[string]string{"workspace_id": id})
 }
 
 // The ordinary anchor checker may report a foreign workspace name or the

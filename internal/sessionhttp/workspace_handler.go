@@ -130,6 +130,9 @@ func (h *Handler) HandleWorkspaces(w http.ResponseWriter, r *http.Request) {
 		subPath := parts[1]
 
 		switch subPath {
+		case "folder-manager-look":
+			h.handleFolderManagerLook(w, r, id)
+			return
 		case "folder-manager-draft":
 			h.handleFolderManagerDraft(w, r, id)
 			return

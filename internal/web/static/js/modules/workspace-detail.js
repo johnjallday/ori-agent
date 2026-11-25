@@ -26,6 +26,7 @@ import {
   firstTaskStartMessage,
   renderFirstTaskBanner
 } from './workspace-first-task-banner.js';
+import { folderStaffingDraft, showAssignedFolderLook } from './workspace-folder-first-look.js';
 import { mountWorkspaceFolderAgent } from './folder-agent-card.js';
 import { commanderPresenter, workspaceCommanderMap } from './commander-map.js';
 import { chatShowsFolderAgentReport } from './folder-agent-chat.js';
@@ -624,6 +625,9 @@ export class WorkspaceDetailPage {
     // this card takes no room: the Commander's line on the map is the status.
     // The look's own ticket is told by that report, so the Map's Next action
     // leaves it out (commanderNarratedTicket).
+    this.listenToPage(window, 'ori:refresh-folder-look', () => {
+      void this.loadWorkspace();
+    });
     this.commanderPresenter?.dispose();
     this.commanderNarratedTicket = '';
     this.folderAgentPhase = undefined;
@@ -732,7 +736,10 @@ export class WorkspaceDetailPage {
     const phase = entry?.view ? String(entry.view.state || '') : '';
     const before = this.folderAgentPhase;
     this.folderAgentPhase = phase;
-    if (before && phase && before !== phase) void this.loadTasks();
+    if (before && phase && before !== phase) {
+      void this.loadTasks();
+      void showAssignedFolderLook(this);
+    }
     window.workspaceCommand?.setFolderAgent?.(
       this.workspaceId,
       entry ? { ...entry, review: () => this.commanderPresenter?.review?.() } : null
@@ -2752,6 +2759,7 @@ export class WorkspaceDetailPage {
       });
       if (!this.isResourceRequestCurrent(request)) return;
       this.publishWorkspaceSnapshot(workspace, request);
+      void showAssignedFolderLook(this);
       this.workspaceSlug = String(this.workspace?.folder_slug || this.workspaceSlug || '').trim();
       this.workspaceSettings = this.normalizeWorkspaceSettings(
         this.workspace?.workspace_settings || this.workspace?.shared_data?.workspace_settings || {}
@@ -6832,11 +6840,7 @@ export class WorkspaceDetailPage {
     if (offer) offer.hidden = true;
     const suggestion =
       offer && this.workspace?.shared_data?.anchor_directory_reference_id
-        ? fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/folder-manager-draft`, {
-            cache: 'no-store'
-          })
-            .then(r => (r.status === 200 ? r.json() : null))
-            .catch(() => null)
+        ? folderStaffingDraft(workspaceId)
         : null;
     await this.loadAgentCatalog(true);
     await this.populateAddAgentOptions();
@@ -6856,6 +6860,7 @@ export class WorkspaceDetailPage {
               window.showAddAgentModal({
                 workspaceId,
                 folderManagerWorkspace: this.workspace.name,
+                folderLookLink: draft.look_link,
                 seedRole: 'orchestrator',
                 seedName: draft.name,
                 seedSystemPrompt: draft.brief

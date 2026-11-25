@@ -213,7 +213,15 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
         r.request().method() === 'POST' &&
         new URL(r.url()).pathname === `/api/workspaces/${blankId}/agents`
     );
-    await form.locator('#createAgentBtn').click();
+    const report = async () =>
+      (await (await request.get(`/api/personal-assistant/folder-agent/${blankId}`)).json())
+        .folder_agent;
+    expect(await report()).toBeNull();
+    await expect(form.getByRole('button', { name: 'Hire only' })).toBeVisible();
+    if (browserName === 'webkit') {
+      await form.locator('#folderManagerLookCheck').check();
+      await form.getByRole('button', { name: 'Hire & look around' }).click();
+    } else await form.getByRole('button', { name: 'Hire only' }).click();
     expect((await assigned).ok()).toBeTruthy();
     expect(await arrivalState(request, blankId!)).toMatchObject({
       agents: [manager],
@@ -221,6 +229,28 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
       goalRuns: 0,
       inFlight: false
     });
+    expect(await inspect()).toEqual(blank);
+    if (browserName === 'chromium') {
+      const look = page.locator('#workspaceAssignedFolderLook');
+      await expect(look.getByRole('button', { name: 'Look around' })).toBeVisible();
+      expect(await report()).toBeNull();
+      await expect(look.getByLabel('Assigned agent')).toHaveValue(manager);
+      await look.getByRole('button', { name: 'Look around' }).click();
+    }
+    await expect.poll(async () => (await report())?.state).toBe('reported');
+    const saved = await report();
+    expect(saved.ticket_id).toBeTruthy();
+    expect(saved.agent_name).toBe(manager);
+    await page.reload();
+    await expect(
+      page.locator('#workspaceAssignedFolderLook').getByRole('button', { name: 'View report' })
+    ).toBeVisible();
+    await page
+      .locator('#workspaceAssignedFolderLook')
+      .getByRole('button', { name: 'View report' })
+      .click();
+    await expect(page.locator('#workspaceAssignedFolderLook [data-look-status]')).toBeEmpty();
+    expect((await report()).ticket_id).toBe(saved.ticket_id);
     expect(await inspect()).toEqual(blank);
   }
 });
