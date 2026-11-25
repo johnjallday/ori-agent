@@ -81,8 +81,10 @@ test('a detached shared-header opener resolves to its live replacement', () => {
 test('Overview keeps the details key; the primary modes stand alone with no More views menu', () => {
   const html = workspaceNavigationHTML({ mode: 'details', dashboard: true });
   assert.match(html, /data-cmd-view-mode="details" aria-pressed="true">Overview/);
-  for (const key of ['map', 'tickets', 'dashboard'])
-    assert.match(html, new RegExp(`data-cmd-view-mode="${key}"`));
+  assert.deepEqual(
+    Array.from(html.matchAll(/data-cmd-view-mode="([^"]+)"/g), m => m[1]),
+    ['details', 'map', 'files', 'tickets', 'dashboard']
+  );
   assert.match(html, /data-cmd-program-destinations/);
   // Plans was the only item of More views; both are gone, even for a caller that
   // still passes a link for it. The workspace canvas stays retired too.
@@ -106,7 +108,7 @@ test('every shared header has one real Give work door, Settings and literal iden
     workspaceSlug: 'w',
     workspace: { name: '<img src=x>', tags: [] }
   };
-  for (const mode of ['details', 'map', 'tickets', 'dashboard']) {
+  for (const mode of ['details', 'map', 'files', 'tickets', 'dashboard']) {
     view.viewMode = mode;
     const html = view.commandBarHTML(view.page.workspace, view.page.workspace.name, '', {});
     assert.equal((html.match(/data-cmd-give-work/g) || []).length, 1);

@@ -135,11 +135,11 @@ export class WorkspaceFilesView {
     this.saved = null;
     this.focusKey =
       row?.id || saved.ancestors.find(key => this.rows.some(r => r.id === key)) || this.root.id;
-    if (row && ['file', 'note'].includes(row.kind)) {
+    if (row && saved.hadPreview) {
       this.showPreview = saved.showPreview;
       void this.select(row, { restore: true });
     } else {
-      this.branchSelection = this.focusKey;
+      this.branchSelection = !row || saved.wasSelected ? this.focusKey : null;
       this.paintTree();
     }
     this.tree.scrollTop = saved.scroll;
@@ -160,6 +160,8 @@ export class WorkspaceFilesView {
       this.saved = {
         key,
         ancestors,
+        hadPreview: !!this.selected,
+        wasSelected: this.branchSelection === key,
         scroll: this.tree.offsetHeight ? this.tree.scrollTop : this.previewScroll,
         showPreview: this.showPreview
       };

@@ -236,6 +236,57 @@ test('phone returns to a keyboard-selected row, then reconciles a removed file',
   await expect(page.locator('#workspaceNextActionRegion')).toBeVisible();
 });
 
+test('a member removed from the live group loses its open preview', async ({ page }) => {
+  const home = await workspace(page, 'Engineering', '', true);
+  const member = await workspace(page, 'Field notes', home.id);
+  const res = await page.request.post(`/api/workspaces/${member.id}/notes`, {
+    data: { name: 'Lab log', content: 'One clean run.' }
+  });
+  expect(res.ok()).toBeTruthy();
+  await page.goto(`/workspaces/${home.folder_slug}?mode=files`);
+  await ready(page);
+  await row(page, 'Linked workspaces').click();
+  await keyed(page, member.id).click();
+  await keyed(page, `${member.id}/s/notes`).click();
+  await row(page, 'Lab log').click();
+  await expect(reader(page)).toContainText('One clean run.');
+  // A different client moves this member, not the reader. Consume the page’s live
+  // membership refresh without another navigation or a second tree expansion.
+  expect(
+    (await page.request.patch(`/api/workspaces/${member.id}`, { data: { parent_id: '' } })).ok()
+  ).toBeTruthy();
+  await page.evaluate(() => (window as any).workspaceDetail.loadWorkspace());
+  await expect(reader(page)).not.toContainText('One clean run.');
+  await expect(keyed(page, member.id)).toHaveCount(0);
+  await expect(row(page, 'No linked workspaces')).toBeVisible();
+});
+
+test('a failed note read clears content and retries without an editor', async ({ page }) => {
+  const ws = await workspace(page, 'Session review');
+  const { note } = await (
+    await page.request.post(`/api/workspaces/${ws.id}/notes`, {
+      data: {
+        name: 'Cue sheet',
+        content: '# Cue 1\n\n<form><input value="No editing"></form>Start here.'
+      }
+    })
+  ).json();
+  await page.goto(`/workspaces/${ws.folder_slug}?mode=files`);
+  await ready(page);
+  await row(page, 'Notes').click();
+  await page.route(
+    `**/api/notes/${note.id}`,
+    route => route.fulfill({ status: 503, body: 'Temporarily unavailable' }),
+    { times: 1 }
+  );
+  await row(page, 'Cue sheet').click();
+  const body = reader(page).locator('.wf-body');
+  await expect(body).toContainText('Temporarily unavailable');
+  await body.getByRole('button', { name: 'Retry preview' }).click();
+  await expect(body).toContainText('Start here.');
+  await expect(body.locator('form,input,[contenteditable]')).toHaveCount(0);
+});
+
 test('empty group distinguishes unavailable membership and retries in place', async ({ page }) => {
   const home = await workspace(page, 'Empty group', '', true);
   await page.goto(`/workspaces/${home.folder_slug}?mode=files`);

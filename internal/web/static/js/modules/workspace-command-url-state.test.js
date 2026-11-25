@@ -208,6 +208,17 @@ test('Files is a direct destination and follows browser history without mounting
   });
 });
 
+test('Files on Personal HQ does not mount its Overview stations', () => {
+  withHarness('?mode=files', ({ container }) => {
+    const view = new WorkspaceCommandView(
+      makePage({ workspace: { id: 'ws-1', name: 'HQ', designation: 'personal_hq' } })
+    );
+    assert.equal(view.isPersonalHQ(), true);
+    assert.match(container.innerHTML, /data-cmd-view-mode="files" aria-pressed="true"/);
+    assert.doesNotMatch(container.innerHTML, /data-hq-capture-control|data-hq-station-grid/);
+  });
+});
+
 test('a details-mode boot with an empty query string never rewrites the clean URL', () => {
   // No agents at all, so reconcileAgentSelection has nothing to auto-select —
   // isolates the "nothing meaningfully changed" invariant from agent defaulting.

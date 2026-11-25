@@ -60,6 +60,19 @@ test('unsupported and oversized files never fetch; document text is inert', asyn
     assert.doesNotMatch(previewHTML({ kind, text: '<form>hello</form>' }, 'Form'), /<form>/);
 });
 
+test('restoring keyboard focus alone does not read the focused note', () => {
+  const view = new WorkspaceFilesView({}, { id: 'album' });
+  view.tree = {};
+  view.rows = [note];
+  view.saved = { key: note.id, ancestors: [], hadPreview: false, scroll: 20 };
+  view.paintTree = () => {};
+  view.select = () => assert.fail('focus cannot open a preview');
+  view.restoreSelection();
+  assert.equal(view.focusKey, note.id);
+  assert.equal(view.branchSelection, null);
+  assert.equal(view.tree.scrollTop, 20);
+});
+
 test('membership loss or failure revokes even a pending member preview', async () => {
   for (const snapshot of [null, { id: 'home', kind: 'group', children: [] }]) {
     const root = { id: 'home', kind: 'group' };
