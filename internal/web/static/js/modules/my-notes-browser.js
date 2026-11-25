@@ -391,6 +391,10 @@ export function notebookReaderView(state) {
         ...base,
         title,
         paragraphs,
+        ...(reader.preview.suggestions?.length
+          ? { suggestions: reader.preview.suggestions.filter(item => item.state !== 'dismissed') }
+          : {}),
+        ...(reader.preview.review_unavailable ? { reviewUnavailable: true } : {}),
         truncated: reader.preview.truncated === true
       };
     }
@@ -769,6 +773,22 @@ export class MyNotesBrowser {
           ...model.paragraphs.map(text => el('p', { text }))
         )
       );
+      if (model.reviewUnavailable)
+        out.push(
+          el('p', { text: 'Ticket suggestions could not be checked. Reopen this note to retry.' })
+        );
+      for (const item of model.suggestions || []) {
+        out.push(
+          el(
+            'section',
+            { className: 'my-notes-suggestion' },
+            el('h4', { text: 'Suggested ticket' }),
+            el('blockquote', { text: item.excerpt }),
+            el('strong', { text: item.title }),
+            el('p', { text: 'Choose workspace' })
+          )
+        );
+      }
       if (model.truncated)
         out.push(
           el('p', { className: 'my-notes-pane-line', text: 'Only the beginning is shown.' })

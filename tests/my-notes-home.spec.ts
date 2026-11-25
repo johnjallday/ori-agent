@@ -259,7 +259,24 @@ test('Home quick note saves one Markdown file and its receipt opens the source, 
   expect(await work()).toEqual(before);
   expect(posts.filter(path => /backlog|followups|\/runs|\/tickets/.test(path))).toEqual([]);
   expect(posts.filter(path => path === endpoint + '/capture')).toHaveLength(2);
+  await expect(reader(page).getByRole('heading', { name: 'Suggested ticket' })).toHaveCount(0);
   await capture(page, 'home-reference-reader');
+});
+
+test('only the comparison in mixed Inbox prose is offered for review', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Quick note', exact: true }).click();
+  await page
+    .locator('#cockpitCaptureTitle')
+    .fill('Maya said disposal costs extra. Compare both roofing quotes before Friday.');
+  await page.getByRole('button', { name: 'Save to Inbox' }).click();
+  await page.locator('#cockpitCaptureReceipt').getByRole('link', { name: 'Open note' }).click();
+  await expect(reader(page).getByRole('heading', { name: 'Suggested ticket' })).toHaveCount(1);
+  await expect(reader(page).locator('blockquote')).toHaveText(
+    'Compare both roofing quotes before Friday.'
+  );
+  await expect(reader(page)).toContainText('Choose workspace');
+  await capture(page, 'inbox-comparison');
 });
 
 test('HQ Overview saves to the personal Inbox and its Map station navigates', async ({

@@ -30,6 +30,7 @@ func (b *ServerBuilder) wireSecondBrain(knowledge *personalassistant.KnowledgeSt
 	service := personalassistant.NewSecondBrainService(personalassistant.NewSecondBrainStore(knowledge), personalassistant.SecondBrainDeps{
 		Vaults:         secondbrain.NewDetector(guards.HomeDir, guards),
 		ProjectTickets: secondBrainProjectTickets{b: b},
+		ReviewLedger:   &secondbrain.ReviewLedger{DB: b.sessionStore.DB().DB},
 		// The store may be created by a later phase; look it up at call time.
 		ResolveDocumentsVault: func(ctx context.Context, owner, token string) (string, error) {
 			if b.folderAgentService == nil {
