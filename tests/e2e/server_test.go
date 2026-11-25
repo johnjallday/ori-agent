@@ -278,9 +278,9 @@ func TestHomeAssistantRoute_UtilityPromptUsesExistingAssistant(t *testing.T) {
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	// Ask Ori is intentionally not auto-created without a configured system
-	// model. Configure one through the public API inside this test's owned
-	// runtime profile so the normal creation path is exercised.
+	// No agent is auto-created by configuring a Default model; the route below
+	// is answered by the hired Personal Assistant. Configure the model through
+	// the public API inside this test's owned runtime profile.
 	configureSystemModel(t, client)
 	hirePersonalAssistant(t, client)
 

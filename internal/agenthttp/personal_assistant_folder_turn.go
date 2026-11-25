@@ -295,7 +295,7 @@ func (h *HomeAssistantAskHandler) answerFolderTurn(ctx context.Context, prompt s
 			system:  buildAssistantConversationSystemPrompt(workContext) + folderTurnInstructions(options, recommendationText != "") + folderReplyPresentation(conversation, turn),
 			history: conversation.history,
 			user:    user,
-			sources: personalAssistantPromptSources(h.Sources, workContext), temperature: 0.6,
+			sources: h.Sources, temperature: 0.6,
 		})
 		if err != nil {
 			resp := h.conversationModelUnavailable(ctx, prompt, homeAssistantConversationIntent.Key, workContext, conversation, err)

@@ -66,7 +66,7 @@ func (f migrationFixture) seed(t *testing.T, name, definition string, sidecars m
 // under the legacy status, one with sidecar files and statistics.
 func (f migrationFixture) seedStandard(t *testing.T) {
 	t.Helper()
-	f.seed(t, systemassistant.CanonicalName,
+	f.seed(t, "Ask Ori",
 		`{"role":"orchestrator","Settings":{"model":"gpt-4o-mini"},"metadata":{"tags":["`+systemassistant.ProtectedMarker+`"]}}`, nil)
 	f.seed(t, "Scout",
 		`{"role":"researcher","Settings":{"model":"gpt-4o-mini","system_prompt":"scout"},"status":"active","statistics":{"message_count":7}}`,
@@ -111,7 +111,7 @@ func TestMigrationMovesUserAgentsIntoTheRoot(t *testing.T) {
 			t.Errorf("%s is still in the data dir", name)
 		}
 	}
-	if !exists(f.legacyDir(systemassistant.CanonicalName)) || exists(f.rootDir(systemassistant.CanonicalName)) {
+	if !exists(f.legacyDir("Ask Ori")) || exists(f.rootDir("Ask Ori")) {
 		t.Error("the built-in assistant must stay in the data dir")
 	}
 
@@ -317,7 +317,7 @@ func TestMigrationLeavesAMissingRootAlone(t *testing.T) {
 
 func TestMigrationWithOnlyTheAssistantIsNotNeeded(t *testing.T) {
 	f := newMigrationFixture(t)
-	f.seed(t, systemassistant.CanonicalName,
+	f.seed(t, "Ask Ori",
 		`{"Settings":{"model":"gpt-4o-mini"},"metadata":{"tags":["`+systemassistant.ProtectedMarker+`"]}}`, nil)
 	if report := f.run(t); report.Status != MigrationNotNeeded {
 		t.Fatalf("status = %q, want not_needed", report.Status)

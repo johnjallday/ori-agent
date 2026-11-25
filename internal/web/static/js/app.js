@@ -129,12 +129,6 @@ function sanitizeHistory(messages) {
 
 // ---- Chat Persistence (localStorage) ----
 
-function getDefaultAssistantAgentName() {
-  // The protected system assistant, under the one identity Issue #350 settled
-  // on. Must match internal/systemassistant's canonical name.
-  return 'Ask Ori';
-}
-
 function getActiveChatStorageKey() {
   const activeSessionId = window.sessionManager?.getActiveSessionId?.();
   if (activeSessionId) {
@@ -244,7 +238,9 @@ function resolveChatWebSearchAgentName(explicitAgentName = '') {
   const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
   if (sessionAgent) return String(sessionAgent).trim();
 
-  return getDefaultAssistantAgentName();
+  // No built-in assistant stands in for a chat with no agent: the toggle
+  // then reads as unavailable rather than describing some other agent.
+  return '';
 }
 
 function setChatWebSearchToggleVisualState({ enabled, loading, agentName, available }) {
@@ -444,7 +440,7 @@ async function refreshAgentDisplay() {
   }
 
   loadChatFromLocalStorage();
-  refreshChatWebSearchToggle(sessionAgent || getDefaultAssistantAgentName());
+  refreshChatWebSearchToggle(sessionAgent || '');
 }
 
 // ---- System Model Display ----

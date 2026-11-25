@@ -10,7 +10,6 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -245,9 +244,6 @@ func (c *CompositeStore) AgentOrigin(name string) (AgentOrigin, bool) {
 // isSystemRecord reports whether the record under name is the built-in
 // assistant rather than a user agent still in the data dir.
 func isSystemRecord(st Store, name string) bool {
-	if systemassistant.IsCanonicalName(name) {
-		return true
-	}
 	ag, ok := st.GetAgent(name)
 	return ok && isMarkedSystemAgent(ag)
 }

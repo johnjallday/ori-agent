@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -153,13 +152,15 @@ func TestCompositeMutateDefinitionRoutesToTheOwningStore(t *testing.T) {
 	f := newCompositeFixture(t)
 	c := f.open(t)
 	var _ DefinitionMutator = c
-	if err := c.CreateAgent(systemassistant.CanonicalName, &CreateAgentConfig{}); err != nil {
-		t.Fatalf("create assistant: %v", err)
+	// An older copy left in the data dir is owned by the system store; a new
+	// agent by the root.
+	if err := c.system.CreateAgent("Data Dir Agent", &CreateAgentConfig{}); err != nil {
+		t.Fatalf("seed data-dir agent: %v", err)
 	}
 	if err := c.CreateAgent("Scout", &CreateAgentConfig{}); err != nil {
 		t.Fatalf("create Scout: %v", err)
 	}
-	for _, name := range []string{systemassistant.CanonicalName, "Scout"} {
+	for _, name := range []string{"Data Dir Agent", "Scout"} {
 		if _, err := MutateDefinition(c, name, func(draft *agent.Agent) error {
 			draft.Settings.SystemPrompt = "routed " + name
 			return nil
@@ -168,7 +169,7 @@ func TestCompositeMutateDefinitionRoutesToTheOwningStore(t *testing.T) {
 		}
 	}
 	reopened := f.open(t)
-	for _, name := range []string{systemassistant.CanonicalName, "Scout"} {
+	for _, name := range []string{"Data Dir Agent", "Scout"} {
 		got, _ := reopened.GetAgent(name)
 		if got == nil || got.Settings.SystemPrompt != "routed "+name {
 			t.Fatalf("%s edit not durable in its own store: %+v", name, got)

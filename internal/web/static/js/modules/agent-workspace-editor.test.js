@@ -19,12 +19,14 @@ test('only editable reusable definitions can change membership', () => {
     { source: 'cli' },
     { role: 'cli_agent' },
     { state: 'unreadable' },
-    { name: 'Ask Ori' },
-    { name: '__assistant__' },
     { origin: { source: 'system' } },
     { origin: { source: 'workspace' } }
   ])
     assert.equal(api.editable({ ...agent, ...patch }), false, JSON.stringify(patch));
+  // A name never makes an agent uneditable: one a person called "Ask Ori" is
+  // theirs like any other.
+  for (const name of ['Ask Ori', 'Ori', 'Workspace Manager'])
+    assert.equal(api.editable({ ...agent, name }), true, name);
 });
 
 test('missing and partial membership cannot be submitted as an empty set', () => {

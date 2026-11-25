@@ -2843,7 +2843,7 @@ for (const [name, kind] of [
   ['Action Owned', 'unknown'],
   ['Action Unreadable', 'unknown'],
   ['Action CLI', 'hidden'],
-  ['Ask Ori', 'hidden']
+  ['Ask Ori', 'assign']
 ]) {
   test(`contextual workspace work respects ${name}`, async ({ page }, testInfo) => {
     await mockWorkspaceActionRoster(page);

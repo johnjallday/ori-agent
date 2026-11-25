@@ -2,6 +2,7 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
 import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { ensureLeadAgent, LEAD_AGENT } from './helpers/lead-agent';
 import { goToFiles } from './helpers/home-destination';
 
 // Real host sources, sessions, filing and navigation. The existing goal wrapper
@@ -67,17 +68,18 @@ test.beforeAll(async ({ request }) => {
       data: { provider: 'ollama', model: 'fixture-model:latest' }
     })
   );
+  await ensureLeadAgent(request, { provider: 'ollama', model: 'fixture-model:latest' });
   letters = (
     await ok(
       await request.post('/api/workspaces', {
-        data: { name: 'Updates · Letters', entry_agent_name: 'Ask Ori' }
+        data: { name: 'Updates · Letters', entry_agent_name: LEAD_AGENT }
       })
     )
   ).folder;
   filing = (
     await ok(
       await request.post('/api/workspaces', {
-        data: { name: 'Updates · Filing', entry_agent_name: 'Ask Ori' }
+        data: { name: 'Updates · Filing', entry_agent_name: LEAD_AGENT }
       })
     )
   ).folder;
@@ -89,7 +91,7 @@ test.beforeAll(async ({ request }) => {
   await ok(
     await request.post(`/api/workspaces/${filing.id}/capabilities/file-janitor/companion`, {
       data: {
-        agent_instance_id: filing.agent_instances.find(agent => agent.name === 'Ask Ori')!.id
+        agent_instance_id: filing.agent_instances.find(agent => agent.name === LEAD_AGENT)!.id
       }
     })
   );
@@ -240,7 +242,7 @@ test('Home updates: keyboard Map message arrival exposes only its saved conversa
   await expect(page.locator('#personalAssistantWorkspaceContext')).toHaveText(
     `Context · ${letters.name}`
   );
-  await expect(page.locator('#homeAssistantConversation')).toContainText('Hi, I’m Ask Ori');
+  await expect(page.locator('#homeAssistantConversation')).toContainText(`Hi, I’m ${LEAD_AGENT}`);
   await expect(
     page.locator(`[data-lead-session-id="${before.welcome.session_id}"]`).first()
   ).toBeVisible();

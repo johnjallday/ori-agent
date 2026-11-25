@@ -70,7 +70,7 @@ func TestResolveExecutionAgentName_PrefersSessionBinding(t *testing.T) {
 	}
 	agentStore := newPreflightStore("Session Agent", nil)
 
-	resolution := resolveExecutionAgentName(context.Background(), sessionLookup, agentStore, nil, "sess-1", "Requested Agent", "")
+	resolution := resolveExecutionAgentName(context.Background(), sessionLookup, agentStore, nil, "sess-1", "Requested Agent", "", "")
 
 	if resolution.Name != "Session Agent" {
 		t.Fatalf("expected session-bound agent, got %q", resolution.Name)
@@ -86,7 +86,7 @@ func TestResolveExecutionAgentName_PrefersSessionBinding(t *testing.T) {
 func TestResolveExecutionAgentName_UsesRequestOverrideBeforeCompatibilityFallback(t *testing.T) {
 	agentStore := newPreflightStore("Requested Agent", nil)
 
-	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, nil, "", "Requested Agent", "")
+	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, nil, "", "Requested Agent", "", "")
 
 	if resolution.Name != "Requested Agent" {
 		t.Fatalf("expected request agent, got %q", resolution.Name)
@@ -107,13 +107,13 @@ func TestResolveExecutionAgentName_SkipsMissingSessionBindingAndUsesRequestOverr
 	}
 	agentStore := &preflightStore{
 		agents: map[string]*agent.Agent{
-			"Requested Agent":           {},
-			assistantExecutionAgentName: {},
+			"Requested Agent": {},
+			"Atlas":           {},
 		},
-		names: []string{"Requested Agent", assistantExecutionAgentName},
+		names: []string{"Requested Agent", "Atlas"},
 	}
 
-	resolution := resolveExecutionAgentName(context.Background(), sessionLookup, agentStore, nil, "sess-1", "Requested Agent", "")
+	resolution := resolveExecutionAgentName(context.Background(), sessionLookup, agentStore, nil, "sess-1", "Requested Agent", "", "")
 
 	if resolution.Name != "Requested Agent" {
 		t.Fatalf("expected request override after stale session binding, got %q", resolution.Name)
@@ -131,14 +131,14 @@ func TestResolveExecutionAgentName_SkipsMissingSessionBindingAndFallsBackToAssis
 	}
 	agentStore := &preflightStore{
 		agents: map[string]*agent.Agent{
-			assistantExecutionAgentName: {},
+			"Atlas": {},
 		},
-		names: []string{assistantExecutionAgentName},
+		names: []string{"Atlas"},
 	}
 
-	resolution := resolveExecutionAgentName(context.Background(), sessionLookup, agentStore, nil, "sess-1", "", "")
+	resolution := resolveExecutionAgentName(context.Background(), sessionLookup, agentStore, nil, "sess-1", "", "", "Atlas")
 
-	if resolution.Name != assistantExecutionAgentName {
+	if resolution.Name != "Atlas" {
 		t.Fatalf("expected assistant fallback after stale session binding, got %q", resolution.Name)
 	}
 	if resolution.Source != executionAgentSourceAssistantDefault {
@@ -149,14 +149,14 @@ func TestResolveExecutionAgentName_SkipsMissingSessionBindingAndFallsBackToAssis
 func TestResolveExecutionAgentName_SkipsMissingRequestOverrideAndFallsBackToAssistant(t *testing.T) {
 	agentStore := &preflightStore{
 		agents: map[string]*agent.Agent{
-			assistantExecutionAgentName: {},
+			"Atlas": {},
 		},
-		names: []string{assistantExecutionAgentName},
+		names: []string{"Atlas"},
 	}
 
-	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, nil, "", "Missing Agent", "")
+	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, nil, "", "Missing Agent", "", "Atlas")
 
-	if resolution.Name != assistantExecutionAgentName {
+	if resolution.Name != "Atlas" {
 		t.Fatalf("expected assistant fallback after stale request override, got %q", resolution.Name)
 	}
 	if resolution.Source != executionAgentSourceAssistantDefault {
@@ -167,16 +167,16 @@ func TestResolveExecutionAgentName_SkipsMissingRequestOverrideAndFallsBackToAssi
 func TestResolveExecutionAgentName_PrefersAssistantDefaultOverCurrentAgent(t *testing.T) {
 	agentStore := &preflightStore{
 		agents: map[string]*agent.Agent{
-			assistantExecutionAgentName: {},
-			"Specialist":                {},
+			"Atlas":      {},
+			"Specialist": {},
 		},
-		names: []string{"Specialist", assistantExecutionAgentName},
+		names: []string{"Specialist", "Atlas"},
 	}
 
-	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, nil, "", "", "")
+	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, nil, "", "", "", "Atlas")
 
-	if resolution.Name != assistantExecutionAgentName {
-		t.Fatalf("expected Assistant runtime %q, got %q", assistantExecutionAgentName, resolution.Name)
+	if resolution.Name != "Atlas" {
+		t.Fatalf("expected Assistant runtime %q, got %q", "Atlas", resolution.Name)
 	}
 	if resolution.Source != executionAgentSourceAssistantDefault {
 		t.Fatalf("expected source %q, got %q", executionAgentSourceAssistantDefault, resolution.Source)
@@ -189,7 +189,7 @@ func TestResolveExecutionAgentName_PrefersAssistantDefaultOverCurrentAgent(t *te
 func TestResolveExecutionAgentName_ReturnsUnresolvedWhenAssistantIsMissing(t *testing.T) {
 	agentStore := newPreflightStore("Fallback Agent", nil)
 
-	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, nil, "", "", "")
+	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, nil, "", "", "", "Atlas")
 
 	if resolution.isResolved() {
 		t.Fatalf("expected unresolved result, got %q", resolution.Name)
@@ -200,7 +200,7 @@ func TestResolveExecutionAgentName_ReturnsUnresolvedWhenAssistantIsMissing(t *te
 }
 
 func TestResolveExecutionAgentName_ReturnsUnresolvedWhenNoAgentIsAvailable(t *testing.T) {
-	resolution := resolveExecutionAgentName(context.Background(), nil, nil, nil, "", "", "")
+	resolution := resolveExecutionAgentName(context.Background(), nil, nil, nil, "", "", "", "")
 
 	if resolution.isResolved() {
 		t.Fatalf("expected unresolved result, got %q", resolution.Name)
@@ -215,10 +215,10 @@ func TestResolveExecutionAgentName_WorkspaceDefaultsToEntryAgent(t *testing.T) {
 	// workspace the entry agent must win.
 	agentStore := &preflightStore{
 		agents: map[string]*agent.Agent{
-			"Workspace Manager":         {},
-			assistantExecutionAgentName: {},
+			"Workspace Manager": {},
+			"Atlas":             {},
 		},
-		names: []string{"Workspace Manager", assistantExecutionAgentName},
+		names: []string{"Workspace Manager", "Atlas"},
 	}
 	wsLookup := &workspaceEntryLookupStub{
 		workspaces: map[string]*workspace.Workspace{
@@ -226,7 +226,7 @@ func TestResolveExecutionAgentName_WorkspaceDefaultsToEntryAgent(t *testing.T) {
 		},
 	}
 
-	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, wsLookup, "", "", "ws-1")
+	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, wsLookup, "", "", "ws-1", "")
 
 	if resolution.Name != "Workspace Manager" {
 		t.Fatalf("expected workspace entry agent, got %q", resolution.Name)
@@ -248,9 +248,9 @@ func TestResolveExecutionAgentName_WorkspaceNeverFallsBackToAssistant(t *testing
 	// silently answer as Ori.
 	agentStore := &preflightStore{
 		agents: map[string]*agent.Agent{
-			assistantExecutionAgentName: {},
+			"Atlas": {},
 		},
-		names: []string{assistantExecutionAgentName},
+		names: []string{"Atlas"},
 	}
 	wsLookup := &workspaceEntryLookupStub{
 		workspaces: map[string]*workspace.Workspace{
@@ -258,7 +258,7 @@ func TestResolveExecutionAgentName_WorkspaceNeverFallsBackToAssistant(t *testing
 		},
 	}
 
-	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, wsLookup, "", "", "ws-1")
+	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, wsLookup, "", "", "ws-1", "Atlas")
 
 	if resolution.isResolved() {
 		t.Fatalf("expected unresolved inside workspace with missing entry agent, got %q", resolution.Name)
@@ -274,9 +274,9 @@ func TestResolveExecutionAgentName_WorkspaceWithNoEntryAgentConfigured(t *testin
 	// the workspace error) and never fall back to the global assistant.
 	agentStore := &preflightStore{
 		agents: map[string]*agent.Agent{
-			assistantExecutionAgentName: {},
+			"Atlas": {},
 		},
-		names: []string{assistantExecutionAgentName},
+		names: []string{"Atlas"},
 	}
 	wsLookup := &workspaceEntryLookupStub{
 		workspaces: map[string]*workspace.Workspace{
@@ -284,7 +284,7 @@ func TestResolveExecutionAgentName_WorkspaceWithNoEntryAgentConfigured(t *testin
 		},
 	}
 
-	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, wsLookup, "", "", "ws-1")
+	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, wsLookup, "", "", "ws-1", "")
 
 	if resolution.isResolved() {
 		t.Fatalf("expected unresolved for workspace with no entry agent, got %q", resolution.Name)
@@ -301,9 +301,9 @@ func TestResolveExecutionAgentName_WorkspaceResolvesEntryAgentFromSnapshot(t *te
 	// missing) — this is the testjdas/test123 case.
 	agentStore := &preflightStore{
 		agents: map[string]*agent.Agent{
-			assistantExecutionAgentName: {},
+			"Atlas": {},
 		},
-		names: []string{assistantExecutionAgentName},
+		names: []string{"Atlas"},
 	}
 	wsLookup := &workspaceEntryLookupStub{
 		workspaces: map[string]*workspace.Workspace{
@@ -314,7 +314,7 @@ func TestResolveExecutionAgentName_WorkspaceResolvesEntryAgentFromSnapshot(t *te
 		},
 	}
 
-	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, wsLookup, "", "", "ws-1")
+	resolution := resolveExecutionAgentName(context.Background(), nil, agentStore, wsLookup, "", "", "ws-1", "")
 
 	if resolution.Name != "Workspace Manager" {
 		t.Fatalf("expected snapshot-backed entry agent, got %q", resolution.Name)
@@ -346,7 +346,7 @@ func TestResolveExecutionAgentName_WorkspaceSessionBindingWinsOverEntryAgent(t *
 		},
 	}
 
-	resolution := resolveExecutionAgentName(context.Background(), sessionLookup, agentStore, wsLookup, "sess-1", "", "ws-1")
+	resolution := resolveExecutionAgentName(context.Background(), sessionLookup, agentStore, wsLookup, "sess-1", "", "ws-1", "")
 
 	if resolution.Name != "Pinned Specialist" {
 		t.Fatalf("expected pinned session agent to win over entry agent, got %q", resolution.Name)

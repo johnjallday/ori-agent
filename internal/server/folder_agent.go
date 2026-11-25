@@ -27,7 +27,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/reviewedintegration"
 	"github.com/johnjallday/ori-agent/internal/secondbrain"
 	"github.com/johnjallday/ori-agent/internal/sessionhttp"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecapability"
@@ -407,9 +406,6 @@ func (h folderAgentHiring) Agents(_ context.Context, userID string) []folderagen
 	}
 	var out []folderagent.HireAgent
 	for _, name := range st.ListAgents() {
-		if systemassistant.IsCanonicalName(name) {
-			continue
-		}
 		if hasRoot {
 			if _, ok := root.RootAgentFolder(name); !ok {
 				continue
@@ -467,9 +463,6 @@ func (h folderAgentHiring) characterCounts() map[string]int {
 	}
 	if st := h.builder.st; st != nil {
 		for _, name := range st.ListAgents() {
-			if systemassistant.IsCanonicalName(name) {
-				continue
-			}
 			ag, ok := st.GetAgent(name)
 			if ok && ag != nil && ag.Appearance != nil && ag.Appearance.Mode == types.AppearanceModeCharacter {
 				counts[ag.Appearance.CharacterCatalogID()]++

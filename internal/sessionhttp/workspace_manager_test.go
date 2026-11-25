@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
+	"github.com/johnjallday/ori-agent/internal/workspacemanager"
 	"github.com/johnjallday/ori-agent/internal/workspaceroles"
 )
 
@@ -25,7 +26,7 @@ func TestWorkspaceManagerBaseName(t *testing.T) {
 		"manager":                "manager",
 		"":                       "Manager",
 		"!!!":                    "Manager",
-		strings.Repeat("a", 200): strings.Repeat("a", maxManagerNameLength-len(managerNameSuffix)) + managerNameSuffix,
+		strings.Repeat("a", 200): strings.Repeat("a", workspacemanager.MaxNameLength-len(" Manager")) + " Manager",
 	} {
 		got := workspaceManagerBaseName(input)
 		if got != want {
@@ -52,11 +53,11 @@ func TestProposeWorkspaceManagerName_NeverReusesAnExistingAgent(t *testing.T) {
 	}
 }
 
-func TestProposeWorkspaceManagerName_SkipsRetiredAssistantNames(t *testing.T) {
+func TestProposeWorkspaceManagerName_RetiredAssistantNamesAreOrdinary(t *testing.T) {
 	handler := newTemplateAgentTestHandler(t)
-	// "Workspace" would propose "Workspace Manager", a name the strict
-	// staffing create refuses while the former assistant's names are reserved.
-	if got := handler.proposeWorkspaceManagerName("Workspace"); got != "Workspace Manager 2" {
+	// The retired assistant's old names reserve nothing any more: a workspace
+	// called "Workspace" gets "Workspace Manager" like any other.
+	if got := handler.proposeWorkspaceManagerName("Workspace"); got != "Workspace Manager" {
 		t.Fatalf("proposal = %q", got)
 	}
 }

@@ -6,11 +6,11 @@
   const text = value => String(value ?? '').trim();
   const sameSet = (a, b) => a.size === b.size && [...a].every(id => b.has(id));
 
+  // No agent is uneditable because of its name; one a person called "Ask Ori"
+  // is theirs like any other.
   function editable(agent) {
-    const name = text(agent?.name).toLowerCase();
     return (
       Boolean(agent?.version) &&
-      !['ori', 'ask ori', '__assistant__', 'workspace manager'].includes(name) &&
       agent?.source !== 'cli' &&
       agent?.role !== 'cli_agent' &&
       agent?.state !== 'unreadable' &&

@@ -7,7 +7,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -26,11 +25,6 @@ type workspaceEntryLookup interface {
 type executionAgentSource string
 
 const (
-	// assistantExecutionAgentName is the global fallback partner outside any
-	// workspace. It read "Ori" long after the assistant had been renamed away
-	// from that — a stale copy of an identity that now lives in one shared
-	// contract precisely so this cannot drift again.
-	assistantExecutionAgentName                               = systemassistant.CanonicalName
 	executionAgentSourceSessionBinding   executionAgentSource = "session_binding"
 	executionAgentSourceRequestOverride  executionAgentSource = "request_override"
 	executionAgentSourceWorkspaceEntry   executionAgentSource = "workspace_entry"
@@ -52,11 +46,12 @@ func (r executionAgentResolution) isResolved() bool {
 	return strings.TrimSpace(r.Name) != ""
 }
 
-// isAssistantMode reports whether the resolution represents the generic system
-// assistant rather than a concrete agent the user is talking to directly. A
-// workspace entry agent is a real agent, so it is never assistant mode — this
-// keeps workspace chats from being intercepted by the global assistant→
-// specialist handoff router.
+// isAssistantMode reports whether the resolution is the global conversation
+// partner outside any workspace — the configured Personal Assistant — rather
+// than an agent the person addressed directly. A workspace entry agent is a
+// real agent, so it is never assistant mode — this keeps workspace chats from
+// being intercepted by the global assistant→specialist handoff router. A name
+// never makes a resolution assistant mode.
 func (r executionAgentResolution) isAssistantMode() bool {
 	if r.Source == executionAgentSourceWorkspaceEntry {
 		return false
@@ -64,12 +59,7 @@ func (r executionAgentResolution) isAssistantMode() bool {
 	if !r.isResolved() {
 		return true
 	}
-	if r.Source == executionAgentSourceAssistantDefault {
-		return true
-	}
-	// A record still carrying a retired name is the same assistant, so it must
-	// take the same path rather than being treated as an ordinary agent.
-	return systemassistant.IsKnownName(r.Name)
+	return r.Source == executionAgentSourceAssistantDefault
 }
 
 // isWorkspaceEntryDefault reports whether the resolution defaulted to the
@@ -165,6 +155,7 @@ func resolveExecutionAgentName(
 	sessionID string,
 	requestedAgentName string,
 	workspaceID string,
+	personalAssistant string,
 ) executionAgentResolution {
 	// 1. Honor an explicit session<->agent binding. This covers Direct agent
 	//    chat and workspace sessions already bound to their entry agent at
@@ -197,10 +188,10 @@ func resolveExecutionAgentName(
 	}
 
 	// 3. Inside a workspace, the default conversational partner is the
-	//    workspace's entry agent. The generic system assistant is never used as
-	//    a workspace default: if the entry agent can't be resolved we leave the
-	//    resolution unresolved so the caller surfaces an actionable
-	//    "add an entry agent" error rather than silently answering as Ori.
+	//    workspace's entry agent — its own manager for a Blank workspace. No
+	//    other agent stands in: if the entry agent can't be resolved we leave
+	//    the resolution unresolved so the caller surfaces an actionable
+	//    "add an entry agent" error.
 	if strings.TrimSpace(workspaceID) != "" {
 		if entry := resolveWorkspaceEntryAgentName(workspaceLookup, agentStore, workspaceID); entry != "" {
 			return executionAgentResolution{
@@ -211,22 +202,35 @@ func resolveExecutionAgentName(
 		return executionAgentResolution{Source: executionAgentSourceUnavailable}
 	}
 
-	// 4. Outside any workspace, fall back to the global system assistant (Ori).
-	if agentStore == nil {
-		return executionAgentResolution{Source: executionAgentSourceUnavailable}
-	}
-
-	// Resolve rather than look up exactly: on an install that has not migrated
-	// yet the assistant is still on disk under a retired name, and answering
-	// "unavailable" there would break global chat for no reason.
-	if _, resolved, ok := store.ResolveAgent(agentStore, assistantExecutionAgentName); ok {
+	// 4. Outside any workspace, cross-workspace work belongs to the configured
+	//    Personal Assistant. Without one the resolution stays unresolved and
+	//    the caller says how to set one up — there is no hidden default agent.
+	if name := strings.TrimSpace(personalAssistant); name != "" && agentExists(agentStore, name) {
 		return executionAgentResolution{
-			Name:   resolved,
+			Name:   name,
 			Source: executionAgentSourceAssistantDefault,
 		}
 	}
 
 	return executionAgentResolution{Source: executionAgentSourceUnavailable}
+}
+
+// PersonalAssistantProfileReader names the configured Personal Assistant's
+// saved profile, or "" when none is hired. Implemented in server wiring over
+// the personal assistant service.
+type PersonalAssistantProfileReader func(ctx context.Context) string
+
+// SetPersonalAssistantProfileReader wires how chat outside any workspace finds
+// the configured Personal Assistant.
+func (h *Handler) SetPersonalAssistantProfileReader(reader PersonalAssistantProfileReader) {
+	h.personalAssistantProfile = reader
+}
+
+func (h *Handler) configuredPersonalAssistant(ctx context.Context) string {
+	if h == nil || h.personalAssistantProfile == nil {
+		return ""
+	}
+	return strings.TrimSpace(h.personalAssistantProfile(ctx))
 }
 
 func (h *Handler) resolveExecutionAgentName(
@@ -238,6 +242,10 @@ func (h *Handler) resolveExecutionAgentName(
 	if h == nil {
 		return executionAgentResolution{Source: executionAgentSourceUnavailable}
 	}
+	personalAssistant := ""
+	if strings.TrimSpace(workspaceID) == "" {
+		personalAssistant = h.configuredPersonalAssistant(ctx)
+	}
 	return resolveExecutionAgentName(
 		ctx,
 		h.sessionStore,
@@ -246,5 +254,6 @@ func (h *Handler) resolveExecutionAgentName(
 		sessionID,
 		requestedAgentName,
 		workspaceID,
+		personalAssistant,
 	)
 }

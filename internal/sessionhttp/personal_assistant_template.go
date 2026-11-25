@@ -12,7 +12,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/personalhq"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/session"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 	agentworkspace "github.com/johnjallday/ori-agent/internal/workspace"
 )
@@ -216,7 +215,9 @@ func applyPersonalAssistantTemplateOptions(tpl projecttemplates.Template, option
 	if err := validateTemplateAgentOverrideName(name); err != nil {
 		return tpl, err
 	}
-	if systemassistant.IsKnownName(name) {
+	// Help speaks as Ori; an assistant borrowing that brand would blur which
+	// one is answering. A naming rule only, as in personalassistant.
+	if strings.EqualFold(name, "Ori") || strings.EqualFold(name, "Ask Ori") {
 		return tpl, fmt.Errorf("assistant name %q is reserved for Ori", name)
 	}
 	if strings.EqualFold(name, personalhq.LegacyJournalAgentName) {

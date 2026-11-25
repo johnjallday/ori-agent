@@ -109,7 +109,7 @@
       label: 'app activity',
       keywords: [],
       preferredPlugins: [],
-      suggestedName: 'Ask Ori',
+      suggestedName: '',
       tags: ['activity', 'introspection']
     },
     app_navigation: {
@@ -117,7 +117,7 @@
       label: 'app navigation',
       keywords: [],
       preferredPlugins: [],
-      suggestedName: 'Ask Ori',
+      suggestedName: '',
       tags: ['navigation']
     },
     // An everyday request the hired personal assistant answers itself, in its
@@ -585,7 +585,7 @@
       var parsed = JSON.parse(raw);
       return normalizeRecentSessionList(parsed);
     } catch (error) {
-      dashLog.debug('Failed to load Ask Ori recent sessions', {
+      dashLog.debug('Failed to load assistant recent sessions', {
         error: (error && error.message) || error
       });
       return [];
@@ -608,7 +608,7 @@
         );
       }
     } catch (error) {
-      dashLog.debug('Failed to persist Ask Ori recent sessions', {
+      dashLog.debug('Failed to persist assistant recent sessions', {
         error: (error && error.message) || error
       });
     }
@@ -623,7 +623,7 @@
       if (raw === 'semi_auto') return 'semi_auto';
       return 'semi_auto';
     } catch (error) {
-      dashLog.debug('Failed to load Ask Ori automation mode', {
+      dashLog.debug('Failed to load assistant automation mode', {
         error: (error && error.message) || error
       });
       return 'semi_auto';
@@ -645,7 +645,7 @@
         );
       }
     } catch (error) {
-      dashLog.debug('Failed to persist Ask Ori automation mode', {
+      dashLog.debug('Failed to persist assistant automation mode', {
         error: (error && error.message) || error
       });
     }
@@ -829,7 +829,7 @@
       }
       return recent;
     } catch (error) {
-      dashLog.debug('Failed to fetch Ask Ori recent sessions from backend', {
+      dashLog.debug('Failed to fetch assistant recent sessions from backend', {
         error: (error && error.message) || error
       });
       return [];
@@ -1741,7 +1741,7 @@
   }
 
   function getWorkspaceHomeAssistantDisplayName() {
-    return String(homeAssistantState.workspaceEntryAgentName || '').trim() || 'Ask Ori';
+    return String(homeAssistantState.workspaceEntryAgentName || '').trim() || 'Workspace chat';
   }
 
   function normalizeWorkspacePromptMode(mode) {
@@ -6966,7 +6966,7 @@
     lines.push('Problem:');
     lines.push('- User request: "' + String(prompt || '').trim() + '"');
     lines.push(
-      '- Ask Ori cannot satisfy this today using the currently available agents, skills, and workspace MCP bindings.'
+      '- Ori cannot satisfy this today using the currently available agents, skills, and workspace MCP bindings.'
     );
     lines.push('');
     lines.push('Observed gaps:');
@@ -6995,16 +6995,16 @@
     lines.push('');
     lines.push('Acceptance criteria:');
     lines.push(
-      '- Ask Ori recognizes the request and produces a capability plan instead of refusing.'
+      '- The assistant recognizes the request and produces a capability plan instead of refusing.'
     );
     lines.push('- Setup steps require explicit user confirmation before any mutation.');
     lines.push(
-      '- Once the capability is bound in the workspace, Ask Ori can hand off or answer inline as appropriate.'
+      '- Once the capability is bound in the workspace, the assistant can hand off or answer inline as appropriate.'
     );
     lines.push('');
     lines.push('Starter actions:');
     lines.push('1. Add or refine the capability requirement entry for this request.');
-    lines.push('2. Wire the required skill and MCP discovery into the Ask Ori planner.');
+    lines.push('2. Wire the required skill and MCP discovery into the assistant planner.');
     lines.push('3. Add the confirmation UI and execution path for the chosen setup steps.');
     lines.push('4. Add regression coverage for direct execution, setup, and workspace escalation.');
 
@@ -8209,27 +8209,6 @@
     }
   }
 
-  function routeMatchesSystemAssistant(routeData) {
-    var matchedAgent = normalizeToken(routeData && routeData.matched_agent);
-    return matchedAgent === 'ori' || matchedAgent === 'system assistant';
-  }
-
-  function shouldRunMatchedAdvisoryInline(prompt, routeData, agentName) {
-    if (!looksLikeAdvisoryRequest(prompt)) return false;
-    if (routePolicyRequiresSpecialist(routeData)) return false;
-
-    var matchedAgent = normalizeToken(agentName);
-    if (matchedAgent !== 'ori' && matchedAgent !== 'system assistant') return false;
-    if (getHomeAssistantHandoffPolicy(routeData) !== 'assistant') return false;
-
-    var routingPolicy = normalizeToken(routeData && routeData.routing_policy);
-    return (
-      !routingPolicy ||
-      routingPolicy === 'assistant_preferred' ||
-      routingPolicy === 'assistant_only'
-    );
-  }
-
   function routeMatchesWorkspaceEntryAgent(routeData) {
     var matchedAgent = normalizeToken(routeData && routeData.matched_agent);
     var entryAgent = normalizeToken(homeAssistantState.workspaceEntryAgentName);
@@ -8243,11 +8222,9 @@
     if (routeContextTargetsCurrentWorkspace(routeData, routeContext)) return true;
     if (isWorkspaceSpecialistIntent(routeData)) return false;
     if (routePolicyRequiresSpecialist(routeData)) return false;
-    if (
-      shouldAcceptBackendRouteMatch(routeData) &&
-      !routeMatchesWorkspaceEntryAgent(routeData) &&
-      !routeMatchesSystemAssistant(routeData)
-    ) {
+    // Local work stays with this workspace's own entry agent; a match for
+    // anyone else hands off rather than answering here.
+    if (shouldAcceptBackendRouteMatch(routeData) && !routeMatchesWorkspaceEntryAgent(routeData)) {
       return false;
     }
     return true;
@@ -8491,7 +8468,7 @@
   }
 
   function formatWorkspaceManagerFailure(error, workspaceManagerLabel) {
-    var label = String(workspaceManagerLabel || 'Ask Ori').trim() || 'Ask Ori';
+    var label = String(workspaceManagerLabel || 'The workspace manager').trim() || 'The workspace manager';
     var stage = normalizeToken((error && error.homeAssistantStage) || (error && error.stage));
     var status = Number((error && error.status) || 0);
     var url = String((error && error.url) || '').trim();
@@ -9236,7 +9213,7 @@
         message: String((data && data.message) || '')
       };
     } catch (error) {
-      dashLog.debug('Failed to check Ask Ori model availability', {
+      dashLog.debug('Failed to check assistant model availability', {
         error: (error && error.message) || error
       });
       return { available: false, system_model_configured: false };
@@ -9888,7 +9865,7 @@
       if (matchedWorkspaceSession && matchedWorkspaceSession.id) return matchedWorkspaceSession;
     }
 
-    // Ask Ori should start a fresh session per task handoff.
+    // The assistant starts a fresh session per task handoff.
     if (typeof manager.createSessionWithAgent === 'function') {
       var created = await manager.createSessionWithAgent(agentName);
       if (created && created.id) return created;
@@ -10081,10 +10058,6 @@
     }
   }
 
-  function runAdvisoryTaskDirect(prompt, agentName, options) {
-    var advisoryOptions = Object.assign({}, options || {}, { responseMode: 'advisory' });
-    return runCapabilityTaskDirect(prompt, agentName, advisoryOptions);
-  }
 
   function formatWorkspaceScheduleTask(task) {
     if (!task || typeof task !== 'object') return 'Scheduled ticket';
@@ -13519,8 +13492,8 @@
 
   function buildWorkspaceDescriptionFromPrompt(prompt) {
     var text = truncateText(String(prompt || '').trim(), 280);
-    if (!text) return 'Created from Ask Ori.';
-    return 'Created from an Ask Ori request: "' + text + '"';
+    if (!text) return 'Created from an assistant request.';
+    return 'Created from an assistant request: "' + text + '"';
   }
 
   function buildWorkspaceBootstrapFromPrompt(prompt) {
@@ -13667,7 +13640,7 @@
         }
       ]);
     } catch (error) {
-      dashLog.debug('Opening workspace create modal from Ask Ori failed', {
+      dashLog.debug('Opening workspace create modal from assistant failed', {
         error: (error && error.message) || error
       });
       appendHomeAssistantMessage(
@@ -13770,7 +13743,7 @@
         }
       ]);
     } catch (error) {
-      dashLog.debug('Opening workspace create modal from Ask Ori failed', {
+      dashLog.debug('Opening workspace create modal from assistant failed', {
         error: (error && error.message) || error
       });
       appendHomeAssistantMessage(
@@ -14566,14 +14539,6 @@
           homeAssistantState.pendingIntent.key === 'utility_direct'
         ) {
           await runUtilityTaskDirect(text, match.agent.name);
-          return;
-        }
-        if (shouldRunMatchedAdvisoryInline(text, routeData, match.agent.name)) {
-          await runAdvisoryTaskDirect(text, match.agent.name, {
-            routeContext: routeContext,
-            intent: homeAssistantState.pendingIntent,
-            appLaunchRequest: appLaunchRequest
-          });
           return;
         }
         var matchedCapabilityHandled = await handleCapabilityResolutionFlow({

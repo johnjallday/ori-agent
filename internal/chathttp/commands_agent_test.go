@@ -14,7 +14,7 @@ import (
 func newCommandHandlerForAgentTests() *CommandHandler {
 	st := &preflightStore{
 		agents: map[string]*agent.Agent{
-			assistantExecutionAgentName: {
+			"Atlas": {
 				Settings: types.Settings{
 					Model:       "gpt-5-nano",
 					Temperature: 0.3,
@@ -27,7 +27,7 @@ func newCommandHandlerForAgentTests() *CommandHandler {
 				},
 			},
 		},
-		names: []string{assistantExecutionAgentName, "Reviewer"},
+		names: []string{"Atlas", "Reviewer"},
 	}
 	return NewCommandHandler(st)
 }
@@ -57,7 +57,7 @@ func TestHandleSwitch_Deprecated(t *testing.T) {
 	}
 }
 
-func TestHandleAgentsList_MarksAssistantWithoutCurrentMarker(t *testing.T) {
+func TestHandleAgentsList_ListsEveryAgentPlainly(t *testing.T) {
 	ch := newCommandHandlerForAgentTests()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", nil)
@@ -65,11 +65,14 @@ func TestHandleAgentsList_MarksAssistantWithoutCurrentMarker(t *testing.T) {
 	ch.HandleAgentsList(rr, req)
 
 	response := decodeSystemCommandResponse(t, rr)
-	if !strings.Contains(response, "(Assistant)") {
-		t.Fatalf("expected Assistant marker, got %q", response)
+	for _, want := range []string{"- Atlas\n", "- Reviewer\n"} {
+		if !strings.Contains(response, want) {
+			t.Fatalf("expected %q in %q", want, response)
+		}
 	}
-	if strings.Contains(response, "(current)") {
-		t.Fatalf("did not expect current-agent marker, got %q", response)
+	// No agent is singled out as a built-in assistant or a current agent.
+	if strings.Contains(response, "(Assistant)") || strings.Contains(response, "(current)") {
+		t.Fatalf("did not expect a special marker, got %q", response)
 	}
 }
 
@@ -79,7 +82,7 @@ func TestCommandSessionModeLabel(t *testing.T) {
 		res  executionAgentResolution
 		want string
 	}{
-		{"assistant default", executionAgentResolution{Name: assistantExecutionAgentName, Source: executionAgentSourceAssistantDefault}, "Assistant"},
+		{"assistant default", executionAgentResolution{Name: "Atlas", Source: executionAgentSourceAssistantDefault}, "Personal Assistant"},
 		{"workspace entry default", executionAgentResolution{Name: "Workspace Manager", Source: executionAgentSourceWorkspaceEntry}, "Workspace entry agent"},
 		{"pinned via session binding", executionAgentResolution{Name: "Specialist", Source: executionAgentSourceSessionBinding}, "Pinned specialist"},
 		{"pinned via request override", executionAgentResolution{Name: "Specialist", Source: executionAgentSourceRequestOverride}, "Pinned specialist"},
@@ -99,7 +102,7 @@ func TestHandleAgentStatus_UsesAssistantTerminology(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", nil)
 	rr := httptest.NewRecorder()
 	ch.HandleAgentStatus(rr, req, executionAgentResolution{
-		Name:   assistantExecutionAgentName,
+		Name:   "Atlas",
 		Source: executionAgentSourceAssistantDefault,
 	})
 
@@ -107,7 +110,7 @@ func TestHandleAgentStatus_UsesAssistantTerminology(t *testing.T) {
 	if !strings.Contains(response, "Assistant Status") {
 		t.Fatalf("expected Assistant status heading, got %q", response)
 	}
-	if !strings.Contains(response, "Execution Agent:** Assistant (`"+assistantExecutionAgentName+"`)") {
+	if !strings.Contains(response, "Execution Agent:** Personal Assistant (`Atlas`)") {
 		t.Fatalf("expected Assistant execution agent label, got %q", response)
 	}
 	if strings.Contains(response, "Current Agent") {
@@ -124,12 +127,12 @@ func TestHandleSkillsList_UsesAssistantRuntime(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/chat", nil)
 	rr := httptest.NewRecorder()
 	ch.HandleSkillsList(rr, req, executionAgentResolution{
-		Name:   assistantExecutionAgentName,
+		Name:   "Atlas",
 		Source: executionAgentSourceAssistantDefault,
 	})
 
 	response := decodeSystemCommandResponse(t, rr)
-	if !strings.Contains(response, "These skills are available to Assistant via `"+assistantExecutionAgentName+"`.") {
+	if !strings.Contains(response, "These skills are available to your Personal Assistant via `Atlas`.") {
 		t.Fatalf("expected Assistant runtime context, got %q", response)
 	}
 	if !strings.Contains(response, "mail-helper") {

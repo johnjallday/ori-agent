@@ -58,14 +58,11 @@ func (p mirrorProviders) GetProvider(name string) (llm.Provider, error) {
 }
 
 // mirrorHandler builds a handler with the hired assistant "Atlas" (HQ built),
-// the protected system assistant on the current System Model, an unrelated
-// agent, and a recording System Model writer that knows codex and claude.
+// an unrelated agent, and a recording System Model writer that knows codex and
+// claude.
 func mirrorHandler(t *testing.T) (*Handler, *mirrorSystemModelWriter) {
 	t.Helper()
 	h := guardTestHandler(t, []string{"Atlas", "Unrelated"}, nil)
-	if err := ensureSystemAssistantAgentWithSystemModel(h.State, "codex", "gpt-6-astra"); err != nil {
-		t.Fatalf("ensure system assistant: %v", err)
-	}
 	h.SetPersonalAssistantSupport(guardStateReader{projection: &personalassistant.Projection{
 		State: personalassistant.APIStateActive, AssistantID: "assistant-1", DisplayName: "Atlas",
 		GlobalAgentProfile: "Atlas", HQWorkspaceID: "hq-1", StateVersion: 3,
@@ -103,17 +100,17 @@ func TestSystemModelMirror_HiredAssistantEditSetsSystemModel(t *testing.T) {
 	if mirror["mirrored"] != true || mirror["provider"] != "claude" || mirror["model"] != "claude-sonnet-5-5" {
 		t.Fatalf("system_model in response = %v", body["system_model"])
 	}
-	// The protected system assistant follows, as it does on a Settings save.
-	ori, ok := h.State.GetAgent(systemAssistantAgentName)
-	if !ok || ori.Settings.Provider != "claude" || ori.Settings.Model != "claude-sonnet-5-5" {
-		t.Fatalf("system assistant = %+v, want claude/claude-sonnet-5-5", ori.Settings)
+	// Saving the Default model creates no agent: the retired assistant is
+	// never re-created to follow it.
+	if _, ok := h.State.GetAgent("Ask Ori"); ok {
+		t.Fatal("mirroring the Default model created an Ask Ori agent")
 	}
 }
 
-func TestSystemModelMirror_SystemAssistantEditCarriesCodexEffort(t *testing.T) {
+func TestSystemModelMirror_HiredAssistantEditCarriesCodexEffort(t *testing.T) {
 	h, writer := mirrorHandler(t)
 
-	rr, _ := patchAgentJSON(t, h, systemAssistantAgentName, `{"model":"gpt-6-astra","llm_provider":"codex","reasoning_effort":"high"}`)
+	rr, _ := patchAgentJSON(t, h, "Atlas", `{"model":"gpt-6-astra","llm_provider":"codex","reasoning_effort":"high"}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rr.Code, rr.Body.String())
 	}
@@ -230,7 +227,7 @@ func TestSystemModelMirror_ProfileSaveFailureNeverMirrors(t *testing.T) {
 func TestSystemModelMirror_DetailReportsLinkedAgents(t *testing.T) {
 	h, _ := mirrorHandler(t)
 
-	for name, want := range map[string]bool{"Atlas": true, systemAssistantAgentName: true, "Unrelated": false} {
+	for name, want := range map[string]bool{"Atlas": true, "Unrelated": false} {
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/agents/"+url.PathEscape(name), nil))
 		if rr.Code != http.StatusOK {

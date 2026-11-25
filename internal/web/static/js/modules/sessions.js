@@ -2865,7 +2865,7 @@ const sessionManager = {
       agentNameEl.textContent = displayAgentName;
     }
     if (typeof window.refreshChatWebSearchToggle === 'function') {
-      window.refreshChatWebSearchToggle(agentName || 'Ask Ori');
+      window.refreshChatWebSearchToggle(agentName || '');
     }
 
     if (editAgentBtn) {

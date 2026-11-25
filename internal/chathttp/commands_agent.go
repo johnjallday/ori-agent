@@ -16,7 +16,7 @@ import (
 func commandSessionModeLabel(resolution executionAgentResolution) string {
 	switch {
 	case resolution.isAssistantMode():
-		return "Assistant"
+		return "Personal Assistant"
 	case resolution.isWorkspaceEntryDefault():
 		return "Workspace entry agent"
 	default:
@@ -29,7 +29,7 @@ func commandExecutionAgentLabel(resolution executionAgentResolution) string {
 		return "Not configured"
 	}
 	if resolution.isAssistantMode() {
-		return fmt.Sprintf("Assistant (`%s`)", resolution.Name)
+		return fmt.Sprintf("Personal Assistant (`%s`)", resolution.Name)
 	}
 	return resolution.Name
 }
@@ -102,7 +102,7 @@ func (ch *CommandHandler) HandleToolsList(w http.ResponseWriter, r *http.Request
 	var toolsResponse strings.Builder
 	toolsResponse.WriteString("## 🔧 Available Tools\n\n")
 	if resolution.isAssistantMode() {
-		toolsResponse.WriteString(fmt.Sprintf("These tools are available to Assistant via `%s`.\n\n", resolution.Name))
+		_, _ = fmt.Fprintf(&toolsResponse, "These tools are available to your Personal Assistant via `%s`.\n\n", resolution.Name)
 	} else {
 		toolsResponse.WriteString(fmt.Sprintf("These tools are available to pinned specialist `%s`.\n\n", resolution.Name))
 	}
@@ -146,7 +146,7 @@ func (ch *CommandHandler) HandleSkillsList(w http.ResponseWriter, r *http.Reques
 	var skillsResponse strings.Builder
 	skillsResponse.WriteString("## 🧩 Available Skills\n\n")
 	if resolution.isAssistantMode() {
-		skillsResponse.WriteString(fmt.Sprintf("These skills are available to Assistant via `%s`.\n\n", resolution.Name))
+		_, _ = fmt.Fprintf(&skillsResponse, "These skills are available to your Personal Assistant via `%s`.\n\n", resolution.Name)
 	} else {
 		skillsResponse.WriteString(fmt.Sprintf("These skills are available to pinned specialist `%s`.\n\n", resolution.Name))
 	}
@@ -206,10 +206,6 @@ func (ch *CommandHandler) HandleAgentsList(w http.ResponseWriter, r *http.Reques
 	agentsResponse.WriteString("## 🤖 Available Agents\n\n")
 
 	for _, name := range names {
-		if strings.EqualFold(strings.TrimSpace(name), assistantExecutionAgentName) {
-			agentsResponse.WriteString(fmt.Sprintf("- **%s** (Assistant)\n", name))
-			continue
-		}
 		agentsResponse.WriteString(fmt.Sprintf("- %s\n", name))
 	}
 

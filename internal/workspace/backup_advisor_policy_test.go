@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -46,9 +45,14 @@ func TestBackupAdvisorDisplayNameDoesNotGrantOrReplaceAnotherRole(t *testing.T) 
 	if !IsBackupAdvisorAttachment(view, "different NAME") {
 		t.Fatal("renaming/case alias bypassed role narrowing")
 	}
-	shared := &resolverAgentStoreStub{agents: map[string]*agent.Agent{systemassistant.CanonicalName: {}}}
-	view.AgentInstances = []AgentInstance{{Name: systemassistant.CanonicalName, RoleID: BackupAdvisorRoleID}}
-	if !IsBackupAdvisorExecution(view, systemassistant.LegacyNames[0], shared) {
-		t.Fatal("retired shared-profile alias bypassed narrowing")
+	// Names resolve exactly: the retired assistant's old names are no longer
+	// aliases, so another name never borrows the attachment's role.
+	shared := &resolverAgentStoreStub{agents: map[string]*agent.Agent{"Ask Ori": {}}}
+	view.AgentInstances = []AgentInstance{{Name: "Ask Ori", RoleID: BackupAdvisorRoleID}}
+	if !IsBackupAdvisorExecution(view, "Ask Ori", shared) {
+		t.Fatal("the attached agent's own execution must be narrowed")
+	}
+	if IsBackupAdvisorExecution(view, "Workspace Manager", shared) {
+		t.Fatal("a retired assistant name was treated as an alias of the attachment")
 	}
 }

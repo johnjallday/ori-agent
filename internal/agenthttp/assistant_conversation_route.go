@@ -125,11 +125,11 @@ func panelSpecialistRequest(prompt string) bool {
 }
 
 // isAssistantOwnAgent reports whether a matched agent is the assistant itself
-// rather than a specialist: the protected system assistant, or the hired
-// profile. Neither is somewhere to hand a conversation off to.
+// rather than a specialist: the hired profile is not somewhere to hand a
+// conversation off to.
 func isAssistantOwnAgent(name string, workContext *PersonalAssistantWorkContext) bool {
 	name = strings.TrimSpace(name)
-	if name == "" || isSystemAssistantAgent(name) {
+	if name == "" {
 		return true
 	}
 	hired := ""

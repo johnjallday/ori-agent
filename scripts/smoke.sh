@@ -3488,7 +3488,7 @@ write("agents/Sleeper/agent_settings.json", {
 write("agents/Quill/agent_settings.json", {
     "role": "general", "Settings": {"model": "gpt-4o-mini", "system_prompt": "You write."}})
 PY
-  echo "ok   seeded Scout, Sleeper (paused), Quill and the assistant into $sandbox/agents"
+  echo "ok   seeded Scout, Sleeper (paused), Quill and the retired assistant record into $sandbox/agents"
 }
 
 # smoke_confirm_root prepares a fresh demo sandbox whose Workspace Directory

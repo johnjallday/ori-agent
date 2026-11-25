@@ -658,6 +658,9 @@ func (b *ServerBuilder) Build() (*Server, error) {
 	if err := b.initializeWorkspaceStore(); err != nil { // Phase 18
 		return nil, fmt.Errorf("workspace store phase failed: %w", err)
 	}
+	// An existing profile's workspaces may still name Ori's retired assistant
+	// as their lead; take that dangling entry off their rosters.
+	detachRetiredAssistantFromRosters(b.st, b.workspaceStore)
 	b.initializeEventSystem()                           // Phase 19
 	b.wireMapActivity()                                 // Phase 19.1 — the map's live activity feed needs the bus
 	b.initializeTaskExecution()                         // Phase 20

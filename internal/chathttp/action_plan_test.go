@@ -2,6 +2,7 @@ package chathttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,14 +16,16 @@ import (
 func newActionPlanTestHandler(t *testing.T) *Handler {
 	t.Helper()
 
-	st := newPreflightStore("Ori", &agent.Agent{
+	st := newPreflightStore("Atlas", &agent.Agent{
 		Settings: types.Settings{
 			Model:       "gpt-5-nano",
 			Temperature: 0.3,
 		},
 	})
 
-	return NewHandler(st, nil)
+	h := NewHandler(st, nil)
+	h.SetPersonalAssistantProfileReader(func(context.Context) string { return "Atlas" })
+	return h
 }
 
 func TestChatHandler_PlanBeforeAction_PreviewsUtilityRoute(t *testing.T) {

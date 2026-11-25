@@ -351,9 +351,6 @@ func (h *AppearanceUploadHandler) checkMutationGuards(w http.ResponseWriter, r *
 		}
 	}
 
-	if isSystemAssistantAgent(agentName) {
-		return true
-	}
 	membership := workspace.WorkspaceMembershipFor(h.workspaceStore, agentName)
 	if membership.Count <= 1 {
 		return true

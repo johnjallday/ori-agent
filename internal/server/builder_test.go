@@ -9,7 +9,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/llm"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
@@ -324,7 +323,7 @@ func TestServerBuilder_WithWorkspaceStore(t *testing.T) {
 	}
 }
 
-func TestServerBuilder_InitializeStorage_EnsuresAssistantFromSystemModel(t *testing.T) {
+func TestServerBuilder_InitializeStorage_SeedsNoAssistantFromSystemModel(t *testing.T) {
 	builder, err := NewServerBuilder()
 	if err != nil {
 		t.Fatalf("NewServerBuilder failed: %v", err)
@@ -347,20 +346,14 @@ func TestServerBuilder_InitializeStorage_EnsuresAssistantFromSystemModel(t *test
 		t.Fatalf("initializeStorage failed: %v", err)
 	}
 
-	// One identity: the guide and the working assistant are both Ask Ori now
-	// (Issue #350). A fresh install must never create a legacy record first.
-	ag, ok := builder.st.GetAgent(systemassistant.CanonicalName)
-	if !ok || ag == nil {
-		t.Fatalf("expected system assistant agent to be created, got %v", builder.st.ListAgents())
+	// Ori's protected assistant is retired: a configured Default model no
+	// longer seeds any agent at startup.
+	if names := builder.st.ListAgents(); len(names) != 0 {
+		t.Fatalf("startup created agents %v; want none", names)
 	}
-	if ag.Settings.Provider != "claude_code" {
-		t.Fatalf("expected system assistant provider claude_code, got %q", ag.Settings.Provider)
-	}
-	if ag.Settings.Model != "sonnet" {
-		t.Fatalf("expected system assistant model sonnet, got %q", ag.Settings.Model)
-	}
-
-	if _, err := os.Stat(filepath.Join(tempDir, "agents", systemassistant.CanonicalName, "agent_settings.json")); err != nil {
-		t.Fatalf("expected persisted system assistant settings: %v", err)
+	for _, retired := range []string{"Ask Ori", "Workspace Manager", "Ori"} {
+		if _, err := os.Stat(filepath.Join(tempDir, "agents", retired)); !os.IsNotExist(err) {
+			t.Fatalf("startup wrote a %q record: %v", retired, err)
+		}
 	}
 }

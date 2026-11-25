@@ -2,7 +2,6 @@ package store
 
 import (
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -53,14 +52,7 @@ func LibraryDefinition(st Store, name string) LibraryRecord {
 	if !ok || ag == nil {
 		return LibraryRecord{State: LibraryAbsent}
 	}
-	return LibraryRecord{Definition: inspectionClone(ag), State: LibraryPresent, Owner: ownerFor(name)}
-}
-
-func ownerFor(name string) string {
-	if systemassistant.IsCanonicalName(name) {
-		return LibraryOwnerSystem
-	}
-	return LibraryOwnerLibrary
+	return LibraryRecord{Definition: inspectionClone(ag), State: LibraryPresent, Owner: LibraryOwnerLibrary}
 }
 
 func (c *CompositeStore) libraryDefinition(name string) LibraryRecord {
@@ -106,7 +98,7 @@ func (s *fileStore) libraryRecord(name string, classifySystem bool) LibraryRecor
 	// Ownership classification also inspects mutable Metadata. Keep it under
 	// the definition lock instead of calling GetAgent before cloning.
 	owner := LibraryOwnerLibrary
-	if classifySystem && (systemassistant.IsCanonicalName(name) || isMarkedSystemAgent(s.agents[name])) {
+	if classifySystem && isMarkedSystemAgent(s.agents[name]) {
 		owner = LibraryOwnerSystem
 	}
 	if s.unreadableErrorUnlocked(name) != nil {

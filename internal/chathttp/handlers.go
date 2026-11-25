@@ -69,23 +69,24 @@ type Handler struct {
 	sessionStore     session.HybridStore
 	// songFacts gives a Home's app assistant, inside one song's workspace, that
 	// song's saved facts for each turn. The reader decides who may have them.
-	songFacts              workspace.SongFactsReader
-	workspaceStore         workspace.Store
-	fileStore              *workspace.FileStore
-	userProfileStore       userprofile.UserStore
-	userProvider           userprofile.UserProvider
-	reviewedMemory         workspace.ReviewedMemoryReader
-	externalMemory         ExternalMemoryReader  // other agents' memory, personal assistant only (external_memory.go)
-	externalMemoryGate     PersonalAssistantGate // verifies the responding instance is that assistant
-	runtimeResolver        chatRuntimeResolver
-	projectLibraryEvidence func(projectlibrary.Scope, *workspace.Workspace) bool
-	resourceCatalogs       func() *resourcecatalog.Service
-	toolCallStore          session.ToolCallStore
-	calendarOpsPreference  chatCalendarOpsPreference
-	backupAdvisorReader    backupAdvisorReader
-	workspaceProtection    workspaceProtectionReader
-	fileCuratorWelcome     fileCuratorWelcomeReader
-	folderWelcome          folderWelcomeReader
+	songFacts                workspace.SongFactsReader
+	workspaceStore           workspace.Store
+	fileStore                *workspace.FileStore
+	userProfileStore         userprofile.UserStore
+	userProvider             userprofile.UserProvider
+	reviewedMemory           workspace.ReviewedMemoryReader
+	externalMemory           ExternalMemoryReader           // other agents' memory, personal assistant only (external_memory.go)
+	externalMemoryGate       PersonalAssistantGate          // verifies the responding instance is that assistant
+	personalAssistantProfile PersonalAssistantProfileReader // names the hired Personal Assistant for chat outside a workspace
+	runtimeResolver          chatRuntimeResolver
+	projectLibraryEvidence   func(projectlibrary.Scope, *workspace.Workspace) bool
+	resourceCatalogs         func() *resourcecatalog.Service
+	toolCallStore            session.ToolCallStore
+	calendarOpsPreference    chatCalendarOpsPreference
+	backupAdvisorReader      backupAdvisorReader
+	workspaceProtection      workspaceProtectionReader
+	fileCuratorWelcome       fileCuratorWelcomeReader
+	folderWelcome            folderWelcomeReader
 
 	// Project-template tool dependencies (optional; see SetProjectTemplateDeps)
 	templatesRootResolver   func() string
@@ -1016,8 +1017,8 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if !executionAgent.isResolved() {
-		responseText := "❌ **Error**: Assistant is unavailable because no execution agent is configured. Configure a Default model so Assistant can be created, or use a session pinned to a specific agent."
-		reason := "no execution agent resolved"
+		responseText := "❌ **Error**: Chat outside a workspace goes to your Personal Assistant, and none is set up yet. Set one up from Home, or open a workspace and ask its manager."
+		reason := "no personal assistant configured"
 		if strings.TrimSpace(normalizedRouteContext.WorkspaceID) != "" {
 			responseText = "❌ **Error**: This workspace has no runnable entry agent. Add or repair the workspace's entry agent, then try again."
 			reason = "workspace has no runnable entry agent"
@@ -1177,18 +1178,6 @@ func (h *Handler) ChatHandler(w http.ResponseWriter, r *http.Request) {
 				h.utilityTelemetry.RecordDelegationEvent(routeModeAssistantChat, "standard assistant chat flow", current)
 			}
 		}
-	}
-
-	preflight := h.maybeAutoEnableMCPForPrompt(current, ag, originalQuery, normalizedRouteContext)
-	if preflight != nil && strings.TrimSpace(preflight.userMessage) != "" {
-		payload := attachRouteMetadata(map[string]any{
-			"response": preflight.userMessage,
-		}, chatRouteMetadata{
-			Mode:   routeModeAssistantChat,
-			Reason: "mcp preflight notice",
-		})
-		writeJSONResponse(w, attachDependencyResolution(payload, preflight.dependencyResolution))
-		return
 	}
 
 	if h.maybeRejectSkillMissingMCP(w, ag, invokedSkill, normalizedRouteContext) {

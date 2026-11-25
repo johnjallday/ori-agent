@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { ensureLeadAgent, LEAD_AGENT } from './helpers/lead-agent';
 
 // Two invocations, different actual server PIDs, one disposable HOME/database:
 // ./scripts/e2e-goal-suggestions.sh --upgrade -- tests/workspace-updates-restart.spec.ts --grep 'Updates restart:'
@@ -75,17 +76,18 @@ test('Updates restart: unread, exact seen after a lost response, and saved filin
         data: { provider: 'ollama', model: 'fixture-model:latest' }
       })
     );
+    await ensureLeadAgent(request, { provider: 'ollama', model: 'fixture-model:latest' });
     const unread = (
       await ok(
         await request.post('/api/workspaces', {
-          data: { name: 'Restart · Unread filing', entry_agent_name: 'Ask Ori' }
+          data: { name: 'Restart · Unread filing', entry_agent_name: LEAD_AGENT }
         })
       )
     ).folder;
     const seen = (
       await ok(
         await request.post('/api/workspaces', {
-          data: { name: 'Restart · Exposed message', entry_agent_name: 'Ask Ori' }
+          data: { name: 'Restart · Exposed message', entry_agent_name: LEAD_AGENT }
         })
       )
     ).folder;
@@ -119,7 +121,7 @@ test('Updates restart: unread, exact seen after a lost response, and saved filin
     const deleted = (
       await ok(
         await request.post('/api/workspaces', {
-          data: { name: 'Restart · Deleted history', entry_agent_name: 'Ask Ori' }
+          data: { name: 'Restart · Deleted history', entry_agent_name: LEAD_AGENT }
         })
       )
     ).folder;
@@ -142,13 +144,13 @@ test('Updates restart: unread, exact seen after a lost response, and saved filin
         agent_instances: [
           {
             id: randomUUID(),
-            name: 'Ask Ori',
+            name: LEAD_AGENT,
             instance_number: 1,
             entry_point: true,
             created_at: '2025-01-01T00:00:00Z'
           }
         ],
-        shared_data: { entry_agent_name: 'Ask Ori' },
+        shared_data: { entry_agent_name: LEAD_AGENT },
         ticket_migration_version: 1
       };
       const dir = join(sandbox, 'Ori Workspaces', slug);
@@ -168,7 +170,7 @@ test('Updates restart: unread, exact seen after a lost response, and saved filin
       await request.post(`/api/workspaces/${unread.id}/capabilities/file-janitor/companion`, {
         data: {
           agent_instance_id: unread.agent_instances.find(
-            (agent: { name: string }) => agent.name === 'Ask Ori'
+            (agent: { name: string }) => agent.name === LEAD_AGENT
           ).id
         }
       })

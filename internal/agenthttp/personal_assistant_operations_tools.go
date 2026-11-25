@@ -135,7 +135,7 @@ func (r *operationRegistry) Definitions() []llm.Tool {
 	workspaceName := map[string]any{"type": "string", "maxLength": 120, "description": "Exact workspace name, when no ID is known."}
 	return append(r.base.Definitions(), llm.Tool{
 		Name:        assistantops.ToolOpen,
-		Description: "Ask Ori to open one of the user's existing workspaces in their app and, optionally, select one agent that already works there. Use only for an explicit request in the user's current message. It changes what the user's own tab shows and nothing else: no workspace, agent or task is created, changed or started. Ori reports that the request was recorded, not that the page changed. Use as the only tool call in this batch, once.",
+		Description: "Ask the Ori app to open one of the user's existing workspaces in their app and, optionally, select one agent that already works there. Use only for an explicit request in the user's current message. It changes what the user's own tab shows and nothing else: no workspace, agent or task is created, changed or started. Ori reports that the request was recorded, not that the page changed. Use as the only tool call in this batch, once.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
 			"workspace_id":   workspaceID,
 			"workspace_name": workspaceName,
@@ -143,7 +143,7 @@ func (r *operationRegistry) Definitions() []llm.Tool {
 		}, "additionalProperties": false},
 	}, llm.Tool{
 		Name:        assistantops.ToolPrepareTask,
-		Description: "Ask Ori to prepare one task draft for an agent that already works in one of the user's workspaces, and show it in the app's own task form for the user to review. Use only for an explicit request in the user's current message. It creates no task and starts nothing: the user edits the draft and saves it themselves. Only a title, a brief and the agent can be set; schedules, subtasks, workflows and file access are the user's to add in the form. Use as the only tool call in this batch, once.",
+		Description: "Ask the Ori app to prepare one task draft for an agent that already works in one of the user's workspaces, and show it in the app's own task form for the user to review. Use only for an explicit request in the user's current message. It creates no task and starts nothing: the user edits the draft and saves it themselves. Only a title, a brief and the agent can be set; schedules, subtasks, workflows and file access are the user's to add in the form. Use as the only tool call in this batch, once.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
 			"workspace_id":   workspaceID,
 			"workspace_name": workspaceName,

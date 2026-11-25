@@ -1738,10 +1738,9 @@ function paintProfileFields(values) {
   profileSelectedTags = Array.isArray(values.tags) ? values.tags.slice() : [];
   if (nameInput) {
     nameInput.value = values.name || '';
-    nameInput.disabled =
-      String(currentAgent?.name || '')
-        .trim()
-        .toLowerCase() === 'ori';
+    // No agent's name is locked: Ori's retired assistant is not listed, and
+    // an agent a person named after it is theirs to rename.
+    nameInput.disabled = false;
   }
   if (descriptionInput) descriptionInput.value = values.description || '';
   if (favoriteToggle) favoriteToggle.checked = Boolean(values.favorite);

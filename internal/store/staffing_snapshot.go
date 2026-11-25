@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -172,7 +171,7 @@ func (s *fileStore) staffingSnapshotLocked(ctx context.Context) StaffingSnapshot
 			return StaffingSnapshot{}
 		}
 		ag := s.agents[name]
-		if ag == nil || ag.WorkspaceLocalConfigID != "" || systemassistant.IsKnownName(name) || isMarkedSystemAgent(ag) {
+		if ag == nil || ag.WorkspaceLocalConfigID != "" || isMarkedSystemAgent(ag) {
 			continue
 		}
 		if counts[strings.ToLower(name)] != 1 {

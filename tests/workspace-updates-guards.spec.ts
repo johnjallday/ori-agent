@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { ensureLeadAgent, LEAD_AGENT } from './helpers/lead-agent';
 const sandbox = process.env.ORI_GOAL_E2E_SANDBOX || '';
 test.skip(!sandbox, 'requires the isolated goal fixture wrapper');
 test.describe.configure({ mode: 'serial' });
@@ -24,6 +25,7 @@ test.beforeAll(async ({ request }) => {
       data: { provider: 'ollama', model: 'fixture-model:latest' }
     })
   );
+  await ensureLeadAgent(request, { provider: 'ollama', model: 'fixture-model:latest' });
 });
 test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
@@ -37,7 +39,7 @@ test('Updates guards: a real Review modal blocks transcript exposure until it cl
   const ws = (
     await ok(
       await request.post('/api/workspaces', {
-        data: { name: 'Modal exposure guard', entry_agent_name: 'Ask Ori' }
+        data: { name: 'Modal exposure guard', entry_agent_name: LEAD_AGENT }
       })
     )
   ).folder;
@@ -129,7 +131,7 @@ test('Updates guards: explicit New, a live user reply and an unsent draft cannot
   const ws = (
     await ok(
       await request.post('/api/workspaces', {
-        data: { name: 'New and busy conversation guard', entry_agent_name: 'Ask Ori' }
+        data: { name: 'New and busy conversation guard', entry_agent_name: LEAD_AGENT }
       })
     )
   ).folder;

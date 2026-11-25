@@ -95,7 +95,7 @@ async function reviewCreateWizard(page: Page, name: string) {
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
   // Geometry does not need a team. Use the current explicit agentless choice,
-  // not the retired flat-roster selectors (which leave Ask Ori unfilled).
+  // not the retired flat-roster selectors.
   await page.getByRole('checkbox', { name: 'Create without agents' }).check();
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();

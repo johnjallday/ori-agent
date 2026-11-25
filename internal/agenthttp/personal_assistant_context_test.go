@@ -76,19 +76,6 @@ func TestPersonalAssistantPrompt_BoundsEscapesAndLabelsUntrustedSources(t *testi
 	}
 }
 
-func TestPersonalAssistantPrompt_HidesInternalSystemAssistantFromRosterAndActivity(t *testing.T) {
-	ctx := activePersonalAssistantContext()
-	snapshot := HomeSnapshot{
-		Agents:   []HomeAgentSummary{{Name: systemAssistantAgentName}, {Name: "Nova"}},
-		Tasks:    []HomeTaskSummary{{ID: "task-1", Assignee: systemAssistantAgentName}},
-		Sessions: []HomeSessionSummary{{ID: "session-internal", AgentName: systemAssistantAgentName}, {ID: "session-user", AgentName: "Nova"}},
-	}
-	filtered := sanitizePersonalAssistantSnapshot(snapshot, ctx)
-	if len(filtered.Agents) != 1 || filtered.Agents[0].Name != "Nova" || filtered.Tasks[0].Assignee != "" || len(filtered.Sessions) != 1 {
-		t.Fatalf("internal system assistant remained in PAF prompt snapshot: %+v", filtered)
-	}
-}
-
 func TestAsk_PersonalAssistantContextUsesCurrentUserAndPausedIdentity(t *testing.T) {
 	capture := &promptCaptureProvider{}
 	factory := llm.NewFactory()
