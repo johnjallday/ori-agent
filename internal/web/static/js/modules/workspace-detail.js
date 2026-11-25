@@ -285,6 +285,8 @@ export class WorkspaceDetailPage {
     this.directoryExplorer = new WorkspaceDirectoryExplorer(this);
     // Group-only Members panel + header identity; no-op for concrete workspaces.
     this.membersPanel = new WorkspaceMembersPanel(workspaceId);
+    this.membersPanel.onMembershipRead = group =>
+      window.workspaceCommand?.filesView?.membershipRead(workspaceId, group);
     this.membersPanel.onSourceFoldersChanged = () =>
       window.workspaceCommand?.syncSourceFolders?.(this.membersPanel);
 

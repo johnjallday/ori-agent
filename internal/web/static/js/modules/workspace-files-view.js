@@ -1,6 +1,13 @@
 // Read-only workspace detail surface. Share Home's qualified keys and read
 // adapters, not its editor, menus, tab persistence or cross-workspace index.
 import { loadFilePreview, loadNote, loadSection, sectionKey } from './home-tree-sources.js';
+import {
+  findWorkspaceNode,
+  directMembers,
+  flattenTree,
+  isGroupNode,
+  readWorkspaceTree
+} from './workspace-detail-members.js';
 import { iconHTML, rowIconName } from './home-tree-icons.js';
 import { escapeHtml as esc, renderMarkdown } from './note-editor.js';
 
@@ -71,6 +78,9 @@ export class WorkspaceFilesView {
     this.root = root;
     this.expanded = new Set([root.id]);
     this.sections = new Map();
+    this.members = new Map();
+    this.membershipVersion = 0;
+    this.linkedKey = sectionKey(root.id, 'members');
     this.focusKey = root.id;
     this.previewVersion = 0;
   }
@@ -97,10 +107,52 @@ export class WorkspaceFilesView {
     if (!this.controller) return;
     this.controller.abort();
     this.controller = null;
+    this.membershipVersion++;
+    this.members.clear();
+    this.membershipStatus = null;
     this.sections.clear();
     this.previewVersion++;
     this.selected = this.value = this.error = null;
     this.host.replaceChildren();
+  }
+
+  // Only the confirmed root's subtree is retained. Neither the global tree
+  // nor source-folder labels are an authority for an item's owner.
+  membershipRead(rootId, group) {
+    if (!this.controller || rootId !== this.root.id || !this.membershipStatus) return;
+    ++this.membershipVersion;
+    const ok = group?.id === rootId && isGroupNode(group);
+    this.membershipStatus = ok ? 'ready' : 'failed';
+    this.members = new Map((ok ? flattenTree([group]) : []).map(node => [node.id, node]));
+    const allowed = key => {
+      const owner = key.split('/')[0];
+      return owner === rootId || this.members.has(owner);
+    };
+    for (const key of this.sections.keys()) if (!allowed(key)) this.sections.delete(key);
+    for (const key of this.expanded) if (!allowed(key)) this.expanded.delete(key);
+    if (this.selected && !allowed(this.selected.id)) {
+      ++this.previewVersion;
+      this.selected = this.value = this.error = null;
+      this.focusKey = this.linkedKey;
+    }
+    this.paintTree();
+    this.paintPreview();
+  }
+
+  async loadMembers() {
+    const version = ++this.membershipVersion;
+    this.membershipStatus = 'loading';
+    this.paintTree();
+    let group;
+    try {
+      group = findWorkspaceNode(
+        await readWorkspaceTree({ signal: this.controller.signal }),
+        this.root.id
+      );
+    } catch {
+      /* No confirmed membership; leave retry in the branch. */
+    }
+    if (version === this.membershipVersion) this.membershipRead(this.root.id, group);
   }
 
   // Flatten visible rows only. A section is queried only when disclosed.
@@ -110,6 +162,10 @@ export class WorkspaceFilesView {
       rows.push({ ...row, level, parent });
       if (!this.expanded.has(row.id)) return;
       const child = entry => visit(entry, level + 1, row.id);
+      const memberRows = owner =>
+        directMembers(this.members.get(owner)).forEach(node =>
+          child({ id: node.id, kind: isGroupNode(node) ? 'group' : 'workspace', label: node.name })
+        );
       if (row.kind === 'workspace' || row.kind === 'group') {
         for (const [section, label] of sections)
           child({
@@ -118,6 +174,28 @@ export class WorkspaceFilesView {
             kind: 'section',
             section,
             label
+          });
+        if (row.kind === 'group') {
+          if (row.id === this.root.id)
+            child({ id: this.linkedKey, kind: 'members', label: 'Linked workspaces' });
+          else memberRows(row.id);
+        }
+      } else if (row.kind === 'members') {
+        if (
+          this.membershipStatus === 'ready' &&
+          directMembers(this.members.get(this.root.id)).length
+        )
+          memberRows(this.root.id);
+        else
+          child({
+            id: `${row.id}/status`,
+            kind: this.membershipStatus === 'failed' ? 'retry' : 'status',
+            label:
+              this.membershipStatus === 'failed'
+                ? 'Could not load linked workspaces. Retry'
+                : this.membershipStatus === 'ready'
+                  ? 'No linked workspaces'
+                  : 'Loading…'
           });
       } else if (row.kind === 'section') {
         const state = this.sections.get(row.id);
@@ -152,9 +230,9 @@ export class WorkspaceFilesView {
     if (!this.rows.some(r => r.id === this.focusKey)) this.focusKey = this.root.id;
     this.tree.innerHTML = this.rows
       .map((r, i) => {
-        const branch = ['workspace', 'group', 'section', 'folder'].includes(r.kind);
+        const branch = ['workspace', 'group', 'section', 'members', 'folder'].includes(r.kind);
         const expanded = this.expanded.has(r.id);
-        return `<div role="treeitem" tabindex="${r.id === this.focusKey ? 0 : -1}" data-row="${i}" aria-level="${r.level}" aria-selected="${this.selected?.id === r.id}" ${branch ? `aria-expanded="${expanded}"` : ''} style="--wf-level:${r.level}">${branch ? iconHTML(expanded ? 'caretDown' : 'caretRight', { size: 12 }) : '<span class="wf-spacer"></span>'}${iconHTML(rowIconName(r))}<span>${esc(r.label)}</span></div>`;
+        return `<div role="treeitem" tabindex="${r.id === this.focusKey ? 0 : -1}" data-row="${i}" data-key="${esc(r.id)}" aria-level="${r.level}" aria-selected="${this.selected?.id === r.id}" ${branch ? `aria-expanded="${expanded}"` : ''} style="--wf-level:${r.level}">${branch ? iconHTML(expanded ? 'caretDown' : 'caretRight', { size: 12 }) : '<span class="wf-spacer"></span>'}${iconHTML(r.kind === 'members' ? 'linkedFolders' : rowIconName(r))}<span>${esc(r.label)}</span></div>`;
       })
       .join('');
     if (focused) this.focusRow(this.focusKey);
@@ -224,13 +302,15 @@ export class WorkspaceFilesView {
       return;
     }
     if (row.kind === 'retry') {
-      void this.load(this.rows.find(r => r.id === row.parent));
+      if (row.parent === this.linkedKey) void this.loadMembers();
+      else void this.load(this.rows.find(r => r.id === row.parent));
       return;
     }
     if (row.kind === 'status') return;
     if (this.expanded.has(row.id)) this.expanded.delete(row.id);
     else {
       this.expanded.add(row.id);
+      if (row.kind === 'members' && !this.membershipStatus) void this.loadMembers();
       if (row.kind === 'section' && !this.sections.has(row.id)) void this.load(row);
     }
     this.paintTree();
@@ -278,7 +358,8 @@ export class WorkspaceFilesView {
 
   paintPreview() {
     const row = this.selected;
-    const owner = this.root.name;
+    const owner =
+      row?.workspaceId === this.root.id ? this.root.name : this.members.get(row?.workspaceId)?.name;
     this.article.querySelector('.wf-crumb').textContent = row
       ? [owner, row.kind === 'note' ? 'Notes' : 'Files', row.meta.path || row.label].join(' / ')
       : '';

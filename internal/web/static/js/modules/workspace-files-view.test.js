@@ -60,6 +60,31 @@ test('unsupported and oversized files never fetch; document text is inert', asyn
     assert.doesNotMatch(previewHTML({ kind, text: '<form>hello</form>' }, 'Form'), /<form>/);
 });
 
+test('membership loss or failure revokes even a pending member preview', async () => {
+  for (const snapshot of [null, { id: 'home', kind: 'group', children: [] }]) {
+    const root = { id: 'home', kind: 'group' };
+    const view = new WorkspaceFilesView({}, root);
+    view.controller = new AbortController();
+    view.membershipStatus = 'loading';
+    view.paintTree = view.paintPreview = () => {};
+    view.membershipRead('home', { ...root, children: [{ id: 'album', name: 'Album' }] });
+    view.sections.set('album/s/notes', { rows: [note] });
+    let finish;
+    view.scopedFetch = () => () =>
+      new Promise(r => {
+        finish = r;
+      });
+    const pending = view.select(note);
+    view.membershipRead('home', snapshot);
+    finish(new Response(JSON.stringify({ id: '1', workspace_id: 'album', content: 'Late' })));
+    await pending;
+    assert.equal(view.sections.size, 0);
+    assert.equal(view.selected, null);
+    assert.equal(view.value, null);
+    assert.equal(view.membershipStatus, snapshot ? 'ready' : 'failed');
+  }
+});
+
 test('an earlier selection or unmounted note cannot repaint the active preview', async () => {
   const view = new WorkspaceFilesView({ replaceChildren() {} }, { id: 'album' });
   view.paintTree = view.paintPreview = () => {};
