@@ -180,8 +180,13 @@ test('the header primary steps aside while the welcome card owns the same action
   // Unknown relationship: nothing to own and nothing to show.
   const unknown = cockpitPrimaryPresentation(null, { show: true });
   assert.deepEqual([unknown.visible, unknown.cardOwnsAction], [false, false]);
-  // A ready assistant's primary is unaffected by a stale welcome object.
-  assert.equal(cockpitPrimaryPresentation({ state: 'active' }, { show: false }).visible, true);
+});
+
+test('post-HQ folder hiring stays available in Files, not the Map header', () => {
+  for (const state of ['active', 'paused']) {
+    assert.equal(cockpitPrimaryPresentation({ state }, null, 'map').visible, false);
+    assert.equal(cockpitPrimaryPresentation({ state }, null, 'tree').visible, true);
+  }
 });
 
 test('Home folder action appears after hire and opens the right existing card', () => {
@@ -1357,7 +1362,10 @@ test('compact shared signal controls retain full accessible scope and partial-da
   const html = renderSignalFiltersHTML({ attention: 2, running: 0, today: null }, '', [
     SIGNAL_ATTENTION
   ]);
-  assert.match(html, /class="modern-btn modern-btn-secondary ui-filter cockpit-signal-chip"/);
+  assert.match(
+    html,
+    /class="modern-btn modern-btn-secondary modern-btn-sm ui-filter cockpit-signal-chip"/
+  );
   assert.match(html, /class="cockpit-signal-label">Attention<\/span>/);
   assert.match(
     html,

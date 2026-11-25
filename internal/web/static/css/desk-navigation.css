@@ -81,6 +81,13 @@
   color: inherit;
   text-decoration: none;
 }
+@media (pointer: coarse), (max-width: 768px) {
+  .desk-rail nav a,
+  .desk-rail [aria-current],
+  .desk-rail .locations button {
+    min-height: 44px;
+  }
+}
 .desk-rail nav a:hover,
 .desk-rail .locations button:hover {
   background: #315243;
@@ -135,6 +142,11 @@
     background: var(--desk-forest);
     border: 0;
     min-height: 44px;
+  }
+  /* WebKit's native select ignores min-height; keep the native picker and
+     give it the same target as the surrounding links. */
+  .desk-mobile select {
+    height: max(44px, 2.75em);
   }
   .desk-mobile:has(select:not([hidden])) a {
     display: none;

@@ -91,6 +91,16 @@ func TestHomeDeskRailIsTheOnlySwitcher(t *testing.T) {
 				t.Errorf("#homeCockpit must start with data-view=%q", tc.current)
 			}
 
+			for id, wantHidden := range map[string]bool{
+				"cockpitSummaryBtn":        tc.current == "map",
+				"cockpitUpdatesSummaryBtn": tc.current == "tree",
+			} {
+				selector := `id="` + id + `"`
+				if strings.Count(body, selector) != 1 || strings.Contains(openingTag(t, body, selector), " hidden") != wantHidden {
+					t.Errorf("expected one #%s with hidden=%t before hydration", id, wantHidden)
+				}
+			}
+
 			title := body[strings.Index(body, `data-cockpit-area-title`):]
 			title = title[strings.Index(title, ">")+1 : strings.Index(title, "</h2>")]
 			if title != tc.heading {

@@ -1534,7 +1534,7 @@
       opts &&
       typeof opts.onSelectHQSite === 'function'
     ) {
-      opts.onSelectHQSite(hqSiteView(hqStatus));
+      opts.onSelectHQSite(hqSiteView(hqStatus), { passive: true });
     }
   }
 
@@ -12994,7 +12994,8 @@
     // post-mount reconciliation then no-ops, because its selection already
     // matches what it was just told.
     if (focusNotify === 'hq-site') {
-      if (state && typeof state.onSelectHQSite === 'function') state.onSelectHQSite(site);
+      if (state && typeof state.onSelectHQSite === 'function')
+        state.onSelectHQSite(site, { passive: true });
     } else if (focusNotify === 'hq-workspace') {
       if (state && typeof state.onSelect === 'function') {
         state.onSelect(selectedId, findWs(workspaces, selectedId) || null);

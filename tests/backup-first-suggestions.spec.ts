@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { attachPlacementFolder } from './helpers/assisted-workspace-placement';
 
 // Backup-first suggestions: after File Curator is hired for an inbox folder
 // with no observed backup, a goal run in its workspace suggests the recovery
@@ -113,11 +114,7 @@ function backlog(page: Page) {
 }
 
 async function hire(page: Page, folder: string) {
-  await page.goto('/');
-  await page.waitForFunction(() => Boolean((window as any).PersonalAssistantPanel?.close));
-  await page.evaluate(() => (window as any).PersonalAssistantPanel.close());
-  await page.locator('#cockpitPrimaryActionBtn').click();
-  await page.locator('.personal-assistant-panel__chip', { hasText: folder }).first().click();
+  await attachPlacementFolder(page, folder, true);
   await expect(panel(page).locator('.folder-visual__agent strong')).toHaveText('File Curator');
   await page.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   const review = page.locator('#assistedWorkspacePlacementPanel');
@@ -126,6 +123,7 @@ async function hire(page: Page, folder: string) {
     timeout: 60_000
   });
   await review.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.locator('#personalAssistantClose').click();
 }
 
 test.beforeAll(async ({ request }) => {

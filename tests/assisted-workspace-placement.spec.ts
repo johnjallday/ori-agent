@@ -312,8 +312,21 @@ test('editable slots stage a new agent, assign a saved agent and replace the fol
   const cards = sheet.getByRole('list', { name: 'Available setup cards' });
   const desktop = cards.getByRole('button', { name: /^Desktop / });
   await expect(desktop).toBeEnabled();
-  await desktop.evaluate(element => element.scrollIntoView({ block: 'center' }));
-  await desktop.dragTo(sheet.getByRole('region', { name: 'Anchored folder', exact: true }));
+  await desktop.evaluate(element =>
+    element.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
+  // Start the native drag inside Desktop before moving across adjacent cards.
+  // dragTo scrolls the destination after mouse-down, which can start the drag
+  // on the replacement card instead even though Desktop received pointer-down.
+  const source = (await desktop.boundingBox())!;
+  const slot = sheet.getByRole('region', { name: 'Anchored folder', exact: true });
+  const x = source.x + source.width / 2,
+    y = source.y + source.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 10, y, { steps: 3 });
+  await slot.hover();
+  await page.mouse.up();
   await expect(sheet.getByRole('region', { name: 'Anchored folder', exact: true })).toContainText(
     join(sandbox, 'Desktop')
   );

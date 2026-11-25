@@ -232,10 +232,15 @@ export function cockpitPrimaryActionView(personalAssistant) {
 // onboarding action twice: while the card is on screen it owns that action and
 // the header primary steps aside; otherwise the header primary is the compact
 // way back in, in Map and Tree alike (assistant-hq-onboarding 1.2).
-export function cockpitPrimaryPresentation(personalAssistant, welcome) {
+export function cockpitPrimaryPresentation(personalAssistant, welcome, view) {
   const action = cockpitPrimaryActionView(personalAssistant);
   const cardOwnsAction = !!(action.visible && welcome && welcome.show);
-  return { ...action, visible: action.visible && !cardOwnsAction, cardOwnsAction };
+  const filesOnly = action.kind === 'folder';
+  return {
+    ...action,
+    visible: action.visible && !cardOwnsAction && (!filesOnly || view === VIEW_TREE),
+    cardOwnsAction
+  };
 }
 
 // Only this explicit known-folder hint can prepare a pre-hire card. The URL
@@ -820,7 +825,7 @@ export function renderSignalFiltersHTML(counts, activeSignal, partialSignals = [
     // A KNOWN zero renders quieter; an unavailable count (null) never does,
     // because "nothing matches" and "we cannot tell" are different answers.
     return (
-      `<button type="button" class="modern-btn modern-btn-secondary ui-filter cockpit-signal-chip" data-cockpit-signal="${escapeHtml(signal)}" ` +
+      `<button type="button" class="modern-btn modern-btn-secondary modern-btn-sm ui-filter cockpit-signal-chip" data-cockpit-signal="${escapeHtml(signal)}" ` +
       (count === 0 ? 'data-zero="true" ' : '') +
       `aria-pressed="${isActive ? 'true' : 'false'}" aria-label="${escapeHtml(accessibleLabel)}">` +
       `<span class="cockpit-signal-label">${escapeHtml(compactLabel)}</span>` +
@@ -2167,6 +2172,7 @@ import {
     railContext: document.getElementById('cockpitRailContext'),
     railLive: document.getElementById('cockpitRailLive'),
     summaryBtn: document.getElementById('cockpitSummaryBtn'),
+    updatesSummaryBtn: document.getElementById('cockpitUpdatesSummaryBtn'),
     primaryActionBtn: document.getElementById('cockpitPrimaryActionBtn'),
     // The empty map's first-run welcome (home-welcome.js). Host-owned, over
     // the map, so the Map's geometry, camera and selection stay its own.
@@ -2556,7 +2562,7 @@ import {
     const welcome = currentWelcome(areaStatus);
     root.dataset.firstRun = welcome.show ? 'welcome' : '';
     if (els.primaryActionBtn) {
-      const primary = cockpitPrimaryPresentation(state.personalAssistant, welcome);
+      const primary = cockpitPrimaryPresentation(state.personalAssistant, welcome, state.view);
       els.primaryActionBtn.hidden = !primary.visible;
     }
     if (!els.welcomeHost) return welcome;
@@ -2796,10 +2802,10 @@ import {
           openModal: !mapMenuSelectionInProgress
         }),
       onOpen: id => openItem(id),
-      onSelectHQSite: view =>
+      onSelectHQSite: (view, { passive = false } = {}) =>
         selectHQSite(view, {
           invoker: document.activeElement,
-          openModal: !mapMenuSelectionInProgress
+          openModal: !mapMenuSelectionInProgress && !(passive && view?.hireFirst)
         }),
       // Delete and group. The map owns no mutation of its own — it hands the
       // ids back here, and these run the very same workspace-bulk-actions.js
@@ -2832,9 +2838,8 @@ import {
       : state.selectedId;
     if (resolved === state.selectedId) return;
     if (resolved === HQ_SITE_ID) {
-      selectHQSite(
-        window.OriWorkspaceMap.getHQSiteView ? window.OriWorkspaceMap.getHQSiteView() : null
-      );
+      const view = window.OriWorkspaceMap.getHQSiteView?.() || null;
+      selectHQSite(view, { openModal: !view?.hireFirst });
       return;
     }
     if (!resolved) {
@@ -4705,6 +4710,8 @@ import {
     // Exactly one peer view is exposed at a time (FR18/FR19).
     if (els.tree) els.tree.hidden = state.view !== VIEW_TREE;
     root.dataset.view = state.view;
+    if (els.summaryBtn) els.summaryBtn.hidden = state.view !== VIEW_TREE;
+    if (els.updatesSummaryBtn) els.updatesSummaryBtn.hidden = state.view !== VIEW_MAP;
     // Entering Tree with something selected on the Map must REVEAL that row by
     // expanding its ancestors — without mutating stored hierarchy (FR59).
     if (state.view === VIEW_TREE && state.selectedId) {
@@ -6915,6 +6922,8 @@ import {
   if (els.questsToggle) els.questsToggle.addEventListener('click', () => togglePanel(PANEL_QUESTS));
   if (els.questsClose) els.questsClose.addEventListener('click', () => closePanel());
 
+  // The flyout closes as the dialog opens. Return to its visible disclosure.
+  els.updatesSummaryBtn?.addEventListener('click', () => showSummary({ invoker: els.railToggle }));
   if (els.summaryBtn) {
     els.summaryBtn.addEventListener('click', () => {
       if (state.railState === RAIL_SUMMARY && (state.modalVisible || state.modalRequested)) {
@@ -6945,7 +6954,9 @@ import {
     )
       return false;
     if (folderAction.target === 'hq' && !window.PersonalAssistantHQCard?.show) return false;
-    const opened = window.PersonalAssistantPanel?.open?.(invoker);
+    const opened = window.PersonalAssistantPanel?.open?.(
+      invoker?.hidden ? document.getElementById('personalAssistantLauncher') : invoker
+    );
     if (!opened) return false;
     if (folderAction.target === 'hq') window.PersonalAssistantHQCard.show();
     else if (walkThrough)

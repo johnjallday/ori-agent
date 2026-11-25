@@ -47,8 +47,6 @@ for (const theme of ['light', 'dark'] as const) {
       for (const control of destinations) await reachable(control, width < 769 ? 44 : 32);
       for (const selector of [
         '#cockpitCaptureBtn',
-        '#cockpitSummaryBtn',
-        '#cockpitPrimaryActionBtn',
         '#cockpitCreateWorkspaceBtn',
         '#cockpitRailToggle',
         '#cockpitQuestsToggle',
@@ -60,9 +58,10 @@ for (const theme of ['light', 'dark'] as const) {
         // narrow/coarse targets retain the canonical 44px floor.
         await reachable(page.locator(selector), width < 769 ? 44 : 32);
       }
-      expect(
-        (await contrast(page.locator('#cockpitPrimaryActionBtn'))).ratio
-      ).toBeGreaterThanOrEqual(4.5);
+      await expect(page.locator('#cockpitPrimaryActionBtn')).toBeHidden();
+      await page.locator('#cockpitRailToggle').click();
+      await reachable(page.getByRole('button', { name: 'View summary' }), width < 769 ? 44 : 32);
+      await page.locator('#cockpitRailToggle').click();
       await homeA11y(page, '.cockpit-area-header');
       const attention = page.locator('[data-cockpit-signal="attention"]');
       await attention.focus();
@@ -109,6 +108,10 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(context).toBeHidden();
       await expect(tile).toHaveClass(/is-selected/);
       await goToFiles(page);
+      const hire = page.getByRole('button', { name: 'Hire an agent', exact: true });
+      await reachable(hire, width < 769 ? 44 : 32);
+      expect((await contrast(hire)).ratio).toBeGreaterThanOrEqual(4.5);
+      await reachable(page.locator('#cockpitSummaryBtn'), width < 769 ? 44 : 32);
       await expect(page.locator('#cockpitTree')).toBeVisible();
       await expect(page.locator('#cockpitMap')).toBeHidden();
       await expect(page.locator('#cockpitSignalFilters')).toBeHidden();
