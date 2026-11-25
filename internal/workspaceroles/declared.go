@@ -57,9 +57,13 @@ func FromTemplateAgents(specs []projecttemplates.AgentSpec) []Role {
 	ids := projecttemplates.AgentRoleIDs(specs)
 	roles := make([]Role, 0, len(specs))
 	for index, spec := range specs {
+		label := strings.TrimSpace(spec.HostRoleLabel)
+		if label == "" {
+			label = strings.TrimSpace(spec.Name)
+		}
 		roles = append(roles, Role{
 			ID:          ids[index],
-			Label:       strings.TrimSpace(spec.Name),
+			Label:       label,
 			Description: summarize(spec.SystemPrompt),
 			Scope:       ScopeProject,
 			Required:    index == 0,

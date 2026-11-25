@@ -274,6 +274,10 @@ func (s *fileStore) createAgentUnlocked(name string, config *CreateAgentConfig, 
 			provenance := *config.AssistantSetup
 			newAgent.AssistantSetup = &provenance
 		}
+		if config != nil && config.WorkspaceManager != nil {
+			provenance := *config.WorkspaceManager
+			newAgent.WorkspaceManager = &provenance
+		}
 		// Initialize statistics for the new agent
 		newAgent.InitializeStatistics()
 		// Initialize evolution defaults for the new agent
@@ -635,6 +639,8 @@ type persistedDefinition struct {
 	Metadata       *types.AgentMetadata            `json:"metadata,omitempty"`
 	Appearance     *types.AgentAppearance          `json:"appearance,omitempty"`
 	AssistantSetup *agent.AssistantSetupProvenance `json:"assistant_setup,omitempty"`
+	// WorkspaceManager binds a workspace's own manager to that workspace by ID.
+	WorkspaceManager *agent.WorkspaceManagerProvenance `json:"workspace_manager,omitempty"`
 	// Paused travels with the agent. In memory it is Status == disabled, which
 	// every runtime check already refuses.
 	Paused bool `json:"paused,omitempty"`
@@ -650,13 +656,14 @@ func encodeDefinition(ag *agent.Agent) ([]byte, error) {
 	// code path — not just the migrating load path — is canonical on disk.
 	ag.EnsureAppearance()
 	data, err := json.MarshalIndent(persistedDefinition{
-		Role:           ag.Role,
-		Capabilities:   ag.Capabilities,
-		Settings:       ag.Settings,
-		Metadata:       ag.Metadata,
-		Appearance:     ag.Appearance,
-		AssistantSetup: ag.AssistantSetup,
-		Paused:         ag.Status == types.AgentStatusDisabled,
+		Role:             ag.Role,
+		Capabilities:     ag.Capabilities,
+		Settings:         ag.Settings,
+		Metadata:         ag.Metadata,
+		Appearance:       ag.Appearance,
+		AssistantSetup:   ag.AssistantSetup,
+		WorkspaceManager: ag.WorkspaceManager,
+		Paused:           ag.Status == types.AgentStatusDisabled,
 	}, "", "  ")
 	if err != nil {
 		return nil, err

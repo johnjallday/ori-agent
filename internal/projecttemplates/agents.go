@@ -53,6 +53,13 @@ type AgentSpec struct {
 	// template agent override or a role fill), never part of the authorable
 	// blueprint: it is not decoded, encoded, or digested.
 	ReasoningEffort string `json:"-"`
+	// HostRoleID and HostRoleLabel give a host-owned synthetic roster (Blank's
+	// manager) a role identity that does not follow the agent's proposed name.
+	// That name is derived from the workspace name, so a name-derived role id
+	// would change when the workspace is renamed and strand the slot. They are
+	// never part of an authorable blueprint: not decoded, encoded, or digested.
+	HostRoleID    string `json:"-"`
+	HostRoleLabel string `json:"-"`
 }
 
 // normalizeAgentSpecs cleans a raw roster: it trims string fields, drops entries

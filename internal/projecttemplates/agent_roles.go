@@ -63,6 +63,9 @@ func AgentRoleIDs(specs []AgentSpec) []string {
 	used := make(map[string]int, len(specs))
 	for i, spec := range specs {
 		base := AgentRoleID(spec.Name)
+		if hostID := strings.TrimSpace(spec.HostRoleID); hostID != "" {
+			base = AgentRoleID(hostID)
+		}
 		id := base
 		for {
 			count := used[id]

@@ -126,6 +126,11 @@ type templateAgentPlanItem struct {
 	Tools           projecttemplates.ToolDefaults  `json:"tools,omitempty"`
 	Warning         string                         `json:"warning,omitempty"`
 	Recommended     *templateAgentRecommendedSetup `json:"recommended_setup,omitempty"`
+	// RoleID and RoleLabel are set only for a host-owned role whose identity
+	// does not follow the proposed agent name (Blank's manager). Omitted for
+	// every authorable blueprint, so their plan revisions are unchanged.
+	RoleID    string `json:"role_id,omitempty"`
+	RoleLabel string `json:"role_label,omitempty"`
 }
 
 type templateAgentRecommendedSetup struct {
@@ -647,6 +652,8 @@ func (h *Handler) buildTemplateAgentPlanItem(spec projecttemplates.AgentSpec, en
 		Action:     "create",
 		EntryPoint: entryPoint,
 		Tools:      spec.Tools,
+		RoleID:     strings.TrimSpace(spec.HostRoleID),
+		RoleLabel:  strings.TrimSpace(spec.HostRoleLabel),
 		Recommended: &templateAgentRecommendedSetup{
 			Role:            proposedRole,
 			Model:           strings.TrimSpace(cfg.Model),

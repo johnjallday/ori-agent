@@ -233,7 +233,8 @@ func (s *fileStore) staffingWitnessLocked(name string) (string, bool) {
 		Toolbox    *types.AgentDefaultToolbox
 	}{persistedDefinition{Role: ag.Role, Capabilities: ag.Capabilities, Settings: ag.Settings,
 		Metadata: ag.Metadata, Appearance: ag.Appearance, AssistantSetup: ag.AssistantSetup,
-		Paused: ag.Status == types.AgentStatusDisabled}, ag.DefaultToolbox})
+		WorkspaceManager: ag.WorkspaceManager,
+		Paused:           ag.Status == types.AgentStatusDisabled}, ag.DefaultToolbox})
 	if err != nil {
 		return "", false
 	}

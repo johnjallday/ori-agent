@@ -126,6 +126,37 @@ func resolveWorkspaceEntryAgentName(
 	return ""
 }
 
+// foreignWorkspaceManager reports whether name is a workspace manager created
+// for a workspace other than workspaceID and not attached to workspaceID's
+// roster. Outside any workspace nothing is foreign: direct chat with a saved
+// agent stays available. A manager the person deliberately assigned to this
+// workspace's roster is theirs to address here too.
+func foreignWorkspaceManager(
+	agentStore store.Store,
+	workspaceLookup workspaceEntryLookup,
+	name string,
+	workspaceID string,
+) bool {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if agentStore == nil || workspaceID == "" {
+		return false
+	}
+	ag, ok := agentStore.GetAgent(strings.TrimSpace(name))
+	if !ok || ag == nil || ag.WorkspaceManager == nil || ag.WorkspaceManager.ManagesWorkspace(workspaceID) {
+		return false
+	}
+	if workspaceLookup != nil {
+		if ws, err := workspaceLookup.Get(workspaceID); err == nil && ws != nil {
+			for _, instance := range ws.AgentInstances {
+				if strings.EqualFold(strings.TrimSpace(instance.Name), strings.TrimSpace(name)) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
 func resolveExecutionAgentName(
 	ctx context.Context,
 	sessionLookup chatSessionLookup,
@@ -151,9 +182,13 @@ func resolveExecutionAgentName(
 		}
 	}
 
-	// 2. Honor an explicit per-request agent override.
+	// 2. Honor an explicit per-request agent override — except that inside a
+	//    workspace a request cannot pick another workspace's manager, which
+	//    would answer with this workspace's tools under a front door the person
+	//    never staffed here.
 	if requested := strings.TrimSpace(requestedAgentName); requested != "" {
-		if agentExists(agentStore, requested) {
+		if agentExists(agentStore, requested) &&
+			!foreignWorkspaceManager(agentStore, workspaceLookup, requested, workspaceID) {
 			return executionAgentResolution{
 				Name:   requested,
 				Source: executionAgentSourceRequestOverride,

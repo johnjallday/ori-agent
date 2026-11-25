@@ -190,6 +190,10 @@ func cloneAgentDefinition(src *agent.Agent) *agent.Agent {
 		setup := *src.AssistantSetup
 		c.AssistantSetup = &setup
 	}
+	if src.WorkspaceManager != nil {
+		manager := *src.WorkspaceManager
+		c.WorkspaceManager = &manager
+	}
 	return &c
 }
 
@@ -204,6 +208,7 @@ func adoptAgentDefinition(live, draft *agent.Agent) {
 	live.Metadata = draft.Metadata
 	live.Appearance = draft.Appearance
 	live.AssistantSetup = draft.AssistantSetup
+	live.WorkspaceManager = draft.WorkspaceManager
 }
 
 func cloneBool(p *bool) *bool {
