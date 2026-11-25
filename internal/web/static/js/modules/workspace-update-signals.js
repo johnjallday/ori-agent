@@ -191,7 +191,8 @@ export function renderWorkspaceUpdateMapMarkers(view) {
     view.signals
       .map(signal => {
         const route = safeSignalRoute(view, signal);
-        return `<span class="workspace-update-signal${route ? '' : ' is-stale'}"${route ? ` data-map-update-route="${escape(route)}"` : ''} title="${escape(signal.label)}"><span class="ws-map-update-text">${escape(signal.text)}</span></span>`;
+        const label = route && signal.kind === 'welcome' ? 'Read new message' : signal.text;
+        return `<span class="workspace-update-signal${route ? '' : ' is-stale'}"${route ? ` data-map-update-route="${escape(route)}"` : ''} title="${escape(signal.label)}"><span class="ws-map-update-text">${escape(label)}</span></span>`;
       })
       .join('') +
     '</span>'

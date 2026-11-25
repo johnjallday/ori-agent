@@ -550,7 +550,7 @@ export function searchForView(search, view) {
  * Map keeps its long name; Files is simply Files (the tree with its search).
  */
 export function deskHeading(view) {
-  return view === VIEW_TREE ? 'Files' : 'Workspace Map';
+  return view === VIEW_TREE ? 'Files' : 'Workspaces';
 }
 
 // ---------------------------------------------------------------------------
@@ -6211,16 +6211,26 @@ import {
       showEconomyHelp(trigger.getAttribute('data-economy-help') || 'craft', trigger);
     });
   });
+  els.economy?.addEventListener('toggle', () => {
+    if (!els.economy.open) hideEconomyHelp({ restoreFocus: false });
+  });
   els.economyHelpClose?.addEventListener('click', () => hideEconomyHelp());
   // Escape and an outside click both close it, like every other transient panel
   // on this page.
   document.addEventListener('keydown', event => {
-    if (event.key !== 'Escape' || !openEconomyHelp) return;
-    hideEconomyHelp();
+    if (event.key !== 'Escape') return;
+    if (openEconomyHelp) hideEconomyHelp();
+    else if (els.economy?.open) {
+      els.economy.open = false;
+      els.economy.querySelector('summary')?.focus();
+    }
   });
   document.addEventListener('mousedown', event => {
-    if (!openEconomyHelp) return;
     const target = event.target;
+    if (els.economy?.open && !target.closest?.('#cockpitEconomy, #cockpitEconomyHelp')) {
+      els.economy.open = false;
+    }
+    if (!openEconomyHelp) return;
     if (!target || typeof target.closest !== 'function') return;
     if (target.closest('#cockpitEconomyHelp') || target.closest('[data-economy-help]')) return;
     hideEconomyHelp({ restoreFocus: false });

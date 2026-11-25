@@ -187,28 +187,13 @@ test('distinguish duplicate copies by location and date before acting', async ({
     await expect(picker).toBeVisible();
     await expect(page.locator('[data-ws-map-viewport]').first()).toBeVisible();
     const gap = await page.evaluate(() => {
-      const shell = document.querySelector('.map-desk-shell')!.getBoundingClientRect();
-      const mobile = document.querySelector('.desk-mobile')!.getBoundingClientRect();
-      const rail = document.querySelector('.desk-rail')!.getBoundingClientRect();
-      const cockpit = document.querySelector('#homeCockpit')!.getBoundingClientRect();
-      return {
-        above: cockpit.top - (mobile.height ? mobile.bottom : shell.top),
-        left: cockpit.left - rail.right,
-        rail: rail.width,
-        bar: mobile.height
-      };
+      const toolbar = document.querySelector('.atlas-toolbar')!.getBoundingClientRect();
+      const map = document.querySelector('#cockpitMap')!.getBoundingClientRect();
+      return { above: map.top - toolbar.bottom, left: Math.abs(map.left - toolbar.left) };
     });
     expect(gap.above).toBeGreaterThanOrEqual(0);
     expect(gap.above).toBeLessThan(20);
-    if (size.width > 700) {
-      expect(gap.left).toBeGreaterThanOrEqual(0);
-      expect(gap.rail).toBeGreaterThan(150);
-      expect(gap.bar).toBe(0);
-    } else {
-      expect(gap.rail).toBe(0);
-      expect(gap.bar).toBeGreaterThan(0);
-      expect(gap.bar).toBeLessThan(70);
-    }
+    expect(gap.left).toBeLessThan(2); // Neither screen size loses a sidebar's width.
     await page.screenshot({ path: join(evidence, `map-header-${size.width}.png`) });
   }
   await page.setViewportSize(originalSize);
@@ -377,7 +362,7 @@ test('distinguish duplicate copies by location and date before acting', async ({
   await expect(results(page)).toHaveCount(1);
   const homePicker = page.locator('[data-map-picker]');
   await expect(homePicker).toBeVisible();
-  await expect(homePicker.locator('option')).toHaveText(['Files', 'Map']);
+  await expect(homePicker.locator('option')).toHaveText(['Map', 'Files']);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: join(evidence, 'narrow.png') });
   await goToMap(page);
