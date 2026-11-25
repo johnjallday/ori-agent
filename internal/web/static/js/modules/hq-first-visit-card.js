@@ -9,6 +9,7 @@ import {
   beginHQAttempt,
   bindEmailAttempt,
   currentHQAttempt,
+  dismissToolsReceipt,
   receiptHint,
   markReturned,
   guidedReturnURL,
@@ -170,6 +171,9 @@ export class HQFirstVisitCard {
   }
 
   receiptHTML() {
+    if (this.receipt?.savedAttempt) {
+      return `<section class="ws-hq-tools-receipt" data-guided-receipt><span role="status">${escape(this.receipt.text)}</span><a href="${escape(this.receipt.href)}">Review tools in Profile</a><button type="button" class="ws-cmd-nav-btn" data-dismiss-tools-receipt="${escape(this.receipt.savedAttempt)}">Dismiss</button></section>`;
+    }
     const projects = this.receipt?.offer?.projects || [];
     const draft = p =>
       this.receipt.offer.writable || this.receipt.offer.setup
@@ -331,6 +335,15 @@ export class HQFirstVisitCard {
 
   bind() {
     void this.loadReturn();
+    const dismiss = this.owner.container?.querySelector?.('[data-dismiss-tools-receipt]');
+    if (dismiss) {
+      dismiss.onclick = () => {
+        if (!dismissToolsReceipt(this.owner.workspaceId(), dismiss.dataset.dismissToolsReceipt))
+          return;
+        void this.loadReturn();
+        this.door()?.focus({ preventScroll: true });
+      };
+    }
     const refresh = () => {
       this.checkedAttempt = null;
       return this.loadReturn();

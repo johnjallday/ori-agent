@@ -59,7 +59,7 @@ test('every badge row of PRD FR5', () => {
     tone: 'loading'
   });
   assert.deepEqual(memoryStationState({ status: 'error' }), {
-    value: 'Memory',
+    value: 'Agent memory',
     description: 'status unavailable',
     tone: 'degraded'
   });
@@ -125,7 +125,7 @@ test('over budget beats new; an unavailable read beats both', () => {
   });
   const baseline = { count: 1 };
   assert.equal(memoryStationState({ status: 'ready', summary, baseline }).value, 'Over budget');
-  assert.equal(memoryStationState({ status: 'error', summary, baseline }).value, 'Memory');
+  assert.equal(memoryStationState({ status: 'error', summary, baseline }).value, 'Agent memory');
   assert.equal(memoryStationState({ status: 'loading', summary, baseline }).value, '—');
 });
 
@@ -245,8 +245,11 @@ test('the Personal HQ badge says global memory and ranks "to review" between ove
 test('the Memory one-liner says what agents are shown, and in the HQ where the notes are', () => {
   assert.equal(
     MEMORY_ONE_LINER,
-    'What agents in this workspace are shown. Your notes folder is separate: see Notes.'
+    'Decisions, preferences, and rules agents should follow in this workspace. Saving something in My Notes does not add it to agent memory.'
   );
   assert.equal(memoryOneLiner({ personalHQ: true }), MEMORY_ONE_LINER);
-  assert.equal(memoryOneLiner(), 'What agents in this workspace are shown.');
+  assert.equal(
+    memoryOneLiner(),
+    'Decisions, preferences, and rules agents should follow in this workspace.'
+  );
 });

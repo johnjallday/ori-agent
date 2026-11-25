@@ -6371,13 +6371,18 @@ test('the Memory panel says what it is under its title, pointing at Notes only i
   const html = hq.statModalHTML('memory');
   assert.ok(
     html.includes(
-      '</header><p class="ws-panel-one-liner" data-memory-one-liner>What agents in this workspace are shown. Your notes folder is separate: see Notes.</p>'
+      '</header><p class="ws-panel-one-liner" data-memory-one-liner>Decisions, preferences, and rules agents should follow in this workspace. Saving something in My Notes does not add it to agent memory.</p>'
     ),
     html
   );
   hq.page.workspace = {};
   const plain = hq.statModalHTML('memory');
-  assert.ok(plain.includes('>What agents in this workspace are shown.</p>'), plain);
+  assert.ok(
+    plain.includes(
+      '>Decisions, preferences, and rules agents should follow in this workspace.</p>'
+    ),
+    plain
+  );
 });
 
 test('openRailItem no longer special-cases an "email" section', () => {
@@ -6689,8 +6694,8 @@ test('the Memory building draws the archive art and reads its badge once', () =>
     const html = plain.renderMapHQStations();
     assert.match(html, /data-cmd-hq-station="memory" data-station-visual="archive"/);
     assert.match(html, /data-building-variant="archive" data-context="station"/);
-    assert.match(html, /aria-label="Memory station, 14 entries, 2 watching"/);
-    assert.match(html, /ws-cmd-map-hq-station-label">Memory</);
+    assert.match(html, /aria-label="Agent memory station, 14 entries, 2 watching"/);
+    assert.match(html, /ws-cmd-map-hq-station-label">Agent memory</);
     assert.match(html, /ws-cmd-map-hq-station-state">14 entries</);
 
     readyMemory(plain, { count: 5, overBudget: true, dropped: 2 });
@@ -6698,7 +6703,7 @@ test('the Memory building draws the archive art and reads its badge once', () =>
     assert.match(over, /class="ws-cmd-map-hq-station has-visual is-attention"/);
     assert.match(
       over,
-      /aria-label="Memory station, Over budget, 2 entries are not shown to agents"/
+      /aria-label="Agent memory station, Over budget, 2 entries are not shown to agents"/
     );
 
     // Without the art module the building falls back to its icon.
@@ -6707,22 +6712,28 @@ test('the Memory building draws the archive art and reads its badge once', () =>
 
     const hq = makeHQCommandView({ id: 'hq-1' });
     readyMemory(hq, { count: 3 });
-    assert.match(hq.renderMapHQStations(), /aria-label="Memory station, global memory, 3 entries"/);
+    assert.match(
+      hq.renderMapHQStations(),
+      /aria-label="Agent memory station, global memory, 3 entries"/
+    );
 
     // Every HQ state leads with "global memory" (FR28), and nothing is heard
     // twice: not a "—" placeholder, not the station's own name.
     const memoryLabel = view =>
       /data-cmd-hq-station="memory"[^>]*aria-label="([^"]*)"/.exec(view.renderMapHQStations())[1];
     readyMemory(hq, { count: 0 });
-    assert.equal(memoryLabel(hq), 'Memory station, global memory, Empty, nothing recorded yet');
+    assert.equal(
+      memoryLabel(hq),
+      'Agent memory station, global memory, Empty, nothing recorded yet'
+    );
     hq._memoryStation.status = 'loading';
-    assert.equal(memoryLabel(hq), 'Memory station, global memory, loading memory');
+    assert.equal(memoryLabel(hq), 'Agent memory station, global memory, loading memory');
     hq._memoryStation.status = 'error';
-    assert.equal(memoryLabel(hq), 'Memory station, global memory, status unavailable');
+    assert.equal(memoryLabel(hq), 'Agent memory station, global memory, status unavailable');
     plain._memoryStation.status = 'loading';
-    assert.equal(memoryLabel(plain), 'Memory station, loading memory');
+    assert.equal(memoryLabel(plain), 'Agent memory station, loading memory');
     plain._memoryStation.status = 'error';
-    assert.equal(memoryLabel(plain), 'Memory station, status unavailable');
+    assert.equal(memoryLabel(plain), 'Agent memory station, status unavailable');
   } finally {
     globalThis.window = originalWindow;
   }
@@ -6738,7 +6749,7 @@ test('the Stations rail shows the Memory row on an ordinary workspace', () => {
     assert.match(panel, /<section class="ws-cmd-panel is-hq-stations is-managing">/);
     assert.match(
       panel,
-      /data-cmd-hq-station="memory" aria-label="Memory station, 2 entries"><span class="ws-cmd-rail-t">Memory<\/span><span class="ws-cmd-rail-m">2 entries</
+      /data-cmd-hq-station="memory" aria-label="Agent memory station, 2 entries"><span class="ws-cmd-rail-t">Agent memory<\/span><span class="ws-cmd-rail-m">2 entries</
     );
     // Stations opens by itself only in an HQ (rail default-open rule unchanged).
     assert.equal(
@@ -6841,7 +6852,7 @@ test('a 404 removes the Memory station and a failed read degrades it', async () 
     failed.memoryStationState();
     await flush();
     assert.deepEqual(failed.memoryStationState(), {
-      value: 'Memory',
+      value: 'Agent memory',
       description: 'status unavailable',
       tone: 'degraded'
     });
@@ -6977,11 +6988,11 @@ test('the memory modal mounts the existing pane through the config surface (FR10
   try {
     const plain = makeMemoryCommandView();
     readyMemory(plain, { count: 7 });
-    assert.deepEqual(plain.statSectionMeta('memory'), { title: 'Memory', addLabel: '' });
+    assert.deepEqual(plain.statSectionMeta('memory'), { title: 'Agent memory', addLabel: '' });
     assert.equal(plain.sectionUsesConfigSurface('memory'), true);
     assert.equal(plain.configTabIdFor('memory'), 'workspace-detail-config-memory-tab');
     const html = plain.statModalHTML('memory');
-    assert.match(html, /<h3 class="ws-cmd-modal-title">Memory<\/h3>/);
+    assert.match(html, /<h3 class="ws-cmd-modal-title">Agent memory<\/h3>/);
     assert.match(html, /<span class="ws-cmd-modal-count">7<\/span>/);
     assert.match(html, /data-cmd-config-host/);
 
@@ -10806,7 +10817,7 @@ function greetingView(patch = {}) {
     cards: [
       { label: 'Watchtower', stateWord: 'Ready' },
       { label: 'Daily Brief', stateWord: 'Ready' },
-      { label: 'Memory', stateWord: 'Checking' }
+      { label: 'Agent memory', stateWord: 'Checking' }
     ],
     folded: [{ label: 'Email' }, { label: 'Calendar Ops' }]
   });

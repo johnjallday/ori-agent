@@ -59,7 +59,7 @@ test('sources are Notes, Email, Calendar and Memory in that order', () => {
       ['second-brain', 'Notes'],
       ['email', 'Email'],
       ['calendar-ops', 'Calendar'],
-      ['memory', 'Memory']
+      ['memory', 'Agent memory']
     ]
   );
 });

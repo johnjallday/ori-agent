@@ -351,7 +351,7 @@ function memoryManager() {
   });
 }
 
-test('terminology: the Memory station is named "Memory" on the map, in the rail, and on its panel', () => {
+test('terminology: the Memory station is named "Agent memory" on the map, in the rail, and on its panel', () => {
   const view = makeView({
     page: { workspace: { id: 'ws-1' }, tasks: [] },
     _memoryStation: {
@@ -362,9 +362,12 @@ test('terminology: the Memory station is named "Memory" on the map, in the rail,
     }
   });
   const station = view.mapStationRegistry().find(entry => entry.key === 'memory');
-  assert.equal(station.label, 'Memory');
-  assert.deepEqual(view.statSectionMeta('memory'), { title: 'Memory', addLabel: '' });
-  assert.match(view.renderMapHQStations(), /aria-label="Memory station, 14 entries, 2 watching"/);
+  assert.equal(station.label, 'Agent memory');
+  assert.deepEqual(view.statSectionMeta('memory'), { title: 'Agent memory', addLabel: '' });
+  assert.match(
+    view.renderMapHQStations(),
+    /aria-label="Agent memory station, 14 entries, 2 watching"/
+  );
   // Systems no longer names Memory: it is a station, not configuration.
   assert.deepEqual(
     view.systemTabs().map(tab => tab.label),

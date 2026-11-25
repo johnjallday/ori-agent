@@ -109,7 +109,7 @@ export class HQQuickCapture {
     const savedFocus = host.contains(document.activeElement)
       ? document.activeElement.dataset.hqCaptureControl
       : '';
-    host.replaceChildren(heading, actions);
+    host.replaceChildren(heading);
     if (!ref && !draft.text) {
       host.append(
         node(
@@ -141,7 +141,7 @@ export class HQQuickCapture {
       const controls = node('div', '', 'ws-hq-capture-actions');
       const save = node(
         'button',
-        changed ? 'Discard draft' : draft.busy ? 'Saving…' : 'Save',
+        changed ? 'Discard draft' : draft.busy ? 'Saving…' : 'Save to Inbox',
         'modern-btn modern-btn-primary modern-btn-sm'
       );
       save.type = changed ? 'button' : 'submit';
@@ -174,6 +174,7 @@ export class HQQuickCapture {
       notice.setAttribute('role', draft.problem ? 'alert' : 'status');
       host.append(notice);
     }
+    host.append(actions);
     if (savedFocus) {
       const target = [...host.querySelectorAll('[data-hq-capture-control]')].find(
         el => el.dataset.hqCaptureControl === savedFocus
