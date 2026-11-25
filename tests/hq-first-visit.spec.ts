@@ -27,6 +27,8 @@ test.beforeAll(async ({ request }) => {
 for (const mode of ['details', 'map'])
   test(`one invitation on ${mode}; voluntary reopen after leaving`, async ({ page }, info) => {
     await installLocalCdn(page);
+    const reducedMotion = mode === 'map';
+    await page.emulateMedia({ reducedMotion: reducedMotion ? 'reduce' : 'no-preference' });
     if (mode === 'map') await page.setViewportSize({ width: 390, height: 844 });
     const access: string[] = [];
     page.on('request', r => {
@@ -81,14 +83,18 @@ for (const mode of ['details', 'map'])
     const button = page.getByRole('button', { name: 'New Workspace', exact: true });
     await expect(button).toBeFocused();
     await expect(button).toHaveAccessibleDescription(/review your Documents/);
+    await expect(button).toHaveCSS('animation-name', reducedMotion ? 'none' : 'hq-workspace-pulse');
+    if (!reducedMotion) await expect(button).toHaveCSS('animation-iteration-count', '3');
     await expect(page.locator('#addFolderModal')).toBeHidden();
     await expect(page.locator('#personalAssistantPanel')).toBeHidden();
     await page.screenshot({ path: info.outputPath('home-hint.png'), animations: 'disabled' });
     await button.press('Escape');
+    await expect(button).toHaveCSS('animation-name', 'none');
     await expect(page.locator('#hqWorkspaceHint')).toBeHidden();
     await page.goto(url!);
     await expect(page.locator('#hqWorkspaceHint')).toBeHidden();
     await page.goto('/');
+    await expect(button).toHaveCSS('animation-name', 'none');
     await expect(button).not.toBeFocused();
     await page.goBack();
     await expect(button).not.toBeFocused();

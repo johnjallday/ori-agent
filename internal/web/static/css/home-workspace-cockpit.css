@@ -131,6 +131,23 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
   border-left: 1px solid var(--hc-line);
 }
 
+/* Echo the focus ring without moving the hit target. The guide removes
+   its description on dismissal or activation, which also stops the pulse. */
+@media (prefers-reduced-motion: no-preference) {
+  #cockpitCreateWorkspaceBtn[aria-describedby~="hqWorkspaceInstruction"] {
+    animation: hq-workspace-pulse 1.4s ease-out 3;
+  }
+}
+
+@keyframes hq-workspace-pulse {
+  from {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--hc-signal) 65%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 9px transparent;
+  }
+}
+
 /* On a phone-width cockpit the groups wrap under each other; a divider left at
    the start of a wrapped line reads as a stray rule, so it goes. */
 @container cockpit (max-width: 560px) {
