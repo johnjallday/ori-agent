@@ -192,6 +192,22 @@ test('an old link to a ticket that is gone still lands on the board; a stale age
   });
 });
 
+test('Files is a direct destination and follows browser history without mounting Overview', () => {
+  withHarness('?mode=files', ({ harness, container }) => {
+    const view = new WorkspaceCommandView(makePage());
+    assert.equal(view.viewMode, 'files');
+    assert.match(container.innerHTML, /data-cmd-view-mode="files" aria-pressed="true"/);
+    assert.doesNotMatch(container.innerHTML, /id="workspaceNextActionRegion"/);
+    view.setCommandViewMode('map');
+    harness.fireExternalNavigation('?mode=files');
+    assert.equal(view.viewMode, 'files');
+    harness.fireExternalNavigation('?mode=map');
+    assert.equal(view.viewMode, 'map');
+    view.setCommandViewMode('files');
+    assert.match(harness.win.location.search, /mode=files/);
+  });
+});
+
 test('a details-mode boot with an empty query string never rewrites the clean URL', () => {
   // No agents at all, so reconcileAgentSelection has nothing to auto-select —
   // isolates the "nothing meaningfully changed" invariant from agent defaulting.

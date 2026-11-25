@@ -7,7 +7,7 @@
  * caller (workspace-command.js) is responsible for reading `location.search`,
  * calling `history.pushState`/`replaceState`, and re-rendering.
  *
- * Canonical query params (FR80-81): `mode` (map|details, replaces the retired
+ * Canonical query params (FR80-81): `mode` (map|files|details|dashboard, replaces the retired
  * `view` param), `panel` (`tasks` or `backlog` — PRD workspace-backlog FR59:
  * the global Workspace Map's owning-workspace deep link opens the Backlog
  * drawer this way), `task` (the selected item ID within whichever drawer
@@ -27,8 +27,13 @@
 // when the workspace has no dashboard. Tickets keeps its existing `ticket` /
 // `tickets` vocabulary, not a new mode value; workspace-ticket-url-state.js
 // bridges that owner's presentation into the shared history.
-export const MODE = Object.freeze({ MAP: 'map', DETAILS: 'details', DASHBOARD: 'dashboard' });
-const VALID_MODES = new Set([MODE.MAP, MODE.DETAILS, MODE.DASHBOARD]);
+export const MODE = Object.freeze({
+  MAP: 'map',
+  FILES: 'files',
+  DETAILS: 'details',
+  DASHBOARD: 'dashboard'
+});
+const VALID_MODES = new Set(Object.values(MODE));
 // `settings` opens the Manager Settings surface. It is here because pages link
 // to it (setup receipts, the Home's knowledge rows, the folder capability
 // actions): a link that gets sanitized away lands the user on the workspace

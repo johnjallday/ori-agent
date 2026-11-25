@@ -4201,7 +4201,7 @@ test('the dashboard mode renders no body inside the rebuilt command container', 
   const source = readFileSync(new URL('./workspace-command.js', import.meta.url), 'utf8');
   assert.match(
     source,
-    /this\.viewMode === 'tickets' \|\| this\.viewMode === 'dashboard'\s*\?\s*''/,
+    /\['tickets', 'files', 'dashboard'\]\.includes\(this\.viewMode\)\s*\?\s*''/,
     'the dashboard mode must render an empty body like Tickets'
   );
   assert.equal(commandView.viewMode, 'dashboard');
@@ -9284,8 +9284,8 @@ test('a nested group gets the same link one level up', () => {
   assert.match(nav, /Group: <span class="ws-cmd-nav-parent-name">Label Releases</);
 });
 
-test('Details, Map, Tickets, and Dashboard share the same group link', () => {
-  for (const viewMode of ['details', 'map', 'tickets', 'dashboard']) {
+test('Overview, Map, Files, Tickets, and Dashboard share the same group link', () => {
+  for (const viewMode of ['details', 'map', 'files', 'tickets', 'dashboard']) {
     const nav = withSurfaceHost([{ key: DASHBOARD_SURFACE_KEY, available: true }], () =>
       parentNavOf(parentNavView(STUDIO, { viewMode }))
     );

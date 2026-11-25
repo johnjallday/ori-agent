@@ -10,8 +10,8 @@ import { installLocalCdn } from './helpers/offline-cdn';
  *
  * The workspace is real. Two reads are stubbed so the widest header is
  * certain, not timing-dependent:
- * - the surface catalog, to add the Dashboard tab (five views: Details, Map,
- *   Tickets, Dashboard, Plans), since a dashboard otherwise needs a file in the
+ * - the surface catalog, to add the Dashboard tab (five views: Overview, Map,
+ *   Files, Tickets, Dashboard), since a dashboard otherwise needs a file in the
  *   workspace's folder on the server's disk;
  * - the continuity status, as "ready", so the chip reads "Ready to move as of
  *   <date, time>". A new workspace says "Saving latest work" until Ori prepares
@@ -151,7 +151,13 @@ for (const width of [375, 320]) {
     expect(header.nameWidth, 'the name has its own line').toBeGreaterThanOrEqual(
       header.titleWidth - 0.5
     );
-    expect(header.tabs.map(tab => tab.text)).toEqual(['Overview', 'Map', 'Tickets', 'Dashboard']);
+    expect(header.tabs.map(tab => tab.text)).toEqual([
+      'Overview',
+      'Map',
+      'Files',
+      'Tickets',
+      'Dashboard'
+    ]);
     for (const tab of header.tabs) expect(tab.fits, `${tab.text} shows its whole word`).toBe(true);
     // There is no More views menu: Plans was its only item, and the workspace
     // canvas is retired.

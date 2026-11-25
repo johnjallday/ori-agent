@@ -109,6 +109,7 @@ import {
   topLevelIds
 } from './workspace-bulk-actions.js';
 import { OperationsMapActivity } from './operations-map-activity.js';
+import { WorkspaceFilesView } from './workspace-files-view.js';
 import { mountDailyBrief } from './home-daily-brief.js';
 import { openParcelByRef } from './parcel-open.js';
 import {
@@ -217,7 +218,7 @@ const EMPTY_ROSTER_LINE = 'Hire someone for this workspace.';
 // has a user-authored dashboard. It stays in this list so a saved or shared URL
 // naming it survives sanitization; hasCustomDashboard() gates the tab and
 // resolveViewMode() falls back when the dashboard is gone.
-const COMMAND_VIEW_MODES = ['details', 'map', 'tickets', 'dashboard'];
+const COMMAND_VIEW_MODES = ['details', 'map', 'files', 'tickets', 'dashboard'];
 const WORKSPACE_VIEW_MODE_EVENT = 'ori:workspace-view-mode-changed';
 
 // The surface key every user dashboard resolves under. Identical for every
@@ -586,7 +587,8 @@ export class WorkspaceCommandView {
   }
 
   persistCommandViewMode(mode) {
-    if (typeof localStorage === 'undefined') return;
+    // The reader is a destination within this visit, not a new landing preference.
+    if (mode === 'files' || typeof localStorage === 'undefined') return;
     try {
       localStorage.setItem(VIEW_MODE_STORAGE_KEY, this.normalizeCommandViewMode(mode));
     } catch (_error) {
@@ -1371,7 +1373,7 @@ export class WorkspaceCommandView {
       // 'details' is the historical default; omit it so a details-mode URL
       // stays clean (no ?mode=details noise) and only an explicit `map` or
       // `dashboard` needs to survive reload/sharing.
-      mode: this.viewMode === 'map' || this.viewMode === 'dashboard' ? this.viewMode : null,
+      mode: ['map', 'files', 'dashboard'].includes(this.viewMode) ? this.viewMode : null,
       // `settings` is last: it names an open modal, so a drawer underneath it
       // still owns the URL. It is reported at all so that the Plans page's
       // "Open Workspace Settings" link survives a reload instead of
@@ -3173,18 +3175,18 @@ export class WorkspaceCommandView {
     // and config panels have to be relocated in and out. Keeping Tickets
     // outside avoids that dance entirely, and with it the orphaning risk of
     // forgetting to restore a moved node.
-    const body =
-      this.viewMode === 'tickets' || this.viewMode === 'dashboard'
-        ? ''
-        : this.viewMode === 'map'
-          ? this.renderOperationsMap() + this.renderFollowUpsHost()
-          : this.isPersonalHQ()
-            ? this.renderHQDetails()
-            : overviewHTML(this);
+    const body = ['tickets', 'files', 'dashboard'].includes(this.viewMode)
+      ? ''
+      : this.viewMode === 'map'
+        ? this.renderOperationsMap() + this.renderFollowUpsHost()
+        : this.isPersonalHQ()
+          ? this.renderHQDetails()
+          : overviewHTML(this);
 
     if (this.container.classList) {
       this.container.classList.toggle('is-settled', this.detailsViewSettled());
       this.container.classList.toggle('is-tickets', this.viewMode === 'tickets');
+      this.container.classList.toggle('is-files', this.viewMode === 'files');
     }
 
     // The follow-ups panel may be mounted inside this container; take it home
@@ -3235,7 +3237,7 @@ export class WorkspaceCommandView {
     } else {
       // Leaving Map mode takes the map's listeners and timers with it (FR-6).
       this.unmountDetachmentMap();
-      if (this.viewMode !== 'tickets' && this.viewMode !== 'dashboard') {
+      if (this.viewMode === 'details') {
         this.bindGarrison();
         this.bindRail();
       }
@@ -3248,6 +3250,7 @@ export class WorkspaceCommandView {
     this.mountRoleRoster();
     this.syncTicketsView();
     this.syncDashboardView();
+    this.syncFilesView();
     this.mountCommandTagInput();
     this.syncMissionPanel();
     this.syncSharedSurfaces();
@@ -4042,6 +4045,23 @@ export class WorkspaceCommandView {
     Promise.resolve(tickets.load()).catch(() => {
       /* the module renders its own error state */
     });
+  }
+
+  syncFilesView() {
+    const host = typeof document !== 'undefined' && document.getElementById('workspace-files-view');
+    if (!host) return;
+    const root = this.page?.workspace;
+    if (this.filesView && this.filesView.root.id !== root?.id) {
+      this.filesView.leave();
+      this.filesView = null;
+    }
+    host.hidden = this.viewMode !== 'files' || !root?.id;
+    if (host.hidden) {
+      this.filesView?.leave();
+      return;
+    }
+    this.filesView ??= new WorkspaceFilesView(host, root);
+    this.filesView.enter(root);
   }
 
   /**
