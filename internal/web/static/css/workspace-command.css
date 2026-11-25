@@ -10171,6 +10171,17 @@ button.ws-cmd-rpg-class-card:focus-visible {
   border-radius: 8px;
   overflow-wrap: anywhere;
 }
+.ws-hq-main .ws-hq-tools-receipt[data-guided-receipt] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+.ws-hq-tools-receipt button {
+  margin-inline-start: auto;
+}
 .ws-hq-main [data-guided-receipt] p {
   margin: 4px 0;
 }

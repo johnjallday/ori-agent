@@ -3676,7 +3676,7 @@ export class WorkspaceCommandView {
       case DAILY_BRIEF_STATION:
         return { title: 'Daily Brief', addLabel: '' };
       case MEMORY_STATION:
-        return { title: 'Memory', addLabel: '' };
+        return { title: HQ_LABELS.memory, addLabel: '' };
       case 'agents':
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
@@ -9513,7 +9513,7 @@ export class WorkspaceCommandView {
     if (!data.workspaceID || data.status === 'absent') return null;
     return {
       key: MEMORY_STATION,
-      label: 'Memory',
+      label: HQ_LABELS.memory,
       icon: 'bi-journal-bookmark',
       visualVariant: 'archive',
       state: () => this.memoryStationState(),
@@ -15180,8 +15180,8 @@ export class WorkspaceCommandView {
       this.renderHQGitHubHost() +
       '<div class="ws-cmd-layout is-hq">' +
       '<main class="ws-cmd-main ws-hq-main">' +
-      (this.firstVisit?.receiptHTML?.() || '') +
       this.hqNeedsYouHTML() +
+      (this.firstVisit?.receiptHTML?.() || '') +
       (this.firstVisit?.view().layout.notes === false ? '' : this.renderHQNotesHost()) +
       this.renderFollowUpsHost() +
       this.hqStationsGridHTML() +

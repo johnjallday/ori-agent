@@ -69,6 +69,17 @@ export function receiptHint(location, hq) {
     return null;
   }
 }
+// Dismiss only this tab's saved-tools receipt. A newer journey owns its own hint.
+export function dismissToolsReceipt(hq, attempt) {
+  if (!currentHQAttempt(hq, 'apps', attempt)?.returned) return false;
+  try {
+    sessionStorage.removeItem(KEY);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 export function markReturned(hint) {
   const current = currentHQAttempt(hint.hq, hint.path, hint.attempt);
   if (!current || current.returned) return;

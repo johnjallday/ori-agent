@@ -172,7 +172,7 @@ test.describe('Overview, desktop', () => {
     await expect(mark(page, 'memory')).toHaveCount(0);
     await expect(part(page, 'memory'), 'its tip is still there').toHaveCount(1);
     await part(page, 'memory').hover();
-    await expect(tip(page)).toContainText('What agents here remember between conversations.');
+    await expect(tip(page)).toContainText('Decisions, preferences, and rules agents should follow in this workspace.');
     await expect(mark(page, 'memory'), 'and does not bring the mark back').toHaveCount(0);
   });
 

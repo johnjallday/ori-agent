@@ -6,13 +6,15 @@
 // every badge row under plain Node, and the panel manager and the run page
 // read the same rules.
 
+import { HQ_LABELS } from './hq-labels.js';
+
 export const MEMORY_STATION = 'memory';
 
 // The Memory panel's one-liner under its title (Issue 776 FR3). The pointer to
 // Notes only makes sense where the Notes station is, the Personal HQ.
-export const MEMORY_ONE_LINER_BASE = 'What agents in this workspace are shown.';
+export const MEMORY_ONE_LINER_BASE = HQ_LABELS.tipMemory;
 export const MEMORY_ONE_LINER =
-  MEMORY_ONE_LINER_BASE + ' Your notes folder is separate: see Notes.';
+  MEMORY_ONE_LINER_BASE + ' Saving something in My Notes does not add it to agent memory.';
 
 export function memoryOneLiner({ personalHQ = false } = {}) {
   return personalHQ ? MEMORY_ONE_LINER : MEMORY_ONE_LINER_BASE;
@@ -136,7 +138,7 @@ function entriesState(summary) {
 export function memoryStationState({ status, summary, baseline, reviewCount, personalHQ } = {}) {
   let state;
   if (status === 'error') {
-    state = { value: 'Memory', description: 'status unavailable', tone: 'degraded' };
+    state = { value: HQ_LABELS.memory, description: 'status unavailable', tone: 'degraded' };
   } else if (status !== 'ready' || !summary) {
     state = { value: '—', description: 'loading memory', tone: 'loading' };
   } else if (summary.overBudget) {

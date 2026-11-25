@@ -32,7 +32,7 @@ test('the map carries every plain name the HQ page needs', () => {
     whatNeedsYou: 'What needs you',
     email: 'Email',
     calendar: 'Calendar',
-    memory: 'Memory',
+    memory: 'Agent memory',
     otherWorkspaces: 'Other workspaces',
     todaysBrief: "Today's brief",
     waitingOnYou: 'Waiting on you',
