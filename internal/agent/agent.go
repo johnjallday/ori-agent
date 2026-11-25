@@ -16,6 +16,24 @@ type AssistantSetupProvenance struct {
 	ConfigDigest string `json:"config_digest"`
 }
 
+// WorkspaceManagerProvenance marks a root agent definition that one workspace's
+// create operation made to be that workspace's manager. It binds the profile to
+// the workspace by ID, so the binding survives a rename of either the agent or
+// the workspace, and a name match can never transfer it.
+//
+// It is creation provenance only. It grants no privilege: protection guards,
+// chat preflight and confirmation rules never consult it. It decides exactly
+// two things — which workspace may delete the profile when that workspace is
+// removed, and which workspace chat may address it by name.
+type WorkspaceManagerProvenance struct {
+	WorkspaceID string `json:"workspace_id"`
+}
+
+// ManagesWorkspace reports whether the provenance names workspaceID.
+func (p *WorkspaceManagerProvenance) ManagesWorkspace(workspaceID string) bool {
+	return p != nil && p.WorkspaceID != "" && p.WorkspaceID == workspaceID
+}
+
 // Agent represents a configured AI agent with its settings and state
 type Agent struct {
 	Role         types.AgentRole                          `json:"role"`         // Agent role for orchestration (orchestrator, researcher, analyzer, etc.)
@@ -63,6 +81,10 @@ type Agent struct {
 	// AssistantSetup is creation provenance, not mutable configuration or an
 	// authorization source. Reused agents never receive this marker.
 	AssistantSetup *AssistantSetupProvenance `json:"assistant_setup,omitempty"`
+
+	// WorkspaceManager is creation provenance for a workspace's own manager;
+	// see WorkspaceManagerProvenance. Reused or assigned agents never get it.
+	WorkspaceManager *WorkspaceManagerProvenance `json:"workspace_manager,omitempty"`
 }
 
 // InitializeDefaultToolbox safely initializes the Default Toolbox if nil.

@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 import { readFileSync, writeFileSync, mkdtempSync, utimesSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { ensureLeadAgent, LEAD_AGENT } from './helpers/lead-agent';
 
 // Real host, sessions, review and chat. Only Ollama is a deterministic fixture.
 // ./scripts/e2e-goal-suggestions.sh --lead-welcome
@@ -30,6 +31,7 @@ test.beforeAll(async ({ request }) => {
       data: { provider: 'ollama', model: 'fixture-model:latest' }
     })
   );
+  await ensureLeadAgent(request, { provider: 'ollama', model: 'fixture-model:latest' });
 });
 
 test('creation saves a quiet welcome before entry, then exposes its first assessment once', async ({
@@ -61,7 +63,7 @@ test('creation saves a quiet welcome before entry, then exposes its first assess
       data: {
         name: 'Newsletter Desk',
         mission: 'Publish the newsletter after editor approval.',
-        entry_agent_name: 'Ask Ori'
+        entry_agent_name: LEAD_AGENT
       }
     })
   );
@@ -82,9 +84,9 @@ test('creation saves a quiet welcome before entry, then exposes its first assess
   await page.screenshot({ path: testInfo.outputPath('quiet-unread-launcher.png'), fullPage: true });
   await page.locator('#personalAssistantLauncher').click();
   await expect(panel).toBeVisible();
-  await expect(page.locator('#personalAssistantPanelTitle')).toHaveText('Ask Ori');
+  await expect(page.locator('#personalAssistantPanelTitle')).toHaveText(LEAD_AGENT);
   const messages = page.locator('#homeAssistantConversation');
-  await expect(messages).toContainText('Hi, I’m Ask Ori');
+  await expect(messages).toContainText(`Hi, I’m ${LEAD_AGENT}`);
   await expect(page.locator('#personalAssistantWorkspaceContext')).toHaveText(
     'Context · Newsletter Desk'
   );
@@ -157,11 +159,11 @@ test('saved filing updates navigate independently and retain remaining review af
 }, testInfo) => {
   const created = await ok(
     await request.post('/api/workspaces', {
-      data: { name: 'Curator Choice Desk', entry_agent_name: 'Ask Ori' }
+      data: { name: 'Curator Choice Desk', entry_agent_name: LEAD_AGENT }
     })
   );
   const { id, folder_slug: slug, agent_instances: instances } = created.folder;
-  const instance = instances.find((item: { name: string }) => item.name === 'Ask Ori');
+  const instance = instances.find((item: { name: string }) => item.name === LEAD_AGENT);
   expect(instance).toBeTruthy();
   await ok(
     await request.post(`/api/workspaces/${id}/capabilities/file-janitor/install`, {
@@ -227,7 +229,7 @@ test('saved filing updates navigate independently and retain remaining review af
   );
   expect(automaticActions).toBe(0);
   await page.locator('[data-fj-console-close]').click();
-  await card.getByRole('button', { name: /Ask Ask Ori/ }).click();
+  await card.getByRole('button', { name: new RegExp(`Ask ${LEAD_AGENT}`) }).click();
   await expect(page.locator('#personalAssistantPanel')).toBeVisible();
   const messages = page.locator('#homeAssistantConversation');
   await expect(messages).toContainText('2 files ready for review');
@@ -356,7 +358,7 @@ test('a draft in another conversation is preserved while a quiet welcome waits',
   const before = modelCalls().length;
   const created = await ok(
     await request.post('/api/workspaces', {
-      data: { name: 'Unreviewed Desk', entry_agent_name: 'Ask Ori' }
+      data: { name: 'Unreviewed Desk', entry_agent_name: LEAD_AGENT }
     })
   );
   const { id, folder_slug: slug } = created.folder;
@@ -370,7 +372,7 @@ test('a draft in another conversation is preserved while a quiet welcome waits',
     .toBe(1);
   const draftSession = await ok(
     await request.post('/api/sessions', {
-      data: { title: 'Draft discussion', folder_id: id, agent_name: 'Ask Ori' }
+      data: { title: 'Draft discussion', folder_id: id, agent_name: LEAD_AGENT }
     })
   );
   await page.addInitScript(
@@ -385,7 +387,7 @@ test('a draft in another conversation is preserved while a quiet welcome waits',
     if (req.url().endsWith('/lead-conversation/open')) deliveries++;
   });
   await page.goto(`/workspaces/${slug}`);
-  await expect(page.locator('#personalAssistantLauncher')).toContainText('Ask Ori');
+  await expect(page.locator('#personalAssistantLauncher')).toContainText(LEAD_AGENT);
   await page.waitForTimeout(5500); // one delivery polling interval: a negative assertion
   expect(deliveries).toBe(0);
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -17,11 +16,14 @@ func TestStaffingSnapshotCanonicalReadOnlySources(t *testing.T) {
 	c, f, _ := compositeWithWorkspaces(t,
 		workspaceCopy("ws-1", "Earlier", "Private", "private canary"),
 		workspaceCopy("ws-2", "Studio", "Scout", "customized canary"))
-	for _, name := range []string{"Scout", systemassistant.CanonicalName} {
-		if err := c.CreateAgent(name, &CreateAgentConfig{SystemPrompt: "secret canary"}); err != nil {
-			t.Fatal(err)
-		}
+	if err := c.CreateAgent("Scout", &CreateAgentConfig{SystemPrompt: "secret canary"}); err != nil {
+		t.Fatal(err)
 	}
+	// The retired assistant's record is never a staffing candidate.
+	if err := c.system.CreateAgent("Ask Ori", &CreateAgentConfig{SystemPrompt: "secret canary"}); err != nil {
+		t.Fatal(err)
+	}
+	markRetiredAssistant(t, c.system, "Ask Ori")
 	if err := c.UpdateAgent("Scout", func(a *agent.Agent) error {
 		a.Metadata = &types.AgentMetadata{Description: "Coordinates music portfolios"}
 		return nil

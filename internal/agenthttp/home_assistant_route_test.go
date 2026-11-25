@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/store"
@@ -736,14 +737,16 @@ func TestHomeAssistantRouteHandler_OpenDomain_NotClassifiedAsAppLaunch(t *testin
 	}
 }
 
-func TestHomeAssistantRouteHandler_GeneralPrompt_FallsBackToSystemAssistant(t *testing.T) {
+// A general request that no specialist matches has no hidden default: the
+// router never falls back to an agent by name — not even a user agent called
+// "Ask Ori" — and never creates one.
+func TestHomeAssistantRouteHandler_GeneralPrompt_HasNoHiddenDefaultAgent(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	handler := NewHomeAssistantRouteHandler(st)
-
-	// Explicitly create the system assistant for fallback tests
-	if err := ensureSystemAssistantAgent(st); err != nil {
-		t.Fatalf("failed to ensure system assistant: %v", err)
+	if err := st.CreateAgent("Ask Ori", &store.CreateAgentConfig{Model: "gpt-5-nano", LLMProvider: "openai"}); err != nil {
+		t.Fatalf("create a user agent named Ask Ori: %v", err)
 	}
+	before := len(st.ListAgents())
+	handler := NewHomeAssistantRouteHandler(st)
 
 	rr := postRouteRequest(t, handler, map[string]string{"prompt": "Help me organize my thoughts for tomorrow"})
 	if rr.Code != http.StatusOK {
@@ -758,28 +761,16 @@ func TestHomeAssistantRouteHandler_GeneralPrompt_FallsBackToSystemAssistant(t *t
 	if resp.Intent != "general_task" {
 		t.Fatalf("expected intent general_task, got %q", resp.Intent)
 	}
-	if resp.RequiresCreation {
-		t.Fatalf("expected requires_creation false for system assistant fallback")
+	if resp.MatchedAgent != "" {
+		t.Fatalf("a general request matched %q; want no default agent", resp.MatchedAgent)
 	}
-	if resp.MatchedAgent != systemAssistantAgentName {
-		t.Fatalf("expected matched agent %q, got %q", systemAssistantAgentName, resp.MatchedAgent)
+	for _, reason := range resp.Reasons {
+		if strings.Contains(reason, "system assistant") {
+			t.Fatalf("unexpected system assistant reason %q", reason)
+		}
 	}
-	if resp.Score < 3 {
-		t.Fatalf("expected score >= 3, got %d", resp.Score)
-	}
-	if len(resp.Reasons) == 0 || resp.Reasons[0] != "fallback to system assistant" {
-		t.Fatalf("expected fallback reason, got %v", resp.Reasons)
-	}
-
-	ag, ok := st.GetAgent(systemAssistantAgentName)
-	if !ok || ag == nil {
-		t.Fatalf("expected system assistant to be created in store")
-	}
-	if ag.Metadata == nil {
-		t.Fatalf("expected metadata for system assistant")
-	}
-	if !containsTag(ag.Metadata.Tags, "system") || !containsTag(ag.Metadata.Tags, "orchestrator") {
-		t.Fatalf("expected system/orchestrator tags, got %v", ag.Metadata.Tags)
+	if after := len(st.ListAgents()); after != before {
+		t.Fatalf("routing created agents: %d -> %d", before, after)
 	}
 }
 
@@ -927,72 +918,33 @@ func TestHomeAssistantRouteHandler_WorkspaceCreatePrompt_UsesWorkspaceIntentAndM
 	}
 }
 
-func TestHomeAssistantRouteHandler_UtilityPrompt_FallsBackToSystemAssistant(t *testing.T) {
-	st := newHomeRouteTestStore(t)
-	handler := NewHomeAssistantRouteHandler(st)
+// Utility prompts keep their intent, but no retired assistant answers them by
+// default; only an agent that actually scores for the intent matches.
+func TestHomeAssistantRouteHandler_UtilityPrompts_HaveNoAssistantFallback(t *testing.T) {
+	for _, prompt := range []string{"What time is it in Tokyo?", "air quality in seoul today"} {
+		t.Run(prompt, func(t *testing.T) {
+			st := newHomeRouteTestStore(t)
+			handler := NewHomeAssistantRouteHandler(st)
 
-	// Explicitly create the system assistant for utility tests
-	if err := ensureSystemAssistantAgent(st); err != nil {
-		t.Fatalf("failed to ensure system assistant: %v", err)
-	}
+			rr := postRouteRequest(t, handler, map[string]string{"prompt": prompt})
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
+			}
 
-	rr := postRouteRequest(t, handler, map[string]string{"prompt": "What time is it in Tokyo?"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
-	}
-
-	var resp HomeAssistantRouteResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if resp.Intent != "utility_direct" {
-		t.Fatalf("expected intent utility_direct, got %q", resp.Intent)
-	}
-	if resp.RequiresCreation {
-		t.Fatalf("expected requires_creation false for utility fallback")
-	}
-	if resp.MatchedAgent != systemAssistantAgentName {
-		t.Fatalf("expected matched agent %q, got %q", systemAssistantAgentName, resp.MatchedAgent)
-	}
-	if resp.Score < 4 {
-		t.Fatalf("expected score >= 4, got %d", resp.Score)
-	}
-	if len(resp.Reasons) == 0 {
-		t.Fatalf("expected non-empty reasons for utility match")
-	}
-	if resp.WorkspaceRecommended {
-		t.Fatalf("expected workspace recommendation to be false for utility prompt")
-	}
-}
-
-func TestHomeAssistantRouteHandler_AirQualityPrompt_UsesUtilityIntent(t *testing.T) {
-	st := newHomeRouteTestStore(t)
-	handler := NewHomeAssistantRouteHandler(st)
-
-	// Explicitly create the system assistant for utility tests
-	if err := ensureSystemAssistantAgent(st); err != nil {
-		t.Fatalf("failed to ensure system assistant: %v", err)
-	}
-
-	rr := postRouteRequest(t, handler, map[string]string{"prompt": "air quality in seoul today"})
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
-	}
-
-	var resp HomeAssistantRouteResponse
-	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if resp.Intent != "utility_direct" {
-		t.Fatalf("expected intent utility_direct, got %q", resp.Intent)
-	}
-	if resp.RequiresCreation {
-		t.Fatalf("expected requires_creation false for utility fallback")
-	}
-	if resp.MatchedAgent != systemAssistantAgentName {
-		t.Fatalf("expected matched agent %q, got %q", systemAssistantAgentName, resp.MatchedAgent)
+			var resp HomeAssistantRouteResponse
+			if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+				t.Fatalf("failed to decode response: %v", err)
+			}
+			if resp.Intent != "utility_direct" {
+				t.Fatalf("expected intent utility_direct, got %q", resp.Intent)
+			}
+			if resp.MatchedAgent == "Ask Ori" || resp.MatchedAgent == "Ori" {
+				t.Fatalf("a utility prompt fell back to the retired assistant %q", resp.MatchedAgent)
+			}
+			if resp.WorkspaceRecommended {
+				t.Fatalf("expected workspace recommendation to be false for utility prompt")
+			}
+		})
 	}
 }
 
@@ -1014,7 +966,7 @@ func TestHomeAssistantRouteHandler_DoesNotCreateSystemAssistantFilesByDefault(t 
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
 	}
 
-	agentSettingsPath := filepath.Join(tmpDir, "agents", systemAssistantAgentName, "agent_settings.json")
+	agentSettingsPath := filepath.Join(tmpDir, "agents", "Ask Ori", "agent_settings.json")
 	if _, err := os.Stat(agentSettingsPath); !os.IsNotExist(err) {
 		t.Fatalf("expected system assistant file at %s NOT to exist, but it does", agentSettingsPath)
 	}
@@ -1022,7 +974,7 @@ func TestHomeAssistantRouteHandler_DoesNotCreateSystemAssistantFilesByDefault(t 
 
 func TestHomeAssistantRouteHandler_DoesNotMigrateLegacyAssistantNameByRoute(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	if err := st.CreateAgent(systemAssistantLegacyNames[0], &store.CreateAgentConfig{
+	if err := st.CreateAgent("Workspace Manager", &store.CreateAgentConfig{
 		Model:       "gpt-5-nano",
 		LLMProvider: "openai",
 	}); err != nil {
@@ -1035,10 +987,10 @@ func TestHomeAssistantRouteHandler_DoesNotMigrateLegacyAssistantNameByRoute(t *t
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rr.Code, rr.Body.String())
 	}
 
-	if _, ok := st.GetAgent(systemAssistantAgentName); ok {
-		t.Fatalf("expected assistant %q NOT to exist yet", systemAssistantAgentName)
+	if _, ok := st.GetAgent("Ask Ori"); ok {
+		t.Fatal("routing must never create an Ask Ori record")
 	}
-	if _, ok := st.GetAgent(systemAssistantLegacyNames[0]); !ok {
-		t.Fatalf("expected legacy assistant %q to still exist", systemAssistantLegacyNames[0])
+	if _, ok := st.GetAgent("Workspace Manager"); !ok {
+		t.Fatalf("expected legacy assistant %q to still exist", "Workspace Manager")
 	}
 }

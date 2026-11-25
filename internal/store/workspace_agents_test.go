@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -70,7 +69,7 @@ func TestRosterIsTheUnionWithEachNameOnce(t *testing.T) {
 		workspaceCopy("ws-b", "Studio", "scout", "studio's scout"), // a customisation, other case
 		workspaceCopy("ws-b", "Studio", "Stranger", "only in a workspace"),
 	)
-	if err := c.CreateAgent(systemassistant.CanonicalName, &CreateAgentConfig{}); err != nil {
+	if err := c.system.CreateAgent("Data Dir Agent", &CreateAgentConfig{}); err != nil {
 		t.Fatalf("assistant: %v", err)
 	}
 	if err := c.CreateAgent("Scout", &CreateAgentConfig{SystemPrompt: "my scout"}); err != nil {
@@ -79,7 +78,7 @@ func TestRosterIsTheUnionWithEachNameOnce(t *testing.T) {
 
 	names := c.ListAgents()
 	if len(names) != 3 {
-		t.Fatalf("ListAgents = %v, want the assistant, Scout, and Stranger once each", names)
+		t.Fatalf("ListAgents = %v, want the data-dir agent, Scout, and Stranger once each", names)
 	}
 	got, ok := c.GetAgent("Scout")
 	if !ok || got.Settings.SystemPrompt != "my scout" {
@@ -152,11 +151,12 @@ func TestOriginReportsCustomisationsOfARootAgent(t *testing.T) {
 	if origin.CustomisedIn[0].Name != "Studio" || origin.CustomisedIn[1].Name != "Garage" {
 		t.Errorf("CustomisedIn = %+v", origin.CustomisedIn)
 	}
-	if err := c.CreateAgent(systemassistant.CanonicalName, &CreateAgentConfig{}); err != nil {
-		t.Fatalf("assistant: %v", err)
+	// A person's own "Ask Ori" is theirs, not a system record.
+	if err := c.CreateAgent("Ask Ori", &CreateAgentConfig{}); err != nil {
+		t.Fatalf("Ask Ori: %v", err)
 	}
-	if origin, _ := c.AgentOrigin(systemassistant.CanonicalName); origin.Source != SourceSystem {
-		t.Errorf("the assistant's origin = %+v, want system", origin)
+	if origin, _ := c.AgentOrigin("Ask Ori"); origin.Source == SourceSystem {
+		t.Errorf("a user's Ask Ori origin = %+v, want not system", origin)
 	}
 }
 

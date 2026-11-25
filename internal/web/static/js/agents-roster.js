@@ -2366,20 +2366,12 @@
     els.purpose.title = 'What this role does. A description of your own replaces it.';
   }
 
-  // The system assistant is reached from Home, not by being placed in a
-  // workspace, and it wears Ori's own reserved identity — so neither "add it to
-  // a workspace" nor "give it a character" is advice that applies to it.
-  function isSystemAssistant(agent) {
-    var name = String((agent && agent.name) || '')
-      .trim()
-      .toLowerCase();
-    return name === 'ask ori' || name === 'workspace manager' || name === 'ori';
-  }
-
   // Membership is a list-response fact, not inferred from usage, XP, status,
   // or a per-card request. Missing references are not an unassigned agent.
+  // No agent is singled out by its name: one a person called "Ask Ori" is an
+  // ordinary agent like any other.
   function workspaceActionView(agent) {
-    if (isPermanent(agent) || isSystemAssistant(agent)) return { kind: 'hidden' };
+    if (isPermanent(agent)) return { kind: 'hidden' };
     if (isUnreadable(agent))
       return {
         kind: 'unavailable',
@@ -5230,10 +5222,9 @@
   // saved colour, character, or upload says the user has been to the editor and
   // decided — and Generated is a real choice (FR-5), so those are left alone
   // even though they render a monogram too. Built-ins have no editable
-  // definition, and the system assistant is Ori — whose identity is reserved,
-  // not picked from the working cast — so neither is ever offered one.
+  // definition, so they are never offered one.
   function isFaceless(agent) {
-    if (!agent || isPermanent(agent) || isSystemAssistant(agent)) return false;
+    if (!agent || isPermanent(agent)) return false;
     // A workspace's own agent is edited in that workspace, not from here.
     if (isWorkspaceOwned(agent)) return false;
     var appearance = normalizeAppearance(agent.appearance);
@@ -5597,15 +5588,14 @@
     return source === 'cli' || role === 'cli_agent';
   }
 
+  // Built-in CLI agents are permanent. Nothing is permanent because of its
+  // name: Ori's retired assistant is not listed at all, and an agent a person
+  // named after it is theirs to edit or delete.
   function isPermanent(agent) {
     if (!agent) return false;
     var source = String(agent.source || '').toLowerCase();
     var role = String(agent.role || '').toLowerCase();
-    if (source === 'cli' || role === 'cli_agent') return true;
-    var name = String(agent.name || '')
-      .trim()
-      .toLowerCase();
-    return name === 'workspace manager' || name === 'ori' || name === '__assistant__';
+    return source === 'cli' || role === 'cli_agent';
   }
 
   function healthKind(agent) {

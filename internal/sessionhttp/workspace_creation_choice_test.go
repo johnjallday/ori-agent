@@ -16,7 +16,7 @@ func TestWorkspaceCreationOperation_OnlyOneAgentlessResultForOffer(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := map[string]any{"entry_point": "assistant_workspace_only", "hire_proposal_id": p.ID, "proposal_conversation_id": "thread", "name": p.WorkspaceName, "mission": p.Brief, "blank": true, "create_template_agents": false, "role_staffing": []string{}, "team_intent": map[string]any{"version": 1, "mode": "agentless", "plan_revision": h.buildTemplateAgentPlan(blankWorkspaceTemplate()).Revision}}
+	body := map[string]any{"entry_point": "assistant_workspace_only", "hire_proposal_id": p.ID, "proposal_conversation_id": "thread", "name": p.WorkspaceName, "mission": p.Brief, "blank": true, "create_template_agents": false, "role_staffing": []string{}, "team_intent": map[string]any{"version": 1, "mode": "agentless", "plan_revision": h.buildTemplateAgentPlan(h.blankWorkspaceTemplate(p.WorkspaceName)).Revision}}
 	first, digest := reviewCreationOperation(t, h, body)
 	body["name"] = "Other tab"
 	second, other := reviewCreationOperation(t, h, body)

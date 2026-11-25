@@ -98,8 +98,9 @@ agents. Keep binaries, coverage and workspace state out of commits.
 
 User agents live at `<Workspace Directory>/Agents/<Name>/agent_settings.json`
 (definition only), alongside images, skills and tool settings. Runtime state is
-in `<data dir>/agent_state/`; the built-in assistant uses the data directory's
-`agents.json` and `agents/`. `AGENT_STORE_PATH` restores the old data-dir store.
+in `<data dir>/agent_state/`; the data directory's `agents.json` and `agents/`
+hold only older copies (Ori's retired assistant record stays there, hidden).
+`AGENT_STORE_PATH` restores the old data-dir store.
 Because the workspace defaults to `$HOME/Ori Workspaces`, a smoke server without
 a HOME override reads/writes the real Agents folder. Use `wt demo` or
 `./scripts/demo-server.sh`: both sandbox HOME/data and suppress browser opening

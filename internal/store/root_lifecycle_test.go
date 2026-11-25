@@ -5,14 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 )
 
-func TestSwitchingRootShowsTheNewRootsAgentsAndKeepsTheAssistant(t *testing.T) {
+func TestSwitchingRootShowsTheNewRootsAgentsAndKeepsDataDirAgents(t *testing.T) {
 	f := newCompositeFixture(t)
 	c := f.open(t)
-	if err := c.CreateAgent(systemassistant.CanonicalName, &CreateAgentConfig{}); err != nil {
+	if err := c.system.CreateAgent("Data Dir Agent", &CreateAgentConfig{}); err != nil {
 		t.Fatalf("assistant: %v", err)
 	}
 	if err := c.CreateAgent("FirstRootAgent", &CreateAgentConfig{}); err != nil {
@@ -30,7 +28,7 @@ func TestSwitchingRootShowsTheNewRootsAgentsAndKeepsTheAssistant(t *testing.T) {
 
 	c.SetRoot(second)
 	names := strings.Join(c.ListAgents(), ",")
-	if names != systemassistant.CanonicalName+",SecondRootAgent" {
+	if names != "Data Dir Agent,SecondRootAgent" {
 		t.Fatalf("after switching, ListAgents = %s", names)
 	}
 	if _, err := os.Stat(filepath.Join(f.root, "Agents", "FirstRootAgent")); err != nil {

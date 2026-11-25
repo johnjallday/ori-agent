@@ -55,11 +55,11 @@ test('existing-folder creation, scoped rows, duplicate recovery, relink and side
   await page.locator('#workspaceAnchorPath').blur();
   await expect(page.locator('#workspaceAnchorStatus')).toBeHidden();
   await page.locator('#wizardNextBtn').click();
-  await page
-    .locator('#workspaceRoleRoster')
-    .getByRole('button', { name: 'Assign an agent to Ask Ori', exact: true })
-    .click();
-  await page.getByRole('button', { name: 'Assign Anchor Reader to Ask Ori', exact: true }).click();
+  // Blank starts with its own manager; replace it with the saved agent.
+  const roster = page.locator('#workspaceRoleRoster');
+  await roster.getByRole('button', { name: 'Clear Manager', exact: true }).click();
+  await roster.getByRole('button', { name: 'Assign an agent to Manager', exact: true }).click();
+  await page.getByRole('button', { name: 'Assign Anchor Reader to Manager', exact: true }).click();
   await page.locator('#wizardNextBtn').click();
   const review = page.locator('#workspaceCreationReviewPanel');
   await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();

@@ -213,7 +213,7 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     const assigned = page.waitForResponse(
       r =>
         r.request().method() === 'PUT' &&
-        new URL(r.url()).pathname === `/api/workspaces/${blankId}/roles/ask-ori`
+        new URL(r.url()).pathname === `/api/workspaces/${blankId}/roles/manager`
     );
     const report = async () =>
       (await (await request.get(`/api/personal-assistant/folder-agent/${blankId}`)).json())
@@ -228,7 +228,7 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     expect(bound.ok(), await bound.text()).toBeTruthy();
     expect((await bound.json()).roles).toMatchObject({
       filled_count: 1,
-      roles: [{ role_id: 'ask-ori', agent: { name: manager } }],
+      roles: [{ role_id: 'manager', agent: { name: manager } }],
       unassigned: []
     });
     expect(
@@ -270,12 +270,12 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
       // Reproduce an older workspace: the same manager is attached without a
       // role. Assigning it repairs the binding, not the agent or the ticket.
       const base = `/api/workspaces/${blankId}`;
-      expect((await request.delete(`${base}/roles/ask-ori`)).ok()).toBeTruthy();
+      expect((await request.delete(`${base}/roles/manager`)).ok()).toBeTruthy();
       expect(
         (await request.post(`${base}/agents`, { data: { agent_name: manager } })).ok()
       ).toBeTruthy();
       await page.reload();
-      await team.getByRole('button', { name: 'Assign an agent to Ask Ori' }).click();
+      await team.getByRole('button', { name: 'Assign an agent to Manager' }).click();
       await assignment.getByLabel('Assign an existing agent').selectOption(manager);
       await assignment.getByRole('button', { name: 'Assign to role' }).click();
       await expect(team.getByText('1 of 1 role filled')).toBeVisible();

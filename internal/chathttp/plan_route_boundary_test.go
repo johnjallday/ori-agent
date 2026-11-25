@@ -35,7 +35,7 @@ type planRouteFixture struct {
 func newPlanRouteFixture(t *testing.T) *planRouteFixture {
 	t.Helper()
 
-	st := newPreflightStore("Ori", &agent.Agent{
+	st := newPreflightStore("Atlas", &agent.Agent{
 		Settings: types.Settings{Model: "gpt-5-nano", Temperature: 0.3},
 	})
 	wsStore, err := workspace.NewFileStore(filepath.Join(t.TempDir(), "workspaces"))
@@ -44,13 +44,14 @@ func newPlanRouteFixture(t *testing.T) *planRouteFixture {
 	}
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{
 		Name:   "Chat Route Workspace",
-		Agents: []string{"Ori"},
+		Agents: []string{"Atlas"},
 	})
 	if err := workspace.CreateNativeWorkspace(context.Background(), wsStore, ws); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 
 	h := NewHandler(st, nil)
+	h.SetPersonalAssistantProfileReader(func(context.Context) string { return "Atlas" })
 	h.SetWorkspaceStore(wsStore)
 	h.SetOrchestrator(orchestration.NewOrchestrator(
 		st, wsStore, nil, agentcomm.NewCommunicator(wsStore), nil, nil, nil))
@@ -226,7 +227,7 @@ func TestNeedsNewAgentReplyIsTerminalAdvice(t *testing.T) {
 func TestOrdinaryChatWithoutPlanBeforeActionIsNotAnsweredWithTheAdvice(t *testing.T) {
 	f := newPlanRouteFixture(t)
 	st := f.agents
-	if _, ok := st.GetAgent("Ori"); !ok {
+	if _, ok := st.GetAgent("Atlas"); !ok {
 		t.Fatal("fixture agent missing")
 	}
 

@@ -31,7 +31,7 @@ The server, not the browser, derives requiredness and role identity.
 |---|---|---|---|
 | Ordinary template `agents` | `projecttemplates.AgentRoleIDs`, derived from the normalized declared name with deterministic collision suffixes | First normalized agent only | First normalized agent only |
 | Assistant Program | Declaration `roles[].id` | Declaration `roles[].required` | Declaration `roles[].primary` within its scope |
-| Blank | Synthetic ordinary roster containing `Ask Ori`; stable role ID `ask-ori` | Required | Primary |
+| Blank | Synthetic host-owned roster: one proposed "<Workspace> Manager"; stable role ID `manager` (label "Manager") | Required | Primary |
 
 Ordinary role IDs identify the declared slot, not the eventual holder. A
 role-specific Create choice may give its new agent another name without changing
@@ -214,8 +214,11 @@ hand, are choices and no longer steps.
 
 ## Blank
 
-Blank's template-agent-plan is a synthetic, host-owned one-role roster for
-`Ask Ori`. The normal `staffed` path must persist exactly what Team showed:
+Blank's template-agent-plan is a synthetic, host-owned one-role roster: a
+manager of the new workspace's own, proposed under a free "<Workspace> Manager"
+name (the plan needs `workspace_name`) in a stable `manager` role. Team prefills
+that role with a Create fill; clearing it, editing it or choosing agentless all
+win. The normal `staffed` path must persist exactly what Team showed:
 Create makes the chosen definition from the synthetic proposal, Assign attaches
 the selected saved definition unchanged, and the holder becomes the entry agent.
 New strict Blank workspaces retain synthetic provenance so an empty role remains
@@ -227,7 +230,9 @@ It creates or attaches zero definitions and suppresses fallback manager seeding.
 An empty roster alone never implies this intent. Selecting a role fill or saved
 agent returns the draft to `staffed`; switching to any real blueprint clears
 `agentless`; reopening starts from `staffed`. Legacy Blank requests that omit
-`team_intent` retain their current default of seeding/reusing `Ask Ori`.
+`team_intent` seed the workspace's own manager the same way; none ever reuses
+an existing agent by name. A created manager is bound to its workspace by
+`workspace_manager` provenance and removed with it when nothing else uses it.
 
 ## Assistant Program completion and recovery
 
@@ -310,7 +315,7 @@ the app assistant's read".
 | Existing workspace Roles roster | Fill/clear remains available, including current clear warnings |
 | Existing workspace created before this feature | No migration or automatic restaffing |
 | Real blueprint plus `agentless` or a general team opt-out | Rejected; choose Blank for intentional agentless creation |
-| Blank, intent absent | Historical default Ask Ori seeding |
+| Blank, intent absent | Seeds the workspace's own "<Workspace> Manager" |
 | Blank, strict `staffed` | Required synthetic role must be explicitly Created or Assigned |
 | Blank, strict `agentless` | Zero agents and a persistent fillable synthetic role |
 

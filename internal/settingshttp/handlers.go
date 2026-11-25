@@ -102,12 +102,12 @@ func (h *Handler) SetMacWakeService(service macWakeService) {
 	h.macWakeService = service
 }
 
+// resolveAssistantDefaultAgentName picks whose settings a request without an
+// explicit agent reads. There is no built-in assistant to prefer, so it is the
+// first saved agent; it never routes a chat.
 func resolveAssistantDefaultAgentName(st store.Store) string {
 	if st == nil {
 		return ""
-	}
-	if agent, ok := st.GetAgent("Ori"); ok && agent != nil {
-		return "Ori"
 	}
 	return store.FirstAgentName(st)
 }
@@ -1275,16 +1275,6 @@ func (h *Handler) SystemModelHandler(w http.ResponseWriter, r *http.Request) {
 		if err := h.configManager.Save(); err != nil {
 			orihttp.InternalError(w, err.Error())
 			return
-		}
-
-		// Ensure the system assistant agent exists and is aligned with the new system model.
-		// Without this, chat won't work until a server restart.
-		if err := agenthttp.EnsureSystemAssistantAgentWithSystemModel(h.store, provider, model); err != nil {
-			logger.Warn("Failed to ensure system assistant agent after system model update", logger.Fields{
-				"provider": provider,
-				"model":    model,
-				"error":    err,
-			})
 		}
 
 		savedReasoning := ""

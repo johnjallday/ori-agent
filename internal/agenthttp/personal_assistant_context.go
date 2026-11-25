@@ -146,62 +146,6 @@ func safePersonalAssistantPromptValue(value string, limit int) string {
 	return value
 }
 
-type personalAssistantAgentRosterReader struct {
-	delegate homeAgentsReader
-}
-
-func (r personalAssistantAgentRosterReader) AgentRoster() ([]HomeAgentSummary, bool) {
-	if r.delegate == nil {
-		return nil, false
-	}
-	roster, ok := r.delegate.AgentRoster()
-	if !ok {
-		return nil, false
-	}
-	filtered := make([]HomeAgentSummary, 0, len(roster))
-	for _, item := range roster {
-		if strings.EqualFold(strings.TrimSpace(item.Name), systemAssistantAgentName) {
-			continue
-		}
-		filtered = append(filtered, item)
-	}
-	return filtered, true
-}
-
-func personalAssistantPromptSources(sources HomeSnapshotSources, c *PersonalAssistantWorkContext) HomeSnapshotSources {
-	if c == nil || !c.ReadyForWork() {
-		return sources
-	}
-	sources.Agents = personalAssistantAgentRosterReader{delegate: sources.Agents}
-	return sources
-}
-
-func sanitizePersonalAssistantSnapshot(snapshot HomeSnapshot, c *PersonalAssistantWorkContext) HomeSnapshot {
-	if c == nil || !c.ReadyForWork() {
-		return snapshot
-	}
-	filteredAgents := make([]HomeAgentSummary, 0, len(snapshot.Agents))
-	for _, item := range snapshot.Agents {
-		if !strings.EqualFold(strings.TrimSpace(item.Name), systemAssistantAgentName) {
-			filteredAgents = append(filteredAgents, item)
-		}
-	}
-	snapshot.Agents = filteredAgents
-	for i := range snapshot.Tasks {
-		if strings.EqualFold(strings.TrimSpace(snapshot.Tasks[i].Assignee), systemAssistantAgentName) {
-			snapshot.Tasks[i].Assignee = ""
-		}
-	}
-	filteredSessions := make([]HomeSessionSummary, 0, len(snapshot.Sessions))
-	for _, item := range snapshot.Sessions {
-		if !strings.EqualFold(strings.TrimSpace(item.AgentName), systemAssistantAgentName) {
-			filteredSessions = append(filteredSessions, item)
-		}
-	}
-	snapshot.Sessions = filteredSessions
-	return snapshot
-}
-
 func detectPersonalAssistantRememberRequest(prompt string, c *PersonalAssistantWorkContext) *HomeActionConfirmation {
 	if c == nil || !c.ReadyForWork() || c.StateVersion < 1 {
 		return nil

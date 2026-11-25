@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projectstaffing"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -86,6 +87,11 @@ func (h *Handler) seedRoleStaffedAgents(
 			}
 			if provenance := assistantSetupAgentProvenance(ctx, requested.Name); provenance != nil {
 				config.AssistantSetup = provenance
+			}
+			// The digest above covers the reviewed configuration; the manager
+			// binding is the create operation's own fact and is added after it.
+			if isBlankManagerSpec(tpl, index) && strings.TrimSpace(ws.ID) != "" {
+				config.WorkspaceManager = &agent.WorkspaceManagerProvenance{WorkspaceID: ws.ID}
 			}
 			if err := h.createSeededProfile(ctx, &result, requested.Name, config); err != nil {
 				return result, fmt.Errorf("agent %q could not be created: %w", requested.Name, err)

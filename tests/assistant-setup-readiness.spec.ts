@@ -364,16 +364,13 @@ test(
     await expect(card.getByLabel('What should it do with it?')).toHaveValue(brief);
     expect(forbidden).toEqual([]);
     expect(await json(request, '/api/workspaces')).toEqual(before);
-    // Existing Settings owns the Ask Ori system-assistant bootstrap. Allow
-    // exactly that definition, not a project hire or any staffing/creation.
+    // Choosing a Default model creates no agent at all — the retired system
+    // assistant is never bootstrapped — and nothing else was hired, staffed or
+    // created either.
     const afterModel = await agents();
-    const systemAssistant = afterModel.filter((agent: any) => agent.name === 'Ask Ori');
-    expect(systemAssistant).toHaveLength(1);
-    expect(systemAssistant[0].source).toBe('user');
+    expect(afterModel.filter((agent: any) => agent.name === 'Ask Ori')).toHaveLength(0);
     const identity = (agent: any) => [agent.id, agent.source, agent.name];
-    expect(afterModel.filter((agent: any) => agent.name !== 'Ask Ori').map(identity)).toEqual(
-      agentsBefore.map(identity)
-    );
+    expect(afterModel.map(identity)).toEqual(agentsBefore.map(identity));
     if (audit) expect(modelCalls()).toBe(initialModelCalls);
     if (evidence)
       await page.screenshot({ path: join(evidence, 'inline-live-configured-review.png') });

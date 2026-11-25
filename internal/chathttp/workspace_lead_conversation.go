@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/session"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 	"github.com/johnjallday/ori-agent/internal/workspace"
@@ -121,7 +122,11 @@ func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (ses
 	// would resolve skills, materialize MCP bindings and build the tool set to
 	// learn the same two facts.
 	lead, unique := ws.FindUniqueAgentInstance(name, "")
-	if !unique || lead.ID == "" || h.sessionStore == nil || !h.leadDefinitionAvailable(name, id) {
+	if !unique || lead.ID == "" || h.sessionStore == nil {
+		return unavailable()
+	}
+	leadAgent, available := h.leadDefinition(name, id)
+	if !available {
 		return unavailable()
 	}
 	live, err := liveLeadWorkspace(h.workspaceStore, id, name, lead.ID)
@@ -131,7 +136,15 @@ func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (ses
 	if live.Version != ws.Version {
 		return input, "", session.ErrWorkspaceVersionConflict
 	}
-	intro := "Hi, I’m " + welcomeText(name, 100) + ", the lead for " + welcomeText(ws.Name, 120) + "."
+	// A Blank workspace's own manager arrives before anyone knows what the
+	// workspace is for, so it introduces itself as the manager and offers both
+	// ways in — no goal question to answer first.
+	ownManager := leadAgent.WorkspaceManager.ManagesWorkspace(id)
+	role := ", the lead for "
+	if ownManager {
+		role = ", the manager for "
+	}
+	intro := "Hi, I’m " + welcomeText(name, 100) + role + welcomeText(ws.Name, 120) + "."
 	if goal := workspace.GoalOutcomeLine(ws.Mission); goal != "" {
 		intro += " I’ll help you work toward: " + welcomeText(goal, 500)
 	}
@@ -139,6 +152,8 @@ func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (ses
 	curator, isCurator := ws.FileCurator()
 	if assessment == "" && isCurator && curator.ID == lead.ID {
 		intro += "\n\nYour saved filing review will appear here when it is available. Nothing moves without your approval in Filing."
+	} else if assessment == "" && ownManager && strings.TrimSpace(ws.Mission) == "" {
+		intro += "\n\nTell me what you’d like done and I’ll start on it, or ask me to help work out what this workspace is for."
 	} else if assessment == "" {
 		intro += "\n\nI don’t have a saved assessment yet. Ask me about your goal, or choose a review in Goal settings when you’re ready."
 		// After Set up the Commander offers a goal itself, so the welcome does not
@@ -154,16 +169,20 @@ func (h *Handler) ComposeLeadWelcome(ctx context.Context, owner, id string) (ses
 	}, workspaceupdates.StateReady, nil
 }
 
-// leadDefinitionAvailable reports whether the lead resolves to a saved, enabled
-// agent definition for this workspace. It reads the definition only: no skills,
-// MCP bindings or tools. A resolver that cannot read definitions is unavailable.
-func (h *Handler) leadDefinitionAvailable(agentName, workspaceID string) bool {
+// leadDefinition returns the lead's saved, enabled agent definition for this
+// workspace. It reads the definition only: no skills, MCP bindings or tools. A
+// resolver that cannot read definitions is unavailable. The caller also reads
+// the definition's manager provenance from it, so a welcome costs one read.
+func (h *Handler) leadDefinition(agentName, workspaceID string) (*agent.Agent, bool) {
 	reader, ok := h.runtimeResolver.(chatDefinitionReader)
 	if !ok {
-		return false
+		return nil, false
 	}
 	definition, err := reader.ResolveAgentDefinition(agentName, workspaceID)
-	return err == nil && definition != nil && definition.Agent != nil && !isAgentPaused(definition.Agent)
+	if err != nil || definition == nil || definition.Agent == nil || isAgentPaused(definition.Agent) {
+		return nil, false
+	}
+	return definition.Agent, true
 }
 
 // Reuse the assessment and task suggestions produced by the authorized review,

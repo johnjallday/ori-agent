@@ -14,7 +14,8 @@ import {
   nextMenuIndex,
   recipientButtonLabel,
   recipientMenuRows,
-  switchLockMessage
+  switchLockMessage,
+  composerLabel
 } from './personal-assistant-recipient.js';
 import { firstQuestionPresentation } from './commander-question-memory.js';
 import { createLeadWelcome } from './personal-assistant-lead-welcome.js';
@@ -1662,6 +1663,7 @@ function renderIdentity() {
     : brief.on
       ? brief.placeholder
       : who.placeholder;
+  if (els.inputLabel) els.inputLabel.textContent = composerLabel(who);
   els.send.textContent = brief.on ? brief.sendLabel : 'Send';
   els.form?.toggleAttribute?.('data-brief-mode', brief.on);
   els.input.disabled = !who.available;
@@ -2585,6 +2587,7 @@ function init() {
     expand: document.getElementById('personalAssistantExpand'),
     form: document.getElementById('personalAssistantForm'),
     input: document.getElementById('personalAssistantInput'),
+    inputLabel: document.querySelector('label[for="personalAssistantInput"]'),
     send: document.getElementById('personalAssistantSend'),
     status: document.getElementById('personalAssistantPanelStatus'),
     unread: document.getElementById('personalAssistantUnread'),

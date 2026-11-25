@@ -72,6 +72,10 @@ type Role struct {
 // template-agent-plan endpoint returns it in full — so carrying it here
 // discloses nothing new.
 type ProposedSetup struct {
+	// Name is the agent name proposed for a host-owned role whose label is not
+	// a usable agent name (Blank's "Manager" proposes "<Workspace> Manager").
+	// Empty for an authorable blueprint, where the label is the proposal.
+	Name         string `json:"name,omitempty"`
 	Model        string `json:"model,omitempty"`
 	Provider     string `json:"provider,omitempty"`
 	SystemPrompt string `json:"system_prompt,omitempty"`

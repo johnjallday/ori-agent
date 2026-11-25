@@ -1,5 +1,4 @@
 const PROTOCOL_VERSION = 1;
-const MAX_CONTEXT_BYTES = 2000;
 
 function secureID(cryptoImpl = globalThis.crypto) {
   if (!cryptoImpl || typeof cryptoImpl.getRandomValues !== 'function') {
@@ -86,16 +85,6 @@ export class OriWorkspaceSurfaceSDK {
     return this._request('ori.surface.host.confirm', {
       confirmation_id: String(confirmationId || '')
     });
-  }
-
-  askOri(context) {
-    const text = String(context || '');
-    if (new TextEncoder().encode(text).length > MAX_CONTEXT_BYTES) {
-      const error = new Error('Ask Ori context is too large');
-      error.code = 'input_too_large';
-      return Promise.reject(error);
-    }
-    return this._request('ori.surface.host.ask_ori', { context: text });
   }
 
   createTask(templateId, variables = {}) {

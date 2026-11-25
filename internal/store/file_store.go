@@ -181,11 +181,19 @@ func (s *fileStore) ListAgents() (names []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	names = make([]string, 0, len(s.agents))
-	for n := range s.agents {
+	for n, ag := range s.agents {
+		if isMarkedSystemAgent(ag) {
+			continue
+		}
 		names = append(names, n)
 	}
 	return names
 }
+
+// ErrRetiredAssistantRecord refuses to create an agent under the name the
+// retired system assistant's stored record still holds in this store. The
+// record is kept as it was — never adopted, overwritten or deleted.
+var ErrRetiredAssistantRecord = errors.New("this name is held by Ori's retired assistant record; choose another name")
 
 func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 	s.mu.Lock()
@@ -196,6 +204,9 @@ func (s *fileStore) CreateAgent(name string, config *CreateAgentConfig) error {
 func (s *fileStore) createAgentUnlocked(name string, config *CreateAgentConfig, strict bool) error {
 	if err := s.unreadableErrorUnlocked(name); err != nil {
 		return err
+	}
+	if isMarkedSystemAgent(s.agents[name]) {
+		return ErrRetiredAssistantRecord
 	}
 	if _, exists := s.agents[name]; exists && strict {
 		return ErrStaffingNameTaken
@@ -273,6 +284,10 @@ func (s *fileStore) createAgentUnlocked(name string, config *CreateAgentConfig, 
 		if config != nil && config.AssistantSetup != nil {
 			provenance := *config.AssistantSetup
 			newAgent.AssistantSetup = &provenance
+		}
+		if config != nil && config.WorkspaceManager != nil {
+			provenance := *config.WorkspaceManager
+			newAgent.WorkspaceManager = &provenance
 		}
 		// Initialize statistics for the new agent
 		newAgent.InitializeStatistics()
@@ -517,10 +532,17 @@ func (s *fileStore) ClearAgents() error {
 	return s.writeIndexUnlocked()
 }
 
+// GetAgent returns a stored agent. The retired system assistant's record is
+// never returned: it stays on disk exactly as it was, but no list, route,
+// roster or chat can reach it — it is identified by its durable marker, never
+// by name, so an agent a person named "Ask Ori" is unaffected.
 func (s *fileStore) GetAgent(name string) (*agent.Agent, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ag, ok := s.agents[name]
+	if ok && isMarkedSystemAgent(ag) {
+		return nil, false
+	}
 	return ag, ok
 }
 
@@ -635,6 +657,8 @@ type persistedDefinition struct {
 	Metadata       *types.AgentMetadata            `json:"metadata,omitempty"`
 	Appearance     *types.AgentAppearance          `json:"appearance,omitempty"`
 	AssistantSetup *agent.AssistantSetupProvenance `json:"assistant_setup,omitempty"`
+	// WorkspaceManager binds a workspace's own manager to that workspace by ID.
+	WorkspaceManager *agent.WorkspaceManagerProvenance `json:"workspace_manager,omitempty"`
 	// Paused travels with the agent. In memory it is Status == disabled, which
 	// every runtime check already refuses.
 	Paused bool `json:"paused,omitempty"`
@@ -650,13 +674,14 @@ func encodeDefinition(ag *agent.Agent) ([]byte, error) {
 	// code path — not just the migrating load path — is canonical on disk.
 	ag.EnsureAppearance()
 	data, err := json.MarshalIndent(persistedDefinition{
-		Role:           ag.Role,
-		Capabilities:   ag.Capabilities,
-		Settings:       ag.Settings,
-		Metadata:       ag.Metadata,
-		Appearance:     ag.Appearance,
-		AssistantSetup: ag.AssistantSetup,
-		Paused:         ag.Status == types.AgentStatusDisabled,
+		Role:             ag.Role,
+		Capabilities:     ag.Capabilities,
+		Settings:         ag.Settings,
+		Metadata:         ag.Metadata,
+		Appearance:       ag.Appearance,
+		AssistantSetup:   ag.AssistantSetup,
+		WorkspaceManager: ag.WorkspaceManager,
+		Paused:           ag.Status == types.AgentStatusDisabled,
 	}, "", "  ")
 	if err != nil {
 		return nil, err

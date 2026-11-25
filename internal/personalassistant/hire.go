@@ -14,7 +14,6 @@ import (
 	"github.com/johnjallday/ori-agent/internal/dailybrief"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/personalhq"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/userprofile"
 )
@@ -492,7 +491,7 @@ func normalizeHireRequest(input HireRequest) (normalizedHireRequest, error) {
 	if out.DisplayName, err = validateText("display name", input.DisplayName, MaxDisplayNameLen, true); err != nil {
 		return out, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
-	if systemassistant.IsKnownName(out.DisplayName) {
+	if isReservedAssistantName(out.DisplayName) {
 		return out, fmt.Errorf("%w: assistant name is reserved for Ori", ErrValidation)
 	}
 	for _, r := range out.DisplayName {

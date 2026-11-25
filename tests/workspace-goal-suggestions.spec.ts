@@ -8,6 +8,7 @@ import {
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { ensureLeadAgent, LEAD_AGENT } from './helpers/lead-agent';
 
 // A workspace goal, from the moment it is written to the work its agents
 // suggest for it, in a real browser against the real server and store.
@@ -39,7 +40,7 @@ const THREE_TASKS_TWO_FINDINGS = JSON.stringify({
       priority: 'high',
       confidence: 'medium',
       effort: 'small',
-      suggested_agent: 'Ask Ori',
+      suggested_agent: LEAD_AGENT,
       first_step: 'Collect five posts that sound right.'
     },
     {
@@ -200,6 +201,7 @@ test.beforeAll(async ({ request }) => {
       data: { provider: 'ollama', model: 'fixture-model:latest' }
     })
   );
+  await ensureLeadAgent(request, { provider: 'ollama', model: 'fixture-model:latest' });
 });
 
 test.beforeEach(async ({ page }) => {
@@ -223,10 +225,10 @@ test('a workspace created from the modal takes its description as its goal and r
   // The untouched Goal field mirrors the description.
   await expect(page.locator('#folderGoalInput')).toHaveValue(GOAL);
 
-  // Team: the blank blueprint's Ask Ori role is filled with the saved Ask Ori.
+  // Team: a Blank workspace starts with a manager of its own, already filled.
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep3')).toBeVisible();
-  await page.getByRole('button', { name: 'Use Ask Ori for Ask Ori' }).click();
+  await expect(page.locator('#wizardStep3')).toContainText('Modal Goal Desk Manager');
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#wizardStep4')).toBeVisible();
 
@@ -290,7 +292,7 @@ test('saving the first goal starts a run whose suggestions reach the Backlog dra
   answerGoalRunsWith(THREE_TASKS_TWO_FINDINGS);
   const body = await ok(
     await request.post('/api/workspaces', {
-      data: { name: 'Goal E2E Desk', entry_agent_name: 'Ask Ori' }
+      data: { name: 'Goal E2E Desk', entry_agent_name: LEAD_AGENT }
     })
   );
   workspaceId = body.folder.id;
@@ -617,7 +619,7 @@ test('stock authoring: preview, duplicate, edit and create preserve custom and e
     await page
       .getByRole('button', { name: 'Assign an agent to Development Assistant', exact: true })
       .click();
-    await page.locator('[data-existing-agent-add="Ask Ori"]').click();
+    await page.locator(`[data-existing-agent-add="${LEAD_AGENT}"]`).click();
     await page.locator('#wizardNextBtn').click();
     await expect(page.locator('#wizardStep4')).toBeVisible();
     await confirmReviewedCreation(page);
@@ -758,7 +760,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page
         .getByRole('button', { name: 'Assign an agent to Writing Coach', exact: true })
         .click();
-      await page.locator('[data-existing-agent-add="Ask Ori"]').click();
+      await page.locator(`[data-existing-agent-add="${LEAD_AGENT}"]`).click();
       await page.locator('#wizardNextBtn').press('Enter');
 
       let release!: () => void;
@@ -841,7 +843,7 @@ test('first-goal lifecycle: readiness blocks once, repair needs an explicit retr
       data: {
         name: 'Goal Readiness Desk',
         template_id: 'goal-readiness-fixture',
-        entry_agent_name: 'Ask Ori',
+        entry_agent_name: LEAD_AGENT,
         create_template_agents: false
       }
     })
@@ -892,7 +894,7 @@ test('first-goal lifecycle: eligible opening runs once but Code opening and savi
       data: {
         name: 'Eligible Goal Desk',
         mission: 'Prepare reviewed chapter suggestions.',
-        entry_agent_name: 'Ask Ori'
+        entry_agent_name: LEAD_AGENT
       }
     })
   );

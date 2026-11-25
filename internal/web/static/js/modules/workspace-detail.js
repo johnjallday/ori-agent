@@ -7214,11 +7214,6 @@ export class WorkspaceDetailPage {
     });
   }
 
-  isSystemAssistantAgentName(name) {
-    const normalized = this.normalizeAgentName(name);
-    return normalized === 'ori' || normalized === 'system assistant';
-  }
-
   getTaskAgentSuggestionPrompt(task) {
     if (!task || typeof task !== 'object') return '';
 
@@ -8268,11 +8263,7 @@ export class WorkspaceDetailPage {
         )
       : false;
 
-    if (
-      suggestedAgent &&
-      !this.isSystemAssistantAgentName(suggestedAgent) &&
-      routeData?.requires_creation !== true
-    ) {
+    if (suggestedAgent && routeData?.requires_creation !== true) {
       const reasonItems = Array.isArray(routeData?.reasons)
         ? routeData.reasons
             .map(reason => String(reason || '').trim())

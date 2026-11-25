@@ -582,10 +582,10 @@ func TestObserveAssistantTeamCompletionReportsDurablePartialState(t *testing.T) 
 	}
 }
 
-func TestStrictBlankAgentlessPersistsFillableAskOriRole(t *testing.T) {
+func TestStrictBlankAgentlessPersistsFillableManagerRole(t *testing.T) {
 	handler, _, _, cleanup := templateTestEnv(t)
 	defer cleanup()
-	plan := handler.buildTemplateAgentPlan(blankWorkspaceTemplate())
+	plan := handler.buildTemplateAgentPlan(handler.blankWorkspaceTemplate("Persistent Empty"))
 	body := fmt.Sprintf(`{"name":"Persistent Empty","blank":true,"create_template_agents":false,"team_intent":{"version":1,"mode":"agentless","plan_revision":%q},"role_staffing":[]}`, plan.Revision)
 	w, response := postCreateWorkspace(t, handler, body)
 	if w.Code != http.StatusCreated {
@@ -605,8 +605,8 @@ func TestStrictBlankAgentlessPersistsFillableAskOriRole(t *testing.T) {
 		t.Fatalf("roster = %#v", roster)
 	}
 	role := roster.Roles[0]
-	if role.RoleID != "ask-ori" || !role.Required || !role.Primary || role.State != "empty" {
-		t.Fatalf("Ask Ori role = %#v", role)
+	if role.RoleID != blankManagerRoleID || role.Label != blankManagerRoleLabel || !role.Required || !role.Primary || role.State != "empty" {
+		t.Fatalf("manager role = %#v", role)
 	}
 }
 
@@ -617,8 +617,8 @@ func TestStrictBlankStaffingPersistsCreateAndAssign(t *testing.T) {
 		agentName  string
 		wantSource string
 	}{
-		{name: "create", mode: roleStaffingModeCreate, agentName: "Fresh Ask Ori", wantSource: agentworkspace.RoleSourceCreated},
-		{name: "assign", mode: roleStaffingModeAssign, agentName: "Saved Ask Ori", wantSource: agentworkspace.RoleSourceAssigned},
+		{name: "create", mode: roleStaffingModeCreate, agentName: "Staffed Blank Manager", wantSource: agentworkspace.RoleSourceCreated},
+		{name: "assign", mode: roleStaffingModeAssign, agentName: "Saved Lead", wantSource: agentworkspace.RoleSourceAssigned},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -629,8 +629,8 @@ func TestStrictBlankStaffingPersistsCreateAndAssign(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			plan := handler.buildTemplateAgentPlan(blankWorkspaceTemplate())
-			body := fmt.Sprintf(`{"name":"Staffed Blank","blank":true,"team_intent":{"version":1,"mode":"staffed","plan_revision":%q},"role_staffing":[{"role_id":"ask-ori","mode":%q,"name":%q}]}`, plan.Revision, tt.mode, tt.agentName)
+			plan := handler.buildTemplateAgentPlan(handler.blankWorkspaceTemplate("Staffed Blank"))
+			body := fmt.Sprintf(`{"name":"Staffed Blank","blank":true,"team_intent":{"version":1,"mode":"staffed","plan_revision":%q},"role_staffing":[{"role_id":"manager","mode":%q,"name":%q}]}`, plan.Revision, tt.mode, tt.agentName)
 			w, response := postCreateWorkspace(t, handler, body)
 			if w.Code != http.StatusCreated {
 				t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
@@ -645,26 +645,32 @@ func TestStrictBlankStaffingPersistsCreateAndAssign(t *testing.T) {
 				t.Fatalf("instances = %#v, want one", current.AgentInstances)
 			}
 			instance := current.AgentInstances[0]
-			if instance.Name != tt.agentName || instance.RoleID != "ask-ori" || instance.RoleSource != tt.wantSource {
-				t.Fatalf("Ask Ori binding = %#v", instance)
+			if instance.Name != tt.agentName || instance.RoleID != blankManagerRoleID || instance.RoleSource != tt.wantSource {
+				t.Fatalf("manager binding = %#v", instance)
 			}
 			entryName, _ := current.SharedData[workspaceEntryAgentNameKey].(string)
 			if entryName != tt.agentName {
 				t.Fatalf("entry agent = %q, want %q", entryName, tt.agentName)
 			}
-			if _, found := handler.agentStore.GetAgent(tt.agentName); !found {
+			saved, found := handler.agentStore.GetAgent(tt.agentName)
+			if !found {
 				t.Fatalf("agent %q was not retained", tt.agentName)
+			}
+			// Only a manager this create made is bound to the workspace; an
+			// assigned saved agent stays the person's own.
+			if got, want := saved.WorkspaceManager.ManagesWorkspace(workspaceID), tt.mode == roleStaffingModeCreate; got != want {
+				t.Fatalf("manager provenance for %s = %#v, want bound=%v", tt.mode, saved.WorkspaceManager, want)
 			}
 		})
 	}
 }
 
 func TestBlankWorkspaceStrictModes(t *testing.T) {
-	t.Run("staffed requires Ask Ori", func(t *testing.T) {
+	t.Run("staffed requires the manager", func(t *testing.T) {
 		handler, cleanup := createTestHandler(t)
 		defer cleanup()
-		plan := handler.buildTemplateAgentPlan(blankWorkspaceTemplate())
-		body := fmt.Sprintf(`{"name":"Missing Ask Ori","blank":true,"team_intent":{"version":1,"mode":"staffed","plan_revision":%q},"role_staffing":[]}`, plan.Revision)
+		plan := handler.buildTemplateAgentPlan(handler.blankWorkspaceTemplate("Missing Manager"))
+		body := fmt.Sprintf(`{"name":"Missing Manager","blank":true,"team_intent":{"version":1,"mode":"staffed","plan_revision":%q},"role_staffing":[]}`, plan.Revision)
 		w, response := postCreateWorkspace(t, handler, body)
 		if w.Code != http.StatusConflict || response["code"] != "team_readiness" {
 			t.Fatalf("status/code = %d/%v: %s", w.Code, response["code"], w.Body.String())
@@ -675,14 +681,14 @@ func TestBlankWorkspaceStrictModes(t *testing.T) {
 	t.Run("agentless creates no fallback agent", func(t *testing.T) {
 		handler, cleanup := createTestHandler(t)
 		defer cleanup()
-		plan := handler.buildTemplateAgentPlan(blankWorkspaceTemplate())
+		plan := handler.buildTemplateAgentPlan(handler.blankWorkspaceTemplate("Intentional Empty"))
 		body := fmt.Sprintf(`{"name":"Intentional Empty","blank":true,"create_template_agents":false,"team_intent":{"version":1,"mode":"agentless","plan_revision":%q},"role_staffing":[]}`, plan.Revision)
 		w, _ := postCreateWorkspace(t, handler, body)
 		if w.Code != http.StatusCreated {
 			t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
 		}
-		if _, found := handler.agentStore.GetAgent(blankWorkspaceEntryAgentName); found {
-			t.Fatal("agentless Blank created the Ask Ori fallback")
+		if _, found := handler.agentStore.GetAgent("Intentional Empty Manager"); found {
+			t.Fatal("agentless Blank created a manager anyway")
 		}
 		workspaces, err := handler.store.ListWorkspaces(context.Background())
 		if err != nil || len(workspaces) != 1 {

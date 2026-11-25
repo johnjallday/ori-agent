@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/agent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/projecttemplates"
@@ -138,7 +139,7 @@ func (h *Handler) fillOrdinaryWorkspaceRole(current *agentworkspace.Workspace, r
 		return fmt.Errorf("this workspace declares no blueprint roles")
 	}
 	// Blank has a host-owned declaration, not a template on the shelf.
-	tpl := blankWorkspaceTemplate()
+	tpl := h.blankWorkspaceTemplate(current.Name)
 	var err error
 	if provenance.TemplateID != blankWorkspaceTemplateID {
 		tpl, err = h.resolveProjectTemplate(provenance.TemplateID, "")
@@ -178,6 +179,11 @@ func (h *Handler) fillOrdinaryWorkspaceRole(current *agentworkspace.Workspace, r
 			return fmt.Errorf("you already have an agent named %q; rename this one or assign the agent you have", requested.Name)
 		}
 		config, _ := h.templateAgentCreateConfig(roleStaffedSpec(spec, requested))
+		if isBlankManagerSpec(tpl, index) {
+			// Created into this Blank workspace's manager slot: it is this
+			// workspace's own manager, exactly as if staffed at create.
+			config.WorkspaceManager = &agent.WorkspaceManagerProvenance{WorkspaceID: current.ID}
+		}
 		if err := h.createSeededProfile(context.Background(), &seed, requested.Name, config); err != nil {
 			h.rollbackSeededAgents(seed)
 			return fmt.Errorf("agent %q could not be created", requested.Name)
@@ -213,6 +219,9 @@ func (h *Handler) fillOrdinaryWorkspaceRole(current *agentworkspace.Workspace, r
 		}
 		instance := agentworkspace.AgentInstancesFromNames(requested.Name)[0]
 		instance.Role = spec.Name
+		if label := strings.TrimSpace(spec.HostRoleLabel); label != "" {
+			instance.Role = label
+		}
 		instance.RoleID = requested.RoleID
 		instance.RoleSource = source
 		ws.AgentInstances = append(instances, instance)
@@ -240,7 +249,10 @@ func (h *Handler) clearOrdinaryWorkspaceRole(workspaceID, roleID string) error {
 		kept := make([]agentworkspace.AgentInstance, 0, len(ws.GetAgentInstances()))
 		removedName := ""
 		for _, instance := range ws.GetAgentInstances() {
-			if strings.EqualFold(strings.TrimSpace(instance.RoleID), roleID) {
+			// A Blank workspace's lead recorded under an earlier derived role
+			// id is shown in the manager slot, so clearing that slot clears it.
+			legacyLead := roleID == blankManagerRoleID && isLegacyBlankRoleID(instance.RoleID)
+			if strings.EqualFold(strings.TrimSpace(instance.RoleID), roleID) || legacyLead {
 				removedName = instance.Name
 				cleared = true
 				continue

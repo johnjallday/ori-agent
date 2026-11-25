@@ -263,7 +263,7 @@ var (
 	homeAssistantAppIntrospectionIntent = homeAssistantIntent{
 		Key:           "app_introspection",
 		Label:         "app activity",
-		SuggestedName: systemAssistantAgentName,
+		SuggestedName: "",
 		MinScore:      3,
 	}
 	// homeAssistantAppNavigationIntent matches "where/how do I…/open <feature>"
@@ -272,7 +272,7 @@ var (
 	homeAssistantAppNavigationIntent = homeAssistantIntent{
 		Key:           "app_navigation",
 		Label:         "app navigation",
-		SuggestedName: systemAssistantAgentName,
+		SuggestedName: "",
 		MinScore:      3,
 	}
 	homeAssistantSpecificIntents = []homeAssistantIntent{
@@ -505,9 +505,8 @@ func (h *HomeAssistantRouteHandler) RoutePrompt(ctx context.Context, prompt stri
 	if match == nil {
 		match = h.findBestMatch(prompt, intent, agentRouteContext)
 	}
-	if match == nil {
-		match = h.systemAssistantFallback(intent)
-	}
+	// No match means no match: there is no hidden default agent to fall back
+	// to. An everyday request is the Personal Assistant's, routed above.
 
 	if context != nil && context.Origin == "personal_assistant_panel" && workContext != nil && workContext.ReadyForWork() && isCompositionRequest(prompt) && (match == nil || isAssistantOwnAgent(match.Name, workContext)) {
 		return assistantConversationRoute(workContext), nil
@@ -593,25 +592,6 @@ func (h *HomeAssistantRouteHandler) calendarOpsPreferredMatch(ctx context.Contex
 		Agent:   ag,
 		Score:   intent.MinScore,
 		Reasons: []string{"calendar ops workspace has a ready calendar connector"},
-	}
-}
-
-func (h *HomeAssistantRouteHandler) systemAssistantFallback(intent homeAssistantIntent) *routedAgentMatch {
-	// Keep specialist intent behavior unchanged; fallback only for utility/general asks.
-	if intent.Key != homeAssistantDefaultIntent.Key && intent.Key != homeAssistantUtilityIntent.Key {
-		return nil
-	}
-
-	ag, ok := h.State.GetAgent(systemAssistantAgentName)
-	if !ok || ag == nil {
-		return nil
-	}
-
-	return &routedAgentMatch{
-		Name:    systemAssistantAgentName,
-		Agent:   ag,
-		Score:   intent.MinScore,
-		Reasons: []string{"fallback to system assistant"},
 	}
 }
 
@@ -768,12 +748,9 @@ func (h *HomeAssistantRouteHandler) findBestMatch(prompt string, intent homeAssi
 	if len(names) == 0 {
 		return nil
 	}
+	// No agent is preferred on a tie: a hidden favourite is exactly the
+	// default agent this router must not have.
 	current := ""
-	if assistant, ok := h.State.GetAgent(systemAssistantAgentName); ok && assistant != nil {
-		current = systemAssistantAgentName
-	} else if len(names) > 0 {
-		current = names[0]
-	}
 
 	var best *routedAgentMatch
 	for _, name := range names {

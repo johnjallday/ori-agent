@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -52,14 +51,14 @@ func TestLibraryDefinitionIsADetachedCopy(t *testing.T) {
 	}
 }
 
-func TestLibraryDefinitionLabelsTheBuiltInAssistantAsSystem(t *testing.T) {
+func TestLibraryDefinitionTreatsAUsersAskOriAsALibraryAgent(t *testing.T) {
 	c, _, _ := compositeWithWorkspaces(t)
-	if err := c.CreateAgent(systemassistant.CanonicalName, &CreateAgentConfig{}); err != nil {
+	if err := c.CreateAgent("Ask Ori", &CreateAgentConfig{}); err != nil {
 		t.Fatal(err)
 	}
-	rec := LibraryDefinition(c, systemassistant.CanonicalName)
-	if rec.State != LibraryPresent || rec.Owner != LibraryOwnerSystem {
-		t.Fatalf("LibraryDefinition(assistant) = %+v, want a present system record", rec)
+	rec := LibraryDefinition(c, "Ask Ori")
+	if rec.State != LibraryPresent || rec.Owner != LibraryOwnerLibrary {
+		t.Fatalf("LibraryDefinition(Ask Ori) = %+v, want a present library record", rec)
 	}
 }
 

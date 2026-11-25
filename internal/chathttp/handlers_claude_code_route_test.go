@@ -118,7 +118,7 @@ func TestChatHandler_RoutesClaudeCodeWithoutOpenAIKey(t *testing.T) {
 	}
 }
 
-func TestChatHandler_RoutesAssistantModeToOriWithoutCurrentAgent(t *testing.T) {
+func TestChatHandler_RoutesAssistantModeToThePersonalAssistant(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agents_index.json")
 	st, err := store.NewFileStore(path, types.Settings{
 		Model:       "gpt-5-nano",
@@ -128,7 +128,7 @@ func TestChatHandler_RoutesAssistantModeToOriWithoutCurrentAgent(t *testing.T) {
 		t.Fatalf("failed to create store: %v", err)
 	}
 
-	if err := st.CreateAgent(assistantExecutionAgentName, &store.CreateAgentConfig{
+	if err := st.CreateAgent("Atlas", &store.CreateAgentConfig{
 		Model:        "sonnet",
 		LLMProvider:  "claude_code",
 		Temperature:  1.0,
@@ -137,18 +137,19 @@ func TestChatHandler_RoutesAssistantModeToOriWithoutCurrentAgent(t *testing.T) {
 		t.Fatalf("failed to create assistant agent: %v", err)
 	}
 
-	ag, ok := st.GetAgent(assistantExecutionAgentName)
+	ag, ok := st.GetAgent("Atlas")
 	if !ok || ag == nil {
-		t.Fatalf("expected %s agent", assistantExecutionAgentName)
+		t.Fatalf("expected %s agent", "Atlas")
 	}
 	ag.Settings.Provider = "claude_code"
 	ag.Settings.Model = "sonnet"
 	ag.Settings.APIKey = ""
-	if err := st.SetAgent(assistantExecutionAgentName, ag); err != nil {
+	if err := st.SetAgent("Atlas", ag); err != nil {
 		t.Fatalf("failed to update assistant agent: %v", err)
 	}
 
 	h := NewHandler(st, client.NewFactory(""))
+	h.SetPersonalAssistantProfileReader(func(context.Context) string { return "Atlas" })
 	factory := llm.NewFactory()
 	mockProvider := &mockClaudeCodeProvider{}
 	factory.Register("claude_code", mockProvider)

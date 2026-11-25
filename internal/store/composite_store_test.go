@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -62,53 +61,81 @@ func TestRootStoreNeverWritesAnIndexFile(t *testing.T) {
 	}
 }
 
-func TestCompositeKeepsTheAssistantInTheDataDir(t *testing.T) {
+// The retired assistant's name is an ordinary one now: a person's agent called
+// "Ask Ori" is written to the Workspace Directory like every other agent.
+func TestCompositeWritesAUsersAskOriToTheRoot(t *testing.T) {
 	f := newCompositeFixture(t)
 	c := f.open(t)
-	if err := c.CreateAgent(systemassistant.CanonicalName, &CreateAgentConfig{}); err != nil {
-		t.Fatalf("create assistant: %v", err)
-	}
-	if err := c.CreateAgent("Scout", &CreateAgentConfig{}); err != nil {
-		t.Fatalf("create Scout: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(f.dataDir, "agents", systemassistant.CanonicalName)); err != nil {
-		t.Errorf("the assistant is not in the data dir: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(f.root, "Agents", systemassistant.CanonicalName)); !os.IsNotExist(err) {
-		t.Error("the assistant was written into the root")
-	}
-	if _, err := os.Stat(filepath.Join(f.dataDir, "agents", "Scout")); !os.IsNotExist(err) {
-		t.Error("a user agent was written into the data dir")
+	for _, name := range []string{"Ask Ori", "Scout"} {
+		if err := c.CreateAgent(name, &CreateAgentConfig{}); err != nil {
+			t.Fatalf("create %s: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(f.root, "Agents", name)); err != nil {
+			t.Errorf("%s is not in the root: %v", name, err)
+		}
+		if _, err := os.Stat(filepath.Join(f.dataDir, "agents", name)); !os.IsNotExist(err) {
+			t.Errorf("%s was written into the data dir", name)
+		}
 	}
 	if got := c.ListAgents(); len(got) != 2 {
-		t.Errorf("ListAgents = %v, want the assistant and Scout", got)
+		t.Errorf("ListAgents = %v, want Ask Ori and Scout", got)
 	}
-
-	// Reopening finds both where they were written.
 	reopened := f.open(t)
-	for _, name := range []string{systemassistant.CanonicalName, "Scout"} {
+	for _, name := range []string{"Ask Ori", "Scout"} {
 		if _, ok := reopened.GetAgent(name); !ok {
 			t.Errorf("%s did not load after a restart", name)
 		}
 	}
 }
 
-func TestCompositeWithAMissingRootHasOnlySystemAgents(t *testing.T) {
+// An existing profile's retired assistant record stays in the data dir, as
+// it was, and no list or lookup reaches it — while a person's own agent of
+// the same name in the root is reached normally.
+func TestCompositeHidesTheRetiredAssistantRecord(t *testing.T) {
+	f := newCompositeFixture(t)
+	c := f.open(t)
+	markedDir := filepath.Join(f.dataDir, "agents", "Ask Ori")
+	if err := c.system.CreateAgent("Ask Ori", &CreateAgentConfig{}); err != nil {
+		t.Fatalf("seed the retired record: %v", err)
+	}
+	markRetiredAssistant(t, c.system, "Ask Ori")
+	if err := c.system.Save(); err != nil {
+		t.Fatalf("persist the retired record: %v", err)
+	}
+
+	reopened := f.open(t)
+	if _, ok := reopened.GetAgent("Ask Ori"); ok {
+		t.Fatal("the retired assistant record was reachable")
+	}
+	if got := reopened.ListAgents(); len(got) != 0 {
+		t.Fatalf("ListAgents = %v, want nothing", got)
+	}
+	if err := reopened.CreateAgent("Ask Ori", &CreateAgentConfig{}); err != nil {
+		t.Fatalf("a person must be able to make their own Ask Ori: %v", err)
+	}
+	if _, ok := reopened.GetAgent("Ask Ori"); !ok {
+		t.Fatal("the person's own Ask Ori was not reachable")
+	}
+	if _, err := os.Stat(markedDir); err != nil {
+		t.Fatalf("the retired record was removed from the data dir: %v", err)
+	}
+}
+
+func TestCompositeWithAMissingRootCreatesNoAgents(t *testing.T) {
 	f := newCompositeFixture(t)
 	f.root = filepath.Join(f.root, "unmounted-drive")
 	c := f.open(t)
-	if err := c.CreateAgent(systemassistant.CanonicalName, &CreateAgentConfig{}); err != nil {
-		t.Fatalf("the assistant must still be creatable: %v", err)
-	}
-	err := c.CreateAgent("Scout", &CreateAgentConfig{})
-	if !errors.Is(err, ErrAgentRootUnavailable) {
-		t.Fatalf("CreateAgent on a missing root: err = %v, want ErrAgentRootUnavailable", err)
+	for _, name := range []string{"Ask Ori", "Scout"} {
+		err := c.CreateAgent(name, &CreateAgentConfig{})
+		if !errors.Is(err, ErrAgentRootUnavailable) {
+			t.Fatalf("CreateAgent(%q) on a missing root: err = %v, want ErrAgentRootUnavailable", name, err)
+		}
 	}
 	if _, err := os.Stat(f.root); !os.IsNotExist(err) {
 		t.Fatal("the store created a missing root")
 	}
-	if got := c.ListAgents(); len(got) != 1 {
-		t.Errorf("ListAgents = %v, want only the assistant", got)
+	if got := c.ListAgents(); len(got) != 0 {
+		t.Errorf("ListAgents = %v, want nothing", got)
 	}
 	status := c.RootStatus()
 	if status.Available || status.Reason != RootReasonMissing {

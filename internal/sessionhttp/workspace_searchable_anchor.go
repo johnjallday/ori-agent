@@ -50,7 +50,7 @@ func (h *Handler) handleFolderManagerDraft(w http.ResponseWriter, r *http.Reques
 					// Only offer the known local lead on a strict Blank workspace. An
 					// ordinary attachment must not replace a holder or staff a Home.
 					if provenance := h.workspaceTemplateProvenance(ws); provenance != nil && provenance.TemplateID == blankWorkspaceTemplateID && !h.workspaceIsAssistantProgram(ws) && blankLeadVacant(ws) {
-						draft["lead_role_id"] = "ask-ori"
+						draft["lead_role_id"] = blankManagerRoleID
 					}
 					if h.folderManager != nil {
 						if rec, e := h.folderManager.Record(ws.OwnerUserID, id); e == nil {

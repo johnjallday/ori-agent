@@ -2,6 +2,7 @@ package chathttp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -24,7 +25,7 @@ func newChatHandlerForOpenAppTests(t *testing.T) *Handler {
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
-	if err := st.CreateAgent(assistantExecutionAgentName, &store.CreateAgentConfig{}); err != nil {
+	if err := st.CreateAgent("Atlas", &store.CreateAgentConfig{}); err != nil {
 		t.Fatalf("failed to create assistant agent: %v", err)
 	}
 	if err := st.CreateAgent("Desktop Launcher", &store.CreateAgentConfig{}); err != nil {
@@ -67,7 +68,9 @@ func newChatHandlerForOpenAppTests(t *testing.T) *Handler {
 		t.Fatalf("failed to update reaper assistant agent: %v", err)
 	}
 
-	return NewHandler(st, nil)
+	h := NewHandler(st, nil)
+	h.SetPersonalAssistantProfileReader(func(context.Context) string { return "Atlas" })
+	return h
 }
 
 func TestChatHandler_AssistantModeRoutesAppLaunchToSpecialistHandoff(t *testing.T) {

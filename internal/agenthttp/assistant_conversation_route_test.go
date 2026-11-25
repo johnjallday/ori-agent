@@ -9,14 +9,10 @@ import (
 )
 
 // newHiredRouteHandler builds a route handler for a hired assistant ("Nova",
-// profile key "nova-profile") with the protected system assistant present, the
-// way a real install with a system model looks.
+// profile key "nova-profile").
 func newHiredRouteHandler(t *testing.T, state string) (*HomeAssistantRouteHandler, store.Store) {
 	t.Helper()
 	st := newHomeRouteTestStore(t)
-	if err := ensureSystemAssistantAgent(st); err != nil {
-		t.Fatalf("ensure system assistant: %v", err)
-	}
 	addHomeRouteTestAgent(t, st, "nova-profile", nil, "Personal assistant", []string{"assistant"}, nil)
 	handler := NewHomeAssistantRouteHandler(st)
 	workContext := activePersonalAssistantContext()
@@ -185,19 +181,17 @@ func TestRoute_CompositionWithoutASpecialistIsDraftedInConversation(t *testing.T
 	}
 }
 
-// Without a hired assistant nothing changes: the legacy handoff stays.
+// Without a hired assistant there is no conversation to route to, and no
+// hidden default agent answers instead.
 func TestRoute_ConversationRequiresAHiredAssistant(t *testing.T) {
 	st := newHomeRouteTestStore(t)
-	if err := ensureSystemAssistantAgent(st); err != nil {
-		t.Fatalf("ensure system assistant: %v", err)
-	}
 	handler := NewHomeAssistantRouteHandler(st)
 	resp, err := handler.RoutePrompt(context.Background(), "Write a short birthday greeting for my friend Mina.", homePanelRouteContext())
 	if err != nil {
 		t.Fatalf("RoutePrompt: %v", err)
 	}
-	if resp.Intent != "general_task" || resp.RouteMode != "specialist_handoff" || resp.MatchedAgent != systemAssistantAgentName {
-		t.Fatalf("legacy route changed: %+v", resp)
+	if resp.Intent != "general_task" || resp.RouteMode == "assistant_conversation" || resp.MatchedAgent != "" {
+		t.Fatalf("an unhired route = %+v; want a general task matched to nobody", resp)
 	}
 }
 

@@ -384,6 +384,12 @@ const sessionManager = {
       // Group. Saved teammates remain staged by the draft's normal semantics.
       if (this.usesGroupRosterCreator() && this.teamDraft?.plan?.blueprintKey) {
         this.resetTemplateAgentReview();
+      } else if (this.currentBlueprintKey() === 'blank') {
+        // A Blank manager's proposed name follows the workspace name too, but
+        // its role is host-owned and stable, so the plan is re-read in place:
+        // the person's staffing choice survives, and an untouched default
+        // manager is renamed to match.
+        this.scheduleTemplateAgentPlanRefresh();
       }
       this.clearWorkspaceNameError();
       this.updateWorkspaceNameHint();
@@ -480,7 +486,7 @@ const sessionManager = {
       this.announceWorkspaceTeamChange(
         event.currentTarget.checked
           ? 'Blank workspace will be created without agents.'
-          : 'Ask Ori is required again; create or assign an agent for the role.'
+          : 'This workspace will start with its manager again; you can rename it or assign a saved agent.'
       );
     });
 
@@ -2859,7 +2865,7 @@ const sessionManager = {
       agentNameEl.textContent = displayAgentName;
     }
     if (typeof window.refreshChatWebSearchToggle === 'function') {
-      window.refreshChatWebSearchToggle(agentName || 'Ask Ori');
+      window.refreshChatWebSearchToggle(agentName || '');
     }
 
     if (editAgentBtn) {
@@ -6901,7 +6907,7 @@ const sessionManager = {
     const fields = groupRoster ? {} : window.ProjectTemplateCard?.getPayloadFields?.() || {};
     const templateId = String(fields.template_id || '').trim();
     const templatePath = String(fields.template_path || '').trim();
-    // Blank ships a synthetic single-agent roster (Workspace Manager). It has no
+    // Blank proposes one manager of the new workspace's own. It has no
     // template_id/path, so signal it explicitly — but an ad-hoc folder override
     // (template_path) takes precedence and is no longer "blank".
     const isBlank =
@@ -6909,6 +6915,8 @@ const sessionManager = {
       Boolean(window.ProjectTemplateCard?.getSelectedTemplate?.()?.blank) &&
       !templateId &&
       !templatePath;
+    // A Group Manager's and a Blank manager's proposed names both follow the
+    // name being typed, so neither plan can load before there is one.
     const groupName = String(document.getElementById('folderNameInput')?.value || '').trim();
     const requestId = ++this.templateAgentPlanRequestId;
     const blueprintKey = this.currentBlueprintKey();
@@ -6918,7 +6926,7 @@ const sessionManager = {
     if (
       this.importModeEnabled ||
       (!groupRoster && !templateId && !templatePath && !isBlank) ||
-      (groupRoster && !groupName)
+      ((groupRoster || isBlank) && !groupName)
     ) {
       this.resetTemplateAgentReview();
       return;
@@ -6940,6 +6948,7 @@ const sessionManager = {
           blank: isBlank || undefined,
           group_roster: groupRoster || undefined,
           group_name: groupRoster ? groupName : undefined,
+          workspace_name: isBlank ? groupName : undefined,
           group_composition: this.groupRequirementDraft?.composition || undefined
         })
       });
@@ -8880,7 +8889,7 @@ const sessionManager = {
       profile: formApi.PROFILE_TEMPLATE,
       providers: Array.isArray(this.editAgentProvidersData) ? this.editAgentProvidersData : [],
       values: {
-        name: row.label,
+        name: proposed.name || row.label,
         type: proposed.type || '',
         model: proposed.model || '',
         provider: proposed.provider || '',
@@ -9131,7 +9140,7 @@ const sessionManager = {
       // Adjust from the assistant's hire card staffs only the primary seat,
       // under the card's name; the other roles stay open to fill later.
       if (primaryOnly && role !== primary) continue;
-      const name = primaryOnly ? context.staffPrimaryRole.name : role.label;
+      const name = primaryOnly ? context.staffPrimaryRole.name : role.proposed?.name || role.label;
       const saved = api.findSavedAgent(draft, name);
       api.setRoleFill(
         draft,
@@ -10232,9 +10241,11 @@ const sessionManager = {
         ? 'Group roster'
         : view?.isAssistantProgram
           ? view.assistantProgram.stationName || 'Shared assistant team'
-          : roster.length === 1
-            ? 'Entry Assistant'
-            : 'Workspace Team';
+          : this.currentBlueprintKey() === 'blank'
+            ? 'Workspace manager'
+            : roster.length === 1
+              ? 'Entry Assistant'
+              : 'Workspace Team';
     }
     if (teamSummary) {
       teamSummary.textContent = groupRoster
@@ -13642,7 +13653,10 @@ const sessionManager = {
       this.clearWorkspaceCreateError();
     }
     this.wizardStep = targetStep;
-    if (targetStep === 3 && this.usesGroupRosterCreator()) {
+    if (
+      targetStep === 3 &&
+      (this.usesGroupRosterCreator() || this.currentBlueprintKey() === 'blank')
+    ) {
       void this.refreshTemplateAgentPlan();
     }
     this.refreshWizardChrome();

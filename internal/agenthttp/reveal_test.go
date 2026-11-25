@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/johnjallday/ori-agent/internal/store"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 )
 
 type recordingOpener struct{ opened []string }
@@ -40,7 +39,7 @@ func TestShowInFinderOpensTheAgentsFolderInTheRoot(t *testing.T) {
 	}
 	root := t.TempDir()
 	c := compositeForRoot(t, root)
-	for _, name := range []string{"Scout", systemassistant.CanonicalName} {
+	for _, name := range []string{"Scout"} {
 		if err := c.CreateAgent(name, &store.CreateAgentConfig{}); err != nil {
 			t.Fatalf("CreateAgent %s: %v", name, err)
 		}
@@ -61,9 +60,9 @@ func TestShowInFinderOpensTheAgentsFolderInTheRoot(t *testing.T) {
 		t.Fatalf("opened %v, want Scout's folder in the root", opener.opened)
 	}
 
-	// Only the user's own agents have a folder to show.
+	// Only an agent the user has has a folder to show; no built-in record does.
 	if code := reveal("/api/agents/Ask%20Ori/reveal"); code != http.StatusNotFound {
-		t.Errorf("reveal the built-in assistant: %d, want 404", code)
+		t.Errorf("reveal a name with no agent: %d, want 404", code)
 	}
 	if code := reveal("/api/agents/..%2F..%2Fetc/reveal"); code != http.StatusBadRequest && code != http.StatusNotFound {
 		t.Errorf("a traversal attempt: %d, want 400 or 404", code)

@@ -121,23 +121,22 @@ func TestBulkTagRejectsEmptyTags(t *testing.T) {
 
 func TestBulkDeleteMixedPartialSuccess(t *testing.T) {
 	h := guardTestHandler(t,
-		[]string{"Loose1", "Loose2", "Attached"},
+		[]string{"Loose1", "Loose2", "Attached", "Ask Ori"},
 		map[string][]string{"ws-a": {"Attached"}},
 	)
-	// The system assistant is the protected agent; referenced through the
-	// constant so a future rename does not silently turn this case into a
-	// "not found" assertion that still passes.
-	body := `{"agent_names":["Loose1","Attached","` + systemAssistantAgentName + `","Missing","Loose2"],"operation":"delete"}`
+	// No agent is protected by its name: a person's own loose "Ask Ori" is
+	// deleted like any other agent.
+	body := `{"agent_names":["Loose1","Attached","Ask Ori","Missing","Loose2"],"operation":"delete"}`
 	resp := postBulk(t, h, body)
 
 	if resp.Summary.Requested != 5 {
 		t.Fatalf("requested=%d, want 5", resp.Summary.Requested)
 	}
-	if resp.Summary.Succeeded != 2 {
-		t.Errorf("succeeded=%d, want 2", resp.Summary.Succeeded)
+	if resp.Summary.Succeeded != 3 {
+		t.Errorf("succeeded=%d, want 3", resp.Summary.Succeeded)
 	}
-	if resp.Summary.Skipped != 3 {
-		t.Errorf("skipped=%d, want 3 (attached, protected, missing)", resp.Summary.Skipped)
+	if resp.Summary.Skipped != 2 {
+		t.Errorf("skipped=%d, want 2 (attached, missing)", resp.Summary.Skipped)
 	}
 
 	if r, _ := resultFor(resp, "Loose1"); r.Status != bulkStatusSucceeded {
@@ -146,8 +145,8 @@ func TestBulkDeleteMixedPartialSuccess(t *testing.T) {
 	if r, _ := resultFor(resp, "Attached"); r.ReasonCode != reasonAttachedAgent {
 		t.Errorf("Attached reason=%s, want %s", r.ReasonCode, reasonAttachedAgent)
 	}
-	if r, _ := resultFor(resp, systemAssistantAgentName); r.ReasonCode != reasonProtectedAgent {
-		t.Errorf("%s reason=%s, want %s", systemAssistantAgentName, r.ReasonCode, reasonProtectedAgent)
+	if r, _ := resultFor(resp, "Ask Ori"); r.Status != bulkStatusSucceeded {
+		t.Errorf("a user's Ask Ori status=%s, want succeeded", r.Status)
 	}
 	if r, _ := resultFor(resp, "Missing"); r.ReasonCode != reasonAgentNotFound {
 		t.Errorf("Missing reason=%s, want %s", r.ReasonCode, reasonAgentNotFound)

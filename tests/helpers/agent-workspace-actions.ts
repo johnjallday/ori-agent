@@ -43,7 +43,8 @@ export const actionAgents = [
   },
   { name: 'Action Unreadable', state: 'unreadable', workspace_count: 0 },
   { name: 'Action CLI', source: 'cli', role: 'cli_agent', workspace_count: 0 },
-  { name: 'Ask Ori', workspace_count: 0 }
+  // A person's own agent called "Ask Ori" is an ordinary library agent.
+  { name: 'Ask Ori', workspace_count: 0, workspaces: [], statistics: { message_count: 0 } }
 ].map(agent => ({ model: 'gpt-4o-mini', status: 'active', role: 'general', ...agent }));
 
 export async function mockWorkspaceActionRoster(page: Page) {

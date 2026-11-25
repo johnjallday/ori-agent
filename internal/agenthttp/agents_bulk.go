@@ -60,7 +60,7 @@ const (
 // Stable reason codes are part of the UI contract (PRD FR51). Business-rule
 // outcomes (skipped) are distinguishable from unexpected server errors (failed).
 const (
-	reasonProtectedAgent    = "protected_agent" // reserved system assistant
+	reasonProtectedAgent    = "protected_agent" // the hired Personal Assistant before its HQ exists
 	reasonReadOnlyAgent     = "read_only_agent" // built-in CLI agent
 	reasonAttachedAgent     = "attached_agent"  // attached to >=1 workspace
 	reasonAgentNotFound     = "agent_not_found" // no such user agent
@@ -292,9 +292,6 @@ func (h *Handler) persistMetadataMutation(name string, ag *agent.Agent, fields [
 // single-agent DELETE handler's guard intent and the bulk delete path so the two
 // cannot drift (PRD FR36–FR38).
 func (h *Handler) checkAgentDeletable(ctx context.Context, name string) (reasonCode, message string) {
-	if isSystemAssistantAgent(name) {
-		return reasonProtectedAgent, "The system assistant cannot be deleted."
-	}
 	if h.isCLIAgent(name) {
 		return reasonReadOnlyAgent, "CLI agents are built-in and cannot be deleted."
 	}
@@ -333,7 +330,7 @@ func (h *Handler) metadataMutationTarget(name string, touchesSharedDefinition, c
 	if owned := workspaceOwnedAgent(h.State, name); owned != nil {
 		return nil, reasonWorkspaceOwned, workspaceOwnedMessage(owned)
 	}
-	if touchesSharedDefinition && !isSystemAssistantAgent(name) {
+	if touchesSharedDefinition {
 		if m := workspace.WorkspaceMembershipFor(h.workspaceStore, name); m.Count > 1 && !confirmed {
 			return nil, reasonSharedEditNeedsOK, fmt.Sprintf("Attached to %d workspaces — confirm the shared edit to proceed.", m.Count)
 		}

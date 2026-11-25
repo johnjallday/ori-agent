@@ -16,6 +16,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 	"github.com/johnjallday/ori-agent/internal/workspace"
+	"github.com/johnjallday/ori-agent/internal/workspacemanager"
 )
 
 // homeRecentSessionsAdapter bridges the session store to the home harness's
@@ -123,6 +124,10 @@ type homeActionMutator struct {
 	agents         store.Store
 	orchestrator   homeTaskOrchestrator
 	backlogService *workspace.BacklogService
+	// systemModel is the Default model a new workspace's manager starts on.
+	systemModel interface {
+		GetSystemModel() (provider, model string)
+	}
 }
 
 func (m homeActionMutator) workspaceHref(workspaceID string) string {
@@ -136,38 +141,69 @@ func (m homeActionMutator) workspaceHref(workspaceID string) string {
 	return "/workspaces/" + url.PathEscape(ws.FolderSlug)
 }
 
-func (m homeActionMutator) defaultAgentName() string {
-	if m.agents == nil {
-		return ""
-	}
-	if _, ok := m.agents.GetAgent("Ori"); ok {
-		return "Ori"
-	}
-	if names := m.agents.ListAgents(); len(names) > 0 {
-		return names[0]
-	}
-	return ""
-}
-
+// CreateWorkspace makes the workspace the person confirmed, with a manager of
+// its own — exactly what a Blank workspace from the create wizard gets. It
+// never attaches whichever saved agent happens to sort first: that hidden
+// default is what workspace-owned managers replace.
 func (m homeActionMutator) CreateWorkspace(ctx context.Context, name, description string) (string, string, error) {
 	if m.workspaces == nil {
 		return "", "", fmt.Errorf("workspace store unavailable")
 	}
-	agentName := m.defaultAgentName()
-	if agentName == "" {
-		return "", "", fmt.Errorf("no agent is available to attach to the workspace")
+	if m.agents == nil {
+		return "", "", fmt.Errorf("agent store unavailable")
 	}
 	ws := workspace.NewWorkspace(workspace.CreateWorkspaceParams{
 		Name:        name,
 		Description: description,
-		Agents:      []string{agentName},
 		InitialData: map[string]any{},
 	})
-	_ = ws.SetEntryAgentName(agentName)
+	managerName, err := m.createWorkspaceManager(ctx, ws.ID, name)
+	if err != nil {
+		return "", "", err
+	}
+	ws.AgentInstances = workspace.AgentInstancesFromNames(managerName)
+	ws.AgentInstances[0].EntryPoint = true
+	ws.AgentInstances[0].Role = workspacemanager.RoleLabel
+	ws.AgentInstances[0].RoleID = workspacemanager.RoleID
+	ws.AgentInstances[0].RoleSource = workspace.RoleSourceCreated
+	_ = ws.SetEntryAgentName(managerName)
 	if err := workspace.CreateNativeWorkspace(ctx, m.workspaces, ws); err != nil {
+		// The manager existed only for this workspace; it never came to be.
+		if deleteErr := m.agents.DeleteAgent(managerName); deleteErr != nil {
+			logger.Warn("Could not remove the manager of a workspace that was not created", logger.Fields{"error": deleteErr})
+		}
 		return "", "", err
 	}
 	return ws.ID, "/workspaces/" + url.PathEscape(ws.FolderSlug), nil
+}
+
+// createWorkspaceManager creates the new workspace's own manager under a free
+// "<Workspace> Manager" name, bound to workspaceID by provenance.
+func (m homeActionMutator) createWorkspaceManager(ctx context.Context, workspaceID, workspaceName string) (string, error) {
+	name := workspacemanager.Propose(workspaceName, workspacemanager.TakenIn(m.agents.ListAgents()))
+	if name == "" {
+		return "", fmt.Errorf("no free name for the workspace's manager")
+	}
+	cfg := &store.CreateAgentConfig{
+		Role:             types.RoleOrchestrator,
+		SystemPrompt:     workspacemanager.Prompt,
+		WorkspaceManager: &agent.WorkspaceManagerProvenance{WorkspaceID: workspaceID},
+	}
+	if m.systemModel != nil {
+		if provider, model := m.systemModel.GetSystemModel(); strings.TrimSpace(provider) != "" && strings.TrimSpace(model) != "" {
+			cfg.LLMProvider, cfg.Model = strings.TrimSpace(provider), strings.TrimSpace(model)
+		}
+	}
+	if creator, ok := m.agents.(store.StaffingProfileCreator); ok {
+		if _, err := creator.CreateStaffingProfile(ctx, name, cfg); err != nil {
+			return "", fmt.Errorf("could not create the workspace's manager: %w", err)
+		}
+		return name, nil
+	}
+	if err := m.agents.CreateAgent(name, cfg); err != nil {
+		return "", fmt.Errorf("could not create the workspace's manager: %w", err)
+	}
+	return name, nil
 }
 
 func (m homeActionMutator) CreateTask(ctx context.Context, workspaceID, description string) (string, string, error) {
@@ -466,6 +502,9 @@ func (s *Server) newHomeAssistantAskHandler() *agenthttp.HomeAssistantAskHandler
 			admissionGate: s.resetWork,
 			workspaces:    s.Storage.WorkspaceStore,
 			agents:        s.Storage.AgentStore,
+		}
+		if s.Core != nil && s.Core.ConfigManager != nil {
+			mutator.systemModel = s.Core.ConfigManager
 		}
 		if s.Storage.WorkspaceStore != nil {
 			// A dedicated instance over the same store/event bus/file

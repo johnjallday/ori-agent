@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { ensureLeadAgent, LEAD_AGENT } from './helpers/lead-agent';
 
 // Real tabs, BroadcastChannel, exact acknowledgements and explicit local filing.
 // ./scripts/e2e-goal-suggestions.sh --lead-welcome -- tests/workspace-updates-lifecycle.spec.ts --grep 'Updates lifecycle:'
@@ -46,6 +47,7 @@ test.beforeAll(async ({ request }) => {
       data: { provider: 'ollama', model: 'fixture-model:latest' }
     })
   );
+  await ensureLeadAgent(request, { provider: 'ollama', model: 'fixture-model:latest' });
 });
 test.beforeEach(async ({ page }) => {
   await installLocalCdn(page);
@@ -61,7 +63,7 @@ test('Updates lifecycle: real tabs reconcile exact exposure and partial filing w
   const ws = (
     await ok(
       await request.post('/api/workspaces', {
-        data: { name: 'Two tabs · Filing', entry_agent_name: 'Ask Ori' }
+        data: { name: 'Two tabs · Filing', entry_agent_name: LEAD_AGENT }
       })
     )
   ).folder;
@@ -74,7 +76,7 @@ test('Updates lifecycle: real tabs reconcile exact exposure and partial filing w
     await request.post(`/api/workspaces/${ws.id}/capabilities/file-janitor/companion`, {
       data: {
         agent_instance_id: ws.agent_instances.find(
-          (agent: { name: string }) => agent.name === 'Ask Ori'
+          (agent: { name: string }) => agent.name === LEAD_AGENT
         ).id
       }
     })
@@ -119,7 +121,7 @@ test('Updates lifecycle: real tabs reconcile exact exposure and partial filing w
     const hintsBefore = await observer.evaluate(() => window.__updateHints.length);
     await page
       .locator('#workspaceNextActionRegion')
-      .getByRole('button', { name: /Ask Ask Ori/ })
+      .getByRole('button', { name: new RegExp(`Ask ${LEAD_AGENT}`) })
       .click();
     await expect(page.locator('#personalAssistantPanel')).toBeVisible();
     await page.locator('#personalAssistantScroll').hover();
@@ -237,7 +239,7 @@ test('Updates lifecycle: a deleted saved conversation makes an old destination u
   const ws = (
     await ok(
       await request.post('/api/workspaces', {
-        data: { name: 'Deleted saved thread', entry_agent_name: 'Ask Ori' }
+        data: { name: 'Deleted saved thread', entry_agent_name: LEAD_AGENT }
       })
     )
   ).folder;

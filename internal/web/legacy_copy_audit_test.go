@@ -6,12 +6,15 @@ import (
 	"testing"
 )
 
-// retiredProductLabels are the names Issue #350 retired in favour of "Ask Ori".
+// retiredProductLabels are the names of Ori's retired protected assistant.
+// "Ask Ori" itself is retired too: Help answers product questions, the
+// Personal Assistant handles cross-workspace work, and each workspace's own
+// manager handles that workspace's work.
 //
-// They may still appear in migration aliases, resolver fixtures, diagnostics,
-// and comments explaining the compatibility — but never in copy a user reads
-// (FR61/FR62/FR85).
+// They may still appear in comments explaining the history — but never in copy
+// a user reads (FR61/FR62/FR85).
 var retiredProductLabels = []string{
+	"Ask Ori",
 	"Workspace Manager",
 	"Workspace Assistant",
 	"Workspaces Assistant",
@@ -73,7 +76,7 @@ func TestTemplatesRenderNoRetiredProductLabel(t *testing.T) {
 			if containsString(allowed, label) {
 				continue
 			}
-			t.Errorf("%s renders the retired label %q; use Ask Ori plus context, "+
+			t.Errorf("%s renders the retired label %q; name Help, the Personal Assistant or the workspace's own manager instead, "+
 				"or add a reviewed entry to legacyCopyAllowlist", path, label)
 		}
 		return nil

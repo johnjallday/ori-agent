@@ -809,11 +809,10 @@ func BuiltinQuests() []Quest {
 		// ---- Tier 1 — First Contact ----
 		{
 			ID: "t1-first-message", Tier: 1,
-			// "Ori" elsewhere in this file means the product. Here it means the
-			// assistant you message — which is now the same thing, since Issue
-			// #350 merged the guide and the working assistant into Ask Ori.
+			// Any message counts: to your Personal Assistant, or to a
+			// workspace's own manager.
 			Title: "Send your first request",
-			Why:   "Ask Ori for something from any page — it's the fastest way to see what Ori can do.",
+			Why:   "Ask your assistant, or a workspace's manager, for something — it's the fastest way to see what Ori can do.",
 			Match: onEvent(ws.EventMessageSent),
 			// Any workspace implies the app has been used; grandfather first contact.
 			Satisfied: func(s Snapshot) bool { return s.ChatMessages > 0 || s.Workspaces > 0 },

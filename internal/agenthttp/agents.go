@@ -62,11 +62,11 @@ func validateAgentName(name string) error {
 	return nil
 }
 
-// isReservedAgentName reports a name a new agent may not take: the system
-// assistant's, or one an exact /api/agents/<name> route already answers.
+// isReservedAgentName reports a name a new agent may not take: one an exact
+// /api/agents/<name> route already answers.
 func isReservedAgentName(name string) bool {
 	name = strings.TrimSpace(name)
-	return isSystemAssistantAgent(name) || strings.EqualFold(name, "catalog") || strings.EqualFold(name, "hire")
+	return strings.EqualFold(name, "catalog") || strings.EqualFold(name, "hire")
 }
 
 func cloneAgentEvolution(ag *agent.Agent) *types.AgentEvolution {
@@ -231,11 +231,8 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	// If specific agent requested, return its details
 	if agentName != "" {
-		// Resolved rather than looked up exactly. A stored workspace reference, a
-		// bookmark, or a client that has not reloaded since the rename still asks
-		// for the assistant by its retired name, and answering 404 there strands
-		// every one of them (FR57). The response reports the canonical name, so
-		// new writes move forward.
+		// Looked up exactly: the retired assistant's old names are no longer
+		// redirected, so a name resolves only to an agent the person has.
 		agent, resolvedName, ok := store.ResolveAgent(h.State, agentName)
 		if ok && agent != nil {
 			agentName = resolvedName
@@ -560,10 +557,9 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Workspace membership drives the shared-edit / rename guards (PRD FR9/FR10).
-	// The system assistant ("Ori") is exempt (PRD FR1). Computed once from the
-	// metadata-only cache.
+	// They apply to every agent, a workspace manager included. Computed once
+	// from the metadata-only cache.
 	membership := workspace.WorkspaceMembershipFor(h.workspaceStore, agentName)
-	guardsApply := !isSystemAssistantAgent(agentName)
 
 	// Shared-edit confirmation: changing a field that lives on the shared
 	// definition affects every attached workspace. When attached to more than
@@ -578,7 +574,7 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		req.RoutingProfile != nil || req.Temperature != nil || req.ReasoningEffort != nil ||
 		req.MaxTokens != nil || req.AllowWebSearch != nil || !req.Appearance.isEmpty()
 	confirmed := req.ConfirmSharedEdit != nil && *req.ConfirmSharedEdit
-	if guardsApply && membership.Count > 1 && touchesSharedDefinition && !confirmed {
+	if membership.Count > 1 && touchesSharedDefinition && !confirmed {
 		_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
 			"error":           "shared_agent_edit_requires_confirmation",
 			"message":         fmt.Sprintf("%q is attached to %d workspaces — this change affects all of them. Resend with confirm_shared_edit=true to proceed.", agentName, membership.Count),
@@ -592,15 +588,10 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// rename never leaves the request's other fields half-saved.
 	wantsRename := req.Name != nil && *req.Name != "" && *req.Name != agentName
 	if wantsRename {
-		if isSystemAssistantAgent(agentName) || isSystemAssistantAgent(*req.Name) {
-			orihttp.BadRequest(w, "system assistant cannot be renamed")
-			return
-		}
-
 		// A hired assistant that has not built Personal HQ yet owns this profile
 		// but is attached to no workspace, so the attachment guard below cannot
 		// see it. Renaming it here would fork the relationship's identity.
-		if guardsApply && h.support.protectsHiredProfile(r.Context(), agentName) {
+		if h.support.protectsHiredProfile(r.Context(), agentName) {
 			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
 				"error":       hiredProfileGuardCode,
 				"message":     hiredProfileGuardMessage,
@@ -612,7 +603,7 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		// Agent identity is still the bare name, so renaming an attached
 		// definition would strand every workspace that references the old name
 		// (PRD FR10). Block it; users create a new definition instead.
-		if guardsApply && membership.Count > 0 {
+		if membership.Count > 0 {
 			_ = orihttp.RespondJSON(w, http.StatusConflict, map[string]any{
 				"error":           "attached_agent_rename_blocked",
 				"message":         fmt.Sprintf("%q is attached to %d workspace(s) and cannot be renamed. Create a new agent and attach it instead.", agentName, membership.Count),
@@ -802,10 +793,6 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	if name == "" {
 		orihttp.BadRequest(w, "name required")
-		return
-	}
-	if isSystemAssistantAgent(name) {
-		orihttp.BadRequest(w, "system assistant cannot be deleted")
 		return
 	}
 	if h.isCLIAgent(name) {

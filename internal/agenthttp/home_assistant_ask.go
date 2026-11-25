@@ -704,7 +704,7 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	}
 
 	h.prepareContinuity(ctx, prompt, conversation)
-	promptSources := h.scopedPanelSources(ctx, personalAssistantPromptSources(h.Sources, workContext), scope)
+	promptSources := h.scopedPanelSources(ctx, h.Sources, scope)
 	var history []llm.Message
 	if conversation != nil {
 		history = conversation.history
@@ -755,7 +755,6 @@ func (h *HomeAssistantAskHandler) Ask(ctx context.Context, req HomeAssistantAskR
 	if scope != nil {
 		snapshot = boundedPanelSnapshot(snapshot)
 	}
-	snapshot = sanitizePersonalAssistantSnapshot(snapshot, workContext)
 
 	answer, err := h.generateAnswer(ctx, prompt, intent, snapshot, promptSources, workContext, history)
 	if err != nil {

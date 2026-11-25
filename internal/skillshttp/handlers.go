@@ -1144,9 +1144,8 @@ func resolveAgentName(r *http.Request, st store.Store) string {
 func resolveAgentNameWithFallback(agentName string, st store.Store) string {
 	agentName = strings.TrimSpace(agentName)
 	if agentName == "" && st != nil {
-		if agent, ok := st.GetAgent("Ori"); ok && agent != nil {
-			return "Ori"
-		}
+		// No built-in assistant is preferred; this only picks whose skills a
+		// request without an explicit agent reads.
 		return store.FirstAgentName(st)
 	}
 	return agentName

@@ -2159,10 +2159,10 @@ test('the retired team opt-out cannot bypass strict role staffing', () => {
 });
 
 test('Blank agentless is explicit, advisory, and suppresses all team seeding', () => {
-  const draft = readyDraft([planAgent('Ask Ori', { entry_point: true })], 'blank', {
+  const draft = readyDraft([blankManagerPlanAgent()], 'blank', {
     template_id: 'blank'
   });
-  assert.equal(Draft.derive(draft).canContinueFromTeam, false, 'Ask Ori is required by default');
+  assert.equal(Draft.derive(draft).canContinueFromTeam, true, 'the manager is staffed by default');
   assert.equal(Draft.setAgentless(draft, true), true);
   const view = Draft.derive(draft);
 
@@ -2337,7 +2337,7 @@ test('agentless applies only to Blank, as the Team step allows', () => {
   const content = contentTeam();
   Draft.applyTeamPatch(content, { mode: 'agentless' });
   assert.equal(content.agentless, false);
-  const blank = readyDraft([planAgent('Ask Ori', { entry_point: true })], 'blank', {
+  const blank = readyDraft([blankManagerPlanAgent()], 'blank', {
     template_id: 'blank'
   });
   Draft.applyTeamPatch(blank, { mode: 'agentless' });
@@ -2369,4 +2369,111 @@ test('a serialized team restores onto the same blueprint and never onto another'
   );
   assert.equal(Draft.restore(other, state), false);
   assert.equal(other.roleFills.size, 0);
+});
+
+// ---- Blank's own manager ---------------------------------------------------
+
+function blankManagerPlanAgent(name = 'House Manager') {
+  return planAgent(name, { entry_point: true, role_id: 'manager', role_label: 'Manager' });
+}
+
+function blankDraft(name) {
+  return readyDraft([blankManagerPlanAgent(name)], 'blank', { template_id: 'blank' });
+}
+
+function managerStaffing(draft) {
+  return (Draft.derive(draft).payload.role_staffing || []).find(row => row.role_id === 'manager');
+}
+
+test('a Blank workspace starts with a manager of its own, under the proposed name', () => {
+  const draft = blankDraft('House Manager');
+  const role = Draft.declaredRoles(draft)[0];
+  assert.equal(role.roleId, 'manager');
+  assert.equal(role.label, 'Manager');
+  assert.equal(role.proposed.name, 'House Manager');
+  assert.deepEqual(
+    {
+      mode: Draft.getRoleFill(draft, 'manager').mode,
+      name: Draft.getRoleFill(draft, 'manager').name
+    },
+    { mode: 'create', name: 'House Manager' }
+  );
+  assert.equal(managerStaffing(draft).name, 'House Manager');
+  assert.equal(Draft.derive(draft).payload.team_intent.mode, 'staffed');
+});
+
+test('renaming the workspace renames an untouched default manager, never an edited one', () => {
+  const draft = blankDraft('House Manager');
+  Draft.setPlanReady(
+    draft,
+    'blank',
+    planResponse([blankManagerPlanAgent('Home Manager')], { template_id: 'blank' })
+  );
+  assert.equal(Draft.getRoleFill(draft, 'manager').name, 'Home Manager');
+
+  Draft.clearRoleFill(draft, 'manager');
+  Draft.setRoleFill(draft, 'manager', { mode: 'create', name: 'Quotes Desk' });
+  Draft.setPlanReady(
+    draft,
+    'blank',
+    planResponse([blankManagerPlanAgent('Cabin Manager')], { template_id: 'blank' })
+  );
+  assert.equal(Draft.getRoleFill(draft, 'manager').name, 'Quotes Desk');
+});
+
+test('a cleared manager stays cleared when the plan is read again', () => {
+  const draft = blankDraft('House Manager');
+  assert.equal(Draft.clearRoleFill(draft, 'manager'), true);
+  Draft.setPlanReady(
+    draft,
+    'blank',
+    planResponse([blankManagerPlanAgent('House Manager')], { template_id: 'blank' })
+  );
+  assert.equal(Draft.getRoleFill(draft, 'manager'), null);
+  assert.equal(Draft.derive(draft).canContinueFromTeam, false);
+});
+
+test('agentless removes the manager, and turning it off offers the manager again', () => {
+  const draft = blankDraft('House Manager');
+  Draft.setAgentless(draft, true);
+  assert.equal(Draft.getRoleFill(draft, 'manager'), null);
+  Draft.setPlanReady(
+    draft,
+    'blank',
+    planResponse([blankManagerPlanAgent('House Manager')], { template_id: 'blank' })
+  );
+  assert.equal(Draft.getRoleFill(draft, 'manager'), null, 'agentless survives a plan refresh');
+  Draft.setAgentless(draft, false);
+  assert.equal(Draft.getRoleFill(draft, 'manager').name, 'House Manager');
+});
+
+test('a default manager with no Default model says it will use the built-in fallback', () => {
+  const draft = blankDraft('Cabin Manager');
+  const notice = Draft.derive(draft).issues.find(issue => issue.id === 'manager-without-model');
+  assert.equal(notice.severity, 'advisory');
+  assert.match(
+    notice.message,
+    /No Default model is set, so Cabin Manager will use Ori's built-in fallback model/
+  );
+
+  const configured = readyDraft([blankManagerPlanAgent('Cabin Manager')], 'blank', {
+    template_id: 'blank',
+    system_provider: 'claude',
+    system_model: 'claude-sonnet-5-5',
+    system_model_configured: true
+  });
+  assert.equal(
+    Draft.derive(configured).issues.some(issue => issue.id === 'manager-without-model'),
+    false
+  );
+  Draft.setAgentless(draft, true);
+  assert.equal(
+    Draft.derive(draft).issues.some(issue => issue.id === 'manager-without-model'),
+    false
+  );
+});
+
+test('only Blank prefills its lead; an ordinary blueprint role starts empty', () => {
+  const draft = readyDraft([planAgent('Engineer', { entry_point: true })], 'template:code-project');
+  assert.equal(draft.roleFills.size, 0);
 });

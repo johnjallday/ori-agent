@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -172,7 +171,7 @@ func (s *fileStore) staffingSnapshotLocked(ctx context.Context) StaffingSnapshot
 			return StaffingSnapshot{}
 		}
 		ag := s.agents[name]
-		if ag == nil || ag.WorkspaceLocalConfigID != "" || systemassistant.IsKnownName(name) || isMarkedSystemAgent(ag) {
+		if ag == nil || ag.WorkspaceLocalConfigID != "" || isMarkedSystemAgent(ag) {
 			continue
 		}
 		if counts[strings.ToLower(name)] != 1 {
@@ -233,7 +232,8 @@ func (s *fileStore) staffingWitnessLocked(name string) (string, bool) {
 		Toolbox    *types.AgentDefaultToolbox
 	}{persistedDefinition{Role: ag.Role, Capabilities: ag.Capabilities, Settings: ag.Settings,
 		Metadata: ag.Metadata, Appearance: ag.Appearance, AssistantSetup: ag.AssistantSetup,
-		Paused: ag.Status == types.AgentStatusDisabled}, ag.DefaultToolbox})
+		WorkspaceManager: ag.WorkspaceManager,
+		Paused:           ag.Status == types.AgentStatusDisabled}, ag.DefaultToolbox})
 	if err != nil {
 		return "", false
 	}

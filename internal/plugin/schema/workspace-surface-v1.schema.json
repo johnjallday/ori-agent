@@ -220,9 +220,10 @@
     "hostIntents": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["ask_ori", "open_setup", "confirmation", "state", "close"],
+      "required": ["open_setup", "confirmation", "state", "close"],
       "properties": {
         "ask_ori": {
+          "description": "Retired. Accepted so an older release still mounts; the host ignores it and refuses the intent.",
           "type": "object",
           "additionalProperties": false,
           "required": ["required_capabilities"],
@@ -389,7 +390,15 @@
     "assistantReflection": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["minimum_projects", "cadence_hours", "max_projects", "max_events_per_project", "max_candidates", "max_evidence", "rubric"],
+      "required": [
+        "minimum_projects",
+        "cadence_hours",
+        "max_projects",
+        "max_events_per_project",
+        "max_candidates",
+        "max_evidence",
+        "rubric"
+      ],
       "properties": {
         "minimum_projects": { "type": "integer", "minimum": 3, "maximum": 32 },
         "cadence_hours": { "type": "integer", "minimum": 24, "maximum": 744 },
@@ -403,7 +412,14 @@
     "allowedProjectAttachment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["provider_plugin_id", "blueprint_id", "project_team_id", "project_team_schema_version", "min_project_team_version", "max_project_team_version"],
+      "required": [
+        "provider_plugin_id",
+        "blueprint_id",
+        "project_team_id",
+        "project_team_schema_version",
+        "min_project_team_version",
+        "max_project_team_version"
+      ],
       "properties": {
         "provider_plugin_id": { "$ref": "#/$defs/id" },
         "blueprint_id": { "$ref": "#/$defs/id" },
@@ -422,7 +438,17 @@
     "assistantProgramHome": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "version", "id", "station_name", "default_primary_name", "hire_title", "roles", "stages", "reflection"],
+      "required": [
+        "schema_version",
+        "version",
+        "id",
+        "station_name",
+        "default_primary_name",
+        "hire_title",
+        "roles",
+        "stages",
+        "reflection"
+      ],
       "properties": {
         "schema_version": { "const": 1 },
         "version": { "type": "integer", "minimum": 1 },
@@ -559,7 +585,16 @@
       "description": "A resource workspace's catalog: the resource blueprint it belongs to, two read_only operations without scopes, and the words its owner view is rendered with. Requires the resource_workspaces_v1 host feature. See the resource catalog contract in docs/architecture.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "id", "version", "blueprint_id", "service_id", "sources_operation", "inventory_operation", "categories"],
+      "required": [
+        "schema_version",
+        "id",
+        "version",
+        "blueprint_id",
+        "service_id",
+        "sources_operation",
+        "inventory_operation",
+        "categories"
+      ],
       "properties": {
         "schema_version": { "const": 1 },
         "id": { "$ref": "#/$defs/id" },

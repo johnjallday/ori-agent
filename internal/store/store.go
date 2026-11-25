@@ -62,6 +62,10 @@ type CreateAgentConfig struct {
 	// AssistantSetup is written atomically with a newly created root profile.
 	// Callers must leave it nil for an existing/reused profile.
 	AssistantSetup *agent.AssistantSetupProvenance
+	// WorkspaceManager is written atomically with a newly created root profile
+	// that one workspace's create operation made as its manager. Callers must
+	// leave it nil for an existing/reused profile.
+	WorkspaceManager *agent.WorkspaceManagerProvenance
 }
 
 type Store interface {

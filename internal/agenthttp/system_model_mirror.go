@@ -8,7 +8,6 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/llm"
-	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/store"
 )
 
@@ -37,12 +36,11 @@ func (h *Handler) SetSystemModelWriter(writer SystemModelWriter, providers Provi
 }
 
 // systemModelLinkedAgent reports whether name's conversations run on Settings
-// → System Model rather than on its own record: the protected system
-// assistant, or the hired personal assistant's profile — the agent the Home
-// drawer is named after. Editing either one's model on the Agents page used
-// to change the card and nothing else.
+// → System Model rather than on its own record: the hired personal assistant's
+// profile — the agent the Home drawer is named after. Editing its model on the
+// Agents page used to change the card and nothing else.
 func systemModelLinkedAgent(ctx context.Context, support personalAssistantSupportClassifier, name string) bool {
-	return isSystemAssistantAgent(name) || support.isHiredProfile(ctx, name)
+	return support.isHiredProfile(ctx, name)
 }
 
 func (h *Handler) isSystemModelAgent(ctx context.Context, name string) bool {
@@ -59,10 +57,9 @@ type systemModelMirror struct {
 }
 
 // mirrorSystemModel writes a system-model agent's provider and model to
-// Settings → System Model after the agent record has been saved. It is the
-// reverse of the Settings page's push onto the assistant record
-// (EnsureSystemAssistantAgentWithSystemModel), so the two surfaces cannot
-// disagree about which model the assistant talks on.
+// Settings → System Model after the agent record has been saved, so the
+// Agents page and Settings cannot disagree about which model the hired
+// assistant talks on.
 //
 // It never clears the System Model: an edit that leaves the provider or model
 // empty, names a provider this server has not registered, or fails validation
@@ -152,14 +149,8 @@ func ApplySystemModel(writer SystemModelWriter, providers ProviderAvailability, 
 	if err := writer.Save(); err != nil {
 		return &SystemModelSaveError{Err: err}
 	}
-	// The protected system assistant follows the Default model on every path.
-	if err := ensureSystemAssistantAgentWithSystemModel(st, provider, model); err != nil {
-		logger.Warn("Failed to align the system assistant after the Default model changed", logger.Fields{
-			"provider": provider,
-			"model":    model,
-			"error":    err,
-		})
-	}
+	// Saving the Default model creates and aligns no agent: Ori's retired
+	// system assistant is never re-created, and nothing stands in for it.
 	return nil
 }
 

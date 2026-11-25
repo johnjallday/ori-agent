@@ -83,6 +83,9 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 		GroupRoster      bool   `json:"group_roster,omitempty"`
 		GroupName        string `json:"group_name,omitempty"`
 		GroupComposition string `json:"group_composition,omitempty"`
+		// WorkspaceName names the Blank workspace being created; its manager
+		// is proposed from it.
+		WorkspaceName string `json:"workspace_name,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -111,9 +114,15 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 			return
 		}
 		// The Blank blueprint has no library template; serve its synthetic
-		// single-agent roster so the review panel can show/edit the entry agent.
+		// manager roster so the review panel can show/edit the manager. The
+		// manager's name follows the workspace's, so the name is required.
 		if req.Blank {
-			_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(blankWorkspaceTemplate()))
+			name := strings.TrimSpace(req.WorkspaceName)
+			if name == "" {
+				_ = orihttp.RespondBadRequest(w, "workspace_name is required for a Blank workspace's manager")
+				return
+			}
+			_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(h.blankWorkspaceTemplate(name)))
 			return
 		}
 		_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(projecttemplates.Template{}))
@@ -206,7 +215,11 @@ func (h *Handler) handleTemplateAgentCreate(w http.ResponseWriter, r *http.Reque
 	case strings.TrimSpace(req.TemplateID) != "" || strings.TrimSpace(req.TemplatePath) != "":
 		tpl, err = h.resolveProjectTemplate(req.TemplateID, req.TemplatePath)
 	case req.Blank:
-		tpl = blankWorkspaceTemplate()
+		// A Blank workspace's manager belongs to that workspace, so it is made
+		// with the workspace by the create operation — never ahead of it as a
+		// free-standing saved agent another workspace could pick up by name.
+		_ = orihttp.RespondBadRequest(w, "a Blank workspace's manager is created with its workspace")
+		return
 	default:
 		_ = orihttp.RespondBadRequest(w, "choose a blueprint before creating an agent")
 		return

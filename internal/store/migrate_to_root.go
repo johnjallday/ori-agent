@@ -202,18 +202,37 @@ func userAgentNames(agents map[string]*agent.Agent) []string {
 	}
 	names := make([]string, 0, len(agents))
 	for name, ag := range agents {
-		if isMarkedSystemAgent(ag) || systemassistant.IsCanonicalName(name) {
+		if isMarkedSystemAgent(ag) {
 			continue
 		}
-		// A retired assistant name is the assistant itself until a marked
-		// record exists; after that it is free for the user's own agent.
-		if systemassistant.IsLegacyName(name) && !anyMarked {
+		// An install from before the marker existed holds the assistant
+		// under one of its old names, unmarked. Moving that record into the
+		// person's synced Agents folder would publish it as their own agent,
+		// so it stays where it is. Once any marked record exists, those names
+		// are ordinary and the person's agents under them move as usual.
+		if isPreMarkerAssistantName(name) && !anyMarked {
 			continue
 		}
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
+}
+
+// preMarkerAssistantNames are the names the system assistant was stored under
+// before records carried a durable marker. Only the one-time move to the
+// Workspace Directory reads them, to leave such a record in the data dir; no
+// lookup, route or permission uses them.
+var preMarkerAssistantNames = []string{"Ask Ori", "Workspace Manager", "Ori", "__assistant__"}
+
+func isPreMarkerAssistantName(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	for _, retired := range preMarkerAssistantNames {
+		if strings.EqualFold(trimmed, retired) {
+			return true
+		}
+	}
+	return false
 }
 
 func isMarkedSystemAgent(ag *agent.Agent) bool {

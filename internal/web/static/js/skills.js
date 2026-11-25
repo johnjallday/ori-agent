@@ -451,12 +451,9 @@ async function loadAgents() {
     }
     const data = await response.json();
     const sessionAgent = window.sessionManager?.getActiveSession?.()?.agent_name;
-    // Canonical first, retired name as a fallback for a not-yet-migrated record
-    // (Issue #350 FR57).
-    const assistantAgent =
-      (data.agents || []).find(agent => getAgentDisplayName(agent) === 'Ask Ori') ||
-      (data.agents || []).find(agent => getAgentDisplayName(agent) === 'Workspace Manager');
-    const selected = sessionAgent || defaultAgentName || getAgentDisplayName(assistantAgent);
+    // No built-in assistant is preferred: the session's agent, the page's
+    // default, or else the picker's own first choice.
+    const selected = sessionAgent || defaultAgentName || '';
     populateAgentSelect(data.agents || [], selected);
   } catch (error) {
     console.error('Failed to load agents:', error);

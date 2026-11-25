@@ -26,12 +26,7 @@ func (ch *CommandHandler) HandleWorkspace(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	current := ""
-	if assistant, ok := ch.store.GetAgent(assistantExecutionAgentName); ok && assistant != nil {
-		current = assistantExecutionAgentName
-	} else {
-		current = store.FirstAgentName(ch.store)
-	}
+	current := store.FirstAgentName(ch.store)
 	if current == "" {
 		response := map[string]any{
 			"response": "❌ No execution agent found.",

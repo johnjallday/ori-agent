@@ -2,6 +2,7 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
+import { ensureLeadAgent, LEAD_AGENT } from './helpers/lead-agent';
 
 // Actual saved assessment races a delayed exact exposure request, not a mock DTO.
 const sandbox = process.env.ORI_GOAL_E2E_SANDBOX || '';
@@ -30,10 +31,11 @@ test('Updates acknowledgement race: an exposed introduction cannot mark a later 
       data: { provider: 'ollama', model: 'fixture-model:latest' }
     })
   );
+  await ensureLeadAgent(request, { provider: 'ollama', model: 'fixture-model:latest' });
   const ws = (
     await ok(
       await request.post('/api/workspaces', {
-        data: { name: 'Delayed exposure receipt', entry_agent_name: 'Ask Ori' }
+        data: { name: 'Delayed exposure receipt', entry_agent_name: LEAD_AGENT }
       })
     )
   ).folder;
@@ -96,7 +98,7 @@ test('Updates acknowledgement race: an exposed introduction cannot mark a later 
       await request.post(`/api/workspaces/${ws.id}/capabilities/file-janitor/companion`, {
         data: {
           agent_instance_id: ws.agent_instances.find(
-            (agent: { name: string }) => agent.name === 'Ask Ori'
+            (agent: { name: string }) => agent.name === LEAD_AGENT
           ).id
         }
       })

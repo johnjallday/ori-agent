@@ -12,6 +12,7 @@ import {
   createRecipientMenu,
   NEW_CONVERSATION_MARK,
   entryAgentPlaceholder,
+  composerLabel,
   entrySessionRows,
   loadEntryAgent,
   loadEntrySession,
@@ -235,6 +236,19 @@ test('the entry agent placeholder reuses the workspace copy', () => {
     'Ask REAPER Assistant about this workspace… (/task creates a ticket)'
   );
   assert.equal(entryAgentPlaceholder({ loading: true }), 'Finding this workspace’s Commander…');
+});
+
+test('the composer label names the recipient, never the personal assistant for a manager', () => {
+  assert.equal(
+    composerLabel({ personal: true, name: 'Atlas' }),
+    'Ask your personal assistant a question or describe work'
+  );
+  assert.equal(
+    composerLabel({ personal: false, name: 'Studio Manager' }),
+    'Ask Studio Manager a question or describe work'
+  );
+  assert.equal(composerLabel({ personal: false, name: ' ' }), 'Ask a question or describe work');
+  assert.equal(composerLabel(undefined), 'Ask a question or describe work');
 });
 
 // A fake server for the lookups: each route answers { status, body }.

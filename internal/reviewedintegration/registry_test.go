@@ -23,13 +23,13 @@ func TestBuiltInRegistryMatchesSpecialistConstraintsAndPublishedRelease(t *testi
 	}
 	// The floor moves only when a release needs a new host feature, blueprint
 	// minimum, program schema or protocol. A change here is a review decision.
-	if entry.MinimumVersion != "0.12.0" || entry.MinimumBlueprintVersion != 10 ||
+	if entry.MinimumVersion != "0.12.1" || entry.MinimumBlueprintVersion != 10 ||
 		entry.ExpectedProgramSchema != 1 || entry.ExpectedProtocol != plugin.SurfaceProtocolVersion {
 		t.Fatalf("reviewed floor versions drifted: %#v", entry)
 	}
 	// The tag's own commit (the squash merge of the plugin PR), never the PR's
 	// last commit: the published asset was verified against this one's manifest.
-	if entry.FallbackCommit != "ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3" {
+	if entry.FallbackCommit != "2c4044171f349d74cf2ab0ee6142bbb23a7c571c" {
 		t.Fatalf("reviewed fallback commit drifted: %q", entry.FallbackCommit)
 	}
 	if !entry.ReleaseReady || entry.FallbackSource() != entry.SourceRepository+"#sha="+entry.FallbackCommit {

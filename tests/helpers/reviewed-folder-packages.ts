@@ -6,7 +6,7 @@ import { expect, type APIRequestContext } from '@playwright/test';
 export async function stageReviewedFolderPackages(request: APIRequestContext) {
   for (const source of [
     'https://github.com/johnjallday/music-project-management#sha=c420507da24c1fc007d794f3e8974231dd2c5d4a',
-    'https://github.com/johnjallday/reaper-plugin#sha=ea85c6692e49ddaaf83ae3f9e17ede17fe6385e3'
+    'https://github.com/johnjallday/reaper-plugin#sha=2c4044171f349d74cf2ab0ee6142bbb23a7c571c'
   ]) {
     const preview = await request.post('/api/plugins/install', { data: { source } });
     expect(preview.ok(), await preview.text()).toBeTruthy();

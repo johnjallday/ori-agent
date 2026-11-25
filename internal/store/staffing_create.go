@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 )
 
 var ErrStaffingNameTaken = errors.New("the selected agent name is no longer available; review the team again")
@@ -24,7 +22,7 @@ type StaffingProfileCreator interface {
 
 func staffingCreateNameAvailable(snapshot StaffingSnapshot, name string) error {
 	if name == "" || strings.TrimSpace(name) != name || utf8.RuneCountInString(name) > 120 ||
-		name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00\r\n") || systemassistant.IsKnownName(name) {
+		name == "." || name == ".." || strings.ContainsAny(name, "/\\\x00\r\n") {
 		return ErrStaffingNameTaken
 	}
 	for _, existing := range snapshot.sourceNames {

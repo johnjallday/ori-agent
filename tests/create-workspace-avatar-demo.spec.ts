@@ -1,4 +1,5 @@
 import { test, expect, Page, APIRequestContext } from '@playwright/test';
+import { confirmReviewedCreation } from './helpers/confirm-reviewed-creation';
 
 /**
  * Demo capture for the Create Workspace Team-step avatars.
@@ -104,9 +105,11 @@ test('Team step renders agent identities through the shared renderer', async ({ 
   );
   await expect(plain.locator('.agent-avatar--generated')).toBeVisible();
 
-  // Fill Blank's required role explicitly, then add the character-backed agent
-  // as an extra teammate. A saved-agent proposal is not role membership.
-  await page.getByRole('button', { name: 'Assign an agent to Ask Ori', exact: true }).click();
+  // Replace Blank's default manager with a saved agent explicitly, then add the
+  // character-backed agent as an extra teammate. A saved-agent proposal is not
+  // role membership.
+  await page.getByRole('button', { name: 'Clear Manager', exact: true }).click();
+  await page.getByRole('button', { name: 'Assign an agent to Manager', exact: true }).click();
   await page.locator(`[data-existing-agent-add="${WITHOUT_CHARACTER}"]`).click();
   await page.locator(`[data-existing-agent-add="${WITH_CHARACTER}"]`).click();
   // Both resulting identities keep their selected render mode in the shared
@@ -137,10 +140,15 @@ test('Team step renders agent identities through the shared renderer', async ({ 
   await expect(page.locator('#wizardStep4')).toBeVisible();
   await expect(page.locator('#workspaceReviewSummary')).toContainText(WITHOUT_CHARACTER);
   await expect(page.locator('#workspaceReviewSummary')).toContainText(WITH_CHARACTER);
+  // Creation goes through the reviewed creation owner, as every wizard create
+  // does; its confirm response carries the persisted workspace.
   const createResponse = page.waitForResponse(
-    response => response.url().endsWith('/api/workspaces') && response.request().method() === 'POST'
+    response =>
+      /\/api\/workspaces\/create-operations\/[^/]+\/confirm$/.test(
+        new URL(response.url()).pathname
+      ) && response.request().method() === 'POST'
   );
-  await page.locator('#createFolderBtn').click();
+  await confirmReviewedCreation(page, true);
   const response = await createResponse;
   expect(response.ok(), await response.text()).toBe(true);
   const body = await response.json();
@@ -153,7 +161,7 @@ test('Team step renders agent identities through the shared renderer', async ({ 
   );
   expect(roleHolder).toEqual(
     expect.objectContaining({
-      role_id: 'ask-ori',
+      role_id: 'manager',
       role_source: 'assigned',
       entry_point: true
     })

@@ -295,7 +295,7 @@ func (h *Handler) seedTemplateAgentsStrict(ws *session.Workspace, tpl projecttem
 		}
 		if !exists {
 			cfg, _ := h.templateAgentCreateConfig(spec)
-			if err := h.createTemplateSeededProfile(context.Background(), &result, tpl, spec.Name, cfg); err != nil {
+			if err := h.createTemplateSeededProfile(context.Background(), &result, tpl, index, ws.ID, spec.Name, cfg); err != nil {
 				return result, &strictTemplateAgentSeedError{
 					Index: index,
 					Name:  spec.Name,
@@ -314,6 +314,9 @@ func (h *Handler) seedTemplateAgentsStrict(ws *session.Workspace, tpl projecttem
 		if index == 0 {
 			setWorkspaceEntryAgent(ws, spec.Name)
 			result.EntrySet = true
+			if isBlankManagerSpec(tpl, index) {
+				markBlankManagerAttachment(ws, spec.Name, !exists)
+			}
 		} else {
 			attachWorkspaceSpecialist(ws, spec.Name)
 		}

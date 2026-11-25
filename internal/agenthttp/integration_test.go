@@ -936,32 +936,34 @@ func TestEvolutionAndFeedEndpoints(t *testing.T) {
 	})
 }
 
-func TestReservedSystemAssistantProtection(t *testing.T) {
+// Ori's protected assistant is retired, so its name protects nothing: a
+// person's own agent called "Ask Ori" is renamed and deleted like any other,
+// and any agent may take the name.
+func TestAskOriNameIsOrdinary(t *testing.T) {
 	ts := setupTestServer(t)
 	defer ts.cleanup()
 
-	if err := ensureSystemAssistantAgent(ts.store); err != nil {
-		t.Fatalf("failed to ensure system assistant: %v", err)
-	}
-
-	t.Run("DeleteReservedAssistantBlocked", func(t *testing.T) {
-		rr := ts.doRequest(t, http.MethodDelete, "/api/agents?name="+systemAssistantAgentName, nil)
-		assertStatus(t, rr, http.StatusBadRequest)
-	})
-
-	t.Run("RenameReservedAssistantBlocked", func(t *testing.T) {
-		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name="+systemAssistantAgentName, map[string]any{
-			"name": "Assistant Renamed",
-		})
-		assertStatus(t, rr, http.StatusBadRequest)
-	})
-
-	t.Run("RenameIntoReservedAssistantBlocked", func(t *testing.T) {
+	t.Run("RenameIntoAskOriAllowed", func(t *testing.T) {
 		createTestAgent(t, ts, "rename-source-agent")
 		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name=rename-source-agent", map[string]any{
-			"name": systemAssistantAgentName,
+			"name": "Ask Ori",
 		})
-		assertStatus(t, rr, http.StatusBadRequest)
+		assertStatus(t, rr, http.StatusOK)
+	})
+
+	t.Run("RenameAUsersAskOriAllowed", func(t *testing.T) {
+		rr := ts.doRequest(t, http.MethodPatch, "/api/agents?name="+url.QueryEscape("Ask Ori"), map[string]any{
+			"name": "Front Desk",
+		})
+		assertStatus(t, rr, http.StatusOK)
+	})
+
+	t.Run("DeleteAUsersAskOriAllowed", func(t *testing.T) {
+		createTestAgent(t, ts, "Ask Ori")
+		rr := ts.doRequest(t, http.MethodDelete, "/api/agents?name="+url.QueryEscape("Ask Ori"), nil)
+		if rr.Code != http.StatusOK && rr.Code != http.StatusNoContent {
+			t.Fatalf("deleting a user's Ask Ori = %d: %s", rr.Code, rr.Body.String())
+		}
 	})
 }
 

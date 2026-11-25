@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/agent"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/workspace"
 	"github.com/johnjallday/ori-agent/internal/workspacecontinuity"
 )
@@ -229,8 +228,17 @@ func validateAssistantRenameName(value string) (string, error) {
 	if !assistantDisplayNamePattern.MatchString(value) {
 		return "", errors.New("assistant name may use letters, numbers, spaces, underscores, and hyphens")
 	}
-	if strings.EqualFold(value, "Ori") || strings.EqualFold(value, systemassistant.CanonicalName) {
+	if isReservedAssistantName(value) {
 		return "", errors.New("the Ori name is reserved for the app guide")
 	}
 	return value, nil
+}
+
+// isReservedAssistantName reports whether a Personal Assistant name would
+// borrow Ori's own brand. Help speaks as Ori, so an assistant called "Ori" or
+// "Ask Ori" would blur which one is answering. This is a naming rule only; no
+// route, lookup or permission depends on it.
+func isReservedAssistantName(value string) bool {
+	trimmed := strings.TrimSpace(value)
+	return strings.EqualFold(trimmed, "Ori") || strings.EqualFold(trimmed, "Ask Ori")
 }

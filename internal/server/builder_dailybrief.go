@@ -294,6 +294,9 @@ func (b *ServerBuilder) initializeDailyBrief() {
 	b.personalAssignment.SetCanonicalWriter(assignmentWriter)
 	b.personalAssignment.SetBriefService(briefService)
 	b.personalAssistantHandler = personalassistanthttp.NewHandler(b.personalAssistantService, b.userProvider)
+	if b.chatHandler != nil {
+		b.chatHandler.SetPersonalAssistantProfileReader(activePersonalAssistantProfile(b.personalAssistantService, b.userProvider))
+	}
 	// The hire preset picks the model the assistant thinks with; the hire saves
 	// it as the Default model through the same write an agent edit uses.
 	if b.configManager != nil {

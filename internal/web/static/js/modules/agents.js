@@ -703,7 +703,8 @@ function normalizeAgentCreationFlowSelections(values) {
 function normalizeAgentCreationFlowOptions(options = {}) {
   return {
     folderLookLink: String(options?.folderLookLink || ''),
-    folderLeadRole: options.folderLeadRole === 'ask-ori' ? options.folderLeadRole : '',
+    // The only lead slot this flow fills is a Blank workspace's own manager.
+    folderLeadRole: options.folderLeadRole === 'manager' ? options.folderLeadRole : '',
     seedName: String(options?.seedName || '').trim(),
     seedRole: String(options?.seedRole || '')
       .trim()

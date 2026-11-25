@@ -11,7 +11,6 @@ import (
 
 	"github.com/johnjallday/ori-agent/internal/agent"
 	"github.com/johnjallday/ori-agent/internal/config"
-	"github.com/johnjallday/ori-agent/internal/systemassistant"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
 
@@ -185,18 +184,13 @@ func (c *CompositeStore) rootForWrite() (*fileStore, error) {
 	return c.root, nil
 }
 
-// owner returns the store holding name, or nil. The built-in assistant is
-// looked for in the system store first; any other name in the root first, so
-// an older copy left behind in the data dir never shadows the user's agent.
+// owner returns the store holding name, or nil. The root is looked in first,
+// so an older copy left behind in the data dir never shadows the user's agent.
+// The retired assistant's record in the data dir is invisible to both.
 func (c *CompositeStore) owner(name string) memberStore {
 	c.mu.RLock()
 	root := c.root
 	c.mu.RUnlock()
-	if systemassistant.IsKnownName(name) {
-		if _, ok := c.system.GetAgent(name); ok {
-			return c.system
-		}
-	}
 	if root != nil {
 		if _, ok := root.GetAgent(name); ok {
 			return root
@@ -213,7 +207,7 @@ func (c *CompositeStore) targetForNew(name string) (memberStore, error) {
 	c.mu.RLock()
 	legacy := c.legacyWrites
 	c.mu.RUnlock()
-	if systemassistant.IsCanonicalName(name) || legacy {
+	if legacy {
 		return c.system, nil
 	}
 	root, err := c.rootForWrite()
