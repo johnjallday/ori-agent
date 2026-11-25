@@ -340,7 +340,8 @@ export class WorkspaceSurfaceHost {
         operation: true,
         confirmation: Boolean(features.confirmation),
         state: Boolean(features.state),
-        ask_ori: Boolean(features.ask_ori),
+        // Retired: never advertised, whatever an older catalog or manifest says.
+        ask_ori: false,
         create_task: Boolean(features.create_task),
         open_setup: Boolean(features.open_setup),
         close: Boolean(features.close)
@@ -468,7 +469,8 @@ export class WorkspaceSurfaceHost {
         operation: true,
         confirmation: Boolean(features.confirmation),
         state: Boolean(features.state),
-        ask_ori: Boolean(features.ask_ori),
+        // Retired: never advertised, whatever an older catalog or manifest says.
+        ask_ori: false,
         create_task: Boolean(features.create_task),
         open_setup: Boolean(features.open_setup),
         close: Boolean(features.close)
@@ -531,7 +533,14 @@ export class WorkspaceSurfaceHost {
       case 'ori.surface.state.delete':
         return this._state('delete', payload, active);
       case 'ori.surface.host.ask_ori':
-        return this._askOri(text(payload.context));
+        // Retired with Ori's Ask Ori persona. An older plugin release may still
+        // send it; it is refused here, before any host request, panel or model,
+        // and its context is never read. Work goes to this workspace's own
+        // chat, outside the surface.
+        return this._bridgeError(
+          'ask_ori_retired',
+          "Ask Ori has been retired. Use this workspace's own chat instead."
+        );
       case 'ori.surface.host.create_task':
         return this._createTask(text(payload.template_id), payload.variables || {});
       case 'ori.surface.host.open_setup':
@@ -624,29 +633,6 @@ export class WorkspaceSurfaceHost {
       return { ok: true, result };
     } catch (error) {
       return this._bridgeError(error.code || 'state_invalid', error.message);
-    }
-  }
-
-  async _askOri(context) {
-    try {
-      const intent = await this._intent('ask_ori', context);
-      if (!this.window?.OriAskRouting || typeof this.window.OriAskRouting.submit !== 'function') {
-        return this._bridgeError('ask_ori_unavailable', 'The work controller is not available.');
-      }
-      await this.window.OriAskRouting.submit(context, {
-        routeContext: {
-          surface: 'plugin_workspace_surface',
-          workspace_id: intent.workspace_id,
-          origin: 'plugin_workspace_surface',
-          required_capabilities: intent.required_capabilities || [],
-          plugin_context: intent.plugin_context || '',
-          plugin_context_untrusted: true
-        },
-        openThinkingModal: true
-      });
-      return { ok: true, result: { submitted: true } };
-    } catch (error) {
-      return this._bridgeError(error.code || 'ask_ori_unavailable', error.message);
     }
   }
 

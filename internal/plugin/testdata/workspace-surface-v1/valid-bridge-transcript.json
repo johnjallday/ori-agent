@@ -27,9 +27,7 @@
         "payload": {
           "challenge": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
           "sdk_version": "1.0.0",
-          "supported_protocols": [
-            1
-          ]
+          "supported_protocols": [1]
         }
       }
     },
@@ -48,7 +46,7 @@
           "features": {
             "confirmation": true,
             "state": true,
-            "ask_ori": true,
+            "ask_ori": false,
             "open_setup": true,
             "close": true
           }
@@ -125,18 +123,6 @@
           "schema_version": 1,
           "expected_revision": "0",
           "value": null
-        }
-      }
-    },
-    {
-      "from": "frame",
-      "message": {
-        "protocol_version": 1,
-        "bridge_id": "bridge-demo-1",
-        "type": "ori.surface.host.ask_ori",
-        "request_id": "ask-1",
-        "payload": {
-          "context": "Explain the current demo status."
         }
       }
     },

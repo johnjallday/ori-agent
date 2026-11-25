@@ -466,7 +466,7 @@ test('host keeps confirmation token out of frame while retrying the exact operat
   );
 });
 
-test('state, Ask Ori, and Setup requests use host-owned generic intents', async () => {
+test('state and Setup requests use host-owned generic intents; retired Ask Ori is refused', async () => {
   const { host, calls, asks, setupCalls, timers } = makeHost();
   await host.loadCatalog();
   await host.open('plugin:workspace-surface-demo:demo-tools:main', new NodeFake('button'));
@@ -483,15 +483,19 @@ test('state, Ask Ori, and Setup requests use host-owned generic intents', async 
     key: 'display'
   });
 
+  // An older plugin release may still send the retired Ask Ori request. It is
+  // refused before any host request is made: no intent call, no submitted
+  // chat, no opened panel, no model.
+  const callsBefore = calls.length;
   const asked = await host.active.bridge.options.onRequest({
     type: 'ori.surface.host.ask_ori',
     payload: { context: 'Explain this status.' }
   });
-  assert.deepEqual(asked, { ok: true, result: { submitted: true } });
-  assert.equal(asks.length, 1);
-  assert.deepEqual(asks[0].options.routeContext.required_capabilities, ['demo_runtime']);
-  assert.equal(asks[0].options.routeContext.plugin_context, 'Explain this status.');
-  assert.equal(asks[0].options.routeContext.plugin_context_untrusted, true);
+  assert.equal(asked.ok, false);
+  assert.equal(asked.error.code, 'ask_ori_retired');
+  assert.equal(asks.length, 0);
+  assert.equal(calls.length, callsBefore);
+  assert.equal(host.active.bridge.options.features.ask_ori, false);
 
   const setup = await host.active.bridge.options.onRequest({
     type: 'ori.surface.host.open_setup',

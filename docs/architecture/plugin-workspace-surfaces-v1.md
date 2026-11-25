@@ -132,7 +132,6 @@ Fields:
   "operations": ["status.read", "greeting.create"],
   "polling": { "map_seconds": 5, "open_seconds": 1 },
   "host_intents": {
-    "ask_ori": { "required_capabilities": [] },
     "open_setup": { "provider_id": "" },
     "confirmation": true,
     "state": true,
@@ -152,8 +151,13 @@ Fields:
 - each operation and the status operation MUST resolve on the capability's
   service and appear in `operations`.
 - map polling requests are 5–60 seconds; open polling requests are 1–60 seconds.
-- Ask Ori requirements and Setup provider are trusted fixed references. A frame
-  request cannot modify them.
+- The Setup provider is a trusted fixed reference. A frame request cannot
+  modify it.
+- `host_intents.ask_ori` is retired. An older manifest that still declares it
+  is accepted (the key is decoded and ignored, so the release still mounts),
+  but the host never advertises it (`features.ask_ori` is always false) and
+  refuses the request. Workspace work goes to the workspace's own chat,
+  outside the surface.
 
 ### Station status operation
 
@@ -479,7 +483,8 @@ server session credential is never in this envelope.
 - `ori.surface.state.delete` — `{key, expected_revision}`.
 - `ori.surface.host.confirm` — `{confirmation_id}` only for a broker-projected
   pending confirmation; arbitrary effect/payload text is not accepted.
-- `ori.surface.host.ask_ori` — `{context}` bounded to 2000 UTF-8 bytes.
+- `ori.surface.host.ask_ori` — retired. Refused with `ask_ori_retired` before
+  any host request; its context is never read.
 - `ori.surface.host.open_setup` — `{}`.
 - `ori.surface.host.close` — `{}`.
 - `ori.surface.status_changed` — `{}`; it asks the host to refresh the declared
@@ -492,7 +497,7 @@ server session credential is never in this envelope.
 - `ori.surface.host.visibility` — `{visible}`.
 - `ori.surface.host.invalidated` — `{code,message}` followed by frame teardown.
 
-The host owns the actual confirmation, Ask Ori, Setup, and close flows. The SDK
+The host owns the actual confirmation, Setup, and close flows. The SDK
 exposes promises/events but does not reproduce authorization logic.
 
 ## Surface session
@@ -695,7 +700,7 @@ The canonical generic provider absence is:
 - `valid-contribution.json` — complete non-REAPER contribution;
 - `valid-workspace-projection.json` — executable-free persisted projection;
 - `valid-catalog.json` — sanitized public station descriptor;
-- `valid-bridge-transcript.json` — challenge, init, operation, state, Ask Ori,
+- `valid-bridge-transcript.json` — challenge, init, operation, state,
   Setup, status-changed, and close envelopes;
 - `valid-service-transcript.json` — initialize/call/result/error shapes;
 - `invalid-vectors.json` — identity, protocol, platform, collision, unsafe path,

@@ -269,7 +269,9 @@ func (h *Handler) catalogItem(ctx context.Context, workspaceID string, surface w
 		Modal: surface.Surface.Modal, Polling: surface.Surface.Polling,
 		Features: catalogFeatures{
 			Confirmation: surface.Surface.ConfirmationEnabled, State: surface.Surface.StateEnabled,
-			AskOri:    len(surface.Surface.AskOriCapabilities) > 0,
+			// Retired: never advertised, so an older release that reads this
+			// flag hides its Ask Ori control.
+			AskOri:    false,
 			OpenSetup: surface.Surface.SetupProviderID != "", Close: surface.Surface.CloseEnabled,
 			CreateTask: len(surface.Surface.TaskTemplates) > 0,
 		},
@@ -575,7 +577,6 @@ type intentRequest struct {
 type intentResponse struct {
 	Intent               string              `json:"intent"`
 	WorkspaceID          string              `json:"workspace_id"`
-	PluginContext        string              `json:"plugin_context,omitempty"`
 	RequiredCapabilities []string            `json:"required_capabilities,omitempty"`
 	ProviderID           string              `json:"provider_id,omitempty"`
 	RequirementKey       string              `json:"requirement_key,omitempty"`
@@ -611,13 +612,12 @@ func (h *Handler) Intent(w http.ResponseWriter, r *http.Request) {
 	response := intentResponse{WorkspaceID: record.WorkspaceID}
 	switch strings.TrimSpace(input.Type) {
 	case "ask_ori":
-		if input.TemplateID != "" || len(input.Variables) != 0 || len(surface.Surface.AskOriCapabilities) == 0 || !validPluginIntentContext(input.Context) {
-			respondError(w, http.StatusBadRequest, "intent_unavailable", "Ask Ori is not available for this surface.")
-			return
-		}
-		response.Intent = "ask_ori"
-		response.PluginContext = strings.TrimSpace(input.Context)
-		response.RequiredCapabilities = append([]string(nil), surface.Surface.AskOriCapabilities...)
+		// Retired with Ori's Ask Ori persona. An older plugin release may still
+		// ask; it is refused whatever its manifest declares, and nothing it
+		// sent is read or passed on. Workspace work goes to the workspace's own
+		// chat, outside the surface.
+		respondError(w, http.StatusGone, "intent_retired", "Ask Ori has been retired. Use this workspace's own chat instead.")
+		return
 	case "open_setup":
 		if input.Context != "" || input.TemplateID != "" || len(input.Variables) != 0 || surface.Surface.SetupProviderID == "" {
 			respondError(w, http.StatusBadRequest, "intent_unavailable", "Setup is not available for this surface.")
@@ -689,18 +689,6 @@ func renderResolvedTaskDetails(instructions string, variables json.RawMessage) (
 		return "", errors.New("resolved task details are invalid")
 	}
 	return details, nil
-}
-
-func validPluginIntentContext(value string) bool {
-	if !utf8.ValidString(value) || len([]byte(value)) > 2000 {
-		return false
-	}
-	for _, r := range value {
-		if r < 0x20 && r != '\n' && r != '\t' || r == 0x7f {
-			return false
-		}
-	}
-	return true
 }
 
 type stateRequest struct {

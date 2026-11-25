@@ -445,7 +445,7 @@ func validateSurface(surface Surface) error {
 		}
 	}
 	for _, capability := range surface.AskOriCapabilities {
-		if err := validateID("Ask Ori capability", capability); err != nil {
+		if err := validateID("retired ask_ori capability", capability); err != nil {
 			return err
 		}
 	}

@@ -952,11 +952,13 @@ test('plugin-backed Reaper Song reaches generic setup, surface, action, script, 
       ).toHaveCount(0);
       await capture('group5-01-live-parity-controls.png');
 
+      // Ask Ori is retired: even a release that still declares it is refused,
+      // and nothing is submitted. Workspace chat lives outside the surface.
       const askIntent = await request.post('/api/workspace-surfaces/intents', {
         data: { session, type: 'ask_ori', context: 'Review the live disposable track state.' }
       });
-      expect(askIntent.ok(), await askIntent.text()).toBeTruthy();
-      expect((await askIntent.json()).required_capabilities).toContain('reaper_live_control');
+      expect(askIntent.status(), await askIntent.text()).toBe(410);
+      expect((await askIntent.json()).code).toBe('intent_retired');
       const setupIntent = await request.post('/api/workspace-surfaces/intents', {
         data: { session, type: 'open_setup' }
       });

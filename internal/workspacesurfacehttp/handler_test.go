@@ -472,13 +472,6 @@ func TestExpiredMalformedAndOversizedRequestsFailClosed(t *testing.T) {
 func TestHostIntentsUseOnlySurfaceRegisteredRequirements(t *testing.T) {
 	fixture := newPrototypeHTTPFixture(t)
 	opened := fixture.openSession(t)
-	askRecorder := fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents",
-		`{"session":"`+opened.Session+`","type":"ask_ori","context":"Explain this status"}`)
-	var ask intentResponse
-	if err := json.Unmarshal(askRecorder.Body.Bytes(), &ask); err != nil || askRecorder.Code != http.StatusOK || ask.Intent != "ask_ori" ||
-		len(ask.RequiredCapabilities) != 1 || ask.RequiredCapabilities[0] != "demo_runtime" || ask.PluginContext != "Explain this status" {
-		t.Fatalf("Ask Ori intent = %d %+v, %v", askRecorder.Code, ask, err)
-	}
 	setup := fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents",
 		`{"session":"`+opened.Session+`","type":"open_setup"}`)
 	var setupIntent intentResponse
@@ -486,14 +479,35 @@ func TestHostIntentsUseOnlySurfaceRegisteredRequirements(t *testing.T) {
 		t.Fatalf("Setup intent = %d %+v, %v", setup.Code, setupIntent, err)
 	}
 	injected := fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents",
-		`{"session":"`+opened.Session+`","type":"ask_ori","context":"x","required_capabilities":["admin"],"tools":["admin"],"route":"/settings"}`)
+		`{"session":"`+opened.Session+`","type":"open_setup","required_capabilities":["admin"],"tools":["admin"],"route":"/settings"}`)
 	if injected.Code != http.StatusBadRequest {
 		t.Fatalf("injected intent authority status = %d, body=%s", injected.Code, injected.Body.String())
 	}
-	control := fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents",
-		`{"session":"`+opened.Session+`","type":"ask_ori","context":"unsafe\u0001context"}`)
-	if control.Code != http.StatusBadRequest {
-		t.Fatalf("control-character intent status = %d, body=%s", control.Code, control.Body.String())
+}
+
+// The Ask Ori host intent is retired. A surface whose (older) manifest still
+// declares it mounts normally, is never advertised the feature, and any
+// request for it is refused outright — nothing is read from its context and
+// no intent payload is handed back to submit anywhere.
+func TestRetiredAskOriIntentIsRefusedEvenWhenDeclared(t *testing.T) {
+	fixture := newPrototypeHTTPFixture(t)
+	opened := fixture.openSession(t)
+	for _, body := range []string{
+		`{"session":"` + opened.Session + `","type":"ask_ori","context":"Explain this status"}`,
+		`{"session":"` + opened.Session + `","type":"ask_ori","context":"unsafe\u0001context"}`,
+		`{"session":"` + opened.Session + `","type":"ask_ori"}`,
+	} {
+		recorder := fixture.serve(http.MethodPost, "/api/workspace-surfaces/intents", body)
+		if recorder.Code != http.StatusGone || !strings.Contains(recorder.Body.String(), "intent_retired") {
+			t.Fatalf("retired intent = %d %s; want 410 intent_retired", recorder.Code, recorder.Body.String())
+		}
+		if strings.Contains(recorder.Body.String(), "required_capabilities") || strings.Contains(recorder.Body.String(), "Explain this status") {
+			t.Fatalf("a refused retired intent echoed its request: %s", recorder.Body.String())
+		}
+	}
+	catalog := fixture.serve(http.MethodGet, "/api/workspaces/"+fixture.workspaceID+"/surfaces", "")
+	if catalog.Code != http.StatusOK || !strings.Contains(catalog.Body.String(), `"ask_ori":false`) || strings.Contains(catalog.Body.String(), `"ask_ori":true`) {
+		t.Fatalf("catalog must not advertise ask_ori: %d %s", catalog.Code, catalog.Body.String())
 	}
 }
 

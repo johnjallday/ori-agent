@@ -381,10 +381,11 @@ sdk.on('invalidated', () => {
 });
 ```
 
-Available calls are `invoke`, `getState`, `setState`, `deleteState`, `askOri`,
+Available calls are `invoke`, `getState`, `setState`, `deleteState`,
 `openSetup`, `statusChanged`, and `close`. State is namespaced by plugin and
 workspace, quota bounded, revision checked, and cannot write core workspace
-fields. Ask Ori context is bounded untrusted context, never authority. Setup
+fields. The former `askOri` call is retired: the host refuses it, and
+workspace work goes to the workspace's own chat. Setup
 routes and required capabilities come from the trusted surface declaration.
 Confirmation UI and single-use approval tokens are host-owned; a frame cannot
 make itself confirmed by adding a field to an operation payload.

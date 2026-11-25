@@ -255,6 +255,9 @@ type ContributionPolling struct {
 }
 
 type ContributionHostIntents struct {
+	// AskOri is retired. It is still decoded (the strict decode rejects an
+	// unknown key, so dropping it would stop older releases mounting) but the
+	// host never advertises or honors it.
 	AskOri       ContributionAskOri    `json:"ask_ori"`
 	OpenSetup    ContributionOpenSetup `json:"open_setup"`
 	Confirmation bool                  `json:"confirmation"`
@@ -797,7 +800,7 @@ func validateSurfaceContribution(capability string, surface ContributedSurface, 
 	}
 	for _, capabilityID := range surface.HostIntents.AskOri.RequiredCapabilities {
 		if !canonicalIDValue(capabilityID) {
-			return contributionError(CodeContributionInvalid, component, "host_intents.ask_ori", "Ask Ori capability id is invalid", nil)
+			return contributionError(CodeContributionInvalid, component, "host_intents.ask_ori", "retired ask_ori capability id is invalid", nil)
 		}
 	}
 	if providerID := surface.HostIntents.OpenSetup.ProviderID; providerID != "" && !canonicalIDValue(providerID) {
