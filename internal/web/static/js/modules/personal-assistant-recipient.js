@@ -206,6 +206,17 @@ export function entryAgentPlaceholder(recipient) {
   return `Ask ${text(recipient?.name) || 'the Commander'} about this workspace… (/task creates a ticket)`;
 }
 
+/**
+ * The composer's accessible name. It follows the recipient the way the panel
+ * title does, so a screen reader never calls a workspace's own manager the
+ * personal assistant.
+ */
+export function composerLabel(who) {
+  if (who?.personal) return 'Ask your personal assistant a question or describe work';
+  const name = text(who?.name);
+  return name ? `Ask ${name} a question or describe work` : 'Ask a question or describe work';
+}
+
 function sameName(a, b) {
   return text(a).toLowerCase() === text(b).toLowerCase();
 }
