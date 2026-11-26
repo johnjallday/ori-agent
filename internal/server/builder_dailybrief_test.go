@@ -49,12 +49,9 @@ func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 		t.Fatalf("failed to chdir to temp dir: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(originalWD) })
-	// DefaultWorkspaceRoot() resolves to $HOME/Ori Workspaces regardless of
-	// CWD (it does not respect ORI_DATA_DIR either) — this test actually
-	// creates a workspace, so without this it would write into the real
-	// user's home directory. t.Setenv restores the original HOME after the
-	// test.
-	t.Setenv("HOME", tmpDir)
+	// Keep known user folders and the workspace root outside the fixture's
+	// protected app data, just as they are in an ordinary user profile.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("ORI_DATA_DIR", tmpDir)
 
 	builder, err := NewServerBuilder()

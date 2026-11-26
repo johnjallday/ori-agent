@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	"github.com/johnjallday/ori-agent/internal/folderdigest"
@@ -38,7 +37,7 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 	service := personalassistant.NewFolderDigestService(store, personalassistant.FolderDigestDeps{
 		ValidateRoot: validateShownFolder,
 		ScanObservation: func(root string) (folderdigest.Result, error) {
-			return folderagent.ObserveInbox(root, []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)})
+			return folderagent.ObserveInbox(root, b.folderReviewProtectedRoots())
 		},
 		Picker: nativeFolderPicker{},
 		// The store may be created by a later phase; look it up at call time.

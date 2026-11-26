@@ -31,6 +31,19 @@ import (
 	"github.com/johnjallday/ori-agent/internal/workspace"
 )
 
+// folderReviewProtectedRoots supplies the same policy to the initial look and
+// its later review. Folder selections use physical paths; a configured guard
+// may instead use an alias (for example /var on macOS). Keep both spellings.
+func (b *ServerBuilder) folderReviewProtectedRoots() []string {
+	roots := []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)}
+	for _, root := range roots {
+		if resolved, err := filepath.EvalSymlinks(root); err == nil && resolved != root {
+			roots = append(roots, resolved)
+		}
+	}
+	return roots
+}
+
 // wireFolderAgent builds "Hire an agent for <folder>" over the folder
 // digest's chooser (picker, chips, typed-path tokens), the ordinary anchored
 // creation pipeline, and the workspace store. Every dependency that a later
@@ -90,7 +103,7 @@ func (b *ServerBuilder) wireFolderAgent() {
 		},
 		ReviewOpen:         platform.OpenReviewDocument,
 		OrganizationMemory: workspace.NewMemoryStore(b.workspaceFileStore),
-		DocumentsProtected: func() []string { return []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)} },
+		DocumentsProtected: b.folderReviewProtectedRoots,
 		ReviewModel:        b.documentsReviewModel,
 		DocumentsNotebook: func(ctx context.Context, owner, hq string, fn func(secondbrain.Source, string) error) error {
 			return b.personalAssistantSecondBrain.WithDocumentsNotebook(ctx, owner, hq, fn)
@@ -99,7 +112,7 @@ func (b *ServerBuilder) wireFolderAgent() {
 			return b.personalAssistantSecondBrain.DocumentsSetup(ctx, owner, hq, root, proposal, ref, confirm)
 		},
 		DocumentsScope: func(ctx context.Context, owner string) (folderagent.DocumentsScope, error) {
-			scope := folderagent.DocumentsScope{Protected: []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)}}
+			scope := folderagent.DocumentsScope{Protected: b.folderReviewProtectedRoots()}
 			source, connected, setup, err := b.personalAssistantSecondBrain.DocumentsNotesState(ctx, owner)
 			scope.Setup = setup
 			if connected {
