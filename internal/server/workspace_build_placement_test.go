@@ -50,7 +50,7 @@ func stageInboxPlacement(t *testing.T, f *draftServerFixture) (map[string]any, s
 }
 
 func TestInboxPlacementHandoff_NoModelNoEffectsReplayAndExactPreparation(t *testing.T) {
-	f := newDraftServerFixture(t)
+	f := newDraftServerFixtureWithHome(t, t.TempDir())
 	status, availability := f.call(t, http.MethodGet, "/api/workspaces/build-sessions/availability", nil)
 	if status != http.StatusOK || availability["available"] != false || availability["reason"] != "no_model" {
 		t.Fatalf("fixture must have no model configured: %d %v", status, availability)

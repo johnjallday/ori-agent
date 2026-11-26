@@ -52,7 +52,12 @@ func (f *draftServerFixture) call(t *testing.T, method, path string, body any) (
 
 func newDraftServerFixture(t *testing.T) *draftServerFixture {
 	t.Helper()
-	builder, handler := newDailyBriefTestServer(t)
+	return newDraftServerFixtureWithHome(t, "")
+}
+
+func newDraftServerFixtureWithHome(t *testing.T, home string) *draftServerFixture {
+	t.Helper()
+	builder, handler := newDailyBriefTestServerWithHome(t, home)
 	f := &draftServerFixture{builder: builder, handler: handler}
 	if status, body := f.call(t, http.MethodPost, "/api/settings/workspace-root", map[string]string{"workspace_root": ""}); status != http.StatusOK {
 		t.Fatalf("workspace root: %d %v", status, body)

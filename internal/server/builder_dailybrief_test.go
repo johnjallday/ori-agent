@@ -40,6 +40,11 @@ func (noReviewedTestReleases) Resolve(context.Context, reviewedintegration.Entry
 // which has no HTTP route (only first-open/manual are exposed to clients).
 func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 	t.Helper()
+	return newDailyBriefTestServerWithHome(t, "")
+}
+
+func newDailyBriefTestServerWithHome(t *testing.T, home string) (*ServerBuilder, http.Handler) {
+	t.Helper()
 	originalWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("failed to get working directory: %v", err)
@@ -49,9 +54,12 @@ func newDailyBriefTestServer(t *testing.T) (*ServerBuilder, http.Handler) {
 		t.Fatalf("failed to chdir to temp dir: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(originalWD) })
-	// Keep known user folders and the workspace root outside the fixture's
-	// protected app data, just as they are in an ordinary user profile.
-	t.Setenv("HOME", t.TempDir())
+	// The default sandbox puts staging and app data under HOME. Tests that
+	// need a real user folder outside protected app data pass a separate HOME.
+	if home == "" {
+		home = tmpDir
+	}
+	t.Setenv("HOME", home)
 	t.Setenv("ORI_DATA_DIR", tmpDir)
 
 	builder, err := NewServerBuilder()
