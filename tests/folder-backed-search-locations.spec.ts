@@ -114,7 +114,7 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
   await expect(page.getByText('Research archive', { exact: true }).first()).toBeVisible();
 });
 
-test('the assistant links a folder without starting a hire or filename scan', async ({
+test('Home chat inspects an attachment or hands it to the real New Workspace button', async ({
   page,
   request,
   baseURL,
@@ -156,6 +156,10 @@ test('the assistant links a folder without starting a hire or filename scan', as
       staffing.push(r.url());
   });
   await page.goto('/?panel=today&folder=explore');
+  await expect(page.locator('html')).toHaveAttribute(
+    'data-bs-theme',
+    browserName === 'webkit' ? 'dark' : 'light'
+  );
   const host = page.locator('#assistantExploreFolder');
   const inventory = () => choiceInventory(request, join(fixture!, 'data'));
   const initial = await inventory();
@@ -203,9 +207,12 @@ test('the assistant links a folder without starting a hire or filename scan', as
     await expect(page.locator('#workspaceSearchConsent')).not.toBeChecked();
   };
   const attachmentActions: string[] = [];
+  let wizardConfirmations = 0;
   page.on('request', r => {
     if (r.url().endsWith('/folder-context/attachment'))
       attachmentActions.push(r.postDataJSON().action);
+    if (r.method() === 'POST' && /\/create-operations\/[^/]+\/confirm$/.test(r.url()))
+      wizardConfirmations++;
   });
   await guide();
   await page.keyboard.press('Escape');
@@ -216,15 +223,56 @@ test('the assistant links a folder without starting a hire or filename scan', as
   await cancelWizard();
   await page.locator('#personalAssistantLauncher').click();
   expect(attachmentActions).toEqual([]);
+  // An unrelated modal or another tab can never consume this drawer's pick.
   await guide();
+  await page.locator('#cockpitCaptureBtn').click();
+  await expect(hint).toBeHidden();
+  await page.locator('#cockpitCaptureCancel').click();
+  await homeButton.click();
+  await expect(modal).toBeVisible();
+  await expect(page.locator('#workspaceAnchorPath')).toHaveValue('');
+  await cancelWizard();
+  await page.locator('#personalAssistantLauncher').click();
+  const desktop = page.viewportSize()!;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  // On macOS WebKit, Option+Tab includes buttons in keyboard navigation.
+  const tab = browserName === 'webkit' ? 'Alt+Tab' : 'Tab';
+  const showWhere = picked.getByRole('button', { name: 'Show me where' });
+  await picked.getByRole('button', { name: 'Look at names and counts' }).focus();
+  await page.keyboard.press(tab);
+  await expect(showWhere).toBeFocused();
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/narrow-attachment.png`
+  });
+  await page.keyboard.press('Enter');
+  await expect(homeButton).toBeFocused();
+  await expect(homeButton).toHaveCSS('animation-name', 'none');
+  await expect(homeButton).toHaveAttribute('aria-describedby', 'chatWorkspaceInstruction');
+  await page.keyboard.press(tab);
+  await expect(hint.getByRole('button', { name: 'Dismiss hint' })).toBeFocused();
+  await page.keyboard.press('Shift+' + tab);
   await expect(homeButton).toBeFocused();
   await expect(hint).toContainText('Start here to use Albums.');
   await expect(modal).toBeHidden();
+  expect(attachmentActions).toEqual([]);
+  const other = await page.context().newPage();
+  try {
+    await installLocalCdn(other);
+    await other.goto('/?home=1');
+    await other.locator('#cockpitCreateWorkspaceBtn').click();
+    await expect(other.locator('#addFolderModal')).toBeVisible();
+    await expect(other.locator('#workspaceFolderModeManaged')).toBeChecked();
+    await expect(other.locator('#workspaceAnchorPath')).toHaveValue('');
+  } finally {
+    await other.close();
+  }
   await page.screenshot({
     path: `tasks/evidence-assistant-folder-handoff/${browserName}/hint.png`
   });
   await homeButton.press('Enter');
   await showPrefill();
+  await page.setViewportSize(desktop);
   expect(attachmentActions).toEqual(['resume']);
   await page.locator('#workspaceSearchConsent').scrollIntoViewIfNeeded();
   await page.screenshot({
@@ -328,6 +376,7 @@ test('the assistant links a folder without starting a hire or filename scan', as
   const creation = page.locator('#workspaceCreationReviewPanel');
   await expect(creation).toContainText('Albums');
   expect(await inventory()).toEqual(initial);
+  expect(wizardConfirmations).toBe(0);
   await creation.getByRole('button', { name: 'Use automatic placement' }).click();
   await creation.locator('[data-placement-action="confirm"]').click();
   await expect(creation.getByRole('heading', { name: 'Workspace created' })).toBeVisible();
@@ -338,6 +387,7 @@ test('the assistant links a folder without starting a hire or filename scan', as
     .toBe(initial.workspaces.length + 1);
 
   const music = (await page.locator('body').getAttribute('data-workspace-id'))!;
+  expect(wizardConfirmations).toBe(1);
   const links = (await (await request.get(`/api/workspaces/${music}/directories`)).json())
     .directories;
   expect(links.filter((link: { path: string }) => link.path === albums)).toHaveLength(1);
