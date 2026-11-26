@@ -6806,8 +6806,7 @@ function openHQCard() {
 // openChooser is the user asking to explore a folder: the composer's Add
 // folder, Home's toolbar button, the `folder=show` link, the mission's Start,
 // or an offer's own "Show another folder". Every one of them starts the same
-// turn in the conversation. Established local Macs offer the compact workspace
-// review; explicit guided and assisted choices keep the folder-agent card.
+// turn in the conversation. Established local Macs attach without inspection; explicit guided and assisted choices keep the folder-agent card.
 // Offers made
 // before this change keep their own controls until they are decided.
 let assistantExplore = null;
@@ -7834,7 +7833,12 @@ function init() {
     assistantExplore = mountAssistantExplore(
       exploreHost,
       document.getElementById('assistantGuidedFolderChooser'),
-      () => els.chips?.querySelector('button')?.focus()
+      () => els.chips?.querySelector('button')?.focus(),
+      () => {
+        closeChooser();
+        document.getElementById('personalAssistantPickedFolder')?.scrollIntoView({ block: 'nearest' });
+        document.getElementById('personalAssistantInput')?.focus({ preventScroll: true });
+      }
     );
   document.addEventListener('personal-assistant:status', event => {
     onStatus(event.detail?.personalAssistant);
@@ -7846,7 +7850,10 @@ function init() {
   // Home's agent directory learned faces: the followed Commander's balloon draws
   // its face again (it was drawn with the fallback until the record arrived).
   document.addEventListener(HOME_AGENT_FACES_EVENT, () => mapPresenter?.presenter.retick?.());
-  document.addEventListener('personal-assistant:conversation-loading', render);
+  document.addEventListener('personal-assistant:conversation-loading', () => {
+    if (exploreHost && !exploreHost.hidden) closeChooser();
+    render();
+  });
   // The first look is followed only while the drawer is open. Opening it reads
   // the look once, which also resumes the poll when it is still running.
   document.getElementById('hqFolderGuideHide')?.addEventListener('click', () => {

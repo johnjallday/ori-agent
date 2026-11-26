@@ -41,7 +41,9 @@ export function createFolderContextController({
     conversationId: currentId(),
     draftId: uuid(),
     revision: '',
+    picked: null, // local review only: never included in request() or browser storage
     observation: null,
+    picked: null,
     // The group Ori proposes for a folder that holds several projects, as the
     // attach response described it. A local preview only: after Send the
     // reply's own suggestion carries the proposal.
@@ -81,7 +83,9 @@ export function createFolderContextController({
       conversationId: id,
       draftId: uuid(),
       revision: saved.revision || '',
+      picked: null,
       observation: saved.observation || null,
+      picked: null,
       structure: null,
       declined: null,
       structureUnavailable: '',
@@ -99,6 +103,55 @@ export function createFolderContextController({
       notice: ''
     });
     changed(state);
+  }
+  async function pick(kind, signal) {
+    if (isBusy() || state.pending) {
+      notify('Wait for the current request before choosing a folder.');
+      return false;
+    }
+    if (isBusy() || state.pending || signal?.aborted) return false;
+    const generation = ++state.generation;
+    const owner = state.conversationId;
+    const replacing = Boolean(state.picked);
+    state.pending = true;
+    state.picked = null; // beginning a replacement invalidates the old Files review
+    notify('Choosing a folder…');
+    try {
+      const review = await post(`${ENDPOINT}/attachment`, { ...target(), action: 'pick', kind });
+      if (generation !== state.generation || owner !== currentId() || signal?.aborted) return false;
+      if (!review?.id) {
+        notify(
+          replacing
+            ? 'Choose the folder again to attach it. Your draft is unchanged.'
+            : 'No folder chosen.'
+        );
+        return false;
+      }
+      Object.assign(state, {
+        picked: review,
+        observation: null,
+        preview: false,
+        authority: '',
+        structure: null,
+        hireCandidate: '',
+        hireUnavailable: '',
+        blocker: null,
+        focusIDs: []
+      });
+      notify('');
+      return true;
+    } catch (error) {
+      if (generation === state.generation && owner === currentId() && !signal?.aborted)
+        notify(error.message || 'Choose the folder again.');
+      return false;
+    } finally {
+      if (generation === state.generation) {
+        state.pending = false;
+        if (signal?.aborted)
+          notify(replacing ? 'Choose the folder again. Your draft is unchanged.' : '');
+        else changed(state);
+      }
+    }
   }
   // selectionToken goes with mode 'selection': the receipt for a typed path
   // the folder-picker endpoint accepted. The path itself is never sent here.
@@ -136,6 +189,7 @@ export function createFolderContextController({
         notify('Your existing review is ready. This pick did not start setup.');
         return true;
       }
+      state.picked = null;
       state.observation = result.observation;
       state.structure = result.structure?.version === 1 ? result.structure : null;
       state.declined = state.structure ? folderDecline(result.declined) : null;
@@ -176,6 +230,13 @@ export function createFolderContextController({
     if (isBusy()) {
       notify('Wait for the current reply before removing its folder.');
       return false;
+    }
+    if (state.picked && !state.observation) {
+      state.generation++;
+      state.picked = null;
+      state.pending = false;
+      notify('Folder removed. Your draft is unchanged.');
+      return true;
     }
     const generation = ++state.generation;
     const owner = state.conversationId;
@@ -302,7 +363,16 @@ export function createFolderContextController({
     const next = String(id || '');
     if (!next || state.conversationId === next || state.observation || state.pending) return false;
     state.generation++;
-    Object.assign(state, { conversationId: next, revision: '', accepted: null, offerId: '' });
+    if (state.picked)
+      state.notice =
+        'Your message was saved. Choose the folder again to use it in this conversation.';
+    Object.assign(state, {
+      conversationId: next,
+      revision: '',
+      accepted: null,
+      offerId: '',
+      picked: null
+    });
     changed(state);
     return true;
   }
@@ -448,6 +518,7 @@ export function createFolderContextController({
   }
   return {
     state,
+    pick,
     select,
     remove,
     reset,
@@ -988,7 +1059,13 @@ const node = (tag, text, className = '') => {
 function renderAttachment(state) {
   if (!elements) return;
   const view = folderComposerState(state, consumedSetup(state));
-  const attached = Boolean(view?.observation);
+  const attached = Boolean(view?.observation || state?.picked);
+  if (elements.picked) {
+    elements.picked.hidden = !state.picked;
+    elements.question.textContent = state.picked
+      ? `What would you like to do with ${state.picked.label}?`
+      : '';
+  }
   const active = document.activeElement;
   const needsFocus =
     consumedSetup(state) &&
@@ -1001,7 +1078,7 @@ function renderAttachment(state) {
   elements.add.classList.toggle('personal-assistant-panel__chip--icon', attached);
   elements.add.setAttribute('aria-label', attached ? 'Replace folder' : 'Add folder');
   elements.add.title = attached ? 'Replace folder' : '';
-  elements.name.textContent = view?.observation?.folder || '';
+  elements.name.textContent = state?.picked?.label || view?.observation?.folder || '';
   elements.remove.disabled = Boolean(state?.pending);
   elements.preview.hidden = !attached || !view.preview;
   elements.history.hidden = !attached || !view.authority;
@@ -1187,6 +1264,8 @@ function init() {
   if (!add || controller) return;
   elements = {
     add,
+    picked: document.getElementById('personalAssistantPickedFolder'),
+    question: document.getElementById('personalAssistantPickedQuestion'),
     chooser: document.getElementById('personalAssistantContextChooser'),
     choices: document.getElementById('personalAssistantFolderChoices'),
     active: document.getElementById('personalAssistantActiveFolder'),
@@ -1306,6 +1385,7 @@ const api = {
   request: () => controller?.request() || null,
   // Attaches the folder a server-held selection names (a typed path the
   // server checked): the same local preview the chooser makes.
+  pick: (kind, signal) => controller?.pick(kind, signal),
   selectHeld: selectionToken =>
     controller ? controller.select('selection', '', selectionToken) : Promise.resolve(false),
   // Attaches one of the usual folders (downloads, music, documents, desktop) as

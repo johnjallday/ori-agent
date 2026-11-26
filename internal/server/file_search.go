@@ -65,6 +65,15 @@ func (s *Server) folderSearchReady() bool {
 	return s.Storage != nil && s.Storage.OnboardingMgr != nil && s.Storage.OnboardingMgr.IsOnboardingComplete()
 }
 
+func (s *Server) chatFolderOwner(r *http.Request) (string, bool) {
+	site := r.Header.Get("Sec-Fetch-Site")
+	if !s.folderSearchReady() || !localSearchPage(r) || r.URL.RawQuery != "" || (site != "" && site != "same-origin") {
+		return "", false
+	}
+	owner, err := learningmissionshttp.LocalOwner(r, s.Storage.UserProvider, true)
+	return owner, err == nil
+}
+
 func (s *Server) registerFileSearch(mux *http.ServeMux) {
 	if runtime.GOOS == "darwin" && s.Storage != nil {
 		mux.HandleFunc("GET /search", func(w http.ResponseWriter, r *http.Request) {

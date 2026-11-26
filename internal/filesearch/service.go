@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/foldercontext"
 	"github.com/johnjallday/ori-agent/internal/knownfolder"
 	"github.com/johnjallday/ori-agent/internal/resetstate"
 )
@@ -40,6 +41,8 @@ type Options struct {
 }
 type choice struct {
 	id, kind      string
+	chatTarget    foldercontext.Target // zero for a Files-only selection
+	chatRevision  string
 	expires       time.Time
 	started       bool
 	offered       []WorkspaceMatch
@@ -86,6 +89,10 @@ func (s *Service) Close() {
 
 // Begin is a mutation, not a status read. At most one short-lived choice per local owner.
 func (s *Service) Begin(owner, kind string) (string, error) {
+	return s.begin(owner, kind, foldercontext.Target{}, "")
+}
+
+func (s *Service) begin(owner, kind string, target foldercontext.Target, revision string) (string, error) {
 	if owner == "" || (kind != "documents" && kind != "downloads" && kind != "custom") {
 		return "", ErrRequest
 	}
@@ -98,7 +105,7 @@ func (s *Service) Begin(owner, kind string) (string, error) {
 		return "", ErrChoice
 	}
 	id := rand.Text()
-	s.intents[owner] = choice{id: id, kind: kind, expires: time.Now().Add(2 * time.Minute)}
+	s.intents[owner] = choice{id: id, kind: kind, chatTarget: target, chatRevision: revision, expires: time.Now().Add(2 * time.Minute)}
 	return id, nil
 }
 
@@ -286,25 +293,60 @@ func (s *Service) ReviewedRoot(ctx context.Context, owner, id string) (string, e
 func (s *Service) ResumeReview(ctx context.Context, owner, id string) (*FolderReview, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	c, err := s.reviewedLocked(owner, id)
+	c, err := s.resumeLocked(ctx, owner, id)
 	if err != nil {
 		return nil, err
+	}
+	return c.review(), nil
+}
+
+// PickForChat binds the target before opening the native picker. An ordinary
+// Files review cannot subsequently be claimed for an arbitrary conversation.
+func (s *Service) PickForChat(ctx context.Context, owner string, target foldercontext.Target, revision, kind string) (*FolderReview, error) {
+	if !target.Valid() {
+		return nil, ErrChoice
+	}
+	intent, err := s.begin(owner, kind, target, revision)
+	if err != nil {
+		return nil, err
+	}
+	return s.Review(ctx, owner, intent)
+}
+
+// ResumeForChat returns display data and a host-only root, never a new pick.
+func (s *Service) ResumeForChat(ctx context.Context, owner string, target foldercontext.Target, revision, id string) (*FolderReview, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !target.Valid() || s.intents[owner].chatTarget != target || s.intents[owner].chatRevision != revision {
+		return nil, "", ErrChoice
+	}
+	c, err := s.resumeLocked(ctx, owner, id)
+	if err != nil {
+		return nil, "", err
+	}
+	return c.review(), c.root, nil
+}
+
+func (s *Service) resumeLocked(ctx context.Context, owner, id string) (choice, error) {
+	c, err := s.reviewedLocked(owner, id)
+	if err != nil {
+		return choice{}, err
 	}
 	existing, err := s.sourceMatchLocked(ctx, owner, c.root, c.witness)
 	if err != nil {
-		return nil, err
+		return choice{}, err
 	}
 	if (existing != nil && existing.ID != c.source) || (existing == nil && c.source != "") {
-		return nil, ErrChoice
+		return choice{}, ErrChoice
 	}
 	matches, err := s.matchesLocked(ctx, owner, c)
 	if err != nil {
-		return nil, err
+		return choice{}, err
 	}
 	if !slices.Equal(c.offered, matches) {
-		return nil, ErrChoice
+		return choice{}, ErrChoice
 	}
-	return c.review(), nil
+	return c, nil
 }
 
 func (s *Service) GrantReviewed(ctx context.Context, owner, id string) (*Source, error) {

@@ -142,13 +142,13 @@ if __name__=='__main__':
     parser.add_argument('--upgrades',action='store_true',help='also build the prior-version fixture')
     parser.add_argument('--folder-backed',action='store_true',help='run only reviewed folder setup on established split profiles')
     parser.add_argument('--browser',choices=('chromium','webkit'),action='append',help='limit the browser journeys to this browser (repeatable; default both)')
-    parser.add_argument('--scenario',choices=('fresh','skip','navigation','files-search'),action='append',help='run only these default scenarios while iterating (repeatable; default all; not with --folder-backed)')
+    parser.add_argument('--scenario',choices=('fresh','skip','navigation','files-search','folder-assistant'),action='append',help='run only these default scenarios while iterating (repeatable; default all; not with --folder-backed)')
     args=parser.parse_args()
     BROWSERS=tuple(args.browser or ('chromium','webkit'))
     SCENARIOS=set(args.scenario or ('fresh','skip','navigation','files-search'))
     if sys.platform!='darwin':sys.exit('macOS only')
     SCRATCH.mkdir(parents=True,exist_ok=True);EVIDENCE.mkdir(parents=True,exist_ok=True)
-    if args.folder_backed:
+    if args.folder_backed or SCENARIOS == {'folder-assistant'}:
         def project_fixture():
             root=fixture()
             project=root/'home/Synthetic Project'
@@ -166,7 +166,17 @@ if __name__=='__main__':
         }}))
         binary=build/'fixture-server'
         subprocess.run(['go','build','-overlay',str(overlay),'-o',str(binary),'./cmd/server'],cwd=REPO,env={**os.environ,'GOWORK':'off'},check=True)
+        def assistant_journey(browser):
+            root=project_fixture()
+            albums=root/'home/Albums'
+            albums.mkdir()
+            (albums/'Daybreak.wav').write_text('private-content-sentinel\n')
+            with serve(root,fixture_binary=binary) as url:
+                spec(root,url,'folder-assistant','folder-backed-search-locations',browser)
         for browser in BROWSERS:
+            if not args.folder_backed:
+                assistant_journey(browser)
+                continue
             root=project_fixture()
             with serve(root, fixture_binary=binary) as url:
                 # First-run search consent predates established workspace setup.
@@ -179,9 +189,7 @@ if __name__=='__main__':
                 locations=json.loads(api(url,'/api/file-search/sources'))
                 assert sorted(s['label'] for s in locations)==['Documents','Downloads']
                 assert len([w for w in json.loads(api(url,'/api/workspaces'))['folders'] if w['name']=='Research archive'])==1
-            root=project_fixture()
-            with serve(root,fixture_binary=binary) as url:
-                spec(root,url,'folder-assistant','folder-backed-search-locations',browser)
+            assistant_journey(browser)
             for entry in ('files','workspace'):
                 for kind in ('downloads','documents','custom'):
                     root=project_fixture()

@@ -157,12 +157,39 @@ test('the assistant links a folder without starting a hire or filename scan', as
   });
   await page.goto('/?panel=today&folder=explore');
   const host = page.locator('#assistantExploreFolder');
-  await host.getByRole('button', { name: 'Documents', exact: true }).click();
-  const card = host.locator('section.explore-card');
-  await expect(card.getByRole('heading')).toHaveText('Create a workspace from Documents?');
-  await card.getByRole('button', { name: 'Cancel' }).click();
-  await expect(host.getByRole('button', { name: 'Documents', exact: true })).toBeFocused();
-  await host.getByRole('button', { name: 'Downloads', exact: true }).click();
+  const inventory = () => choiceInventory(request, join(fixture!, 'data'));
+  const initial = await inventory();
+  const pickAlbums = () => host.getByRole('button', { name: 'Choose another folder…' }).click();
+  await pickAlbums();
+  const chip = page.locator('#personalAssistantActiveFolder');
+  const input = page.locator('#personalAssistantInput');
+  const picked = page.locator('#personalAssistantPickedFolder');
+  await expect(chip).toHaveText(/Albums/);
+  await expect(picked).toContainText('What would you like to do with Albums?');
+  await expect(page.locator('#personalAssistantFolderPreview')).toBeHidden();
+  await expect(page.locator('section.explore-card')).toHaveCount(0);
+  await input.fill('What’s in here?');
+  await chip.getByRole('button').click();
+  await expect(chip).toBeHidden();
+  await expect(input).toHaveValue('What’s in here?');
+  await page.locator('#personalAssistantAttachMenu').click();
+  await page.locator('#personalAssistantFolderChip').click();
+  await pickAlbums();
+  await expect(chip).toContainText('Albums');
+  await expect(input).toHaveValue('What’s in here?');
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/attachment.png`
+  });
+  expect(await inventory()).toEqual(initial);
+
+  // The Files card still owns compact creation, receipt recovery and optional staffing.
+  await page.goto('/?view=tree');
+  await page.locator('[data-tree-add-folder]').click();
+  await page
+    .getByRole('dialog', { name: 'Choose a folder' })
+    .getByRole('button', { name: 'Downloads', exact: true })
+    .click();
+  const card = page.locator('dialog.explore-card');
   await expect(card.getByRole('checkbox')).not.toBeChecked();
   await card.getByLabel('Workspace name').fill('Reading inbox');
   await page.screenshot({
@@ -193,7 +220,6 @@ test('the assistant links a folder without starting a hire or filename scan', as
     ).json();
   expect(await sources()).toEqual([]);
   await expect(card.getByRole('button', { name: 'Open workspace' })).toBeVisible();
-  const inventory = () => choiceInventory(request, join(fixture!, 'data'));
   const receipt = await inventory();
   await card.getByRole('button', { name: 'Add an agent…' }).click();
   const rosterForm = page.locator('#workspace-detail-add-agent-modal');

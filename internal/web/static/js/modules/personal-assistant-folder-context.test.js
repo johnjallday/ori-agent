@@ -58,6 +58,38 @@ function fixture(post) {
   };
 }
 
+test('a passive pick supplies no send reference; cancel and remove do not inspect or write', async () => {
+  const picked = { id: 'review', label: 'Albums' };
+  const results = [picked, null, picked];
+  const { controller, calls } = fixture(async () => results.shift());
+  assert.equal(await controller.pick('custom'), true);
+  assert.deepEqual(controller.state.picked, picked);
+  assert.equal(controller.request(), null);
+  assert.equal(await controller.pick('custom'), false);
+  assert.match(controller.state.notice, /Choose the folder again/);
+  assert.equal(controller.state.picked, null);
+  await controller.pick('custom');
+  await controller.remove();
+  assert.equal(controller.state.picked, null);
+  assert.deepEqual(
+    calls.map(c => c.body.action),
+    ['pick', 'pick', 'pick']
+  );
+});
+
+test('a second pick while choosing or a late result after a switch cannot attach', async () => {
+  const waiting = deferred();
+  const { controller, calls, setId } = fixture(() => waiting.promise);
+  const first = controller.pick('custom');
+  assert.equal(await controller.pick('documents'), false);
+  setId('another');
+  controller.reset('another');
+  waiting.resolve({ id: 'review', label: 'Albums' });
+  assert.equal(await first, false);
+  assert.equal(controller.state.picked, null);
+  assert.equal(calls.length, 1);
+});
+
 test('consumed attachment stops supplying references without changing canonical history or writing detach', () => {
   let consumed = false;
   const calls = [];

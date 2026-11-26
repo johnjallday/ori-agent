@@ -261,6 +261,8 @@ type HomeAssistantAskHandler struct {
 	// conversations; nil keeps every turn stateless.
 	Conversations      PersonalAssistantConversationStore
 	FolderObservations PersonalAssistantFolderObservations
+	ChatFolders        ChatFolderReviews
+	ChatFolderOwner    func(*http.Request) (string, bool)
 	ArrangementPlanner *workspacearrangement.Planner
 	FolderSetups       PersonalAssistantFolderSetups
 	folderRequests     folderRequestGate

@@ -394,6 +394,12 @@
         </div>
         <p id="personalAssistantLinkStatus" class="personal-assistant-folder-context__note" role="status" aria-live="polite" hidden></p>
       </section>
+      {{if .Extra.FolderSearchReady}}
+      <section id="personalAssistantPickedFolder" class="personal-assistant-folder-context" aria-labelledby="personalAssistantPickedQuestion" hidden>
+        <h3 id="personalAssistantPickedQuestion"></h3>
+        <p>Attached locally. Nothing inside has been inspected or shared.</p>
+      </section>
+      {{end}}
       <div id="personalAssistantContextProgress"></div>
       <section id="personalAssistantFolderPreview" class="personal-assistant-folder-context" aria-label="Local folder preview" hidden>
         <div id="personalAssistantFolderSummary"></div>
