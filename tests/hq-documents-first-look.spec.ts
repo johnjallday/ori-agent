@@ -369,25 +369,75 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await expect(shelves).toContainText('9 ready to file · 4 stay loose');
     await verifyBytes();
     await page.screenshot({ path: info.outputPath('own-shelves.png') });
-    await shelves.getByRole('button', { name: 'note-1.txt', exact: true }).press('Enter');
-    await shelves.getByRole('button', { name: 'Name a new folder' }).press('Enter');
+    const loose = shelves.getByRole('region', { name: 'Still loose in Documents' });
+    const tripShelf = shelves.getByRole('region', { name: 'Trips', exact: true });
+    const dragged = shelves.getByRole('button', { name: 'note-2.txt', exact: true });
+    await dragged.dragTo(tripShelf.getByRole('heading', { name: 'Trips' }));
+    await expect(tripShelf.getByRole('button', { name: 'note-2.txt' })).toBeVisible();
+    await dragged.dragTo(loose.getByRole('heading'));
+    await expect(loose.getByRole('button', { name: 'note-2.txt' })).toBeVisible();
+    // A coarse pointer has no drag dependency. At a narrow viewport and
+    // 200% scale both the loose chip and its separate Move here work by tap.
+    const viewport = page.viewportSize()!;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+    await page.setViewportSize({ width: 480, height: 800 });
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = '2';
+    });
+    const tap = async (loc: typeof dragged) => {
+      await loc.evaluate(el =>
+        el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' })
+      );
+      const b = await loc.boundingBox();
+      expect(b).toBeTruthy();
+      const point = { x: b!.x + b!.width / 2, y: b!.y + b!.height / 2 };
+      expect(
+        await loc.evaluate((el, p) => el.contains(document.elementFromPoint(p.x, p.y)), point)
+      ).toBe(true);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    };
+    await tap(dragged);
+    const moveHere = tripShelf.getByRole('button', { name: 'Move here: Trips' });
+    await expect(moveHere).toBeEnabled();
+    expect(await shelves.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await tap(moveHere);
+    await expect(tripShelf.getByRole('button', { name: 'note-2.txt' })).toBeVisible();
+    await verifyBytes();
+    await page.screenshot({ path: info.outputPath('shelf-touch-zoom.png') });
+    await page.evaluate(() => {
+      document.documentElement.style.zoom = '';
+    });
+    await page.setViewportSize(viewport);
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await cdp.detach();
+    // Redraw with the current pointer capabilities, then use the new shelf
+    // drop target. Checking its name still creates nothing on disk.
+    await dragged.press('Enter');
+    await dragged.press('Enter');
+    await shelves
+      .getByRole('button', { name: 'note-1.txt', exact: true })
+      .dragTo(shelves.getByRole('heading', { name: 'New folder', exact: true }));
     await shelves.getByRole('textbox', { name: 'New folder name' }).fill('Orders');
     await shelves.getByRole('button', { name: 'Use this folder name' }).press('Enter');
     await expect(shelves).toContainText('That name is not available here');
-    await expect(shelves.getByRole('button', { name: 'File 9 files', exact: true })).toBeDisabled();
+    await expect(
+      shelves.getByRole('button', { name: 'File 10 files', exact: true })
+    ).toBeDisabled();
     await shelves.getByRole('textbox', { name: 'New folder name' }).fill('Invoices');
     await shelves.getByRole('button', { name: 'Use this folder name' }).press('Enter');
     await expect(shelves).toContainText('No folder has been created');
     expect((await readdir(root)).sort()).toEqual(stationTree);
     await verifyBytes();
-    await expect(shelves).toContainText('10 ready to file · 3 stay loose');
-    await shelves.getByRole('button', { name: 'File 10 files', exact: true }).press('Enter');
+    await expect(shelves).toContainText('11 ready to file · 2 stay loose');
+    await shelves.getByRole('button', { name: 'File 11 files', exact: true }).press('Enter');
     const undo = station.getByRole('button', { name: 'Undo all', exact: true });
     await expect(undo).toBeVisible();
     await expect(station.locator('#fileJanitorReceipt')).toContainText('Created “Invoices”');
-    await expect(station.locator('#fileJanitorReceipt')).toContainText('10 files filed.');
+    await expect(station.locator('#fileJanitorReceipt')).toContainText('11 files filed.');
     await expect(station.locator('#fileJanitorReceipt')).toContainText(
-      '3 files stay loose in Documents.'
+      '2 files stay loose in Documents.'
     );
     expect(await readFile(join(root, 'Invoices', 'note-1.txt'), 'utf8')).toBe(
       stationFiles['note-1.txt']
@@ -401,7 +451,7 @@ test('the manager offers a first look on Open; dismissal and return do not start
         .sort()
     );
     expect((await readdir(root)).sort()).toEqual(
-      [...stationFolders, 'Invoices', 'note-2.txt', 'note-3.txt', 'note-4.txt'].sort()
+      [...stationFolders, 'Invoices', 'note-3.txt', 'note-4.txt'].sort()
     );
     await station.screenshot({ path: info.outputPath('shelf-receipt.png') });
     await station.locator('#fileJanitorReceiptDone').press('Enter');

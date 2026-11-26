@@ -58,9 +58,8 @@
       const grid = node('div', 'fj-shelves-grid');
       host.appendChild(grid);
       let focusTarget;
-      const move = dest => {
-        if (!active() || !selected) return;
-        const id = selected;
+      const move = (dest, id = selected) => {
+        if (!active() || !id) return;
         places.set(id, dest);
         selected = '';
         message = dest
@@ -68,9 +67,42 @@
           : 'Left loose for review.';
         draw(id);
       };
+      // Drag is local to this render. Never interpret DataTransfer contents
+      // (including files dropped from the desktop) as a file or destination.
+      const targets = new Map();
+      let held = '';
+      const clearDrag = () => {
+        held = '';
+        for (const card of targets.keys()) card.classList.remove('fj-drop-ready', 'fj-drop-over');
+      };
+      const canDrop = dest => held && active() && !naming && (places.get(held) || '') !== dest;
+      const target = (card, dest) => {
+        targets.set(card, dest);
+        card.addEventListener('dragover', e => {
+          if (!canDrop(dest)) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          for (const c of targets.keys()) c.classList.toggle('fj-drop-over', c === card);
+        });
+        card.addEventListener('dragleave', e => {
+          if (!card.contains(e.relatedTarget)) card.classList.remove('fj-drop-over');
+        });
+        card.addEventListener('drop', e => {
+          if (!canDrop(dest)) return;
+          e.preventDefault();
+          const id = held;
+          clearDrag();
+          if (dest === null) {
+            selected = id;
+            naming = { name: '', parent: '' };
+            draw('new-name');
+          } else move(dest, id);
+        });
+      };
       const shelf = (dest, name) => {
         const card = node('section', dest ? 'fj-shelf' : 'fj-shelf fj-shelf-loose');
         card.setAttribute('aria-label', name);
+        target(card, dest);
         grid.appendChild(card);
         if (folders.get(dest)?.newName) {
           card.classList.add('fj-shelf-new');
@@ -93,6 +125,20 @@
           );
           chip.setAttribute('aria-pressed', String(f.id === selected));
           chip.disabled = !active();
+          chip.draggable =
+            active() && !naming && !doc.defaultView?.matchMedia('(pointer: coarse)').matches;
+          chip.addEventListener('dragstart', e => {
+            if (!chip.draggable || !active() || !e.dataTransfer) {
+              e.preventDefault();
+              return;
+            }
+            held = f.id;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('application/x-ori-picture', 'chip');
+            for (const [card, destination] of targets)
+              card.classList.toggle('fj-drop-ready', Boolean(canDrop(destination)));
+          });
+          chip.addEventListener('dragend', clearDrag);
           files.appendChild(chip);
           if (f.id === focus) focusTarget = chip;
         }
@@ -108,6 +154,7 @@
       shelf('', `Still loose in ${picture.folder}`);
       const newTarget = node('section', 'fj-shelf fj-shelf-new');
       grid.appendChild(newTarget);
+      target(newTarget, null);
       newTarget.appendChild(node('h4', 'fj-shelf-title', 'New folder'));
       if (!naming) {
         const start = button('Name a new folder', () => {

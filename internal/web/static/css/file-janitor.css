@@ -87,8 +87,23 @@
   outline: 2px solid currentColor;
   outline-offset: 1px;
 }
-.fj-shelf-tools select {
+.fj-drop-ready {
+  outline: 2px dashed currentColor;
+  outline-offset: -3px;
+}
+.fj-drop-over {
+  outline-style: solid;
+  background: var(--bs-tertiary-bg);
+}
+.fj-shelves :is(input, select, button) {
   max-width: 100%;
+}
+.fj-shelves .fj-btn { white-space: normal; overflow-wrap: anywhere; }
+@media (pointer: coarse) {
+  .fj-shelves :is(input, select, button) { min-height: 44px; }
+}
+@media (max-width: 36rem) {
+  .fj-shelf-tools, .fj-shelf-tools > label { min-width: 0; max-width: 100%; }
 }
 .fj-shelf-footer {
   border-top: 1px solid var(--bs-border-color);
@@ -2522,6 +2537,16 @@
     border: 0;
     border-radius: 0;
   }
+
+  /* At high zoom the wrapping header can fill the viewport. Give the shelf
+     picture and its heading one scroll surface so every target remains reachable. */
+  .fj-console:has(.fj-shelves) {
+    display: block;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .fj-console:has(.fj-shelves) .fj-console-head { position: static; }
+  .fj-console-body:has(.fj-shelves) { overflow: visible; }
 
   /* On a small screen the actions need the full width rather than being
      squeezed beside a wrapping title. */
