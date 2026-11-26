@@ -383,7 +383,7 @@ for (const [theme, width] of [
   });
 }
 
-test('HQ Overview saves to the personal Inbox and its Map station navigates', async ({
+test('HQ Overview saves to the personal Inbox and its Map station opens the inventory', async ({
   page,
   request
 }) => {
@@ -442,15 +442,39 @@ test('HQ Overview saves to the personal Inbox and its Map station navigates', as
   // My Notes opens on Inbox, where the HQ capture landed.
   await expect(noteList(page).getByRole('button', { name: /idea-from-hq/i })).toBeVisible();
   await capture(page, '10-hq-note-in-personal-inbox');
+  // On the map, Notes opens the note inventory over it: no navigation, and
+  // closing puts focus back on the node or building that opened it. The HQ
+  // map opens in Flow.
   await page.goto(base + '?mode=map');
-  await page
-    .locator('[data-cmd-hq-station="second-brain"]')
+  const mapURL = page.url();
+  const inventory = page.getByRole('dialog', { name: 'Note inventory' });
+  const flowNode = page.locator('.ws-cmd-flow-node[data-cmd-hq-station="second-brain"]');
+  await flowNode.click();
+  await expect(inventory).toBeVisible();
+  await expect(inventory.getByRole('heading', { name: 'Note inventory' })).toBeVisible();
+  await expect(inventory.getByRole('link', { name: /Open My Notes/ })).toHaveAttribute(
+    'href',
+    '/my-notes'
+  );
+  expect(page.url()).toBe(mapURL);
+  await page.keyboard.press('Escape');
+  await expect(inventory).toBeHidden();
+  await expect(flowNode).toBeFocused();
+  expect(page.url()).toBe(mapURL);
+  // The Free building is the same station and opens the same inventory.
+  await page.locator('[data-cmd-map-arrangement="free"]').click();
+  const building = page
+    .locator('.ws-cmd-map-hq-station[data-cmd-hq-station="second-brain"]')
     .filter({ visible: true })
-    .first()
-    .click();
-  await expect(page).toHaveURL(/\/my-notes$/);
-  await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`/workspaces/${slug}.*mode=map`));
+    .first();
+  await building.click();
+  await expect(inventory).toBeVisible();
+  await inventory.getByRole('button', { name: 'Close note inventory' }).click();
+  await expect(inventory).toBeHidden();
+  await expect(building).toBeFocused();
+  expect(page.url()).toBe(mapURL);
+  await page.locator('[data-cmd-map-arrangement="flow"]').click();
+  // The old station link is not a map click: it still goes to the notebook.
   await page.goto(base + '?mode=map&station=second-brain');
   await expect(page).toHaveURL(/\/my-notes$/);
 });

@@ -1,0 +1,879 @@
+/*
+ * HQ note inventory — the Notes station's panel over the Personal HQ map.
+ *
+ * It opens inside Workspace Command's stat modal (.ws-cmd-modal is a .ws-cmd,
+ * so the tactical tokens and their light-theme values apply). Everything here
+ * is scoped to .hq-note-inventory or to the panel that holds it; nothing
+ * changes another stat modal or the notebook at /my-notes.
+ */
+
+/* ---- the frame -------------------------------------------------------------- */
+
+/* The station panel's navbar clearance comes from .is-station; here the
+   panel takes the inventory's own width and angular, gold-trimmed frame. */
+.ws-cmd-modal-panel.is-note-inventory {
+  --inv-gold: var(--ws-keeper);
+  --inv-gold-deep: var(--ws-keeper-deep);
+  /* Gold that carries small text; the light theme needs a darker one to keep
+     4.5:1 across the panel's gradient. */
+  --inv-gold-text: var(--inv-gold);
+  --inv-cut: 18px;
+
+  max-width: min(1040px, 96vw);
+  max-height: min(86vh, calc(100dvh - var(--navbar-offset, 76px) - 28px));
+  border: 1px solid var(--ws-line-bright);
+  border-top: 2px solid var(--inv-gold);
+  background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
+  clip-path: polygon(
+    0 0,
+    calc(100% - var(--inv-cut)) 0,
+    100% var(--inv-cut),
+    100% calc(100% - var(--inv-cut)),
+    calc(100% - var(--inv-cut)) 100%,
+    0 100%
+  );
+  /* Re-attached whenever the map repaints; an entrance would replay. */
+  animation: none;
+  overflow: hidden;
+}
+
+.hq-note-inventory {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  color: var(--ws-ink);
+  font-family: var(--font-body, system-ui, sans-serif);
+  letter-spacing: 0;
+}
+
+/* A thin gold rule down the left edge, the frame's trim. */
+.hq-note-inventory::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 52px;
+  background: var(--inv-gold);
+  pointer-events: none;
+}
+
+/* ---- head ------------------------------------------------------------------- */
+
+.hq-note-inventory__head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px 16px 26px;
+  border-bottom: 1px solid var(--ws-line);
+}
+
+.hq-note-inventory__emblem {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+}
+
+.hq-note-inventory__ident {
+  min-width: 0;
+  flex: 1;
+}
+
+[data-bs-theme="light"] .ws-cmd-modal-panel.is-note-inventory {
+  --inv-gold-text: #7d4f12;
+}
+
+.hq-note-inventory__eyebrow {
+  margin: 0 0 2px;
+  color: var(--inv-gold-text);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 2.2px;
+  text-transform: uppercase;
+}
+
+.hq-note-inventory__title {
+  margin: 0;
+  color: var(--ws-ink-heading, var(--ws-ink));
+  font-family: var(--font-display, Georgia, serif);
+  font-size: clamp(24px, 3.2vw, 34px);
+  font-weight: 500;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.hq-note-inventory__close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.hq-note-inventory__close:hover {
+  border-color: var(--inv-gold);
+}
+
+.hq-note-inventory__close-key {
+  padding: 1px 5px;
+  border: 1px solid var(--ws-line);
+  background: none;
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+}
+
+/* ---- body ------------------------------------------------------------------- */
+
+.hq-note-inventory__body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 20px 26px;
+}
+
+/* A state before any note shows: checking, retry, not connected, missing. */
+.hq-note-inventory__state {
+  max-width: 520px;
+  padding: 18px 20px;
+  border: 1px solid var(--ws-line);
+  border-left: 3px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+}
+
+.hq-note-inventory__state.is-attention {
+  border-left-color: var(--ws-waiting);
+}
+
+.hq-note-inventory__state.is-degraded {
+  border-left-color: var(--ws-alert);
+}
+
+.hq-note-inventory__state.is-ready {
+  border-left-color: var(--ws-faction);
+}
+
+.hq-note-inventory__state-title {
+  margin: 0;
+  color: var(--ws-ink-heading, var(--ws-ink));
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.hq-note-inventory__state-body {
+  margin: 6px 0 0;
+  color: var(--ws-ink-dim);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.hq-note-inventory__state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.hq-note-inventory__button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.hq-note-inventory__button:hover {
+  border-color: var(--inv-gold);
+  color: var(--ws-ink);
+}
+
+/* ---- collections, slots and the inspector ------------------------------------ */
+
+/* With notes to show, the body does not scroll as one: the slots and the
+   inspector each scroll under the tabs. */
+.hq-note-inventory__body:has(> .hq-note-inventory__layout) {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.hq-note-inventory__tabs {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 10px 22px 0 26px;
+  border-bottom: 1px solid var(--ws-line);
+}
+
+.hq-note-inventory__tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ws-ink-dim);
+  font: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.hq-note-inventory__tab:hover {
+  color: var(--ws-ink);
+}
+
+/* The chosen collection: bolder words and a gold rule, not colour alone. */
+.hq-note-inventory__tab.is-active {
+  border-bottom-color: var(--inv-gold);
+  background: color-mix(in srgb, var(--inv-gold) 10%, transparent);
+  color: var(--ws-ink-heading, var(--ws-ink));
+  font-weight: 700;
+}
+
+.hq-note-inventory__tab-count {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* The chosen tab's count reads in the tab's own ink: 12px gold does not
+   reach 4.5:1 on the light panel. */
+.hq-note-inventory__tab.is-active .hq-note-inventory__tab-count {
+  color: inherit;
+}
+
+.hq-note-inventory__layout {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.hq-note-inventory__slots,
+.hq-note-inventory__inspector {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 22px 20px 26px;
+}
+
+.hq-note-inventory__inspector {
+  border-left: 1px solid var(--ws-line);
+  padding-left: 26px;
+}
+
+.hq-note-inventory__eyebrow-row {
+  margin: 0 0 12px;
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+}
+
+.hq-note-inventory__inspector > .hq-note-inventory__eyebrow-row {
+  color: var(--inv-gold-text);
+}
+
+.hq-note-inventory__notice {
+  margin: 0 0 12px;
+  color: var(--ws-ink-dim);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.hq-note-inventory__notice.is-scope {
+  font-size: 13px;
+}
+
+.hq-note-inventory__notice.is-empty {
+  color: var(--ws-ink);
+}
+
+.hq-note-inventory__group + .hq-note-inventory__group {
+  margin-top: 18px;
+}
+
+.hq-note-inventory__group-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: var(--ws-ink);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+}
+
+.hq-note-inventory__group-count {
+  color: var(--ws-ink-faint);
+  font-family: var(--ws-font-mono);
+  font-weight: 400;
+}
+
+.hq-note-inventory__section-problem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.hq-note-inventory__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.hq-note-inventory__cell {
+  min-width: 0;
+}
+
+/* A slot: its number, its picture, its real name and what it is. */
+.hq-note-inventory__slot {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-height: 150px;
+  grid-template-rows: auto auto 1fr auto;
+  justify-items: start;
+  gap: 4px;
+  padding: 10px 14px 12px;
+  border: 1px solid var(--ws-line-bright);
+  background-color: var(--ws-bg-2);
+  background-image: radial-gradient(
+    color-mix(in srgb, var(--ws-ink) 12%, transparent) 1px,
+    transparent 1.2px
+  );
+  background-size: 14px 14px;
+  color: var(--ws-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hq-note-inventory__slot:hover {
+  border-color: var(--ws-ink-faint);
+}
+
+.hq-note-inventory__slot-index {
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 12px;
+}
+
+.hq-note-inventory__slot-art {
+  justify-self: center;
+  width: 56px;
+  height: 56px;
+}
+
+.hq-note-inventory__slot-art svg {
+  width: 100%;
+  height: 100%;
+}
+
+.hq-note-inventory__slot-title {
+  align-self: end;
+  max-width: 100%;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.hq-note-inventory__slot-detail {
+  max-width: 100%;
+  color: var(--ws-ink-dim);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* Selected: a 2px gold frame and a corner mark with a check, legible without
+   colour (the frame is thicker, the mark has a shape). */
+.hq-note-inventory__slot.is-selected {
+  border: 2px solid var(--inv-gold);
+  padding: 9px 13px 11px;
+  background-color: color-mix(in srgb, var(--inv-gold) 8%, var(--ws-bg-2));
+}
+
+.hq-note-inventory__slot-mark {
+  display: none;
+}
+
+.hq-note-inventory__slot.is-selected .hq-note-inventory__slot-mark {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: block;
+  width: 24px;
+  height: 24px;
+  background: var(--inv-gold);
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+
+.hq-note-inventory__slot.is-selected .hq-note-inventory__slot-mark::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 4px;
+  border-bottom: 2px solid var(--ws-bg);
+  border-left: 2px solid var(--ws-bg);
+  transform: rotate(-45deg);
+}
+
+.hq-note-inventory__more,
+.hq-note-inventory__link-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 4px 12px;
+  border: 1px solid var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.hq-note-inventory__more:hover,
+.hq-note-inventory__link-button:hover {
+  border-color: var(--inv-gold);
+  color: var(--ws-ink);
+}
+
+.hq-note-inventory__crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.hq-note-inventory__crumb {
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--ws-ink);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.hq-note-inventory__crumb.is-current {
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.hq-note-inventory__crumb-sep {
+  color: var(--ws-ink-faint);
+}
+
+.hq-note-inventory__inspector-title {
+  margin: 0 0 14px;
+  color: var(--ws-ink-heading, var(--ws-ink));
+  font-family: var(--font-display, Georgia, serif);
+  font-size: clamp(22px, 2.6vw, 30px);
+  font-weight: 500;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+/* The paper: a note card with a folded corner and ruled lines. Paper stays
+   paper in both themes, so its ink is fixed for contrast on it. */
+.hq-note-inventory__paper {
+  --paper: #efe2c2;
+  --paper-deep: #e2cfa2;
+  --paper-ink: #2f2412;
+  --paper-dim: #5e4b2a;
+
+  position: relative;
+  margin: 0 0 14px;
+  padding: 18px 22px 20px;
+  background-color: var(--paper);
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0 27px,
+    rgba(94, 75, 42, 0.16) 27px 28px
+  );
+  color: var(--paper-ink);
+  clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 0 100%);
+}
+
+.hq-note-inventory__paper::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  background: var(--paper-deep);
+  clip-path: polygon(0 0, 0 100%, 100% 100%);
+}
+
+.hq-note-inventory__paper-eyebrow {
+  margin: 0 0 10px;
+  color: var(--paper-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.hq-note-inventory__paper-title {
+  margin: 0 0 10px;
+  font-family: var(--font-display, Georgia, serif);
+  font-size: 22px;
+  font-style: italic;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.hq-note-inventory__paper-text {
+  margin: 0 0 10px;
+  font-size: 15px;
+  /* On the paper's 28px rules. */
+  line-height: 28px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.hq-note-inventory__paper-text.is-quiet {
+  color: var(--paper-dim);
+}
+
+.hq-note-inventory__paper-more {
+  margin: 4px 0 0;
+  color: var(--paper-dim);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.hq-note-inventory__handoffs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0 0 12px;
+}
+
+.hq-note-inventory__handoffs .hq-note-inventory__notice {
+  margin: 0;
+}
+
+.hq-note-inventory__place {
+  margin: 0;
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+/* Back only exists for the phone layout below. */
+.hq-note-inventory__back {
+  display: none;
+}
+
+/* ---- the action row --------------------------------------------------------- */
+
+.hq-note-inventory__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+  padding: 16px 26px 18px;
+  border-top: 1px solid var(--ws-line);
+}
+
+.hq-note-inventory__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  color: var(--ws-ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.hq-note-inventory__open:hover {
+  color: var(--inv-gold-text);
+}
+
+/* ---- Quick note and the reader link ----------------------------------------- */
+
+/* The save announcement: one line above the action row, quiet when empty. */
+.hq-note-inventory__announce {
+  margin: 0;
+  padding: 0 26px;
+  color: var(--ws-faction);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.hq-note-inventory__announce:not(:empty) {
+  padding-top: 10px;
+}
+
+/* The primary action: gold, like the reference's Quick note. */
+.hq-note-inventory__quick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 18px;
+  border: 1px solid var(--inv-gold);
+  background: var(--inv-gold);
+  /* White on the light theme's darker gold (about 5:1); the dark theme has
+     no on-accent token, so its near-black ink stays (about 10:1). */
+  color: var(--ws-on-accent, var(--ws-bg));
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.hq-note-inventory__quick:hover {
+  background: color-mix(in srgb, var(--inv-gold) 86%, var(--ws-ink));
+}
+
+.hq-note-inventory__quick[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 2px var(--ws-bg);
+}
+
+.hq-note-inventory__quick:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+/* A rule between Quick note and Open My Notes, as in the reference. */
+.hq-note-inventory__quick + .hq-note-inventory__open {
+  padding-left: 18px;
+  border-left: 1px solid var(--ws-line-bright);
+}
+
+/* Read full note sits at the far end of the row. */
+.hq-note-inventory__read {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  margin-left: auto;
+  padding: 6px 18px;
+  border: 1px solid var(--ws-line-bright);
+  color: var(--ws-ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.hq-note-inventory__read:hover {
+  border-color: var(--inv-gold);
+  color: var(--ws-ink);
+}
+
+.hq-note-inventory__capture {
+  display: grid;
+  gap: 12px;
+}
+
+.hq-note-inventory__capture-label {
+  display: grid;
+  gap: 8px;
+}
+
+.hq-note-inventory__capture-where {
+  color: var(--ws-ink);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.hq-note-inventory__capture-field {
+  width: 100%;
+  min-height: 140px;
+  padding: 12px 14px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-field-bg, var(--ws-bg));
+  color: var(--ws-ink);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.hq-note-inventory__capture-field[readonly] {
+  color: var(--ws-ink-dim);
+}
+
+.hq-note-inventory__capture-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.hq-note-inventory__notice.is-problem {
+  color: var(--ws-alert);
+  font-weight: 600;
+}
+
+/* ---- focus: visible on every control, independent of colour ------------------ */
+
+.hq-note-inventory :is(a, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .hq-note-inventory__head {
+    padding: 14px 14px 12px 16px;
+  }
+
+  .hq-note-inventory__emblem {
+    width: 40px;
+    height: 40px;
+  }
+
+  .hq-note-inventory__body {
+    padding: 14px 14px;
+  }
+
+  .hq-note-inventory__actions {
+    padding: 12px 14px 14px;
+  }
+
+  .hq-note-inventory__tabs {
+    padding: 6px 10px 0;
+  }
+
+  .hq-note-inventory__tab {
+    padding: 8px 8px;
+    font-size: 15px;
+  }
+
+  /* One pane at a time: the slots, then the chosen note, then Back. */
+  .hq-note-inventory__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hq-note-inventory[data-note-inventory-pane="slots"] .hq-note-inventory__inspector,
+  .hq-note-inventory[data-note-inventory-pane="inspector"] .hq-note-inventory__slots {
+    display: none;
+  }
+
+  .hq-note-inventory__slots,
+  .hq-note-inventory__inspector {
+    padding: 14px;
+    border-left: 0;
+  }
+
+  .hq-note-inventory__back {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+    margin: 0 0 10px;
+    padding: 4px 0;
+    border: 0;
+    background: none;
+    color: var(--ws-ink);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .hq-note-inventory__slot {
+    min-height: 132px;
+  }
+}
+
+/* A short window (a laptop at 200% zoom, a phone on its side): the shared
+   modal keeps clear of the navbar, which leaves little height. The panel then
+   scrolls as one instead of squeezing the slots and inspector between a fixed
+   head, tabs and footer. */
+@media (max-height: 560px) {
+  .ws-cmd-modal-panel.is-note-inventory {
+    overflow-y: auto;
+  }
+
+  .hq-note-inventory,
+  .hq-note-inventory__body,
+  .hq-note-inventory__body:has(> .hq-note-inventory__layout),
+  .hq-note-inventory__layout {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .hq-note-inventory__slots,
+  .hq-note-inventory__inspector {
+    overflow: visible;
+  }
+
+  .hq-note-inventory__head {
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .hq-note-inventory__emblem {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+@media (max-width: 380px) {
+  .hq-note-inventory__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .hq-note-inventory__slot,
+  .hq-note-inventory__tab,
+  .hq-note-inventory__more,
+  .hq-note-inventory__link-button {
+    transition:
+      border-color 120ms ease,
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+}

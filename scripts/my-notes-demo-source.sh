@@ -8,6 +8,9 @@
 #       Disconnect, then set up a new Ori notebook "Demo Notes" (or "Demo
 #       Notes 2", … on a rerun) in <sandbox>/Documents with a House project
 #       note and one Inbox capture.
+#   ./scripts/my-notes-demo-source.sh <port> ori-empty <sandbox>
+#       The same notebook without the capture, so its Inbox starts at 0 (the
+#       note inventory's 0 → 1 journey).
 #   ./scripts/my-notes-demo-source.sh <port> external <sandbox>
 #       Disconnect, then connect <sandbox>/Documents/Field Notebook, an Obsidian
 #       vault with differently named folders and notes.
@@ -22,7 +25,7 @@
 set -euo pipefail
 
 usage() {
-	sed -n '3,20p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'
 	exit 2
 }
 
@@ -34,7 +37,7 @@ sandbox="$3"
 	echo "port must be a number: $port" >&2
 	exit 2
 }
-[[ "$mode" == ori || "$mode" == external ]] || usage
+[[ "$mode" == ori || "$mode" == ori-empty || "$mode" == external ]] || usage
 if [[ ! -f "$sandbox/.ori-demo-owner" ]]; then
 	echo "refusing: $sandbox is not a demo sandbox (no .ori-demo-owner)" >&2
 	exit 2
@@ -59,7 +62,7 @@ if [[ "$status" != not_connected ]]; then
 	echo "disconnected ($status)"
 fi
 
-if [[ "$mode" == ori ]]; then
+if [[ "$mode" == ori || "$mode" == ori-empty ]]; then
 	mkdir -p "$sandbox/Documents"
 	# Ori sets up only an empty or new folder; a rerun gets the next free name.
 	name="Demo Notes"
@@ -69,7 +72,9 @@ if [[ "$mode" == ori ]]; then
 	done
 	parent="$(pick "$sandbox/Documents")"
 	api -X POST "$endpoint/create" -d "{\"selection_token\":\"$parent\",\"name\":\"$name\",\"request_id\":\"demo-create-$stamp\",\"project\":{\"name\":\"House\",\"answer\":\"Repaint the hallway and fix the porch light before winter.\"}}" >/dev/null
-	api -X POST "$endpoint/capture" -d "{\"text\":\"Pick up paint samples on Saturday\",\"request_id\":\"demo-capture-$stamp\"}" >/dev/null
+	if [[ "$mode" == ori ]]; then
+		api -X POST "$endpoint/capture" -d "{\"text\":\"Pick up paint samples on Saturday\",\"request_id\":\"demo-capture-$stamp\"}" >/dev/null
+	fi
 	echo "set up $name"
 else
 	root="$sandbox/Documents/Field Notebook"

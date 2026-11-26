@@ -135,6 +135,7 @@ import {
 export const NOTES_STATION = 'second-brain';
 import { notesBadge, notesNudge } from './notes-station.js';
 import { HQQuickCapture, MY_NOTES_URL } from './hq-quick-capture.js';
+import { HQNoteInventory, NOTE_INVENTORY_TITLE } from './hq-note-inventory.js';
 import {
   parseWorkspaceURLState,
   sanitizeWorkspaceURLState,
@@ -3682,6 +3683,10 @@ export class WorkspaceCommandView {
         return { title: 'Daily Brief', addLabel: '' };
       case MEMORY_STATION:
         return { title: HQ_LABELS.memory, addLabel: '' };
+      // Only the map opens it (openNoteInventory); every other door to the
+      // Notes station goes to /my-notes.
+      case NOTES_STATION:
+        return { title: NOTE_INVENTORY_TITLE, addLabel: '' };
       case 'agents':
         return { title: 'Agents', addLabel: '＋ Add Agent' };
       case 'tasks':
@@ -3996,6 +4001,8 @@ export class WorkspaceCommandView {
     // own controller, so it is attached rather than re-serialized on every
     // repaint.
     const isBrief = this.statModalSection === DAILY_BRIEF_STATION;
+    // The note inventory is live DOM too, for the same reason.
+    const isInventory = this.statModalSection === NOTES_STATION;
     if (panel.classList) {
       panel.classList.toggle(
         'is-station',
@@ -4003,8 +4010,10 @@ export class WorkspaceCommandView {
       );
       panel.classList.toggle('is-daily-brief', isBrief);
       panel.classList.toggle('is-memory', this.statModalSection === MEMORY_STATION);
+      panel.classList.toggle('is-note-inventory', isInventory);
     }
     if (isBrief) this.mountDailyBriefPanel(panel);
+    else if (isInventory) this.mountNoteInventory(panel);
     else panel.innerHTML = this.statModalHTML(this.statModalSection);
     this.syncBoardSurface();
     this.syncConfigModalSurface();
@@ -8543,7 +8552,8 @@ export class WorkspaceCommandView {
   // The user's notes folder as an HQ building beside Email. It joins the
   // registry after Memory, so no station the user never dragged moves, and
   // stands by Email through its own default position. Its badge reads the
-  // connection; activation always goes to the personal notebook.
+  // connection. On the map (a Free building or the Flow node) it opens the
+  // note inventory over the map; every other door goes to the notebook.
   notesStation() {
     return {
       key: NOTES_STATION,
@@ -8552,8 +8562,76 @@ export class WorkspaceCommandView {
       defaultX: 0.76,
       defaultY: 0.39,
       state: () => this.notesStationState(),
-      action: () => this.openNotesStation()
+      action: () => this.openNotesStation(),
+      mapAction: trigger => this.openNoteInventory(trigger),
+      onPanelClosed: () => this._noteInventory?.close()
     };
+  }
+
+  // The inventory panel, built once and kept like the Daily Brief panel: it
+  // holds live elements and its own state, so a map repaint behind it never
+  // rebuilds it.
+  ensureNoteInventory() {
+    if (this._noteInventory) return this._noteInventory;
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+      return null;
+    }
+    // A Quick note saved in the inventory tells the page the way the HQ
+    // Overview's capture does: the Notes badge and anything else showing the
+    // Inbox read it again.
+    this._noteInventory = new HQNoteInventory({
+      doc: document,
+      onSaved: () => this.notesChanged()
+    });
+    return this._noteInventory;
+  }
+
+  // Opens the inventory over this HQ's map. It does not touch the URL, the
+  // history, the arrangement or the map's position; closing puts focus back on
+  // the building (or Flow node) that opened it.
+  openNoteInventory(trigger) {
+    if (!this.isPersonalHQ()) return;
+    const view = this.ensureNoteInventory();
+    if (!view) {
+      this.openNotesStation();
+      return;
+    }
+    const notes = this.notesState();
+    view.open({
+      hqWorkspaceID: this.watchtowerWorkspaceID(),
+      // The map's answer is reused only when it is settled; otherwise the
+      // panel reads the connection itself.
+      known: notes.status === 'ready' ? notes.secondBrain : null
+    });
+    this.openStatModal(NOTES_STATION, this.stationOpener(NOTES_STATION, trigger));
+  }
+
+  // Attaches the inventory into the stat modal; a repaint while it is already
+  // there leaves it alone. An inventory opened for another HQ (the page moved
+  // on) is closed rather than shown here.
+  mountNoteInventory(panel) {
+    const view = this._noteInventory;
+    const root = view?.ensureRoot();
+    if (!view || !root) {
+      panel.innerHTML = this.modalEmptyHTML('The note inventory is unavailable on this page.');
+      return;
+    }
+    if (!this.isPersonalHQ() || view.hqWorkspaceID !== this.watchtowerWorkspaceID()) {
+      view.close();
+      panel.innerHTML = '';
+      if (!this._closingNoteInventory) {
+        this._closingNoteInventory = true;
+        try {
+          this.closeStatModal({ coordinated: false });
+        } finally {
+          this._closingNoteInventory = false;
+        }
+      }
+      return;
+    }
+    if (root.parentNode === panel) return;
+    panel.innerHTML = '';
+    panel.appendChild(root);
   }
 
   // Refresh the drawer and the capture/badge after a confirmed save.
@@ -9520,10 +9598,27 @@ export class WorkspaceCommandView {
     ];
   }
 
-  // Dispatches a click on a station button to its registry action.
-  runHQStationAction(stationKey, trigger) {
+  // Dispatches a click on a station button to its registry action. A station
+  // may answer the map itself differently (`mapAction`): only a Free building
+  // or a Flow node passes `surface: 'map'`; the rail, cards, greeting and
+  // links keep the station's ordinary action.
+  runHQStationAction(stationKey, trigger, { surface = '' } = {}) {
     const station = this.mapStationRegistry().find(entry => entry.key === stationKey);
-    if (station && typeof station.action === 'function') station.action(trigger);
+    if (!station) return;
+    const action =
+      surface === 'map' && typeof station.mapAction === 'function'
+        ? station.mapAction
+        : station.action;
+    if (typeof action === 'function') action(trigger);
+  }
+
+  // Whether a clicked station element is one of the map's own buildings: a
+  // Free station or a Flow node, never a row or link that happens to sit in
+  // the map shell.
+  isMapStationTrigger(element) {
+    const classes = element && element.classList;
+    if (!classes || typeof classes.contains !== 'function') return false;
+    return classes.contains('ws-cmd-map-hq-station') || classes.contains('ws-cmd-flow-node');
   }
 
   // --- Memory station (PRD memory-station) ----------------------------------
@@ -12836,7 +12931,9 @@ export class WorkspaceCommandView {
           this._suppressStationClick = false;
           return;
         }
-        this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'), hqStation);
+        this.runHQStationAction(hqStation.getAttribute('data-cmd-hq-station'), hqStation, {
+          surface: this.isMapStationTrigger(hqStation) ? 'map' : ''
+        });
         return;
       }
       const systemTab = event.target.closest('[data-cmd-map-system-tab]');

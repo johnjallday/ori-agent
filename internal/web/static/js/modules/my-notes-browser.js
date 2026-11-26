@@ -95,10 +95,16 @@ function listedEntry(entry) {
 // which folder and note are chosen, and what the reader shows. Only the newest
 // answer for a folder or note, within one connection, can change it.
 export class NotebookState {
-  constructor({ request = notesRequest, onChange = () => {}, onStale = () => {} } = {}) {
+  constructor({
+    request = notesRequest,
+    onChange = () => {},
+    onStale = () => {},
+    onLandingMissing = () => {}
+  } = {}) {
     this.request = request;
     this.onChange = onChange;
     this.onStale = onStale;
+    this.onLandingMissing = onLandingMissing;
     this.generation = 0;
     this.controllers = new Set();
     this.reset();
@@ -247,6 +253,8 @@ export class NotebookState {
       this.landing === folderKey(node.parts) &&
       sameFolder(this.folder, node.parts)
     ) {
+      // Whoever chose this landing (a note link) can say why it moved.
+      this.onLandingMissing([...node.parts]);
       this.openFolder([]);
     }
   }
@@ -460,10 +468,14 @@ function actionButton(text, action, label) {
 }
 
 export class MyNotesBrowser {
-  constructor(root, { openFolder, recheck = () => {} }) {
+  constructor(root, { openFolder, recheck = () => {}, landingMissing = () => {} }) {
     this.root = root;
     this.openFolder = openFolder;
-    this.state = new NotebookState({ onChange: () => this.render(), onStale: () => recheck() });
+    this.state = new NotebookState({
+      onChange: () => this.render(),
+      onStale: () => recheck(),
+      onLandingMissing: parts => landingMissing(parts)
+    });
     this.panes = null;
     this.signatures = {};
     this.resetPanes();
