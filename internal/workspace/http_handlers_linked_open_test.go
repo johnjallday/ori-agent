@@ -27,7 +27,7 @@ func newLinkedOpenFixture(t *testing.T, id string) *linkedOpenFixture {
 	}
 	store, ws, h := newFolderHandlerTest(t, id, id)
 	f := &linkedOpenFixture{h: h, store: store, id: ws.ID, root: t.TempDir()}
-	for _, name := range []string{"Song.rpp", "Alternate.RPP", "Notes.txt", ".hidden.rpp", "Executable.rpp"} {
+	for _, name := range []string{"Song.rpp", "Alternate.RPP", "Notes.txt", ".hidden.rpp", "Executable.rpp", "Song.als", "Song.logicx", "Song.rpp-bak"} {
 		if err := os.WriteFile(filepath.Join(f.root, name), []byte("project"), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -105,7 +105,7 @@ func TestLinkedOpenDispatchesExactSelection(t *testing.T) {
 	if token == "" || rows["Song.rpp"] == "" {
 		t.Fatal("eligible rows have no selection")
 	}
-	for _, name := range []string{"Notes.txt", "Executable.rpp", "Bundle.rpp", "Pointer.rpp"} {
+	for _, name := range []string{"Notes.txt", "Executable.rpp", "Bundle.rpp", "Pointer.rpp", "Song.als", "Song.logicx", "Song.rpp-bak"} {
 		if selection, ok := rows[name]; !ok || selection != "" {
 			t.Errorf("%s must be inert", name)
 		}

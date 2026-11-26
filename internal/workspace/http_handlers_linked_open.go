@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/johnjallday/ori-agent/internal/connectionshttp"
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
 	"github.com/johnjallday/ori-agent/internal/platform"
 )
@@ -36,7 +37,11 @@ func exactLocalOrigin(r *http.Request) bool {
 
 func linkedDocumentPath(path string) bool {
 	rel, err := ContainedRelativePath(path)
-	return err == nil && rel == path && utf8.ValidString(path) && strings.EqualFold(filepath.Ext(path), ".rpp")
+	if err != nil || rel != path || !utf8.ValidString(path) {
+		return false
+	}
+	marker, ok := folderdigest.MatchMarker(filepath.Base(rel), false)
+	return ok && marker.LinkedDesktopDocument
 }
 
 // Sign the observed facts, not just the filename. Only the expiry and MAC go

@@ -51,6 +51,9 @@ type Marker struct {
 	// ProjectFormat is inert, host-owned catalog identity for a recognized
 	// project marker. It grants no plugin, project connection or execution.
 	ProjectFormat string
+	// LinkedDesktopDocument opts this format into the workspace Files open
+	// action. Recognition alone is not permission to dispatch a document.
+	LinkedDesktopDocument bool `json:"-"`
 	// SummaryTitle and SummaryGuidance are inert copy for supported saved-file
 	// summaries. They grant no reads, tools or runtime capability.
 	SummaryTitle    string

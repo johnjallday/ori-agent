@@ -80,7 +80,7 @@ var capabilityRows = []CapabilityRow{
 	{
 		Shape: ShapeAudio,
 		Markers: []Marker{
-			{Name: "*.rpp", Kind: MarkerGlob, Shape: ShapeAudio, Label: "REAPER session", ProjectFormat: "reaper",
+			{Name: "*.rpp", Kind: MarkerGlob, Shape: ShapeAudio, Label: "REAPER session", ProjectFormat: "reaper", LinkedDesktopDocument: true,
 				SummaryTitle:    "Summarize the REAPER session: tracks, overview and one next step",
 				SummaryGuidance: "For this saved session report its actual track names, a supported session overview, and one evidence-based next step. A single saved session does not establish edit history, recent edits, audio quality, or listening results."},
 			{Name: "*.logicx", Kind: MarkerGlob, Shape: ShapeAudio, Label: "Logic Pro project", ProjectFormat: "logic", ProjectBundle: true},
