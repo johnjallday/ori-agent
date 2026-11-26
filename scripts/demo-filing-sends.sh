@@ -207,16 +207,12 @@ if [[ "$with_model" == 1 ]]; then
 	api POST /api/settings/system-model '{"provider":"claude","model":"claude-sonnet-5-5"}' >/dev/null
 	curator="$(api POST "/api/workspaces/$downloads_id/capabilities/file-janitor/companion" | field companion.name)"
 	api PATCH "/api/workspaces/$downloads_id/file-janitor/settings" '{"content_mode":"local_model"}' >/dev/null
-	# "Add a Curator" gives the Curator its template's default model, not the
-	# system model. Point the sandbox's own copy at the system model so the one
-	# model turn can run. Sandbox files only; never a real workspace.
-	# The workspace keeps its agents in its own folder (read on every turn) and a
-	# mirror under workspaces/<id>; both are patched.
-	while IFS= read -r snapshot; do
-		[[ -f "$snapshot" ]] || continue
-		node -e 'const fs=require("fs");const p=process.argv[1];const c=JSON.parse(fs.readFileSync(p,"utf8"));if(c.Settings){c.Settings.model="claude-sonnet-5-5";c.Settings.provider="claude";fs.writeFileSync(p,JSON.stringify(c,null,2)+"\n")}' "$snapshot"
-	done < <(find "$sandbox" -path '*/agents/*curator*/config.json' -type f 2>/dev/null)
 	echo "CURATOR=${curator:-added}"
+	# What the Curator was created on, read from the workspace's own copy (the
+	# one each turn reads). It should name the system model above.
+	while IFS= read -r snapshot; do
+		echo "CURATOR_MODEL=$(field Settings.provider <"$snapshot")/$(field Settings.model <"$snapshot")"
+	done < <(find "$sandbox" -path '*/workspace-staging/*/agents/*curator*/config.json' -type f 2>/dev/null)
 	echo "CONTENT_MODE=local_model"
 fi
 

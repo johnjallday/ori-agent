@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/logger"
+	"github.com/johnjallday/ori-agent/internal/projecttemplates"
 	"github.com/johnjallday/ori-agent/internal/store"
 	"github.com/johnjallday/ori-agent/internal/types"
 )
@@ -142,10 +143,19 @@ func (p *CapabilityCompanionProvisioner) RemoveCompanionAgent(workspaceID, agent
 // It is read-only by construction: the Curator's filesystem access comes from
 // the capability's own root-scoped MCP binding, whose allowlist excludes
 // read_file and every mutation tool. Nothing here can widen that.
+//
+// It runs on the system model, as a hired template agent does. Left empty, the
+// store's fallback is a model with no provider, which neither chat nor a Filing
+// suggestion can run until the person picks a model in the agent's settings.
+// With no system model set, it is left empty as before.
 func (p *CapabilityCompanionProvisioner) companionConfig(name string) *store.CreateAgentConfig {
+	model, provider, reasoningEffort, _ := p.handler.templateAgentModelDefaults(projecttemplates.AgentSpec{})
 	return &store.CreateAgentConfig{
-		Role:         types.RoleSpecialist,
-		SystemPrompt: companionSystemPrompt(name),
+		Role:            types.RoleSpecialist,
+		SystemPrompt:    companionSystemPrompt(name),
+		Model:           model,
+		LLMProvider:     provider,
+		ReasoningEffort: reasoningEffort,
 	}
 }
 
