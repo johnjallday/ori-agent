@@ -3874,6 +3874,8 @@
         `On. ${name} can now receive files, and each send waits for you on Review.`
       );
       announce(`Sends to ${name} is on.`);
+      // The review's picture and plan depend on which connections are on.
+      void loadBatch();
     } catch (error) {
       connectionBusy = '';
       if (connectCard) connectCard = { ...connectCard, error: error.message };
@@ -3898,6 +3900,8 @@
         : `Turned off. ${view.sender_name} can no longer send files here; files already sent stay here.`;
       setSettingsMessage(message);
       announce(message);
+      // Review must not keep drawing a Leaving card for a connection that is off.
+      void loadBatch();
     } catch (error) {
       connectionBusy = '';
       renderSettings();

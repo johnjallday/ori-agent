@@ -75,6 +75,17 @@ forbidden-content/mutation policy, consent and filing destination are unchanged.
 Its recorded reference remains excluded from generic `AdoptedFolders` advice.
 An unrelated explicit user grant is not silently deleted or repointed.
 
+A Filing **connection** ("Downloads sends to Documents") is explicit access of
+the same kind: only the person turns it on, from the sender's Filing Settings;
+grouping workspaces or folders being near each other never creates one. It is one
+way, carries only the kinds the person ticked, and either workspace can turn it
+off. It grants no MCP binding and no agent tool: each folder keeps only its own
+Filing grant, and the Filing agent keeps its four read-only tools on its own
+folder. Only the Filing service moves a file across, at the person's press, to
+the receiver's top level, through the conditional mover that never replaces a
+name. The connection records both folders' identities; pointing either workspace
+at another folder, revoking access or removing Filing ends it.
+
 Pinned Toolbox selections are intersected with the binding's current allowlist.
 A recipe pinned before Janitor narrowed a grant cannot retain content-reading
 operations afterward.

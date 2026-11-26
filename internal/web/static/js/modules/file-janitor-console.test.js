@@ -7806,6 +7806,12 @@ test('the receiver sees Receives from and can turn it off (FR 11, FR 41)', async
       doc.getElementById('fileJanitorSettingsStatus').textContent,
       /Downloads can no longer send files here/
     );
+    // The review is read again, so Review never keeps a stale Leaving card.
+    const turnOff = requests.findIndex(r => r.method === 'POST');
+    assert.ok(
+      requests.slice(turnOff + 1).some(r => r.url.includes('/batches')),
+      'turning a connection off reloads the review'
+    );
   } finally {
     delete globalThis.FileJanitorConnections;
   }
