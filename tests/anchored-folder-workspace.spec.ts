@@ -63,13 +63,12 @@ test('existing-folder creation, scoped rows, duplicate recovery, relink and side
   await page.locator('#wizardNextBtn').click();
   const review = page.locator('#workspaceCreationReviewPanel');
   await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
-  await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
-  await expect(
-    review.getByRole('heading', { name: 'Workspace created', exact: true })
-  ).toBeVisible();
-  const id = await page.evaluate(
-    () => (window as any).sessionManager.workspaceCreatorContext.ordinaryReview.result.id
+  const confirmation = page.waitForResponse(
+    r => r.request().method() === 'POST' && r.url().endsWith('/confirm')
   );
+  await review.getByRole('button', { name: 'Create workspace', exact: true }).click();
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  const id = (await (await confirmation).json()).folder.id;
   const canonical = await (await request.get(`/api/workspaces/${id}`)).json();
   expect(canonical.shape).toBe('anchored');
   expect(canonical.directory_references).toHaveLength(1);
@@ -82,9 +81,7 @@ test('existing-folder creation, scoped rows, duplicate recovery, relink and side
   expect(canonical.mcp_bindings[0].allowed_tools).not.toContain('write_file');
   expect(existsSync(join(canonical.sidecar_path, 'files'))).toBe(false);
   expect(existsSync(join(root, 'workspace.json'))).toBe(false);
-  // Acknowledge the durable result through its real owner before starting
-  // another creation (a raw navigation leaves that recoverable review active).
-  await review.getByRole('button', { name: 'Open workspace', exact: true }).click();
+  await page.locator('#toastContainer').getByRole('button', { name: 'Open workspace' }).click();
   await expect(page).toHaveURL(/\/workspaces\/anchored-client$/);
   await expect(page.locator('.ws-cmd-anchor-details')).toContainText(
     'Anchored to ~/client-fixture'

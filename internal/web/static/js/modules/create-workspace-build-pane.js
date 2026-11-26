@@ -36,7 +36,7 @@
     busy: 'Setting up…',
     placeholder: 'Type a reply…',
     showEarlier: 'Show earlier',
-    resume: 'Resume',
+    resume: 'Continue draft',
     chooseFolder: 'Choose a folder',
     noFolder: 'No folder',
     folderChosen: 'I chose a folder.',
@@ -47,7 +47,27 @@
     chosenBy: name => `Chosen by ${name}`,
     buildWith: name => `Build with ${name}`,
     replyLabel: name => `Reply to ${name}`,
-    resumeQuestion: name => `Resume building ${name || 'your workspace'}?`,
+    resumeQuestion: session => {
+      const label =
+        session.draft?.name ||
+        session.folder?.observation?.folder ||
+        session.link?.observation?.title ||
+        session.link?.observation?.host ||
+        session.first_request ||
+        session.transcript?.find(line => line.role === 'user')?.text ||
+        session.draft?.description ||
+        session.draft?.mission;
+      const snippet = Array.from(
+        String(label || '')
+          .trim()
+          .replace(/\s+/g, ' ')
+      );
+      if (snippet.length)
+        return `Continue the draft for “${snippet.slice(0, 80).join('')}${snippet.length > 80 ? '…' : ''}”?`;
+      if (session.edited_fields?.team) return 'Continue the draft with your saved team choices?';
+      if (session.draft?.blank) return 'Continue your Blank workspace draft?';
+      return 'Continue your unfinished setup draft?';
+    },
     // Add folder: the composer's folder context, in the pane's own words.
     addFolder: 'Add folder',
     removeFolder: 'Remove folder',

@@ -460,6 +460,26 @@ type createBuildRequest struct {
 	FirstMessage string `json:"first_message,omitempty"`
 }
 
+// Opening the dialog synchronizes form defaults (including the Blank roster)
+// and can advance the step/version without the user doing anything. Those
+// writes aren't a draft to resume. Explicit edits, even clears, and any
+// conversation, attachment or in-flight setup must keep the resume choice.
+func buildNeedsResume(s *personalassistant.WorkspaceBuildSession) bool {
+	if s.TurnCount > 0 || s.FirstRequest != "" || len(s.Transcript) > 0 || len(s.EditedFields) > 0 {
+		return true
+	}
+	if s.Status != personalassistant.WorkspaceBuildOpen || s.PlacementSource != nil || s.Setup != nil || s.Preparation != nil ||
+		s.Folder != nil || s.Link != nil || s.InferenceID != "" || s.FolderRequestID != "" || s.LinkRequestID != "" ||
+		s.Proposal != nil || s.Staffing != nil || s.TeamPatch != nil || s.PendingQuestion != nil || s.Retry != nil {
+		return true
+	}
+	// Keep material choices in older drafts too, even without edit markers.
+	d := s.Draft
+	return d.Name != "" || d.TemplateID != "" || d.Description != "" || d.Mission != "" || d.Color != "" ||
+		len(d.Tags) > 0 || len(d.BlueprintInputs) > 0 || len(d.WorkspaceBootstrap) > 0 || len(d.ProjectConnection) > 0 ||
+		(d.WorkspacePreset != "" && d.WorkspacePreset != "general")
+}
+
 // createWorkspaceBuildSession starts a build, or returns the one already
 // open: there is at most one open build per user (FR10).
 func (h *Handler) createWorkspaceBuildSession(w http.ResponseWriter, r *http.Request) {
@@ -505,9 +525,17 @@ func (h *Handler) createWorkspaceBuildSession(w http.ResponseWriter, r *http.Req
 		}
 	}
 	var existing *personalassistant.WorkspaceBuildSession
+	var resume bool
 	_, err := deps.Store.Mutate(ctx, userID, func(doc *personalassistant.WorkspaceBuildDocument) error {
 		existing = nil
 		if open := doc.Open(); open != nil {
+			resume = buildNeedsResume(open)
+			if !resume && (open.EntryPoint != entryPoint || open.Draft.ParentID != fresh.Draft.ParentID) {
+				// An untouched draft belongs to this opener, not to the map/group
+				// it happened to be opened from last time. Fence other tabs' writes.
+				open.EntryPoint, open.Draft.ParentID = entryPoint, fresh.Draft.ParentID
+				open.Touch(now)
+			}
 			copied := cloneBuildSession(*open)
 			copied.CreateNow = false // Resume observes state, never replays an action.
 			existing = &copied
@@ -521,21 +549,26 @@ func (h *Handler) createWorkspaceBuildSession(w http.ResponseWriter, r *http.Req
 		respondBuildUnavailable(w, buildReasonAssistantNotReady)
 		return
 	}
+	opened, statusOnOpen := &fresh, http.StatusCreated
 	if existing != nil {
-		h.respondBuildSession(r.Context(), w, http.StatusOK, existing, map[string]any{"resumed": true})
-		return
+		if resume {
+			h.respondBuildSession(ctx, w, http.StatusOK, existing, map[string]any{"resumed": true})
+			return
+		}
+		opened, statusOnOpen = existing, http.StatusOK
+	} else {
+		logger.Info("Workspace build started", logger.Fields{"session_id": fresh.ID, "entry_point": entryPoint, "first_message": message != ""})
 	}
-	logger.Info("Workspace build started", logger.Fields{"session_id": fresh.ID, "entry_point": entryPoint, "first_message": message != ""})
 	if message == "" {
-		h.respondBuildSession(r.Context(), w, http.StatusCreated, &fresh, nil)
+		h.respondBuildSession(ctx, w, statusOnOpen, opened, nil)
 		return
 	}
-	session, status, code := h.runWorkspaceBuildTurn(ctx, userID, fresh.ID, buildTurnRequest{Text: message, Version: fresh.Version}, readiness)
+	session, status, code := h.runWorkspaceBuildTurn(ctx, userID, opened.ID, buildTurnRequest{Text: message, Version: opened.Version}, readiness)
 	if session == nil {
 		_ = orihttp.RespondJSON(w, status, map[string]any{"error": "The build could not continue.", "code": code})
 		return
 	}
-	h.respondBuildSession(r.Context(), w, http.StatusCreated, session, nil)
+	h.respondBuildSession(ctx, w, statusOnOpen, session, nil)
 }
 
 type buildTurnRequest struct {

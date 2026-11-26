@@ -104,7 +104,7 @@ test('the manager offers a first look on Open; dismissal and return do not start
       `UPDATE workspace_creation_operations SET documents_witness=NULL WHERE workspace_id='${id}' AND state='complete'`
     ]);
   }
-  await review.getByRole('button', { name: 'Open workspace', exact: true }).click();
+  await page.locator('#toastContainer').getByRole('button', { name: 'Open workspace' }).click();
   const card = page.locator('#workspaceDocumentsLook');
   if (legacy) {
     await expect(card.getByRole('heading')).toHaveText('Verify the Documents folder');

@@ -4937,6 +4937,7 @@ const sessionManager = {
       const [ui, api, groupedApi] = await review.modules;
       if (
         this.workspaceCreatorContext !== context ||
+        context.ordinaryReview !== review ||
         context.generation !== review.generation ||
         !this.usesUnifiedOrdinaryReview()
       )
@@ -4963,7 +4964,7 @@ const sessionManager = {
             void this.syncOrdinaryCreationReview();
           });
         });
-      if (!review.restored) {
+      if (!review.restored && this.isFinalWizardStep()) {
         review.restored = true;
         try {
           const reference = api.savedCreationReference(window.localStorage);
@@ -5086,6 +5087,8 @@ const sessionManager = {
         openLabel: review.result && review.buildDraft ? `Open ${review.result.name}` : '',
         searchSource: review.searchSource,
         definiteRefusal,
+        statusUnavailable:
+          review.owner === 'ordinary' && ['uncertain', 'missing'].includes(review.observedState),
         resultParentName: review.result?.parent_id
           ? this.findFolderById(review.result.parent_id, this.folders || [])?.name || ''
           : '',
@@ -5512,16 +5515,11 @@ const sessionManager = {
         context.hqWorkspaceOutcome ||
         (review.restored && (await import('./hq-workspace-outcome.js').catch(() => null)));
       if (this.workspaceCreatorContext !== context) return;
-      outcome?.openingReviewedWorkspace?.(review.reference, review.result.id);
       this.releaseCreationReviewReference(review);
-      // Workspace pages are routed by slug; resolve it rather than use the ID.
-      const slug = String(review.result.folder_slug || '').trim();
-      if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
-      else await this.openExistingResourceWorkspace(review.result.id);
+      await this.openVerifiedWorkspace(review.result, review.reference, outcome);
       return;
     }
     if (action === 'back' && (review.result || review.accepted)) {
-      if (review.result) this.releaseCreationReviewReference(review);
       this.hideWorkspaceCreatorModal();
       return;
     }
@@ -5613,6 +5611,14 @@ const sessionManager = {
     if (this.workspaceCreatorContext === context) void this.syncOrdinaryCreationReview();
   },
 
+  async openVerifiedWorkspace(workspace, reference, hqOutcome) {
+    hqOutcome?.openingReviewedWorkspace?.(reference, workspace.id);
+    // Workspace pages are routed by slug; resolve it rather than use the ID.
+    const slug = String(workspace.folder_slug || '').trim();
+    if (slug) window.location.href = `/workspaces/${encodeURIComponent(slug)}`;
+    else await this.openExistingResourceWorkspace(workspace.id);
+  },
+
   // Each owner keeps its own lookup store; releasing one never erases another
   // tab's newer reference (both stores compare the exact original identity).
   releaseCreationReviewReference(review) {
@@ -5668,7 +5674,7 @@ const sessionManager = {
     }
   },
 
-  async readOrdinaryCreationStatus(context) {
+  async readOrdinaryCreationStatus(context, { freshOpen = false } = {}) {
     const review = context.ordinaryReview;
     if (this.workspaceCreatorContext !== context || !review?.reference || review.reading) return;
     review.reading = true;
@@ -5680,11 +5686,14 @@ const sessionManager = {
       const outcome = await review.api.observeCreationOperation(fetch, review.reference);
       if (this.workspaceCreatorContext !== context) return;
       if (
-        outcome.state !== 'uncertain' ||
+        !['uncertain', 'missing'].includes(outcome.state) ||
         !['accepted', 'reconciliation_required'].includes(review.observedState)
       )
         review.observedState = outcome.state;
       review.buildDraft ||= outcome.operation?.build_backed === true;
+      // New Workspace is a new intent, never a retry. Retire this browser
+      // reference only for a verified result or the journal's scoped absence.
+      if (freshOpen && ['complete', 'missing'].includes(review.observedState)) return true;
       if (outcome.state === 'complete') {
         review.searchSource = outcome.result.filename_source_id || '';
         review.result = await this.observeOrdinaryCreationResource(context, outcome.result.folder);
@@ -5990,10 +5999,7 @@ const sessionManager = {
           this.presentOrdinaryMapOutcome(context, placement, statusFocus);
       },
       showDetails: () => this.showWorkspaceCreatorResult(placement.token, statusFocus),
-      dismiss: () => {
-        if (review.result) this.releaseCreationReviewReference(review);
-        this.closeHiddenWorkspaceCreator(context);
-      }
+      dismiss: () => this.closeHiddenWorkspaceCreator(context)
     });
   },
 
@@ -6042,7 +6048,40 @@ const sessionManager = {
       : review.message ||
         'Creation delivery is uncertain. Read the original operation; do not create again.';
     const modal = document.getElementById('addFolderModal');
-    if (placement) {
+    // A simple creation has no next setup, repair or Files action to review.
+    // Leave the workspace on the map/list; opening it is still an explicit choice.
+    const notifyOnly =
+      modal &&
+      review.result &&
+      !placement &&
+      review.owner === 'ordinary' &&
+      !this.isGroupCreator() &&
+      this.teamView()?.isBlank &&
+      !review.buildDraft &&
+      !review.searchSource &&
+      !review.resourceObservationWarning &&
+      !result.search_warning &&
+      !result.project_warning &&
+      !result.agent_warnings?.length &&
+      !(result.team_completion && result.team_completion.state !== 'complete') &&
+      !this.ordinaryCreationSetupHint(review.result, review.setupObservation);
+    if (notifyOnly) {
+      const { result: workspace, reference } = review;
+      const hqOutcome = context.hqWorkspaceOutcome;
+      modal.addEventListener(
+        'hidden.bs.modal',
+        () =>
+          this.showToast(`${workspace.name} created.`, 'success', {
+            duration: 10000,
+            action: {
+              label: 'Open workspace',
+              onClick: () => this.openVerifiedWorkspace(workspace, reference, hqOutcome)
+            }
+          }),
+        { once: true }
+      );
+      this.hideWorkspaceCreatorModal();
+    } else if (placement) {
       if (!review.result) placement.phase = 'accepted';
       window.OriWorkspaceMap?.endPlacement?.(placement.token);
       const statusFocus = '#workspaceCreationReviewPanel [data-placement-focus="status"]';
@@ -6063,8 +6102,10 @@ const sessionManager = {
         bootstrap.Modal.getOrCreateInstance(modal).show();
       }
     }
-    this.wizardStep = this.wizardStepCount;
-    this.refreshWizardChrome();
+    if (!notifyOnly) {
+      this.wizardStep = this.wizardStepCount;
+      this.refreshWizardChrome();
+    }
     if (review.result) {
       this.notifyWorkspacesChanged({ workspaceId: review.result.id });
       await this.loadFolders();
@@ -13920,7 +13961,15 @@ const sessionManager = {
     context?.ordinaryReview?.panel?.destroy();
     context?.groupTemplates?.sharedReview?.panel?.destroy();
     const ordinaryReview = context?.ordinaryReview;
-    if (ordinaryReview?.reference && !ordinaryReview.accepted && !ordinaryReview.result) {
+    if (ordinaryReview?.result) {
+      // Storage can become unavailable (or unreadable in another tab). Still
+      // finish closing; the next opener will check the retained reference.
+      try {
+        this.releaseCreationReviewReference(ordinaryReview);
+      } catch (error) {
+        console.warn('Completed creation reference could not be retired:', error);
+      }
+    } else if (ordinaryReview?.reference && !ordinaryReview.accepted) {
       void ordinaryReview.api
         ?.abandonCreationOperation(fetch, ordinaryReview.reference)
         .catch(error => console.warn('Unaccepted workspace review could not be retired:', error));
@@ -14448,9 +14497,11 @@ const sessionManager = {
         }
         if (reference || message) {
           if (folderCheck) folderCheck.hidden = true;
+          const initialStep = this.wizardStep;
           const review = (context.ordinaryReview ||= { generation: context.generation });
           Object.assign(review, {
             owner: 'ordinary',
+            api,
             reference,
             accepted: true,
             restored: true,
@@ -14461,20 +14512,35 @@ const sessionManager = {
           this.refreshWizardChrome();
           await this.syncOrdinaryCreationReview();
           if (this.workspaceCreatorContext !== context) return;
-          if (!review.observedState && reference) await this.readOrdinaryCreationStatus(context);
-          if (
-            this.workspaceCreatorContext === context &&
-            (document.activeElement === document.body ||
-              document.activeElement?.id === 'addFolderModal')
-          )
-            document.getElementById('workspaceCreationReviewTitle')?.focus();
-          return;
+          const canStartFresh =
+            reference && (await this.readOrdinaryCreationStatus(context, { freshOpen: true }));
+          if (this.workspaceCreatorContext !== context) return;
+          if (!canStartFresh) {
+            if (
+              document.activeElement === document.body ||
+              document.activeElement?.id === 'addFolderModal'
+            )
+              document.getElementById('workspaceCreationReviewTitle')?.focus();
+            return;
+          }
+          try {
+            this.releaseCreationReviewReference(review);
+          } catch (error) {
+            review.message = error.message;
+            await this.syncOrdinaryCreationReview();
+            return;
+          }
+          review.panel?.destroy();
+          context.ordinaryReview = null;
+          this.wizardStep = initialStep;
+          this.refreshWizardChrome();
+          if (folderCheck) folderCheck.hidden = !chatHandoff;
         }
       }
     }
     if (this.workspaceCreatorContext !== context) return;
     if (chatHandoff) {
-      // A saved confirmation wins over either guide. Only a fresh, unchanged
+      // An unresolved confirmation wins over either guide. Only a fresh, unchanged
       // dialog gets the handoff. Never turn failed verification into blank setup.
       const current = () =>
         this.workspaceCreatorContext === context && sequence === this.anchorCheckSequence;
@@ -14501,7 +14567,7 @@ const sessionManager = {
       return;
     }
     if (hqAttempt && context.entryPoint === 'home_cockpit_create') {
-      // A saved confirmation always wins. Without its reader we cannot know
+      // Without a reader for a possible unresolved confirmation we cannot know
       // whether this is a fresh wizard, so leave the ordinary form untouched.
       if (sequence !== this.anchorCheckSequence || !checkedForRecovery) return;
       const outcome = await import('./hq-workspace-outcome.js').catch(() => null);
@@ -15316,7 +15382,7 @@ const sessionManager = {
     }
     build.session = session;
     // The dialog's create request names this build only once its draft is on
-    // the form: an unanswered "Resume building …?" must not tie a workspace
+    // the form: an unanswered Continue draft prompt must not tie a workspace
     // the user makes by hand to the paused build.
     if (result.body.resumed && !fresh && build.context.buildResume) {
       await this.applyWorkspaceBuildSession(session, { resume: true, revision });
@@ -15325,9 +15391,8 @@ const sessionManager = {
       }
       return;
     }
-    if (result.body.resumed && !fresh) {
-      const name = String(session.draft?.name || '').trim();
-      build.resumeLine = pane.showLine(pane.COPY.resumeQuestion(name), {
+    if (result.body.resumed) {
+      build.resumeLine = pane.showLine(pane.COPY.resumeQuestion(session), {
         chips: [
           { id: 'resume', label: pane.COPY.resume },
           { id: 'start_over', label: pane.COPY.startOver }
@@ -22957,7 +23022,7 @@ const sessionManager = {
   // ============================================================================
 
   // Show toast notification
-  showToast(message, type = 'info') {
+  showToast(message, type = 'info', options) {
     const normalizedType = (type || 'info').toLowerCase();
     const toastType =
       normalizedType === 'danger'
@@ -22967,18 +23032,18 @@ const sessionManager = {
           : normalizedType;
 
     if (typeof window.notifyToast === 'function') {
-      window.notifyToast(message, toastType);
+      window.notifyToast(message, toastType, options);
       return;
     }
 
     if (window.Toast) {
       const toastFn = window.Toast[toastType];
       if (typeof toastFn === 'function') {
-        toastFn(message);
+        toastFn(message, options);
         return;
       }
       if (typeof window.Toast.show === 'function') {
-        window.Toast.show(message, toastType);
+        window.Toast.show(message, toastType, options);
         return;
       }
     }

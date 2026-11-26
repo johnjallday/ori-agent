@@ -299,9 +299,30 @@ func TestWorkspaceBuild_CreateThenResumeTheOneOpenBuild(t *testing.T) {
 	if first.Status != personalassistant.WorkspaceBuildOpen || first.Assistant.DisplayName != "Luna" || first.FurthestStep != 1 {
 		t.Fatalf("fresh session %+v", first)
 	}
-	status, body := f.do(t, http.MethodPost, "/api/workspaces/build-sessions", map[string]any{"entry_point": "workspace_hub_create"})
+	// A passive form sync can record Blank, team defaults and the wizard step.
+	status, _ := f.do(t, http.MethodPatch, "/api/workspaces/build-sessions/"+first.ID+"/draft", map[string]any{
+		"version": first.Version, "sync": true, "step": 2, "draft": map[string]any{"blank": true, "workspace_preset": "general"}, "team_state": map[string]any{"version": 1},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("initial sync: %d", status)
+	}
+	open := func() (int, map[string]any) {
+		return f.do(t, http.MethodPost, "/api/workspaces/build-sessions", map[string]any{"entry_point": "workspace_hub_create"})
+	}
+	status, body := open()
+	found := sessionOf(t, body)
+	if status != http.StatusOK || body["resumed"] == true || found.ID != first.ID || f.provider.calls != 0 {
+		t.Fatalf("untouched build must open quietly without allocating another: %d %v", status, body)
+	}
+	status, _ = f.do(t, http.MethodPatch, "/api/workspaces/build-sessions/"+first.ID+"/draft", map[string]any{
+		"version": found.Version, "draft": map[string]any{"blank": true}, "edited_fields": []string{"blueprint_id"},
+	})
+	if status != http.StatusOK {
+		t.Fatalf("explicit choice: %d", status)
+	}
+	status, body = open()
 	if status != http.StatusOK || body["resumed"] != true || sessionOf(t, body).ID != first.ID {
-		t.Fatalf("second create must resume: %d %v", status, body)
+		t.Fatalf("the explicitly chosen Blank must offer Continue draft: %d %v", status, body)
 	}
 	if status, _ := f.do(t, http.MethodPost, "/api/workspaces/build-sessions", map[string]any{"entry_point": "folder_digest"}); status != http.StatusBadRequest {
 		t.Fatalf("a manual opener must not build: %d", status)
@@ -311,6 +332,43 @@ func TestWorkspaceBuild_CreateThenResumeTheOneOpenBuild(t *testing.T) {
 	}
 	if second := f.start(t); second.ID == first.ID {
 		t.Fatal("after abandoning, a new build starts")
+	}
+}
+
+func TestWorkspaceBuild_FirstMessageOnUntouchedBuildIsNotLostOrReplayed(t *testing.T) {
+	f := newBuildFixture(t, true, describeReply)
+	first := f.start(t)
+	ask := func() map[string]any {
+		status, body := f.do(t, http.MethodPost, "/api/workspaces/build-sessions", map[string]any{
+			"entry_point": "personal_assistant_ask", "first_message": "Make a newsletter workspace",
+		})
+		if status != http.StatusOK || sessionOf(t, body).ID != first.ID {
+			t.Fatalf("ask open: %d %v", status, body)
+		}
+		return body
+	}
+	body := ask()
+	got := sessionOf(t, body)
+	if body["resumed"] == true || got.FirstRequest != "Make a newsletter workspace" || got.EntryPoint != "personal_assistant_ask" {
+		t.Fatalf("first message not applied: %+v", got)
+	}
+	if ask()["resumed"] != true || f.provider.calls != 1 {
+		t.Fatal("reopening a meaningful draft must not replay the opener's message")
+	}
+}
+
+func TestWorkspaceBuild_ProtectedWorkAlwaysNeedsResume(t *testing.T) {
+	for _, build := range []personalassistant.WorkspaceBuildSession{
+		{Status: personalassistant.WorkspaceBuildPreparing},
+		{Status: personalassistant.WorkspaceBuildOpen, FolderRequestID: "pending"},
+		{Status: personalassistant.WorkspaceBuildOpen, Preparation: &personalassistant.BuildPreparationClaim{}},
+		{Status: personalassistant.WorkspaceBuildOpen, Folder: &personalassistant.BuildFolder{}},
+		{Status: personalassistant.WorkspaceBuildOpen, Link: &personalassistant.BuildLink{}},
+		{Status: personalassistant.WorkspaceBuildOpen, PlacementSource: &personalassistant.InboxPlacementSource{}},
+	} {
+		if !buildNeedsResume(&build) {
+			t.Fatalf("treated protected work as an empty draft: %+v", build)
+		}
 	}
 }
 

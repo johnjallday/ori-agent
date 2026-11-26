@@ -1,5 +1,7 @@
 import { test, expect, type APIRequestContext, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { installLocalCdn } from './helpers/offline-cdn';
+import { openMapReceiptDetails } from './helpers/confirm-reviewed-creation';
 
 // Real-server recovery matrix for the ordinary operation owner. Only reply
 // delivery or a layout write is interrupted; no creation, receipt or layout
@@ -10,6 +12,7 @@ async function workspaceIDs(request: APIRequestContext) {
 }
 
 async function openBlankReview(page: Page, name: string) {
+  await installLocalCdn(page);
   await page.goto('/');
   await page.locator('#cockpitCreateWorkspaceBtn').click();
   await page.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
@@ -41,11 +44,18 @@ test('a second tab cannot compete with a confirmed operation; it reads the origi
   const secondReview = await openBlankReview(second, `Second tab ${randomUUID().slice(0, 8)}`);
 
   let confirms = 0;
+  let finish!: () => void;
+  const pending = new Promise<void>(resolve => {
+    finish = resolve;
+  });
+  let accepted = false;
   await context.route('**/api/workspaces/create-operations/*/confirm', async route => {
     confirms++;
     if (confirms === 1) {
       // The host accepts and completes the first confirmation; its reply is lost.
       await route.fetch();
+      accepted = true;
+      await pending;
       await route.abort('failed');
       return;
     }
@@ -53,9 +63,7 @@ test('a second tab cannot compete with a confirmed operation; it reads the origi
   });
   await firstReview.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   await firstReview.getByRole('button', { name: 'Create workspace', exact: true }).click();
-  await expect(
-    firstReview.getByRole('heading', { name: 'Workspace created', exact: true })
-  ).toBeVisible();
+  await expect.poll(() => accepted).toBe(true);
 
   await secondReview.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   await secondReview.getByRole('button', { name: 'Create workspace', exact: true }).click();
@@ -68,17 +76,64 @@ test('a second tab cannot compete with a confirmed operation; it reads the origi
   const after = await workspaceIDs(request);
   expect(after).toHaveLength(before.length + 1);
 
-  // Closing the original result releases it; a new confirmation then works.
-  await secondReview.getByRole('button', { name: 'Close', exact: true }).click();
+  // The dialog × must retire a verified result just like its inner Close.
+  await second.locator('#addFolderModal .btn-close').first().click();
+  await expect(second.locator('#addFolderModal')).toBeHidden();
+  expect(
+    await second.evaluate(() => localStorage.getItem('ori.workspaceCreationOperation.v1'))
+  ).toBeNull();
+  finish();
+  await expect(first.locator('#toastContainer')).toContainText(`${firstName} created.`);
   const thirdName = `After release ${randomUUID().slice(0, 8)}`;
   const third = await openBlankReview(second, thirdName);
   await third.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   await third.getByRole('button', { name: 'Create workspace', exact: true }).click();
-  await expect(
-    third.getByRole('heading', { name: 'Workspace created', exact: true })
-  ).toBeVisible();
-  await expect(third).toContainText(thirdName);
+  await expect(second.locator('#toastContainer')).toContainText(`${thirdName} created.`);
   expect(await workspaceIDs(request)).toHaveLength(before.length + 2);
+});
+
+test('New Workspace keeps an unreadable reference but skips one missing from this profile', async ({
+  page,
+  request
+}) => {
+  const key = 'ori.workspaceCreationOperation.v1';
+  const reference = { id: randomUUID(), digest: 'a'.repeat(64) };
+  const endpoint = `**/api/workspaces/create-operations/${reference.id}`;
+  const before = await workspaceIDs(request);
+  await installLocalCdn(page);
+  await page.goto('/');
+  await page.evaluate(
+    ({ key, reference }) => localStorage.setItem(key, JSON.stringify(reference)),
+    { key, reference }
+  );
+  const writes: string[] = [];
+  page.on('request', r => {
+    if (
+      r.method() === 'POST' &&
+      new URL(r.url()).pathname.startsWith('/api/workspaces/create-operations')
+    )
+      writes.push(r.url());
+  });
+  const create = page.locator('#cockpitCreateWorkspaceBtn');
+  const modal = page.locator('#addFolderModal');
+  // A proxy/route 404 must not be mistaken for the journal's scoped answer.
+  await page.route(endpoint, route => route.fulfill({ status: 404, json: { code: 'not_found' } }));
+  await create.click();
+  await expect(modal.getByRole('heading', { name: 'Workspace status unavailable' })).toBeVisible();
+  await modal.getByRole('button', { name: 'Check status' }).click();
+  await modal.getByRole('button', { name: 'Close', exact: true }).last().click();
+  await expect(modal).toBeHidden();
+  expect(await page.evaluate(key => localStorage.getItem(key), key)).toBe(
+    JSON.stringify(reference)
+  );
+
+  await page.unroute(endpoint);
+  await create.click();
+  await expect.poll(() => page.evaluate(key => localStorage.getItem(key), key)).toBeNull();
+  await expect(page.locator('#wizardStep1')).toBeVisible();
+  await expect(modal.getByRole('button', { name: 'Check status' })).toBeHidden();
+  expect(writes).toEqual([]);
+  expect(await workspaceIDs(request)).toEqual(before);
 });
 
 test('a double-clicked final confirmation creates exactly once', async ({ page, request }) => {
@@ -91,9 +146,8 @@ test('a double-clicked final confirmation creates exactly once', async ({ page, 
   const review = await openBlankReview(page, `Double click ${randomUUID().slice(0, 8)}`);
   await review.getByRole('button', { name: 'Use automatic placement', exact: true }).click();
   await review.getByRole('button', { name: 'Create workspace', exact: true }).dblclick();
-  await expect(
-    review.getByRole('heading', { name: 'Workspace created', exact: true })
-  ).toBeVisible();
+  await expect(page.locator('#addFolderModal')).toBeHidden();
+  await expect(page.locator('#toastContainer')).toContainText('created.');
   expect(confirms).toBe(1);
   expect(await workspaceIDs(request)).toHaveLength(before.length + 1);
 });
@@ -124,6 +178,7 @@ test('a failed position save keeps the workspace and repairs only its layout', a
     y: Number.parseFloat((element as HTMLElement).style.top)
   }));
   await page.keyboard.press('Enter');
+  await openMapReceiptDetails(page, 'Workspace created');
   await expect(
     review.getByRole('heading', { name: 'Workspace created', exact: true })
   ).toBeVisible();

@@ -160,9 +160,14 @@ func TestWorkspaceCreationOperation_ForeignStaleAndStrictEnvelopeRefuseBeforeEff
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("foreign confirmation: %d", w.Code)
 	}
-	w, _ = creationOperationRequest(t, h, http.MethodGet, "/"+id, nil)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("foreign observation: %d", w.Code)
+	// The caller cannot distinguish a missing row from another owner's row.
+	// Bind the status to the requested lookup, without returning any row data.
+	for _, lookup := range []string{id, uuid.NewString()} {
+		w, body := creationOperationRequest(t, h, http.MethodGet, "/"+lookup, nil)
+		details, _ := body["details"].(map[string]any)
+		if w.Code != http.StatusNotFound || body["code"] != "creation_record_missing" || details["operation_id"] != lookup || body["operation"] != nil || body["result"] != nil {
+			t.Fatalf("missing scoped observation: %d %s", w.Code, w.Body)
+		}
 	}
 	owner = ""
 	w, _ = creationOperationRequest(t, h, http.MethodGet, "/"+id, nil)
