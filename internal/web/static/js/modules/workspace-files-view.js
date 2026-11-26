@@ -387,6 +387,7 @@ export class WorkspaceFilesView {
         break;
       case ' ':
       case 'Enter':
+        this.focusKey = row.id;
         this.activate(row);
         break;
       default:

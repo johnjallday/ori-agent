@@ -47,6 +47,9 @@ func (h *HTTPHandler) linkedSelection(ref DirectoryReference, rootID string, ent
 		!entry.mode.IsRegular() || entry.mode.Perm()&0o111 != 0 || v.Identity == "" || v.Links != 1 || v.Placeholder {
 		return ""
 	}
+	if !ordinaryDesktopDocument(filepath.Join(ref.Path, filepath.FromSlash(entry.RelativePath)), v) {
+		return ""
+	}
 	facts, err := json.Marshal([]any{expires, ref.WorkspaceID, ref.ID, ref.Path, ref.CreatedAt.UnixNano(), ref.UpdatedAt.UnixNano(), rootID, entry.RelativePath, v})
 	if err != nil {
 		return ""

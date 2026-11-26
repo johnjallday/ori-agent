@@ -109,52 +109,95 @@ async function musicGroup(page: Page) {
   return { home, demo, albums };
 }
 
-test('linked Track-2 reveals its original only on disclosure and distinguishes an unavailable folder', async ({
-  page
-}) => {
-  const home = await workspace(page, 'Music Production Home', '', true);
-  const demo = await workspace(page, 'Ori Music Demo', home.id, true);
-  const track = await workspace(page, 'Track-2', demo.id);
-  await files(page, track.id); // verify this server belongs to the supplied sandbox
-  const fixtures = mkdtempSync(join(realpathSync(process.env.ORI_SANDBOX!), 'linked-'));
-  execFileSync('./scripts/folder-agent-fixtures.sh', [fixtures]);
-  const project = join(fixtures, 'Ori Music Demo', 'Picker Songs', track.name);
-  const ref = await linkedFixture(page, track.id, 'Project', project);
-  const absent = join(fixtures, 'Filed');
-  mkdirSync(absent);
-  const missing = await linkedFixture(page, track.id, 'Archive', absent);
-  renameSync(absent, `${absent}-offline`);
-  await page.goto(`/workspaces/${home.folder_slug}?mode=files`);
-  await ready(page);
-  const reads: string[] = [];
-  page.on('request', r => {
-    const path = new URL(r.url()).pathname;
-    if (
-      path.includes('/directories/') ||
-      (path.endsWith('/open') && !path.endsWith('/lead-conversation/open'))
-    )
-      reads.push(`${r.method()} ${path}`);
+for (const phone of [false, true])
+  test(`linked Track-2 reveals its original only on disclosure (${phone ? 'phone, dark' : 'desktop, light'})`, async ({
+    page
+  }) => {
+    test.setTimeout(60000);
+    await page.setViewportSize(phone ? { width: 390, height: 844 } : { width: 1440, height: 1000 });
+    await page.addInitScript(
+      theme => localStorage.setItem('ori-theme', theme),
+      phone ? 'dark' : 'light'
+    );
+    const home = await workspace(page, 'Music Production Home', '', true);
+    const demo = await workspace(page, 'Ori Music Demo', home.id, true);
+    const track = await workspace(page, 'Track-2', demo.id);
+    await files(page, track.id); // verify this server belongs to the supplied sandbox
+    const fixtures = mkdtempSync(join(realpathSync(process.env.ORI_SANDBOX!), 'linked-'));
+    execFileSync('./scripts/folder-agent-fixtures.sh', [fixtures]);
+    const project = join(fixtures, 'Ori Music Demo', 'Picker Songs', track.name);
+    const ref = await linkedFixture(page, track.id, 'Project', project);
+    const sibling = await workspace(page, 'Track-1', demo.id);
+    const siblingRef = await linkedFixture(
+      page,
+      sibling.id,
+      'Project',
+      join(dirname(project), 'Track-1')
+    );
+    const absent = join(fixtures, 'Filed');
+    mkdirSync(absent);
+    const missing = await linkedFixture(page, track.id, 'Archive', absent);
+    renameSync(absent, `${absent}-offline`);
+    await page.goto(`/workspaces/${home.folder_slug}?mode=map`);
+    await ready(page);
+    const viewport = page.locator('[data-ws-map-viewport]');
+    await viewport.press('+');
+    await viewport.press('ArrowRight');
+    const camera = () => page.evaluate(() => (window as any).OriWorkspaceMap.getCamera());
+    const moved = await camera();
+    await mode(page, 'files').click();
+    const reads: string[] = [];
+    page.on('request', r => {
+      const path = new URL(r.url()).pathname;
+      if (
+        path.includes('/directories/') ||
+        (path.endsWith('/open') && !path.endsWith('/lead-conversation/open'))
+      )
+        reads.push(`${r.method()} ${path}`);
+    });
+    await row(page, 'Linked workspaces').click();
+    await row(page, demo.name).click();
+    await keyed(page, sibling.id).click();
+    await keyed(page, `${sibling.id}/s/files`).click();
+    await keyed(page, `${sibling.id}/l/${siblingRef}`).press('Enter');
+    await keyed(page, `${sibling.id}/lf/${siblingRef}/Song.rpp`).press('Enter');
+    await expect(reader(page).locator('.wf-crumb')).toHaveText(
+      'Track-1 / Files / Project / Song.rpp'
+    );
+    if (phone) await reader(page).getByRole('button', { name: 'Back to files' }).press('Enter');
+    await keyed(page, sibling.id).click();
+    await row(page, track.name).click();
+    await keyed(page, `${track.id}/s/files`).click();
+    await expect(row(page, 'Project Linked folder')).toBeVisible();
+    expect(reads.splice(0)).toEqual([
+      `GET /api/workspaces/${sibling.id}/directories/${siblingRef}/entries`
+    ]);
+    await row(page, 'Project Linked folder').click();
+    await row(page, 'Song.rpp').press('Enter');
+    await expect(reader(page).locator('.wf-crumb')).toHaveText(
+      'Track-2 / Files / Project / Song.rpp'
+    );
+    await expect(page.locator('.ws-cmd-title h2')).toHaveText(home.name);
+    await page.screenshot({
+      path: join(linkedEvidence, phone ? 'track-2-phone.png' : 'track-2.png')
+    });
+    if (phone) {
+      await reader(page).getByRole('button', { name: 'Back to files' }).press('Enter');
+      await expect(row(page, 'Song.rpp')).toBeFocused();
+    }
+    await row(page, 'Archive Linked folder').click();
+    await expect(row(page, 'Folder unavailable. Retry')).toBeVisible();
+    await row(page, 'Folder unavailable. Retry').scrollIntoViewIfNeeded();
+    await page.screenshot({
+      path: join(linkedEvidence, phone ? 'unavailable-phone.png' : 'unavailable.png')
+    });
+    expect(reads).toEqual(
+      [ref, missing].map(id => `GET /api/workspaces/${track.id}/directories/${id}/entries`)
+    );
+    await mode(page, 'map').click();
+    await expect(viewport).toBeVisible();
+    expect(await camera()).toEqual(moved);
   });
-  await row(page, 'Linked workspaces').click();
-  await row(page, demo.name).click();
-  await row(page, track.name).click();
-  await keyed(page, `${track.id}/s/files`).click();
-  await expect(row(page, 'Project Linked folder')).toBeVisible();
-  expect(reads).toEqual([]);
-  await row(page, 'Project Linked folder').click();
-  await row(page, 'Song.rpp').press('Enter');
-  await expect(reader(page).locator('.wf-crumb')).toHaveText(
-    'Track-2 / Files / Project / Song.rpp'
-  );
-  await expect(page.locator('.ws-cmd-title h2')).toHaveText(home.name);
-  await page.screenshot({ path: join(linkedEvidence, 'track-2.png') });
-  await row(page, 'Archive Linked folder').click();
-  await expect(row(page, 'Folder unavailable. Retry')).toBeVisible();
-  await page.screenshot({ path: join(linkedEvidence, 'unavailable.png') });
-  expect(reads).toEqual(
-    [ref, missing].map(id => `GET /api/workspaces/${track.id}/directories/${id}/entries`)
-  );
-});
 
 test('a linked alternate opens only by explicit sandbox dispatch; disconnect refuses replay', async ({
   page

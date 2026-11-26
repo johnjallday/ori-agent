@@ -68,6 +68,12 @@ an explicit unknown/unavailable state and an existing retry/repair destination.
 A rendered zero must come from a successful canonical read. An idle agent's
 **Ready to help** is not proof that a workspace has no queued work.
 
+## Files inside a workspace
+
+Open the workspace’s **Files** tab, then expand **Files** in Contents. A folder marked **Linked folder** shows the originals in a folder already connected to this workspace. Expand one folder at a time. **Stored in Ori** distinguishes the workspace’s own files when both are present. From a group, expand **Linked workspaces → member → Files** to browse that member without leaving the group or losing your place on Map.
+
+Selecting a linked file shows its workspace, folder name and relative path; it does not read the document or launch an app. On the Mac running Ori, select an eligible `.rpp` project and choose **Open in default app** to request that exact original, even if another project is the workspace’s primary. The default application is chosen by macOS. Remote clients can browse but cannot launch it. If the folder is unavailable, reconnect it and retry; if the selection changed or expired, refresh Files and select it again. Browsing a linked folder does not copy its files or make it searchable.
+
 ## Files and Map
 
 Home has one switcher, the rail on its left: **Files** and **Map**. Files is Home's tree (`/?view=tree`), with one **Search by name…** box and, beside the tree, a **Results** tab for what it finds; there is no separate Map/Tree toggle. Map is the workspace map. The rail shows for everyone, switching is in the page (no reload), and on a narrow screen it becomes the **Destination** picker. The global app bar and workspace controls remain on Map. Visiting either does not change your starting page or grant a search folder to a workspace.
