@@ -140,6 +140,12 @@
           });
           chip.addEventListener('dragend', clearDrag);
           files.appendChild(chip);
+          if (f.remembered && f.suggested === dest) {
+            const marker = node('small', 'fj-label', 'From last time');
+            marker.id = 'fj-last-' + f.id;
+            chip.setAttribute('aria-describedby', marker.id);
+            files.appendChild(marker);
+          }
           if (f.id === focus) focusTarget = chip;
         }
         const action = button(dest ? 'Move here' : 'Leave loose', () => move(dest));
@@ -580,7 +586,12 @@
             }
           }
         }
-        for (const f of p.folders) folders.set(f.key, { ...f, parent: parentKey });
+        for (const f of p.folders)
+          folders.set(f.key, {
+            ...f,
+            parent: f.parent || parentKey,
+            located: f.located ? f.name : undefined
+          });
         if (parentKey)
           message = p.folders.length
             ? `Choose one of the ${p.folders.length} subfolders in the folder list.`
@@ -647,5 +658,64 @@
     draw();
     return { host, load, pending: () => busy || Boolean(waiting) };
   }
-  window.FilingStationShelves = { create };
+  // Settings shares the workspace feedback store with Documents. Removing a
+  // pattern never edits the receipt, the contents of a folder, or an approval.
+  function placementSettings(doc, base, changed) {
+    const section = doc.createElement('section');
+    section.className = 'fj-setting';
+    section.setAttribute('aria-label', 'Saved placements');
+    const title = doc.createElement('h4');
+    title.textContent = 'Saved placements';
+    const note = doc.createElement('p');
+    note.setAttribute('role', 'status');
+    const rows = doc.createElement('div');
+    section.append(title, note, rows);
+    const load = async () => {
+      note.textContent = 'Checking saved placements…';
+      rows.replaceChildren();
+      try {
+        const r = await fetch(base + '/placements', { cache: 'no-store' });
+        if (!r.ok) throw Error();
+        const { placements } = await r.json();
+        if (!section.isConnected) return;
+        note.textContent = placements.rows.length
+          ? 'Used only to draw the picture. You still press File.'
+          : 'No placements saved.';
+        for (const row of placements.rows) {
+          const line = doc.createElement('p');
+          line.textContent =
+            row.label +
+            (row.broken ? ' · Broken: the original folder or placement is unavailable.' : '');
+          const remove = doc.createElement('button');
+          remove.type = 'button';
+          remove.className = 'fj-btn fj-btn-secondary';
+          remove.textContent = 'Remove';
+          remove.setAttribute('aria-label', 'Remove ' + row.label);
+          remove.addEventListener('click', async () => {
+            remove.disabled = true;
+            try {
+              const res = await fetch(base + '/placements/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ revision: placements.revision, row: row.id })
+              });
+              if (!res.ok) throw Error();
+              changed?.();
+              await load();
+            } catch {
+              note.textContent = 'Could not confirm removal. Reopen Settings to check.';
+              remove.disabled = false;
+            }
+          });
+          line.append(' ', remove);
+          rows.appendChild(line);
+        }
+      } catch {
+        note.textContent = 'Saved placements unavailable. Reopen Settings to check.';
+      }
+    };
+    void load();
+    return section;
+  }
+  window.FilingStationShelves = { create, placementSettings };
 })();

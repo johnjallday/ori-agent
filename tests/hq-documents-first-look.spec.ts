@@ -453,8 +453,40 @@ test('the manager offers a first look on Open; dismissal and return do not start
     expect((await readdir(root)).sort()).toEqual(
       [...stationFolders, 'Invoices', 'note-3.txt', 'note-4.txt'].sort()
     );
+    const rulesUrl = `/api/workspaces/${id}/file-janitor/placements`;
+    const rules = async () => (await (await request.get(rulesUrl)).json()).placements.rows;
+    const remember = station.getByRole('group', { name: 'Start from these placements next time?' });
+    await expect(remember.getByRole('checkbox', { name: /Files named "order"/ })).toBeChecked();
+    await expect(remember.getByRole('checkbox', { checked: true })).toHaveCount(1);
+    expect(await rules()).toEqual([]);
     await station.screenshot({ path: info.outputPath('shelf-receipt.png') });
     await station.locator('#fileJanitorReceiptDone').press('Enter');
+    await expect.poll(rules).toHaveLength(1);
+    const additions = ['order-20.txt', 'order-21.txt', 'order-22.txt', 'postcard.txt'];
+    const oldTime = new Date(Date.now() - 3600_000);
+    for (const name of additions) {
+      await writeFile(join(root, name), `Added ${name}`, { mode: 0o600 });
+      await utimes(join(root, name), oldTime, oldTime);
+    }
+    await station.getByRole('button', { name: 'Scan now', exact: true }).click();
+    await station.getByRole('button', { name: 'Show the newer scan' }).press('Enter');
+    await expect(shelves.getByText('From last time', { exact: true })).toHaveCount(3);
+    await expect(
+      shelves
+        .getByRole('region', { name: 'Orders', exact: true })
+        .getByRole('button', { name: 'order-22.txt' })
+    ).toBeVisible();
+    for (const name of additions)
+      expect(await readFile(join(root, name), 'utf8')).toBe(`Added ${name}`);
+    await station.getByRole('button', { name: 'Back to map' }).click();
+    await expect(building.locator('.fj-station-stack')).toHaveText('4');
+    await expect(
+      page
+        .locator('.commander-balloon-line:visible')
+        .filter({ hasText: '3 already have a place from last time' })
+    ).toBeVisible();
+    await page.screenshot({ path: info.outputPath('remembered-pile.png') });
+    await building.press('Enter');
     await station.getByRole('tab', { name: 'History', exact: true }).click();
     await station.locator('#fileJanitorLastFilingUndo').press('Enter');
     await expect(station.locator('#fileJanitorUndone')).toContainText(
@@ -463,12 +495,18 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await expect.poll(() => readdir(join(root, 'Invoices'))).toEqual([]);
     await page.screenshot({ path: info.outputPath('undo-retained-folder.png') });
     await verifyBytes();
-    expect((await readdir(root)).sort()).toEqual([...stationTree, 'Invoices'].sort());
+    expect((await readdir(root)).sort()).toEqual([...stationTree, ...additions, 'Invoices'].sort());
+    await rename(join(root, 'Orders'), join(root, 'Orders moved'));
     await station.getByRole('tab', { name: 'Settings', exact: true }).click();
+    const saved = station.getByRole('region', { name: 'Saved placements' });
+    await expect(saved).toContainText('Broken: the original folder or placement is unavailable.');
+    await saved.getByRole('button', { name: /Remove Files named/ }).press('Enter');
+    await expect.poll(rules).toHaveLength(0);
+    await rename(join(root, 'Orders moved'), join(root, 'Orders'));
     await station.locator('#fileJanitorChangeMethod').press('Enter');
     await method.getByRole('button', { name: 'By kind', exact: true }).press('Enter');
     await expect(station).toContainText('Filing by kind');
-    expect((await readdir(root)).sort()).toEqual([...stationTree, 'Invoices'].sort());
+    expect((await readdir(root)).sort()).toEqual([...stationTree, ...additions, 'Invoices'].sort());
     return;
   }
   await expect(suggestionButton).toBeVisible();

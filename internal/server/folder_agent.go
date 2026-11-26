@@ -76,6 +76,12 @@ func (b *ServerBuilder) wireFolderAgent() {
 		StationAnchor:          b.hiredStationAnchor,
 		InboxStation:           b.inboxStation,
 		DocumentsAccess:        b.documentsOrganizationAccess,
+		StationPlacements: func(owner, id string, names []string) (map[string]string, bool) {
+			if b.fileJanitorService == nil {
+				return nil, false
+			}
+			return b.fileJanitorService.DocumentPlacementMatches(owner, id, names)
+		},
 		SavedFilingAccess: func(owner, id, agent, link string) (folderagent.DocumentsAccess, error) {
 			if b.sessionHandler == nil {
 				return folderagent.DocumentsAccess{}, folderagent.ErrUnavailable

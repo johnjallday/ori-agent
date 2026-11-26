@@ -3769,6 +3769,13 @@
     panel.appendChild(title);
     if (window.FilingStationMethod && consoleOpen && settings.root_id)
       panel.appendChild(methodControl());
+    if (consoleOpen && settings.filing_method && window.FilingStationShelves?.placementSettings)
+      panel.appendChild(
+        window.FilingStationShelves.placementSettings(document, apiBase(wsId()), () => {
+          shelfVisit = null;
+          void loadBatch();
+        })
+      );
 
     // Daily catch-up time.
     const timeRow = el('div', 'fj-setting');
@@ -4869,13 +4876,19 @@
     const drawing = window.FileJanitorReceipt;
     if (!drawing || !view) return;
 
+    const offer = view.model?.placementOffer;
+    if (offer && !view.chosen)
+      view.chosen = new Set(offer.rows.filter(r => r.count >= 2).map(r => r.id));
     const ctx = {
+      chosen: view.chosen,
+      placementMessage: view.placementMessage,
+      onChoosePlacements: (id, on) => (on ? view.chosen.add(id) : view.chosen.delete(id)),
       folderName: compactFolderName(lastStatus?.settings?.root_path),
       filingRoot: lastStatus?.settings?.filing_root_name || 'Filed',
       busy: receiptBusy,
       onUndoAll: summary => void undoAll(summary.filingId || summary.filing_id),
       onScanAgain: () => void scanAgainAfterUndo(view.filingId),
-      onDone: () => closeResults()
+      onDone: () => (offer && view.chosen.size ? void rememberAndClose(view) : closeResults())
     };
     // Focus moves to the panel below, so the user is taken to the outcome rather
     // than told about it from elsewhere. The panel is a labelled group, not a live
@@ -4923,6 +4936,37 @@
   }
 
   // Done closes the account and puts focus back on the picture.
+  async function rememberAndClose(view) {
+    if (lastResults !== view || receiptBusy) return;
+    const scope = requestScope();
+    receiptBusy = true;
+    renderResults(view);
+    try {
+      const r = await fetch(
+        apiBase(scope.id) + '/filings/' + encodeURIComponent(view.filingId) + '/placements',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            revision: view.model.placementOffer.revision,
+            rows: [...view.chosen]
+          })
+        }
+      );
+      if (!r.ok) throw Error();
+      if (scopeCurrent(scope) && lastResults === view) closeResults();
+    } catch {
+      if (scopeCurrent(scope) && lastResults === view)
+        view.placementMessage =
+          'Could not confirm the saved placements. Check Settings. Uncheck the patterns to leave without saving.';
+    } finally {
+      if (scopeCurrent(scope)) {
+        receiptBusy = false;
+        if (lastResults === view) renderResults(view);
+      }
+    }
+  }
+
   function closeResults() {
     lastResults = null;
     const host = document.getElementById('fileJanitorResultsHost');
@@ -7968,6 +8012,12 @@
         reviewCount: pending,
         reviewBatchId: lastBatch?.id,
         actionTab: 'review',
+        pile: settings.filing_method === 'own_folders',
+        rememberedPile:
+          lastBatch?.station_pile?.batch === lastBatch?.id &&
+          lastBatch?.station_pile?.waiting === pending
+            ? lastBatch.station_pile
+            : null,
         description: 'Nothing moves until you file.',
         tone: 'attention'
       };

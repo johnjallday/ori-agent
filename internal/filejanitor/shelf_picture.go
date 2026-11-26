@@ -28,15 +28,17 @@ type ShelfPicture struct {
 	Files     []ShelfFile    `json:"files"`
 }
 type PictureShelf struct {
-	Parent string `json:"parent,omitempty"`
-	Key    string `json:"key"`
-	Name   string `json:"name"`
-	dir    DirRef
+	Parent  string `json:"parent,omitempty"`
+	Key     string `json:"key"`
+	Located bool   `json:"located,omitempty"`
+	Name    string `json:"name"`
+	dir     DirRef
 }
 type ShelfFile struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Suggested string `json:"suggested,omitempty"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Suggested  string `json:"suggested,omitempty"`
+	Remembered bool   `json:"remembered,omitempty"`
 }
 
 type shelfScope struct {
@@ -251,12 +253,29 @@ func (s *Service) shelfPicture(ctx context.Context, owner, id, batchID, parentKe
 		}
 	}
 	var versions []string
+	// Resolve remembered identities even outside this bounded page; File
+	// still rechecks each exact named folder and the current picture revision.
+	saved, _ := s.placementList(scope)
+	known := map[string]bool{}
+	for _, sh := range first {
+		known[sh.Key] = true
+	}
 	for _, c := range state.CandidatesFor(batchID) {
 		if !proposalPending(c) || c.Decision == DecisionTrash || excluded[c.ID] || state.IsSkipped(c.Fingerprint) || workspace.ContainedEntryExcluded(c.Name) {
 			continue
 		}
 		versions = append(versions, c.Fingerprint.Key())
-		view.Files = append(view.Files, ShelfFile{ID: c.ID, Name: c.Display(), Suggested: suggestedShelf(c.Name, first)})
+		file := ShelfFile{ID: c.ID, Name: c.Display(), Suggested: suggestedShelf(c.Name, first)}
+		if sh, matched := saved.match(c.Name); matched {
+			file.Suggested = sh.Key
+			file.Remembered = sh.Key != ""
+			if sh.Key != "" && !known[sh.Key] && parentKey == "" {
+				sh.Located = true
+				view.Folders = append(view.Folders, sh)
+				known[sh.Key] = true
+			}
+		}
+		view.Files = append(view.Files, file)
 	}
 	view.Revision, err = setupDigest([]any{"filing-shelves-v1", scope.scope, scope.witness, scope.methodRevision, batchID, draft.Revision, groups.Revision, first, view.Files, versions})
 	if err != nil {

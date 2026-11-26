@@ -1051,6 +1051,7 @@ func (b *ServerBuilder) wireWorkspaceCapabilities() {
 	}
 	b.workspaceCapabilityService = service
 	if b.fileJanitorService != nil {
+		b.fileJanitorService.SetPlacementMemory(workspace.NewMemoryStore(b.workspaceFileStore))
 		b.fileJanitorService.SetStationReadHost(func(id, lead string) (filejanitor.StationProcessor, filejanitor.StationChat) {
 			p, chat := b.documentsReviewModel(id, lead)
 			return filejanitor.StationProcessor{Provider: p.Name, Model: p.Model, Pin: p.Pin, OffDevice: chat != nil}, chat

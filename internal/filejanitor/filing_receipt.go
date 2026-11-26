@@ -61,12 +61,13 @@ type ReceiptNotMoved struct {
 
 // FilingReceipt is one press's account. It carries no path, token or fingerprint.
 type FilingReceipt struct {
-	ShelfPicture   bool      `json:"shelf_picture,omitempty"`
-	CreatedFolders []string  `json:"created_folders,omitempty"`
-	FilingID       string    `json:"filing_id"`
-	State          string    `json:"state"`
-	AdmittedAt     time.Time `json:"admitted_at"`
-	CompletedAt    time.Time `json:"completed_at,omitzero"`
+	PlacementOffer *PlacementList `json:"placement_offer,omitempty"`
+	ShelfPicture   bool           `json:"shelf_picture,omitempty"`
+	CreatedFolders []string       `json:"created_folders,omitempty"`
+	FilingID       string         `json:"filing_id"`
+	State          string         `json:"state"`
+	AdmittedAt     time.Time      `json:"admitted_at"`
+	CompletedAt    time.Time      `json:"completed_at,omitzero"`
 	// Filed and Trashed count files that actually moved and were verified.
 	Filed   int `json:"filed"`
 	Trashed int `json:"trashed"`
@@ -320,6 +321,16 @@ func (s *Service) ReadFiling(ctx context.Context, owner, workspaceID, filingID s
 		return FilingReceipt{}, err
 	}
 	receipt := buildReceipt(state, record, settings.RootID, offset)
+	if record.ShelfPicture && receipt.UndoAvailable && s.placementMemory != nil {
+		if sc, e := s.shelfScope(owner, workspaceID); e == nil {
+			if saved, e := s.placementList(sc); e == nil {
+				offer := s.receiptPlacementOffer(sc, state, record, saved)
+				if len(offer.Rows) > 0 {
+					receipt.PlacementOffer = &offer
+				}
+			}
+		}
+	}
 	// Names are read now, so a renamed workspace reads as it is called today.
 	for i := range receipt.Sends {
 		id := receipt.Sends[i].ReceiverWorkspaceID

@@ -9537,6 +9537,11 @@ export class WorkspaceCommandView {
               visualMarkup +
               '</span>'
             : '<span class="ws-cmd-map-hq-station-icon">' + icon + '</span>') +
+          (review && state.pile
+            ? '<span class="fj-station-stack" aria-hidden="true">' +
+              escapeHtml(String(state.reviewCount)) +
+              '</span>'
+            : '') +
           '<span class="ws-cmd-map-hq-station-label">' +
           escapeHtml(station.label) +
           '</span>' +

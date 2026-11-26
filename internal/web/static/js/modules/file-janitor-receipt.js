@@ -72,6 +72,7 @@ export function receiptModelFromReceipt(receipt) {
   return {
     filingId: receipt.filing_id,
     shelfPicture: Boolean(receipt.shelf_picture),
+    placementOffer: receipt.placement_offer,
     createdFolders: receipt.created_folders || [],
     state: receipt.state || 'done',
     filed: receipt.filed || 0,
@@ -272,6 +273,35 @@ export function renderReceipt(doc, model, ctx = {}) {
       )
     );
 
+  const offer = model.placementOffer;
+  if (offer?.rows?.length && ctx.onChoosePlacements) {
+    const group = h('fieldset', 'fj-setting');
+    group.appendChild(h('legend', 'fj-label', 'Start from these placements next time?'));
+    group.appendChild(
+      h(
+        'p',
+        'fj-sub',
+        'Done saves the checked patterns. Next time you will still choose whether to file.'
+      )
+    );
+    for (const row of offer.rows) {
+      const label = h('label', 'fj-check');
+      const check = h('input');
+      check.type = 'checkbox';
+      check.checked = ctx.chosen.has(row.id);
+      check.disabled = ctx.busy;
+      check.addEventListener('change', () => ctx.onChoosePlacements(row.id, check.checked));
+      label.appendChild(check);
+      label.appendChild(h('span', '', row.label + ' · ' + filesPhrase(row.count)));
+      group.appendChild(label);
+    }
+    if (ctx.placementMessage) {
+      const note = h('p', 'fj-sub', ctx.placementMessage);
+      note.setAttribute('role', 'status');
+      group.appendChild(note);
+    }
+    panel.appendChild(group);
+  }
   const actions = h('div', 'fj-results-actions');
   if (model.undoAvailable)
     actions.appendChild(

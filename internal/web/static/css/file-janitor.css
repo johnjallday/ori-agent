@@ -98,12 +98,21 @@
 .fj-shelves :is(input, select, button) {
   max-width: 100%;
 }
-.fj-shelves .fj-btn { white-space: normal; overflow-wrap: anywhere; }
+.fj-shelves .fj-btn {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 @media (pointer: coarse) {
-  .fj-shelves :is(input, select, button) { min-height: 44px; }
+  .fj-shelves :is(input, select, button) {
+    min-height: 44px;
+  }
 }
 @media (max-width: 36rem) {
-  .fj-shelf-tools, .fj-shelf-tools > label { min-width: 0; max-width: 100%; }
+  .fj-shelf-tools,
+  .fj-shelf-tools > label {
+    min-width: 0;
+    max-width: 100%;
+  }
 }
 .fj-shelf-footer {
   border-top: 1px solid var(--bs-border-color);
@@ -123,6 +132,19 @@
   width: 100%;
   margin: 0;
   overflow-wrap: anywhere;
+}
+.fj-station-stack {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-start: 0;
+  min-width: 1.6rem;
+  padding: 0.1rem 0.4rem;
+  background: var(--bg-secondary);
+  border: 1px solid currentColor;
+  box-shadow:
+    2px 2px var(--bg-secondary),
+    3px 3px currentColor;
+  font-size: 0.8rem;
 }
 .filing-station-plot {
   position: absolute;
@@ -2545,8 +2567,12 @@
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  .fj-console:has(.fj-shelves) .fj-console-head { position: static; }
-  .fj-console-body:has(.fj-shelves) { overflow: visible; }
+  .fj-console:has(.fj-shelves) .fj-console-head {
+    position: static;
+  }
+  .fj-console-body:has(.fj-shelves) {
+    overflow: visible;
+  }
 
   /* On a small screen the actions need the full width rather than being
      squeezed beside a wrapping title. */

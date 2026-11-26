@@ -203,6 +203,7 @@ type Service struct {
 	prepareMu        sync.Mutex
 	stationLook      func(string, string) (StationLook, error)
 	stationInstaller StationInstaller
+	placementMemory  placementMemory
 	stationRead      stationReadHost
 }
 

@@ -213,6 +213,9 @@ type Deps struct {
 	// A missing reader or read error is unknown, not a missing permission.
 	FilingPermission func(workspaceID string) (bool, error)
 	StationAvailable func(owner, workspaceID string) bool
+	// StationPlacements projects confirmed workspace feedback; an opted-in station
+	// replaces the legacy Documents placement inference, not its saved views.
+	StationPlacements func(owner, id string, names []string) (map[string]string, bool)
 	// StationAnchor resolves only metadata for an ordinary hired folder. It is not DocumentsAccess and cannot authorize a content read.
 	StationAnchor func(owner, id, lead string) (StationAnchor, bool)
 	InboxStation  func(owner, id string) (InboxStation, bool)

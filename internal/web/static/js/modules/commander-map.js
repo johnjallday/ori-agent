@@ -735,6 +735,31 @@ export function commanderPresenter(
           return p;
         }
       });
+    const station =
+      map.filingStation &&
+      map.showing?.() &&
+      globalThis.window?.FileJanitorConsole?.stationState?.();
+    const remembered = station?.rememberedPile;
+    if (
+      !buildVisible &&
+      remembered?.waiting > 0 &&
+      last?.view?.workspaceID ===
+        globalThis.window?.FileJanitorConsole?.getActionState?.().workspaceId
+    ) {
+      const line = `${remembered.waiting} ${remembered.waiting === 1 ? 'file is' : 'files are'} waiting in ${remembered.folder}. ${remembered.placed} ${remembered.placed === 1 ? 'already has' : 'already have'} a place from last time.`;
+      items.push({
+        kind: 'report',
+        agent: last.view.agent,
+        line,
+        headline: line,
+        signature: `remembered|${remembered.batch}|${line}`,
+        body: doc => {
+          const p = doc.createElement('p');
+          p.textContent = 'Open Filing to arrange the picture. Nothing moves until you press File.';
+          return p;
+        }
+      });
+    }
     const pile = pileView();
     if (!buildVisible && pile && !stationDeferred(pile.workspaceID))
       items.push({

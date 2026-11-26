@@ -182,6 +182,9 @@ func (s *Service) planShelves(ctx context.Context, owner, id, batch string, p sh
 	index := func(parent string, shelves []PictureShelf) {
 		dirs := map[string]DirRef{}
 		for _, sh := range shelves {
+			if sh.Located {
+				continue
+			} // checked through exactFolder, not as a listed child
 			dirs[sh.Key] = sh.dir
 		}
 		folders[parent] = dirs

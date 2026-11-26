@@ -127,10 +127,10 @@ export function documentsOrganizationOffer(
         details.append(
           node(
             'p',
-            `Suggested for ${f.source.path}: ${f.placement.destination} (${f.placement.convention ? 'from your Documents convention' : 'based on your confirmed placements'}).`
+            `Suggested for ${f.source.path}: ${f.placement.destination} (${f.placement.remembered ? 'from last time' : f.placement.convention ? 'from your Documents convention' : 'based on your confirmed placements'}).`
           )
         );
-        if (f.placement.convention || filingOnly) continue;
+        if (f.placement.remembered || f.placement.convention || filingOnly) continue;
         details.append(button('Remember for Documents', () => preview([], [], null, true)));
         const proof = node('details');
         proof.append(node('summary', 'Show those decisions'));

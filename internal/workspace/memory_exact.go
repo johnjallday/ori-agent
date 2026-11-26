@@ -187,28 +187,51 @@ func (s *MemoryStore) EditExact(workspaceID string, target MemoryExactTarget, re
 // reviewed. It preserves all existing bytes, including the terminal-newline
 // convention, and returns a stable exact target for subsequent edits.
 func (s *MemoryStore) AppendExact(workspaceID, expectedFileHash string, entry MemoryEntry) (MemoryExactTarget, error) {
-	cleaned, err := validateExactMemoryEntry(entry)
+	targets, err := s.AppendManyExact(workspaceID, expectedFileHash, []MemoryEntry{entry})
 	if err != nil {
 		return MemoryExactTarget{}, err
 	}
-	if expectedFileHash == "" {
-		return MemoryExactTarget{}, ErrMemoryConflict
+	return targets[0], nil
+}
+
+// AppendManyExact applies one reviewed selection in one write. A concurrent
+// Memory edit, invalid row or failed replacement leaves the whole file alone.
+func (s *MemoryStore) AppendManyExact(workspaceID, expectedFileHash string, entries []MemoryEntry) ([]MemoryExactTarget, error) {
+	if expectedFileHash == "" || len(entries) == 0 || len(entries) > 64 {
+		return nil, ErrMemoryConflict
 	}
+	cleaned := make([]MemoryEntry, len(entries))
+	for i, e := range entries {
+		c, err := validateExactMemoryEntry(e)
+		if err != nil {
+			return nil, err
+		}
+		cleaned[i] = c
+	}
+
 	defer notifyMemoryWritten(workspaceID) // after the unlock below
 	memoryMu.Lock()
 	defer memoryMu.Unlock()
 	raw, path, err := s.readExact(workspaceID)
 	if err != nil {
-		return MemoryExactTarget{}, err
+		return nil, err
 	}
 	if hashMemoryBytes(raw) != expectedFileHash {
-		return MemoryExactTarget{}, ErrMemoryConflict
+		return nil, ErrMemoryConflict
 	}
-	result := appendMemoryBytes(raw, cleaned)
+	result := raw
+	for _, e := range cleaned {
+		result = appendMemoryBytes(result, e)
+	}
 	if err := s.writeExact(path, result, expectedFileHash); err != nil {
-		return MemoryExactTarget{}, err
+		return nil, err
 	}
-	return MemoryExactTarget{FileHash: hashMemoryBytes(result), LineHash: hashMemoryBytes([]byte(cleaned.Render())), Provenance: cleaned.Provenance}, nil
+	hash := hashMemoryBytes(result)
+	targets := make([]MemoryExactTarget, len(cleaned))
+	for i, e := range cleaned {
+		targets[i] = MemoryExactTarget{FileHash: hash, LineHash: hashMemoryBytes([]byte(e.Render())), Provenance: e.Provenance}
+	}
+	return targets, nil
 }
 
 func validateExactMemoryEntry(entry MemoryEntry) (MemoryEntry, error) {
