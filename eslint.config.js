@@ -154,6 +154,7 @@ export default defineConfig([
       'internal/web/static/js/modules/personal-assistant-hq-greeting.js',
       'internal/web/static/js/modules/hq-first-note.js',
       'internal/web/static/js/modules/hq-quick-capture.js',
+      'internal/web/static/js/modules/hq-note-inventory.js',
       'internal/web/static/js/modules/work-labels.js',
       'internal/web/static/js/modules/hq-attention.js',
       'internal/web/static/js/modules/hq-stations-grid.js',

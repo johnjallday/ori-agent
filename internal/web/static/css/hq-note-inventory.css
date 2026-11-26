@@ -1,0 +1,253 @@
+/*
+ * HQ note inventory — the Notes station's panel over the Personal HQ map.
+ *
+ * It opens inside Workspace Command's stat modal (.ws-cmd-modal is a .ws-cmd,
+ * so the tactical tokens and their light-theme values apply). Everything here
+ * is scoped to .hq-note-inventory or to the panel that holds it; nothing
+ * changes another stat modal or the notebook at /my-notes.
+ */
+
+/* ---- the frame -------------------------------------------------------------- */
+
+/* The station panel's navbar clearance comes from .is-station; here the
+   panel takes the inventory's own width and angular, gold-trimmed frame. */
+.ws-cmd-modal-panel.is-note-inventory {
+  --inv-gold: var(--ws-keeper);
+  --inv-gold-deep: var(--ws-keeper-deep);
+  --inv-cut: 18px;
+
+  max-width: min(1040px, 96vw);
+  max-height: min(86vh, calc(100dvh - var(--navbar-offset, 76px) - 28px));
+  border: 1px solid var(--ws-line-bright);
+  border-top: 2px solid var(--inv-gold);
+  background: linear-gradient(180deg, var(--ws-panel-2), var(--ws-panel));
+  clip-path: polygon(
+    0 0,
+    calc(100% - var(--inv-cut)) 0,
+    100% var(--inv-cut),
+    100% calc(100% - var(--inv-cut)),
+    calc(100% - var(--inv-cut)) 100%,
+    0 100%
+  );
+  /* Re-attached whenever the map repaints; an entrance would replay. */
+  animation: none;
+  overflow: hidden;
+}
+
+.hq-note-inventory {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  color: var(--ws-ink);
+  font-family: var(--font-body, system-ui, sans-serif);
+  letter-spacing: 0;
+}
+
+/* A thin gold rule down the left edge, the frame's trim. */
+.hq-note-inventory::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 52px;
+  background: var(--inv-gold);
+  pointer-events: none;
+}
+
+/* ---- head ------------------------------------------------------------------- */
+
+.hq-note-inventory__head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 22px 16px 26px;
+  border-bottom: 1px solid var(--ws-line);
+}
+
+.hq-note-inventory__emblem {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border: 1px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+}
+
+.hq-note-inventory__ident {
+  min-width: 0;
+  flex: 1;
+}
+
+.hq-note-inventory__eyebrow {
+  margin: 0 0 2px;
+  color: var(--inv-gold);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+  letter-spacing: 2.2px;
+  text-transform: uppercase;
+}
+
+.hq-note-inventory__title {
+  margin: 0;
+  color: var(--ws-ink-heading, var(--ws-ink));
+  font-family: var(--font-display, Georgia, serif);
+  font-size: clamp(24px, 3.2vw, 34px);
+  font-weight: 500;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.hq-note-inventory__close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.hq-note-inventory__close:hover {
+  border-color: var(--inv-gold);
+}
+
+.hq-note-inventory__close-key {
+  padding: 1px 5px;
+  border: 1px solid var(--ws-line);
+  background: none;
+  color: var(--ws-ink-dim);
+  font-family: var(--ws-font-mono);
+  font-size: 11px;
+}
+
+/* ---- body ------------------------------------------------------------------- */
+
+.hq-note-inventory__body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 20px 26px;
+}
+
+/* A state before any note shows: checking, retry, not connected, missing. */
+.hq-note-inventory__state {
+  max-width: 520px;
+  padding: 18px 20px;
+  border: 1px solid var(--ws-line);
+  border-left: 3px solid var(--ws-line-bright);
+  background: var(--ws-bg-2);
+}
+
+.hq-note-inventory__state.is-attention {
+  border-left-color: var(--ws-waiting);
+}
+
+.hq-note-inventory__state.is-degraded {
+  border-left-color: var(--ws-alert);
+}
+
+.hq-note-inventory__state.is-ready {
+  border-left-color: var(--ws-faction);
+}
+
+.hq-note-inventory__state-title {
+  margin: 0;
+  color: var(--ws-ink-heading, var(--ws-ink));
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.hq-note-inventory__state-body {
+  margin: 6px 0 0;
+  color: var(--ws-ink-dim);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.hq-note-inventory__state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.hq-note-inventory__button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid var(--ws-line-bright);
+  background: transparent;
+  color: var(--ws-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.hq-note-inventory__button:hover {
+  border-color: var(--inv-gold);
+  color: var(--ws-ink);
+}
+
+/* ---- the action row --------------------------------------------------------- */
+
+.hq-note-inventory__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+  padding: 16px 26px 18px;
+  border-top: 1px solid var(--ws-line);
+}
+
+.hq-note-inventory__open {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  color: var(--ws-ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.hq-note-inventory__open:hover {
+  color: var(--inv-gold);
+}
+
+/* ---- focus: visible on every control, independent of colour ------------------ */
+
+.hq-note-inventory :is(a, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--ws-faction);
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .hq-note-inventory__head {
+    padding: 14px 14px 12px 16px;
+  }
+
+  .hq-note-inventory__emblem {
+    width: 40px;
+    height: 40px;
+  }
+
+  .hq-note-inventory__body {
+    padding: 14px 14px;
+  }
+
+  .hq-note-inventory__actions {
+    padding: 12px 14px 14px;
+  }
+}

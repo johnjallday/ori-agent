@@ -6185,6 +6185,266 @@ test('HQ station click delegation dispatches through the registry', () => {
   }
 });
 
+// ---------- the note inventory: only the map's Notes building opens it ----------
+
+// A station element as the map's click delegation sees it.
+function stationElement(key, className) {
+  return {
+    classList: { contains: name => String(className).split(/\s+/).includes(name) },
+    getAttribute: name => (name === 'data-cmd-hq-station' ? key : null)
+  };
+}
+
+function notesMapClick(hq, element) {
+  const mapRoot = makeListenerRoot();
+  hq.container = { querySelector: selector => (selector === '.ws-cmd-map-shell' ? mapRoot : null) };
+  hq.bindOperationsMap();
+  mapRoot.listener({
+    target: { closest: selector => (selector === '[data-cmd-hq-station]' ? element : null) }
+  });
+}
+
+test('the Free Notes building and the Flow Notes node open the inventory; other station rows keep /my-notes', () => {
+  const originalWindow = globalThis.window;
+  const navigated = [];
+  globalThis.window = { location: { assign: path => navigated.push(path) } };
+  try {
+    for (const className of ['ws-cmd-map-hq-station', 'ws-cmd-flow-node is-clear']) {
+      const hq = makeHQCommandView({ id: 'hq-1' });
+      const opened = [];
+      hq.openNoteInventory = trigger => opened.push(trigger);
+      const element = stationElement('second-brain', className);
+      notesMapClick(hq, element);
+      assert.deepEqual(opened, [element], className + ' opens the inventory with itself as opener');
+    }
+    assert.deepEqual(navigated, [], 'the map never navigates for Notes');
+
+    // A station row that happens to sit in the map shell is not a building.
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.openNoteInventory = () => assert.fail('only a map building opens the inventory');
+    notesMapClick(hq, stationElement('second-brain', 'ws-cmd-resource-row'));
+    assert.deepEqual(navigated, ['/my-notes']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('dispatch: only surface "map" takes the Notes mapAction; every other caller goes to /my-notes', () => {
+  const originalWindow = globalThis.window;
+  const navigated = [];
+  globalThis.window = { location: { assign: path => navigated.push(path) } };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    const opened = [];
+    hq.openNoteInventory = trigger => opened.push(trigger || 'none');
+    hq.runHQStationAction('second-brain', 'tile', { surface: 'map' });
+    hq.runHQStationAction('second-brain', 'rail-row');
+    hq.runHQStationAction('second-brain', 'card', { surface: '' });
+    assert.deepEqual(opened, ['tile']);
+    assert.deepEqual(navigated, ['/my-notes', '/my-notes']);
+    // A station without a mapAction answers the map with its ordinary action.
+    const memory = [];
+    hq.mapStationRegistry = () => [{ key: 'memory', action: t => memory.push(t) }];
+    hq.runHQStationAction('memory', 'tile', { surface: 'map' });
+    assert.deepEqual(memory, ['tile']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('an ordinary workspace has no Notes station, so the map dispatches no inventory', () => {
+  const originalWindow = globalThis.window;
+  const navigated = [];
+  globalThis.window = { location: { assign: path => navigated.push(path) } };
+  try {
+    const plain = makeHQCommandView({ id: 'ws-1', designation: '' });
+    assert.equal(plain.isPersonalHQ(), false);
+    plain.openStatModal = () => assert.fail('no inventory outside the Personal HQ');
+    plain.runHQStationAction('second-brain', 'tile', { surface: 'map' });
+    plain.openNoteInventory('tile');
+    assert.ok(!plain.mapStationRegistry().some(entry => entry.key === 'second-brain'));
+    assert.deepEqual(navigated, []);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a drag of the Notes building never opens the inventory', () => {
+  const hq = makeHQCommandView({ id: 'hq-1' });
+  const opened = [];
+  hq.openNoteInventory = trigger => opened.push(trigger);
+  hq._suppressStationClick = true;
+  const element = stationElement('second-brain', 'ws-cmd-map-hq-station');
+  notesMapClick(hq, element);
+  assert.deepEqual(opened, [], 'the click a completed drag synthesizes is swallowed');
+  notesMapClick(hq, element);
+  assert.deepEqual(opened, [element], 'a plain click after it still opens');
+});
+
+test('the legacy ?station=second-brain link still replaces itself with /my-notes', () => {
+  const originalWindow = globalThis.window;
+  const replaced = [];
+  globalThis.window = {
+    location: {
+      href: 'http://x/workspaces/hq?station=second-brain',
+      replace: p => replaced.push(p)
+    },
+    history: { replaceState: () => assert.fail('no history entry is rewritten') }
+  };
+  try {
+    const hq = makeHQCommandView({ id: 'hq-1' });
+    hq.openNoteInventory = () => assert.fail('a link is not a map click');
+    hq._bootStation = 'second-brain';
+    hq.applyStationDeepLink();
+    assert.deepEqual(replaced, ['/my-notes']);
+  } finally {
+    globalThis.window = originalWindow;
+  }
+});
+
+// The stat modal with a real element tree: open from the map, repaint, close.
+function noteInventoryPage({ secondBrain } = {}) {
+  const doc = makeTreeDoc();
+  const container = doc.createElement('div');
+  doc.body.appendChild(container);
+  const building = doc.createElement('button');
+  building.className = 'ws-cmd-map-hq-station';
+  building.setAttribute('data-cmd-hq-station', 'second-brain');
+  container.appendChild(building);
+  const hq = makeHQCommandView({ id: 'hq-1' });
+  hq.container = container;
+  hq._notes = {
+    hqWorkspaceID: 'hq-1',
+    status: secondBrain ? 'ready' : 'loading',
+    secondBrain: secondBrain || null
+  };
+  // The tree's innerHTML does not parse markup, so the shell is built here.
+  hq.ensureStatModal = function () {
+    if (this.statModalEl) return this.statModalEl;
+    const el = doc.createElement('div');
+    el.hidden = true;
+    const panel = doc.createElement('div');
+    panel.className = 'ws-cmd-modal-panel';
+    el.appendChild(panel);
+    doc.body.appendChild(el);
+    this.statModalEl = el;
+    return el;
+  };
+  const calls = [];
+  const root = doc.createElement('section');
+  root.setAttribute('data-note-inventory', '');
+  hq._noteInventory = {
+    hqWorkspaceID: '',
+    ensureRoot: () => root,
+    open(options) {
+      this.hqWorkspaceID = options.hqWorkspaceID;
+      calls.push(['open', options]);
+    },
+    close: () => calls.push(['close'])
+  };
+  return { doc, container, building, hq, root, calls };
+}
+
+test('opening Notes from the map mounts the inventory over it and closing returns to the rebuilt building, URL untouched', () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const history = [];
+  const coordinator = new OverlayCoordinator({
+    setInert() {},
+    releaseInert() {},
+    trapFocus() {},
+    restoreFocus: trigger => trigger.focus()
+  });
+  const vault = { status: 'connected', source: { name: 'Demo Notes', origin: 'created_by_ori' } };
+  const { doc, container, building, hq, root, calls } = noteInventoryPage({ secondBrain: vault });
+  globalThis.document = doc;
+  globalThis.window = {
+    workspaceOverlayCoordinator: coordinator,
+    history: {
+      pushState: () => history.push('push'),
+      replaceState: () => history.push('replace')
+    },
+    location: { assign: p => history.push(p), replace: p => history.push(p) }
+  };
+  try {
+    hq.runHQStationAction('second-brain', building, { surface: 'map' });
+    assert.equal(hq.statModalSection, 'second-brain');
+    assert.deepEqual(calls, [['open', { hqWorkspaceID: 'hq-1', known: vault }]]);
+    const panel = hq.statModalEl.querySelector('.ws-cmd-modal-panel');
+    assert.equal(root.parentNode, panel, 'the inventory is inside the modal');
+    assert.equal(panel.getAttribute('aria-label'), 'Note inventory');
+    assert.equal(hq.statModalEl.hidden, false);
+    assert.equal(coordinator.activeModal()?.id, 'workspace-command-manager', 'one overlay');
+    assert.equal(doc.activeElement, panel, 'keyboard focus is inside');
+
+    // A repaint behind it leaves the same inventory element in place.
+    hq.renderStatModalBody();
+    assert.equal(root.parentNode, panel);
+
+    // The badge re-read rebuilt the building while the inventory was open.
+    container.children.splice(container.children.indexOf(building), 1);
+    building.parentNode = null;
+    building.isConnected = false;
+    const rebuilt = doc.createElement('button');
+    rebuilt.className = 'ws-cmd-map-hq-station';
+    rebuilt.setAttribute('data-cmd-hq-station', 'second-brain');
+    container.appendChild(rebuilt);
+
+    hq.closeStatModal();
+    assert.equal(hq.statModalSection, '');
+    assert.equal(hq.statModalEl.hidden, true);
+    assert.deepEqual(calls.at(-1), ['close'], 'closing cancels inventory work');
+    assert.equal(doc.activeElement, rebuilt, 'focus is back on the visible Notes building');
+    assert.equal(coordinator.modalCount(), 0);
+    assert.deepEqual(history, [], 'no navigation and no history entry');
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('without a settled map answer the inventory reads the connection itself', () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const { doc, building, hq, calls } = noteInventoryPage();
+  globalThis.document = doc;
+  globalThis.window = {
+    workspaceOverlayCoordinator: new OverlayCoordinator({})
+  };
+  try {
+    hq.openNoteInventory(building);
+    assert.deepEqual(calls, [['open', { hqWorkspaceID: 'hq-1', known: null }]]);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('an inventory opened for another HQ is closed, not shown, when the page has moved on', () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  const coordinator = new OverlayCoordinator({});
+  const { doc, building, hq, root, calls } = noteInventoryPage({
+    secondBrain: { status: 'not_connected' }
+  });
+  globalThis.document = doc;
+  globalThis.window = { workspaceOverlayCoordinator: coordinator };
+  try {
+    hq.openNoteInventory(building);
+    assert.equal(hq.statModalSection, 'second-brain');
+    hq.page.workspace.id = 'hq-2';
+    hq.renderStatModalBody();
+    assert.notEqual(root.parentNode, hq.statModalEl.querySelector('.ws-cmd-modal-panel'));
+    assert.equal(hq.statModalSection, '');
+    assert.equal(hq.statModalEl.hidden, true);
+    assert.ok(calls.some(([name]) => name === 'close'));
+    assert.equal(coordinator.modalCount(), 0);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
 // ---------- HQ station drag-to-place (FR9-FR11) ----------
 
 test('stationDragExceedsThreshold treats travel past ~5px as a drag', () => {
@@ -9547,6 +9807,9 @@ function makeTreeDoc() {
     hasAttribute(name) {
       return name in this.attributes;
     }
+    removeAttribute(name) {
+      delete this.attributes[name];
+    }
     addEventListener(type, fn) {
       this.listeners[type] = fn;
     }
@@ -9867,10 +10130,8 @@ test('HQ Overview attaches just quick capture to its Notes slot', () => {
     const host = container.querySelector('[data-cmd-hq-host="notes"]');
     assert.ok(host);
     assert.deepEqual(loads.at(-1), { host, view: CONNECTED_VAULT });
-    assert.equal(
-      WorkspaceCommandView.prototype.statSectionMeta.call(commandView, 'second-brain'),
-      null
-    );
+    // Rendering Overview opens nothing: the inventory belongs to the map.
+    assert.ok(!commandView.statModalSection, 'no panel opened by Overview');
   } finally {
     globalThis.document = originalDocument;
   }
