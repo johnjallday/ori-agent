@@ -40,6 +40,7 @@ func TestResponses_NeverCarryTheAbsoluteRoot(t *testing.T) {
 		{http.MethodGet, "/api/workspaces/ws-1/file-janitor/skipped", ""},
 		{http.MethodGet, "/api/workspaces/ws-1/file-janitor/readiness", ""},
 		{http.MethodPost, "/api/workspaces/ws-1/file-janitor/test-scan", ""},
+		{http.MethodGet, "/api/workspaces/ws-1/file-janitor/connections", ""},
 	}
 
 	for _, read := range reads {

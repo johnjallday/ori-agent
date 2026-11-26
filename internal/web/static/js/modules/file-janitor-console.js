@@ -3513,6 +3513,8 @@
     if (repair) health.appendChild(repair);
     panel.appendChild(health);
 
+    connectionSections().forEach(section => panel.appendChild(section));
+
     const protectionSection = protectionSettings();
     if (protectionSection) panel.appendChild(protectionSection);
 
@@ -3547,6 +3549,210 @@
     panel.appendChild(status);
 
     host.appendChild(panel);
+  }
+
+  // ------------------------------------------------------------ connections
+  //
+  // "Sends to" and "Receives from": the one-way connections that let this
+  // workspace's Filing send reviewed files to another workspace's folder. The
+  // drawing lives in file-janitor-connections.js; this owns the state and every
+  // request. A request names the other workspace or the connection by ID, never a
+  // folder: the server works out both folders itself.
+  let connections = null; // the last /connections answer for this workspace
+  let connectionsLoadState = 'idle'; // idle | loading | ready | error
+  let connectionsWorkspace = '';
+  let connectCard = null; // { receiverId, kinds: [ids], error } while the card is open
+  let connectionBusy = ''; // '' | 'connect' | the connection id being turned off
+
+  function resetConnections() {
+    connections = null;
+    connectionsLoadState = 'idle';
+    connectionsWorkspace = '';
+    connectCard = null;
+    connectionBusy = '';
+  }
+
+  // connectionAgentName is the agent named on the connect card, only when the
+  // agent can suggest sends: Filing uses a model and an agent helps here (FR 42).
+  function connectionAgentName() {
+    const settings = (lastStatus && lastStatus.settings) || {};
+    const guidance = lastStatus && lastStatus.guidance;
+    const usesModel = settings.content_mode && settings.content_mode !== 'metadata_only';
+    if (!usesModel || !guidance || !guidance.available) return '';
+    return guidance.agent_name || 'The Curator';
+  }
+
+  function connectionSections() {
+    const drawing = window.FileJanitorConnections;
+    const settings = (lastStatus && lastStatus.settings) || {};
+    if (!drawing || !settings.root_path) return [];
+    const id = wsId();
+    if (connectionsWorkspace !== id) {
+      resetConnections();
+      connectionsWorkspace = id;
+    }
+    if (connectionsLoadState === 'idle') void loadConnections();
+    if (connectionsLoadState !== 'ready') {
+      const section = el('div', 'fj-setting fj-setting-sends');
+      section.appendChild(el('h4', 'fj-setting-heading', 'Sends to'));
+      section.appendChild(
+        el(
+          'p',
+          'fj-setting-help',
+          connectionsLoadState === 'error'
+            ? 'Ori could not read which workspaces this one sends to. Close Settings and open it again.'
+            : 'Reading which workspaces this one sends to…'
+        )
+      );
+      return [section];
+    }
+    const ctx = {
+      card: connectCard,
+      busyId: connectionBusy,
+      agentName: connectionAgentName(),
+      onConnectStart: startConnect,
+      onConnectCancel: cancelConnect,
+      onReceiverChange: changeConnectReceiver,
+      onKindToggle: toggleConnectKind,
+      onConnectAllow: (receiverId, kinds) => void allowConnect(receiverId, kinds),
+      onTurnOff: view => void turnOffConnection(view)
+    };
+    const out = [drawing.renderSendsTo(document, connections, ctx)];
+    const receives = drawing.renderReceivesFrom(document, connections, ctx);
+    if (receives) out.push(receives);
+    return out;
+  }
+
+  async function connectionRequest(path, options) {
+    const id = wsId();
+    const response = await fetch(apiBase(id) + '/connections' + (path || ''), options);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body.connections) {
+      const apiError = body.error || body;
+      const error = new Error(
+        (apiError && apiError.message) || 'Ori could not change this connection.'
+      );
+      error.refused = apiError && apiError.code === 'connection_refused';
+      throw error;
+    }
+    return body.connections;
+  }
+
+  async function loadConnections() {
+    const id = wsId();
+    if (!id) return;
+    connectionsLoadState = 'loading';
+    try {
+      const loaded = await connectionRequest('', { method: 'GET' });
+      if (wsId() !== id) return;
+      connections = loaded;
+      connectionsLoadState = 'ready';
+    } catch {
+      if (wsId() !== id) return;
+      connectionsLoadState = 'error';
+    }
+    if (settingsOpen) renderSettings();
+  }
+
+  // openConnectStep opens the connect card, from Settings or from a review
+  // row's "Send to another workspace…" (FR 4).
+  function openConnectStep() {
+    const receivers = (connections && connections.receivers) || [];
+    const first = receivers.find(option => !option.refusal) || receivers[0];
+    const drawing = window.FileJanitorConnections;
+    connectCard = {
+      receiverId: first ? first.workspace_id : '',
+      kinds: first && drawing ? drawing.preTicked(first) : [],
+      error: ''
+    };
+  }
+
+  function startConnect() {
+    openConnectStep();
+    renderSettings();
+    document.getElementById('fileJanitorConnectTitle')?.focus?.();
+  }
+
+  function cancelConnect() {
+    connectCard = null;
+    renderSettings();
+    document.getElementById('fileJanitorConnectStart')?.focus?.();
+  }
+
+  function changeConnectReceiver(receiverId) {
+    const receiver = ((connections && connections.receivers) || []).find(
+      option => option.workspace_id === receiverId
+    );
+    const drawing = window.FileJanitorConnections;
+    connectCard = {
+      receiverId,
+      kinds: receiver && drawing ? drawing.preTicked(receiver) : [],
+      error: ''
+    };
+    renderSettings();
+    document.getElementById('fileJanitorConnectReceiver')?.focus?.();
+  }
+
+  function toggleConnectKind(kind, checked) {
+    if (!connectCard) return;
+    const kinds = new Set(connectCard.kinds || []);
+    if (checked) kinds.add(kind);
+    else kinds.delete(kind);
+    connectCard = { ...connectCard, kinds: [...kinds], error: '' };
+    renderSettings();
+    document.getElementById('fileJanitorConnectKind-' + kind)?.focus?.();
+  }
+
+  async function allowConnect(receiverId, kinds) {
+    if (connectionBusy || !connectCard) return;
+    connectionBusy = 'connect';
+    renderSettings();
+    try {
+      connections = await connectionRequest('', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiver_workspace_id: receiverId, kinds })
+      });
+      connectCard = null;
+      connectionBusy = '';
+      const view = (connections.sends_to || []).find(
+        item => item.receiver_workspace_id === receiverId
+      );
+      const name = view ? view.receiver_name : 'that workspace';
+      renderSettings();
+      setSettingsMessage(
+        `On. ${name} can now receive files, and each send waits for you on Review.`
+      );
+      announce(`Sends to ${name} is on.`);
+    } catch (error) {
+      connectionBusy = '';
+      if (connectCard) connectCard = { ...connectCard, error: error.message };
+      renderSettings();
+      setSettingsMessage(error.message);
+    }
+  }
+
+  async function turnOffConnection(view) {
+    if (connectionBusy || !view || !view.id) return;
+    connectionBusy = view.id;
+    renderSettings();
+    try {
+      connections = await connectionRequest('/' + encodeURIComponent(view.id) + '/turn-off', {
+        method: 'POST'
+      });
+      connectionBusy = '';
+      renderSettings();
+      const sending = view.sender_workspace_id === wsId();
+      const message = sending
+        ? `Turned off. Nothing more goes to ${view.receiver_name}; files already sent stay there.`
+        : `Turned off. ${view.sender_name} can no longer send files here; files already sent stay here.`;
+      setSettingsMessage(message);
+      announce(message);
+    } catch (error) {
+      connectionBusy = '';
+      renderSettings();
+      setSettingsMessage(error.message);
+    }
   }
 
   // The removal confirmation, kept in state so the section can render either
@@ -5254,6 +5460,9 @@
     consoleOpen = false;
     consoleVisit++;
     settingsOpen = false;
+    // Read connections again on the next visit: the other workspace may have
+    // turned one off, or pointed at another folder, in the meantime.
+    resetConnections();
     consoleCloseButton = null;
     const host = document.getElementById(CONSOLE_HOST_ID);
     if (host) {
@@ -7626,6 +7835,7 @@
       removalSummary = null;
       removalConfirming = false;
       removalCompanionChecked = false;
+      resetConnections();
       pageOffset = 0;
       filter = '';
       batchTotal = 0;
