@@ -15243,20 +15243,24 @@ const sessionManager = {
         !build.acceptedPreparation &&
         !build.preparationUncertain &&
         !build.closeReady;
+      const hireOnly = build.janitorReview?.inbox_hire_only === true;
       const started = window.OriWorkspaceMap?.beginPlacement?.({
         token: placement.token,
         mode: 'reviewed-setup',
         actionCopy: {
-          confirmLabel: build.janitorReview?.inbox_hire_only
+          confirmLabel: hireOnly
             ? 'Hire and create workspace here'
             : 'Create workspace & scan here',
           pendingLabel: 'Creating workspace…',
-          instruction:
-            'Click open ground or press Enter to create this reviewed workspace and scan. Drag to pan; Escape to edit setup. No district membership is added.',
-          pendingInstruction:
-            'Creating the reviewed workspace and preparing its filing scan. This position is locked.',
-          announcement:
-            'Setup reviewed. Click open ground or press Enter to create the workspace and scan. Escape returns to editing.'
+          instruction: hireOnly
+            ? 'Click open ground or press Enter to hire the manager and create the workspace. Drag to pan; Escape to edit the hire.'
+            : 'Click open ground or press Enter to create this reviewed workspace and scan. Drag to pan; Escape to edit setup. No district membership is added.',
+          pendingInstruction: hireOnly
+            ? 'Creating the workspace and assigning its manager. This position is locked.'
+            : 'Creating the reviewed workspace and preparing its filing scan. This position is locked.',
+          announcement: hireOnly
+            ? 'Hire reviewed. Click open ground or press Enter to create the workspace. Escape returns to editing.'
+            : 'Setup reviewed. Click open ground or press Enter to create the workspace and scan. Escape returns to editing.'
         },
         origin: {},
         initialCandidate: placement.candidate,

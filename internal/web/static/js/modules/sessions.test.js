@@ -1233,7 +1233,8 @@ test('inbox handoff cannot replace a suspended editor or an editor opened and cl
 });
 
 test('placement conflict recovery explicitly reads the same draft and preserves local choices on failure or a late reply', async () => {
-  for (const outcome of ['current', 'failed', 'foreign', 'late']) {
+  for (const outcome of ['fresh', 'accepted', 'failed', 'foreign', 'late']) {
+    const current = outcome === 'fresh' || outcome === 'accepted';
     const manager = loadSessionManager();
     const build = {
       session: { id: 'saved', status: 'open' },
@@ -1253,7 +1254,10 @@ test('placement conflict recovery explicitly reads the same draft and preserves 
           session: {
             id: outcome === 'foreign' ? 'other' : 'saved',
             status: 'open',
-            placement_monitoring: true
+            // Only an accepted preparation restores monitoring. An old draft
+            // preference must not turn a fresh hire into setup on reload.
+            placement_monitoring: outcome !== 'accepted',
+            preparation: outcome === 'accepted' ? { monitoring: true } : undefined
           }
         }
       };
@@ -1267,9 +1271,9 @@ test('placement conflict recovery explicitly reads the same draft and preserves 
     if (['failed', 'foreign'].includes(outcome))
       await assert.rejects(manager.reloadInboxWorkspaceDraft(build), /local edits are still kept/);
     else await manager.reloadInboxWorkspaceDraft(build);
-    assert.equal(applied, outcome === 'current' ? 1 : 0);
-    assert.equal(build.draftConflict, outcome !== 'current');
-    assert.equal(build.janitorMonitoring, outcome === 'current');
+    assert.equal(applied, current ? 1 : 0);
+    assert.equal(build.draftConflict, !current);
+    assert.equal(build.janitorMonitoring, outcome === 'accepted');
   }
 });
 
@@ -1447,7 +1451,11 @@ test('reviewed inbox map gestures confirm once; previews and stale or changed re
     candidate: null,
     host: { classList: { add() {} }, contains: () => false }
   };
-  const build = { session: { status: 'open', draft: { name: 'Inbox' } }, placement };
+  const build = {
+    session: { status: 'open', draft: { name: 'Inbox' } },
+    janitorReview: { inbox_hire_only: true },
+    placement
+  };
   manager.workspaceBuild = build;
   manager.syncWorkspaceBuildPresentation = () => {};
   manager.syncInboxWorkspacePlacement = () => {};
@@ -1465,6 +1473,8 @@ test('reviewed inbox map gestures confirm once; previews and stale or changed re
   assert.equal(spec, undefined, 'placement waits for the opening transition');
   emit('shown.bs.modal');
   assert.equal(spec.mode, 'reviewed-setup');
+  assert.match(spec.actionCopy.confirmLabel, /Hire and create/);
+  assert.doesNotMatch(Object.values(spec.actionCopy).join(' '), /scan/i);
   assert.equal(spec.onSelect, undefined);
   assert.deepEqual(JSON.parse(JSON.stringify(spec.origin)), {});
   spec.onCandidate(placement.token, { x: 12, y: 24 });
