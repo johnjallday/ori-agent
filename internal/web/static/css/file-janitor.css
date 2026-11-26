@@ -1995,6 +1995,107 @@
   text-align: right;
 }
 
+/* What arrived from another workspace (FR 36, 37), above the receiver's review. */
+.fj-arrivals {
+  --fj-send-accent: var(--warning-color, #b26a00);
+  --fj-send-ink: color-mix(in srgb, var(--fj-send-accent) 35%, var(--text-primary, #e8e8e8));
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.85rem;
+}
+
+.fj-arrival {
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--fj-send-accent);
+  border-radius: 10px;
+  background: var(--bg-tertiary, transparent);
+}
+
+.fj-arrival-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.9rem;
+}
+
+.fj-arrival-icon {
+  flex: none;
+  color: var(--fj-send-ink);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.fj-arrival-text {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.fj-arrival-title {
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-arrival-when {
+  margin-left: 0.5rem;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.8rem;
+}
+
+.fj-arrival-help {
+  margin: 0.2rem 0 0;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.8rem;
+}
+
+.fj-arrival-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fj-arrival-actions .fj-btn,
+.fj-arrival-actions .fj-link,
+.fj-arrival .fj-more {
+  min-height: 44px;
+}
+
+/* A visible edge in both themes: the strip's own background is close to the
+   default button border in the light theme. */
+.fj-arrival-actions .fj-btn-secondary {
+  border-color: var(--fj-line-strong);
+}
+
+.fj-arrival-files {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.fj-arrival-file {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-primary, #e8e8e8);
+  overflow-wrap: anywhere;
+}
+
+.fj-arrival-from {
+  flex: none;
+  color: var(--fj-send-ink);
+  border-color: var(--fj-send-accent);
+}
+
+.fj-arrival-message {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--text-primary, #e8e8e8);
+}
+
 /* ------------------------------------------------------------------ console
 
    The console opens over whatever the user was looking at — usually the Map.

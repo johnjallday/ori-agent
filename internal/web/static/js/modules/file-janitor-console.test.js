@@ -1583,6 +1583,30 @@ test('history lists what happened and names the reversal each entry offers', () 
   assert.match(body, /Restore from Trash/);
 });
 
+test('history says which workspace a sent file went to, and where it is put back from', () => {
+  const doc = setup();
+  renderReview(doc);
+  panel._selectTab('history');
+  panel._setHistory(
+    [
+      {
+        id: 'action-send',
+        source_name: 'lease.pdf',
+        operation: 'send',
+        result: 'applied',
+        undo: 'available',
+        destination_relative: '',
+        send: { receiver_workspace_id: 'ws-2' }
+      }
+    ],
+    { 'ws-2': 'Documents' }
+  );
+  const body = text(doc);
+  assert.match(body, /lease\.pdf\s+— sent to Documents/);
+  assert.doesNotMatch(body, /filed to\s+·|Undo move/);
+  assert.match(body, /Put back from the receipt, or from Documents/);
+});
+
 test('history explains entries that cannot be undone instead of hiding them', () => {
   const doc = setup();
   renderReview(doc);
@@ -7801,6 +7825,59 @@ test('with no folder set up, Settings has no Sends to section and asks for nothi
   try {
     assert.equal(connectionsSection(doc, 'sends-to'), undefined);
     assert.ok(!requests.some(r => r.url.includes('/connections')));
+  } finally {
+    delete globalThis.FileJanitorConnections;
+  }
+});
+
+test('the receiver sees what arrived on Review, and Undo this send posts with no body (FR 36, 38)', async () => {
+  const doc = setup();
+  globalThis.FileJanitorConnections = connectionsModule;
+  const requests = [];
+  let undone = false;
+  const arrived = {
+    id: 'arrival-1',
+    sender_workspace_id: 'ws-9',
+    sender_name: 'Downloads',
+    arrived_at: '2026-11-26T10:42:00Z',
+    count: 2,
+    names: ['lease.pdf', 'invoice.pdf']
+  };
+  try {
+    panel._setBatch(null, [], CATEGORIES);
+    openConsole(statusFixture(), 'review');
+    globalThis.fetch = async (url, opts = {}) => {
+      const target = String(url);
+      requests.push({ url: target, method: opts.method || 'GET', body: opts.body });
+      if (target.endsWith('/arrivals/arrival-1/undo')) {
+        undone = true;
+        return { ok: true, json: async () => ({ undo: { back: 2, not_back: 0, outcomes: [] } }) };
+      }
+      if (target.endsWith('/arrivals'))
+        return { ok: true, json: async () => ({ arrivals: undone ? [] : [arrived] }) };
+      return {
+        ok: true,
+        json: async () => ({ batch: null, candidates: [], status: statusFixture() })
+      };
+    };
+    panel._selectTab('settings');
+    panel._selectTab('review');
+    await settle();
+    await settle();
+    const host = doc.getElementById('fileJanitorArrivalsHost');
+    assert.match(host.textContent, /2 files arrived from Downloads/);
+    assert.match(host.textContent, /lease\.pdf from Downloads/);
+    doc.getElementById('fileJanitorUndoSend-arrival-1').click();
+    await settle();
+    await settle();
+    const post = requests.find(r => r.method === 'POST');
+    assert.ok(post.url.endsWith('/file-janitor/arrivals/arrival-1/undo'));
+    assert.equal(post.body, undefined);
+    assert.match(
+      doc.getElementById('fileJanitorArrivalsHost').textContent,
+      /2 files are back in Downloads\./
+    );
+    assert.doesNotMatch(doc.getElementById('fileJanitorArrivalsHost').textContent, /arrived from/);
   } finally {
     delete globalThis.FileJanitorConnections;
   }

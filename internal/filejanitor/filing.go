@@ -303,6 +303,11 @@ func (s *Service) FileReviewPlan(ctx context.Context, owner, workspaceID, batchI
 			unrecorded = append(unrecorded, FilingUnrecorded{CandidateID: item.CandidateID, Reason: outcome.Message})
 		}
 	}
+	// Each receiver records what arrived, still under both folders' locks, in a
+	// write of its own (FR 36).
+	if len(routes) > 0 {
+		s.recordArrivals(workspaceID, admitted.record.ID, routes)
+	}
 	final, err := s.store.UpdateScanState(workspaceID, func(state *ScanState) error {
 		for i := range state.Filings {
 			if state.Filings[i].ID == admitted.record.ID {

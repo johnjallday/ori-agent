@@ -179,6 +179,8 @@
   // scan batch.
   let expandedCandidates = new Set();
   let historyActions = [];
+  // Receiving workspaces' names by ID, for History's "sent to <receiver>".
+  let historyReceivers = {};
   let historyLoaded = false;
   let historyFilter = '';
   // The last undo outcome, kept so the history reload that follows an undo does
@@ -4317,14 +4319,23 @@
     entry.appendChild(mark);
     entry.appendChild(el('span', 'fj-history-name', displayName(action)));
 
+    // A send has no destination inside this folder: it says which workspace.
+    const receiver =
+      action.operation === 'send'
+        ? historyReceivers[action.send?.receiver_workspace_id] || 'another workspace'
+        : '';
     const what =
       action.operation === 'trash'
         ? action.result === 'applied'
           ? ' — moved to Trash'
           : ' — not removed'
-        : action.result === 'applied'
-          ? ' — filed to ' + (action.destination_relative || '')
-          : ' — not moved';
+        : action.operation === 'send'
+          ? action.result === 'applied'
+            ? ' — sent to ' + receiver
+            : ' — not sent'
+          : action.result === 'applied'
+            ? ' — filed to ' + (action.destination_relative || '')
+            : ' — not moved';
     entry.appendChild(el('span', 'fj-history-what', what));
 
     if (action.undo === 'undone') {
@@ -4339,7 +4350,11 @@
 
     // Undo is offered only where the server says it is still possible, and the
     // label names the actual reversal rather than a generic "undo".
-    if (action.result === 'applied' && action.undo === 'available') {
+    if (action.operation === 'send' && action.result === 'applied' && action.undo !== 'undone') {
+      // A send is put back with both folders held: from the receipt's Undo all,
+      // or from the receiving workspace's "Undo this send".
+      entry.appendChild(el('span', 'fj-muted', ' Put back from the receipt, or from ' + receiver));
+    } else if (action.result === 'applied' && action.undo === 'available') {
       entry.appendChild(
         button(
           action.operation === 'trash' ? 'Restore from Trash' : 'Undo move',
@@ -4519,6 +4534,8 @@
       const body = await listRead;
       if (!current()) return;
       historyActions = Array.isArray(body.actions) ? body.actions : [];
+      historyReceivers =
+        body.receivers && typeof body.receivers === 'object' ? { ...body.receivers } : {};
       historyLoaded = true;
       historyListLoadState = 'ready';
       if (historyStatusMessage.startsWith('History unavailable.')) historyStatusMessage = '';
@@ -5244,6 +5261,11 @@
     }
     const repair = !downloadsReviewRequested() && repairAction(status);
     if (repair) host.appendChild(repair);
+    // What other workspaces sent here, above the review (FR 36). Drawn only when
+    // something that arrived is still loose at the top level.
+    const arrivalsHost = el('div', 'fj-arrivals-host');
+    arrivalsHost.id = 'fileJanitorArrivalsHost';
+    host.appendChild(arrivalsHost);
     const batchHost = el('div', 'fj-batch');
     batchHost.id = 'fileJanitorBatch';
     host.appendChild(batchHost);
@@ -5262,7 +5284,128 @@
     announcer.setAttribute('aria-atomic', 'true');
     host.appendChild(announcer);
     renderBatch();
+    renderArrivalsStrip();
     if (lastResults) renderResults(lastResults, { focus: false });
+  }
+
+  // ---------------------------------------------------------------- arrivals
+  //
+  // The receiving side (FR 36 to 39): what other workspaces sent here, with "Undo
+  // this send" and Dismiss. The list is read once per visit to Review.
+  let arrivals = [];
+  let arrivalsLoadState = 'idle'; // idle | loading | ready | error
+  let arrivalsWorkspace = '';
+  let arrivalsShown = {}; // arrival id -> names shown
+  let arrivalBusy = '';
+  let arrivalMessage = '';
+
+  function resetArrivals() {
+    arrivals = [];
+    arrivalsLoadState = 'idle';
+    arrivalsWorkspace = '';
+    arrivalsShown = {};
+    arrivalBusy = '';
+    arrivalMessage = '';
+  }
+
+  function renderArrivalsStrip() {
+    const host = document.getElementById('fileJanitorArrivalsHost');
+    const drawing = window.FileJanitorConnections;
+    if (!host || !drawing || typeof drawing.renderArrivals !== 'function') return;
+    const id = wsId();
+    if (arrivalsWorkspace !== id) {
+      resetArrivals();
+      arrivalsWorkspace = id;
+    }
+    if (arrivalsLoadState === 'idle' && lastStatus?.settings?.root_path) void loadArrivals();
+    clear(host);
+    const section = drawing.renderArrivals(document, arrivals, {
+      shown: arrivalsShown,
+      busyId: arrivalBusy,
+      message: arrivalMessage,
+      onUndo: arrival => void undoArrival(arrival),
+      onDismiss: arrival => void dismissArrival(arrival),
+      onShowMore: arrival => {
+        arrivalsShown = {
+          ...arrivalsShown,
+          [arrival.id]: (arrivalsShown[arrival.id] || 5) + 5
+        };
+        renderArrivalsStrip();
+      }
+    });
+    if (section) host.appendChild(section);
+  }
+
+  async function arrivalRequest(path, options) {
+    const response = await fetch(apiBase(wsId()) + '/arrivals' + (path || ''), options);
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const apiError = body.error || body;
+      throw new Error((apiError && apiError.message) || 'Ori could not do that.');
+    }
+    return body;
+  }
+
+  async function loadArrivals() {
+    const id = wsId();
+    if (!id) return;
+    arrivalsLoadState = 'loading';
+    try {
+      const body = await arrivalRequest('', { method: 'GET' });
+      if (wsId() !== id) return;
+      arrivals = Array.isArray(body.arrivals) ? body.arrivals.slice(0, 20) : [];
+      arrivalsLoadState = 'ready';
+    } catch {
+      if (wsId() !== id) return;
+      arrivals = [];
+      arrivalsLoadState = 'error';
+    }
+    renderArrivalsStrip();
+  }
+
+  async function undoArrival(arrival) {
+    if (arrivalBusy) return;
+    arrivalBusy = arrival.id;
+    renderArrivalsStrip();
+    try {
+      const body = await arrivalRequest('/' + encodeURIComponent(arrival.id) + '/undo', {
+        method: 'POST'
+      });
+      const back = body.undo?.back || 0;
+      const notBack = body.undo?.not_back || 0;
+      arrivalMessage =
+        (back === 1 ? '1 file is back in ' : back + ' files are back in ') +
+        arrival.sender_name +
+        '.' +
+        (notBack > 0
+          ? ' ' +
+            (notBack === 1 ? '1 file was' : notBack + ' files were') +
+            ' not put back: they are no longer loose here.'
+          : '');
+    } catch (error) {
+      arrivalMessage = error.message;
+    }
+    arrivalBusy = '';
+    announce(arrivalMessage);
+    arrivalsLoadState = 'idle';
+    renderArrivalsStrip();
+    // The files left this folder: the review reads the folder again.
+    void loadBatch();
+  }
+
+  async function dismissArrival(arrival) {
+    if (arrivalBusy) return;
+    arrivalBusy = arrival.id;
+    try {
+      await arrivalRequest('/' + encodeURIComponent(arrival.id) + '/dismiss', { method: 'POST' });
+      arrivals = arrivals.filter(item => item.id !== arrival.id);
+      arrivalMessage = '';
+    } catch (error) {
+      arrivalMessage = error.message;
+    }
+    arrivalBusy = '';
+    renderArrivalsStrip();
+    document.getElementById('fileJanitorBatch')?.focus?.();
   }
 
   function announce(message) {
@@ -5541,8 +5684,10 @@
     consoleVisit++;
     settingsOpen = false;
     // Read connections again on the next visit: the other workspace may have
-    // turned one off, or pointed at another folder, in the meantime.
+    // turned one off, or pointed at another folder, in the meantime. The same for
+    // what arrived.
     resetConnections();
+    resetArrivals();
     consoleCloseButton = null;
     const host = document.getElementById(CONSOLE_HOST_ID);
     if (host) {
@@ -5898,6 +6043,9 @@
     const next = validTab(tab);
     if (!next) return;
     if (consoleTab !== next) consoleVisit++;
+    // Coming back to Review reads what arrived again: a send may have landed, or
+    // been undone from the other workspace, meanwhile.
+    if (next === 'review' && consoleTab !== next) arrivalsLoadState = 'idle';
     consoleTab = next;
     rememberedTab.set(wsId(), next);
     // Moving tabs drops the Trash tick: it is never restored after coming back
@@ -7890,8 +8038,9 @@
       settingsOpen = true;
       renderSettings();
     },
-    _setHistory: actions => {
+    _setHistory: (actions, receivers) => {
       historyActions = actions || [];
+      historyReceivers = receivers || {};
       historyLoaded = true;
       renderHistory();
     },
@@ -7916,6 +8065,7 @@
       removalConfirming = false;
       removalCompanionChecked = false;
       resetConnections();
+      resetArrivals();
       pageOffset = 0;
       filter = '';
       batchTotal = 0;

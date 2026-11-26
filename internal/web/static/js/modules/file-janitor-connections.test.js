@@ -6,11 +6,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  ARRIVAL_PAGE,
   BANNED_WORDS,
   KINDS,
+  arrivedTitle,
+  arrivedWhen,
   carriedBy,
   kindsPhrase,
   preTicked,
+  renderArrivals,
   renderConnectCard,
   renderReceivesFrom,
   renderSendsTo,
@@ -342,4 +346,64 @@ test('workspace names are text: a direction override cannot disguise them', () =
   assert.equal(workspaceName(''), 'That workspace');
   assert.equal(kindsPhrase(['documents', 'images', 'other']), 'Documents, Images and Other');
   assert.equal(kindsPhrase([]), '');
+});
+
+// ---------------------------------------------------------------- arrivals
+
+const arrival = (over = {}) => ({
+  id: 'arrival-1',
+  sender_workspace_id: 'ws-1',
+  sender_name: 'Downloads',
+  arrived_at: '2026-11-26T10:42:00Z',
+  count: 14,
+  names: Array.from({ length: 14 }, (_, i) => 'Invoice-' + i + '.pdf'),
+  ...over
+});
+
+test('the strip says how many arrived from whom, when, and that they are loose here (FR 36)', () => {
+  const section = renderArrivals(doc, [arrival()], { now: new Date('2026-11-26T12:00:00Z') });
+  assert.match(section.textContent, /14 files arrived from Downloads/);
+  assert.match(
+    section.textContent,
+    /You sent them from the Downloads review\. They are loose at the top level until you file them here\./
+  );
+  assert.equal(arrivedTitle(arrival({ count: 1 })), '1 file arrived from Downloads');
+  assert.match(arrivedWhen('2026-11-26T10:42:00Z', new Date('2026-11-26T12:00:00Z')), /^today, /);
+  assert.doesNotMatch(section.textContent, /linked|batch|candidate|proposal|draft/i);
+});
+
+test('the list shows five names at a time, each from the sender, with and N more (FR 37)', () => {
+  const more = [];
+  const section = renderArrivals(doc, [arrival()], { onShowMore: a => more.push(a.id) });
+  const items = section.all(item => item.className === 'fj-arrival-file');
+  assert.equal(items.length, ARRIVAL_PAGE);
+  assert.match(items[0].textContent, /Invoice-0\.pdf from Downloads/);
+  const button = buttonNamed(section, 'and 9 more');
+  button.fire('click');
+  assert.deepEqual(more, ['arrival-1']);
+  const wider = renderArrivals(doc, [arrival()], { shown: { 'arrival-1': 10 } });
+  assert.equal(wider.all(item => item.className === 'fj-arrival-file').length, 10);
+});
+
+test('Undo this send and Dismiss are real buttons that wait while one runs (FR 38, 39)', () => {
+  const calls = [];
+  const section = renderArrivals(doc, [arrival()], {
+    onUndo: a => calls.push('undo ' + a.id),
+    onDismiss: a => calls.push('dismiss ' + a.id)
+  });
+  const undo = byId(section, 'fileJanitorUndoSend-arrival-1');
+  assert.equal(undo.textContent, 'Undo this send');
+  assert.equal(undo.getAttribute('type'), 'button');
+  undo.fire('click');
+  byId(section, 'fileJanitorDismissArrival-arrival-1').fire('click');
+  assert.deepEqual(calls, ['undo arrival-1', 'dismiss arrival-1']);
+  const busy = renderArrivals(doc, [arrival()], { busyId: 'arrival-1' });
+  assert.equal(byId(busy, 'fileJanitorUndoSend-arrival-1').textContent, 'Putting files back…');
+  assert.ok(byId(busy, 'fileJanitorDismissArrival-arrival-1').disabled);
+});
+
+test('nothing arrived draws nothing; a result message is still said', () => {
+  assert.equal(renderArrivals(doc, [], {}), null);
+  const said = renderArrivals(doc, [], { message: '14 files are back in Downloads.' });
+  assert.match(said.textContent, /14 files are back in Downloads\./);
 });

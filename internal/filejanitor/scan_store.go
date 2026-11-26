@@ -139,6 +139,11 @@ type ScanState struct {
 	// action, so it can neither undo nor repeat one. The schema version stays 3
 	// because raising it would make an older build refuse the whole state.
 	Filings []FilingRecord `json:"filings,omitempty"`
+	// Arrivals are the files other workspaces sent here, one record per press, for
+	// the Review tab's "N files arrived from <sender>" (see send_arrivals.go). A
+	// display list only: the sender's journal proves and reverses each send. An
+	// older build drops it on rewrite, which loses the strip and nothing else.
+	Arrivals []SendArrival `json:"arrivals,omitempty"`
 	// ScanOperations are bounded operation-specific acknowledgments written in
 	// the same atomic record as their batch/candidates/settling observations.
 	ScanOperations []ScanOperationReceipt `json:"scan_operations,omitempty"`
@@ -473,6 +478,16 @@ func validateScanState(state ScanState) error {
 		}
 		seenFilings[filing.ID] = struct{}{}
 	}
+	seenArrivals := make(map[string]struct{}, len(state.Arrivals))
+	for _, arrival := range state.Arrivals {
+		if err := arrival.validate(state.WorkspaceID); err != nil {
+			return err
+		}
+		if _, duplicate := seenArrivals[arrival.ID]; duplicate {
+			return fmt.Errorf("%w: duplicate arrival %s", ErrInvalidCandidate, arrival.ID)
+		}
+		seenArrivals[arrival.ID] = struct{}{}
+	}
 	totalChoices := 0
 	for _, draft := range state.ReviewDrafts {
 		if len(draft.invalid) > 0 {
@@ -587,6 +602,13 @@ func pruneScanState(state ScanState, now time.Time) ScanState {
 			return state.Filings[i].AdmittedAt.Before(state.Filings[j].AdmittedAt)
 		})
 		state.Filings = state.Filings[len(state.Filings)-MaxRetainedFilings:]
+	}
+	// Arrival records keep the newest few too.
+	if len(state.Arrivals) > MaxRetainedFilings {
+		sort.SliceStable(state.Arrivals, func(i, j int) bool {
+			return state.Arrivals[i].ArrivedAt.Before(state.Arrivals[j].ArrivedAt)
+		})
+		state.Arrivals = state.Arrivals[len(state.Arrivals)-MaxRetainedFilings:]
 	}
 
 	// Skips are user decisions, so they are only ever dropped by the cap —

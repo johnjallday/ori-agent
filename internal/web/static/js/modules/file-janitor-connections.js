@@ -409,11 +409,126 @@ export function renderConnectCard(doc, connections, card, ctx = {}) {
   return box;
 }
 
+// ARRIVAL_PAGE is how many arrived names the list shows at a time (FR 37).
+export const ARRIVAL_PAGE = 5;
+
+// arrivedWhen is "today, 10:42" or a date, in the person's own clock.
+export function arrivedWhen(iso, now = new Date()) {
+  const when = new Date(iso);
+  if (Number.isNaN(when.getTime())) return '';
+  const time = when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (when.toDateString() === now.toDateString()) return 'today, ' + time;
+  return when.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ', ' + time;
+}
+
+export function arrivedTitle(arrival) {
+  const count = arrival?.count || 0;
+  return (
+    (count === 1 ? '1 file arrived from ' : count + ' files arrived from ') +
+    workspaceName(arrival?.sender_name)
+  );
+}
+
+// renderArrivals draws the receiving workspace's strip and list (FR 36 to 39), or
+// nothing when nothing that arrived is still loose. ctx: shown (arrival id ->
+// names shown), busyId, message, now, onUndo, onDismiss, onShowMore.
+export function renderArrivals(doc, arrivals, ctx = {}) {
+  const list = Array.isArray(arrivals) ? arrivals : [];
+  if (!list.length && !ctx.message) return null;
+  const h = builder(doc);
+  const section = h('section', 'fj-arrivals');
+  section.setAttribute('aria-label', 'What arrived from other workspaces');
+  for (const arrival of list) {
+    const sender = workspaceName(arrival.sender_name);
+    const card = h('div', 'fj-arrival');
+    card.setAttribute('data-arrival-id', arrival.id);
+    card.setAttribute('role', 'group');
+    const strip = h('div', 'fj-arrival-strip');
+    const icon = h('span', 'fj-arrival-icon', '↓');
+    icon.setAttribute('aria-hidden', 'true');
+    strip.appendChild(icon);
+    const text = h('div', 'fj-arrival-text');
+    const title = h('strong', 'fj-arrival-title', arrivedTitle(arrival));
+    title.id = 'fileJanitorArrival-' + arrival.id;
+    card.setAttribute('aria-labelledby', title.id);
+    text.appendChild(title);
+    const when = arrivedWhen(arrival.arrived_at, ctx.now);
+    if (when) text.appendChild(h('span', 'fj-arrival-when', when));
+    text.appendChild(
+      h(
+        'p',
+        'fj-arrival-help',
+        'You sent them from the ' +
+          sender +
+          ' review. They are loose at the top level until you file them here.'
+      )
+    );
+    strip.appendChild(text);
+    const actions = h('div', 'fj-arrival-actions');
+    const busy = Boolean(ctx.busyId);
+    const undo = actionButton(
+      h,
+      ctx.busyId === arrival.id ? 'Putting files back…' : 'Undo this send',
+      'fj-btn fj-btn-secondary',
+      () => ctx.onUndo && ctx.onUndo(arrival),
+      busy
+    );
+    undo.id = 'fileJanitorUndoSend-' + arrival.id;
+    actions.appendChild(undo);
+    const dismiss = actionButton(
+      h,
+      'Dismiss',
+      'fj-link',
+      () => ctx.onDismiss && ctx.onDismiss(arrival),
+      busy
+    );
+    dismiss.id = 'fileJanitorDismissArrival-' + arrival.id;
+    dismiss.setAttribute('aria-label', 'Dismiss: ' + arrivedTitle(arrival));
+    actions.appendChild(dismiss);
+    strip.appendChild(actions);
+    card.appendChild(strip);
+
+    const names = Array.isArray(arrival.names) ? arrival.names : [];
+    const shown = Math.min(
+      names.length,
+      Math.max(ARRIVAL_PAGE, (ctx.shown || {})[arrival.id] || 0)
+    );
+    const items = h('ul', 'fj-arrival-files');
+    for (const name of names.slice(0, shown)) {
+      const item = h('li', 'fj-arrival-file');
+      item.appendChild(h('span', 'fj-arrival-name', workspaceName(name, '(unreadable name)')));
+      item.appendChild(h('span', 'fj-tag fj-arrival-from', 'from ' + sender));
+      items.appendChild(item);
+    }
+    card.appendChild(items);
+    const more = (arrival.count || 0) - shown;
+    if (more > 0) {
+      if (shown < names.length) {
+        const button = actionButton(h, 'and ' + more + ' more', 'fj-more', () =>
+          ctx.onShowMore ? ctx.onShowMore(arrival) : undefined
+        );
+        button.id = 'fileJanitorArrivalMore-' + arrival.id;
+        card.appendChild(button);
+      } else {
+        card.appendChild(h('p', 'fj-sub', 'and ' + more + ' more'));
+      }
+    }
+    section.appendChild(card);
+  }
+  if (ctx.message) {
+    const note = h('p', 'fj-arrival-message', ctx.message);
+    note.setAttribute('role', 'status');
+    section.appendChild(note);
+  }
+  return section;
+}
+
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   window.FileJanitorConnections = {
     renderSendsTo,
     renderReceivesFrom,
     renderConnectCard,
+    renderArrivals,
     preTicked,
     kindsPhrase
   };
