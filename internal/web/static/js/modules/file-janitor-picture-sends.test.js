@@ -13,7 +13,8 @@ import {
   rowMenuOptions,
   rowMenuValue,
   rowNote,
-  sendTotals
+  sendTotals,
+  SUGGESTION_LABEL
 } from './file-janitor-picture.js';
 import {
   locationText,
@@ -371,4 +372,88 @@ test('a press answer counts sends as filed, and a sent file not put back says wh
   assert.equal(model.filed, 2);
   assert.equal(model.sent, 1);
   assert.equal(locationText({ location: 'sent' }), 'It is still in the workspace it was sent to.');
+});
+
+// ------------------------------------------------------- the agent's suggestion
+
+const suggestion = (over = {}) => ({
+  agent_name: 'File Curator',
+  paragraph:
+    'The scanned receipt reads like paperwork, so it belongs with your Documents. The holiday photos can stay.',
+  empty: false,
+  cards: [
+    {
+      connection_id: 'connection-1',
+      receiver_name: 'Documents',
+      group_state: 'unticked',
+      count: 1,
+      files: [file('receipt-scan.png')]
+    }
+  ],
+  ...over
+});
+
+test('with a model, Review offers "Ask <agent> what to send" (FR 43)', () => {
+  let asked = 0;
+  const root = renderPicture(
+    doc,
+    pictureFixture(),
+    ctx({ askAgent: 'File Curator', onAskAgent: () => asked++ })
+  );
+  const ask = byId(root, 'fileJanitorAskAgent');
+  assert.equal(ask.textContent, 'Ask File Curator what to send');
+  ask.fire('click');
+  assert.equal(asked, 1);
+  const busy = renderPicture(
+    doc,
+    pictureFixture(),
+    ctx({ askAgent: 'File Curator', asking: true })
+  );
+  assert.equal(byId(busy, 'fileJanitorAskAgent').textContent, 'Asking File Curator…');
+  assert.ok(byId(busy, 'fileJanitorAskAgent').disabled);
+});
+
+test('the suggestion shows the agent, the label and its paragraph whole, with its card unticked (FR 47, 48)', () => {
+  const ticks = [];
+  const root = renderPicture(
+    doc,
+    pictureFixture({ suggestion: suggestion() }),
+    ctx({ askAgent: 'File Curator', onTickSuggestion: (card, on) => ticks.push(on) })
+  );
+  const section = root.all(item => item.className === 'fj-suggestion')[0];
+  assert.match(section.textContent, /File Curator/);
+  assert.match(section.textContent, new RegExp(SUGGESTION_LABEL));
+  assert.match(
+    section.textContent,
+    /The scanned receipt reads like paperwork, so it belongs with your Documents\. The holiday photos can stay\./
+  );
+  const box = byId(root, 'fileJanitorSuggested-connection-1');
+  assert.equal(box.checked, false, 'a suggested send always needs one extra tick');
+  assert.match(
+    box.getAttribute('aria-label'),
+    /Send the 1 file File Curator suggested to the Documents workspace/
+  );
+  box.checked = true;
+  box.fire('change');
+  assert.deepEqual(ticks, [true]);
+  assert.match(section.textContent, /Nothing moves until you press File\./);
+  // The suggestion is drawn above Leaving.
+  const sections = root.children.map(item => item.className);
+  assert.ok(sections.indexOf('fj-suggestion') < sections.indexOf('fj-frame fj-leaving-frame'));
+  assert.doesNotMatch(section.textContent, BANNED);
+});
+
+test('an agent with no suggestion says so (FR 46)', () => {
+  const root = renderPicture(
+    doc,
+    pictureFixture({ suggestion: suggestion({ empty: true, paragraph: '', cards: [] }) }),
+    ctx({ askAgent: 'File Curator' })
+  );
+  assert.match(root.textContent, /File Curator had no suggestion\./);
+});
+
+test('with no model nothing about the agent is drawn (FR 42)', () => {
+  const root = renderPicture(doc, pictureFixture(), ctx());
+  assert.equal(byId(root, 'fileJanitorAskAgent'), undefined);
+  assert.doesNotMatch(root.textContent, /suggest|Curator/i);
 });

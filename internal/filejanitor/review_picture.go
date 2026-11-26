@@ -190,6 +190,10 @@ type ReviewPicture struct {
 	// Leaving has one card per connection that is on (FR 20, 21). Absent with no
 	// connection, so the picture is then exactly what it was before sends.
 	Leaving []PictureLeavingCard `json:"leaving,omitempty"`
+	// Suggestion is the Filing agent's kept suggestion for this review, drawn
+	// above Leaving with its cards unticked (FR 47, 48). Absent with no model,
+	// no connection, or no suggestion.
+	Suggestion *PictureSuggestion `json:"suggestion,omitempty"`
 }
 
 // PictureFilesQuery names one list to page: the section, and the folder category
@@ -696,6 +700,9 @@ type pictureSnapshot struct {
 	groups     ReviewGroups
 	view       ReviewDraftView
 	candidates []JanitorCandidate
+	// state is the saved scan the snapshot was taken from, for the agent's kept
+	// suggestion.
+	state ScanState
 }
 
 // latestPendingBatch is the newest retained batch that still has work waiting or
@@ -752,7 +759,7 @@ func (s *Service) readPictureSnapshot(ctx context.Context, owner, workspaceID, b
 	if err != nil || freshRoot != root || freshBinding != binding || ctx.Err() != nil {
 		return pictureSnapshot{}, ErrReviewUnavailable
 	}
-	return pictureSnapshot{batchID: batchID, groups: groups, view: view, candidates: state.CandidatesFor(batchID)}, nil
+	return pictureSnapshot{batchID: batchID, groups: groups, view: view, candidates: state.CandidatesFor(batchID), state: state}, nil
 }
 
 // ReadReviewPicture is the one bounded read that draws the review's first
@@ -769,7 +776,13 @@ func (s *Service) ReadReviewPicture(ctx context.Context, owner, workspaceID, bat
 			LeftOut: pictureSection(nil), Trash: pictureSection(nil), CouldNotFile: pictureSection(nil),
 		}, nil
 	}
-	return buildReviewPicture(snapshot.groups, snapshot.view, snapshot.candidates), nil
+	picture := buildReviewPicture(snapshot.groups, snapshot.view, snapshot.candidates)
+	if len(snapshot.view.routes) > 0 {
+		if settings, err := s.store.LoadSettings(workspaceID); err == nil {
+			picture.Suggestion = pictureSuggestion(snapshot.state, settings, snapshot.view, snapshot.batchID)
+		}
+	}
+	return picture, nil
 }
 
 // ReadReviewPictureFiles pages one list of the picture ("and N more", a row's

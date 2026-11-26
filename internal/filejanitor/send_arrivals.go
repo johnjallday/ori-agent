@@ -297,7 +297,7 @@ func (s *Service) UndoArrival(ctx context.Context, owner, receiverID, arrivalID 
 		}
 	}()
 	for i := len(targets) - 1; i >= 0; i-- {
-		_, _ = s.undoSend(ctx, sender.settings, senderRoot, targets[i], receiver.root.Path)
+		_ = s.undoSend(ctx, sender.settings, senderRoot, targets[i], receiver.root.Path)
 	}
 
 	// The strip is done with: what was put back is back, and what could not be is

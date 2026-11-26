@@ -5,6 +5,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/filejanitorhttp"
 	"github.com/johnjallday/ori-agent/internal/fileshttp"
 	"github.com/johnjallday/ori-agent/internal/filewatcher"
+	"github.com/johnjallday/ori-agent/internal/folderlook"
 	"github.com/johnjallday/ori-agent/internal/followup"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -958,6 +960,37 @@ func (b *ServerBuilder) wireFileJanitor() {
 	if b.chatHandler != nil {
 		b.chatHandler.SetFileCuratorWelcomeReader(service)
 	}
+	// "Ask <agent> what to send" reaches the Filing agent's own tool-capable
+	// model, resolved when the person asks (send_suggestion.go). The turn offers
+	// that model one recording tool and nothing else.
+	service.SetSuggestionModel(func(workspaceID, agentName string) (filejanitor.SuggestionChat, string, error) {
+		chat, ref, err := b.agentToolModel(workspaceID, agentName)
+		if err != nil {
+			// The same plain sentence a folder agent's first look gives.
+			var modelErr *folderlook.ModelError
+			if errors.As(err, &modelErr) {
+				cause := modelErr.Cause
+				if cause.Kind == folderlook.CauseNotConfigured && strings.TrimSpace(cause.Provider) == "" {
+					// No provider runs the agent's model at all: name the model, not
+					// a placeholder provider.
+					model := strings.TrimSpace(cause.Model)
+					if model == "" {
+						model = "its model"
+					}
+					return nil, "", &filejanitor.SuggestionModelError{
+						Sentence: agentName + " uses " + model + ", which no set-up provider runs. Choose another model for it in its settings.",
+						Err:      err,
+					}
+				}
+				if sentence, _ := folderlook.CauseSentence(cause, agentName); sentence != "" {
+					sentence = strings.Replace(sentence, "which the look needs", "which a suggestion needs", 1)
+					return nil, "", &filejanitor.SuggestionModelError{Sentence: sentence, Err: err}
+				}
+			}
+			return nil, "", err
+		}
+		return filejanitor.SuggestionChat(chat), ref.Model, nil
+	})
 }
 
 // wireWorkspaceCapabilities constructs the built-in Workspace Capability

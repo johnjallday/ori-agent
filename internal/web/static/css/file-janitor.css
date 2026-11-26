@@ -191,6 +191,64 @@
   min-height: 44px;
 }
 
+/* The Filing agent's suggestion (FR 47): its face and name, the label, and its
+   paragraph whole; its cards open unticked, dashed like any unticked card. */
+.fj-suggestion {
+  --fj-send-accent: var(--warning-color, #b26a00);
+  --fj-send-ink: color-mix(in srgb, var(--fj-send-accent) 35%, var(--text-primary, #e8e8e8));
+  margin-bottom: 0.85rem;
+  padding: 0.75rem;
+  border: 1px solid var(--fj-line);
+  border-radius: 12px;
+}
+
+.fj-suggestion-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+}
+
+.fj-suggestion-face {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: var(--bg-tertiary, transparent);
+  border: 1px solid var(--fj-line-strong);
+  color: var(--text-primary, #e8e8e8);
+  font-weight: 700;
+}
+
+.fj-suggestion-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary, #e8e8e8);
+}
+
+.fj-suggestion-label {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--fj-line-strong);
+  border-radius: 999px;
+  color: var(--text-secondary, #9aa0a6);
+  font-size: 0.75rem;
+}
+
+.fj-suggestion-paragraph {
+  margin: 0.5rem 0;
+  font-size: 0.85rem;
+  color: var(--text-primary, #e8e8e8);
+  overflow-wrap: anywhere;
+}
+
+.fj-suggestion .fj-btn {
+  min-height: 44px;
+  margin-top: 0.5rem;
+}
+
 .fj-folder-head {
   display: flex;
   align-items: center;

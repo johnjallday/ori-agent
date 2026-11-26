@@ -264,7 +264,7 @@ func (s *Service) UndoFiling(ctx context.Context, owner, workspaceID, filingID s
 			if action.Send != nil {
 				receiverRoot = receivers[action.Send.ReceiverWorkspaceID]
 			}
-			_, _ = s.undoSend(ctx, settings, root, action, receiverRoot)
+			_ = s.undoSend(ctx, settings, root, action, receiverRoot)
 		case OperationTrash:
 			_, _ = s.restoreFromTrash(settings, root, action, owner)
 		default:

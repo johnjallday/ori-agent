@@ -480,6 +480,95 @@ function leavingCard(h, card, ctx, folderName) {
   return article;
 }
 
+export const SUGGESTION_LABEL = 'A suggestion, it moves nothing';
+
+// suggestionSection is "Ask <agent> what to send" and, once asked, the agent's
+// suggestion: its face and name, the label, its paragraph whole, and one card per
+// workspace with the tick off. File names are untrusted text, so a suggested send
+// always needs this one extra tick (FR 48).
+function suggestionSection(h, picture, ctx) {
+  const section = h('section', 'fj-suggestion');
+  section.setAttribute('aria-labelledby', 'fileJanitorSuggestionTitle');
+  const suggestion = picture.suggestion;
+  const agent = (suggestion && suggestion.agent_name) || ctx.askAgent || 'The Filing agent';
+  const head = h('div', 'fj-suggestion-head');
+  const face = h('span', 'fj-suggestion-face', Array.from(agent)[0] || '?');
+  face.setAttribute('aria-hidden', 'true');
+  head.appendChild(face);
+  const title = h('h4', 'fj-suggestion-title', agent);
+  title.id = 'fileJanitorSuggestionTitle';
+  head.appendChild(title);
+  if (suggestion) head.appendChild(h('span', 'fj-suggestion-label', SUGGESTION_LABEL));
+  section.appendChild(head);
+
+  if (suggestion && suggestion.empty) {
+    section.appendChild(h('p', 'fj-suggestion-paragraph', agent + ' had no suggestion.'));
+  } else if (suggestion) {
+    section.appendChild(h('p', 'fj-suggestion-paragraph', suggestion.paragraph || ''));
+    const cards = h('div', 'fj-folder-cards');
+    for (const card of suggestion.cards || []) {
+      const article = h('article', 'fj-leaving-card fj-suggested-card is-unticked');
+      article.setAttribute('data-fj-suggested', card.connection_id);
+      const label = h('label', 'fj-folder-tick');
+      const box = h('input');
+      box.type = 'checkbox';
+      box.id = 'fileJanitorSuggested-' + card.connection_id;
+      box.checked = card.group_state === 'ticked' || card.group_state === 'partial';
+      box.indeterminate = card.group_state === 'partial';
+      box.disabled = !ctx.editsAvailable;
+      box.setAttribute(
+        'aria-label',
+        'Send the ' +
+          filesWord(card.count) +
+          ' ' +
+          agent +
+          ' suggested to the ' +
+          card.receiver_name +
+          ' workspace'
+      );
+      box.setAttribute(
+        'aria-checked',
+        box.indeterminate ? 'mixed' : box.checked ? 'true' : 'false'
+      );
+      box.addEventListener('change', () => ctx.onTickSuggestion?.(card, box.checked));
+      label.appendChild(box);
+      label.appendChild(h('span', 'fj-folder-name', card.receiver_name));
+      label.appendChild(h('span', 'fj-leaving-kind', ' workspace'));
+      const head = h('div', 'fj-folder-head');
+      head.appendChild(label);
+      head.appendChild(h('span', 'fj-folder-count', String(card.count)));
+      article.appendChild(head);
+      const names = h('ul', 'fj-folder-files');
+      for (const file of card.files || []) {
+        const item = h('li', 'fj-file');
+        setName(h, item, file.name);
+        names.appendChild(item);
+      }
+      article.appendChild(names);
+      if (card.count > (card.files || []).length)
+        article.appendChild(h('p', 'fj-sub', 'and ' + (card.count - card.files.length) + ' more'));
+      article.appendChild(
+        h('p', 'fj-leaving-note', 'Tick to send these too. Nothing moves until you press File.')
+      );
+      cards.appendChild(article);
+    }
+    section.appendChild(cards);
+  }
+  if (ctx.askAgent) {
+    const ask = h(
+      'button',
+      'fj-btn fj-btn-secondary',
+      ctx.asking ? 'Asking ' + ctx.askAgent + '…' : 'Ask ' + ctx.askAgent + ' what to send'
+    );
+    ask.type = 'button';
+    ask.id = 'fileJanitorAskAgent';
+    ask.disabled = Boolean(ctx.asking) || !ctx.editsAvailable;
+    ask.addEventListener('click', () => ctx.onAskAgent?.());
+    section.appendChild(ask);
+  }
+  return section;
+}
+
 // leavingFrame is "Leaving <folder>", drawn above the folder's own frame whenever a
 // connection is on (FR 20).
 function leavingFrame(h, picture, ctx, folderName) {
@@ -515,6 +604,10 @@ export function renderPicture(doc, picture, ctx) {
   root.appendChild(lead);
 
   const leaving = Array.isArray(picture.leaving) && picture.leaving.length > 0;
+  // The agent's suggestion, above Leaving (FR 43, 47, 48). With no model the
+  // console passes no agent and the server sends no suggestion: nothing is drawn.
+  if (leaving && (ctx.askAgent || picture.suggestion))
+    root.appendChild(suggestionSection(h, picture, ctx));
   if (leaving) root.appendChild(leavingFrame(h, picture, ctx, folderName));
 
   const frame = h('section', 'fj-frame');

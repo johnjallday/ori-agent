@@ -57,10 +57,12 @@ func receiverPaths(receivers map[string]string) []string {
 
 // undoSend puts one sent file back. The caller holds both folders' locks and has
 // claimed the action (UndoInProgress). receiverRoot is "" when the receiver no
-// longer manages the folder the file went to.
-func (s *Service) undoSend(ctx context.Context, settings JanitorSettings, root string, action FileAction, receiverRoot string) (UndoResult, error) {
-	fail := func(message string) (UndoResult, error) {
-		return s.finishUndo(settings.WorkspaceID, action, UndoFailed, message)
+// longer manages the folder the file went to. Every outcome is journaled on the
+// action; the returned error is only a failure to record it.
+func (s *Service) undoSend(ctx context.Context, settings JanitorSettings, root string, action FileAction, receiverRoot string) error {
+	fail := func(message string) error {
+		_, err := s.finishUndo(settings.WorkspaceID, action, UndoFailed, message)
+		return err
 	}
 	sent := action.Send
 	if sent == nil || action.AfterFingerprint.FileID == "" {
@@ -80,15 +82,12 @@ func (s *Service) undoSend(ctx context.Context, settings JanitorSettings, root s
 		DestRoot: root, DestRootID: sent.RootDirID,
 	})
 	if err == nil {
-		result, err := s.finishUndo(settings.WorkspaceID, action, UndoDone, "")
-		if err != nil {
-			return UndoResult{}, err
+		if _, err := s.finishUndo(settings.WorkspaceID, action, UndoDone, ""); err != nil {
+			return err
 		}
-		result.RestoredTo = action.SourceName
-		result.Message = "Put back in the folder."
 		// A file the person just took back must not be re-proposed by the next scan.
 		s.suppressRestored(settings.WorkspaceID, root, action.SourceName)
-		return result, nil
+		return nil
 	}
 	var race *MoveRaceError
 	switch {

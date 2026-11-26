@@ -129,12 +129,12 @@ func TestConditionalSend_NeverReplacesAFileAlreadyInTheReceiver(t *testing.T) {
 func TestConditionalSend_OnlyTheReviewedFileIsSent(t *testing.T) {
 	t.Run("the file changed since the review", func(t *testing.T) {
 		f := newSendFixture(t)
-		expect := f.sender.write("lease.pdf", "reviewed")
-		f.sender.write("lease.pdf", "edited after the review, longer")
-		if _, err := f.move(f.send("lease.pdf", expect)); !errors.Is(err, ErrMoveSourceChanged) {
+		expect := f.sender.write("deed.pdf", "reviewed")
+		f.sender.write("deed.pdf", "edited after the review, longer")
+		if _, err := f.move(f.send("deed.pdf", expect)); !errors.Is(err, ErrMoveSourceChanged) {
 			t.Fatalf("want a changed source, got %v", err)
 		}
-		f.receiver.mustBeAbsent("lease.pdf")
+		f.receiver.mustBeAbsent("deed.pdf")
 	})
 	t.Run("a different file took the name at the last instant", func(t *testing.T) {
 		f := newSendFixture(t)

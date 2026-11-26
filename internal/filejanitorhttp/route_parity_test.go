@@ -143,6 +143,7 @@ func TestBothPrefixesEnforceOwnership(t *testing.T) {
 		{"list arrivals", http.MethodGet, "/arrivals", ""},
 		{"dismiss an arrival", http.MethodPost, "/arrivals/arrival-1/dismiss", ""},
 		{"undo a send", http.MethodPost, "/arrivals/arrival-1/undo", ""},
+		{"ask for a suggestion", http.MethodPost, "/batches/batch-1/suggestion", ""},
 	}
 
 	for _, tc := range cases {

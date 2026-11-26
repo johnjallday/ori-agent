@@ -50,7 +50,7 @@ func (r ReviewDraftEdit) validate() error {
 	switch r.Action {
 	// The send actions (see send_review.go). Every other action refuses a
 	// connection ID, so nothing else can mark a send.
-	case "send_connection", "unsend_connection", "keep_connection":
+	case "send_connection", "unsend_connection", "keep_connection", "send_suggested", "unsend_suggested":
 		return validIf(connection && !group && !files && !category)
 	case "send_group":
 		return validIf(connection && group && !files && !category)
@@ -437,6 +437,93 @@ func (s *Service) EditReviewDraft(owner, workspaceID, batchID string, request Re
 				if choice.ConnectionID == route.ConnectionID {
 					choice.ConnectionID = ""
 					choices[id] = choice
+				}
+			}
+		case "send_suggested", "unsend_suggested":
+			// The agent's suggestion card (FR 48): its tick turns exactly the files
+			// it names into sends on that connection, and unticking returns them to
+			// where the rule had them. Only a suggestion that still applies counts.
+			suggestion, found := suggestionFor(*state, batchID)
+			if !found || !suggestionCurrent(*state, suggestion) {
+				return ErrReviewConflict
+			}
+			var files []SuggestedFile
+			for _, send := range suggestion.Sends {
+				if send.ConnectionID == route.ConnectionID {
+					files = send.Files
+				}
+			}
+			if len(files) == 0 {
+				return ErrReviewConflict
+			}
+			groupOf := map[string]ReviewGroup{}
+			for _, group := range groups.Groups {
+				members, _ := groups.Members(group.ID)
+				for _, member := range members {
+					groupOf[member.Candidate.ID] = group
+				}
+			}
+			if request.Action == "send_suggested" {
+				marked, left := 0, 0
+				for _, file := range files {
+					index, ok := byID[file.CandidateID]
+					if !ok {
+						continue
+					}
+					candidate := state.Candidates[index]
+					prior, exists := choices[candidate.ID]
+					if candidate.Decision == DecisionTrash || (exists && prior.Operation != OperationMove) {
+						continue // a Trash mark is the person's own choice and stays
+					}
+					// A file of a kind this connection does not carry goes as its
+					// first kind, as a row sent with "Send to <receiver>" does.
+					answer := Category("")
+					if kind, err := LookupCategory(string(candidate.EffectiveCategory())); err != nil || !route.Carries(kind.ID) {
+						answer = route.Kinds[0]
+					}
+					if !exists {
+						if err := selectMove(candidate.ID, "", answer); err != nil {
+							if errors.Is(err, errMemberChanged) {
+								left++
+								continue
+							}
+							return err
+						}
+						prior = choices[candidate.ID]
+					}
+					if answer != "" {
+						c := &state.Candidates[index]
+						c.Decision, c.DecisionCategory, c.DecidedAt = DecisionMove, answer, s.clock()
+						c.DecisionGroupID = ""
+					}
+					prior.ConnectionID = route.ConnectionID
+					choices[candidate.ID] = prior
+					marked++
+				}
+				if marked == 0 && left > 0 {
+					return errMemberChanged
+				}
+				break
+			}
+			for _, file := range files {
+				prior, exists := choices[file.CandidateID]
+				index, ok := byID[file.CandidateID]
+				if !exists || !ok || prior.ConnectionID != route.ConnectionID {
+					continue
+				}
+				candidate := &state.Candidates[index]
+				group := groupOf[candidate.ID]
+				// The rule's own send stays: a confident file of a kind this
+				// connection carries was leaving before the suggestion.
+				if group.Kind == "filing" && route.Carries(group.Category) &&
+					(candidate.DecisionCategory == "" || candidate.DecisionCategory == group.Category) {
+					continue
+				}
+				delete(choices, candidate.ID)
+				// Take back the kind the suggestion's tick gave it.
+				if candidate.Decision == DecisionMove && candidate.DecisionGroupID == "" &&
+					route.Carries(candidate.DecisionCategory) && candidate.DecisionCategory != candidate.Category {
+					candidate.Decision, candidate.DecisionCategory, candidate.DecidedAt = DecisionNone, "", time.Time{}
 				}
 			}
 		case "send_group":

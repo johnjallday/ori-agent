@@ -2117,6 +2117,20 @@
               card.files.length <= 3 &&
               Array.isArray(card.not_sent_files) &&
               card.not_sent_files.length <= 3
+          ))) &&
+      // The agent's suggestion: its paragraph and one card per workspace.
+      (value.suggestion === undefined ||
+        (value.suggestion &&
+          typeof value.suggestion.paragraph === 'string' &&
+          value.suggestion.paragraph.length <= 700 &&
+          Array.isArray(value.suggestion.cards) &&
+          value.suggestion.cards.length <= 8 &&
+          value.suggestion.cards.every(
+            card =>
+              typeof card.connection_id === 'string' &&
+              count(card.count) &&
+              Array.isArray(card.files) &&
+              card.files.length <= 3
           )))
     );
   }
@@ -2572,6 +2586,48 @@
     }
   }
 
+  // The agent slice is on only with a model set and a Filing agent here (FR 42).
+  let askingAgent = false;
+
+  function suggestionAgentName() {
+    const settings = (lastStatus && lastStatus.settings) || {};
+    const guidance = lastStatus && lastStatus.guidance;
+    if (!settings.content_mode || settings.content_mode === 'metadata_only') return '';
+    if (!guidance || !guidance.available) return '';
+    if (!picture || !(picture.leaving || []).length || !(picture.waiting > 0)) return '';
+    return guidance.agent_name || 'The Curator';
+  }
+
+  async function askAgentForSuggestion() {
+    const name = suggestionAgentName();
+    const batchID = lastBatch?.id;
+    if (!name || !batchID || askingAgent) return;
+    askingAgent = true;
+    renderBatch();
+    try {
+      const response = await fetch(
+        apiBase(wsId()) + '/batches/' + encodeURIComponent(batchID) + '/suggestion',
+        { method: 'POST' }
+      );
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const apiError = body.error || body;
+        throw new Error((apiError && apiError.message) || name + ' could not be asked.');
+      }
+      const suggestion = body.suggestion || {};
+      const count = (suggestion.cards || []).reduce((total, card) => total + (card.count || 0), 0);
+      announce(
+        suggestion.empty || count === 0
+          ? name + ' had no suggestion.'
+          : name + ' suggested ' + (count === 1 ? '1 file' : count + ' files') + ' to send.'
+      );
+    } catch (error) {
+      showError(error.message);
+    }
+    askingAgent = false;
+    await loadReviewPicture();
+  }
+
   // openConnectFromReview switches to Settings with the connect card open.
   function openConnectFromReview() {
     selectTab('settings');
@@ -2960,6 +3016,18 @@
           void answerLeaving(card, ticked ? 'send_connection' : 'unsend_connection', binding),
         onKeepLeaving: card => void answerLeaving(card, 'keep_connection', binding),
         onSendLeaving: card => void answerLeaving(card, 'send_connection', binding),
+        // The agent's suggestion (FR 42 to 48): asked only on the button, and only
+        // with a model set; its card's tick is the one way its files become sends.
+        askAgent: suggestionAgentName(),
+        asking: askingAgent,
+        onAskAgent: () => void askAgentForSuggestion(),
+        onTickSuggestion: (card, ticked) =>
+          void submitReviewEdit(
+            ticked ? 'send_suggested' : 'unsend_suggested',
+            { connection_id: card.connection_id },
+            null,
+            binding
+          ),
         onOpenMore: (pickedSection, key) => {
           if (pictureMore?.section === pickedSection && pictureMore?.key === key)
             closePictureMore();

@@ -259,6 +259,21 @@ func TestConnect_RefusesWithOnePlainSentence(t *testing.T) {
 	})
 }
 
+// A chain is not a pair in both directions: Documents may send on to a third
+// workspace while it receives from Downloads (FR 8 refuses only the reverse).
+func TestConnect_AChainOfOneWayConnectionsIsAllowed(t *testing.T) {
+	f := newConnectionFixture(t)
+	f.mustConnect("ws-1", "ws-2", "documents")
+	f.setUp("ws-3", "Music")
+	onward := f.mustConnect("ws-2", "ws-3", "audio")
+	if !onward.On || onward.SenderName != "Documents" || onward.ReceiverName != "Music" {
+		t.Fatalf("onward connection: %+v", onward)
+	}
+	if got := f.list("ws-2"); len(got.SendsTo) != 1 || len(got.ReceivesFrom) != 1 {
+		t.Fatalf("Documents both sends and receives: %+v", got)
+	}
+}
+
 func TestConnection_EndsWhenEitherSideChangesAndBothSidesSaySo(t *testing.T) {
 	ended := func(t *testing.T, f *connectionFixture, want string) {
 		t.Helper()
