@@ -15,7 +15,8 @@ PRDs and task lists are both opt-in:
 - A **PRD** is useful when the team does not yet know exactly what to build. Its
   most valuable output is the clarification round.
 - A **task list** is useful when agreed work spans several files or surfaces and
-  benefits from resumable checkpoints, demos, commits, and a delivery gate.
+  a builder needs its scope, boundaries, and acceptance demo written down. It
+  states outcomes and constraints, not steps.
 - Work whose shape is already agreed skips both and starts in an isolated
   worktree.
 
@@ -31,13 +32,13 @@ Determine the mode from the instruction that invoked this skill.
 `wt plan --issue <N>` launches this mode. Read the Issue snapshot named by the
 bootstrap prompt and write the requested planning artifacts in
 `ori-agent-dev/tasks/`. Never implement, create a branch, create a worktree, or
-run `wt start`. Stop after the detailed task list is saved; a person or a
+run `wt start`. Stop after the approved task list is saved; a person or a
 separate handoff action starts implementation.
 
 ### Plan-and-deliver mode
 
 Use this mode only when the user directly asked the current session to carry the
-work through implementation. After the detailed task list is approved and saved,
+work through implementation. After the task list is approved and saved,
 create the feature worktree with `wt start <feature>` and continue there. Work
 that intentionally skips planning starts with `wt new <name>`.
 
@@ -90,143 +91,178 @@ Generate a task list only when explicitly requested or when a `wt plan` starter
 requests one. Approved Ori Plans are exported by compiled application code, not
 by invoking this skill a second time.
 
+A task list records what a builder cannot read off the code: the outcome of each
+parent group, the boundaries it must respect, the demo that proves the feature,
+and who owns what. It does not prescribe steps, files, or test commands. The
+builder reads the code at build time, when more is known than at planning time,
+and chooses the steps. The _Standing steps_ and the gates in this skill apply to
+every feature, so a task list does not repeat them.
+
 ### Planning gate
 
 1. Read the requirements, PRD, approved Ori Plan, and relevant repository
    evidence.
-2. Identify uncertainty hotspots, external or live-system questions, repeated
-   implementation patterns, shared-file contention, and genuinely independent
-   work before choosing an execution shape. Assess companion dependencies
-   below, including whether local plugins need changes; present that decision
-   and its evidence with the parent groups.
-3. Write only the high-level parent groups, usually about five. Prefer thin
-   end-to-end outcomes over architecture layers.
-4. Add a recommended model chip to every implementation parent group. The parent
-   chip is the default for most of that group; reserve sub-task overrides for
-   small deep-reasoning or mechanical pockets.
-5. Present the parent groups and wait for `Go` before expanding sub-tasks.
+2. Identify uncertainty hotspots, external or live-system questions, shared-file
+   contention, and genuinely independent work. Assess companion dependencies
+   below, including whether local plugins need changes.
+3. Write the task list in the shape below: the scope and non-goals, the parent
+   groups (usually three to five), the acceptance demo, and dependencies and
+   ownership. Prefer thin end-to-end outcomes over architecture layers.
+4. Add a recommended model chip to every implementation parent group, and name
+   the builder model the chips imply (see _The builder model_).
+5. Present the task list, with the companion decision and its evidence, and
+   wait for `Go`. When the file began as a planning starter, a draft saved for
+   review before `Go` keeps its `ori-devflow: planning-starter` marker so
+   `wt start` still refuses it.
+6. After `Go`, save the approved task list as `tasks/tasks-<feature>.md`. The
+   final file must not contain `ori-devflow: planning-starter`. There is no
+   separate outline file and no expansion step: the approved parent groups are
+   the task list. Add sub-tasks only under _When to add sub-tasks_.
 
-This is the first of two planned checklist pauses. In planning-only mode, do not ask
+This is the first of two planned pauses. In planning-only mode, do not ask
 for an implementation-agent choice: the later handoff owns that decision. In a
 direct plan-and-deliver session, honor any agent choice the user supplied;
 otherwise use the repository's configured primary agent.
 
-### Detailed checklist
-
-After `Go`:
-
-1. Break every parent into concrete, ordered sub-tasks.
-2. Add an `Execution Topology` section that names the integration owner, writing
-   rule, delegation lanes, model hotspots, parallel-safe boundaries, and
-   validation cadence. Name which of the standard lanes (demo verification,
-   scribe, exploration; see _Execution topology and delegation_) apply. Write
-   `none` with a reason only for work that is cheaper in the primary context.
-3. Add a `Companion Dependencies` section using the assessment below. Include
-   concrete companion implementation, integration-test, and delivery tasks when
-   needed; identify which Ori steps depend on them. Prefer vertical slices: a
-   group should produce a narrow real path through the necessary layers, not
-   “all backend” followed by “all frontend.”
-4. Order each group for the fastest honest feedback. Consolidate related
-   external or live-system unknowns into one early findings-first spike when its
-   result will govern multiple later groups.
-5. Keep the parent model chip as the group's default. Add a model override to an
-   individual sub-task when expensive reasoning or mechanical work is localized;
-   do not assign a deep model to routine implementation after the contract is
-   settled.
-6. End each group with `Commit: "<conventional message>"`. Plan one `Validate:`
-   checkpoint per implementation group, naming the affected checks. Put it before
-   the `Demo:` item, or directly before the commit when no demo applies. Keep test
-   authoring alongside the behavior it covers; do not add suite runs to every
-   sub-task. Follow _Validation cadence_ for early risk checks and delivery gates.
-7. For every user-visible group, place a `Demo:` item immediately before its
-   commit. Scope it to the group's changed path, not a full feature tour.
-8. Include the following delivery checkpoints, keeping the merge separate from
-   the actions that precede it:
-   - `Permission sweep`
-   - `Write manual test guide: tasks/test-guide-<feature>.md`
-   - Complete required validation, demos, and milestone commits
-   - Prepare the PR body with evidence and limitations
-   - `PR readiness: verify the gate, then open the PR with wt pr`
-   - `Merge: a person reviews the open PR and squash-merges it to dev`
-   - `Run wt done <feature> after merge`
-9. List relevant implementation and test files.
-10. Replace the planning starter with the complete checklist. The final file must
-    not contain `ori-devflow: planning-starter`.
-11. Keep the checklist reusable by a later builder. Planning history may record
-    approval and preparation facts, but must not address the future reader with
-    session-specific commands such as “this session stops after saving.” Those
-    instructions belong to the planning invocation, not the implementation scope.
-    Name task dependencies explicitly; a blocked companion task must not become
-    an accidental prerequisite for otherwise independent host work.
-
-Use this shape:
+### Shape
 
 ```markdown
-## Relevant Files
+# <Feature name>
 
-- `path/file.go` - Why this file is relevant.
-- `path/file_test.go` - Tests for the behavior above.
+One paragraph: what ships and for whom, delivered as one PR to `dev`; what it
+builds on; and what it is not (the non-goals a builder would otherwise drift
+into).
 
-### Notes
-
-- Use the repository's own test commands.
-
-## Instructions for Completing Tasks
-
-Implementation agent: `[configured primary, explicit override, or worktree-only]`
+Implementation agent: `[claude, codex, pi, or worktree-only]`
+Implementation model: `[opus or sonnet; see The builder model]`
 
 Follow `.agents/skills/task-planning/SKILL.md` for operating mode, continuous
-execution, dependency preflight, and PR readiness. The current authorized handoff
-supplies the mode; this document defines scope, not permission to start.
-Check off each sub-task immediately after it is complete. Record findings, real
-test counts, and evidence paths in `tasks/findings-<feature>.md`; this checklist
-holds checkbox state only.
-
-## Execution Topology
-
-- Integration owner: `[primary implementation agent]`
-- Writing rule: one active writer at a time; the integration owner owns shared files
-- Delegation: `[demo verification for every Demo: item; scribe for checkbox ticks, findings log, test guide, and PR body; exploration sweeps at group starts; other bounded findings-only review; or none with a reason]`
-- Deep-model hotspots: `[specific unresolved decisions, or none]`
-- Parallel-safe work: `[file-disjoint, independently verifiable work, or none]`
-- Validation cadence: `[smallest useful checks after coherent changes; one affected-test checkpoint and changed-path demo per group; broad regression and full repository gate at delivery; name any early risk checks]`
-
-## Companion Dependencies
-
-- Assessment: `[required / not required / unresolved]` — `[evidence and reason]`
-- For each required or unresolved companion: record source, change scope,
-  owner/preparation, validation, and delivery using the canonical skill's
-  assessment fields.
-
-## Cross-Repository Contract
-
-Only when a companion is `required`; see _Cross-repository contract_.
-
-- Host features: `[flag → where Ori declares it; which companion manifest requires it]`
-- Versions: `[protocol / manifest / blueprint / schema: before → after]`
-- Releases: `[companion version to publish; Ori reviewed-floor bump; approval owner]`
-- Candidate path: `[companion worktree; harness flag Ori uses to test against it]`
-- Companion checklist: `[tasks/tasks-<feature>.md inside that companion worktree]`
-- Order: `[contract → candidates → Ori integration → companion PR + release → floor bump → Ori PR]`
+execution, standing steps, dependency preflight, and PR readiness. The current
+authorized handoff supplies the mode; this document defines scope, not
+permission to start. The builder chooses the steps. Tick a group when it is
+committed; record decisions, real test counts, and evidence paths in
+`tasks/findings-<feature>.md`.
 
 ## Tasks
 
-- [ ] 1.0 First vertical outcome `Model: Sonnet 5`
-  - [ ] 1.1 Concrete implementation step with focused behavior tests
-  - [ ] 1.2 Validate: run the named affected package/module checks
-  - [ ] 1.3 Demo: drive the changed user-visible path with `wt demo`
-  - [ ] 1.4 Commit: "feat(scope): deliver first outcome"
-- [ ] 2.0 Final delivery outcome `Model: Sonnet 5`
-  - [ ] 2.1 Concrete implementation step
-  - [ ] 2.2 Permission sweep
-  - [ ] 2.3 Write manual test guide: `tasks/test-guide-<feature>.md`
-  - [ ] 2.4 Complete required validation and demos
-  - [ ] 2.5 Commit: "test(scope): verify the completed feature"
-  - [ ] 2.6 Prepare PR body with evidence and limitations
-  - [ ] 2.7 PR readiness: verify the gate, then open the PR with `wt pr`
-  - [ ] 2.8 Merge: a person reviews the open PR and squash-merges it to `dev`
-  - [ ] 2.9 Run `wt done <feature>` after merge
+- [ ] 1.0 First vertical outcome `Model: opus`
+  What a person can do, or what is true, when this group lands. Boundaries:
+  what must keep working, the shortcut not to take, the states that must be
+  handled. Settle first: the unknown that governs the rest, if there is one.
+- [ ] 2.0 Next vertical outcome `Model: sonnet`
+  Outcome, boundaries, states.
+- [ ] 3.0 Verify the journey and open a PR `Model: sonnet`
+  The journeys, layouts, and regressions this feature needs beyond the
+  standing delivery steps. Ends when the PR is open: verify the gate, then
+  open the PR with `wt pr`.
+- [ ] 4.0 Merge: a person reviews the open PR and squash-merges it to `dev`
+  Then `wt done <feature>`. Not an agent step.
+
+## Acceptance demo
+
+The one journey that proves the feature in the real UI or API: the starting
+state, the actions, what must be true at the end, and the refusal or no-action
+path that must also hold.
+
+## Dependencies and ownership
+
+- Companion dependencies: `[required / not required / unresolved]` — `[evidence and reason]`
+- Ownership: `[what the integration owner must keep; file-disjoint work that can be prepared independently, or none]`
+- Deep-model hotspots: `[specific unresolved decisions, or none]`
+- Entry points: `[only where the obvious place is wrong or the owner is not discoverable, or none]`
 ```
+
+The devtools read specific lines of this file, so their wording is part of the
+shape:
+
+- **`Implementation agent` and `Implementation model`** each start their own
+  line, with the value in backticks and nothing after it. `wt start` and a
+  remote Start launch the builder on that model; the Away dispatcher requires
+  both lines. Write the agent as exactly `claude`, `codex`, or `pi` (the
+  configured primary unless the user chose another), or `worktree-only` with no
+  model line when no agent should start.
+- **Each checkbox line** carries only the group's title and model chip.
+  Progress displays and handoff previews show that line, and the devtools
+  classify it to decide what an unattended agent may continue with. The text
+  under it is for the builder and is not classified.
+- **The last agent group's title says `open a PR`, and the merge line keeps its
+  sentence on the checkbox line.** Those words are what stop an unattended
+  agent before the PR and the merge. A title that names a demo, a sign-off or
+  approval, a credential, a release, or a deploy is treated as a person's too,
+  so keep those words out of the title of a group the builder should do.
+- **A task list queued for the Away dispatcher** adds a `## Relevant Files`
+  section listing the paths it expects to change. The dispatcher's overlap
+  check reads only that section, and a plan without one is never blocked by it.
+
+### Writing a parent group
+
+Each group is a thin end-to-end outcome a person can see or verify: a narrow
+real path through the necessary layers, not "all backend" followed by "all
+frontend." Order groups for the fastest honest feedback. The text under a group
+says:
+
+- **Outcome:** what a person can do, or what is true, when the group lands.
+- **Boundaries:** the invariants and "do not" lines the code will not tell a
+  builder: behavior that must keep working, an authority that must not be
+  loosened, the tempting shortcut that is wrong, the store or engine to reuse
+  instead of building a second one.
+- **States:** the empty, failure, read-only, partial, and replayed cases that
+  must be handled, when the outcome does not already imply them.
+- **Settle first:** an unknown whose answer governs later work. Consolidate
+  related external or live-system unknowns into one early findings-first spike
+  and name the groups that depend on it.
+
+Leave out ordered implementation steps, file lists, test names and commands,
+commit messages, and every standing step. When a PRD exists, cite its
+requirement numbers instead of restating them. Test each line by asking whether
+a capable builder reading the code would get it wrong, or could not know it,
+without the line; delete the lines that fail. A task list for one PR usually
+fits on one screen. One that runs much longer is prescribing steps.
+
+### Standing steps
+
+These apply to every feature and are not written into its task list.
+
+- **Every implementation group:** focused tests alongside the behavior; one
+  validation checkpoint for the affected checks (_Validation cadence_); a
+  changed-path demo when the group is user-visible (_Demo checkpoints_); one
+  conventional commit; then tick the group and add its findings entry
+  (_Findings log_).
+- **The delivery group:** the acceptance demo and complete user journeys; the
+  permission sweep; the manual test guide; the full `make ci-local` gate; the
+  PR body with evidence and limitations; then the _PR readiness gate_ and
+  `wt pr`.
+- **After the PR is open:** the merge and `wt done <feature>` belong to a
+  person. Their group stays unchecked.
+
+### When to add sub-tasks
+
+Sub-tasks are the exception. Add ordered sub-tasks under a group only when the
+order of steps is itself a requirement:
+
+- A companion is `required`: the order across repositories is part of the
+  _Cross-repository contract_.
+- The work is an epic: several PRs or sessions on one long-lived branch need
+  shared, resumable state.
+- The sequence is the risk: a data migration, a staged permission change, or a
+  rollout with a compatibility window.
+- The user asks for a detailed checklist.
+
+Expand only the groups that need it. A sub-task is an ordered outcome with its
+dependencies named. It is still not a file-level instruction and still omits
+the standing steps. Put a model override on a sub-task only when deep reasoning
+or mechanical work is localized there.
+
+A checklist in the older detailed shape, with explicit `Validate:`, `Demo:`,
+`Commit:`, and delivery sub-tasks, or one exported from an approved Ori Plan,
+stays valid: follow its items as written.
+
+Keep the task list reusable by a later builder. Planning history may record
+approval and preparation facts, but must not address the future reader with
+session-specific commands such as "this session stops after saving." Those
+instructions belong to the planning invocation, not the implementation scope.
+Name group dependencies explicitly; a blocked companion task must not become
+an accidental prerequisite for otherwise independent host work.
 
 ## Companion dependency assessment
 
@@ -238,7 +274,9 @@ host-only behavior can be `not required`, while a plugin-owned blueprint,
 manifest, prompt, or runtime contract may require coordinated changes. Missing
 source or unavailable evidence means `unresolved`, not `not required`.
 
-For each required or unresolved companion, record:
+`not required` is the one `Companion dependencies` line under `Dependencies and
+ownership`, with its evidence. For each required or unresolved companion, add a
+`## Companion Dependencies` section to the task list and record:
 
 - **Source identity:** canonical repository, observed checkout path and exact
   base revision, and applicable repository guidance. Distinguish editable source
@@ -247,8 +285,8 @@ For each required or unresolved companion, record:
   name alone. Mark facts not inspected as unverified.
 - **Change scope:** affected files/contracts, plugin/blueprint/schema versions,
   host-feature compatibility, and why a host-only change is insufficient. For
-  unresolved scope, add an early bounded findings task and name the dependent
-  steps it must settle before implementation.
+  unresolved scope, add an early bounded `Settle first` spike and name the
+  groups it must settle before implementation.
 - **Owner and preparation:** companion implementation owner, separately isolated
   worktree/branch and preparation status (`not prepared` until verified), and
   who will arrange its authorized handoff. A proposed path is not a prepared
@@ -272,8 +310,10 @@ tagging a release, updating a reviewed pin, or resetting real data.
 ### Cross-repository contract
 
 When the assessment marks a companion `required`, the task list carries a
-`## Cross-Repository Contract` section. It is the only planning text a companion
-builder receives besides its own checklist, so it must stand on its own:
+`## Cross-Repository Contract` section, and the groups that depend on the
+companion carry ordered sub-tasks (see _When to add sub-tasks_). The contract is
+the only planning text a companion builder receives besides its own checklist,
+so it must stand on its own:
 
 - **Host features:** every new host-feature flag, where Ori declares it
   (`internal/plugin/surface_descriptor.go`), and which companion manifest
@@ -308,9 +348,11 @@ states.
 
 Before initial implementation and on continuation:
 
-1. Read the full planning artifacts, including `Execution Topology` and
-   `Companion Dependencies`, before acting on the next unchecked item. The
-   handoff's next-item preview can be truncated; it is not the complete scope.
+1. Read the full planning artifacts before acting on the next unchecked item:
+   every group's boundaries, the acceptance demo, and `Dependencies and
+   ownership`, plus any `Companion Dependencies`, `Cross-Repository Contract`,
+   or older `Execution Topology` section. The handoff's next-item preview shows
+   only a group's title; it is not the complete scope.
 2. Revalidate relevant source identity, revisions, ownership, and preparation
    from the current worktree. For older plans without an assessment, perform a
    bounded read-only assessment and record the result in the active checklist
@@ -354,24 +396,29 @@ owner, preparation, or authorization is a real execution boundary.
 
 ## Execution topology and delegation
 
+This section is the default topology for every feature. A task list records
+only departures from it, under `Dependencies and ownership`: file-disjoint work
+that can run in parallel, a named deep-model hotspot, or a lane that does not
+apply.
+
 Adding agents is not itself a cost optimization: every separate context pays a
 repository-reading and coordination tax. Optimize first by routing the smallest
 uncertain unit to the right model.
 
 1. Keep one primary integration owner for a feature branch.
-2. Start the feature session on the balanced tier and keep it there, whatever
-   chips the groups carry (see _Model recommendations_). A mid-session model
-   switch needs a person and re-reads the whole context uncached, so do not
-   plan on one.
+2. Start the feature session on the task list's `Implementation model` and keep
+   it there, whatever chips the groups carry (see _Model recommendations_). A
+   mid-session model switch needs a person and re-reads the whole context
+   uncached, so do not plan on one.
 3. Use a short-lived subagent for a bounded research spike, test matrix, focused
    review, or other output that can return as findings without editing shared
    product files.
 4. Use a persistent separate role only for a genuinely independent long-running
    workstream or repeated review responsibility.
-5. Route deep models to specific decision-bearing tasks. For a deep chip or a
-   named hotspot, a findings-only deep-tier subagent settles the contract and
-   the owner implements it on the balanced tier. Escalate the same way when the
-   same check fails twice with no new approach.
+5. Route stronger models to specific decision-bearing tasks. For a chip above
+   the builder's model or a named hotspot, a findings-only subagent on that
+   model settles the contract and the owner implements it. Escalate the same
+   way when the same check fails twice with no new approach.
 6. Allow only one active writer in a shared worktree. Delegated edits must be
    sequential and explicitly file-bounded; concurrent coding requires separate
    branches, file-disjoint ownership, independent verification, and a planned
@@ -396,21 +443,27 @@ top-level planning markdown into `tasks/archive/` and drops
 `tasks/evidence-<feature>/` and everything else with the worktree, so anything
 worth keeping afterwards belongs in the PR body or the findings log.
 
-- **Demo verification:** every `Demo:` item. The lane drives the running demo
-  server, captures and inspects the screenshots, and returns a verdict of at
-  most 30 lines with evidence paths. Screenshots never enter the owner's
-  context. The owner fixes what fails and re-runs the lane for the failed state.
-- **Scribe:** checkbox ticks, the append-only findings log, the manual test
-  guide, and the PR body. The owner sends a summary of at most five lines per
-  sub-task and receives the next open item back, so it never re-reads the
-  checklist or PRD. Keep one scribe for the whole feature.
+- **Demo verification:** every group demo and the acceptance demo. The lane
+  drives the running demo server, captures and inspects the screenshots, and
+  returns a verdict of at most 30 lines with evidence paths. Screenshots never
+  enter the owner's context. The owner fixes what fails and re-runs the lane
+  for the failed state.
+- **Scribe:** a feature with a PRD or a detailed checklist. The scribe keeps
+  the checkbox ticks, the append-only findings log, the manual test guide, and
+  the PR body. The owner sends a summary of at most five lines per sub-task and
+  receives the next open item back, so it never re-reads the checklist or PRD.
+  Keep one scribe for the whole feature. With a plain task list the owner ticks
+  the group and appends the findings entry itself: one edit per group costs
+  less than a second context.
 - **Exploration:** "where does this live" sweeps and file maps at the start of a
   group. Findings only, no edits.
-- **Deep consult:** a deep chip, a named hotspot, or the same check failing
-  twice. The owner sends one decision or one failure with what it has already
-  read and ruled out; the lane reads the code on the deep tier and returns a
-  contract of at most 60 lines. Read-only. The owner implements the contract
-  and resumes the same consult if an invariant proves wrong.
+- **Deep consult:** a chip above the builder's model, a named hotspot, or the
+  same check failing twice. The owner sends one decision or one failure with
+  what it has already read and ruled out; the lane reads the code on the
+  stronger model and returns a contract of at most 60 lines. Read-only. The
+  owner implements the contract and resumes the same consult if an invariant
+  proves wrong. A consult on the builder's own model buys a fresh context and
+  nothing else, so it is rarely worth one.
 
 Parent groups are never separate agents: implementation is edit-heavy and needs
 the owner's accumulated context. A harness without a lane runs that step inline
@@ -424,6 +477,10 @@ usable.
 For every user-visible group, verify its new or changed path and directly
 impacted behavior, not the entire feature again. Keep the complete user journeys
 and browser/layout/theme matrix for delivery unless an earlier risk requires them.
+
+The task list names one acceptance demo for the whole feature. The owner derives
+each group's demo from that group's outcome and states, and runs the acceptance
+demo at delivery.
 
 1. Use a current build of the branch; rebuild when relevant inputs change.
 2. Launch the isolated demo server with `wt demo` (default port 8931), or reuse
@@ -451,17 +508,18 @@ Claude, Codex, and Pi; harness-specific entrypoints must not define another one.
 - Write focused tests alongside behavior changes. Deferring broad suite execution
   is not deferring test authoring or reducing required acceptance coverage.
 - During implementation, run the smallest useful check after a coherent change,
-  not mechanically after every sub-task. Batch related mechanical edits before
-  checking; use a focused test or module rather than multiple whole packages
-  when that gives honest feedback.
+  not mechanically after every edit or step. Batch related mechanical edits
+  before checking; use a focused test or module rather than multiple whole
+  packages when that gives honest feedback.
 - Check risky foundations before dependent work: permissions, data writes,
   concurrency, API contracts, and uncertain external integrations. Name those
-  early checks in the plan rather than discovering a broken assumption at delivery.
-- At each implementation group boundary, use one `Validate:` checkpoint for the
+  early checks in the group's boundaries rather than discovering a broken
+  assumption at delivery.
+- At each implementation group boundary, run one validation checkpoint for the
   affected package/module tests, plus the changed-path demo when applicable.
   Reuse a passing result only while its relevant code, dependencies, fixtures,
   and environment are unchanged; otherwise rerun the affected checks. Do not run
-  the same suite twice merely to tick both a sub-task and its parent checkpoint.
+  the same suite twice merely to tick a box.
 - At delivery, run broad regression, complete user journeys, the relevant
   browser/layout/theme matrix, and the full required `make ci-local` gate
   (including ratcheted lint, scoped security, and frontend checks). Keep these
@@ -472,6 +530,20 @@ Claude, Codex, and Pi; harness-specific entrypoints must not define another one.
   mandatory pre-push checks or authorize `--skip-checks`.
 - Scoped checks never replace the final gate. A failed check must be resolved or
   reported as an explicit blocker, not deferred silently to claim a group passed.
+
+## Findings log
+
+`tasks/findings-<feature>.md` is the record of what happened. A resumed session,
+the reviewer, and the PR body are all built from it. It is append-only; the task
+list holds checkbox state only.
+
+- Add one entry per group at its boundary: what changed, the evidence paths, the
+  checks run with their real counts (including failures and NOT RUN), and the
+  commit.
+- Add an entry as soon as the builder makes a decision the task list left open,
+  finds a boundary wrong, or hits a surprise a reviewer needs to know. A task
+  list that does not prescribe steps leaves these decisions recorded nowhere
+  else.
 
 ## Manual test guide
 
@@ -500,7 +572,8 @@ Before the PR gate:
 
 The default is one feature, one branch, and one PR targeting `dev`.
 
-- Commit once per completed parent group, not once per sub-task.
+- Commit once per completed parent group, not once per sub-task. The owner
+  writes each conventional message from what the group delivered.
 - Once the PR readiness gate below passes, open the PR with `wt pr` without
   asking. CI then runs while a person reviews the open PR.
 - The merge is the human gate. Never enable auto-merge, run `gh pr merge`, run
@@ -523,51 +596,77 @@ Split directly into serialized PRs to `dev` only when every slice is:
 
 ## Model recommendations
 
-Choose by uncertainty, not line count:
+Chips and the launch line use Claude Code's model aliases. An alias follows its
+tier's current model, so a task list does not go stale when versions change.
+Choose by risk and uncertainty, not line count:
 
-- **Haiku 4.5** — mechanical changes with a complete pattern
-- **Sonnet 5** — normal well-scoped implementation
-- **Opus 5 / Fable 5** — ambiguous, cross-cutting, architectural, concurrent,
-  performance-sensitive, or security-sensitive work
+- `haiku`: mechanical changes with a complete pattern
+- `sonnet`: work that follows a pattern already in the code, such as UI
+  polish, copy, documentation, and mechanical refactors
+- `opus`: permissions or authorization, data writes or migrations,
+  concurrency, a cross-repository contract, or a `Settle first` unknown; also
+  the choice when unsure
+- `fable`: an unresolved architectural or cross-cutting decision
 
-When model names change, map these to fast, balanced, and deep-reasoning tiers.
+### The builder model
 
-Feature sessions start on Sonnet 5. The `[primary] model` default in
-`.herdr/devflow.toml` sets it for `wt start`; a session started by hand picks
-the same model. A chip is advice to the owner, not a launch setting: a deep chip
-means a deep-tier consult for that group's hotspot (see _Execution topology and
-delegation_), never a deep-tier session for the whole group. Start a session on
-the deep tier (`wt start --model`) only when most groups carry a deep chip.
+Every task list names the model its builder session launches on, in its
+`Implementation model` line. The planner chooses it so that nobody has to at
+launch: `wt start` and a remote Start use that line, `--model` overrides it for
+one run, and the `[primary] model` in `.herdr/devflow.toml` applies only when a
+task list names none or the work is ad-hoc (`wt new`).
+
+The builder model is the strongest chip among the implementation groups, capped
+at `opus`: `opus` when any group carries an `opus` or `fable` chip, otherwise
+`sonnet`. Name `fable` only when most groups carry a `fable` chip. For a
+`codex` or `pi` builder, write that integration's own model id.
+
+The session stays on that model for the whole feature. A chip is advice to the
+owner, not a launch setting: a chip above the builder's model means a consult
+on that model for the group's hotspot (see _Execution topology and
+delegation_), never a stronger session for the whole group.
+
+A task list that states outcomes leaves the step decisions to the owner. Send
+the decision-bearing ones to a consult on a stronger model. Do not compensate
+by writing steps into the task list.
 
 A separate agent on the same model is usually more expensive than staying in the
 owner's context because it must rebuild that context. Use separate contexts for
 isolation or durable independent work, and subagents for narrow outputs. Budget
-the deep tier around unresolved decisions rather than whole parent groups
-whenever possible.
+the strongest models around unresolved decisions rather than whole parent
+groups whenever possible.
 
 ## Continuous execution
 
 There are exactly two planned pauses:
 
-1. After parent groups, waiting for `Go`
+1. After the task list is presented, waiting for `Go`
 2. After the PR is open, waiting for a person to review and merge it
 
 In plan-and-deliver mode, create the worktree and then follow the same execution
 loop as implementation mode:
 
-1. Select the next authorized, unblocked task from the full scope. A next-item
-   preview is a navigation hint, not the assignment's completion boundary.
+1. Select the next authorized, unblocked group from the full scope and decide
+   its steps from the code as it stands. A next-item preview is a navigation
+   hint, not the assignment's completion boundary.
 2. Implement with focused tests, run checks at the _Validation cadence_ above,
    record evidence, and update completed checkboxes.
 3. At group boundaries, complete the group's validation checkpoint, self-verify
-   the changed-path demo when applicable, and commit.
+   the changed-path demo when applicable, commit, tick the group, and add its
+   findings entry.
 4. Continue immediately to the next runnable task. Milestones, passing tests,
    demos, commits, and progress summaries are checkpoints, not stop conditions.
    Send progress as non-terminal updates; do not end with “next: X,” “not yet
    PR-ready,” or a request to say “continue” while runnable work remains.
-5. When context needs compaction or the session is resumed, use the checklist and
-   findings to recover scope, evidence, blockers, and the next action. A context
-   checkpoint is not a new human approval gate.
+5. When context needs compaction or the session is resumed, use the task list
+   and findings log to recover scope, evidence, blockers, and the next action.
+   A context checkpoint is not a new human approval gate.
+
+The builder owns the steps, not the scope. Record a decision the task list left
+open in the findings log and carry on. When a boundary proves wrong or a
+discovery changes what ships, record it and report it in the PR body if the
+remaining scope still stands. If it does not, that is the scope-invalidating
+stop below, not a decision to make silently.
 
 A blocked task is not automatically a blocked feature. Record the exact blocked
 task IDs, evidence, and missing decision/credential/authorization; continue only
@@ -583,7 +682,7 @@ Never override cancellation, authorization, or a spending limit to keep running.
 Do not invent a per-group stopping point or treat a normal model response ending
 as proof that the assigned work is finished.
 
-In planning-only mode, saving the detailed checklist ends the session's assigned
+In planning-only mode, saving the approved task list ends the session's assigned
 work. Do not cross the worktree boundary.
 
 ### PR readiness gate
