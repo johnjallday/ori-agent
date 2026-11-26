@@ -27,12 +27,15 @@ async function fedFolder(page: Page, request: APIRequestContext, shots: string, 
   await mkdir(shots, { recursive: true, mode: 0o750 });
   await installLocalCdn(page);
   await page.addInitScript(value => localStorage.setItem('ori-theme', value), theme);
+  const home = process.env.ORI_DEMO_SPLIT_PROFILE === '1' ? join(sandbox, 'home') : sandbox;
   for (const known of ['Downloads', 'Desktop', 'Documents'])
-    await mkdir(join(sandbox, known), { recursive: true, mode: 0o750 });
-  // This journey installs Filing from the folder agent’s setup plan. The OS
-  // Downloads root instead has its own Review Downloads → Install Filing flow
-  // (folder-agent-downloads-inbox.spec.ts); identity is by path, not basename.
-  const root = join(sandbox, variant || 'filing-case', folderName);
+    await mkdir(join(home, known), { recursive: true, mode: 0o750 });
+  // Only the station journey chooses the actual disposable OS Downloads
+  // folder. The other fixtures exercise ordinary anchored folders.
+  const root =
+    variant === 'station' && ['Downloads', 'Desktop'].includes(folderName)
+      ? join(home, folderName)
+      : join(home, variant || 'filing-case', folderName);
   const files: string[] = [];
   await mkdir(root, { recursive: true, mode: 0o750 });
   const old = new Date(Date.now() - 3_600_000);
@@ -107,39 +110,115 @@ async function fedFolder(page: Page, request: APIRequestContext, shots: string, 
   await expect(report).toContainText(
     `Organize loose files in ${folderName} (you approve every move)`
   );
-  await expect(report).toContainText(`Adds filing to ${folderName}`);
+  await expect(report).toContainText(`${folderName} Manager recommends a Filing station`);
   await page.screenshot({ path: join(shots, '01-folder-hire.png'), fullPage: true });
   await report.getByRole('button', { name: 'Set it up', exact: true }).click();
   await expect.poll(async () => (await get())?.setup?.status).toBe('done');
   const api = `/api/workspaces/${view.workspace_id}/file-janitor`;
   const status = async () => (await (await request.get(api)).json()).status;
+  expect((await status()).applies).toBe(false);
+  if (variant.startsWith('map-')) {
+    // Compatibility case: a workspace that already installed Filing but has
+    // not yet granted its linked folder. Hiring alone is NOT that fixture.
+    const capability = `/api/workspaces/${view.workspace_id}/capabilities/file-janitor`;
+    const installed = await request.post(`${capability}/install`, { data: {} });
+    expect(installed.ok(), await installed.text()).toBe(true);
+    const ws = await (await request.get(`/api/workspaces/${view.workspace_id}`)).json();
+    const lead = ws.agent_instances.find((a: { name: string }) => a.name === view.agent_name);
+    const bound = await request.post(`${capability}/companion`, {
+      data: { agent_instance_id: lead.id }
+    });
+    expect(bound.ok(), await bound.text()).toBe(true);
+  }
   return { view, root, files, closeAssistant, status, api };
 }
+
+test(`a hired ${folderName} station is built separately and files by kind only on File`, async ({
+  page,
+  request
+}, info) => {
+  const f = await fedFolder(page, request, resolve('tasks/evidence-filing-station'), 'station');
+  expect((await f.status()).applies).toBe(false);
+  expect(await readdir(f.root)).not.toContain('Filed');
+  await page.goto(`${f.view.route}?mode=map`);
+  if (await f.closeAssistant.isVisible()) await f.closeAssistant.click();
+  await expect(page.locator('.filing-station-plot')).toHaveText('36');
+  const invite = page.getByRole('button', { name: 'Review station build', exact: true });
+  await invite.press('Enter');
+  const panel = page.getByRole('dialog', { name: 'Filing', exact: true });
+  await expect(
+    panel.getByRole('heading', { name: `Build a Filing station for ${folderName}` })
+  ).toBeVisible();
+  expect((await f.status()).applies).toBe(false);
+  const press = page.waitForResponse(
+    r => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/prepare-review')
+  );
+  await panel.getByRole('button', { name: 'Build the station', exact: true }).press('Enter');
+  const r = await press;
+  expect(r.status(), await r.text()).toBe(200);
+  const result = (await r.json()).preparation.result;
+  expect(result.eligible_count).toBe(36);
+  expect(await readdir(f.root)).not.toContain('Filed');
+  const station = page.locator('[data-cmd-hq-station="file-janitor"]:visible');
+  await expect(station).toContainText('Review 36 files');
+  if (!(await panel.isVisible())) await station.press('Enter');
+  const chooser = panel.getByRole('region', { name: 'Filing method' });
+  await expect(chooser).toContainText('Suggested · Sort loose files by type.');
+  await chooser.getByRole('button', { name: 'By kind', exact: true }).press('Enter');
+  expect(await readdir(f.root)).not.toContain('Filed');
+  const file = panel.locator('#fileJanitorApprove');
+  await expect(file).toHaveText('File 30 files');
+  await expect(file).toBeEnabled();
+  await file.press('Enter');
+  const receipt = panel.locator('#fileJanitorReceipt');
+  await expect(receipt).toContainText('30 files filed.', { timeout: 90_000 });
+  expect(await readdir(f.root)).toContain('Filed');
+  expect((await readdir(join(f.root, 'Filed'))).length).toBeGreaterThan(0);
+  const loose = await readdir(f.root);
+  expect(loose.filter(n => n.endsWith('.qqq'))).toHaveLength(6);
+  expect(loose).toHaveLength(7);
+  await receipt.screenshot({ path: info.outputPath('by-kind.png') });
+  // An existing, configured Filing workspace is eligible to receive. The Send
+  // tile opens the connection review; merely opening it cannot change the
+  // sender's local method or approve a transfer.
+  await requireSandbox();
+  const receiverRoot = join(await realpath(sandbox), 'receiver');
+  await mkdir(receiverRoot, { mode: 0o750 });
+  const create = await request.post('/api/workspaces', {
+    data: { name: 'Station receiver', template_id: 'file-janitor', create_template_agents: true }
+  });
+  expect(create.ok(), await create.text()).toBe(true);
+  const receiver = (await create.json()).folder;
+  const setup = await request.post(`/api/workspaces/${receiver.id}/file-janitor/setup`, {
+    data: { path: receiverRoot, paused: true }
+  });
+  expect(setup.ok(), await setup.text()).toBe(true);
+  await receipt.getByRole('button', { name: 'Done', exact: true }).press('Enter');
+  await panel.getByRole('tab', { name: 'Settings' }).press('Enter');
+  await panel.locator('#fileJanitorChangeMethod').press('Enter');
+  await chooser.getByRole('button', { name: 'Send to another workspace' }).press('Enter');
+  const connection = panel.locator('#fileJanitorConnectCard');
+  await expect(connection).toContainText('What it never allows');
+  await expect(connection).toContainText('Station receiver');
+  expect((await f.status()).settings.filing_method).toBe('by_kind');
+  expect(await readdir(f.root)).toEqual(loose);
+  expect(await readdir(receiverRoot)).toEqual(['Filed']);
+});
 
 test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`, async ({
   page,
   request
 }) => {
   const { view, root, closeAssistant, status } = await fedFolder(page, request, evidence);
-  await page.goto('/?panel=today');
-  await page.locator('#personalAssistantProgressRow').click();
-  await expect(page.locator('#personalAssistantDoneItems')).toContainText(
-    `${folderName} Manager is hired. One step left: allow filing.`
-  );
-  await page.screenshot({
-    path: join(evidence, '14-today-remaining-permission.png'),
-    fullPage: true
-  });
+  expect(view.filing_pile.count).toBe(36);
+  expect(await readdir(root)).not.toContain('Filed');
   await page.goto(`${view.route}?view=details`);
   if (await closeAssistant.isVisible()) await closeAssistant.click();
   const summary = page.locator('#fileJanitorMount');
   await expect(summary).toBeHidden();
-  await expect(page.locator('#workspaceFolderAgentReport')).toContainText(
-    `${folderName} Manager is hired. One step left: allow filing.`
-  );
-  await expect(page.locator('#workspaceNextAction')).toHaveText('Review permission');
+  await expect(page.locator('#workspaceNextAction')).toHaveText('Review station build');
   await expect(
-    page.getByText(`Let ${folderName} Manager file ${folderName}`, { exact: true })
+    page.getByText(`Build a Filing station for ${folderName}?`, { exact: true })
   ).toBeVisible();
   await page.screenshot({ path: join(evidence, '09-single-ask.png'), fullPage: true });
   const mutations: string[] = [];
@@ -155,17 +234,20 @@ test(`a fed ${folderName} folder asks permission once (${entryPoint}, ${theme})`
   await expect(console).toBeVisible();
   await expect(console.locator('.fj-console-title')).toHaveText('Filing');
   const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
-  await expect(permissions.getByRole('heading')).toHaveText(`Allow filing in ${folderName}`);
+  await expect(permissions.getByRole('heading')).toHaveText(
+    `Build a Filing station for ${folderName}`
+  );
   await page.screenshot({ path: join(evidence, '05-named-folder-consent.png'), fullPage: true });
   expect((await status()).settings.root_path || '').toBe('');
   expect(mutations).toEqual([]);
-  await permissions
-    .getByRole('button', { name: `Allow filing in ${folderName}`, exact: true })
-    .click();
+  await permissions.getByRole('button', { name: 'Build the station', exact: true }).click();
   await expect(console).toContainText('36 files ready for review. Nothing moved.');
   expect((await status()).settings.root_path).toBe(root);
   expect(mutations.filter(url => /\/(apply|preview|scan|setup)$/.test(url))).toEqual([]);
-  expect(mutations.filter(url => url.endsWith('/prepare-review'))).toHaveLength(1);
+  expect(mutations.filter(url => new URL(url).pathname.endsWith('/prepare-review'))).toHaveLength(
+    1
+  );
+  expect(await readdir(root)).not.toContain('Filed');
   await page.screenshot({ path: join(evidence, '06-first-review.png'), fullPage: true });
   await console.getByRole('button', { name: 'Close Filing', exact: true }).click();
   await expect(page.locator('#workspaceFolderAgentReport')).toContainText(
@@ -258,10 +340,9 @@ test(`a fed ${folderName} preview hands off on the map (${entryPoint}, ${theme})
   await expect(guidance.getByRole('button', { name: 'All tickets' })).toHaveCount(0);
   const tickets = page.locator('[data-cmd-view-mode="tickets"]');
   await expect(tickets).toBeVisible();
-  await expect(page.locator('.ws-cmd-map-agent.is-command-node')).toContainText(
-    'Waiting for permission'
-  );
-  await expect(page.getByText('See what I made', { exact: false })).toHaveCount(0);
+  // The independent install has no historical folder-hire install receipt;
+  // its permission invitation comes from the station's own setup review.
+  await expect(invite).toBeVisible();
   await expect(station).toBeVisible();
   expect(await guidance.evaluate(node => node.scrollWidth <= node.clientWidth)).toBe(true);
   await snapshot('02-map-before');
@@ -426,7 +507,8 @@ for (const scenario of ['empty', 'retry', 'urgent'] as const) {
     await allow.click();
     if (scenario === 'empty') {
       await expect(panel).toContainText('No eligible files are ready for review');
-      await panel.getByRole('button', { name: 'Close Filing', exact: true }).click();
+      await page.keyboard.press('Escape');
+      await expect(panel).toBeHidden();
       await expect(guidance).toContainText('No eligible files for this preview');
       await expect(station).not.toHaveClass(/is-preview-handoff/);
       const saved = (await (await request.get(`${fixture.api}/setup-review`)).json()).review.result;

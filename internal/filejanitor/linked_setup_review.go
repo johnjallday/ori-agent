@@ -51,6 +51,7 @@ type LinkedSetupReview struct {
 }
 
 type SetupReviewTerms struct {
+	DeferDestination   bool        `json:"defer_destination,omitempty"` // this review leaves Filed/ to the first by-kind filing
 	PrivacyMode        ContentMode `json:"privacy_mode"`
 	FilingRootName     string      `json:"filing_root_name"`
 	WatchEvents        []string    `json:"watch_events"`
@@ -141,6 +142,12 @@ func (s *Service) reviewSetup(workspaceID, ownerUserID, referenceID, selectedPat
 		BuildStation: station != nil, station: station, WorkspaceID: workspaceID, Candidates: []LinkedSetupCandidate{},
 		DisclosureVersion: SetupDisclosureVersion, Monitoring: monitoring,
 		Terms: setupReviewTerms(automation),
+	}
+	// Purchase provides the workspace, not access or a layout. Its fresh
+	// folder review uses the same inside as a station. Previously accepted
+	// reviews retain the terms that were actually displayed and hashed.
+	if expansionWorkspace(ws) {
+		review.Terms.DeferDestination = !continuing || (settings.SetupPreparation != nil && settings.SetupPreparation.Terms.DeferDestination)
 	}
 	if settings.IsSetUp() && !continuing {
 		review.State = "configured"

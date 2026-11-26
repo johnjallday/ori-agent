@@ -47,7 +47,7 @@ func CandidatesForPolicy(policy RootPolicy, facts foldermap.Facts, ready Readine
 			why = "Documents is where you keep things. Filing is optional; nothing is selected to set up."
 		}
 		return []Candidate{{ID: "file-curator", Kind: KindFileCurator, Name: "Filing", Source: SourceTable,
-			Action: ActionAdd, Required: policy != RootDocuments, Detail: "adds filing; the folder's agent explains proposed filing", Why: why}}
+			Action: ActionAdd, Required: policy != RootDocuments, Detail: "recommends a Filing station; building it is a separate choice", Why: why}}
 	}
 	if policy == RootUnresolved {
 		return nil

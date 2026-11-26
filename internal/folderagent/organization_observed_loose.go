@@ -13,10 +13,11 @@ import (
 // This is a hint about the saved look, not a selection or permission to read.
 // Only the owner-facing report gets samples, never the model or a file action.
 type LooseDocumentObservation struct {
-	Pile         *LooseFilePile `json:"pile,omitempty"`
-	Eligible     bool           `json:"eligible,omitempty"`
-	RootModified time.Time      `json:"root_modified"`
-	Policy       string         `json:"policy"`
+	Pile           *LooseFilePile `json:"pile,omitempty"`
+	Eligible       bool           `json:"eligible,omitempty"`
+	RootModified   time.Time      `json:"root_modified"`
+	Policy         string         `json:"policy"`
+	StationBinding string         `json:"station_binding,omitempty"` // hashed hired anchor/manager at the walk; never a read grant
 }
 
 // LooseFilePile is bounded display evidence. Older boolean-only observations
@@ -33,13 +34,16 @@ func (s *Service) protectedReviewRoots() []string {
 	return nil
 }
 func (s *Service) observeLooseDocuments(root string) (*LooseDocumentObservation, func(string)) {
+	return s.observeLooseNames(root, reviewableDocumentName)
+}
+func (s *Service) observeLooseNames(root string, allowed func(string) bool) (*LooseDocumentObservation, func(string)) {
 	protected := s.protectedReviewRoots()
 	out := &LooseDocumentObservation{Policy: scopeHash(protected), Pile: &LooseFilePile{}}
 	if info, err := os.Lstat(root); err == nil && info.IsDir() {
 		out.RootModified = info.ModTime()
 	}
 	return out, func(name string) {
-		if !reviewableDocumentName(name) {
+		if !allowed(name) {
 			return
 		}
 		path := filepath.Join(root, name)

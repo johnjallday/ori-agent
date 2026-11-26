@@ -31,6 +31,16 @@ func TestView_FilingPermissionIsLiveNotPartOfTheSavedPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.svc.Wait()
+	if recommended, _ := h.svc.View(t.Context(), "u1", v.WorkspaceID); recommended.FilingPermissionRequired {
+		t.Fatal("recommendation projected as an install")
+	}
+	// Old completed installs keep their separate permission repair.
+	if _, err := h.svc.deps.Store.Update(v.WorkspaceID, func(r *Record) error {
+		r.Setup.Lines = []personalassistant.FolderPlanLine{{Kind: FolderPlanCapability, Step: "file-curator"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	saved, _ := h.svc.deps.Store.Read(v.WorkspaceID)
 	before := BuildPlan(*saved, nil).Digest
 	pending, _ := h.svc.View(t.Context(), "u1", v.WorkspaceID)

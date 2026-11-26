@@ -213,6 +213,8 @@ type Deps struct {
 	// A missing reader or read error is unknown, not a missing permission.
 	FilingPermission func(workspaceID string) (bool, error)
 	StationAvailable func(owner, workspaceID string) bool
+	// StationAnchor resolves only metadata for an ordinary hired folder. It is not DocumentsAccess and cannot authorize a content read.
+	StationAnchor func(owner, id, lead string) (StationAnchor, bool)
 	// Songs reads the Home's song-details consent for the offer to learn the
 	// songs. Nil makes no offer.
 	Songs Songs
@@ -605,6 +607,11 @@ func (s *Service) look(ctx context.Context, workspaceID string, first []string) 
 	if m == nil {
 		if strings.HasPrefix(rec.AssignedLink, GuidedDocumentsLinkPrefix) {
 			loose, opts.ObserveRootFile = s.observeLooseDocuments(root)
+		} else if rec.AssignedLink == "" && s.deps.StationAnchor != nil {
+			if anchor, ok := s.deps.StationAnchor(rec.OwnerUserID, workspaceID, rec.AgentName); ok && anchor.Root == root {
+				loose, opts.ObserveRootFile = s.observeLooseNames(root, stationFileName)
+				loose.StationBinding = scopeHash(anchor)
+			}
 		}
 		m, err = foldermap.Walk(root, opts)
 	} else {

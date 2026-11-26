@@ -186,6 +186,7 @@ export function folderAgentReportView(view) {
     organizationReview: view.organization_review === true,
     filingReviewHint: String(view.filing_review_hint || ''),
     filingPile: stationPile(view.filing_pile),
+    stationHire: view.station_hire === true,
     policyNote: String(view.policy_note || ''),
     // The setup is done but filing was not allowed yet: one step left.
     filingPermissionRequired: Boolean(view.filing_permission_required),
@@ -2724,6 +2725,7 @@ export function renderFolderAgentReport(
     });
   }
   const downloadsReview =
+    !view.stationHire &&
     view.rootPolicy === 'downloads_inbox' &&
     view.route.startsWith('/workspaces/') &&
     ['reported', 'set_up'].includes(view.state);

@@ -1,11 +1,23 @@
 package folderagent
 
 import (
+	"os"
 	"strings"
 
+	"github.com/johnjallday/ori-agent/internal/diridentity"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/filewatcher"
 	"github.com/johnjallday/ori-agent/internal/foldermap"
+	"github.com/johnjallday/ori-agent/internal/sensitive"
+	"github.com/johnjallday/ori-agent/internal/workspace"
 )
+
+// StationAnchor is a live metadata lookup: the unique lead and external anchor reference. Only its digest goes into the saved walk.
+type StationAnchor struct{ Root, Reference, LeadID string }
+
+func stationFileName(name string) bool {
+	return filejanitor.ValidateFileName(name) == nil && filejanitor.DisplayFileName(name) == name && !workspace.ContainedEntryExcluded(name) && !filewatcher.ShouldIgnoreFile(name) && !sensitive.ContainsSecretLikeText(name)
+}
 
 // StationLook binds the build offer to the saved, current walk. The callback
 // only returns host evidence; a look, a model or an offer cannot install Filing.
@@ -26,7 +38,8 @@ func (s *Service) StationLook(owner, id string) (filejanitor.StationLook, error)
 
 func (s *Service) stationLook(r *Record) (filejanitor.StationLook, bool) {
 	var no filejanitor.StationLook
-	if !strings.HasPrefix(r.AssignedLink, GuidedDocumentsLinkPrefix) || r.Map == nil || r.LooseDocuments == nil || r.LooseDocuments.Pile == nil || r.Map.Stopped != "" {
+	guided := strings.HasPrefix(r.AssignedLink, GuidedDocumentsLinkPrefix)
+	if (!guided && r.AssignedLink != "") || (r.State != StateReported && r.State != StateKept && !completed(r)) || r.Map == nil || r.LooseDocuments == nil || r.LooseDocuments.Pile == nil || r.Map.Stopped != "" {
 		return no, false
 	}
 	pile := r.LooseDocuments.Pile
@@ -34,7 +47,7 @@ func (s *Service) stationLook(r *Record) (filejanitor.StationLook, bool) {
 		return no, false
 	}
 	for _, name := range pile.Names {
-		if !reviewableDocumentName(name) {
+		if (guided && !reviewableDocumentName(name)) || (!guided && !stationFileName(name)) {
 			return no, false
 		}
 	}
@@ -43,6 +56,24 @@ func (s *Service) stationLook(r *Record) (filejanitor.StationLook, bool) {
 			return no, false
 		}
 	}
+	root, ok := r.Map.Folder("")
+	if !ok || root.BranchWitness == "" {
+		return no, false
+	}
+	if !guided {
+		if s.deps.StationAnchor == nil || r.LooseDocuments.StationBinding == "" {
+			return no, false
+		}
+		a, ok := s.deps.StationAnchor(r.OwnerUserID, r.WorkspaceID, r.AgentName)
+		if !ok || a.Reference == "" || a.LeadID == "" || scopeHash(a) != r.LooseDocuments.StationBinding || !s.currentLooseObservation(r, a.Root) {
+			return no, false
+		}
+		info, err := os.Lstat(a.Root) // #nosec G304 G703 -- host-resolved owned workspace anchor, metadata only
+		if err != nil || !info.IsDir() || diridentity.Of(info) != root.BranchWitness {
+			return no, false
+		}
+		return filejanitor.StationLook{ReferenceID: a.Reference, Manager: r.AgentName, Witness: root.BranchWitness, Revision: scopeHash([]any{r.LooseDocuments, root.BranchWitness})}, true
+	}
 	if hint := s.looseDocumentHint(r); hint != "eligible" && hint != "history" {
 		return no, false
 	}
@@ -50,6 +81,5 @@ func (s *Service) stationLook(r *Record) (filejanitor.StationLook, bool) {
 	if err != nil || !s.currentLooseObservation(r, a.Root) {
 		return no, false
 	}
-	root, _ := r.Map.Folder("")
 	return filejanitor.StationLook{ReferenceID: strings.TrimPrefix(r.AssignedLink, GuidedDocumentsLinkPrefix), Manager: r.AgentName, Witness: root.BranchWitness, Revision: scopeHash([]any{a.Binding, r.LooseDocuments, root.BranchWitness})}, true
 }

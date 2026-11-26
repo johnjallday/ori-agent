@@ -703,15 +703,15 @@ func (s *Service) confirmSetup(req SetupRequest, downloadOwner string, verifyDow
 	if req.ExpectedRootIdentity != "" && witness != req.ExpectedRootIdentity {
 		return Status{}, setupErr(CodeFolderChanged, "The reviewed folder changed. Choose it again.", RepairChooseFolder, nil)
 	}
-	station := operation != nil && operation.PreparationID != "" && current.SetupPreparation != nil && current.SetupPreparation.Station != nil
-	if !station && !current.DeferredDestination {
-		if err := ensureFilingRoot(filepath.Join(root, filingRootName)); err != nil {
-			return Status{}, err
-		}
-	}
 	var preparation *SetupPreparation
 	if operation != nil && operation.PreparationID != "" {
 		preparation = current.SetupPreparation
+	}
+	deferDestination := current.DeferredDestination || preparation != nil && (preparation.Station != nil || preparation.Terms.DeferDestination)
+	if !deferDestination {
+		if err := ensureFilingRoot(filepath.Join(root, filingRootName)); err != nil {
+			return Status{}, err
+		}
 	}
 	referenceID, err := s.ensureWorkspaceAccess(workspaceID, root, req.DirectoryReferenceID, preparation, req.relinkAnchor)
 	if err != nil {
@@ -752,7 +752,7 @@ func (s *Service) confirmSetup(req SetupRequest, downloadOwner string, verifyDow
 		settings.RootID = rootID
 		settings.RootPath = root
 		settings.FilingRootName = filingRootName
-		settings.DeferredDestination = station || current.DeferredDestination
+		settings.DeferredDestination = deferDestination
 		settings.DirectoryReferenceID = referenceID
 		settings.ApprovedReference = proof
 		settings.DailyScanLocalTime = dailyTime

@@ -507,6 +507,7 @@ export class WorkspaceDetailPage {
       command.disposeNextAction?.();
       command.workspacePanels?.destroy?.();
       document.removeEventListener?.('ori:workspace-goal-state', command.boundGoalState);
+      document.removeEventListener?.('ori:filing-offer-changed', command.boundGoalState);
     }
     const janitor = window.FileJanitorConsole;
     if (janitor?.getActionState?.().workspaceId === this.workspaceId) janitor.dispose();

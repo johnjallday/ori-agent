@@ -3019,6 +3019,9 @@
           shelfVisit = null;
           discardProtectionApproval();
           resetPicture();
+          // The method revision is part of the displayed File plan, even if
+          // the batch and the selected candidate IDs haven't changed.
+          resetPlan();
         }
         lastStatus.settings.filing_method = method;
         renderBatch();
@@ -3323,7 +3326,14 @@
   function renderBatch() {
     const container = document.getElementById('fileJanitorBatch');
     if (!container) return;
-    const focusedReviewControlID = String(document.activeElement?.id || '');
+    const focusedReviewControl = document.activeElement;
+    const focusedReviewControlID = String(focusedReviewControl?.id || '');
+    const restoreSurfaceFocus = surface => {
+      // The chooser and shelf controls are retained nodes. A batch refresh
+      // temporarily detaches them; keep a keyboard user's exact control.
+      if (focusedReviewControl && surface?.contains?.(focusedReviewControl))
+        focusedReviewControl.focus({ preventScroll: true });
+    };
     const fileFocus = captureFileFocus();
     const scroller = document.getElementById('fileJanitorConsoleBody');
     const scrollTop = scroller?.scrollTop;
@@ -3384,6 +3394,7 @@
       }
       if (methodVisit) {
         container.appendChild(methodVisit.surface.host);
+        restoreSurfaceFocus(methodVisit.surface.host);
         if (headerAllFiles) headerAllFiles.hidden = true;
         return;
       }
@@ -3438,7 +3449,10 @@
       if (consoleOpen && filingMethod() === 'own_folders' && window.FilingStationShelves) {
         if (lastResults) return;
         if (!shelfVisit) openShelfPicture();
-        if (shelfVisit?.surface) container.appendChild(shelfVisit.surface.host);
+        if (shelfVisit?.surface) {
+          container.appendChild(shelfVisit.surface.host);
+          restoreSurfaceFocus(shelfVisit.surface.host);
+        }
         return;
       }
       container.appendChild(renderPictureView());
@@ -5432,7 +5446,13 @@
     }
     const build = buildProgress?.id === wsId() ? buildProgress : null;
     if ((preparation || build?.running) && consoleTab === 'review') {
-      const progress = el('p', 'fj-sub', build?.line || 'Preparing your preview…');
+      const progress = el(
+        'p',
+        'fj-sub',
+        (!preparation || preparation.station) && build?.operation_id
+          ? build.line
+          : 'Preparing your preview…'
+      );
       progress.id = 'fileJanitorBuildProgress';
       progress.setAttribute('role', 'status');
       host.appendChild(progress);
@@ -6140,7 +6160,12 @@
     renderConsoleBody(body, status);
 
     paintError();
-    const liveFocus = focusId && document.getElementById(focusId);
+    const retained =
+      ancestor === host &&
+      (methodVisit?.surface?.host.contains?.(focused) ||
+        shelfVisit?.surface?.host.contains?.(focused));
+    const liveFocus =
+      retained && host.contains?.(focused) ? focused : focusId && document.getElementById(focusId);
     if (isVisibleFocusTarget(liveFocus)) liveFocus.focus();
     else focusRequestedItem() || focusConsole();
   }
@@ -6814,7 +6839,9 @@
     [
       review.build_station
         ? 'Filing is added to this workspace. Your manager explains suggestions. No folder is created.'
-        : 'Create or reuse Filed/ inside this folder. This changes the folder on disk.',
+        : terms.defer_destination
+          ? 'No folder is created now. Filed/ is used only when you choose By kind and press File.'
+          : 'Create or reuse Filed/ inside this folder. This changes the folder on disk.',
       'Scan top-level file names, types, sizes, and dates once. No file contents are opened.',
       review.build_station
         ? 'Nothing moves until you press File. You can undo a filing. Reading inside a file always needs separate approval.'
@@ -6892,6 +6919,7 @@
         const mode = workspaceViewMode();
         const intent = {
           id: wsId(),
+          station: review.build_station === true,
           path: window.location?.pathname,
           ownsOverlay: () =>
             workspaceViewMode() === mode &&

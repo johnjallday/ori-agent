@@ -28,7 +28,7 @@ case "$mode" in
 				theme=light
 				if [[ "$entry:$folder" == 'home:Loose Files' || "$entry:$folder" == composer:Downloads ]]; then theme=dark; fi
 				label="$entry-${folder// /-}-$theme"
-				fresh --sandbox-env ORI_FILING_SANDBOX \
+				ORI_DEMO_SPLIT_PROFILE=1 fresh --sandbox-env ORI_FILING_SANDBOX \
 					--env "ORI_FILING_CASE=$label" --env "ORI_FILING_ENTRY=$entry" \
 					--env "ORI_FILING_FOLDER=$folder" --env "ORI_FILING_THEME=$theme" \
 					tests/filing-first-run.spec.ts -- --workers=1 -g 'a fed'

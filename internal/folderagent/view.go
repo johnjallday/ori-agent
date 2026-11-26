@@ -42,6 +42,7 @@ type View struct {
 	ProgressLine string   `json:"progress_line,omitempty"`
 
 	ProjectHolders     *ProjectHoldersView    `json:"project_holders,omitempty"`
+	StationHire        bool                   `json:"station_hire,omitempty"` // this look uses the separate Build press, not the old Downloads install route
 	FilingPile         *LooseFilePile         `json:"filing_pile,omitempty"`
 	FilingReviewHint   string                 `json:"filing_review_hint,omitempty"`
 	OrganizationReview bool                   `json:"organization_review,omitempty"`
@@ -272,13 +273,14 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	if strings.HasPrefix(rec.AssignedLink, GuidedDocumentsLinkPrefix) {
 		v.FilingReviewHint = s.looseDocumentHint(rec)
 		v.OrganizationReview = v.FilingReviewHint == "eligible" || v.FilingReviewHint == "history"
-		if _, ok := s.stationLook(rec); ok && s.deps.StationAvailable != nil && s.deps.StationAvailable(rec.OwnerUserID, rec.WorkspaceID) {
-			v.FilingPile = rec.LooseDocuments.Pile
-		}
 	} else if rec.RootPolicy == folderlook.RootDocuments || completed(rec) {
 		_, err := s.organizationAccess(rec.OwnerUserID, rec)
 		v.OrganizationReview = err == nil
 	}
+	if _, ok := s.stationLook(rec); ok && s.deps.StationAvailable != nil && s.deps.StationAvailable(rec.OwnerUserID, rec.WorkspaceID) {
+		v.FilingPile = rec.LooseDocuments.Pile
+	}
+	v.StationHire = rec.AssignedLink == "" && rec.LooseDocuments != nil && rec.LooseDocuments.StationBinding != ""
 	v.PolicyNote = folderlook.PolicyLine(rec.RootPolicy)
 	v.ExploreFolder = rec.RootPolicy.IsCatchAll() && rec.RootPolicy != folderlook.RootDownloads
 	if rec.RootPolicy == folderlook.RootDocuments {
@@ -886,18 +888,8 @@ func BuildPlan(rec Record, selected []string) Plan {
 				plan.HiresNote = note
 			}
 		case folderlook.KindFileCurator:
-			// File Janitor goes into this workspace in place (the folder is
-			// already its anchor); the hired agent explains proposed filing.
-			janitor, curator := "Adds filing to "+rec.WorkspaceName, rec.AgentName+" explains proposed filing"
-			plan.Lines = append(plan.Lines,
-				personalassistant.FolderPlanLine{
-					Kind: FolderPlanCapability, Name: janitor, Outcome: janitor,
-					Detail: "Watching and the daily scan stay off until you turn them on in its setup.",
-				},
-				personalassistant.FolderPlanLine{
-					Kind: personalassistant.FolderPlanAgents, Name: curator, Outcome: curator,
-					Detail: "You approve every move.",
-				})
+			advice := rec.AgentName + " recommends a Filing station"
+			plan.Lines = append(plan.Lines, personalassistant.FolderPlanLine{Kind: FolderPlanFilingAdvice, Name: advice, Outcome: advice, Detail: "Hiring does not add Filing, grant access or scan the folder. Review Build a Filing station on the workspace Map."})
 		case folderlook.KindSkill, folderlook.KindMCP, folderlook.KindPlugin:
 			line := addOnLine(c, rec.WorkspaceName)
 			// A plugin the install block lists is not repeated in the outcome.
@@ -1191,7 +1183,8 @@ const FolderPlanAddOn = "add_on"
 
 // FolderPlanCapability is the plan line kind of a built-in capability
 // installed in place (File Janitor for a folder of loose files).
-const FolderPlanCapability = "capability"
+const FolderPlanCapability = "capability" // historical install receipts
+const FolderPlanFilingAdvice = "filing_recommendation"
 
 // addOnLine words one selected add-on: "Installs <plugin>", "Adds skill
 // <name>", "Adds <server>", each labelled "found by search" (PRD FR33).
