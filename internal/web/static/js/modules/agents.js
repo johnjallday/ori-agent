@@ -634,7 +634,7 @@ function showAddAgentModal(options = {}) {
   if (destination) {
     destination.hidden = !options.folderManagerWorkspace;
     destination.textContent = options.folderManagerWorkspace
-      ? `Create this agent and add it to ${options.folderManagerWorkspace}${options.folderLeadRole ? ' as Project Lead' : ''}. No new workspace will be created.`
+      ? `Create this agent and add it to ${options.folderManagerWorkspace}${options.folderLeadRole === 'manager' ? ' as Manager' : options.folderLeadRole ? ' as Project Lead' : ''}. No new workspace will be created.`
       : '';
   }
   const choice = document.getElementById('folderManagerLookChoice');

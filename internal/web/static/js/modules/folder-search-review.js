@@ -346,7 +346,7 @@ export function exploreFolder(
         const planResponse = await fetch('/api/workspaces/template-agent-plan', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ blank: true })
+          body: JSON.stringify({ blank: true, workspace_name: name.value.trim() })
         });
         const plan = planResponse.ok ? await planResponse.json() : null;
         if (!alive) return;

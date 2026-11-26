@@ -200,7 +200,7 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     await expect(form.locator('#agentSystemPrompt')).toHaveValue('Keep Downloads sorted');
     await expect(form.locator('#agentAllowWebSearch')).not.toBeChecked();
     await expect(form.locator('#folderManagerDestination')).toContainText(
-      'add it to Downloads as Project Lead'
+      'add it to Downloads as Manager'
     );
     await form.getByRole('button', { name: 'Cancel' }).click();
     await expect(form).toBeHidden();
@@ -225,8 +225,12 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
       await form.getByRole('button', { name: 'Hire & look around' }).click();
     } else await form.getByRole('button', { name: 'Hire only' }).click();
     const bound = await assigned;
-    expect(bound.ok(), await bound.text()).toBeTruthy();
-    expect((await bound.json()).roles).toMatchObject({
+    expect(bound.ok(), `role assignment: ${bound.status()}`).toBeTruthy();
+    // Hiring navigates on success; Chromium may already have discarded the
+    // pre-navigation response body. Verify the durable role via its read API.
+    expect(
+      (await (await request.get(`/api/workspaces/${blankId}/roles`)).json()).roles
+    ).toMatchObject({
       filled_count: 1,
       roles: [{ role_id: 'manager', agent: { name: manager } }],
       unassigned: []
@@ -255,8 +259,13 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
     await page.reload();
     const team = page.locator('.ws-cmd-team');
     await expect(team).toContainText('1 of 1 role filled');
-    await expect(team.getByText(manager, { exact: true })).toHaveCount(1);
-    await expect(team.getByText('Project Lead', { exact: true })).toBeVisible();
+    // The chat contact and the role can both show the same agent. Count role
+    // holders, not occurrences of the name throughout the Team section.
+    const roleHolder = team
+      .getByRole('list', { name: 'Roles' })
+      .getByText(manager, { exact: true });
+    await expect(roleHolder).toHaveCount(1);
+    await expect(team.getByText('Manager', { exact: true })).toBeVisible();
     await expect(
       page.locator('#workspaceAssignedFolderLook').getByRole('button', { name: 'View report' })
     ).toBeVisible();
@@ -279,7 +288,8 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
       await assignment.getByLabel('Assign an existing agent').selectOption(manager);
       await assignment.getByRole('button', { name: 'Assign to role' }).click();
       await expect(team.getByText('1 of 1 role filled')).toBeVisible();
-      await expect(team.getByText(manager, { exact: true })).toHaveCount(1);
+      await expect(roleHolder).toHaveCount(1);
+      expect((await (await request.get(`${base}/roles`)).json()).roles.unassigned).toEqual([]);
       expect((await report()).ticket_id).toBe(saved.ticket_id);
     }
     expect(await inspect()).toEqual(blank);
