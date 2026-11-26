@@ -3,8 +3,27 @@ package folderagent
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
+
+func TestStartAssignedWorkerRefusesChangedRoot(t *testing.T) {
+	root := demo(t)
+	h := newHarness(t, root)
+	h.ws.anchors["saved"] = root
+	var checks atomic.Int64
+	h.svc.deps.AssignedRoot = func(context.Context, string, string, string, string) (string, string, bool) {
+		return root, "Shelves", checks.Add(1) == 1 // allowed at start only
+	}
+	if err := h.svc.StartAssigned(t.Context(), "me", "saved", "Ada", "reviewed", "Review metadata"); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.Wait()
+	rec, err := h.svc.deps.Store.Read("saved")
+	if err != nil || rec.State != StateFailed || rec.Map != nil || rec.Turn != nil || len(h.tickets.opened) != 1 {
+		t.Fatalf("changed root reached the walk: %+v, %v", rec, err)
+	}
+}
 
 func TestStartAssignedClaimsOneLookWithoutHiringOrSettingUp(t *testing.T) {
 	root := demo(t)

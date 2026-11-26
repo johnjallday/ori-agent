@@ -243,10 +243,36 @@ creation operation and workspace-ID binding as any Blank workspace. Neither
 renaming the workspace nor choosing a replacement folder changes this purpose.
 An ordinary Blank named Documents still proposes the ordinary manager prompt.
 Opening an already-owned anchor does not review or create another manager.
+The guided default uses the catalog’s Research Archivist portrait. Team and
+Review show the effective face: an explicit Create choice (including Generated)
+beats the preset; an assigned agent always keeps its own profile.
 
 Staffing is independent of filename indexing, folder-agent enrollment and runs.
 Creating the anchor uses the ordinary read-only folder binding; this preset adds
 no tool grants. Chat configuration, if needed, belongs to the confirmed agent.
+
+**Opening is not consent to examine Documents.** On supported local APFS, the
+optional offer requires the completed local creation receipt, its original
+manager instance as current entry agent, the reviewed anchor and listing grant,
+compatible Toolbox, and the same physical known Documents directory. A renamed
+workspace still qualifies; a replacement directory does not. A pre-update
+receipt without a directory witness requires a separate **Verify Documents
+folder** action. Verification saves identity only; it does not enable search.
+
+- **Not now** dismisses the invitation for this owner and workspace in this
+  browser. **Show Documents first look** brings it back without starting it.
+- **Look around Documents** claims one assigned ticket. Only names and structure
+  are examined; a configured model may receive metadata, not document contents.
+- **Review filing suggestions** opens the existing scope preview when the look
+  observed supported loose documents. A saved review remains reachable. Only
+  **Approve this read** sends selected excerpts to the disclosed direct Claude
+  processor. Saving a group is not approval to move its files.
+- Installing Filing, granting folder access, running a manual scan, previewing
+  destinations, confirming movement and putting a file back are separate
+  actions. The first look performs none of them. If setup narrows the original
+  anchor grant to Filing’s metadata-only grant, the saved review remains usable
+  for filing and undo. That grant cannot approve another read or open an original.
+  Replacing the grant, reference, lead or physical folder does not recover the view.
 
 ## Assistant Program completion and recovery
 

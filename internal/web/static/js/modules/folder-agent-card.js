@@ -183,6 +183,7 @@ export function folderAgentReportView(view) {
     projectHolders: view.project_holders || null,
     rootPolicy: String(view.root_policy || ''),
     organizationReview: view.organization_review === true,
+    filingReviewHint: String(view.filing_review_hint || ''),
     policyNote: String(view.policy_note || ''),
     // The setup is done but filing was not allowed yet: one step left.
     filingPermissionRequired: Boolean(view.filing_permission_required),
@@ -2680,9 +2681,25 @@ export function renderFolderAgentReport(
         doc,
         `${FOLDER_AGENT_ENDPOINT}/${encodeURIComponent(view.workspaceID)}`,
         fetchImpl,
-        workspaceRoute(view.route)
+        workspaceRoute(view.route),
+        view.filingReviewHint === 'eligible'
+          ? 'Review filing suggestions'
+          : view.filingReviewHint === 'history'
+            ? 'Open saved filing reviews'
+            : undefined
       )
     );
+  else {
+    const note = {
+      empty: 'This look found no loose documents supported for filing review.',
+      partial: 'This look did not fully cover the loose documents in this folder.',
+      stale:
+        'The folder has changed since this look. Look again before reviewing filing suggestions.',
+      unavailable:
+        'Filing review needs the current manager and a scoped Documents read binding. Check the workspace’s access settings.'
+    }[view.filingReviewHint];
+    if (note) card.append(el(doc, 'p', 'folder-agent-card__note', note));
+  }
   if (view.policyNote) card.append(el(doc, 'p', 'folder-agent-card__note', view.policyNote));
   if (view.projectHolders?.rows?.length) {
     card.append(renderProjectHolders(doc, view, fetchImpl));

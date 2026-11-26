@@ -74,10 +74,16 @@ func (b *ServerBuilder) wireFolderAgent() {
 		UndoFilingFile:         b.fileJanitorService.UndoPlacedFile,
 		FilingStanding:         b.fileJanitorService.DocumentsFilingStanding,
 		DocumentsAccess:        b.documentsOrganizationAccess,
-		ReviewOpen:             platform.OpenReviewDocument,
-		OrganizationMemory:     workspace.NewMemoryStore(b.workspaceFileStore),
-		DocumentsProtected:     func() []string { return []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)} },
-		ReviewModel:            b.documentsReviewModel,
+		SavedFilingAccess: func(owner, id, agent, link string) (folderagent.DocumentsAccess, error) {
+			if b.sessionHandler == nil {
+				return folderagent.DocumentsAccess{}, folderagent.ErrUnavailable
+			}
+			return b.sessionHandler.GuidedFilingAccess(owner, id, agent, link)
+		},
+		ReviewOpen:         platform.OpenReviewDocument,
+		OrganizationMemory: workspace.NewMemoryStore(b.workspaceFileStore),
+		DocumentsProtected: func() []string { return []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)} },
+		ReviewModel:        b.documentsReviewModel,
 		DocumentsNotebook: func(ctx context.Context, owner, hq string, fn func(secondbrain.Source, string) error) error {
 			return b.personalAssistantSecondBrain.WithDocumentsNotebook(ctx, owner, hq, fn)
 		},
@@ -116,6 +122,9 @@ func (b *ServerBuilder) wireFolderAgent() {
 	b.folderAgentService = service
 	if b.sessionHandler != nil {
 		b.sessionHandler.SetFolderManagerService(service)
+		if b.fileJanitorService != nil {
+			b.sessionHandler.SetGuidedFilingRoot(b.fileJanitorService.StoredManagedRoot)
+		}
 	}
 	b.folderAgentHandler = folderagenthttp.New(service, func(ctx context.Context) (string, error) {
 		if b.userProvider == nil {

@@ -27,18 +27,19 @@ const creationOperationDigestKey = "workspace_creation_operation_digest"
 // This is a delivery journal around createWorkspace, not a second creator or
 // a resumable setup engine. An accepted operation never re-enters creation.
 type workspaceCreationOperation struct {
-	ID             string `json:"id"`
-	State          string `json:"state"`
-	Digest         string `json:"review_digest"`
-	BuildBacked    bool   `json:"build_backed,omitempty"`
-	SourceDigest   string `json:"-"`
-	WorkspaceID    string `json:"-"` // reserved identity is not creation proof
-	Owner          string `json:"-"`
-	Request        string `json:"-"`
-	ResponseStatus int    `json:"-"`
-	Response       string `json:"-"`
-	claimed        bool
-	deferFirstGoal bool
+	ID               string `json:"id"`
+	State            string `json:"state"`
+	Digest           string `json:"review_digest"`
+	BuildBacked      bool   `json:"build_backed,omitempty"`
+	SourceDigest     string `json:"-"`
+	WorkspaceID      string `json:"-"` // reserved identity is not creation proof
+	Owner            string `json:"-"`
+	Request          string `json:"-"`
+	ResponseStatus   int    `json:"-"`
+	Response         string `json:"-"`
+	claimed          bool
+	deferFirstGoal   bool
+	documentsWitness string // host observation at confirmation, never taken from request JSON
 }
 
 type creationOperationContextKey struct{}
@@ -438,8 +439,8 @@ func (h *Handler) finishWorkspaceCreationOperation(ctx context.Context, op *work
 	}
 	err := h.store.DB().InTransaction(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `UPDATE workspace_creation_operations
-		SET state=?,response_status=?,response_json=?,updated_at=CURRENT_TIMESTAMP
-		WHERE id=? AND owner_user_id=? AND state=?`, state, recorder.Code, recorder.Body.String(), op.ID, op.Owner, prior)
+		SET state=?,response_status=?,response_json=?,documents_witness=?,updated_at=CURRENT_TIMESTAMP
+		WHERE id=? AND owner_user_id=? AND state=?`, state, recorder.Code, recorder.Body.String(), op.documentsWitness, op.ID, op.Owner, prior)
 		if err != nil || state != "complete" {
 			return err
 		}

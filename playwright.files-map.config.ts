@@ -9,6 +9,8 @@ export default defineConfig({
     'files-search-folders.spec.ts',
     'folder-backed-search-locations.spec.ts',
     'folder-setup-parity.spec.ts',
+    // Requires its own split-profile e2e-fresh invocation, never a shared HOME.
+    'hq-documents-first-look.spec.ts',
     // Run on any isolated server (./scripts/e2e-fresh.sh <spec> -- --config
     // playwright.files-map.config.ts --project webkit): they need no marked profile.
     'files-name-search.spec.ts',

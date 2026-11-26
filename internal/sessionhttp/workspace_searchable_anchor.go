@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/johnjallday/ori-agent/internal/folderagent"
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
@@ -41,9 +42,12 @@ func (h *Handler) handleFolderManagerDraft(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	if h.workspaceStore != nil && h.folderSearch != nil && h.folderSearchAllowed != nil {
+	if h.workspaceStore != nil {
 		ws, err := h.workspaceStore.Get(id)
-		if err == nil && ws != nil && ws.ID == id && h.folderSearchAllowed(r, ws.OwnerUserID) {
+		if err == nil && ws != nil && ws.ID == id && ws.SharedData[guidedPurposeKey] == documentsPurpose && h.guidedLookDraft(w, r, ws) {
+			return
+		}
+		if err == nil && ws != nil && ws.ID == id && h.folderSearch != nil && h.folderSearchAllowed != nil && h.folderSearchAllowed(r, ws.OwnerUserID) {
 			if ref, err := ws.GetDirectoryReference(ws.AnchorDirectoryReferenceID()); err == nil && ref != nil && ref.WorkspaceID == id {
 				if kind, ok := h.folderSearch.StaffingFolderKind(r.Context(), ws.OwnerUserID, ref.Path, filesearch.WorkspaceMatch{ID: id, Link: ref.ID}); ok {
 					draft := map[string]string{"workspace_id": id, "name": filepath.Base(ref.Path) + " Manager", "brief": folderagent.WorkspaceManagerBrief(kind)}
@@ -72,11 +76,21 @@ func (h *Handler) SetFolderManagerService(service *folderagent.Service) { h.fold
 
 // AssignedLookRoot checks host-owned identity again before the worker walks.
 func (h *Handler) AssignedLookRoot(ctx context.Context, owner, id, agent, link string) (string, string, bool) {
-	if h.workspaceStore == nil || h.folderSearch == nil || agent == "" || link == "" {
+	if h.workspaceStore == nil || owner == "" || agent == "" || link == "" {
 		return "", "", false
 	}
 	ws, e := h.workspaceStore.Get(id)
-	if e != nil || ws == nil || ws.ID != id || ws.OwnerUserID != owner || ws.AnchorDirectoryReferenceID() != link {
+	if e != nil || ws == nil || ws.ID != id || ws.OwnerUserID != owner {
+		return "", "", false
+	}
+	if strings.HasPrefix(link, documentsLinkPrefix) {
+		look, ok := h.guidedDocumentsLook(ctx, ws)
+		if !ok || look.verification != "" || look.link != link || look.agent != agent {
+			return "", "", false
+		}
+		return look.root, ws.Name, true
+	}
+	if h.folderSearch == nil || ws.AnchorDirectoryReferenceID() != link {
 		return "", "", false
 	}
 	instance, ok := ws.FindAgentInstance(agent, "")
@@ -101,12 +115,12 @@ func (h *Handler) handleFolderManagerLook(w http.ResponseWriter, r *http.Request
 		_ = orihttp.RespondMethodNotAllowed(w)
 		return
 	}
-	if h.folderManager == nil || h.workspaceStore == nil || h.folderSearchAllowed == nil {
+	if h.folderManager == nil || h.workspaceStore == nil {
 		_ = orihttp.RespondError(w, http.StatusServiceUnavailable, "Folder review is unavailable.")
 		return
 	}
 	ws, e := h.workspaceStore.Get(id)
-	if e != nil || ws == nil || !h.folderSearchAllowed(r, ws.OwnerUserID) {
+	if e != nil || ws == nil || ws.ID != id {
 		_ = orihttp.RespondForbidden(w, "This folder is not available here.")
 		return
 	}
@@ -116,6 +130,14 @@ func (h *Handler) handleFolderManagerLook(w http.ResponseWriter, r *http.Request
 		Brief string `json:"brief"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &choice) {
+		return
+	}
+	allowed := h.folderSearchAllowed
+	if strings.HasPrefix(choice.Link, documentsLinkPrefix) {
+		allowed = h.guidedLookAllowed
+	}
+	if allowed == nil || !allowed(r, ws.OwnerUserID) {
+		_ = orihttp.RespondForbidden(w, "This folder is not available here.")
 		return
 	}
 	if err := h.folderManager.StartAssigned(r.Context(), ws.OwnerUserID, id, choice.Agent, choice.Link, choice.Brief); err != nil {

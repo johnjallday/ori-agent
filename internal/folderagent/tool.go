@@ -48,7 +48,7 @@ func (t lookTool) Definition() toolapi.ToolDefinition {
 	}
 }
 
-func (t lookTool) Call(_ context.Context, args string) (string, error) {
+func (t lookTool) Call(ctx context.Context, args string) (string, error) {
 	var in struct {
 		Folder *string `json:"folder"`
 	}
@@ -66,6 +66,9 @@ func (t lookTool) Call(_ context.Context, args string) (string, error) {
 	}
 	var result foldermap.LookResult
 	_, err = t.service.deps.Store.Update(t.workspaceID, func(r *Record) error {
+		if r.AssignedLink != "" && !t.service.assignedRootCurrent(ctx, r, root) {
+			return ErrWrongState
+		}
 		if r.Map == nil {
 			return foldermap.ErrNotInMap
 		}

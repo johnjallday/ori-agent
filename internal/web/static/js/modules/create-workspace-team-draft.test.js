@@ -2457,6 +2457,34 @@ test('guided Documents uses the reviewed manager slot; edits, opt-out and cancel
   assert.equal(Draft.derive(draft).payload.guided_purpose, undefined);
 });
 
+test('the manager previews the effective face without staging a default as a user edit', () => {
+  const appearance = { mode: 'character', character: { catalog_id: 'research-archivist' } };
+  const plan = name =>
+    planResponse([{ ...blankManagerPlanAgent(name), appearance }], { template_id: 'blank' });
+  const draft = Draft.createDraft();
+  const face = () => Draft.derive(draft).roleRoster.roles[0].agent.appearance;
+  Draft.setPlanReady(draft, 'blank', plan('Documents Manager'));
+  assert.deepEqual(face(), appearance);
+  assert.equal(managerStaffing(draft).appearance, undefined);
+  Draft.setPlanReady(draft, 'blank', plan('Documents Manager 2'));
+  assert.equal(managerStaffing(draft).name, 'Documents Manager 2');
+  const generated = { mode: 'generated', generated: {} };
+  Draft.clearRoleFill(draft, 'manager');
+  Draft.setRoleFill(draft, 'manager', {
+    mode: 'create',
+    name: 'My manager',
+    appearance: generated
+  });
+  Draft.setPlanReady(draft, 'blank', plan('Documents Manager 3'));
+  assert.deepEqual(face(), generated);
+  assert.deepEqual(managerStaffing(draft).appearance, generated);
+  Draft.clearRoleFill(draft, 'manager');
+  Draft.setSavedRosterReady(draft, [{ name: 'My saved agent', appearance: generated }]);
+  Draft.setRoleFill(draft, 'manager', { mode: 'assign', name: 'My saved agent' });
+  assert.deepEqual(face(), generated);
+  assert.equal(managerStaffing(draft).appearance, undefined);
+});
+
 test('a cleared manager stays cleared when the plan is read again', () => {
   const draft = blankDraft('House Manager');
   assert.equal(Draft.clearRoleFill(draft, 'manager'), true);

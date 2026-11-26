@@ -2032,7 +2032,9 @@ export class WorkspaceCommandView {
       (hqDetails || (mapTab && this.isPersonalHQ()) ? this.firstVisit?.headerHTML?.() || '' : '') +
       (this.roleRoster?.workspace_id === ws.id &&
       this.roleRoster?.total_count === 1 &&
-      this.roleRoster.roles?.[0]?.role_id === 'ask-ori' &&
+      (this.roleRoster.roles?.[0]?.role_id === 'ask-ori' ||
+        (this.roleRoster.roles?.[0]?.role_id === 'manager' &&
+          ws.shared_data?.anchor_directory_reference_id)) &&
       !this.roleRoster.filled_count &&
       !this.roleRoster.unassigned?.length
         ? '<button type="button" class="ws-cmd-nav-btn" data-cmd-staff-workspace aria-haspopup="dialog">Add an agent…</button>'

@@ -58,6 +58,10 @@ type organizationScope struct {
 	root, rootID, authority string
 }
 
+func reviewableDocumentName(name string) bool {
+	return !workspace.ContainedEntryExcluded(name) && fileparser.SupportsReviewFile(name) && secondbrain.ValidFolderName(name) && !sensitive.ContainsSecretLikeText(name)
+}
+
 func scopeHash(v any) string { b, _ := json.Marshal(v); return documentsRef(string(b)) }
 
 func (s *Service) reviewScope(ctx context.Context, owner string, rec *Record, sel ReviewSelection) (organizationScope, error) {
@@ -106,7 +110,7 @@ func (s *Service) reviewScope(ctx context.Context, owner string, rec *Record, se
 	collect := func(list workspace.DirectoryListing, example bool) []ReviewSource {
 		var rows []ReviewSource
 		for _, e := range list.Entries {
-			if e.Kind != "file" || !fileparser.SupportsReviewFile(e.Name) || !secondbrain.ValidFolderName(e.Name) || !allowed(e.RelativePath) || sensitive.ContainsSecretLikeText(e.Name) {
+			if e.Kind != "file" || !reviewableDocumentName(e.Name) || !allowed(e.RelativePath) {
 				continue
 			}
 			src := ReviewSource{Path: e.RelativePath, Version: e.Version, Example: example}

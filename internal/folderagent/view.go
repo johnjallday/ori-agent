@@ -42,6 +42,7 @@ type View struct {
 	ProgressLine string   `json:"progress_line,omitempty"`
 
 	ProjectHolders     *ProjectHoldersView    `json:"project_holders,omitempty"`
+	FilingReviewHint   string                 `json:"filing_review_hint,omitempty"`
 	OrganizationReview bool                   `json:"organization_review,omitempty"`
 	RootPolicy         folderlook.RootPolicy  `json:"root_policy,omitempty"`
 	PolicyNote         string                 `json:"policy_note,omitempty"`
@@ -267,7 +268,10 @@ func (s *Service) viewOf(ctx context.Context, rec *Record) View {
 	v.StageLine = folderlook.DefaultLine(folderlook.StepsForPolicy(rec.RootPolicy, rec.FolderName, rec.Facts, rec.Candidates))
 	v.ProjectHolders = projectHoldersView(rec)
 	v.RootPolicy = rec.RootPolicy
-	if rec.RootPolicy == folderlook.RootDocuments || completed(rec) {
+	if strings.HasPrefix(rec.AssignedLink, GuidedDocumentsLinkPrefix) {
+		v.FilingReviewHint = s.looseDocumentHint(rec)
+		v.OrganizationReview = v.FilingReviewHint == "eligible" || v.FilingReviewHint == "history"
+	} else if rec.RootPolicy == folderlook.RootDocuments || completed(rec) {
 		_, err := s.organizationAccess(rec.OwnerUserID, rec)
 		v.OrganizationReview = err == nil
 	}
