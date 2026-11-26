@@ -31,6 +31,10 @@ func (h *Handler) FileReviewPlan(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if r.URL.Query().Get("layout") == "shelves" {
+		h.fileShelfPicture(w, r, workspaceID)
+		return
+	}
 	if r.ContentLength > maxFileRequestBytes {
 		_ = orihttp.RespondBadRequest(w, "That request is too large.")
 		return
@@ -57,6 +61,31 @@ func (h *Handler) FileReviewPlan(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.respondFilingError(w, err, result)
+		return
+	}
+	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "filing": result})
+}
+
+func (h *Handler) fileShelfPicture(w http.ResponseWriter, r *http.Request, id string) {
+	var body struct {
+		Revision   string                       `json:"revision"`
+		Key        string                       `json:"client_key"`
+		Placements []filejanitor.ShelfPlacement `json:"placements"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 384<<10))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&body) != nil || decoder.Decode(&struct{}{}) != io.EOF {
+		_ = orihttp.RespondBadRequest(w, "Send one reviewed folder picture.")
+		return
+	}
+	owner, err := h.currentOwner(r.Context())
+	if err != nil {
+		_ = orihttp.RespondForbidden(w, "Your workspace identity is unavailable.")
+		return
+	}
+	result, err := h.service.FileShelfPicture(r.Context(), owner, id, r.PathValue("batchID"), body.Revision, body.Key, body.Placements)
+	if err != nil {
+		h.respondFilingError(w, err, filejanitor.FilingResult{})
 		return
 	}
 	_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "filing": result})

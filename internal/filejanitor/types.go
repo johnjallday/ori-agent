@@ -142,6 +142,9 @@ type AssistedAutomationReceipt struct {
 // letting saved-only readers recognize it without resolving symlinks. Execution
 // still resolves and validates the actual root. Missing legacy proof is inert.
 type ApprovedReferenceSpelling struct {
+	// Witness pins the physical directory for the station picture without
+	// exposing its inode. Missing legacy proof is never upgraded on a read.
+	Witness     string `json:"witness_digest,omitempty"`
 	RootID      string `json:"root_id"`
 	ReferenceID string `json:"reference_id"`
 	Path        string `json:"path"`

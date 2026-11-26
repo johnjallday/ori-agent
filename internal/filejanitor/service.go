@@ -695,11 +695,13 @@ func (s *Service) confirmSetup(req SetupRequest, downloadOwner string, verifyDow
 			return Status{}, err
 		}
 	}
-	if req.ExpectedRootIdentity != "" {
-		info, err := os.Stat(root) // #nosec G304 -- previously canonicalized reviewed root; identity rechecked before consequences
-		if err != nil || platformFileID(info) != req.ExpectedRootIdentity {
-			return Status{}, setupErr(CodeFolderChanged, "The reviewed folder changed. Choose it again.", RepairChooseFolder, nil)
-		}
+	info, err := os.Lstat(root) // #nosec G304 G703 -- canonical approved root; pin its identity at the grant, never on a picture read
+	if err != nil || !info.IsDir() {
+		return Status{}, setupErr(CodeFolderChanged, "The reviewed folder changed. Choose it again.", RepairChooseFolder, err)
+	}
+	witness := platformFileID(info)
+	if req.ExpectedRootIdentity != "" && witness != req.ExpectedRootIdentity {
+		return Status{}, setupErr(CodeFolderChanged, "The reviewed folder changed. Choose it again.", RepairChooseFolder, nil)
 	}
 	station := operation != nil && operation.PreparationID != "" && current.SetupPreparation != nil && current.SetupPreparation.Station != nil
 	if !station && !current.DeferredDestination {
@@ -730,7 +732,7 @@ func (s *Service) confirmSetup(req SetupRequest, downloadOwner string, verifyDow
 	if err != nil || resolvedReference != root {
 		return Status{}, setupErr(CodeFolderChanged, "The approved folder reference changed. Review access again.", RepairChooseFolder, err)
 	}
-	proof := &ApprovedReferenceSpelling{RootID: rootID, ReferenceID: referenceID, Path: ref.Path}
+	proof := &ApprovedReferenceSpelling{RootID: rootID, ReferenceID: referenceID, Path: ref.Path, Witness: shelfWitness(rootID, witness)}
 	completedAt := s.clock()
 	if _, err := s.store.UpdateSettings(workspaceID, func(settings *JanitorSettings) error {
 		if operation != nil {

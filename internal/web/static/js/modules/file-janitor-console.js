@@ -2973,6 +2973,39 @@
   // the picture read says. A tick or untick is one saved edit through the same
   // lifecycle as every other choice, and the picture is redrawn from the server's
   // next read, never from this module's own arithmetic.
+  let shelfVisit = null;
+  function openShelfPicture() {
+    if (!lastBatch || !window.FilingStationShelves || shelfVisit || busy) return;
+    const scope = requestScope(),
+      batch = lastBatch.id;
+    const visit = { batch, scope };
+    const current = () => shelfVisit === visit && scopeCurrent(scope) && lastBatch?.id === batch;
+    shelfVisit = visit;
+    lastResults = null;
+    visit.surface = window.FilingStationShelves.create({
+      doc: document,
+      batch,
+      base: apiBase(scope.id) + '/batches/' + encodeURIComponent(batch),
+      current,
+      key: newClientKey,
+      back() {
+        if (!current()) return;
+        shelfVisit = null;
+        renderBatch();
+        document.getElementById('fileJanitorOpenShelves')?.focus();
+      },
+      async receipt(result) {
+        if (!current()) return;
+        shelfVisit = null;
+        await loadBatch();
+        if (!scopeCurrent(scope)) return;
+        await showReceipt(scope, result);
+        await loadHistory();
+      }
+    });
+    renderBatch();
+    void visit.surface.load();
+  }
   function renderPictureView() {
     const section = el('section', 'fj-picture-host');
     const drawing = window.FileJanitorPicture;
@@ -3306,6 +3339,17 @@
     if (reviewView === 'groups') {
       // The picture owns the decision summary. All files stays reachable from
       // the header and owns the progress, picker and filters.
+      if (shelfVisit && (!scopeCurrent(shelfVisit.scope) || shelfVisit.batch !== lastBatch.id))
+        shelfVisit = null;
+      if (shelfVisit?.surface) {
+        container.appendChild(shelfVisit.surface.host);
+        return;
+      }
+      if (lastStatus?.settings?.deferred_destination && window.FilingStationShelves) {
+        const shelves = button('Into my folders', 'fj-btn fj-btn-secondary', openShelfPicture);
+        shelves.id = 'fileJanitorOpenShelves';
+        container.appendChild(shelves);
+      }
       container.appendChild(renderPictureView());
       if (protection) container.appendChild(protection);
       appendReviewFooter(container, focusedReviewControlID);
@@ -5812,6 +5856,7 @@
   function close(options = {}) {
     if (!consoleOpen) return false;
     discardProtectionApproval();
+    shelfVisit = null;
     lastResults = null;
     consoleOpen = false;
     if (stationBuildOpen()) {

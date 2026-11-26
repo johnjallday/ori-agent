@@ -78,6 +78,9 @@ type FilingRecord struct {
 	// chose (the Documents path). Additive: an older build drops them on rewrite and
 	// then cannot treat the filing as one of its own category filings.
 	Destination *FilingDestination `json:"destination,omitempty"`
+	// A station picture may have a different shelf for each file. The exact
+	// paths/identities live in each placement's existing journal entry.
+	ShelfPicture bool `json:"shelf_picture,omitempty"`
 	// DecisionID is the one organizing decision this filing belongs to, fixed at
 	// admission so the decision can be written after the move and backfilled.
 	DecisionID string `json:"decision_id,omitempty"`
@@ -104,7 +107,11 @@ func (f FilingRecord) validate() error {
 		f.PlannedMoves < 0 || f.PlannedTrash < 0 || f.PlannedMoves+f.PlannedTrash > PlanMaxOperations {
 		return fmt.Errorf("%w: invalid filing record", ErrInvalidCandidate)
 	}
-	if (f.Destination == nil) != (f.DecisionID == "") {
+	if f.ShelfPicture {
+		if f.Destination != nil || f.PlannedTrash != 0 || !managedRootGeneration.MatchString(f.DecisionID) {
+			return fmt.Errorf("%w: invalid shelf filing", ErrInvalidCandidate)
+		}
+	} else if (f.Destination == nil) != (f.DecisionID == "") {
 		return fmt.Errorf("%w: invalid filing record", ErrInvalidCandidate)
 	}
 	if f.Destination != nil {
@@ -212,7 +219,7 @@ func (s *Service) FileReviewPlan(ctx context.Context, owner, workspaceID, batchI
 	_, err = s.store.UpdateScanState(workspaceID, func(state *ScanState) error {
 		for _, existing := range state.Filings {
 			if existing.ClientKey == req.ClientKey {
-				if existing.Owner != owner || existing.BatchID != batchID || existing.Destination != nil {
+				if existing.Owner != owner || existing.BatchID != batchID || existing.DecisionID != "" {
 					return ErrReviewConflict
 				}
 				admitted.record = existing

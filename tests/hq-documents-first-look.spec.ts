@@ -249,6 +249,30 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await page.reload();
     await expect(building).toContainText('Review 1 file');
     await expect(building).not.toHaveAttribute('data-station-part', /foundation|walls|roof/);
+    // A shelf is an existing folder the person chooses, not one created by
+    // setup or by selecting a chip. Exercise the admitted File and Undo too.
+    await mkdir(join(root, 'Orders'), { mode: 0o750 });
+    if (!(await station.isVisible())) await building.press('Enter');
+    await station.getByRole('button', { name: 'Into my folders', exact: true }).press('Enter');
+    const shelves = station.locator('.fj-shelves');
+    const picker = shelves.getByRole('combobox', { name: 'Choose an existing folder' });
+    await picker.selectOption({ label: 'Orders' });
+    await shelves.getByRole('button', { name: 'Add shelf' }).press('Enter');
+    await shelves.getByRole('button', { name: 'estimate.txt', exact: true }).press('Enter');
+    await shelves.getByRole('button', { name: 'Move here: Orders', exact: true }).press('Enter');
+    await expect(shelves).toContainText('1 ready to file · 0 stay loose');
+    await verifyBytes();
+    await page.screenshot({ path: info.outputPath('own-shelves.png') });
+    await shelves.getByRole('button', { name: 'File 1 file', exact: true }).press('Enter');
+    const undo = station.getByRole('button', { name: 'Undo all', exact: true });
+    await expect(undo).toBeVisible();
+    expect(await readFile(join(root, 'Orders', 'estimate.txt'), 'utf8')).toBe(
+      fixtures['estimate.txt']
+    );
+    expect(await readdir(root)).toEqual(['Orders']);
+    await undo.press('Enter');
+    await expect.poll(() => readdir(join(root, 'Orders'))).toEqual([]);
+    await verifyBytes();
     return;
   }
   await expect(suggestionButton).toBeVisible();

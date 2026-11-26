@@ -71,6 +71,9 @@ type DocumentsFileRequest struct {
 	// DecisionID is the organizing decision this filing belongs to, fixed by the
 	// caller from the retry key so a replay finds the same one.
 	DecisionID string
+	// shelves is created only by the station, never decoded from JSON. It
+	// derives a per-file destination from the same admitted picture.
+	shelves *shelfRequest
 }
 
 // DocumentsFilingResult is what a press did, built from the journal so the first
@@ -95,6 +98,7 @@ type DocumentsFilingResult struct {
 type documentsPlanItem struct {
 	candidate JanitorCandidate
 	finalName string
+	shelf     DirRef // an existing station shelf; zero for a single Documents destination
 }
 
 type documentsPlan struct {
@@ -283,7 +287,7 @@ func documentsFilingFor(state ScanState, clientKey string) (FilingRecord, bool) 
 
 // sameDocumentsIntent reports whether a retry is the same press as the admitted one.
 func sameDocumentsIntent(existing FilingRecord, owner string, req DocumentsFileRequest) bool {
-	return existing.Owner == owner && existing.Destination != nil && existing.PlanDigest == req.Digest && existing.DecisionID == req.DecisionID
+	return existing.Owner == owner && (existing.ShelfPicture && req.shelves != nil || existing.Destination != nil && req.shelves == nil) && existing.PlanDigest == req.Digest && existing.DecisionID == req.DecisionID
 }
 
 // FileDocumentsSelection files exactly the plan the person last saw, or nothing.
@@ -368,7 +372,15 @@ func (s *Service) FileDocumentsSelection(ctx context.Context, owner, workspaceID
 				state.Filings[i].Interrupted = true // the process died after admitting it
 			}
 		}
-		plan := s.planDocuments(owner, workspaceID, sel, req.Destination, *state)
+		var plan documentsPlan
+		if req.shelves != nil {
+			plan, err = s.planShelves(ctx, owner, workspaceID, sel.Batch, *req.shelves, *state)
+			if err != nil {
+				return err
+			}
+		} else {
+			plan = s.planDocuments(owner, workspaceID, sel, req.Destination, *state)
+		}
 		admitted.fresh = plan.preview
 		if plan.preview.State != documentsPreviewReady || plan.preview.Digest != req.Digest {
 			return ErrReviewPlanChanged
@@ -396,6 +408,10 @@ func (s *Service) FileDocumentsSelection(ctx context.Context, owner, workspaceID
 			ID: filingID, Owner: owner, BatchID: sel.Batch, RootID: root.Generation, ClientKey: req.ClientKey,
 			PlanDigest: plan.preview.Digest, PlannedMoves: len(plan.items), AdmittedAt: now,
 			Destination: destination, DecisionID: req.DecisionID,
+		}
+		if req.shelves != nil {
+			admitted.record.Destination = nil
+			admitted.record.ShelfPicture = true
 		}
 		state.Approvals = append(state.Approvals, admitted.approval)
 		state.Filings = append(state.Filings, admitted.record)
@@ -457,7 +473,12 @@ func (s *Service) FileDocumentsSelection(ctx context.Context, owner, workspaceID
 	if ready {
 		for _, item := range plan.items {
 			planItem := PlanItem{CandidateID: item.candidate.ID, Operation: OperationPlace, FingerprintKey: item.candidate.Fingerprint.Key()}
-			outcome := s.placeOne(runCtx, settings, root.Path, admitted.approval, planItem, item, folder, plan.rootDirID)
+			target := folder
+			if admitted.record.ShelfPicture {
+				target = item.shelf
+				planItem.explicitShelf = true
+			}
+			outcome := s.placeOne(runCtx, settings, root.Path, admitted.approval, planItem, item, target, plan.rootDirID)
 			if outcome.ActionID == "" {
 				unrecorded = append(unrecorded, FilingUnrecorded{CandidateID: item.candidate.ID, Reason: outcome.Message})
 			}

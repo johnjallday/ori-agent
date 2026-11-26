@@ -18,6 +18,59 @@
   }
 }
 
+.fj-shelves-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: 0.9rem;
+  margin-block: 1rem;
+}
+.fj-shelf {
+  border: 1px solid var(--bs-border-color);
+  border-bottom: 4px double var(--bs-border-color);
+  border-radius: 0.5rem 0.5rem 0.2rem 0.2rem;
+  padding: 0.85rem;
+  min-width: 0;
+}
+.fj-shelf-loose {
+  border-style: dashed;
+}
+.fj-shelf-title {
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+.fj-shelf-files,
+.fj-shelf-tools,
+.fj-shelf-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.7rem;
+}
+.fj-shelf-file {
+  color: var(--bs-body-color);
+  background: var(--bs-tertiary-bg);
+  border: 1px solid var(--bs-border-color);
+  border-radius: 0.25rem;
+  padding: 0.35rem 0.6rem;
+  text-align: start;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 100%;
+}
+.fj-shelf-file[aria-pressed="true"] {
+  outline: 2px solid currentColor;
+  outline-offset: 1px;
+}
+.fj-shelf-tools select {
+  max-width: 100%;
+}
+.fj-shelf-footer {
+  border-top: 1px solid var(--bs-border-color);
+  padding-block-start: 0.8rem;
+  justify-content: space-between;
+}
+
 .filing-station-offer {
   display: flex;
   flex-wrap: wrap;

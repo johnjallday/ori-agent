@@ -23,6 +23,17 @@ func (h *Handler) GetReviewPicture(w http.ResponseWriter, r *http.Request) {
 		_ = orihttp.RespondInternalError(w, "Failed to resolve the current user")
 		return
 	}
+	// The shelves variant additionally lists folder names under the approved
+	// directory. The default By kind picture stays a saved-state-only read.
+	if r.URL.Query().Get("layout") == "shelves" {
+		picture, err := h.service.ReadShelfPicture(r.Context(), owner, workspaceID, r.PathValue("batchID"), r.URL.Query().Get("parent"))
+		if err != nil {
+			h.respondPictureError(w, err)
+			return
+		}
+		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "picture": picture})
+		return
+	}
 	picture, err := h.service.ReadReviewPicture(r.Context(), owner, workspaceID, r.PathValue("batchID"))
 	if err != nil {
 		h.respondPictureError(w, err)

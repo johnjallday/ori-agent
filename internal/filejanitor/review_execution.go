@@ -48,8 +48,10 @@ func validExecutionCandidate(candidate JanitorCandidate, item PlanItem, approval
 		}
 	}
 	// A placement has no category: the person chose the folder. A file the review
-	// marked for the Trash, or whose type question is unanswered, is never placed.
-	if item.Operation == OperationPlace && (approval.ReviewRevision == "" || !moveAnswered(candidate) || candidate.Decision == DecisionTrash) {
+	// marked for the Trash is never placed. The Documents handoff additionally
+	// requires an answered type question; the station instead has an explicit
+	// placement choice per file, bound to its reviewed shelf.
+	if item.Operation == OperationPlace && (approval.ReviewRevision == "" || (!item.explicitShelf && !moveAnswered(candidate)) || candidate.Decision == DecisionTrash) {
 		return false
 	}
 	// A send exists only through the one press of a saved review, for a file whose

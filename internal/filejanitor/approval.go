@@ -100,6 +100,9 @@ type PlanItem struct {
 	// ConnectionID is set only on an OperationSend item: the connection the file
 	// goes out on.
 	ConnectionID string
+	// Explicitly choosing a station shelf answers where to put this one
+	// file without having to answer the unrelated By kind question.
+	explicitShelf bool
 }
 
 // PayloadHash computes the stable hash of a plan. Items are sorted so the same

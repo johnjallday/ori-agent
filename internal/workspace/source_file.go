@@ -276,7 +276,7 @@ func readContainedFile(root, relativePath string, maxBytes int64, rootID string,
 // skips hidden entries and Ori's own record files. It reads names, sizes and
 // times only; no file is opened.
 func ListContainedEntries(root, relativePath string, depth int) (DirectoryListing, error) {
-	return listContainedEntries(root, relativePath, depth, false)
+	return listContainedEntries(root, relativePath, depth, false, "", "")
 }
 
 // listContainedPage bounds the directory read itself, including names that are
@@ -287,10 +287,19 @@ func listContainedPage(root, relativePath string) (DirectoryListing, error) {
 			return DirectoryListing{}, ErrSourceExcluded
 		}
 	}
-	return listContainedEntries(root, relativePath, 1, true)
+	return listContainedEntries(root, relativePath, 1, true, "", "")
 }
 
-func listContainedEntries(root, relativePath string, depth int, page bool) (DirectoryListing, error) {
+// ListWitnessedPage lists one bounded level only after verifying the opened
+// directory belongs to the reviewed root. It never opens a regular file.
+func ListWitnessedPage(root, relativePath, rootWitness, folderWitness string) (DirectoryListing, error) {
+	if rootWitness == "" || folderWitness == "" {
+		return DirectoryListing{}, ErrSourceChanged
+	}
+	return listContainedEntries(root, relativePath, 1, true, rootWitness, folderWitness)
+}
+
+func listContainedEntries(root, relativePath string, depth int, page bool, witness, folderWitness string) (DirectoryListing, error) {
 	start := "."
 	if strings.TrimSpace(relativePath) != "" && strings.TrimSpace(relativePath) != "." {
 		rel, err := ContainedRelativePath(relativePath)
@@ -304,6 +313,9 @@ func listContainedEntries(root, relativePath string, depth int, page bool) (Dire
 		return DirectoryListing{}, err
 	}
 	defer func() { _ = folder.Close() }()
+	if witness != "" && rootID != witness {
+		return DirectoryListing{}, ErrSourceChanged
+	}
 	if depth <= 0 || depth > DirectoryListMaxDepth {
 		depth = DirectoryListMaxDepth
 	}
@@ -319,6 +331,12 @@ func listContainedEntries(root, relativePath string, depth int, page bool) (Dire
 			return DirectoryListing{}, err
 		}
 		defer func() { _ = top.Close() }()
+	}
+	if folderWitness != "" {
+		info, err := top.Stat(".")
+		if err != nil || directoryid.Witness(info) != folderWitness {
+			return DirectoryListing{}, ErrSourceChanged
+		}
 	}
 	listing := DirectoryListing{rootIdentity: rootID}
 	var walk func(current *os.Root, dir string, level int) error
@@ -372,7 +390,7 @@ func listContainedEntries(root, relativePath string, depth int, page bool) (Dire
 				// Opened before it is listed: another workspace's folder, or one of
 				// Ori's own inside a workspace folder, is not named at all.
 				opened, err := openContainedDir(current, name)
-				if errors.Is(err, ErrSourceExcluded) {
+				if errors.Is(err, ErrSourceExcluded) || (witness != "" && err != nil) {
 					continue
 				}
 				sub = opened // nil when unreadable or swapped for a link: listed, left unexpanded
