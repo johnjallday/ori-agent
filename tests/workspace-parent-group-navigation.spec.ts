@@ -275,7 +275,8 @@ for (const viewport of [
   }) => {
     await page.setViewportSize({ width: viewport.width, height: viewport.height });
     const id = tag();
-    const longName = `Spring Release Campaign Mastering Sessions And Stems Archive ${id}`;
+    // Keep the two fixtures distinct even when slug truncation removes the suffix.
+    const longName = `Spring ${viewport.name} Release Campaign Mastering Sessions And Stems Archive ${id}`;
     const group = await createGroup(page.request, longName);
     const member = await createWorkspace(page.request, `Stems ${id}`, group.id);
 
@@ -324,13 +325,17 @@ for (const viewport of [
     await page.locator('.ws-cmd-nav [data-cmd-nav-home]').focus();
     await page.keyboard.press('Tab');
     await expect(groupLink(page)).toBeFocused();
-    // The ring must be drawn inside the border box: the nav buttons' clip-path
-    // cuts away anything outside it. Polled past their 0.15s transition.
+    // The shared button skin is no longer clipped. On a clipped variant the
+    // ring must still be inset; either way the keyboard indicator is visible.
     await expect
       .poll(() =>
         groupLink(page).evaluate(el => {
           const style = getComputedStyle(el);
-          return [style.outlineStyle, style.outlineWidth, parseFloat(style.outlineOffset) < 0];
+          return [
+            style.outlineStyle,
+            style.outlineWidth,
+            style.clipPath === 'none' || parseFloat(style.outlineOffset) < 0
+          ];
         })
       )
       .toEqual(['solid', '2px', true]);

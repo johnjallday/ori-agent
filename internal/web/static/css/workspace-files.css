@@ -1,0 +1,136 @@
+.workspace-files:not([hidden]) {
+  display: grid;
+  grid-template-columns: minmax(14rem, 30%) minmax(0, 1fr);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: var(--ori-launcher-clearance-y, 5rem);
+}
+.wf-index,
+.wf-preview {
+  min-width: 0;
+}
+.wf-index {
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  padding: 1rem 0.5rem;
+}
+.wf-kicker {
+  display: block;
+  font: 600 0.72rem/1.4 var(--font-mono, monospace);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-secondary);
+  margin: 0 0 0.8rem;
+}
+.wf-index .wf-kicker {
+  padding-inline: 0.65rem;
+}
+.wf-tree {
+  overflow: auto;
+  max-height: 65vh;
+  min-height: 14rem;
+}
+.wf-tree [role="treeitem"] {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.35rem;
+  padding-left: calc(0.35rem + min(var(--wf-level) - 1, 7) * 0.7rem);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+.wf-tree [aria-level="1"] {
+  font-weight: 650;
+}
+.wf-tree [role="treeitem"]:hover {
+  background: var(--bg-tertiary);
+}
+.wf-tree [aria-selected="true"] {
+  background: var(--bg-tertiary);
+  box-shadow: inset 3px 0 var(--focus-color);
+}
+.wf-tree [role="treeitem"]:focus-visible,
+.workspace-files button:focus-visible {
+  outline: 2px solid var(--focus-color);
+  outline-offset: -2px;
+}
+.workspace-files .cockpit-tree-icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  flex: none;
+}
+.wf-spacer {
+  width: 12px;
+  flex: none;
+}
+.wf-preview {
+  padding: clamp(1.2rem, 4vw, 3rem);
+  overflow-wrap: anywhere;
+}
+.wf-crumb {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 0.45rem;
+}
+.wf-preview h2 {
+  font-size: clamp(1.2rem, 2.6vw, 1.8rem);
+  line-height: 1.2;
+}
+.wf-body {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border-color);
+  max-width: 70ch;
+  line-height: 1.6;
+  overflow: auto;
+}
+.wf-body pre {
+  white-space: pre-wrap;
+  color: inherit;
+}
+.wf-body img {
+  max-width: 100%;
+  height: auto;
+}
+.wf-back {
+  display: none;
+}
+@media (max-width: 700px) {
+  .workspace-files:not([hidden]) {
+    grid-template-columns: minmax(0, 1fr);
+    scroll-margin-top: calc(var(--ori-navbar-bottom, 84px) + 12px);
+  }
+  .wf-index {
+    border-right: 0;
+  }
+  .wf-tree {
+    max-height: 60dvh;
+  }
+  .wf-tree [role="treeitem"] {
+    min-height: 40px;
+  }
+  .workspace-files:not(.wf-reading) .wf-preview,
+  .workspace-files.wf-reading .wf-index {
+    display: none;
+  }
+  .wf-preview {
+    min-height: 55dvh;
+  }
+  .wf-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-bottom: 1rem;
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 5px;
+    padding: 0.45rem 0.65rem;
+  }
+}

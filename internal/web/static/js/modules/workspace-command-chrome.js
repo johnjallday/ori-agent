@@ -20,6 +20,7 @@ export function workspaceNavigationHTML({
   const modes = [
     ['details', 'Overview'],
     ['map', 'Map'],
+    ['files', 'Files'],
     ['tickets', 'Tickets'],
     ...(dashboard ? [['dashboard', 'Dashboard']] : [])
   ];

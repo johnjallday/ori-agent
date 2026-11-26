@@ -7179,7 +7179,7 @@ button.ws-cmd-rpg-class-card:focus-visible {
      controls are never trapped underneath it (PRD FR5.20). */
   /* Tickets owns its own sibling surface and launcher clearance below it;
      the header-only command container must not reserve another empty footer. */
-  .ws-cmd:not(.is-tickets) {
+  .ws-cmd:not(.is-tickets):not(.is-files) {
     padding-bottom: 84px;
   }
   /* Three tabs to a line on a phone, so nine sections stay within three

@@ -739,6 +739,21 @@ function resolveFetch(fetchImpl) {
   return impl;
 }
 
+/** Workspace detail's uncapped, read-only sections. A missing attachment is
+ * kept by the management API for Locate, but has nothing for a reader. */
+export async function loadWorkspaceContents(workspaceId, sectionId, { fetchImpl } = {}) {
+  if (![SECTION_FILES, SECTION_NOTES].includes(sectionId))
+    throw new Error('Unsupported reader section');
+  const loader = LOADERS[sectionId];
+  const payload = await getJSON(loader.url(workspaceId), fetchImpl);
+  if (sectionId === SECTION_FILES && Array.isArray(payload.files)) {
+    return loader.shape(workspaceId, {
+      files: payload.files.filter(entry => entry?.status !== 'missing')
+    });
+  }
+  return loader.shape(workspaceId, payload);
+}
+
 /** Fetch one section of one workspace and return its capped rows. */
 export async function loadSection(workspaceId, sectionId, { fetchImpl } = {}) {
   const loader = LOADERS[sectionId];

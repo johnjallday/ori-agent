@@ -57,6 +57,13 @@ export function findWorkspaceNode(nodes, id) {
   return null;
 }
 
+export async function readWorkspaceTree({ signal } = {}) {
+  const res = await fetch('/api/workspaces?tree=true', { signal });
+  if (!res.ok) throw new Error(`tree fetch failed: ${res.status}`);
+  const data = await res.json();
+  return data.workspaces || data.folders || [];
+}
+
 export function directMembers(group) {
   return group && Array.isArray(group.children) ? group.children : [];
 }
@@ -469,13 +476,12 @@ export class WorkspaceMembersPanel {
     this.onSourceFoldersChanged?.();
     this.paintSourceFolders();
     try {
-      const res = await fetch('/api/workspaces?tree=true', { signal });
-      if (!res.ok) throw new Error(`tree fetch failed: ${res.status}`);
-      const data = await res.json();
+      const tree = await readWorkspaceTree({ signal });
       if (!isCurrent()) return;
       this.readFailed = false;
-      this.tree = data.workspaces || data.folders || [];
+      this.tree = tree;
       this.group = findWorkspaceNode(this.tree, this.workspaceId);
+      this.onMembershipRead?.(isGroupNode(this.group) ? this.group : null);
       if (!isGroupNode(this.group)) {
         this.group = null;
         return;
@@ -496,6 +502,7 @@ export class WorkspaceMembersPanel {
       if (!isCurrent()) return;
       console.error('Failed to load group members:', err);
       this.readFailed = true;
+      this.onMembershipRead?.(null);
       this.showError('Failed to load members.');
     }
   }
