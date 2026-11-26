@@ -357,14 +357,14 @@ func (s *Service) Install(req InstallRequest) (result InstallResult, resultErr e
 				return err
 			}
 			if w.CapabilityWasRemoved(def.ID) {
-				return errors.New("Filing was removed")
+				return errors.New("the Filing capability was removed")
 			}
 			record.InstalledAt = st.at
 			record.OwnedResources = []workspace.CapabilityResource{{Kind: workspace.ResourceCompanionAgent, ID: st.manager, Shared: true}}
 		}
 		if existing, ok := w.GetInstalledCapability(def.ID); ok {
 			if req.station != nil && !existing.InstalledAt.Equal(req.station.at) {
-				return errors.New("Filing installation changed")
+				return errors.New("the Filing installation changed")
 			}
 			alreadyInstalled = true
 			record = existing

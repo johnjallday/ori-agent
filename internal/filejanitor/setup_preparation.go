@@ -345,10 +345,10 @@ func (s *Service) StopLinkedPreparation(workspaceID, owner, operationID string) 
 			return setupErr(CodeFolderChanged, "Preparation changed. Open the workspace's current settings.", RepairRetry, nil)
 		}
 		settings.Paused = true
-		part, err := s.StationProgress(owner, workspaceID)
-		if err != nil {
-			return err
-		}
+		// Progress is presentation. Refusing to stop an exact, owned
+		// operation because its progress cannot be read would turn loss of a
+		// receipt into a prerequisite for withdrawing consent.
+		part, _ := s.StationProgress(owner, workspaceID)
 		if part.Part != "open" {
 			settings.StoppedStationPart = part.Part
 		}

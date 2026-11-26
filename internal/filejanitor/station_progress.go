@@ -129,7 +129,9 @@ func (s *Service) StationProgress(owner, id string) (StationBuildProgress, error
 		if err != nil {
 			var domain *SetupError
 			if !errors.As(err, &domain) || domain.Code != CodeInitialReceiptUnavailable {
-				return no, err
+				// The install and grant still happened. An explicit stop can
+				// keep those parts even if the scan record cannot be read.
+				return out, err
 			}
 		} else if found && receipt.RootID == settings.RootID {
 			out.Part = "roof"
