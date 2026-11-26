@@ -582,6 +582,8 @@
 
   function createDraft() {
     return {
+      guidedPurpose: '',
+      managerDefault: null,
       plan: { status: PLAN_IDLE, blueprintKey: '', data: null, error: '' },
       includeBlueprintTeam: true,
       overrides: new Map(),
@@ -1953,6 +1955,7 @@
       plan.status === PLAN_READY &&
       text(plan.data?.revision)
     ) {
+      if (isBlank && source.guidedPurpose) payload.guided_purpose = source.guidedPurpose;
       payload.team_intent = {
         version: 1,
         mode: agentless ? 'agentless' : 'staffed',

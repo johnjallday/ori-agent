@@ -86,6 +86,7 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 		// WorkspaceName names the Blank workspace being created; its manager
 		// is proposed from it.
 		WorkspaceName string `json:"workspace_name,omitempty"`
+		GuidedPurpose string `json:"guided_purpose,omitempty"`
 	}
 	if !orihttp.ParseJSONBody(w, r, &req) {
 		return
@@ -93,6 +94,10 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 
 	if strings.TrimSpace(req.TemplateID) != "" && strings.TrimSpace(req.TemplatePath) != "" {
 		_ = orihttp.RespondBadRequest(w, "specify either template_id or template_path, not both")
+		return
+	}
+	if req.GuidedPurpose != "" && (req.GuidedPurpose != documentsPurpose || !req.Blank || req.GroupRoster || req.TemplateID != "" || req.TemplatePath != "") {
+		_ = orihttp.RespondBadRequest(w, "guided_purpose requires the Documents suggestion and a Blank workspace")
 		return
 	}
 	if req.GroupRoster && (strings.TrimSpace(req.TemplateID) != "" || strings.TrimSpace(req.TemplatePath) != "") {
@@ -122,7 +127,7 @@ func (h *Handler) handleTemplateAgentPlan(w http.ResponseWriter, r *http.Request
 				_ = orihttp.RespondBadRequest(w, "workspace_name is required for a Blank workspace's manager")
 				return
 			}
-			_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(h.blankWorkspaceTemplate(name)))
+			_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(h.blankWorkspaceTeam(name, req.GuidedPurpose)))
 			return
 		}
 		_ = orihttp.RespondSuccess(w, h.buildTemplateAgentPlan(projecttemplates.Template{}))

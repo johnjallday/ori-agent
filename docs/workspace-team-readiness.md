@@ -234,6 +234,20 @@ agent returns the draft to `staffed`; switching to any real blueprint clears
 an existing agent by name. A created manager is bound to its workspace by
 `workspace_manager` provenance and removed with it when nothing else uses it.
 
+### Guided Documents
+
+Only the **Create a workspace from Documents** suggestion starts a Blank draft
+with `guided_purpose: "documents"`. It proposes a free **Documents Manager**
+name and a document-focused prompt, using the same `manager` role, plan revision,
+creation operation and workspace-ID binding as any Blank workspace. Neither
+renaming the workspace nor choosing a replacement folder changes this purpose.
+An ordinary Blank named Documents still proposes the ordinary manager prompt.
+Opening an already-owned anchor does not review or create another manager.
+
+Staffing is independent of filename indexing, folder-agent enrollment and runs.
+Creating the anchor uses the ordinary read-only folder binding; this preset adds
+no tool grants. Chat configuration, if needed, belongs to the confirmed agent.
+
 ## Assistant Program completion and recovery
 
 Assistant Program scopes remain separately revisioned. The callback is required

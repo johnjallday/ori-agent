@@ -139,7 +139,7 @@ func (h *Handler) fillOrdinaryWorkspaceRole(current *agentworkspace.Workspace, r
 		return fmt.Errorf("this workspace declares no blueprint roles")
 	}
 	// Blank has a host-owned declaration, not a template on the shelf.
-	tpl := h.blankWorkspaceTemplate(current.Name)
+	tpl := h.storedBlankWorkspaceTeam(current)
 	var err error
 	if provenance.TemplateID != blankWorkspaceTemplateID {
 		tpl, err = h.resolveProjectTemplate(provenance.TemplateID, "")

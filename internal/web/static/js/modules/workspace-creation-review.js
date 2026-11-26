@@ -63,7 +63,10 @@ export function creationTeamReviewRows(view = {}, roleRows = [], effects = null)
               ? `Suggested model: ${row.proposed.model}`
               : '',
           row.scopeLine,
-          row.readOnlyReason
+          row.readOnlyReason,
+          view.advisoryIssues?.find(
+            issue => issue.id === 'manager-without-model' && issue.roleId === row.roleId
+          )?.message
         ]
           .filter(Boolean)
           .join(' · '),

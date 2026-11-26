@@ -315,10 +315,10 @@ func (h *Handler) respondCreationOperationReadError(w http.ResponseWriter, err e
 func workspaceCreationSourceDigest(request createWorkspaceRequest, template projecttemplates.Template, resolved bool) (string, error) {
 	if request.Blank && (!resolved || (template.Builtin && template.ID == blankWorkspaceTemplateID)) {
 		// The source of a Blank workspace is the host's declaration, which is
-		// the same for every workspace. The manager's proposed name depends on
+		// specific to the reviewed purpose. The manager's proposed name depends on
 		// the saved agents and is bound by the team plan revision instead, so
 		// review (unresolved) and confirm (the named team template) agree.
-		template = blankWorkspaceTemplateFor(blankManagerRoleLabel)
+		template = blankWorkspaceDeclaration(blankManagerRoleLabel, request.GuidedPurpose)
 	} else if !resolved && request.Kind == "group" {
 		template = groupRosterTemplate(request.Name)
 	}

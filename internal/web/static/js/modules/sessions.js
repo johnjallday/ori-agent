@@ -5279,6 +5279,15 @@ const sessionManager = {
               : 'No file contents are indexed. Refresh manually.'
       });
     }
+    if (this.anchorChoice?.enabled && !this.anchorChoice.review && this.anchorChoice.checkedPath) {
+      rows.push({
+        label: 'Work folder',
+        value: this.anchorChoice.checkedPath,
+        detail: 'Linked in place. No new search permission.',
+        action: 'details',
+        actionLabel: 'Edit folder'
+      });
+    }
     const attached = session?.folder?.observation;
     if (attached) {
       rows.push({
@@ -6949,6 +6958,7 @@ const sessionManager = {
           group_roster: groupRoster || undefined,
           group_name: groupRoster ? groupName : undefined,
           workspace_name: isBlank ? groupName : undefined,
+          guided_purpose: (isBlank && draft?.guidedPurpose) || undefined,
           group_composition: this.groupRequirementDraft?.composition || undefined
         })
       });
@@ -14450,12 +14460,14 @@ const sessionManager = {
       if (this.workspaceCreatorContext !== context || sequence !== this.anchorCheckSequence) return;
       context.hqWorkspaceOutcome = outcome;
       context.hqWorkspaceAttempt = hqAttempt;
+      this.ensureWorkspaceTeamDraft().guidedPurpose = 'documents';
       this.workspaceMapOrigin = false;
       this.wizardStep = 2;
       const name = document.getElementById('folderNameInput');
       if (name && !name.value) name.value = 'Documents';
       this.updateWorkspaceNameHint();
       this.setAnchorMode(true);
+      this.scheduleTemplateAgentPlanRefresh();
       await this.checkAnchorPath(true);
       return;
     }
@@ -20017,6 +20029,8 @@ const sessionManager = {
       }
       if (!this.usesGroupRosterCreator() && teamPayload.team_intent) {
         payload.team_intent = { ...teamPayload.team_intent };
+        if (payload.blank && teamPayload.guided_purpose)
+          payload.guided_purpose = teamPayload.guided_purpose;
       }
       // Strict project intent always carries the explicit array, including
       // when empty. A Group Roster instead uses template_agent_review; this

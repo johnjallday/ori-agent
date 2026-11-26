@@ -191,7 +191,7 @@ func (h *Handler) validateWorkspaceTeamReadiness(
 			(req.CreateTemplateAgents != nil && *req.CreateTemplateAgents) {
 			return nil, invalidWorkspaceTeamIntent("agentless mode cannot include staffing or agent seeding choices")
 		}
-		plan := h.buildTemplateAgentPlan(h.blankWorkspaceTemplate(req.Name))
+		plan := h.buildTemplateAgentPlan(tpl)
 		if intent.PlanRevision != plan.Revision {
 			return nil, workspaceTeamConflict("The Blank team plan changed; review it again.", nil, &plan)
 		}
