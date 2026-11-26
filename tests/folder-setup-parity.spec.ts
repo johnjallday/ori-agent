@@ -69,7 +69,12 @@ test(`${scenario}: both routes converge on one link and one index`, async ({
   else {
     await page.locator('#folderNameInput').fill(name);
     await page.locator('#wizardNextBtn').click();
-    await page.getByRole('checkbox', { name: 'Create without agents' }).check();
+    // Toggling rerenders Team. Assert on the current control, not the input
+    // WebKit just detached during the click.
+    const agentless = page.getByRole('checkbox', { name: 'Create without agents' });
+    await expect(agentless).not.toBeChecked();
+    await agentless.click();
+    await expect(agentless).toBeChecked();
     await page.locator('#wizardNextBtn').click();
     await expect(review).toContainText('Index filenames');
   }

@@ -39,7 +39,10 @@ test('Files uses the workspace review; selection alone makes nothing', async ({
   await page.locator('#workspaceSearchConsent').check();
   await page.locator('#folderNameInput').fill('Cancelled workspace');
   await page.locator('#wizardNextBtn').click();
-  await page.getByRole('checkbox', { name: 'Create without agents' }).check();
+  const agentless = page.getByRole('checkbox', { name: 'Create without agents' });
+  await expect(agentless).not.toBeChecked();
+  await agentless.click();
+  await expect(agentless).toBeChecked();
   await page.locator('#wizardNextBtn').click();
   await expect(page.locator('#workspaceCreationReviewPanel')).toContainText('Downloads');
   await page.screenshot({
