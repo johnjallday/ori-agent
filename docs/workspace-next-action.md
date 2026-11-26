@@ -95,6 +95,13 @@ identity, paging, migration, exposure and lifecycle boundaries.
 
 ## File review remains in Filing
 
+On the **workspace Map**, an eligible saved folder look can show a pile and a
+station plot before Filing exists. The manager's invitation opens a permission
+card, not a scan. Not now leaves it unbuilt. After Build the depot opens the
+existing Filing console. A later scan can show both how many files are waiting
+and how many already have a place from last time. Those counts are not approval;
+File is still a separate press. None of this places a building on Home.
+
 **Review files** opens the existing console. Setup, consent, repair and result
 links also open their existing destinations there. Opening guidance does not
 start a task, scan, preview, move, or Trash operation. The console may read state

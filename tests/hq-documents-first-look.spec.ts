@@ -136,11 +136,12 @@ test('the manager offers a first look on Open; dismissal and return do not start
   await expect(page.locator('#personalAssistantPanel')).toBeHidden();
   await card.screenshot({ path: info.outputPath('first-open.png') });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'dark' });
-  await page.evaluate(() => {
-    localStorage.setItem('ori-theme', 'dark');
-    document.documentElement.setAttribute('data-bs-theme', 'dark');
-  });
+  const theme = process.env.ORI_STATION_THEME === 'light' ? 'light' : 'dark';
+  await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: theme });
+  await page.evaluate(value => {
+    localStorage.setItem('ori-theme', value);
+    document.documentElement.setAttribute('data-bs-theme', value);
+  }, theme);
   await card.screenshot({ path: info.outputPath('narrow-invite.png') });
   await card.getByRole('button', { name: 'Not now' }).press('Enter');
   const manual = card.getByRole('button', { name: 'Show Documents first look' });
@@ -225,7 +226,8 @@ test('the manager offers a first look on Open; dismissal and return do not start
       station.getByRole('checkbox', { name: 'Also watch for new files and look once a day' })
     ).not.toBeChecked();
     await station.screenshot({ path: info.outputPath('build-card.png') });
-    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const reduced = historical || process.env.ORI_STATION_REDUCED === '1';
+    await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
     const building = page.locator('[data-cmd-hq-station="file-janitor"]:visible');
     const builtParts: string[] = [];
     await page.exposeFunction('observeBuildPart', (part: string) => {
@@ -255,7 +257,7 @@ test('the manager offers a first look on Open; dismissal and return do not start
     expect(result.result.eligible_count).toBe(13);
     expect((await readdir(root)).sort()).toEqual(stationTree);
     await verifyBytes();
-    await expect.poll(() => builtParts).toEqual(['foundation', 'walls', 'roof']);
+    if (!reduced) await expect.poll(() => builtParts).toEqual(['foundation', 'walls', 'roof']);
     await expect(building).toContainText('Review 13 files');
     if (await closeReport.isVisible()) await closeReport.click();
     const collapse = page.locator('.commander-balloon:visible .commander-balloon__close');
@@ -278,6 +280,7 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await method.screenshot({ path: info.outputPath('method-chooser.png') });
     await method.getByRole('button', { name: 'Into my folders', exact: true }).press('Enter');
     const shelves = station.locator('.fj-shelves');
+    await expect(page.locator('html')).toHaveAttribute('data-bs-theme', theme);
     await expect(shelves).toContainText('8 ready to file · 5 stay loose');
     await page.reload();
     if (!(await station.isVisible())) await building.press('Enter');
@@ -507,6 +510,47 @@ test('the manager offers a first look on Open; dismissal and return do not start
     await method.getByRole('button', { name: 'By kind', exact: true }).press('Enter');
     await expect(station).toContainText('Filing by kind');
     expect((await readdir(root)).sort()).toEqual([...stationTree, ...additions, 'Invoices'].sort());
+    return;
+  }
+  // A fresh counted look now offers a station, not the retired one-click
+  // report entry. Exercise its real, separately approved direct processor.
+  const liveOffer = savedReport.getByRole('button', { name: 'Build a Filing station' });
+  if (liveModel && (await liveOffer.count())) {
+    await liveOffer.click();
+    const station = page.getByRole('dialog', { name: 'Filing', exact: true });
+    await station.getByRole('button', { name: 'Build the station', exact: true }).click();
+    const choose = station.getByRole('button', { name: 'Into my folders', exact: true });
+    if (!(await choose.isVisible())) {
+      await expect
+        .poll(
+          async () =>
+            (await (await request.get(`/api/workspaces/${id}/file-janitor`)).json()).status.applies
+        )
+        .toBe(true);
+      if (!(await station.isVisible())) await page.locator('#fileJanitorCardOpen').click();
+    }
+    await choose.press('Enter');
+    const shelves = station.locator('.fj-shelves');
+    const ask = shelves.getByRole('button', { name: /Read the first lines of the 3 loose files/ });
+    await ask.press('Enter');
+    const seal = shelves.getByRole('region', { name: 'Optional first-lines read' });
+    await expect(seal).toContainText('Anthropic (api.anthropic.com)');
+    await expect(seal).toContainText(liveModel);
+    await expect(seal).toContainText('leave this device');
+    await verifyBytes();
+    await seal.getByRole('button', { name: 'Not now' }).click();
+    await ask.press('Enter');
+    const done = page.waitForResponse(
+      r => new URL(r.url()).pathname.endsWith('/picture/read-lines'),
+      { timeout: 100_000 }
+    );
+    await seal.getByRole('button', { name: 'Approve this read' }).press('Enter');
+    const r = await done;
+    expect(r.status(), (await r.json()).code || 'approved station read').toBe(200);
+    await expect(shelves).toContainText('3 read · 0 not read');
+    await verifyBytes();
+    expect(await readdir(join(root, 'Project receipts'))).toEqual([]);
+    await station.screenshot({ path: info.outputPath('approved-station-read.png') });
     return;
   }
   await expect(suggestionButton).toBeVisible();

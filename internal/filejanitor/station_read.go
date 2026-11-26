@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"io"
 	"slices"
 	"strings"
@@ -21,6 +22,8 @@ import (
 // Requests name candidate IDs in one saved picture, never filesystem paths.
 const stationReadFiles = 8
 const stationReadShelves = 12
+
+var ErrStationReplyInvalid = errors.New("the processor did not return numbered shelf suggestions")
 
 type StationProcessor struct {
 	Provider  string `json:"provider"`
@@ -274,8 +277,11 @@ func (s *Service) ReadStationLines(ctx context.Context, owner, id, batch, token 
 		return StationReadResult{}, ErrReviewBounds
 	}
 	reply, err := sc.chat.Chat(ctx, llm.ChatRequest{ProviderConfiguration: sc.view.Processor.Pin, Model: sc.view.Processor.Model, MaxTokens: 512, Isolated: true, SingleAttempt: true, SystemPrompt: stationReadPrompt, Messages: []llm.Message{llm.NewUserMessage(string(data))}})
-	if err != nil || reply == nil || len(reply.ToolCalls) != 0 || len(reply.Content) > 8<<10 || reply.Usage.CompletionTokens > 512 || (reply.FinishReason != llm.FinishReasonStop && reply.FinishReason != "end_turn") {
-		return StationReadResult{}, ErrReviewUnavailable
+	if err != nil {
+		return StationReadResult{}, err
+	}
+	if reply == nil || len(reply.ToolCalls) != 0 || len(reply.Content) > 8<<10 || reply.Usage.CompletionTokens > 512 || (reply.FinishReason != llm.FinishReasonStop && reply.FinishReason != "end_turn") {
+		return StationReadResult{}, ErrStationReplyInvalid
 	}
 	if _, err = current(); err != nil {
 		return StationReadResult{}, err
@@ -284,15 +290,21 @@ func (s *Service) ReadStationLines(ctx context.Context, owner, id, batch, token 
 		File   int `json:"file"`
 		Folder int `json:"folder"`
 	}
-	d := json.NewDecoder(strings.NewReader(reply.Content))
+	text := strings.TrimSpace(reply.Content)
+	// Some direct processors wrap otherwise exact JSON in a single Markdown
+	// fence. Never search for an array in explanatory text or repair its shape.
+	if inner, ok := strings.CutPrefix(text, "```json\n"); ok && strings.HasSuffix(inner, "\n```") {
+		text = strings.TrimSuffix(inner, "\n```")
+	}
+	d := json.NewDecoder(strings.NewReader(text))
 	d.DisallowUnknownFields()
 	if d.Decode(&choices) != nil || choices == nil || len(choices) > len(texts) || d.Decode(&struct{}{}) != io.EOF {
-		return StationReadResult{}, ErrReviewUnavailable
+		return StationReadResult{}, ErrStationReplyInvalid
 	}
 	for _, c := range choices {
 		key := readIDs[c.File]
 		if key == "" || result.Placements[key] != "" || c.Folder < 1 || c.Folder > len(sc.shelves) {
-			return StationReadResult{}, ErrReviewUnavailable
+			return StationReadResult{}, ErrStationReplyInvalid
 		}
 		result.Placements[key] = sc.shelves[c.Folder-1].Key
 	}

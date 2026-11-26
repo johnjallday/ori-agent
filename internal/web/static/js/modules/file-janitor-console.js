@@ -4881,6 +4881,7 @@
       view.chosen = new Set(offer.rows.filter(r => r.count >= 2).map(r => r.id));
     const ctx = {
       chosen: view.chosen,
+      savingPlacements: view.savingPlacements,
       placementMessage: view.placementMessage,
       onChoosePlacements: (id, on) => (on ? view.chosen.add(id) : view.chosen.delete(id)),
       folderName: compactFolderName(lastStatus?.settings?.root_path),
@@ -4940,6 +4941,7 @@
     if (lastResults !== view || receiptBusy) return;
     const scope = requestScope();
     receiptBusy = true;
+    view.savingPlacements = true;
     renderResults(view);
     try {
       const r = await fetch(
@@ -4962,6 +4964,7 @@
     } finally {
       if (scopeCurrent(scope)) {
         receiptBusy = false;
+        view.savingPlacements = false;
         if (lastResults === view) renderResults(view);
       }
     }

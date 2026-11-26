@@ -308,7 +308,7 @@ export function renderReceipt(doc, model, ctx = {}) {
       actionButton(
         h,
         'fileJanitorUndoAll',
-        ctx.busy ? 'Putting files back…' : 'Undo all',
+        ctx.busy && !ctx.savingPlacements ? 'Putting files back…' : 'Undo all',
         'fj-btn fj-btn-secondary',
         () => ctx.onUndoAll?.(model),
         ctx.busy
@@ -318,7 +318,7 @@ export function renderReceipt(doc, model, ctx = {}) {
     actionButton(
       h,
       'fileJanitorReceiptDone',
-      'Done',
+      ctx.savingPlacements ? 'Saving placements…' : 'Done',
       'fj-btn fj-btn-primary',
       () => ctx.onDone?.(),
       ctx.busy

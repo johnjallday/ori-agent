@@ -2154,8 +2154,14 @@ For a recognized folder whose `plan` waits on its Home's plugin. The request nam
 
 ### Reviewed Filing Creation
 
-For built-in `file-janitor` (and legacy `downloads-janitor`) with a live attached
-folder, review the **canonical edited BuildDraft**, not a replacement client draft:
+For a fresh assistant inbox hire the reviewed placement confirms **Hire and create
+workspace**: the roster, linked folder and original source are bound to the claim.
+The outcome is `hired`, not `prepared`. It grants no Filing permission and starts
+no scan. Opening that workspace's station build card is a separate action.
+Previously accepted **Create workspace & scan** claims keep their accepted terms.
+
+For a reviewed built-in `file-janitor` (and legacy `downloads-janitor`) preparation
+with a live attached folder, review the **canonical edited BuildDraft**, not a replacement client draft:
 
 | Method / build-session suffix | Closed body | Effect |
 | --- | --- | --- |
@@ -2201,8 +2207,8 @@ is implied by these API contracts.
 ## Filing Folder Review API
 
 Prefix: `/api/workspaces/{id}/file-janitor`; retained `downloads-janitor` is an alias.
-All routes are owner scoped and `no-store`. POST bodies are closed single JSON
-objects bounded to 4 KiB. Foreign workspaces return `404`.
+The setup routes are owner scoped and `no-store`. Their POST bodies are closed
+single JSON objects bounded to 4 KiB. Foreign workspaces return `404`.
 
 | Method / suffix | Body | Effect |
 | --- | --- | --- |
@@ -2224,6 +2230,30 @@ manual consent, not just `paused:true` or missing approval data.
 
 See [reviewed creation architecture](../architecture/file-janitor-creation-flow.md)
 for persistence versions, dispatch/receipt refusal fences and lifecycle semantics.
+
+### Workspace Map station and shelf picture
+
+The same owner-scoped prefix serves these additions. Receipt reads, preparation
+observation, method choice, folder checks and drawing a shelf are not move consent.
+
+| Method / suffix | Request or result |
+| --- | --- |
+| `GET` or `POST /setup-review?station=build` | Review the saved look and current linked folder; POST can review the reference and optional monitoring. |
+| `POST /prepare-review?station=build` | Confirm the displayed `reference_id`, `monitoring` and `review_revision`. Installs, grants metadata access and obtains a first scan receipt; moves nothing. |
+| `GET /setup-review?station=progress` | `{build}` from receipts. No retry or timer-based advancement. |
+| `GET` or `POST /method` | Read `{layout}` or confirm `{revision, method}` (`own_folders` or `by_kind`). Send has its own connection flow. |
+| `GET /batches/{batchID}/picture?layout=shelves` | `{picture}` with candidate IDs, existing shelf keys, suggestions and revision; optional `parent` requests one shelf's children. |
+| `POST /batches/{batchID}/picture/find-folder` or `/picture/check-folder` | Look up an existing named shelf, or check availability of a proposed child. A name is a lookup hint, not permission to use a path. Neither call creates a directory. |
+| `POST /batches/{batchID}/picture/read-review` | `{revision, files: [candidate IDs]}`; `{review}` names the exact documents, remaining count, folder choices, provider/model, off-device disclosure and, only when available, a one-use approval. Metadata only. |
+| `POST /batches/{batchID}/picture/read-lines` | `{approval}`; after a fresh identity and processor check, returns `{result: {read, remaining, placements}}`. No file move, agent tool or persistent content grant. |
+| `POST /batches/{batchID}/file?layout=shelves` | `{revision, client_key, placements}`. Each placement identifies a file and an existing shelf or checked new name. One filing identity, conditional moves, journal, receipt and Undo. |
+| `POST /filings/{filingID}/placements` | Done saves checked pattern IDs (`rows`) and their receipt offer `revision` into workspace feedback Memory. No paths or actions accepted. |
+| `GET /placements`; `POST /placements/remove` | List the current rules (including broken shelves); remove one with `{revision, row}`. These do not move files. |
+
+`GET /filings/{filingID}` may include `created_folders` and a `placement_offer`.
+Undo reports a retained folder rather than removing by name. An earlier saved
+Documents review still uses the original folder-agent review/filing/undo checks
+when opened from Filing History; it is not a station read approval.
 
 ### Sending to another workspace
 

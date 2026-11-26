@@ -425,8 +425,12 @@
           headers,
           body: JSON.stringify({ approval })
         });
-        const { result } = await r.json();
+        const { result, message: failure } = await r.json();
         if (!current()) return;
+        if (!r.ok)
+          throw Error(
+            failure || 'No suggestions were applied. Review the folder and processor again.'
+          );
         if (
           !r.ok ||
           !result ||

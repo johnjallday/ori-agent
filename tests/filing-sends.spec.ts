@@ -88,9 +88,9 @@ async function openFiling(page: Page, slug: string, tab: 'review' | 'settings') 
 
 // At least 44 px tall (FR 52).
 async function tallEnough(control: Locator) {
-  const box = await control.boundingBox();
-  expect(box, 'the control is laid out').not.toBeNull();
-  expect(box!.height).toBeGreaterThanOrEqual(43.5);
+  // The cold-open refresh can replace the first rendered card between the
+  // accessible-name assertion and layout. Measure the live control.
+  await expect.poll(async () => (await control.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(43.5);
 }
 
 const BANNED =

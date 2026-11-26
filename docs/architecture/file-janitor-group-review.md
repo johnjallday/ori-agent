@@ -808,10 +808,33 @@ and path-leak lists, takes no path and returns none. New saved-choice actions:
 `send_connection`, `unsend_connection`, `keep_connection`, `send_group`,
 `send_suggested`, `unsend_suggested`.
 
+## Into my folders
+
+The station's shelf picture shares the Documents conditional mover, the same-host
+filing journal, receipts and Undo. A shelf is an existing folder under the granted
+root (at most two levels). Selecting, dragging, tapping, or naming a new shelf
+changes only the picture. **File** rechecks the source and destination; it never
+replaces an occupied name. Undo restores what it can. Where the filesystem cannot
+conditionally remove the same empty directory, Undo leaves a created shelf and
+names it in the receipt; it does not delete by path.
+
+**Read the first lines** is optional, even after Build. Its one-use approval pins
+up to eight exact loose documents, the folder choices, and the named processor
+and model. The card says whether excerpts leave the device. It neither changes
+`ContentMode` nor grants an agent a content tool. A reply can only suggest existing
+shelves in the picture. History can open a previously saved Documents review
+for File or Undo without requesting another read.
+
+After a shelf filing, Done can save checked name/type patterns in workspace
+feedback Memory. Two or more verified files tick a row by default. On a later
+scan an unchanged destination may start with chips marked **From last time**;
+a missing or replaced shelf stays broken and creates nothing. Settings can remove
+a pattern. These are suggestions, not approvals or moves.
+
 ## Non-goals
 
-No physical staging folders, recursive/folder moves, custom trees, content or
-archive inspection, hashing/duplicate verification, inferred disposal, learned
+No physical staging folders, recursive/folder moves, arbitrary destination trees,
+automatic content or archive inspection, hashing/duplicate verification, inferred disposal, learned
 approval, scheduled deletion, model dependency, workspace-navigation redesign,
 cross-batch approval, or backup guarantee. Explicit per-file system Trash and
 supported move Undo remain separate existing actions. For sends: no sending

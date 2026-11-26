@@ -14,14 +14,23 @@ import uuid
 sandbox = pathlib.Path(sys.argv[1]).resolve(strict=True)
 wid = str(uuid.UUID(sys.argv[2]))
 assert sandbox.name.startswith(('ori-e2e.', 'ori-demo.'))
-root = sandbox / 'home' / 'Documents'
-assert root.resolve(strict=True) == root
+assert (sandbox / '.ori-demo-owner').read_text().strip() == f'worktree={pathlib.Path.cwd().resolve()}'
 paths = [p for p in sandbox.rglob('folder-agent-v1.json')
          if p.resolve(strict=True) == p and json.loads(p.read_text()).get('workspace_id') == wid]
 assert len(paths) == 1
 sidecar, = paths
 record = json.loads(sidecar.read_text())
 assert not record.get('organization_runs') and record['state'] == 'reported'
+if sys.argv[3:] == ['pre-station-hire']:
+    # Ordinary historical hires did not retain the station's count/binding.
+    # Keep the original report, grant, lead, root witness and folder intact.
+    assert not record.get('assigned_link') and record['loose_documents']['station_binding']
+    del record['loose_documents']
+    sidecar.write_text(json.dumps(record))
+    sys.exit(0)
+assert not sys.argv[3:]
+root = sandbox / 'home' / 'Documents'
+assert root.resolve(strict=True) == root
 creation = json.load(sys.stdin)
 lead, = [a for a in creation['agent_instances'] if a.get('entry_point')]
 ref, = creation['directory_references']

@@ -78,7 +78,7 @@ func TestStationLinesOnlyReadExactApprovedVersionsAndNeverFile(t *testing.T) {
 		t.Fatalf("no-model preview: %+v", no)
 	}
 	proc := StationProcessor{Provider: "Example cloud", Model: "test", Pin: "original", OffDevice: true}
-	reply := `[{"file":1,"folder":1}]`
+	reply := "```json\n" + `[{"file":1,"folder":1}]` + "\n```"
 	f.s.SetStationReadHost(func(id, lead string) (StationProcessor, StationChat) {
 		return proc, stationChatFunc(func(_ context.Context, r llm.ChatRequest) (*llm.ChatResponse, error) {
 			calls++

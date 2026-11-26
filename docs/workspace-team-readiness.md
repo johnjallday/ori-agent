@@ -263,13 +263,14 @@ folder** action. Verification saves identity only; it does not enable search.
   browser. **Show Documents first look** brings it back without starting it.
 - **Look around Documents** claims one assigned ticket. Only names and structure
   are examined; a configured model may receive metadata, not document contents.
-- **Review filing suggestions** opens the existing scope preview when the look
-  observed supported loose documents. A saved review remains reachable. Only
-  **Approve this read** sends selected excerpts to the disclosed direct Claude
-  processor. Saving a group is not approval to move its files.
-- Installing Filing, granting folder access, running a manual scan, previewing
-  destinations, confirming movement and putting a file back are separate
-  actions. The first look performs none of them. If setup narrows the original
+- A current, counted loose pile offers **Build a Filing station**. Opening the
+  card installs nothing. Only **Build the station** accepts the disclosed install,
+  manager association, metadata grant and first scan. Optional monitoring starts
+  unchecked. The first look itself performs none of these steps.
+- Reading first lines, arranging shelves, confirming movement and putting files
+  back remain separate. Only **Approve this read** shares the listed excerpts
+  with the named processor. Older eligible reports keep their scope preview;
+  earlier saved reviews are reachable from Filing History. If setup narrows the original
   anchor grant to Filing’s metadata-only grant, the saved review remains usable
   for filing and undo. That grant cannot approve another read or open an original.
   Replacing the grant, reference, lead or physical folder does not recover the view.
