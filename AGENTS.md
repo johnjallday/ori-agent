@@ -121,7 +121,7 @@ branch disrupts other sessions and possibly a running server/build.
 
 | Starting point | Command |
 | --- | --- |
-| Existing PRD and/or detailed task list in dev `tasks/` | `wt start [feature]` |
+| Existing PRD and/or approved task list in dev `tasks/` | `wt start [feature]` |
 | Ready GitHub Issue not yet planned | `wt plan --issue N`, then human `wt start` |
 | Agreed ad-hoc work without planning artifacts | `wt new <name>` or `wt new <type>/<name>` |
 

@@ -74,9 +74,9 @@ func TestTaskPlanningScopesValidationWithoutDeferringRiskChecks(t *testing.T) {
 			heading: "Validation cadence",
 			required: []string{
 				"Write focused tests alongside behavior changes",
-				"not mechanically after every sub-task",
+				"not mechanically after every edit or step",
 				"Check risky foundations before dependent work",
-				"one `Validate:` checkpoint",
+				"one validation checkpoint",
 				"full required `make ci-local` gate",
 				"`wt pr`'s mandatory pre-push checks",
 				"Scoped checks never replace the final gate",
@@ -107,37 +107,89 @@ func TestTaskPlanningScopesValidationWithoutDeferringRiskChecks(t *testing.T) {
 	}
 }
 
-func TestTaskPlanningTemplateSeparatesOpeningThePRFromTheMerge(t *testing.T) {
-	protocol := taskPlanningProtocol(t)
-	_, template, ok := strings.Cut(protocol, "```markdown\n")
+// taskListTemplate returns the first fenced markdown block: the default task
+// list shape a planner copies.
+func taskListTemplate(t *testing.T) string {
+	t.Helper()
+	_, template, ok := strings.Cut(taskPlanningProtocol(t), "```markdown\n")
 	if !ok {
-		t.Fatal("missing checklist template")
+		t.Fatal("missing task list template")
 	}
 	template, _, ok = strings.Cut(template, "\n```")
 	if !ok {
-		t.Fatal("unterminated checklist template")
+		t.Fatal("unterminated task list template")
 	}
+	return template
+}
+
+// The default task list states outcomes, not steps. Devtools progress and
+// handoff previews read top-level checkbox lines, so groups stay checkboxes;
+// sub-tasks and the standing validation, demo, and commit steps stay out.
+func TestTaskPlanningDefaultTemplateStatesOutcomesNotSteps(t *testing.T) {
+	template := taskListTemplate(t)
+	for _, required := range []string{
+		"## Tasks",
+		"- [ ] 1.0 ",
+		"Boundaries:",
+		"## Acceptance demo",
+		"## Dependencies and ownership",
+		"- Companion dependencies: `[required / not required / unresolved]`",
+		"- Deep-model hotspots:",
+	} {
+		if !strings.Contains(template, required) {
+			t.Errorf("default task list is missing %q", required)
+		}
+	}
+	for _, line := range strings.Split(template, "\n") {
+		if strings.HasPrefix(line, " ") && strings.HasPrefix(strings.TrimSpace(line), "- [") {
+			t.Errorf("default task list prescribes a sub-task: %q", line)
+		}
+	}
+	for _, step := range []string{"Validate:", "Demo:", "Commit:", "Permission sweep", "## Relevant Files", "## Execution Topology"} {
+		if strings.Contains(template, step) {
+			t.Errorf("default task list restates a standing step or dropped section: %q", step)
+		}
+	}
+
+	protocol := taskPlanningProtocol(t)
+	for _, required := range []string{
+		"### Standing steps",
+		"### When to add sub-tasks",
+		"Sub-tasks are the exception",
+		"stays valid: follow its items as written",
+		"## Findings log",
+		"The builder owns the steps, not the scope",
+	} {
+		if !strings.Contains(protocol, required) {
+			t.Errorf("missing lean task list rule: %q", required)
+		}
+	}
+}
+
+func TestTaskPlanningTemplateSeparatesOpeningThePRFromTheMerge(t *testing.T) {
+	template := taskListTemplate(t)
+	// Line wrapping is not part of the contract.
+	flat := strings.Join(strings.Fields(template), " ")
 	for _, required := range []string{
 		".agents/skills/task-planning/SKILL.md",
 		"this document defines scope, not permission to start",
 	} {
-		if !strings.Contains(template, required) {
+		if !strings.Contains(flat, required) {
 			t.Errorf("missing canonical delegation: %q", required)
 		}
 	}
+	// Opening the PR ends the last agent group; the merge and cleanup are a
+	// separate group that belongs to a person.
 	previous := -1
 	for _, checkpoint := range []string{
-		"1.1 Concrete implementation step with focused behavior tests",
-		"1.2 Validate:",
-		"1.3 Demo: drive the changed user-visible path",
-		"1.4 Commit:",
-		"Complete required validation and demos",
-		"Prepare PR body with evidence and limitations",
-		"PR readiness: verify the gate, then open the PR with `wt pr`",
-		"Merge: a person reviews the open PR and squash-merges it to `dev`",
-		"Run `wt done <feature>` after merge",
+		"- [ ] 1.0 First vertical outcome",
+		"Verify the journey and deliver",
+		"verify the gate, then open the PR with `wt pr`",
+		"- [ ] 4.0 Merge A person reviews the open PR and squash-merges it to `dev`",
+		"`wt done <feature>`",
+		"Not an agent step",
 	} {
-		index := strings.Index(template, checkpoint)
+		index := strings.Index(flat, checkpoint)
 		if index < 0 || index <= previous {
 			t.Fatalf("missing or out-of-order delivery checkpoint: %q", checkpoint)
 		}
@@ -145,7 +197,7 @@ func TestTaskPlanningTemplateSeparatesOpeningThePRFromTheMerge(t *testing.T) {
 	}
 	for _, stale := range []string{"planning-starter", "this session stops", "planning-only mode"} {
 		if strings.Contains(strings.ToLower(template), stale) {
-			t.Errorf("reusable checklist contains session-specific planning instruction: %q", stale)
+			t.Errorf("reusable task list contains session-specific planning instruction: %q", stale)
 		}
 	}
 }
