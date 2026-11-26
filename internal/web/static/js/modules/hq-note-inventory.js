@@ -19,8 +19,9 @@
  * lands after it was closed, reopened or the connection changed.
  */
 
-import { notesRequest } from './notes-api.js';
-import { MY_NOTES_URL } from './hq-quick-capture.js';
+import { notesPost, notesRequest } from './notes-api.js';
+import { HQCaptureDraft, MY_NOTES_URL, hqCaptureReference } from './hq-quick-capture.js';
+import { myNotesNoteURL } from './my-notes-arrival.js';
 import { openSecondBrainFolder } from './personal-assistant-second-brain.js';
 import {
   INVENTORY_PAGE_SIZE,
@@ -34,7 +35,7 @@ import {
   previewTarget,
   sectionCount
 } from './hq-note-inventory-items.js';
-import { inspectorNode, slotsNode, tabsNode } from './hq-note-inventory-view.js';
+import { captureNode, inspectorNode, slotsNode, tabsNode } from './hq-note-inventory-view.js';
 
 export const NOTE_INVENTORY_TITLE = 'Note inventory';
 export const NOTE_INVENTORY_CONNECTION_PATH = '?view=connection';
@@ -164,13 +165,22 @@ export class HQNoteInventory {
     doc = globalThis.document,
     myNotesURL = MY_NOTES_URL,
     openFolder = openSecondBrainFolder,
+    post = notesPost,
+    onSaved = () => {},
     narrow = () => Boolean(globalThis.matchMedia?.(NOTE_INVENTORY_NARROW_QUERY)?.matches)
   } = {}) {
     this.request = request;
     this.doc = doc;
     this.myNotesURL = myNotesURL;
     this.openFolder = openFolder;
+    this.post = post;
+    this.onSaved = onSaved;
     this.narrow = narrow;
+    // A Quick note draft lives in memory for this HQ while the page does:
+    // never in the URL or browser storage.
+    this.draft = new HQCaptureDraft('hq-inventory');
+    this.draftHQ = '';
+    this.capturing = false;
     this.root = null;
     this.session = 0;
     this.opened = false;
@@ -234,17 +244,39 @@ export class HQNoteInventory {
 
     const body = el(doc, 'div', 'hq-note-inventory__body');
     body.setAttribute('data-note-inventory-body', '');
+    // One live line, kept across repaints, so a save is announced once.
+    const live = el(doc, 'p', 'hq-note-inventory__announce');
+    live.setAttribute('role', 'status');
+    live.setAttribute('data-note-inventory-live', '');
     const actions = el(doc, 'footer', 'hq-note-inventory__actions');
     actions.setAttribute('data-note-inventory-actions', '');
-    root.append(head, body, actions);
+    root.append(head, body, live, actions);
 
     root.addEventListener('click', event => {
       const control = event.target?.closest?.('[data-note-inventory-action]');
-      if (!control || !root.contains(control)) return;
+      if (!control || !root.contains(control) || control.disabled) return;
       this.act(
         control.getAttribute('data-note-inventory-action'),
         control.getAttribute('data-note-inventory-value') || ''
       );
+    });
+    // Typing only updates the draft; a repaint would take the caret away.
+    root.addEventListener('input', event => {
+      const field = event.target;
+      if (field?.getAttribute?.('data-note-inventory-control') !== 'draft') return;
+      this.draft.edit(field.value, hqCaptureReference(this.connectionView));
+    });
+    root.addEventListener('submit', event => {
+      if (!event.target?.hasAttribute?.('data-note-inventory-capture')) return;
+      event.preventDefault?.();
+      void this.submitCapture();
+    });
+    // Escape while writing goes back to the selected note; the panel stays.
+    root.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || !this.capturing) return;
+      event.stopPropagation?.();
+      event.preventDefault?.();
+      this.cancelCapture();
     });
     this.root = root;
     this.render();
@@ -258,10 +290,17 @@ export class HQNoteInventory {
     this.session += 1;
     this.opened = true;
     this.hqWorkspaceID = String(hqWorkspaceID || '');
+    // A draft belongs to the HQ it was written in.
+    if (this.draftHQ !== this.hqWorkspaceID && !this.draft.busy) {
+      this.draft = new HQCaptureDraft('hq-inventory');
+      this.draftHQ = this.hqWorkspaceID;
+    }
+    this.capturing = false;
     this.state = { phase: 'checking' };
     this.connectionView = null;
     this.resetView();
     this.ensureRoot();
+    this.announce('');
     this.render();
     if (known && typeof known.status === 'string' && known.status) {
       this.accept(known);
@@ -560,12 +599,14 @@ export class HQNoteInventory {
     } else if (state.status !== 'ready') {
       message = state.message || 'Open this note in your editor.';
     }
-    // The existing doors out, offered where Ori shows no text: Obsidian's
-    // vault-relative link for an Obsidian folder, else the open-folder door.
+    // The existing doors out, offered where Ori shows no text or only part of
+    // it: Obsidian's vault-relative link for an Obsidian folder, else the
+    // open-folder door.
     const showDoor =
       !this.state.owned ||
       (item.kind === 'project' && !checking && item.check !== 'note') ||
-      ['yours', 'missing', 'unsupported'].includes(state?.status);
+      ['yours', 'missing', 'unsupported'].includes(state?.status) ||
+      (state?.status === 'ready' && state.preview?.truncated === true);
     return {
       item,
       index: index || 0,
@@ -648,8 +689,97 @@ export class HQNoteInventory {
       case 'open-folder':
         void this.openNotebookFolder();
         return;
+      case 'quick-note':
+        this.openCapture();
+        return;
+      case 'cancel-capture':
+        this.cancelCapture();
+        return;
+      case 'discard-draft':
+        if (this.draft.busy) return;
+        this.draft.edit('', '');
+        this.cancelCapture();
+        return;
       default:
     }
+  }
+
+  // ---- Quick note ---------------------------------------------------------------
+
+  // Where a Quick note goes: only a present notebook Ori set up.
+  captureRef() {
+    return hqCaptureReference(this.connectionView);
+  }
+
+  // A draft written for an earlier connection is never sent to this one.
+  draftStranded() {
+    return Boolean(this.draft.text && this.draft.ref && this.draft.ref !== this.captureRef());
+  }
+
+  canCapture() {
+    return Boolean(this.captureRef()) || this.draftStranded();
+  }
+
+  openCapture() {
+    if (!this.canCapture()) return;
+    this.announce('');
+    if (!this.capturing) this.paneBeforeCapture = this.pane;
+    this.capturing = true;
+    this.pane = 'inspector';
+    this.render();
+    this.focusControl('draft');
+  }
+
+  // Cancelling keeps the draft and goes back to the note that was selected.
+  cancelCapture() {
+    if (!this.capturing) return;
+    this.capturing = false;
+    this.pane = this.paneBeforeCapture || (this.selected ? 'inspector' : 'slots');
+    this.render();
+    this.focusAfterCapture();
+  }
+
+  focusAfterCapture() {
+    if (this.selected && this.pane === 'inspector' && this.narrow()) {
+      if (this.focusControl('inspector-title')) return;
+    }
+    if (this.selected && this.focusControl('item:' + this.selected.id)) return;
+    this.focusControl('quick-note') || this.focusControl('open-my-notes');
+  }
+
+  // Saves only on an explicit submit, through the same source-bound capture
+  // the HQ Overview uses: one request id per text and destination, reused on
+  // a retry; success only with a receipt.
+  async submitCapture() {
+    const draft = this.draft;
+    if (!this.capturing || draft.busy || this.draftStranded()) return;
+    const ref = this.captureRef();
+    if (!ref) return;
+    const session = this.session;
+    const pending = draft.save(ref, this.post);
+    this.render();
+    const saved = await pending;
+    // The note is saved even if the panel closed meanwhile: the badge and
+    // anything else showing the Inbox still hear about it.
+    if (saved) this.onSaved();
+    if (session !== this.session || !this.opened) return;
+    if (!saved) {
+      this.render();
+      this.focusControl('draft', { caretAtEnd: true });
+      return;
+    }
+    this.capturing = false;
+    this.pane = this.paneBeforeCapture || (this.selected ? 'inspector' : 'slots');
+    this.announce(draft.receipt || 'Saved to My Notes → Inbox.');
+    // The real Inbox, listed again; never a count made up here.
+    if (this.state.owned) void this.listings.loadSection('inbox');
+    this.render();
+    this.focusAfterCapture();
+  }
+
+  announce(text) {
+    const live = this.root?.querySelector?.('[data-note-inventory-live]');
+    if (live) live.textContent = text;
   }
 
   // Selecting a slot is choosing it: only now is its note read. A folder in a
@@ -675,6 +805,9 @@ export class HQNoteInventory {
     this.pane = 'inspector';
     this.folderNotice = '';
     this.pendingProject = '';
+    // Choosing a note while writing shows that note; the draft stays.
+    this.capturing = false;
+    this.announce('');
     if (item.kind === 'project' && ['unchecked', 'queued', 'checking'].includes(item.check)) {
       this.preview.clear();
       this.pendingProject = item.id;
@@ -708,12 +841,23 @@ export class HQNoteInventory {
 
   // Names can hold any character, so controls are found by comparing their
   // name, never by building a selector from it.
-  focusControl(name) {
+  focusControl(name, { caret = null, caretAtEnd = false } = {}) {
     const target = this.controls().find(
       node => node.getAttribute('data-note-inventory-control') === name
     );
     if (!target || typeof target.focus !== 'function' || target.disabled) return false;
     target.focus({ preventScroll: true });
+    if (typeof target.setSelectionRange === 'function') {
+      const end = String(target.value || '').length;
+      const range = caret || (caretAtEnd ? [end, end] : null);
+      if (range) {
+        try {
+          target.setSelectionRange(range[0], range[1]);
+        } catch {
+          /* not a text field */
+        }
+      }
+    }
     return true;
   }
 
@@ -746,6 +890,12 @@ export class HQNoteInventory {
     const root = this.root;
     if (!root) return;
     const focused = this.focusedControl();
+    // A repaint while writing keeps the caret where it was.
+    const active = this.doc?.activeElement;
+    const caret =
+      focused === 'draft' && typeof active?.selectionStart === 'number'
+        ? [active.selectionStart, active.selectionEnd]
+        : null;
     const scrolled = this.scrollers().map(node => [node.className.split(' ')[0], node.scrollTop]);
     const body = root.querySelector('[data-note-inventory-body]');
     const actions = root.querySelector('[data-note-inventory-actions]');
@@ -759,7 +909,7 @@ export class HQNoteInventory {
       const saved = scrolled.find(([name]) => name === node.className.split(' ')[0]);
       if (saved) node.scrollTop = saved[1];
     }
-    if (focused && focused !== 'close') this.focusControl(focused);
+    if (focused && focused !== 'close') this.focusControl(focused, { caret });
     // Only the projects on screen are looked inside.
     if (visible.length) this.listings.checkProjects(visible);
   }
@@ -795,13 +945,66 @@ export class HQNoteInventory {
     const nodes = [];
     if (state.owned) nodes.push(tabsNode(doc, { tabs: this.tabsModel(), active: this.tab }));
     const layout = el(doc, 'div', 'hq-note-inventory__layout');
-    layout.append(slotsNode(doc, slots), inspectorNode(doc, this.inspectorModel(slots)));
+    layout.append(
+      slotsNode(doc, slots),
+      this.capturing && this.canCapture()
+        ? captureNode(doc, this.captureModel(slots))
+        : inspectorNode(doc, this.inspectorModel(slots))
+    );
     nodes.push(layout);
     return { nodes, visible: this.visibleItems(slots) };
   }
 
+  captureModel(slots) {
+    const draft = this.draft;
+    const stranded = this.draftStranded();
+    return {
+      back: this.pane === 'inspector' ? slots.heading : '',
+      stranded,
+      busy: draft.busy,
+      text: draft.text,
+      label: stranded ? 'Draft from your previous notes connection' : 'Save to My Notes → Inbox',
+      problem: draft.problem
+    };
+  }
+
+  // The selected note's own page in My Notes, when it has one: a project's
+  // README, a journal page or an Inbox note in a notebook Ori set up. The
+  // words say what My Notes will show: the whole note, or (for a long one)
+  // the same first part, with Obsidian offered in the inspector.
+  readerLink() {
+    if (!this.state.owned || this.capturing || !this.selected) return null;
+    const item = this.findItem(this.selected.id);
+    if (!item || !['inbox', 'daily', 'project'].includes(item.kind)) return null;
+    if (item.kind === 'project' && item.check !== 'note') return null;
+    const href = myNotesNoteURL({ ref: this.state.ref, kind: item.kind, name: item.name });
+    if (!href) return null;
+    const state = this.preview.state;
+    const ready =
+      state?.key === this.state.ref + '|' + item.id && state.status === 'ready' ? state : null;
+    if (ready && ready.preview?.truncated !== true) return { href, label: 'Read full note' };
+    return { href, label: 'Open in My Notes' };
+  }
+
+  // The bottom row: Quick note where Ori may write, the notebook itself, and
+  // the selected note's page in it.
   actionNodes() {
     const doc = this.doc;
+    const nodes = [];
+    if (this.state.phase === 'ready' && this.canCapture()) {
+      const quick = el(doc, 'button', 'hq-note-inventory__quick');
+      quick.type = 'button';
+      quick.setAttribute('data-note-inventory-action', 'quick-note');
+      quick.setAttribute('data-note-inventory-control', 'quick-note');
+      quick.setAttribute('aria-pressed', this.capturing ? 'true' : 'false');
+      const plus = el(doc, 'span', 'hq-note-inventory__arrow', '+');
+      plus.setAttribute('aria-hidden', 'true');
+      quick.append(
+        plus,
+        el(doc, 'span', '', this.draft.text ? 'Quick note (draft)' : 'Quick note')
+      );
+      nodes.push(quick);
+    }
     const open = el(doc, 'a', 'hq-note-inventory__open');
     open.href = this.myNotesURL;
     open.setAttribute('data-note-inventory-control', 'open-my-notes');
@@ -809,6 +1012,18 @@ export class HQNoteInventory {
     const arrow = el(doc, 'span', 'hq-note-inventory__arrow', '→');
     arrow.setAttribute('aria-hidden', 'true');
     open.append(arrow);
-    return [open];
+    nodes.push(open);
+    const reader = this.readerLink();
+    if (reader) {
+      const read = el(doc, 'a', 'hq-note-inventory__read');
+      read.href = reader.href;
+      read.setAttribute('data-note-inventory-control', 'read-note');
+      read.append(el(doc, 'span', '', reader.label));
+      const out = el(doc, 'span', 'hq-note-inventory__arrow', '↗');
+      out.setAttribute('aria-hidden', 'true');
+      read.append(out);
+      nodes.push(read);
+    }
+    return nodes;
   }
 }

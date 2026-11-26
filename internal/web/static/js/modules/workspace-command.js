@@ -8576,7 +8576,13 @@ export class WorkspaceCommandView {
     if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
       return null;
     }
-    this._noteInventory = new HQNoteInventory({ doc: document });
+    // A Quick note saved in the inventory tells the page the way the HQ
+    // Overview's capture does: the Notes badge and anything else showing the
+    // Inbox read it again.
+    this._noteInventory = new HQNoteInventory({
+      doc: document,
+      onSaved: () => this.notesChanged()
+    });
     return this._noteInventory;
   }
 

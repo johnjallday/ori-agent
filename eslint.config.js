@@ -139,6 +139,7 @@ export default defineConfig([
       'internal/web/static/js/modules/notes-api.js',
       'internal/web/static/js/modules/my-notes.js',
       'internal/web/static/js/modules/my-notes-browser.js',
+      'internal/web/static/js/modules/my-notes-arrival.js',
       'internal/web/static/js/modules/inbox-review.js',
       'internal/web/static/js/modules/home-note-form.js',
       'internal/web/static/js/modules/my-notes-quick-note.js',

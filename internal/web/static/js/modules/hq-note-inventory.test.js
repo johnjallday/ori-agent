@@ -85,6 +85,10 @@ function makeDoc() {
     focus() {
       doc.activeElement = this;
     }
+    setSelectionRange(start, end) {
+      this.selectionStart = start;
+      this.selectionEnd = end;
+    }
     contains(node) {
       for (let at = node; at; at = at.parentNode) if (at === this) return true;
       return false;
@@ -353,7 +357,8 @@ test('the same panel element survives reopening', async () => {
 
 // ---- collections, slots and the inspector (group 2) -----------------------------
 
-const REF = 'r'.repeat(64);
+// A connection reference is 64 hex characters, like the server's.
+const REF = 'e'.repeat(64);
 const DEMO = {
   status: 'connected',
   source: { name: 'Demo Notes', origin: 'created_by_ori', kind: 'obsidian' },
@@ -743,4 +748,232 @@ test('on a phone the slots give way to the inspector, and Back returns to the sa
   control(view.root, 'back').click();
   assert.equal(view.root.getAttribute('data-note-inventory-pane'), 'slots');
   assert.equal(doc.activeElement, slotFor(view.root, 'project:House'));
+});
+
+// ---- Quick note and the reader link (group 3) ----------------------------------
+
+const live = root => root.querySelector('[data-note-inventory-live]').textContent;
+const draftField = root => control(root, 'draft');
+const captureForm = root => root.querySelector('[data-note-inventory-capture]');
+
+function type(root, text) {
+  const field = draftField(root);
+  field.value = text;
+  field.dispatch('input');
+}
+
+function submit(root) {
+  captureForm(root).dispatch('submit', { preventDefault() {} });
+}
+
+// A notebook whose Inbox grows by one file per confirmed capture.
+function capturingServer({ fail = () => null } = {}) {
+  const inbox = ['README.md'];
+  const folders = { ...HOUSE_FOLDERS };
+  Object.defineProperty(folders, 'Inbox', { get: () => F(...inbox), enumerable: true });
+  const notes = server({
+    folders,
+    previews: { [HOUSE_PREVIEW]: { title: 'House', body: 'Paint the porch.' } }
+  });
+  const posts = [];
+  const post = async (path, body, id) => {
+    posts.push({ path, body, id });
+    const problem = fail(posts.length);
+    if (problem) throw problem;
+    const file = '20261126-1012-ask-about-the-roof-warranty.md';
+    if (!inbox.includes(file)) inbox.push(file);
+    return { capture: { note: 'Inbox/' + file, name: file.slice(0, -3) } };
+  };
+  return { ...notes, posts, post, inbox };
+}
+
+async function openWithHouse(srv, options = {}) {
+  const doc = makeDoc();
+  const saved = [];
+  const view = new HQNoteInventory({
+    doc,
+    request: srv.request,
+    post: srv.post,
+    narrow: () => false,
+    onSaved: () => saved.push('saved'),
+    ...options
+  });
+  await view.open({ hqWorkspaceID: 'hq-1', known: DEMO });
+  await settle();
+  slotFor(view.root, 'project:House').click();
+  await settle();
+  return { doc, view, saved };
+}
+
+test('Quick note appears only where Ori may write, and says where the note goes first', async () => {
+  for (const known of [FIELD, PLAIN, { status: 'missing' }, { status: 'not_connected' }]) {
+    const doc = makeDoc();
+    const view = new HQNoteInventory({ doc, request: server({ folders: { '': [] } }).request });
+    await view.open({ hqWorkspaceID: 'hq-1', known });
+    await settle();
+    assert.equal(control(view.root, 'quick-note'), null, JSON.stringify(known.source || known));
+  }
+  const srv = capturingServer();
+  const { doc, view } = await openWithHouse(srv);
+  const before = srv.log.length;
+  control(view.root, 'quick-note').click();
+  assert.match(view.root.querySelector('.is-capture').textContent, /Save to My Notes → Inbox/);
+  assert.equal(doc.activeElement, draftField(view.root));
+  assert.equal(srv.log.length, before, 'opening Quick note sends nothing');
+  assert.deepEqual(srv.posts, []);
+  assert.equal(view.root.querySelector('[id]'), null, 'no ids to collide with HQ Overview');
+});
+
+test('saving: one capture for a double submit, 0 → 1 in the real Inbox, House stays selected', async () => {
+  const srv = capturingServer();
+  const { doc, view, saved } = await openWithHouse(srv);
+  assert.match(tab(view.root, 'inbox').textContent, /Inbox0/);
+  control(view.root, 'quick-note').click();
+  type(view.root, 'Ask about the roof warranty');
+  submit(view.root);
+  submit(view.root);
+  assert.equal(control(view.root, 'save').disabled, true, 'Save is disabled while saving');
+  assert.match(control(view.root, 'save').textContent, /Saving/);
+  await settle();
+  assert.equal(srv.posts.length, 1, 'one capture');
+  assert.equal(srv.posts[0].path, '/capture');
+  assert.deepEqual(srv.posts[0].body, { text: 'Ask about the roof warranty', source_ref: REF });
+  assert.deepEqual(saved, ['saved'], 'the page hears about it once');
+  assert.equal(live(view.root), 'Saved to My Notes → Inbox.');
+  assert.match(tab(view.root, 'inbox').textContent, /Inbox1/, 'listed again, not counted up here');
+  assert.equal(srv.inbox.length, 2, 'exactly one new file');
+  assert.equal(slotFor(view.root, 'project:House').getAttribute('aria-pressed'), 'true');
+  assert.match(
+    inspector(view.root).textContent,
+    /Paint the porch/,
+    'the House inspector is unchanged'
+  );
+  assert.equal(doc.activeElement, slotFor(view.root, 'project:House'));
+  // A repaint does not announce again.
+  view.render();
+  assert.equal(live(view.root), 'Saved to My Notes → Inbox.');
+  slotFor(view.root, 'project:Studio').click();
+  assert.equal(live(view.root), '');
+});
+
+test('a failed or uncertain save keeps the draft and retries with the same request id', async () => {
+  const lost = new Error('Ori could not confirm the save. Your draft is still here.');
+  const srv = capturingServer({ fail: n => (n === 1 ? lost : null) });
+  const { doc, view, saved } = await openWithHouse(srv);
+  control(view.root, 'quick-note').click();
+  type(view.root, 'Ask about the roof warranty');
+  submit(view.root);
+  await settle();
+  assert.equal(saved.length, 0);
+  assert.equal(draftField(view.root).value, 'Ask about the roof warranty');
+  assert.match(view.root.querySelector('[role="alert"]').textContent, /could not confirm/);
+  assert.equal(doc.activeElement, draftField(view.root));
+  assert.equal(draftField(view.root).selectionStart, 'Ask about the roof warranty'.length);
+  assert.equal(live(view.root), '', 'no success without a receipt');
+  submit(view.root);
+  await settle();
+  assert.equal(srv.posts.length, 2);
+  assert.equal(srv.posts[1].id, srv.posts[0].id, 'the same request id');
+  assert.deepEqual(saved, ['saved']);
+});
+
+test('a draft from another connection is never sent there: it can only be copied or discarded', async () => {
+  const srv = capturingServer();
+  const { view } = await openWithHouse(srv);
+  control(view.root, 'quick-note').click();
+  type(view.root, 'Ask about the roof warranty');
+  // The notebook was reconnected (a new reference) while the draft waited.
+  view.accept({ ...DEMO, browse_ref: 'n'.repeat(64) });
+  await settle();
+  control(view.root, 'quick-note').click();
+  assert.match(view.root.textContent, /Draft from your previous notes connection/);
+  assert.equal(draftField(view.root).readOnly, true);
+  assert.equal(control(view.root, 'save'), null);
+  submit(view.root);
+  await settle();
+  assert.deepEqual(srv.posts, []);
+  control(view.root, 'discard-draft').click();
+  assert.equal(view.draft.text, '');
+});
+
+test('cancel and Escape go back to the selected note; the draft stays for this HQ only', async () => {
+  const srv = capturingServer();
+  const { doc, view } = await openWithHouse(srv);
+  control(view.root, 'quick-note').click();
+  type(view.root, 'Half a thought');
+  control(view.root, 'cancel-capture').click();
+  assert.match(inspector(view.root).textContent, /Paint the porch/);
+  assert.equal(doc.activeElement, slotFor(view.root, 'project:House'));
+  assert.match(control(view.root, 'quick-note').textContent, /draft/);
+  control(view.root, 'quick-note').click();
+  assert.equal(draftField(view.root).value, 'Half a thought');
+  let stopped = false;
+  draftField(view.root).dispatch('keydown', {
+    key: 'Escape',
+    stopPropagation: () => (stopped = true)
+  });
+  assert.equal(stopped, true, 'Escape stays with the form, not the whole panel');
+  assert.equal(view.root.querySelector('.is-capture'), null);
+
+  view.close();
+  await view.open({ hqWorkspaceID: 'hq-1', known: DEMO });
+  await settle();
+  assert.equal(view.draft.text, 'Half a thought', 'kept in memory for this HQ');
+  view.close();
+  await view.open({ hqWorkspaceID: 'hq-2', known: DEMO });
+  assert.equal(view.draft.text, '', 'another HQ starts clean');
+  assert.deepEqual(srv.posts, []);
+});
+
+test('a save that finishes after closing is still announced to the page', async () => {
+  let release;
+  const srv = capturingServer();
+  const slowPost = async (...args) => {
+    await new Promise(resolve => (release = resolve));
+    return srv.post(...args);
+  };
+  const { view, saved } = await openWithHouse(srv, { post: slowPost });
+  control(view.root, 'quick-note').click();
+  type(view.root, 'Ask about the roof warranty');
+  submit(view.root);
+  view.close();
+  release();
+  await settle();
+  assert.deepEqual(saved, ['saved']);
+  assert.equal(live(view.root), '');
+});
+
+test('Read full note opens that note in My Notes, worded for what My Notes will show', async () => {
+  const srv = capturingServer();
+  const { view } = await openWithHouse(srv);
+  const read = control(view.root, 'read-note');
+  assert.equal(read.textContent.trim().startsWith('Read full note'), true);
+  assert.equal(read.href, '/my-notes#ref=' + REF + '&kind=project&name=House');
+  assert.equal(control(view.root, 'open-my-notes').href, '/my-notes', 'Open My Notes stays plain');
+  slotFor(view.root, 'project:Studio').click();
+  await settle();
+  assert.equal(control(view.root, 'read-note'), null, 'no page for a folder without a note');
+
+  const long = server({
+    folders: HOUSE_FOLDERS,
+    previews: { [HOUSE_PREVIEW]: { title: 'House', body: 'x', truncated: true } }
+  });
+  const other = await openWithHouse({ ...long, post: async () => ({}) });
+  assert.match(control(other.view.root, 'read-note').textContent, /Open in My Notes/);
+  assert.ok(control(other.view.root, 'obsidian'), 'the whole file is a door away');
+
+  const day = server({
+    folders: HOUSE_FOLDERS,
+    previews: { ['/preview/daily/2026-11-25.md?ref=' + REF]: { title: 'Day', body: 'x' } }
+  });
+  const doc = makeDoc();
+  const journal = new HQNoteInventory({ doc, request: day.request, narrow: () => false });
+  await journal.open({ hqWorkspaceID: 'hq-1', known: DEMO });
+  await settle();
+  slotFor(journal.root, 'daily:2026-11-25.md').click();
+  await settle();
+  assert.equal(
+    control(journal.root, 'read-note').href,
+    '/my-notes#ref=' + REF + '&kind=daily&name=2026-11-25.md'
+  );
 });

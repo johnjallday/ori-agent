@@ -307,3 +307,75 @@ export function inspectorNode(doc, model) {
   pane.append(place);
   return pane;
 }
+
+// ---- Quick note --------------------------------------------------------------------
+
+// The Quick note form, in the inspector's place. It says where the note goes
+// before anything is sent; it has no id, so it never collides with the HQ
+// Overview's own capture field.
+export function captureNode(doc, model) {
+  const pane = el(doc, 'section', 'hq-note-inventory__inspector is-capture');
+  pane.setAttribute('aria-label', 'Quick note');
+  if (model.back) {
+    pane.append(
+      button(doc, 'hq-note-inventory__back', '← Back to ' + model.back, 'back', 'cancel-capture')
+    );
+  }
+  pane.append(el(doc, 'p', 'hq-note-inventory__eyebrow-row', 'Quick note'));
+  const form = el(doc, 'form', 'hq-note-inventory__capture');
+  form.setAttribute('data-note-inventory-capture', '');
+  form.noValidate = true;
+  const label = el(doc, 'label', 'hq-note-inventory__capture-label');
+  label.append(el(doc, 'span', 'hq-note-inventory__capture-where', model.label));
+  const field = el(doc, 'textarea', 'hq-note-inventory__capture-field');
+  control(field, 'draft');
+  field.value = model.text;
+  field.rows = 5;
+  field.maxLength = 4000;
+  field.placeholder = 'A thought to keep…';
+  field.readOnly = model.busy || model.stranded;
+  label.append(field);
+  form.append(label);
+  const row = el(doc, 'div', 'hq-note-inventory__capture-actions');
+  if (model.stranded) {
+    row.append(
+      button(doc, 'hq-note-inventory__quick', 'Discard draft', 'discard-draft', 'discard-draft')
+    );
+  } else {
+    const save = el(
+      doc,
+      'button',
+      'hq-note-inventory__quick',
+      model.busy ? 'Saving…' : 'Save to Inbox'
+    );
+    save.type = 'submit';
+    control(save, 'save');
+    save.disabled = model.busy;
+    row.append(save);
+  }
+  const cancel = button(
+    doc,
+    'hq-note-inventory__link-button',
+    'Cancel',
+    'cancel-capture',
+    'cancel-capture'
+  );
+  cancel.disabled = model.busy;
+  row.append(cancel);
+  form.append(row);
+  if (model.stranded) {
+    form.append(
+      noticeNode(
+        doc,
+        'Copy this draft if you want to keep it. Ori won’t send it to another folder.'
+      )
+    );
+  }
+  if (model.problem) {
+    const problem = noticeNode(doc, model.problem, 'is-problem');
+    problem.setAttribute('role', 'alert');
+    form.append(problem);
+  }
+  pane.append(form);
+  return pane;
+}

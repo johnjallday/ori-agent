@@ -1,5 +1,6 @@
 import { notesPost, notesRequest } from './notes-api.js';
 import { initialNotesFolder, MyNotesBrowser } from './my-notes-browser.js';
+import { ARRIVAL_MISSING_LINE, myNotesArrivalNote } from './my-notes-arrival.js';
 import { inboxHasUserNotes, MyNotesQuickNote, quickNoteEntry } from './my-notes-quick-note.js';
 import {
   isCreatedByOri,
@@ -138,6 +139,14 @@ export class MyNotes {
       // for the connection again; a changed one clears and reopens the browser.
       recheck: () => {
         if (!this.suspended) void this.load();
+      },
+      // A note link's folder that is gone falls back to the notebook's top,
+      // and says so.
+      landingMissing: parts => {
+        if (this.arrivalFolder && this.arrivalFolder === parts.join('/')) {
+          this.arrivalFolder = '';
+          this.notice(ARRIVAL_MISSING_LINE);
+        }
       }
     });
     this.quick = new MyNotesQuickNote(root.querySelector('[data-my-notes-quick]'), {
@@ -280,23 +289,23 @@ export class MyNotes {
   }
 
   // land opens the browser once per connection. A refresh of the same
-  // connection keeps whatever folder and note the reader chose.
+  // connection keeps whatever folder and note the reader chose. A note link
+  // (a capture receipt, or one note chosen in the HQ's note inventory) opens
+  // that note in its own folder, only for the notebook it was made for.
   land() {
     const landing = myNotesLanding(this.view, this.arrival);
     if (landing.kind !== 'browse') return;
     if (!this.browser.view) {
-      this.browser.start(this.view, landing.folder);
       const receipt = this.captureArrival;
       this.captureArrival = null;
-      const name = receipt?.get('note');
-      if (
-        name &&
-        isCreatedByOri(this.view) &&
-        receipt.get('ref') === this.view.browse_ref &&
-        /^[^/\\]+\.md$/u.test(name)
-      ) {
-        this.browser.forward('reader', 'list', 'note:' + name);
-        void this.browser.state.openNote(name);
+      const note = myNotesArrivalNote(receipt, this.view);
+      this.arrivalFolder = note?.folder ? note.folder.join('/') : '';
+      this.browser.start(this.view, note?.folder || landing.folder);
+      if (note?.folder) {
+        this.browser.forward('reader', 'list', 'note:' + note.note);
+        void this.browser.state.openNote(note.note);
+      } else if (note?.problem) {
+        this.notice(note.message);
       }
     }
     void this.checkFirstNote();
