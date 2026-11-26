@@ -496,6 +496,41 @@ func TestWorkspaceBuildPreparation_AcceptedResultReadsAreObservational(t *testin
 	}
 }
 
+// An accepted pre-station inbox used the same template creator and saved
+// scan receipt as an ordinary reviewed template. The source discriminator
+// alone must never reinterpret that receipt as a new hire or rescan on read.
+func TestInboxStation_ObserveHistoricalInboxKeepsTheAcceptedScan(t *testing.T) {
+	f := newBuildPreparationFixture(t)
+	req := f.review(t)
+	response := f.call("janitor-prepare", req)
+	if response.Code != http.StatusOK {
+		t.Fatal(response.Body.String())
+	}
+	doc, err := f.builds.Read(t.Context(), "local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	historic := *doc.Session(f.build.ID)
+	historic.PlacementSource = &personalassistant.InboxPlacementSource{OfferID: uuid.NewString()}
+	if historic.Preparation.InboxHireOnly {
+		t.Fatal("legacy fixture unexpectedly used hire-only terms")
+	}
+	first := f.h.ObserveWorkspaceBuildPreparation("local", historic)
+	if first.State != "prepared" || first.Preparation == nil || first.Preparation.Result == nil || first.Preparation.Result.EligibleCount != 1 {
+		t.Fatalf("historical scan missing: %+v", first)
+	}
+	if err := os.WriteFile(filepath.Join(f.root, "later.txt"), []byte("must not be scanned"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	again := f.h.ObserveWorkspaceBuildPreparation("local", historic)
+	if again.State != "prepared" || again.Preparation.Result.OperationID != first.Preparation.Result.OperationID || again.Preparation.Result.BatchID != first.Preparation.Result.BatchID || again.Preparation.Result.EligibleCount != 1 {
+		t.Fatalf("history changed: %+v", again)
+	}
+	if bs, err := f.janitor.ListBatches(historic.Preparation.WorkspaceID); err != nil || len(bs) != 1 {
+		t.Fatalf("history created another batch: %v %v", bs, err)
+	}
+}
+
 func TestWorkspaceBuildPreparation_LaterRevocationOrLifecycleChangeStopsReplay(t *testing.T) {
 	for _, change := range []string{"revoke", "pause", "remove", "reinstall", "owner", "archive", "team"} {
 		t.Run(change, func(t *testing.T) {

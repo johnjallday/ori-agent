@@ -609,6 +609,7 @@ func buildFolderPromptJSON(observation foldercontext.Observation) (string, error
 // server's own root before anything is created so a lost pick refuses the
 // create and leaves nothing behind.
 type createWorkspaceBuildFolderPlan struct {
+	pile        *folderdigest.ObservedPile
 	sessionID   string
 	name        string
 	root        string
@@ -681,7 +682,15 @@ func (h *Handler) planCreateWorkspaceBuildFolder(ctx context.Context, req create
 		logger.Info("Workspace build folder is no longer held for a create", logger.Fields{"session_id": sessionID, "error": err})
 		return nil, errBuildFolderLost
 	}
-	return &createWorkspaceBuildFolderPlan{sessionID: build.ID, name: build.Folder.Observation.Folder, root: root}, nil
+	plan := &createWorkspaceBuildFolderPlan{sessionID: build.ID, name: build.Folder.Observation.Folder, root: root}
+	if build.PlacementSource != nil {
+		if observed, ok := deps.Folders.(interface {
+			InboxStationPile(context.Context, foldercontext.Target, string) *folderdigest.ObservedPile
+		}); ok {
+			plan.pile = observed.InboxStationPile(ctx, target, build.Folder.Observation.ID)
+		}
+	}
+	return plan, nil
 }
 
 // recordCreateWorkspaceBuildFolder links the build's attached folder to the

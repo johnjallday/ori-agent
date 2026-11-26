@@ -56,6 +56,21 @@ func (h *Handler) preparedBuildWorkspace(owner string, build personalassistant.W
 	if teamErr != nil || teamRevision != marker.TeamRevision {
 		return refuse("team_changed", "The saved workspace team changed. Open the workspace and review its current setup.", "folder")
 	}
+	if claim.InboxHireOnly {
+		lead, ok := ws.FindUniqueAgentInstance(ws.EntryAgentName(), "")
+		if build.PlacementSource == nil || !ok || lead.ID == "" || lead.ID != marker.InboxHireLeadID || ws.AnchorDirectoryReferenceID() != marker.FolderReferenceID || marker.FolderReferenceID == "" {
+			return refuse("hire_changed", "The hired manager or the folder link changed.", "folder")
+		}
+		ref, err := ws.GetDirectoryReference(marker.FolderReferenceID)
+		if err != nil || ref == nil {
+			return refuse("folder_changed", "The reviewed folder is no longer linked.", "folder")
+		}
+		root, err := janitor.ReviewSelectedSetup(ws.ID, ref.Path, nil)
+		if err != nil || root.Revision != claim.RootRevision {
+			return refuse("folder_changed", "The reviewed folder is no longer current.", "folder")
+		}
+		return &verifiedBuildWorkspace{workspace: ws}, nil
+	}
 	install, found := ws.GetInstalledCapability(workspace.CapabilityFileJanitor)
 	install.OwnedResources = nil
 	capabilityRevision, digestErr := digestJSON(install)
@@ -125,6 +140,12 @@ func (h *Handler) ObserveWorkspaceBuildPreparation(owner string, build personala
 		return view
 	}
 	view.FolderName, view.FolderPath = ref.Name, ref.Path
+	if claim.InboxHireOnly {
+		view.State = "hired"
+		view.Terms = nil
+		view.Message = "Your manager is hired. Review the Filing station separately on the workspace Map."
+		return view
+	}
 	if claim.LinkedReviewRevision == "" {
 		return view
 	}
@@ -159,7 +180,7 @@ func (h *Handler) ObserveWorkspaceBuildPreparation(owner string, build personala
 // Recording a verified source receipt is projection bookkeeping, not a setup
 // continuation. Keep it outside the pure observer and outside build-store locks.
 func (h *Handler) recordObservedBuildPreparation(ctx context.Context, owner string, build personalassistant.WorkspaceBuildSession, view *WorkspaceBuildPreparationObservation) {
-	if build.PlacementSource == nil || view.State != "prepared" {
+	if build.PlacementSource == nil || (view.State != "prepared" && view.State != "hired") {
 		return
 	}
 	recorder, ok := h.workspaceBuild.Placement.(interface {

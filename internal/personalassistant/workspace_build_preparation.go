@@ -13,6 +13,7 @@ import (
 // creation settles it; canonical workspace/domain receipts own consequences.
 // No path, selection token, prompt, or arbitrary request JSON is retained here.
 type BuildPreparationClaim struct {
+	InboxHireOnly        bool      `json:"inbox_hire_only,omitempty"`
 	ID                   string    `json:"id"`
 	WorkspaceID          string    `json:"workspace_id"`
 	BuildVersion         int64     `json:"build_version"`
@@ -25,6 +26,9 @@ type BuildPreparationClaim struct {
 }
 
 func (c BuildPreparationClaim) Validate() error {
+	if c.InboxHireOnly && (c.Monitoring || c.LinkedReviewRevision != "") {
+		return fmt.Errorf("%w: inbox hire does not grant filing", ErrWorkspaceBuildInvalid)
+	}
 	for _, id := range []string{c.ID, c.WorkspaceID} {
 		if _, err := uuid.Parse(id); err != nil {
 			return fmt.Errorf("%w: preparation identity", ErrWorkspaceBuildInvalid)

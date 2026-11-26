@@ -58,19 +58,20 @@ export function placementPanelHTML(view = {}) {
   if (view.ownerKind === 'ordinary' || view.ownerKind === 'setup')
     return workspaceCreationReviewHTML(view);
   const draft = view.draft || {};
+  const hire = view.hireOnly || view.review?.inbox_hire_only || view.result?.outcome === 'hired';
   if (view.result)
     return `<section class="assisted-placement" aria-label="Workspace preparation result">
-    <h2>Workspace prepared</h2>
+    <h2>${hire ? 'Manager hired' : 'Workspace prepared'}</h2>
     <p>${escape(view.resultName || draft.name)}</p>
     ${Array.isArray(view.members) && view.members.length ? `<p>Assigned: ${view.members.map(escape).join(', ')}</p>` : ''}
-    <p>${view.result.outcome === 'batch' ? `${escape(view.result.eligible_count)} ${Number(view.result.eligible_count) === 1 ? 'file' : 'files'} in the first filing review.` : 'The first scan found no eligible files.'}</p>
+    <p>${hire ? 'Filing was not installed. No scan was run.' : view.result.outcome === 'batch' ? `${escape(view.result.eligible_count)} ${Number(view.result.eligible_count) === 1 ? 'file' : 'files'} in the first filing review.` : 'The first scan found no eligible files.'}</p>
     <p>Source files were not moved. Filing still needs your separate approval.</p>
     <p role="status" aria-live="polite" tabindex="-1" data-placement-focus="status">${escape(view.message)}</p>
     ${view.sourceReceiptPending ? '<p>The assistant receipt is not yet saved. Read status again to reconcile this same setup; do not create another.</p>' : ''}
     <div class="assisted-placement__footer">
       ${view.sourceReceiptPending ? `<button type="button" data-placement-action="read-status"${view.busy ? ' disabled' : ''}>Read saved status</button>` : ''}
       ${view.positionFailed ? `<button type="button" data-placement-action="retry-position"${view.busy ? ' disabled' : ''}>Retry position only</button>` : ''}
-      <button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>Open filing review</button>
+      <button type="button" data-placement-action="open"${view.busy ? ' disabled' : ''}>${hire ? 'Open workspace Map' : 'Open filing review'}</button>
       ${view.canDefer ? `<button type="button" data-placement-action="defer"${view.busy ? ' disabled' : ''}>Defer preparation</button>` : ''}
       <button type="button" data-placement-action="back"${view.busy ? ' disabled' : ''}>Close</button>
     </div></section>`;
@@ -155,15 +156,21 @@ export function placementPanelHTML(view = {}) {
             actionLabel: 'Choose folder'
           },
           {
-            label: 'Prepare a filing review',
+            label: hire ? 'Review Filing separately' : 'Prepare a filing review',
             ariaLabel: 'First action',
-            value: 'A metadata-only scan. You approve any filing separately.'
+            value: hire
+              ? 'Your manager may suggest a station on the Map. Only Build installs it and runs a scan.'
+              : 'A metadata-only scan. You approve any filing separately.'
           }
         ],
         { locked, selectedCard: view.selectedCard }
       )}
-      <label class="assisted-placement__monitoring"><input type="checkbox" data-placement-field="monitoring"${view.monitoring ? ' checked' : ''}${disabled}> Also watch for new files and run a daily catch-up</label>
-      <p class="assisted-placement__hint">${view.monitoring ? 'Monitoring is selected. Review the exact schedule below before confirming.' : 'Monitoring is off. No background scans will be enabled.'}</p>
+      ${
+        hire
+          ? ''
+          : `<label class="assisted-placement__monitoring"><input type="checkbox" data-placement-field="monitoring"${view.monitoring ? ' checked' : ''}${disabled}> Also watch for new files and run a daily catch-up</label>
+      <p class="assisted-placement__hint">${view.monitoring ? 'Monitoring is selected. Review the exact schedule below before confirming.' : 'Monitoring is off. No background scans will be enabled.'}</p>`
+      }
       <section class="assisted-placement__review" aria-label="Before you confirm">
         <h3>Before you confirm</h3>
         ${
@@ -174,10 +181,14 @@ export function placementPanelHTML(view = {}) {
           <dt>Team</dt><dd>${escape(teamText)}</dd>
           <dt>Work folder</dt><dd>${escape(folder.path || folder.name)} — used where it is, not moved</dd>
           <dt>Ori’s notes and settings</dt><dd>${escape(review.sidecar_path || 'A separate workspace folder in Ori Workspaces')} — your work folder is not used for Ori’s state.</dd>
-          <dt>Access</dt><dd>Top-level names, types, sizes and dates only. No file contents.</dd>
+          ${
+            hire
+              ? '<dt>Access</dt><dd>The workspace links to your folder. No Filing access, scan, monitoring or Filed/ folder is included.</dd>'
+              : `<dt>Access</dt><dd>Top-level names, types, sizes and dates only. No file contents.</dd>
           <dt>Destination</dt><dd>Create or reuse Filed/ inside this folder.</dd>
           <dt>Next</dt><dd>Prepare the first filing review. No model call. Nothing is moved or deleted.</dd>
-          <dt>Monitoring</dt><dd>${review.monitoring ? `On · watch for new files; daily catch-up at ${escape(review.terms?.daily_scan_local_time || 'the reviewed time')} (${escape(review.terms?.timezone || 'local time')}).` : 'Off · manual scans only.'}</dd>
+          <dt>Monitoring</dt><dd>${review.monitoring ? `On · watch for new files; daily catch-up at ${escape(review.terms?.daily_scan_local_time || 'the reviewed time')} (${escape(review.terms?.timezone || 'local time')}).` : 'Off · manual scans only.'}</dd>`
+          }
         </dl>`
             : '<p>Your current choices need a fresh server review before you can confirm.</p>'
         }
@@ -185,11 +196,11 @@ export function placementPanelHTML(view = {}) {
       <p class="assisted-placement__status" role="status" aria-live="polite" tabindex="-1" data-placement-focus="status">${escape(view.message || '')}</p>
       ${view.conflict ? `<button type="button" data-placement-action="reload-draft"${busy ? ' disabled' : ''}>Discard local edits &amp; load saved draft</button>` : ''}
       ${view.canRefresh ? '<button type="button" data-placement-action="review">Refresh permission review</button>' : ''}
-      ${creationReviewNavigationHTML({ ...view, reviewed: Boolean(review), mapHint: view.candidate ? 'Your previous position is kept. On the map, click or press Enter to create this reviewed setup and scan.' : 'On the map, click a valid position or press Enter to create this reviewed setup and scan. Moving the preview does nothing. Escape returns here.' })}
+      ${creationReviewNavigationHTML({ ...view, reviewed: Boolean(review), mapHint: hire ? 'Click a valid position or press Enter to hire the manager and create the workspace there. Escape returns here.' : view.candidate ? 'Your previous position is kept. On the map, click or press Enter to create this reviewed setup and scan.' : 'On the map, click a valid position or press Enter to create this reviewed setup and scan. Moving the preview does nothing. Escape returns here.' })}
       <footer class="assisted-placement__footer">
         <button type="button" data-placement-action="back"${busy ? ' disabled' : ''}>Back</button>
         <button type="button" data-placement-action="cancel"${disabled}>Cancel draft</button>
-        ${view.automatic ? `<button type="button" class="assisted-placement__primary" data-placement-action="confirm"${!view.canConfirm || !review || locked ? ' disabled' : ''}>${busy ? 'Working…' : 'Create workspace &amp; scan'}</button>` : ''}
+        ${view.automatic ? `<button type="button" class="assisted-placement__primary" data-placement-action="confirm"${!view.canConfirm || !review || locked ? ' disabled' : ''}>${busy ? 'Working…' : hire ? 'Hire and create workspace' : 'Create workspace &amp; scan'}</button>` : ''}
       </footer>
     </section>`;
 }

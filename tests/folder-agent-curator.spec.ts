@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { installLocalCdn } from './helpers/offline-cdn';
 
-// Real sandbox APIs, no model: ./scripts/e2e-fresh.sh --sandbox-env ORI_FOLDER_CURATOR_SANDBOX tests/folder-agent-curator.spec.ts
+// Real sandbox APIs, no model: ORI_DEMO_SPLIT_PROFILE=1 ./scripts/e2e-fresh.sh --sandbox-env ORI_FOLDER_CURATOR_SANDBOX tests/folder-agent-curator.spec.ts
 const sandbox = process.env.ORI_FOLDER_CURATOR_SANDBOX || '';
 const endpoint = '/api/personal-assistant/folder-agent';
 const filingLive = process.env.ORI_FILING_LIVE === '1';
@@ -54,7 +54,10 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
     : live
       ? ['Downloads', 'Desktop']
       : ['Downloads', 'Loose Files']) {
-    const root = join(sandbox, folder);
+    const root = join(
+      process.env.ORI_DEMO_SPLIT_PROFILE === '1' ? join(sandbox, 'home') : sandbox,
+      folder
+    );
     await mkdir(root, { recursive: true, mode: 0o750 });
     const old = new Date(Date.now() - 3_600_000);
     const names = Array.from(
@@ -65,14 +68,17 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
       await writeFile(join(root, name), 'synthetic fixture', { mode: 0o600 });
       await utimes(join(root, name), old, old);
     }
-    await page.goto('/?panel=today&folder=show');
+    await page.goto('/?view=tree');
+    const drawer = page.locator('#personalAssistantClose');
+    if (await drawer.isVisible()) await drawer.click();
+    await page.locator('#cockpitPrimaryActionBtn').click();
     const entry = page.locator('#personalAssistantFolderPathEntry');
     await expect(entry).toBeVisible();
     await entry.locator('input').fill(root);
     await entry.getByRole('button').click();
-    const card = page.locator('#personalAssistantFolderAgent');
-    await expect(card).toContainText(`Hire an agent for ${folder}`);
-    await card.locator('[data-folder-agent-action="start"]').click();
+    const hireCard = page.locator('#personalAssistantFolderAgent');
+    await expect(hireCard).toContainText(`Hire an agent for ${folder}`);
+    await hireCard.locator('[data-folder-agent-action="start"]').click();
     const get = async () =>
       (await (await request.get(endpoint)).json()).folder_agents.find(
         (v: { folder_name: string }) => v.folder_name === folder
@@ -89,7 +95,7 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
     if (await closeAssistant.isVisible()) await closeAssistant.click();
     await page.getByRole('button', { name: 'Open in chat', exact: true }).click();
     const report = page.locator('.folder-agent-card--report:visible');
-    await expect(report).toContainText(`${folder} Manager explains proposed filing`);
+    await expect(report).toContainText(`${folder} Manager recommends a Filing station`);
     await expect(report).not.toContainText('Adds File Curator');
     await report.getByRole('button', { name: 'Set it up', exact: true }).click({ timeout: 15_000 });
     await expect.poll(async () => (await get()).setup?.status).toBe('done');
@@ -100,23 +106,25 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
     const status = async () =>
       (await (await request.get(`/api/workspaces/${view.workspace_id}/file-janitor`)).json())
         .status;
+    expect((await status()).applies).toBe(false);
+    expect(await readdir(root)).not.toContain('Filed');
+    await page.goto(`${view.route}?mode=map`);
+    if (await closeAssistant.isVisible()) await closeAssistant.click();
+    await page.getByRole('button', { name: 'Review station build', exact: true }).click();
+    const card = page.getByRole('dialog', { name: 'Filing', exact: true });
+    await card.getByRole('button', { name: 'Build the station', exact: true }).click();
+    const station = page.locator('[data-cmd-hq-station="file-janitor"]:visible');
+    await expect(station).toContainText('Review 24 files');
+    if (!(await card.isVisible())) await station.click();
+    const chooser = card.getByRole('region', { name: 'Filing method' });
+    await chooser.getByRole('button', { name: 'By kind', exact: true }).click();
     expect((await status()).guidance.agent_name).toBe(`${folder} Manager`);
     expect((await status()).guidance.available).toBe(true);
-
-    await page.reload();
-    if (await closeAssistant.isVisible()) await closeAssistant.click();
-    await page.locator('#workspaceNextAction').click();
-    const permissions = page.getByRole('region', { name: 'Review Filing permissions' });
-    await expect(permissions).toContainText('Both require separate approval');
-    await permissions
-      .getByRole('button', { name: `Allow filing in ${folder}`, exact: true })
-      .click();
-    await expect(permissions).toBeHidden();
     // Permission acceptance can hide this card before preparation's async
     // handoff opens Review. Wait for that real completion, not an intermediate
     // repaint that can reclaim a Settings click made too early.
     const settings = page.locator('#fileJanitorConsoleBody');
-    await expect(settings).toContainText('24 files ready for review. Nothing moved.');
+    await expect(settings).toContainText('File 20 files');
     const settingsTab = page.getByRole('tab', { name: 'Settings', exact: true });
     await settingsTab.click();
     await expect(settingsTab).toHaveAttribute('aria-selected', 'true');
@@ -127,7 +135,7 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
       path: join(evidence, `${folder}-curator-settings.png`),
       fullPage: true
     });
-    await page.getByRole('button', { name: 'Close Filing', exact: true }).click();
+    await card.getByRole('button', { name: 'Back to map', exact: true }).click();
 
     // Preparation's saved-batch welcome is delivered asynchronously. Do not
     // mistake the earlier folder-look report for that later filing message.
@@ -211,7 +219,7 @@ test('fed folders keep their hired agent as Curator, with Settings and a saved w
       });
     }
     const actual = await readdir(root);
-    expect(actual.filter(name => name !== 'Filed').sort()).toEqual(names.sort());
+    expect(actual.sort()).toEqual(names.sort());
     for (const name of names)
       expect(await readFile(join(root, name), 'utf8')).toBe('synthetic fixture');
   }

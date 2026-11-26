@@ -1,6 +1,7 @@
 package folderagent
 
 import (
+	"errors"
 	"os"
 	"strings"
 
@@ -26,6 +27,11 @@ func (s *Service) StationLook(owner, id string) (filejanitor.StationLook, error)
 		return filejanitor.StationLook{}, ErrUnavailable
 	}
 	r, err := s.Record(owner, id)
+	if errors.Is(err, ErrNoRecord) {
+		if _, look, ok := s.inboxStation(owner, id); ok {
+			return look, nil
+		}
+	}
 	if err != nil {
 		return filejanitor.StationLook{}, err
 	}

@@ -215,6 +215,7 @@ type Deps struct {
 	StationAvailable func(owner, workspaceID string) bool
 	// StationAnchor resolves only metadata for an ordinary hired folder. It is not DocumentsAccess and cannot authorize a content read.
 	StationAnchor func(owner, id, lead string) (StationAnchor, bool)
+	InboxStation  func(owner, id string) (InboxStation, bool)
 	// Songs reads the Home's song-details consent for the offer to learn the
 	// songs. Nil makes no offer.
 	Songs Songs
@@ -1032,6 +1033,11 @@ func (s *Service) Record(userID, workspaceID string) (*Record, error) {
 // View reads the report for one workspace.
 func (s *Service) View(ctx context.Context, userID, workspaceID string) (View, error) {
 	rec, err := s.Record(userID, workspaceID)
+	if errors.Is(err, ErrNoRecord) {
+		if v, _, ok := s.inboxStation(userID, workspaceID); ok && s.deps.StationAvailable != nil && s.deps.StationAvailable(userID, workspaceID) {
+			return v, nil
+		}
+	}
 	if err != nil {
 		return View{}, err
 	}

@@ -2,6 +2,9 @@ package workspace
 
 import (
 	"maps"
+	"slices"
+
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"strings"
 	"time"
 )
@@ -47,9 +50,13 @@ type AssistantSetupCreation struct {
 	// Reviewed build preparation additionally binds its original attached
 	// reference and capability install. These are inert reconciliation facts,
 	// never a grant and never inferred from a directory/profile name.
-	FolderReferenceID  string `json:"folder_reference_id,omitempty"`
-	CapabilityRevision string `json:"capability_revision,omitempty"`
-	TeamRevision       string `json:"team_revision,omitempty"`
+	// InboxHireLeadID belongs to an ordinary anchored hire whose roster was
+	// reviewed using the Filing blueprint. The capability was NOT installed.
+	InboxPile          *folderdigest.ObservedPile `json:"inbox_pile,omitempty"`
+	InboxHireLeadID    string                     `json:"inbox_hire_lead_id,omitempty"`
+	FolderReferenceID  string                     `json:"folder_reference_id,omitempty"`
+	CapabilityRevision string                     `json:"capability_revision,omitempty"`
+	TeamRevision       string                     `json:"team_revision,omitempty"`
 }
 
 // TemplateProvenance records the template a workspace was created from in
@@ -217,6 +224,11 @@ func cloneTemplateProvenanceInto(dst *TemplateProvenance, src *TemplateProvenanc
 	dst.GroupRequirement = CloneGroupRequirementSnapshot(src.GroupRequirement)
 	if src.AssistantSetup != nil {
 		creation := *src.AssistantSetup
+		if p := creation.InboxPile; p != nil {
+			pile := *p
+			pile.Names = slices.Clone(p.Names)
+			creation.InboxPile = &pile
+		}
 		dst.AssistantSetup = &creation
 	}
 	dst.BuildSummary = src.BuildSummary.Clone()

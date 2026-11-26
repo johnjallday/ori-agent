@@ -15,7 +15,7 @@ cleanup() {
   [[ -z "$demo_pid" ]] || wait "$demo_pid" 2>/dev/null || true
 }
 trap cleanup EXIT
-./scripts/demo-inbox-folder.sh --port "$port" --sandbox "$sandbox" --desktop-project-leads > "$sandbox/bootstrap.log" 2>&1 &
+ORI_DEMO_SPLIT_PROFILE=1 ./scripts/demo-inbox-folder.sh --port "$port" --sandbox "$sandbox" --desktop-project-leads > "$sandbox/bootstrap.log" 2>&1 &
 demo_pid=$!
 for _ in $(seq 1 300); do
   grep -q '^READY:' "$sandbox/bootstrap.log" && break

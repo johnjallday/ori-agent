@@ -99,9 +99,10 @@ func (h *Handler) patchWorkspaceBuildDraft(w http.ResponseWriter, r *http.Reques
 			if draft.TemplateID != "file-janitor" || draft.Blank || draft.ParentID != "" || len(draft.ProjectConnection) > 0 {
 				return errBuildTurn{http.StatusConflict, "placement_only"}
 			}
-			if req.Monitoring != nil {
-				session.PlacementMonitoring = *req.Monitoring
+			if req.Monitoring != nil && *req.Monitoring {
+				return errBuildTurn{http.StatusConflict, "hire_does_not_monitor"}
 			}
+			session.PlacementMonitoring = false
 		} else if req.Monitoring != nil {
 			return errBuildTurn{http.StatusBadRequest, "placement_only"}
 		}

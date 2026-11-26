@@ -56,6 +56,9 @@ func TestInboxPlacementHandoff_NoModelNoEffectsReplayAndExactPreparation(t *test
 		t.Fatalf("fixture must have no model configured: %d %v", status, availability)
 	}
 	input, root := stageInboxPlacement(t, f)
+	if status, _ := f.call(t, http.MethodPost, "/api/personal-assistant/folder-digest/offers/"+input["offer_id"].(string)+"/setup", map[string]any{"request_id": "no-direct-scan", "plan_digest": input["plan_digest"]}); status < 400 {
+		t.Fatal("fresh one-click route bypassed hire review")
+	}
 	before, profiles := len(f.builder.workspaceFileStore.CachedWorkspaces()), len(f.builder.st.ListAgents())
 	input["name"], input["brief"] = "My inbox", "Keep my exact goal — 음악."
 	status, result := f.call(t, http.MethodPost, "/api/workspaces/build-sessions/from-inbox", input)
@@ -143,9 +146,33 @@ func TestInboxPlacementHandoff_NoModelNoEffectsReplayAndExactPreparation(t *test
 		t.Fatal("wrong workspace count")
 	}
 	batches, err := f.builder.fileJanitorService.ListBatches(workspaceID)
-	if err != nil || len(batches) != 1 {
-		t.Fatalf("initial result duplicated/missing: %v %v", batches, err)
+	if err != nil || len(batches) != 0 {
+		t.Fatalf("hire created a filing batch: %v %v", batches, err)
 	}
+	ws, err := f.builder.workspaceFileStore.Get(workspaceID)
+	if err != nil || ws.HasInstalledCapability("file-janitor") {
+		t.Fatalf("unexpected Filing install: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "Filed")); !os.IsNotExist(err) {
+		t.Fatal("hire created Filed")
+	}
+	view, err := f.builder.folderAgentService.View(context.Background(), "local", workspaceID)
+	if err != nil || view.FilingPile == nil || view.FilingPile.Count != 1 || view.FilingPile.Names[0] != "invoice.pdf" {
+		t.Fatalf("missing pile on the workspace Map: %+v %v", view.FilingPile, err)
+	}
+	if _, err := f.builder.folderAgentService.StationLook("local", workspaceID); err != nil {
+		t.Fatalf("no station on Map: %v", err)
+	}
+	if _, err := f.builder.folderAgentService.StationLook("another-owner", workspaceID); err == nil {
+		t.Fatal("foreign owner could use pile")
+	}
+	if err := os.WriteFile(filepath.Join(root, "new.pdf"), []byte("new"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.builder.folderAgentService.StationLook("local", workspaceID); err == nil {
+		t.Fatal("changed folder offered stale pile")
+	}
+
 	if bytes, err := os.ReadFile(filepath.Join(root, "invoice.pdf")); err != nil || string(bytes) != "unchanged synthetic source" {
 		t.Fatal("source bytes changed")
 	}

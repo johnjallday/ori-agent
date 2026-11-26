@@ -57,6 +57,15 @@ func BuildInboxPlan(facts InboxFacts) personalassistant.FolderSetupPlan {
 		{Kind: personalassistant.FolderPlanFolder, Name: InboxFolderLine, Detail: InboxFolderDetail},
 		{Kind: personalassistant.FolderPlanTask, Name: InboxFirstLookLine, Detail: InboxFirstLookDetail},
 	}
+	if intent.HireOnly {
+		if intent.Agent.Action != personalassistant.FolderSoftwareReuse {
+			lines[0].Detail = "A new manager for your folder. Hiring does not install Filing."
+		}
+		lines[1].Name = "A workspace named " + intent.WorkspaceName
+		lines[2].Detail = "The workspace links to this folder. Hiring does not grant Filing access."
+		lines[3].Name = "Review Filing on the workspace Map"
+		lines[3].Detail = "If the look found loose files, your manager can suggest a station. Only Build installs Filing and scans. Nothing moves until you press File."
+	}
 	plan := personalassistant.NewFolderSetupPlan(lines)
 	promise := intent
 	plan.Intent = personalassistant.FolderSetupIntent{
@@ -68,5 +77,8 @@ func BuildInboxPlan(facts InboxFacts) personalassistant.FolderSetupPlan {
 		RequirementsChecked: true, Builtin: facts.BlueprintLabel,
 		Model: &personalassistant.FolderSetupModel{State: personalassistant.FolderSetupModelNotNeeded},
 	}
+	if intent.HireOnly {
+		plan.Visual.Builtin = ""
+	} // An ordinary workspace, not an installed Filing template.
 	return plan.Stamped()
 }

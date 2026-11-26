@@ -125,41 +125,46 @@ seed_loose() {
 	done
 }
 
-seed_loose "$sandbox/Downloads" 25 download pdf png zip dmg csv mov
+fixture_home="$sandbox"
+if [[ "${ORI_DEMO_SPLIT_PROFILE:-0}" == 1 ]]; then
+	[[ ! -L "$sandbox/home" ]] || exit 2
+	fixture_home="$sandbox/home"
+fi
+seed_loose "$fixture_home/Downloads" 25 download pdf png zip dmg csv mov
 if [[ "$recurring_names" == 1 ]]; then
 	# Files whose names recur, for what the approved files teach Ori (first-week
 	# FR17): Chase and Dana Lee each appear in more than one file name, Acme in
 	# only one, and a statement carries an amount that must never be kept.
 	for name in Chase_Statement_Jan.pdf Chase_Statement_Feb.pdf Chase_Statement_balance-4521.88_Mar.pdf \
 		Dana_Lee_Contract.pdf Dana_Lee_Proposal.docx Acme_Invoice_0412.pdf; do
-		printf 'fixture\n' >"$sandbox/Downloads/$name"
+		printf 'fixture\n' >"$fixture_home/Downloads/$name"
 		# Dated like the loose files: a file written a moment ago is not settled, so
 		# the first review would leave it out and nothing would recur.
-		touch -t "$(date -v-4d +%Y%m%d%H%M)" "$sandbox/Downloads/$name" 2>/dev/null || true
+		touch -t "$(date -v-4d +%Y%m%d%H%M)" "$fixture_home/Downloads/$name" 2>/dev/null || true
 	done
 	echo "RECURRING_NAMES=Chase,Dana Lee (Acme appears once and must not be learned)"
 fi
-echo "DOWNLOADS=$sandbox/Downloads"
+echo "DOWNLOADS=$fixture_home/Downloads"
 
-seed_loose "$sandbox/Documents" 22 note docx pdf txt xlsx png
-widget="$sandbox/Documents/widget"
+seed_loose "$fixture_home/Documents" 22 note docx pdf txt xlsx png
+widget="$fixture_home/Documents/widget"
 mkdir -p "$widget"
 printf 'module example.com/widget\n\ngo 1.22\n' >"$widget/go.mod"
 for name in main util handler store config; do
 	printf 'package main\n' >"$widget/$name.go"
 done
-echo "DOCUMENTS=$sandbox/Documents"
+echo "DOCUMENTS=$fixture_home/Documents"
 
-mkdir -p "$sandbox/Desktop"
+mkdir -p "$fixture_home/Desktop"
 if [[ "$desktop" == project-leads ]]; then
 	# A Go module beside only a few loose files: the project leads.
-	seed_loose "$sandbox/Desktop" 5 receipt pdf png zip csv txt
-	mkdir -p "$sandbox/Desktop/tool"
-	printf 'module example.com/tool\n\ngo 1.22\n' >"$sandbox/Desktop/tool/go.mod"
-	for name in main util store; do printf 'package main\n' >"$sandbox/Desktop/tool/$name.go"; done
+	seed_loose "$fixture_home/Desktop" 5 receipt pdf png zip csv txt
+	mkdir -p "$fixture_home/Desktop/tool"
+	printf 'module example.com/tool\n\ngo 1.22\n' >"$fixture_home/Desktop/tool/go.mod"
+	for name in main util store; do printf 'package main\n' >"$fixture_home/Desktop/tool/$name.go"; done
 fi
 # By default Desktop is empty: its first scan finds nothing to file.
-echo "DESKTOP=$sandbox/Desktop"
+echo "DESKTOP=$fixture_home/Desktop"
 
 stop_server() {
 	./scripts/stop-demo-server.sh "$port" >/dev/null 2>&1 || true

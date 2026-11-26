@@ -173,6 +173,27 @@ test('names, paths and draft fields are inert text, including review and message
   assert.match(html, /&quot;/);
 });
 
+test('a fresh inbox hire discloses no install or scan and opens the Map, not a batch', () => {
+  const html = placementPanelHTML({
+    draft,
+    team,
+    folder,
+    review: { ...review, inbox_hire_only: true },
+    automatic: true,
+    canConfirm: true
+  });
+  assert.match(html, /Hire and create workspace/);
+  assert.match(html, /No Filing access, scan, monitoring or Filed/);
+  assert.doesNotMatch(
+    html,
+    /data-placement-field="monitoring"|Create workspace &amp; scan|Create or reuse Filed/
+  );
+  const result = placementPanelHTML({ draft, result: { outcome: 'hired' } });
+  assert.match(result, /Manager hired/);
+  assert.match(result, /Open workspace Map/);
+  assert.doesNotMatch(result, /Open filing review|first scan found no eligible/);
+});
+
 test('monitoring selection and reviewed schedule are distinct disclosures', () => {
   const html = placementPanelHTML({
     draft,

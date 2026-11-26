@@ -613,7 +613,7 @@ test('a built-in recipe says why nothing is downloaded and that no model is need
   assert.equal(view.summary, 'Nothing to download: File Janitor is built into Ori');
   assert.equal(view.rows.length, 0);
   assert.equal(view.model.state, 'not_needed');
-  assert.equal(view.model.status, 'Not needed for the first batch');
+  assert.equal(view.model.status, 'Not needed for setup');
   assert.equal(view.model.settings, '', 'no configuration route for a model nothing needs');
   const container = documentFixture().createElement('div');
   renderRequirements(container, { plan: inboxPlan });
@@ -646,7 +646,7 @@ test('an inbox hire is a File Janitor workspace with no parent and no model to w
   );
   const texts = nodes(container).map(node => node.textContent);
   assert.ok(texts.includes('File Janitor workspace'));
-  assert.ok(texts.includes('specialist · No model needed for the first batch'));
+  assert.ok(texts.includes('specialist · No model needed for setup'));
   // Before you start never claims model tokens for a scan that calls no model.
   const effects = globalThis.OriFolderSetupVisual.reviewConsequences(inboxPlan);
   assert.ok(!effects.some(effect => /model tokens/.test(effect)));

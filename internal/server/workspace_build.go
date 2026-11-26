@@ -8,6 +8,7 @@ import (
 	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
 	"github.com/johnjallday/ori-agent/internal/foldercontext"
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/githubhttp"
 	"github.com/johnjallday/ori-agent/internal/linkcontext"
 	"github.com/johnjallday/ori-agent/internal/llm"
@@ -151,6 +152,13 @@ func (o buildFolderObservations) ResolveRoot(ctx context.Context, target folderc
 		return "", personalassistant.ErrFolderSelection
 	}
 	return service.ResolveRoot(ctx, target, id)
+}
+
+func (o buildFolderObservations) InboxStationPile(ctx context.Context, target foldercontext.Target, id string) *folderdigest.ObservedPile {
+	if s := o.service(); s != nil {
+		return s.InboxStationPile(ctx, target, id)
+	}
+	return nil
 }
 
 func (o buildFolderObservations) Recognize(ctx context.Context, target foldercontext.Target, id string) (*personalassistant.BuildFolderRecognition, error) {

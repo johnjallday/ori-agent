@@ -10,7 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/johnjallday/ori-agent/internal/config"
 	"github.com/johnjallday/ori-agent/internal/filejanitor"
+	"github.com/johnjallday/ori-agent/internal/folderagent"
+	"github.com/johnjallday/ori-agent/internal/folderdigest"
 	"github.com/johnjallday/ori-agent/internal/logger"
 	"github.com/johnjallday/ori-agent/internal/onboarding/detector"
 	"github.com/johnjallday/ori-agent/internal/pathselection"
@@ -34,7 +37,10 @@ func (b *ServerBuilder) wireFolderDigest(knowledge *personalassistant.KnowledgeS
 	b.folderSetupHost = setupHost
 	service := personalassistant.NewFolderDigestService(store, personalassistant.FolderDigestDeps{
 		ValidateRoot: validateShownFolder,
-		Picker:       nativeFolderPicker{},
+		ScanObservation: func(root string) (folderdigest.Result, error) {
+			return folderagent.ObserveInbox(root, []string{config.DefaultDataDir(), resolveWorkspaceRoot(b.configManager)})
+		},
+		Picker: nativeFolderPicker{},
 		// The store may be created by a later phase; look it up at call time.
 		ResolveSelection: func(token string) (string, error) {
 			if b.pathSelectionStore == nil {

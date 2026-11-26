@@ -74,6 +74,7 @@ func (b *ServerBuilder) wireFolderAgent() {
 		FilingStanding:         b.fileJanitorService.DocumentsFilingStanding,
 		StationAvailable:       b.fileJanitorService.StationAvailable,
 		StationAnchor:          b.hiredStationAnchor,
+		InboxStation:           b.inboxStation,
 		DocumentsAccess:        b.documentsOrganizationAccess,
 		SavedFilingAccess: func(owner, id, agent, link string) (folderagent.DocumentsAccess, error) {
 			if b.sessionHandler == nil {
@@ -136,6 +137,27 @@ func (b *ServerBuilder) wireFolderAgent() {
 	if closed := service.SweepInterrupted(); closed > 0 {
 		logger.Info("Closed interrupted folder agent looks", logger.Fields{"count": closed})
 	}
+}
+
+func (b *ServerBuilder) inboxStation(owner, id string) (folderagent.InboxStation, bool) {
+	var no folderagent.InboxStation
+	// Reviewed creation provenance lives in the folder mirror; the primary
+	// workspace row still independently verifies live owner, lead and anchor.
+	ws, err := b.workspaceFileStore.Get(id)
+	if err != nil || ws == nil || ws.OwnerUserID != owner {
+		return no, false
+	}
+	prov := ws.GetTemplateProvenance()
+	if prov == nil || prov.AssistantSetup == nil {
+		return no, false
+	}
+	m := prov.AssistantSetup
+	name := ws.EntryAgentName()
+	a, ok := b.hiredStationAnchor(owner, id, name)
+	if !ok || m.InboxHireLeadID != a.LeadID || m.FolderReferenceID != a.Reference || m.InboxPile == nil {
+		return no, false
+	}
+	return folderagent.InboxStation{Anchor: a, Manager: name, WorkspaceName: ws.Name, Route: "/workspaces/" + ws.FolderSlug, Operation: m.OperationID, Pile: m.InboxPile}, true
 }
 
 func (b *ServerBuilder) hiredStationAnchor(owner, id, name string) (folderagent.StationAnchor, bool) {

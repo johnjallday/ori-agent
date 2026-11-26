@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,8 +16,8 @@ func TestInboxPlacementRecovery_LostHoldsKeepEditsButRequireTrustedRepick(t *tes
 	build, root := seedEditableInbox(t, f)
 	build["draft"].(map[string]any)["name"] = "Keep my edited name"
 	build["draft"].(map[string]any)["mission"] = "Keep this exact goal."
-	build = saveEditedInbox(t, f, build, true)
-	review := reviewEditedInbox(t, f, build, true)
+	build = saveEditedInbox(t, f, build, false)
+	review := reviewEditedInbox(t, f, build, false)
 	id := build["id"].(string)
 	original := build["folder"].(map[string]any)["observation"].(map[string]any)["id"]
 	beforeDraft, _ := json.Marshal(build["draft"])
@@ -35,11 +34,11 @@ func TestInboxPlacementRecovery_LostHoldsKeepEditsButRequireTrustedRepick(t *tes
 		t.Fatalf("read retained draft: %d %v", status, latest)
 	}
 	afterDraft, _ := json.Marshal(latest["session"].(map[string]any)["draft"])
-	if string(beforeDraft) != string(afterDraft) || latest["session"].(map[string]any)["placement_monitoring"] != true {
+	if string(beforeDraft) != string(afterDraft) || latest["session"].(map[string]any)["placement_monitoring"] == true {
 		t.Fatal("losing selection authority discarded material choices")
 	}
 	status, response := f.call(t, http.MethodPost, "/api/workspaces/build-sessions/"+id+"/janitor-prepare", map[string]any{
-		"version": build["version"], "monitoring": true, "review_revision": review["review_revision"],
+		"version": build["version"], "monitoring": false, "review_revision": review["review_revision"],
 	})
 	if status < 400 {
 		t.Fatalf("persisted snapshot restored permission: %d %v", status, response)
@@ -52,11 +51,11 @@ func TestInboxPlacementRecovery_LostHoldsKeepEditsButRequireTrustedRepick(t *tes
 	}
 	build = response["session"].(map[string]any)
 	afterDraft, _ = json.Marshal(build["draft"])
-	if string(beforeDraft) != string(afterDraft) || build["placement_monitoring"] != true || build["folder_path"] != canonicalFolderPath(t, root) ||
+	if string(beforeDraft) != string(afterDraft) || build["placement_monitoring"] == true || build["folder_path"] != canonicalFolderPath(t, root) ||
 		build["folder"].(map[string]any)["observation"].(map[string]any)["id"] == original {
 		t.Fatalf("re-pick lost choices or reused old authority: %v", build)
 	}
-	reviewEditedInbox(t, f, build, true)
+	reviewEditedInbox(t, f, build, false)
 	if len(f.builder.workspaceFileStore.CachedWorkspaces()) != workspaces || len(f.builder.st.ListAgents()) != profiles {
 		t.Fatal("recovery created domain resources without confirmation")
 	}
@@ -135,12 +134,11 @@ func TestInboxPlacementRecovery_AcceptedHistoryCanReopenAfterDetachWithoutContin
 	offerID := input["offer_id"].(string)
 	source, err := f.builder.personalAssistantFolderDigest.StoredOffer(context.Background(), "local", offerID)
 	if err != nil || source.Status != personalassistant.FolderOfferResolved || source.PlacementHandoff == nil || source.Setup != nil || source.DecidedAt != nil ||
-		source.Outcome == nil || source.Outcome.WorkspaceID != workspaceID || source.Outcome.FirstTaskID != "" || source.Outcome.FirstLook == nil || source.Outcome.FirstLook.TaskID != "" || source.Outcome.FirstLook.Started || source.Outcome.FirstLook.Batch == nil {
+		source.Outcome == nil || source.Outcome.WorkspaceID != workspaceID || source.Outcome.FirstTaskID != "" || source.Outcome.FirstLook != nil || source.Outcome.Blueprint != "" {
 		t.Fatalf("source is not a verified, task-free receipt: %+v %v", source, err)
 	}
-	batchURL, err := url.Parse(source.Outcome.FirstLook.Batch.Route)
-	if err != nil || batchURL.Query().Get("preparation") != prepared["preparation"].(map[string]any)["operation_id"] {
-		t.Fatalf("source filing link lost the actual preparation identity: %v %v", batchURL, err)
+	if source.Outcome.Route != "/workspaces/"+prepared["folder_slug"].(string) || prepared["preparation"] != nil {
+		t.Fatal("hire receipt invented a scan or lost its workspace")
 	}
 	assigned := false
 	for _, row := range source.Outcome.Receipt {
@@ -172,7 +170,7 @@ func TestInboxPlacementRecovery_AcceptedHistoryCanReopenAfterDetachWithoutContin
 		t.Fatal("recovery changed the accepted envelope")
 	}
 	read := reviewEditedInbox(t, f, reopened, false)
-	if read["state"] != "accepted" || read["workspace_id"] != workspaceID || read["outcome"].(map[string]any)["state"] != "prepared" {
+	if read["state"] != "accepted" || read["workspace_id"] != workspaceID || read["outcome"].(map[string]any)["state"] != "hired" {
 		t.Fatalf("accepted read lost ownership: %v", read)
 	}
 	source, err = f.builder.personalAssistantFolderDigest.StoredOffer(context.Background(), "local", offerID)
@@ -189,8 +187,6 @@ func TestInboxPlacementRecovery_AcceptedHistoryCanReopenAfterDetachWithoutContin
 		binding := *bad.PlacementSource
 		bad.PlacementSource = &binding
 		outcome := *source.Outcome
-		look := *outcome.FirstLook
-		outcome.FirstLook = &look
 		owner := "local"
 		const foreign = "00000000-0000-4000-8000-000000000001"
 		switch field {
@@ -207,7 +203,7 @@ func TestInboxPlacementRecovery_AcceptedHistoryCanReopenAfterDetachWithoutContin
 		case "workspace":
 			outcome.WorkspaceID = foreign
 		case "task":
-			outcome.FirstLook.TaskID = foreign
+			outcome.FirstTaskID = foreign
 		case "claim":
 			bad.Preparation = nil
 		}
@@ -220,7 +216,7 @@ func TestInboxPlacementRecovery_AcceptedHistoryCanReopenAfterDetachWithoutContin
 		t.Fatalf("foreign source replaced accepted binding: %d %v", status, response)
 	}
 	batches, err := f.builder.fileJanitorService.ListBatches(workspaceID)
-	if err != nil || len(batches) != 1 || len(f.builder.workspaceFileStore.CachedWorkspaces()) != workspaces || len(f.builder.st.ListAgents()) != profiles {
+	if err != nil || len(batches) != 0 || len(f.builder.workspaceFileStore.CachedWorkspaces()) != workspaces || len(f.builder.st.ListAgents()) != profiles {
 		t.Fatalf("reopening continued or repeated work: %v %v", batches, err)
 	}
 	_, err = f.builder.workspaceBuildStore.Mutate(context.Background(), "local", func(doc *personalassistant.WorkspaceBuildDocument) error {

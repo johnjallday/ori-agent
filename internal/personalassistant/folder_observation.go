@@ -280,6 +280,19 @@ func (s *FolderObservationService) resolveHeld(ctx context.Context, target folde
 	return selection, "", nil
 }
 
+// InboxStationPile returns only samples from the actual held inbox attachment
+// walk. Reconstructing the right to link a folder cannot reconstruct this
+// evidence. It is never attached to a conversation event or sent to a model.
+func (s *FolderObservationService) InboxStationPile(ctx context.Context, target foldercontext.Target, id string) *folderdigest.ObservedPile {
+	selection, _, err := s.resolveHeld(ctx, target, id)
+	if err != nil || selection.reheld != nil || selection.result.Pile == nil {
+		return nil
+	}
+	copy := *selection.result.Pile
+	copy.Names = append([]string(nil), copy.Names...)
+	return &copy
+}
+
 // ResolveRoot returns the canonical root of a live, exactly scoped selection,
 // for a host that links the folder to a workspace the user is creating from
 // it (the workspace build's Create). The root is the server's own: it is never

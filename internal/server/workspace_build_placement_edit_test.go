@@ -157,11 +157,13 @@ func canonicalFolderPath(t *testing.T, path string) string {
 	return resolved
 }
 
-func TestInboxPlacementEditing_TrustedReplacementRetainsMonitoringAndRejectsIncompatibleOrReplacedRoots(t *testing.T) {
+func TestInboxPlacementEditing_TrustedReplacementDoesNotEnableMonitoringOrAcceptReplacedRoots(t *testing.T) {
 	f := newDraftServerFixture(t)
 	build, _ := seedEditableInbox(t, f)
 	oldReview := reviewEditedInbox(t, f, build, false)
-	build = saveEditedInbox(t, f, build, true)
+	if status, _ := f.call(t, http.MethodPatch, "/api/workspaces/build-sessions/"+build["id"].(string)+"/draft", map[string]any{"version": build["version"], "draft": build["draft"], "monitoring": true}); status != http.StatusConflict {
+		t.Fatal("hire allowed a monitoring edit")
+	}
 	id := build["id"].(string)
 	initial := build["folder"].(map[string]any)["observation"].(map[string]any)["id"]
 	before, profiles := len(f.builder.workspaceFileStore.CachedWorkspaces()), len(f.builder.st.ListAgents())
@@ -183,7 +185,7 @@ func TestInboxPlacementEditing_TrustedReplacementRetainsMonitoringAndRejectsInco
 			t.Fatalf("replace: %d %v", status, response)
 		}
 		build = response["session"].(map[string]any)
-		if build["placement_monitoring"] != true || build["folder_path"] != canonicalFolderPath(t, currentPath) || build["proposal"] != nil || build["draft"].(map[string]any)["template_id"] != "file-janitor" {
+		if build["placement_monitoring"] == true || build["folder_path"] != canonicalFolderPath(t, currentPath) || build["proposal"] != nil || build["draft"].(map[string]any)["template_id"] != "file-janitor" {
 			t.Fatalf("replacement changed intent: %v", build)
 		}
 		observation := build["folder"].(map[string]any)["observation"].(map[string]any)
@@ -191,7 +193,7 @@ func TestInboxPlacementEditing_TrustedReplacementRetainsMonitoringAndRejectsInco
 			t.Fatalf("same-named folders lost identity: %v", observation)
 		}
 		initial = observation["id"]
-		reviewEditedInbox(t, f, build, true)
+		reviewEditedInbox(t, f, build, false)
 	}
 	status, response := f.call(t, http.MethodPost, "/api/workspaces/build-sessions/"+id+"/janitor-prepare", map[string]any{"version": oldReview["version"], "monitoring": false, "review_revision": oldReview["review_revision"]})
 	if status != http.StatusConflict {
@@ -225,7 +227,7 @@ func TestInboxPlacementEditing_TrustedReplacementRetainsMonitoringAndRejectsInco
 	if err := os.Mkdir(currentPath, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if status, response := f.call(t, http.MethodPost, "/api/workspaces/build-sessions/"+id+"/janitor-review", map[string]any{"version": build["version"], "monitoring": true}); status < 400 {
+	if status, response := f.call(t, http.MethodPost, "/api/workspaces/build-sessions/"+id+"/janitor-review", map[string]any{"version": build["version"], "monitoring": false}); status < 400 {
 		t.Fatalf("replacement root revived authority: %d %v", status, response)
 	}
 	if len(f.builder.workspaceFileStore.CachedWorkspaces()) != before || len(f.builder.st.ListAgents()) != profiles {

@@ -60,7 +60,7 @@ func (h *folderSetupHost) inboxRun(ctx context.Context, req personalassistant.Fo
 	deps, available := h.inboxDeps()
 	intent := req.Plan.Intent.Inbox
 	row, inbox := inboxRow(req.Offer)
-	if !available || !inbox || intent == nil || intent.Validate() != nil || req.Update == nil ||
+	if !available || !inbox || intent == nil || intent.HireOnly || intent.Validate() != nil || req.Update == nil ||
 		req.Plan.Intent.Recipe != row.Builtin.Recipe || req.Plan.Intent.RecipeVersion != row.Builtin.Version {
 		return errSetupUnavailable
 	}

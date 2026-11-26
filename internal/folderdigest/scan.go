@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/johnjallday/ori-agent/internal/diridentity"
 )
 
 // Bounds for one scan (FR11). They keep a look at a huge folder cheap and
@@ -69,6 +71,9 @@ type Options struct {
 	// CaptureTree retains at most 64 observed entries, during this same walk.
 	// It is opt-in for conversation attachments, never a second scan or reader.
 	CaptureTree bool
+	// Keep only the count and six host-approved examples from this walk.
+	// This observation stays out of the tree and conversation transcript.
+	PileFile func(name string) bool
 	// Now supplies the clock, for tests that exercise the time budget.
 	Now func() time.Time
 }
@@ -160,6 +165,17 @@ type MetadataTree struct {
 
 const MaxTreeNodes = 64
 
+// ObservedPile is display evidence, not access. The recorded directory must
+// still have the same identity and modification time when the pile is used.
+// Missing evidence (including an old or partial look) is never a zero count.
+type ObservedPile struct {
+	Count    int       `json:"count"`
+	Names    []string  `json:"names"`
+	Witness  string    `json:"witness"`
+	Modified time.Time `json:"modified"`
+	Policy   string    `json:"policy,omitempty"`
+}
+
 // Result is one scan's outcome.
 type Result struct {
 	// Root is the scanned folder's absolute path; in memory only.
@@ -180,6 +196,7 @@ type Result struct {
 	Elapsed       time.Duration
 	// Metadata is process-local until explicitly sanitized for an attachment.
 	Metadata *MetadataTree `json:"-"`
+	Pile     *ObservedPile `json:"-"`
 }
 
 // RootCandidate returns the root's own stats.
@@ -253,6 +270,9 @@ func Scan(root string, opts Options) (Result, error) {
 	}
 
 	s := &scanner{opts: opts, start: opts.Now()}
+	if opts.PileFile != nil {
+		s.pile = &ObservedPile{Witness: diridentity.Of(info), Modified: info.ModTime()}
+	}
 	if opts.CaptureTree {
 		s.metadata = &MetadataTree{Nodes: []MetadataEntry{}}
 	}
@@ -272,6 +292,14 @@ func Scan(root string, opts Options) (Result, error) {
 		Elapsed:       opts.Now().Sub(s.start),
 		Metadata:      s.metadata,
 	}
+	if p := s.pile; p != nil && p.Count > 0 && p.Witness != "" && !result.Partial && !s.incomplete {
+		// A changed root is not the pile that the walk just counted. Stat
+		// only; do not restart the walk or replace it with a fresh listing.
+		after, err := os.Lstat(root) // #nosec G304 G703 -- same server-validated root as the walk; metadata only
+		if err == nil && after.IsDir() && diridentity.Of(after) == p.Witness && after.ModTime().Equal(p.Modified) {
+			result.Pile = p
+		}
+	}
 	result.Candidates = append(result.Candidates, s.root.finish())
 	for _, sub := range s.subfolders {
 		result.Candidates = append(result.Candidates, sub.finish())
@@ -288,6 +316,8 @@ type scanner struct {
 	root          *accumulator
 	subfolders    []*accumulator
 	metadata      *MetadataTree
+	pile          *ObservedPile
+	incomplete    bool
 }
 
 // stopped reports whether a bound has tripped, marking the reason the first
@@ -315,6 +345,7 @@ func (s *scanner) walk(dir string, depth int, owners []*accumulator, markerOwner
 		if fatal {
 			return err
 		}
+		s.incomplete = true
 		return nil
 	}
 	for _, entry := range entries {
@@ -361,6 +392,9 @@ func (s *scanner) walk(dir string, depth int, owners []*accumulator, markerOwner
 				childOwners = append(append([]*accumulator{}, owners...), sub)
 				childMarkerOwner = sub
 			}
+			if depth+1 > s.opts.MaxDepth {
+				s.incomplete = true
+			}
 			if depth+1 <= s.opts.MaxDepth {
 				if err := s.walk(child, depth+1, childOwners, childMarkerOwner, false, id); err != nil {
 					return err
@@ -371,7 +405,11 @@ func (s *scanner) walk(dir string, depth int, owners []*accumulator, markerOwner
 
 		// Lstat, never Stat: a file's metadata is all the scan may look at.
 		info, err := entry.Info()
-		if err != nil || !info.Mode().IsRegular() || isDataless(info) {
+		if err != nil {
+			s.incomplete = true
+			continue
+		}
+		if !info.Mode().IsRegular() || isDataless(info) {
 			continue
 		}
 		s.noteEntry(parentID, depth, name, "file")
@@ -381,6 +419,12 @@ func (s *scanner) walk(dir string, depth int, owners []*accumulator, markerOwner
 		}
 		if depth == 0 {
 			s.root.addLoose(ext)
+			if s.pile != nil && s.opts.PileFile(name) {
+				s.pile.Count++
+				if len(s.pile.Names) < 6 {
+					s.pile.Names = append(s.pile.Names, name)
+				}
+			}
 		}
 	}
 	return nil

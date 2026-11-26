@@ -14633,7 +14633,7 @@ const sessionManager = {
     const session = context.inboxPlacement.session;
     const build = this.newWorkspaceBuildState(context, null, { folders: true });
     this.workspaceBuild = build;
-    build.janitorMonitoring = session.placement_monitoring === true;
+    build.janitorMonitoring = session.preparation?.monitoring === true;
     // The source handoff has already happened. Only this placement presentation
     // is shared with other editable File Janitor build drafts.
     if (
@@ -14863,7 +14863,15 @@ const sessionManager = {
       },
       review,
       monitoring: build.janitorMonitoring,
-      canDefer: Boolean(build.acceptedPreparation && build.janitorReview?.review_revision),
+      hireOnly: Boolean(
+        build.session?.placement_source &&
+        (!accepted || review?.inbox_hire_only || build.session?.preparation?.inbox_hire_only)
+      ),
+      canDefer: Boolean(
+        build.acceptedPreparation &&
+        build.janitorReview?.review_revision &&
+        !review?.inbox_hire_only
+      ),
       accepted,
       busy: Boolean(
         build.preparationBusy ||
@@ -14904,7 +14912,7 @@ const sessionManager = {
           ? 'This draft was closed elsewhere. It cannot create anything; close this editor and return to the assistant.'
           : placement.message ||
             build.preparationMessage ||
-            'Review this setup, then choose its position. Nothing is created until Create workspace & scan.',
+            'Review the team and folder, then confirm where to put the workspace.',
       result: placement.result,
       positionFailed: placement.positionFailed,
       resultName: placement.resultName,
@@ -15079,7 +15087,7 @@ const sessionManager = {
       build.draftError = false;
       build.draftUser = undefined;
       build.lastDraftKey = '';
-      build.janitorMonitoring = session.placement_monitoring === true;
+      build.janitorMonitoring = session.preparation?.monitoring === true;
       placement.dirty = false;
       placement.message = 'Loaded the saved draft. Review its current choices before confirming.';
       await this.applyWorkspaceBuildSession(session, { resume: true });
@@ -15173,7 +15181,9 @@ const sessionManager = {
         token: placement.token,
         mode: 'reviewed-setup',
         actionCopy: {
-          confirmLabel: 'Create workspace & scan here',
+          confirmLabel: build.janitorReview?.inbox_hire_only
+            ? 'Hire and create workspace here'
+            : 'Create workspace & scan here',
           pendingLabel: 'Creating workspace…',
           instruction:
             'Click open ground or press Enter to create this reviewed workspace and scan. Drag to pan; Escape to edit setup. No district membership is added.',
@@ -19554,9 +19564,11 @@ const sessionManager = {
       }
       build.preparationMessage = build.acceptedPreparation
         ? 'An earlier confirmation was saved. Resume that exact workspace.'
-        : build.placement
-          ? 'Review these permissions. Only Create workspace & scan starts this work.'
-          : 'Review these permissions. Only the Create & scan folder button starts this work.';
+        : review.inbox_hire_only
+          ? 'Review the team and folder. Hiring does not install Filing or scan.'
+          : build.placement
+            ? 'Review these permissions. Only Create workspace & scan starts this work.'
+            : 'Review these permissions. Only the Create & scan folder button starts this work.';
     } catch (error) {
       if (this.workspaceBuild === build && request.key === this.workspaceBuildPreparationKey()) {
         build.janitorReviewFailureKey = request.key;
@@ -19570,9 +19582,23 @@ const sessionManager = {
     }
   },
 
-  workspaceBuildPreparedOutcome(body) {
+  workspaceBuildPreparedOutcome(body, hireOnly = false) {
     const id = body?.workspace_id;
     const slug = body?.folder_slug;
+    if (hireOnly) {
+      const hire = body?.outcome || body;
+      if (
+        hire?.state !== 'hired' ||
+        !id ||
+        hire.workspace_id !== id ||
+        hire.folder_slug !== slug ||
+        !/^[a-z0-9][a-z0-9-]*$/.test(slug || '') ||
+        hire.preparation ||
+        !hire.members?.length
+      )
+        return null;
+      return { id, receipt: { outcome: 'hired' }, route: `/workspaces/${slug}?mode=map` };
+    }
     const preparation = body?.preparation;
     const receipt = preparation?.result;
     if (
@@ -19619,12 +19645,12 @@ const sessionManager = {
         : '';
     placement.sourceReceiptPending = outcome?.source_receipt_pending === true;
     placement.reconciliationRequired = outcome?.state === 'reconciliation_required';
-    if (outcome?.state !== 'prepared') {
+    if (outcome?.state !== (review?.inbox_hire_only ? 'hired' : 'prepared')) {
       placement.message =
         outcome?.message || 'The saved outcome is not yet available. No work was continued.';
       return false;
     }
-    const proven = this.workspaceBuildPreparedOutcome(outcome);
+    const proven = this.workspaceBuildPreparedOutcome(outcome, review?.inbox_hire_only);
     if (!proven || proven.id !== review.workspace_id) {
       placement.reconciliationRequired = true;
       placement.message =
@@ -19641,7 +19667,9 @@ const sessionManager = {
     this.notifyWorkspacesChanged({ workspaceId: proven.id });
     placement.message = placement.positionFailed
       ? 'Setup is complete. The requested position has not been verified; retry position only. No setup work was continued.'
-      : 'The original filing review is saved. No setup or map position was changed by this status read.';
+      : review?.inbox_hire_only
+        ? 'Your hire is saved. Reading this receipt did not build or scan.'
+        : 'The original filing review is saved. No setup or map position was changed by this status read.';
     return true;
   },
 
@@ -19727,7 +19755,9 @@ const sessionManager = {
     build.preparationMessage =
       alreadyUncertain || build.acceptedPreparation
         ? 'Checking your previous confirmation and continuing its saved setup…'
-        : 'Creating the reviewed workspace and preparing one metadata-only scan…';
+        : review.inbox_hire_only
+          ? 'Creating your workspace and assigning its manager…'
+          : 'Creating the reviewed workspace and preparing one metadata-only scan…';
     this.syncWorkspaceBuildPresentation();
     this.workspaceBuildPane()?.setBusy?.(true);
     if (this.workspaceCreatorContext) this.workspaceCreatorContext.submitting = true;
@@ -19759,7 +19789,7 @@ const sessionManager = {
             'Preparation stopped. Keep this build; do not create another workspace.'
         );
       }
-      const proven = this.workspaceBuildPreparedOutcome(result.body);
+      const proven = this.workspaceBuildPreparedOutcome(result.body, review.inbox_hire_only);
       if (!proven) {
         throw new Error(
           'The preparation response was incomplete. Checking its accepted identity; do not create another workspace.'

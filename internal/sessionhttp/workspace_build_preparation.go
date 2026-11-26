@@ -147,7 +147,7 @@ func (h *Handler) postWorkspaceBuildPreparation(w http.ResponseWriter, r *http.R
 			h.recordObservedBuildPreparation(r.Context(), owner, *build, &outcome)
 			_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "review": map[string]any{
 				"state": "accepted", "version": claim.BuildVersion, "review_revision": claim.ReviewRevision,
-				"monitoring": claim.Monitoring, "workspace_id": claim.WorkspaceID, "folder_slug": h.preparedBuildFolderSlug(owner, *build),
+				"monitoring": claim.Monitoring, "inbox_hire_only": claim.InboxHireOnly, "workspace_id": claim.WorkspaceID, "folder_slug": h.preparedBuildFolderSlug(owner, *build),
 				"outcome": outcome,
 			}})
 			return
@@ -159,8 +159,8 @@ func (h *Handler) postWorkspaceBuildPreparation(w http.ResponseWriter, r *http.R
 		h.prepareCreatedBuild(w, r, owner, *build, janitor, automation)
 		return
 	}
-	if build.PlacementSource != nil && request.Monitoring != build.PlacementMonitoring {
-		respondBuildPreparationError(w, "review_changed", "Review the draft's current monitoring choice.", http.StatusConflict, nil)
+	if build.PlacementSource != nil && request.Monitoring {
+		respondBuildPreparationError(w, "review_changed", "Hiring does not enable monitoring. Review the station separately after the hire.", http.StatusConflict, nil)
 		return
 	}
 	if build.Status != personalassistant.WorkspaceBuildOpen || build.Version != request.Version {
@@ -309,13 +309,26 @@ func (h *Handler) preflightBuildPreparation(w http.ResponseWriter, r *http.Reque
 		savedDigests[name] = digest
 		members = append(members, buildPreparationMember{Name: name, Action: "attach", Provider: profile.Settings.Provider, Model: profile.Settings.Model})
 	}
-	termsRevision, err := digestJSON(root.Terms)
+	// The accepted terms identify the action the user actually reviewed.
+	// A hire links the selected folder but grants no Filing or monitoring terms.
+	hireOnly := p.build.PlacementSource != nil
+	var terms any = root.Terms
+	if hireOnly {
+		terms = "inbox-hire-only-v1"
+	}
+	termsRevision, err := digestJSON(terms)
 	if err != nil {
 		return refuse("review_changed", "The permission terms cannot be reviewed.")
 	}
-	revision, err := digestJSON([]any{p.owner, p.build.ID, p.build.Version, req, tpl, profileDigests, savedDigests, root.Revision, root.Terms, p.request.Monitoring, filejanitor.SetupDisclosureVersion})
+	revision, err := digestJSON([]any{p.owner, p.build.ID, p.build.Version, req, tpl, profileDigests, savedDigests, root.Revision, terms, p.request.Monitoring, filejanitor.SetupDisclosureVersion})
 	if err != nil {
 		return refuse("review_changed", "The current draft cannot be reviewed.")
+	}
+	if hireOnly {
+		revision, err = digestJSON([]any{revision, folder.pile})
+		if err != nil {
+			return refuse("review_changed", "The hire review could not be confirmed.")
+		}
 	}
 	if !p.confirm {
 		placementLabel := "Workspace root"
@@ -327,10 +340,10 @@ func (h *Handler) preflightBuildPreparation(w http.ResponseWriter, r *http.Reque
 			placementLabel = parent.Name
 		}
 		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "review": map[string]any{
-			"state": "review", "version": p.build.Version, "review_revision": revision,
+			"state": "review", "version": p.build.Version, "review_revision": revision, "inbox_hire_only": hireOnly,
 			"monitoring": p.request.Monitoring, "disclosure_version": filejanitor.SetupDisclosureVersion, "placement_label": placementLabel,
 			"workspace": buildPreparationSummary{Name: req.Name, Description: req.Description, Mission: createWorkspaceGoal(req, session.WorkspaceKindWorkspace, tpl, true), ParentID: req.ParentID, Color: req.Color, Tags: req.Tags},
-			"team":      members, "folder": map[string]string{"name": folder.name, "path": root.Path}, "terms": root.Terms,
+			"team":      members, "folder": map[string]string{"name": folder.name, "path": root.Path}, "terms": terms,
 			"sidecar_path": h.plannedAnchorSidecarPath(req),
 		}})
 		return descriptor, false
@@ -340,6 +353,9 @@ func (h *Handler) preflightBuildPreparation(w http.ResponseWriter, r *http.Reque
 	}
 	claim := &personalassistant.BuildPreparationClaim{ID: uuid.NewString(), WorkspaceID: uuid.NewString(), BuildVersion: p.build.Version,
 		ReviewRevision: revision, RootRevision: root.Revision, TermsRevision: termsRevision, Monitoring: p.request.Monitoring, AcceptedAt: h.workspaceBuild.Store.Now()}
+	if hireOnly {
+		claim.InboxHireOnly = true
+	}
 	_, err = h.workspaceBuild.Store.Mutate(r.Context(), p.owner, func(doc *personalassistant.WorkspaceBuildDocument) error {
 		current := doc.Session(p.build.ID)
 		if current == nil || current.Status != personalassistant.WorkspaceBuildOpen || current.Version != p.build.Version || current.Preparation != nil {
@@ -416,6 +432,19 @@ func (h *Handler) prepareCreatedBuild(w http.ResponseWriter, r *http.Request, ow
 		return
 	}
 	ws := verified.workspace
+	if claim.InboxHireOnly {
+		// No Filing preparation, task or second listing. The attachment
+		// observation stays the only pile until an explicit reviewed Build.
+		h.finishWorkspaceBuild(r.Context(), build.ID, ws.ID, build.Draft)
+		outcome := h.ObserveWorkspaceBuildPreparation(owner, build)
+		if outcome.State != "hired" {
+			incomplete("workspace_result_unconfirmed", "The hire receipt could not be verified. Reopen this same workspace.", "result")
+			return
+		}
+		h.recordObservedBuildPreparation(r.Context(), owner, build, &outcome)
+		_ = orihttp.RespondSuccess(w, map[string]any{"success": true, "workspace_id": ws.ID, "folder_slug": outcome.FolderSlug, "outcome": outcome})
+		return
+	}
 	marker := ws.GetTemplateProvenance().AssistantSetup
 	if r.Context().Err() != nil {
 		incomplete("preparation_stopped", "The workspace was created. Preparation stopped before the next step; resume this workspace.", "folder")

@@ -11,9 +11,14 @@ func (s *FolderDigestService) RecordInboxPlacementOutcome(ctx context.Context, o
 	source, claim := build.PlacementSource, build.Preparation
 	if s == nil || s.store == nil || source == nil || source.validate() != nil || source.Target.UserID != owner ||
 		claim == nil || claim.Validate() != nil || outcome.WorkspaceID != claim.WorkspaceID || outcome.Kind != FolderChoiceProject ||
-		outcome.Blueprint != "file-janitor" || outcome.Parent != nil || outcome.HomeRoute != "" || outcome.Remembered || outcome.Existing ||
-		outcome.FirstTaskID != "" || outcome.FirstLook == nil || outcome.FirstLook.Started || outcome.FirstLook.TaskID != "" || outcome.FirstLook.At.IsZero() || outcome.FirstLook.Batch == nil ||
-		outcome.FirstLook.Batch.validate() != nil || outcome.FirstLook.Batch.Outcome == FolderFirstBatchFailed {
+		outcome.Parent != nil || outcome.HomeRoute != "" || outcome.Remembered || outcome.Existing || outcome.FirstTaskID != "" {
+		return ErrFolderWorkspaceRefused
+	}
+	if claim.InboxHireOnly {
+		if outcome.Blueprint != "" || outcome.FirstLook != nil {
+			return ErrFolderWorkspaceRefused
+		}
+	} else if outcome.Blueprint != "file-janitor" || outcome.FirstLook == nil || outcome.FirstLook.Started || outcome.FirstLook.TaskID != "" || outcome.FirstLook.At.IsZero() || outcome.FirstLook.Batch == nil || outcome.FirstLook.Batch.validate() != nil || outcome.FirstLook.Batch.Outcome == FolderFirstBatchFailed {
 		return ErrFolderWorkspaceRefused
 	}
 	matches := func(offer *FolderOffer) bool {
