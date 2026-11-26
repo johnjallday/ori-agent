@@ -1,5 +1,6 @@
 // One local folder preview per personal conversation. No paths, observations or
 // authority are recovered from browser storage. Only Send shares a reference.
+import { showChatWorkspaceGuide } from './hq-workspace-guide.js';
 import { folderSelectionFocus, folderTreeView } from './personal-assistant-folder-tree.js';
 import { initFolderExplorer } from './personal-assistant-folder-explorer.js';
 import { folderChooserView } from './personal-assistant-folder-chooser.js';
@@ -152,6 +153,33 @@ export function createFolderContextController({
           notify(replacing ? 'Choose the folder again. Your draft is unchanged.' : '');
         else changed(state);
       }
+    }
+  }
+  async function resumePick(picked) {
+    const generation = state.generation;
+    const valid = () =>
+      picked &&
+      state.picked === picked &&
+      generation === state.generation &&
+      state.conversationId === currentId() &&
+      !isBusy();
+    const message =
+      'This folder selection changed. Choose the folder again; your draft is unchanged.';
+    if (!valid()) throw new Error(message);
+    try {
+      const review = await post(`${ENDPOINT}/attachment`, {
+        ...target(),
+        action: 'resume',
+        id: picked.id
+      });
+      if (!valid() || review?.id !== picked.id) throw new Error(message);
+      return review;
+    } catch {
+      if (valid()) {
+        state.picked = null;
+        notify(message);
+      }
+      throw new Error(message);
     }
   }
   function consent(open) {
@@ -568,6 +596,7 @@ export function createFolderContextController({
   return {
     state,
     pick,
+    resumePick,
     consent,
     inspect,
     select,
@@ -1113,6 +1142,8 @@ function renderAttachment(state) {
   const attached = Boolean(view?.observation || state?.picked);
   if (elements.picked) {
     elements.picked.hidden = !state.picked || Boolean(state.observation);
+    elements.workspace.hidden =
+      !state.picked || state.consentOpen || Boolean(state.picked.matches?.length);
     elements.consent.hidden = !state.consentOpen;
     elements.look.hidden = state.consentOpen;
     elements.look.disabled = state.pending;
@@ -1319,6 +1350,7 @@ function init() {
   elements = {
     add,
     picked: document.getElementById('personalAssistantPickedFolder'),
+    workspace: document.getElementById('personalAssistantFolderHandoff'),
     question: document.getElementById('personalAssistantPickedQuestion'),
     consent: document.getElementById('personalAssistantInspectConsent'),
     look: document.getElementById('personalAssistantLookAtNames'),
@@ -1382,6 +1414,11 @@ function init() {
     },
     true
   );
+  document.getElementById('personalAssistantGuideWorkspace')?.addEventListener('click', () => {
+    const picked = controller.state.picked;
+    if (picked && !picked.matches?.length && !controller.state.pending)
+      showChatWorkspaceGuide(window, document, picked.label, () => controller.resumePick(picked));
+  });
   elements.look?.addEventListener('click', () => {
     controller.consent(true);
     document.getElementById('personalAssistantInspectOnce')?.focus();

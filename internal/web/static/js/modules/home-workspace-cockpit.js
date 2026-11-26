@@ -6723,6 +6723,9 @@ import {
   function consumeFolderDeepLink() {
     const folder = new URLSearchParams(window.location.search).get('folder');
     if (!['show', 'guide', 'explore'].includes(folder) || !folderAction.visible) return;
+    // A returning tab restores its conversation first. The completion event
+    // below retries this same link even if loading takes several seconds.
+    if (folder === 'explore' && window.PersonalAssistantConversation?.isLoading?.()) return;
     const suggestion = folderSuggestion(window.location.search);
     if (
       openHomeFolder(
@@ -6740,6 +6743,9 @@ import {
     }
   }
   window.OriHomeFolder = { open: () => openHomeFolder() };
+  document.addEventListener('personal-assistant:conversation-loading', () => {
+    if (!window.PersonalAssistantConversation?.isLoading?.()) queueMicrotask(consumeFolderDeepLink);
+  });
   // Mission 01's steps live on their own routes; the HQ card and the folder
   // chooser open in the drawer through the deep link's own guarded path.
   function runPrimaryAction(invoker) {

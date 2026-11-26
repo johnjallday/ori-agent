@@ -7836,7 +7836,9 @@ function init() {
       () => els.chips?.querySelector('button')?.focus(),
       () => {
         closeChooser();
-        document.getElementById('personalAssistantPickedFolder')?.scrollIntoView({ block: 'nearest' });
+        document
+          .getElementById('personalAssistantPickedFolder')
+          ?.scrollIntoView({ block: 'nearest' });
         document.getElementById('personalAssistantInput')?.focus({ preventScroll: true });
       }
     );
@@ -7851,7 +7853,8 @@ function init() {
   // its face again (it was drawn with the fallback until the record arrived).
   document.addEventListener(HOME_AGENT_FACES_EVENT, () => mapPresenter?.presenter.retick?.());
   document.addEventListener('personal-assistant:conversation-loading', () => {
-    if (exploreHost && !exploreHost.hidden) closeChooser();
+    if (exploreHost && !exploreHost.hidden && window.PersonalAssistantConversation?.isLoading?.())
+      closeChooser();
     render();
   });
   // The first look is followed only while the drawer is open. Opening it reads

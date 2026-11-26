@@ -104,6 +104,13 @@
 /* The final action names what it creates ("Create group “…” only"). A long,
    user- or source-supplied name must shrink to one line on the footer row
    instead of wrapping into a pill that spills past the dialog. */
+/* Keep only the header's Close action available until the host verifies the folder. */
+.workspace-create-modal
+  .modal-content:has(> #workspaceChatFolderCheck:not([hidden]))
+  > :is(.modal-body, .modal-footer) {
+  display: none;
+}
+
 .workspace-create-modal .modal-footer #createFolderBtn {
   flex: 0 1 auto;
   min-width: 0;

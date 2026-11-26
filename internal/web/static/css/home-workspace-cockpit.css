@@ -134,7 +134,10 @@ body.home-command-page .home-command-main:has(> .map-desk-shell) {
 /* Grow around the button's center without reflowing the toolbar. Its guide
    description is removed on dismissal or activation, stopping the loop. */
 @media (prefers-reduced-motion: no-preference) {
-  #cockpitCreateWorkspaceBtn[aria-describedby~="hqWorkspaceInstruction"] {
+  #cockpitCreateWorkspaceBtn:is(
+    [aria-describedby~="hqWorkspaceInstruction"],
+    [aria-describedby~="chatWorkspaceInstruction"]
+  ) {
     animation: hq-workspace-pulse 1.6s ease-in-out infinite;
   }
 }

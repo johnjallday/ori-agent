@@ -8764,6 +8764,61 @@ function anchorChoiceFixture(fetchImpl) {
   return { manager, elements };
 }
 
+test('a chat handoff waits for its reviewed folder and drops a result after the wizard closes', async () => {
+  const status = { hidden: true };
+  const name = { value: '' };
+  const manager = loadSessionManager(
+    () => assert.fail('opening cannot create or inspect'),
+    { OriWorkspaceCreationOperation: { savedCreationReference: () => null } },
+    { getElementById: id => ({ workspaceChatFolderCheck: status, folderNameInput: name })[id] }
+  );
+  const applied = [];
+  manager.applySearchFolderReview = (...args) => applied.push(args);
+  manager.updateWorkspaceNameHint = manager.scheduleTemplateAgentPlanRefresh = () => {};
+  const context = { mode: 'ordinary', entryPoint: 'home_cockpit_create' };
+  manager.workspaceCreatorContext = context;
+  const review = { id: 'pick', label: 'Albums' };
+  let resolve;
+  const opening = manager.openWorkspaceCreatorBuild(
+    context,
+    null,
+    () =>
+      new Promise(done => {
+        resolve = done;
+      })
+  );
+  assert.equal(status.hidden, false);
+  manager.anchorCheckSequence++;
+  resolve(review);
+  await opening;
+  assert.deepEqual(applied, []);
+  await manager.openWorkspaceCreatorBuild(context, null, () => review);
+  assert.equal(status.hidden, true);
+  assert.equal(name.value, 'Albums');
+  assert.deepEqual(applied, [[review, false]]);
+});
+
+test('a saved creation receipt takes priority over an attached folder', async () => {
+  const reference = { operationId: 'previous' };
+  const status = { hidden: true };
+  const manager = loadSessionManager(
+    undefined,
+    { OriWorkspaceCreationOperation: { savedCreationReference: () => reference } },
+    { getElementById: id => (id === 'workspaceChatFolderCheck' ? status : null) }
+  );
+  const context = { mode: 'ordinary', entryPoint: 'home_cockpit_create' };
+  manager.workspaceCreatorContext = context;
+  manager.refreshWizardChrome = manager.syncOrdinaryCreationReview = () => {};
+  manager.readOrdinaryCreationStatus = () => {
+    context.ordinaryReview.observedState = 'complete';
+  };
+  await manager.openWorkspaceCreatorBuild(context, null, () =>
+    assert.fail('do not replace a receipt')
+  );
+  assert.equal(context.ordinaryReview.reference, reference);
+  assert.equal(status.hidden, true);
+});
+
 test('a delayed known Documents check never replaces a typed path or the next form', async () => {
   for (const close of [true, false]) {
     let finish;

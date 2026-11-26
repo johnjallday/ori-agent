@@ -187,6 +187,58 @@ test('the assistant links a folder without starting a hire or filename scan', as
   });
   expect(await inventory()).toEqual(initial);
 
+  const homeButton = page.locator('#cockpitCreateWorkspaceBtn');
+  const modal = page.locator('#addFolderModal');
+  const hint = page.locator('#chatWorkspaceHint');
+  const guide = () => picked.getByRole('button', { name: 'Show me where' }).click();
+  const cancelWizard = async () => {
+    await modal.locator('[data-bs-dismiss="modal"]').filter({ visible: true }).first().click();
+    await expect(modal).toBeHidden();
+  };
+  const showPrefill = async () => {
+    await modal.locator('.workspace-template-card', { hasText: 'Blank' }).first().click();
+    await page.locator('#wizardNextBtn').click();
+    await expect(page.locator('#workspaceAnchorPath')).toHaveValue('Albums');
+    await expect(page.locator('#workspaceSearchConsent')).toBeVisible();
+    await expect(page.locator('#workspaceSearchConsent')).not.toBeChecked();
+  };
+  const attachmentActions: string[] = [];
+  page.on('request', r => {
+    if (r.url().endsWith('/folder-context/attachment'))
+      attachmentActions.push(r.postDataJSON().action);
+  });
+  await guide();
+  await page.keyboard.press('Escape');
+  await expect(hint).toBeHidden();
+  await homeButton.press('Enter');
+  await expect(modal).toBeVisible();
+  await expect(page.locator('#workspaceAnchorPath')).toHaveValue('');
+  await cancelWizard();
+  await page.locator('#personalAssistantLauncher').click();
+  expect(attachmentActions).toEqual([]);
+  await guide();
+  await expect(homeButton).toBeFocused();
+  await expect(hint).toContainText('Start here to use Albums.');
+  await expect(modal).toBeHidden();
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/hint.png`
+  });
+  await homeButton.press('Enter');
+  await showPrefill();
+  expect(attachmentActions).toEqual(['resume']);
+  await page.locator('#workspaceSearchConsent').scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: `tasks/evidence-assistant-folder-handoff/${browserName}/prefill.png`
+  });
+  await cancelWizard();
+  await homeButton.click();
+  await expect(page.locator('#workspaceAnchorPath')).toHaveValue('');
+  await cancelWizard();
+  await page.locator('#personalAssistantLauncher').click();
+  await expect(input).toHaveValue('What’s in here?');
+  await expect(chip).toContainText('Albums');
+  expect(await inventory()).toEqual(initial);
+
   const look = picked.getByRole('button', { name: 'Look at names and counts' });
   await look.click();
   await expect(picked).toContainText('one-time local look');
@@ -221,6 +273,31 @@ test('the assistant links a folder without starting a hire or filename scan', as
   await page.screenshot({
     path: `tasks/evidence-assistant-folder-handoff/${browserName}/answer.png`
   });
+
+  await page.locator('#personalAssistantAttachMenu').click();
+  await page.locator('#personalAssistantFolderChip').click();
+  await pickAlbums();
+  await guide();
+  await homeButton.evaluate(button => {
+    button.click();
+    button.click();
+  });
+  await showPrefill();
+  await page.locator('#folderNameInput').fill('Music Library');
+  await page.locator('#wizardNextBtn').click();
+  await page.getByRole('checkbox', { name: 'Create without agents' }).click();
+  await page.locator('#wizardNextBtn').click();
+  const creation = page.locator('#workspaceCreationReviewPanel');
+  await expect(creation).toContainText('Albums');
+  expect(await inventory()).toEqual(initial);
+  await creation.getByRole('button', { name: 'Use automatic placement' }).click();
+  await creation.locator('[data-placement-action="confirm"]').click();
+  await expect(creation.getByRole('heading', { name: 'Workspace created' })).toBeVisible();
+  await creation.getByRole('button', { name: 'Open workspace', exact: true }).click();
+  await expect(page.locator('body')).toHaveAttribute('data-workspace-id', /.+/);
+  await expect
+    .poll(async () => (await inventory()).workspaces.length)
+    .toBe(initial.workspaces.length + 1);
 
   // The Files card still owns compact creation, receipt recovery and optional staffing.
   await page.goto('/?view=tree');

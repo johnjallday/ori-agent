@@ -907,7 +907,11 @@ const sessionManager = {
       delete addFolderModal.dataset.pendingParentLocked;
       // Build with your assistant is decided per open, after the form above
       // is reset; an ineligible open leaves the manual wizard untouched.
-      void this.openWorkspaceCreatorBuild(this.workspaceCreatorContext, event.hqWorkspaceAttempt);
+      void this.openWorkspaceCreatorBuild(
+        this.workspaceCreatorContext,
+        event.hqWorkspaceAttempt,
+        event.chatFolderResume
+      );
     });
 
     // A dismissed creator must not leave a fixed selected-member Group or a
@@ -14416,8 +14420,12 @@ const sessionManager = {
     };
   },
 
-  async openWorkspaceCreatorBuild(context, hqAttempt) {
+  async openWorkspaceCreatorBuild(context, hqAttempt, chatFolderResume) {
     const sequence = this.anchorCheckSequence;
+    const chatHandoff =
+      context?.entryPoint === 'home_cockpit_create' && typeof chatFolderResume === 'function';
+    const folderCheck = document.getElementById('workspaceChatFolderCheck');
+    if (folderCheck) folderCheck.hidden = !chatHandoff;
     let checkedForRecovery = false;
     if (
       context?.mode === 'ordinary' &&
@@ -14439,6 +14447,7 @@ const sessionManager = {
           message = error.message;
         }
         if (reference || message) {
+          if (folderCheck) folderCheck.hidden = true;
           const review = (context.ordinaryReview ||= { generation: context.generation });
           Object.assign(review, {
             owner: 'ordinary',
@@ -14464,6 +14473,33 @@ const sessionManager = {
       }
     }
     if (this.workspaceCreatorContext !== context) return;
+    if (chatHandoff) {
+      // A saved confirmation wins over either guide. Only a fresh, unchanged
+      // dialog gets the handoff. Never turn failed verification into blank setup.
+      const current = () =>
+        this.workspaceCreatorContext === context && sequence === this.anchorCheckSequence;
+      if (!current()) return;
+      try {
+        if (!checkedForRecovery)
+          throw new Error('Cannot verify the previous creation status. Reopen New Workspace.');
+        const review = await chatFolderResume();
+        if (!current()) return;
+        if (!review?.id || review.matches?.length)
+          throw new Error('Folder links changed. Choose the folder again in chat.');
+        this.applySearchFolderReview(review, false);
+        const name = document.getElementById('folderNameInput');
+        if (name && !name.value) name.value = review.label;
+        this.updateWorkspaceNameHint();
+        this.scheduleTemplateAgentPlanRefresh();
+        if (folderCheck) folderCheck.hidden = true;
+      } catch (error) {
+        if (current()) {
+          this.hideWorkspaceCreatorModal();
+          this.showToast(error.message, 'warning');
+        }
+      }
+      return;
+    }
     if (hqAttempt && context.entryPoint === 'home_cockpit_create') {
       // A saved confirmation always wins. Without its reader we cannot know
       // whether this is a fresh wizard, so leave the ordinary form untouched.

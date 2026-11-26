@@ -59,6 +59,12 @@
                 New Workspace
               </button>
             </div>
+            {{if .Extra.FolderSearchReady}}
+            <aside id="chatWorkspaceHint" class="small" aria-label="Folder workspace guide" hidden>
+              <span id="chatWorkspaceInstruction"></span>
+              <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm">Dismiss hint</button>
+            </aside>
+            {{end}}
             <aside id="hqWorkspaceHint" class="small" aria-label="Workspace guide" hidden>
               <span id="hqWorkspaceInstruction">Choose New Workspace to review your Documents folder.</span>
               <button type="button" class="modern-btn modern-btn-secondary modern-btn-sm">Dismiss hint</button>
