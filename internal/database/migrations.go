@@ -268,6 +268,9 @@ func (db *DB) runMigration(ctx context.Context, version int) error {
 		// Local-only directory identity. NULL on pre-update receipts; never
 		// synthesize historical proof from the directory at migration time.
 		_, err := db.ExecContext(ctx, `ALTER TABLE workspace_creation_operations ADD COLUMN documents_witness TEXT`)
+		if isDuplicateColumnError(err) {
+			return nil
+		}
 		return err
 	default:
 		return fmt.Errorf("unknown migration version: %d", version)
