@@ -789,7 +789,7 @@ export async function loadLinkedPage(parent, { fetchImpl } = {}) {
         entry.kind === 'folder' ? 'linkedFolder' : 'linkedFile',
         `${dirId}/${entry.path}`,
         entry.name,
-        { dirName, dirId, path: entry.path }
+        { dirName, dirId, path: entry.path, selection: entry.selection }
       )
     )
     .sort(

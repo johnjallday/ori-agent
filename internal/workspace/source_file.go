@@ -299,25 +299,11 @@ func listContainedEntries(root, relativePath string, depth int, page bool) (Dire
 		}
 		start = rel
 	}
-	if !filepath.IsAbs(root) {
-		return DirectoryListing{}, ErrSourceUnreadable
-	}
-	root = filepath.Clean(root)
-	rootInfo, err := os.Lstat(root) // #nosec G304 G703 -- a folder resolved from canonical state by the caller, never a request path
+	folder, rootID, err := openLinkedRoot(root)
 	if err != nil {
-		return DirectoryListing{}, ErrSourceMissing
-	}
-	if !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
-		return DirectoryListing{}, ErrSourceOutside
-	}
-	folder, err := os.OpenRoot(root)
-	if err != nil {
-		return DirectoryListing{}, ErrSourceUnreadable
+		return DirectoryListing{}, err
 	}
 	defer func() { _ = folder.Close() }()
-	if opened, err := folder.Stat("."); err != nil || !os.SameFile(rootInfo, opened) {
-		return DirectoryListing{}, ErrSourceChanged
-	}
 	if depth <= 0 || depth > DirectoryListMaxDepth {
 		depth = DirectoryListMaxDepth
 	}
@@ -334,7 +320,7 @@ func listContainedEntries(root, relativePath string, depth int, page bool) (Dire
 		}
 		defer func() { _ = top.Close() }()
 	}
-	var listing DirectoryListing
+	listing := DirectoryListing{rootIdentity: rootID}
 	var walk func(current *os.Root, dir string, level int) error
 	walk = func(current *os.Root, dir string, level int) error {
 		var entries []fs.DirEntry
@@ -375,6 +361,7 @@ func listContainedEntries(root, relativePath string, depth int, page bool) (Dire
 			// in between would describe an excluded entry under a visible name.
 			if info, err := current.Lstat(name); err == nil {
 				item.Version = sourceVersion(info)
+				item.mode = info.Mode()
 				item.ModTime = info.ModTime()
 				if item.Kind == "file" {
 					item.Size = info.Size()
@@ -411,6 +398,31 @@ func listContainedEntries(root, relativePath string, depth int, page bool) (Dire
 		return DirectoryListing{}, err
 	}
 	return listing, nil
+}
+
+// openLinkedRoot opens the canonical root itself without admitting a symlink
+// or a substitution between inspecting the root and acquiring its handle.
+func openLinkedRoot(root string) (*os.Root, string, error) {
+	if !filepath.IsAbs(root) {
+		return nil, "", ErrSourceUnreadable
+	}
+	root = filepath.Clean(root)
+	info, err := os.Lstat(root) // #nosec G304 G703 -- canonical persisted directory reference, never a caller-selected root
+	if err != nil {
+		return nil, "", ErrSourceMissing
+	}
+	if !info.IsDir() {
+		return nil, "", ErrSourceOutside
+	}
+	folder, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, "", ErrSourceUnreadable
+	}
+	if opened, err := folder.Stat("."); err != nil || !os.SameFile(info, opened) {
+		_ = folder.Close()
+		return nil, "", ErrSourceChanged
+	}
+	return folder, directoryid.Witness(info), nil
 }
 
 func readDirectoryPage(root *os.Root) ([]fs.DirEntry, bool, error) {

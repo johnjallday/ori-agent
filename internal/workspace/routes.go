@@ -86,6 +86,7 @@ func RegisterRoutes(mux *http.ServeMux, h *HTTPHandler) {
 	mux.HandleFunc("PUT /api/workspaces/{workspaceID}/directories/{dirId}", h.UpdateDirectory)
 	mux.HandleFunc("PATCH /api/workspaces/{workspaceID}/directories/{dirId}", h.UpdateDirectory)
 	mux.HandleFunc("DELETE /api/workspaces/{workspaceID}/directories/{dirId}", h.DeleteDirectory)
+	mux.HandleFunc("POST /api/workspaces/{workspaceID}/directories/{dirId}/open", h.OpenLinkedFile)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/directories/{dirId}/entries", h.ListLinkedFilePage)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/directories/{dirId}/files", h.ListDirectoryFiles)
 	mux.HandleFunc("GET /api/workspaces/{workspaceID}/directories/{dirId}/files/{filePath...}", h.ReadDirectoryFile)

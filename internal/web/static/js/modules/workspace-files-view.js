@@ -5,6 +5,7 @@ import {
   loadLinkedPage,
   loadNote,
   loadWorkspaceContents,
+  responseError,
   sectionKey
 } from './home-tree-sources.js';
 import {
@@ -93,6 +94,7 @@ export class WorkspaceFilesView {
     this.linkedKey = sectionKey(root.id, 'members');
     this.focusKey = root.id;
     this.previewVersion = 0;
+    this.opening = new Set();
   }
 
   enter(root) {
@@ -339,6 +341,15 @@ export class WorkspaceFilesView {
       this.focusRow(this.selected?.id || this.focusKey);
       return;
     }
+    if (event.target.closest('[data-open-linked]')) {
+      void this.openSelected();
+      return;
+    }
+    if (event.target.closest('[data-refresh-links]') && this.selected) {
+      this.refreshLinks(this.selected.workspaceId);
+      this.focusRow(this.focusKey);
+      return;
+    }
     const target = event.target.closest('[data-row]');
     if (target && this.tree.contains(target)) {
       const row = this.rows[Number(target.dataset.row)];
@@ -485,6 +496,7 @@ export class WorkspaceFilesView {
   async select(row, { restore = false } = {}) {
     const version = ++this.previewVersion;
     this.selected = row;
+    this.openResult = null;
     if (row.kind === 'linkedFile') this.watchLink(row.workspaceId);
     this.branchSelection = null;
     if (!restore) {
@@ -507,6 +519,48 @@ export class WorkspaceFilesView {
       this.error = error;
     }
     this.paintPreview();
+  }
+
+  async openSelected() {
+    const row = this.selected;
+    const version = this.previewVersion;
+    if (
+      !this.controller ||
+      row?.kind !== 'linkedFile' ||
+      !row.meta.selection ||
+      this.opening.has(row.id) ||
+      this.openResult?.stale ||
+      (row.workspaceId !== this.root.id && !this.members.has(row.workspaceId)) ||
+      !this.rows.some(
+        current => current.id === row.id && current.meta?.selection === row.meta.selection
+      )
+    )
+      return;
+    this.opening.add(row.id);
+    this.openResult = null;
+    this.paintPreview();
+    let result;
+    try {
+      const response = await this.scopedFetch()(
+        `/api/workspaces/${encodeURIComponent(row.workspaceId)}/directories/${encodeURIComponent(row.meta.dirId)}/open`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: row.meta.path, selection: row.meta.selection })
+        }
+      );
+      if (!response.ok) throw await responseError(response);
+      result = { message: (await response.json()).message };
+    } catch (err) {
+      result = {
+        message: err.message || 'Open request failed.',
+        stale: [404, 409].includes(err.status)
+      };
+    } finally {
+      this.opening.delete(row.id);
+    }
+    if (version === this.previewVersion) this.openResult = result;
+    if (this.controller && this.selected?.id === row.id) this.paintPreview();
   }
 
   paintPreview() {
@@ -532,5 +586,14 @@ export class WorkspaceFilesView {
         : this.value
           ? previewHTML(this.value, row.label)
           : '<p role="status">Loading preview…</p>';
+    if (row?.kind === 'linkedFile' && row.meta.selection) {
+      const pending = this.opening.has(row.id);
+      this.article
+        .querySelector('.wf-body')
+        .insertAdjacentHTML(
+          'beforeend',
+          `<button type="button" class="wf-action" data-open-linked ${pending || this.openResult?.stale ? 'disabled' : ''}>Open in default app</button><p role="status">${esc(pending ? 'Requesting open…' : this.openResult?.message || '')}</p>${this.openResult?.stale ? '<button type="button" class="wf-action" data-refresh-links>Refresh Files</button>' : ''}`
+        );
+    }
   }
 }

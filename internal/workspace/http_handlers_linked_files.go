@@ -3,8 +3,10 @@ package workspace
 import (
 	"net/http"
 	"path/filepath"
+	"time"
 
 	orihttp "github.com/johnjallday/ori-agent/internal/http"
+	"github.com/johnjallday/ori-agent/internal/platform"
 )
 
 // linkedFileSources reads portable, owner-scoped references, not the label of
@@ -76,5 +78,19 @@ func (h *HTTPHandler) ListLinkedFilePage(w http.ResponseWriter, r *http.Request)
 		orihttp.NotFound(w, "Folder unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": listing.Entries, "partial": listing.Truncated})
+	type listedEntry struct {
+		DirectoryEntry
+		Selection string `json:"selection,omitempty"`
+	}
+	entries := make([]listedEntry, 0, len(listing.Entries))
+	local := h.linkedDesktop && h.openFile != nil && linkedOpenLocal(r)
+	expires := time.Now().Add(linkedSelectionTTL).Unix()
+	for _, entry := range listing.Entries {
+		item := listedEntry{DirectoryEntry: entry}
+		if local && entry.Kind == "file" {
+			item.Selection = h.linkedSelection(source, listing.rootIdentity, entry, expires)
+		}
+		entries = append(entries, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"entries": entries, "partial": listing.Truncated, "desktop_disabled": platform.DesktopOpenDisabled()})
 }

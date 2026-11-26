@@ -120,6 +120,53 @@ test('unsupported and oversized files never fetch; document text is inert', asyn
     assert.doesNotMatch(previewHTML({ kind, text: '<form>hello</form>' }, 'Form'), /<form>/);
 });
 
+test('only the explicit open sends the current owner, ref and selected document, once while pending', async () => {
+  const view = new WorkspaceFilesView({}, { id: 'group' });
+  view.members.set('album', { id: 'album' });
+  const song = {
+    id: 'album/lf/ref/Song.rpp',
+    kind: 'linkedFile',
+    workspaceId: 'album',
+    label: 'Song.rpp',
+    meta: { dirId: 'ref', path: 'Song.rpp', selection: 'primary' }
+  };
+  const alt = {
+    ...song,
+    id: 'album/lf/ref/Alternate.rpp',
+    meta: { ...song.meta, path: 'Alternate.rpp', selection: 'alternate' }
+  };
+  view.rows = [song, alt];
+  view.controller = new AbortController();
+  view.paintTree = view.paintPreview = () => {};
+  let finish;
+  const calls = [];
+  view.scopedFetch = () => (url, init) => {
+    calls.push([url, init.method, JSON.parse(init.body)]);
+    return new Promise(r => {
+      finish = r;
+    });
+  };
+  await view.select(song);
+  await view.select(alt, { restore: true });
+  assert.deepEqual(calls, []);
+  const pending = view.openSelected();
+  await view.openSelected();
+  assert.deepEqual(calls, [
+    [
+      '/api/workspaces/album/directories/ref/open',
+      'POST',
+      { path: 'Alternate.rpp', selection: 'alternate' }
+    ]
+  ]);
+  await view.select(song);
+  finish(new Response('', { status: 409 }));
+  await pending;
+  assert.equal(view.openResult, null);
+  view.members.clear();
+  await view.openSelected();
+  assert.equal(calls.length, 1);
+});
+
 test('restoring keyboard focus alone does not read the focused note', () => {
   const view = new WorkspaceFilesView({}, { id: 'album' });
   view.tree = {};
