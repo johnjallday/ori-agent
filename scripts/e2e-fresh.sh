@@ -186,7 +186,16 @@ for spec in "${specs[@]}"; do
 	}
 	echo "== $spec"
 	echo "   sandbox $sandbox"
-	(cd "$sandbox" && exec env HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/.config" ORI_DATA_DIR="$sandbox" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN=1 "$binary") \
+	demo_home="$sandbox"
+	demo_data="$sandbox"
+	if [[ "${ORI_DEMO_SPLIT_PROFILE:-0}" == 1 ]]; then
+		# Match demo-server.sh: Documents cannot be inside protected Ori data.
+		[[ -z "${WORKSPACE_DIR:-}" && ! -L "$sandbox/home" && ! -L "$sandbox/data" ]] || exit 2
+		demo_home="$sandbox/home"
+		demo_data="$sandbox/data"
+		mkdir -m 700 -p "$demo_home" "$demo_data"
+	fi
+	(cd "$sandbox" && exec env HOME="$demo_home" XDG_CONFIG_HOME="$demo_home/.config" ORI_DATA_DIR="$demo_data" PORT="$port" NO_BROWSER=1 ORI_NO_DESKTOP_OPEN=1 "$binary") \
 		>>"$sandbox/server.log" 2>&1 &
 	server_pid=$!
 

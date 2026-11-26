@@ -4035,6 +4035,7 @@ const sessionManager = {
         return;
       if (response.ok && result.success && result.normalized_path) {
         choice.path = choice.checkedPath = result.normalized_path;
+        if (knownDocuments) choice.knownDocumentsPath = result.normalized_path;
         choice.related = result.related_workspace || null;
         input.value = result.normalized_path;
       } else {
@@ -5339,11 +5340,22 @@ const sessionManager = {
     const details = this.workspaceReviewDetailChoices();
     if (details.length) facts.push({ label: 'Advanced choices', value: details.join(' · ') });
     const steps = Array.isArray(template?.setup_wizard?.steps) ? template.setup_wizard.steps : [];
-    const later = steps.length
-      ? `Setup remains separate: ${steps.map(step => step.title || step.id).join(' → ')}. No account or runtime access is granted here.`
-      : this.workspaceBuild?.session && this.ordinaryBuildPreviewEligible()
-        ? 'Open the workspace to see what was saved. Start work or run its goal only when you choose.'
-        : 'Add notes, files or work when you choose. Opening the workspace retains its existing goal and first-work flow.';
+    const team = this.teamDraft;
+    const documentsHandoff =
+      team?.guidedPurpose === 'documents' &&
+      !team.agentless &&
+      team.roleFills?.has('manager') &&
+      this.anchorChoice?.enabled &&
+      (this.anchorChoice.review?.kind === 'documents' ||
+        (this.anchorChoice.checkedPath &&
+          this.anchorChoice.checkedPath === this.anchorChoice.knownDocumentsPath));
+    const later = documentsHandoff
+      ? 'If the folder and manager can still be verified, your manager will offer a first look. Opening the workspace does not start it.'
+      : steps.length
+        ? `Setup remains separate: ${steps.map(step => step.title || step.id).join(' → ')}. No account or runtime access is granted here.`
+        : this.workspaceBuild?.session && this.ordinaryBuildPreviewEligible()
+          ? 'Open the workspace to see what was saved. Start work or run its goal only when you choose.'
+          : 'Add notes, files or work when you choose. Opening the workspace retains its existing goal and first-work flow.';
     const tasks = Array.isArray(template?.starter_tasks) ? template.starter_tasks.length : 0;
     const now = [
       'Create one workspace with the reviewed team.',
